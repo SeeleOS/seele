@@ -11,6 +11,9 @@ pub struct Canvas {
     fb: &'static mut [u8],
     buffer: alloc::vec::Vec<u8>,
     info: bootloader_api::info::FrameBufferInfo,
+
+    pub width: u32,
+    pub height: u32,
 }
 
 impl Canvas {
@@ -25,6 +28,9 @@ impl Canvas {
             info,
             fb,
             buffer: alloc::vec![0u8; info.byte_len],
+
+            width: info.width as u32,
+            height: info.height as u32,
         }
     }
 

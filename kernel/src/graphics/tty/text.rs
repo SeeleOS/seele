@@ -17,11 +17,11 @@ impl<'a> Tty<'a> {
                 continue;
             }
 
-            if self.col >= 30 {
+            if self.col >= self.screen_width() {
                 self.new_line();
             }
 
-            if self.row >= 30 {
+            if self.row >= self.screen_height() {
                 self.row = 0;
                 self.col = 0;
             }
@@ -55,6 +55,14 @@ impl<'a> Tty<'a> {
         }
 
         self.col += 1;
+    }
+
+    fn screen_width(&self) -> u32 {
+        self.canvas.lock().width / self.font.width
+    }
+
+    fn screen_height(&self) -> u32 {
+        self.canvas.lock().height / self.font.height
     }
 
     fn new_line(&mut self) {
