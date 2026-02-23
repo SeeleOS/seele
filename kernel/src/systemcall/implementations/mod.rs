@@ -1,4 +1,5 @@
 pub mod allocate_mem;
+pub mod exit;
 pub mod futex;
 pub mod get_fs;
 pub mod get_process_id;

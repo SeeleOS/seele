@@ -12,4 +12,5 @@ pub enum SyscallNo {
     GetThreadID = 7,
     FutexWait = 8,
     FutexWake = 9,
+    Exit = 10,
 }

@@ -1,5 +1,4 @@
 pub mod context;
-pub mod exit_handling;
 pub mod kernel_task;
 pub mod manager;
 pub mod memory;

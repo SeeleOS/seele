@@ -18,6 +18,10 @@ pub fn print_buf(buf: &[u8], len: u64) -> SyscallResult {
     syscall!(Print, buf as u64, len)
 }
 
+pub fn exit() -> SyscallResult {
+    syscall!(Exit)
+}
+
 pub fn set_fs(addr: u64) -> SyscallResult {
     syscall!(SetFs, addr)
 }

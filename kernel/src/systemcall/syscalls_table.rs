@@ -4,6 +4,7 @@ use crate::{
         error::SyscallError,
         implementations::{
             allocate_mem::AllocMemImpl,
+            exit::ExitImpl,
             futex::{FutexWaitImpl, FutexWakeImpl},
             get_fs::GetFSImpl,
             get_process_id::GetPIDImpl,
@@ -32,6 +33,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 512] = {
     register_syscall!(table, SyscallNo::GetThreadID, GetTIDImpl);
     register_syscall!(table, SyscallNo::FutexWait, FutexWaitImpl);
     register_syscall!(table, SyscallNo::FutexWake, FutexWakeImpl);
+    register_syscall!(table, SyscallNo::Exit, ExitImpl);
 
     table
 };
