@@ -9,19 +9,20 @@ use crate::{
 
 pub mod others;
 
-pub static CPU_CORE_CONTEXT: OnceCell<&mut CpuCoreContext> = OnceCell::uninit();
+pub static mut CPU_CORE_CONTEXT: &mut CpuCoreContext = &mut CpuCoreContext {
+    gs_kernel_stack_top: 0,
+    gs_user_stack_top: 0,
+};
 
 pub fn init() {
-    CPU_CORE_CONTEXT
-        .try_get_or_init(|| {
-            Box::leak(Box::new(CpuCoreContext {
-                gs_kernel_stack_top: allocate_kernel_stack(16, &mut MAPPER.get().unwrap().lock())
-                    .finish()
-                    .as_u64(),
-                gs_user_stack_top: 0,
-            }))
-        })
-        .unwrap();
+    unsafe {
+        CPU_CORE_CONTEXT = Box::leak(Box::new(CpuCoreContext {
+            gs_kernel_stack_top: allocate_kernel_stack(16, &mut MAPPER.get().unwrap().lock())
+                .finish()
+                .as_u64(),
+            gs_user_stack_top: 0,
+        }))
+    };
 }
 
 pub fn hlt_loop() -> ! {

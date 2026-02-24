@@ -1,6 +1,9 @@
 use core::arch::{self, naked_asm};
 
+use x86_64::registers::model_specific::Msr;
+
 use crate::{
+    misc::{CPU_CORE_CONTEXT, others::CpuCoreContext},
     multitasking::{self, context::Context, manager::Manager},
     new_syscall,
 };
@@ -11,9 +14,17 @@ impl Context {
         if let Some(source) = source {
             source.save();
         }
+        self.update_gs();
         self.load();
         self.load_page_table();
         self.switch_user();
+    }
+
+    fn update_gs(&mut self) {
+        unsafe {
+            CPU_CORE_CONTEXT.gs_kernel_stack_top = self.kernel_rsp;
+            Msr::new(0xC0000102).write(((CPU_CORE_CONTEXT) as *const CpuCoreContext) as u64);
+        }
     }
 
     /// Save all the cpu registers into [`self`]

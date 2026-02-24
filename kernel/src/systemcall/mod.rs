@@ -39,8 +39,7 @@ pub fn init() {
         LStar::write(syscall_entry_addr);
 
         unsafe {
-            Msr::new(0xC0000102)
-                .write((*(CPU_CORE_CONTEXT.get().unwrap()) as *const CpuCoreContext) as u64);
+            Msr::new(0xC0000102).write(((CPU_CORE_CONTEXT) as *const CpuCoreContext) as u64);
         }
     })
 }

@@ -18,7 +18,7 @@ use crate::{
 pub struct Context {
     cr3: u64, // +0
     // RSP used on context switching in kernel space to not messup the userstack
-    kernel_rsp: u64, // +8
+    pub kernel_rsp: u64, // +8
 
     r15: u64, // +16
     r14: u64, // +24
