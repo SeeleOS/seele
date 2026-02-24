@@ -1,48 +1,71 @@
-use core::arch;
+use core::arch::{self, naked_asm};
 
-use crate::multitasking::{self, context::Context, manager::Manager};
+use crate::{
+    multitasking::{self, context::Context, manager::Manager},
+    new_syscall,
+};
 
-// NOTE: DO NOT call context_switch deep within a call stack
-// because it will messup the stack completely
-//
-/// # Safety
-/// Must provide valid current / next conteext ptr
-#[unsafe(naked)]
-pub unsafe extern "C" fn context_switch(current: *mut Context, next: *mut Context) {
-    arch::naked_asm!(
-        // Saves the registers into the context struct
-        "mov [rdi + 8], rsp",
-        "mov [rdi + 56], rbp",
-        "mov [rdi + 48], rbx",
-        "mov [rdi + 40], r12",
-        "mov [rdi + 32], r13",
-        "mov [rdi + 24], r14",
-        "mov [rdi + 16], r15",
-        // Updates the page table
-        // No need to save the current page table
-        // because the pagetable for each process
-        // should always be the same
-        "mov rax, [rsi]",
-        "mov cr3, rax",
-        // Loads the context of the next process
-        "mov r15, [rsi + 16]",
-        "mov r14, [rsi + 24]",
-        "mov r13, [rsi + 32]",
-        "mov r12, [rsi + 40]",
-        "mov rbx, [rsi + 48]",
-        "mov rbp, [rsi + 56]",
-        // Loads the kernel stack so it wont messup the user stack
-        "mov rsp, [rsi + 8]",
-        // Pushes the things required for iretq
-        // TODO: use ret to return to whatever it came from
-        // instead of just straightup jumping to userspace with iretq
-        "push [rsi + 64]", // SS
-        "push [rsi + 72]", // RSP
-        "push [rsi + 80]", // RFlags
-        "push [rsi + 88]", // CS
-        "push [rsi + 96]", // RIP
-        "iretq"
-    )
+impl Context {
+    /// Switches from [`source`] to [`self`]
+    pub fn switch_from(&mut self, source: Option<&mut Context>) {
+        if let Some(source) = source {
+            source.save();
+        }
+        self.load();
+        self.load_page_table();
+        self.switch_user();
+    }
+
+    /// Save all the cpu registers into [`self`]
+    #[unsafe(naked)]
+    extern "C" fn save(&mut self) {
+        naked_asm!(
+            "mov [rdi + 8], rsp",
+            "mov [rdi + 56], rbp",
+            "mov [rdi + 48], rbx",
+            "mov [rdi + 40], r12",
+            "mov [rdi + 32], r13",
+            "mov [rdi + 24], r14",
+            "mov [rdi + 16], r15",
+            "ret"
+        );
+    }
+
+    /// Laods all the cpu registers from [`self`]
+    #[unsafe(naked)]
+    extern "C" fn load(&mut self) {
+        naked_asm!(
+            "mov r15, [rdi + 16]",
+            "mov r14, [rdi + 24]",
+            "mov r13, [rdi + 32]",
+            "mov r12, [rdi + 40]",
+            "mov rbx, [rdi + 48]",
+            "mov rbp, [rdi + 56]",
+            "ret"
+        )
+    }
+
+    #[unsafe(naked)]
+    extern "C" fn load_page_table(&mut self) {
+        naked_asm!("mov rax, [rdi]", "mov cr3, rax", "ret")
+    }
+
+    #[unsafe(naked)]
+    extern "C" fn switch_user(&mut self) {
+        naked_asm!(
+            // Loads the kernel stack so it wont messup the user stack
+            "mov rsp, [rdi + 8]",
+            // Pushes the things required for iretq
+            // TODO: use ret to return to whatever it came from
+            // instead of just straightup jumping to userspace with iretq
+            "push [rdi + 64]", // SS
+            "push [rdi + 72]", // RSP
+            "push [rdi + 80]", // RFlags
+            "push [rdi + 88]", // CS
+            "push [rdi + 96]", // RIP
+            "iretq"
+        )
+    }
 }
 
 /// # Safety

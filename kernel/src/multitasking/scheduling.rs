@@ -1,13 +1,7 @@
 use x86_64::{instructions::interrupts::without_interrupts, structures::idt::InterruptStackFrame};
 
 use crate::{
-    multitasking::{
-        MANAGER,
-        context::Context,
-        manager::Manager,
-        process::State,
-        switch::{context_switch, context_switch_zombie},
-    },
+    multitasking::{MANAGER, context::Context, manager::Manager, process::State},
     s_print, s_println,
     tss::TSS,
 };
@@ -87,7 +81,7 @@ pub fn run_next(interrupt_stack_frame: InterruptStackFrame) {
         (*current).rflags = interrupt_stack_frame.cpu_flags.bits();
         (*current).user_rsp = interrupt_stack_frame.stack_pointer.as_u64();
 
-        context_switch(current, next);
+        (*next).switch_from(Some(current.as_mut().unwrap()));
     }
 }
 
@@ -101,6 +95,6 @@ pub fn run_next_zombie() {
     s_println!("next task: {:?}", next);
 
     unsafe {
-        context_switch_zombie(next);
+        (*next).switch_from(None);
     }
 }
