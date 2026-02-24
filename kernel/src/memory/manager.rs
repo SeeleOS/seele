@@ -90,13 +90,6 @@ pub fn allocate_kernel_mem(
                 .flush();
         };
 
-        let write_addr = apply_offset(frame.start_address().as_u64() + 4096);
-        unsafe {
-            let bytes = 4096;
-            let start_ptr = (write_addr as usize - bytes as usize) as *mut u8;
-            core::ptr::write_bytes(start_ptr, 0, bytes as usize);
-        }
-
         last_frame = Some(frame);
     }
 
