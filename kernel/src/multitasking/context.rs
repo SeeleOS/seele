@@ -33,6 +33,8 @@ pub struct Context {
     pub rflags: u64,   // +80
     pub cs: u64,       // +88
     pub rip: u64,      // +96
+
+    pub fs_base: u64,
 }
 
 impl Context {
@@ -53,6 +55,8 @@ impl Context {
             rflags: 0x202,
             cs: GDT.1.user_code.0 as u64,
             rip: entry_point,
+
+            fs_base: 0,
         }
     }
 

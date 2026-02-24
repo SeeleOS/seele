@@ -1,6 +1,9 @@
 use core::arch::{self, naked_asm};
 
-use x86_64::registers::model_specific::Msr;
+use x86_64::{
+    VirtAddr,
+    registers::model_specific::{FsBase, Msr},
+};
 
 use crate::{
     misc::{CPU_CORE_CONTEXT, others::CpuCoreContext},
@@ -13,7 +16,9 @@ impl Context {
     pub fn switch_from(&mut self, source: Option<&mut Context>) {
         if let Some(source) = source {
             source.save();
+            source.save_msr();
         }
+        self.load_msr();
         self.update_gs();
         self.load();
         self.load_page_table();
@@ -25,6 +30,14 @@ impl Context {
             CPU_CORE_CONTEXT.gs_kernel_stack_top = self.kernel_rsp;
             Msr::new(0xC0000102).write(((CPU_CORE_CONTEXT) as *const CpuCoreContext) as u64);
         }
+    }
+
+    fn save_msr(&mut self) {
+        self.fs_base = FsBase::read().as_u64();
+    }
+
+    fn load_msr(&mut self) {
+        FsBase::write(VirtAddr::new(self.fs_base));
     }
 
     /// Save all the cpu registers into [`self`]
