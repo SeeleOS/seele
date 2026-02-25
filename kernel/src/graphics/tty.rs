@@ -6,7 +6,7 @@ use spleen_font::PSF2Font;
 use crate::{
     graphics::{
         framebuffer::{Canvas, FRAME_BUFFER},
-        tty::text::TextCell,
+        tty::text::{PADDING, TextCell},
     },
     s_println,
 };
@@ -27,8 +27,14 @@ pub struct Tty<'a> {
 
 impl<'a> Tty<'a> {
     pub fn new(font: PSF2Font<'a>) -> Self {
-        let mut text_buf = Vec::with_capacity(10000);
-        text_buf.resize(10000, TextCell::default());
+        let width =
+            ((FRAME_BUFFER.get().unwrap().lock().width - PADDING * 2) / font.width) as usize;
+        let height =
+            ((FRAME_BUFFER.get().unwrap().lock().height - PADDING * 2) / font.height) as usize;
+        let size = width * height;
+
+        let mut text_buf = Vec::with_capacity(size);
+        text_buf.resize(size, TextCell::default());
         Self {
             font,
             canvas: FRAME_BUFFER.get().unwrap(),

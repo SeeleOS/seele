@@ -27,7 +27,7 @@ impl Default for TextCell {
     }
 }
 
-const PADDING: u32 = 50;
+pub const PADDING: u32 = 50;
 
 impl<'a> Tty<'a> {
     pub fn print_string(&mut self, string: &str) {
