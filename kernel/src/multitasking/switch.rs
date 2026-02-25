@@ -18,10 +18,10 @@ impl Context {
             source.save();
             source.save_msr();
         }
-        self.load_msr();
         self.update_gs();
         self.load();
         self.load_page_table();
+        self.load_msr();
         self.switch_user();
     }
 
