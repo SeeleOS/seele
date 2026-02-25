@@ -1,4 +1,7 @@
-use x86_64::registers::model_specific::Msr;
+use x86_64::{
+    VirtAddr,
+    registers::model_specific::{FsBase, Msr},
+};
 
 use crate::{
     new_syscall,
@@ -18,9 +21,7 @@ impl SyscallImpl for SetFSImpl {
         arg5: u64,
         arg6: u64,
     ) -> Result<usize, SyscallError> {
-        unsafe {
-            Msr::new(0xC0000100).write(arg1);
-        };
+        FsBase::write(VirtAddr::new(arg1));
         Ok(0)
     }
 }
