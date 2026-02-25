@@ -1,7 +1,6 @@
 // Snapshot of the operating system. Including registers.
 // Also known as Frame, Context, etc.
 
-use core::arch::naked_asm;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default, Debug)]

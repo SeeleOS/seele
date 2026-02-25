@@ -1,6 +1,5 @@
 use core::arch::naked_asm;
 
-use x86_64::structures::idt::InterruptStackFrame;
 
 use crate::{
     hardware_interrupt::{HardwareInterrupt, notify_end_of_interrupt},

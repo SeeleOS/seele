@@ -1,8 +1,5 @@
 use alloc::sync::Arc;
-use bootloader_api::{
-    BootInfo,
-    info::{MemoryRegionKind, MemoryRegions},
-};
+use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
 use x86_64::{
@@ -11,7 +8,6 @@ use x86_64::{
     structures::paging::{FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB},
 };
 
-use crate::s_println;
 
 pub static MAPPER: OnceCell<Arc<Mutex<OffsetPageTable<'static>>>> = OnceCell::uninit();
 pub static FRAME_ALLOCATOR: OnceCell<Arc<Mutex<BootinfoFrameAllocator>>> = OnceCell::uninit();

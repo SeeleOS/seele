@@ -11,19 +11,13 @@ extern crate alloc;
 
 use core::panic::PanicInfo;
 
-use alloc::string::ToString;
-use bootloader_api::config::Mapping;
-use bootloader_api::{BootInfo, BootloaderConfig, entry_point};
+use bootloader_api::{BootInfo, entry_point};
 #[cfg(test)]
 use kernel::debug_exit::debug_exit;
 use kernel::driver::keyboard::scancode_processing::process_keypresses;
-use kernel::filesystem::path::Path;
-use kernel::filesystem::vfs::{FileData, VirtualFS};
 use kernel::multitasking::MANAGER;
 use kernel::multitasking::kernel_task::executor::Executor;
 use kernel::multitasking::kernel_task::task::Task;
-use kernel::multitasking::scheduling::run_next;
-use kernel::userspace::elf_loader::load_elf;
 use kernel::{BOOTLOADER_CONFIG, println};
 use kernel::{init, s_println};
 

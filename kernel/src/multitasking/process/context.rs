@@ -1,13 +1,11 @@
-use core::iter::empty;
 
-use x86_64::{VirtAddr, registers::control::Cr3Flags};
+use x86_64::registers::control::Cr3Flags;
 
 use crate::{
     gdt::GDT,
     memory::page_table_wrapper::PageTableWrapped,
     misc::{others::calc_cr3_value, snapshot::Snapshot},
-    multitasking::memory::{allocate_kernel_stack, allocate_stack},
-    userspace::elf_loader::Function,
+    multitasking::memory::allocate_kernel_stack,
 };
 
 // NOTE: the direction of the struct in memory and the stack is REVERSED

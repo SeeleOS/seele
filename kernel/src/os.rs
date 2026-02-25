@@ -1,12 +1,7 @@
-use crate::hardware_interrupt::{PIC_1_OFFSET, PIC_2_OFFSET};
 use lazy_static::lazy_static;
-use pic8259::ChainedPics;
 use spin::*;
 use uart_16550::SerialPort;
-use x86_64::{
-    VirtAddr,
-    instructions::interrupts::{self},
-};
+use x86_64::instructions::interrupts::{self};
 
 lazy_static! {
     pub static ref ELYSIA_OS: Mutex<OS> = Mutex::new(OS::new());

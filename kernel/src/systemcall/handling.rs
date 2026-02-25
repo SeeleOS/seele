@@ -1,5 +1,5 @@
 use crate::{
-    println, s_println,
+    s_println,
     systemcall::{error::SyscallError, syscalls_table::SYSCALL_TABLE},
 };
 

@@ -10,8 +10,7 @@ use crate::{
     driver::init_interrupt_drivers,
     exception_interrupt::init_exception_interrupts,
     hardware_interrupt::{PIC_1_OFFSET, PIC_2_OFFSET, init_hardware_interrupts},
-    os::get_os,
-    print, println, s_println, test,
+    print, s_println, test,
 };
 pub mod timer;
 use lazy_static::lazy_static;

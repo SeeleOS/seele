@@ -1,6 +1,5 @@
-use bootloader_api::BootInfo;
 use spin::Mutex;
-use spleen_font::{FONT_6X12, FONT_8X16, FONT_12X24, FONT_16X32, FONT_32X64, PSF2Font};
+use spleen_font::PSF2Font;
 
 use crate::graphics::{
     framebuffer::{Canvas, FRAME_BUFFER},

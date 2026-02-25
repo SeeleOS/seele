@@ -36,7 +36,7 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
 };
 
 use crate::misc::others::enable_sse;
-use bootloader_api::{BootInfo, entry_point};
+use bootloader_api::BootInfo;
 use bootloader_api::{BootloaderConfig, config::Mapping};
 #[cfg(test)]
 use core::panic::PanicInfo;

@@ -1,6 +1,6 @@
 use x86_64::{
-    PhysAddr, VirtAddr,
-    registers::control::{Cr0, Cr0Flags, Cr3, Cr3Flags, Cr4, Cr4Flags},
+    PhysAddr,
+    registers::control::{Cr0, Cr0Flags, Cr3Flags, Cr4, Cr4Flags},
 };
 /// Context for a CPU Core
 #[derive(Debug)]

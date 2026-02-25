@@ -1,16 +1,12 @@
 use alloc::sync::Arc;
-use bootloader_api::{BootInfo, info::MemoryRegions};
+use bootloader_api::info::MemoryRegions;
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
-use x86_64::VirtAddr;
 
-use crate::{
-    memory::{
+use crate::memory::{
         heap::init_heap,
         paging::{BootinfoFrameAllocator, FRAME_ALLOCATOR, MAPPER, init_mapper},
-    },
-    os::get_os,
-};
+    };
 
 pub mod fixed_block_size;
 pub mod heap;

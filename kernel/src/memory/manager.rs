@@ -6,7 +6,6 @@ use x86_64::{
 };
 
 use crate::{
-    graphics::framebuffer::FRAME_BUFFER,
     memory::{paging::FRAME_ALLOCATOR, utils::apply_offset},
     misc::stack_builder::StackBuilder,
 };

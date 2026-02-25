@@ -1,14 +1,8 @@
 use core::fmt::Write;
 
-use alloc::{borrow, fmt};
+use alloc::fmt;
 
-use crate::{
-    graphics::{
-        framebuffer::FRAME_BUFFER,
-        tty::{TTY, Tty},
-    },
-    s_println,
-};
+use crate::graphics::tty::{TTY, Tty};
 
 #[derive(Clone, Copy, Debug)]
 pub struct TextCell {

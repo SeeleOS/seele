@@ -3,7 +3,7 @@ use spin::Mutex;
 
 use crate::{
     multitasking::{
-        MANAGER, process::manager::block_current, process::process::ProcessID, yielding::BlockType,
+        MANAGER, process::process::ProcessID,
     },
     systemcall::{implementations::utils::SyscallImpl, syscall_no::SyscallNo},
 };
@@ -25,10 +25,10 @@ impl SyscallImpl for FutexWaitImpl {
     fn handle_call(
         arg1: u64,
         arg2: u64,
-        arg3: u64,
-        arg4: u64,
-        arg5: u64,
-        arg6: u64,
+        _arg3: u64,
+        _arg4: u64,
+        _arg5: u64,
+        _arg6: u64,
     ) -> Result<usize, crate::systemcall::error::SyscallError> {
         let mut queue = FUTEX_QUEUE.lock();
         let cur_value = unsafe { *(arg1 as *mut u64) };
@@ -59,10 +59,10 @@ impl SyscallImpl for FutexWakeImpl {
     fn handle_call(
         arg1: u64,
         arg2: u64,
-        arg3: u64,
-        arg4: u64,
-        arg5: u64,
-        arg6: u64,
+        _arg3: u64,
+        _arg4: u64,
+        _arg5: u64,
+        _arg6: u64,
     ) -> Result<usize, crate::systemcall::error::SyscallError> {
         let mut queue = FUTEX_QUEUE.lock();
         let mut woken = 0;

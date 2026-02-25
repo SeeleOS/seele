@@ -1,19 +1,15 @@
-use alloc::boxed::Box;
 use x86_64::{
     VirtAddr,
     instructions::interrupts::without_interrupts,
     registers::{
         control::{Efer, EferFlags},
-        model_specific::{GsBase, KernelGsBase, LStar, Msr, SFMask},
+        model_specific::{KernelGsBase, LStar, SFMask},
         rflags::RFlags,
     },
 };
 
 use crate::{
-    memory::paging::MAPPER,
     misc::{CPU_CORE_CONTEXT, others::CpuCoreContext},
-    multitasking::memory::allocate_kernel_stack,
-    s_println,
     systemcall::entry::syscall_entry,
 };
 

@@ -1,19 +1,14 @@
 use x86_64::{
     VirtAddr,
     structures::paging::{
-        FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame,
-        Size4KiB, mapper::MapToError, page::PageRangeInclusive, page_table::PageTableEntry,
+        Page, PageTable, page::PageRangeInclusive,
     },
 };
 
-use crate::{
-    memory::{
+use crate::memory::{
         PHYSICAL_MEMORY_OFFSET,
-        paging::{FRAME_ALLOCATOR, MAPPER, get_l4_table},
-    },
-    os::get_os,
-    println, s_println,
-};
+        paging::MAPPER,
+    };
 
 pub struct Locked<A> {
     inner: spin::Mutex<A>,

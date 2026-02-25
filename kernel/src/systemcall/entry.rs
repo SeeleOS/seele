@@ -1,4 +1,3 @@
-use crate::print;
 
 // entry point for all system calls
 #[unsafe(no_mangle)]

@@ -1,5 +1,4 @@
 use alloc::boxed::Box;
-use conquer_once::spin::OnceCell;
 use x86_64::instructions::hlt;
 
 use crate::{

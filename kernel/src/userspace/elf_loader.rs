@@ -1,26 +1,19 @@
 use core::{cmp::min, ptr::copy_nonoverlapping};
 
-use alloc::{
-    collections::{btree_map::Range, vec_deque::VecDeque},
-    vec::Vec,
-};
 use elfloader::ElfBinary;
 use x86_64::{
-    PhysAddr, VirtAddr,
+    VirtAddr,
     structures::paging::{
-        FrameAllocator, Mapper, OffsetPageTable, Page, PageTableFlags, PhysFrame, Size4KiB,
-        Translate, mapper::MapToError,
+        FrameAllocator, Mapper, OffsetPageTable, PageTableFlags,
+        Translate,
     },
 };
 
-use crate::{
-    memory::{
+use crate::memory::{
         page_table_wrapper::PageTableWrapped,
-        paging::{FRAME_ALLOCATOR, MAPPER},
+        paging::FRAME_ALLOCATOR,
         utils::{apply_offset, page_range_from_size},
-    },
-    println, s_println,
-};
+    };
 
 pub type Function = *const extern "C" fn() -> !;
 
@@ -83,7 +76,7 @@ impl<'a> elfloader::ElfLoader for ElfLoader<'a> {
 
     fn load(
         &mut self,
-        flags: elfloader::Flags,
+        _flags: elfloader::Flags,
         base: elfloader::VAddr,
         region: &[u8],
     ) -> Result<(), elfloader::ElfLoaderErr> {

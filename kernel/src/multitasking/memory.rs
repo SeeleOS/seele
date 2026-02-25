@@ -1,20 +1,11 @@
-use core::sync::atomic::AtomicU64;
 
-use x86_64::{
-    VirtAddr,
-    structures::paging::{
-        FrameAllocator, Mapper, OffsetPageTable, Page, PageTableFlags, PhysFrame, Size4KiB,
-    },
-};
+use x86_64::structures::paging::{
+        OffsetPageTable, PageTableFlags,
+    };
 
 use crate::{
-    memory::{
-        manager::{allocate_kernel_mem, allocate_user_mem},
-        paging::FRAME_ALLOCATOR,
-        utils::apply_offset,
-    },
+    memory::manager::{allocate_kernel_mem, allocate_user_mem},
     misc::stack_builder::StackBuilder,
-    s_println,
 };
 
 /// Returns the virtual address of the stack top

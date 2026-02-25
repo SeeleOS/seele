@@ -3,14 +3,11 @@ use x86_64::{
     structures::paging::{FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB},
 };
 
-use crate::{
-    memory::{
+use crate::memory::{
         PHYSICAL_MEMORY_OFFSET,
         paging::FRAME_ALLOCATOR,
         utils::{apply_offset, copy_kernel_mapping},
-    },
-    os::get_os,
-};
+    };
 
 #[derive(Debug)]
 pub struct PageTableWrapped {

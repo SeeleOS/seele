@@ -1,12 +1,11 @@
-use x86_64::{instructions::interrupts::without_interrupts, structures::idt::InterruptStackFrame};
+use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
     misc::snapshot::Snapshot,
     multitasking::{
         MANAGER, process::context::ProcessSnapshot, process::manager::Manager,
         process::process::State,
-    },
-    s_print, s_println,
+    }, s_println,
     tss::TSS,
 };
 

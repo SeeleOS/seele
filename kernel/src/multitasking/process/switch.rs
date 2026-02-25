@@ -1,14 +1,13 @@
-use core::arch::{self, naked_asm};
+use core::arch::naked_asm;
 
 use x86_64::{
     VirtAddr,
-    registers::model_specific::{FsBase, GsBase, KernelGsBase, Msr},
+    registers::model_specific::{FsBase, KernelGsBase},
 };
 
 use crate::{
     misc::{CPU_CORE_CONTEXT, others::CpuCoreContext, snapshot::Snapshot},
-    multitasking::process::{self, context::ProcessSnapshot, manager::Manager},
-    new_syscall, s_println,
+    multitasking::process::context::ProcessSnapshot, s_println,
 };
 
 impl ProcessSnapshot {

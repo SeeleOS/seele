@@ -1,8 +1,6 @@
-use lazy_static::lazy_static;
-use spin::Mutex;
 use x86_64::{
     VirtAddr,
-    structures::tss::{self, TaskStateSegment},
+    structures::tss::TaskStateSegment,
 };
 
 pub const DOUBLE_FAULT_IST_LOCATION: u16 = 0;

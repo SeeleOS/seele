@@ -5,7 +5,7 @@ use alloc::{
 };
 use spin::Mutex;
 
-use crate::filesystem::vfs::{Directory, FSResult, File, FileData, FileLike, FileSystem};
+use crate::filesystem::vfs::{Directory, FSResult, File, FileData, FileLike};
 
 #[derive(Debug)]
 pub struct RamDirectory {

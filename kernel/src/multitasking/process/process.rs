@@ -1,23 +1,17 @@
 use core::sync::atomic::AtomicU64;
 
-use alloc::boxed::Box;
 use elfloader::ElfBinary;
-use x86_64::{
-    VirtAddr,
-    registers::model_specific::Msr,
-    structures::paging::{Mapper, Page, Size4KiB, Translate},
-};
+use x86_64::VirtAddr;
 
 use crate::{
     memory::page_table_wrapper::PageTableWrapped,
-    misc::{aux::AuxType, stack_builder::StackBuilder},
+    misc::stack_builder::StackBuilder,
     multitasking::{
         memory::{allocate_kernel_stack, allocate_stack},
         process::context::ProcessSnapshot,
         yielding::BlockType,
     },
-    s_println,
-    userspace::elf_loader::{Function, load_elf},
+    userspace::elf_loader::load_elf,
 };
 
 #[derive(Debug)]

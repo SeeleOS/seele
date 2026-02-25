@@ -3,7 +3,7 @@
 
 use core::panic::PanicInfo;
 
-use crate::{misc::hlt_loop, println, s_println};
+use crate::{misc::hlt_loop, s_println};
 
 pub fn handle_panic(_info: &PanicInfo) -> ! {
     s_println!("{}", _info);

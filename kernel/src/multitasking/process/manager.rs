@@ -2,19 +2,16 @@ use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
     vec::Vec,
 };
-use x86_64::{instructions::interrupts::without_interrupts, structures::idt::InterruptStackFrame};
+use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
-    hardware_interrupt::notify_end_of_interrupt,
     misc::hlt_loop,
     multitasking::{
         MANAGER,
         process::process::{self, Process, ProcessID},
-        scheduling::run_next,
         yielding::{BlockType, BlockedQueues, WakeType},
     },
     print, println,
-    userspace::elf_loader::Function,
 };
 
 #[derive(Debug, Default)]

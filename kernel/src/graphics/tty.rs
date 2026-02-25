@@ -1,15 +1,12 @@
-use alloc::{boxed::Box, vec::Vec};
+use alloc::vec::Vec;
 use conquer_once::spin::OnceCell;
-use spin::{Mutex, MutexGuard};
+use spin::Mutex;
 use spleen_font::PSF2Font;
 
-use crate::{
-    graphics::{
+use crate::graphics::{
         framebuffer::{Canvas, FRAME_BUFFER},
         tty::text::{PADDING, TextCell},
-    },
-    s_println,
-};
+    };
 
 pub mod text;
 pub mod wallpaper;
