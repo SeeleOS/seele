@@ -29,59 +29,6 @@ pub struct Snapshot {
     pub ss: u64,
 }
 
-#[macro_export]
-macro_rules! load_registers {
-    ($base:literal) => {
-        concat!(
-            "mov r15, [",
-            $base,
-            " + 0]",
-            "mov r14, [",
-            $base,
-            " + 8]",
-            "mov r13, [",
-            $base,
-            " + 16]",
-            "mov r12, [",
-            $base,
-            " + 24]",
-            "mov r11, [",
-            $base,
-            " + 32]",
-            "mov r10, [",
-            $base,
-            " + 40]",
-            "mov r9,  [",
-            $base,
-            " + 48]",
-            "mov r8,  [",
-            $base,
-            " + 56]",
-            "mov rsi, [",
-            $base,
-            " + 72]", // 跳过 rdi (offset 64)
-            "mov rbp, [",
-            $base,
-            " + 80]",
-            "mov rbx, [",
-            $base,
-            " + 88]",
-            "mov rdx, [",
-            $base,
-            " + 96]",
-            "mov rcx, [",
-            $base,
-            " + 104]",
-            "mov rax, [",
-            $base,
-            " + 112]",
-            "mov rdi, [",
-            $base,
-            " + 64]", // 最后恢复基址寄存器
-        )
-    };
-}
-
 impl Snapshot {
     pub fn default_regs(rip: u64, cs: u16, rflags: u64, rsp: u64, ss: u16) -> Self {
         Self {
