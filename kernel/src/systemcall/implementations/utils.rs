@@ -34,9 +34,9 @@ macro_rules! new_syscall {
                 arg1: u64,
                 arg2: u64,
                 arg3: u64,
-                arg4: u64,
-                arg5: u64,
-                arg6: u64,
+                _arg4: u64,
+                _arg5: u64,
+                _arg6: u64,
             ) -> Result<usize, SyscallError> {
                 // 宏会自动生成转换代码
                 let $arg1 = arg1 as $type1;

@@ -1,7 +1,6 @@
 use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
 use std::{
     env,
-    fs::*,
     process::{Command, exit},
 };
 
