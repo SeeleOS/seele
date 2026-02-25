@@ -1,6 +1,6 @@
 use alloc::collections::vec_deque::VecDeque;
 
-use crate::multitasking::{
+use crate::multitasking::process::{
     manager::Manager,
     process::{ProcessID, State},
 };

@@ -6,7 +6,7 @@ use futures_util::{Stream, StreamExt, task::AtomicWaker};
 
 use crate::{
     driver::keyboard::ps2::{KeyboardDriver, PS2KeyboardDriver, get_keyboard},
-    multitasking::{MANAGER, manager},
+    multitasking::MANAGER,
     println,
 };
 

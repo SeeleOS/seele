@@ -2,7 +2,9 @@ use alloc::collections::{btree_map::BTreeMap, vec_deque::VecDeque};
 use spin::Mutex;
 
 use crate::{
-    multitasking::{MANAGER, manager::block_current, process::ProcessID, yielding::BlockType},
+    multitasking::{
+        MANAGER, process::manager::block_current, process::process::ProcessID, yielding::BlockType,
+    },
     systemcall::{implementations::utils::SyscallImpl, syscall_no::SyscallNo},
 };
 

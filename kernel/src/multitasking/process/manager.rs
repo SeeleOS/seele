@@ -9,7 +9,7 @@ use crate::{
     misc::hlt_loop,
     multitasking::{
         MANAGER,
-        process::{self, Process, ProcessID},
+        process::process::{self, Process, ProcessID},
         scheduling::run_next,
         yielding::{BlockType, BlockedQueues, WakeType},
     },
@@ -30,11 +30,11 @@ pub struct Manager {
 
 #[repr(align(8))]
 struct AlignedElf {
-    data: [u8; include_bytes!("../../../libc-test/test.elf").len()],
+    data: [u8; include_bytes!("../../../../libc-test/test.elf").len()],
 }
 
 static ELF_HOLDER: AlignedElf = AlignedElf {
-    data: *include_bytes!("../../../libc-test/test.elf"),
+    data: *include_bytes!("../../../../libc-test/test.elf"),
 };
 
 impl Manager {

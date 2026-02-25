@@ -12,8 +12,8 @@ use crate::{
     memory::page_table_wrapper::PageTableWrapped,
     misc::{aux::AuxType, stack_builder::StackBuilder},
     multitasking::{
-        context::ProcessSnapshot,
         memory::{allocate_kernel_stack, allocate_stack},
+        process::context::ProcessSnapshot,
         yielding::BlockType,
     },
     s_println,

@@ -2,7 +2,10 @@ use x86_64::{instructions::interrupts::without_interrupts, structures::idt::Inte
 
 use crate::{
     misc::snapshot::Snapshot,
-    multitasking::{MANAGER, context::ProcessSnapshot, manager::Manager, process::State},
+    multitasking::{
+        MANAGER, process::context::ProcessSnapshot, process::manager::Manager,
+        process::process::State,
+    },
     s_print, s_println,
     tss::TSS,
 };

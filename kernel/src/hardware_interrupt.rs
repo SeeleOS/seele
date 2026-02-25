@@ -10,7 +10,7 @@ use x86_64::{
 use crate::{
     debug_exit::debug_exit,
     interrupts::{PICS, timer::timer_interrupt_handler_wrapper},
-    multitasking::{MANAGER, manager::Manager, scheduling::run_next},
+    multitasking::{MANAGER, process::manager::Manager, scheduling::run_next},
     os::get_os,
     print, println, s_print,
 };
