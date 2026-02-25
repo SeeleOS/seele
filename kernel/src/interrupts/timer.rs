@@ -2,7 +2,12 @@ use core::arch::naked_asm;
 
 use x86_64::structures::idt::InterruptStackFrame;
 
-use crate::{misc::snapshot::Snapshot, multitasking::scheduling::run_next, s_println};
+use crate::{
+    hardware_interrupt::{HardwareInterrupt, notify_end_of_interrupt},
+    misc::snapshot::Snapshot,
+    multitasking::scheduling::run_next,
+    s_println,
+};
 
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
@@ -33,6 +38,7 @@ pub extern "C" fn timer_interrupt_handler_wrapper() {
 
 pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
     s_println!("timer");
+    notify_end_of_interrupt(HardwareInterrupt::Timer);
     run_next(snapshot);
 
     panic!("What the fuck");
