@@ -60,7 +60,6 @@ impl<'a> Tty<'a> {
         let index = self.get_text_cell_location(self.row, self.col);
         let text_cell = &mut self.text_buf[index];
 
-        text_cell.previous_char = text_cell.char;
         text_cell.char = char;
         self.col += 1;
     }
@@ -73,17 +72,9 @@ impl<'a> Tty<'a> {
                 let index = self.get_text_cell_location(row as u32, col as u32);
                 let cell = self.text_buf[index];
 
-                if cell.char == '\0' {
-                    continue;
-                }
-
                 if cell.char != cell.previous_char {
-                    let mut buf = [0u8, 4];
-                    self.render_char(
-                        col as u32,
-                        row as u32,
-                        cell.char.encode_utf8(&mut buf).as_bytes(),
-                    );
+                    self.render_char(col as u32, row as u32, cell.char);
+                    self.text_buf[index].previous_char = cell.char;
                 }
             }
         }
@@ -91,8 +82,14 @@ impl<'a> Tty<'a> {
         self.canvas.lock().flush();
     }
 
-    fn render_char(&mut self, col: u32, row: u32, char: &[u8]) {
-        let glyph = self.font.glyph_for_utf8(char).expect("Invalid charcter");
+    fn render_char(&mut self, col: u32, row: u32, char: char) {
+        let mut buf = [0u8, 4];
+        let character = char.encode_utf8(&mut buf).as_bytes();
+
+        let glyph = self
+            .font
+            .glyph_for_utf8(character)
+            .expect("Invalid charcter");
 
         let base_x = (PADDING + (col * self.font.width)) as usize;
         let base_y = (PADDING + (row * self.font.height)) as usize;
@@ -101,7 +98,7 @@ impl<'a> Tty<'a> {
 
         for (y, row) in glyph.enumerate() {
             for (x, visible) in row.enumerate() {
-                if visible {
+                if visible && char != '\0' {
                     canvas.write_pixel(base_x + x, base_y + y, 255, 255, 255);
                     // Shadow
                     canvas.write_pixel(base_x + x + 1, base_y + y + 1, 0, 0, 0);
