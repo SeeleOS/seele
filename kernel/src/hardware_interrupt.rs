@@ -2,13 +2,14 @@ use conquer_once::spin::OnceCell;
 use pic8259::ChainedPics;
 use spin::Mutex;
 use x86_64::{
+    VirtAddr,
     instructions::interrupts::without_interrupts,
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame},
 };
 
 use crate::{
     debug_exit::debug_exit,
-    interrupts::PICS,
+    interrupts::{PICS, timer::timer_interrupt_handler_wrapper},
     multitasking::{MANAGER, manager::Manager, scheduling::run_next},
     os::get_os,
     print, println, s_print,
@@ -61,17 +62,8 @@ macro_rules! register_hardware_interrupt {
 }
 
 pub fn init_hardware_interrupts(idt: &mut InterruptDescriptorTable) {
-    register_hardware_interrupt!(idt, HardwareInterrupt::Timer, TimerHandler);
-}
-
-struct TimerHandler;
-
-impl HardwareInterruptHandler for TimerHandler {
-    const HARDWARE_INTERRUPT: HardwareInterrupt = HardwareInterrupt::Timer;
-
-    fn handle_hardware_interrupt_unwrapped(_stack_frame: InterruptStackFrame) {
-        notify_end_of_interrupt(Self::HARDWARE_INTERRUPT);
-
-        run_next(_stack_frame);
-    }
+    unsafe {
+        idt[HardwareInterrupt::Timer.as_u8()]
+            .set_handler_addr(VirtAddr::new(timer_interrupt_handler_wrapper as u64))
+    };
 }

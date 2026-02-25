@@ -6,13 +6,9 @@ use x86_64::{
 };
 
 use crate::{
-    misc::{
-        CPU_CORE_CONTEXT,
-        others::CpuCoreContext,
-        snapshot::{Snapshot, UserSnapshot},
-    },
+    misc::{CPU_CORE_CONTEXT, others::CpuCoreContext, snapshot::Snapshot},
     multitasking::{self, context::ProcessSnapshot, manager::Manager},
-    new_syscall,
+    new_syscall, s_println,
 };
 
 impl ProcessSnapshot {
@@ -20,15 +16,16 @@ impl ProcessSnapshot {
     pub fn switch_from(
         &mut self,
         source: Option<&mut ProcessSnapshot>,
-        snapshot: &mut UserSnapshot,
+        snapshot: Option<&mut Snapshot>,
     ) {
         if let Some(source) = source {
-            source.save(snapshot);
+            // Saves the current state of the system (snapshot)
+            source.inner = *snapshot.unwrap();
             source.save_msr();
         }
 
         self.update_gs();
-        self.load();
+        self.inner.load();
         self.load_page_table();
         self.load_msr();
         self.switch_user();
@@ -51,63 +48,25 @@ impl ProcessSnapshot {
         FsBase::write(VirtAddr::new(self.fs_base));
     }
 
-    /// Save all the cpu registers into [`self`]
-    extern "C" fn save(&mut self, snapshot: &mut UserSnapshot) {
-        self.inner = *snapshot;
-    }
-
-    /// Laods all the cpu registers from [`self`]
-    #[unsafe(naked)]
-    extern "C" fn load(&mut self) {
-        naked_asm!(
-            "mov r15, [rdi + 16]",
-            "mov r14, [rdi + 24]",
-            "mov r13, [rdi + 32]",
-            "mov r12, [rdi + 40]",
-            "mov rbx, [rdi + 48]",
-            "mov rbp, [rdi + 56]",
-            "ret"
-        )
-    }
-
     #[unsafe(naked)]
     extern "C" fn load_page_table(&mut self) {
-        naked_asm!("mov rax, [rdi]", "mov cr3, rax", "ret")
+        naked_asm!("mov rax, [rdi + 160]", "mov cr3, rax", "ret")
     }
 
     #[unsafe(naked)]
     extern "C" fn switch_user(&mut self) {
         naked_asm!(
             // Loads the kernel stack so it wont messup the user stack
-            "mov rsp, [rdi + 8]",
+            "mov rsp, [rdi + 168]",
             // Pushes the things required for iretq
             // TODO: use ret to return to whatever it came from
             // instead of just straightup jumping to userspace with iretq
-            "push [rdi + 64]", // SS
-            "push [rdi + 72]", // RSP
-            "push [rdi + 80]", // RFlags
-            "push [rdi + 88]", // CS
-            "push [rdi + 96]", // RIP
+            "push [rdi + 152]", // SS
+            "push [rdi + 144]", // RSP
+            "push [rdi + 136]", // RFlags
+            "push [rdi + 128]", // CS
+            "push [rdi + 120]", // RIP
             "iretq"
         )
     }
-}
-
-/// # Safety
-/// Must provide valid pointer to context
-#[unsafe(naked)]
-pub unsafe extern "C" fn context_switch_zombie(next: *mut ProcessSnapshot) {
-    arch::naked_asm!(
-        "mov rax, [rdi]",
-        "mov cr3, rax",
-        "mov rsp, [rdi + 8]",
-        "popfq",
-        "mov r15, [rdi + 16]",
-        "mov r14, [rdi + 24]",
-        "mov r13, [rdi + 32]",
-        "mov r12, [rdi + 40]",
-        "mov rbx, [rdi + 48]",
-        "mov rbp, [rsi + 56]",
-        "ret",
-    );
 }

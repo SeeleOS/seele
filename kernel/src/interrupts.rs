@@ -13,6 +13,7 @@ use crate::{
     os::get_os,
     print, println, s_println, test,
 };
+pub mod timer;
 use lazy_static::lazy_static;
 pub static PICS: OnceCell<Mutex<ChainedPics>> = OnceCell::uninit();
 

@@ -5,10 +5,7 @@ use x86_64::{VirtAddr, registers::control::Cr3Flags};
 use crate::{
     gdt::GDT,
     memory::page_table_wrapper::PageTableWrapped,
-    misc::{
-        others::calc_cr3_value,
-        snapshot::{Snapshot, UserSnapshot},
-    },
+    misc::{others::calc_cr3_value, snapshot::Snapshot},
     multitasking::memory::{allocate_kernel_stack, allocate_stack},
     userspace::elf_loader::Function,
 };
@@ -19,20 +16,20 @@ use crate::{
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProcessSnapshot {
-    pub inner: UserSnapshot,
-    cr3: u64, // +0
+    pub inner: Snapshot,
+    cr3: u64,
     // RSP used on context switching in kernel space to not messup the userstack
-    pub kernel_rsp: u64, // +8
+    pub kernel_rsp: u64,
     pub fs_base: u64,
 }
 
 impl ProcessSnapshot {
     pub fn new(entry_point: u64, table: &mut PageTableWrapped, virt_stack_addr: u64) -> Self {
         Self {
-            inner: UserSnapshot::default_regs(
+            inner: Snapshot::default_regs(
                 entry_point,
                 GDT.1.user_code.0,
-                0x0,
+                0x202,
                 virt_stack_addr,
                 GDT.1.user_data.0,
             ),

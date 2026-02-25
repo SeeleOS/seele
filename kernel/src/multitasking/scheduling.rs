@@ -1,6 +1,7 @@
 use x86_64::{instructions::interrupts::without_interrupts, structures::idt::InterruptStackFrame};
 
 use crate::{
+    misc::snapshot::Snapshot,
     multitasking::{MANAGER, context::ProcessSnapshot, manager::Manager, process::State},
     s_print, s_println,
     tss::TSS,
@@ -68,7 +69,7 @@ impl Manager {
     }
 }
 
-pub fn run_next(interrupt_stack_frame: InterruptStackFrame) {
+pub fn run_next(snapshot: &mut Snapshot) {
     let (current, next) = {
         without_interrupts(|| {
             let mut manager = MANAGER.lock();
@@ -77,11 +78,7 @@ pub fn run_next(interrupt_stack_frame: InterruptStackFrame) {
     };
 
     unsafe {
-        (*current).rip = interrupt_stack_frame.instruction_pointer.as_u64();
-        (*current).rflags = interrupt_stack_frame.cpu_flags.bits();
-        (*current).user_rsp = interrupt_stack_frame.stack_pointer.as_u64();
-
-        (*next).switch_from(Some(current.as_mut().unwrap()));
+        (*next).switch_from(Some(current.as_mut().unwrap()), Some(snapshot));
     }
 }
 
@@ -95,6 +92,6 @@ pub fn run_next_zombie() {
     s_println!("next task: {:?}", next);
 
     unsafe {
-        (*next).switch_from(None);
+        (*next).switch_from(None, None);
     }
 }
