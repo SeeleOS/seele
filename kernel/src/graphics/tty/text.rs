@@ -20,9 +20,9 @@ pub struct TextCell {
 impl Default for TextCell {
     fn default() -> Self {
         Self {
-            char: 'a',
+            char: '\0',
             color: 0,
-            previous_char: 'a',
+            previous_char: '\0',
         }
     }
 }
@@ -59,6 +59,8 @@ impl<'a> Tty<'a> {
     fn push_char(&mut self, char: char) {
         let index = self.get_text_cell_location(self.row, self.col);
         let text_cell = &mut self.text_buf[index];
+
+        text_cell.previous_char = text_cell.char;
         text_cell.char = char;
         self.col += 1;
     }
@@ -75,13 +77,14 @@ impl<'a> Tty<'a> {
                     continue;
                 }
 
-                let mut buf = [0u8, 4];
-                self.render_char(
-                    col as u32,
-                    row as u32,
-                    cell.char.encode_utf8(&mut buf).as_bytes(),
-                );
-                self.text_buf[index].previous_char = cell.char;
+                if cell.char != cell.previous_char {
+                    let mut buf = [0u8, 4];
+                    self.render_char(
+                        col as u32,
+                        row as u32,
+                        cell.char.encode_utf8(&mut buf).as_bytes(),
+                    );
+                }
             }
         }
 
