@@ -21,17 +21,17 @@ impl<'a> Tty<'a> {
 
         // 从静态数组中读取颜色分量
         // 注意：由于我们转换时用了 BGRA，所以顺序是 B, G, R, A
-        let mut b = WALLPAPER[i];
-        let mut g = WALLPAPER[i + 1];
-        let mut r = WALLPAPER[i + 2];
+        let mut b = WALLPAPER[i] as u32;
+        let mut g = WALLPAPER[i + 1] as u32;
+        let mut r = WALLPAPER[i + 2] as u32;
 
-        b = b - (b >> 1);
-        g = g - (g >> 1);
-        r = r - (r >> 1);
+        b = (b as f32 / 1.3) as u32;
+        g = (g as f32 / 1.3) as u32;
+        r = (r as f32 / 1.3) as u32;
 
         // 第 4 位是 Alpha(i+3)，我们通常跳过它，或者用来做透明度计算
 
         // 调用你引以为傲的 write_pixel
-        canvas.write_pixel(x, y, r, g, b);
+        canvas.write_pixel(x, y, r as u8, g as u8, b as u8);
     }
 }

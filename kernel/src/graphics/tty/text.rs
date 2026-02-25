@@ -52,12 +52,12 @@ impl<'a> Tty<'a> {
         self.render();
     }
 
-    fn get_text_cell_location(&mut self, row: u32, col: u32) -> usize {
+    fn get_text_cell_index(&mut self, row: u32, col: u32) -> usize {
         (self.screen_width_char() * row as usize) + col as usize
     }
 
     fn push_char(&mut self, char: char) {
-        let index = self.get_text_cell_location(self.row, self.col);
+        let index = self.get_text_cell_index(self.row, self.col);
         let text_cell = &mut self.text_buf[index];
 
         text_cell.char = char;
@@ -67,9 +67,10 @@ impl<'a> Tty<'a> {
     fn render(&mut self) {
         let rows = self.screen_height_chars();
         let cols = self.screen_width_char();
+
         for row in 0..rows {
             for col in 0..cols {
-                let index = self.get_text_cell_location(row as u32, col as u32);
+                let index = self.get_text_cell_index(row as u32, col as u32);
                 let cell = self.text_buf[index];
 
                 if cell.char != cell.previous_char {
@@ -83,7 +84,7 @@ impl<'a> Tty<'a> {
     }
 
     fn render_char(&mut self, col: u32, row: u32, char: char) {
-        let mut buf = [0u8, 4];
+        let mut buf = [0u8; 4];
         let character = char.encode_utf8(&mut buf).as_bytes();
 
         let glyph = self
