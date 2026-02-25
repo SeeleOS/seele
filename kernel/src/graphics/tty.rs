@@ -1,64 +1,40 @@
+use alloc::{boxed::Box, vec::Vec};
 use conquer_once::spin::OnceCell;
 use spin::{Mutex, MutexGuard};
 use spleen_font::PSF2Font;
 
 use crate::{
-    graphics::framebuffer::{Canvas, FRAME_BUFFER},
+    graphics::{
+        framebuffer::{Canvas, FRAME_BUFFER},
+        tty::text::TextCell,
+    },
     s_println,
 };
 
 pub mod text;
+pub mod wallpaper;
 
-pub static WALLPAPER: &[u8] = include_bytes!("../../../resources/wallpaper.bin");
 pub static TTY: OnceCell<Mutex<Tty>> = OnceCell::uninit();
 
 pub struct Tty<'a> {
     font: PSF2Font<'a>,
     canvas: &'a Mutex<Canvas>,
 
+    text_buf: Vec<TextCell>,
     row: u32,
     col: u32,
 }
 
 impl<'a> Tty<'a> {
     pub fn new(font: PSF2Font<'a>) -> Self {
+        let mut text_buf = Vec::with_capacity(10000);
+        text_buf.resize(10000, TextCell::default());
         Self {
             font,
             canvas: FRAME_BUFFER.get().unwrap(),
             row: 0,
+            text_buf,
             col: 0,
         }
-    }
-
-    pub fn draw_wallpaper(&mut self) {
-        let mut fb = self.canvas.lock();
-
-        let width = 1280;
-        let height = 720;
-        let bpp = 4; // 每个像素占 4 字节 (BGRA)
-
-        for y in 0..height {
-            for x in 0..width {
-                // 计算该像素在 bin 文件中的起始位置
-                let i = (y * width + x) * bpp;
-
-                // 从静态数组中读取颜色分量
-                // 注意：由于我们转换时用了 BGRA，所以顺序是 B, G, R, A
-                let mut b = WALLPAPER[i];
-                let mut g = WALLPAPER[i + 1];
-                let mut r = WALLPAPER[i + 2];
-
-                b = b - (b >> 1);
-                g = g - (g >> 1);
-                r = r - (r >> 1);
-
-                // 第 4 位是 Alpha(i+3)，我们通常跳过它，或者用来做透明度计算
-
-                // 调用你引以为傲的 write_pixel
-                fb.write_pixel(x, y, r, g, b);
-            }
-        }
-
-        fb.flush();
     }
 }
