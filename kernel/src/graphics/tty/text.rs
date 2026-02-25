@@ -71,6 +71,10 @@ impl<'a> Tty<'a> {
                 let index = self.get_text_cell_location(row as u32, col as u32);
                 let cell = self.text_buf[index];
 
+                if cell.char == '\0' {
+                    continue;
+                }
+
                 let mut buf = [0u8, 4];
                 self.render_char(
                     col as u32,
