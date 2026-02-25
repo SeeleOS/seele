@@ -35,13 +35,11 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     config
 };
 
-#[cfg(test)]
-use core::panic::PanicInfo;
-
+use crate::misc::others::enable_sse;
 use bootloader_api::{BootInfo, entry_point};
 use bootloader_api::{BootloaderConfig, config::Mapping};
-
-use crate::misc::misc::enable_sse;
+#[cfg(test)]
+use core::panic::PanicInfo;
 
 #[cfg(test)]
 entry_point!(test_k_main, config = &BOOTLOADER_CONFIG);

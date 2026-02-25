@@ -8,7 +8,6 @@ use crate::{
 };
 
 pub mod aux;
-pub mod misc;
 pub mod others;
 pub mod stack_builder;
 
