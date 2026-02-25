@@ -7,7 +7,10 @@ use crate::{
     multitasking::memory::allocate_kernel_stack,
 };
 
+pub mod aux;
+pub mod misc;
 pub mod others;
+pub mod stack_builder;
 
 pub static mut CPU_CORE_CONTEXT: &mut CpuCoreContext = &mut CpuCoreContext {
     gs_kernel_stack_top: 0,

@@ -8,7 +8,7 @@ use x86_64::{
 use crate::{
     graphics::framebuffer::FRAME_BUFFER,
     memory::{paging::FRAME_ALLOCATOR, utils::apply_offset},
-    utils::stack_builder::StackBuilder,
+    misc::stack_builder::StackBuilder,
 };
 
 static USER_MEM: AtomicU64 = AtomicU64::new(0x30_0000_0000);

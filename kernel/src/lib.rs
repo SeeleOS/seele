@@ -25,7 +25,6 @@ pub mod systemcall;
 pub mod testing;
 pub mod tss;
 pub mod userspace;
-pub mod utils;
 
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
@@ -42,7 +41,7 @@ use core::panic::PanicInfo;
 use bootloader_api::{BootInfo, entry_point};
 use bootloader_api::{BootloaderConfig, config::Mapping};
 
-use crate::utils::misc::enable_sse;
+use crate::misc::misc::enable_sse;
 
 #[cfg(test)]
 entry_point!(test_k_main, config = &BOOTLOADER_CONFIG);

@@ -10,6 +10,7 @@ use x86_64::{
 
 use crate::{
     memory::page_table_wrapper::PageTableWrapped,
+    misc::{aux::AuxType, stack_builder::StackBuilder},
     multitasking::{
         context::Context,
         memory::{allocate_kernel_stack, allocate_stack},
@@ -17,7 +18,6 @@ use crate::{
     },
     s_println,
     userspace::elf_loader::{Function, load_elf},
-    utils::{aux::AuxType, stack_builder::StackBuilder},
 };
 
 #[derive(Debug)]

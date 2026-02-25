@@ -2,7 +2,7 @@ use elfloader::ElfBinary;
 use x86_64::VirtAddr;
 use xmas_elf::program;
 
-use crate::{s_println, utils::aux::AuxType};
+use crate::{misc::aux::AuxType, s_println};
 
 #[derive(Debug)]
 pub struct StackBuilder {
