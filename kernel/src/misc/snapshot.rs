@@ -21,8 +21,22 @@ pub struct Snapshot {
     pub rax: u64,
 
     pub rip: u64,
-    pub cs: u64,
+    pub cs: u16,
     pub rflags: u64,
     pub rsp: u64,
-    pub ss: u64,
+    pub ss: u16,
+}
+
+impl Snapshot {
+    pub fn default_regs(rip: u64, cs: u16, rflags: u64, rsp: u64, ss: u16) -> Self {
+        let mut snapshot = Snapshot::default();
+
+        snapshot.rip = rip;
+        snapshot.cs = cs;
+        snapshot.rflags = rflags;
+        snapshot.rsp = rsp;
+        snapshot.ss = ss;
+
+        snapshot
+    }
 }
