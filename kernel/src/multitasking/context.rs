@@ -41,7 +41,9 @@ impl Context {
     pub fn new(entry_point: u64, table: &mut PageTableWrapped, virt_stack_addr: u64) -> Self {
         Self {
             cr3: calc_cr3_value(table.frame.start_address(), Cr3Flags::empty()),
-            kernel_rsp: allocate_kernel_stack(1, &mut table.inner).finish().as_u64(),
+            kernel_rsp: allocate_kernel_stack(16, &mut table.inner)
+                .finish()
+                .as_u64(),
 
             r15: 0,
             r14: 0,
