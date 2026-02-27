@@ -1,8 +1,10 @@
 use core::task::Poll;
 
+use alloc::collections::vec_deque::VecDeque;
 use conquer_once::spin::OnceCell;
 use crossbeam_queue::ArrayQueue;
 use futures_util::{Stream, StreamExt, task::AtomicWaker};
+use spin::Mutex;
 
 use crate::{
     driver::keyboard::ps2::{KeyboardDriver, PS2KeyboardDriver, get_keyboard},
@@ -13,6 +15,7 @@ use crate::{
 // TODO: Move this and the other stuffs such as
 // mapper, executer, etc into the OS struct
 static SCANCODE_QUEUE: OnceCell<ArrayQueue<u8>> = OnceCell::uninit();
+pub static KEYBOARD_QUEUE: OnceCell<Mutex<VecDeque<u8>>> = OnceCell::uninit();
 static WAKER: AtomicWaker = AtomicWaker::new();
 
 pub(crate) fn add_scancode(scancode: u8) {

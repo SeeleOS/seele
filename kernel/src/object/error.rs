@@ -1,2 +1,4 @@
 #[derive(Debug)]
-pub enum ObjectError {}
+pub enum ObjectError {
+    Other,
+}

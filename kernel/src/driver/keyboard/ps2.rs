@@ -1,3 +1,5 @@
+use alloc::collections::vec_deque::VecDeque;
+use crossbeam_queue::ArrayQueue;
 use lazy_static::lazy_static;
 use pc_keyboard::{DecodedKey, KeyCode, Keyboard, ScancodeSet1, layouts};
 use spin::{Mutex, MutexGuard};
@@ -13,7 +15,10 @@ lazy_static! {
 }
 
 use crate::{
-    driver::{Driver, InterruptDriver, keyboard::scancode_processing::add_scancode},
+    driver::{
+        Driver, InterruptDriver,
+        keyboard::scancode_processing::{KEYBOARD_QUEUE, add_scancode},
+    },
     hardware_interrupt::{HardwareInterrupt, HardwareInterruptHandler},
     print, register_hardware_interrupt,
 };
@@ -21,7 +26,10 @@ use crate::{
 pub trait KeyboardDriver: Driver {
     fn handle_key(key: DecodedKey) {
         match key {
-            DecodedKey::Unicode(character) => print!("{character}"),
+            DecodedKey::Unicode(character) => KEYBOARD_QUEUE
+                .get_or_init(|| Mutex::new(VecDeque::new()))
+                .lock()
+                .push_back(character as u8),
             DecodedKey::RawKey(key) => Self::handle_raw_key(key),
         }
     }
