@@ -8,13 +8,13 @@ extern crate alloc;
 
 pub mod acpi;
 pub mod debug_exit;
-pub mod driver;
 pub mod exception_interrupt;
 pub mod filesystem;
 pub mod gdt;
 pub mod graphics;
 pub mod hardware_interrupt;
 pub mod interrupts;
+pub mod keyboard;
 pub mod memory;
 pub mod misc;
 pub mod multitasking;

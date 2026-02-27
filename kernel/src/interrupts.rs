@@ -7,7 +7,6 @@ use x86_64::{
 };
 
 use crate::{
-    driver::init_interrupt_drivers,
     exception_interrupt::init_exception_interrupts,
     hardware_interrupt::{PIC_1_OFFSET, PIC_2_OFFSET, init_hardware_interrupts},
     print, s_println, test,
@@ -21,7 +20,6 @@ lazy_static! {
         let mut idt = InterruptDescriptorTable::new();
 
         init_hardware_interrupts(&mut idt);
-        init_interrupt_drivers(&mut idt);
         init_exception_interrupts(&mut idt);
 
         idt

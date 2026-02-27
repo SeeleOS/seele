@@ -1,7 +1,7 @@
 use x86_64::registers::mxcsr::read;
 
 use crate::{
-    driver::keyboard::scancode_processing::KEYBOARD_QUEUE,
+    keyboard::decoding_task::KEYBOARD_QUEUE,
     object::{Object, Readable, error::ObjectError},
 };
 

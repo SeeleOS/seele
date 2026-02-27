@@ -15,7 +15,6 @@ use bootloader_api::{BootInfo, entry_point};
 use kernel::BOOTLOADER_CONFIG;
 #[cfg(test)]
 use kernel::debug_exit::debug_exit;
-use kernel::driver::keyboard::scancode_processing::process_keypresses;
 use kernel::multitasking::kernel_task::executor::Executor;
 use kernel::multitasking::kernel_task::task::Task;
 use kernel::{init, s_println};

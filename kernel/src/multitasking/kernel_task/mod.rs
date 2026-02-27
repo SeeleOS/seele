@@ -2,7 +2,7 @@ use conquer_once::spin::OnceCell;
 use spin::Mutex;
 
 use crate::{
-    driver::keyboard::scancode_processing::process_keypresses,
+    keyboard::decoding_task::process_keypresses,
     multitasking::kernel_task::{executor::Executor, spawner::TaskSpawner, task::Task},
 };
 

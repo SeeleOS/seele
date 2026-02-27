@@ -3,7 +3,7 @@ use core::sync::atomic::AtomicU64;
 use alloc::{sync::Arc, vec::Vec};
 
 use crate::{
-    driver::keyboard::object::KeyboardObject, graphics::object::TtyObject,
+    graphics::object::TtyObject, keyboard::object::KeyboardObject,
     multitasking::yielding::BlockType, object::Object,
 };
 
