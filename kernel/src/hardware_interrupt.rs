@@ -53,7 +53,8 @@ macro_rules! register_hardware_interrupt {
 
 pub fn init_hardware_interrupts(idt: &mut InterruptDescriptorTable) {
     unsafe {
-        idt[HardwareInterrupt::Timer.as_u8()]
-            .set_handler_addr(VirtAddr::new(timer_interrupt_handler_wrapper as *const () as u64))
+        idt[HardwareInterrupt::Timer.as_u8()].set_handler_addr(VirtAddr::new(
+            timer_interrupt_handler_wrapper as *const () as u64,
+        ))
     };
 }

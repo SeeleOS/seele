@@ -7,8 +7,9 @@ use crate::{
     multitasking::{
         MANAGER,
         process::process::State,
-        thread::{THREAD_MANAGER, ThreadRef},
+        thread::{THREAD_MANAGER, ThreadRef, snapshot::ThreadSnapshot},
     },
+    s_println,
     tss::TSS,
 };
 
@@ -36,42 +37,50 @@ impl Future for ThreadFuture {
         self: core::pin::Pin<&mut Self>,
         cx: &mut core::task::Context<'_>,
     ) -> core::task::Poll<Self::Output> {
-        let mut manager = THREAD_MANAGER.get().unwrap().lock();
-        let mut thread = self.0.lock();
-        let previous_thread_ref = manager.current.clone().unwrap();
-        let previous_thread = previous_thread_ref.lock();
+        let (thread_snapshot, executor_snapshot) = {
+            let mut manager = THREAD_MANAGER.get().unwrap().lock();
+            let mut thread = self.0.lock();
+            let previous_thread_ref = manager.current.clone().unwrap();
+            let previous_thread = previous_thread_ref.lock();
 
-        let thread_pid = {
-            let p = thread.parent.lock();
-            p.pid
+            let thread_pid = {
+                let p = thread.parent.lock();
+                p.pid
+            };
+            let previous_thread_pid = {
+                let p = previous_thread.parent.lock();
+                p.pid
+            };
+
+            thread.state = State::Running;
+            manager.current = Some(self.0.clone());
+            unsafe {
+                TSS.privilege_stack_table[0] = VirtAddr::new(thread.kernel_stack_top);
+            }
+
+            if previous_thread_pid != thread_pid {
+                MANAGER.lock().load_process(thread.parent.clone());
+            }
+
+            (
+                &mut thread.snapshot as *mut ThreadSnapshot,
+                &mut thread.executor_snapshot as *mut ThreadSnapshot,
+            )
         };
-        let previous_thread_pid = {
-            let p = previous_thread.parent.lock();
-            p.pid
-        };
 
-        let mut executor_snapshot = thread.executor_snapshot;
-        let mut snapshot = thread.snapshot;
+        s_println!("current: {:?}", Snapshot::from_current());
 
-        thread.state = State::Running;
-        manager.current = Some(self.0.clone());
         unsafe {
-            TSS.privilege_stack_table[0] = VirtAddr::new(thread.kernel_stack_top);
-        }
+            s_println!("is locked {}", self.0.is_locked());
+            self.0.force_unlock();
+            (*thread_snapshot).switch_from(
+                Some(&mut *executor_snapshot),
+                Some(&mut Snapshot::from_current()),
+            )
+        };
 
-        if previous_thread_pid != thread_pid {
-            MANAGER.lock().load_process(thread.parent.clone());
-        }
-
-        drop(manager);
-        drop(thread);
-        drop(previous_thread);
-        drop(previous_thread_ref);
-
-        snapshot.switch_from(
-            Some(&mut executor_snapshot),
-            Some(&mut Snapshot::from_current()),
-        );
+        s_println!("returned");
+        s_println!("ret is locked {}", self.0.is_locked());
 
         match self.0.lock().state {
             State::Zombie => Poll::Ready(()),

@@ -1,10 +1,9 @@
 use core::arch::naked_asm;
 
-
 use crate::{
     hardware_interrupt::{HardwareInterrupt, notify_end_of_interrupt},
     misc::snapshot::Snapshot,
-    multitasking::scheduling::run_next,
+    multitasking::scheduling::return_to_executor,
     s_println,
 };
 
@@ -42,7 +41,7 @@ pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
         snapshot.ss = 0x23;
     }
     notify_end_of_interrupt(HardwareInterrupt::Timer);
-    run_next(snapshot);
+    return_to_executor(snapshot);
 
     panic!("What the fuck");
 }

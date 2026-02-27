@@ -53,6 +53,13 @@ impl ThreadSnapshot {
         }
     }
 
+    pub fn new_executor() -> Self {
+        Self {
+            snapshot_type: ThreadSnapshotType::Executor,
+            ..Default::default()
+        }
+    }
+
     pub fn as_ptr(&mut self) -> *mut Self {
         self as *mut Self
     }

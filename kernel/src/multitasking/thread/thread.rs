@@ -36,7 +36,7 @@ impl Thread {
             parent: Process::empty(),
             id: ThreadID::default(),
             snapshot: ThreadSnapshot::default(),
-            executor_snapshot: ThreadSnapshot::default(),
+            executor_snapshot: ThreadSnapshot::new_executor(),
             state: State::Ready,
             kernel_stack_top: 0,
         }))
@@ -56,7 +56,7 @@ impl Thread {
                 stack.finish().as_u64(),
                 ThreadSnapshotType::Thread,
             ),
-            executor_snapshot: ThreadSnapshot::default(),
+            executor_snapshot: ThreadSnapshot::new_executor(),
             parent,
             kernel_stack_top,
             state: State::Ready,
@@ -71,7 +71,7 @@ impl Thread {
     ) -> Self {
         Self {
             snapshot,
-            executor_snapshot: ThreadSnapshot::default(),
+            executor_snapshot: ThreadSnapshot::new_executor(),
             parent,
             state: State::Ready,
             id: ThreadID::default(),

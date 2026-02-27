@@ -75,15 +75,19 @@ impl ThreadManager {
     }
 }
 
-pub fn run_next(snapshot: &mut Snapshot) {
-    let (current, next) = {
-        without_interrupts(|| {
-            let mut manager = THREAD_MANAGER.get().unwrap().lock();
-            manager.run_next_unwrapped()
-        })
+pub fn return_to_executor(snapshot: &mut Snapshot) {
+    let (thread_snapshot, executor_snapshot) = {
+        let manager = THREAD_MANAGER.get().unwrap().lock();
+        let current_ref = manager.current.clone().unwrap();
+        let mut current = current_ref.lock();
+
+        (
+            &mut current.snapshot as *mut ThreadSnapshot,
+            &mut current.executor_snapshot as *mut ThreadSnapshot,
+        )
     };
 
-    unsafe { (*next).switch_from(Some(current.as_mut().unwrap()), Some(snapshot)) };
+    unsafe { (*executor_snapshot).switch_from(Some(&mut *thread_snapshot), Some(snapshot)) };
 }
 
 /// runs the next process. called from a zombie process
