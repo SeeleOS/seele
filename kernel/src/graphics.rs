@@ -7,6 +7,7 @@ use crate::graphics::{
 };
 
 pub mod framebuffer;
+pub mod object;
 pub mod tty;
 
 pub static FONT: &[u8] = include_bytes!("../../maplemono.psf");
