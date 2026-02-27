@@ -26,6 +26,7 @@ use crate::{
         },
         yielding::BlockType,
     },
+    object::Writable,
     s_println,
     userspace::elf_loader::load_elf,
 };
@@ -37,6 +38,7 @@ pub struct Process {
     pub page_table: PageTableWrapped,
     pub kernel_stack_top: VirtAddr,
     pub threads: Vec<Weak<Mutex<Thread>>>,
+    pub objects: Vec<Arc<dyn Writable>>,
 }
 
 impl Process {
@@ -47,6 +49,7 @@ impl Process {
             page_table: PageTableWrapped::default(),
             kernel_stack_top: VirtAddr::zero(),
             threads: Vec::new(),
+            objects: Vec::new(),
         }))
     }
 }
@@ -63,6 +66,7 @@ impl Process {
             page_table,
             kernel_stack_top,
             threads: Vec::new(),
+            objects: Vec::new(),
         }));
 
         let mut process = process_arc.lock();

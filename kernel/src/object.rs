@@ -1,14 +1,16 @@
+use core::fmt::Debug;
+
 use crate::object::error::ObjectError;
 
 pub mod error;
 
-pub trait Object: Send + Sync {}
+pub trait Object: Send + Sync + Debug {}
 
 pub type ObjectResult<T> = Result<T, ObjectError>;
 
 pub trait Writable: Object {
     /// Write the content of [`buffer`] to [`self`]
-    fn write(&self, buffer: &[u8]) -> ObjectResult<u64>;
+    fn write(&self, buffer: &[u8]) -> ObjectResult<usize>;
 }
 
 pub trait Readable: Object {
