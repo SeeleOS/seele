@@ -27,7 +27,10 @@ impl ThreadManager {
             (current_thread.snapshot.as_ptr(), pid)
         }; // Lock released.
 
-        let next_thread_arc = self.queue.pop_front().unwrap();
+        let next_thread_arc = self
+            .queue
+            .pop_front()
+            .unwrap_or(self.idle_thread.clone().unwrap());
         let mut next_thread = next_thread_arc.lock();
         let next_pid = {
             let p = next_thread.parent.lock();
@@ -50,28 +53,28 @@ impl ThreadManager {
 
     /// picks the next process. called from a zombie process
     fn run_next_zombie_unwrapped(&mut self) -> *mut ThreadSnapshot {
-        unimplemented!();
-        //self.clean_zombies();
+        let next_thread_arc = self
+            .queue
+            .pop_front()
+            .unwrap_or(self.idle_thread.clone().unwrap());
+        let mut next_thread = next_thread_arc.lock();
+        let next_pid = {
+            let p = next_thread.parent.lock();
+            p.pid
+        };
+        let next_thread_ptr = next_thread.snapshot.as_ptr();
 
-        //let next_task = if let Some(next) = self.queue.pop_front() {
-        //  self.processes.get_mut(&next).unwrap()
-        //} else {
-        //  // call the idle process if there is nothing to do
-        //match self.processes.get_mut(&self.idle_process.unwrap()) {
-        //  Some(task) => task,
-        //None => panic!("This isnt supposed to happen"),
-        //}
-        //};
+        MANAGER.lock().load_process(next_thread.parent.clone());
 
-        //     next_task.state = State::Running;
+        next_thread.state = State::Running;
+        self.current = Some(next_thread_arc.clone());
+        unsafe {
+            TSS.privilege_stack_table[0] = VirtAddr::new(next_thread.kernel_stack_top);
+        }
 
-        //   self.current = Some(next_task.pid);
+        self.clean_zombies();
 
-        // unsafe {
-        //   TSS.privilege_stack_table[0] = next_task.kernel_stack_top;
-        //}
-
-        //next_task.context.as_ptr()
+        next_thread_ptr
     }
 }
 

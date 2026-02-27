@@ -20,6 +20,5 @@ pub fn init() {
         thread::init();
 
         MANAGER.lock().init();
-        THREAD_MANAGER.get().unwrap().lock().init();
     })
 }

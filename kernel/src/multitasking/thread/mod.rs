@@ -13,7 +13,10 @@ pub mod thread;
 pub static THREAD_MANAGER: OnceCell<Mutex<ThreadManager>> = OnceCell::uninit();
 
 pub fn init() {
-    THREAD_MANAGER.get_or_init(|| Mutex::new(ThreadManager::default()));
+    let mut thread_manager = THREAD_MANAGER
+        .get_or_init(|| Mutex::new(ThreadManager::default()))
+        .lock();
+    thread_manager.init();
 }
 
 pub type ThreadRef = Arc<Mutex<Thread>>;

@@ -24,8 +24,6 @@ pub struct Manager {
     pub queue: VecDeque<ProcessRef>,
     pub zombies: Vec<ProcessRef>,
     pub blocked_queues: BlockedQueues,
-
-    pub idle_process: Option<ProcessRef>,
 }
 
 #[repr(align(8))]
@@ -48,10 +46,6 @@ impl Manager {
             self.processes
                 .insert(kernel_process.lock().pid, kernel_process.clone());
 
-            self.idle_process = Some(idle_process.clone());
-            self.processes
-                .insert(idle_process.lock().pid, idle_process.clone());
-
             // TODO: remove these test processes
             self.spawn(&ELF_HOLDER.data);
         });
@@ -60,24 +54,12 @@ impl Manager {
     pub fn spawn(&mut self, program: &[u8]) {
         let process = Process::new(program);
         let pid = process.lock().pid;
-        s_println!(
-            "process pagetable frame at spawn() {:?}",
-            process.lock().page_table.frame
-        );
         self.processes.insert(process.lock().pid, process.clone());
         self.queue.push_back(process.clone());
-        s_println!(
-            "process pagetable got from self.processes {:?}",
-            self.processes.get(&pid).unwrap().lock().page_table.frame
-        );
-        s_println!("queue: {:?}", self.queue);
     }
 
-    pub fn clean_zombies(&mut self) {
-        for zombie in self.zombies.drain(..) {
-            self.processes.remove(&zombie.lock().pid);
-            self.current.take_if(|p| p.lock().pid == zombie.lock().pid);
-        }
+    pub fn remove_process(&mut self, process: ProcessRef) {
+        self.processes.remove(&process.lock().pid);
     }
 
     pub fn load_process(&mut self, process: ProcessRef) {

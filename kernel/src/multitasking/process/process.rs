@@ -72,6 +72,7 @@ impl Process {
             stack_builder.finish().as_u64(),
         );
 
+        // Initilizes the main thread
         process
             .threads
             .push(Arc::downgrade(&THREAD_MANAGER.get().unwrap().lock().spawn(

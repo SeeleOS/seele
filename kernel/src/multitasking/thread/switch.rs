@@ -24,10 +24,7 @@ impl ThreadSnapshot {
             source.save_msr();
         }
 
-        s_println!("update gs");
         self.update_gs();
-        //self.load_page_table();
-        s_println!("load pagetable end");
         self.load_msr();
         s_println!("final jump");
         s_println!("self: {:?}", self);
