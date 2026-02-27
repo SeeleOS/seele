@@ -16,7 +16,7 @@ use crate::{
         memory::{allocate_kernel_stack, allocate_stack},
         process::{
             ProcessRef,
-            misc::{ProcessID, State},
+            misc::{ProcessID, State, init_objects},
         },
         thread::{
             self, THREAD_MANAGER,
@@ -92,7 +92,7 @@ impl Process {
                 Thread::from_snapshot(context, process_arc.clone(), kernel_stack_top.as_u64()),
             )));
 
-        s_println!("processes page table is at {:?}", process.page_table.frame);
+        init_objects(&mut process.objects);
 
         process_arc.clone()
     }

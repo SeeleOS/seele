@@ -1,6 +1,8 @@
 use core::sync::atomic::AtomicU64;
 
-use crate::multitasking::yielding::BlockType;
+use alloc::{sync::Arc, vec::Vec};
+
+use crate::{graphics::object::TtyObject, multitasking::yielding::BlockType, object::Writable};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct ProcessID(pub u64);
@@ -20,4 +22,8 @@ pub enum State {
     Running,
     Blocked(BlockType), // stuck, waiting for something (like keyboard input)
     Zombie,             // Exited process
+}
+
+pub fn init_objects(objects: &mut Vec<Arc<dyn Writable>>) {
+    objects[1] = Arc::new(TtyObject {});
 }
