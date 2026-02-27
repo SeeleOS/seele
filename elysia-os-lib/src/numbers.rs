@@ -9,4 +9,6 @@ pub enum SyscallNumber {
     FutexWait = 8,
     FutexWake = 9,
     Exit = 10,
+    ReadObject = 11,
+    WriteObject = 12,
 }
