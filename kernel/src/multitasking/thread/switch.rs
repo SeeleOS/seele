@@ -50,11 +50,6 @@ impl ThreadSnapshot {
     }
 
     #[unsafe(naked)]
-    extern "C" fn load_page_table(&mut self) {
-        naked_asm!("mov rax, [rdi + 176]", "mov cr3, rax", "ret")
-    }
-
-    #[unsafe(naked)]
     extern "C" fn switch_user(&mut self) {
         naked_asm!(
             // Loads the kernel stack so it wont messup the user stack
