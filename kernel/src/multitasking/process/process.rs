@@ -14,7 +14,10 @@ use crate::{
     multitasking::{
         MANAGER,
         memory::{allocate_kernel_stack, allocate_stack},
-        process::ProcessRef,
+        process::{
+            ProcessRef,
+            misc::{ProcessID, State},
+        },
         thread::{
             self, THREAD_MANAGER,
             misc::ThreadID,
@@ -112,24 +115,4 @@ fn init_stack_layout(builder: &mut StackBuilder, file: &ElfBinary) {
 
     // argc (1 arguments)
     builder.push(1);
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct ProcessID(pub u64);
-
-impl Default for ProcessID {
-    fn default() -> Self {
-        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
-
-        Self(NEXT_ID.fetch_add(1, core::sync::atomic::Ordering::Relaxed))
-    }
-}
-
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub enum State {
-    #[default]
-    Ready, // ready to run (in a queue)
-    Running,
-    Blocked(BlockType), // stuck, waiting for something (like keyboard input)
-    Zombie,             // Exited process
 }

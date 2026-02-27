@@ -7,10 +7,7 @@ use crate::{
     multitasking::{
         MANAGER,
         memory::{allocate_kernel_stack, allocate_stack},
-        process::{
-            ProcessRef,
-            process::{Process, ProcessID, State},
-        },
+        process::{ProcessRef, misc::State, process::Process},
         thread::{
             ThreadRef,
             misc::ThreadID,

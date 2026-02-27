@@ -3,7 +3,7 @@ use alloc::collections::vec_deque::VecDeque;
 use crate::multitasking::process::{
     ProcessRef,
     manager::Manager,
-    process::{ProcessID, State},
+    misc::{ProcessID, State},
 };
 
 use paste::paste;

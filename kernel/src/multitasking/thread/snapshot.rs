@@ -7,9 +7,6 @@ use crate::{
     multitasking::memory::allocate_kernel_stack,
 };
 
-// NOTE: the direction of the struct in memory and the stack is REVERSED
-// therefore you need to push rbp - r15 and then rflags
-// and also, ptr.sub(1) 6 times (rbp-r15) and then write the rflags
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ThreadSnapshot {

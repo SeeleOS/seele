@@ -19,7 +19,6 @@ impl ThreadSnapshot {
         snapshot: Option<&mut Snapshot>,
     ) {
         if let Some(source) = source {
-            s_println!("source is {:?}", source);
             // Saves the current RSP, which have the RIP saved
             // on the stacktop when we called switch_from()
             // So when we use jump_to_executor(), it will load
@@ -39,7 +38,7 @@ impl ThreadSnapshot {
         s_println!("self is {:?}", self);
 
         match self.snapshot_type {
-            ThreadSnapshotType::Thread => self.switch_user(),
+            ThreadSnapshotType::Thread => self.jump_user(),
             ThreadSnapshotType::Executor => self.jump_to_executor(),
         }
     }
@@ -91,7 +90,7 @@ impl ThreadSnapshot {
     }
 
     #[unsafe(naked)]
-    extern "C" fn switch_user(&mut self) {
+    extern "C" fn jump_user(&mut self) {
         naked_asm!(
             // Loads the kernel stack so it wont messup the user stack
             "mov rsp, [rdi + 168]",

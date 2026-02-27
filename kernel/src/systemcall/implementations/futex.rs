@@ -4,7 +4,7 @@ use spin::Mutex;
 use crate::{
     multitasking::{
         MANAGER,
-        process::{ProcessRef, process::ProcessID},
+        process::{ProcessRef, misc::ProcessID},
     },
     systemcall::{implementations::utils::SyscallImpl, syscall_no::SyscallNo},
 };

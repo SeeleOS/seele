@@ -10,7 +10,8 @@ use crate::{
         MANAGER,
         process::{
             ProcessRef,
-            process::{self, Process, ProcessID},
+            misc::ProcessID,
+            process::{self, Process},
         },
         yielding::{BlockType, BlockedQueues, WakeType},
     },
@@ -40,20 +41,16 @@ impl Manager {
         without_interrupts(|| {
             let kernel_process = Process::empty();
             // TODO: delete the idle proecss or let it fucking work with all that shit
-            let idle_process = Process::empty();
-
             self.current = Some(kernel_process.clone());
             self.processes
                 .insert(kernel_process.lock().pid, kernel_process.clone());
 
-            // TODO: remove these test processes
             self.spawn(&ELF_HOLDER.data);
         });
     }
 
     pub fn spawn(&mut self, program: &[u8]) {
         let process = Process::new(program);
-        let pid = process.lock().pid;
         self.processes.insert(process.lock().pid, process.clone());
         self.queue.push_back(process.clone());
     }
@@ -68,27 +65,4 @@ impl Manager {
         process_locked.page_table.load();
         self.current = Some(process.clone());
     }
-
-    pub fn block_current_unwrappped(&mut self, block_type: BlockType) {
-        let current = self.current.clone().unwrap();
-
-        current.lock().state = process::State::Blocked(block_type);
-        //self.queue.into_iter().filter(|p| *p != current.pid.clone());
-
-        match block_type {
-            BlockType::WakeRequired(wake_type) => match wake_type {
-                WakeType::Keyboard => self.blocked_queues.keyboard.push_back(current),
-                WakeType::IO => self.blocked_queues.io.push_back(current),
-            },
-            _ => {}
-        }
-
-        //run_next();
-    }
-}
-
-pub fn block_current(block_type: BlockType) {
-    MANAGER.lock().block_current_unwrappped(block_type);
-    // TODO
-    //run_next(InterruptStackFrame::new(fwefwefas, code_segment, cpu_flags, stack_pointer, stack_segment));
 }

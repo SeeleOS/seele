@@ -7,7 +7,7 @@ use crate::{
     misc::snapshot::Snapshot,
     multitasking::{
         MANAGER,
-        process::process::State,
+        process::misc::State,
         thread::{THREAD_MANAGER, ThreadRef, snapshot::ThreadSnapshot},
     },
     s_println,
@@ -38,17 +38,16 @@ impl Future for ThreadFuture {
         self: core::pin::Pin<&mut Self>,
         cx: &mut core::task::Context<'_>,
     ) -> core::task::Poll<Self::Output> {
-        s_println!("i got polled ");
         let (thread_snapshot, executor_snapshot) = {
             let mut manager = THREAD_MANAGER.get().unwrap().lock();
-            s_println!("locked thread mamager");
             let mut thread = self.0.lock();
             let previous_thread_ref = manager.current.clone().unwrap();
-            s_println!("d");
+
             if Arc::ptr_eq(&self.0, &previous_thread_ref) {
                 thread.state = State::Running;
             } else {
                 let previous_thread = previous_thread_ref.lock();
+
                 let thread_pid = {
                     let p = thread.parent.lock();
                     p.pid
@@ -68,32 +67,24 @@ impl Future for ThreadFuture {
                     MANAGER.lock().load_process(thread.parent.clone());
                 }
             };
+
             (
                 &mut thread.snapshot as *mut ThreadSnapshot,
                 &mut thread.executor_snapshot as *mut ThreadSnapshot,
             )
         };
 
-        s_println!("current: {:?}", Snapshot::from_current());
-
         unsafe {
-            s_println!("is locked {}", self.0.is_locked());
-            self.0.force_unlock();
             (*thread_snapshot).switch_from(
                 Some(&mut *executor_snapshot),
                 Some(&mut Snapshot::from_current()),
             )
         };
 
-        s_println!("returned");
-        s_println!("ret is locked {}", self.0.is_locked());
-
         match self.0.lock().state {
             State::Zombie => Poll::Ready(()),
             State::Running => {
-                s_println!("re-queueing");
                 cx.waker().wake_by_ref();
-                s_println!("returned");
                 Poll::Pending
             }
             State::Blocked(_) => unimplemented!(),
