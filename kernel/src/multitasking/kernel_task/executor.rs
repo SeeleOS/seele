@@ -14,15 +14,17 @@ pub struct Executor {
     wakers: BTreeMap<TaskID, Waker>,
 }
 
-impl Executor {
-    pub fn new() -> Self {
+impl Default for Executor {
+    fn default() -> Self {
         Self {
             tasks: BTreeMap::new(),
             task_queue: Arc::new(ArrayQueue::new(128)),
             wakers: BTreeMap::new(),
         }
     }
+}
 
+impl Executor {
     pub fn spawn(&mut self, task: Task) {
         let task_id = task.id;
         if self.tasks.insert(task.id, task).is_some() {

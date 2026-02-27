@@ -29,7 +29,7 @@ fn k_main(bootinfo: &'static mut BootInfo) -> ! {
 
     init(bootinfo);
 
-    let mut executor = Executor::new();
+    let mut executor = Executor::default();
 
     //executor.spawn(Task::new(init_processes()));
     //executor.spawn(Task::new(taskz()));
