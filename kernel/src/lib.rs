@@ -68,8 +68,8 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     misc::init();
     systemcall::init();
     acpi::init();
-    multitasking::init();
     let mut executor = kernel_task::init();
+    multitasking::init();
     interrupts::init();
 
     executor.run();

@@ -10,8 +10,9 @@ use spin::Mutex;
 use crate::{
     multitasking::{
         MANAGER,
+        kernel_task::{TASK_SPAWNER, task::Task},
         process::process::State,
-        thread::{self, ThreadRef, misc::ThreadID, thread::Thread},
+        thread::{self, ThreadRef, future::ThreadFuture, misc::ThreadID, thread::Thread},
     },
     s_println,
 };
@@ -38,7 +39,12 @@ impl ThreadManager {
 
         let thread = self.threads.get_mut(&id).unwrap();
 
-        self.queue.push_back(thread.clone());
+        TASK_SPAWNER
+            .get()
+            .unwrap()
+            .lock()
+            .spawn(Task::new(ThreadFuture(thread.clone())));
+
         thread.clone()
     }
 
