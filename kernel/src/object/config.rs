@@ -11,7 +11,7 @@ use crate::{
 pub enum ConfigurateRequest {
     GetWindowSize(*mut WindowSizeInfo),
     GetTerminalInfo(*mut TerminalInfo),
-    Other(u64),
+    Unknown(u64, u64),
 }
 
 impl ConfigurateRequest {
@@ -19,7 +19,7 @@ impl ConfigurateRequest {
         match request {
             0x5401 => Self::GetTerminalInfo(ptr as *mut TerminalInfo),
             0x5413 => Self::GetWindowSize(ptr as *mut WindowSizeInfo),
-            _ => unimplemented!(),
+            _ => Self::Unknown(request, ptr),
         }
     }
 }
