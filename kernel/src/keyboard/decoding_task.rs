@@ -16,7 +16,7 @@ use crate::{
 pub static KEYBOARD_QUEUE: OnceCell<Mutex<VecDeque<u8>>> = OnceCell::uninit();
 
 pub async fn process_keypresses() {
-    let mut scancodes = ScancodeStream::new();
+    let mut scancodes = ScancodeStream::default();
     let mut keyboard = _PS2_KEYBOARD.lock();
 
     // loop through scancodes infinitely

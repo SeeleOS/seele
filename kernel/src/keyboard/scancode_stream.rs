@@ -10,8 +10,8 @@ pub static WAKER: AtomicWaker = AtomicWaker::new();
 
 pub struct ScancodeStream;
 
-impl ScancodeStream {
-    pub fn new() -> Self {
+impl Default for ScancodeStream {
+    fn default() -> Self {
         SCANCODE_QUEUE
             .try_init_once(|| ArrayQueue::new(128))
             .expect("Dont call this twice");
@@ -31,11 +31,11 @@ impl Stream for ScancodeStream {
 
         if let Some(scancode) = queue.pop() {
             // Skips registering a waker if there already is a scancode avalible
-            return Poll::Ready(Some(scancode));
+            Poll::Ready(Some(scancode))
         } else {
             // registers a waker to wakeup when a value is avalible
             // the queue might have the code again after registering the waker
-            WAKER.register(&cx.waker());
+            WAKER.register(cx.waker());
             match queue.pop() {
                 Some(value) => {
                     // remove the waker because its nologner needed, we already have the value
