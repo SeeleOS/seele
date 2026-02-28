@@ -10,7 +10,7 @@ use spin::Mutex;
 use crate::{
     keyboard::{ps2::_PS2_KEYBOARD, scancode_stream::ScancodeStream},
     multitasking::MANAGER,
-    println,
+    print, println,
 };
 
 pub static KEYBOARD_QUEUE: OnceCell<Mutex<VecDeque<u8>>> = OnceCell::uninit();
@@ -32,7 +32,6 @@ pub async fn process_keypresses() {
                             .get_or_init(|| Mutex::new(VecDeque::new()))
                             .lock()
                             .push_back(character as u8);
-                        println!("{character}");
                     }
                     DecodedKey::RawKey(key) => {}
                 }
