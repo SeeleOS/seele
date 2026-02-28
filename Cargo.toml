@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["elysia-os-lib","kernel", "test-init"]
+members = ["elysiaos-syslib","kernel"]
 
 [package]
 name = "elysia-os-runner"
@@ -24,7 +24,4 @@ ovmf-prebuilt = "0.2"
 [build-dependencies]
 bootloader = "0.11"
 kernel = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
-
-[patch.crates-io]
-test-init = { path = "test-init", artifact = "bin", target = "x86_64-unknown-none"}
 

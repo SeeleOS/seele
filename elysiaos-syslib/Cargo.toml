@@ -1,5 +1,5 @@
 [package]
-name = "elysia-os-lib"
+name = "elysiaos-syslib"
 version = "0.1.5"
 edition = "2024"
 

@@ -1,5 +1,0 @@
-[target.x86_64-unknown-none] # 替换成你的 target 三元组
-rustflags = [
-    "-C", "relocation-model=static",
-    "-C", "link-args=-no-pie",
-]
