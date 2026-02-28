@@ -5,7 +5,7 @@ use alloc::{sync::Arc, vec::Vec};
 use crate::{
     graphics::object::TtyObject,
     keyboard::object::KeyboardObject,
-    multitasking::yielding::BlockType,
+    multitasking::thread::yielding::BlockType,
     object::{Object, tty_device::TtyDevice},
 };
 
@@ -18,15 +18,6 @@ impl Default for ProcessID {
 
         Self(NEXT_ID.fetch_add(1, core::sync::atomic::Ordering::Relaxed))
     }
-}
-
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub enum State {
-    #[default]
-    Ready, // ready to run (in a queue)
-    Running,
-    Blocked(BlockType), // stuck, waiting for something (like keyboard input)
-    Zombie,             // Exited process
 }
 
 pub fn init_objects(objects: &mut Vec<Arc<dyn Object>>) {

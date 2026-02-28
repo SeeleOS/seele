@@ -16,15 +16,14 @@ use crate::{
         memory::{allocate_kernel_stack, allocate_stack},
         process::{
             ProcessRef,
-            misc::{ProcessID, State, init_objects},
+            misc::{ProcessID, init_objects},
         },
         thread::{
             self, THREAD_MANAGER,
-            misc::ThreadID,
+            misc::{State, ThreadID},
             snapshot::{ThreadSnapshot, ThreadSnapshotType},
             thread::Thread,
         },
-        yielding::BlockType,
     },
     object::Object,
     s_println,
@@ -34,7 +33,6 @@ use crate::{
 #[derive(Debug)]
 pub struct Process {
     pub pid: ProcessID,
-    pub state: State,
     pub page_table: PageTableWrapped,
     pub kernel_stack_top: VirtAddr,
     pub threads: Vec<Weak<Mutex<Thread>>>,
@@ -45,7 +43,6 @@ impl Process {
     pub fn empty() -> ProcessRef {
         Arc::new(Mutex::new(Process {
             pid: ProcessID::default(),
-            state: State::default(),
             page_table: PageTableWrapped::default(),
             kernel_stack_top: VirtAddr::zero(),
             threads: Vec::new(),
@@ -62,7 +59,6 @@ impl Process {
 
         let process_arc = Arc::new(Mutex::new(Process {
             pid,
-            state: State::Ready,
             page_table,
             kernel_stack_top,
             threads: Vec::new(),

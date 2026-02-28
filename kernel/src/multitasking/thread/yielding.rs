@@ -2,12 +2,8 @@ use alloc::collections::vec_deque::VecDeque;
 use futures_util::lock;
 
 use crate::multitasking::{
-    process::{
-        ProcessRef,
-        manager::Manager,
-        misc::{ProcessID, State},
-    },
-    thread::{ThreadRef, manager::ThreadManager},
+    process::{ProcessRef, manager::Manager, misc::ProcessID},
+    thread::{ThreadRef, manager::ThreadManager, misc::State},
 };
 
 use paste::paste;
@@ -51,7 +47,7 @@ impl ThreadManager {
         let mut locked_thread = thread.lock();
         if matches!(locked_thread.state, State::Blocked(_)) {
             locked_thread.state = State::Ready;
-            self.queue.push_back(thread);
+            self.queue.push_back(thread.clone());
         }
     }
 

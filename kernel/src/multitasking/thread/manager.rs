@@ -11,9 +11,11 @@ use crate::{
     multitasking::{
         MANAGER,
         kernel_task::{TASK_SPAWNER, task::Task},
-        process::misc::State,
         thread::{
-            self, ThreadRef, future::ThreadFuture, misc::ThreadID, thread::Thread,
+            self, ThreadRef,
+            future::ThreadFuture,
+            misc::{State, ThreadID},
+            thread::Thread,
             yielding::BlockedQueues,
         },
     },

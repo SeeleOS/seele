@@ -7,8 +7,7 @@ use crate::{
     misc::snapshot::Snapshot,
     multitasking::{
         MANAGER,
-        process::misc::State,
-        thread::{THREAD_MANAGER, ThreadRef, snapshot::ThreadSnapshot},
+        thread::{THREAD_MANAGER, ThreadRef, misc::State, snapshot::ThreadSnapshot},
     },
     s_println,
     tss::TSS,

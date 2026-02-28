@@ -11,7 +11,7 @@ use crate::{
         ps2::_PS2_KEYBOARD,
         scancode_stream::{SCANCODE_QUEUE, WAKER},
     },
-    multitasking::MANAGER,
+    multitasking::{MANAGER, thread::THREAD_MANAGER},
     println,
 };
 
@@ -27,5 +27,5 @@ pub(crate) fn push_scancode(scancode: u8) {
     // wake up the registered waker
     WAKER.wake();
     // Wakeup all the blocked process (it should be threads now lol)
-    MANAGER.lock().wake_keyboard();
+    THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
 }

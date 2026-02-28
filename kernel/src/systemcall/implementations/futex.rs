@@ -6,6 +6,7 @@ use crate::{
         MANAGER,
         process::{ProcessRef, misc::ProcessID},
     },
+    s_println,
     systemcall::{implementations::utils::SyscallImpl, syscall_no::SyscallNo},
 };
 
@@ -71,7 +72,8 @@ impl SyscallImpl for FutexWakeImpl {
         if let Some(queue) = queue.get_mut(&arg1) {
             for _ in 0..arg2 {
                 if let Some(process) = queue.pop_front() {
-                    MANAGER.lock().wake(process);
+                    //MANAGER.lock().wake(process);
+                    s_println!("[TODO] Futex shit");
                     woken += 1;
                 } else {
                     break;
