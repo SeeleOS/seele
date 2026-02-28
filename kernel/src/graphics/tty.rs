@@ -4,9 +4,9 @@ use spin::Mutex;
 use spleen_font::PSF2Font;
 
 use crate::graphics::{
-        framebuffer::{Canvas, FRAME_BUFFER},
-        tty::text::{PADDING, TextCell},
-    };
+    framebuffer::{Canvas, FRAME_BUFFER},
+    tty::text::{PADDING, TextCell},
+};
 
 pub mod text;
 pub mod wallpaper;
@@ -20,6 +20,9 @@ pub struct Tty<'a> {
     text_buf: Vec<TextCell>,
     row: u32,
     col: u32,
+
+    pub max_rows: u16,
+    pub max_cols: u16,
 }
 
 impl<'a> Tty<'a> {
@@ -38,6 +41,9 @@ impl<'a> Tty<'a> {
             row: 0,
             text_buf,
             col: 0,
+
+            max_rows: height as u16,
+            max_cols: width as u16,
         }
     }
 }

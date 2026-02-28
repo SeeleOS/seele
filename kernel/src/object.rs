@@ -2,7 +2,10 @@ use core::fmt::Debug;
 
 use alloc::sync::Arc;
 
-use crate::object::error::ObjectError;
+use crate::{
+    graphics::object_config::{TerminalInfo, WindowSizeInfo},
+    object::error::ObjectError,
+};
 
 pub mod error;
 
@@ -29,8 +32,8 @@ pub trait Readable: Object {
 }
 
 pub enum ConfigurateRequest {
-    GetWindowSize,
-    GetTerminalInfo,
+    GetWindowSize(*mut WindowSizeInfo),
+    GetTerminalInfo(*mut TerminalInfo),
 }
 
 pub trait Configuratable: Object {
