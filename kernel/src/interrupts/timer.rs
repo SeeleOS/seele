@@ -34,10 +34,6 @@ pub extern "C" fn timer_interrupt_handler_wrapper() {
 }
 
 pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
-    s_println!("FORCE FIXING CS/SS");
-    s_println!("[TODO] Find out what the hell made CS/SS went wrong");
-    snapshot.cs = GDT.1.user_code.0 as u64;
-    snapshot.ss = GDT.1.user_data.0 as u64;
     notify_end_of_interrupt(HardwareInterrupt::Timer);
     return_to_executor(snapshot);
 
