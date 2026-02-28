@@ -5,6 +5,12 @@ pub enum SyscallError {
     Other = -256,
 }
 
+impl SyscallError {
+    pub fn as_isize(self) -> isize {
+        self as isize
+    }
+}
+
 impl From<isize> for SyscallError {
     fn from(value: isize) -> Self {
         match value {
