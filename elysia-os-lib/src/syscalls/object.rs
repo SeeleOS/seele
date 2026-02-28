@@ -17,3 +17,7 @@ pub fn write_object(index: u64, buffer: &[u8]) -> SyscallResult {
         buffer.len() as u64
     )
 }
+
+pub fn configurate_object(index: u64, request_num: u64, ptr: *mut u8) -> SyscallResult {
+    syscall!(ConfigurateObject, index, request_num, ptr as u64)
+}

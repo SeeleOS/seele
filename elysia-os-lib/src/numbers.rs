@@ -11,4 +11,5 @@ pub enum SyscallNumber {
     Exit = 10,
     ReadObject = 11,
     WriteObject = 12,
+    ConfigurateObject = 13,
 }
