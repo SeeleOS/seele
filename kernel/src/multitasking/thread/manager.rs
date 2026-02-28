@@ -12,7 +12,10 @@ use crate::{
         MANAGER,
         kernel_task::{TASK_SPAWNER, task::Task},
         process::misc::State,
-        thread::{self, ThreadRef, future::ThreadFuture, misc::ThreadID, thread::Thread},
+        thread::{
+            self, ThreadRef, future::ThreadFuture, misc::ThreadID, thread::Thread,
+            yielding::BlockedQueues,
+        },
     },
     s_println,
 };
@@ -24,6 +27,7 @@ pub struct ThreadManager {
     pub queue: VecDeque<ThreadRef>,
     pub idle_thread: Option<ThreadRef>,
     pub zombies: Vec<ThreadRef>,
+    pub blocked_queues: BlockedQueues,
 }
 
 impl ThreadManager {

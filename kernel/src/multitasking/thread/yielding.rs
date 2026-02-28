@@ -1,9 +1,13 @@
 use alloc::collections::vec_deque::VecDeque;
+use futures_util::lock;
 
-use crate::multitasking::process::{
-    ProcessRef,
-    manager::Manager,
-    misc::{ProcessID, State},
+use crate::multitasking::{
+    process::{
+        ProcessRef,
+        manager::Manager,
+        misc::{ProcessID, State},
+    },
+    thread::{ThreadRef, manager::ThreadManager},
 };
 
 use paste::paste;
@@ -25,8 +29,8 @@ pub enum WakeType {
 
 #[derive(Clone, Debug, Default)]
 pub struct BlockedQueues {
-    pub keyboard: VecDeque<ProcessRef>,
-    pub io: VecDeque<ProcessRef>,
+    pub keyboard: VecDeque<ThreadRef>,
+    pub io: VecDeque<ThreadRef>,
 }
 
 #[macro_export]
@@ -34,19 +38,20 @@ macro_rules! register_wake_func {
     ($type: ident) => {
         paste! {
         pub fn [<wake_$type>](&mut self) {
-            while let Some(pid) = self.blocked_queues.$type.pop_front() {
-                self.wake(pid);
+            while let Some(thread) = self.blocked_queues.$type.pop_front() {
+                self.wake(thread);
             }
         }
         }
     };
 }
 
-impl Manager {
-    pub fn wake(&mut self, process: ProcessRef) {
-        if matches!(process.lock().state, State::Blocked(_)) {
-            process.lock().state = State::Ready;
-            self.queue.push_back(process);
+impl ThreadManager {
+    pub fn wake(&mut self, thread: ThreadRef) {
+        let mut locked_thread = thread.lock();
+        if matches!(locked_thread.state, State::Blocked(_)) {
+            locked_thread.state = State::Ready;
+            self.queue.push_back(thread);
         }
     }
 

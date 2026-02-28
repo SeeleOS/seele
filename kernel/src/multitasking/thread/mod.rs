@@ -10,6 +10,7 @@ pub mod misc;
 pub mod snapshot;
 pub mod switch;
 pub mod thread;
+pub mod yielding;
 
 pub static THREAD_MANAGER: OnceCell<Mutex<ThreadManager>> = OnceCell::uninit();
 

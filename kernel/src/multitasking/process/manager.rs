@@ -13,7 +13,6 @@ use crate::{
             misc::ProcessID,
             process::{self, Process},
         },
-        yielding::{BlockType, BlockedQueues, WakeType},
     },
     print, println, s_println,
 };
@@ -24,7 +23,6 @@ pub struct Manager {
     pub current: Option<ProcessRef>,
     pub queue: VecDeque<ProcessRef>,
     pub zombies: Vec<ProcessRef>,
-    pub blocked_queues: BlockedQueues,
 }
 
 #[repr(align(8))]

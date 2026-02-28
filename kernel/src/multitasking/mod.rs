@@ -3,7 +3,6 @@ pub mod memory;
 pub mod process;
 pub mod scheduling;
 pub mod thread;
-pub mod yielding;
 
 use lazy_static::lazy_static;
 use spin::Mutex;
