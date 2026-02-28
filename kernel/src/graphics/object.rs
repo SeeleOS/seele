@@ -12,6 +12,12 @@ impl Object for TtyObject {
     fn as_writable(self: alloc::sync::Arc<Self>) -> Option<alloc::sync::Arc<dyn Writable>> {
         Some(self)
     }
+
+    fn as_configuratable(
+        self: alloc::sync::Arc<Self>,
+    ) -> Option<alloc::sync::Arc<dyn crate::object::config::Configuratable>> {
+        Some(self)
+    }
 }
 impl Writable for TtyObject {
     fn write(&self, buffer: &[u8]) -> crate::object::ObjectResult<usize> {
