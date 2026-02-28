@@ -3,6 +3,7 @@ use core::arch::naked_asm;
 use core::mem::offset_of;
 use x86_64::{
     VirtAddr,
+    instructions::interrupts::without_interrupts,
     registers::model_specific::{FsBase, KernelGsBase},
 };
 
@@ -19,26 +20,28 @@ impl ThreadSnapshot {
         source: Option<&mut ThreadSnapshot>,
         snapshot: Option<&mut Snapshot>,
     ) {
-        if let Some(source) = source {
-            // Saves the current RSP, which have the RIP saved
-            // on the stacktop when we called switch_from()
-            // So when we use jump_to_executor(), it will load
-            // the RSP, get the RIP, and when RET back
-            if matches!(source.snapshot_type, ThreadSnapshotType::Executor) {
-                source.save_executor_rsp();
+        without_interrupts(|| {
+            if let Some(source) = source {
+                // Saves the current RSP, which have the RIP saved
+                // on the stacktop when we called switch_from()
+                // So when we use jump_to_executor(), it will load
+                // the RSP, get the RIP, and when RET back
+                if matches!(source.snapshot_type, ThreadSnapshotType::Executor) {
+                    source.save_executor_rsp();
+                }
+
+                // Saves the current state of the system (snapshot)
+                source.inner = *snapshot.unwrap();
+                source.save_msr();
             }
 
-            // Saves the current state of the system (snapshot)
-            source.inner = *snapshot.unwrap();
-            source.save_msr();
-        }
+            self.update_gs();
+            self.load_msr();
 
-        self.update_gs();
-        self.load_msr();
+            s_println!("self is {:?}", self);
 
-        s_println!("self is {:?}", self);
-
-        s_println!("Target CS: {:#x}, SS: {:#x}", self.inner.cs, self.inner.ss);
+            s_println!("Target CS: {:#x}, SS: {:#x}", self.inner.cs, self.inner.ss);
+        });
         match self.snapshot_type {
             ThreadSnapshotType::Thread => self.jump_user(),
             ThreadSnapshotType::Executor => self.jump_to_executor(),

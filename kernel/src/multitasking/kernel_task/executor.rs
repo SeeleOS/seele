@@ -49,7 +49,6 @@ impl Executor {
         let mut tasks = tasks.lock();
 
         while let Some(taskid) = task_queue.pop() {
-            s_println!("b");
             let task = match tasks.get_mut(&taskid) {
                 Some(task) => task,
                 None => continue,
@@ -59,7 +58,6 @@ impl Executor {
                 // inserts a new waker if there is no waker assigned to the task
                 .or_insert_with(|| TaskWaker::new(taskid, task_queue.clone()));
             let mut context = Context::from_waker(waker);
-            s_println!("c");
 
             match task.poll(&mut context) {
                 Poll::Ready(()) => {
@@ -69,7 +67,6 @@ impl Executor {
                 }
                 Poll::Pending => {}
             }
-            s_println!("a");
         }
     }
 
