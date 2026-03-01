@@ -36,6 +36,7 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     config
 };
 
+use crate::keyboard::block_device::initrd::{self, RAMDISK};
 use crate::misc::others::enable_sse;
 use crate::multitasking::kernel_task;
 use bootloader_api::BootInfo;
@@ -72,6 +73,11 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     let mut executor = kernel_task::init();
     multitasking::init();
     interrupts::init();
+
+    initrd::init(
+        bootinfo.ramdisk_addr.into_option().expect("No ramdisk."),
+        bootinfo.ramdisk_len,
+    );
 
     executor.run();
 }
