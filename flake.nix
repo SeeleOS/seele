@@ -26,12 +26,14 @@
             nativeBuildInputs = [ rustup ];
             buildInputs = [
               cargo
+              ninja
               pkgs.pkgsCross.x86_64-embedded.buildPackages.gcc
               clang
               lld
               rustc
               rustfmt
               pre-commit
+              meson
               rustPackages.clippy
               qemu
             ];
