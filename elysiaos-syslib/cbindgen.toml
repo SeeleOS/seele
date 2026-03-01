@@ -1,0 +1,22 @@
+# cbindgen.toml
+
+# 目标语言，mlibc 是 C++ 写的，所以选 C++
+language = "C++"
+
+# 自动包含的头文件
+# 因为你的 sysdeps 是在内核环境或早期用户态，通常需要这些基础定义
+includes = ["stdint.h", "stddef.h"]
+
+[export]
+# 如果你想给所有生成的函数加前缀，可以在这里设置
+prefix = "elysia_"
+
+[parse]
+parse_deps = false
+include = ["elysiaos-syslib"]
+# 开启宏展开（这需要你的环境里有 nightly rust 或者安装了相应的插件）
+expand = ["elysiaos-syslib"]
+
+# 处理你自定义的类型别名
+[defines]
+"SyscallResult" = "intptr_t"
