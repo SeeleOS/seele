@@ -39,9 +39,10 @@
             ];
             RUST_SRC_PATH = rustPlatform.rustLibSrc;
             shellHook = ''
-                            	  export RUSTUP_DIST_SERVER=https://mirrors.tuna.tsinghua.edu.cn/rustup
-              		  export PATH=~/.cargo/bin:$PATH
-                            	  '';
+                                          	  export RUSTUP_DIST_SERVER=https://mirrors.tuna.tsinghua.edu.cn/rustup
+                            		  export PATH=~/.cargo/bin:$PATH
+              			  export SYSROOT="./sysroot"
+                                          	  '';
           };
       }
     );
