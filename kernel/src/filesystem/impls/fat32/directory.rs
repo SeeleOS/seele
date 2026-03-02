@@ -5,88 +5,12 @@ use spin::mutex::Mutex;
 use crate::filesystem::{
     block_device::BlockDeviceError,
     errors::FSError,
+    impls::fat32::{file::FAT32File, operator::Fat32RamDiskReader},
     storage_operator::{SeekFrom, StorageOperator, initrd::RamDiskOperator},
     vfs_traits::{
         Directory, DirectoryContentInfo, DirectoryContentType, File, FileLike, FileSystem,
     },
 };
-
-pub struct FAT32(fatfs::FileSystem<Fat32RamDiskReader>);
-pub struct Fat32RamDiskReader(RamDiskOperator);
-
-impl IoBase for Fat32RamDiskReader {
-    type Error = BlockDeviceError;
-}
-
-impl Write for Fat32RamDiskReader {
-    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.0.write(buf)
-    }
-
-    fn flush(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-impl Read for Fat32RamDiskReader {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        self.0.read(buf)
-    }
-}
-
-impl Seek for Fat32RamDiskReader {
-    fn seek(&mut self, pos: fatfs::SeekFrom) -> Result<u64, Self::Error> {
-        self.0.seek(SeekFrom::from(pos))
-    }
-}
-
-impl From<fatfs::SeekFrom> for SeekFrom {
-    fn from(value: fatfs::SeekFrom) -> Self {
-        match value {
-            fatfs::SeekFrom::Start(val) => Self::Start(val),
-            fatfs::SeekFrom::End(val) => Self::End(val),
-            fatfs::SeekFrom::Current(val) => Self::Current(val),
-        }
-    }
-}
-
-pub struct FAT32File {
-    name: String,
-    inner: fatfs::File<
-        'static,
-        Fat32RamDiskReader,
-        fatfs::DefaultTimeProvider,
-        fatfs::LossyOemCpConverter,
-    >,
-}
-
-impl FAT32File {
-    pub fn new(
-        name: String,
-        inner: fatfs::File<
-            'static,
-            Fat32RamDiskReader,
-            fatfs::DefaultTimeProvider,
-            fatfs::LossyOemCpConverter,
-        >,
-    ) -> Self {
-        Self { name, inner }
-    }
-}
-
-impl File for FAT32File {
-    fn read(&mut self, buffer: &mut [u8]) -> crate::filesystem::vfs::FSResult<usize> {
-        self.inner.read(buffer).map_err(|_| FSError::NotFound)
-    }
-
-    fn write(&mut self, buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
-        self.inner.write(buffer).map_err(|_| FSError::NotFound)
-    }
-
-    fn name(&mut self) -> crate::filesystem::vfs::FSResult<String> {
-        Ok(self.name.clone())
-    }
-}
 
 type RawFAT32Directory<'a> =
     fatfs::Dir<'a, Fat32RamDiskReader, fatfs::DefaultTimeProvider, fatfs::LossyOemCpConverter>;
@@ -170,15 +94,3 @@ impl Directory for FAT32Directory {
         Err(FSError::NotFound)
     }
 }
-
-impl FileSystem for FAT32 {
-    fn init(&mut self) -> crate::filesystem::vfs::FSResult<()> {
-        Ok(())
-    }
-}
-
-unsafe impl Sync for FAT32 {}
-unsafe impl Sync for FAT32File {}
-unsafe impl Send for FAT32File {}
-unsafe impl Send for FAT32Directory {}
-unsafe impl Sync for FAT32Directory {}
