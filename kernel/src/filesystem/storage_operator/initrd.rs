@@ -1,12 +1,11 @@
 use crate::filesystem::{
-        block_device::{BlockDevice, BlockDeviceError, initrd::RAMDISK},
-        storage_operator::{SeekFrom, StorageOperator},
-    };
+    block_device::{BlockDevice, BlockDeviceError, initrd::RAMDISK},
+    storage_operator::{SeekFrom, StorageOperator},
+};
 
 #[derive(Debug)]
 pub struct RamDiskReader {
     pos: u64,
-    cache: [u8; 1024],
 }
 
 impl StorageOperator for RamDiskReader {
