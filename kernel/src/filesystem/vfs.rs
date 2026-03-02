@@ -1,14 +1,12 @@
-
-use alloc::{
-    boxed::Box,
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use fatfs::FsOptions;
 use spin::Mutex;
 
 use crate::filesystem::{
     errors::FSError,
+    impls::fat32::{FAT32, operator::Fat32RamDiskReader},
     path::Path,
+    storage_operator::initrd::RamDiskOperator,
     vfs_traits::{
         Directory, DirectoryContentInfo, DirectoryContentType, File, FileLike, FileSystem,
     },
@@ -44,9 +42,15 @@ impl VFS {
     }
 
     pub fn init(&mut self) -> FSResult<()> {
-        for ele in &self.filesystems {
-            ele.lock().init()?;
-        }
+        let mut fat32_fs = FAT32(
+            fatfs::FileSystem::new(
+                Fat32RamDiskReader(RamDiskOperator::default()),
+                FsOptions::new(),
+            )
+            .unwrap(),
+        );
+
+        self.root = Some(fat32_fs.root_dir().unwrap());
 
         Ok(())
     }

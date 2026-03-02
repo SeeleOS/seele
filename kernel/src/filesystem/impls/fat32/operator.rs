@@ -11,7 +11,7 @@ use crate::filesystem::{
     },
 };
 
-pub struct Fat32RamDiskReader(RamDiskOperator);
+pub struct Fat32RamDiskReader(pub RamDiskOperator);
 
 impl IoBase for Fat32RamDiskReader {
     type Error = BlockDeviceError;

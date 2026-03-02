@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use alloc::{string::String, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
 
 use crate::filesystem::vfs::{FSResult, WrappedDirectory, WrappedFile};
 
@@ -39,6 +39,7 @@ pub enum DirectoryContentType {
 
 pub trait FileSystem: Send + Sync {
     fn init(&mut self) -> FSResult<()>;
+    fn root_dir(&mut self) -> FSResult<WrappedDirectory>;
 }
 
 pub enum FileLike {

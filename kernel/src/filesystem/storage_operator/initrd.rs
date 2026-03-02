@@ -3,7 +3,7 @@ use crate::filesystem::{
     storage_operator::{SeekFrom, StorageOperator},
 };
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct RamDiskOperator {
     pos: u64,
 }
