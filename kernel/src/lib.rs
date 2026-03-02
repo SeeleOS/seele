@@ -68,28 +68,22 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     acpi::init();
     let mut executor = kernel_task::init();
     multitasking::init();
-    interrupts::init();
 
     initrd::init(
         bootinfo.ramdisk_addr.into_option().expect("No ramdisk."),
         bootinfo.ramdisk_len,
     );
 
-    {
-        let ramdisk = RAMDISK.get().unwrap();
-        let mut buf = [0u8; 3];
-
-        ramdisk.read_by_bytes(509, &mut buf).unwrap();
-
-        println!("{:?}", buf);
-    }
-
+    s_println!("a");
     let mut vfs = VirtualFS.lock();
+    s_println!("b");
 
     vfs.init().unwrap();
+    s_println!("c");
     let mut buf = [0u8; 16];
     vfs.read_file(Path::new("/test.txt"), &mut buf).unwrap();
     println!("{:?}", buf);
+    interrupts::init();
 
     executor.run();
 }

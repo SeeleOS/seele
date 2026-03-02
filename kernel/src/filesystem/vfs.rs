@@ -1,15 +1,19 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use fatfs::FsOptions;
+use log::trace;
 use spin::Mutex;
 
-use crate::filesystem::{
-    errors::FSError,
-    impls::fat32::{FAT32, operator::Fat32RamDiskReader},
-    path::Path,
-    storage_operator::initrd::RamDiskOperator,
-    vfs_traits::{
-        Directory, DirectoryContentInfo, DirectoryContentType, File, FileLike, FileSystem,
+use crate::{
+    filesystem::{
+        errors::FSError,
+        impls::fat32::{FAT32, operator::Fat32RamDiskReader},
+        path::Path,
+        storage_operator::initrd::RamDiskOperator,
+        vfs_traits::{
+            Directory, DirectoryContentInfo, DirectoryContentType, File, FileLike, FileSystem,
+        },
     },
+    s_println,
 };
 use lazy_static::lazy_static;
 
@@ -42,6 +46,7 @@ impl VFS {
     }
 
     pub fn init(&mut self) -> FSResult<()> {
+        trace!("vfs::init");
         let mut fat32_fs = FAT32(
             fatfs::FileSystem::new(
                 Fat32RamDiskReader(RamDiskOperator::default()),
@@ -78,12 +83,18 @@ impl VFS {
     }
 
     pub fn read_file(&mut self, path: Path, buffer: &mut [u8]) -> FSResult<usize> {
+        s_println!("a");
         let cur_dir = path.navigate(self)?;
+        s_println!("b");
         let dir = cur_dir.0.lock();
+        s_println!("c");
         let dir_name = cur_dir.1.clone();
+        s_println!("d");
 
         let file_like = dir.get(dir_name.as_str())?;
+        s_println!("e");
         if let FileLike::File(file) = file_like {
+            s_println!("f");
             file.lock().read(buffer)
         } else {
             Err(FSError::NotFound)
