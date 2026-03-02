@@ -17,7 +17,6 @@ pub mod memory;
 pub mod misc;
 pub mod multitasking;
 pub mod object;
-pub mod os;
 pub mod systemcall;
 pub mod userspace;
 
