@@ -1,3 +1,5 @@
+use core::cmp;
+
 use fatfs::IoError;
 
 #[derive(Debug)]
@@ -28,4 +30,20 @@ pub trait BlockDevice: Send + Sync {
     fn block_size(&self) -> usize;
     fn read_block(&self, id: usize, buffer: &mut [u8]) -> BlockDeviceResult;
     fn write_block(&self, id: usize, buffer: &[u8]) -> BlockDeviceResult;
+
+    fn read_by_bytes(&mut self, offset: usize, buffer: &mut [u8]) -> BlockDeviceResult {
+        let block_id = offset / self.block_size();
+        let offset_in_block = offset % self.block_size();
+
+        let mut tmp_buffer = [0u8; 1024];
+
+        self.read_block(block_id, &mut tmp_buffer)?;
+
+        let available = self.block_size() - offset_in_block;
+        let n = cmp::min(buffer.len(), available);
+
+        buffer[..n].copy_from_slice(&tmp_buffer[offset_in_block..offset_in_block + n]);
+
+        Ok(n)
+    }
 }
