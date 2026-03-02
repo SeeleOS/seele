@@ -9,7 +9,11 @@ use alloc::{
 };
 use spin::Mutex;
 
-use crate::filesystem::{errors::FSError, path::Path};
+use crate::filesystem::{
+    errors::FSError,
+    path::Path,
+    vfs_traits::{Directory, FileLike, FileSystem},
+};
 use lazy_static::lazy_static;
 
 lazy_static! {
@@ -24,45 +28,6 @@ lazy_static! {
 // Get INode (root) -> FileContent (Directory) -> directoy contents -> INode(to ./elysia)
 // INode (to .elysia) -> Elysia -> contents -> INode(file.txt) -> Contents
 pub type FSResult<T> = Result<T, FSError>;
-
-#[derive(Clone, Debug)]
-pub struct FileData {
-    pub content: String,
-}
-
-pub trait File: Send + Sync + Debug {
-    fn name(&self) -> FSResult<String>;
-    fn read(&self, buffer: &mut [u8]) -> FSResult<usize>;
-    fn write(&mut self, buffer: &[u8]) -> FSResult<usize>;
-}
-
-pub trait Directory: Send + Sync + Debug {
-    fn name(&self) -> FSResult<String>;
-    fn contents(&self) -> FSResult<Vec<DirectoryContentInfo>>;
-    fn create(&self, info: DirectoryContentInfo) -> FSResult<()>;
-    fn delete(&self, name: &str) -> FSResult<()>;
-    fn get(&self, name: &str) -> FSResult<FileLike>;
-}
-
-pub struct DirectoryContentInfo {
-    pub name: String,
-}
-
-pub enum DirectoryContentType {
-    File,
-    Directory,
-    Symlink,
-}
-
-pub trait FileSystem: Send + Sync {
-    fn init(&mut self) -> FSResult<()>;
-}
-
-#[derive(Debug)]
-pub enum FileLike {
-    File(Arc<Mutex<dyn File>>),
-    Directory(Arc<Mutex<dyn Directory>>),
-}
 
 pub struct VFS {
     pub root: Option<Arc<Mutex<dyn Directory>>>,

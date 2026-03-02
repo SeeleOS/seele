@@ -53,7 +53,7 @@ impl Path {
             match ele {
                 PathPart::Normal(name) => {
                     let next_dir = {
-                        let guard = current_dir.lock();
+                        let guard = current_dir;
                         if let Ok(FileLike::Directory(dir)) = guard.get(name.clone()) {
                             Some(dir.clone())
                         } else {
