@@ -25,9 +25,8 @@ version = "1.0"
 features = ["spin_no_std"]
 
 [dependencies.fatfs]
-git = "https://github.com/rafalh/rust-fatfs.git"
-rev = "c4bb76929eb115f228720631b4110f827b998653"
-default-features = false
+version = "0.3"
+default-features = false  # 必须禁用默认特性，因为默认通常带 std
 features = ["alloc"]
 
 [dependencies.num_enum]
