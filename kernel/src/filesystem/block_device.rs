@@ -27,11 +27,16 @@ impl IoError for BlockDeviceError {
 pub type BlockDeviceResult = Result<usize, BlockDeviceError>;
 
 pub trait BlockDevice: Send + Sync {
+    fn total_blocks(&self) -> usize;
     fn block_size(&self) -> usize;
     fn read_block(&self, id: usize, buffer: &mut [u8]) -> BlockDeviceResult;
     fn write_block(&self, id: usize, buffer: &[u8]) -> BlockDeviceResult;
 
-    fn read_by_bytes(&mut self, offset: usize, buffer: &mut [u8]) -> BlockDeviceResult {
+    fn total_bytes(&self) -> usize {
+        self.total_blocks() * self.block_size()
+    }
+
+    fn read_by_bytes(&self, offset: usize, buffer: &mut [u8]) -> BlockDeviceResult {
         let block_id = offset / self.block_size();
         let offset_in_block = offset % self.block_size();
 
