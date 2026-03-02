@@ -29,7 +29,7 @@ pub type WrappedDirectory = Arc<Mutex<dyn Directory>>;
 pub type WrappedFile = Arc<Mutex<dyn File>>;
 
 pub struct VFS {
-    pub root: Option<Arc<Mutex<dyn Directory>>>,
+    pub root: Option<WrappedDirectory>,
     pub filesystems: Vec<Box<Mutex<dyn FileSystem>>>,
 }
 

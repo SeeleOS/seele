@@ -25,15 +25,7 @@ pub struct FAT32File {
 }
 
 impl FAT32File {
-    pub fn new(
-        name: String,
-        inner: fatfs::File<
-            'static,
-            Fat32RamDiskReader,
-            fatfs::DefaultTimeProvider,
-            fatfs::LossyOemCpConverter,
-        >,
-    ) -> Self {
+    pub fn new(name: String, inner: RawFAT32File) -> Self {
         Self { name, inner }
     }
 }
