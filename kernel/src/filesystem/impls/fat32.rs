@@ -1,12 +1,13 @@
-use fatfs::{FileSystem, IoBase, Read, ReadWriteSeek, Seek, Write};
+use fatfs::{IoBase, Read, ReadWriteSeek, Seek, Write};
 
 use crate::filesystem::{
     block_device::BlockDeviceError,
     storage_operator::{SeekFrom, StorageOperator, initrd::RamDiskReader},
+    vfs::FileSystem,
 };
 
 pub struct FAT32 {
-    fs: FileSystem<Fat32RamDiskReader>,
+    fs: fatfs::FileSystem<Fat32RamDiskReader>,
 }
 
 pub struct Fat32RamDiskReader {
