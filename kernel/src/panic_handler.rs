@@ -13,7 +13,7 @@ pub fn handle_panic(_info: &PanicInfo) -> ! {
 
 pub fn test_handle_panic(_info: &PanicInfo) -> ! {
     use crate::{
-        debug_exit::{QemuExitCode, debug_exit},
+        misc::debug_exit::{QemuExitCode, debug_exit},
         s_println,
     };
 

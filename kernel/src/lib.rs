@@ -7,7 +7,6 @@
 extern crate alloc;
 
 pub mod acpi;
-pub mod debug_exit;
 pub mod exception_interrupt;
 pub mod filesystem;
 pub mod gdt;

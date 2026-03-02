@@ -7,6 +7,7 @@ use crate::{
 };
 
 pub mod aux;
+pub mod debug_exit;
 pub mod others;
 pub mod snapshot;
 pub mod stack_builder;

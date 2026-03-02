@@ -2,7 +2,7 @@ use crate::{s_print, s_println};
 
 pub fn run_tests(tests: &[&dyn Fn()]) {
     use crate::{
-        debug_exit::{QemuExitCode, debug_exit},
+        misc::debug_exit::{QemuExitCode, debug_exit},
         s_println,
     };
 
