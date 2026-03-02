@@ -26,6 +26,6 @@ pub type BlockDeviceResult = Result<usize, BlockDeviceError>;
 
 pub trait BlockDevice: Send + Sync {
     fn block_size(&self) -> usize;
-    fn read(&self, id: usize, buffer: &mut [u8]) -> BlockDeviceResult;
-    fn write(&self, id: usize, buffer: &[u8]) -> BlockDeviceResult;
+    fn read_block(&self, id: usize, buffer: &mut [u8]) -> BlockDeviceResult;
+    fn write_block(&self, id: usize, buffer: &[u8]) -> BlockDeviceResult;
 }

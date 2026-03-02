@@ -20,7 +20,7 @@ impl BlockDevice for RamDisk {
         1024
     }
 
-    fn read(
+    fn read_block(
         &self,
         id: usize,
         buffer: &mut [u8],
@@ -41,7 +41,7 @@ impl BlockDevice for RamDisk {
         Ok(())
     }
 
-    fn write(
+    fn write_block(
         &self,
         id: usize,
         buffer: &[u8],

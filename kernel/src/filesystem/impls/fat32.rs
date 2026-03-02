@@ -30,7 +30,7 @@ impl Read for RamDiskReader {
         let block_id = (self.pos / b_size) as usize;
         let offset_in_block = (self.pos % b_size) as usize;
 
-        ramdisk.read(block_id, &mut self.cache)?;
+        ramdisk.read_block(block_id, &mut self.cache)?;
 
         let available_in_block = (b_size as usize) - offset_in_block;
 
