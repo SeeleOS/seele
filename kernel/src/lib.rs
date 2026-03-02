@@ -36,7 +36,7 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     config
 };
 
-use crate::keyboard::block_device::initrd::{self, RAMDISK};
+use crate::filesystem::block_device::initrd;
 use crate::misc::others::enable_sse;
 use crate::multitasking::kernel_task;
 use bootloader_api::BootInfo;

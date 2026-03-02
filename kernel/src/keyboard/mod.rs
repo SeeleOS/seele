@@ -15,7 +15,6 @@ use crate::{
     println,
 };
 
-pub mod block_device;
 pub mod decoding_task;
 pub mod object;
 pub mod ps2;

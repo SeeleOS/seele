@@ -1,10 +1,9 @@
 use crate::{
     filesystem::{
-        block_device::{BlockDevice, BlockDeviceError},
+        block_device::{BlockDevice, BlockDeviceError, initrd::RAMDISK},
         storage_operator::{SeekFrom, StorageOperator},
-        vfs::FileSystem,
+        vfs_traits::FileSystem,
     },
-    keyboard::block_device::initrd::RAMDISK,
     s_println,
 };
 

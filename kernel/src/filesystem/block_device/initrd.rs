@@ -38,7 +38,7 @@ impl BlockDevice for RamDisk {
 
         buffer[..self.block_size()].copy_from_slice(&self.0[start..end]);
 
-        Ok(())
+        Ok(end - start)
     }
 
     fn write_block(

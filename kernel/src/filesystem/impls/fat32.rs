@@ -50,7 +50,6 @@ impl From<fatfs::SeekFrom> for SeekFrom {
     }
 }
 
-#[derive(Debug)]
 pub struct FAT32File {
     name: String,
     inner: fatfs::File<
@@ -76,7 +75,7 @@ impl FAT32File {
 }
 
 impl File for FAT32File {
-    fn read(&self, buffer: &mut [u8]) -> crate::filesystem::vfs::FSResult<usize> {
+    fn read(&mut self, buffer: &mut [u8]) -> crate::filesystem::vfs::FSResult<usize> {
         self.inner.read(buffer).map_err(|_| FSError::NotFound)
     }
 
@@ -84,15 +83,14 @@ impl File for FAT32File {
         self.inner.write(buffer).map_err(|_| FSError::NotFound)
     }
 
-    fn name(&self) -> crate::filesystem::vfs::FSResult<String> {
-        Ok(self.name)
+    fn name(&mut self) -> crate::filesystem::vfs::FSResult<String> {
+        Ok(self.name.clone())
     }
 }
 
 type RawFAT32Directory<'a> =
     fatfs::Dir<'a, Fat32RamDiskReader, fatfs::DefaultTimeProvider, fatfs::LossyOemCpConverter>;
 
-#[derive(Debug)]
 pub struct FAT32Directory {
     name: String,
     inner: RawFAT32Directory<'static>,
@@ -106,7 +104,7 @@ impl FAT32Directory {
 
 impl Directory for FAT32Directory {
     fn name(&self) -> crate::filesystem::vfs::FSResult<String> {
-        Ok(self.name)
+        Ok(self.name.clone())
     }
 
     fn contents(
@@ -118,7 +116,7 @@ impl Directory for FAT32Directory {
 
         for dir_entry in self.inner.iter() {
             contents.push(DirectoryContentInfo {
-                name: dir_entry.unwrap().file_name(),
+                name: dir_entry.as_ref().unwrap().file_name().clone(),
                 content_type: if dir_entry.unwrap().is_file() {
                     DirectoryContentType::File
                 } else {
@@ -132,8 +130,12 @@ impl Directory for FAT32Directory {
 
     fn create(&self, info: DirectoryContentInfo) -> crate::filesystem::vfs::FSResult<()> {
         match info.content_type {
-            DirectoryContentType::File => self.inner.create_file(&info.name).unwrap(),
-            DirectoryContentType::Directory => self.inner.create_dir(&info.name).unwrap(),
+            DirectoryContentType::File => {
+                self.inner.create_file(&info.name).unwrap();
+            }
+            DirectoryContentType::Directory => {
+                self.inner.create_dir(&info.name).unwrap();
+            }
             _ => unimplemented!(),
         }
 

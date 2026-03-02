@@ -12,7 +12,9 @@ use spin::Mutex;
 use crate::filesystem::{
     errors::FSError,
     path::Path,
-    vfs_traits::{Directory, FileLike, FileSystem},
+    vfs_traits::{
+        Directory, DirectoryContentInfo, DirectoryContentType, File, FileLike, FileSystem,
+    },
 };
 use lazy_static::lazy_static;
 
@@ -28,6 +30,8 @@ lazy_static! {
 // Get INode (root) -> FileContent (Directory) -> directoy contents -> INode(to ./elysia)
 // INode (to .elysia) -> Elysia -> contents -> INode(file.txt) -> Contents
 pub type FSResult<T> = Result<T, FSError>;
+pub type WrappedDirectory = Arc<Mutex<dyn Directory>>;
+pub type WrappedFile = Arc<Mutex<dyn File>>;
 
 pub struct VFS {
     pub root: Option<Arc<Mutex<dyn Directory>>>,
@@ -57,13 +61,19 @@ impl VFS {
     pub fn create_file(&mut self, path: Path) -> FSResult<()> {
         let dir = path.navigate(self)?;
 
-        dir.clone().0.lock().new_file(dir.1)
+        dir.clone()
+            .0
+            .lock()
+            .create(DirectoryContentInfo::new(dir.1, DirectoryContentType::File))
     }
 
     pub fn create_dir(&mut self, path: Path) -> FSResult<()> {
         let dir = path.navigate(self)?;
 
-        dir.clone().0.lock().mkdir(dir.1.clone())
+        dir.clone().0.lock().create(DirectoryContentInfo::new(
+            dir.1,
+            DirectoryContentType::Directory,
+        ))
     }
 
     pub fn read_file(&mut self, path: Path, buffer: &mut [u8]) -> FSResult<usize> {
@@ -71,7 +81,7 @@ impl VFS {
         let dir = cur_dir.0.lock();
         let dir_name = cur_dir.1.clone();
 
-        let file_like = dir.get(dir_name)?;
+        let file_like = dir.get(dir_name.as_str())?;
         if let FileLike::File(file) = file_like {
             file.lock().read(buffer)
         } else {
@@ -82,7 +92,7 @@ impl VFS {
     pub fn write_file(&mut self, path: Path, buffer: &[u8]) -> FSResult<usize> {
         let dir = path.navigate(self)?;
 
-        if let Ok(FileLike::File(file)) = dir.0.lock().get(dir.1.clone()) {
+        if let Ok(FileLike::File(file)) = dir.0.lock().get(dir.1.as_str().clone()) {
             file.lock().write(buffer)
         } else {
             Err(FSError::NotFound)
@@ -93,13 +103,13 @@ impl VFS {
         unimplemented!("Just dont create files that your gonna delete lmao its not my problem")
     }
 
-    pub fn list_contents(&self, path: Path) -> FSResult<Vec<String>> {
+    pub fn list_contents(&self, path: Path) -> FSResult<Vec<DirectoryContentInfo>> {
         let dir = path.navigate(self)?;
         let bindind = dir.0.lock();
-        let dir = bindind.get(dir.1.clone());
+        let dir = bindind.get(dir.1.as_str().clone());
 
         if let Ok(FileLike::Directory(dir)) = dir {
-            Ok(dir.lock().list_contents()?)
+            Ok(dir.lock().contents()?)
         } else {
             Err(FSError::NotFound)
         }
