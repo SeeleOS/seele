@@ -8,6 +8,7 @@ use crate::{
 
 pub mod aux;
 pub mod debug_exit;
+pub mod error;
 pub mod gdt;
 pub mod logging;
 pub mod others;
