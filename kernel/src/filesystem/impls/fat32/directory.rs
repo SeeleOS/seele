@@ -2,14 +2,17 @@ use alloc::{string::String, sync::Arc, vec::Vec};
 use fatfs::{IoBase, Read, Seek, Write};
 use spin::mutex::Mutex;
 
-use crate::filesystem::{
-    block_device::BlockDeviceError,
-    errors::FSError,
-    impls::fat32::{file::FAT32File, operator::Fat32RamDiskReader},
-    storage_operator::{SeekFrom, StorageOperator, initrd::RamDiskOperator},
-    vfs_traits::{
-        Directory, DirectoryContentInfo, DirectoryContentType, File, FileLike, FileSystem,
+use crate::{
+    filesystem::{
+        block_device::BlockDeviceError,
+        errors::FSError,
+        impls::fat32::{file::FAT32File, operator::Fat32RamDiskReader},
+        storage_operator::{SeekFrom, StorageOperator, initrd::RamDiskOperator},
+        vfs_traits::{
+            Directory, DirectoryContentInfo, DirectoryContentType, File, FileLike, FileSystem,
+        },
     },
+    s_println,
 };
 
 type RawFAT32Directory<'a> =
@@ -74,8 +77,11 @@ impl Directory for FAT32Directory {
         &self,
         name: &str,
     ) -> crate::filesystem::vfs::FSResult<crate::filesystem::vfs_traits::FileLike> {
+        let name = name.to_ascii_uppercase();
+
         for dir_entry in self.inner.iter() {
             let dir_entry = dir_entry.unwrap();
+            s_println!("dir entry: {:?}", dir_entry.file_name());
 
             if dir_entry.file_name() == name {
                 if dir_entry.is_file() {

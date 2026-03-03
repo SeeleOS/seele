@@ -4,7 +4,7 @@ use fatfs::IoError;
 
 pub mod initrd;
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum BlockDeviceError {
     Readonly,
     OutOfBounds,

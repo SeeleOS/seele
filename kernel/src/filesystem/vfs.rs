@@ -1,3 +1,5 @@
+use core::str::from_utf8;
+
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use fatfs::FsOptions;
 use log::trace;
@@ -13,7 +15,7 @@ use crate::{
             Directory, DirectoryContentInfo, DirectoryContentType, File, FileLike, FileSystem,
         },
     },
-    s_println,
+    println, s_println,
 };
 use lazy_static::lazy_static;
 
@@ -47,15 +49,26 @@ impl VFS {
 
     pub fn init(&mut self) -> FSResult<()> {
         trace!("vfs::init");
-        let mut fat32_fs = FAT32(
-            fatfs::FileSystem::new(
-                Fat32RamDiskReader(RamDiskOperator::default()),
-                FsOptions::new(),
-            )
-            .unwrap(),
+        let fs = fatfs::FileSystem::new(
+            Fat32RamDiskReader(RamDiskOperator::default()),
+            FsOptions::new(),
         );
+        let mut fat32_fs = FAT32(fs.unwrap());
 
         self.root = Some(fat32_fs.root_dir().unwrap());
+
+        let a = fat32_fs.root_dir().unwrap().lock().get("test.txt").unwrap();
+        if let FileLike::File(aaa) = a {
+            let mut buf = [0u8; 32];
+            aaa.lock().read(&mut buf).unwrap();
+
+            let str = from_utf8(&buf).unwrap();
+            println!("{str}");
+        }
+
+        // 纯净测试：直接在这里跑迭代
+        s_println!("Test Start");
+        s_println!("Test End");
 
         Ok(())
     }
@@ -83,9 +96,12 @@ impl VFS {
     }
 
     pub fn read_file(&mut self, path: Path, buffer: &mut [u8]) -> FSResult<usize> {
+        s_println!("a");
         let file = path.navigate(self)?;
+        s_println!("b");
 
         if let FileLike::File(file) = file {
+            s_println!("c");
             file.lock().read(buffer)
         } else {
             Err(FSError::NotAFile)
