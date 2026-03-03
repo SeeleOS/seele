@@ -1,6 +1,7 @@
 use alloc::{string::String, vec::Vec};
 
 use crate::filesystem::{
+    errors::FSError,
     vfs::{FSResult, VFS, WrappedDirectory},
     vfs_traits::{DirectoryContentInfo, DirectoryContentType, FileLike},
 };
@@ -47,57 +48,50 @@ impl Path {
         vec
     }
 
-    pub fn navigate(&self, vfs: &VFS) -> FSResult<(WrappedDirectory, String)> {
-        let mut current_dir = vfs.root.clone().unwrap();
+    /// NOTE:
+    /// If you do navigate_with_depth with a depth of 1 and a
+    /// path len of 6, the actrual depth that will be 5 (6 - 1)
+    fn navigate_with_depth(&self, vfs: &VFS, depth: usize) -> FSResult<FileLike> {
+        let mut current = FileLike::Directory(vfs.root.clone().unwrap());
+        let end = self.0.len().saturating_sub(depth);
 
-        for ele in 0..=self.0.len() - 2 {
-            let ele = self.0.get(ele).unwrap();
-            match ele {
+        for i in 0..end {
+            let part = &self.0[i];
+            match part {
+                PathPart::Root => continue,
                 PathPart::Normal(name) => {
-                    let next_dir = {
-                        let guard = current_dir.lock();
-                        if let Ok(FileLike::Directory(dir)) = guard.get(name.as_str()) {
-                            Some(dir.clone())
+                    current = {
+                        if let FileLike::Directory(current) = current {
+                            let current = current.lock();
+                            current.get(name.as_str())?
                         } else {
-                            None
+                            return Err(FSError::NotADirectory);
                         }
                     };
-
-                    if let Some(dir) = next_dir {
-                        current_dir = dir.clone();
-                    } else {
-                        current_dir
-                            .clone()
-                            .lock()
-                            .create(DirectoryContentInfo::new(
-                                name.clone(),
-                                DirectoryContentType::Directory,
-                            ))?;
-
-                        let dir = {
-                            let guard = current_dir.lock();
-                            if let Ok(FileLike::Directory(dir)) = guard.get(name.as_str()) {
-                                Some(dir.clone())
-                            } else {
-                                None
-                            }
-                        };
-                        if let Some(dir) = dir {
-                            current_dir = dir.clone();
-                        }
-                    }
                 }
-                PathPart::Root => continue,
             }
         }
 
-        let name = {
-            if let Some(PathPart::Normal(name)) = self.0.get(self.0.len() - 1) {
-                Some(name)
-            } else {
-                None
-            }
-        };
-        Ok((current_dir, name.unwrap().clone()))
+        Ok(current)
+    }
+
+    pub fn navigate(&self, vfs: &VFS) -> FSResult<FileLike> {
+        self.navigate_with_depth(vfs, 0)
+    }
+
+    pub fn navigate_to_parent(&self, vfs: &VFS) -> FSResult<(WrappedDirectory, String)> {
+        let name = self.0.last().ok_or(FSError::NotFound)?;
+        let nav = self.navigate_with_depth(vfs, 1)?;
+
+        match nav {
+            FileLike::File(_) => Err(FSError::NotADirectory),
+            FileLike::Directory(dir) => Ok((
+                dir,
+                match name {
+                    PathPart::Normal(s) => s.clone(),
+                    PathPart::Root => todo!("Find a proper error name for this case"),
+                },
+            )),
+        }
     }
 }

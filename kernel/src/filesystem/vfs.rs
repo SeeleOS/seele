@@ -65,49 +65,40 @@ impl VFS {
     }
 
     pub fn create_file(&mut self, path: Path) -> FSResult<()> {
-        let dir = path.navigate(self)?;
+        let (parent_dir, name) = path.navigate_to_parent(self)?;
 
-        dir.clone()
-            .0
+        parent_dir
+            .clone()
             .lock()
-            .create(DirectoryContentInfo::new(dir.1, DirectoryContentType::File))
+            .create(DirectoryContentInfo::new(name, DirectoryContentType::File))
     }
 
     pub fn create_dir(&mut self, path: Path) -> FSResult<()> {
-        let dir = path.navigate(self)?;
+        let (parent_dir, name) = path.navigate_to_parent(self)?;
 
-        dir.clone().0.lock().create(DirectoryContentInfo::new(
-            dir.1,
+        parent_dir.clone().lock().create(DirectoryContentInfo::new(
+            name,
             DirectoryContentType::Directory,
         ))
     }
 
     pub fn read_file(&mut self, path: Path, buffer: &mut [u8]) -> FSResult<usize> {
-        s_println!("a");
-        let cur_dir = path.navigate(self)?;
-        s_println!("b");
-        let dir = cur_dir.0.lock();
-        s_println!("c");
-        let dir_name = cur_dir.1.clone();
-        s_println!("d");
+        let file = path.navigate(self)?;
 
-        let file_like = dir.get(dir_name.as_str())?;
-        s_println!("e");
-        if let FileLike::File(file) = file_like {
-            s_println!("f");
+        if let FileLike::File(file) = file {
             file.lock().read(buffer)
         } else {
-            Err(FSError::NotFound)
+            Err(FSError::NotAFile)
         }
     }
 
     pub fn write_file(&mut self, path: Path, buffer: &[u8]) -> FSResult<usize> {
-        let dir = path.navigate(self)?;
+        let file = path.navigate(self)?;
 
-        if let Ok(FileLike::File(file)) = dir.0.lock().get(dir.1.as_str()) {
+        if let FileLike::File(file) = file {
             file.lock().write(buffer)
         } else {
-            Err(FSError::NotFound)
+            Err(FSError::NotAFile)
         }
     }
 
@@ -117,13 +108,11 @@ impl VFS {
 
     pub fn list_contents(&self, path: Path) -> FSResult<Vec<DirectoryContentInfo>> {
         let dir = path.navigate(self)?;
-        let bindind = dir.0.lock();
-        let dir = bindind.get(dir.1.as_str());
 
-        if let Ok(FileLike::Directory(dir)) = dir {
+        if let FileLike::Directory(dir) = dir {
             Ok(dir.lock().contents()?)
         } else {
-            Err(FSError::NotFound)
+            Err(FSError::NotADirectory)
         }
     }
 }
