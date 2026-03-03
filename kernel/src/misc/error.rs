@@ -1,5 +1,7 @@
 use crate::filesystem::{block_device::BlockDeviceError, errors::FSError};
 
+pub type KernelResult<T> = Result<T, KernelError>;
+
 pub enum KernelError {
     FileSystem(FSError),
     BlockDevice(BlockDeviceError),
