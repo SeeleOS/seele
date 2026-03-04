@@ -46,19 +46,9 @@ impl Manager {
     pub fn spawn(&mut self, program: Path) {
         let mut vfs = VirtualFS.lock();
         let size = vfs.file_info(program.clone()).unwrap().size;
-        let layout = core::alloc::Layout::from_size_align(size as usize, 4096).unwrap();
-        let ptr = unsafe { alloc::alloc::alloc(layout) };
-
-        // 构造 Vec
-        let mut buf = unsafe { alloc::vec::Vec::from_raw_parts(ptr, size as usize, size as usize) };
-        s_println!("{:?}", buf.as_ptr());
+        let mut buf = alloc::vec![0u8; size as usize];
 
         vfs.read_file(program, &mut buf).unwrap();
-
-        for i in 1010..1050 {
-            s_print!("{}\n", buf[i as usize]);
-            s_print!("{}\n", ELF_HOLDER.data[i as usize]);
-        }
 
         let process = Process::new(&buf);
         self.processes.insert(process.lock().pid, process.clone());

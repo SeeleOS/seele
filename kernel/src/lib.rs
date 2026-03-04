@@ -76,13 +76,8 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
         bootinfo.ramdisk_len,
     );
 
-    let mut vfs = VirtualFS.lock();
-    vfs.init().unwrap();
+    VirtualFS.lock().init().unwrap();
 
-    let mut buf = [0u8; 32];
-    vfs.read_file(Path::new("/test.txt"), &mut buf).unwrap();
-    println!("{:?}", from_utf8(&buf));
-    drop(vfs);
     multitasking::init();
 
     interrupts::init();

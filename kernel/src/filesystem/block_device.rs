@@ -1,6 +1,9 @@
 use core::cmp;
 
+use alloc::vec;
 use fatfs::IoError;
+
+use crate::s_print;
 
 pub mod initrd;
 
@@ -34,23 +37,36 @@ pub trait BlockDevice: Send + Sync {
     fn read_single_block(&self, id: usize, buffer: &mut [u8]) -> BlockDeviceResult;
     fn write_single_block(&self, id: usize, buffer: &[u8]) -> BlockDeviceResult;
 
+    fn read_blocks(&self, start: usize, buffer: &mut [u8]) -> BlockDeviceResult {
+        let read_len = buffer.len() / self.block_size();
+
+        for i in 0..read_len {
+            let block = start + i;
+            let byte = i * self.block_size();
+
+            self.read_single_block(block, &mut buffer[byte..byte + self.block_size()])?;
+        }
+
+        Ok(buffer.len())
+    }
+
     fn total_bytes(&self) -> usize {
         self.total_blocks() * self.block_size()
     }
 
     fn read_by_bytes(&self, offset: usize, buffer: &mut [u8]) -> BlockDeviceResult {
-        let block_id = offset / self.block_size();
-        let offset_in_block = offset % self.block_size();
+        let block_size = self.block_size();
+        let starting_block = offset / block_size;
+        let offset_in_block = offset % block_size;
 
-        let mut tmp_buffer = [0u8; 1024];
+        let tmpbuffer_size =
+            (buffer.len() + offset_in_block + block_size - 1) / block_size * block_size;
 
-        self.read_single_block(block_id, &mut tmp_buffer)?;
+        let mut tmp_buffer = alloc::vec![0u8; tmpbuffer_size];
+        self.read_blocks(starting_block, &mut tmp_buffer)?;
 
-        let available = self.block_size() - offset_in_block;
-        let n = cmp::min(buffer.len(), available);
+        buffer.copy_from_slice(&tmp_buffer[offset_in_block..offset_in_block + buffer.len()]);
 
-        buffer[..n].copy_from_slice(&tmp_buffer[offset_in_block..offset_in_block + n]);
-
-        Ok(n)
+        Ok(buffer.len())
     }
 }
