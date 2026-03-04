@@ -31,8 +31,8 @@ pub type BlockDeviceResult = Result<usize, BlockDeviceError>;
 pub trait BlockDevice: Send + Sync {
     fn total_blocks(&self) -> usize;
     fn block_size(&self) -> usize;
-    fn read_block(&self, id: usize, buffer: &mut [u8]) -> BlockDeviceResult;
-    fn write_block(&self, id: usize, buffer: &[u8]) -> BlockDeviceResult;
+    fn read_single_block(&self, id: usize, buffer: &mut [u8]) -> BlockDeviceResult;
+    fn write_single_block(&self, id: usize, buffer: &[u8]) -> BlockDeviceResult;
 
     fn total_bytes(&self) -> usize {
         self.total_blocks() * self.block_size()
@@ -44,7 +44,7 @@ pub trait BlockDevice: Send + Sync {
 
         let mut tmp_buffer = [0u8; 1024];
 
-        self.read_block(block_id, &mut tmp_buffer)?;
+        self.read_single_block(block_id, &mut tmp_buffer)?;
 
         let available = self.block_size() - offset_in_block;
         let n = cmp::min(buffer.len(), available);
