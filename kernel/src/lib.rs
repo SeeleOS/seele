@@ -79,6 +79,8 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
         let mut vfs = VirtualFS.lock();
 
         vfs.init().unwrap();
+
+        s_print!("{:?}", vfs.list_contents(Path::new("/programs")));
     }
 
     multitasking::init();

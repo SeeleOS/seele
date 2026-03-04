@@ -40,7 +40,7 @@ int main() {
     struct termios term;
     struct winsize ws;
 
-    kprint("--- Starting BusyBox Readiness Test ---\n");
+    kprint("---WHATTHEFUCK Starting BusyBox Readiness Test ---\n");
 
     // 测试 TCGETS (0x5401)
     if (ioctl(0, 0x5401, &term) != 0) {

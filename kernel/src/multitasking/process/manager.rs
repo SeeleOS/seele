@@ -30,7 +30,7 @@ impl Manager {
             self.processes
                 .insert(kernel_process.lock().pid, kernel_process.clone());
 
-            self.spawn(Path::new("/programs/mash.elf"));
+            self.spawn(Path::new("/test.elf"));
         });
     }
 
