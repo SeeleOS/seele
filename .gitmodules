@@ -7,3 +7,6 @@
 [submodule "dash"]
 	path = dash
 	url = https://git.kernel.org/pub/scm/utils/dash/dash.git
+[submodule "Manuae-Shell"]
+	path = Manuae-Shell
+	url = https://codeberg.org/sakettor/Manuae-Shell
