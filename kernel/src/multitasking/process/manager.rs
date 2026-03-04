@@ -38,7 +38,7 @@ impl Manager {
         let mut vfs = VirtualFS.lock();
         let size = vfs.file_info(program.clone()).unwrap().size;
 
-        let mut buf = alloc::vec![0u8; size as usize];
+        let mut buf = alloc::vec![0u8; size];
         vfs.read_file(program, &mut buf).unwrap();
 
         let process = Process::new(&buf);
