@@ -28,9 +28,11 @@ impl Readable for KeyboardObject {
         }
 
         let mut read_chars = 0;
-        while let Some(result) = queue.pop_front() {
-            buffer[read_chars] = result;
-            read_chars += 1;
+        while read_chars < buffer.len() {
+            if let Some(result) = queue.pop_front() {
+                buffer[read_chars] = result;
+                read_chars += 1;
+            }
         }
 
         Ok(read_chars)
