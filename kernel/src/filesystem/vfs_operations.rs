@@ -39,7 +39,7 @@ impl VFS {
         ))
     }
 
-    pub fn read_file(&mut self, path: Path, buffer: &mut [u8]) -> FSResult<usize> {
+    pub fn read_file(&mut self, path: Path, buffer: &mut [u8]) -> FSResult<()> {
         let file = path.navigate(self.root.clone().unwrap())?;
 
         if let FileLike::File(file) = file {
@@ -58,7 +58,7 @@ impl VFS {
         }
     }
 
-    pub fn write_file(&mut self, path: Path, buffer: &[u8]) -> FSResult<usize> {
+    pub fn write_file(&mut self, path: Path, buffer: &[u8]) -> FSResult<()> {
         let file = path.navigate(self.root.clone().unwrap())?;
 
         if let FileLike::File(file) = file {

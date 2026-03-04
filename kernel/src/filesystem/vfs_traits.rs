@@ -7,8 +7,8 @@ use crate::filesystem::vfs::{FSResult, WrappedDirectory, WrappedFile};
 pub trait File: Send + Sync {
     fn info(&mut self) -> FSResult<FileInfo>;
 
-    fn read(&mut self, buffer: &mut [u8]) -> FSResult<usize>;
-    fn write(&mut self, buffer: &[u8]) -> FSResult<usize>;
+    fn read(&mut self, buffer: &mut [u8]) -> FSResult<()>;
+    fn write(&mut self, buffer: &[u8]) -> FSResult<()>;
 }
 
 pub trait Directory: Send + Sync {

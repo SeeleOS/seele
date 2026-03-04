@@ -2,14 +2,18 @@ use alloc::{string::String, sync::Arc, vec::Vec};
 use fatfs::{IoBase, Read, Seek, Write};
 use spin::mutex::Mutex;
 
-use crate::filesystem::{
-    block_device::BlockDeviceError,
-    errors::FSError,
-    impls::fat32::operator::Fat32RamDiskReader,
-    storage_operator::{SeekFrom, StorageOperator, initrd::RamDiskOperator},
-    vfs_traits::{
-        Directory, DirectoryContentInfo, DirectoryContentType, File, FileInfo, FileLike, FileSystem,
+use crate::{
+    filesystem::{
+        block_device::BlockDeviceError,
+        errors::FSError,
+        impls::fat32::operator::Fat32RamDiskReader,
+        storage_operator::{SeekFrom, StorageOperator, initrd::RamDiskOperator},
+        vfs_traits::{
+            Directory, DirectoryContentInfo, DirectoryContentType, File, FileInfo, FileLike,
+            FileSystem,
+        },
     },
+    s_print,
 };
 
 type RawFAT32File = fatfs::File<
@@ -32,12 +36,12 @@ impl FAT32File {
 }
 
 impl File for FAT32File {
-    fn read(&mut self, buffer: &mut [u8]) -> crate::filesystem::vfs::FSResult<usize> {
-        self.inner.read(buffer).map_err(|_| FSError::NotFound)
+    fn read(&mut self, buffer: &mut [u8]) -> crate::filesystem::vfs::FSResult<()> {
+        self.inner.read_exact(buffer).map_err(|_| FSError::NotFound)
     }
 
-    fn write(&mut self, buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
-        self.inner.write(buffer).map_err(|_| FSError::NotFound)
+    fn write(&mut self, buffer: &[u8]) -> crate::filesystem::vfs::FSResult<()> {
+        self.inner.write_all(buffer).map_err(|_| FSError::NotFound)
     }
 
     fn info(&mut self) -> crate::filesystem::vfs::FSResult<FileInfo> {
