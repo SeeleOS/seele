@@ -19,6 +19,12 @@ pub enum PathPart {
     Normal(String),
 }
 
+impl Default for Path {
+    fn default() -> Self {
+        Self::new("/")
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Path(pub Vec<PathPart>);
 

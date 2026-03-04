@@ -7,6 +7,7 @@ use spin::Mutex;
 use x86_64::VirtAddr;
 
 use crate::{
+    filesystem::path::Path,
     memory::page_table_wrapper::PageTableWrapped,
     misc::stack_builder::StackBuilder,
     multitasking::{
@@ -35,6 +36,7 @@ impl Process {
             pid,
             page_table,
             kernel_stack_top,
+            current_directory: Path::default(),
             threads: Vec::new(),
             objects: Vec::new(),
         }));
