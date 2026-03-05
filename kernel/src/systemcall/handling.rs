@@ -1,5 +1,5 @@
 use crate::{
-    s_println,
+    println, s_println,
     systemcall::{error::SyscallError, syscalls_table::SYSCALL_TABLE},
 };
 
@@ -22,8 +22,6 @@ struct SyscallSnapshot {
 extern "C" fn syscall_handler(snapshot_ptr: *mut SyscallSnapshot) {
     let snapshot = unsafe { &mut *snapshot_ptr };
 
-    s_println!("[DEBUG] Syscall: {}", (snapshot.syscall_no));
-
     let result = syscall_handler_unwrapped(
         snapshot.syscall_no,
         snapshot.arg1,
@@ -33,8 +31,6 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut SyscallSnapshot) {
         snapshot.arg5,
         snapshot.arg6,
     );
-
-    s_println!("Syscall result:{:?}", result);
 
     snapshot.syscall_no = result;
 }
@@ -54,6 +50,7 @@ fn syscall_handler_unwrapped(
             Err(err) => err as isize,
         }
     } else {
+        println!("Attempted to call invalid syscall {}", syscall_no);
         SyscallError::InvalidSyscall as isize
     }
 }

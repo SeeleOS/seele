@@ -34,7 +34,6 @@ pub extern "C" fn timer_interrupt_handler_wrapper() {
 
 pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
     notify_end_of_interrupt(HardwareInterrupt::Timer);
-    s_println!("timer interrupt");
     return_to_executor(snapshot);
 
     panic!("What the fuck");

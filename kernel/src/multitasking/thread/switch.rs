@@ -37,10 +37,6 @@ impl ThreadSnapshot {
 
             self.update_gs();
             self.load_msr();
-
-            s_println!("self is {:?}", self);
-
-            s_println!("Target CS: {:#x}, SS: {:#x}", self.inner.cs, self.inner.ss);
         });
         match self.snapshot_type {
             ThreadSnapshotType::Thread => self.jump_user(),
