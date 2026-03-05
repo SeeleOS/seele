@@ -9,9 +9,16 @@ use crate::graphics::{
     tty::rendering::{PADDING, TextCell},
 };
 
+pub mod ansi_color;
+pub mod misc;
 pub mod processing;
 pub mod rendering;
 pub mod wallpaper;
+
+pub const DEFAULT_FOREGROUND: Color = (255, 255, 255);
+pub const EMPTY_BACKGROUND: Color = (0, 0, 0);
+
+pub type Color = (u8, u8, u8);
 
 pub static TTY: OnceCell<Mutex<Tty>> = OnceCell::uninit();
 
@@ -27,6 +34,10 @@ pub struct Tty<'a> {
     pub max_cols: u16,
 
     parser: Parser,
+
+    current_background: Color,
+    current_foreground: Color,
+    bold: bool,
 }
 
 impl<'a> Tty<'a> {
@@ -39,6 +50,7 @@ impl<'a> Tty<'a> {
 
         let mut text_buf = Vec::with_capacity(size);
         text_buf.resize(size, TextCell::default());
+
         Self {
             font,
             canvas: FRAME_BUFFER.get().unwrap(),
@@ -50,6 +62,10 @@ impl<'a> Tty<'a> {
             max_cols: width as u16,
 
             parser: Parser::new(),
+
+            current_foreground: DEFAULT_FOREGROUND,
+            current_background: EMPTY_BACKGROUND,
+            bold: false,
         }
     }
 }

@@ -1,6 +1,9 @@
 use vte::Perform;
 
-use crate::{graphics::tty::Tty, s_println};
+use crate::{
+    graphics::tty::{Tty, ansi_color::AnsiColor},
+    s_println,
+};
 
 impl<'a> Perform for Tty<'a> {
     fn print(&mut self, c: char) {
@@ -33,6 +36,23 @@ impl<'a> Perform for Tty<'a> {
         action: char,
     ) {
         match action {
+            'm' => {
+                for param in _params {
+                    match param[0] {
+                        0 => self.reset_color(),
+                        1 => self.bold = true,
+                        30..=37 | 90..=97 => {
+                            self.current_background =
+                                AnsiColor::from_ansi_code(param[0]).unwrap().as_rgb()
+                        }
+                        40..=47 | 100..=107 => {
+                            self.current_foreground =
+                                AnsiColor::from_ansi_code(param[0]).unwrap().as_rgb()
+                        }
+                        _ => s_println!("unimplemented color thing: {}", param[0]),
+                    }
+                }
+            }
             _ => s_println!("Unimplemented csi dispatch asni escape code {}", action),
         }
     }
