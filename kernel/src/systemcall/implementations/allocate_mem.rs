@@ -26,8 +26,11 @@ impl SyscallImpl for AllocMemImpl {
             PageTableFlags::USER_ACCESSIBLE | PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
         let mut current = manager.current.as_ref().unwrap().lock();
         s_println!("process is {:?}", current.pid);
-        s_println!("Allocating mem for {:?}", current.page_table.frame);
-        let mem_start = allocate_user_mem(arg1, &mut current.page_table.inner, flags)
+        s_println!(
+            "Allocating mem for {:?}",
+            current.addrspace.page_table.frame
+        );
+        let mem_start = allocate_user_mem(arg1, &mut current.addrspace.page_table.inner, flags)
             .0
             .as_u64();
         unsafe {

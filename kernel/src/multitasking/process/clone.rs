@@ -1,15 +1,14 @@
 use crate::{
-    memory::page_table_wrapper::PageTableWrapped,
+    memory::{addrspace::AddrSpace, page_table_wrapper::PageTableWrapped},
     multitasking::process::{Process, misc::ProcessID},
 };
 
 impl Process {
     /// Clones a process, with all its memory (aka fork)
     pub fn process_clone(&mut self) -> Self {
-        let page_table = PageTableWrapped::default();
         let new_pcd = Self {
             pid: ProcessID::default(),
-            page_table,
+            addrspace: AddrSpace::default(),
             used_memories: self.used_memories.clone(),
             kernel_stack_top: self.kernel_stack_top,
             threads: self.threads.clone(),

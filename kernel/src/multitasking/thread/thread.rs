@@ -36,14 +36,15 @@ impl Thread {
 
 impl Thread {
     pub fn new(entry_point: u64, parent: ProcessRef) -> Self {
-        let stack = allocate_stack(16, &mut parent.lock().page_table.inner);
-        let kernel_stack_top = allocate_kernel_stack(16, &mut parent.lock().page_table.inner)
-            .finish()
-            .as_u64();
+        let stack = allocate_stack(16, &mut parent.lock().addrspace.page_table.inner);
+        let kernel_stack_top =
+            allocate_kernel_stack(16, &mut parent.lock().addrspace.page_table.inner)
+                .finish()
+                .as_u64();
         Self {
             snapshot: ThreadSnapshot::new(
                 entry_point,
-                &mut parent.clone().lock().page_table,
+                &mut parent.clone().lock().addrspace.page_table,
                 stack.finish().as_u64(),
                 ThreadSnapshotType::Thread,
             ),

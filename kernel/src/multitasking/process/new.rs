@@ -3,7 +3,7 @@ use spin::Mutex;
 
 use crate::{
     filesystem::path::Path,
-    memory::page_table_wrapper::PageTableWrapped,
+    memory::{addrspace::AddrSpace, page_table_wrapper::PageTableWrapped},
     multitasking::{
         memory::{allocate_kernel_stack, allocate_stack},
         process::{
@@ -27,7 +27,7 @@ impl Process {
 
         let process_arc = Arc::new(Mutex::new(Process {
             pid,
-            page_table,
+            addrspace: AddrSpace::default(),
             kernel_stack_top,
             used_memories: Vec::new(),
             current_directory: Path::default(),
@@ -37,8 +37,8 @@ impl Process {
 
         let mut process = process_arc.lock();
 
-        let mut stack_builder = allocate_stack(160, &mut process.page_table.inner);
-        let program = load_elf(&mut process.page_table, program);
+        let mut stack_builder = allocate_stack(160, &mut process.addrspace.page_table.inner);
+        let program = load_elf(&mut process.addrspace.page_table, program);
 
         assert!(!program.is_pie(), "Pie program is not supported for now");
 
@@ -46,7 +46,7 @@ impl Process {
 
         let context = ThreadSnapshot::new(
             program.entry_point() as u64,
-            &mut process.page_table,
+            &mut process.addrspace.page_table,
             stack_builder.finish().as_u64(),
             ThreadSnapshotType::Thread,
         );
