@@ -4,8 +4,8 @@ use crate::{
         error::SyscallError,
         implementations::{
             allocate_mem::AllocMemImpl,
-            change_dir::ChangeDirImpl,
             configurate_object::ConfigurateObjectImpl,
+            directory::ChangeDirImpl,
             exit::ExitImpl,
             futex::{FutexWaitImpl, FutexWakeImpl},
             get_fs::GetFSImpl,
