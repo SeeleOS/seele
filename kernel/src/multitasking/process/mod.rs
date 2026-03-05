@@ -6,13 +6,11 @@ use x86_64::VirtAddr;
 use crate::filesystem::path::Path;
 use crate::{
     memory::page_table_wrapper::PageTableWrapped,
-    multitasking::{
-        process::misc::ProcessID,
-        thread::thread::Thread,
-    },
+    multitasking::{process::misc::ProcessID, thread::thread::Thread},
     object::Object,
 };
 
+pub mod clone;
 pub mod manager;
 pub mod misc;
 pub mod new;

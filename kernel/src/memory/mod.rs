@@ -4,10 +4,11 @@ use conquer_once::spin::OnceCell;
 use spin::Mutex;
 
 use crate::memory::{
-        heap::init_heap,
-        paging::{BootinfoFrameAllocator, FRAME_ALLOCATOR, MAPPER, init_mapper},
-    };
+    heap::init_heap,
+    paging::{BootinfoFrameAllocator, FRAME_ALLOCATOR, MAPPER, init_mapper},
+};
 
+pub mod clone;
 pub mod fixed_block_size;
 pub mod heap;
 pub mod manager;
