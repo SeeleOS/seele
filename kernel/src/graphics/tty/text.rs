@@ -26,8 +26,7 @@ impl<'a> Tty<'a> {
             }
 
             if self.row >= self.screen_height_chars() as u32 {
-                self.row = 0;
-                self.col = 0;
+                self.scroll_up();
             }
 
             self.push_char(c);
