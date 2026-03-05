@@ -40,12 +40,7 @@ impl VFS {
     }
 
     pub fn file_info(&mut self, path: Path) -> FSResult<FileLikeInfo> {
-        let file = path.navigate(self.root.clone().unwrap())?;
-
-        match file {
-            FileLike::File(file) => file.lock().info(),
-            FileLike::Directory(_) => Err(FSError::NotAFile),
-        }
+        path.navigate(self.root.clone().unwrap())?.info()
     }
 
     pub fn write_file(&mut self, path: Path, buffer: &[u8]) -> FSResult<()> {
