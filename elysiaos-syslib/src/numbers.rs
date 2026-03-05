@@ -13,4 +13,5 @@ pub enum SyscallNumber {
     WriteObject,
     ConfigurateObject,
     ChangeDirectory,
+    GetCurrentDirectory,
 }
