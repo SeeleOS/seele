@@ -6,7 +6,7 @@ pub struct AddrSpace {
 }
 
 impl AddrSpace {
-    pub fn load(&self) {
+    pub fn load(&mut self) {
         self.page_table.load();
     }
 }
