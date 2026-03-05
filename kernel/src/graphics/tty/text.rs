@@ -21,11 +21,11 @@ impl<'a> Tty<'a> {
                 continue;
             }
 
-            if self.col >= self.screen_width_char() as u32 {
+            if self.cursor_x >= self.screen_width_char() as u32 {
                 self.new_line();
             }
 
-            if self.row >= self.screen_height_chars() as u32 {
+            if self.cursor_y >= self.screen_height_chars() as u32 {
                 self.scroll_up();
             }
 
@@ -44,11 +44,11 @@ impl<'a> Tty<'a> {
     }
 
     pub fn push_char(&mut self, char: char) {
-        let index = self.get_text_cell_index(self.row, self.col);
+        let index = self.get_text_cell_index(self.cursor_y, self.cursor_x);
         let text_cell = &mut self.text_buf[index];
 
         text_cell.char = char;
-        self.col += 1;
+        self.cursor_x += 1;
     }
 
     pub fn render(&mut self) {
@@ -106,8 +106,8 @@ impl<'a> Tty<'a> {
     }
 
     pub fn new_line(&mut self) {
-        self.row += 1;
-        self.col = 0;
+        self.cursor_y += 1;
+        self.cursor_x = 0;
     }
 }
 

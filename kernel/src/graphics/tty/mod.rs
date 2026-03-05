@@ -19,8 +19,8 @@ pub struct Tty<'a> {
     canvas: &'a Mutex<Canvas>,
 
     text_buf: Vec<TextCell>,
-    row: u32,
-    col: u32,
+    cursor_y: u32,
+    cursor_x: u32,
 
     pub max_rows: u16,
     pub max_cols: u16,
@@ -39,9 +39,9 @@ impl<'a> Tty<'a> {
         Self {
             font,
             canvas: FRAME_BUFFER.get().unwrap(),
-            row: 0,
+            cursor_y: 0,
             text_buf,
-            col: 0,
+            cursor_x: 0,
 
             max_rows: height as u16,
             max_cols: width as u16,
