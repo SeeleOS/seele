@@ -51,7 +51,7 @@ impl<'a> Tty<'a> {
         self.col += 1;
     }
 
-    fn render(&mut self) {
+    pub fn render(&mut self) {
         let rows = self.screen_height_chars();
         let cols = self.screen_width_char();
 
@@ -97,15 +97,15 @@ impl<'a> Tty<'a> {
         }
     }
 
-    fn screen_width_char(&self) -> usize {
+    pub fn screen_width_char(&self) -> usize {
         ((self.canvas.lock().width - PADDING * 2) / self.font.width) as usize
     }
 
-    fn screen_height_chars(&self) -> usize {
+    pub fn screen_height_chars(&self) -> usize {
         ((self.canvas.lock().height - PADDING * 2) / self.font.height) as usize
     }
 
-    fn new_line(&mut self) {
+    pub fn new_line(&mut self) {
         self.row += 1;
         self.col = 0;
     }
