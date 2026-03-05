@@ -2,12 +2,10 @@ use alloc::string::String;
 use fatfs::{Read, Write};
 
 use crate::filesystem::{
-        errors::FSError,
-        impls::fat32::operator::Fat32RamDiskReader,
-        vfs_traits::{
-            Directory, File, FileInfo,
-        },
-    };
+    errors::FSError,
+    impls::fat32::operator::Fat32RamDiskReader,
+    vfs_traits::{Directory, File, FileLikeInfo},
+};
 
 type RawFAT32File = fatfs::File<
     'static,
@@ -37,7 +35,7 @@ impl File for FAT32File {
         self.inner.write_all(buffer).map_err(|_| FSError::Other)
     }
 
-    fn info(&mut self) -> crate::filesystem::vfs::FSResult<FileInfo> {
-        Ok(FileInfo::new(self.name.clone(), self.size))
+    fn info(&mut self) -> crate::filesystem::vfs::FSResult<FileLikeInfo> {
+        Ok(FileLikeInfo::new(self.name.clone(), self.size))
     }
 }

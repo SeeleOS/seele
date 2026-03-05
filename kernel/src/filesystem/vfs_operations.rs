@@ -3,12 +3,12 @@ use crate::filesystem::vfs::{FSResult, VFS};
 use alloc::vec::Vec;
 
 use crate::filesystem::{
-        errors::FSError,
-        path::Path,
-        vfs_traits::{
-            Directory, DirectoryContentInfo, DirectoryContentType, File, FileInfo, FileLike,
-        },
-    };
+    errors::FSError,
+    path::Path,
+    vfs_traits::{
+        Directory, DirectoryContentInfo, DirectoryContentType, File, FileLike, FileLikeInfo,
+    },
+};
 
 impl VFS {
     pub fn create_file(&mut self, path: Path) -> FSResult<()> {
@@ -39,7 +39,7 @@ impl VFS {
         }
     }
 
-    pub fn file_info(&mut self, path: Path) -> FSResult<FileInfo> {
+    pub fn file_info(&mut self, path: Path) -> FSResult<FileLikeInfo> {
         let file = path.navigate(self.root.clone().unwrap())?;
 
         match file {
