@@ -9,6 +9,7 @@ use crate::graphics::{
 };
 
 pub mod text;
+pub mod vte_impl;
 pub mod wallpaper;
 
 pub static TTY: OnceCell<Mutex<Tty>> = OnceCell::uninit();

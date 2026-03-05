@@ -40,7 +40,7 @@ impl<'a> Tty<'a> {
         (self.screen_width_char() * row as usize) + col as usize
     }
 
-    fn push_char(&mut self, char: char) {
+    pub fn push_char(&mut self, char: char) {
         let index = self.get_text_cell_index(self.row, self.col);
         let text_cell = &mut self.text_buf[index];
 
