@@ -1,5 +1,6 @@
 #[derive(Debug)]
 pub enum SyscallError {
+    BufferTooSmall = -1,
     InvalidSyscall = -38,
     InvalidFileDescriptor = -255,
     Other = -256,
