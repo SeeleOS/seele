@@ -5,7 +5,7 @@ use crate::{
         implementations::{
             allocate_mem::AllocMemImpl,
             configurate_object::ConfigurateObjectImpl,
-            directory::ChangeDirImpl,
+            directory::{ChangeDirImpl, GetDirImpl},
             exit::ExitImpl,
             futex::{FutexWaitImpl, FutexWakeImpl},
             get_fs::GetFSImpl,
@@ -41,6 +41,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
     register_syscall!(table, SyscallNo::WriteObject, WriteObjectImpl);
     register_syscall!(table, SyscallNo::ConfigurateObject, ConfigurateObjectImpl);
     register_syscall!(table, SyscallNo::ChangeDirectory, ChangeDirImpl);
+    register_syscall!(table, SyscallNo::GetCurrentDirectory, GetDirImpl);
 
     table
 };
