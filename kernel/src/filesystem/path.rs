@@ -1,11 +1,10 @@
-
 use alloc::{string::String, vec::Vec};
 
 use crate::filesystem::{
-        errors::FSError,
-        vfs::{FSResult, WrappedDirectory},
-        vfs_traits::FileLike,
-    };
+    errors::FSError,
+    vfs::{FSResult, WrappedDirectory},
+    vfs_traits::FileLike,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PathPart {
@@ -103,5 +102,21 @@ impl Path {
                 },
             )),
         }
+    }
+
+    pub fn as_string(self) -> String {
+        let mut string = String::new();
+
+        for part in self.0 {
+            match part {
+                PathPart::Root => string.push('/'),
+                PathPart::Normal(part) => {
+                    string.push_str(&part);
+                    string.push('/');
+                }
+            }
+        }
+
+        string
     }
 }
