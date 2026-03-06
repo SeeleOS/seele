@@ -9,7 +9,6 @@ impl Process {
         let new_pcd = Self {
             pid: ProcessID::default(),
             addrspace: AddrSpace::default(),
-            used_memories: self.used_memories.clone(),
             kernel_stack_top: self.kernel_stack_top,
             threads: self.threads.clone(),
             objects: self.objects.clone(),

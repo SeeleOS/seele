@@ -28,7 +28,6 @@ impl Process {
             pid,
             addrspace,
             kernel_stack_top,
-            used_memories: Vec::new(),
             current_directory: Path::default(),
             threads: Vec::new(),
             objects: Vec::new(),
