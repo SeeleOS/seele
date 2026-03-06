@@ -12,6 +12,7 @@ use crate::{
         utils::{MemoryRegion, apply_offset},
     },
     misc::stack_builder::StackBuilder,
+    s_print, s_println,
 };
 
 const USER_MEM_START: u64 = 0x30_0000_0000;
@@ -49,20 +50,22 @@ impl AddrSpace {
     }
 
     pub fn allocate_user(&mut self, pages: u64) -> AllocResult {
+        let mem = self.user_mem;
         self.user_mem += (pages + 1) * 4096;
 
         self.map(
-            self.user_mem,
+            mem,
             pages,
             PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE,
         )
     }
 
     pub fn allocate_kernel(&mut self, pages: u64) -> AllocResult {
+        let mem = self.kernel_mem;
         self.kernel_mem += (pages + 1) * 4096;
 
         self.map(
-            self.kernel_mem,
+            mem,
             pages,
             PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
         )
@@ -70,15 +73,35 @@ impl AddrSpace {
 
     pub fn map(&mut self, start: VirtAddr, pages: u64, flags: PageTableFlags) -> AllocResult {
         let region = MemoryRegion::new(start, pages, flags);
+        s_println!("Mapping VAddr: {:?} to {:?} pages", start, pages);
 
         self.used_memories.push(region);
 
-        self.apply_region(region)
+        self.apply_region(region, true)
     }
 
-    fn apply_region(&mut self, region: MemoryRegion) -> AllocResult {
+    pub fn map_no_guard_page(
+        &mut self,
+        start: VirtAddr,
+        pages: u64,
+        flags: PageTableFlags,
+    ) -> AllocResult {
+        let region = MemoryRegion::new(start, pages, flags);
+
+        self.used_memories.push(region);
+
+        self.apply_region(region, false)
+    }
+
+    fn apply_region(&mut self, region: MemoryRegion, use_guard_page: bool) -> AllocResult {
         let guard_page = region.start_page();
-        let start = guard_page + 1;
+        let start = {
+            if use_guard_page {
+                guard_page + 1
+            } else {
+                guard_page
+            }
+        };
         let pages = region.pages();
 
         let mut last_frame = None;
