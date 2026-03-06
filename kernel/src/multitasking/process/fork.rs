@@ -22,7 +22,7 @@ impl Process {
                 &Weak::upgrade(&ele)
                     .unwrap()
                     .lock()
-                    .clone_and_spawn(MANAGER.lock().current.clone().unwrap().clone()),
+                    .fork(MANAGER.lock().current.clone().unwrap().clone()),
             ));
         }
 

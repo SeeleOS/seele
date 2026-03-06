@@ -16,7 +16,7 @@ use crate::multitasking::{
 };
 
 impl Thread {
-    pub fn clone_and_spawn(&self, process: ProcessRef) -> ThreadRef {
+    pub fn fork(&self, process: ProcessRef) -> ThreadRef {
         let id = ThreadID::default();
         let thread = Arc::new(Mutex::new(Self {
             parent: process.clone(),
