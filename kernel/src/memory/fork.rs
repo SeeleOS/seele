@@ -12,11 +12,11 @@ use crate::memory::{
 
 impl AddrSpace {
     /// Clone all the memory thats in [`self`] to [`target`]
-    pub fn clone_all(&mut self) -> Self {
+    pub fn fork(&self) -> Self {
         let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
 
         let mut new_page_table = PageTableWrapped::default();
-        let old_page_table = &mut self.page_table;
+        let old_page_table = &self.page_table;
 
         for region in self.used_memories.clone() {
             let pages = Page::<Size4KiB>::range_inclusive(

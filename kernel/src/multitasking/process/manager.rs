@@ -13,7 +13,6 @@ use crate::{
 pub struct Manager {
     pub processes: BTreeMap<ProcessID, ProcessRef>,
     pub current: Option<ProcessRef>,
-    pub queue: VecDeque<ProcessRef>,
     pub zombies: Vec<ProcessRef>,
 }
 
@@ -39,7 +38,6 @@ impl Manager {
 
         let process = Process::new(&buf);
         self.processes.insert(process.lock().pid, process.clone());
-        self.queue.push_back(process.clone());
     }
 
     pub fn remove_process(&mut self, process: ProcessRef) {

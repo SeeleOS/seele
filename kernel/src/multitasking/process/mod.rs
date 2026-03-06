@@ -13,7 +13,7 @@ use crate::{
     object::Object,
 };
 
-pub mod clone;
+pub mod fork;
 pub mod manager;
 pub mod misc;
 pub mod new;
