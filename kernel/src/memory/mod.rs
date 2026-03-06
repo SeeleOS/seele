@@ -12,7 +12,6 @@ pub mod addrspace;
 pub mod clone;
 pub mod fixed_block_size;
 pub mod heap;
-pub mod manager;
 pub mod page_table_wrapper;
 pub mod paging;
 pub mod utils;

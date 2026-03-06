@@ -1,6 +1,6 @@
 use x86_64::{
     VirtAddr,
-    structures::paging::{Page, PageTable, PageTableFlags, page::PageRangeInclusive},
+    structures::paging::{Page, PageTable, PageTableFlags, Size4KiB, page::PageRangeInclusive},
 };
 
 use crate::memory::{PHYSICAL_MEMORY_OFFSET, paging::MAPPER};
@@ -49,6 +49,7 @@ pub fn page_range_from_addr(start: u64, end: u64) -> PageRangeInclusive {
     Page::range_inclusive(heap_start_page, heap_end_page)
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct MemoryRegion {
     pub start: VirtAddr,
     pub end: VirtAddr,
@@ -64,7 +65,15 @@ impl MemoryRegion {
         }
     }
 
-    pub fn pages(&mut self) -> u64 {
+    pub fn pages(&self) -> u64 {
         (self.end - self.start) / 4096
+    }
+
+    pub fn start_page(&self) -> Page<Size4KiB> {
+        Page::containing_address(self.start)
+    }
+
+    pub fn end_page(&self) -> Page<Size4KiB> {
+        Page::containing_address(self.end)
     }
 }
