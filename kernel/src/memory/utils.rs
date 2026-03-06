@@ -1,14 +1,9 @@
 use x86_64::{
     VirtAddr,
-    structures::paging::{
-        Page, PageTable, page::PageRangeInclusive,
-    },
+    structures::paging::{Page, PageTable, PageTableFlags, page::PageRangeInclusive},
 };
 
-use crate::memory::{
-        PHYSICAL_MEMORY_OFFSET,
-        paging::MAPPER,
-    };
+use crate::memory::{PHYSICAL_MEMORY_OFFSET, paging::MAPPER};
 
 pub struct Locked<A> {
     inner: spin::Mutex<A>,
@@ -52,4 +47,24 @@ pub fn page_range_from_addr(start: u64, end: u64) -> PageRangeInclusive {
     let heap_start_page = Page::containing_address(heap_start);
     let heap_end_page = Page::containing_address(heap_end);
     Page::range_inclusive(heap_start_page, heap_end_page)
+}
+
+pub struct MemoryRegion {
+    pub start: VirtAddr,
+    pub end: VirtAddr,
+    pub flags: PageTableFlags,
+}
+
+impl MemoryRegion {
+    pub fn new(start: VirtAddr, pages: u64, flags: PageTableFlags) -> Self {
+        Self {
+            start,
+            end: start + (pages * 4096),
+            flags,
+        }
+    }
+
+    pub fn pages(&mut self) -> u64 {
+        (self.end - self.start) / 4096
+    }
 }
