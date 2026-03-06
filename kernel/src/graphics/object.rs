@@ -1,7 +1,7 @@
 use core::{fmt::Write, str::from_utf8};
 
 use crate::{
-    graphics::terminal::TERMINAL,
+    graphics::{framebuffer::FRAME_BUFFER, terminal::TERMINAL},
     object::{Object, Writable},
 };
 
@@ -26,6 +26,8 @@ impl Writable for TtyObject {
         terminal
             .write_str(from_utf8(buffer).unwrap_or("Unsupported character"))
             .unwrap();
+
+        FRAME_BUFFER.get().unwrap().lock().flush();
 
         Ok(buffer.len())
     }

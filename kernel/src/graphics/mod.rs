@@ -3,14 +3,17 @@ use core::ops::Deref;
 use alloc::boxed::Box;
 use os_terminal::{
     Terminal,
-    font::{BitmapFont, FontManager},
+    font::{BitmapFont, FontManager, TrueTypeFont},
 };
 use spin::Mutex;
 use spleen_font::PSF2Font;
 
-use crate::graphics::{
-    framebuffer::{Canvas, FRAME_BUFFER},
-    terminal::{TERMINAL, Tty},
+use crate::{
+    graphics::{
+        framebuffer::{Canvas, FRAME_BUFFER},
+        terminal::{TERMINAL, TermRenderer},
+    },
+    println,
 };
 
 pub mod framebuffer;
@@ -18,21 +21,16 @@ pub mod object;
 pub mod object_config;
 pub mod terminal;
 
-pub static FONT: &[u8] = include_bytes!("../../../maplemono.psf");
+pub static FONT: &[u8] = include_bytes!("../../../MapleMono-Regular.ttf");
 
 pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
-    FRAME_BUFFER.get_or_init(|| Mutex::new(Canvas::new(boot_info)));
-    let terminal = TERMINAL.get_or_init(|| Mutex::new(Terminal::new(Tty::new())));
+    let canvas = FRAME_BUFFER.get_or_init(|| Mutex::new(Canvas::new(boot_info)));
+    let mut terminal = TERMINAL
+        .get_or_init(|| Mutex::new(Terminal::new(TermRenderer::new(canvas))))
+        .lock();
 
-    for i in 0..100 {
-        FRAME_BUFFER
-            .get()
-            .unwrap()
-            .lock()
-            .write_pixel(i, i, (0, 0, 0));
-    }
-    FRAME_BUFFER.get().unwrap().lock().flush();
+    let font_manager = TrueTypeFont::new(13.0, FONT);
 
-    terminal.lock().set_font_manager(Box::new(BitmapFont));
-    terminal.lock().process(b"asdadas");
+    terminal.set_font_manager(Box::new(font_manager));
+    terminal.set_crnl_mapping(true);
 }

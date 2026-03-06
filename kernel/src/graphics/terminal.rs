@@ -8,20 +8,20 @@ use crate::graphics::framebuffer::{Canvas, FRAME_BUFFER};
 
 pub type Color = (u8, u8, u8);
 
-pub static TERMINAL: OnceCell<Mutex<Terminal<Tty>>> = OnceCell::uninit();
+pub static TERMINAL: OnceCell<Mutex<Terminal<TermRenderer>>> = OnceCell::uninit();
 
-pub struct Tty<'a> {
+pub struct TermRenderer<'a> {
     canvas: &'a Mutex<Canvas>,
     pub width: u32,
     pub height: u32,
 }
 
-impl<'a> Tty<'a> {
-    pub fn new() -> Self {
-        let width = FRAME_BUFFER.get().unwrap().lock().width;
-        let height = FRAME_BUFFER.get().unwrap().lock().height;
+impl<'a> TermRenderer<'a> {
+    pub fn new(canvas: &'a Mutex<Canvas>) -> Self {
+        let width = canvas.lock().width;
+        let height = canvas.lock().height;
         Self {
-            canvas: FRAME_BUFFER.get().unwrap(),
+            canvas,
             width,
             height,
         }
@@ -30,7 +30,7 @@ impl<'a> Tty<'a> {
 
 #[macro_export]
 macro_rules! print {
-    ($($arg:tt)*) => ($crate::graphics::terminal::_print(format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::graphics::terminal::term_print(format_args!($($arg)*)));
 }
 
 #[macro_export]
@@ -40,13 +40,14 @@ macro_rules! println {
 }
 
 #[doc(hidden)]
-pub fn _print(args: Arguments) {
+pub fn term_print(args: Arguments) {
     TERMINAL.get().unwrap().lock().write_fmt(args).unwrap();
+    FRAME_BUFFER.get().unwrap().lock().flush();
 }
 
 use os_terminal::DrawTarget;
 
-impl<'a> DrawTarget for Tty<'a> {
+impl<'a> DrawTarget for TermRenderer<'a> {
     fn size(&self) -> (usize, usize) {
         (self.width as usize, self.height as usize)
     }
