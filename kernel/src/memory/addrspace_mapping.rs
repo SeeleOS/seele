@@ -15,7 +15,8 @@ use crate::{
 
 impl AddrSpace {
     pub fn map(&mut self, start: VirtAddr, pages: u64, flags: PageTableFlags) -> AllocResult {
-        let region = MemoryRegion::new(start, pages, flags);
+        let actual_start = start + 4096;
+        let region = MemoryRegion::new(actual_start, pages, flags);
 
         self.used_memories.push(region);
 
