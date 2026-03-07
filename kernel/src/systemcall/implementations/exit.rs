@@ -1,5 +1,6 @@
 use crate::{
-    multitasking::{scheduling::run_next_zombie, thread::THREAD_MANAGER},
+    multitasking::thread::THREAD_MANAGER,
+    s_println,
     systemcall::{implementations::utils::SyscallImpl, syscall_no::SyscallNo},
 };
 
@@ -23,8 +24,7 @@ impl SyscallImpl for ExitImpl {
         manager.mark_current_as_zombie();
 
         drop(manager);
-
-        run_next_zombie();
+        s_println!("exit called wtf");
         Ok(0)
     }
 }
