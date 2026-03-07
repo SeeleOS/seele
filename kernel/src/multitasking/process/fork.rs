@@ -9,6 +9,7 @@ use crate::{
     multitasking::{
         MANAGER,
         process::{Process, ProcessRef, manager::Manager, misc::ProcessID},
+        thread::THREAD_MANAGER,
     },
     s_println,
 };
@@ -18,17 +19,19 @@ impl Process {
         s_println!("inside fork!");
         let mut new_threads = Vec::new();
         let pid = ProcessID::default();
+        let current_thread = THREAD_MANAGER
+            .get()
+            .unwrap()
+            .lock()
+            .current
+            .clone()
+            .unwrap();
 
-        for ele in self.threads.clone() {
-            s_println!("woa");
-            new_threads.push(Arc::downgrade(
-                &Weak::upgrade(&ele)
-                    .unwrap()
-                    .lock()
-                    .clone_and_spawn(ref_to_self.clone()),
-            ));
-            s_println!("wopa end");
-        }
+        let new_thread = current_thread.lock().clone_and_spawn(ref_to_self.clone());
+
+        s_println!("woa");
+        new_threads.push(Arc::downgrade(&new_thread));
+        s_println!("wopa end");
 
         s_println!("f");
         let new_process = Arc::new(Mutex::new(Self {
