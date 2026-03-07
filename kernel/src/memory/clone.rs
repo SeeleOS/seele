@@ -67,7 +67,6 @@ impl AddrSpace {
             page_table: new_page_table,
             used_memories: self.used_memories.clone(),
             user_mem: self.user_mem,
-            kernel_mem: self.kernel_mem,
         }
     }
 }

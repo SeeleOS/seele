@@ -1,3 +1,5 @@
+use core::sync::atomic::{AtomicU64, Ordering};
+
 use alloc::vec::Vec;
 use futures_util::stream::All;
 use x86_64::{
@@ -17,6 +19,8 @@ use crate::{
 const USER_MEM_START: u64 = 0x30_0000_0000;
 const KERNEL_MEM_START: u64 = 0xFFFF_8000_1000_0000;
 
+static KERNEL_MEM: AtomicU64 = AtomicU64::new(KERNEL_MEM_START);
+
 pub type AllocResult = (VirtAddr, StackBuilder);
 
 #[derive(Debug)]
@@ -25,7 +29,6 @@ pub struct AddrSpace {
     pub page_table: PageTableWrapped,
 
     pub user_mem: VirtAddr,
-    pub kernel_mem: VirtAddr,
 }
 
 impl Default for AddrSpace {
@@ -34,7 +37,6 @@ impl Default for AddrSpace {
             used_memories: Vec::default(),
             page_table: PageTableWrapped::default(),
             user_mem: VirtAddr::new(USER_MEM_START),
-            kernel_mem: VirtAddr::new(KERNEL_MEM_START),
         }
     }
 }
@@ -67,11 +69,8 @@ impl AddrSpace {
     }
 
     pub fn allocate_kernel(&mut self, pages: u64) -> AllocResult {
-        let mem = self.kernel_mem;
-        self.kernel_mem += (pages + 1) * 4096;
-
         self.map(
-            mem,
+            VirtAddr::new(KERNEL_MEM.fetch_add((pages + 1) * 4096, Ordering::Relaxed)),
             pages,
             PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
         )
