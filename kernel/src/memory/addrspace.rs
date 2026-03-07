@@ -47,7 +47,6 @@ impl AddrSpace {
     pub fn clean(&mut self) {
         // TODO: properly "clean" the memory lmao
         self.user_mem = VirtAddr::new(USER_MEM_START);
-        self.kernel_mem = VirtAddr::new(KERNEL_MEM_START);
         self.page_table = PageTableWrapped::default();
         self.used_memories = Vec::new();
     }
