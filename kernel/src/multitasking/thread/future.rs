@@ -39,7 +39,6 @@ impl Future for ThreadFuture {
     ) -> core::task::Poll<Self::Output> {
         let (thread_snapshot, executor_snapshot) = {
             without_interrupts(|| {
-                s_println!("THREAD IS {:?}", self.0.lock().id);
                 let mut manager = THREAD_MANAGER.get().unwrap().lock();
                 let mut thread = self.0.lock();
                 let previous_thread_ref = manager.current.clone().unwrap();
