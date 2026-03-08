@@ -5,7 +5,7 @@ use vte::Parser;
 
 use crate::{
     filesystem::path::Path,
-    multitasking::MANAGER,
+    multitasking::{MANAGER, process::execve::execve},
     systemcall::{error::SyscallError, implementations::utils::SyscallImpl, syscall_no::SyscallNo},
 };
 
@@ -27,12 +27,8 @@ impl SyscallImpl for ExecveImpl {
                 .map_err(|_| SyscallError::InvalidString)?
         };
         let path = Path::new(path_str);
-        let current_process = MANAGER.lock().current.clone().unwrap();
 
-        current_process
-            .lock()
-            .execve(path, Vec::new())
-            .map_err(|_| SyscallError::InvalidPath)?;
+        execve(path, Vec::new()).map_err(|_| SyscallError::InvalidPath)?;
 
         Ok(0)
     }

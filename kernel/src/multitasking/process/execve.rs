@@ -3,6 +3,7 @@ use alloc::{string::String, vec::Vec};
 use crate::{
     filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
     multitasking::{
+        MANAGER,
         process::{
             Process,
             misc::{init_objects, init_stack_layout},
@@ -19,7 +20,11 @@ use crate::{
 };
 
 impl Process {
-    pub fn execve(&mut self, path: Path, args: Vec<String>) -> Result<(), FSError> {
+    pub fn execve(
+        &mut self,
+        path: Path,
+        args: Vec<String>,
+    ) -> Result<*mut ThreadSnapshot, FSError> {
         s_println!("in execve");
         self.addrspace.clean();
 
@@ -44,7 +49,9 @@ impl Process {
 
         init_stack_layout(&mut stack_builder, &program);
 
-        thread.lock().snapshot = ThreadSnapshot::new(
+        let mut thread_locked = thread.lock();
+
+        thread_locked.snapshot = ThreadSnapshot::new(
             program.entry_point() as u64,
             &mut self.addrspace,
             stack_builder.finish().as_u64(),
@@ -52,9 +59,19 @@ impl Process {
         );
 
         init_objects(&mut self.objects);
+        self.addrspace.load();
 
-        s_println!("execve done. returning to executor");
-        return_to_executor_no_save();
-        panic!("What the fuck");
+        Ok(&mut thread_locked.snapshot as *mut ThreadSnapshot)
     }
+}
+
+pub fn execve(path: Path, args: Vec<String>) -> Result<(), FSError> {
+    let snapshot = {
+        let manager = MANAGER.lock();
+        let current = manager.current.clone().unwrap();
+        current.lock().execve(path, args)?
+    };
+
+    unsafe { (*snapshot).switch_from(None, None) };
+    panic!("What the fuck")
 }

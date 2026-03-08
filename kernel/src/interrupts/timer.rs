@@ -4,6 +4,7 @@ use crate::{
     interrupts::hardware_interrupt::{HardwareInterrupt, notify_end_of_interrupt},
     misc::snapshot::Snapshot,
     multitasking::scheduling::return_to_executor,
+    s_println,
 };
 
 #[unsafe(naked)]
@@ -33,6 +34,7 @@ pub extern "C" fn timer_interrupt_handler_wrapper() {
 
 pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
     notify_end_of_interrupt(HardwareInterrupt::Timer);
+    s_println!("timer");
     return_to_executor(snapshot);
 
     panic!("What the fuck");
