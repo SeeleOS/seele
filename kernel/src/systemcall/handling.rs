@@ -1,18 +1,16 @@
 use crate::{
     misc::snapshot::Snapshot,
+    multitasking::thread::THREAD_MANAGER,
     println, s_println,
     systemcall::{error::SyscallError, syscalls_table::SYSCALL_TABLE},
 };
 
 #[unsafe(no_mangle)]
 extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
-    unsafe {
-        s_println!("actrual rip is {:x}", (*snapshot_ptr).rip);
-    }
     let snapshot = unsafe { &mut *snapshot_ptr };
 
     let result = syscall_handler_unwrapped(
-        snapshot.rax as isize,
+        snapshot.rax,
         snapshot.rdi,
         snapshot.rsi,
         snapshot.rdx,
@@ -22,6 +20,17 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     );
 
     snapshot.rax = result;
+
+    THREAD_MANAGER
+        .get()
+        .unwrap()
+        .lock()
+        .current
+        .clone()
+        .unwrap()
+        .lock()
+        .snapshot
+        .inner = *snapshot;
 }
 
 fn syscall_handler_unwrapped(
