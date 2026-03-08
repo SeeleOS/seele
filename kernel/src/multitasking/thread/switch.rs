@@ -39,7 +39,6 @@ impl ThreadSnapshot {
 
             self.update_gs();
             self.load_msr();
-            s_println!("rip is {}", self.inner.rip);
         });
         match self.snapshot_type {
             ThreadSnapshotType::Thread => self.jump_user(),
