@@ -28,7 +28,13 @@ impl Thread {
             snapshot: self.snapshot,
             executor_snapshot: ThreadSnapshot::new_executor(),
             state: State::Ready,
-            kernel_stack_top: self.kernel_stack_top,
+            kernel_stack_top: process
+                .lock()
+                .addrspace
+                .allocate_kernel(16)
+                .1
+                .finish()
+                .as_u64(),
         };
 
         s_println!("thredad mgr lock start");
