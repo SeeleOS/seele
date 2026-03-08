@@ -10,6 +10,7 @@ pub mod get_fs;
 pub mod get_process_id;
 pub mod get_thread_id;
 pub mod object;
+pub mod open_file;
 pub mod print;
 pub mod set_fs;
 pub mod set_gs;

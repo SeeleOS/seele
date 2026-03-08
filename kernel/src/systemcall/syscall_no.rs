@@ -21,4 +21,5 @@ pub enum SyscallNo {
     FileInfo,
     Fork,
     Execve,
+    OpenFile,
 }

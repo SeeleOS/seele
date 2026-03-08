@@ -17,6 +17,7 @@ use crate::{
             get_process_id::GetPIDImpl,
             get_thread_id::GetTIDImpl,
             object::{ReadObjectImpl, WriteObjectImpl},
+            open_file::OpenFileImpl,
             print::PrintImpl,
             set_fs::SetFSImpl,
             set_gs::SetGSImpl,
@@ -50,6 +51,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
     register_syscall!(table, SyscallNo::FileInfo, FileInfoImpl);
     register_syscall!(table, SyscallNo::Fork, ForkImpl);
     register_syscall!(table, SyscallNo::Execve, ExecveImpl);
+    register_syscall!(table, SyscallNo::OpenFile, OpenFileImpl);
 
     table
 };
