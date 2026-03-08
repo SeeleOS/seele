@@ -21,6 +21,7 @@ use crate::{
 
 impl Process {
     fn execve(&mut self, path: Path, args: Vec<String>) -> Result<*mut ThreadSnapshot, FSError> {
+        // TODO: kill all the other threads when execveing
         s_println!("in execve");
         self.addrspace.clean();
 
