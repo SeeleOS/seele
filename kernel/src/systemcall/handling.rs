@@ -1,5 +1,5 @@
 use crate::{
-    println,
+    println, s_println,
     systemcall::{error::SyscallError, syscalls_table::SYSCALL_TABLE},
 };
 
@@ -20,6 +20,9 @@ struct SyscallSnapshot {
 
 #[unsafe(no_mangle)]
 extern "C" fn syscall_handler(snapshot_ptr: *mut SyscallSnapshot) {
+    unsafe {
+        s_println!("actrual rip is {:x}", (*snapshot_ptr).rip);
+    }
     let snapshot = unsafe { &mut *snapshot_ptr };
 
     let result = syscall_handler_unwrapped(
