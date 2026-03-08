@@ -38,13 +38,7 @@ impl Manager {
     }
 
     pub fn spawn(&mut self, program: Path) {
-        let mut vfs = VirtualFS.lock();
-        let size = vfs.file_info(program.clone()).unwrap().size;
-
-        let mut buf = alloc::vec![0u8; size];
-        vfs.read_file(program, &mut buf).unwrap();
-
-        let process = Process::new(&buf);
+        let process = Process::new(program);
         self.processes.insert(process.lock().pid, process.clone());
     }
 
