@@ -15,7 +15,7 @@ use crate::{
 };
 
 impl Process {
-    pub fn fork(&self, manager: &mut MutexGuard<Manager>) {
+    pub fn fork(&self, manager: &mut MutexGuard<Manager>) -> ProcessID {
         s_println!("inside fork!");
         let pid = ProcessID::default();
         let current_thread = THREAD_MANAGER
@@ -44,5 +44,7 @@ impl Process {
         new_process.lock().threads.push(Arc::downgrade(&new_thread));
 
         manager.processes.insert(pid, new_process);
+
+        self.pid
     }
 }
