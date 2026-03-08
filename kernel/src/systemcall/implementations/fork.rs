@@ -21,6 +21,8 @@ impl SyscallImpl for ForkImpl {
 
         s_println!("start fork");
         let current = manager.current.clone().unwrap();
-        Ok(current.lock().fork(&mut manager).0 as usize)
+        current.lock().fork(&mut manager);
+
+        Ok(3)
     }
 }

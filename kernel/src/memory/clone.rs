@@ -30,13 +30,11 @@ impl AddrSpace {
                 Page::containing_address(region.start),
                 Page::containing_address(region.end),
             );
-            s_println!("\nMapping {:?} - {:?}", pages.start, pages.end);
 
             for page in pages {
                 if let Some(addr) = old_page_table.inner.translate_addr(page.start_address())
                     && page.start_address() < VirtAddr::new(KERNEL_MEM_START)
                 {
-                    s_print!("{:?}", page.start_address());
                     let old_addr = apply_offset(addr.as_u64());
                     let frame = frame_allocator.allocate_frame().unwrap();
                     let new_addr = apply_offset(frame.start_address().as_u64());
