@@ -1,41 +1,27 @@
 use crate::{
+    misc::snapshot::Snapshot,
     println, s_println,
     systemcall::{error::SyscallError, syscalls_table::SYSCALL_TABLE},
 };
 
-// Repr C to make the assembly code can successfully construct it
-#[repr(C)]
-struct SyscallSnapshot {
-    arg6: u64,
-    arg5: u64,
-    arg4: u64,
-    arg3: u64,         // rdx
-    arg2: u64,         // rsi
-    arg1: u64,         // rdi
-    syscall_no: isize, // rax
-    // required for sysret to correctly resume (go back to the previous instruction)
-    rflags: u64, // r11
-    rip: u64,    // rcx
-}
-
 #[unsafe(no_mangle)]
-extern "C" fn syscall_handler(snapshot_ptr: *mut SyscallSnapshot) {
+extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     unsafe {
         s_println!("actrual rip is {:x}", (*snapshot_ptr).rip);
     }
     let snapshot = unsafe { &mut *snapshot_ptr };
 
     let result = syscall_handler_unwrapped(
-        snapshot.syscall_no,
-        snapshot.arg1,
-        snapshot.arg2,
-        snapshot.arg3,
-        snapshot.arg4,
-        snapshot.arg5,
-        snapshot.arg6,
+        snapshot.rax as isize,
+        snapshot.rdi,
+        snapshot.rsi,
+        snapshot.rdx,
+        snapshot.r10,
+        snapshot.r8,
+        snapshot.r9,
     );
 
-    snapshot.syscall_no = result;
+    snapshot.rax = result;
 }
 
 fn syscall_handler_unwrapped(

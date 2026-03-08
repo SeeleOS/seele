@@ -18,7 +18,7 @@ pub struct Snapshot {
     pub rbx: u64,
     pub rdx: u64,
     pub rcx: u64,
-    pub rax: u64,
+    pub rax: isize,
 
     pub rip: u64,
     pub cs: u64,
