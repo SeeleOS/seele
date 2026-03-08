@@ -20,11 +20,7 @@ use crate::{
 };
 
 impl Process {
-    pub fn execve(
-        &mut self,
-        path: Path,
-        args: Vec<String>,
-    ) -> Result<*mut ThreadSnapshot, FSError> {
+    fn execve(&mut self, path: Path, args: Vec<String>) -> Result<*mut ThreadSnapshot, FSError> {
         s_println!("in execve");
         self.addrspace.clean();
 
