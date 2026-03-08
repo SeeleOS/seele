@@ -9,6 +9,17 @@ use crate::{
 extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     let snapshot = unsafe { &mut *snapshot_ptr };
 
+    THREAD_MANAGER
+        .get()
+        .unwrap()
+        .lock()
+        .current
+        .clone()
+        .unwrap()
+        .lock()
+        .snapshot
+        .inner = *snapshot;
+
     let result = syscall_handler_unwrapped(
         snapshot.rax,
         snapshot.rdi,
@@ -20,17 +31,6 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     );
 
     snapshot.rax = result;
-
-    THREAD_MANAGER
-        .get()
-        .unwrap()
-        .lock()
-        .current
-        .clone()
-        .unwrap()
-        .lock()
-        .snapshot
-        .inner = *snapshot;
 }
 
 fn syscall_handler_unwrapped(
