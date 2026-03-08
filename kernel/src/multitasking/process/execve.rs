@@ -25,13 +25,11 @@ impl Process {
         s_println!("in execve");
         self.addrspace.clean();
 
-        let thread = THREAD_MANAGER
-            .get()
-            .unwrap()
-            .lock()
-            .current
-            .clone()
-            .unwrap();
+        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+
+        let thread = thread_manager.current.clone().unwrap();
+
+        thread_manager.kill_all_except(thread.clone());
 
         let mut program = alloc::vec![0u8; VirtualFS.lock().file_info(path.clone())?.size];
         VirtualFS.lock().read_file(path.clone(), &mut program)?;

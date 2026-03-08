@@ -49,6 +49,26 @@ impl ThreadManager {
         thread.clone()
     }
 
+    pub fn kill_all_except(&mut self, thread: ThreadRef) {
+        let threads = self
+            .current
+            .clone()
+            .unwrap()
+            .lock()
+            .parent
+            .lock()
+            .threads
+            .clone();
+
+        let zombies = threads
+            .iter()
+            .filter(|p| p.upgrade().unwrap().lock().id != thread.lock().id);
+
+        for zombie in zombies {
+            self.mark_as_zombie(zombie.upgrade().unwrap());
+        }
+    }
+
     pub fn mark_current_as_zombie(&mut self) {
         self.mark_as_zombie(self.current.clone().unwrap());
     }
