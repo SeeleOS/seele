@@ -34,21 +34,3 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function!(configuratable, Configuratable);
     define_cast_function!(have_linux_stat, HaveLinuxStat);
 }
-
-#[macro_export]
-macro_rules! impl_cast_function {
-    ($fn_name: expr, $type:ty) => {
-        paste::paste! {
-        fn [<as_$fn_name>](self: alloc::sync::Arc<Self>) -> Option<alloc::sync::Arc<dyn $type>> {
-            Some(self)
-        }
-        }
-    };
-}
-
-pub fn get_object(id: u64) -> Option<Arc<dyn Object>> {
-    let current = MANAGER.lock().current.clone().unwrap();
-    let current = current.lock();
-
-    current.objects.get(id as usize).cloned()?
-}

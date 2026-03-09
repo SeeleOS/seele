@@ -1,5 +1,5 @@
 use crate::{
-    object::{config::ConfigurateRequest, get_object},
+    object::{config::ConfigurateRequest, misc::get_object},
     println,
     systemcall::{error::SyscallError, implementations::utils::SyscallImpl, syscall_no::SyscallNo},
 };
