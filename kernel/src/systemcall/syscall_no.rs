@@ -22,4 +22,5 @@ pub enum SyscallNo {
     Fork,
     Execve,
     OpenFile,
+    RemoveObject,
 }
