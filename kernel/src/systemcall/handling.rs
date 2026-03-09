@@ -49,6 +49,6 @@ fn syscall_handler_unwrapped(
         }
     } else {
         println!("Attempted to call invalid syscall {}", syscall_no);
-        SyscallError::InvalidSyscall as isize
+        SyscallError::NoSyscall as isize
     }
 }

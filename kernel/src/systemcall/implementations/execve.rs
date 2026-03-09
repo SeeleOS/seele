@@ -5,6 +5,7 @@ use vte::Parser;
 
 use crate::{
     filesystem::path::Path,
+    misc::others::from_cstr,
     multitasking::{MANAGER, process::execve::execve},
     systemcall::{error::SyscallError, implementations::utils::SyscallImpl, syscall_no::SyscallNo},
 };
@@ -22,13 +23,11 @@ impl SyscallImpl for ExecveImpl {
         arg5: u64,
         arg6: u64,
     ) -> Result<usize, crate::systemcall::error::SyscallError> {
-        let path_str = unsafe {
-            from_utf8(slice::from_raw_parts(arg1 as *const u8, arg2 as usize))
-                .map_err(|_| SyscallError::InvalidString)?
-        };
-        let path = Path::new(path_str);
+        let path_str = unsafe { from_cstr(arg1 as *const u8)? };
 
-        execve(path, Vec::new()).map_err(|_| SyscallError::InvalidPath)?;
+        let path = Path::new(path_str.as_str());
+
+        execve(path, Vec::new())?;
 
         Ok(0)
     }

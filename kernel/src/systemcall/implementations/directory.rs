@@ -59,7 +59,7 @@ impl SyscallImpl for GetDirImpl {
             // add \0
             buf[path_len] = 0;
         } else {
-            return Err(SyscallError::BufferTooSmall);
+            return Err(SyscallError::InvalidArguments);
         }
 
         Ok(arg1 as usize)

@@ -33,6 +33,8 @@ pub enum SyscallError {
     TooManyOpenFilesSystem = -23,
     /// 进程打开文件过多 (EMFILE)
     TooManyOpenFilesProcess = -24,
+    /// ENOTTY
+    InappropriateIoctl = -25,
     /// 文件太大 (EFBIG)
     FileTooLarge = -27,
     /// 磁盘空间不足 (ENOSPC)

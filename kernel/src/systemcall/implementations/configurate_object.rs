@@ -18,9 +18,9 @@ impl SyscallImpl for ConfigurateObjectImpl {
         _arg6: u64,
     ) -> Result<usize, crate::systemcall::error::SyscallError> {
         let res = get_object(arg1)
-            .ok_or(SyscallError::InvalidFileDescriptor)?
+            .ok_or(SyscallError::BadFileDescriptor)?
             .as_configuratable()
-            .ok_or(SyscallError::UnconfiguratableObject)?
+            .ok_or(SyscallError::InappropriateIoctl)?
             .configure(ConfigurateRequest::new(arg2, arg3));
 
         match res {
