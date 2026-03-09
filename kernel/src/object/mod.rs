@@ -31,29 +31,12 @@ pub trait Object: Send + Sync + Debug {
 }
 
 #[macro_export]
-macro_rules! is_writable {
-    () => {
-        fn as_writable(self: alloc::sync::Arc<Self>) -> Option<alloc::sync::Arc<dyn Writable>> {
+macro_rules! impl_cast_function {
+    ($fn_name: expr, $type:ty) => {
+        paste::paste! {
+        fn [<as_$fn_name>](self: alloc::sync::Arc<Self>) -> Option<alloc::sync::Arc<dyn $type>> {
             Some(self)
         }
-    };
-}
-#[macro_export]
-macro_rules! is_readable {
-    () => {
-        fn as_readable(self: alloc::sync::Arc<Self>) -> Option<alloc::sync::Arc<dyn Readable>> {
-            Some(self)
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! have_linux_stat {
-    () => {
-        fn as_have_linux_stat(
-            self: alloc::sync::Arc<Self>,
-        ) -> Option<alloc::sync::Arc<dyn HaveLinuxStat>> {
-            Some(self)
         }
     };
 }

@@ -10,7 +10,7 @@ use crate::{
         vfs::{FSResult, VirtualFS},
         vfs_traits::File,
     },
-    have_linux_stat, is_readable, is_writable,
+    impl_cast_function,
     object::{HaveLinuxStat, Object, Readable, Writable, misc::ObjectResult},
     s_println,
 };
@@ -36,9 +36,9 @@ impl Debug for FileObject {
 }
 
 impl Object for FileObject {
-    is_writable!();
-    is_readable!();
-    have_linux_stat!();
+    impl_cast_function!(writable, Writable);
+    impl_cast_function!(readable, Readable);
+    impl_cast_function!(have_linux_stat, HaveLinuxStat);
 }
 
 impl Writable for FileObject {
