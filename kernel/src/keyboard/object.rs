@@ -2,6 +2,7 @@ use alloc::collections::vec_deque::VecDeque;
 use spin::mutex::Mutex;
 
 use crate::{
+    impl_cast_function,
     keyboard::decoding_task::KEYBOARD_QUEUE,
     object::{Object, misc::ObjectResult, traits::Readable},
 };
@@ -10,9 +11,7 @@ use crate::{
 pub struct KeyboardObject;
 
 impl Object for KeyboardObject {
-    fn as_readable(self: alloc::sync::Arc<Self>) -> Option<alloc::sync::Arc<dyn Readable>> {
-        Some(self)
-    }
+    impl_cast_function!(readable, Readable);
 }
 
 impl Readable for KeyboardObject {

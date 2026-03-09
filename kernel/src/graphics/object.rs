@@ -2,22 +2,20 @@ use core::{fmt::Write, str::from_utf8};
 
 use crate::{
     graphics::{framebuffer::FRAME_BUFFER, terminal::TERMINAL},
-    object::{Object, misc::ObjectResult, traits::Writable},
+    impl_cast_function,
+    object::{
+        Object,
+        misc::ObjectResult,
+        traits::{Configuratable, Writable},
+    },
 };
 
 #[derive(Debug)]
 pub struct TtyObject;
 
 impl Object for TtyObject {
-    fn as_writable(self: alloc::sync::Arc<Self>) -> Option<alloc::sync::Arc<dyn Writable>> {
-        Some(self)
-    }
-
-    fn as_configuratable(
-        self: alloc::sync::Arc<Self>,
-    ) -> Option<alloc::sync::Arc<dyn crate::object::traits::Configuratable>> {
-        Some(self)
-    }
+    impl_cast_function!(configuratable, Configuratable);
+    impl_cast_function!(writable, Writable);
 }
 
 impl Writable for TtyObject {

@@ -1,5 +1,6 @@
 use crate::{
     graphics::object::TtyObject,
+    impl_cast_function,
     keyboard::object::KeyboardObject,
     object::{
         Object,
@@ -11,19 +12,9 @@ use crate::{
 pub struct TtyDevice;
 
 impl Object for TtyDevice {
-    fn as_configuratable(
-        self: alloc::sync::Arc<Self>,
-    ) -> Option<alloc::sync::Arc<dyn super::traits::Configuratable>> {
-        Some(self)
-    }
-
-    fn as_writable(self: alloc::sync::Arc<Self>) -> Option<alloc::sync::Arc<dyn super::Writable>> {
-        Some(self)
-    }
-
-    fn as_readable(self: alloc::sync::Arc<Self>) -> Option<alloc::sync::Arc<dyn super::Readable>> {
-        Some(self)
-    }
+    impl_cast_function!(writable, Writable);
+    impl_cast_function!(readable, Readable);
+    impl_cast_function!(configuratable, Configuratable);
 }
 
 impl Configuratable for TtyDevice {
