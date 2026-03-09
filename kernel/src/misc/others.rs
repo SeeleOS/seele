@@ -3,6 +3,8 @@ use x86_64::{
     PhysAddr,
     registers::control::{Cr0, Cr0Flags, Cr3Flags, Cr4, Cr4Flags},
 };
+
+use crate::misc::error::KernelError;
 /// Context for a CPU Core
 #[derive(Debug)]
 #[repr(C)]
@@ -35,7 +37,7 @@ pub fn enable_sse() {
 
 /// # Safety
 /// Caller mush provide valid pointer
-pub unsafe fn from_cstr(ptr: *const u8) -> Result<String, ()> {
+pub unsafe fn from_cstr(ptr: *const u8) -> Result<String, KernelError> {
     const MAX_LENGTH: usize = 4096;
 
     let mut str = String::new();
@@ -51,5 +53,5 @@ pub unsafe fn from_cstr(ptr: *const u8) -> Result<String, ()> {
         }
     }
 
-    Err(())
+    Err(KernelError::InvalidString)
 }

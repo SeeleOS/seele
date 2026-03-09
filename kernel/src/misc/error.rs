@@ -10,25 +10,29 @@ pub enum KernelError {
     FileSystem(FSError),
     BlockDevice(BlockDeviceError),
     Object(ObjectError),
+
+    InvalidString,
 }
 
-impl From<FSError> for KernelError {
-    fn from(value: FSError) -> Self {
-        Self::FileSystem(value)
-    }
+macro_rules! register_error {
+    ($err_type:ty, $kerror_type: ident) => {
+        impl From<$err_type> for SyscallError {
+            fn from(err: $err_type) -> Self {
+                SyscallError::from(KernelError::from(err))
+            }
+        }
+
+        impl From<$err_type> for KernelError {
+            fn from(err: $err_type) -> Self {
+                Self::$kerror_type(err)
+            }
+        }
+    };
 }
 
-impl From<BlockDeviceError> for KernelError {
-    fn from(value: BlockDeviceError) -> Self {
-        Self::BlockDevice(value)
-    }
-}
-
-impl From<ObjectError> for KernelError {
-    fn from(value: ObjectError) -> Self {
-        Self::Object(value)
-    }
-}
+register_error!(FSError, FileSystem);
+register_error!(BlockDeviceError, BlockDevice);
+register_error!(ObjectError, Object);
 
 pub trait AsSyscallError {
     fn as_syscall_error(&self) -> SyscallError;
@@ -40,6 +44,7 @@ impl KernelError {
             Self::FileSystem(err) => err.as_syscall_error(),
             Self::BlockDevice(err) => err.as_syscall_error(),
             Self::Object(err) => err.as_syscall_error(),
+            Self::InvalidString => unimplemented!(),
         }
     }
 }
