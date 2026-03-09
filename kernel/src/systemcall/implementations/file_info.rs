@@ -45,7 +45,7 @@ impl SyscallImpl for FileInfoImpl {
 
         let info = VirtualFS.lock().file_info(path).unwrap();
 
-        unsafe { (*(arg4 as *mut LinuxStat)) = info.as_linux() };
+        unsafe { (*(arg3 as *mut LinuxStat)) = info.as_linux() };
 
         Ok(0)
     }

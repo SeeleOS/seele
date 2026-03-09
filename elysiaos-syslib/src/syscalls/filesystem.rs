@@ -11,3 +11,16 @@ pub fn get_current_directory(buf: &mut [u8]) -> SyscallResult {
 pub fn open_file(path: *const i8) -> SyscallResult {
     syscall!(OpenFile, path as u64)
 }
+
+pub fn file_info(
+    from_current_dir: bool,
+    path_ptr: *const i8,
+    stat_ptr: *const u8,
+) -> SyscallResult {
+    syscall!(
+        FileInfo,
+        from_current_dir as u64,
+        path_ptr as u64,
+        stat_ptr as u64
+    )
+}
