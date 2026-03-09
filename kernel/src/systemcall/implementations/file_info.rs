@@ -1,11 +1,15 @@
 use core::str::from_utf8;
 
-use alloc::slice;
+use alloc::{slice, string::ToString};
+use bootloader_api::info;
 use x86_64::structures::paging::PageTableFlags;
 
 use crate::{
-    filesystem::{path::Path, vfs::VirtualFS},
-    systemcall::{implementations::utils::SyscallImpl, syscall_no::SyscallNo},
+    filesystem::{info::LinuxStat, path::Path, vfs::VirtualFS},
+    misc::others::from_cstr,
+    multitasking::process::manager::current_process,
+    println,
+    systemcall::{error::SyscallError, implementations::utils::SyscallImpl, syscall_no::SyscallNo},
 };
 
 pub struct FileInfoImpl;
@@ -21,11 +25,27 @@ impl SyscallImpl for FileInfoImpl {
         arg5: u64,
         arg6: u64,
     ) -> Result<usize, crate::systemcall::error::SyscallError> {
-        let path_str =
-            unsafe { from_utf8(slice::from_raw_parts(arg1 as *const u8, arg2 as usize)).unwrap() };
-        let path = Path::new(path_str);
+        let path_str = unsafe { from_cstr(arg2 as *const u8)? };
+        let path: Path;
+
+        if arg1 == 1 {
+            // start from current directory
+            path = Path::new(
+                (current_process().lock().current_directory.1.clone() + &path_str).as_str(),
+            );
+        } else {
+            if path_str.starts_with('/') {
+                path = Path::new(&path_str);
+            } else {
+                return Err(SyscallError::other(
+                    "Non-absolute paths are not supported yet",
+                ));
+            }
+        }
 
         let info = VirtualFS.lock().file_info(path).unwrap();
+
+        unsafe { (*(arg4 as *mut LinuxStat)) = info.as_linux() };
 
         Ok(0)
     }

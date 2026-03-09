@@ -68,6 +68,10 @@ impl FileLikeInfo {
             file_like_type,
         }
     }
+
+    pub fn as_linux(self) -> LinuxStat {
+        LinuxStat::new(self)
+    }
 }
 
 impl DirectoryContentInfo {

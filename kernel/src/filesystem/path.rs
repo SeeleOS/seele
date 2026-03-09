@@ -1,4 +1,7 @@
-use alloc::{string::String, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 
 use crate::filesystem::{
     errors::FSError,
@@ -21,11 +24,11 @@ impl Default for Path {
 }
 
 #[derive(Clone, Debug)]
-pub struct Path(pub Vec<PathPart>);
+pub struct Path(pub Vec<PathPart>, pub String);
 
 impl Path {
     pub fn new(path: &str) -> Self {
-        Self(Self::parse(path))
+        Self(Self::parse(path), path.to_string())
     }
 
     fn parse(path: &str) -> Vec<PathPart> {

@@ -6,7 +6,10 @@ use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
     filesystem::{path::Path, vfs::VirtualFS},
-    multitasking::process::{Process, ProcessRef, misc::ProcessID},
+    multitasking::{
+        MANAGER,
+        process::{Process, ProcessRef, misc::ProcessID},
+    },
     println,
 };
 
@@ -45,4 +48,8 @@ impl Manager {
         process_locked.addrspace.load();
         self.current = Some(process.clone());
     }
+}
+
+pub fn current_process() -> ProcessRef {
+    MANAGER.lock().current.clone().unwrap()
 }
