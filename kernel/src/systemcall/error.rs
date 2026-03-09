@@ -1,5 +1,6 @@
 use crate::{misc::error::KernelError, println};
 
+#[derive(Debug)]
 pub enum SyscallError {
     /// 操作不允许 (EPERM)
     PermissionDenied = -1,
