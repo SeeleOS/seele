@@ -2,7 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 use spin::Mutex;
 
 use crate::{
-    filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
+    filesystem::{errors::FSError, path::Path, vfs::VirtualFS, vfs_operations::read_all},
     memory::{addrspace::AddrSpace, page_table_wrapper::PageTableWrapped},
     multitasking::{
         process::{
@@ -55,7 +55,7 @@ pub fn setup_process(
     objects: &mut Vec<Arc<dyn Object>>,
 ) -> Result<ThreadSnapshot, FSError> {
     let mut program = alloc::vec![0u8; VirtualFS.lock().file_info(path.clone())?.size];
-    VirtualFS.lock().read_file(path.clone(), &mut program)?;
+    read_all(path.clone(), &mut program)?;
 
     let mut stack_builder = addrspace.allocate_user(16).1;
     let program = load_elf(addrspace, &program);

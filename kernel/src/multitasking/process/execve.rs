@@ -1,7 +1,7 @@
 use alloc::{string::String, vec::Vec};
 
 use crate::{
-    filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
+    filesystem::{errors::FSError, path::Path, vfs::VirtualFS, vfs_operations::read_all},
     multitasking::{
         MANAGER,
         process::{
@@ -32,7 +32,7 @@ impl Process {
         thread_manager.kill_all_except(thread.clone());
 
         let mut program = alloc::vec![0u8; VirtualFS.lock().file_info(path.clone())?.size];
-        VirtualFS.lock().read_file(path.clone(), &mut program)?;
+        read_all(path.clone(), &mut program)?;
 
         let mut stack_builder = self.addrspace.allocate_user(16).1;
         let program = load_elf(&mut self.addrspace, &program);

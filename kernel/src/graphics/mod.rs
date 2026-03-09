@@ -14,6 +14,7 @@ use crate::{
     filesystem::{
         path::{Path, PathPart},
         vfs::VirtualFS,
+        vfs_operations::read_all,
     },
     graphics::{
         framebuffer::{Canvas, FRAME_BUFFER},
@@ -35,12 +36,19 @@ pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
         .get_or_init(|| Mutex::new(Terminal::new(TermRenderer::new(canvas))))
         .lock();
 
-    let mut vfs = VirtualFS.lock();
     let font_path = Path::new(FONT_PATH);
     let font: &'static mut [u8] = Box::leak(
-        Box::new(vec![0u8; vfs.file_info(font_path.clone()).unwrap().size]).into_boxed_slice(),
+        Box::new(vec![
+            0u8;
+            VirtualFS
+                .lock()
+                .file_info(font_path.clone())
+                .unwrap()
+                .size
+        ])
+        .into_boxed_slice(),
     );
-    vfs.read_file(font_path, font).unwrap();
+    read_all(font_path, font).unwrap();
 
     let font_manager = TrueTypeFont::new(13.0, font);
 
