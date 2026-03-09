@@ -13,22 +13,21 @@ pub mod error;
 pub mod misc;
 pub mod tty_device;
 
+macro_rules! define_cast_function {
+    ($name: expr, $type: ty) => {
+        paste::paste! {
+            fn [<as_$name>](self: Arc<Self>) -> Option<Arc<dyn $type>> {
+                None
+            }
+        }
+    };
+}
+
 pub trait Object: Send + Sync + Debug {
-    fn as_writable(self: Arc<Self>) -> Option<Arc<dyn Writable>> {
-        None
-    }
-
-    fn as_readable(self: Arc<Self>) -> Option<Arc<dyn Readable>> {
-        None
-    }
-
-    fn as_configuratable(self: Arc<Self>) -> Option<Arc<dyn Configuratable>> {
-        None
-    }
-
-    fn as_have_linux_stat(self: Arc<Self>) -> Option<Arc<dyn HaveLinuxStat>> {
-        None
-    }
+    define_cast_function!(writable, Writable);
+    define_cast_function!(readable, Readable);
+    define_cast_function!(configuratable, Configuratable);
+    define_cast_function!(have_linux_stat, HaveLinuxStat);
 }
 
 #[macro_export]
