@@ -1,6 +1,6 @@
-
 use fatfs::IoError;
 
+use crate::{misc::error::AsSyscallError, systemcall::error::SyscallError};
 
 pub mod initrd;
 
@@ -10,6 +10,14 @@ pub enum BlockDeviceError {
     OutOfBounds,
     BufferTooSmall,
     Other,
+}
+
+impl AsSyscallError for BlockDeviceError {
+    fn as_syscall_error(&self) -> crate::systemcall::error::SyscallError {
+        match self {
+            _ => SyscallError::Other,
+        }
+    }
 }
 
 impl IoError for BlockDeviceError {
