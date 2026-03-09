@@ -4,6 +4,13 @@ use crate::{errors::SyscallError, numbers::SyscallNumber, syscalls::print};
 
 pub type SyscallResult = Result<usize, SyscallError>;
 
+pub fn process_result(result: SyscallResult) -> usize {
+    match result {
+        Ok(result) => result,
+        Err(err) => err.as_isize() as usize,
+    }
+}
+
 #[inline(always)]
 pub fn raw_syscall(
     num: SyscallNumber,

@@ -1,9 +1,11 @@
 [package]
 name = "elysiaos-syslib"
-version = "0.1.6"
+version = "0.1.8"
 edition = "2024"
 
 [dependencies]
+num-traits = { version = "0.2", default-features = false }
+num-derive = "0.4"
 paste = "1.0.15"
 
 [build-dependencies]
