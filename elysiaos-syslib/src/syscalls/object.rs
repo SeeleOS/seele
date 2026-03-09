@@ -24,3 +24,7 @@ wrap_c!(configurate_object(index: u64, request_num: u64, ptr: *mut u8));
 pub fn configurate_object(index: u64, request_num: u64, ptr: *mut u8) -> SyscallResult {
     syscall!(ConfigurateObject, index, request_num, ptr as u64)
 }
+
+pub fn remove_object(index: u64) -> SyscallResult {
+    syscall!(RemoveObject, index)
+}
