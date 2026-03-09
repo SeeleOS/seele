@@ -1,5 +1,5 @@
 use crate::{
-    filesystem::block_device::BlockDeviceError, misc::error::AsSyscallError,
+    filesystem::block_device::BlockDeviceError, misc::error::AsSyscallError, println,
     systemcall::error::SyscallError,
 };
 
@@ -15,7 +15,13 @@ pub enum FSError {
 impl AsSyscallError for FSError {
     fn as_syscall_error(&self) -> crate::systemcall::error::SyscallError {
         match self {
-            _ => SyscallError::Other,
+            Self::NotFound => SyscallError::FileNotFound,
+            Self::NotADirectory => SyscallError::NotADirectory,
+            Self::NotAFile => SyscallError::IsADirectory,
+
+            Self::StorageDeviceError(err) => err.as_syscall_error(),
+
+            Self::Other => SyscallError::other(),
         }
     }
 }

@@ -8,7 +8,7 @@ pub enum ObjectError {
 impl AsSyscallError for ObjectError {
     fn as_syscall_error(&self) -> crate::systemcall::error::SyscallError {
         match self {
-            _ => SyscallError::Other,
+            Self::Other => SyscallError::other(),
         }
     }
 }

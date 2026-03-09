@@ -15,7 +15,10 @@ pub enum BlockDeviceError {
 impl AsSyscallError for BlockDeviceError {
     fn as_syscall_error(&self) -> crate::systemcall::error::SyscallError {
         match self {
-            _ => SyscallError::Other,
+            Self::Readonly => SyscallError::ReadOnlyFileSystem,
+            Self::OutOfBounds => SyscallError::other(),
+            Self::BufferTooSmall => SyscallError::other(),
+            Self::Other => SyscallError::other(),
         }
     }
 }
