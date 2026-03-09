@@ -1,6 +1,11 @@
-use crate::filesystem::{
-    info::{DirectoryContentInfo, FileLikeInfo},
-    vfs::{FSResult, VFS},
+use crate::{
+    filesystem::{
+        info::{DirectoryContentInfo, FileLikeInfo},
+        object::FileObject,
+        vfs::{FSResult, VFS, VirtualFS},
+    },
+    object::Readable,
+    s_println,
 };
 
 use alloc::vec::Vec;
@@ -30,11 +35,9 @@ impl VFS {
         ))
     }
 
-    pub fn read_file(&mut self, path: Path, buffer: &mut [u8]) -> FSResult<()> {
-        let file = path.navigate(self.root.clone().unwrap())?;
-
-        if let FileLike::File(file) = file {
-            file.lock().read(buffer)
+    pub fn open(&mut self, path: Path) -> FSResult<FileObject> {
+        if let FileLike::File(file) = path.navigate(self.root.clone().unwrap())? {
+            Ok(FileObject::new(file))
         } else {
             Err(FSError::NotAFile)
         }
@@ -42,16 +45,6 @@ impl VFS {
 
     pub fn file_info(&mut self, path: Path) -> FSResult<FileLikeInfo> {
         path.navigate(self.root.clone().unwrap())?.info()
-    }
-
-    pub fn write_file(&mut self, path: Path, buffer: &[u8]) -> FSResult<()> {
-        let file = path.navigate(self.root.clone().unwrap())?;
-
-        if let FileLike::File(file) = file {
-            file.lock().write(buffer)
-        } else {
-            Err(FSError::NotAFile)
-        }
     }
 
     pub fn delete_file(&mut self, _path: Path) -> FSResult<()> {
@@ -67,4 +60,16 @@ impl VFS {
             Err(FSError::NotADirectory)
         }
     }
+}
+
+pub fn read_all(path: Path) -> FSResult<Vec<u8>> {
+    let mut content = Vec::new();
+    let file_object = VirtualFS.lock().open(path)?;
+    while let Ok(n) = file_object.read(&mut content) {
+        if n == 0 {
+            break;
+        }
+    }
+
+    Ok(content)
 }
