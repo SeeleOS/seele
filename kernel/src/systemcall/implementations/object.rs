@@ -75,8 +75,11 @@ impl SyscallImpl for RemoveObjectImpl {
         let mut current = current_ref.lock();
         let objects = &mut current.objects;
 
-        if objects.len() < arg1 as usize {
-            objects.remove(arg1 as usize);
+        if objects.len() > arg1 as usize {
+            let object = objects[arg1 as usize].take();
+
+            drop(object);
+
             Ok(0)
         } else {
             Err(SyscallError::BadFileDescriptor)
