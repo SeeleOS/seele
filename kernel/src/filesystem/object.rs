@@ -7,10 +7,17 @@ use crate::{
     filesystem::{path::Path, vfs::VirtualFS, vfs_traits::File},
     is_readable, is_writable,
     object::{Object, Readable, Writable},
+    s_println,
 };
 
 pub struct FileObject {
     file: Arc<Mutex<dyn File>>,
+}
+
+impl FileObject {
+    pub fn new(file: Arc<Mutex<dyn File>>) -> Self {
+        Self { file }
+    }
 }
 
 impl Debug for FileObject {
