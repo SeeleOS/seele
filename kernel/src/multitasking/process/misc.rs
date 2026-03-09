@@ -6,7 +6,12 @@ use elfloader::ElfBinary;
 use crate::{
     misc::stack_builder::StackBuilder,
     multitasking::process::Process,
-    object::{Object, ObjectResult, error::ObjectError, misc::ObjectRef, tty_device::TtyDevice},
+    object::{
+        Object,
+        error::ObjectError,
+        misc::{ObjectRef, ObjectResult},
+        tty_device::TtyDevice,
+    },
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]

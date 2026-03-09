@@ -2,7 +2,7 @@ use core::{fmt::Write, str::from_utf8};
 
 use crate::{
     graphics::{framebuffer::FRAME_BUFFER, terminal::TERMINAL},
-    object::{Object, Writable},
+    object::{Object, Writable, misc::ObjectResult},
 };
 
 #[derive(Debug)]
@@ -21,7 +21,7 @@ impl Object for TtyObject {
 }
 
 impl Writable for TtyObject {
-    fn write(&self, buffer: &[u8]) -> crate::object::ObjectResult<usize> {
+    fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
         let mut terminal = TERMINAL.get().unwrap().lock();
 
         terminal

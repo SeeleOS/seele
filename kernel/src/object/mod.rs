@@ -5,7 +5,7 @@ use alloc::sync::Arc;
 use crate::{
     filesystem::info::LinuxStat,
     multitasking::MANAGER,
-    object::{config::Configuratable, error::ObjectError},
+    object::{config::Configuratable, error::ObjectError, misc::ObjectResult},
 };
 
 pub mod config;
@@ -58,8 +58,6 @@ macro_rules! have_linux_stat {
         }
     };
 }
-
-pub type ObjectResult<T> = Result<T, ObjectError>;
 
 pub trait Writable: Object {
     /// Write the content of [`buffer`] to [`self`]

@@ -3,7 +3,7 @@ use spin::mutex::Mutex;
 
 use crate::{
     keyboard::decoding_task::KEYBOARD_QUEUE,
-    object::{Object, Readable},
+    object::{Object, Readable, misc::ObjectResult},
 };
 
 #[derive(Debug)]
@@ -18,7 +18,7 @@ impl Object for KeyboardObject {
 }
 
 impl Readable for KeyboardObject {
-    fn read(&self, buffer: &mut [u8]) -> crate::object::ObjectResult<usize> {
+    fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
         let mut queue = KEYBOARD_QUEUE
             .get_or_init(|| Mutex::new(VecDeque::new()))
             .lock();
