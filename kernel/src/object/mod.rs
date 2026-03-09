@@ -25,16 +25,33 @@ pub trait Object: Send + Sync + Debug {
     }
 }
 
+#[macro_export]
+macro_rules! is_writable {
+    () => {
+        fn as_writable(self: alloc::sync::Arc<Self>) -> Option<alloc::sync::Arc<dyn Writable>> {
+            Some(self)
+        }
+    };
+}
+#[macro_export]
+macro_rules! is_readable {
+    () => {
+        fn as_readable(self: alloc::sync::Arc<Self>) -> Option<alloc::sync::Arc<dyn Readable>> {
+            Some(self)
+        }
+    };
+}
+
 pub type ObjectResult<T> = Result<T, ObjectError>;
 
 pub trait Writable: Object {
     /// Write the content of [`buffer`] to [`self`]
-    fn write(&self, buffer: &[u8]) -> ObjectResult<usize>;
+    fn write(&mut self, buffer: &[u8]) -> ObjectResult<usize>;
 }
 
 pub trait Readable: Object {
     /// Reads the content of [`self`] and write them to [`buffer`]
-    fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize>;
+    fn read(&mut self, buffer: &mut [u8]) -> ObjectResult<usize>;
 }
 
 pub fn get_object(id: u64) -> Option<Arc<dyn Object>> {
