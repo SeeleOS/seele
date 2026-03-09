@@ -22,10 +22,13 @@ impl SyscallImpl for ReadObjectImpl {
     ) -> Result<usize, crate::systemcall::error::SyscallError> {
         let current = MANAGER.lock().current.clone().unwrap();
         let current = current.lock();
-        let object = current.objects[arg1 as usize].clone();
-
         unsafe {
-            Ok(object
+            Ok(current
+                .objects
+                .get(arg1 as usize)
+                .ok_or(SyscallError::BadFileDescriptor)?
+                .clone()
+                .ok_or(SyscallError::BadFileDescriptor)?
                 .as_readable()
                 .unwrap()
                 .read(slice::from_raw_parts_mut(arg2 as *mut u8, arg3 as usize))
@@ -47,10 +50,14 @@ impl SyscallImpl for WriteObjectImpl {
     ) -> Result<usize, crate::systemcall::error::SyscallError> {
         let current = MANAGER.lock().current.clone().unwrap();
         let current = current.lock();
-        let object = current.objects[arg1 as usize].clone();
 
         unsafe {
-            Ok((object)
+            Ok(current
+                .objects
+                .get(arg1 as usize)
+                .ok_or(SyscallError::BadFileDescriptor)?
+                .clone()
+                .ok_or(SyscallError::BadFileDescriptor)?
                 .as_writable()
                 .unwrap()
                 .write(slice::from_raw_parts(arg2 as *mut u8, arg3 as usize))

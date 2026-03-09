@@ -26,7 +26,7 @@ impl SyscallImpl for OpenFileImpl {
         let object = Arc::new(VirtualFS.lock().open(path)?);
 
         let current_process = &mut MANAGER.lock().current.clone().unwrap();
-        current_process.lock().objects.push(object);
+        current_process.lock().objects.push(Some(object));
         Ok(current_process.lock().objects.len() + 1)
     }
 }

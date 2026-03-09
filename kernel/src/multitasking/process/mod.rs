@@ -27,7 +27,7 @@ pub struct Process {
     pub addrspace: AddrSpace,
     pub kernel_stack_top: VirtAddr,
     pub threads: Vec<Weak<Mutex<Thread>>>,
-    pub objects: Vec<Arc<dyn Object>>,
+    pub objects: Vec<Option<Arc<dyn Object>>>,
     pub current_directory: Path,
 }
 

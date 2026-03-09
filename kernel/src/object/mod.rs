@@ -58,5 +58,5 @@ pub fn get_object(id: u64) -> Option<Arc<dyn Object>> {
     let current = MANAGER.lock().current.clone().unwrap();
     let current = current.lock();
 
-    current.objects.get(id as usize).cloned()
+    current.objects.get(id as usize).cloned()?
 }

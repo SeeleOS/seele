@@ -19,10 +19,10 @@ impl Default for ProcessID {
     }
 }
 
-pub fn init_objects(objects: &mut Vec<Arc<dyn Object>>) {
-    objects.push(Arc::new(TtyDevice)); // stdin (unimpllemented)
-    objects.push(Arc::new(TtyDevice)); // stdout
-    objects.push(Arc::new(TtyDevice)); // stderr
+pub fn init_objects(objects: &mut Vec<Option<Arc<dyn Object>>>) {
+    objects.push(Some(Arc::new(TtyDevice))); // stdin (unimpllemented)
+    objects.push(Some(Arc::new(TtyDevice))); // stdout
+    objects.push(Some(Arc::new(TtyDevice))); // stderr
 }
 
 pub fn init_stack_layout(builder: &mut StackBuilder, file: &ElfBinary) {

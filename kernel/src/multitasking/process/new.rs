@@ -52,7 +52,7 @@ impl Process {
 pub fn setup_process(
     path: Path,
     addrspace: &mut AddrSpace,
-    objects: &mut Vec<Arc<dyn Object>>,
+    objects: &mut Vec<Option<Arc<dyn Object>>>,
 ) -> Result<ThreadSnapshot, FSError> {
     let program = read_all(path.clone())?;
 
