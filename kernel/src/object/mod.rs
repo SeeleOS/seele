@@ -5,12 +5,17 @@ use alloc::sync::Arc;
 use crate::{
     filesystem::info::LinuxStat,
     multitasking::MANAGER,
-    object::{config::Configuratable, error::ObjectError, misc::ObjectResult},
+    object::{
+        error::ObjectError,
+        misc::ObjectResult,
+        traits::{Configuratable, HaveLinuxStat, Readable, Writable},
+    },
 };
 
 pub mod config;
 pub mod error;
 pub mod misc;
+pub mod traits;
 pub mod tty_device;
 
 macro_rules! define_cast_function {
@@ -39,20 +44,6 @@ macro_rules! impl_cast_function {
         }
         }
     };
-}
-
-pub trait Writable: Object {
-    /// Write the content of [`buffer`] to [`self`]
-    fn write(&self, buffer: &[u8]) -> ObjectResult<usize>;
-}
-
-pub trait Readable: Object {
-    /// Reads the content of [`self`] and write them to [`buffer`]
-    fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize>;
-}
-
-pub trait HaveLinuxStat: Object {
-    fn stat(&self) -> ObjectResult<LinuxStat>;
 }
 
 pub fn get_object(id: u64) -> Option<Arc<dyn Object>> {

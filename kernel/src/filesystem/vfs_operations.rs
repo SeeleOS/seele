@@ -4,7 +4,7 @@ use crate::{
         object::FileObject,
         vfs::{FSResult, VFS, VirtualFS},
     },
-    object::Readable,
+    object::traits::Readable,
     s_println,
 };
 

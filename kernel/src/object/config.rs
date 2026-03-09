@@ -1,5 +1,3 @@
-
-
 use crate::{
     graphics::object_config::{TerminalInfo, WindowSizeInfo},
     object::{Object, ObjectResult},
@@ -19,8 +17,4 @@ impl ConfigurateRequest {
             _ => Self::Unknown(request, ptr),
         }
     }
-}
-
-pub trait Configuratable: Object {
-    fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize>;
 }

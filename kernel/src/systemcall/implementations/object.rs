@@ -2,7 +2,7 @@ use alloc::slice;
 
 use crate::{
     multitasking::MANAGER,
-    object::Writable,
+    object::traits::Writable,
     systemcall::{error::SyscallError, implementations::utils::SyscallImpl, syscall_no::SyscallNo},
 };
 

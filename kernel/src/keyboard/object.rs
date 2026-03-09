@@ -3,16 +3,14 @@ use spin::mutex::Mutex;
 
 use crate::{
     keyboard::decoding_task::KEYBOARD_QUEUE,
-    object::{Object, Readable, misc::ObjectResult},
+    object::{Object, misc::ObjectResult, traits::Readable},
 };
 
 #[derive(Debug)]
 pub struct KeyboardObject;
 
 impl Object for KeyboardObject {
-    fn as_readable(
-        self: alloc::sync::Arc<Self>,
-    ) -> Option<alloc::sync::Arc<dyn crate::object::Readable>> {
+    fn as_readable(self: alloc::sync::Arc<Self>) -> Option<alloc::sync::Arc<dyn Readable>> {
         Some(self)
     }
 }

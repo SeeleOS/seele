@@ -2,7 +2,7 @@ use core::{fmt::Write, str::from_utf8};
 
 use crate::{
     graphics::{framebuffer::FRAME_BUFFER, terminal::TERMINAL},
-    object::{Object, Writable, misc::ObjectResult},
+    object::{Object, misc::ObjectResult, traits::Writable},
 };
 
 #[derive(Debug)]
@@ -15,7 +15,7 @@ impl Object for TtyObject {
 
     fn as_configuratable(
         self: alloc::sync::Arc<Self>,
-    ) -> Option<alloc::sync::Arc<dyn crate::object::config::Configuratable>> {
+    ) -> Option<alloc::sync::Arc<dyn crate::object::traits::Configuratable>> {
         Some(self)
     }
 }

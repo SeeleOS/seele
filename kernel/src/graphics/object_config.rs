@@ -2,10 +2,7 @@ use core::ptr::write_volatile;
 
 use crate::{
     graphics::{object::TtyObject, terminal::TERMINAL},
-    object::{
-        config::{Configuratable, ConfigurateRequest},
-        misc::ObjectResult,
-    },
+    object::{config::ConfigurateRequest, misc::ObjectResult, traits::Configuratable},
 };
 
 #[repr(C)]

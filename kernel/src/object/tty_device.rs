@@ -1,7 +1,10 @@
 use crate::{
     graphics::object::TtyObject,
     keyboard::object::KeyboardObject,
-    object::{Object, Readable, Writable, config::Configuratable},
+    object::{
+        Object,
+        traits::{Configuratable, Readable, Writable},
+    },
 };
 
 #[derive(Debug)]
@@ -10,7 +13,7 @@ pub struct TtyDevice;
 impl Object for TtyDevice {
     fn as_configuratable(
         self: alloc::sync::Arc<Self>,
-    ) -> Option<alloc::sync::Arc<dyn super::config::Configuratable>> {
+    ) -> Option<alloc::sync::Arc<dyn super::traits::Configuratable>> {
         Some(self)
     }
 

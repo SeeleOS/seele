@@ -11,7 +11,11 @@ use crate::{
         vfs_traits::File,
     },
     impl_cast_function,
-    object::{HaveLinuxStat, Object, Readable, Writable, misc::ObjectResult},
+    object::{
+        Object,
+        misc::ObjectResult,
+        traits::{HaveLinuxStat, Readable, Writable},
+    },
     s_println,
 };
 
