@@ -5,7 +5,8 @@ use elfloader::ElfBinary;
 
 use crate::{
     misc::stack_builder::StackBuilder,
-    object::{Object, tty_device::TtyDevice},
+    multitasking::process::Process,
+    object::{Object, ObjectResult, error::ObjectError, misc::ObjectRef, tty_device::TtyDevice},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -46,4 +47,14 @@ pub fn init_stack_layout(builder: &mut StackBuilder, file: &ElfBinary) {
 
     // argc (1 arguments)
     builder.push(1);
+}
+
+impl Process {
+    pub fn get_object(&mut self, index: u64) -> ObjectResult<ObjectRef> {
+        self.objects
+            .get(index as usize)
+            .ok_or(ObjectError::DoesNotExist)?
+            .clone()
+            .ok_or(ObjectError::DoesNotExist)
+    }
 }

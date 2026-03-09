@@ -9,6 +9,7 @@ use crate::{
 
 pub mod config;
 pub mod error;
+pub mod misc;
 pub mod tty_device;
 
 pub trait Object: Send + Sync + Debug {
