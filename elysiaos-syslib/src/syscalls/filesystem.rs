@@ -14,13 +14,17 @@ pub fn open_file(path: *const i8) -> SyscallResult {
 
 pub fn file_info(
     from_current_dir: bool,
+    use_object: bool,
     path_ptr: *const i8,
-    stat_ptr: *const u8,
+    stat_ptr: *mut u8,
+    object: u64,
 ) -> SyscallResult {
     syscall!(
         FileInfo,
         from_current_dir as u64,
         path_ptr as u64,
-        stat_ptr as u64
+        stat_ptr as u64,
+        use_object as u64,
+        object
     )
 }

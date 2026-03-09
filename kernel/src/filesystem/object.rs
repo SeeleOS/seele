@@ -10,8 +10,8 @@ use crate::{
         vfs::{FSResult, VirtualFS},
         vfs_traits::File,
     },
-    is_readable, is_writable,
-    object::{Object, Readable, Writable},
+    have_linux_stat, is_readable, is_writable,
+    object::{HaveLinuxStat, Object, Readable, Writable},
     s_println,
 };
 
@@ -38,6 +38,7 @@ impl Debug for FileObject {
 impl Object for FileObject {
     is_writable!();
     is_readable!();
+    have_linux_stat!();
 }
 
 impl Writable for FileObject {
@@ -49,5 +50,11 @@ impl Writable for FileObject {
 impl Readable for FileObject {
     fn read(&self, buffer: &mut [u8]) -> crate::object::ObjectResult<usize> {
         Ok(self.file.lock().read(buffer).unwrap())
+    }
+}
+
+impl HaveLinuxStat for FileObject {
+    fn stat(&self) -> crate::object::ObjectResult<super::info::LinuxStat> {
+        Ok(self.file.lock().info().unwrap().as_linux())
     }
 }

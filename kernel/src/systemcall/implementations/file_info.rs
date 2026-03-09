@@ -27,19 +27,32 @@ impl SyscallImpl for FileInfoImpl {
     ) -> Result<usize, crate::systemcall::error::SyscallError> {
         let path_str = unsafe { from_cstr(arg2 as *const u8)? };
         let path: Path;
-        if path_str.starts_with('/') {
-            path = Path::new(&path_str);
-        } else {
-            if arg1 == 1 {
-                // start from current directory
-                path = Path::new(
-                    (current_process().lock().current_directory.1.clone() + &path_str).as_str(),
-                );
+        if arg4 != 1 {
+            if path_str.starts_with('/') {
+                path = Path::new(&path_str);
             } else {
-                return Err(SyscallError::other(
-                    "Non-absolute paths are not supported yet",
-                ));
+                if arg1 == 1 {
+                    // start from current directory
+                    path = Path::new(
+                        (current_process().lock().current_directory.1.clone() + &path_str).as_str(),
+                    );
+                } else {
+                    return Err(SyscallError::other(
+                        "Non-absolute paths are not supported yet",
+                    ));
+                }
             }
+        } else {
+            unsafe {
+                (*(arg3 as *mut LinuxStat)) = current_process()
+                    .lock()
+                    .get_object(arg5)?
+                    .as_have_linux_stat()
+                    .ok_or(SyscallError::InvalidArguments)?
+                    .stat()?
+            };
+
+            return Ok(0);
         }
 
         let info = VirtualFS.lock().file_info(path).unwrap();

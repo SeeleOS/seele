@@ -3,6 +3,7 @@ use core::fmt::Debug;
 use alloc::sync::Arc;
 
 use crate::{
+    filesystem::info::LinuxStat,
     multitasking::MANAGER,
     object::{config::Configuratable, error::ObjectError},
 };
@@ -24,6 +25,10 @@ pub trait Object: Send + Sync + Debug {
     fn as_configuratable(self: Arc<Self>) -> Option<Arc<dyn Configuratable>> {
         None
     }
+
+    fn as_have_linux_stat(self: Arc<Self>) -> Option<Arc<dyn HaveLinuxStat>> {
+        None
+    }
 }
 
 #[macro_export]
@@ -43,6 +48,17 @@ macro_rules! is_readable {
     };
 }
 
+#[macro_export]
+macro_rules! have_linux_stat {
+    () => {
+        fn as_have_linux_stat(
+            self: alloc::sync::Arc<Self>,
+        ) -> Option<alloc::sync::Arc<dyn HaveLinuxStat>> {
+            Some(self)
+        }
+    };
+}
+
 pub type ObjectResult<T> = Result<T, ObjectError>;
 
 pub trait Writable: Object {
@@ -53,6 +69,10 @@ pub trait Writable: Object {
 pub trait Readable: Object {
     /// Reads the content of [`self`] and write them to [`buffer`]
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize>;
+}
+
+pub trait HaveLinuxStat: Object {
+    fn stat(&self) -> ObjectResult<LinuxStat>;
 }
 
 pub fn get_object(id: u64) -> Option<Arc<dyn Object>> {
