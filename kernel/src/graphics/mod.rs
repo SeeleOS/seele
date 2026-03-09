@@ -37,18 +37,8 @@ pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
         .lock();
 
     let font_path = Path::new(FONT_PATH);
-    let font: &'static mut [u8] = Box::leak(
-        Box::new(vec![
-            0u8;
-            VirtualFS
-                .lock()
-                .file_info(font_path.clone())
-                .unwrap()
-                .size
-        ])
-        .into_boxed_slice(),
-    );
-    read_all(font_path, font).unwrap();
+    let font: &'static mut [u8] =
+        Box::leak(Box::new(read_all(font_path).unwrap()).into_boxed_slice());
 
     let font_manager = TrueTypeFont::new(13.0, font);
 

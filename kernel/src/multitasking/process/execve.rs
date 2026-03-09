@@ -31,8 +31,7 @@ impl Process {
 
         thread_manager.kill_all_except(thread.clone());
 
-        let mut program = alloc::vec![0u8; VirtualFS.lock().file_info(path.clone())?.size];
-        read_all(path.clone(), &mut program)?;
+        let program = read_all(path.clone())?;
 
         let mut stack_builder = self.addrspace.allocate_user(16).1;
         let program = load_elf(&mut self.addrspace, &program);

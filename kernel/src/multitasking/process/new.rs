@@ -54,8 +54,7 @@ pub fn setup_process(
     addrspace: &mut AddrSpace,
     objects: &mut Vec<Arc<dyn Object>>,
 ) -> Result<ThreadSnapshot, FSError> {
-    let mut program = alloc::vec![0u8; VirtualFS.lock().file_info(path.clone())?.size];
-    read_all(path.clone(), &mut program)?;
+    let program = read_all(path.clone())?;
 
     let mut stack_builder = addrspace.allocate_user(16).1;
     let program = load_elf(addrspace, &program);

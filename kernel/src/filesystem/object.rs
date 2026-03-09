@@ -4,7 +4,12 @@ use alloc::{boxed::Box, sync::Arc};
 use spin::Mutex;
 
 use crate::{
-    filesystem::{path::Path, vfs::VirtualFS, vfs_traits::File},
+    filesystem::{
+        info::FileLikeInfo,
+        path::Path,
+        vfs::{FSResult, VirtualFS},
+        vfs_traits::File,
+    },
     is_readable, is_writable,
     object::{Object, Readable, Writable},
     s_println,
@@ -17,6 +22,10 @@ pub struct FileObject {
 impl FileObject {
     pub fn new(file: Arc<Mutex<dyn File>>) -> Self {
         Self { file }
+    }
+
+    pub fn info(&self) -> FSResult<FileLikeInfo> {
+        self.file.lock().info()
     }
 }
 

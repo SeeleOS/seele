@@ -63,12 +63,19 @@ impl VFS {
 }
 
 pub fn read_all(path: Path) -> FSResult<Vec<u8>> {
-    let mut content = Vec::new();
     let file_object = VirtualFS.lock().open(path)?;
-    while let Ok(n) = file_object.read(&mut content) {
+    let mut content = Vec::with_capacity(file_object.info().unwrap().size);
+    let mut total_read = 0;
+
+    content.resize(file_object.info().unwrap().size, 0);
+    s_println!("W");
+    while let Ok(n) = file_object.read(&mut content[total_read..]) {
         if n == 0 {
+            s_println!("broke");
             break;
         }
+        s_println!("read");
+        total_read += n;
     }
 
     Ok(content)
