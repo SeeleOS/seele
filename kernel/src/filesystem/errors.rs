@@ -21,7 +21,7 @@ impl AsSyscallError for FSError {
 
             Self::StorageDeviceError(err) => err.as_syscall_error(),
 
-            Self::Other => SyscallError::other(),
+            Self::Other => SyscallError::other("FS error other"),
         }
     }
 }

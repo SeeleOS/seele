@@ -57,8 +57,9 @@ impl From<KernelError> for SyscallError {
 }
 
 impl SyscallError {
-    pub fn other() -> SyscallError {
+    pub fn other(message: &str) -> SyscallError {
         println!("Returned Other syscall error. Something have probably gone wrong.");
+        println!("{message}");
         Self::Other
     }
 }

@@ -16,9 +16,9 @@ impl AsSyscallError for BlockDeviceError {
     fn as_syscall_error(&self) -> crate::systemcall::error::SyscallError {
         match self {
             Self::Readonly => SyscallError::ReadOnlyFileSystem,
-            Self::OutOfBounds => SyscallError::other(),
-            Self::BufferTooSmall => SyscallError::other(),
-            Self::Other => SyscallError::other(),
+            Self::OutOfBounds => SyscallError::InvalidArguments,
+            Self::BufferTooSmall => SyscallError::InvalidArguments,
+            Self::Other => SyscallError::IOError,
         }
     }
 }
