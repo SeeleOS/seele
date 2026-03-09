@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use alloc::boxed::Box;
+use alloc::{boxed::Box, sync::Arc};
 use spin::Mutex;
 
 use crate::{
@@ -10,7 +10,7 @@ use crate::{
 };
 
 pub struct FileObject {
-    file: Box<Mutex<dyn File>>,
+    file: Arc<Mutex<dyn File>>,
 }
 
 impl Debug for FileObject {
