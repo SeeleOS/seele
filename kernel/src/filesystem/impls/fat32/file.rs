@@ -28,12 +28,12 @@ impl FAT32File {
 }
 
 impl File for FAT32File {
-    fn read(&mut self, buffer: &mut [u8]) -> crate::filesystem::vfs::FSResult<()> {
-        self.inner.read_exact(buffer).map_err(|_| FSError::Other)
+    fn read(&mut self, buffer: &mut [u8]) -> crate::filesystem::vfs::FSResult<usize> {
+        self.inner.read(buffer).map_err(|_| FSError::Other)
     }
 
-    fn write(&mut self, buffer: &[u8]) -> crate::filesystem::vfs::FSResult<()> {
-        self.inner.write_all(buffer).map_err(|_| FSError::Other)
+    fn write(&mut self, buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+        self.inner.write(buffer).map_err(|_| FSError::Other)
     }
 
     fn info(&mut self) -> crate::filesystem::vfs::FSResult<FileLikeInfo> {

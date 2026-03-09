@@ -10,8 +10,8 @@ use crate::filesystem::{
 pub trait File: Send + Sync {
     fn info(&mut self) -> FSResult<FileLikeInfo>;
 
-    fn read(&mut self, buffer: &mut [u8]) -> FSResult<()>;
-    fn write(&mut self, buffer: &[u8]) -> FSResult<()>;
+    fn read(&mut self, buffer: &mut [u8]) -> FSResult<usize>;
+    fn write(&mut self, buffer: &[u8]) -> FSResult<usize>;
 }
 
 pub trait Directory: Send + Sync {
