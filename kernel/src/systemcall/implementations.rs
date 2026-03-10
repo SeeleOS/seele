@@ -17,8 +17,10 @@ use crate::{
             ProcessRef,
             execve::{self, execve},
             manager::get_current_process,
+            misc::ProcessID,
         },
-        thread::THREAD_MANAGER,
+        scheduling::{return_to_executor_from_current, return_to_executor_no_save},
+        thread::{THREAD_MANAGER, misc::State},
     },
     object::{config::ConfigurateRequest, misc::get_object_current_process},
     println, s_println,
@@ -28,6 +30,31 @@ use crate::{
 use crate::define_syscall;
 
 static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ProcessRef>>> = Mutex::new(BTreeMap::new());
+
+define_syscall!(
+    WaitForProcessExit,
+    |target_process: ProcessID, exit_code_ptr: *mut u64| {
+        for (pid, process) in &mut MANAGER.lock().processes {
+            if pid.0 == target_process.0 {
+                loop {
+                    let threads = &mut process.lock().threads;
+
+                    if threads.is_empty() {
+                        // Finished waiting, process exitted
+                        unsafe {
+                            *exit_code_ptr = process.lock().exit_code.unwrap();
+                        }
+                        return Ok(0);
+                    } else {
+                        return_to_executor_from_current();
+                    }
+                }
+            }
+        }
+
+        Err(SyscallError::NoProcess)
+    }
+);
 
 define_syscall!(FutexWait, |arg1: u64, arg2: u64| {
     let mut queue = FUTEX_QUEUE.lock();
@@ -150,10 +177,12 @@ define_syscall!(Execve, |path_str: String| {
     Ok(0)
 });
 
-define_syscall!(Exit, {
+define_syscall!(Exit, |exit_code: u64| {
     let mut manager = THREAD_MANAGER.get().unwrap().lock();
 
     manager.mark_current_as_zombie();
+
+    get_current_process().lock().exit_code = Some(exit_code);
 
     drop(manager);
     s_println!("exit called wtf");

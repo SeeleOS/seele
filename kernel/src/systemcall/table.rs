@@ -33,7 +33,8 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         FileInfo,
         OpenFile,
         Exit,
-        ConfigurateObject
+        ConfigurateObject,
+        WaitForProcessExit
     );
 
     table
