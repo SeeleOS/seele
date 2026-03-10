@@ -25,6 +25,10 @@ pub fn return_to_executor(snapshot: &mut Snapshot) {
     unsafe { (*executor_snapshot).switch_from(Some(&mut *thread_snapshot), Some(snapshot)) };
 }
 
+pub fn return_to_executor_from_current() {
+    return_to_executor(&mut Snapshot::from_current());
+}
+
 pub fn return_to_executor_no_save() {
     let (thread_snapshot, executor_snapshot) = {
         let manager = THREAD_MANAGER.get().unwrap().lock();
