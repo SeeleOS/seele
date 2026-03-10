@@ -1,3 +1,9 @@
+use alloc::string::String;
+
+use crate::{
+    filesystem::info::LinuxStat, misc::others::from_cstr, systemcall::error::SyscallError,
+};
+
 #[macro_export]
 macro_rules! register_syscall {
     ($table: expr, $no: expr, $val: ty) => {
@@ -11,8 +17,7 @@ macro_rules! register_syscall {
 #[macro_export]
 macro_rules! define_syscall {
     ($name:ident, |$($arg_name:ident : $arg_type:ty),*| $body:block) => {
-        paste::paste! {
-        pub struct [<$name Impl>];
+        pub struct $name;
 
         impl SyscallImpl for $name {
             const ENTRY: SyscallNo = SyscallNo::$name;
@@ -22,26 +27,17 @@ macro_rules! define_syscall {
                 arg4: u64, arg5: u64, arg6: u64,
             ) -> Result<usize, SyscallError> {
                 let args = [arg1, arg2, arg3, arg4, arg5, arg6];
-                let mut idx = 0;
+                let mut _idx = 0;
 
-                // Cast types
                 $(
-                    let $arg_name = match stringify!($arg_type) {
-                        "&str" => unsafe { from_cstr(args[idx] as *const u8)? },
-                        "i32"  => args[idx] as i32,
-                        "u32"  => args[idx] as u32,
-                        "usize" => args[idx] as usize,
-                        "bool" => args[idx] as bool,
-                        "*mut LinuxStat" => args[idx] as *mut LinuxStat,
-                        _ => args[idx] as $arg_type, // 默认强转
-                    };
+                    // 核心变化：利用 Trait 进行动态转换
+                    let $arg_name: $arg_type = <$arg_type as $crate::systemcall::arg_types::SyscallArg>::from_u64(args[_idx])?;
                     #[allow(unused_assignments)]
-                    { idx += 1; }
+                    { _idx += 1; }
                 )*
 
                 $body
             }
-        }
         }
     };
 }

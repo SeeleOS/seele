@@ -8,7 +8,7 @@ use crate::{
             allocate_mem::AllocMemImpl,
             configurate_object::ConfigurateObjectImpl,
             directory::{ChangeDirImpl, GetDirImpl},
-            execve::ExecveImpl,
+            execve::Execve,
             exit::ExitImpl,
             file_info::FileInfoImpl,
             fork::ForkImpl,
@@ -50,7 +50,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
     register_syscall!(table, SyscallNo::GetCurrentDirectory, GetDirImpl);
     register_syscall!(table, SyscallNo::FileInfo, FileInfoImpl);
     register_syscall!(table, SyscallNo::Fork, ForkImpl);
-    register_syscall!(table, SyscallNo::Execve, ExecveImpl);
+    register_syscall!(table, SyscallNo::Execve, Execve);
     register_syscall!(table, SyscallNo::OpenFile, OpenFileImpl);
     register_syscall!(table, SyscallNo::RemoveObject, RemoveObjectImpl);
 
