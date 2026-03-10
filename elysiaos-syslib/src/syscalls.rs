@@ -4,22 +4,6 @@ pub mod filesystem;
 pub mod futex;
 pub mod object;
 
-#[inline(always)]
-pub fn print(value: &str) -> SyscallResult {
-    let msg = value.as_bytes();
-    let buf = msg.as_ptr();
-    let count = msg.len();
-
-    syscall!(Print, buf as u64, count as u64)
-}
-
-#[inline]
-pub fn print_buf(buf: &[u8], len: u64) -> SyscallResult {
-    let buf = buf.as_ptr();
-
-    syscall!(Print, buf as u64, len)
-}
-
 wrap_c!(exit());
 pub fn exit() -> SyscallResult {
     syscall!(Exit)

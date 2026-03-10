@@ -1,6 +1,6 @@
 use core::arch;
 
-use crate::{errors::SyscallError, numbers::SyscallNumber, syscalls::print};
+use crate::{errors::SyscallError, numbers::SyscallNumber};
 
 pub type SyscallResult = Result<usize, SyscallError>;
 
