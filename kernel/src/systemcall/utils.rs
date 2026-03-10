@@ -31,6 +31,7 @@ macro_rules! define_syscall {
                         "i32"  => args[idx] as i32,
                         "u32"  => args[idx] as u32,
                         "usize" => args[idx] as usize,
+                        "bool" => args[idx] as bool,
                         "*mut LinuxStat" => args[idx] as *mut LinuxStat,
                         _ => args[idx] as $arg_type, // 默认强转
                     };
