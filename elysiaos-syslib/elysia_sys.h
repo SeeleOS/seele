@@ -11,8 +11,6 @@
 
 extern "C" {
 
-intptr_t c_sys_exit();
-
 intptr_t c_sys_set_fs(uint64_t addr);
 
 intptr_t c_sys_get_fs();

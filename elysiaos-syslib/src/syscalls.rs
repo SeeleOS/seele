@@ -4,9 +4,8 @@ pub mod filesystem;
 pub mod futex;
 pub mod object;
 
-wrap_c!(exit());
-pub fn exit() -> SyscallResult {
-    syscall!(Exit)
+pub fn exit(code: u64) -> SyscallResult {
+    syscall!(Exit, code)
 }
 
 pub fn fork() -> SyscallResult {
