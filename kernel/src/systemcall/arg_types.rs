@@ -1,7 +1,8 @@
 use alloc::string::String;
 
 use crate::{
-    filesystem::info::LinuxStat, misc::others::from_cstr, systemcall::error::SyscallError,
+    filesystem::info::LinuxStat, misc::others::from_cstr, multitasking::process::misc::ProcessID,
+    systemcall::error::SyscallError,
 };
 
 pub trait SyscallArg {
@@ -65,5 +66,23 @@ impl SyscallArg for bool {
         Self: Sized,
     {
         Ok(val != 0)
+    }
+}
+
+impl SyscallArg for ProcessID {
+    fn from_u64(val: u64) -> Result<Self, SyscallError>
+    where
+        Self: Sized,
+    {
+        Ok(ProcessID(val))
+    }
+}
+
+impl SyscallArg for *mut u64 {
+    fn from_u64(val: u64) -> Result<Self, SyscallError>
+    where
+        Self: Sized,
+    {
+        Ok(val as *mut u64)
     }
 }
