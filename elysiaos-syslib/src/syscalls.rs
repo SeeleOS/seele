@@ -4,6 +4,10 @@ pub mod filesystem;
 pub mod futex;
 pub mod object;
 
+pub fn wait_for_process_exit(process: u64, exit_code_ptr: *mut u64) -> SyscallResult {
+    syscall!(WaitForProcessExit, process, exit_code_ptr as u64)
+}
+
 pub fn exit(code: u64) -> SyscallResult {
     syscall!(Exit, code)
 }

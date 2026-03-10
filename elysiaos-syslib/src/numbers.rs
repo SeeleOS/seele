@@ -19,4 +19,5 @@ pub enum SyscallNumber {
     Execve,
     OpenFile,
     RemoveObject,
+    WaitForProcessExit,
 }
