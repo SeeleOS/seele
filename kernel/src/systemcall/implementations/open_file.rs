@@ -27,6 +27,6 @@ impl SyscallImpl for OpenFileImpl {
 
         let current_process = &mut MANAGER.lock().current.clone().unwrap();
         current_process.lock().objects.push(Some(object));
-        Ok(current_process.lock().objects.len() + 1)
+        Ok(current_process.lock().objects.len() - 1)
     }
 }
