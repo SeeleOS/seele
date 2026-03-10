@@ -21,6 +21,8 @@ uart_16550 = "0.2.0"
 qemu-exit = "3.0.2"
 pic8259 = "0.11.0"
 log = "0.4"
+# You can also access strum_macros exports directly through strum using the "derive" feature
+strum = { version = "0.28", default-features = false, features = ["derive"] }
 spleen-font = { version = "0.2" }
 
 [dependencies.lazy_static]

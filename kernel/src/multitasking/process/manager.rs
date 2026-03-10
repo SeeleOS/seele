@@ -50,6 +50,6 @@ impl Manager {
     }
 }
 
-pub fn current_process() -> ProcessRef {
+pub fn get_current_process() -> ProcessRef {
     MANAGER.lock().current.clone().unwrap()
 }

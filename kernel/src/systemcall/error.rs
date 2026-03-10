@@ -14,6 +14,8 @@ pub enum SyscallError {
     IOError = -5,
     /// 坏的文件描述符 (EBADF)
     BadFileDescriptor = -9,
+    /// EAGAIN
+    TryAgain = -11,
     /// 内存不足 (ENOMEM)
     NoMemory = -12,
     /// 权限不足 (EACCES)

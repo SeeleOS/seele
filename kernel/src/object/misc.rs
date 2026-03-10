@@ -19,7 +19,7 @@ macro_rules! impl_cast_function {
     };
 }
 
-pub fn get_object(id: u64) -> Option<Arc<dyn Object>> {
+pub fn get_object_current_process(id: u64) -> Option<Arc<dyn Object>> {
     let current = MANAGER.lock().current.clone().unwrap();
     let current = current.lock();
 

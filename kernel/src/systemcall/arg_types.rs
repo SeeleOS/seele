@@ -40,3 +40,30 @@ impl SyscallArg for *mut LinuxStat {
         Ok(val as *mut LinuxStat)
     }
 }
+
+impl SyscallArg for u64 {
+    fn from_u64(val: u64) -> Result<Self, SyscallError>
+    where
+        Self: Sized,
+    {
+        Ok(val)
+    }
+}
+
+impl SyscallArg for *mut u8 {
+    fn from_u64(val: u64) -> Result<Self, SyscallError>
+    where
+        Self: Sized,
+    {
+        Ok(val as *mut u8)
+    }
+}
+
+impl SyscallArg for bool {
+    fn from_u64(val: u64) -> Result<Self, SyscallError>
+    where
+        Self: Sized,
+    {
+        Ok(val != 0)
+    }
+}

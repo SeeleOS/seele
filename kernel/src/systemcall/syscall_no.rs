@@ -1,6 +1,7 @@
 use num_enum::TryFromPrimitive;
+use strum::EnumIter;
 
-#[derive(Debug, Clone, Copy, PartialEq, TryFromPrimitive)]
+#[derive(EnumIter, Debug, Clone, Copy, PartialEq, TryFromPrimitive)]
 #[repr(usize)]
 pub enum SyscallNo {
     Print = 1000,
