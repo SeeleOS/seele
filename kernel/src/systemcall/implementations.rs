@@ -189,8 +189,10 @@ define_syscall!(Exit, |exit_code: u64| {
     get_current_process().lock().exit_code = Some(exit_code);
 
     drop(manager);
-    s_println!("exit called wtf");
-    Ok(0)
+
+    return_to_executor_no_save();
+
+    panic!("What the fuck")
 });
 
 define_syscall!(FileInfo, |start_from_current_dir: bool,
