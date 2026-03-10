@@ -165,7 +165,7 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
                            use_object: bool,
                            object: u64| {
     let path: Path;
-    if use_object {
+    if !use_object {
         if path_str.starts_with('/') {
             path = Path::new(&path_str);
         } else {
