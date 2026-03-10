@@ -29,6 +29,7 @@ pub struct Process {
     pub threads: Vec<Weak<Mutex<Thread>>>,
     pub objects: Vec<Option<Arc<dyn Object>>>,
     pub current_directory: Path,
+    pub exit_code: Option<u64>,
 }
 
 impl Process {
@@ -40,6 +41,7 @@ impl Process {
             kernel_stack_top: VirtAddr::zero(),
             threads: Vec::new(),
             objects: Vec::new(),
+            exit_code: None,
         }))
     }
 }
