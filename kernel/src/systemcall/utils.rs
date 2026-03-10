@@ -3,7 +3,7 @@ use alloc::string::String;
 use crate::{
     filesystem::info::LinuxStat,
     misc::others::from_cstr,
-    systemcall::{error::SyscallError, syscall_no::SyscallNo},
+    systemcall::{error::SyscallError, numbers::SyscallNo},
 };
 
 #[macro_export]

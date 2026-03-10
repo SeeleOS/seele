@@ -22,7 +22,7 @@ use crate::{
     },
     object::{config::ConfigurateRequest, misc::get_object_current_process},
     println, s_println,
-    systemcall::{error::SyscallError, syscall_no::SyscallNo, utils::SyscallImpl},
+    systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
 };
 
 use crate::define_syscall;

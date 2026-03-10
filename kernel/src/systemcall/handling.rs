@@ -2,7 +2,7 @@ use crate::{
     misc::snapshot::Snapshot,
     multitasking::thread::THREAD_MANAGER,
     println, s_println,
-    systemcall::{error::SyscallError, syscalls_table::SYSCALL_TABLE},
+    systemcall::{error::SyscallError, table::SYSCALL_TABLE},
 };
 
 #[unsafe(no_mangle)]
