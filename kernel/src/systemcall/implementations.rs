@@ -34,9 +34,11 @@ static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ProcessRef>>> = Mutex::new(BTre
 define_syscall!(
     WaitForProcessExit,
     |target_process: ProcessID, exit_code_ptr: *mut u64| {
-        for (pid, process) in &mut MANAGER.lock().processes {
-            if pid.0 == target_process.0 {
-                loop {
+        loop {
+            let mut exited = None;
+
+            for (pid, process) in &mut MANAGER.lock().processes {
+                if pid.0 == target_process.0 {
                     let threads = &mut process.lock().threads;
 
                     if threads.is_empty() {
@@ -44,15 +46,21 @@ define_syscall!(
                         unsafe {
                             *exit_code_ptr = process.lock().exit_code.unwrap();
                         }
-                        return Ok(0);
+
+                        exited = Some(true);
                     } else {
-                        return_to_executor_from_current();
+                        // Havent exited. return to executor.
+                        exited = Some(false);
                     }
                 }
             }
-        }
 
-        Err(SyscallError::NoProcess)
+            if exited.ok_or(SyscallError::NoProcess)? {
+                return Ok(0);
+            } else {
+                return_to_executor_from_current();
+            }
+        }
     }
 );
 
