@@ -145,6 +145,7 @@ define_syscall!(Execve, |path_str: String| {
     let path = Path::new(path_str.as_str());
 
     execve(path, Vec::new())?;
+    s_println!("execve done");
 
     Ok(0)
 });
