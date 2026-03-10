@@ -35,25 +35,21 @@ define_syscall!(
     WaitForProcessExit,
     |target_process: ProcessID, exit_code_ptr: *mut u64| {
         loop {
-            let mut exited = None;
-
-            for (pid, process) in &mut MANAGER.lock().processes {
-                if pid.0 == target_process.0 {
-                    let threads = &mut process.lock().threads;
-
-                    if threads.is_empty() {
-                        // Finished waiting, process exitted
+            let exited = MANAGER
+                .lock()
+                .processes
+                .iter()
+                .find(|(pid, _)| pid.0 == target_process.0)
+                .map(|(_, process)| {
+                    if process.lock().threads.is_empty() {
                         unsafe {
                             *exit_code_ptr = process.lock().exit_code.unwrap();
                         }
-
-                        exited = Some(true);
+                        true
                     } else {
-                        // Havent exited. return to executor.
-                        exited = Some(false);
+                        false
                     }
-                }
-            }
+                });
 
             if exited.ok_or(SyscallError::NoProcess)? {
                 return Ok(0);
