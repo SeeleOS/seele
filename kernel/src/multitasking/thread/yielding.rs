@@ -1,4 +1,6 @@
-use alloc::collections::vec_deque::VecDeque;
+use core::ptr::with_exposed_provenance;
+
+use alloc::{collections::vec_deque::VecDeque, vec::Vec};
 
 use crate::multitasking::{
     kernel_task::{TASK_SPAWNER, task::Task},
@@ -55,6 +57,26 @@ impl ThreadManager {
                 .unwrap()
                 .lock()
                 .spawn(Task::new(ThreadFuture(thread.clone())));
+        }
+    }
+
+    pub fn wake_process_exit(&mut self, pid: ProcessID) {
+        let mut to_wake = Vec::new();
+
+        self.blocked_queues.process_exit.retain(|f| {
+            if let State::Blocked(BlockType::WakeRequired(WakeType::ProcsesExit(target_pid))) =
+                f.lock().state
+                && target_pid.0 == pid.0
+            {
+                to_wake.push(f.clone());
+                false
+            } else {
+                true
+            }
+        });
+
+        for thread in to_wake {
+            self.wake(thread);
         }
     }
 
