@@ -78,6 +78,8 @@ impl ThreadManager {
     }
 
     pub fn clean_zombies(&mut self) {
+        let mut to_remove = Vec::new();
+
         for ele in self.zombies.drain(..) {
             let thread = ele.lock();
             let parent_arc = thread.parent.clone();
@@ -85,8 +87,12 @@ impl ThreadManager {
             self.threads.remove(&thread.id);
 
             if parent.threads.is_empty() {
-                MANAGER.lock().remove_process(parent_arc.clone());
+                to_remove.push(parent_arc.clone());
             }
+        }
+
+        for dead_process in to_remove {
+            MANAGER.lock().remove_process(dead_process, self);
         }
     }
 }

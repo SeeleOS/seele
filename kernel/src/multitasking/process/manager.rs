@@ -1,3 +1,5 @@
+use core::any::Any;
+
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
     vec::Vec,
@@ -9,6 +11,7 @@ use crate::{
     multitasking::{
         MANAGER,
         process::{Process, ProcessRef, misc::ProcessID},
+        thread::manager::ThreadManager,
     },
     println,
 };
@@ -38,8 +41,9 @@ impl Manager {
         self.processes.insert(process.lock().pid, process.clone());
     }
 
-    pub fn remove_process(&mut self, process: ProcessRef) {
+    pub fn remove_process(&mut self, process: ProcessRef, thread_manager: &mut ThreadManager) {
         self.processes.remove(&process.lock().pid);
+        thread_manager.wake_process_exit(process.lock().pid);
     }
 
     pub fn load_process(&mut self, process: ProcessRef) {
