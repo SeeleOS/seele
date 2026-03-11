@@ -18,7 +18,7 @@ use crate::{
     },
     graphics::{
         framebuffer::{Canvas, FRAME_BUFFER},
-        terminal::{TERMINAL, TermRenderer},
+        terminal::{COLOR_SCHEME, TERMINAL, TermRenderer},
     },
     println, s_println,
 };
@@ -44,4 +44,5 @@ pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
 
     terminal.set_font_manager(Box::new(font_manager));
     terminal.set_crnl_mapping(true);
+    terminal.set_custom_color_scheme(&COLOR_SCHEME);
 }
