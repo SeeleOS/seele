@@ -1,6 +1,9 @@
 use alloc::collections::vec_deque::VecDeque;
 
-use crate::multitasking::thread::{ThreadRef, manager::ThreadManager, misc::State};
+use crate::multitasking::{
+    kernel_task::{TASK_SPAWNER, task::Task},
+    thread::{ThreadRef, future::ThreadFuture, manager::ThreadManager, misc::State},
+};
 
 use paste::paste;
 // [TODO] make the blocked process wont be pushed onto the queue.
@@ -43,7 +46,11 @@ impl ThreadManager {
         let mut locked_thread = thread.lock();
         if matches!(locked_thread.state, State::Blocked(_)) {
             locked_thread.state = State::Ready;
-            self.queue.push_back(thread.clone());
+            TASK_SPAWNER
+                .get()
+                .unwrap()
+                .lock()
+                .spawn(Task::new(ThreadFuture(thread.clone())));
         }
     }
 

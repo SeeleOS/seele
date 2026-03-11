@@ -21,7 +21,6 @@ use crate::multitasking::{
 pub struct ThreadManager {
     pub threads: BTreeMap<ThreadID, ThreadRef>,
     pub current: Option<ThreadRef>,
-    pub queue: VecDeque<ThreadRef>,
     pub idle_thread: Option<ThreadRef>,
     pub zombies: Vec<ThreadRef>,
     pub blocked_queues: BlockedQueues,
