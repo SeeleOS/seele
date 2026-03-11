@@ -46,6 +46,6 @@ impl Process {
 
         manager.processes.insert(pid, new_process);
 
-        self.pid
+        pid
     }
 }
