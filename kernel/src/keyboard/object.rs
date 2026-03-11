@@ -16,7 +16,6 @@ impl Object for KeyboardObject {
 
 impl Readable for KeyboardObject {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
-        log::trace!("keyboard: read request {}", buffer.len());
         let mut queue = KEYBOARD_QUEUE
             .get_or_init(|| Mutex::new(VecDeque::new()))
             .lock();
@@ -33,7 +32,6 @@ impl Readable for KeyboardObject {
             }
         }
 
-        log::trace!("keyboard: read {} bytes", read_chars);
         Ok(read_chars)
     }
 }

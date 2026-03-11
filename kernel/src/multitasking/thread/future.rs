@@ -37,7 +37,6 @@ impl Future for ThreadFuture {
         self: core::pin::Pin<&mut Self>,
         cx: &mut core::task::Context<'_>,
     ) -> core::task::Poll<Self::Output> {
-        log::trace!("thread poll start");
         let (thread_snapshot, executor_snapshot) = {
             without_interrupts(|| {
                 let mut manager = THREAD_MANAGER.get().unwrap().lock();
@@ -93,7 +92,6 @@ impl Future for ThreadFuture {
                 Poll::Ready(())
             }
             State::Running => {
-                log::trace!("thread poll: running -> pending");
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }

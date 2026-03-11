@@ -26,14 +26,12 @@ impl Configuratable for TtyDevice {
 
 impl Writable for TtyDevice {
     fn write(&self, buffer: &[u8]) -> super::ObjectResult<usize> {
-        log::trace!("tty: write {} bytes", buffer.len());
         TtyObject.write(buffer)
     }
 }
 
 impl Readable for TtyDevice {
     fn read(&self, buffer: &mut [u8]) -> super::ObjectResult<usize> {
-        log::trace!("tty: read {} bytes", buffer.len());
         KeyboardObject.read(buffer)
     }
 }
