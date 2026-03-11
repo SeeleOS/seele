@@ -35,8 +35,11 @@ pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
         .lock();
 
     log::debug!("graphics: terminal ready");
+
     terminal.set_font_manager(Box::new(BitmapFont));
     terminal.set_crnl_mapping(true);
     terminal.set_custom_color_scheme(&COLOR_SCHEME);
+    terminal.set_auto_flush(false);
+
     log::debug!("graphics: terminal configured");
 }

@@ -25,6 +25,7 @@ impl Writable for TtyObject {
         terminal
             .write_str(from_utf8(buffer).unwrap_or("Unsupported character"))
             .unwrap();
+        terminal.flush();
 
         FRAME_BUFFER.get().unwrap().lock().flush();
 

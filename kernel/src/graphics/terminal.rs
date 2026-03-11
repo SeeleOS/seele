@@ -7,7 +7,10 @@ use spin::Mutex;
 
 use crate::{
     filesystem::{path::Path, vfs_operations::read_all},
-    graphics::framebuffer::{Canvas, FRAME_BUFFER},
+    graphics::{
+        framebuffer::{Canvas, FRAME_BUFFER},
+        terminal,
+    },
 };
 
 const FONT_PATH: &str = "/misc/fonts/maplem~1.ttf";
@@ -86,7 +89,11 @@ macro_rules! println {
 
 #[doc(hidden)]
 pub fn term_print(args: Arguments) {
-    TERMINAL.get().unwrap().lock().write_fmt(args).unwrap();
+    let mut term = TERMINAL.get().unwrap().lock();
+
+    term.write_fmt(args).unwrap();
+    term.flush();
+
     FRAME_BUFFER.get().unwrap().lock().flush();
 }
 
