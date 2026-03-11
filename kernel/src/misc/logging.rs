@@ -27,20 +27,20 @@ impl log::Log for Logger {
                 }
                 Level::Warn => println!(
                     "{} {}",
-                    "Warn".yellow().bold().on_yellow(),
+                    "  Warn ".yellow().bold().on_yellow(),
                     content.yellow().bold()
                 ),
                 Level::Info => println!(
                     "{} {}",
-                    "Info".bright_blue().bold().on_bright_blue(),
+                    "  Info ".bright_blue().bold().on_bright_blue(),
                     content
                 ),
                 Level::Debug => println!(
                     "{} {}",
-                    "Debug".bright_black().bold().on_bright_black(),
+                    " Debug ".bright_black().bold().on_bright_black(),
                     content
                 ),
-                Level::Trace => println!("{} {}", "Trace".black().on_bright_black(), content),
+                Level::Trace => println!("{} {}", " Trace ".black().on_bright_black(), content),
             }
         }
     }
