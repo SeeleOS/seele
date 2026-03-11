@@ -1,4 +1,8 @@
+use log::LevelFilter;
+
 use crate::s_println;
+
+const LEVEL_FILTER: LevelFilter = LevelFilter::Info;
 
 static LOGGER: Logger = Logger;
 
@@ -20,4 +24,5 @@ impl log::Log for Logger {
 
 pub fn init() {
     log::set_logger(&LOGGER).unwrap();
+    log::set_max_level(LEVEL_FILTER);
 }
