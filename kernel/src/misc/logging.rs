@@ -1,6 +1,6 @@
 use log::LevelFilter;
 
-use crate::s_println;
+use crate::{graphics::terminal::TERMINAL, println, s_println};
 
 const LEVEL_FILTER: LevelFilter = LevelFilter::Info;
 
@@ -15,7 +15,7 @@ impl log::Log for Logger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            s_println!("[{}] {}", record.level(), record.args());
+            println!("[{}] {}", record.level(), record.args());
         }
     }
 
