@@ -42,7 +42,7 @@ pub fn hlt_loop() -> ! {
 }
 
 #[cfg(target_arch = "x86_64")]
-pub fn rdtsc() -> u64 {
+pub fn get_cycles() -> u64 {
     let low: u32;
     let high: u32;
     unsafe {
