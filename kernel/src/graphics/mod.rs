@@ -39,7 +39,4 @@ pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
     terminal.set_crnl_mapping(true);
     terminal.set_custom_color_scheme(&COLOR_SCHEME);
     log::debug!("graphics: terminal configured");
-
-    unsafe { terminal.process("asdasd".as_bytes()) };
-    log::trace!("graphics: test write done");
 }
