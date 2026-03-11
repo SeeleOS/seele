@@ -21,7 +21,7 @@ impl log::Log for Logger {
                 Level::Error => {
                     println!(
                         "{} {}",
-                        "Error".bright_red().bold().on_red(),
+                        " Error ".white().bold().on_red(),
                         content.red().bold()
                     )
                 }

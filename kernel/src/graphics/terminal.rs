@@ -7,8 +7,8 @@ use spin::Mutex;
 use crate::graphics::framebuffer::{Canvas, FRAME_BUFFER};
 
 pub const COLOR_SCHEME: Palette = Palette {
-    foreground: (30, 34, 51),
-    background: (237, 239, 246),
+    background: (30, 34, 51),
+    foreground: (237, 239, 246),
     ansi_colors: [
         // 0-7 normal
         (30, 34, 51),    // black (ink)
