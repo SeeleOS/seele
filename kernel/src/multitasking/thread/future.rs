@@ -37,6 +37,7 @@ impl Future for ThreadFuture {
         self: core::pin::Pin<&mut Self>,
         cx: &mut core::task::Context<'_>,
     ) -> core::task::Poll<Self::Output> {
+        log::trace!("thread poll start");
         let (thread_snapshot, executor_snapshot) = {
             without_interrupts(|| {
                 let mut manager = THREAD_MANAGER.get().unwrap().lock();
@@ -65,6 +66,7 @@ impl Future for ThreadFuture {
 
                     if previous_thread_pid != thread_pid {
                         MANAGER.lock().load_process(thread.parent.clone());
+                        log::trace!("thread poll: load_process {}", thread_pid.0);
                     }
                 };
 
@@ -86,10 +88,12 @@ impl Future for ThreadFuture {
 
         match state {
             State::Zombie => {
+                log::debug!("thread poll: zombie");
                 THREAD_MANAGER.get().unwrap().lock().clean_zombies();
                 Poll::Ready(())
             }
             State::Running => {
+                log::trace!("thread poll: running -> pending");
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }

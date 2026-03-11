@@ -19,18 +19,21 @@ impl Object for TtyDevice {
 
 impl Configuratable for TtyDevice {
     fn configure(&self, request: super::config::ConfigurateRequest) -> super::ObjectResult<isize> {
+        log::trace!("tty: configure");
         TtyObject.configure(request)
     }
 }
 
 impl Writable for TtyDevice {
     fn write(&self, buffer: &[u8]) -> super::ObjectResult<usize> {
+        log::trace!("tty: write {} bytes", buffer.len());
         TtyObject.write(buffer)
     }
 }
 
 impl Readable for TtyDevice {
     fn read(&self, buffer: &mut [u8]) -> super::ObjectResult<usize> {
+        log::trace!("tty: read {} bytes", buffer.len());
         KeyboardObject.read(buffer)
     }
 }

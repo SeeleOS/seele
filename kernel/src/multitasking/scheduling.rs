@@ -11,6 +11,7 @@ use crate::{
 };
 
 pub fn return_to_executor(snapshot: &mut Snapshot) {
+    log::trace!("return_to_executor");
     let (thread_snapshot, executor_snapshot) = {
         let manager = THREAD_MANAGER.get().unwrap().lock();
         let current_ref = manager.current.clone().unwrap();
@@ -26,10 +27,12 @@ pub fn return_to_executor(snapshot: &mut Snapshot) {
 }
 
 pub fn return_to_executor_from_current() {
+    log::trace!("return_to_executor_from_current");
     return_to_executor(&mut Snapshot::from_current());
 }
 
 pub fn return_to_executor_no_save() {
+    log::trace!("return_to_executor_no_save");
     let (thread_snapshot, executor_snapshot) = {
         let manager = THREAD_MANAGER.get().unwrap().lock();
         let current_ref = manager.current.clone().unwrap();

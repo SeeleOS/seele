@@ -29,10 +29,12 @@ lazy_static! {
 }
 
 pub fn init() {
+    log::info!("interrupts: init start");
     IDT.load();
     PICS.get_or_init(|| unsafe { Mutex::new(ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET)) });
 
     unsafe { PICS.get().unwrap().lock().initialize() };
+    log::info!("interrupts: init done");
 }
 
 pub fn print_stackframe_m(stack_frame: InterruptStackFrame) {

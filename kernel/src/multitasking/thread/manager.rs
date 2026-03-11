@@ -75,10 +75,12 @@ impl ThreadManager {
     }
 
     pub fn mark_current_as_zombie(&mut self) {
+        log::debug!("mark_current_as_zombie");
         self.mark_as_zombie(self.current.clone().unwrap());
     }
 
     pub fn mark_as_zombie(&mut self, thread: ThreadRef) {
+        log::debug!("mark_as_zombie");
         thread.lock().state = State::Zombie;
         self.zombies.push(thread);
     }

@@ -6,7 +6,6 @@ use x86_64::{
 };
 
 use crate::{
-    println,
     tss::{self},
 };
 
@@ -37,6 +36,7 @@ pub struct GDTSelectors {
 }
 
 pub fn init() {
+    log::debug!("gdt: init start");
     GDT.0.load();
 
     unsafe {
@@ -46,4 +46,5 @@ pub fn init() {
         // load the tss from the gdt entry
         load_tss(GDT.1.tss_selector);
     }
+    log::debug!("gdt: init done");
 }

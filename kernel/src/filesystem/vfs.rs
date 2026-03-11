@@ -43,6 +43,7 @@ impl VFS {
     }
 
     pub fn init(&mut self) -> FSResult<()> {
+        log::debug!("vfs: init start");
         let fs = fatfs::FileSystem::new(
             Fat32RamDiskReader(RamDiskOperator::default()),
             FsOptions::new(),
@@ -52,10 +53,12 @@ impl VFS {
 
         self.root = Some(self.filesystems[0].lock().root_dir().unwrap());
 
+        log::debug!("vfs: init done");
         Ok(())
     }
 
     fn register_fs(&mut self, fs: impl FileSystem + 'static) {
+        log::debug!("vfs: register filesystem");
         self.filesystems.push(Box::new(Mutex::new(fs)));
     }
 }

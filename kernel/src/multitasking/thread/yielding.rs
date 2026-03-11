@@ -62,6 +62,7 @@ macro_rules! register_wake_func {
 
 impl ThreadManager {
     pub fn block(&mut self, thread_ref: ThreadRef, block_type: BlockType) {
+        log::debug!("thread block: {:?}", block_type);
         let mut thread = thread_ref.lock();
 
         thread.state = State::Blocked(block_type);
@@ -70,11 +71,13 @@ impl ThreadManager {
     }
 
     pub fn block_current(&mut self, block_type: BlockType) {
+        log::debug!("thread block_current: {:?}", block_type);
         let current = self.current.clone().unwrap();
         self.block(current, block_type);
     }
 
     pub fn wake(&mut self, thread: ThreadRef) {
+        log::debug!("thread wake");
         let mut locked_thread = thread.lock();
         if matches!(locked_thread.state, State::Blocked(_)) {
             locked_thread.state = State::Ready;
@@ -87,6 +90,7 @@ impl ThreadManager {
     }
 
     pub fn wake_process_exit(&mut self, pid: ProcessID) {
+        log::debug!("thread wake_process_exit: {}", pid.0);
         let mut to_wake = Vec::new();
 
         self.blocked_queues.process_exit.retain(|f| {

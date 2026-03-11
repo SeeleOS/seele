@@ -36,6 +36,7 @@ impl VFS {
     }
 
     pub fn open(&mut self, path: Path) -> FSResult<FileObject> {
+        log::trace!("vfs: open {}", path.clone().as_string());
         if let FileLike::File(file) = path.navigate(self.root.clone().unwrap())? {
             Ok(FileObject::new(file))
         } else {
@@ -44,6 +45,7 @@ impl VFS {
     }
 
     pub fn file_info(&mut self, path: Path) -> FSResult<FileLikeInfo> {
+        log::trace!("vfs: file_info {}", path.clone().as_string());
         path.navigate(self.root.clone().unwrap())?.info()
     }
 
@@ -52,6 +54,7 @@ impl VFS {
     }
 
     pub fn list_contents(&self, path: Path) -> FSResult<Vec<DirectoryContentInfo>> {
+        log::trace!("vfs: list_contents {}", path.clone().as_string());
         let dir = path.navigate(self.root.clone().unwrap())?;
 
         if let FileLike::Directory(dir) = dir {

@@ -20,7 +20,6 @@ use crate::{
         framebuffer::{Canvas, FRAME_BUFFER},
         terminal::{COLOR_SCHEME, TERMINAL, TermRenderer},
     },
-    println, s_println,
 };
 
 pub mod framebuffer;
@@ -29,13 +28,18 @@ pub mod object_config;
 pub mod terminal;
 
 pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
-    s_println!("graphicvs start!");
+    log::info!("graphics: init start");
     let canvas = FRAME_BUFFER.get_or_init(|| Mutex::new(Canvas::new(boot_info)));
     let mut terminal = TERMINAL
         .get_or_init(|| Mutex::new(Terminal::new(TermRenderer::new(canvas))))
         .lock();
 
+    log::debug!("graphics: terminal ready");
     terminal.set_font_manager(Box::new(BitmapFont));
     terminal.set_crnl_mapping(true);
     terminal.set_custom_color_scheme(&COLOR_SCHEME);
+    log::debug!("graphics: terminal configured");
+
+    unsafe { terminal.process("asdasd".as_bytes()) };
+    log::trace!("graphics: test write done");
 }

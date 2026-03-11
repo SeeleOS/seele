@@ -37,6 +37,7 @@ impl File for FAT32File {
     }
 
     fn info(&mut self) -> crate::filesystem::vfs::FSResult<FileLikeInfo> {
+        log::trace!("fat32 file info");
         Ok(FileLikeInfo::new(
             self.name.clone(),
             self.size,

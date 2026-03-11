@@ -37,7 +37,11 @@ impl log::Log for Logger {
                     println!("{} {}", " Debug ".white().bold().on_bright_black(), content)
                 }
                 Level::Trace => {
-                    println!("{} {}", " Trace ".bright_black().on_bright_black(), content)
+                    println!(
+                        "{} {}",
+                        " Trace ".white().on_bright_black(),
+                        content.bright_black()
+                    )
                 }
             }
         }

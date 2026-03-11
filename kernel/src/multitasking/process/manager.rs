@@ -44,11 +44,13 @@ impl Manager {
     }
 
     pub fn remove_process(&mut self, process: ProcessRef, thread_manager: &mut ThreadManager) {
+        log::debug!("remove process {}", process.lock().pid.0);
         self.processes.remove(&process.lock().pid);
         thread_manager.wake_process_exit(process.lock().pid);
     }
 
     pub fn load_process(&mut self, process: ProcessRef) {
+        log::trace!("load process {}", process.lock().pid.0);
         let mut process_locked = process.lock();
 
         process_locked.addrspace.load();

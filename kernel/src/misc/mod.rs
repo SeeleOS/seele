@@ -31,8 +31,6 @@ pub fn init() {
             gs_user_stack_top: 0,
         }))
     };
-
-    logging::init();
 }
 
 pub fn hlt_loop() -> ! {

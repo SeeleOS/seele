@@ -11,6 +11,7 @@ pub const GP_IST_LOCATION: u16 = 2;
 pub static mut TSS: TaskStateSegment = TaskStateSegment::new();
 
 pub fn init() {
+    log::debug!("tss: init start");
     let mut tss = TaskStateSegment::new();
 
     tss.interrupt_stack_table[DOUBLE_FAULT_IST_LOCATION as usize] = {
@@ -55,6 +56,7 @@ pub fn init() {
     unsafe {
         TSS = tss;
     }
+    log::debug!("tss: init done");
 }
 
 pub fn get_ref() -> &'static TaskStateSegment {

@@ -43,10 +43,12 @@ impl Default for AddrSpace {
 
 impl AddrSpace {
     pub fn load(&mut self) {
+        log::debug!("addrspace: load");
         self.page_table.load();
     }
 
     pub fn clean(&mut self) {
+        log::debug!("addrspace: clean");
         // TODO: properly "clean" the memory lmao
         self.user_mem = VirtAddr::new(USER_MEM_START);
         self.page_table = PageTableWrapped::default();
@@ -58,6 +60,7 @@ impl AddrSpace {
     }
 
     pub fn allocate_user(&mut self, pages: u64) -> AllocResult {
+        log::trace!("addrspace: allocate_user pages {}", pages);
         let mem = self.user_mem;
         self.user_mem += (pages + 1) * 4096;
 
@@ -69,6 +72,7 @@ impl AddrSpace {
     }
 
     pub fn allocate_kernel(&mut self, pages: u64) -> AllocResult {
+        log::trace!("addrspace: allocate_kernel pages {}", pages);
         self.map(
             VirtAddr::new(KERNEL_MEM.fetch_add((pages + 1) * 4096, Ordering::Relaxed)),
             pages,

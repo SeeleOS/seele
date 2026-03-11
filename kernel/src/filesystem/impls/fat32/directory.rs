@@ -28,6 +28,7 @@ impl Directory for FAT32Directory {
     }
 
     fn contents(&self) -> crate::filesystem::vfs::FSResult<alloc::vec::Vec<DirectoryContentInfo>> {
+        log::trace!("fat32 dir contents");
         let mut contents = Vec::new();
 
         for dir_entry in self.inner.iter() {
@@ -45,6 +46,7 @@ impl Directory for FAT32Directory {
     }
 
     fn create(&self, info: DirectoryContentInfo) -> crate::filesystem::vfs::FSResult<()> {
+        log::trace!("fat32 dir create {}", info.name);
         match info.content_type {
             DirectoryContentType::File => {
                 self.inner.create_file(&info.name).unwrap();
@@ -59,6 +61,7 @@ impl Directory for FAT32Directory {
     }
 
     fn delete(&self, name: &str) -> crate::filesystem::vfs::FSResult<()> {
+        log::trace!("fat32 dir delete {}", name);
         self.inner.remove(name).map_err(|_| FSError::NotFound)
     }
 
@@ -66,6 +69,7 @@ impl Directory for FAT32Directory {
         &self,
         name: &str,
     ) -> crate::filesystem::vfs::FSResult<crate::filesystem::vfs_traits::FileLike> {
+        log::trace!("fat32 dir get {}", name);
         let name = name.to_ascii_uppercase();
 
         for dir_entry in self.inner.iter() {
