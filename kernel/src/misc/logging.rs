@@ -3,7 +3,7 @@ use log::{Level, LevelFilter};
 use crate::{graphics::terminal::TERMINAL, println, s_println};
 use owo_colors::OwoColorize;
 
-const LEVEL_FILTER: LevelFilter = LevelFilter::Info;
+const LEVEL_FILTER: LevelFilter = LevelFilter::Trace;
 
 static LOGGER: Logger = Logger;
 
@@ -27,20 +27,18 @@ impl log::Log for Logger {
                 }
                 Level::Warn => println!(
                     "{} {}",
-                    "  Warn ".yellow().bold().on_yellow(),
+                    "  Warn ".white().bold().on_yellow(),
                     content.yellow().bold()
                 ),
-                Level::Info => println!(
-                    "{} {}",
-                    "  Info ".bright_blue().bold().on_bright_blue(),
-                    content
-                ),
-                Level::Debug => println!(
-                    "{} {}",
-                    " Debug ".bright_black().bold().on_bright_black(),
-                    content
-                ),
-                Level::Trace => println!("{} {}", " Trace ".black().on_bright_black(), content),
+                Level::Info => {
+                    println!("{} {}", "  Info ".white().bold().on_bright_blue(), content)
+                }
+                Level::Debug => {
+                    println!("{} {}", " Debug ".white().bold().on_bright_black(), content)
+                }
+                Level::Trace => {
+                    println!("{} {}", " Trace ".bright_black().on_bright_black(), content)
+                }
             }
         }
     }

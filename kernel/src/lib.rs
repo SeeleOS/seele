@@ -54,27 +54,39 @@ fn test_k_main(_boot_info: &'static mut BootInfo) -> ! {
 
 pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     enable_sse();
+    log::info!("init: sse enabled");
     tss::init();
+    log::info!("init: tss ready");
     memory::init(
         bootinfo.physical_memory_offset.into_option().unwrap(),
         &bootinfo.memory_regions,
     );
+    log::info!("init: memory ready");
     initrd::init(
         bootinfo.ramdisk_addr.into_option().expect("No ramdisk."),
         bootinfo.ramdisk_len,
     );
+    log::info!("init: initrd ready");
 
     VirtualFS.lock().init().unwrap();
+    log::info!("init: vfs ready");
     graphics::init(bootinfo.framebuffer.as_mut().unwrap());
+    log::info!("init: graphics ready");
     gdt::init();
+    log::info!("init: gdt ready");
     misc::init();
+    log::info!("init: misc ready");
     systemcall::init();
+    log::info!("init: syscall ready");
     acpi::init();
+    log::info!("init: acpi ready");
     let mut executor = kernel_task::init();
+    log::info!("init: kernel task executor ready");
     multitasking::init();
+    log::info!("init: multitasking ready");
     interrupts::init();
+    log::info!("init: interrupts ready");
 
-    log::error!("Test");
     executor.run();
 }
 
