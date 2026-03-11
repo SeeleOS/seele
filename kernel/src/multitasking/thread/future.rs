@@ -65,7 +65,6 @@ impl Future for ThreadFuture {
 
                     if previous_thread_pid != thread_pid {
                         MANAGER.lock().load_process(thread.parent.clone());
-                        log::trace!("thread poll: load_process {}", thread_pid.0);
                     }
                 };
 

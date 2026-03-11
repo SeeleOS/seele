@@ -50,7 +50,6 @@ impl Manager {
     }
 
     pub fn load_process(&mut self, process: ProcessRef) {
-        log::trace!("load process {}", process.lock().pid.0);
         let mut process_locked = process.lock();
 
         process_locked.addrspace.load();

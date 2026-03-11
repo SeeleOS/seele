@@ -43,7 +43,6 @@ impl Default for AddrSpace {
 
 impl AddrSpace {
     pub fn load(&mut self) {
-        log::debug!("addrspace: load");
         self.page_table.load();
     }
 
