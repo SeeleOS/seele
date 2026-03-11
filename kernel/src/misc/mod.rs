@@ -41,6 +41,21 @@ pub fn hlt_loop() -> ! {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+pub fn rdtsc() -> u64 {
+    let low: u32;
+    let high: u32;
+    unsafe {
+        core::arch::asm!(
+            "rdtsc",
+            out("eax") low,
+            out("edx") high,
+            options(nomem, nostack, preserves_flags)
+        );
+    }
+    ((high as u64) << 32) | low as u64
+}
+
 #[macro_export]
 macro_rules! read_addr {
     ($addr: expr, $type: ty) => {
