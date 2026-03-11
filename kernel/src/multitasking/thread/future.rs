@@ -82,7 +82,9 @@ impl Future for ThreadFuture {
             )
         };
 
-        match self.0.lock().state {
+        let state = self.0.lock().state;
+
+        match state {
             State::Zombie => {
                 THREAD_MANAGER.get().unwrap().lock().clean_zombies();
                 Poll::Ready(())
@@ -91,7 +93,7 @@ impl Future for ThreadFuture {
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }
-            State::Blocked(_) => unimplemented!(),
+            State::Blocked(_) => Poll::Ready(()),
             State::Ready => panic!("wat"),
         }
     }
