@@ -42,7 +42,7 @@ define_syscall!(
             .lock()
             .processes
             .iter()
-            .find(|(pid, _)| pid.0 == target_process.0)
+            .find(|(pid, _)| **pid == target_process)
             .map(|(_, process)| {
                 if process.lock().threads.is_empty() {
                     if !exit_code_ptr.is_null() {
