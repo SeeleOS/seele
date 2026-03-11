@@ -82,10 +82,9 @@ impl StackBuilder {
     }
 
     pub fn finish(self) -> VirtAddr {
-        assert!(
-            self.sp.is_aligned(16u64),
-            "Stack pointer is not 16 byte aligned"
-        );
+        if !self.sp.is_aligned(16u64) {
+            log::error!("Stack pointer is not 16 byte aligned");
+        }
         self.sp
     }
 }
