@@ -20,7 +20,11 @@ use crate::{
             misc::ProcessID,
         },
         scheduling::{return_to_executor_from_current, return_to_executor_no_save},
-        thread::{THREAD_MANAGER, misc::State},
+        thread::{
+            THREAD_MANAGER,
+            misc::State,
+            yielding::{BlockType, WakeType},
+        },
     },
     object::{config::ConfigurateRequest, misc::get_object_current_process},
     println, s_println,
@@ -34,28 +38,29 @@ static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ProcessRef>>> = Mutex::new(BTre
 define_syscall!(
     WaitForProcessExit,
     |target_process: ProcessID, exit_code_ptr: *mut u64| {
-        loop {
-            let exited = MANAGER
-                .lock()
-                .processes
-                .iter()
-                .find(|(pid, _)| pid.0 == target_process.0)
-                .map(|(_, process)| {
-                    if process.lock().threads.is_empty() {
+        println!("waitpid called!");
+        let exited = MANAGER
+            .lock()
+            .processes
+            .iter()
+            .find(|(pid, _)| pid.0 == target_process.0)
+            .map(|(_, process)| {
+                if process.lock().threads.is_empty() {
+                    if !exit_code_ptr.is_null() {
                         unsafe {
                             *exit_code_ptr = process.lock().exit_code.unwrap();
                         }
-                        true
-                    } else {
-                        false
                     }
-                });
+                    true
+                } else {
+                    false
+                }
+            });
 
-            if exited.ok_or(SyscallError::NoProcess)? {
-                return Ok(0);
-            } else {
-                return_to_executor_from_current();
-            }
+        if exited.ok_or(SyscallError::NoProcess)? {
+            return Ok(0);
+        } else {
+            return Err(SyscallError::TryAgain);
         }
     }
 );

@@ -1,3 +1,5 @@
+use core::ops::Index;
+
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
     sync::Arc,
@@ -5,16 +7,19 @@ use alloc::{
 };
 use spin::Mutex;
 
-use crate::multitasking::{
-    MANAGER,
-    kernel_task::{TASK_SPAWNER, task::Task},
-    thread::{
-        ThreadRef,
-        future::ThreadFuture,
-        misc::{State, ThreadID},
-        thread::Thread,
-        yielding::BlockedQueues,
+use crate::{
+    multitasking::{
+        MANAGER,
+        kernel_task::{TASK_SPAWNER, task::Task},
+        thread::{
+            ThreadRef,
+            future::ThreadFuture,
+            misc::{State, ThreadID},
+            thread::Thread,
+            yielding::BlockedQueues,
+        },
     },
+    println,
 };
 
 #[derive(Default, Debug)]
@@ -80,11 +85,27 @@ impl ThreadManager {
     pub fn clean_zombies(&mut self) {
         let mut to_remove = Vec::new();
 
+        println!("zombies size {}", self.zombies.len());
+
         for ele in self.zombies.drain(..) {
-            let thread = ele.lock();
-            let parent_arc = thread.parent.clone();
-            let parent = parent_arc.lock();
-            self.threads.remove(&thread.id);
+            let parent_arc;
+            let thread_id;
+            {
+                println!("a");
+                let thread = ele.lock();
+                println!("b");
+                parent_arc = thread.parent.clone();
+                self.threads.remove(&thread.id);
+                thread_id = thread.id;
+
+                drop(thread);
+            }
+            let mut parent = parent_arc.lock();
+
+            parent
+                .threads
+                .retain(|t| t.upgrade().is_some_and(|f| f.lock().id != thread_id));
+            println!("{:?}", parent.threads);
 
             if parent.threads.is_empty() {
                 to_remove.push(parent_arc.clone());
@@ -94,5 +115,6 @@ impl ThreadManager {
         for dead_process in to_remove {
             MANAGER.lock().remove_process(dead_process, self);
         }
+        println!("clean zombies done");
     }
 }
