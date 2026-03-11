@@ -74,6 +74,7 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     multitasking::init();
     interrupts::init();
 
+    log::error!("Test");
     executor.run();
 }
 
