@@ -33,7 +33,6 @@ pub fn init() {
     PICS.get_or_init(|| unsafe { Mutex::new(ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET)) });
 
     unsafe { PICS.get().unwrap().lock().initialize() };
-    interrupts::enable();
 }
 
 pub fn print_stackframe_m(stack_frame: InterruptStackFrame) {
