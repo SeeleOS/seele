@@ -9,7 +9,7 @@ use x86_64::{
 use crate::{
     interrupts::exception_interrupt::init_exception_interrupts,
     interrupts::hardware_interrupt::{PIC_1_OFFSET, PIC_2_OFFSET, init_hardware_interrupts},
-    print, s_println, test,
+    print, test,
 };
 pub mod exception_interrupt;
 pub mod hardware_interrupt;
@@ -36,7 +36,7 @@ pub fn init() {
 }
 
 pub fn print_stackframe_m(stack_frame: InterruptStackFrame) {
-    s_println!("{:#?}", stack_frame);
+    log::error!("{:#?}", stack_frame);
 }
 
 pub fn print_stackframe(message: &str, stack_frame: InterruptStackFrame) {

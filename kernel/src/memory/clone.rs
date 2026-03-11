@@ -11,16 +11,15 @@ use crate::{
         addrspace::AddrSpace, page_table_wrapper::PageTableWrapped, paging::FRAME_ALLOCATOR,
         utils::apply_offset,
     },
-    s_print, s_println,
 };
 
 const KERNEL_MEM_START: u64 = 0xffff_8000_0000_0000;
 
 impl AddrSpace {
     pub fn clone_all(&self) -> Self {
-        s_println!("addrspace fork");
+        log::debug!("addrspace fork");
         let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
-        s_println!("framealloc locked!");
+        log::debug!("frame allocator locked");
 
         let mut new_page_table = PageTableWrapped::new_with_frame_allocator(&mut frame_allocator);
         let old_page_table = &self.page_table;

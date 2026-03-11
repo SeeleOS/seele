@@ -15,14 +15,14 @@ use bootloader_api::{BootInfo, entry_point};
 use kernel::BOOTLOADER_CONFIG;
 #[cfg(test)]
 use kernel::debug_exit::debug_exit;
-use kernel::{init, s_println};
+use kernel::init;
 
 entry_point!(k_main, config = &BOOTLOADER_CONFIG);
 
 fn k_main(bootinfo: &'static mut BootInfo) -> ! {
     #[cfg(test)]
     debug_exit(kernel::debug_exit::QemuExitCode::Success);
-    s_println!("Welcome  Elysia-OS v0.1.0");
+    log::info!("Welcome  Elysia-OS v0.1.0");
 
     init(bootinfo);
 }

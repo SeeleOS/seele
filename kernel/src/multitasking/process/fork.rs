@@ -11,12 +11,11 @@ use crate::{
         process::{Process, ProcessRef, manager::Manager, misc::ProcessID},
         thread::THREAD_MANAGER,
     },
-    s_println,
 };
 
 impl Process {
     pub fn fork(&self, manager: &mut MutexGuard<Manager>) -> ProcessID {
-        s_println!("inside fork!");
+        log::info!("inside fork");
         let pid = ProcessID::default();
         let current_thread = THREAD_MANAGER
             .get()
@@ -25,7 +24,7 @@ impl Process {
             .current
             .clone()
             .unwrap();
-        s_println!(
+        log::debug!(
             "Forking. Parent Current RSP: {:x}",
             current_thread.lock().snapshot.inner.rsp
         );

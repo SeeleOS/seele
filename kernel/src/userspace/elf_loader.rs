@@ -13,7 +13,6 @@ use crate::{
         paging::FRAME_ALLOCATOR,
         utils::{apply_offset, page_range_from_size},
     },
-    s_println,
 };
 
 pub type Function = *const extern "C" fn() -> !;
@@ -46,6 +45,12 @@ impl<'a> elfloader::ElfLoader for ElfLoader<'a> {
                 | PageTableFlags::WRITABLE;
             let pages = header.mem_size().div_ceil(4096);
 
+            log::debug!(
+                "elf alloc: vaddr {:#x} mem {} bytes pages {}",
+                header.virtual_addr(),
+                header.mem_size(),
+                pages
+            );
             self.addrspace
                 .map_no_guard_page(VirtAddr::new(header.virtual_addr()), pages, flags);
         }
@@ -60,7 +65,7 @@ impl<'a> elfloader::ElfLoader for ElfLoader<'a> {
     ) -> Result<(), elfloader::ElfLoaderErr> {
         let addr = VirtAddr::new(base);
         let mut offset = 0;
-        s_println!("base {}", base);
+        log::trace!("elf load base {:#x}", base);
 
         while offset < region.len() {
             let addr = addr + offset as u64;
@@ -96,11 +101,13 @@ impl<'a> elfloader::ElfLoader for ElfLoader<'a> {
 
 /// Returns the entry point
 pub fn load_elf<'a>(addrspace: &mut AddrSpace, program: &'a [u8]) -> ElfBinary<'a> {
+    log::info!("load_elf: start ({} bytes)", program.len());
     let binary = ElfBinary::new(program).expect("Failed to parse elf binary");
 
     binary
         .load(&mut ElfLoader::new(addrspace))
         .expect("Failed to load ELF");
 
+    log::info!("load_elf: done");
     binary
 }

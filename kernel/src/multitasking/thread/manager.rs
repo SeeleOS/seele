@@ -44,6 +44,7 @@ impl ThreadManager {
 
         let thread = self.threads.get_mut(&id).unwrap();
 
+        log::debug!("thread spawn: {:?}", id);
         TASK_SPAWNER
             .get()
             .unwrap()
@@ -85,15 +86,15 @@ impl ThreadManager {
     pub fn clean_zombies(&mut self) {
         let mut to_remove = Vec::new();
 
-        println!("zombies size {}", self.zombies.len());
+        log::debug!("zombies size {}", self.zombies.len());
 
         for ele in self.zombies.drain(..) {
             let parent_arc;
             let thread_id;
             {
-                println!("a");
+                log::trace!("clean_zombies: lock thread");
                 let thread = ele.lock();
-                println!("b");
+                log::trace!("clean_zombies: locked thread");
                 parent_arc = thread.parent.clone();
                 self.threads.remove(&thread.id);
                 thread_id = thread.id;
@@ -105,7 +106,7 @@ impl ThreadManager {
             parent
                 .threads
                 .retain(|t| t.upgrade().is_some_and(|f| f.lock().id != thread_id));
-            println!("{:?}", parent.threads);
+            log::trace!("clean_zombies: remaining threads {:?}", parent.threads);
 
             if parent.threads.is_empty() {
                 to_remove.push(parent_arc.clone());
@@ -115,6 +116,6 @@ impl ThreadManager {
         for dead_process in to_remove {
             MANAGER.lock().remove_process(dead_process, self);
         }
-        println!("clean zombies done");
+        log::debug!("clean_zombies done");
     }
 }

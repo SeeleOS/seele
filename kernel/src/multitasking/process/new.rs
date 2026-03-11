@@ -21,6 +21,7 @@ use crate::{
 
 impl Process {
     pub fn new(path: Path) -> ProcessRef {
+        log::info!("process new: {}", path.clone().as_string());
         let pid = ProcessID::default();
         let mut addrspace = AddrSpace::default();
         let kernel_stack_top = addrspace.allocate_kernel(16).1.finish();
@@ -37,7 +38,9 @@ impl Process {
 
         let process = &mut *process_arc.lock();
 
+        log::debug!("process {}: setup start", pid.0);
         let context = setup_process(path, &mut process.addrspace, &mut process.objects).unwrap();
+        log::debug!("process {}: setup done", pid.0);
 
         // Initilizes the main thread
         process
@@ -56,6 +59,7 @@ pub fn setup_process(
     objects: &mut Vec<Option<Arc<dyn Object>>>,
 ) -> Result<ThreadSnapshot, FSError> {
     let program = read_all(path.clone())?;
+    log::debug!("setup_process: loaded {} bytes", program.len());
 
     let mut stack_builder = addrspace.allocate_user(16).1;
     let program = load_elf(addrspace, &program);

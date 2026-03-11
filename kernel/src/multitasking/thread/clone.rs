@@ -15,12 +15,11 @@ use crate::{
             thread::Thread,
         },
     },
-    s_println,
 };
 
 impl Thread {
     pub fn clone_and_spawn(&self, process: ProcessRef) -> ThreadRef {
-        s_println!("inside thread fork");
+        log::info!("clone_and_spawn: start");
         let id = ThreadID::default();
         let thread = Self {
             parent: process.clone(),
@@ -37,9 +36,9 @@ impl Thread {
                 .as_u64(),
         };
 
-        s_println!("thredad mgr lock start");
+        log::debug!("clone_and_spawn: thread manager lock start");
         let mut manager = THREAD_MANAGER.get().unwrap().lock();
-        s_println!("fd");
+        log::debug!("clone_and_spawn: thread manager locked");
 
         manager.spawn(thread)
     }

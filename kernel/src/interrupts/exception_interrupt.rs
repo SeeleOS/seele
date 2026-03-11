@@ -6,7 +6,6 @@ use x86_64::{
 use crate::{
     interrupts::print_stackframe_m,
     misc::hlt_loop,
-    s_println,
     tss::{DOUBLE_FAULT_IST_LOCATION, GP_IST_LOCATION, PAGE_FAULT_IST_LOCATION},
 };
 
@@ -28,7 +27,7 @@ pub fn init_exception_interrupts(idt: &mut InterruptDescriptorTable) {
 extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) {}
 
 extern "x86-interrupt" fn gp_handler(_stack_frame: InterruptStackFrame, _err_code: u64) {
-    s_println!("gp");
+    log::error!("general protection fault");
     print_stackframe_m(_stack_frame);
     hlt_loop()
 }
@@ -48,9 +47,9 @@ extern "x86-interrupt" fn pagefault_handler(
     _stack_frame: InterruptStackFrame,
     err_code: PageFaultErrorCode,
 ) {
-    s_println!("Page fault");
-    s_println!("Adress: {:?}", Cr2::read());
-    s_println!("Error code: {:?}", err_code);
+    log::error!("Page fault");
+    log::error!("Address: {:?}", Cr2::read());
+    log::error!("Error code: {:?}", err_code);
     print_stackframe_m(_stack_frame);
     hlt_loop();
 }

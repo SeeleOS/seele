@@ -27,7 +27,6 @@ use crate::{
         },
     },
     object::{config::ConfigurateRequest, misc::get_object_current_process},
-    println, s_println,
     systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
 };
 
@@ -95,7 +94,7 @@ define_syscall!(FutexWake, |arg1: u64, arg2: u64| {
         for _ in 0..arg2 {
             if let Some(_process) = queue.pop_front() {
                 //MANAGER.lock().wake(process);
-                s_println!("[TODO] Futex shit");
+                log::warn!("[TODO] Futex wake not implemented");
                 woken += 1;
             } else {
                 break;
@@ -142,7 +141,7 @@ define_syscall!(
         match res {
             Ok(val) => Ok(val as usize),
             Err(_) => {
-                println!("Failed when trying to configurate object. returnning Ok(0)");
+                log::warn!("ConfigurateObject failed; returning Ok(0)");
                 Ok(0)
             }
         }
@@ -180,7 +179,7 @@ define_syscall!(Execve, |path_str: String| {
     let path = Path::new(path_str.as_str());
 
     execve(path, Vec::new())?;
-    s_println!("execve done");
+    log::info!("execve done");
 
     Ok(0)
 });
@@ -243,7 +242,7 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
 define_syscall!(Fork, {
     let mut manager = MANAGER.lock();
 
-    s_println!("start fork");
+    log::info!("start fork");
     let current = manager.current.clone().unwrap();
     Ok(current.lock().fork(&mut manager).0 as usize)
 });

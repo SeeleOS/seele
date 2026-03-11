@@ -32,11 +32,13 @@ impl Manager {
             self.processes
                 .insert(kernel_process.lock().pid, kernel_process.clone());
 
+            log::info!("manager init: spawn /programs/mash.elf");
             self.spawn(Path::new("/programs/mash.elf"));
         });
     }
 
     pub fn spawn(&mut self, program: Path) {
+        log::info!("spawn process: {}", program.clone().as_string());
         let process = Process::new(program);
         self.processes.insert(process.lock().pid, process.clone());
     }

@@ -2,7 +2,7 @@ use elfloader::ElfBinary;
 use x86_64::VirtAddr;
 use xmas_elf::program;
 
-use crate::{misc::aux::AuxType, s_println};
+use crate::misc::aux::AuxType;
 
 #[derive(Debug)]
 pub struct StackBuilder {
@@ -29,7 +29,7 @@ impl StackBuilder {
             }
         }
 
-        s_println!("base: {base}");
+        log::trace!("stack_builder base: {base}");
 
         self.push_aux_entry(AuxType::Null, 0);
         self.push_aux_entry(AuxType::EntryPointAddress, file.entry_point());

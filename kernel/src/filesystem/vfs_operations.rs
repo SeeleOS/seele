@@ -63,6 +63,7 @@ impl VFS {
 }
 
 pub fn read_all(path: Path) -> FSResult<Vec<u8>> {
+    log::debug!("read_all: {}", path.clone().as_string());
     let file_object = VirtualFS.lock().open(path)?;
     let mut content = Vec::with_capacity(file_object.info().unwrap().size);
     let mut total_read = 0;
@@ -75,5 +76,6 @@ pub fn read_all(path: Path) -> FSResult<Vec<u8>> {
         total_read += n;
     }
 
+    log::debug!("read_all: total {} bytes", total_read);
     Ok(content)
 }

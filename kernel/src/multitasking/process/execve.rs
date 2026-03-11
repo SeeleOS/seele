@@ -15,25 +15,24 @@ use crate::{
             thread::Thread,
         },
     },
-    println, s_println,
     userspace::elf_loader::load_elf,
 };
 
 impl Process {
     fn execve(&mut self, path: Path, args: Vec<String>) -> Result<*mut ThreadSnapshot, FSError> {
         // TODO: kill all the other threads when execveing
-        s_println!("in execve");
+        log::info!("execve: start");
         self.addrspace.clean();
 
-        println!("start locking thread manager");
+        log::debug!("execve: locking thread manager");
         let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-        println!("thread manager locked");
+        log::debug!("execve: thread manager locked");
 
         let thread = thread_manager.current.clone().unwrap();
 
-        println!("killing all except stuff ");
+        log::debug!("execve: kill all except current");
         //thread_manager.kill_all_except(thread.clone());
-        println!("killing all done");
+        log::debug!("execve: kill all done");
 
         let program = read_all(path.clone())?;
 
@@ -47,9 +46,9 @@ impl Process {
 
         init_stack_layout(&mut stack_builder, &program);
 
-        println!("start locking thread");
+        log::debug!("execve: locking current thread");
         let mut thread_locked = thread.lock();
-        println!("thjrea dlocked");
+        log::debug!("execve: current thread locked");
 
         thread_locked.snapshot = ThreadSnapshot::new(
             program.entry_point() as u64,
@@ -67,9 +66,9 @@ impl Process {
 
 pub fn execve(path: Path, args: Vec<String>) -> Result<(), FSError> {
     let snapshot = {
-        println!("locking mgr");
+        log::debug!("execve: locking process manager");
         let manager = MANAGER.lock();
-        println!("mgr locked");
+        log::debug!("execve: process manager locked");
         let current = manager.current.clone().unwrap();
         current.lock().execve(path, args)?
     };

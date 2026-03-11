@@ -42,13 +42,23 @@ fn syscall_handler_unwrapped(
     arg5: u64,
     arg6: u64,
 ) -> isize {
+    log::trace!(
+        "syscall {} args [{:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x}]",
+        syscall_no,
+        arg1,
+        arg2,
+        arg3,
+        arg4,
+        arg5,
+        arg6
+    );
     if let Some(Some(handler)) = SYSCALL_TABLE.get(syscall_no as usize) {
         match handler(arg1, arg2, arg3, arg4, arg5, arg6) {
             Ok(value) => value as isize,
             Err(err) => err as isize,
         }
     } else {
-        println!("Attempted to call invalid syscall {}", syscall_no);
+        log::error!("Attempted to call invalid syscall {}", syscall_no);
         SyscallError::NoSyscall as isize
     }
 }

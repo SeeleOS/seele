@@ -11,7 +11,6 @@ use crate::{
         spawner::TaskSpawner,
         task::{Task, TaskID, TaskWaker},
     },
-    s_println,
 };
 
 // When a task was awoken, the taskid will be pushed to the
@@ -72,9 +71,9 @@ impl Executor {
 
     pub fn run(&mut self) -> ! {
         loop {
-            s_println!("started running queued tasks");
+            log::trace!("started running queued tasks");
             self.run_queued_tasks();
-            s_println!("finished running queued tasks");
+            log::trace!("finished running queued tasks");
             self.sleep_on_idle();
         }
     }
