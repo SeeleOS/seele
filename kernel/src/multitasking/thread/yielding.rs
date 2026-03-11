@@ -2,6 +2,7 @@ use alloc::collections::vec_deque::VecDeque;
 
 use crate::multitasking::{
     kernel_task::{TASK_SPAWNER, task::Task},
+    process::misc::ProcessID,
     thread::{ThreadRef, future::ThreadFuture, manager::ThreadManager, misc::State},
 };
 
@@ -19,6 +20,8 @@ pub enum BlockType {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum WakeType {
     Keyboard,
+    // Waiting for a process to exit
+    ProcsesExit(ProcessID),
     IO,
 }
 
@@ -26,6 +29,7 @@ pub enum WakeType {
 pub struct BlockedQueues {
     pub keyboard: VecDeque<ThreadRef>,
     pub io: VecDeque<ThreadRef>,
+    pub process_exit: VecDeque<ThreadRef>,
 }
 
 #[macro_export]
