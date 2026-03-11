@@ -3,7 +3,7 @@ use log::{Level, LevelFilter};
 use crate::{graphics::terminal::TERMINAL, println, s_println};
 use owo_colors::OwoColorize;
 
-const LEVEL_FILTER: LevelFilter = LevelFilter::Trace;
+const LEVEL_FILTER: LevelFilter = LevelFilter::Info;
 
 static LOGGER: Logger = Logger;
 

@@ -1,4 +1,4 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{string::String, sync::Arc, vec::Vec};
 use spin::Mutex;
 
 use crate::{
@@ -39,7 +39,14 @@ impl Process {
         let process = &mut *process_arc.lock();
 
         log::debug!("process {}: setup start", pid.0);
-        let context = setup_process(path, &mut process.addrspace, &mut process.objects).unwrap();
+        let context = setup_process(
+            path,
+            Vec::new(),
+            Vec::new(),
+            &mut process.addrspace,
+            &mut process.objects,
+        )
+        .unwrap();
         log::debug!("process {}: setup done", pid.0);
 
         // Initilizes the main thread
@@ -53,8 +60,12 @@ impl Process {
     }
 }
 
+pub type EnvironmentVariable = (String, String);
+
 pub fn setup_process(
     path: Path,
+    args: Vec<String>,
+    env: Vec<EnvironmentVariable>,
     addrspace: &mut AddrSpace,
     objects: &mut Vec<Option<Arc<dyn Object>>>,
 ) -> Result<ThreadSnapshot, FSError> {
