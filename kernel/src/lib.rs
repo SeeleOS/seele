@@ -30,6 +30,7 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
 use crate::filesystem::block_device::initrd::{self};
 use crate::filesystem::path::Path;
 use crate::filesystem::vfs::VirtualFS;
+use crate::graphics::terminal;
 use crate::misc::others::enable_sse;
 use crate::misc::{gdt, tss};
 use crate::multitasking::kernel_task;
@@ -53,15 +54,17 @@ fn test_k_main(_boot_info: &'static mut BootInfo) -> ! {
 }
 
 pub fn init(bootinfo: &'static mut BootInfo) -> ! {
-    enable_sse();
-    log::info!("init: sse enabled");
-    tss::init();
-    log::info!("init: tss ready");
     memory::init(
         bootinfo.physical_memory_offset.into_option().unwrap(),
         &bootinfo.memory_regions,
     );
-    log::info!("init: memory ready");
+
+    s_println!("start init graphics");
+    graphics::init(bootinfo.framebuffer.as_mut().unwrap());
+    enable_sse();
+    log::info!("init: sse enabled");
+    tss::init();
+    log::info!("init: tss ready");
     initrd::init(
         bootinfo.ramdisk_addr.into_option().expect("No ramdisk."),
         bootinfo.ramdisk_len,
@@ -70,8 +73,7 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
 
     VirtualFS.lock().init().unwrap();
     log::info!("init: vfs ready");
-    graphics::init(bootinfo.framebuffer.as_mut().unwrap());
-    log::info!("init: graphics ready");
+    terminal::init_font();
     gdt::init();
     log::info!("init: gdt ready");
     misc::init();

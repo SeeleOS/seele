@@ -22,7 +22,6 @@ entry_point!(k_main, config = &BOOTLOADER_CONFIG);
 fn k_main(bootinfo: &'static mut BootInfo) -> ! {
     #[cfg(test)]
     debug_exit(kernel::debug_exit::QemuExitCode::Success);
-    log::info!("Welcome  Elysia-OS v0.1.0");
 
     init(bootinfo);
 }

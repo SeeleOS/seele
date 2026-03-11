@@ -1,10 +1,30 @@
 use core::fmt::{Arguments, Write};
 
+use alloc::boxed::Box;
 use conquer_once::spin::OnceCell;
-use os_terminal::{Palette, Terminal};
+use os_terminal::{Palette, Terminal, font::TrueTypeFont};
 use spin::Mutex;
 
-use crate::graphics::framebuffer::{Canvas, FRAME_BUFFER};
+use crate::{
+    filesystem::{path::Path, vfs_operations::read_all},
+    graphics::framebuffer::{Canvas, FRAME_BUFFER},
+};
+
+const FONT_PATH: &str = "/misc/fonts/maplem~1.ttf";
+
+pub fn init_font() {
+    let font_path = Path::new(FONT_PATH);
+    let font: &'static mut [u8] =
+        Box::leak(Box::new(read_all(font_path).unwrap()).into_boxed_slice());
+
+    let font_manager = TrueTypeFont::new(13.0, font);
+
+    TERMINAL
+        .get()
+        .unwrap()
+        .lock()
+        .set_font_manager(Box::new(font_manager));
+}
 
 pub const COLOR_SCHEME: Palette = Palette {
     background: (30, 34, 51),
