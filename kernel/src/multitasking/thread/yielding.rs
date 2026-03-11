@@ -34,6 +34,19 @@ pub struct BlockedQueues {
     pub process_exit: VecDeque<ThreadRef>,
 }
 
+impl BlockedQueues {
+    pub fn push(&mut self, thread_ref: ThreadRef, block_type: BlockType) {
+        match block_type {
+            BlockType::WakeRequired(wake_type) => match wake_type {
+                WakeType::ProcsesExit(_) => self.process_exit.push_back(thread_ref),
+                WakeType::Keyboard => self.keyboard.push_back(thread_ref),
+                WakeType::IO => self.io.push_back(thread_ref),
+            },
+            _ => unimplemented!(),
+        }
+    }
+}
+
 #[macro_export]
 macro_rules! register_wake_func {
     ($type: ident) => {
@@ -48,6 +61,19 @@ macro_rules! register_wake_func {
 }
 
 impl ThreadManager {
+    pub fn block(&mut self, thread_ref: ThreadRef, block_type: BlockType) {
+        let mut thread = thread_ref.lock();
+
+        thread.state = State::Blocked(block_type);
+
+        self.blocked_queues.push(thread_ref.clone(), block_type);
+    }
+
+    pub fn block_current(&mut self, block_type: BlockType) {
+        let current = self.current.clone().unwrap();
+        self.block(current, block_type);
+    }
+
     pub fn wake(&mut self, thread: ThreadRef) {
         let mut locked_thread = thread.lock();
         if matches!(locked_thread.state, State::Blocked(_)) {
