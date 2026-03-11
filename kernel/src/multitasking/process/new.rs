@@ -60,12 +60,10 @@ impl Process {
     }
 }
 
-pub type EnvironmentVariable = (String, String);
-
 pub fn setup_process(
     path: Path,
     args: Vec<String>,
-    env: Vec<EnvironmentVariable>,
+    env: Vec<String>,
     addrspace: &mut AddrSpace,
     objects: &mut Vec<Option<Arc<dyn Object>>>,
 ) -> Result<ThreadSnapshot, FSError> {
@@ -77,7 +75,7 @@ pub fn setup_process(
 
     assert!(!program.is_pie(), "Pie program is not supported for now");
 
-    init_stack_layout(&mut stack_builder, &program);
+    init_stack_layout(&mut stack_builder, &program, args, env);
 
     init_objects(objects);
 

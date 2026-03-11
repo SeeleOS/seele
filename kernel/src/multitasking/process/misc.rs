@@ -1,6 +1,6 @@
 use core::sync::atomic::AtomicU64;
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{string::String, sync::Arc, vec::Vec};
 use elfloader::ElfBinary;
 
 use crate::{
@@ -31,27 +31,35 @@ pub fn init_objects(objects: &mut Vec<Option<Arc<dyn Object>>>) {
     objects.push(Some(Arc::new(TtyDevice))); // stderr
 }
 
-pub fn init_stack_layout(builder: &mut StackBuilder, file: &ElfBinary) {
-    // A. 先在栈的最顶端存入字符串 "init\0"
-    // 字符串占用 5 字节，为了对齐我们按 8 字节处理
-    let arg_str = builder.push_str("init");
+pub fn init_stack_layout(
+    builder: &mut StackBuilder,
+    file: &ElfBinary,
+    args: Vec<String>,
+    env_vars: Vec<String>,
+) {
+    let mut arg_ptrs = Vec::new();
+    let mut env_ptrs = Vec::new();
 
-    // 手动移动指针存入字符串
-    //*virt_stack_write = (virt_stack_write).sub(16);
-    //core::ptr::copy_nonoverlapping(arg_str.as_ptr(), *virt_stack_write as *mut u8, str_len);
+    arg_ptrs.push(builder.push_str("_placeholder_name"));
+
+    args.iter().for_each(|f| arg_ptrs.push(builder.push_str(f)));
+    env_vars
+        .iter()
+        .for_each(|f| env_ptrs.push(builder.push_str(f)));
 
     builder.push(0);
     // B. 使用你的 write_and_sub 按照 ABI 逆序压栈
     builder.push_aux_entries(file);
 
     builder.push(0); // envp = 0
+    env_ptrs.iter().for_each(|f| builder.push(*f));
 
     // argv
     builder.push(0); // argv[1] == null (end)
-    builder.push(arg_str); // argv[0] ==  *arg_str
+    arg_ptrs.iter().for_each(|f| builder.push(*f));
 
-    // argc (1 arguments)
-    builder.push(1);
+    // argc
+    builder.push(args.len() as u64 + 1);
 }
 
 impl Process {

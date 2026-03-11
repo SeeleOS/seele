@@ -7,6 +7,7 @@ use crate::{
         process::{
             Process,
             misc::{init_objects, init_stack_layout},
+            new::setup_process,
         },
         scheduling::return_to_executor_no_save,
         thread::{
@@ -21,44 +22,34 @@ use crate::{
 impl Process {
     fn execve(&mut self, path: Path, args: Vec<String>) -> Result<*mut ThreadSnapshot, FSError> {
         // TODO: kill all the other threads when execveing
-        log::debug!("execve: start {}", path.clone().as_string());
+        log::trace!("execve: start {}", path.clone().as_string());
         self.addrspace.clean();
 
-        log::debug!("execve: locking thread manager");
-        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-        log::debug!("execve: thread manager locked");
+        log::trace!("execve: locking thread manager");
+        let thread_manager = THREAD_MANAGER.get().unwrap().lock();
+        log::trace!("execve: thread manager locked");
 
         let thread = thread_manager.current.clone().unwrap();
 
-        log::debug!("execve: kill all except current");
+        log::trace!("execve: kill all except current");
         //thread_manager.kill_all_except(thread.clone());
-        log::debug!("execve: kill all done");
-
-        let program = read_all(path.clone())?;
-
-        let mut stack_builder = self.addrspace.allocate_user(16).1;
-        let program = load_elf(&mut self.addrspace, &program);
+        log::trace!("execve: kill all done");
 
         // Reallocates the kernel stack top (just in case)
         self.kernel_stack_top = self.addrspace.allocate_kernel(16).1.finish();
 
-        assert!(!program.is_pie(), "Pie program is not supported for now");
-
-        init_stack_layout(&mut stack_builder, &program);
-
-        log::debug!("execve: locking current thread");
+        log::trace!("execve: locking current thread");
         let mut thread_locked = thread.lock();
-        log::debug!("execve: current thread locked");
+        log::trace!("execve: current thread locked");
 
-        thread_locked.snapshot = ThreadSnapshot::new(
-            program.entry_point() as u64,
+        thread_locked.snapshot = setup_process(
+            path,
+            args,
+            Vec::new(),
             &mut self.addrspace,
-            stack_builder.finish().as_u64(),
-            ThreadSnapshotType::Thread,
-        );
-        log::debug!("execve: entry {:#x}", program.entry_point());
+            &mut self.objects,
+        )?;
 
-        init_objects(&mut self.objects);
         self.addrspace.load();
 
         Ok(&mut thread_locked.snapshot as *mut ThreadSnapshot)
