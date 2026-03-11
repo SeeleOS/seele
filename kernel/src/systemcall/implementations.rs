@@ -38,7 +38,6 @@ static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ProcessRef>>> = Mutex::new(BTre
 define_syscall!(
     WaitForProcessExit,
     |target_process: ProcessID, exit_code_ptr: *mut u64| {
-        println!("waitpid called!");
         let exited = MANAGER
             .lock()
             .processes
