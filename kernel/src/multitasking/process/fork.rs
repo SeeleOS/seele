@@ -37,6 +37,7 @@ impl Process {
             threads: Vec::new(),
             objects: self.objects.clone(),
             current_directory: self.current_directory.clone(),
+            exit_code: None,
         }));
 
         let new_thread = current_thread.lock().clone_and_spawn(new_process.clone());

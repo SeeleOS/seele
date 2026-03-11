@@ -31,6 +31,7 @@ impl Process {
             kernel_stack_top,
             current_directory: Path::default(),
             threads: Vec::new(),
+            exit_code: None,
             objects: Vec::new(),
         }));
 
