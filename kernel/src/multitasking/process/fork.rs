@@ -15,7 +15,7 @@ use crate::{
 
 impl Process {
     pub fn fork(&self, manager: &mut MutexGuard<Manager>) -> ProcessID {
-        log::info!("inside fork");
+        log::debug!("inside fork");
         let pid = ProcessID::default();
         let current_thread = THREAD_MANAGER
             .get()
@@ -29,6 +29,7 @@ impl Process {
             current_thread.lock().snapshot.inner.rsp
         );
 
+        log::debug!("fork: parent {} -> child {}", self.pid.0, pid.0);
         let new_process = Arc::new(Mutex::new(Self {
             pid,
             addrspace: self.addrspace.clone_all(),

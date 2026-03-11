@@ -187,6 +187,11 @@ define_syscall!(Execve, |path_str: String| {
 define_syscall!(Exit, |exit_code: u64| {
     let mut manager = THREAD_MANAGER.get().unwrap().lock();
 
+    log::debug!(
+        "exit: pid {} code {}",
+        get_current_process().lock().pid.0,
+        exit_code
+    );
     manager.mark_current_as_zombie();
 
     get_current_process().lock().exit_code = Some(exit_code);

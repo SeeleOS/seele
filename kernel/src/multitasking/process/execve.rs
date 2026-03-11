@@ -21,7 +21,7 @@ use crate::{
 impl Process {
     fn execve(&mut self, path: Path, args: Vec<String>) -> Result<*mut ThreadSnapshot, FSError> {
         // TODO: kill all the other threads when execveing
-        log::info!("execve: start");
+        log::debug!("execve: start {}", path.clone().as_string());
         self.addrspace.clean();
 
         log::debug!("execve: locking thread manager");
@@ -56,6 +56,7 @@ impl Process {
             stack_builder.finish().as_u64(),
             ThreadSnapshotType::Thread,
         );
+        log::debug!("execve: entry {:#x}", program.entry_point());
 
         init_objects(&mut self.objects);
         self.addrspace.load();
