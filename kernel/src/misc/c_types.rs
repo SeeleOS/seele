@@ -30,20 +30,20 @@ impl KernelFrom<CString> for String {
     }
 }
 
-impl<T: PartialEq<i32> + KernelFrom<T> + Copy> KernelFrom<CVec<T>> for Vec<T> {
-    fn k_from(val: CVec<T>) -> super::error::KernelResult<Self> {
+impl KernelFrom<CVec<CString>> for Vec<String> {
+    fn k_from(val: CVec<CString>) -> super::error::KernelResult<Self> {
         const MAX_LENGTH: usize = 4096;
 
         let mut vec = Vec::new();
 
         for i in 0..MAX_LENGTH {
             unsafe {
-                let val = *val.sub(i);
+                let ptr = *val.add(i);
 
-                if val == 0 {
+                if ptr.is_null() {
                     break;
                 }
-                vec.push(T::k_from(val)?);
+                vec.push(String::k_from(ptr)?);
             }
         }
 
