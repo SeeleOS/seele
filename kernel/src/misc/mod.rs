@@ -7,6 +7,7 @@ use crate::{
 };
 
 pub mod aux;
+pub mod c_types;
 pub mod debug_exit;
 pub mod error;
 pub mod gdt;

@@ -1,4 +1,7 @@
-use alloc::string::String;
+use core::char::MAX;
+
+use alloc::{string::String, vec::Vec};
+use elfloader::VAddr;
 use x86_64::{
     PhysAddr,
     registers::control::{Cr0, Cr0Flags, Cr3Flags, Cr4, Cr4Flags},
@@ -33,25 +36,4 @@ pub fn enable_sse() {
         cr4.insert(Cr4Flags::OSXMMEXCPT_ENABLE);
         Cr4::write(cr4);
     }
-}
-
-/// # Safety
-/// Caller mush provide valid pointer
-pub unsafe fn from_cstr(ptr: *const u8) -> Result<String, KernelError> {
-    const MAX_LENGTH: usize = 4096;
-
-    let mut str = String::new();
-
-    for i in 0..MAX_LENGTH {
-        unsafe {
-            let char = *ptr.add(i) as char;
-
-            if char == '\0' {
-                return Ok(str);
-            }
-            str.push(char);
-        }
-    }
-
-    Err(KernelError::InvalidString)
 }
