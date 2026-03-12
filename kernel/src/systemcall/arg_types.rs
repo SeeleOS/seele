@@ -1,7 +1,7 @@
 use alloc::string::String;
 
 use crate::{
-    filesystem::info::LinuxStat, misc::others::from_cstr, multitasking::process::misc::ProcessID,
+    filesystem::info::LinuxStat, misc::others::KernelFrom, multitasking::process::misc::ProcessID,
     systemcall::error::SyscallError,
 };
 
@@ -31,7 +31,7 @@ impl SyscallArg for usize {
 
 impl SyscallArg for String {
     fn from_u64(val: u64) -> Result<Self, SyscallError> {
-        unsafe { Ok(from_cstr(val as *const u8)?) }
+        Ok(String::k_from(val as *const u8)?)
     }
 }
 
