@@ -34,6 +34,10 @@ impl KernelFrom<CVec<CString>> for Vec<String> {
     fn k_from(val: CVec<CString>) -> super::error::KernelResult<Self> {
         const MAX_LENGTH: usize = 4096;
 
+        if val.is_null() {
+            return Ok(Vec::new());
+        }
+
         let mut vec = Vec::new();
 
         for i in 0..MAX_LENGTH {
