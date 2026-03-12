@@ -20,7 +20,12 @@ use crate::{
 };
 
 impl Process {
-    fn execve(&mut self, path: Path, args: Vec<String>) -> Result<*mut ThreadSnapshot, FSError> {
+    fn execve(
+        &mut self,
+        path: Path,
+        args: Vec<String>,
+        env: Vec<String>,
+    ) -> Result<*mut ThreadSnapshot, FSError> {
         // TODO: kill all the other threads when execveing
         log::trace!("execve: start {}", path.clone().as_string());
         self.addrspace.clean();
@@ -42,13 +47,8 @@ impl Process {
         let mut thread_locked = thread.lock();
         log::trace!("execve: current thread locked");
 
-        thread_locked.snapshot = setup_process(
-            path,
-            args,
-            Vec::new(),
-            &mut self.addrspace,
-            &mut self.objects,
-        )?;
+        thread_locked.snapshot =
+            setup_process(path, args, env, &mut self.addrspace, &mut self.objects)?;
 
         self.addrspace.load();
 
@@ -56,13 +56,13 @@ impl Process {
     }
 }
 
-pub fn execve(path: Path, args: Vec<String>) -> Result<(), FSError> {
+pub fn execve(path: Path, args: Vec<String>, env: Vec<String>) -> Result<(), FSError> {
     let snapshot = {
         log::debug!("execve: locking process manager");
         let manager = MANAGER.lock();
         log::debug!("execve: process manager locked");
         let current = manager.current.clone().unwrap();
-        current.lock().execve(path, args)?
+        current.lock().execve(path, args, env)?
     };
 
     unsafe { (*snapshot).switch_from(None, None) };

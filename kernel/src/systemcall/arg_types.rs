@@ -1,8 +1,13 @@
+use core::ffi::CStr;
+
 use alloc::{string::String, vec::Vec};
 
 use crate::{
     filesystem::info::LinuxStat,
-    misc::{c_types::CVec, others::KernelFrom},
+    misc::{
+        c_types::{CString, CVec},
+        others::KernelFrom,
+    },
     multitasking::process::misc::ProcessID,
     systemcall::error::SyscallError,
 };
@@ -27,12 +32,12 @@ pub trait SyscallArg {
 
 add_syscall_arg_type!(u32, usize, *mut LinuxStat, u64, *mut u8, *mut u64);
 
-impl<T: PartialEq<i32> + KernelFrom<T> + Copy> SyscallArg for Vec<T> {
+impl SyscallArg for Vec<String> {
     fn from_u64(val: u64) -> Result<Self, SyscallError>
     where
         Self: Sized,
     {
-        Ok(Vec::k_from(val as CVec<T>)?)
+        Ok(Vec::k_from(val as CVec<CString>)?)
     }
 }
 

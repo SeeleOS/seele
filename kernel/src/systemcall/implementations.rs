@@ -2,6 +2,7 @@ use core::slice;
 
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
+    ffi::CString,
     string::String,
     sync::Arc,
     vec::Vec,
@@ -175,10 +176,12 @@ define_syscall!(GetCurrentDirectory, |buf_ptr: *mut u8, len: usize| {
     Ok(buf_ptr as usize)
 });
 
-define_syscall!(Execve, |path_str: String| {
+define_syscall!(Execve, |path_str: String,
+                         args: Vec<String>,
+                         env: Vec<String>| {
     let path = Path::new(path_str.as_str());
 
-    execve(path, Vec::new())?;
+    execve(path, args, env)?;
     log::info!("execve done");
 
     Ok(0)
