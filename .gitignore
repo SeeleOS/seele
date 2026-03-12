@@ -1,4 +1,5 @@
 /target
+/posix-tests
 /disk
 /disk.img
 /toolchain
