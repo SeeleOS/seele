@@ -39,5 +39,5 @@ pub fn enable_sse() {
 }
 
 pub trait KernelFrom<T> {
-    fn from(val: T) -> KernelResult<T>;
+    fn from(val: T) -> KernelResult<Self>;
 }
