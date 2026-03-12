@@ -1,45 +1,52 @@
+use core::ffi::CStr;
+
 use alloc::{string::String, vec::Vec};
+use fatfs::SeekFrom;
+use x86_64::registers::segmentation::CS;
 
-use crate::misc::error::KernelError;
+use crate::misc::{error::KernelError, others::KernelFrom};
 
-pub type CStringPtr = *const u8;
+pub type CString = *const u8;
+pub type CVec<T> = *const T;
 
-/// # Safety
-/// Caller mush provide valid pointer
-pub unsafe fn from_cstr(ptr: CStringPtr) -> Result<String, KernelError> {
-    const MAX_LENGTH: usize = 4096;
+impl KernelFrom<CString> for String {
+    fn from(val: CString) -> super::error::KernelResult<Self> {
+        const MAX_LENGTH: usize = 4096;
 
-    let mut str = String::new();
+        let mut str = String::new();
 
-    for i in 0..MAX_LENGTH {
-        unsafe {
-            let char = *ptr.add(i) as char;
+        for i in 0..MAX_LENGTH {
+            unsafe {
+                let char = *val.add(i) as char;
 
-            if char == '\0' {
-                return Ok(str);
+                if char == '\0' {
+                    return Ok(str);
+                }
+                str.push(char);
             }
-            str.push(char);
         }
-    }
 
-    Err(KernelError::InvalidString)
+        Err(KernelError::InvalidString)
+    }
 }
 
-pub fn from_c_array(ptr: *const CStringPtr) -> Result<Vec<String>, KernelError> {
-    const MAX_LENGTH: usize = 4096;
+impl<T: PartialEq<i32> + KernelFrom<T> + Copy> KernelFrom<CVec<T>> for Vec<T> {
+    fn from(val: CVec<T>) -> super::error::KernelResult<Self> {
+        const MAX_LENGTH: usize = 4096;
 
-    let mut vec = Vec::new();
+        let mut vec = Vec::new();
 
-    for i in 0..MAX_LENGTH {
-        unsafe {
-            let val = *ptr.sub(i);
+        for i in 0..MAX_LENGTH {
+            unsafe {
+                let val = *val.sub(i);
 
-            if val.is_null() {
-                break;
+                if val == 0 {
+                    break;
+                }
+                vec.push(T::from(val)?);
             }
-            vec.push(from_cstr(val)?);
         }
-    }
 
-    Ok(vec)
+        Ok(vec)
+    }
 }
