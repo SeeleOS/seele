@@ -7,7 +7,7 @@ use x86_64::{
     registers::control::{Cr0, Cr0Flags, Cr3Flags, Cr4, Cr4Flags},
 };
 
-use crate::misc::error::KernelError;
+use crate::misc::error::{KernelError, KernelResult};
 /// Context for a CPU Core
 #[derive(Debug)]
 #[repr(C)]
@@ -36,4 +36,8 @@ pub fn enable_sse() {
         cr4.insert(Cr4Flags::OSXMMEXCPT_ENABLE);
         Cr4::write(cr4);
     }
+}
+
+pub trait KernelFrom<T> {
+    fn from(val: T) -> KernelResult<T>;
 }
