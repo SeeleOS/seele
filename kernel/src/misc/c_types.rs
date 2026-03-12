@@ -10,7 +10,7 @@ pub type CString = *const u8;
 pub type CVec<T> = *const T;
 
 impl KernelFrom<CString> for String {
-    fn from(val: CString) -> super::error::KernelResult<Self> {
+    fn k_from(val: CString) -> super::error::KernelResult<Self> {
         const MAX_LENGTH: usize = 4096;
 
         let mut str = String::new();
@@ -31,7 +31,7 @@ impl KernelFrom<CString> for String {
 }
 
 impl<T: PartialEq<i32> + KernelFrom<T> + Copy> KernelFrom<CVec<T>> for Vec<T> {
-    fn from(val: CVec<T>) -> super::error::KernelResult<Self> {
+    fn k_from(val: CVec<T>) -> super::error::KernelResult<Self> {
         const MAX_LENGTH: usize = 4096;
 
         let mut vec = Vec::new();
@@ -43,7 +43,7 @@ impl<T: PartialEq<i32> + KernelFrom<T> + Copy> KernelFrom<CVec<T>> for Vec<T> {
                 if val == 0 {
                     break;
                 }
-                vec.push(T::from(val)?);
+                vec.push(T::k_from(val)?);
             }
         }
 
