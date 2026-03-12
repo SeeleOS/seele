@@ -1,3 +1,5 @@
+use core::ffi::c_char;
+
 use crate::{errors::SyscallError, numbers::SyscallNumber, syscall, utils::SyscallResult, wrap_c};
 
 pub mod filesystem;
@@ -53,6 +55,11 @@ pub fn get_thread_id() -> SyscallResult {
     get_process_id()
 }
 
-pub fn execve(path: &str) -> SyscallResult {
-    syscall!(Execve, path.as_bytes().as_ptr() as u64)
+pub fn execve(path: &str, args: *const *mut c_char, env: *const *mut c_char) -> SyscallResult {
+    syscall!(
+        Execve,
+        path.as_bytes().as_ptr() as u64,
+        args as u64,
+        env as u64
+    )
 }
