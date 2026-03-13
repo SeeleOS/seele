@@ -56,7 +56,9 @@ impl Path {
             }
         }
 
-        vec.push(PathPart::Normal(buf));
+        if !buf.is_empty() {
+            vec.push(PathPart::Normal(buf));
+        }
 
         vec
     }
