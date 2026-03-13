@@ -6,7 +6,6 @@ use crate::misc::aux::AuxType;
 
 #[derive(Debug)]
 pub struct StackBuilder {
-    origin: u64,
     sp: VirtAddr,
     write_sp: *mut u64,
 }
@@ -14,7 +13,6 @@ pub struct StackBuilder {
 impl StackBuilder {
     pub fn new(sp: u64, write_sp: *mut u64) -> Self {
         Self {
-            origin: sp,
             sp: VirtAddr::new(sp),
             write_sp,
         }
