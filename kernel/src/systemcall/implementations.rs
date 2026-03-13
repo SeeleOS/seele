@@ -250,7 +250,7 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
 define_syscall!(Fork, {
     let mut manager = MANAGER.lock();
 
-    log::info!("start fork");
+    log::debug!("start fork");
     let current = manager.current.clone().unwrap();
     Ok(current.lock().fork(&mut manager).0 as usize)
 });

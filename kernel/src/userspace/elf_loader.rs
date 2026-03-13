@@ -6,13 +6,11 @@ use x86_64::{
     structures::paging::{FrameAllocator, Mapper, OffsetPageTable, PageTableFlags, Translate},
 };
 
-use crate::{
-    memory::{
-        addrspace::AddrSpace,
-        page_table_wrapper::PageTableWrapped,
-        paging::FRAME_ALLOCATOR,
-        utils::{apply_offset, page_range_from_size},
-    },
+use crate::memory::{
+    addrspace::AddrSpace,
+    page_table_wrapper::PageTableWrapped,
+    paging::FRAME_ALLOCATOR,
+    utils::{apply_offset, page_range_from_size},
 };
 
 pub type Function = *const extern "C" fn() -> !;
@@ -101,13 +99,13 @@ impl<'a> elfloader::ElfLoader for ElfLoader<'a> {
 
 /// Returns the entry point
 pub fn load_elf<'a>(addrspace: &mut AddrSpace, program: &'a [u8]) -> ElfBinary<'a> {
-    log::info!("load_elf: start ({} bytes)", program.len());
+    log::debug!("load_elf: start ({} bytes)", program.len());
     let binary = ElfBinary::new(program).expect("Failed to parse elf binary");
 
     binary
         .load(&mut ElfLoader::new(addrspace))
         .expect("Failed to load ELF");
 
-    log::info!("load_elf: done");
+    log::debug!("load_elf: done");
     binary
 }

@@ -3,23 +3,21 @@ use core::fmt::Arguments;
 use alloc::sync::Arc;
 use spin::mutex::Mutex;
 
-use crate::{
-    multitasking::{
-        kernel_task::{TASK_SPAWNER, task::Task},
-        process::ProcessRef,
-        thread::{
-            THREAD_MANAGER, ThreadRef,
-            future::ThreadFuture,
-            misc::{State, ThreadID},
-            snapshot::ThreadSnapshot,
-            thread::Thread,
-        },
+use crate::multitasking::{
+    kernel_task::{TASK_SPAWNER, task::Task},
+    process::ProcessRef,
+    thread::{
+        THREAD_MANAGER, ThreadRef,
+        future::ThreadFuture,
+        misc::{State, ThreadID},
+        snapshot::ThreadSnapshot,
+        thread::Thread,
     },
 };
 
 impl Thread {
     pub fn clone_and_spawn(&self, process: ProcessRef) -> ThreadRef {
-        log::info!("clone_and_spawn: start");
+        log::debug!("clone_and_spawn: start");
         let id = ThreadID::default();
         let thread = Self {
             parent: process.clone(),
