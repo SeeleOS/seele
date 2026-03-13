@@ -31,6 +31,10 @@ impl Path {
         Self(Self::parse(path), path.to_string())
     }
 
+    pub fn is_valid(&mut self, root: WrappedDirectory) -> bool {
+        self.navigate(root).is_ok()
+    }
+
     fn parse(path: &str) -> Vec<PathPart> {
         let mut buf = String::new();
         let mut vec = Vec::new();

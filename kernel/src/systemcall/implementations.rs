@@ -150,8 +150,13 @@ define_syscall!(
 );
 
 define_syscall!(ChangeDirectory, |dir: String| {
-    get_current_process().lock().current_directory = Path::new(dir.as_str());
-    Ok(0)
+    let mut dir = Path::new(dir.as_str());
+    if dir.is_valid(VirtualFS.lock().root.clone().unwrap()) {
+        get_current_process().lock().current_directory = dir;
+        Ok(0)
+    } else {
+        Err(SyscallError::FileNotFound)
+    }
 });
 
 define_syscall!(GetCurrentDirectory, |buf_ptr: *mut u8, len: usize| {
