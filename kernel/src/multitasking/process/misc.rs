@@ -59,7 +59,7 @@ pub fn init_stack_layout(
     arg_ptrs.iter().for_each(|f| builder.push(*f));
 
     // argc
-    builder.push(args.len() as u64 + 1);
+    builder.push(args.len() as u64);
 }
 
 impl Process {
