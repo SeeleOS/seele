@@ -40,14 +40,11 @@ pub fn init_stack_layout(
     let mut arg_ptrs = Vec::new();
     let mut env_ptrs = Vec::new();
 
-    arg_ptrs.push(builder.push_str("_placeholder_name"));
-
     args.iter().for_each(|f| arg_ptrs.push(builder.push_str(f)));
     env_vars
         .iter()
         .for_each(|f| env_ptrs.push(builder.push_str(f)));
 
-    builder.push(0);
     // B. 使用你的 write_and_sub 按照 ABI 逆序压栈
     builder.push_aux_entries(file);
 
@@ -59,7 +56,7 @@ pub fn init_stack_layout(
     arg_ptrs.iter().for_each(|f| builder.push(*f));
 
     // argc
-    builder.push(args.len() as u64 + 1);
+    builder.push(args.len() as u64);
 }
 
 impl Process {
