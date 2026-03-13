@@ -29,7 +29,6 @@
               ninja
               clang
               lld
-              codex
               rustc
               rustfmt
               gmp
