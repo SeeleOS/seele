@@ -31,7 +31,7 @@ impl Path {
         Self(Self::parse(path), path.to_string())
     }
 
-    pub fn is_valid(&mut self, root: WrappedDirectory) -> bool {
+    pub fn is_valid(&self, root: WrappedDirectory) -> bool {
         self.navigate(root).is_ok()
     }
 

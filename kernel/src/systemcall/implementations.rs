@@ -1,5 +1,6 @@
 use core::slice;
 
+use acpi::aml::object;
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
     ffi::CString,
@@ -150,13 +151,10 @@ define_syscall!(
 );
 
 define_syscall!(ChangeDirectory, |dir: String| {
-    let mut dir = Path::new(dir.as_str());
-    if dir.is_valid(VirtualFS.lock().root.clone().unwrap()) {
-        get_current_process().lock().current_directory = dir;
-        Ok(0)
-    } else {
-        Err(SyscallError::FileNotFound)
-    }
+    get_current_process()
+        .lock()
+        .change_directory(Path::new(&dir))?;
+    Ok(0)
 });
 
 define_syscall!(GetCurrentDirectory, |buf_ptr: *mut u8, len: usize| {
