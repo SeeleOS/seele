@@ -6,17 +6,17 @@ language = "C++"
 # 自动包含的头文件
 # 因为你的 sysdeps 是在内核环境或早期用户态，通常需要这些基础定义
 includes = ["stdint.h", "stddef.h"]
-include_guard = "elysiaos_syslib_h"
+include_guard = "seele_syslib_h"
 
 [export]
 # 如果你想给所有生成的函数加前缀，可以在这里设置
-prefix = "elysia_"
+prefix = "seele_"
 
 [parse]
 parse_deps = false
-include = ["elysiaos-syslib"]
+include = ["seele-syslib"]
 # 开启宏展开（这需要你的环境里有 nightly rust 或者安装了相应的插件）
-expand = ["elysiaos-syslib"]
+expand = ["seele-syslib"]
 
 # 处理你自定义的类型别名
 [defines]

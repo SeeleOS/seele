@@ -1,15 +1,15 @@
 [workspace]
 resolver = "3"
-members = ["elysiaos-syslib","kernel"]
+members = ["seele-syslib","kernel"]
 
 [package]
-name = "elysia-os-runner"
+name = "seeleos-runner"
 version = "0.1.0"
 edition = "2024"
 build = "misc/build.rs"
 
 [[bin]]
-name = "elysia-os-runner"
+name = "seeleos-runner"
 path = "misc/runner.rs"
 
 [profile.dev]

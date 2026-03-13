@@ -1,5 +1,5 @@
-#ifndef elysiaos_syslib_h
-#define elysiaos_syslib_h
+#ifndef seele_syslib_h
+#define seele_syslib_h
 
 #include <cstdarg>
 #include <cstdint>
@@ -33,4 +33,4 @@ intptr_t c_sys_configurate_object(uint64_t index, uint64_t request_num, uint8_t 
 
 }  // extern "C"
 
-#endif  // elysiaos_syslib_h
+#endif  // seele_syslib_h

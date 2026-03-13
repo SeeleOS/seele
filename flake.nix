@@ -47,8 +47,8 @@
             ];
             RUST_SRC_PATH = rustPlatform.rustLibSrc;
             shellHook = ''
-                                 export SYSROOT_DIR="/home/elysia/coding-project/elysia-os/sysroot"
-              		      export TOOLCHAIN_DIR="/home/elysia/coding-project/elysia-os/toolchain"
+                                 export SYSROOT_DIR="/home/elysia/coding-project/seeleos/sysroot"
+              		      export TOOLCHAIN_DIR="/home/elysia/coding-project/seeleos/toolchain"
                                     export RUSTUP_DIST_SERVER=https://mirrors.tuna.tsinghua.edu.cn/rustup
                                     export PATH=~/.cargo/bin:$TOOLCHAIN_DIR/misc/toolchain/bin:$PATH
                                                                      	  '';

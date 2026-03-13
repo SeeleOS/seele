@@ -1,4 +1,4 @@
-# Elysia OS
+# SeeleOS
 
 A small hobby OS written in Rust with a custom kernel, basic userspace, and a growing POSIX-compat layer.
 
@@ -27,23 +27,23 @@ Optional (for userspace C programs):
 Build and run (UEFI or BIOS):
 
 ```bash
-cargo run --bin elysia-os-runner --release -- uefi
+cargo run --bin seeleos-runner --release -- uefi
 # or
-cargo run --bin elysia-os-runner --release -- bios
+cargo run --bin seeleos-runner --release -- bios
 ```
 
 Build sample userspace programs:
 
 ```bash
 make -C Manuae-Shell
-make -C posix-tests
+make -C bash-test
 ```
 
 ## Usage
 
 - Boot the OS with QEMU (see Build and Run).
 - The default shell is loaded from `/programs` in the sysroot image.
-- Use `posix-tests.elf` to validate syscalls and basic POSIX behavior.
+- Use `bash-test.elf` to validate syscall and shell basics.
 
 ## Contributing
 
