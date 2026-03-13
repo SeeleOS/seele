@@ -48,12 +48,12 @@ pub fn init_stack_layout(
     // B. 使用你的 write_and_sub 按照 ABI 逆序压栈
     builder.push_aux_entries(file);
 
-    builder.push(0); // envp = 0
-    env_ptrs.iter().for_each(|f| builder.push(*f));
+    builder.push(0); // envp terminator
+    env_ptrs.iter().rev().for_each(|f| builder.push(*f));
 
     // argv
-    builder.push(0); // argv[1] == null (end)
-    arg_ptrs.iter().for_each(|f| builder.push(*f));
+    builder.push(0); // argv terminator
+    arg_ptrs.iter().rev().for_each(|f| builder.push(*f));
 
     // argc
     builder.push(args.len() as u64);
