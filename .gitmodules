@@ -1,6 +1,6 @@
-[submodule "relibc"]
-	path = relibc
-	url = https://gitlab.redox-os.org/redox-os/relibc.git
+[submodule "relibc-seele"]
+	path = relibc-seele
+	url = https://github.com/SeeleOS/relibc-seele
 [submodule "mlibc"]
 	path = mlibc
 	url = https://github.com/managarm/mlibc
