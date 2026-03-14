@@ -2,7 +2,5 @@
 /posix-tests
 /disk
 /disk.img
-/toolchain
 /sysroot
 /libc-test
-/dev_toolchain
