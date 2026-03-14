@@ -7,3 +7,6 @@
 [submodule "Manuae-Shell"]
 	path = Manuae-Shell
 	url = https://codeberg.org/sakettor/Manuae-Shell
+[submodule "toolchain"]
+	path = toolchain
+	url = https://github.com/SeeleOS/toolchain
