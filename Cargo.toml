@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["seele-syslib","kernel"]
+members = ["seele-syslib","kernel", "rust-test"]
 exclude = ["toolchain/rust-seele"]
 
 [package]
