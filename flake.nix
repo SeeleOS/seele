@@ -49,6 +49,7 @@
             shellHook = ''
                                  export SYSROOT_DIR="/home/elysia/coding-project/seeleos/sysroot"
               		      export TOOLCHAIN_DIR="/home/elysia/coding-project/seeleos/toolchain"
+                                    export RUSTUP_TOOLCHAIN=seele
                                     export RUSTUP_DIST_SERVER=https://mirrors.tuna.tsinghua.edu.cn/rustup
                                     export PATH=~/.cargo/bin:$TOOLCHAIN_DIR/misc/toolchain/bin:$PATH
                                                                      	  '';
