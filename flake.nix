@@ -53,10 +53,8 @@
                                     export RUSTUP_TOOLCHAIN=seele
                                     export RUSTUP_DIST_SERVER=https://mirrors.tuna.tsinghua.edu.cn/rustup
                                     export PATH=~/.cargo/bin:$TOOLCHAIN_DIR/misc/toolchain/bin:$PATH
-                                    if ! rustup toolchain list | grep -q "^seele"; then
-                                      echo "[devshell] Installing Rust toolchain 'seele'..."
-                                      (cd /home/elysia/coding-project/elysia-os/toolchain && ./install.rs) || echo "[devshell] install.rs failed"
-                                    fi
+                                    echo "[devshell] Ensuring Rust toolchain 'seele'..."
+                                    (cd /home/elysia/coding-project/elysia-os/toolchain && ./install.rs) || echo "[devshell] install.rs failed"
                                                                      	  '';
           };
       }
