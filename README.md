@@ -18,8 +18,20 @@ A small hobby OS written in Rust with a custom kernel, basic userspace, and a gr
 ## Build and Run
 
 Prereqs:
-- Rust toolchain with `x86_64-unknown-none` target
+- Seele Rust toolchain (`seele`), built from `toolchain/` in this repo
 - QEMU (`qemu-system-x86_64`)
+- (optional) host Rust toolchain with `x86_64-unknown-none` target for low-level experiments
+
+### Install the Seele toolchain
+
+From the repo root:
+
+```bash
+cd toolchain
+./install.rs
+```
+
+This installs a `seele` toolchain via `rustup toolchain link`, with the `x86_64-seele` target and its std.
 
 Optional (for userspace C programs):
 - `x86_64-elf-gcc`
