@@ -28,6 +28,7 @@
               cargo
               ninja
               clang
+              rust-script
               lld
               rustc
               rustfmt
