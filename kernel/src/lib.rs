@@ -89,6 +89,11 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     interrupts::init();
     log::info!("init: interrupts ready");
 
+    println!(
+        "{:?}",
+        VirtualFS.lock().list_contents(Path::new("/programs"))
+    );
+
     executor.run();
 }
 
