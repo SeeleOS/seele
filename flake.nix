@@ -35,6 +35,7 @@
               gmp
               mpfr
               libmpc
+              stdenv.cc.cc.lib
               flex
               pkgsCross.x86_64-embedded.buildPackages.gcc
               bison
