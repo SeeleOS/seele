@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["seele-syslib","kernel"]
+exclude = ["toolchain/rust-seele"]
 
 [package]
 name = "seeleos-runner"
