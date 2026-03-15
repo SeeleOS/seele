@@ -11,6 +11,7 @@ use crate::{
         framebuffer::{Canvas, FRAME_BUFFER},
         terminal,
     },
+    misc::serial_print::_print,
 };
 
 const FONT_PATH: &str = "/misc/fonts/maplem~1.ttf";
@@ -89,6 +90,8 @@ macro_rules! println {
 
 #[doc(hidden)]
 pub fn term_print(args: Arguments) {
+    _print(args);
+
     let mut term = TERMINAL.get().unwrap().lock();
 
     term.write_fmt(args).unwrap();
