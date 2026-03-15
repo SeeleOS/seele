@@ -32,6 +32,11 @@ impl ThreadSnapshot {
         virt_stack_addr: u64,
         snapshot_type: ThreadSnapshotType,
     ) -> Self {
+        log::trace!(
+            "ThreadSnapshot::new: entry_point = {:#x}, user_rsp = {:#x}",
+            entry_point,
+            virt_stack_addr
+        );
         Self {
             inner: Snapshot::default_regs(
                 entry_point,

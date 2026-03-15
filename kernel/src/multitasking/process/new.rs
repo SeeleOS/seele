@@ -72,6 +72,10 @@ pub fn setup_process(
 
     let mut stack_builder = addrspace.allocate_user(16).1;
     let program = load_elf(addrspace, &program);
+    log::debug!(
+        "setup_process: ELF entry_point = {:#x}",
+        program.entry_point()
+    );
 
     assert!(!program.is_pie(), "Pie program is not supported for now");
 
