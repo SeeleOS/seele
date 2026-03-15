@@ -8,6 +8,7 @@ use crate::{
         misc::ObjectResult,
         traits::{Configuratable, Writable},
     },
+    print,
 };
 
 #[derive(Debug)]
@@ -20,15 +21,7 @@ impl Object for TtyObject {
 
 impl Writable for TtyObject {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
-        let mut terminal = TERMINAL.get().unwrap().lock();
-
-        terminal
-            .write_str(from_utf8(buffer).unwrap_or("Unsupported character"))
-            .unwrap();
-        terminal.flush();
-
-        FRAME_BUFFER.get().unwrap().lock().flush();
-
+        print!("{}", from_utf8(buffer).unwrap_or("Unsupported character"));
         Ok(buffer.len())
     }
 }
