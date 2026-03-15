@@ -23,6 +23,11 @@ impl log::Log for Logger {
                         "{} {}",
                         " Error ".white().bold().on_red(),
                         content.red().bold()
+                    );
+                    s_println!(
+                        "{} {}",
+                        " Error ".white().bold().on_red(),
+                        content.red().bold()
                     )
                 }
                 Level::Warn => println!(
