@@ -19,16 +19,17 @@ impl log::Log for Logger {
             let content = record.args();
             match record.level() {
                 Level::Error => {
+                    s_println!(
+                        "{} {}",
+                        " Error ".white().bold().on_red(),
+                        content.red().bold()
+                    );
+
                     println!(
                         "{} {}",
                         " Error ".white().bold().on_red(),
                         content.red().bold()
                     );
-                    s_println!(
-                        "{} {}",
-                        " Error ".white().bold().on_red(),
-                        content.red().bold()
-                    )
                 }
                 Level::Warn => println!(
                     "{} {}",
