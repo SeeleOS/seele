@@ -27,6 +27,8 @@ fi
 
 echo "[rust-test] installing to ${TARGET_DIR}/${CRATE_NAME}..."
 sudo mkdir -p "${TARGET_DIR}"
+sudo rm -f "${TARGET_DIR}/${CRATE_NAME}"
 sudo cp "${BIN_PATH}" "${TARGET_DIR}/${CRATE_NAME}"
+sync
 
 echo "[rust-test] done."
