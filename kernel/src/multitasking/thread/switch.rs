@@ -10,7 +10,6 @@ use x86_64::{
 use crate::{
     misc::{CPU_CORE_CONTEXT, others::CpuCoreContext, snapshot::Snapshot},
     multitasking::thread::snapshot::{ThreadSnapshot, ThreadSnapshotType},
-    s_println,
 };
 
 impl ThreadSnapshot {

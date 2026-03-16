@@ -9,7 +9,7 @@ use crate::{
         MANAGER,
         thread::{THREAD_MANAGER, ThreadRef, misc::State, snapshot::ThreadSnapshot},
     },
-    println, s_println,
+    println,
     tss::TSS,
 };
 
@@ -74,16 +74,6 @@ impl Future for ThreadFuture {
                 )
             })
         };
-
-        unsafe {
-            let snap = &*thread_snapshot;
-            s_println!(
-                "switch to {:?} rip {:#x} rsp {:#x}",
-                snap.snapshot_type,
-                snap.inner.rip,
-                snap.inner.rsp
-            );
-        }
 
         unsafe {
             (*thread_snapshot).switch_from(

@@ -4,7 +4,6 @@ use crate::{
     interrupts::hardware_interrupt::{HardwareInterrupt, notify_end_of_interrupt},
     misc::snapshot::Snapshot,
     multitasking::{scheduling::return_to_executor, thread::snapshot::ThreadSnapshotType},
-    s_println,
 };
 
 #[unsafe(naked)]
