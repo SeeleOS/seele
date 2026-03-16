@@ -1,5 +1,3 @@
-use core::pat;
-
 use alloc::{string::String, vec::Vec};
 
 use crate::{
