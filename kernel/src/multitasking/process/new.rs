@@ -1,4 +1,8 @@
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    sync::Arc,
+    vec::{self, Vec},
+};
 use spin::Mutex;
 
 use crate::{
@@ -18,6 +22,8 @@ use crate::{
     object::Object,
     userspace::elf_loader::load_elf,
 };
+
+const DEFAULT_PATH: &str = "PATH=/programs";
 
 impl Process {
     pub fn new(path: Path) -> ProcessRef {
@@ -42,7 +48,7 @@ impl Process {
         let context = setup_process(
             path,
             Vec::new(),
-            Vec::new(),
+            alloc::vec![DEFAULT_PATH.to_string()],
             &mut process.addrspace,
             &mut process.objects,
         )
