@@ -1,24 +1,18 @@
 use core::ops::Deref;
 
-use alloc::{boxed::Box, vec};
+use alloc::{boxed::Box, sync::Arc, vec};
 use os_terminal::{
     Terminal,
     font::{BitmapFont, FontManager, TrueTypeFont},
 };
 use spin::Mutex;
-use spleen_font::PSF2Font;
-use vte::Parser;
-use x86_64::VirtAddr;
 
 use crate::{
-    filesystem::{
-        path::{Path, PathPart},
-        vfs::VirtualFS,
-        vfs_operations::read_all,
-    },
+    filesystem::path::{Path, PathPart},
     graphics::{
         framebuffer::{Canvas, FRAME_BUFFER},
-        terminal::{COLOR_SCHEME, TERMINAL, TermRenderer},
+        object::TerminalObject,
+        terminal::{COLOR_SCHEME, KernelTerminal, TermRenderer, state::DEFAULT_TERMINAL},
     },
 };
 
@@ -30,9 +24,7 @@ pub mod terminal;
 pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
     log::info!("graphics: init start");
     let canvas = FRAME_BUFFER.get_or_init(|| Mutex::new(Canvas::new(boot_info)));
-    let mut terminal = TERMINAL
-        .get_or_init(|| Mutex::new(Terminal::new(TermRenderer::new(canvas))))
-        .lock();
+    let mut terminal = Terminal::new(TermRenderer::new(canvas));
 
     log::debug!("graphics: terminal ready");
 
@@ -40,6 +32,12 @@ pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
     terminal.set_crnl_mapping(true);
     terminal.set_custom_color_scheme(&COLOR_SCHEME);
     terminal.set_auto_flush(false);
+
+    DEFAULT_TERMINAL.get_or_init(|| {
+        Arc::new(Mutex::new(TerminalObject {
+            inner: Arc::new(Mutex::new(KernelTerminal(terminal))),
+        }))
+    });
 
     log::debug!("graphics: terminal configured");
 }
