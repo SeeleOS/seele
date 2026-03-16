@@ -13,6 +13,12 @@ pub struct TtyDevice {
     terminal: TerminalObject,
 }
 
+impl TtyDevice {
+    pub fn new(terminal: TerminalObject) -> Self {
+        Self { terminal }
+    }
+}
+
 impl Object for TtyDevice {
     impl_cast_function!(writable, Writable);
     impl_cast_function!(readable, Readable);
