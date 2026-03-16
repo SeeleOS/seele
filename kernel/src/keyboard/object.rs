@@ -4,6 +4,10 @@ use spin::mutex::Mutex;
 use crate::{
     impl_cast_function,
     keyboard::decoding_task::KEYBOARD_QUEUE,
+    multitasking::thread::{
+        THREAD_MANAGER,
+        yielding::{BlockType, WakeType, block_current},
+    },
     object::{Object, misc::ObjectResult, traits::Readable},
 };
 
@@ -16,22 +20,25 @@ impl Object for KeyboardObject {
 
 impl Readable for KeyboardObject {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
-        let mut queue = KEYBOARD_QUEUE
-            .get_or_init(|| Mutex::new(VecDeque::new()))
-            .lock();
+        loop {
+            let mut queue = KEYBOARD_QUEUE
+                .get_or_init(|| Mutex::new(VecDeque::new()))
+                .lock();
 
-        if queue.is_empty() {
-            return Ok(0);
-        }
+            if queue.is_empty() {
+                drop(queue);
+                block_current(BlockType::WakeRequired(WakeType::Keyboard));
+            } else {
+                let mut read_chars = 0;
+                while read_chars < buffer.len() {
+                    if let Some(result) = queue.pop_front() {
+                        buffer[read_chars] = result;
+                        read_chars += 1;
+                    }
+                }
 
-        let mut read_chars = 0;
-        while read_chars < buffer.len() {
-            if let Some(result) = queue.pop_front() {
-                buffer[read_chars] = result;
-                read_chars += 1;
+                return Ok(read_chars);
             }
         }
-
-        Ok(read_chars)
     }
 }
