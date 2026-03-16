@@ -9,7 +9,9 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct TtyDevice;
+pub struct TtyDevice {
+    terminal: TerminalObject,
+}
 
 impl Object for TtyDevice {
     impl_cast_function!(writable, Writable);
@@ -20,13 +22,13 @@ impl Object for TtyDevice {
 impl Configuratable for TtyDevice {
     fn configure(&self, request: super::config::ConfigurateRequest) -> super::ObjectResult<isize> {
         log::trace!("tty: configure");
-        DEFAULT_TERMINAL.get().unwrap().lock().configure(request)
+        self.terminal.configure(request)
     }
 }
 
 impl Writable for TtyDevice {
     fn write(&self, buffer: &[u8]) -> super::ObjectResult<usize> {
-        DEFAULT_TERMINAL.get().unwrap().lock().write(buffer)
+        self.terminal.write(buffer)
     }
 }
 
