@@ -1,7 +1,7 @@
 use core::ptr::write_volatile;
 
 use crate::{
-    graphics::{object::TerminalObject, terminal::TERMINAL},
+    graphics::object::TerminalObject,
     object::{config::ConfigurateRequest, misc::ObjectResult, traits::Configuratable},
 };
 

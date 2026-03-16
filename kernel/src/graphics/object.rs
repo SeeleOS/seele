@@ -1,7 +1,7 @@
 use core::{fmt::Write, str::from_utf8};
 
 use alloc::sync::Arc;
-use spin::{Mutex, mutex::Mutex};
+use spin::Mutex;
 
 use crate::{
     graphics::{
@@ -26,13 +26,12 @@ pub struct TerminalObject {
 }
 
 impl TerminalObject {
-    pub fn new(term: impl AbstractTerminal) -> Self {
+    pub fn new(term: Arc<Mutex<dyn AbstractTerminal>>) -> Self {
+        let window_size = term.lock().size();
         Self {
-            window_size: WindowSizeInfo {
-                rows: 
-            },
+            window_size,
             terminal_info: TerminalInfo::new_default(),
-            inner: Arc::new(Mutex::new(term)),
+            inner: term,
         }
     }
 }

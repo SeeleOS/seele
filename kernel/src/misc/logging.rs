@@ -1,6 +1,6 @@
 use log::{Level, LevelFilter};
 
-use crate::{graphics::terminal::TERMINAL, println, s_println};
+use crate::{println, s_println};
 use owo_colors::OwoColorize;
 
 const LEVEL_FILTER: LevelFilter = LevelFilter::Info;

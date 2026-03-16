@@ -21,6 +21,8 @@ pub mod object;
 pub mod object_config;
 pub mod terminal;
 
+pub static FONT: &[u8] = include_bytes!("../../../misc/maplemono.ttf");
+
 pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
     log::info!("graphics: init start");
     let canvas = FRAME_BUFFER.get_or_init(|| Mutex::new(Canvas::new(boot_info)));
@@ -32,11 +34,12 @@ pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
     terminal.set_crnl_mapping(true);
     terminal.set_custom_color_scheme(&COLOR_SCHEME);
     terminal.set_auto_flush(false);
+    terminal.set_font_manager(Box::new(TrueTypeFont::new(12.0, FONT)));
 
     DEFAULT_TERMINAL.get_or_init(|| {
-        Arc::new(Mutex::new(TerminalObject {
-            inner: Arc::new(Mutex::new(KernelTerminal(terminal))),
-        }))
+        Arc::new(Mutex::new(TerminalObject::new(Arc::new(Mutex::new(
+            KernelTerminal(terminal),
+        )))))
     });
 
     log::debug!("graphics: terminal configured");
