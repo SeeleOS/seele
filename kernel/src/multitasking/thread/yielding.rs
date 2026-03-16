@@ -123,7 +123,6 @@ pub fn block(thread_ref: ThreadRef, block_type: BlockType) {
         thread_manager.block(thread_ref, block_type);
     }
 
-    s_println!("daadad");
     return_to_executor_from_current();
 }
 
