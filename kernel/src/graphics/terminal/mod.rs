@@ -11,6 +11,5 @@ pub use font::{FONT_PATH, init_font};
 pub use macros::term_print;
 use os_terminal::Terminal;
 pub use renderer::TermRenderer;
-pub use state::TERMINAL;
 
-pub struct KernelTerminal(Terminal<TermRenderer<'static>>);
+pub struct KernelTerminal(pub Terminal<TermRenderer<'static>>);
