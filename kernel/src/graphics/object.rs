@@ -1,7 +1,12 @@
 use core::{fmt::Write, str::from_utf8};
 
+use alloc::sync::Arc;
+
 use crate::{
-    graphics::{framebuffer::FRAME_BUFFER, terminal::TERMINAL},
+    graphics::{
+        framebuffer::FRAME_BUFFER,
+        terminal::{TERMINAL, term_trait::AbstractTerminal},
+    },
     impl_cast_function,
     object::{
         Object,
@@ -12,7 +17,9 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct TerminalObject;
+pub struct TerminalObject {
+    inner: Arc<dyn AbstractTerminal>,
+}
 
 impl Object for TerminalObject {
     impl_cast_function!(configuratable, Configuratable);
