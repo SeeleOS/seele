@@ -1,7 +1,7 @@
 use core::ptr::write_volatile;
 
 use crate::{
-    graphics::{object::TtyObject, terminal::TERMINAL},
+    graphics::{object::TerminalObject, terminal::TERMINAL},
     object::{config::ConfigurateRequest, misc::ObjectResult, traits::Configuratable},
 };
 
@@ -48,7 +48,7 @@ impl TerminalInfo {
         }
     }
 }
-impl Configuratable for TtyObject {
+impl Configuratable for TerminalObject {
     fn configure(&self, request: crate::object::config::ConfigurateRequest) -> ObjectResult<isize> {
         let terminal = TERMINAL.get().unwrap().lock();
 

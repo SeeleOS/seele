@@ -1,5 +1,5 @@
 use crate::{
-    graphics::object::TtyObject,
+    graphics::object::TerminalObject,
     impl_cast_function,
     keyboard::object::KeyboardObject,
     object::{
@@ -20,13 +20,13 @@ impl Object for TtyDevice {
 impl Configuratable for TtyDevice {
     fn configure(&self, request: super::config::ConfigurateRequest) -> super::ObjectResult<isize> {
         log::trace!("tty: configure");
-        TtyObject.configure(request)
+        TerminalObject.configure(request)
     }
 }
 
 impl Writable for TtyDevice {
     fn write(&self, buffer: &[u8]) -> super::ObjectResult<usize> {
-        TtyObject.write(buffer)
+        TerminalObject.write(buffer)
     }
 }
 
