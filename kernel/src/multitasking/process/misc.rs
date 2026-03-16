@@ -11,7 +11,7 @@ use crate::{
         Object,
         error::ObjectError,
         misc::{ObjectRef, ObjectResult},
-        tty_device::TtyDevice,
+        tty_device::{TtyDevice, get_default_tty},
     },
 };
 
@@ -38,9 +38,9 @@ impl Default for ProcessID {
 }
 
 pub fn init_objects(objects: &mut Vec<Option<Arc<dyn Object>>>) {
-    objects.push(Some(Arc::new(TtyDevice))); // stdin (unimpllemented)
-    objects.push(Some(Arc::new(TtyDevice))); // stdout
-    objects.push(Some(Arc::new(TtyDevice))); // stderr
+    objects.push(Some(get_default_tty())); // stdin (unimpllemented)
+    objects.push(Some(get_default_tty())); // stdout
+    objects.push(Some(get_default_tty())); // stderr
 }
 
 pub fn init_stack_layout(

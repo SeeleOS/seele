@@ -14,6 +14,7 @@ use crate::{
         object::TerminalObject,
         terminal::{COLOR_SCHEME, KernelTerminal, TermRenderer, state::DEFAULT_TERMINAL},
     },
+    object::tty_device::{DEFAULT_TTY, TtyDevice},
 };
 
 pub mod framebuffer;
@@ -36,11 +37,13 @@ pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
     terminal.set_auto_flush(false);
     terminal.set_font_manager(Box::new(TrueTypeFont::new(12.0, FONT)));
 
-    DEFAULT_TERMINAL.get_or_init(|| {
+    let default_terminal = DEFAULT_TERMINAL.get_or_init(|| {
         Arc::new(Mutex::new(TerminalObject::new(Arc::new(Mutex::new(
             KernelTerminal(terminal),
         )))))
     });
+
+    DEFAULT_TTY.get_or_init(|| Arc::new(TtyDevice::new(default_terminal.clone())));
 
     log::debug!("graphics: terminal configured");
 }
