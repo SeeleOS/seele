@@ -73,7 +73,6 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
 
     VirtualFS.lock().init().unwrap();
     log::info!("init: vfs ready");
-    terminal::init_font();
     gdt::init();
     log::info!("init: gdt ready");
     misc::init();
