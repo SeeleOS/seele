@@ -3,13 +3,15 @@ use x86_64::{
     instructions::interrupts::without_interrupts,
     registers::{
         control::{Efer, EferFlags},
-        model_specific::{KernelGsBase, LStar, SFMask},
+        model_specific::{KernelGsBase, LStar, SFMask, Star},
         rflags::RFlags,
     },
+    registers::segmentation::SegmentSelector,
+    PrivilegeLevel,
 };
 
 use crate::{
-    misc::{CPU_CORE_CONTEXT, others::CpuCoreContext},
+    misc::{CPU_CORE_CONTEXT, gdt::GDT, others::CpuCoreContext},
     systemcall::entry::syscall_entry,
 };
 
@@ -29,6 +31,14 @@ pub fn init() {
 
         // disable interrupts on systemcalls
         SFMask::write(RFlags::INTERRUPT_FLAG);
+
+        // set segment selectors for SYSCALL/SYSRET
+        let kernel_cs = SegmentSelector::new(GDT.1.kernel_code.index(), PrivilegeLevel::Ring0);
+        let kernel_ss = SegmentSelector::new(GDT.1.kernel_data.index(), PrivilegeLevel::Ring0);
+        let user_cs = SegmentSelector::new(GDT.1.user_code.index(), PrivilegeLevel::Ring3);
+        let user_ss = SegmentSelector::new(GDT.1.user_data.index(), PrivilegeLevel::Ring3);
+        Star::write(user_cs, user_ss, kernel_cs, kernel_ss)
+            .expect("invalid STAR segment selectors");
 
         // sets the entry point for systemcalls
         let syscall_entry_addr = VirtAddr::new(syscall_entry as *const () as usize as u64);

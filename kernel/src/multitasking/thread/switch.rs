@@ -42,6 +42,7 @@ impl ThreadSnapshot {
         });
         match self.snapshot_type {
             ThreadSnapshotType::Thread => self.jump_user(),
+            ThreadSnapshotType::Kernel => self.jump_kernel(),
             ThreadSnapshotType::Executor => self.jump_to_executor(),
         }
     }
@@ -156,6 +157,62 @@ impl ThreadSnapshot {
                 RDX_OFF   = const offset_of!(Snapshot, rdx),
                 RCX_OFF   = const offset_of!(Snapshot, rcx),
                 RAX_OFF   = const offset_of!(Snapshot, rax),
+        )
+    }
+
+    #[unsafe(naked)]
+    extern "C" fn jump_kernel(&mut self) {
+        naked_asm!(
+            // Keep self pointer in rax before changing rsp.
+            "mov rax, rdi",
+
+            // Restore kernel stack pointer.
+            "mov rsp, [rax + {INNER_OFF} + {RSP_OFF}]",
+
+            // Restore rflags (same CPL).
+            "push [rax + {INNER_OFF} + {FLAGS_OFF}]",
+            "popfq",
+
+            // Restore general registers.
+            "mov r15, [rax + {INNER_OFF} + {R15_OFF}]",
+            "mov r14, [rax + {INNER_OFF} + {R14_OFF}]",
+            "mov r13, [rax + {INNER_OFF} + {R13_OFF}]",
+            "mov r12, [rax + {INNER_OFF} + {R12_OFF}]",
+            "mov r11, [rax + {INNER_OFF} + {R11_OFF}]",
+            "mov r10, [rax + {INNER_OFF} + {R10_OFF}]",
+            "mov r9,  [rax + {INNER_OFF} + {R9_OFF}]",
+            "mov r8,  [rax + {INNER_OFF} + {R8_OFF}]",
+            "mov rsi, [rax + {INNER_OFF} + {RSI_OFF}]",
+            "mov rbp, [rax + {INNER_OFF} + {RBP_OFF}]",
+            "mov rbx, [rax + {INNER_OFF} + {RBX_OFF}]",
+            "mov rdx, [rax + {INNER_OFF} + {RDX_OFF}]",
+            "mov rcx, [rax + {INNER_OFF} + {RCX_OFF}]",
+            "mov rdi, [rax + {INNER_OFF} + {RDI_OFF}]",
+
+            // Push target RIP and return without changing stack depth.
+            "push [rax + {INNER_OFF} + {RIP_OFF}]",
+            "mov rax, [rax + {INNER_OFF} + {RAX_OFF}]",
+            "ret",
+
+            INNER_OFF = const offset_of!(ThreadSnapshot, inner),
+            RIP_OFF   = const offset_of!(Snapshot, rip),
+            FLAGS_OFF = const offset_of!(Snapshot, rflags),
+            RSP_OFF   = const offset_of!(Snapshot, rsp),
+            R15_OFF   = const offset_of!(Snapshot, r15),
+            R14_OFF   = const offset_of!(Snapshot, r14),
+            R13_OFF   = const offset_of!(Snapshot, r13),
+            R12_OFF   = const offset_of!(Snapshot, r12),
+            R11_OFF   = const offset_of!(Snapshot, r11),
+            R10_OFF   = const offset_of!(Snapshot, r10),
+            R9_OFF    = const offset_of!(Snapshot, r9),
+            R8_OFF    = const offset_of!(Snapshot, r8),
+            RDI_OFF   = const offset_of!(Snapshot, rdi),
+            RSI_OFF   = const offset_of!(Snapshot, rsi),
+            RBP_OFF   = const offset_of!(Snapshot, rbp),
+            RBX_OFF   = const offset_of!(Snapshot, rbx),
+            RDX_OFF   = const offset_of!(Snapshot, rdx),
+            RCX_OFF   = const offset_of!(Snapshot, rcx),
+            RAX_OFF   = const offset_of!(Snapshot, rax),
         )
     }
 }

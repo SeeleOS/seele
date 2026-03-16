@@ -2,13 +2,16 @@ use core::ptr::with_exposed_provenance;
 
 use alloc::{collections::vec_deque::VecDeque, vec::Vec};
 
-use crate::multitasking::{
-    kernel_task::{TASK_SPAWNER, task::Task},
-    process::misc::ProcessID,
-    scheduling::return_to_executor_from_current,
-    thread::{
-        THREAD_MANAGER, ThreadRef, future::ThreadFuture, manager::ThreadManager, misc::State,
+use crate::{
+    multitasking::{
+        kernel_task::{TASK_SPAWNER, task::Task},
+        process::misc::ProcessID,
+        scheduling::{return_to_executor_from_current, return_to_executor_no_save},
+        thread::{
+            THREAD_MANAGER, ThreadRef, future::ThreadFuture, manager::ThreadManager, misc::State,
+        },
     },
+    s_println,
 };
 
 use paste::paste;
@@ -120,6 +123,7 @@ pub fn block(thread_ref: ThreadRef, block_type: BlockType) {
         thread_manager.block(thread_ref, block_type);
     }
 
+    s_println!("daadad");
     return_to_executor_from_current();
 }
 

@@ -20,6 +20,8 @@ pub enum ThreadSnapshotType {
     // Snapshot of the thread it self
     #[default]
     Thread,
+    // Snapshot of a blocked kernel context (e.g. syscall blocking)
+    Kernel,
     // Snapshot for the poll()
     // function of the thread
     Executor,

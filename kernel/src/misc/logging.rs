@@ -25,11 +25,11 @@ impl log::Log for Logger {
                         content.red().bold()
                     );
 
-                    println!(
-                        "{} {}",
-                        " Error ".white().bold().on_red(),
-                        content.red().bold()
-                    );
+                    //println!(
+                    //  "{} {}",
+                    //" Error ".white().bold().on_red(),
+                    //content.red().bold()
+                    //);
                 }
                 Level::Warn => println!(
                     "{} {}",

@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use x86_64::{
     instructions::tables::load_tss,
-    registers::segmentation::{CS, Segment},
+    registers::segmentation::{CS, DS, ES, SS, Segment},
     structures::gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector},
 };
 
@@ -43,6 +43,10 @@ pub fn init() {
         // updates the CS so that it knows the gdt stuff or
         // whatever have changed.
         CS::set_reg(GDT.1.kernel_code);
+        // Ensure data segments use the kernel data selector.
+        SS::set_reg(GDT.1.kernel_data);
+        DS::set_reg(GDT.1.kernel_data);
+        ES::set_reg(GDT.1.kernel_data);
         // load the tss from the gdt entry
         load_tss(GDT.1.tss_selector);
     }

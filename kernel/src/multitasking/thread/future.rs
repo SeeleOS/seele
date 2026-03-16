@@ -76,6 +76,16 @@ impl Future for ThreadFuture {
         };
 
         unsafe {
+            let snap = &*thread_snapshot;
+            s_println!(
+                "switch to {:?} rip {:#x} rsp {:#x}",
+                snap.snapshot_type,
+                snap.inner.rip,
+                snap.inner.rsp
+            );
+        }
+
+        unsafe {
             (*thread_snapshot).switch_from(
                 Some(&mut *executor_snapshot),
                 Some(&mut Snapshot::from_current()),
