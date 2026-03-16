@@ -1,3 +1,5 @@
+use core::pat;
+
 use alloc::{string::String, vec::Vec};
 
 use crate::{
@@ -26,6 +28,9 @@ impl Process {
         args: Vec<String>,
         env: Vec<String>,
     ) -> Result<*mut ThreadSnapshot, FSError> {
+        if !path.is_valid(VirtualFS.lock().root.clone().unwrap()) {
+            return Err(FSError::NotFound);
+        }
         // TODO: kill all the other threads when execveing
         log::trace!("execve: start {}", path.clone().as_string());
         self.addrspace.clean();
@@ -48,7 +53,7 @@ impl Process {
         log::trace!("execve: current thread locked");
 
         thread_locked.snapshot =
-            setup_process(path, args, env, &mut self.addrspace, &mut self.objects)?;
+            setup_process(path, args, env, &mut self.addrspace, &mut self.objects).unwrap();
 
         self.addrspace.load();
 
