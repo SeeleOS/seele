@@ -1,8 +1,12 @@
 use core::fmt::{Arguments, Write};
 
-use crate::{graphics::framebuffer::FRAME_BUFFER, misc::serial_print::_print};
+use alloc::fmt::format;
 
-use super::state::TERMINAL;
+use crate::{
+    graphics::{framebuffer::FRAME_BUFFER, terminal::state::DEFAULT_TERMINAL},
+    misc::serial_print::_print,
+    object::traits::Writable,
+};
 
 #[macro_export]
 macro_rules! print {
@@ -19,10 +23,9 @@ macro_rules! println {
 pub fn term_print(args: Arguments) {
     _print(args);
 
-    let mut term = TERMINAL.get().unwrap().lock();
-
-    term.write_fmt(args).unwrap();
-    term.flush();
-
-    FRAME_BUFFER.get().unwrap().lock().flush();
+    DEFAULT_TERMINAL
+        .get()
+        .unwrap()
+        .lock()
+        .write(format(args).as_bytes());
 }
