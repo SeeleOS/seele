@@ -5,7 +5,10 @@ use alloc::{collections::vec_deque::VecDeque, vec::Vec};
 use crate::multitasking::{
     kernel_task::{TASK_SPAWNER, task::Task},
     process::misc::ProcessID,
-    thread::{ThreadRef, future::ThreadFuture, manager::ThreadManager, misc::State},
+    scheduling::return_to_executor_from_current,
+    thread::{
+        THREAD_MANAGER, ThreadRef, future::ThreadFuture, manager::ThreadManager, misc::State,
+    },
 };
 
 use paste::paste;
@@ -61,7 +64,7 @@ macro_rules! register_wake_func {
 }
 
 impl ThreadManager {
-    pub fn block(&mut self, thread_ref: ThreadRef, block_type: BlockType) {
+    fn block(&mut self, thread_ref: ThreadRef, block_type: BlockType) {
         log::debug!("thread block: {:?}", block_type);
         let mut thread = thread_ref.lock();
 
@@ -70,11 +73,7 @@ impl ThreadManager {
         self.blocked_queues.push(thread_ref.clone(), block_type);
     }
 
-    pub fn block_current(&mut self, block_type: BlockType) {
-        log::debug!("thread block_current: {:?}", block_type);
-        let current = self.current.clone().unwrap();
-        self.block(current, block_type);
-    }
+    pub fn block_current(&mut self, block_type: BlockType) {}
 
     pub fn wake(&mut self, thread: ThreadRef) {
         log::debug!("thread wake");
@@ -112,4 +111,25 @@ impl ThreadManager {
 
     register_wake_func!(keyboard);
     register_wake_func!(io);
+}
+
+pub fn block(thread_ref: ThreadRef, block_type: BlockType) {
+    {
+        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+
+        thread_manager.block(thread_ref, block_type);
+    }
+
+    return_to_executor_from_current();
+}
+
+pub fn block_current(block_type: BlockType) {
+    let current = THREAD_MANAGER
+        .get()
+        .unwrap()
+        .lock()
+        .current
+        .clone()
+        .unwrap();
+    block(current, block_type);
 }
