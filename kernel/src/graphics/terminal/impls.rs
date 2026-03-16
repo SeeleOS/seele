@@ -1,12 +1,10 @@
-use core::{
-    f128::consts::FRAC_1_PI,
-    fmt::{Debug, Write},
-};
+use core::fmt::{Debug, Write};
 
 use os_terminal::Terminal;
 
 use crate::graphics::{
     framebuffer::FRAME_BUFFER,
+    object_config::WindowSizeInfo,
     terminal::{KernelTerminal, TermRenderer, term_trait::AbstractTerminal},
 };
 
@@ -15,6 +13,14 @@ impl<'a> AbstractTerminal for KernelTerminal {
         self.0.write_str(str).unwrap();
         self.0.flush();
         FRAME_BUFFER.get().unwrap().lock().flush();
+    }
+
+    fn size(&self) -> crate::graphics::object_config::WindowSizeInfo {
+        WindowSizeInfo {
+            rows: self.0.rows() as u16,
+            cols: self.0.columns() as u16,
+            ..Default::default()
+        }
     }
 }
 
