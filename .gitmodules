@@ -10,3 +10,6 @@
 [submodule "toolchain"]
 	path = toolchain
 	url = https://github.com/SeeleOS/toolchain
+[submodule "Quantis"]
+	path = Quantis
+	url = https://github.com/SeeleOS/Quantis
