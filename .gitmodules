@@ -13,3 +13,6 @@
 [submodule "Quantis"]
 	path = Quantis
 	url = https://github.com/SeeleOS/Quantis
+[submodule "busybox"]
+	path = busybox
+	url = https://github.com/SeeleOS/busybox
