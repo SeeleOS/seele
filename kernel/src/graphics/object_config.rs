@@ -5,6 +5,7 @@ use crate::{
     object::{config::ConfigurateRequest, misc::ObjectResult, traits::Configuratable},
 };
 
+#[derive(Debug)]
 #[repr(C)]
 #[derive(Default, Copy, Clone)]
 pub struct WindowSizeInfo {
@@ -14,6 +15,7 @@ pub struct WindowSizeInfo {
     pub ws_ypixel: u16,
 }
 
+#[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct TerminalInfo {
     pub c_iflag: u32,   // 输入标志 (Input modes)
@@ -50,22 +52,12 @@ impl TerminalInfo {
 }
 impl Configuratable for TerminalObject {
     fn configure(&self, request: crate::object::config::ConfigurateRequest) -> ObjectResult<isize> {
-        let terminal = TERMINAL.get().unwrap().lock();
-
         match request {
             ConfigurateRequest::GetWindowSize(window_size) => unsafe {
-                write_volatile(
-                    window_size,
-                    WindowSizeInfo {
-                        rows: terminal.rows() as u16,
-                        cols: terminal.columns() as u16,
-                        ws_xpixel: 0,
-                        ws_ypixel: 0,
-                    },
-                );
+                write_volatile(window_size, self.window_size);
             },
             ConfigurateRequest::GetTerminalInfo(term_info) => unsafe {
-                write_volatile(term_info, TerminalInfo::new_default());
+                write_volatile(term_info, self.terminal_info);
             },
             _ => {}
         }
