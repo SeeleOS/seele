@@ -1,11 +1,13 @@
 use core::{fmt::Write, str::from_utf8};
 
 use alloc::sync::Arc;
+use spin::{Mutex, mutex::Mutex};
 
 use crate::{
     graphics::{
         framebuffer::FRAME_BUFFER,
-        terminal::{TERMINAL, term_trait::AbstractTerminal},
+        object_config::{TerminalInfo, WindowSizeInfo},
+        terminal::term_trait::AbstractTerminal,
     },
     impl_cast_function,
     object::{
@@ -18,7 +20,21 @@ use crate::{
 
 #[derive(Debug)]
 pub struct TerminalObject {
-    inner: Arc<dyn AbstractTerminal>,
+    pub inner: Arc<Mutex<dyn AbstractTerminal>>,
+    pub window_size: WindowSizeInfo,
+    pub terminal_info: TerminalInfo,
+}
+
+impl TerminalObject {
+    pub fn new(term: impl AbstractTerminal) -> Self {
+        Self {
+            window_size: WindowSizeInfo {
+                rows: 
+            },
+            terminal_info: TerminalInfo::new_default(),
+            inner: Arc::new(Mutex::new(term)),
+        }
+    }
 }
 
 impl Object for TerminalObject {
@@ -28,7 +44,9 @@ impl Object for TerminalObject {
 
 impl Writable for TerminalObject {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
-        print!("{}", from_utf8(buffer).unwrap_or("Unsupported character"));
+        self.inner
+            .lock()
+            .push_str(from_utf8(buffer).unwrap_or("Unsupported charcter"));
         Ok(buffer.len())
     }
 }
