@@ -39,38 +39,34 @@ static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ProcessRef>>> = Mutex::new(BTre
 define_syscall!(
     WaitForProcessExit,
     |target_process: ProcessID, exit_code_ptr: *mut u64| {
-        loop {
-            let check_result = {
-                let manager = MANAGER.lock();
-                let process = manager
-                    .processes
-                    .iter()
-                    .find(|(pid, _)| **pid == target_process)
-                    .ok_or(SyscallError::NoProcess)?;
+        let check_result = {
+            let manager = MANAGER.lock();
+            let process = manager
+                .processes
+                .iter()
+                .find(|(pid, _)| **pid == target_process)
+                .ok_or(SyscallError::NoProcess)?;
 
-                let p_lock = process.1.lock();
-                if p_lock.threads.is_empty() {
-                    let code = p_lock.exit_code.unwrap_or(0);
-                    Some(code)
-                } else {
-                    None
-                }
-            };
+            let p_lock = process.1.lock();
+            if p_lock.threads.is_empty() {
+                let code = p_lock.exit_code.unwrap_or(0);
+                Some(code)
+            } else {
+                None
+            }
+        };
 
-            match check_result {
-                Some(exit_code) => {
-                    if !exit_code_ptr.is_null() {
-                        unsafe {
-                            *exit_code_ptr = exit_code;
-                        }
+        match check_result {
+            Some(exit_code) => {
+                if !exit_code_ptr.is_null() {
+                    unsafe {
+                        *exit_code_ptr = exit_code;
                     }
-                    return Ok(0);
                 }
-                None => {
-                    block_current(BlockType::WakeRequired(WakeType::ProcsesExit(
-                        target_process,
-                    )));
-                }
+                return Ok(0);
+            }
+            None => {
+                return Err(SyscallError::TryAgain);
             }
         }
     }
