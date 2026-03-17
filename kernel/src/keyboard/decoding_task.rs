@@ -7,7 +7,9 @@ use pc_keyboard::DecodedKey;
 use spin::Mutex;
 
 use crate::{
-    keyboard::{ps2::_PS2_KEYBOARD, scancode_stream::ScancodeStream},
+    keyboard::{
+        char_processing::process_char_non_raw, ps2::_PS2_KEYBOARD, scancode_stream::ScancodeStream,
+    },
     multitasking::thread::THREAD_MANAGER,
     print, s_println,
     terminal::{
@@ -42,21 +44,7 @@ pub async fn process_keypresses() {
                     .push_back(character as u8);
                 THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
             } else {
-                print!("{character}");
-
-                LINE_BUFFER.lock().push_back(character as u8);
-
-                match character {
-                    '\n' => {
-                        flush_line_buffer();
-                        THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
-                    }
-                    '\x08' => {
-                        print!(" \x08");
-                        LINE_BUFFER.lock().pop_front();
-                    }
-                    _ => {}
-                }
+                process_char_non_raw(character);
             }
         }
     }

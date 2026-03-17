@@ -3,6 +3,7 @@ use crate::{
     multitasking::thread::THREAD_MANAGER,
 };
 
+pub mod char_processing;
 pub mod decoding_task;
 pub mod object;
 pub mod ps2;
