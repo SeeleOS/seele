@@ -3,8 +3,7 @@ use core::fmt::{Arguments, Write};
 use alloc::fmt::format;
 
 use crate::{
-    graphics::{framebuffer::FRAME_BUFFER, terminal::state::DEFAULT_TERMINAL},
-    misc::serial_print::_print,
+    graphics::terminal::state::DEFAULT_TERMINAL, misc::serial_print::_print,
     object::traits::Writable,
 };
 

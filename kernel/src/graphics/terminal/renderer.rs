@@ -1,7 +1,7 @@
 use os_terminal::DrawTarget;
 use spin::Mutex;
 
-use crate::graphics::framebuffer::Canvas;
+use crate::misc::framebuffer::Canvas;
 
 pub struct TermRenderer<'a> {
     pub(crate) canvas: &'a Mutex<Canvas>,
@@ -28,9 +28,6 @@ impl<'a> DrawTarget for TermRenderer<'a> {
 
     #[inline(always)]
     fn draw_pixel(&mut self, x: usize, y: usize, rgb: os_terminal::Rgb) {
-        self.canvas
-            .lock()
-            .write_pixel(x, y, (rgb.0, rgb.1, rgb.2));
+        self.canvas.lock().write_pixel(x, y, (rgb.0, rgb.1, rgb.2));
     }
 }
-

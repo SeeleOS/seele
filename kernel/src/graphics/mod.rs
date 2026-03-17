@@ -10,14 +10,13 @@ use spin::Mutex;
 use crate::{
     filesystem::path::{Path, PathPart},
     graphics::{
-        framebuffer::{Canvas, FRAME_BUFFER},
         object::TerminalObject,
         terminal::{COLOR_SCHEME, KernelTerminal, TermRenderer, state::DEFAULT_TERMINAL},
     },
+    misc::framebuffer::FRAME_BUFFER,
     object::tty_device::{DEFAULT_TTY, TtyDevice},
 };
 
-pub mod framebuffer;
 pub mod object;
 pub mod object_config;
 pub mod terminal;
@@ -26,8 +25,7 @@ pub static FONT: &[u8] = include_bytes!("../../../misc/maplemono.ttf");
 
 pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
     log::info!("graphics: init start");
-    let canvas = FRAME_BUFFER.get_or_init(|| Mutex::new(Canvas::new(boot_info)));
-    let mut terminal = Terminal::new(TermRenderer::new(canvas));
+    let mut terminal = Terminal::new(TermRenderer::new(FRAME_BUFFER.get().unwrap()));
 
     log::debug!("graphics: terminal ready");
 

@@ -2,10 +2,12 @@ use core::fmt::{Debug, Write};
 
 use os_terminal::Terminal;
 
-use crate::graphics::{
-    framebuffer::FRAME_BUFFER,
-    object_config::WindowSizeInfo,
-    terminal::{KernelTerminal, TermRenderer, term_trait::AbstractTerminal},
+use crate::{
+    graphics::{
+        object_config::WindowSizeInfo,
+        terminal::{KernelTerminal, TermRenderer, term_trait::AbstractTerminal},
+    },
+    misc::framebuffer::FRAME_BUFFER,
 };
 
 impl<'a> AbstractTerminal for KernelTerminal {

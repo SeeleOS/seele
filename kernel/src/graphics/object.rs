@@ -5,7 +5,6 @@ use spin::Mutex;
 
 use crate::{
     graphics::{
-        framebuffer::FRAME_BUFFER,
         object_config::{TerminalInfo, WindowSizeInfo},
         terminal::term_trait::AbstractTerminal,
     },

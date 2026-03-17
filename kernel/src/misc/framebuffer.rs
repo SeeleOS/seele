@@ -4,6 +4,12 @@ use spin::Mutex;
 
 use crate::graphics::terminal::Color;
 
+pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
+    log::info!("graphics: init start");
+    FRAME_BUFFER.init_once(|| Mutex::new(Canvas::new(boot_info)));
+    log::debug!("graphics: terminal configured");
+}
+
 pub static FRAME_BUFFER: OnceCell<Mutex<Canvas>> = OnceCell::uninit();
 
 pub struct Canvas {
