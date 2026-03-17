@@ -2,7 +2,7 @@ use alloc::collections::vec_deque::VecDeque;
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
 
-use crate::keyboard::decoding_task::KEYBOARD_QUEUE;
+use crate::{keyboard::decoding_task::KEYBOARD_QUEUE, s_println};
 
 lazy_static::lazy_static! {
     pub static ref LINE_BUFFER: Mutex<VecDeque<u8>> = Mutex::new(VecDeque::new());

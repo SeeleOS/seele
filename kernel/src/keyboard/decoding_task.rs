@@ -1,3 +1,5 @@
+use core::{char, str::Chars};
+
 use alloc::collections::vec_deque::VecDeque;
 use conquer_once::spin::{Once, OnceCell};
 use futures_util::StreamExt;
@@ -6,7 +8,8 @@ use spin::Mutex;
 
 use crate::{
     keyboard::{ps2::_PS2_KEYBOARD, scancode_stream::ScancodeStream},
-    print,
+    multitasking::thread::THREAD_MANAGER,
+    print, s_println,
     terminal::{
         misc::{LINE_BUFFER, flush_line_buffer},
         state::DEFAULT_TERMINAL,
@@ -37,13 +40,22 @@ pub async fn process_keypresses() {
                     .get_or_init(|| Mutex::new(VecDeque::new()))
                     .lock()
                     .push_back(character as u8);
+                THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
             } else {
                 print!("{character}");
 
                 LINE_BUFFER.lock().push_back(character as u8);
 
-                if character == '\n' {
-                    flush_line_buffer();
+                match character {
+                    '\n' => {
+                        flush_line_buffer();
+                        THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+                    }
+                    '\x08' => {
+                        print!(" \x08");
+                        LINE_BUFFER.lock().pop_front();
+                    }
+                    _ => {}
                 }
             }
         }

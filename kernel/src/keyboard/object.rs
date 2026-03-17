@@ -9,6 +9,7 @@ use crate::{
         yielding::{BlockType, WakeType, block_current},
     },
     object::{Object, misc::ObjectResult, traits::Readable},
+    s_println,
 };
 
 #[derive(Debug)]
@@ -31,9 +32,12 @@ impl Readable for KeyboardObject {
             } else {
                 let mut read_chars = 0;
                 while read_chars < buffer.len() {
-                    if let Some(result) = queue.pop_front() {
-                        buffer[read_chars] = result;
-                        read_chars += 1;
+                    match queue.pop_front() {
+                        Some(val) => {
+                            buffer[read_chars] = val;
+                            read_chars += 1;
+                        }
+                        None => break,
                     }
                 }
 

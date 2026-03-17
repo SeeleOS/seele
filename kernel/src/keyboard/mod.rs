@@ -1,5 +1,3 @@
-
-
 use crate::{
     keyboard::scancode_stream::{SCANCODE_QUEUE, WAKER},
     multitasking::thread::THREAD_MANAGER,
@@ -17,5 +15,4 @@ pub(crate) fn push_scancode(scancode: u8) {
     // wake up the registered waker
     WAKER.wake();
     // Wakeup all the blocked process (it should be threads now lol)
-    THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
 }
