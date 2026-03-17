@@ -1,11 +1,14 @@
-
 use alloc::collections::vec_deque::VecDeque;
 use conquer_once::spin::OnceCell;
 use futures_util::StreamExt;
 use pc_keyboard::DecodedKey;
 use spin::Mutex;
 
-use crate::keyboard::{ps2::_PS2_KEYBOARD, scancode_stream::ScancodeStream};
+use crate::{
+    graphics::terminal::state::DEFAULT_TERMINAL,
+    keyboard::{ps2::_PS2_KEYBOARD, scancode_stream::ScancodeStream},
+    print,
+};
 
 pub static KEYBOARD_QUEUE: OnceCell<Mutex<VecDeque<u8>>> = OnceCell::uninit();
 
@@ -19,10 +22,20 @@ pub async fn process_keypresses() {
             && let Some(key) = keyboard.process_keyevent(key_event)
             && let DecodedKey::Unicode(character) = key
         {
-            KEYBOARD_QUEUE
-                .get_or_init(|| Mutex::new(VecDeque::new()))
+            if DEFAULT_TERMINAL
+                .get()
+                .unwrap()
                 .lock()
-                .push_back(character as u8);
+                .terminal_info
+                .is_raw_mode()
+            {
+                KEYBOARD_QUEUE
+                    .get_or_init(|| Mutex::new(VecDeque::new()))
+                    .lock()
+                    .push_back(character as u8);
+            } else {
+                print!("{character}");
+            }
         }
     }
 }
