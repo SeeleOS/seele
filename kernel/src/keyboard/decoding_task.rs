@@ -40,7 +40,7 @@ pub async fn process_keypresses() {
             } else {
                 print!("{character}");
 
-                LINE_BUFFER.get().unwrap().lock().push_back(character as u8);
+                LINE_BUFFER.lock().push_back(character as u8);
 
                 if character == '\n' {
                     flush_line_buffer();
