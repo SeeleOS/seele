@@ -25,7 +25,7 @@ use crate::{
         thread::{
             THREAD_MANAGER,
             misc::State,
-            yielding::{BlockType, WakeType},
+            yielding::{BlockType, WakeType, block_current},
         },
     },
     object::{config::ConfigurateRequest, misc::get_object_current_process},
@@ -39,28 +39,39 @@ static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ProcessRef>>> = Mutex::new(BTre
 define_syscall!(
     WaitForProcessExit,
     |target_process: ProcessID, exit_code_ptr: *mut u64| {
-        let exited = MANAGER
-            .lock()
-            .processes
-            .iter()
-            .find(|(pid, _)| **pid == target_process)
-            .map(|(_, process)| {
-                if process.lock().threads.is_empty() {
+        loop {
+            let check_result = {
+                let manager = MANAGER.lock();
+                let process = manager
+                    .processes
+                    .iter()
+                    .find(|(pid, _)| **pid == target_process)
+                    .ok_or(SyscallError::NoProcess)?;
+
+                let p_lock = process.1.lock();
+                if p_lock.threads.is_empty() {
+                    let code = p_lock.exit_code.unwrap_or(0);
+                    Some(code)
+                } else {
+                    None
+                }
+            };
+
+            match check_result {
+                Some(exit_code) => {
                     if !exit_code_ptr.is_null() {
                         unsafe {
-                            *exit_code_ptr = process.lock().exit_code.unwrap();
+                            *exit_code_ptr = exit_code;
                         }
                     }
-                    true
-                } else {
-                    false
+                    return Ok(0);
                 }
-            });
-
-        if exited.ok_or(SyscallError::NoProcess)? {
-            return Ok(0);
-        } else {
-            return Err(SyscallError::TryAgain);
+                None => {
+                    block_current(BlockType::WakeRequired(WakeType::ProcsesExit(
+                        target_process,
+                    )));
+                }
+            }
         }
     }
 );
