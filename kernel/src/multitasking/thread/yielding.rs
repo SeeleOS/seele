@@ -76,8 +76,6 @@ impl ThreadManager {
         self.blocked_queues.push(thread_ref.clone(), block_type);
     }
 
-    pub fn block_current(&mut self, block_type: BlockType) {}
-
     pub fn wake(&mut self, thread: ThreadRef) {
         log::debug!("thread wake");
         let mut locked_thread = thread.lock();
