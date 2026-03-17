@@ -23,7 +23,7 @@ pub mod terminal;
 
 pub static FONT: &[u8] = include_bytes!("../../../misc/maplemono.ttf");
 
-pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
+pub fn init() {
     log::info!("graphics: init start");
     let mut terminal = Terminal::new(TermRenderer::new(FRAME_BUFFER.get().unwrap()));
 

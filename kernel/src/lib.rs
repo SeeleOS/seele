@@ -32,7 +32,7 @@ use crate::filesystem::path::Path;
 use crate::filesystem::vfs::VirtualFS;
 use crate::graphics::terminal;
 use crate::misc::others::enable_sse;
-use crate::misc::{gdt, logging, tss};
+use crate::misc::{framebuffer, gdt, logging, tss};
 use crate::multitasking::kernel_task;
 use bootloader_api::BootInfo;
 use bootloader_api::{BootloaderConfig, config::Mapping};
@@ -59,7 +59,8 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
         bootinfo.physical_memory_offset.into_option().unwrap(),
         &bootinfo.memory_regions,
     );
-    graphics::init(bootinfo.framebuffer.as_mut().unwrap());
+    framebuffer::init(bootinfo.framebuffer.as_mut().unwrap());
+    graphics::init();
     logging::init();
     enable_sse();
     log::info!("init: sse enabled");
