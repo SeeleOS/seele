@@ -1,11 +1,14 @@
 use alloc::collections::vec_deque::VecDeque;
-use conquer_once::spin::OnceCell;
+use conquer_once::spin::{Once, OnceCell};
 use futures_util::StreamExt;
 use pc_keyboard::DecodedKey;
 use spin::Mutex;
 
 use crate::{
-    graphics::terminal::state::DEFAULT_TERMINAL,
+    graphics::terminal::{
+        misc::{LINE_BUFFER, flush_line_buffer},
+        state::DEFAULT_TERMINAL,
+    },
     keyboard::{ps2::_PS2_KEYBOARD, scancode_stream::ScancodeStream},
     print,
 };
@@ -36,6 +39,12 @@ pub async fn process_keypresses() {
                     .push_back(character as u8);
             } else {
                 print!("{character}");
+
+                LINE_BUFFER.get().unwrap().lock().push_back(character as u8);
+
+                if character == '\n' {
+                    flush_line_buffer();
+                }
             }
         }
     }
