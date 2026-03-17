@@ -1,6 +1,7 @@
 pub mod color;
 pub mod impls;
 pub mod macros;
+pub mod misc;
 pub mod renderer;
 pub mod state;
 pub mod term_trait;
