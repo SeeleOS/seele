@@ -27,6 +27,7 @@ pub async fn process_keypresses() {
                 .unwrap()
                 .lock()
                 .terminal_info
+                .lock()
                 .is_raw_mode()
             {
                 KEYBOARD_QUEUE

@@ -22,7 +22,7 @@ use crate::{
 pub struct TerminalObject {
     pub inner: Arc<Mutex<dyn AbstractTerminal>>,
     pub window_size: WindowSizeInfo,
-    pub terminal_info: TerminalInfo,
+    pub terminal_info: Mutex<TerminalInfo>,
 }
 
 impl TerminalObject {
@@ -30,7 +30,7 @@ impl TerminalObject {
         let window_size = term.lock().size();
         Self {
             window_size,
-            terminal_info: TerminalInfo::new_default(),
+            terminal_info: Mutex::new(TerminalInfo::new_default()),
             inner: term,
         }
     }

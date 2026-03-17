@@ -1,4 +1,4 @@
-use core::ptr::write_volatile;
+use core::ptr::{read, read_volatile, write_volatile};
 
 use crate::{
     graphics::object::TerminalObject,
@@ -61,7 +61,19 @@ impl Configuratable for TerminalObject {
                 write_volatile(window_size, self.window_size);
             },
             ConfigurateRequest::GetTerminalInfo(term_info) => unsafe {
-                write_volatile(term_info, self.terminal_info);
+                write_volatile(term_info, *self.terminal_info.lock());
+            },
+            ConfigurateRequest::SetTerminalInfo(term_info) => unsafe {
+                let new_info = read_volatile(term_info);
+
+                *self.terminal_info.lock() = new_info;
+
+                // 3. 关键逻辑：根据 ICANON 位的变化，决定是否需要清理 LineBuffer
+                if (new_info.c_lflag & 0x00000002) == 0 {
+                    // 进入了 Raw Mode！
+                    // 如果之前 LineBuffer 里有还没敲回车的存货，
+                    // 考虑是不是要把它们直接冲刷到 InputQueue 里
+                }
             },
             _ => {}
         }
