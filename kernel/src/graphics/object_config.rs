@@ -49,6 +49,10 @@ impl TerminalInfo {
             c_cc: cc,
         }
     }
+
+    pub fn is_raw_mode(&self) -> bool {
+        self.c_lflag & 0x00000002 == 0
+    }
 }
 impl Configuratable for TerminalObject {
     fn configure(&self, request: crate::object::config::ConfigurateRequest) -> ObjectResult<isize> {
