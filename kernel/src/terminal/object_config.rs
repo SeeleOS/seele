@@ -1,8 +1,8 @@
 use core::ptr::{read, read_volatile, write_volatile};
 
 use crate::{
-    graphics::object::TerminalObject,
     object::{config::ConfigurateRequest, misc::ObjectResult, traits::Configuratable},
+    terminal::TerminalObject,
 };
 
 #[derive(Debug)]

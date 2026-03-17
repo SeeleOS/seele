@@ -1,25 +1,28 @@
-use core::ops::Deref;
+pub mod color;
+pub mod impls;
+pub mod macros;
+pub mod misc;
+pub mod renderer;
+pub mod state;
+pub mod term_trait;
 
-use alloc::{boxed::Box, sync::Arc, vec};
-use os_terminal::{
-    Terminal,
-    font::{BitmapFont, FontManager, TrueTypeFont},
-};
-use spin::Mutex;
+use alloc::{boxed::Box, sync::Arc};
+pub use color::{COLOR_SCHEME, Color};
+pub use macros::term_print;
+use os_terminal::{Terminal, font::TrueTypeFont};
+pub use renderer::TermRenderer;
+use spin::mutex::Mutex;
 
 use crate::{
-    filesystem::path::{Path, PathPart},
-    graphics::{
-        object::TerminalObject,
-        terminal::{COLOR_SCHEME, KernelTerminal, TermRenderer, state::DEFAULT_TERMINAL},
-    },
     misc::framebuffer::FRAME_BUFFER,
     object::tty_device::{DEFAULT_TTY, TtyDevice},
+    terminal::{object::TerminalObject, state::DEFAULT_TERMINAL},
 };
+
+pub struct KernelTerminal(pub Terminal<TermRenderer<'static>>);
 
 pub mod object;
 pub mod object_config;
-pub mod terminal;
 
 pub static FONT: &[u8] = include_bytes!("../../../misc/maplemono.ttf");
 
@@ -29,7 +32,6 @@ pub fn init() {
 
     log::debug!("graphics: terminal ready");
 
-    terminal.set_font_manager(Box::new(BitmapFont));
     terminal.set_crnl_mapping(true);
     terminal.set_custom_color_scheme(&COLOR_SCHEME);
     terminal.set_auto_flush(false);

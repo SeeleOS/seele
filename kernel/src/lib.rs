@@ -8,7 +8,6 @@ extern crate alloc;
 
 pub mod acpi;
 pub mod filesystem;
-pub mod graphics;
 pub mod interrupts;
 pub mod keyboard;
 pub mod memory;
@@ -16,6 +15,7 @@ pub mod misc;
 pub mod multitasking;
 pub mod object;
 pub mod systemcall;
+pub mod terminal;
 pub mod userspace;
 
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
@@ -30,7 +30,6 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
 use crate::filesystem::block_device::initrd::{self};
 use crate::filesystem::path::Path;
 use crate::filesystem::vfs::VirtualFS;
-use crate::graphics::terminal;
 use crate::misc::others::enable_sse;
 use crate::misc::{framebuffer, gdt, logging, tss};
 use crate::multitasking::kernel_task;
@@ -60,7 +59,7 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
         &bootinfo.memory_regions,
     );
     framebuffer::init(bootinfo.framebuffer.as_mut().unwrap());
-    graphics::init();
+    terminal::init();
     logging::init();
     enable_sse();
     log::info!("init: sse enabled");

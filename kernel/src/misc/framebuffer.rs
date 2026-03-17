@@ -2,7 +2,7 @@ use bootloader_api::info::PixelFormat;
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
 
-use crate::graphics::terminal::Color;
+use crate::terminal::Color;
 
 pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
     log::info!("graphics: init start");

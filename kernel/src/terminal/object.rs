@@ -4,10 +4,6 @@ use alloc::sync::Arc;
 use spin::Mutex;
 
 use crate::{
-    graphics::{
-        object_config::{TerminalInfo, WindowSizeInfo},
-        terminal::term_trait::AbstractTerminal,
-    },
     impl_cast_function,
     object::{
         Object,
@@ -15,6 +11,10 @@ use crate::{
         traits::{Configuratable, Writable},
     },
     print,
+    terminal::{
+        object_config::{TerminalInfo, WindowSizeInfo},
+        term_trait::AbstractTerminal,
+    },
 };
 
 #[derive(Debug)]

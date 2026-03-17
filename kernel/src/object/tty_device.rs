@@ -3,16 +3,14 @@ use conquer_once::spin::OnceCell;
 use spin::Mutex;
 
 use crate::{
-    graphics::{
-        object::TerminalObject,
-        terminal::state::{self, DEFAULT_TERMINAL},
-    },
     impl_cast_function,
     keyboard::object::KeyboardObject,
     object::{
         Object,
         traits::{Configuratable, Readable, Writable},
     },
+    terminal::object::TerminalObject,
+    terminal::state::{self, DEFAULT_TERMINAL},
 };
 
 pub static DEFAULT_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();

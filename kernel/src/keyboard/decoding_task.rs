@@ -5,12 +5,12 @@ use pc_keyboard::DecodedKey;
 use spin::Mutex;
 
 use crate::{
-    graphics::terminal::{
+    keyboard::{ps2::_PS2_KEYBOARD, scancode_stream::ScancodeStream},
+    print,
+    terminal::{
         misc::{LINE_BUFFER, flush_line_buffer},
         state::DEFAULT_TERMINAL,
     },
-    keyboard::{ps2::_PS2_KEYBOARD, scancode_stream::ScancodeStream},
-    print,
 };
 
 pub static KEYBOARD_QUEUE: OnceCell<Mutex<VecDeque<u8>>> = OnceCell::uninit();

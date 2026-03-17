@@ -3,11 +3,8 @@ use core::fmt::{Debug, Write};
 use os_terminal::Terminal;
 
 use crate::{
-    graphics::{
-        object_config::WindowSizeInfo,
-        terminal::{KernelTerminal, TermRenderer, term_trait::AbstractTerminal},
-    },
     misc::framebuffer::FRAME_BUFFER,
+    terminal::{KernelTerminal, object_config::WindowSizeInfo, term_trait::AbstractTerminal},
 };
 
 impl<'a> AbstractTerminal for KernelTerminal {
@@ -17,7 +14,7 @@ impl<'a> AbstractTerminal for KernelTerminal {
         FRAME_BUFFER.get().unwrap().lock().flush();
     }
 
-    fn size(&self) -> crate::graphics::object_config::WindowSizeInfo {
+    fn size(&self) -> crate::terminal::object_config::WindowSizeInfo {
         WindowSizeInfo {
             rows: self.0.rows() as u16,
             cols: self.0.columns() as u16,

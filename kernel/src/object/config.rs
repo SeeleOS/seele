@@ -1,6 +1,6 @@
 use crate::{
-    graphics::object_config::{TerminalInfo, WindowSizeInfo},
     object::{Object, ObjectResult},
+    terminal::object_config::{TerminalInfo, WindowSizeInfo},
 };
 
 pub enum ConfigurateRequest {

@@ -3,13 +3,12 @@ use core::fmt::{Arguments, Write};
 use alloc::fmt::format;
 
 use crate::{
-    graphics::terminal::state::DEFAULT_TERMINAL, misc::serial_print::_print,
-    object::traits::Writable,
+    misc::serial_print::_print, object::traits::Writable, terminal::state::DEFAULT_TERMINAL,
 };
 
 #[macro_export]
 macro_rules! print {
-    ($($arg:tt)*) => ($crate::graphics::terminal::term_print(format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::terminal::term_print(format_args!($($arg)*)));
 }
 
 #[macro_export]
