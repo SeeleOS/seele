@@ -3,7 +3,7 @@ use core::fmt::Debug;
 use alloc::sync::Arc;
 
 use crate::{
-    filesystem::info::LinuxStat,
+    filesystem::{info::LinuxStat, object::FileLikeObject},
     multitasking::MANAGER,
     object::{
         error::ObjectError,
@@ -17,6 +17,15 @@ pub mod error;
 pub mod misc;
 pub mod traits;
 pub mod tty_device;
+macro_rules! define_cast_function_non_trait {
+    ($name: expr, $type: ty) => {
+        paste::paste! {
+            fn [<as_$name>](self: Arc<Self>) -> Option<Arc<$type>> {
+                None
+            }
+        }
+    };
+}
 
 macro_rules! define_cast_function {
     ($name: expr, $type: ty) => {
@@ -33,4 +42,6 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function!(readable, Readable);
     define_cast_function!(configuratable, Configuratable);
     define_cast_function!(have_linux_stat, HaveLinuxStat);
+
+    define_cast_function_non_trait!(file_like, FileLikeObject);
 }
