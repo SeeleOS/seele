@@ -72,6 +72,7 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     log::info!("init: initrd ready");
 
     VirtualFS.lock().init().unwrap();
+
     log::info!("init: vfs ready");
     gdt::init();
     log::info!("init: gdt ready");
@@ -87,11 +88,6 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     log::info!("init: multitasking ready");
     interrupts::init();
     log::info!("init: interrupts ready");
-
-    println!(
-        "{:?}",
-        VirtualFS.lock().list_contents(Path::new("/programs"))
-    );
 
     executor.run();
 }
