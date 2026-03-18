@@ -47,6 +47,10 @@ impl AbsolutePath {
         self.push_path(Path::new(string).as_absolute());
     }
 
+    pub fn as_string(self) -> String {
+        self.as_normal().as_string()
+    }
+
     // Wrappers for the normal Path
 
     pub fn navigate(&mut self, root: WrappedDirectory) -> FSResult<FileLike> {
