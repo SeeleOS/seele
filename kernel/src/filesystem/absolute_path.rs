@@ -1,7 +1,11 @@
 use alloc::{collections::vec_deque::VecDeque, string::String, vec::Vec};
 
 use crate::{
-    filesystem::path::{Path, PathPart},
+    filesystem::{
+        path::{Path, PathPart},
+        vfs::{FSResult, WrappedDirectory},
+        vfs_traits::FileLike,
+    },
     multitasking::process::{manager::get_current_process, new},
 };
 
@@ -41,6 +45,16 @@ impl AbsolutePath {
 
     pub fn push_path_str(&mut self, string: &str) {
         self.push_path(Path::new(string).as_absolute());
+    }
+
+    // Wrappers for the normal Path
+
+    pub fn navigate(&mut self, root: WrappedDirectory) -> FSResult<FileLike> {
+        self.as_normal().navigate(root)
+    }
+
+    pub fn is_valid(&mut self, root: WrappedDirectory) -> bool {
+        self.as_normal().is_valid(root)
     }
 }
 
