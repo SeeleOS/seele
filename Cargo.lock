@@ -153,8 +153,7 @@ dependencies = [
 [[package]]
 name = "bootloader"
 version = "0.11.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5fb69232f250c0d5b74eeb285702b4b0479f574980f45dc9bef97b2c65e2021"
+source = "git+https://github.com/rust-osdev/bootloader?branch=fix%2Flarge-fat16#afdebf5fca74bc17dddadec1393fa09c9eef1eb2"
 dependencies = [
  "anyhow",
  "bootloader-boot-config",
@@ -169,8 +168,7 @@ dependencies = [
 [[package]]
 name = "bootloader-boot-config"
 version = "0.11.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10a5e475c13d3d988e105b76b92aeea94614c12590c33495165c02b16e895375"
+source = "git+https://github.com/rust-osdev/bootloader?branch=fix%2Flarge-fat16#afdebf5fca74bc17dddadec1393fa09c9eef1eb2"
 dependencies = [
  "serde",
 ]

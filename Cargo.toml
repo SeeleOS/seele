@@ -23,5 +23,5 @@ panic = "abort"
 ovmf-prebuilt = "0.2"
 
 [build-dependencies]
-bootloader = "0.11"
+bootloader = { git = "https://github.com/rust-osdev/bootloader", branch = "fix/large-fat16"}
 kernel = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }

@@ -1,4 +1,5 @@
 /target
+/bash
 /posix-tests
 /disk
 /disk.img
