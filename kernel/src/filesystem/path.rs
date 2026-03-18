@@ -32,7 +32,11 @@ pub struct Path(pub Vec<PathPart>);
 
 impl Path {
     pub fn new(path: &str) -> Self {
-        Self(Self::parse(path))
+        if path.is_empty() {
+            Self::new("/")
+        } else {
+            Self(Self::parse(path))
+        }
     }
 
     pub fn is_valid(&self, root: WrappedDirectory) -> bool {
