@@ -7,6 +7,16 @@ use crate::{
 
 pub type ObjectRef = Arc<dyn Object>;
 pub type ObjectResult<T> = Result<T, ObjectError>;
+#[macro_export]
+macro_rules! impl_cast_function_non_trait {
+    ($fn_name: expr, $type:ty) => {
+        paste::paste! {
+        fn [<as_$fn_name>](self: alloc::sync::Arc<Self>) -> Option<alloc::sync::Arc<$type>> {
+            Some(self)
+        }
+        }
+    };
+}
 
 #[macro_export]
 macro_rules! impl_cast_function {
