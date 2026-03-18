@@ -29,12 +29,17 @@ use crate::{
         },
     },
     object::{config::ConfigurateRequest, misc::get_object_current_process},
+    s_println,
     systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
 };
 
 use crate::define_syscall;
 
 static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ProcessRef>>> = Mutex::new(BTreeMap::new());
+
+// Track per-(process, object) directory offsets so repeated getdents
+// calls can advance through a directory and eventually hit EOF.
+static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeMap::new());
 
 define_syscall!(
     GetDirectoryContents,
@@ -47,10 +52,16 @@ define_syscall!(
 
         let contents = obj.directory_contents()?;
 
+        // 目录的“当前位置”：每个进程、每个对象一份
+        let current_pid = get_current_process().lock().pid;
+        let mut offsets = DIR_OFFSETS.lock();
+        let offset_entry = offsets.entry((current_pid, object)).or_insert(0usize);
+
         let mut bytes_written = 0;
 
-        // 2. 遍历你拿到的 Vec<DirectoryContentInfo>
-        for info in contents {
+        // 2. 遍历从当前 offset 开始的 Vec<DirectoryContentInfo>
+        while *offset_entry < contents.len() {
+            let info = &contents[*offset_entry];
             let name_bytes = info.name.as_bytes();
             let name_len = name_bytes.len();
 
@@ -72,8 +83,13 @@ define_syscall!(
                 // 填充 Inode (如果没有真实的，暂时填 1)
                 entry_ptr.cast::<u64>().write_unaligned(1);
 
-                // 填充 d_off (通常是目录流的逻辑位置)
-                entry_ptr.add(8).cast::<i64>().write_unaligned(0);
+                // 填充 d_off：使用“下一条记录的逻辑索引”作为 opaque offset。
+                // 目前 userspace 并不真正使用这个字段，但保持一个单调递增的值更接近
+                // 标准 getdents 语义，也方便以后实现 lseek/seekdir。
+                entry_ptr
+                    .add(8)
+                    .cast::<i64>()
+                    .write_unaligned((*offset_entry as i64) + 1);
 
                 // 填充 d_reclen
                 entry_ptr.add(16).cast::<u16>().write_unaligned(reclen);
@@ -93,6 +109,14 @@ define_syscall!(
             }
 
             bytes_written += reclen as usize;
+            *offset_entry += 1;
+        }
+
+        // 如果已经读完目录并且本次没有写入任何内容，则表示 EOF。
+        // 为了避免 map 无限制增长，把条目删掉。
+        if *offset_entry >= contents.len() && bytes_written == 0 {
+            offsets.remove(&(current_pid, object));
+            return Ok(0);
         }
 
         Ok(bytes_written)
