@@ -8,7 +8,7 @@ use crate::{
     object::{
         error::ObjectError,
         misc::ObjectResult,
-        traits::{Configuratable, HaveLinuxStat, Readable, Writable},
+        traits::{Configuratable, Readable, Writable},
     },
 };
 
@@ -41,7 +41,6 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function!(writable, Writable);
     define_cast_function!(readable, Readable);
     define_cast_function!(configuratable, Configuratable);
-    define_cast_function!(have_linux_stat, HaveLinuxStat);
 
     define_cast_function_non_trait!(file_like, FileLikeObject);
 }

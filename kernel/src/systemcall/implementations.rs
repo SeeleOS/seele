@@ -242,7 +242,7 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
             *linux_stat_ptr = get_current_process()
                 .lock()
                 .get_object(object)?
-                .as_have_linux_stat()
+                .as_file_like()
                 .ok_or(SyscallError::InvalidArguments)?
                 .stat()?
         };

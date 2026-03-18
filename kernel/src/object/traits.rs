@@ -13,10 +13,6 @@ pub trait Readable: Object {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize>;
 }
 
-pub trait HaveLinuxStat: Object {
-    fn stat(&self) -> ObjectResult<LinuxStat>;
-}
-
 pub trait Configuratable: Object {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize>;
 }

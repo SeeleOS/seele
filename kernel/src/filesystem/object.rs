@@ -16,7 +16,7 @@ use crate::{
         Object,
         error::ObjectError,
         misc::ObjectResult,
-        traits::{HaveLinuxStat, Readable, Writable},
+        traits::{Readable, Writable},
     },
     s_println,
 };
@@ -36,6 +36,13 @@ impl FileLikeObject {
             FileLike::Directory(dir) => dir.lock().info(),
         }
     }
+
+    pub fn stat(&self) -> ObjectResult<super::info::LinuxStat> {
+        match &self.file {
+            FileLike::File(f) => Ok(f.lock().info()?.as_linux()),
+            FileLike::Directory(d) => Ok(d.lock().info()?.as_linux()),
+        }
+    }
 }
 
 impl Debug for FileLikeObject {
@@ -47,7 +54,6 @@ impl Debug for FileLikeObject {
 impl Object for FileLikeObject {
     impl_cast_function!(writable, Writable);
     impl_cast_function!(readable, Readable);
-    impl_cast_function!(have_linux_stat, HaveLinuxStat);
 
     impl_cast_function_non_trait!(file_like, FileLikeObject);
 }
@@ -66,15 +72,6 @@ impl Readable for FileLikeObject {
         match &self.file {
             FileLike::File(file) => Ok(file.lock().read(buffer)?),
             FileLike::Directory(_) => Err(ObjectError::FSError(FSError::NotAFile)),
-        }
-    }
-}
-
-impl HaveLinuxStat for FileLikeObject {
-    fn stat(&self) -> ObjectResult<super::info::LinuxStat> {
-        match &self.file {
-            FileLike::File(f) => Ok(f.lock().info()?.as_linux()),
-            FileLike::Directory(d) => Ok(d.lock().info()?.as_linux()),
         }
     }
 }
