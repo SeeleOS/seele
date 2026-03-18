@@ -12,7 +12,7 @@ use spin::Mutex;
 use x86_64::{VirtAddr, registers::model_specific::FsBase, structures::paging::Page};
 
 use crate::{
-    filesystem::{info::LinuxStat, path::Path, vfs::VirtualFS},
+    filesystem::{info::LinuxStat, path::Path, vfs::VirtualFS, vfs_traits::DirectoryContentType},
     multitasking::{
         MANAGER,
         process::{
@@ -35,6 +35,69 @@ use crate::{
 use crate::define_syscall;
 
 static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ProcessRef>>> = Mutex::new(BTreeMap::new());
+
+define_syscall!(
+    GetDirectoryContents,
+    |object: u64, buf: *mut u8, len: usize| {
+        // 1. 获取 Object 并调用你写好的原生接口
+        let obj = get_object_current_process(object)
+            .ok_or(SyscallError::BadFileDescriptor)?
+            .as_file_like()
+            .ok_or(SyscallError::BadFileDescriptor)?;
+
+        let contents = obj.directory_contents()?;
+
+        let mut bytes_written = 0;
+
+        // 2. 遍历你拿到的 Vec<DirectoryContentInfo>
+        for info in contents {
+            let name_bytes = info.name.as_bytes();
+            let name_len = name_bytes.len();
+
+            // 计算 Linux 要求的长度:
+            // 8(ino) + 8(off) + 2(reclen) + 1(type) + name_len + 1(\0) = 19 + name_len + 1
+            let base_len = 19 + name_len + 1;
+
+            // 关键：必须 8 字节对齐，否则 ls 直接 Invalid Argument
+            let reclen = ((base_len + 7) & !7) as u16;
+
+            // 检查缓冲区是否溢出
+            if bytes_written + (reclen as usize) > len {
+                break;
+            }
+
+            unsafe {
+                let entry_ptr = buf.add(bytes_written);
+
+                // 填充 Inode (如果没有真实的，暂时填 1)
+                entry_ptr.cast::<u64>().write_unaligned(1);
+
+                // 填充 d_off (通常是目录流的逻辑位置)
+                entry_ptr.add(8).cast::<i64>().write_unaligned(0);
+
+                // 填充 d_reclen
+                entry_ptr.add(16).cast::<u16>().write_unaligned(reclen);
+
+                // 转换类型 (Seele Enum -> Linux Type)
+                let linux_type = match info.content_type {
+                    DirectoryContentType::Directory => 4, // DT_DIR
+                    DirectoryContentType::File => 8,      // DT_REG
+                    _ => 0,                               // DT_UNKNOWN
+                };
+                entry_ptr.add(18).write(linux_type);
+
+                // 填充文件名
+                core::ptr::copy_nonoverlapping(name_bytes.as_ptr(), entry_ptr.add(19), name_len);
+                // 补上 \0
+                entry_ptr.add(19 + name_len).write(0);
+            }
+
+            bytes_written += reclen as usize;
+        }
+
+        Ok(bytes_written)
+    }
+);
 
 define_syscall!(
     WaitForProcessExit,

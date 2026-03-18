@@ -25,4 +25,5 @@ pub enum SyscallNo {
     OpenFile,
     RemoveObject,
     WaitForProcessExit,
+    GetDirectoryContents,
 }
