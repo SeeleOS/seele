@@ -37,10 +37,10 @@ impl FileLikeObject {
         }
     }
 
-    pub fn stat(&self) -> ObjectResult<super::info::LinuxStat> {
+    pub fn stat(&self) -> ObjectResult<FileLikeInfo> {
         match &self.file {
-            FileLike::File(f) => Ok(f.lock().info()?.as_linux()),
-            FileLike::Directory(d) => Ok(d.lock().info()?.as_linux()),
+            FileLike::File(f) => Ok(f.lock().info()?),
+            FileLike::Directory(d) => Ok(d.lock().info()?),
         }
     }
 

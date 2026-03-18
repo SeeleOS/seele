@@ -245,6 +245,7 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
                 .as_file_like()
                 .ok_or(SyscallError::InvalidArguments)?
                 .stat()?
+                .as_linux()
         };
 
         return Ok(0);
