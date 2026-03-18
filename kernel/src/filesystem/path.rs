@@ -2,6 +2,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
+use elfloader::PAddr;
 
 use crate::filesystem::{
     errors::FSError,
@@ -11,8 +12,8 @@ use crate::filesystem::{
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PathPart {
-    // [TODO] CurrentDir,
-    // [TODO] ParentDir,
+    CurrentDir,
+    ParentDir,
     Root,
     Normal(String),
 }
@@ -52,6 +53,10 @@ impl Path {
                     vec.push(PathPart::Normal(buf.clone()));
                     buf.clear()
                 }
+                '.' => {
+                    vec.push(PathPart::CurrentDir);
+                    buf.clear();
+                }
                 _ => buf.push(ch),
             }
         }
@@ -84,6 +89,10 @@ impl Path {
                         }
                     };
                 }
+                PathPart::CurrentDir => {}
+                PathPart::ParentDir => {
+                    unimplemented!()
+                }
             }
         }
 
@@ -108,6 +117,8 @@ impl Path {
                 match name {
                     PathPart::Normal(s) => s.clone(),
                     PathPart::Root => todo!("Find a proper error name for this case"),
+                    PathPart::CurrentDir => todo!(),
+                    PathPart::ParentDir => todo!(),
                 },
             )),
         }
@@ -125,6 +136,8 @@ impl Path {
                         string.push('/');
                     }
                 }
+                PathPart::CurrentDir => string.push_str("."),
+                PathPart::ParentDir => string.push_str(".."),
             }
         }
 
