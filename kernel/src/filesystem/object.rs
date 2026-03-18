@@ -11,7 +11,7 @@ use crate::{
         vfs::{FSResult, VirtualFS},
         vfs_traits::{File, FileLike},
     },
-    impl_cast_function,
+    impl_cast_function, impl_cast_function_non_trait,
     object::{
         Object,
         error::ObjectError,
@@ -48,6 +48,8 @@ impl Object for FileLikeObject {
     impl_cast_function!(writable, Writable);
     impl_cast_function!(readable, Readable);
     impl_cast_function!(have_linux_stat, HaveLinuxStat);
+
+    impl_cast_function_non_trait!(file_like, FileLikeObject);
 }
 
 impl Writable for FileLikeObject {
