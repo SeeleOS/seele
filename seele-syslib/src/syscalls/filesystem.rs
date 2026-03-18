@@ -29,6 +29,6 @@ pub fn file_info(
     )
 }
 
-pub fn file_contents(object: u64, buf: *mut u8, len: u64) -> SyscallResult {
+pub fn directory_contents(object: u64, buf: *mut u8, len: u64) -> SyscallResult {
     syscall!(GetDirectoryContents, object, buf as u64, len)
 }
