@@ -46,7 +46,15 @@ impl Path {
         if let Some(character) = path.chars().nth(0) {
             match character {
                 '/' => vec.push(PathPart::Root),
-                '.' => vec.push(PathPart::CurrentDir),
+                '.' => {
+                    if let Some(character) = path.chars().nth(1)
+                        && character == '.'
+                    {
+                        vec.push(PathPart::ParentDir);
+                    } else {
+                        vec.push(PathPart::CurrentDir);
+                    }
+                }
                 _ => {}
             }
         }
