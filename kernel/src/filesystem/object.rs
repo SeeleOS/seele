@@ -1,12 +1,12 @@
 use core::fmt::Debug;
 
-use alloc::{boxed::Box, sync::Arc};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use spin::Mutex;
 
 use crate::{
     filesystem::{
         errors::FSError,
-        info::FileLikeInfo,
+        info::{DirectoryContentInfo, FileLikeInfo},
         path::Path,
         vfs::{FSResult, VirtualFS},
         vfs_traits::{File, FileLike},
@@ -41,6 +41,13 @@ impl FileLikeObject {
         match &self.file {
             FileLike::File(f) => Ok(f.lock().info()?.as_linux()),
             FileLike::Directory(d) => Ok(d.lock().info()?.as_linux()),
+        }
+    }
+
+    pub fn directory_contents(&self) -> ObjectResult<Vec<DirectoryContentInfo>> {
+        match &self.file {
+            FileLike::File(_) => Err(ObjectError::FSError(FSError::NotADirectory)),
+            FileLike::Directory(dir) => Ok(dir.lock().contents()?),
         }
     }
 }
