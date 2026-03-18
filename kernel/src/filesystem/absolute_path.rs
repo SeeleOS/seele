@@ -21,12 +21,12 @@ impl Default for AbsolutePath {
 }
 
 impl AbsolutePath {
-    pub fn as_normal(self) -> Path {
+    pub fn as_normal(&self) -> Path {
         let mut new_path = Path::default();
 
-        for part in self.0 {
+        for part in &self.0 {
             if let AbsolutePathPart::Normal(str) = part {
-                new_path.0.push(PathPart::Normal(str));
+                new_path.0.push(PathPart::Normal(str.clone()));
             }
         }
 
@@ -45,7 +45,7 @@ impl AbsolutePath {
 }
 
 impl Path {
-    pub fn as_absolute(self) -> AbsolutePath {
+    pub fn as_absolute(&self) -> AbsolutePath {
         let mut new_path = AbsolutePath(Vec::new());
 
         for (i, part) in self.0.iter().enumerate() {
