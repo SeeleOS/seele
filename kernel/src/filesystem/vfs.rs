@@ -1,17 +1,13 @@
-
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use fatfs::FsOptions;
 use spin::Mutex;
 
 use crate::filesystem::{
-        errors::FSError,
-        impls::fat32::{FAT32, operator::Fat32RamDiskReader},
-        storage_operator::initrd::RamDiskOperator,
-        vfs_traits::{
-            Directory, File,
-            FileSystem,
-        },
-    };
+    errors::FSError,
+    impls::ext4::{EXT4, operator::Ext4RamDiskReader},
+    storage_operator::initrd::RamDiskOperator,
+    vfs_traits::{Directory, File, FileSystem},
+};
+use ext4plus::Ext4 as Ext4Inner;
 use lazy_static::lazy_static;
 
 lazy_static! {
@@ -44,12 +40,10 @@ impl VFS {
 
     pub fn init(&mut self) -> FSResult<()> {
         log::debug!("vfs: init start");
-        let fs = fatfs::FileSystem::new(
-            Fat32RamDiskReader(RamDiskOperator::default()),
-            FsOptions::new(),
-        );
-
-        self.register_fs(FAT32(fs.unwrap()));
+        // 使用 ext4plus + RamDiskOperator 作为根文件系统。
+        let reader = Ext4RamDiskReader(Mutex::new(RamDiskOperator::default()));
+        let ext4 = Ext4Inner::load(Box::new(reader)).unwrap();
+        self.register_fs(EXT4(ext4));
 
         self.root = Some(self.filesystems[0].lock().root_dir().unwrap());
 
