@@ -164,7 +164,7 @@ dependencies = [
 [[package]]
 name = "bootloader"
 version = "0.11.15"
-source = "git+https://github.com/rust-osdev/bootloader?branch=fix%2Flarge-fat16#afdebf5fca74bc17dddadec1393fa09c9eef1eb2"
+source = "git+https://github.com/rust-osdev/bootloader?branch=enhancement%2Fbios-disk-speed#65f5385421b6e887a685a445f68ad278d07810dd"
 dependencies = [
  "anyhow",
  "bootloader-boot-config",
@@ -179,7 +179,7 @@ dependencies = [
 [[package]]
 name = "bootloader-boot-config"
 version = "0.11.15"
-source = "git+https://github.com/rust-osdev/bootloader?branch=fix%2Flarge-fat16#afdebf5fca74bc17dddadec1393fa09c9eef1eb2"
+source = "git+https://github.com/rust-osdev/bootloader?branch=enhancement%2Fbios-disk-speed#65f5385421b6e887a685a445f68ad278d07810dd"
 dependencies = [
  "serde",
 ]
