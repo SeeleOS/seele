@@ -41,7 +41,7 @@ impl AbsolutePath {
 }
 
 impl Path {
-    pub fn as_absolute(self) -> Option<AbsolutePath> {
+    pub fn as_absolute(self) -> AbsolutePath {
         let mut new_path = AbsolutePath(Vec::new());
 
         for (i, part) in self.0.iter().enumerate() {
@@ -57,11 +57,11 @@ impl Path {
                     if i == 0 {
                         new_path.push_path(get_current_process().lock().current_directory.clone());
                     }
-                    new_path.0.pop()?;
+                    let _ = new_path.0.pop();
                 }
             }
         }
 
-        Some(new_path)
+        new_path
     }
 }
