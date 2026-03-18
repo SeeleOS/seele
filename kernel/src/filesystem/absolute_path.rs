@@ -12,7 +12,7 @@ enum AbsolutePathPart {
 }
 
 #[derive(Clone, Debug)]
-pub struct AbsolutePath(pub Vec<AbsolutePathPart>, pub String);
+pub struct AbsolutePath(pub Vec<AbsolutePathPart>);
 
 impl Default for AbsolutePath {
     fn default() -> Self {
@@ -42,7 +42,7 @@ impl AbsolutePath {
 
 impl Path {
     pub fn as_absolute(self) -> Option<AbsolutePath> {
-        let mut new_path = AbsolutePath(Vec::new(), String::new());
+        let mut new_path = AbsolutePath(Vec::new());
 
         for (i, part) in self.0.iter().enumerate() {
             match part {
