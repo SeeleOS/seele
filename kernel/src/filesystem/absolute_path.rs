@@ -53,7 +53,7 @@ impl AbsolutePath {
         self.as_normal().navigate(root)
     }
 
-    pub fn is_valid(&mut self, root: WrappedDirectory) -> bool {
+    pub fn is_valid(&self, root: WrappedDirectory) -> bool {
         self.as_normal().is_valid(root)
     }
 }
