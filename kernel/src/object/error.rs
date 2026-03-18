@@ -1,10 +1,19 @@
-use crate::{misc::error::AsSyscallError, systemcall::error::SyscallError};
+use crate::{
+    filesystem::errors::FSError, misc::error::AsSyscallError, systemcall::error::SyscallError,
+};
 
 #[derive(Debug)]
 pub enum ObjectError {
     DoesNotExist,
     TryAgain,
+    FSError(FSError),
     Other,
+}
+
+impl From<FSError> for ObjectError {
+    fn from(value: FSError) -> Self {
+        Self::FSError(value)
+    }
 }
 
 impl AsSyscallError for ObjectError {
@@ -12,6 +21,7 @@ impl AsSyscallError for ObjectError {
         match self {
             Self::TryAgain => SyscallError::TryAgain,
             Self::DoesNotExist => SyscallError::BadFileDescriptor,
+            Self::FSError(err) => err.as_syscall_error(),
             Self::Other => SyscallError::other("object error other"),
         }
     }
