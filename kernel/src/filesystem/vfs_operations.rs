@@ -1,7 +1,7 @@
 use crate::{
     filesystem::{
         info::{DirectoryContentInfo, FileLikeInfo},
-        object::FileObject,
+        object::FileLikeObject,
         vfs::{FSResult, VFS, VirtualFS},
     },
     object::traits::Readable,
@@ -35,10 +35,10 @@ impl VFS {
         ))
     }
 
-    pub fn open(&mut self, path: Path) -> FSResult<FileObject> {
+    pub fn open(&mut self, path: Path) -> FSResult<FileLikeObject> {
         log::trace!("vfs: open {}", path.clone().as_string());
         if let FileLike::File(file) = path.navigate(self.root.clone().unwrap())? {
-            Ok(FileObject::new(file))
+            Ok(FileLikeObject::new(file))
         } else {
             Err(FSError::NotAFile)
         }

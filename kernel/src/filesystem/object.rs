@@ -19,11 +19,11 @@ use crate::{
     s_println,
 };
 
-pub struct FileObject {
+pub struct FileLikeObject {
     file: Arc<Mutex<dyn File>>,
 }
 
-impl FileObject {
+impl FileLikeObject {
     pub fn new(file: Arc<Mutex<dyn File>>) -> Self {
         Self { file }
     }
@@ -33,31 +33,31 @@ impl FileObject {
     }
 }
 
-impl Debug for FileObject {
+impl Debug for FileLikeObject {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         Ok(())
     }
 }
 
-impl Object for FileObject {
+impl Object for FileLikeObject {
     impl_cast_function!(writable, Writable);
     impl_cast_function!(readable, Readable);
     impl_cast_function!(have_linux_stat, HaveLinuxStat);
 }
 
-impl Writable for FileObject {
+impl Writable for FileLikeObject {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
         Ok(self.file.lock().write(buffer).unwrap())
     }
 }
 
-impl Readable for FileObject {
+impl Readable for FileLikeObject {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
         Ok(self.file.lock().read(buffer).unwrap())
     }
 }
 
-impl HaveLinuxStat for FileObject {
+impl HaveLinuxStat for FileLikeObject {
     fn stat(&self) -> ObjectResult<super::info::LinuxStat> {
         Ok(self.file.lock().info().unwrap().as_linux())
     }
