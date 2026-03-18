@@ -247,7 +247,7 @@ define_syscall!(
 define_syscall!(ChangeDirectory, |dir: String| {
     get_current_process()
         .lock()
-        .change_directory(Path::new(&dir))?;
+        .change_directory(Path::new(&dir).as_absolute())?;
     Ok(0)
 });
 
@@ -255,7 +255,7 @@ define_syscall!(GetCurrentDirectory, |buf_ptr: *mut u8, len: usize| {
     let buf = unsafe { slice::from_raw_parts_mut(buf_ptr, len) };
 
     let process = get_current_process();
-    let path_str = process.lock().current_directory.clone().as_string().clone();
+    let path_str = process.lock().current_directory.clone().as_string();
     let path_bytes = path_str.as_bytes();
 
     let path_len = path_bytes.len();
@@ -314,10 +314,11 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
             path = Path::new(&path_str);
         } else {
             if start_from_current_dir {
-                // start from current directory
-                path = Path::new(
-                    (get_current_process().lock().current_directory.1.clone() + &path_str).as_str(),
-                );
+                let mut cur_path = get_current_process().lock().current_directory.clone();
+
+                cur_path.push_path_str(&path_str);
+
+                path = cur_path.clone().as_normal();
             } else {
                 return Err(SyscallError::other(
                     "Non-absolute paths are not supported yet",

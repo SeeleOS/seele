@@ -6,7 +6,10 @@ use alloc::{
 use spin::Mutex;
 
 use crate::{
-    filesystem::{errors::FSError, path::Path, vfs::VirtualFS, vfs_operations::read_all},
+    filesystem::{
+        absolute_path::AbsolutePath, errors::FSError, path::Path, vfs::VirtualFS,
+        vfs_operations::read_all,
+    },
     memory::{addrspace::AddrSpace, page_table_wrapper::PageTableWrapped},
     multitasking::{
         process::{
@@ -36,7 +39,7 @@ impl Process {
             pid,
             addrspace,
             kernel_stack_top,
-            current_directory: Path::default(),
+            current_directory: AbsolutePath::default(),
             threads: Vec::new(),
             exit_code: None,
             objects: Vec::new(),

@@ -4,7 +4,7 @@ use alloc::{string::String, sync::Arc, vec::Vec};
 use elfloader::ElfBinary;
 
 use crate::{
-    filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
+    filesystem::{absolute_path::AbsolutePath, errors::FSError, path::Path, vfs::VirtualFS},
     misc::stack_builder::StackBuilder,
     multitasking::process::Process,
     object::{
@@ -16,7 +16,7 @@ use crate::{
 };
 
 impl Process {
-    pub fn change_directory(&mut self, directory: Path) -> Result<(), FSError> {
+    pub fn change_directory(&mut self, directory: AbsolutePath) -> Result<(), FSError> {
         if directory.is_valid(VirtualFS.lock().root.clone().unwrap()) {
             self.current_directory = directory;
             Ok(())

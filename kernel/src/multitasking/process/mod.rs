@@ -5,6 +5,7 @@ use bootloader_api::info::MemoryRegion;
 use spin::Mutex;
 use x86_64::VirtAddr;
 
+use crate::filesystem::absolute_path::AbsolutePath;
 use crate::filesystem::path::Path;
 use crate::memory::addrspace::AddrSpace;
 use crate::{
@@ -28,7 +29,7 @@ pub struct Process {
     pub kernel_stack_top: VirtAddr,
     pub threads: Vec<Weak<Mutex<Thread>>>,
     pub objects: Vec<Option<Arc<dyn Object>>>,
-    pub current_directory: Path,
+    pub current_directory: AbsolutePath,
     pub exit_code: Option<u64>,
 }
 
@@ -36,7 +37,7 @@ impl Process {
     pub fn empty() -> ProcessRef {
         Arc::new(Mutex::new(Process {
             pid: ProcessID::default(),
-            current_directory: Path::default(),
+            current_directory: AbsolutePath::default(),
             addrspace: AddrSpace::default(),
             kernel_stack_top: VirtAddr::zero(),
             threads: Vec::new(),
