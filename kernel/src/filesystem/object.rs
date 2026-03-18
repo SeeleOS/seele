@@ -37,13 +37,6 @@ impl FileLikeObject {
         }
     }
 
-    pub fn stat(&self) -> ObjectResult<FileLikeInfo> {
-        match &self.file {
-            FileLike::File(f) => Ok(f.lock().info()?),
-            FileLike::Directory(d) => Ok(d.lock().info()?),
-        }
-    }
-
     pub fn directory_contents(&self) -> ObjectResult<Vec<DirectoryContentInfo>> {
         match &self.file {
             FileLike::File(_) => Err(ObjectError::FSError(FSError::NotADirectory)),
