@@ -28,11 +28,11 @@ impl Default for Path {
 }
 
 #[derive(Clone, Debug)]
-pub struct Path(pub Vec<PathPart>, pub String);
+pub struct Path(pub Vec<PathPart>);
 
 impl Path {
     pub fn new(path: &str) -> Self {
-        Self(Self::parse(path), path.to_string())
+        Self(Self::parse(path))
     }
 
     pub fn is_valid(&self, root: WrappedDirectory) -> bool {
@@ -88,10 +88,14 @@ impl Path {
             PathPart::CurrentDir => get_current_process()
                 .lock()
                 .current_directory
+                .clone()
+                .as_normal()
                 .navigate(root)?,
             _ => get_current_process()
                 .lock()
                 .current_directory
+                .clone()
+                .as_normal()
                 .navigate(root)?,
         };
 
