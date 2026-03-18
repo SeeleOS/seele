@@ -16,7 +16,7 @@ pub struct AbsolutePath(pub Vec<AbsolutePathPart>);
 
 impl Default for AbsolutePath {
     fn default() -> Self {
-        Path::default().as_absolute().unwrap()
+        Path::default().as_absolute()
     }
 }
 
@@ -37,6 +37,10 @@ impl AbsolutePath {
         for ele in path.0 {
             self.0.push(ele);
         }
+    }
+
+    pub fn push_path_str(&mut self, string: &str) {
+        self.push_path(Path::new(string).as_absolute());
     }
 }
 
