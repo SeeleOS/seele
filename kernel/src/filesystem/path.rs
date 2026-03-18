@@ -40,8 +40,12 @@ impl Path {
         let mut buf = String::new();
         let mut vec = Vec::new();
 
-        if path.chars().nth(0) == Some('/') {
-            vec.push(PathPart::Root);
+        if let Some(character) = path.chars().nth(0) {
+            match character {
+                '/' => vec.push(PathPart::Root),
+                '.' => vec.push(PathPart::CurrentDir),
+                _ => {}
+            }
         }
 
         for ch in path.chars() {
@@ -54,6 +58,10 @@ impl Path {
                     buf.clear()
                 }
                 '.' => {
+                    if buf.is_empty() {
+                        continue;
+                    }
+
                     vec.push(PathPart::CurrentDir);
                     buf.clear();
                 }
