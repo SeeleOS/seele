@@ -16,9 +16,6 @@
 [submodule "busybox"]
 	path = busybox
 	url = https://github.com/SeeleOS/busybox
-[submodule "tinycc"]
-	path = tinycc
-	url = https://github.com/SeeleOS/tinycc
 [submodule "packages"]
 	path = packages
 	url = https://github.com/SeeleOS/packages
