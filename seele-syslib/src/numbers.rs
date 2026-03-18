@@ -20,4 +20,5 @@ pub enum SyscallNumber {
     OpenFile,
     RemoveObject,
     WaitForProcessExit,
+    GetDirectoryContents,
 }
