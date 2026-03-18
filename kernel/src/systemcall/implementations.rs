@@ -245,9 +245,8 @@ define_syscall!(
 );
 
 define_syscall!(ChangeDirectory, |dir: String| {
-    get_current_process()
-        .lock()
-        .change_directory(Path::new(&dir).as_absolute())?;
+    let path = Path::new(&dir).as_absolute();
+    get_current_process().lock().change_directory(path)?;
     Ok(0)
 });
 
