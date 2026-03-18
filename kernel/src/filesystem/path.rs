@@ -4,10 +4,13 @@ use alloc::{
 };
 use elfloader::PAddr;
 
-use crate::filesystem::{
-    errors::FSError,
-    vfs::{FSResult, WrappedDirectory},
-    vfs_traits::FileLike,
+use crate::{
+    filesystem::{
+        errors::FSError,
+        vfs::{FSResult, WrappedDirectory},
+        vfs_traits::FileLike,
+    },
+    multitasking::process::manager::get_current_process,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -80,7 +83,18 @@ impl Path {
     /// If you do navigate_with_depth with a depth of 1 and a
     /// path len of 6, the actrual depth that will be 5 (6 - 1)
     fn navigate_with_depth(&self, root: WrappedDirectory, depth: usize) -> FSResult<FileLike> {
-        let mut current = FileLike::Directory(root.clone());
+        let mut current = match &self.0[0] {
+            PathPart::Root => FileLike::Directory(root),
+            PathPart::CurrentDir => get_current_process()
+                .lock()
+                .current_directory
+                .navigate(root)?,
+            _ => get_current_process()
+                .lock()
+                .current_directory
+                .navigate(root)?,
+        };
+
         let end = self.0.len().saturating_sub(depth);
 
         for i in 0..end {
