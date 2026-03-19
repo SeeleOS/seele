@@ -128,7 +128,7 @@ impl ThreadManager {
                     .clone()
                     .as_poller()
                     .unwrap()
-                    .queue_woken_event(target_object.clone(), event);
+                    .push_woken_event(target_object.clone(), event);
                 if should_wake {
                     to_wake.push(f.clone());
                     false

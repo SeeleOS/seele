@@ -25,6 +25,7 @@ pub fn get_default_tty() -> Arc<TtyDevice> {
     DEFAULT_TTY.get().unwrap().clone()
 }
 
+// Is the tty already readable? (for polling)
 pub fn is_tty_readable(object: &ObjectRef) -> bool {
     let default_tty: ObjectRef = get_default_tty();
     Arc::ptr_eq(object, &default_tty)

@@ -4,14 +4,11 @@ use crate::{
     define_syscall,
     multitasking::{
         MANAGER,
-        process::{
-            execve::execve,
-            manager::get_current_process,
-            misc::ProcessID,
-        },
+        process::{execve::execve, manager::get_current_process, misc::ProcessID},
         scheduling::return_to_executor_no_save,
         thread::THREAD_MANAGER,
     },
+    s_print,
     systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
 };
 
@@ -26,6 +23,7 @@ define_syscall!(GetProcessParentID, {
 define_syscall!(
     WaitForProcessExit,
     |target_process: ProcessID, exit_code_ptr: *mut u64| {
+        crate::s_print!(".");
         let check_result = {
             let manager = MANAGER.lock();
             let process = manager
@@ -35,7 +33,9 @@ define_syscall!(
                 .ok_or(SyscallError::NoProcess)?;
 
             let p_lock = process.1.lock();
+            s_println!()
             if p_lock.threads.is_empty() {
+                panic!("exit");
                 Some(p_lock.exit_code.unwrap_or(0))
             } else {
                 None
@@ -56,8 +56,14 @@ define_syscall!(
     }
 );
 
-define_syscall!(Execve, |path_str: String, args: Vec<String>, env: Vec<String>| {
-    execve(crate::filesystem::path::Path::new(path_str.as_str()), args, env)?;
+define_syscall!(Execve, |path_str: String,
+                         args: Vec<String>,
+                         env: Vec<String>| {
+    execve(
+        crate::filesystem::path::Path::new(path_str.as_str()),
+        args,
+        env,
+    )?;
     log::info!("execve done");
     Ok(0)
 });

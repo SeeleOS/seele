@@ -37,7 +37,10 @@ define_syscall!(CreatePoller, {
     Ok(objects.len() - 1)
 });
 
-define_syscall!(PollerAdd, |poller: u64, target_object: u64, event: u64, data: u64| {
+define_syscall!(PollerAdd, |poller: u64,
+                            target_object: u64,
+                            event: u64,
+                            data: u64| {
     get_object_current_process(poller)
         .ok_or(SyscallError::BadFileDescriptor)?
         .as_poller()
@@ -79,7 +82,7 @@ define_syscall!(PollerWait, |poller: u64,
         .ok_or(SyscallError::InvalidArguments)?;
 
     if !poller.has_woken_events() {
-        poller.queue_current_ready_events();
+        poller.push_already_ready_events();
     }
 
     if !poller.has_woken_events() {

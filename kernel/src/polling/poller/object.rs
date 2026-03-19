@@ -12,7 +12,9 @@ use crate::{
 
 #[derive(Debug)]
 pub struct PollerObject {
+    // Registered objects that will notify the poller when an event is triggered
     pub entries: Mutex<Vec<PollerEntry>>,
+    // Events that are triggered. Will be processed by caller (poll_wait syscall).
     woken_events: Mutex<Vec<PollerReadyEvent>>,
 }
 
@@ -44,7 +46,8 @@ impl PollerObject {
         }
     }
 
-    pub fn queue_woken_event(&self, object: ObjectRef, event: PollableEvent) -> bool {
+    // Checks for all matching entries that should be woken, and pushes them to the woken_events
+    pub fn push_woken_event(&self, object: ObjectRef, event: PollableEvent) -> bool {
         let matching_entries: Vec<u64> = self
             .entries
             .lock()
@@ -69,7 +72,8 @@ impl PollerObject {
         matches!(entry.event, PollableEvent::CanBeRead) && is_tty_readable(&entry.object)
     }
 
-    pub fn queue_current_ready_events(&self) -> bool {
+    // Pushes the events that are already ready and dont need waiting.
+    pub fn push_already_ready_events(&self) -> bool {
         let ready_entries: Vec<(ObjectRef, PollableEvent, u64)> = self
             .entries
             .lock()
