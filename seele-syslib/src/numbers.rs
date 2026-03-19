@@ -22,4 +22,5 @@ pub enum SyscallNumber {
     WaitForProcessExit,
     GetDirectoryContents,
     GetProcessParentID,
+    ControlObject,
 }
