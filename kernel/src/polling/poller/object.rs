@@ -24,8 +24,10 @@ impl PollerObject {
         }
     }
 
-    pub fn register_obj(&self, object: ObjectRef, event: PollableEvent) {
-        self.entries.lock().push(PollerEntry::new(object, event));
+    pub fn register_obj(&self, object: ObjectRef, event: PollableEvent, data: u64) {
+        self.entries
+            .lock()
+            .push(PollerEntry::new(object, event, data));
     }
 
     pub fn unregister_obj(&self, object: ObjectRef, event: PollableEvent) {
@@ -43,16 +45,21 @@ impl PollerObject {
     }
 
     pub fn queue_woken_event(&self, object: ObjectRef, event: PollableEvent) -> bool {
-        let interested = self
+        let matching_entries: Vec<u64> = self
             .entries
             .lock()
             .iter()
-            .any(|entry| entry.event == event && Arc::ptr_eq(&entry.object, &object));
+            .filter(|entry| entry.event == event && Arc::ptr_eq(&entry.object, &object))
+            .map(|entry| entry.data)
+            .collect();
+
+        let interested = !matching_entries.is_empty();
 
         if interested {
-            self.woken_events
-                .lock()
-                .push(PollerReadyEvent::new(object, event));
+            let mut woken_events = self.woken_events.lock();
+            for data in matching_entries {
+                woken_events.push(PollerReadyEvent::new(object.clone(), event, data));
+            }
         }
 
         interested

@@ -28,24 +28,6 @@ fn pollable_event_to_linux_bits(event: PollableEvent) -> u32 {
     }
 }
 
-fn current_process_object_id(target: &Arc<dyn crate::object::Object>) -> Option<u64> {
-    let process = get_current_process();
-    let process = process.lock();
-
-    process
-        .objects
-        .iter()
-        .enumerate()
-        .find_map(|(index, object)| {
-            let object = object.as_ref()?;
-            if Arc::ptr_eq(object, target) {
-                Some(index as u64)
-            } else {
-                None
-            }
-        })
-}
-
 define_syscall!(CreatePoller, {
     let process = get_current_process();
     let objects = &mut process.lock().objects;
@@ -55,7 +37,7 @@ define_syscall!(CreatePoller, {
     Ok(objects.len() - 1)
 });
 
-define_syscall!(PollerAdd, |poller: u64, target_object: u64, event: u64| {
+define_syscall!(PollerAdd, |poller: u64, target_object: u64, event: u64, data: u64| {
     get_object_current_process(poller)
         .ok_or(SyscallError::BadFileDescriptor)?
         .as_poller()
@@ -63,6 +45,7 @@ define_syscall!(PollerAdd, |poller: u64, target_object: u64, event: u64| {
         .register_obj(
             get_object_current_process(target_object).ok_or(SyscallError::BadFileDescriptor)?,
             PollableEvent::from(event),
+            data,
         );
 
     Ok(0)
@@ -104,15 +87,11 @@ define_syscall!(PollerWait, |poller: u64,
 
     if !events_ptr.is_null() {
         for (index, woken) in woken_events.iter().enumerate() {
-            let Some(object_id) = current_process_object_id(&woken.object) else {
-                continue;
-            };
-
             unsafe {
                 events_ptr.add(index).write(PollResult {
                     events: pollable_event_to_linux_bits(woken.event),
                     _pad: 0,
-                    data: object_id,
+                    data: woken.data,
                 });
             }
         }

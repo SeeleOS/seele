@@ -21,8 +21,8 @@ pub fn create_poller() -> SyscallResult {
     syscall!(CreatePoller)
 }
 
-pub fn poller_add(poller: u64, object: u64, event: PollEvent) -> SyscallResult {
-    syscall!(PollerAdd, poller, object, event as u64)
+pub fn poller_add(poller: u64, object: u64, event: PollEvent, data: u64) -> SyscallResult {
+    syscall!(PollerAdd, poller, object, event as u64, data)
 }
 
 pub fn poller_remove(poller: u64, object: u64, event: PollEvent) -> SyscallResult {
