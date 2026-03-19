@@ -12,7 +12,7 @@ use crate::{
 };
 
 #[repr(C)]
-struct RawPollerEvent {
+pub struct PollResult {
     events: u32,
     _pad: u32,
     data: u64,
@@ -84,7 +84,7 @@ define_syscall!(PollerRemove, |poller: u64,
 });
 
 define_syscall!(PollerWait, |poller: u64,
-                             events_ptr: *mut u8,
+                             events_ptr: *mut PollResult,
                              maxevents: usize| {
     if maxevents == 0 {
         return Err(SyscallError::InvalidArguments);
@@ -100,18 +100,17 @@ define_syscall!(PollerWait, |poller: u64,
         block_current(BlockType::WakeRequired(WakeType::Poller(poller_ref)));
     }
 
-    let ready_events = poller.take_woken_events(maxevents);
-    let events_ptr = events_ptr.cast::<RawPollerEvent>();
+    let woken_events = poller.take_woken_events(maxevents);
 
     if !events_ptr.is_null() {
-        for (index, ready) in ready_events.iter().enumerate() {
-            let Some(object_id) = current_process_object_id(&ready.object) else {
+        for (index, woken) in woken_events.iter().enumerate() {
+            let Some(object_id) = current_process_object_id(&woken.object) else {
                 continue;
             };
 
             unsafe {
-                events_ptr.add(index).write(RawPollerEvent {
-                    events: pollable_event_to_linux_bits(ready.event),
+                events_ptr.add(index).write(PollResult {
+                    events: pollable_event_to_linux_bits(woken.event),
                     _pad: 0,
                     data: object_id,
                 });
@@ -119,5 +118,5 @@ define_syscall!(PollerWait, |poller: u64,
         }
     }
 
-    Ok(ready_events.len())
+    Ok(woken_events.len())
 });
