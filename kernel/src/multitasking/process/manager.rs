@@ -39,7 +39,7 @@ impl Manager {
 
     pub fn spawn(&mut self, program: Path) {
         log::info!("spawn process: {}", program.clone().as_string());
-        let process = Process::new(program);
+        let process = Process::init();
         self.processes.insert(process.lock().pid, process.clone());
     }
 

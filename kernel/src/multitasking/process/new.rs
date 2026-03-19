@@ -27,10 +27,10 @@ use crate::{
 };
 
 const DEFAULT_PATH: &str = "PATH=/programs";
+const INIT_PATH: &str = "/programs/quantis";
 
 impl Process {
-    pub fn new(path: Path) -> ProcessRef {
-        log::info!("process new: {}", path.clone().as_string());
+    pub fn init() -> ProcessRef {
         let pid = ProcessID::default();
         let mut addrspace = AddrSpace::default();
         let kernel_stack_top = addrspace.allocate_kernel(16).1.finish();
@@ -50,7 +50,7 @@ impl Process {
 
         log::debug!("process {}: setup start", pid.0);
         let context = setup_process(
-            path,
+            Path::new(INIT_PATH),
             Vec::new(),
             alloc::vec![DEFAULT_PATH.to_string()],
             &mut process.addrspace,
