@@ -3,11 +3,16 @@
 
 use core::panic::PanicInfo;
 
+use acpi::platform::interrupt;
+use x86_64::instructions::interrupts;
+
 use crate::{misc::hlt_loop, println, s_println};
 
 pub fn handle_panic(_info: &PanicInfo) -> ! {
     s_println!("KERNEL_PANIC!!! \n{}", _info);
     println!("KERNEL PANIC!!! \n {}", _info);
+
+    interrupts::disable();
 
     hlt_loop();
 }
