@@ -10,13 +10,13 @@ use crate::{
 
 #[derive(Debug)]
 pub struct PollerObject {
-    entries: Mutex<Vec<PollerEntry>>,
+    pub entries: Mutex<Vec<PollerEntry>>,
 }
 
 #[derive(Debug)]
 struct PollerEntry {
-    event: PollableEvent,
-    object: ObjectRef,
+    pub event: PollableEvent,
+    pub object: ObjectRef,
 }
 
 impl PollerEntry {
