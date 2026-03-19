@@ -9,6 +9,9 @@ lazy_static::lazy_static! {
 }
 pub fn flush_line_buffer() {
     for ele in LINE_BUFFER.lock().drain(..) {
-        KEYBOARD_QUEUE.get().unwrap().lock().push_back(ele);
+        KEYBOARD_QUEUE
+            .get_or_init(|| Mutex::new(VecDeque::new()))
+            .lock()
+            .push_back(ele);
     }
 }
