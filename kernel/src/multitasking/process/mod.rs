@@ -31,6 +31,7 @@ pub struct Process {
     pub objects: Vec<Option<Arc<dyn Object>>>,
     pub current_directory: AbsolutePath,
     pub exit_code: Option<u64>,
+    pub parent: Option<ProcessRef>,
 }
 
 impl Process {
@@ -43,6 +44,7 @@ impl Process {
             threads: Vec::new(),
             objects: Vec::new(),
             exit_code: None,
+            parent: None,
         }))
     }
 }

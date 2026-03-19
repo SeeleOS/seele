@@ -43,6 +43,7 @@ impl Process {
             threads: Vec::new(),
             exit_code: None,
             objects: Vec::new(),
+            parent: None,
         }));
 
         let process = &mut *process_arc.lock();

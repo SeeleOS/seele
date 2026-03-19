@@ -8,7 +8,11 @@ use crate::{
     memory::{addrspace::AddrSpace, page_table_wrapper::PageTableWrapped},
     multitasking::{
         MANAGER,
-        process::{Process, ProcessRef, manager::Manager, misc::ProcessID},
+        process::{
+            Process, ProcessRef,
+            manager::{Manager, get_current_process},
+            misc::ProcessID,
+        },
         thread::THREAD_MANAGER,
     },
 };
@@ -38,6 +42,7 @@ impl Process {
             objects: self.objects.clone(),
             current_directory: self.current_directory.clone(),
             exit_code: None,
+            parent: Some(get_current_process().clone()),
         }));
 
         let new_thread = current_thread.lock().clone_and_spawn(new_process.clone());
