@@ -18,5 +18,5 @@ pub trait Configuratable: Object {
 }
 
 pub trait Controllable: Object {
-    fn control(&self, command: control::Command) -> ObjectResult<isize>;
+    fn control(&self, command: control::Command, arg: u64) -> ObjectResult<isize>;
 }
