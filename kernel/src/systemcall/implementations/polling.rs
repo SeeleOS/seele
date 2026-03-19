@@ -79,6 +79,10 @@ define_syscall!(PollerWait, |poller: u64,
         .ok_or(SyscallError::InvalidArguments)?;
 
     if !poller.has_woken_events() {
+        poller.queue_current_ready_events();
+    }
+
+    if !poller.has_woken_events() {
         let poller_ref: Arc<dyn crate::object::Object> = poller.clone();
         block_current(BlockType::WakeRequired(WakeType::Poller(poller_ref)));
     }

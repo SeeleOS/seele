@@ -4,6 +4,7 @@ use spin::Mutex;
 
 use crate::{
     impl_cast_function,
+    keyboard::decoding_task::KEYBOARD_QUEUE,
     keyboard::object::KeyboardObject,
     multitasking::thread::THREAD_MANAGER,
     object::{
@@ -22,6 +23,15 @@ pub static DEFAULT_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();
 
 pub fn get_default_tty() -> Arc<TtyDevice> {
     DEFAULT_TTY.get().unwrap().clone()
+}
+
+pub fn is_tty_readable(object: &ObjectRef) -> bool {
+    let default_tty: ObjectRef = get_default_tty();
+    Arc::ptr_eq(object, &default_tty)
+        && !KEYBOARD_QUEUE
+            .get_or_init(|| Mutex::new(Default::default()))
+            .lock()
+            .is_empty()
 }
 
 pub fn wake_tty_poller_readable() {

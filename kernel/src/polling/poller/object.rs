@@ -3,7 +3,7 @@ use spin::Mutex;
 
 use crate::{
     impl_cast_function_non_trait,
-    object::{Object, misc::ObjectRef},
+    object::{Object, misc::ObjectRef, tty_device::is_tty_readable},
     polling::{
         event::PollableEvent,
         poller::{PollerEntry, PollerReadyEvent},
@@ -63,6 +63,31 @@ impl PollerObject {
         }
 
         interested
+    }
+
+    fn is_entry_ready(entry: &PollerEntry) -> bool {
+        matches!(entry.event, PollableEvent::CanBeRead) && is_tty_readable(&entry.object)
+    }
+
+    pub fn queue_current_ready_events(&self) -> bool {
+        let ready_entries: Vec<(ObjectRef, PollableEvent, u64)> = self
+            .entries
+            .lock()
+            .iter()
+            .filter(|entry| Self::is_entry_ready(entry))
+            .map(|entry| (entry.object.clone(), entry.event, entry.data))
+            .collect();
+
+        let has_ready = !ready_entries.is_empty();
+
+        if has_ready {
+            let mut woken_events = self.woken_events.lock();
+            for (object, event, data) in ready_entries {
+                woken_events.push(PollerReadyEvent::new(object, event, data));
+            }
+        }
+
+        has_ready
     }
 
     pub fn has_woken_events(&self) -> bool {
