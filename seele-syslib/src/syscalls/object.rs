@@ -7,6 +7,22 @@ pub enum Command {
     GetFlags = 1,
 }
 
+impl From<i32> for Command {
+    fn from(value: i32) -> Self {
+        Self::from(value as u64)
+    }
+}
+
+impl From<u64> for Command {
+    fn from(value: u64) -> Self {
+        match value {
+            0 => Self::SetFlags,
+            1 => Self::GetFlags,
+            _ => panic!("invalid object control command: {value}"),
+        }
+    }
+}
+
 pub fn read_object(object: u64, buffer: &mut [u8]) -> SyscallResult {
     syscall!(
         ReadObject,
