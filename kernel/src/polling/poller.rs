@@ -32,6 +32,23 @@ impl PollerObject {
     pub fn add(&mut self, object: ObjectRef, event: Event) {
         self.entries.push(PollerEntry::new(object, event));
     }
+
+    pub fn remove(&mut self, object: ObjectRef, event: Event) {
+        let mut index = 0;
+        let mut waiting_to_remove = Vec::new();
+
+        for entry in &self.entries {
+            if entry.event == event && Arc::ptr_eq(&entry.object, &object) {
+                waiting_to_remove.push(index);
+            }
+
+            index += 1;
+        }
+
+        for ele in waiting_to_remove {
+            self.entries.remove(ele);
+        }
+    }
 }
 
 impl Object for PollerObject {}
