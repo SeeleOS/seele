@@ -49,6 +49,10 @@ pub fn get_process_id() -> SyscallResult {
     syscall!(GetProcessID)
 }
 
+pub fn get_process_parent_id() -> SyscallResult {
+    syscall!(GetProcessParentID)
+}
+
 wrap_c!(get_thread_id());
 pub fn get_thread_id() -> SyscallResult {
     // TODO not yet implemented
