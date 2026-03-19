@@ -14,7 +14,7 @@ pub struct PollerObject {
 }
 
 #[derive(Debug)]
-struct PollerEntry {
+pub struct PollerEntry {
     pub event: PollableEvent,
     pub object: ObjectRef,
 }
