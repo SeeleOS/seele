@@ -38,14 +38,11 @@ use crate::define_syscall;
 static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ProcessRef>>> = Mutex::new(BTreeMap::new());
 
 define_syscall!(GetProcessParentID, {
-    Ok(get_current_process()
-        .lock()
-        .parent
-        .clone()
-        .unwrap()
-        .lock()
-        .pid
-        .0 as usize)
+    if let Some(parent) = get_current_process().lock().parent.clone() {
+        Ok(parent.lock().pid.0 as usize)
+    } else {
+        Ok(0)
+    }
 });
 
 // Track per-(process, object) directory offsets so repeated getdents
