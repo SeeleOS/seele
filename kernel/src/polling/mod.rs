@@ -35,4 +35,3 @@
 
 pub mod event;
 pub mod poller;
-pub mod wake;
