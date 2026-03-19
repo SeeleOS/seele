@@ -24,4 +24,7 @@ pub enum SyscallNumber {
     GetProcessParentID,
     ControlObject,
     CreatePoller,
+    PollerAdd,
+    PollerRemove,
+    PollerWait,
 }
