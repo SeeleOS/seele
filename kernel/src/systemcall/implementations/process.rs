@@ -62,9 +62,10 @@ define_syscall!(
                         *exit_code_ptr = exit_code;
                     }
                 }
+                let pid = process.lock().pid.0;
                 MANAGER.lock().remove_process(process);
                 s_print!("exit");
-                Ok(0)
+                Ok(pid as usize)
             }
             None => Err(SyscallError::TryAgain),
         }
