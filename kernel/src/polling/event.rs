@@ -1,5 +1,5 @@
 /// Events made by a specific object to a poller.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PollableEvent {
     CanBeRead,
     CanBeWritten,
