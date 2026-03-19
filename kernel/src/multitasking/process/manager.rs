@@ -37,10 +37,14 @@ impl Manager {
         });
     }
 
-    pub fn remove_process(&mut self, process: ProcessRef, thread_manager: &mut ThreadManager) {
+    pub fn wake_process_exit(&mut self, process: ProcessRef, thread_manager: &mut ThreadManager) {
+        log::debug!("wake process exit {}", process.lock().pid.0);
+        thread_manager.wake_process_exit(process.lock().pid);
+    }
+
+    pub fn remove_process(&mut self, process: ProcessRef) {
         log::debug!("remove process {}", process.lock().pid.0);
         self.processes.remove(&process.lock().pid);
-        thread_manager.wake_process_exit(process.lock().pid);
     }
 
     pub fn load_process(&mut self, process: ProcessRef) {

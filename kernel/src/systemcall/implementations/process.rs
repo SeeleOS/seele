@@ -1,4 +1,4 @@
-use alloc::{string::String, vec::Vec};
+use alloc::{string::String, sync::Arc, vec::Vec};
 
 use crate::{
     define_syscall,
@@ -23,32 +23,47 @@ define_syscall!(GetProcessParentID, {
 define_syscall!(
     WaitForProcessExit,
     |target_process: ProcessID, exit_code_ptr: *mut u64| {
-        crate::s_print!(".");
+        let current_process = get_current_process();
         let check_result = {
             let manager = MANAGER.lock();
             let process = manager
                 .processes
                 .iter()
-                .find(|(pid, _)| **pid == target_process)
+                .find(|(pid, process)| {
+                    if target_process.0 == (-1i64) as u64 {
+                        // Waiting for any process to exit
+                        process
+                            .lock()
+                            .parent
+                            .clone()
+                            .is_some_and(|parent| Arc::ptr_eq(&parent, &current_process))
+                    } else if target_process.0 > 0 {
+                        **pid == target_process
+                    } else {
+                        false
+                    }
+                })
                 .ok_or(SyscallError::NoProcess)?;
 
             let p_lock = process.1.lock();
-            s_println!()
             if p_lock.threads.is_empty() {
-                panic!("exit");
-                Some(p_lock.exit_code.unwrap_or(0))
+                Some((process.1.clone(), p_lock.exit_code.unwrap_or(0)))
             } else {
                 None
             }
         };
 
+        THREAD_MANAGER.get().unwrap().lock().clean_zombies();
+
         match check_result {
-            Some(exit_code) => {
+            Some((process, exit_code)) => {
                 if !exit_code_ptr.is_null() {
                     unsafe {
                         *exit_code_ptr = exit_code;
                     }
                 }
+                MANAGER.lock().remove_process(process);
+                s_print!("exit");
                 Ok(0)
             }
             None => Err(SyscallError::TryAgain),

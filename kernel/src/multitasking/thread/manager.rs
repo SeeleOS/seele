@@ -116,7 +116,7 @@ impl ThreadManager {
         }
 
         for dead_process in to_remove {
-            MANAGER.lock().remove_process(dead_process, self);
+            MANAGER.lock().wake_process_exit(dead_process, self);
         }
         log::debug!("clean_zombies done");
     }
