@@ -10,7 +10,7 @@ use crate::{
         misc::ObjectResult,
         traits::{Configuratable, Writable},
     },
-    print,
+    print, s_println,
     terminal::{
         object_config::{TerminalInfo, WindowSizeInfo},
         term_trait::AbstractTerminal,
@@ -42,9 +42,9 @@ impl Object for TerminalObject {
 
 impl Writable for TerminalObject {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
-        self.inner
-            .lock()
-            .push_str(from_utf8(buffer).unwrap_or("Unsupported charcter"));
+        let string = from_utf8(buffer).unwrap_or("Unsupported charcter");
+        self.inner.lock().push_str(string);
+        s_println!("{string}");
         Ok(buffer.len())
     }
 }
