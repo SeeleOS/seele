@@ -86,6 +86,8 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     log::info!("init: kernel task executor ready");
     multitasking::init();
     log::info!("init: multitasking ready");
+    keyboard::init();
+    log::info!("init: keyboard ready");
     interrupts::init();
     log::info!("init: interrupts ready");
 

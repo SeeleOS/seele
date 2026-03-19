@@ -1,6 +1,5 @@
 use crate::{
     keyboard::scancode_stream::{SCANCODE_QUEUE, WAKER},
-    multitasking::thread::THREAD_MANAGER,
 };
 
 pub mod char_processing;
@@ -8,6 +7,10 @@ pub mod decoding_task;
 pub mod object;
 pub mod ps2;
 pub mod scancode_stream;
+
+pub fn init() {
+    ps2::init();
+}
 
 pub(crate) fn push_scancode(scancode: u8) {
     let queue = SCANCODE_QUEUE.get().unwrap();

@@ -17,11 +17,34 @@ use crate::{
     keyboard::push_scancode,
 };
 
-pub extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    notify_end_of_interrupt(HardwareInterrupt::Keyboard);
+pub fn init() {
+    let dropped = drain_output_buffer();
+    if dropped != 0 {
+        log::info!("ps2: dropped {dropped} stale byte(s) left by firmware/bootloader");
+    }
+}
 
+pub extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
     let mut keyboard_port = Port::new(0x60);
     let scancode = unsafe { keyboard_port.read() };
-
     push_scancode(scancode);
+    notify_end_of_interrupt(HardwareInterrupt::Keyboard);
+}
+
+fn drain_output_buffer() -> usize {
+    let mut status_port: Port<u8> = Port::new(0x64);
+    let mut data_port: Port<u8> = Port::new(0x60);
+    let mut drained = 0;
+
+    while drained < 256 {
+        let status = unsafe { status_port.read() };
+        if (status & 1) == 0 {
+            break;
+        }
+
+        let _ = unsafe { data_port.read() };
+        drained += 1;
+    }
+
+    drained
 }
