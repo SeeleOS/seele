@@ -32,4 +32,5 @@ pub enum SyscallNo {
     CreatePoller,
     PollerAdd,
     PollerRemove,
+    PollerWait,
 }

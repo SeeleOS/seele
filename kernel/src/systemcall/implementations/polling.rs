@@ -1,3 +1,4 @@
+use crate::multitasking::thread::yielding::{BlockType, WakeType, block_current};
 use crate::object::misc::get_object_current_process;
 use crate::polling::event::PollableEvent;
 use crate::systemcall::numbers::*;
@@ -44,6 +45,14 @@ define_syscall!(PollerRemove, |poller: u64,
             get_object_current_process(target_object).ok_or(SyscallError::BadFileDescriptor)?,
             PollableEvent::from(event),
         );
+
+    Ok(0)
+});
+
+define_syscall!(PollerWait, |poller: u64| {
+    block_current(BlockType::WakeRequired(WakeType::Poller(
+        get_object_current_process(poller).ok_or(SyscallError::BadFileDescriptor)?,
+    )));
 
     Ok(0)
 });
