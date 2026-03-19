@@ -28,4 +28,6 @@ pub enum SyscallNo {
     GetDirectoryContents,
     GetProcessParentID,
     ControlObject,
+
+    CreatePoller,
 }
