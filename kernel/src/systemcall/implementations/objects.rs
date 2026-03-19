@@ -7,7 +7,7 @@ use crate::{
     define_syscall,
     filesystem::vfs_traits::DirectoryContentType,
     multitasking::process::{manager::get_current_process, misc::ProcessID},
-    object::{config::ConfigurateRequest, misc::get_object_current_process},
+    object::{config::ConfigurateRequest, control::Command, misc::get_object_current_process},
     systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
 };
 
@@ -48,7 +48,11 @@ define_syscall!(
                     _ => 0,
                 };
                 entry_ptr.add(18).write(linux_type);
-                core::ptr::copy_nonoverlapping(name_bytes.as_ptr(), entry_ptr.add(19), name_bytes.len());
+                core::ptr::copy_nonoverlapping(
+                    name_bytes.as_ptr(),
+                    entry_ptr.add(19),
+                    name_bytes.len(),
+                );
                 entry_ptr.add(19 + name_bytes.len()).write(0);
             }
 
@@ -117,3 +121,13 @@ define_syscall!(
         }
     }
 );
+
+define_syscall!(ControlObject, |object: u64, command: u64, arg: u64| {
+    get_object_current_process(object)
+        .ok_or(SyscallError::BadFileDescriptor)?
+        .as_controllable()
+        .ok_or(SyscallError::InvalidArguments)?
+        .control(Command::new(command)?, arg)?;
+
+    Ok(0)
+});

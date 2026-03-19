@@ -36,7 +36,8 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         ConfigurateObject,
         WaitForProcessExit,
         GetDirectoryContents,
-        GetProcessParentID
+        GetProcessParentID,
+        ControlObject
     );
 
     table
