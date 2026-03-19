@@ -11,6 +11,7 @@ use crate::{
         char_processing::process_char_non_raw, ps2::_PS2_KEYBOARD, scancode_stream::ScancodeStream,
     },
     multitasking::thread::THREAD_MANAGER,
+    object::tty_device::wake_default_tty_readable,
     print, s_println,
     terminal::{
         misc::{LINE_BUFFER, flush_line_buffer},
@@ -43,6 +44,7 @@ pub async fn process_keypresses() {
                     .lock()
                     .push_back(character as u8);
                 THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+                wake_default_tty_readable();
             } else {
                 process_char_non_raw(character);
             }

@@ -5,10 +5,13 @@ use spin::Mutex;
 use crate::{
     impl_cast_function,
     keyboard::object::KeyboardObject,
+    multitasking::thread::THREAD_MANAGER,
     object::{
         Object,
+        misc::ObjectRef,
         traits::{Configuratable, Controllable, Readable, Writable},
     },
+    polling::event::PollableEvent,
     terminal::{
         object::TerminalObject,
         state::{self, DEFAULT_TERMINAL},
@@ -19,6 +22,15 @@ pub static DEFAULT_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();
 
 pub fn get_default_tty() -> Arc<TtyDevice> {
     DEFAULT_TTY.get().unwrap().clone()
+}
+
+pub fn wake_default_tty_readable() {
+    let tty: ObjectRef = get_default_tty();
+    THREAD_MANAGER
+        .get()
+        .unwrap()
+        .lock()
+        .wake_poller(tty, PollableEvent::CanBeRead);
 }
 
 #[derive(Debug)]

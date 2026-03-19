@@ -2,6 +2,7 @@ use core::char;
 
 use crate::{
     multitasking::thread::THREAD_MANAGER,
+    object::tty_device::wake_default_tty_readable,
     print,
     terminal::misc::{LINE_BUFFER, flush_line_buffer},
 };
@@ -13,6 +14,7 @@ pub fn process_char_non_raw(char: char) {
             LINE_BUFFER.lock().push_back(b'\n');
             flush_line_buffer();
             THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+            wake_default_tty_readable();
         }
         '\x08' | '\x7f' => {
             let mut lb = LINE_BUFFER.lock();
