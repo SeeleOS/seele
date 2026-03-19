@@ -7,10 +7,12 @@ use crate::{
     keyboard::object::KeyboardObject,
     object::{
         Object,
-        traits::{Configuratable, Readable, Writable},
+        traits::{Configuratable, Controllable, Readable, Writable},
     },
-    terminal::object::TerminalObject,
-    terminal::state::{self, DEFAULT_TERMINAL},
+    terminal::{
+        object::TerminalObject,
+        state::{self, DEFAULT_TERMINAL},
+    },
 };
 
 pub static DEFAULT_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();
@@ -34,6 +36,7 @@ impl Object for TtyDevice {
     impl_cast_function!(writable, Writable);
     impl_cast_function!(readable, Readable);
     impl_cast_function!(configuratable, Configuratable);
+    impl_cast_function!(controllable, Controllable);
 }
 
 impl Configuratable for TtyDevice {
@@ -52,5 +55,12 @@ impl Writable for TtyDevice {
 impl Readable for TtyDevice {
     fn read(&self, buffer: &mut [u8]) -> super::ObjectResult<usize> {
         KeyboardObject.read(buffer)
+    }
+}
+
+impl Controllable for TtyDevice {
+    fn control(&self, command: super::control::Command) -> super::misc::ObjectResult<isize> {
+        // Stub
+        Ok(0)
     }
 }
