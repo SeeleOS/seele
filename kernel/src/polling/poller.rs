@@ -32,11 +32,11 @@ impl PollerObject {
         }
     }
 
-    pub fn add(&self, object: ObjectRef, event: PollableEvent) {
+    pub fn register_obj(&self, object: ObjectRef, event: PollableEvent) {
         self.entries.lock().push(PollerEntry::new(object, event));
     }
 
-    pub fn remove(&self, object: ObjectRef, event: PollableEvent) {
+    pub fn unregister_obj(&self, object: ObjectRef, event: PollableEvent) {
         let mut waiting_to_remove = Vec::new();
 
         for (i, entry) in self.entries.lock().iter().enumerate() {

@@ -25,7 +25,7 @@ define_syscall!(PollerAdd, |poller: u64, target_object: u64, event: u64| {
         .ok_or(SyscallError::BadFileDescriptor)?
         .as_poller()
         .ok_or(SyscallError::InvalidArguments)?
-        .add(
+        .register_obj(
             get_object_current_process(target_object).ok_or(SyscallError::BadFileDescriptor)?,
             PollableEvent::from(event),
         );
@@ -40,7 +40,7 @@ define_syscall!(PollerRemove, |poller: u64,
         .ok_or(SyscallError::BadFileDescriptor)?
         .as_poller()
         .ok_or(SyscallError::InvalidArguments)?
-        .remove(
+        .unregister_obj(
             get_object_current_process(target_object).ok_or(SyscallError::BadFileDescriptor)?,
             PollableEvent::from(event),
         );

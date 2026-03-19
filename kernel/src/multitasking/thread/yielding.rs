@@ -1,4 +1,4 @@
-use core::ptr::with_exposed_provenance;
+use core::{clone, ptr::with_exposed_provenance};
 
 use alloc::{collections::vec_deque::VecDeque, vec::Vec};
 
@@ -12,6 +12,7 @@ use crate::{
         },
     },
     object::misc::ObjectRef,
+    polling::event::PollableEvent,
     s_println,
 };
 
@@ -114,6 +115,28 @@ impl ThreadManager {
         for thread in to_wake {
             self.wake(thread);
         }
+    }
+
+    pub fn wake_poller(&mut self, target_object: ObjectRef, event: PollableEvent) {
+        let mut to_wake = Vec::new();
+
+        self.blocked_queues.poller.retain(|f| {
+            if let State::Blocked(BlockType::WakeRequired(WakeType::Poller(poller))) =
+                &f.lock().state
+            {
+                poller
+                    .clone()
+                    .as_poller()
+                    .unwrap()
+                    .wake(target_object.clone(), event);
+                to_wake.push(f.clone());
+                false
+            } else {
+                true
+            }
+        });
+
+        to_wake.iter().for_each(|f| self.wake(f.clone()));
     }
 
     register_wake_func!(keyboard);
