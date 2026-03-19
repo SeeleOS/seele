@@ -1,6 +1,6 @@
 use crate::{
     filesystem::info::LinuxStat,
-    object::{Object, config::ConfigurateRequest, misc::ObjectResult},
+    object::{Object, config::ConfigurateRequest, control, misc::ObjectResult},
 };
 
 pub trait Writable: Object {
@@ -18,5 +18,5 @@ pub trait Configuratable: Object {
 }
 
 pub trait Controllable: Object {
-    fn control(&self) -> ObjectResult<isize>;
+    fn control(&self, command: control::Command) -> ObjectResult<isize>;
 }
