@@ -35,3 +35,12 @@
 
 pub mod event;
 pub mod poller;
+mod entry;
+mod object;
+mod ready;
+mod registration;
+mod wake;
+
+pub use entry::PollerEntry;
+pub use object::PollerObject;
+pub use ready::PollerReadyEvent;
