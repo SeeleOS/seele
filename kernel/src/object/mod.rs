@@ -13,10 +13,12 @@ use crate::{
 };
 
 pub mod config;
+pub mod control;
 pub mod error;
 pub mod misc;
 pub mod traits;
 pub mod tty_device;
+
 macro_rules! define_cast_function_non_trait {
     ($name: expr, $type: ty) => {
         paste::paste! {

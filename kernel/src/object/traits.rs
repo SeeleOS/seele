@@ -16,3 +16,7 @@ pub trait Readable: Object {
 pub trait Configuratable: Object {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize>;
 }
+
+pub trait Controllable: Object {
+    fn control(&self) -> ObjectResult<isize>;
+}
