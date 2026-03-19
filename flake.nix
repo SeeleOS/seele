@@ -46,6 +46,7 @@
               meson
               rustPackages.clippy
               qemu
+              codex
             ];
             RUST_SRC_PATH = rustPlatform.rustLibSrc;
             shellHook = ''
