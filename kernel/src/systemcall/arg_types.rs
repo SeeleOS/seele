@@ -9,7 +9,7 @@ use crate::{
         others::KernelFrom,
     },
     multitasking::process::misc::ProcessID,
-    systemcall::error::SyscallError,
+    systemcall::{error::SyscallError, implementations::PollResult},
 };
 
 macro_rules! add_syscall_arg_type {
@@ -30,7 +30,15 @@ pub trait SyscallArg {
         Self: Sized;
 }
 
-add_syscall_arg_type!(u32, usize, *mut LinuxStat, u64, *mut u8, *mut u64);
+add_syscall_arg_type!(
+    u32,
+    usize,
+    *mut LinuxStat,
+    u64,
+    *mut u8,
+    *mut u64,
+    *mut PollResult
+);
 
 impl SyscallArg for Vec<String> {
     fn from_u64(val: u64) -> Result<Self, SyscallError>
