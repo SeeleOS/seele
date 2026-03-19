@@ -1,6 +1,7 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use crate::{
+    impl_cast_function_non_trait,
     object::{Object, misc::ObjectRef},
     polling::event::Event,
 };
@@ -51,4 +52,6 @@ impl PollerObject {
     }
 }
 
-impl Object for PollerObject {}
+impl Object for PollerObject {
+    impl_cast_function_non_trait!(poller, PollerObject);
+}
