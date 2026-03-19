@@ -30,7 +30,7 @@ pub enum SyscallError {
     NotADirectory = -20,
     /// 是一个目录 (EISDIR)
     IsADirectory = -21,
-    /// 参数非法 (EINVAL)
+    /// 参数非法 (EINVAL)，例如不支持的 fcntl cmd
     InvalidArguments = -22,
     /// 系统打开文件过多 (ENFILE)
     TooManyOpenFilesSystem = -23,
