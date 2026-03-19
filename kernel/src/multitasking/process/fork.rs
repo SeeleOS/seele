@@ -1,17 +1,10 @@
-use alloc::{
-    sync::{Arc, Weak},
-    vec::Vec,
-};
+use alloc::{sync::Arc, vec::Vec};
 use spin::{MutexGuard, mutex::Mutex};
 
 use crate::{
-    memory::{addrspace::AddrSpace, page_table_wrapper::PageTableWrapped},
     multitasking::{
-        MANAGER,
         process::{
-            Process, ProcessRef,
-            manager::{Manager, get_current_process},
-            misc::ProcessID,
+            manager::Manager, misc::ProcessID, Process,
         },
         thread::THREAD_MANAGER,
     },
@@ -34,6 +27,7 @@ impl Process {
         );
 
         log::debug!("fork: parent {} -> child {}", self.pid.0, pid.0);
+        let parent = manager.current.clone().unwrap();
         let new_process = Arc::new(Mutex::new(Self {
             pid,
             addrspace: self.addrspace.clone_all(),
@@ -42,7 +36,7 @@ impl Process {
             objects: self.objects.clone(),
             current_directory: self.current_directory.clone(),
             exit_code: None,
-            parent: Some(get_current_process().clone()),
+            parent: Some(parent),
         }));
 
         let new_thread = current_thread.lock().clone_and_spawn(new_process.clone());
