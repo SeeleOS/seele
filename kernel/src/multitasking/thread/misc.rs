@@ -12,7 +12,7 @@ impl Default for ThreadID {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Default, Clone, Debug)]
 pub enum State {
     #[default]
     Ready, // ready to run (in a queue)

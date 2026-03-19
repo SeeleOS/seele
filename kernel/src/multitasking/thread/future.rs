@@ -82,7 +82,7 @@ impl Future for ThreadFuture {
             )
         };
 
-        let state = self.0.lock().state;
+        let state = self.0.lock().state.clone();
 
         match state {
             State::Zombie => {

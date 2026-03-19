@@ -78,7 +78,7 @@ impl ThreadManager {
         log::debug!("thread block: {:?}", block_type);
         let mut thread = thread_ref.lock();
 
-        thread.state = State::Blocked(block_type);
+        thread.state = State::Blocked(block_type.clone());
 
         self.blocked_queues.push(thread_ref.clone(), block_type);
     }
@@ -124,13 +124,17 @@ impl ThreadManager {
             if let State::Blocked(BlockType::WakeRequired(WakeType::Poller(poller))) =
                 &f.lock().state
             {
-                poller
+                let should_wake = poller
                     .clone()
                     .as_poller()
                     .unwrap()
-                    .wake(target_object.clone(), event);
-                to_wake.push(f.clone());
-                false
+                    .queue_woken_event(target_object.clone(), event);
+                if should_wake {
+                    to_wake.push(f.clone());
+                    false
+                } else {
+                    true
+                }
             } else {
                 true
             }
