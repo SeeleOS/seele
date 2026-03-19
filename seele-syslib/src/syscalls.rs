@@ -5,6 +5,7 @@ use crate::{syscall, utils::SyscallResult};
 pub mod filesystem;
 pub mod futex;
 pub mod object;
+pub mod polling;
 
 // Wait for a process to exit
 pub fn wait_for_process_exit(process: i32, exit_code_ptr: *mut i32) -> SyscallResult {
