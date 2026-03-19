@@ -25,5 +25,6 @@ pub fn term_print(args: Arguments) {
         .get()
         .unwrap()
         .lock()
-        .write(format(args).as_bytes());
+        .write(format(args).as_bytes())
+        .unwrap();
 }
