@@ -1,6 +1,6 @@
-use crate::systemcall::error::SyscallError;
 use crate::systemcall::numbers::*;
 use crate::systemcall::utils::SyscallImpl;
+use crate::systemcall::{error::SyscallError, implementations::objects};
 use alloc::sync::Arc;
 
 use crate::{
@@ -9,10 +9,10 @@ use crate::{
 };
 
 define_syscall!(CreatePoller, {
-    get_current_process()
-        .lock()
-        .objects
-        .push(Some(Arc::new(PollerObject::new())));
+    let process = get_current_process();
+    let objects = &mut process.lock().objects;
 
-    Ok(0)
+    objects.push(Some(Arc::new(PollerObject::new())));
+
+    Ok(objects.len() - 1)
 });
