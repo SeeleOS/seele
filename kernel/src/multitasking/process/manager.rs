@@ -32,15 +32,9 @@ impl Manager {
             self.processes
                 .insert(kernel_process.lock().pid, kernel_process.clone());
 
-            // Spawns the shell
-            self.spawn(Path::new("/programs/quantis"));
+            let init = Process::init();
+            self.processes.insert(init.lock().pid, init.clone());
         });
-    }
-
-    pub fn spawn(&mut self, program: Path) {
-        log::info!("spawn process: {}", program.clone().as_string());
-        let process = Process::init();
-        self.processes.insert(process.lock().pid, process.clone());
     }
 
     pub fn remove_process(&mut self, process: ProcessRef, thread_manager: &mut ThreadManager) {
