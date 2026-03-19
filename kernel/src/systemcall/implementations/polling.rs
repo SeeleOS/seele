@@ -1,5 +1,5 @@
 use crate::object::misc::get_object_current_process;
-use crate::polling::event::Event;
+use crate::polling::event::PollableEvent;
 use crate::systemcall::numbers::*;
 use crate::systemcall::utils::SyscallImpl;
 use crate::systemcall::{error::SyscallError, implementations::objects};
@@ -27,7 +27,7 @@ define_syscall!(PollerAdd, |poller: u64, target_object: u64, event: u64| {
         .ok_or(SyscallError::InvalidArguments)?
         .add(
             get_object_current_process(target_object).ok_or(SyscallError::BadFileDescriptor)?,
-            Event::from(event),
+            PollableEvent::from(event),
         );
 
     Ok(0)
@@ -42,7 +42,7 @@ define_syscall!(PollerRemove, |poller: u64,
         .ok_or(SyscallError::InvalidArguments)?
         .remove(
             get_object_current_process(target_object).ok_or(SyscallError::BadFileDescriptor)?,
-            Event::from(event),
+            PollableEvent::from(event),
         );
 
     Ok(0)

@@ -3,8 +3,9 @@ use spin::Mutex;
 
 use crate::{
     impl_cast_function_non_trait,
+    multitasking::thread::yielding::{BlockType, block_current},
     object::{Object, misc::ObjectRef},
-    polling::event::Event,
+    polling::event::PollableEvent,
 };
 
 #[derive(Debug)]
@@ -14,12 +15,12 @@ pub struct PollerObject {
 
 #[derive(Debug)]
 struct PollerEntry {
-    event: Event,
+    event: PollableEvent,
     object: ObjectRef,
 }
 
 impl PollerEntry {
-    fn new(object: ObjectRef, event: Event) -> Self {
+    fn new(object: ObjectRef, event: PollableEvent) -> Self {
         Self { event, object }
     }
 }
@@ -31,11 +32,11 @@ impl PollerObject {
         }
     }
 
-    pub fn add(&self, object: ObjectRef, event: Event) {
+    pub fn add(&self, object: ObjectRef, event: PollableEvent) {
         self.entries.lock().push(PollerEntry::new(object, event));
     }
 
-    pub fn remove(&self, object: ObjectRef, event: Event) {
+    pub fn remove(&self, object: ObjectRef, event: PollableEvent) {
         let mut waiting_to_remove = Vec::new();
 
         for (i, entry) in self.entries.lock().iter().enumerate() {
