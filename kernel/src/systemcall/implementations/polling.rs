@@ -1,9 +1,9 @@
 use crate::multitasking::thread::yielding::{BlockType, WakeType, block_current};
 use crate::object::misc::get_object_current_process;
 use crate::polling::event::PollableEvent;
+use crate::systemcall::error::SyscallError;
 use crate::systemcall::numbers::*;
 use crate::systemcall::utils::SyscallImpl;
-use crate::systemcall::error::SyscallError;
 use alloc::sync::Arc;
 
 use crate::{
@@ -83,7 +83,9 @@ define_syscall!(PollerRemove, |poller: u64,
     Ok(0)
 });
 
-define_syscall!(PollerWait, |poller: u64, events_ptr: *mut u8, maxevents: usize| {
+define_syscall!(PollerWait, |poller: u64,
+                             events_ptr: *mut u8,
+                             maxevents: usize| {
     if maxevents == 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -93,12 +95,12 @@ define_syscall!(PollerWait, |poller: u64, events_ptr: *mut u8, maxevents: usize|
         .as_poller()
         .ok_or(SyscallError::InvalidArguments)?;
 
-    if !poller.has_ready_events() {
+    if !poller.has_woken_events() {
         let poller_ref: Arc<dyn crate::object::Object> = poller.clone();
         block_current(BlockType::WakeRequired(WakeType::Poller(poller_ref)));
     }
 
-    let ready_events = poller.take_ready_events(maxevents);
+    let ready_events = poller.take_woken_events(maxevents);
     let events_ptr = events_ptr.cast::<RawPollerEvent>();
 
     if !events_ptr.is_null() {

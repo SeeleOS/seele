@@ -58,11 +58,11 @@ impl PollerObject {
         interested
     }
 
-    pub fn has_ready_events(&self) -> bool {
+    pub fn has_woken_events(&self) -> bool {
         !self.woken_events.lock().is_empty()
     }
 
-    pub fn take_ready_events(&self, maxevents: usize) -> Vec<PollerReadyEvent> {
+    pub fn take_woken_events(&self, maxevents: usize) -> Vec<PollerReadyEvent> {
         let mut woken_events = self.woken_events.lock();
         let count = woken_events.len().min(maxevents);
         woken_events.drain(..count).collect()
