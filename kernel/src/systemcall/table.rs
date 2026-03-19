@@ -38,7 +38,9 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         GetDirectoryContents,
         GetProcessParentID,
         ControlObject,
-        CreatePoller
+        CreatePoller,
+        PollerAdd,
+        PollerRemove
     );
 
     table

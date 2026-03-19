@@ -30,4 +30,6 @@ pub enum SyscallNo {
     ControlObject,
 
     CreatePoller,
+    PollerAdd,
+    PollerRemove,
 }
