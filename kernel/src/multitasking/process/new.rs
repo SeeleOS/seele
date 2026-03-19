@@ -27,7 +27,7 @@ use crate::{
 };
 
 const DEFAULT_PATH: &str = "PATH=/programs";
-const INIT_PATH: &str = "/programs/quantis";
+const INIT_PATH: &str = "/programs/bash";
 
 impl Process {
     pub fn init() -> ProcessRef {
