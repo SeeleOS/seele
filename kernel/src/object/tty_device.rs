@@ -24,7 +24,7 @@ pub fn get_default_tty() -> Arc<TtyDevice> {
     DEFAULT_TTY.get().unwrap().clone()
 }
 
-pub fn wake_default_tty_readable() {
+pub fn wake_tty_poller_readable() {
     let tty: ObjectRef = get_default_tty();
     THREAD_MANAGER
         .get()
