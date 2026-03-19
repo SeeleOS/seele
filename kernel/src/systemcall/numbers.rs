@@ -26,4 +26,5 @@ pub enum SyscallNo {
     RemoveObject,
     WaitForProcessExit,
     GetDirectoryContents,
+    GetProcessParentID,
 }

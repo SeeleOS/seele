@@ -37,6 +37,17 @@ use crate::define_syscall;
 
 static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ProcessRef>>> = Mutex::new(BTreeMap::new());
 
+define_syscall!(GetProcessParentID, {
+    Ok(get_current_process()
+        .lock()
+        .parent
+        .clone()
+        .unwrap()
+        .lock()
+        .pid
+        .0 as usize)
+});
+
 // Track per-(process, object) directory offsets so repeated getdents
 // calls can advance through a directory and eventually hit EOF.
 static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeMap::new());
