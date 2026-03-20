@@ -81,7 +81,7 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     log::info!("init: misc ready");
     systemcall::init();
     log::info!("init: syscall ready");
-    acpi::init();
+    acpi::init(bootinfo.rsdp_addr.into_option().unwrap());
     log::info!("init: acpi ready");
     let mut executor = kernel_task::init();
     log::info!("init: kernel task executor ready");
