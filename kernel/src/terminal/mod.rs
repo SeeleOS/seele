@@ -25,6 +25,7 @@ pub mod object;
 pub mod object_config;
 
 pub static FONT: &[u8] = include_bytes!("../../../misc/maplemono.ttf");
+pub static WALLPAPER: &[u8] = include_bytes!("../../../misc/wallpaper.png");
 
 pub fn init() {
     log::info!("graphics: init start");
@@ -38,6 +39,7 @@ pub fn init() {
     terminal.set_crnl_mapping(true);
     terminal.set_custom_color_scheme(&COLOR_SCHEME);
     terminal.set_auto_flush(false);
+    terminal.set_wallpaper(WALLPAPER).unwrap();
 
     let default_terminal = DEFAULT_TERMINAL.get_or_init(|| {
         Arc::new(Mutex::new(TerminalObject::new(Arc::new(Mutex::new(
