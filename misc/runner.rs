@@ -1,6 +1,7 @@
 use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
 use std::{
     env,
+    path::Path,
     process::{Command, exit},
 };
 
@@ -32,6 +33,13 @@ fn main() {
     // enable the guest to exit qemu
     cmd.arg("-device")
         .arg("isa-debug-exit,iobase=0xf4,iosize=0x04");
+
+    if Path::new("/dev/kvm").exists() {
+        cmd.arg("-enable-kvm");
+        cmd.arg("-cpu").arg("host");
+    } else {
+        eprintln!("warning: /dev/kvm not found, falling back to software emulation");
+    }
 
     if uefi {
         let prebuilt =
