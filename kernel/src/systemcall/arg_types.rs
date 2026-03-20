@@ -6,9 +6,11 @@ use crate::{
     filesystem::info::LinuxStat,
     misc::{
         c_types::{CString, CVec},
+        error::AsSyscallError,
         others::KernelFrom,
     },
-    multitasking::process::misc::ProcessID,
+    multitasking::process::{manager::get_current_process, misc::ProcessID},
+    object::misc::{ObjectRef, get_object_current_process},
     systemcall::{error::SyscallError, implementations::PollResult},
 };
 
@@ -70,5 +72,14 @@ impl SyscallArg for ProcessID {
         Self: Sized,
     {
         Ok(ProcessID(val))
+    }
+}
+
+impl SyscallArg for ObjectRef {
+    fn from_u64(val: u64) -> Result<Self, SyscallError>
+    where
+        Self: Sized,
+    {
+        get_object_current_process(val).map_err(Into::into)
     }
 }
