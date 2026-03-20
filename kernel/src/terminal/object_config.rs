@@ -14,6 +14,8 @@ pub struct TerminalInfo {
     pub cols: u64,
     pub echo: bool,
     pub raw: bool,
+    pub echo_newline: bool,
+    pub echo_delete: bool,
 }
 
 impl TerminalInfo {
@@ -22,6 +24,8 @@ impl TerminalInfo {
             rows: size.rows,
             cols: size.cols,
             echo: true,
+            echo_newline: true,
+            echo_delete: true,
             raw: false,
         }
     }
