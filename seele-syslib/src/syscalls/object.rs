@@ -1,5 +1,21 @@
 use crate::{syscall, utils::SyscallResult};
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TerminalInfo {
+    pub rows: u64,
+    pub cols: u64,
+    pub echo: bool,
+    pub raw: bool,
+}
+
+#[repr(u64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigCommand {
+    GetTerminalInfo = 0,
+    SetTerminalInfo = 1,
+}
+
 #[repr(u64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -41,6 +57,14 @@ pub fn write_object(object: u64, buffer: &[u8]) -> SyscallResult {
 
 pub fn configurate_object(object: u64, request_num: u64, ptr: *mut u8) -> SyscallResult {
     syscall!(ConfigurateObject, object, request_num, ptr as u64)
+}
+
+pub fn get_terminal_info(object: u64, info: *mut TerminalInfo) -> SyscallResult {
+    configurate_object(object, ConfigCommand::GetTerminalInfo as u64, info.cast())
+}
+
+pub fn set_terminal_info(object: u64, info: *const TerminalInfo) -> SyscallResult {
+    configurate_object(object, ConfigCommand::SetTerminalInfo as u64, info.cast_mut().cast())
 }
 
 pub fn control_object(object: u64, command: Command, arg: u64) -> SyscallResult {
