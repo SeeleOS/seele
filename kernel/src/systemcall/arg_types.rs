@@ -1,4 +1,4 @@
-use core::ffi::CStr;
+use core::{ffi::CStr, task::Poll};
 
 use alloc::{string::String, vec::Vec};
 
@@ -11,6 +11,7 @@ use crate::{
     },
     multitasking::process::{manager::get_current_process, misc::ProcessID},
     object::misc::{ObjectRef, get_object_current_process},
+    polling::event::PollableEvent,
     systemcall::{error::SyscallError, implementations::PollResult},
 };
 
@@ -81,5 +82,14 @@ impl SyscallArg for ObjectRef {
         Self: Sized,
     {
         get_object_current_process(val).map_err(Into::into)
+    }
+}
+
+impl SyscallArg for PollableEvent {
+    fn from_u64(val: u64) -> Result<Self, SyscallError>
+    where
+        Self: Sized,
+    {
+        Ok(PollableEvent::from(val))
     }
 }
