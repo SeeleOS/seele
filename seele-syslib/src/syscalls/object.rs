@@ -64,7 +64,11 @@ pub fn get_terminal_info(object: u64, info: *mut TerminalInfo) -> SyscallResult 
 }
 
 pub fn set_terminal_info(object: u64, info: *const TerminalInfo) -> SyscallResult {
-    configurate_object(object, ConfigCommand::SetTerminalInfo as u64, info.cast_mut().cast())
+    configurate_object(
+        object,
+        ConfigCommand::SetTerminalInfo as u64,
+        info.cast_mut().cast(),
+    )
 }
 
 pub fn control_object(object: u64, command: Command, arg: u64) -> SyscallResult {
