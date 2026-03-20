@@ -11,7 +11,7 @@ bootloader_api = "0.11"
 volatile = "0.6.1"
 ext4plus = { version = "0.1.0-alpha.6", features = ["sync"] }
 owo-colors = { version = "4.3", default-features = false }
-os-terminal = { version = "0.7", features = ["truetype"] }
+os-terminal = { path = "../../os-terminal", features = ["truetype", "wallpaper"] }
 vte = { version = "0.15", default-features = false}
 elfloader = "0.16.0"
 spin = "0.10"
