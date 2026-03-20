@@ -29,9 +29,14 @@ macro_rules! impl_cast_function {
     };
 }
 
-pub fn get_object_current_process(id: u64) -> Option<Arc<dyn Object>> {
+pub fn get_object_current_process(id: u64) -> ObjectResult<Arc<dyn Object>> {
     let current = MANAGER.lock().current.clone().unwrap();
     let current = current.lock();
 
-    current.objects.get(id as usize).cloned()?
+    current
+        .objects
+        .get(id as usize)
+        .cloned()
+        .unwrap()
+        .ok_or(ObjectError::DoesNotExist)
 }

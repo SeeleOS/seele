@@ -1,5 +1,5 @@
 use crate::multitasking::thread::yielding::{BlockType, WakeType, block_current};
-use crate::object::misc::get_object_current_process;
+use crate::object::misc::{ObjectRef, get_object_current_process};
 use crate::polling::event::PollableEvent;
 use crate::systemcall::error::SyscallError;
 use crate::systemcall::numbers::*;
@@ -37,49 +37,38 @@ define_syscall!(CreatePoller, {
     Ok(objects.len() - 1)
 });
 
-define_syscall!(PollerAdd, |poller: u64,
-                            target_object: u64,
-                            event: u64,
+define_syscall!(PollerAdd, |poller: ObjectRef,
+                            target_object: ObjectRef,
+                            event: PollableEvent,
                             data: u64| {
-    get_object_current_process(poller)
-        .ok_or(SyscallError::BadFileDescriptor)?
+    poller
         .as_poller()
         .ok_or(SyscallError::InvalidArguments)?
-        .register_obj(
-            get_object_current_process(target_object).ok_or(SyscallError::BadFileDescriptor)?,
-            PollableEvent::from(event),
-            data,
-        );
+        .register_obj(target_object, event, data);
 
     Ok(0)
 });
 
-define_syscall!(PollerRemove, |poller: u64,
-                               target_object: u64,
-                               event: u64| {
-    get_object_current_process(poller)
-        .ok_or(SyscallError::BadFileDescriptor)?
-        .as_poller()
-        .ok_or(SyscallError::InvalidArguments)?
-        .unregister_obj(
-            get_object_current_process(target_object).ok_or(SyscallError::BadFileDescriptor)?,
-            PollableEvent::from(event),
-        );
+define_syscall!(
+    PollerRemove,
+    |poller: ObjectRef, target_object: ObjectRef, event: PollableEvent| {
+        poller
+            .as_poller()
+            .ok_or(SyscallError::InvalidArguments)?
+            .unregister_obj(target_object, event);
 
-    Ok(0)
-});
+        Ok(0)
+    }
+);
 
-define_syscall!(PollerWait, |poller: u64,
+define_syscall!(PollerWait, |poller: ObjectRef,
                              events_ptr: *mut PollResult,
                              maxevents: usize| {
     if maxevents == 0 {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let poller = get_object_current_process(poller)
-        .ok_or(SyscallError::BadFileDescriptor)?
-        .as_poller()
-        .ok_or(SyscallError::InvalidArguments)?;
+    let poller = poller.as_poller().ok_or(SyscallError::InvalidArguments)?;
 
     if !poller.has_woken_events() {
         poller.push_already_ready_events();

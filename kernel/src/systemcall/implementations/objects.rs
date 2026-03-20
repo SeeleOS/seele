@@ -7,7 +7,11 @@ use crate::{
     define_syscall,
     filesystem::vfs_traits::DirectoryContentType,
     multitasking::process::{manager::get_current_process, misc::ProcessID},
-    object::{config::ConfigurateRequest, control::Command, misc::get_object_current_process},
+    object::{
+        config::ConfigurateRequest,
+        control::Command,
+        misc::{ObjectRef, get_object_current_process},
+    },
     systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
 };
 
@@ -15,15 +19,14 @@ static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeM
 
 define_syscall!(
     GetDirectoryContents,
-    |object: u64, buf: *mut u8, len: usize| {
-        let obj = get_object_current_process(object)
-            .ok_or(SyscallError::BadFileDescriptor)?
+    |object_index: u64, buf: *mut u8, len: usize| {
+        let obj = get_object_current_process(object_index)?
             .as_file_like()
             .ok_or(SyscallError::BadFileDescriptor)?;
         let contents = obj.directory_contents()?;
         let current_pid = get_current_process().lock().pid;
         let mut offsets = DIR_OFFSETS.lock();
-        let offset_entry = offsets.entry((current_pid, object)).or_insert(0usize);
+        let offset_entry = offsets.entry((current_pid, object_index)).or_insert(0usize);
         let mut bytes_written = 0;
 
         while *offset_entry < contents.len() {
@@ -61,7 +64,7 @@ define_syscall!(
         }
 
         if *offset_entry >= contents.len() && bytes_written == 0 {
-            offsets.remove(&(current_pid, object));
+            offsets.remove(&(current_pid, object_index));
             return Ok(0);
         }
 
@@ -69,20 +72,22 @@ define_syscall!(
     }
 );
 
-define_syscall!(ReadObject, |object: u64, buf_ptr: *mut u8, len: usize| {
+define_syscall!(ReadObject, |object: ObjectRef,
+                             buf_ptr: *mut u8,
+                             len: usize| {
     unsafe {
-        Ok(get_object_current_process(object)
-            .ok_or(SyscallError::BadFileDescriptor)?
+        Ok(object
             .as_readable()
             .ok_or(SyscallError::BadFileDescriptor)?
             .read(slice::from_raw_parts_mut(buf_ptr, len))?)
     }
 });
 
-define_syscall!(WriteObject, |object: u64, buf_ptr: *mut u8, len: usize| {
+define_syscall!(WriteObject, |object: ObjectRef,
+                              buf_ptr: *mut u8,
+                              len: usize| {
     unsafe {
-        Ok(get_object_current_process(object)
-            .ok_or(SyscallError::BadFileDescriptor)?
+        Ok(object
             .as_writable()
             .ok_or(SyscallError::BadFileDescriptor)?
             .write(slice::from_raw_parts(buf_ptr, len))?)
@@ -105,9 +110,8 @@ define_syscall!(RemoveObject, |object: usize| {
 
 define_syscall!(
     ConfigurateObject,
-    |object: u64, request: u64, request_ptr: u64| {
-        let res = get_object_current_process(object)
-            .ok_or(SyscallError::BadFileDescriptor)?
+    |object: ObjectRef, request: u64, request_ptr: u64| {
+        let res = object
             .as_configuratable()
             .ok_or(SyscallError::InappropriateIoctl)?
             .configure(ConfigurateRequest::new(request, request_ptr)?);
@@ -116,9 +120,10 @@ define_syscall!(
     }
 );
 
-define_syscall!(ControlObject, |object: u64, command: u64, arg: u64| {
-    get_object_current_process(object)
-        .ok_or(SyscallError::BadFileDescriptor)?
+define_syscall!(ControlObject, |object: ObjectRef,
+                                command: u64,
+                                arg: u64| {
+    object
         .as_controllable()
         .ok_or(SyscallError::InvalidArguments)?
         .control(Command::new(command)?, arg)?;
