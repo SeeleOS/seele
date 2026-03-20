@@ -13,6 +13,7 @@ fn main() {
     // create an UEFI disk image (optional)
     let uefi_path = out_dir.join("uefi.img");
     bootloader::UefiBoot::new(&kernel)
+        .set_ramdisk(Path::new("./disk.img"))
         .create_disk_image(&uefi_path)
         .unwrap();
 
