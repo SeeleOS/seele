@@ -31,16 +31,7 @@ pub async fn process_keypresses() {
             && let Some(key) = keyboard.process_keyevent(key_event)
             && let DecodedKey::Unicode(character) = key
         {
-            if DEFAULT_TERMINAL.get().unwrap().lock().info.lock().raw {
-                KEYBOARD_QUEUE
-                    .get_or_init(|| Mutex::new(VecDeque::new()))
-                    .lock()
-                    .push_back(character as u8);
-                THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
-                wake_tty_poller_readable();
-            } else {
-                process_char_non_raw(character);
-            }
+            process_char(character);
         }
     }
 }
