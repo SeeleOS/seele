@@ -6,7 +6,8 @@ pub struct TerminalInfo {
     pub rows: u64,
     pub cols: u64,
     pub echo: bool,
-    pub raw: bool,
+    /// Whether the kernel tty applies canonical line discipline semantics.
+    pub canonical: bool,
     pub echo_newline: bool,
     pub echo_delete: bool,
 }

@@ -13,7 +13,9 @@ pub struct TerminalInfo {
     pub rows: u64,
     pub cols: u64,
     pub echo: bool,
-    pub raw: bool,
+    /// Whether the kernel tty should handle canonical line discipline semantics
+    /// such as line buffering, erase, and newline submission.
+    pub canonical: bool,
     pub echo_newline: bool,
     pub echo_delete: bool,
 }
@@ -26,7 +28,7 @@ impl TerminalInfo {
             echo: true,
             echo_newline: true,
             echo_delete: true,
-            raw: false,
+            canonical: true,
         }
     }
 }
