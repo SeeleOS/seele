@@ -7,6 +7,8 @@ pub struct TerminalInfo {
     pub cols: u64,
     pub echo: bool,
     pub raw: bool,
+    pub echo_newline: bool,
+    pub echo_delete: bool,
 }
 
 #[repr(u64)]
