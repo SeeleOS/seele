@@ -6,7 +6,7 @@ use crate::{
 pub enum ObjectError {
     DoesNotExist,
     TryAgain,
-    InappropriateIoctl,
+    InvalidRequest,
     FSError(FSError),
     Other,
 }
@@ -22,7 +22,7 @@ impl AsSyscallError for ObjectError {
         match self {
             Self::TryAgain => SyscallError::TryAgain,
             Self::DoesNotExist => SyscallError::BadFileDescriptor,
-            Self::InappropriateIoctl => SyscallError::InappropriateIoctl,
+            Self::InvalidRequest => SyscallError::InappropriateIoctl,
             Self::FSError(err) => err.as_syscall_error(),
             Self::Other => SyscallError::other("object error other"),
         }

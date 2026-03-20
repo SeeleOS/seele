@@ -110,15 +110,9 @@ define_syscall!(
             .ok_or(SyscallError::BadFileDescriptor)?
             .as_configuratable()
             .ok_or(SyscallError::InappropriateIoctl)?
-            .configure(ConfigurateRequest::new(request, request_ptr));
+            .configure(ConfigurateRequest::new(request, request_ptr)?);
 
-        match res {
-            Ok(val) => Ok(val as usize),
-            Err(_) => {
-                log::warn!("ConfigurateObject failed; returning Ok(0)");
-                Ok(0)
-            }
-        }
+        res.map(|val| val as usize).map_err(Into::into)
     }
 );
 
