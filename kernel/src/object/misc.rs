@@ -37,6 +37,6 @@ pub fn get_object_current_process(id: u64) -> ObjectResult<Arc<dyn Object>> {
         .objects
         .get(id as usize)
         .cloned()
-        .unwrap()
+        .ok_or(ObjectError::DoesNotExist)?
         .ok_or(ObjectError::DoesNotExist)
 }
