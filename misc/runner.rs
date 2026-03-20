@@ -28,6 +28,8 @@ fn main() {
     };
 
     let mut cmd = Command::new("qemu-system-x86_64");
+    // give the guest 8 GiB of RAM
+    cmd.arg("-m").arg("8G");
     // print serial output to the shell
     cmd.arg("-serial").arg("mon:stdio");
     // enable the guest to exit qemu
