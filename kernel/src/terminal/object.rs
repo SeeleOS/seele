@@ -11,25 +11,20 @@ use crate::{
         traits::{Configuratable, Writable},
     },
     print, s_println,
-    terminal::{
-        object_config::{TerminalInfo, WindowSizeInfo},
-        term_trait::AbstractTerminal,
-    },
+    terminal::{object_config::TerminalInfo, term_trait::AbstractTerminal},
 };
 
 #[derive(Debug)]
 pub struct TerminalObject {
     pub inner: Arc<Mutex<dyn AbstractTerminal>>,
-    pub window_size: WindowSizeInfo,
-    pub terminal_info: Mutex<TerminalInfo>,
+    pub info: Mutex<TerminalInfo>,
 }
 
 impl TerminalObject {
     pub fn new(term: Arc<Mutex<dyn AbstractTerminal>>) -> Self {
         let window_size = term.lock().size();
         Self {
-            window_size,
-            terminal_info: Mutex::new(TerminalInfo::new_default()),
+            info: Mutex::new(TerminalInfo::new(window_size)),
             inner: term,
         }
     }

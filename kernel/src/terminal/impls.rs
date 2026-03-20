@@ -4,22 +4,21 @@ use os_terminal::Terminal;
 
 use crate::{
     misc::framebuffer::FRAME_BUFFER,
-    terminal::{KernelTerminal, object_config::WindowSizeInfo, term_trait::AbstractTerminal},
+    terminal::{
+        KernelTerminal,
+        term_trait::{AbstractTerminal, TerminalSize},
+    },
 };
 
-impl<'a> AbstractTerminal for KernelTerminal {
+impl AbstractTerminal for KernelTerminal {
     fn push_str(&mut self, str: &str) {
         self.0.write_str(str).unwrap();
         self.0.flush();
         FRAME_BUFFER.get().unwrap().lock().flush();
     }
 
-    fn size(&self) -> crate::terminal::object_config::WindowSizeInfo {
-        WindowSizeInfo {
-            rows: self.0.rows() as u16,
-            cols: self.0.columns() as u16,
-            ..Default::default()
-        }
+    fn size(&self) -> TerminalSize {
+        TerminalSize::new(self.0.rows(), self.0.columns())
     }
 }
 

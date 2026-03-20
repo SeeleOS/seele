@@ -31,14 +31,7 @@ pub async fn process_keypresses() {
             && let Some(key) = keyboard.process_keyevent(key_event)
             && let DecodedKey::Unicode(character) = key
         {
-            if DEFAULT_TERMINAL
-                .get()
-                .unwrap()
-                .lock()
-                .terminal_info
-                .lock()
-                .is_raw_mode()
-            {
+            if DEFAULT_TERMINAL.get().unwrap().lock().info.lock().raw {
                 KEYBOARD_QUEUE
                     .get_or_init(|| Mutex::new(VecDeque::new()))
                     .lock()
