@@ -1,6 +1,9 @@
 [unstable]
 bindeps = true
 
+[alias]
+rr = "run --release"
+
 [target.x86_64-seele]
 rustflags = [
   # relibc 的库搜索路径（-lc/-lm/-lpthread/-lrt）
