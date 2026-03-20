@@ -82,7 +82,7 @@ impl AddrSpace {
 
         (
             start_addr,
-            StackBuilder::new(end_addr.as_u64(), write_addr as *mut u64),
+            StackBuilder::new(end_addr.as_u64(), write_addr as *mut u8),
         )
     }
 }

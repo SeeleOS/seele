@@ -52,5 +52,5 @@ pub fn allocate_kernel_stack(pages: u64) -> StackBuilder {
     let end_addr = (start + pages).start_address();
     let write_addr = apply_offset(last_frame.unwrap().start_address().as_u64() + 4096);
 
-    StackBuilder::new(end_addr.as_u64(), write_addr as *mut u64)
+    StackBuilder::new(end_addr.as_u64(), write_addr as *mut u8)
 }

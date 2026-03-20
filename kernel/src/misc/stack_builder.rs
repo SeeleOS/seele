@@ -7,11 +7,11 @@ use crate::misc::aux::AuxType;
 #[derive(Debug)]
 pub struct StackBuilder {
     sp: VirtAddr,
-    write_sp: *mut u64,
+    write_sp: *mut u8,
 }
 
 impl StackBuilder {
-    pub fn new(sp: u64, write_sp: *mut u64) -> Self {
+    pub fn new(sp: u64, write_sp: *mut u8) -> Self {
         Self {
             sp: VirtAddr::new(sp),
             write_sp,
@@ -49,34 +49,44 @@ impl StackBuilder {
     }
 
     pub fn push(&mut self, value: u64) {
-        unsafe { write_and_sub(&mut self.write_sp, value) };
         self.sp -= 8;
+        unsafe { write_u64_and_sub(&mut self.write_sp, value) };
     }
 
     pub fn push_str(&mut self, s: &str) -> u64 {
         let bytes = s.as_bytes();
         let len_with_null = (bytes.len() + 1) as u64;
 
-        // 1. 移动用户态 SP (虚拟地址)
-        self.sp -= len_with_null * 8;
-        // 2. 移动内核态写入指针 (物理映射地址)
+        self.sp -= len_with_null;
         self.write_sp = unsafe { self.write_sp.sub(len_with_null as usize) };
 
         let user_vaddr = self.sp;
         let kernel_vaddr = self.write_sp;
 
         unsafe {
-            // 关键：将内核写入地址强转为 *mut u8
-            let slice =
-                core::slice::from_raw_parts_mut(kernel_vaddr as *mut u8, len_with_null as usize);
-
-            // 这里的 bytes 是 &[u8]，slice 现在也是 &mut [u8]，匹配成功！
+            let slice = core::slice::from_raw_parts_mut(kernel_vaddr, len_with_null as usize);
             slice[..bytes.len()].copy_from_slice(bytes);
-            slice[bytes.len()] = 0; // 写入 \0
+            slice[bytes.len()] = 0;
         }
 
-        // 返回用户态看到的地址，这个地址会被存入 argv[0]
         user_vaddr.as_u64()
+    }
+
+    pub fn align_down(&mut self, align: u64) {
+        let misalignment = self.sp.as_u64() & (align - 1);
+        if misalignment == 0 {
+            return;
+        }
+
+        self.pad_bytes(misalignment);
+    }
+
+    pub fn align_for_pushes(&mut self, bytes_to_push: u64, align: u64) {
+        let final_sp = self.sp.as_u64().wrapping_sub(bytes_to_push);
+        let padding = final_sp & (align - 1);
+        if padding != 0 {
+            self.pad_bytes(padding);
+        }
     }
 
     pub fn finish(self) -> VirtAddr {
@@ -87,11 +97,21 @@ impl StackBuilder {
     }
 }
 
+impl StackBuilder {
+    fn pad_bytes(&mut self, bytes: u64) {
+        self.sp -= bytes;
+        unsafe {
+            self.write_sp = self.write_sp.sub(bytes as usize);
+            core::ptr::write_bytes(self.write_sp, 0, bytes as usize);
+        }
+    }
+}
+
 /// # Safety
 /// Must provide valid pointer
-unsafe fn write_and_sub(ptr: &mut *mut u64, data: u64) {
+unsafe fn write_u64_and_sub(ptr: &mut *mut u8, data: u64) {
     unsafe {
-        *ptr = ptr.sub(1);
-        ptr.write(data);
+        *ptr = ptr.sub(8);
+        ptr.cast::<u64>().write_unaligned(data);
     }
 }

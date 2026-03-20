@@ -57,7 +57,10 @@ pub fn init_stack_layout(
         .iter()
         .for_each(|f| env_ptrs.push(builder.push_str(f)));
 
-    // B. 使用你的 write_and_sub 按照 ABI 逆序压栈
+    let aux_bytes = 6 * 2 * 8;
+    let argv_env_bytes = (arg_ptrs.len() + env_ptrs.len() + 3) as u64 * 8;
+    builder.align_for_pushes(aux_bytes + argv_env_bytes, 16);
+
     builder.push_aux_entries(file);
 
     builder.push(0); // envp terminator
