@@ -25,7 +25,7 @@ pub mod object;
 pub mod object_config;
 
 pub static FONT: &[u8] = include_bytes!("../../../misc/maplemono.ttf");
-pub static WALLPAPER: &[u8] = include_bytes!("../../../misc/wallpaper.png");
+pub static WALLPAPER: &[u8] = include_bytes!("../../../misc/wallpaper-65.png");
 
 pub fn init() {
     log::info!("graphics: init start");
