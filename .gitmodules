@@ -1,21 +1,9 @@
 [submodule "relibc-seele"]
 	path = relibc-seele
 	url = https://github.com/SeeleOS/relibc-seele
-[submodule "dash"]
-	path = dash
-	url = https://git.kernel.org/pub/scm/utils/dash/dash.git
-[submodule "Manuae-Shell"]
-	path = Manuae-Shell
-	url = https://codeberg.org/sakettor/Manuae-Shell
 [submodule "toolchain"]
 	path = toolchain
 	url = https://github.com/SeeleOS/toolchain
-[submodule "Quantis"]
-	path = Quantis
-	url = https://github.com/SeeleOS/Quantis
-[submodule "busybox"]
-	path = busybox
-	url = https://github.com/SeeleOS/busybox
 [submodule "packages"]
 	path = packages
 	url = https://github.com/SeeleOS/packages
