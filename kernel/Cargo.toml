@@ -9,6 +9,7 @@ xmas-elf = "0.8.0"
 acpi = "6.0.1"
 bootloader_api = "0.11"
 volatile = "0.6.1"
+x2apic = "0.5"
 ext4plus = { version = "0.1.0-alpha.6", features = ["sync"] }
 owo-colors = { version = "4.3", default-features = false }
 os-terminal = { path = "../../os-terminal", features = ["truetype", "wallpaper"] }
