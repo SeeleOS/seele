@@ -1,7 +1,7 @@
 use core::arch::naked_asm;
 
 use crate::{
-    interrupts::hardware_interrupt::HardwareInterrupt,
+    interrupts::hardware_interrupt::{HardwareInterrupt, send_eoi},
     misc::{snapshot::Snapshot, with_cpu_core_context},
     multitasking::{scheduling::return_to_executor, thread::snapshot::ThreadSnapshotType},
 };
@@ -49,7 +49,7 @@ pub extern "C" fn timer_interrupt_handler_wrapper() {
 }
 
 pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
-    unsafe { with_cpu_core_context(|f| f.local_apic.as_mut().unwrap().end_of_interrupt()) };
+    send_eoi();
     // Don't preempt kernel mode; it can corrupt in-flight kernel snapshots.
     if (snapshot.cs & 0x3) == 0 {
         return;
