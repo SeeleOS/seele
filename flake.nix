@@ -54,7 +54,7 @@
                                  export SYSROOT_DIR="/home/elysia/coding-project/seeleos/sysroot"
               		      export TOOLCHAIN_DIR="/home/elysia/coding-project/seeleos/toolchain"
                                     export LD_LIBRARY_PATH=${pkgs.stdenv.cc.cc.lib}/lib:$LD_LIBRARY_PATH
-                                    export PATH=~/.cargo/bin:$TOOLCHAIN_DIR/misc/toolchain/bin:$PATH
+                                    export PATH=./.llvm/bin:~/.cargo/bin:$TOOLCHAIN_DIR/misc/toolchain/bin:$PATH
                                     echo "[devshell] Ensuring Rust toolchain 'seele'..."
                                     (cd /home/elysia/coding-project/elysia-os/toolchain && ./install.rs) || echo "[devshell] install.rs failed"
                                                                      	  '';
