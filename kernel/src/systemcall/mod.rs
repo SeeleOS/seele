@@ -1,17 +1,16 @@
 use x86_64::{
-    VirtAddr,
+    PrivilegeLevel, VirtAddr,
     instructions::interrupts::without_interrupts,
+    registers::segmentation::SegmentSelector,
     registers::{
         control::{Efer, EferFlags},
         model_specific::{KernelGsBase, LStar, SFMask, Star},
         rflags::RFlags,
     },
-    registers::segmentation::SegmentSelector,
-    PrivilegeLevel,
 };
 
 use crate::{
-    misc::{CPU_CORE_CONTEXT, gdt::GDT, others::CpuCoreContext},
+    misc::{CPU_CORE_CONTEXT, CpuCoreContext, gdt::GDT},
     systemcall::entry::syscall_entry,
 };
 

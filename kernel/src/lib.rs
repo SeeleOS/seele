@@ -32,7 +32,7 @@ use crate::filesystem::block_device::initrd::{self};
 use crate::filesystem::path::Path;
 use crate::filesystem::vfs::VirtualFS;
 use crate::misc::others::enable_sse;
-use crate::misc::{framebuffer, gdt, logging, tss};
+use crate::misc::{cpu_core_context, framebuffer, gdt, logging, tss};
 use crate::multitasking::kernel_task;
 use bootloader_api::BootInfo;
 use bootloader_api::{BootloaderConfig, config::Mapping};
@@ -59,6 +59,7 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
         bootinfo.physical_memory_offset.into_option().unwrap(),
         &bootinfo.memory_regions,
     );
+    cpu_core_context::init();
     framebuffer::init(bootinfo.framebuffer.as_mut().unwrap());
     terminal::init();
     logging::init();
@@ -77,7 +78,6 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     log::info!("init: vfs ready");
     gdt::init();
     log::info!("init: gdt ready");
-    misc::init();
     log::info!("init: misc ready");
     systemcall::init();
     log::info!("init: syscall ready");

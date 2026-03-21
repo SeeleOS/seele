@@ -9,16 +9,6 @@ use x86_64::{
 };
 
 use crate::misc::error::{KernelError, KernelResult};
-/// Context for a CPU Core
-#[derive(Debug)]
-#[repr(C)]
-pub struct CpuCoreContext {
-    pub local_apic: Option<LocalApic>,
-    // Used on syscall_entry with swapgs
-    pub gs_kernel_stack_top: u64,
-    pub gs_user_stack_top: u64,
-}
-
 pub fn calc_cr3_value(addr: PhysAddr, flags: Cr3Flags) -> u64 {
     ((false as u64) << 63) | addr.as_u64() | flags.bits()
 }

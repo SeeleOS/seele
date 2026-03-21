@@ -7,9 +7,12 @@ use x86_64::{
 };
 
 use crate::{
-    interrupts::exception_interrupt::init_exception_interrupts,
-    interrupts::hardware_interrupt::{PIC_1_OFFSET, PIC_2_OFFSET, init_hardware_interrupts},
-    print, test,
+    interrupts::{
+        exception_interrupt::init_exception_interrupts,
+        hardware_interrupt::{PIC_1_OFFSET, PIC_2_OFFSET, init_hardware_interrupts},
+    },
+    misc::{CPU_CORE_CONTEXT, with_cpu_core_context},
+    print, s_print, test,
 };
 pub mod exception_interrupt;
 pub mod hardware_interrupt;
@@ -30,15 +33,10 @@ pub fn init() {
     log::info!("interrupts: init start");
     IDT.load();
 
-    let mut local_apic = LocalApicBuilder::new()
-        .timer_vector(32)
-        .error_vector(0xFE)
-        .spurious_vector(0xFF)
-        .build()
-        .unwrap();
-
     unsafe {
-        local_apic.enable();
+        s_print!("a");
+        with_cpu_core_context(|f| f.local_apic.as_mut().unwrap().enable());
+        s_print!("b");
     };
 
     log::info!("interrupts: init done");
