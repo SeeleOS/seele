@@ -35,7 +35,11 @@ pub fn init() {
 
     unsafe {
         s_print!("a");
-        with_cpu_core_context(|f| f.local_apic.as_mut().unwrap().enable());
+        with_cpu_core_context(|f| {
+            let local_apic = f.local_apic.as_mut().unwrap();
+            local_apic.enable();
+            local_apic.disable_timer();
+        });
         s_print!("b");
     };
 

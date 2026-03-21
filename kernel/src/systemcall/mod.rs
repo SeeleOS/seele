@@ -10,7 +10,7 @@ use x86_64::{
 };
 
 use crate::{
-    misc::{CPU_CORE_CONTEXT, CpuCoreContext, gdt::GDT},
+    misc::{CPU_CORE_CONTEXT, gdt::GDT},
     systemcall::entry::syscall_entry,
 };
 
@@ -44,9 +44,7 @@ pub fn init() {
         LStar::write(syscall_entry_addr);
 
         unsafe {
-            KernelGsBase::write(VirtAddr::new(
-                ((CPU_CORE_CONTEXT) as *const CpuCoreContext) as u64,
-            ));
+            KernelGsBase::write(VirtAddr::new(CPU_CORE_CONTEXT as u64));
         }
     })
 }

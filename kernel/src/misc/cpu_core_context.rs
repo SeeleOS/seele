@@ -1,41 +1,43 @@
 use alloc::boxed::Box;
-use x2apic::lapic::{LocalApic, LocalApicBuilder};
+use x2apic::lapic::{LocalApic, LocalApicBuilder, xapic_base};
 
 use crate::multitasking::memory::allocate_kernel_stack;
 
 #[derive(Debug)]
 #[repr(C)]
 pub struct CpuCoreContext {
-    pub local_apic: Option<LocalApic>,
     // Used on syscall_entry with swapgs
     pub gs_kernel_stack_top: u64,
     pub gs_user_stack_top: u64,
+    pub local_apic: Option<LocalApic>,
 }
 
-pub static mut CPU_CORE_CONTEXT: &mut CpuCoreContext = &mut CpuCoreContext {
-    local_apic: None,
-    gs_kernel_stack_top: 0,
-    gs_user_stack_top: 0,
-};
+pub static mut CPU_CORE_CONTEXT: *mut CpuCoreContext = core::ptr::null_mut();
 
 pub fn with_cpu_core_context<R>(f: impl FnOnce(&mut CpuCoreContext) -> R) -> R {
-    let ctx = core::ptr::addr_of_mut!(CPU_CORE_CONTEXT);
-    unsafe { f(&mut *ctx) }
+    unsafe {
+        let ctx = CPU_CORE_CONTEXT;
+        assert!(!ctx.is_null(), "CPU core context not initialized");
+        f(&mut *ctx)
+    }
 }
 
 pub fn init() {
+    let ctx = Box::leak(Box::new(CpuCoreContext {
+        local_apic: Some(
+            LocalApicBuilder::new()
+                .timer_vector(32)
+                .error_vector(0xFE)
+                .spurious_vector(0xFF)
+                .set_xapic_base(unsafe { xapic_base() })
+                .build()
+                .unwrap(),
+        ),
+        gs_kernel_stack_top: allocate_kernel_stack(16).finish().as_u64(),
+        gs_user_stack_top: 0,
+    }));
+
     unsafe {
-        CPU_CORE_CONTEXT = Box::leak(Box::new(CpuCoreContext {
-            local_apic: Some(
-                LocalApicBuilder::new()
-                    .timer_vector(32)
-                    .error_vector(0xFE)
-                    .spurious_vector(0xFF)
-                    .build()
-                    .unwrap(),
-            ),
-            gs_kernel_stack_top: allocate_kernel_stack(16).finish().as_u64(),
-            gs_user_stack_top: 0,
-        }))
+        CPU_CORE_CONTEXT = ctx as *mut CpuCoreContext;
     }
 }

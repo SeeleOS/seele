@@ -8,7 +8,7 @@ use x86_64::{
 };
 
 use crate::{
-    misc::{CPU_CORE_CONTEXT, CpuCoreContext, snapshot::Snapshot},
+    misc::{CPU_CORE_CONTEXT, snapshot::Snapshot},
     multitasking::thread::snapshot::{ThreadSnapshot, ThreadSnapshotType},
 };
 
@@ -48,10 +48,8 @@ impl ThreadSnapshot {
 
     fn update_gs(&mut self) {
         unsafe {
-            CPU_CORE_CONTEXT.gs_kernel_stack_top = self.kernel_rsp;
-            KernelGsBase::write(VirtAddr::new(
-                ((CPU_CORE_CONTEXT) as *const CpuCoreContext) as u64,
-            ));
+            (*CPU_CORE_CONTEXT).gs_kernel_stack_top = self.kernel_rsp;
+            KernelGsBase::write(VirtAddr::new(CPU_CORE_CONTEXT as u64));
         }
     }
 
