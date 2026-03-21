@@ -29,6 +29,7 @@
               ninja
               clang
               rust-script
+              cmake
               lld
               rustc
               rustfmt
