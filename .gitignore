@@ -1,4 +1,5 @@
 /target
+/.llvm
 /porting_dev
 /bash
 /posix-tests
