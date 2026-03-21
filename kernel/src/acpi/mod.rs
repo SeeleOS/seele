@@ -12,7 +12,7 @@ pub fn init(rsdp_addr: u64) {
     let handler = ACPIHandler {};
     ACPI_TABLE
         .try_get_or_init(|| unsafe {
-            AcpiTables::from_rsdt(handler, 2, rsdp_addr as usize)
+            AcpiTables::from_rsdp(handler, rsdp_addr as usize)
                 .expect("Failed to parse ACPI Table from RSDT")
         })
         .expect("Failed to initalize ACPI Table");
