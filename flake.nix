@@ -27,7 +27,6 @@
             buildInputs = [
               cargo
               ninja
-              clang
               rust-script
               cmake
               lld
