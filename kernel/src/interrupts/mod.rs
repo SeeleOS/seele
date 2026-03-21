@@ -17,7 +17,9 @@ use crate::{
 };
 pub mod exception_interrupt;
 pub mod hardware_interrupt;
+pub mod io_apic;
 pub mod timer;
+
 use lazy_static::lazy_static;
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
@@ -39,6 +41,8 @@ pub fn init() {
             f.local_apic.as_mut().unwrap().enable();
         });
     };
+
+    io_apic::init();
 
     log::info!("interrupts: init done");
 }
