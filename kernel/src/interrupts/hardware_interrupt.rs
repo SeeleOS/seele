@@ -4,7 +4,9 @@ use x86_64::{
 };
 
 use crate::{
-    interrupts::timer::timer_interrupt_handler_wrapper, keyboard::ps2::keyboard_interrupt_handler,
+    interrupts::timer::timer_interrupt_handler_wrapper,
+    keyboard::ps2::keyboard_interrupt_handler,
+    misc::{CPU_CORE_CONTEXT, with_cpu_core_context},
 };
 
 pub const PIC_1_OFFSET: u8 = 32;
@@ -24,6 +26,10 @@ impl HardwareInterrupt {
     pub fn as_usize(self) -> usize {
         usize::from(self.as_u8())
     }
+}
+
+pub fn send_eoi() {
+    unsafe { with_cpu_core_context(|f| f.local_apic.as_mut().unwrap().end_of_interrupt()) };
 }
 
 pub fn init_hardware_interrupts(idt: &mut InterruptDescriptorTable) {
