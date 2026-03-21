@@ -12,10 +12,7 @@ lazy_static! {
         ));
 }
 
-use crate::{
-    interrupts::hardware_interrupt::{HardwareInterrupt, notify_end_of_interrupt},
-    keyboard::push_scancode,
-};
+use crate::{interrupts::hardware_interrupt::HardwareInterrupt, keyboard::push_scancode};
 
 pub fn init() {
     let dropped = drain_output_buffer();
@@ -28,7 +25,7 @@ pub extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: Interrupt
     let mut keyboard_port = Port::new(0x60);
     let scancode = unsafe { keyboard_port.read() };
     push_scancode(scancode);
-    notify_end_of_interrupt(HardwareInterrupt::Keyboard);
+    // TODO
 }
 
 fn drain_output_buffer() -> usize {
