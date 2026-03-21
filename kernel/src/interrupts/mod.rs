@@ -34,13 +34,9 @@ pub fn init() {
     IDT.load();
 
     unsafe {
-        s_print!("a");
         with_cpu_core_context(|f| {
-            let local_apic = f.local_apic.as_mut().unwrap();
-            local_apic.enable();
-            local_apic.disable_timer();
+            f.local_apic.as_mut().unwrap().enable();
         });
-        s_print!("b");
     };
 
     log::info!("interrupts: init done");
