@@ -11,6 +11,7 @@ use crate::{
         exception_interrupt::init_exception_interrupts,
         hardware_interrupt::{PIC_1_OFFSET, PIC_2_OFFSET, init_hardware_interrupts},
     },
+    memory::{paging::MAPPER, utils::apply_offset},
     misc::{CPU_CORE_CONTEXT, with_cpu_core_context},
     print, s_print, test,
 };
@@ -47,7 +48,7 @@ pub fn default_local_apic() -> LocalApic {
         .timer_vector(32)
         .error_vector(0xFE)
         .spurious_vector(0xFF)
-        .set_xapic_base(unsafe { xapic_base() })
+        .set_xapic_base(unsafe { apply_offset(xapic_base()) })
         .build()
         .unwrap()
 }
