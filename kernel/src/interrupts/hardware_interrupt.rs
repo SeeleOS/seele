@@ -4,8 +4,7 @@ use x86_64::{
 };
 
 use crate::{
-    interrupts::{PICS, timer::timer_interrupt_handler_wrapper},
-    keyboard::ps2::keyboard_interrupt_handler,
+    interrupts::timer::timer_interrupt_handler_wrapper, keyboard::ps2::keyboard_interrupt_handler,
 };
 
 pub const PIC_1_OFFSET: u8 = 32;
@@ -39,12 +38,7 @@ pub trait HardwareInterruptHandler {
 }
 
 pub fn notify_end_of_interrupt(interrupt: HardwareInterrupt) {
-    unsafe {
-        PICS.get()
-            .unwrap()
-            .lock()
-            .notify_end_of_interrupt(interrupt.as_u8());
-    }
+    unimplemented!()
 }
 
 #[macro_export]

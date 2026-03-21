@@ -1,6 +1,6 @@
 use conquer_once::spin::OnceCell;
-use pic8259::ChainedPics;
 use spin::Mutex;
+use x2apic::lapic::{LocalApic, LocalApicBuilder, xapic_base};
 use x86_64::{
     instructions::interrupts::{self},
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame},
@@ -15,8 +15,6 @@ pub mod exception_interrupt;
 pub mod hardware_interrupt;
 pub mod timer;
 use lazy_static::lazy_static;
-pub static PICS: OnceCell<Mutex<ChainedPics>> = OnceCell::uninit();
-
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
@@ -31,9 +29,18 @@ lazy_static! {
 pub fn init() {
     log::info!("interrupts: init start");
     IDT.load();
-    PICS.get_or_init(|| unsafe { Mutex::new(ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET)) });
 
-    unsafe { PICS.get().unwrap().lock().initialize() };
+    let mut local_apic = LocalApicBuilder::new()
+        .timer_vector(32)
+        .error_vector(0xFE)
+        .spurious_vector(0xFF)
+        .build()
+        .unwrap();
+
+    unsafe {
+        local_apic.enable();
+    };
+
     log::info!("interrupts: init done");
 }
 
