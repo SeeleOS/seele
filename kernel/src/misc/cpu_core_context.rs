@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use x2apic::lapic::{LocalApic, LocalApicBuilder, xapic_base};
 
-use crate::multitasking::memory::allocate_kernel_stack;
+use crate::{interrupts::default_local_apic, multitasking::memory::allocate_kernel_stack};
 
 #[derive(Debug)]
 #[repr(C)]
@@ -24,15 +24,7 @@ pub fn with_cpu_core_context<R>(f: impl FnOnce(&mut CpuCoreContext) -> R) -> R {
 
 pub fn init() {
     let ctx = Box::leak(Box::new(CpuCoreContext {
-        local_apic: Some(
-            LocalApicBuilder::new()
-                .timer_vector(32)
-                .error_vector(0xFE)
-                .spurious_vector(0xFF)
-                .set_xapic_base(unsafe { xapic_base() })
-                .build()
-                .unwrap(),
-        ),
+        local_apic: Some(default_local_apic()),
         gs_kernel_stack_top: allocate_kernel_stack(16).finish().as_u64(),
         gs_user_stack_top: 0,
     }));

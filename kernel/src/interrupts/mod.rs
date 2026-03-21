@@ -42,6 +42,16 @@ pub fn init() {
     log::info!("interrupts: init done");
 }
 
+pub fn default_local_apic() -> LocalApic {
+    LocalApicBuilder::new()
+        .timer_vector(32)
+        .error_vector(0xFE)
+        .spurious_vector(0xFF)
+        .set_xapic_base(unsafe { xapic_base() })
+        .build()
+        .unwrap()
+}
+
 pub fn print_stackframe_m(stack_frame: InterruptStackFrame) {
     log::error!("{:#?}", stack_frame);
 }
