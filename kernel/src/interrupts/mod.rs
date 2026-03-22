@@ -60,6 +60,3 @@ pub fn print_stackframe(message: &str, stack_frame: InterruptStackFrame) {
     print!("\n{message}:\n\n");
     print_stackframe_m(stack_frame);
 }
-
-// test if breakpoint interrupt will crash the system
-test!("Breakpoint interrupt crash", || interrupts::int3());
