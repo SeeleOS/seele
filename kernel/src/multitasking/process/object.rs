@@ -24,4 +24,9 @@ impl Process {
             .clone()
             .ok_or(ObjectError::DoesNotExist)
     }
+
+    pub fn clone_object(&mut self, object: ObjectRef) -> ObjectResult<usize> {
+        self.objects.push(Some(object.clone()));
+        Ok(self.objects.len() + 1)
+    }
 }
