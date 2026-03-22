@@ -2,7 +2,7 @@ use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
 use std::{
     env,
     path::Path,
-    process::{Command, exit},
+    process::Command,
 };
 
 fn main() {
