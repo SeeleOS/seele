@@ -1,15 +1,10 @@
 use core::{cmp::min, ptr::copy_nonoverlapping};
 
 use elfloader::ElfBinary;
-use x86_64::{
-    VirtAddr,
-    structures::paging::{FrameAllocator, Mapper, OffsetPageTable, PageTableFlags, Translate},
-};
+use x86_64::{VirtAddr, structures::paging::PageTableFlags};
 
 use crate::memory::{
     addrspace::AddrSpace,
-    page_table_wrapper::PageTableWrapped,
-    paging::FRAME_ALLOCATOR,
     utils::{apply_offset, page_range_from_size},
 };
 
@@ -37,16 +32,21 @@ impl<'a> elfloader::ElfLoader for ElfLoader<'a> {
         load_headers: elfloader::LoadableHeaders,
     ) -> Result<(), elfloader::ElfLoaderErr> {
         for header in load_headers {
+            let mem_size = header.mem_size();
+            if mem_size == 0 {
+                continue;
+            }
+
             // TODO: use the proper flags
             let flags = PageTableFlags::USER_ACCESSIBLE
                 | PageTableFlags::PRESENT
                 | PageTableFlags::WRITABLE;
-            let pages = header.mem_size().div_ceil(4096);
+            let pages = page_range_from_size(header.virtual_addr(), mem_size).count() as u64;
 
             log::debug!(
                 "elf alloc: vaddr {:#x} mem {} bytes pages {}",
                 header.virtual_addr(),
-                header.mem_size(),
+                mem_size,
                 pages
             );
             self.addrspace
