@@ -14,7 +14,8 @@ use crate::{
     multitasking::{
         process::{
             Process, ProcessRef,
-            misc::{ProcessID, init_objects, init_stack_layout},
+            misc::{ProcessID, init_stack_layout},
+            object::init_objects,
         },
         thread::{
             THREAD_MANAGER,

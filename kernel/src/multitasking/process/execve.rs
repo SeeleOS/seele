@@ -4,11 +4,7 @@ use crate::{
     filesystem::{errors::FSError, path::Path, vfs::VirtualFS, vfs_operations::read_all},
     multitasking::{
         MANAGER,
-        process::{
-            Process,
-            misc::{init_objects, init_stack_layout},
-            new::setup_process,
-        },
+        process::{Process, misc::init_stack_layout, new::setup_process},
         scheduling::return_to_executor_no_save,
         thread::{
             THREAD_MANAGER,

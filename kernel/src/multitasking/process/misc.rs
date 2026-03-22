@@ -37,12 +37,6 @@ impl Default for ProcessID {
     }
 }
 
-pub fn init_objects(objects: &mut Vec<Option<Arc<dyn Object>>>) {
-    objects.push(Some(get_default_tty())); // stdin (unimpllemented)
-    objects.push(Some(get_default_tty())); // stdout
-    objects.push(Some(get_default_tty())); // stderr
-}
-
 pub fn init_stack_layout(
     builder: &mut StackBuilder,
     file: &ElfBinary,
@@ -72,14 +66,4 @@ pub fn init_stack_layout(
 
     // argc
     builder.push(args.len() as u64);
-}
-
-impl Process {
-    pub fn get_object(&mut self, index: u64) -> ObjectResult<ObjectRef> {
-        self.objects
-            .get(index as usize)
-            .ok_or(ObjectError::DoesNotExist)?
-            .clone()
-            .ok_or(ObjectError::DoesNotExist)
-    }
 }

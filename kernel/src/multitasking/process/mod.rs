@@ -19,6 +19,7 @@ pub mod fork;
 pub mod manager;
 pub mod misc;
 pub mod new;
+pub mod object;
 
 pub type ProcessRef = Arc<Mutex<Process>>;
 
