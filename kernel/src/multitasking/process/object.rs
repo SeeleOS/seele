@@ -17,6 +17,15 @@ pub fn init_objects(objects: &mut Vec<Option<Arc<dyn Object>>>) {
 }
 
 impl Process {
+    // Allocates a slot on the objects vec
+    pub fn alloc_object_slot(&mut self) -> usize {
+        if let Some((i, _)) = self.objects.iter().enumerate().find(|(_, p)| p.is_none()) {
+            i
+        } else {
+            self.objects.push(None);
+            self.objects.len() - 1
+        }
+    }
     pub fn get_object(&mut self, index: u64) -> ObjectResult<ObjectRef> {
         self.objects
             .get(index as usize)
