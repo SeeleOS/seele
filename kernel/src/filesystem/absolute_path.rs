@@ -16,7 +16,7 @@ enum AbsolutePathPart {
 }
 
 #[derive(Clone, Debug)]
-pub struct AbsolutePath(pub Vec<AbsolutePathPart>);
+pub struct AbsolutePath(Vec<AbsolutePathPart>);
 
 impl Default for AbsolutePath {
     fn default() -> Self {

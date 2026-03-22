@@ -5,7 +5,7 @@ use crate::filesystem::{
     errors::FSError,
     impls::fat32::operator::Fat32RamDiskReader,
     info::FileLikeInfo,
-    vfs_traits::{Directory, File, FileLikeType},
+    vfs_traits::{File, FileLikeType},
 };
 
 type RawFAT32File = fatfs::File<

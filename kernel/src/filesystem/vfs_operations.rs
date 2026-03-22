@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 use crate::filesystem::{
     errors::FSError,
     path::Path,
-    vfs_traits::{Directory, DirectoryContentType, File, FileLike},
+    vfs_traits::{DirectoryContentType, FileLike},
 };
 
 impl VFS {

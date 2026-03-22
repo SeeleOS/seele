@@ -2,7 +2,7 @@ use core::task::Poll;
 
 use conquer_once::spin::OnceCell;
 use crossbeam_queue::ArrayQueue;
-use futures_util::{Stream, StreamExt, task::AtomicWaker};
+use futures_util::{Stream, task::AtomicWaker};
 
 pub static SCANCODE_QUEUE: OnceCell<ArrayQueue<u8>> = OnceCell::uninit();
 pub static WAKER: AtomicWaker = AtomicWaker::new();

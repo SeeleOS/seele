@@ -7,7 +7,7 @@ use crate::{
         errors::FSError,
         info::{DirectoryContentInfo, FileLikeInfo},
         vfs::FSResult,
-        vfs_traits::{File, FileLike},
+        vfs_traits::FileLike,
     },
     impl_cast_function, impl_cast_function_non_trait,
     object::{

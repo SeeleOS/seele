@@ -3,7 +3,6 @@ use fatfs::{IoBase, Read, Seek, Write};
 use crate::filesystem::{
     block_device::BlockDeviceError,
     storage_operator::{SeekFrom, StorageOperator, initrd::RamDiskOperator},
-    vfs_traits::File,
 };
 
 pub struct Fat32RamDiskReader(pub RamDiskOperator);
