@@ -26,6 +26,7 @@ impl Process {
             self.objects.len() - 1
         }
     }
+
     pub fn get_object(&mut self, index: u64) -> ObjectResult<ObjectRef> {
         self.objects
             .get(index as usize)
