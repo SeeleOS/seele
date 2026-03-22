@@ -137,3 +137,10 @@ define_syscall!(CloneObject, |object: ObjectRef| {
         .clone_object(object)
         .map_err(Into::into)
 });
+
+define_syscall!(CloneObjectTo, |source: ObjectRef, dest: usize| {
+    get_current_process()
+        .lock()
+        .clone_object_to(source, dest)
+        .map_err(Into::into)
+});

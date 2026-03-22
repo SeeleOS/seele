@@ -35,4 +35,5 @@ pub enum SyscallNo {
     PollerWait,
 
     CloneObject,
+    CloneObjectTo,
 }
