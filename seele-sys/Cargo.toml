@@ -1,5 +1,5 @@
 [package]
-name = "seele-syslib"
+name = "seele-sys"
 version = "0.1.8"
 edition = "2024"
 

@@ -1,5 +1,5 @@
-#ifndef seele_syslib_h
-#define seele_syslib_h
+#ifndef seele_sys_h
+#define seele_sys_h
 
 #include <cstdarg>
 #include <cstdint>
@@ -9,4 +9,4 @@
 #include "stdint.h"
 #include "stddef.h"
 
-#endif  // seele_syslib_h
+#endif  // seele_sys_h
