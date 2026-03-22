@@ -34,6 +34,7 @@ use crate::filesystem::vfs::VirtualFS;
 use crate::misc::others::enable_sse;
 use crate::misc::{cpu_core_context, framebuffer, gdt, logging, tss};
 use crate::multitasking::kernel_task;
+use crate::terminal::misc::clear;
 use bootloader_api::BootInfo;
 use bootloader_api::{BootloaderConfig, config::Mapping};
 #[cfg(test)]
@@ -92,6 +93,7 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     interrupts::init();
     log::info!("init: interrupts ready");
 
+    clear();
     executor.run();
 }
 
