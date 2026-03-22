@@ -903,6 +903,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 [[package]]
 name = "os-terminal"
 version = "0.7.3"
+source = "git+https://github.com/SeeleOS/os-terminal#30d1ca75fea04975267080cf897a046ffeedc2b1"
 dependencies = [
  "base64ct",
  "bitflags 2.11.0",
