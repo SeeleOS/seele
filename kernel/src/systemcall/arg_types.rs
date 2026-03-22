@@ -1,4 +1,3 @@
-
 use alloc::{string::String, vec::Vec};
 
 use crate::{
@@ -38,7 +37,8 @@ add_syscall_arg_type!(
     u64,
     *mut u8,
     *mut u64,
-    *mut PollResult
+    *mut PollResult,
+    i32
 );
 
 impl SyscallArg for Vec<String> {
