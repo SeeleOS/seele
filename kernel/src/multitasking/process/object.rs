@@ -35,7 +35,8 @@ impl Process {
     }
 
     pub fn clone_object(&mut self, object: ObjectRef) -> ObjectResult<usize> {
-        self.objects.push(Some(object.clone()));
-        Ok(self.objects.len() + 1)
+        let slot = self.alloc_object_slot();
+        self.objects[slot] = Some(object.clone());
+        Ok(slot)
     }
 }
