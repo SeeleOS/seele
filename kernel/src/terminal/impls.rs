@@ -20,6 +20,10 @@ impl AbstractTerminal for KernelTerminal {
     fn size(&self) -> TerminalSize {
         TerminalSize::new(self.0.rows(), self.0.columns())
     }
+
+    fn clear(&mut self) {
+        self.0.clear();
+    }
 }
 
 unsafe impl Send for KernelTerminal {}

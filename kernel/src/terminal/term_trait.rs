@@ -17,4 +17,5 @@ impl TerminalSize {
 pub trait AbstractTerminal: Debug + Sync + Send {
     fn push_str(&mut self, str: &str);
     fn size(&self) -> TerminalSize;
+    fn clear(&mut self);
 }

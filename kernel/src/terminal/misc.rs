@@ -19,8 +19,5 @@ pub fn flush_line_buffer() {
 }
 
 pub fn clear() {
-    let rows = DEFAULT_TERMINAL.get().unwrap().lock().info.lock().rows;
-    for _ in 0..rows {
-        println!();
-    }
+    DEFAULT_TERMINAL.get().unwrap().lock().inner.lock().clear();
 }
