@@ -40,4 +40,10 @@ impl Process {
         self.objects[slot] = Some(object.clone());
         Ok(slot)
     }
+
+    pub fn clone_object_to(&mut self, object: ObjectRef, dest: usize) -> ObjectResult<usize> {
+        self.objects.resize(dest + 1, None);
+        self.objects[dest] = Some(object.clone());
+        Ok(dest)
+    }
 }
