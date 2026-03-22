@@ -33,4 +33,6 @@ pub enum SyscallNo {
     PollerAdd,
     PollerRemove,
     PollerWait,
+
+    CloneObject,
 }

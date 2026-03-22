@@ -1,4 +1,3 @@
-
 use crate::systemcall::implementations::*;
 use crate::systemcall::utils::SyscallImpl;
 use crate::{
@@ -39,7 +38,8 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         CreatePoller,
         PollerAdd,
         PollerRemove,
-        PollerWait
+        PollerWait,
+        CloneObject
     );
 
     table

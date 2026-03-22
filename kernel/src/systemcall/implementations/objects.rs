@@ -130,3 +130,10 @@ define_syscall!(ControlObject, |object: ObjectRef,
 
     Ok(0)
 });
+
+define_syscall!(CloneObject, |object: ObjectRef| {
+    get_current_process()
+        .lock()
+        .clone_object(object)
+        .map_err(Into::into)
+});
