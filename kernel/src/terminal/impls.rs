@@ -1,6 +1,5 @@
 use core::fmt::{Debug, Write};
 
-use os_terminal::Terminal;
 
 use crate::{
     misc::framebuffer::FRAME_BUFFER,
@@ -30,7 +29,7 @@ unsafe impl Send for KernelTerminal {}
 unsafe impl Sync for KernelTerminal {}
 
 impl Debug for KernelTerminal {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, _f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         Ok(())
     }
 }

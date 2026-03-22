@@ -1,4 +1,4 @@
-use alloc::{collections::vec_deque::VecDeque, string::String, vec::Vec};
+use alloc::{string::String, vec::Vec};
 
 use crate::{
     filesystem::{
@@ -6,7 +6,7 @@ use crate::{
         vfs::{FSResult, WrappedDirectory},
         vfs_traits::FileLike,
     },
-    multitasking::process::{manager::get_current_process, new},
+    multitasking::process::manager::get_current_process,
 };
 
 #[derive(Clone, Debug)]

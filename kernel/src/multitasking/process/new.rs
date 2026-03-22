@@ -1,16 +1,16 @@
 use alloc::{
     string::{String, ToString},
     sync::Arc,
-    vec::{self, Vec},
+    vec::Vec,
 };
 use spin::Mutex;
 
 use crate::{
     filesystem::{
-        absolute_path::AbsolutePath, errors::FSError, path::Path, vfs::VirtualFS,
+        absolute_path::AbsolutePath, errors::FSError, path::Path,
         vfs_operations::read_all,
     },
-    memory::{addrspace::AddrSpace, page_table_wrapper::PageTableWrapped},
+    memory::addrspace::AddrSpace,
     multitasking::{
         process::{
             Process, ProcessRef,

@@ -1,12 +1,10 @@
 use crate::{
     filesystem::{
-        self,
         info::{DirectoryContentInfo, FileLikeInfo},
         object::FileLikeObject,
         vfs::{FSResult, VFS, VirtualFS},
     },
     object::traits::Readable,
-    s_println,
 };
 
 use alloc::vec::Vec;

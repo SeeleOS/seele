@@ -1,14 +1,10 @@
-use core::char::MAX;
 
-use alloc::{string::String, vec::Vec};
-use elfloader::VAddr;
-use x2apic::lapic::LocalApic;
 use x86_64::{
     PhysAddr,
     registers::control::{Cr0, Cr0Flags, Cr3Flags, Cr4, Cr4Flags},
 };
 
-use crate::misc::error::{KernelError, KernelResult};
+use crate::misc::error::KernelResult;
 pub fn calc_cr3_value(addr: PhysAddr, flags: Cr3Flags) -> u64 {
     ((false as u64) << 63) | addr.as_u64() | flags.bits()
 }

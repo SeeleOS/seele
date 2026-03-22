@@ -1,4 +1,4 @@
-use alloc::{collections::vec_deque::VecDeque, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 
 use crate::{
     multitasking::process::Process,

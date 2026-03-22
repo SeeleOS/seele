@@ -1,6 +1,6 @@
 use crate::{
     gdt::GDT,
-    memory::{addrspace::AddrSpace, page_table_wrapper::PageTableWrapped, paging::MAPPER},
+    memory::addrspace::AddrSpace,
     misc::snapshot::Snapshot,
     multitasking::memory::allocate_kernel_stack,
 };

@@ -1,7 +1,4 @@
-use crate::{
-    filesystem::info::LinuxStat,
-    object::{Object, config::ConfigurateRequest, control, misc::ObjectResult},
-};
+use crate::object::{Object, config::ConfigurateRequest, control, misc::ObjectResult};
 
 pub trait Writable: Object {
     /// Write the content of [`buffer`] to [`self`]

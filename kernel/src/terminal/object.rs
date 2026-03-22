@@ -1,4 +1,4 @@
-use core::{fmt::Write, str::from_utf8};
+use core::str::from_utf8;
 
 use alloc::sync::Arc;
 use spin::Mutex;
@@ -10,7 +10,6 @@ use crate::{
         misc::ObjectResult,
         traits::{Configuratable, Writable},
     },
-    print, s_println,
     terminal::{object_config::TerminalInfo, term_trait::AbstractTerminal},
 };
 

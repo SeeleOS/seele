@@ -1,9 +1,8 @@
 use alloc::collections::vec_deque::VecDeque;
-use conquer_once::spin::OnceCell;
 use spin::Mutex;
 
 use crate::{
-    keyboard::decoding_task::KEYBOARD_QUEUE, println, s_println, terminal::state::DEFAULT_TERMINAL,
+    keyboard::decoding_task::KEYBOARD_QUEUE, terminal::state::DEFAULT_TERMINAL,
 };
 
 lazy_static::lazy_static! {

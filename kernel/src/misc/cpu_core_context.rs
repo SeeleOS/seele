@@ -1,5 +1,5 @@
 use alloc::boxed::Box;
-use x2apic::lapic::{LocalApic, LocalApicBuilder, xapic_base};
+use x2apic::lapic::LocalApic;
 
 use crate::{interrupts::default_local_apic, multitasking::memory::allocate_kernel_stack};
 

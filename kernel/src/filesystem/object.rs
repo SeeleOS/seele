@@ -1,14 +1,12 @@
 use core::fmt::Debug;
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use spin::Mutex;
+use alloc::vec::Vec;
 
 use crate::{
     filesystem::{
         errors::FSError,
         info::{DirectoryContentInfo, FileLikeInfo},
-        path::Path,
-        vfs::{FSResult, VirtualFS},
+        vfs::FSResult,
         vfs_traits::{File, FileLike},
     },
     impl_cast_function, impl_cast_function_non_trait,
@@ -18,7 +16,6 @@ use crate::{
         misc::ObjectResult,
         traits::{Readable, Writable},
     },
-    s_println,
 };
 
 pub struct FileLikeObject {
@@ -46,7 +43,7 @@ impl FileLikeObject {
 }
 
 impl Debug for FileLikeObject {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, _f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         Ok(())
     }
 }

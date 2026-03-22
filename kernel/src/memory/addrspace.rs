@@ -1,17 +1,15 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use alloc::vec::Vec;
-use futures_util::stream::All;
 use x86_64::{
     PhysAddr, VirtAddr,
-    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Translate},
+    structures::paging::{PageTableFlags, Translate},
 };
 
 use crate::{
     memory::{
         page_table_wrapper::PageTableWrapped,
-        paging::{FRAME_ALLOCATOR, MAPPER},
-        utils::{MemoryRegion, apply_offset},
+        utils::MemoryRegion,
     },
     misc::stack_builder::StackBuilder,
 };

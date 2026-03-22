@@ -1,8 +1,5 @@
-use core::ffi::CStr;
 
 use alloc::{string::String, vec::Vec};
-use fatfs::SeekFrom;
-use x86_64::registers::segmentation::CS;
 
 use crate::misc::{error::KernelError, others::KernelFrom};
 

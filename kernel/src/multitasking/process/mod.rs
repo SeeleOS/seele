@@ -1,15 +1,11 @@
-use acpi::address::AddressSpace;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use bootloader_api::info::MemoryRegion;
 use spin::Mutex;
 use x86_64::VirtAddr;
 
 use crate::filesystem::absolute_path::AbsolutePath;
-use crate::filesystem::path::Path;
 use crate::memory::addrspace::AddrSpace;
 use crate::{
-    memory::page_table_wrapper::PageTableWrapped,
     multitasking::{process::misc::ProcessID, thread::thread::Thread},
     object::Object,
 };

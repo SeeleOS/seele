@@ -1,5 +1,5 @@
 use crate::{
-    filesystem::block_device::BlockDeviceError, misc::error::AsSyscallError, println,
+    filesystem::block_device::BlockDeviceError, misc::error::AsSyscallError,
     systemcall::error::SyscallError,
 };
 

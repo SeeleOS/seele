@@ -1,18 +1,12 @@
 use core::sync::atomic::AtomicU64;
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{string::String, vec::Vec};
 use elfloader::ElfBinary;
 
 use crate::{
-    filesystem::{absolute_path::AbsolutePath, errors::FSError, path::Path, vfs::VirtualFS},
+    filesystem::{absolute_path::AbsolutePath, errors::FSError, vfs::VirtualFS},
     misc::stack_builder::StackBuilder,
     multitasking::process::Process,
-    object::{
-        Object,
-        error::ObjectError,
-        misc::{ObjectRef, ObjectResult},
-        tty_device::{TtyDevice, get_default_tty},
-    },
 };
 
 impl Process {

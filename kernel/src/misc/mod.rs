@@ -1,8 +1,5 @@
-use alloc::boxed::Box;
-use x2apic::lapic::LocalApicBuilder;
 use x86_64::instructions::hlt;
 
-use crate::{memory::paging::MAPPER, multitasking::memory::allocate_kernel_stack};
 
 pub mod aux;
 pub mod c_types;

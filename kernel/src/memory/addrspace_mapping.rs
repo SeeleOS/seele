@@ -1,4 +1,3 @@
-use futures_util::stream::All;
 use x86_64::{
     VirtAddr,
     structures::paging::{FrameAllocator, Mapper, PageTableFlags},

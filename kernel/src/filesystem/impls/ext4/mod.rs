@@ -4,7 +4,7 @@ use spin::mutex::Mutex;
 use ext4plus::Ext4;
 
 use crate::filesystem::{
-    impls::ext4::{directory::Ext4Directory, file::Ext4File, operator::Ext4RamDiskReader},
+    impls::ext4::{directory::Ext4Directory, file::Ext4File},
     vfs::WrappedDirectory,
     vfs_traits::FileSystem,
 };

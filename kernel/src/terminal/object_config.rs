@@ -1,10 +1,9 @@
-use core::ptr::{read, read_volatile, write_volatile};
+use core::ptr::{read_volatile, write_volatile};
 
-use fatfs::FsStatusFlags;
 
 use crate::{
     object::{
-        config::ConfigurateRequest, error::ObjectError, misc::ObjectResult, traits::Configuratable,
+        config::ConfigurateRequest, misc::ObjectResult, traits::Configuratable,
     },
     terminal::{TerminalObject, term_trait::TerminalSize},
 };

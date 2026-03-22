@@ -1,4 +1,3 @@
-use core::{ffi::CStr, task::Poll};
 
 use alloc::{string::String, vec::Vec};
 
@@ -6,10 +5,9 @@ use crate::{
     filesystem::info::LinuxStat,
     misc::{
         c_types::{CString, CVec},
-        error::AsSyscallError,
         others::KernelFrom,
     },
-    multitasking::process::{manager::get_current_process, misc::ProcessID},
+    multitasking::process::misc::ProcessID,
     object::misc::{ObjectRef, get_object_current_process},
     polling::event::PollableEvent,
     systemcall::{error::SyscallError, implementations::PollResult},

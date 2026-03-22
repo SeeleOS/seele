@@ -3,11 +3,8 @@ use core::fmt::Debug;
 use alloc::sync::Arc;
 
 use crate::{
-    define_syscall,
-    filesystem::{info::LinuxStat, object::FileLikeObject},
-    multitasking::MANAGER,
+    filesystem::object::FileLikeObject,
     object::{
-        error::ObjectError,
         misc::ObjectResult,
         traits::{Configuratable, Controllable, Readable, Writable},
     },

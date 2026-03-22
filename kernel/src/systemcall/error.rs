@@ -1,4 +1,4 @@
-use crate::{misc::error::KernelError, println};
+use crate::misc::error::KernelError;
 
 #[derive(Debug)]
 pub enum SyscallError {

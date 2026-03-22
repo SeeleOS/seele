@@ -29,7 +29,6 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
 };
 
 use crate::filesystem::block_device::initrd::{self};
-use crate::filesystem::path::Path;
 use crate::filesystem::vfs::VirtualFS;
 use crate::misc::others::enable_sse;
 use crate::misc::{cpu_core_context, framebuffer, gdt, logging, tss};
@@ -39,7 +38,6 @@ use bootloader_api::BootInfo;
 use bootloader_api::{BootloaderConfig, config::Mapping};
 #[cfg(test)]
 use core::panic::PanicInfo;
-use log::logger;
 
 #[cfg(test)]
 entry_point!(test_k_main, config = &BOOTLOADER_CONFIG);

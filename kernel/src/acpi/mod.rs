@@ -1,4 +1,4 @@
-use acpi::{AcpiTables, rsdp::Rsdp};
+use acpi::AcpiTables;
 use conquer_once::spin::OnceCell;
 
 use crate::acpi::handler::ACPIHandler;

@@ -13,9 +13,8 @@ lazy_static! {
 }
 
 use crate::{
-    interrupts::hardware_interrupt::{HardwareInterrupt, send_eoi},
+    interrupts::hardware_interrupt::send_eoi,
     keyboard::push_scancode,
-    s_print,
 };
 
 pub fn init() {

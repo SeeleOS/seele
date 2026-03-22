@@ -1,6 +1,5 @@
 use core::ptr::copy_nonoverlapping;
 
-use acpi::registers;
 use x86_64::{
     VirtAddr,
     structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, Translate},

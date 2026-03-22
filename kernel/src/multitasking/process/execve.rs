@@ -1,18 +1,15 @@
 use alloc::{string::String, vec::Vec};
 
 use crate::{
-    filesystem::{errors::FSError, path::Path, vfs::VirtualFS, vfs_operations::read_all},
+    filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
     multitasking::{
         MANAGER,
-        process::{Process, misc::init_stack_layout, new::setup_process},
-        scheduling::return_to_executor_no_save,
+        process::{Process, new::setup_process},
         thread::{
             THREAD_MANAGER,
-            snapshot::{ThreadSnapshot, ThreadSnapshotType},
-            thread::Thread,
+            snapshot::ThreadSnapshot,
         },
     },
-    userspace::elf_loader::load_elf,
 };
 
 impl Process {

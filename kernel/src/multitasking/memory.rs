@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 
 use x86_64::{
     VirtAddr,
-    structures::paging::{FrameAllocator, Mapper, OffsetPageTable, Page, PageTableFlags},
+    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags},
 };
 
 use crate::{

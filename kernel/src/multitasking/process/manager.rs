@@ -1,20 +1,15 @@
-use core::any::Any;
 
 use alloc::{
-    collections::{btree_map::BTreeMap, vec_deque::VecDeque},
+    collections::btree_map::BTreeMap,
     vec::Vec,
 };
 use x86_64::instructions::interrupts::without_interrupts;
 
-use crate::{
-    filesystem::{path::Path, vfs::VirtualFS},
-    multitasking::{
+use crate::multitasking::{
         MANAGER,
         process::{Process, ProcessRef, misc::ProcessID},
         thread::manager::ThreadManager,
-    },
-    println,
-};
+    };
 
 #[derive(Debug, Default)]
 pub struct Manager {

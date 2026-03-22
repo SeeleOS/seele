@@ -1,9 +1,5 @@
-use alloc::string::String;
 
-use crate::{
-    filesystem::info::LinuxStat,
-    systemcall::{error::SyscallError, numbers::SyscallNo},
-};
+use crate::systemcall::{error::SyscallError, numbers::SyscallNo};
 
 #[macro_export]
 macro_rules! register_syscalls {

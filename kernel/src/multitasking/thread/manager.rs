@@ -1,14 +1,12 @@
-use core::ops::Index;
 
 use alloc::{
-    collections::{btree_map::BTreeMap, vec_deque::VecDeque},
+    collections::btree_map::BTreeMap,
     sync::Arc,
     vec::Vec,
 };
 use spin::Mutex;
 
-use crate::{
-    multitasking::{
+use crate::multitasking::{
         MANAGER,
         kernel_task::{TASK_SPAWNER, task::Task},
         thread::{
@@ -18,9 +16,7 @@ use crate::{
             thread::Thread,
             yielding::BlockedQueues,
         },
-    },
-    println,
-};
+    };
 
 #[derive(Default, Debug)]
 pub struct ThreadManager {

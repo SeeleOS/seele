@@ -13,10 +13,7 @@ use crate::{
         traits::{Configuratable, Controllable, Readable, Writable},
     },
     polling::event::PollableEvent,
-    terminal::{
-        object::TerminalObject,
-        state::{self, DEFAULT_TERMINAL},
-    },
+    terminal::object::TerminalObject,
 };
 
 pub static DEFAULT_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();
@@ -84,8 +81,8 @@ impl Readable for TtyDevice {
 impl Controllable for TtyDevice {
     fn control(
         &self,
-        command: super::control::Command,
-        arg: u64,
+        _command: super::control::Command,
+        _arg: u64,
     ) -> super::misc::ObjectResult<isize> {
         // Stub
         Ok(0)

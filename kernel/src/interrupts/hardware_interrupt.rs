@@ -1,12 +1,12 @@
 use x86_64::{
     VirtAddr,
-    structures::idt::{InterruptDescriptorTable, InterruptStackFrame},
+    structures::idt::InterruptDescriptorTable,
 };
 
 use crate::{
     interrupts::timer::timer_interrupt_handler_wrapper,
     keyboard::ps2::keyboard_interrupt_handler,
-    misc::{CPU_CORE_CONTEXT, with_cpu_core_context},
+    misc::with_cpu_core_context,
 };
 
 pub const PIC_1_OFFSET: u8 = 32;

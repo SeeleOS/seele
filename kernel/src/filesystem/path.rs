@@ -1,8 +1,7 @@
 use alloc::{
-    string::{String, ToString},
+    string::String,
     vec::Vec,
 };
-use elfloader::PAddr;
 
 use crate::{
     filesystem::{

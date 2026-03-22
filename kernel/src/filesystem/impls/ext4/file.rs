@@ -1,6 +1,6 @@
 use alloc::string::String;
 
-use ext4plus::{Ext4, file::File as Ext4InnerFile};
+use ext4plus::file::File as Ext4InnerFile;
 
 use crate::filesystem::{
     errors::FSError,

@@ -1,5 +1,5 @@
 use crate::{
-    object::{Object, ObjectResult, error::ObjectError},
+    object::{ObjectResult, error::ObjectError},
     terminal::object_config::TerminalInfo,
 };
 

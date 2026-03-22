@@ -9,7 +9,6 @@ use crate::{
         MANAGER,
         thread::{THREAD_MANAGER, ThreadRef, misc::State, snapshot::ThreadSnapshot},
     },
-    println,
     tss::TSS,
 };
 

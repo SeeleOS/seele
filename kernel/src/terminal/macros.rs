@@ -1,4 +1,4 @@
-use core::fmt::{Arguments, Write};
+use core::fmt::Arguments;
 
 use alloc::fmt::format;
 

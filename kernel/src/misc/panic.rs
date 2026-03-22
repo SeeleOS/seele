@@ -3,7 +3,6 @@
 
 use core::panic::PanicInfo;
 
-use acpi::platform::interrupt;
 use x86_64::instructions::interrupts;
 
 use crate::{misc::hlt_loop, println, s_println};

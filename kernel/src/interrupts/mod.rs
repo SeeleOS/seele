@@ -1,19 +1,14 @@
-use conquer_once::spin::OnceCell;
-use spin::Mutex;
 use x2apic::lapic::{LocalApic, LocalApicBuilder, xapic_base};
-use x86_64::{
-    instructions::interrupts::{self},
-    structures::idt::{InterruptDescriptorTable, InterruptStackFrame},
-};
+use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
 use crate::{
     interrupts::{
         exception_interrupt::init_exception_interrupts,
-        hardware_interrupt::{PIC_1_OFFSET, PIC_2_OFFSET, init_hardware_interrupts},
+        hardware_interrupt::init_hardware_interrupts,
     },
-    memory::{paging::MAPPER, utils::apply_offset},
-    misc::{CPU_CORE_CONTEXT, with_cpu_core_context},
-    print, s_print, test,
+    memory::utils::apply_offset,
+    misc::with_cpu_core_context,
+    print, test,
 };
 pub mod exception_interrupt;
 pub mod hardware_interrupt;

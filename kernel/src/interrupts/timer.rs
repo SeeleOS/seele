@@ -1,8 +1,8 @@
 use core::arch::naked_asm;
 
 use crate::{
-    interrupts::hardware_interrupt::{HardwareInterrupt, send_eoi},
-    misc::{snapshot::Snapshot, with_cpu_core_context},
+    interrupts::hardware_interrupt::send_eoi,
+    misc::snapshot::Snapshot,
     multitasking::{scheduling::return_to_executor, thread::snapshot::ThreadSnapshotType},
 };
 

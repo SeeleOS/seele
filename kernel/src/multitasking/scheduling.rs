@@ -1,15 +1,9 @@
 use crate::{
     misc::snapshot::Snapshot,
-    multitasking::{
-        MANAGER,
-        thread::{
+    multitasking::thread::{
             THREAD_MANAGER,
-            manager::ThreadManager,
-            misc::State,
             snapshot::{ThreadSnapshot, ThreadSnapshotType},
         },
-    },
-    tss::TSS,
 };
 
 pub fn return_to_executor(snapshot: &mut Snapshot, snapshot_type: ThreadSnapshotType) {

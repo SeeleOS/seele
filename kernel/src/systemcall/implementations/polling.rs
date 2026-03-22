@@ -1,5 +1,5 @@
 use crate::multitasking::thread::yielding::{BlockType, WakeType, block_current};
-use crate::object::misc::{ObjectRef, get_object_current_process};
+use crate::object::misc::ObjectRef;
 use crate::polling::event::PollableEvent;
 use crate::systemcall::error::SyscallError;
 use crate::systemcall::numbers::*;

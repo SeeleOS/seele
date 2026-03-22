@@ -1,7 +1,6 @@
 use crate::{
     misc::snapshot::Snapshot,
     multitasking::thread::THREAD_MANAGER,
-    println, s_println,
     systemcall::{error::SyscallError, table::SYSCALL_TABLE},
 };
 
