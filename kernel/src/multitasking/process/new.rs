@@ -81,7 +81,7 @@ pub fn setup_process(
     let program = read_all(path.clone())?;
     log::debug!("setup_process: loaded {} bytes", program.len());
 
-    let mut stack_builder = addrspace.allocate_user(16).1;
+    let mut stack_builder = addrspace.allocate_user(32).1;
     let program = load_elf(addrspace, &program);
     log::debug!(
         "setup_process: ELF entry_point = {:#x}",
