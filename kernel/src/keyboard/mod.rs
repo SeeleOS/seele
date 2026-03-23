@@ -5,6 +5,7 @@ pub mod decoding_task;
 pub mod key_to_escape_sequence;
 pub mod object;
 pub mod ps2;
+pub mod raw_key_processing;
 pub mod scancode_stream;
 
 pub fn init() {
