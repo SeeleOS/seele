@@ -28,6 +28,7 @@ use crate::{
 };
 
 const DEFAULT_PATH: &str = "PATH=/programs";
+const DEFAULT_TERM: &str = "TERM=xterm-256color";
 const INIT_PATH: &str = "/programs/bash";
 
 impl Process {
@@ -53,7 +54,7 @@ impl Process {
         let context = setup_process(
             Path::new(INIT_PATH),
             Vec::new(),
-            alloc::vec![DEFAULT_PATH.to_string()],
+            alloc::vec![DEFAULT_PATH.to_string(), DEFAULT_TERM.to_string()],
             &mut process.addrspace,
             &mut process.objects,
         )
