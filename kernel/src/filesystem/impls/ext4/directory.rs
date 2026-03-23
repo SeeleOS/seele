@@ -16,14 +16,7 @@ use crate::filesystem::{
 };
 
 fn map_ext4_error(err: Ext4Error) -> FSError {
-    use Ext4Error::*;
-    match err {
-        NotFound => FSError::NotFound,
-        NotADirectory => FSError::NotADirectory,
-        IsADirectory => FSError::NotAFile,
-        Io(_) => FSError::StorageDeviceError(crate::filesystem::block_device::BlockDeviceError::Other),
-        _ => FSError::Other,
-    }
+    FSError::from(err)
 }
 
 pub struct Ext4Directory {
@@ -78,10 +71,7 @@ impl Directory for Ext4Directory {
                 DirectoryContentType::File
             };
 
-            result.push(DirectoryContentInfo {
-                name,
-                content_type,
-            });
+            result.push(DirectoryContentInfo { name, content_type });
         }
 
         Ok(result)
@@ -109,14 +99,11 @@ impl Directory for Ext4Directory {
         let meta = inode.metadata();
 
         if meta.is_dir() {
-            Ok(FileLike::Directory(Arc::new(Mutex::new(Ext4Directory::new(
-                name.to_string(),
-                path,
-                self.fs.clone(),
-            )))))
+            Ok(FileLike::Directory(Arc::new(Mutex::new(
+                Ext4Directory::new(name.to_string(), path, self.fs.clone()),
+            ))))
         } else {
-            let inner_file =
-                Ext4InnerFile::open_inode(&self.fs, inode).map_err(map_ext4_error)?;
+            let inner_file = Ext4InnerFile::open_inode(&self.fs, inode).map_err(map_ext4_error)?;
             Ok(FileLike::File(Arc::new(Mutex::new(Ext4File::new(
                 name.to_string(),
                 inner_file,

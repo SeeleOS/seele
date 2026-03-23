@@ -20,17 +20,17 @@ impl Ext4File {
 
     fn size(&self) -> Result<usize, FSError> {
         let meta = self.inner.inode().metadata();
-        usize::try_from(meta.len()).map_err(|_| FSError::Other)
+        Ok(usize::try_from(meta.len()).unwrap())
     }
 }
 
 impl File for Ext4File {
     fn read(&mut self, buffer: &mut [u8]) -> crate::filesystem::vfs::FSResult<usize> {
-        self.inner.read_bytes(buffer).map_err(|_| FSError::Other)
+        self.inner.read_bytes(buffer).map_err(Into::into)
     }
 
     fn write(&mut self, buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
-        self.inner.write_bytes(buffer).map_err(|_| FSError::Other)
+        self.inner.write_bytes(buffer).map_err(Into::into)
     }
 
     fn info(&mut self) -> crate::filesystem::vfs::FSResult<FileLikeInfo> {
@@ -42,4 +42,3 @@ impl File for Ext4File {
         ))
     }
 }
-
