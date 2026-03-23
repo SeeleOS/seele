@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use core::error::Error;
 
-use ext4plus::Ext4Read;
+use ext4plus::{Ext4Read, Ext4Write};
 use spin::mutex::Mutex;
 
 use crate::filesystem::{
@@ -52,3 +52,24 @@ impl Ext4Read for Ext4RamDiskReader {
     }
 }
 
+impl Ext4Write for Ext4RamDiskReader {
+    fn write(
+        &self,
+        start_byte: u64,
+        src: &[u8],
+    ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+        let mut op = self.0.lock();
+
+        op.seek(SeekFrom::Start(start_byte))
+            .map_err(Ext4RamDiskIoError::from)?;
+
+        let n = op.write(src).map_err(Ext4RamDiskIoError::from)?;
+
+        if n != src.len() {
+            return Err(Box::new(Ext4RamDiskIoError(BlockDeviceError::Other)));
+        }
+
+        op.flush().map_err(Ext4RamDiskIoError::from)?;
+        Ok(())
+    }
+}
