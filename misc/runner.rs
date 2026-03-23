@@ -1,11 +1,9 @@
 use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
-use std::{
-    env,
-    path::Path,
-    process::Command,
-};
+use std::{env, path::Path, process::Command, task::Context};
 
 fn main() {
+    umount_sysroot();
+
     // read env variables that were set in build script
     let uefi_path = env!("UEFI_PATH");
 
@@ -50,4 +48,12 @@ fn main() {
         0x11 => 1, // failure
         _ => 2,    // unknown fault
     };
+}
+
+fn umount_sysroot() {
+    Command::new("sudo")
+        .arg("umount")
+        .arg("./disk.img")
+        .spawn()
+        .unwrap();
 }
