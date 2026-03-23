@@ -3,7 +3,7 @@ use spin::Mutex;
 
 use crate::filesystem::{
     errors::FSError,
-    impls::ext4::{EXT4, operator::Ext4RamDiskReader},
+    impls::ext4::{EXT4, operator::Ext4RamDiskOperator},
     storage_operator::initrd::RamDiskOperator,
     vfs_traits::{Directory, File, FileSystem},
 };
@@ -41,8 +41,8 @@ impl VFS {
     pub fn init(&mut self) -> FSResult<()> {
         log::debug!("vfs: init start");
         // 使用 ext4plus + RamDiskOperator 作为根文件系统。
-        let reader = Ext4RamDiskReader(Mutex::new(RamDiskOperator::default()));
-        let writer = Ext4RamDiskReader(Mutex::new(RamDiskOperator::default()));
+        let reader = Ext4RamDiskOperator(Mutex::new(RamDiskOperator::default()));
+        let writer = Ext4RamDiskOperator(Mutex::new(RamDiskOperator::default()));
         let ext4 = Ext4Inner::load_with_writer(Box::new(reader), Some(Box::new(writer))).unwrap();
         self.register_fs(EXT4(ext4));
 

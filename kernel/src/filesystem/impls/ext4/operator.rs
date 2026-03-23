@@ -11,7 +11,7 @@ use crate::filesystem::{
 
 /// Simple adapter that lets ext4plus read from the existing ramdisk
 /// storage operator.
-pub struct Ext4RamDiskReader(pub Mutex<RamDiskOperator>);
+pub struct Ext4RamDiskOperator(pub Mutex<RamDiskOperator>);
 
 #[derive(Debug)]
 struct Ext4RamDiskIoError(BlockDeviceError);
@@ -30,7 +30,7 @@ impl From<BlockDeviceError> for Ext4RamDiskIoError {
     }
 }
 
-impl Ext4Read for Ext4RamDiskReader {
+impl Ext4Read for Ext4RamDiskOperator {
     fn read(
         &self,
         start_byte: u64,
@@ -52,7 +52,7 @@ impl Ext4Read for Ext4RamDiskReader {
     }
 }
 
-impl Ext4Write for Ext4RamDiskReader {
+impl Ext4Write for Ext4RamDiskOperator {
     fn write(
         &self,
         start_byte: u64,
