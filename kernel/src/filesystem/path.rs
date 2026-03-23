@@ -24,14 +24,20 @@ impl Default for Path {
 }
 
 #[derive(Clone, Debug)]
-pub struct Path(pub Vec<PathPart>);
+pub struct Path {
+    pub parts: Vec<PathPart>,
+    ends_with_slash: bool,
+}
 
 impl Path {
     pub fn new(path: &str) -> Self {
         if path.is_empty() {
             Self::new("/")
         } else {
-            Self(Self::parse(path))
+            Self {
+                parts: Self::parse(path),
+                ends_with_slash: path.len() > 1 && path.ends_with('/'),
+            }
         }
     }
 
@@ -65,7 +71,8 @@ impl Path {
     /// If you do navigate_with_depth with a depth of 1 and a
     /// path len of 6, the actrual depth that will be 5 (6 - 1)
     fn navigate_with_depth(&self, root: WrappedDirectory, depth: usize) -> FSResult<FileLike> {
-        let mut current = match &self.0[0] {
+        let first = self.parts.first().ok_or(FSError::NotFound)?;
+        let mut current = match first {
             PathPart::Root => FileLike::Directory(root),
             PathPart::CurrentDir => get_current_process()
                 .lock()
@@ -81,10 +88,10 @@ impl Path {
                 .navigate(root)?,
         };
 
-        let end = self.0.len().saturating_sub(depth);
+        let end = self.parts.len().saturating_sub(depth);
 
         for i in 0..end {
-            let part = &self.0[i];
+            let part = &self.parts[i];
             match part {
                 PathPart::Root => continue,
                 PathPart::Normal(name) => {
@@ -108,14 +115,18 @@ impl Path {
     }
 
     pub fn navigate(&self, root: WrappedDirectory) -> FSResult<FileLike> {
-        self.navigate_with_depth(root, 0)
+        let current = self.navigate_with_depth(root, 0)?;
+        if self.ends_with_slash && matches!(current, FileLike::File(_)) {
+            return Err(FSError::NotADirectory);
+        }
+        Ok(current)
     }
 
     pub fn navigate_to_parent(
         &self,
         root: WrappedDirectory,
     ) -> FSResult<(WrappedDirectory, String)> {
-        let name = self.0.last().ok_or(FSError::NotFound)?;
+        let name = self.parts.last().ok_or(FSError::NotFound)?;
         let nav = self.navigate_with_depth(root, 1)?;
 
         match nav {
@@ -133,20 +144,41 @@ impl Path {
     }
 
     pub fn as_string(self) -> String {
-        let mut string = String::new();
+        let mut segments = Vec::new();
+        let mut is_absolute = false;
 
-        for part in self.0 {
+        for part in self.parts {
             match part {
-                PathPart::Root => string.push('/'),
+                PathPart::Root => is_absolute = true,
                 PathPart::Normal(part) => {
                     if !part.is_empty() {
-                        string.push_str(&part);
-                        string.push('/');
+                        segments.push(part);
                     }
                 }
-                PathPart::CurrentDir => string.push('.'),
-                PathPart::ParentDir => string.push_str(".."),
+                PathPart::CurrentDir => segments.push(".".into()),
+                PathPart::ParentDir => segments.push("..".into()),
             }
+        }
+
+        let mut string = if is_absolute {
+            String::from("/")
+        } else {
+            String::new()
+        };
+
+        if !segments.is_empty() {
+            if !string.is_empty() && !string.ends_with('/') {
+                string.push('/');
+            }
+            string.push_str(&segments.join("/"));
+        }
+
+        if self.ends_with_slash && !string.ends_with('/') {
+            string.push('/');
+        }
+
+        if string.is_empty() {
+            string.push('/');
         }
 
         string

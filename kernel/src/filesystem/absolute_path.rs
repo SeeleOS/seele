@@ -30,7 +30,7 @@ impl AbsolutePath {
 
         for part in &self.0 {
             if let AbsolutePathPart::Normal(str) = part {
-                new_path.0.push(PathPart::Normal(str.clone()));
+                new_path.parts.push(PathPart::Normal(str.clone()));
             }
         }
 
@@ -66,7 +66,7 @@ impl Path {
     pub fn as_absolute(&self) -> AbsolutePath {
         let mut new_path = AbsolutePath(Vec::new());
 
-        for (i, part) in self.0.iter().enumerate() {
+        for (i, part) in self.parts.iter().enumerate() {
             match part {
                 PathPart::Normal(str) => new_path.0.push(AbsolutePathPart::Normal(str.clone())),
                 PathPart::Root => new_path.0.push(AbsolutePathPart::Root),
