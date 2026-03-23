@@ -96,9 +96,15 @@ pub trait BlockDevice: Send + Sync {
             (buffer.len() + offset_in_block + block_size - 1) / block_size * block_size;
 
         let mut tmp_buffer = alloc::vec![0u8; tmpbuffer_size];
+        // Read the existing data into the tmp buffer
         self.read_blocks(starting_block, &mut tmp_buffer)?;
+        // Overwrite the tmp buffer with the actual data that we wanna write
         tmp_buffer[offset_in_block..offset_in_block + buffer.len()].copy_from_slice(buffer);
 
+        // Write the blocks with the previous data and the actual data
+        // NOTE: we need to read the original data of the block because we can only
+        // write by block, and we dont wanna write nonsense into the block, so we
+        // have to read it first.
         let write_len = tmp_buffer.len() / block_size;
         for i in 0..write_len {
             let block = starting_block + i;
