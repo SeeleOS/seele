@@ -88,25 +88,22 @@ impl Directory for Ext4Directory {
     }
 
     fn create(&self, info: DirectoryContentInfo) -> crate::filesystem::vfs::FSResult<()> {
-        let mut new_inode = self
-            .fs
-            .create_inode(InodeCreationOptions {
-                file_type: match info.content_type {
-                    DirectoryContentType::File => FileType::Regular,
-                    DirectoryContentType::Directory => FileType::Directory,
-                    _ => unimplemented!(),
-                },
-                uid: 0,
-                gid: 0,
-                flags: InodeFlags::empty(),
-                time: Duration::from_millis(0),
-                mode: InodeMode::S_IFREG
-                    | InodeMode::S_IRUSR
-                    | InodeMode::S_IWUSR
-                    | InodeMode::S_IRGRP
-                    | InodeMode::S_IROTH,
-            })
-            .unwrap();
+        let mut new_inode = self.fs.create_inode(InodeCreationOptions {
+            file_type: match info.content_type {
+                DirectoryContentType::File => FileType::Regular,
+                DirectoryContentType::Directory => FileType::Directory,
+                _ => unimplemented!(),
+            },
+            uid: 0,
+            gid: 0,
+            flags: InodeFlags::empty(),
+            time: Duration::from_millis(0),
+            mode: InodeMode::S_IFREG
+                | InodeMode::S_IRUSR
+                | InodeMode::S_IWUSR
+                | InodeMode::S_IRGRP
+                | InodeMode::S_IROTH,
+        })?;
 
         // Parent inode of the new inode. In this case, the parent inode is [`self`]
         let parent_inode = self
