@@ -20,9 +20,11 @@ define_syscall!(OpenFile, |path_str: String, create: bool| {
     } else {
         return Err(SyscallError::FileNotFound);
     }
+
     let current_process = get_current_process();
-    current_process.lock().objects.push(Some(object));
-    Ok(current_process.lock().objects.len() - 1)
+    let slot = current_process.lock().alloc_object_slot();
+    current_process.lock().objects[slot] = Some(object);
+    Ok(slot)
 });
 
 define_syscall!(ChangeDirectory, |dir: String| {
