@@ -4,8 +4,8 @@ use futures_util::StreamExt;
 use pc_keyboard::DecodedKey;
 use spin::Mutex;
 
-use crate::{
-    keyboard::{char_processing::process_char, ps2::_PS2_KEYBOARD, scancode_stream::ScancodeStream},
+use crate::keyboard::{
+    char_processing::process_char, ps2::_PS2_KEYBOARD, scancode_stream::ScancodeStream,
 };
 
 pub static KEYBOARD_QUEUE: OnceCell<Mutex<VecDeque<u8>>> = OnceCell::uninit();
@@ -18,9 +18,11 @@ pub async fn process_keypresses() {
     while let Some(scancode) = scancodes.next().await {
         if let Ok(Some(key_event)) = keyboard.add_byte(scancode)
             && let Some(key) = keyboard.process_keyevent(key_event)
-            && let DecodedKey::Unicode(character) = key
         {
-            process_char(character);
+            match key {
+                DecodedKey::RawKey(key_code) => {}
+                DecodedKey::Unicode(character) => process_char(character),
+            }
         }
     }
 }
