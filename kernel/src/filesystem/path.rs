@@ -1,7 +1,4 @@
-use alloc::{
-    string::String,
-    vec::Vec,
-};
+use alloc::{string::String, vec::Vec};
 
 use crate::{
     filesystem::{
@@ -43,48 +40,22 @@ impl Path {
     }
 
     fn parse(path: &str) -> Vec<PathPart> {
-        let mut buf = String::new();
         let mut vec = Vec::new();
 
-        if let Some(character) = path.chars().nth(0) {
-            match character {
-                '/' => vec.push(PathPart::Root),
-                '.' => {
-                    if let Some(character) = path.chars().nth(1)
-                        && character == '.'
-                    {
-                        vec.push(PathPart::ParentDir);
-                    } else {
-                        vec.push(PathPart::CurrentDir);
-                    }
-                }
-                _ => {}
-            }
+        if path.starts_with('/') {
+            vec.push(PathPart::Root);
         }
 
-        for ch in path.chars() {
-            match ch {
-                '/' => {
-                    if buf.is_empty() {
-                        continue;
-                    }
-                    vec.push(PathPart::Normal(buf.clone()));
-                    buf.clear()
-                }
-                '.' => {
-                    if buf.is_empty() {
-                        continue;
-                    }
-
-                    vec.push(PathPart::CurrentDir);
-                    buf.clear();
-                }
-                _ => buf.push(ch),
+        for component in path.split('/') {
+            if component.is_empty() {
+                continue;
             }
-        }
 
-        if !buf.is_empty() {
-            vec.push(PathPart::Normal(buf));
+            match component {
+                "." => vec.push(PathPart::CurrentDir),
+                ".." => vec.push(PathPart::ParentDir),
+                _ => vec.push(PathPart::Normal(component.into())),
+            }
         }
 
         vec
@@ -173,7 +144,7 @@ impl Path {
                         string.push('/');
                     }
                 }
-                PathPart::CurrentDir => string.push_str("."),
+                PathPart::CurrentDir => string.push('.'),
                 PathPart::ParentDir => string.push_str(".."),
             }
         }
