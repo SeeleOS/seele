@@ -42,7 +42,8 @@ impl VFS {
         log::debug!("vfs: init start");
         // 使用 ext4plus + RamDiskOperator 作为根文件系统。
         let reader = Ext4RamDiskReader(Mutex::new(RamDiskOperator::default()));
-        let ext4 = Ext4Inner::load(Box::new(reader)).unwrap();
+        let writer = Ext4RamDiskReader(Mutex::new(RamDiskOperator::default()));
+        let ext4 = Ext4Inner::load_with_writer(Box::new(reader), Some(Box::new(writer))).unwrap();
         self.register_fs(EXT4(ext4));
 
         self.root = Some(self.filesystems[0].lock().root_dir().unwrap());
