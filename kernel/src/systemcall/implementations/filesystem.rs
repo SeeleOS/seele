@@ -9,9 +9,17 @@ use crate::{
     systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
 };
 
-define_syscall!(OpenFile, |path_str: String| {
+define_syscall!(OpenFile, |path_str: String, create: bool| {
     let path = Path::new(path_str.as_str());
-    let object = Arc::new(VirtualFS.lock().open(path)?);
+    let object;
+    if let Ok(file) = VirtualFS.lock().open(path.clone()) {
+        object = Arc::new(file);
+    } else if create {
+        VirtualFS.lock().create_file(path.clone())?;
+        object = Arc::new(VirtualFS.lock().open(path)?);
+    } else {
+        return Err(SyscallError::FileNotFound);
+    }
     let current_process = get_current_process();
     current_process.lock().objects.push(Some(object));
     Ok(current_process.lock().objects.len() - 1)
@@ -40,39 +48,38 @@ define_syscall!(GetCurrentDirectory, |buf_ptr: *mut u8, len: usize| {
     Ok(buf_ptr as usize)
 });
 
-define_syscall!(
-    FileInfo,
-    |start_from_current_dir: bool,
-     path_str: String,
-     linux_stat_ptr: *mut LinuxStat,
-     use_object: bool,
-     object: u64| {
-        let path: Path;
-        if !use_object {
-            if path_str.starts_with('/') {
-                path = Path::new(&path_str);
-            } else if start_from_current_dir {
-                let mut cur_path = get_current_process().lock().current_directory.clone();
-                cur_path.push_path_str(&path_str);
-                path = cur_path.clone().as_normal();
-            } else {
-                return Err(SyscallError::other("Non-absolute paths are not supported yet"));
-            }
+define_syscall!(FileInfo, |start_from_current_dir: bool,
+                           path_str: String,
+                           linux_stat_ptr: *mut LinuxStat,
+                           use_object: bool,
+                           object: u64| {
+    let path: Path;
+    if !use_object {
+        if path_str.starts_with('/') {
+            path = Path::new(&path_str);
+        } else if start_from_current_dir {
+            let mut cur_path = get_current_process().lock().current_directory.clone();
+            cur_path.push_path_str(&path_str);
+            path = cur_path.clone().as_normal();
         } else {
-            unsafe {
-                *linux_stat_ptr = get_current_process()
-                    .lock()
-                    .get_object(object)?
-                    .as_file_like()
-                    .ok_or(SyscallError::InvalidArguments)?
-                    .info()?
-                    .as_linux()
-            };
-            return Ok(0);
+            return Err(SyscallError::other(
+                "Non-absolute paths are not supported yet",
+            ));
         }
-
-        let info = VirtualFS.lock().file_info(path).unwrap();
-        unsafe { *linux_stat_ptr = info.as_linux() };
-        Ok(0)
+    } else {
+        unsafe {
+            *linux_stat_ptr = get_current_process()
+                .lock()
+                .get_object(object)?
+                .as_file_like()
+                .ok_or(SyscallError::InvalidArguments)?
+                .info()?
+                .as_linux()
+        };
+        return Ok(0);
     }
-);
+
+    let info = VirtualFS.lock().file_info(path).unwrap();
+    unsafe { *linux_stat_ptr = info.as_linux() };
+    Ok(0)
+});
