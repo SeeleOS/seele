@@ -87,4 +87,26 @@ pub trait BlockDevice: Send + Sync {
 
         Ok(buffer.len())
     }
+
+    fn write_by_bytes(&self, offset: usize, buffer: &[u8]) -> BlockDeviceResult {
+        let block_size = self.block_size();
+        let starting_block = offset / block_size;
+        let offset_in_block = offset % block_size;
+        let tmpbuffer_size =
+            (buffer.len() + offset_in_block + block_size - 1) / block_size * block_size;
+
+        let mut tmp_buffer = alloc::vec![0u8; tmpbuffer_size];
+        self.read_blocks(starting_block, &mut tmp_buffer)?;
+        tmp_buffer[offset_in_block..offset_in_block + buffer.len()].copy_from_slice(buffer);
+
+        let write_len = tmp_buffer.len() / block_size;
+        for i in 0..write_len {
+            let block = starting_block + i;
+            let byte_start = i * block_size;
+            let byte_end = byte_start + block_size;
+            self.write_single_block(block, &tmp_buffer[byte_start..byte_end])?;
+        }
+
+        Ok(buffer.len())
+    }
 }

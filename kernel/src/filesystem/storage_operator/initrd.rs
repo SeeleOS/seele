@@ -18,8 +18,13 @@ impl StorageOperator for RamDiskOperator {
 
         Ok(n)
     }
-    fn write(&mut self, _buf: &[u8]) -> Result<usize, Self::Error> {
-        Err(BlockDeviceError::Readonly)
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        let ramdisk = RAMDISK.get().unwrap();
+        let n = ramdisk.write_by_bytes(self.pos as usize, buf)?;
+
+        self.pos += n as u64;
+
+        Ok(n)
     }
 
     fn flush(&mut self) -> Result<(), Self::Error> {
