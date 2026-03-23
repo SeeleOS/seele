@@ -8,6 +8,7 @@ pub enum FSError {
     NotFound,
     NotADirectory,
     NotAFile,
+    Readonly,
     Other,
     StorageDeviceError(BlockDeviceError),
 }
@@ -18,6 +19,7 @@ impl AsSyscallError for FSError {
             Self::NotFound => SyscallError::FileNotFound,
             Self::NotADirectory => SyscallError::NotADirectory,
             Self::NotAFile => SyscallError::IsADirectory,
+            Self::Readonly => SyscallError::ReadOnlyFileSystem,
 
             Self::StorageDeviceError(err) => err.as_syscall_error(),
 
