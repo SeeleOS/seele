@@ -1,7 +1,8 @@
 use crate::{
     misc::snapshot::Snapshot,
     multitasking::thread::THREAD_MANAGER,
-    systemcall::{error::SyscallError, table::SYSCALL_TABLE},
+    s_print, s_println,
+    systemcall::{error::SyscallError, numbers::SyscallNo, table::SYSCALL_TABLE},
 };
 
 #[unsafe(no_mangle)]
@@ -42,6 +43,7 @@ fn syscall_handler_unwrapped(
     arg6: u64,
 ) -> isize {
     if let Some(Some(handler)) = SYSCALL_TABLE.get(syscall_no as usize) {
+        s_println!("called {:?}", SyscallNo::from_number(syscall_no as usize));
         match handler(arg1, arg2, arg3, arg4, arg5, arg6) {
             Ok(value) => value as isize,
             Err(err) => err as isize,

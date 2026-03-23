@@ -1,6 +1,6 @@
 use pc_keyboard::KeyCode;
 
-pub fn raw_key_to_escape_sequence(key: KeyCode) -> &'static [u8] {
+pub fn to_escape_sequence(key: KeyCode) -> &'static [u8] {
     match key {
         KeyCode::Escape => b"\x1b",
         KeyCode::F1 => b"\x1bOP",
