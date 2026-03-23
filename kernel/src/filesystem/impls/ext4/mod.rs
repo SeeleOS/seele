@@ -10,6 +10,7 @@ use crate::filesystem::{
 };
 
 pub mod directory;
+pub mod error;
 pub mod file;
 pub mod operator;
 
@@ -36,4 +37,3 @@ unsafe impl Sync for Ext4File {}
 unsafe impl Send for Ext4File {}
 unsafe impl Send for Ext4Directory {}
 unsafe impl Sync for Ext4Directory {}
-
