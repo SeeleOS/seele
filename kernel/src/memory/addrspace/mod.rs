@@ -56,7 +56,6 @@ impl AddrSpace {
 
     pub fn clean(&mut self) {
         log::debug!("addrspace: clean");
-        s_print!("clean");
         for area in &self.memory_areas {
             if !area.is_user() {
                 continue;
@@ -67,7 +66,6 @@ impl AddrSpace {
                     flush.flush();
                     if decrease_ref(frame) {
                         unsafe {
-                            s_print!("a");
                             FRAME_ALLOCATOR
                                 .get()
                                 .unwrap()
@@ -75,7 +73,6 @@ impl AddrSpace {
                                 .deallocate_frame(frame);
                         }
                     }
-                    s_print!("v");
                 }
             }
         }
