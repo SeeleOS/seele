@@ -1,6 +1,9 @@
 use x86_64::{
     registers::control::Cr2,
-    structures::idt::{InterruptStackFrame, PageFaultErrorCode},
+    structures::{
+        idt::{InterruptStackFrame, PageFaultErrorCode},
+        paging::Page,
+    },
 };
 
 use crate::{
@@ -16,7 +19,7 @@ pub extern "x86-interrupt" fn pagefault_handler(_: InterruptStackFrame, _: PageF
 
     match addrspace.get_area(addr) {
         Some(area) => {
-            addrspace.apply_area(*area);
+            addrspace.apply_page(Page::containing_address(addr), *area);
         }
         None => {
             todo!()
