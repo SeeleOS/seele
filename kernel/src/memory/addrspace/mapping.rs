@@ -26,8 +26,10 @@ impl AddrSpace {
         }
     }
 
-    pub fn map_lazy(&mut self, area: MemoryArea) {
+    pub fn map_lazy(&mut self, area: MemoryArea) -> VirtAddr {
         self.memory_areas.push(area);
+
+        area.start
     }
 
     fn apply_region(&mut self, region: MemoryArea) -> AllocResult {

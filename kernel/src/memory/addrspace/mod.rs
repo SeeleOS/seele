@@ -74,7 +74,7 @@ impl AddrSpace {
         ))
     }
 
-    pub fn allocate_user_lazy(&mut self, pages: u64) {
+    pub fn allocate_user_lazy(&mut self, pages: u64) -> VirtAddr {
         log::trace!("addrspace: allocate_user_lazy pages {}", pages);
         let mem = self.user_mem;
         self.user_mem += (pages + 1) * 4096;
@@ -85,7 +85,7 @@ impl AddrSpace {
             PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE,
             Data::Normal,
             true,
-        ));
+        ))
     }
 
     pub fn allocate_kernel(&mut self, pages: u64) -> AllocResult {
