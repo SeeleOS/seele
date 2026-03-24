@@ -23,11 +23,7 @@ pub extern "x86-interrupt" fn pagefault_handler(
 ) {
     let address = Cr2::read().unwrap();
 
-    if let TranslateResult::Mapped {
-        frame,
-        offset,
-        flags,
-    } = get_current_process()
+    if let TranslateResult::Mapped { flags, .. } = get_current_process()
         .lock()
         .addrspace
         .page_table
