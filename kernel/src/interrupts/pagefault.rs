@@ -61,7 +61,7 @@ fn actual_pagefault_handler(
     s_println!("stack frame {:#?}", stack_frame);
     s_println!("address {:?}", address);
 
-    MANAGER.lock().kill_process(get_current_process());
+    MANAGER.lock().terminate_process(get_current_process());
 
     return_to_executor_no_save();
 

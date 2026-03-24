@@ -86,7 +86,7 @@ impl Future for ThreadFuture {
         match state {
             State::Zombie => {
                 log::debug!("thread poll: zombie");
-                THREAD_MANAGER.get().unwrap().lock().clean_zombies();
+                THREAD_MANAGER.get().unwrap().lock().cleanup_exited_threads();
                 Poll::Ready(())
             }
             State::Running => {

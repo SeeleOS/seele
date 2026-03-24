@@ -53,7 +53,7 @@ define_syscall!(
             }
         };
 
-        THREAD_MANAGER.get().unwrap().lock().clean_zombies();
+        THREAD_MANAGER.get().unwrap().lock().cleanup_exited_threads();
 
         match check_result {
             Some((process, exit_code)) => {
@@ -63,7 +63,7 @@ define_syscall!(
                     }
                 }
                 let pid = process.lock().pid.0;
-                MANAGER.lock().remove_process(process);
+                MANAGER.lock().destroy_process(process);
                 s_print!("exit");
                 Ok(pid as usize)
             }
@@ -91,7 +91,7 @@ define_syscall!(Exit, |exit_code: u64| {
         get_current_process().lock().pid.0,
         exit_code
     );
-    manager.mark_current_as_zombie();
+    manager.mark_current_thread_exited();
     get_current_process().lock().exit_code = Some(exit_code);
     drop(manager);
     return_to_executor_no_save();

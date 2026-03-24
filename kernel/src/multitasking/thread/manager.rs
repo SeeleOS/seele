@@ -66,22 +66,22 @@ impl ThreadManager {
             .filter(|p| p.upgrade().unwrap().lock().id != thread.lock().id);
 
         for zombie in zombies {
-            self.mark_as_zombie(zombie.upgrade().unwrap());
+            self.mark_thread_exited(zombie.upgrade().unwrap());
         }
     }
 
-    pub fn mark_current_as_zombie(&mut self) {
-        log::debug!("mark_current_as_zombie");
-        self.mark_as_zombie(self.current.clone().unwrap());
+    pub fn mark_current_thread_exited(&mut self) {
+        log::debug!("mark_current_thread_exited");
+        self.mark_thread_exited(self.current.clone().unwrap());
     }
 
-    pub fn mark_as_zombie(&mut self, thread: ThreadRef) {
-        log::debug!("mark_as_zombie");
+    pub fn mark_thread_exited(&mut self, thread: ThreadRef) {
+        log::debug!("mark_thread_exited");
         thread.lock().state = State::Zombie;
         self.zombies.push(thread);
     }
 
-    pub fn clean_zombies(&mut self) {
+    pub fn cleanup_exited_threads(&mut self) {
         let mut to_remove = Vec::new();
 
         log::debug!("zombies size {}", self.zombies.len());
@@ -112,8 +112,8 @@ impl ThreadManager {
         }
 
         for dead_process in to_remove {
-            MANAGER.lock().wake_process_exit(dead_process, self);
+            MANAGER.lock().notify_process_exit_waiters(dead_process, self);
         }
-        log::debug!("clean_zombies done");
+        log::debug!("cleanup_exited_threads done");
     }
 }

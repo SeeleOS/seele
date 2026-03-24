@@ -28,23 +28,27 @@ impl Manager {
         });
     }
 
-    pub fn wake_process_exit(&mut self, process: ProcessRef, thread_manager: &mut ThreadManager) {
-        log::debug!("wake process exit {}", process.lock().pid.0);
-        thread_manager.wake_process_exit(process.lock().pid);
+    pub fn notify_process_exit_waiters(
+        &mut self,
+        process: ProcessRef,
+        thread_manager: &mut ThreadManager,
+    ) {
+        log::debug!("notify process exit waiters {}", process.lock().pid.0);
+        thread_manager.wake_process_exit_waiters(process.lock().pid);
     }
 
-    pub fn kill_process(&mut self, process: ProcessRef) {
+    pub fn terminate_process(&mut self, process: ProcessRef) {
         for thread in &process.lock().threads {
             THREAD_MANAGER
                 .get()
                 .unwrap()
                 .lock()
-                .mark_as_zombie(thread.upgrade().unwrap());
+                .mark_thread_exited(thread.upgrade().unwrap());
         }
     }
 
-    pub fn remove_process(&mut self, process: ProcessRef) {
-        log::debug!("remove process {}", process.lock().pid.0);
+    pub fn destroy_process(&mut self, process: ProcessRef) {
+        log::debug!("destroy process {}", process.lock().pid.0);
         self.processes.remove(&process.lock().pid);
 
         process.lock().addrspace.clean();
