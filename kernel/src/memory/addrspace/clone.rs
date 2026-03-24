@@ -30,13 +30,9 @@ impl AddrSpace {
             );
 
             for page in pages {
-                if let Some(addr) = old_page_table.inner.translate_addr(page.start_address())
+                if let Ok(frame) = old_page_table.inner.translate_page(page)
                     && page.start_address() < VirtAddr::new(KERNEL_MEM_START)
                 {
-                    let old_addr = apply_offset(addr.as_u64());
-                    let frame = frame_allocator.allocate_frame().unwrap();
-                    let new_addr = apply_offset(frame.start_address().as_u64());
-
                     unsafe {
                         new_page_table
                             .inner
@@ -50,10 +46,6 @@ impl AddrSpace {
                             )
                             .unwrap()
                             .flush()
-                    };
-
-                    unsafe {
-                        copy_nonoverlapping(old_addr as *const u8, new_addr as *mut u8, 4096)
                     };
                 }
             }
