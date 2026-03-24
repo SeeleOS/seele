@@ -15,6 +15,7 @@ use crate::{
 };
 
 pub mod clone;
+pub mod cow;
 pub mod mapping;
 pub mod mem_area;
 
