@@ -65,20 +65,17 @@ pub fn increase_ref(frame: PhysFrame) {
         .or_insert(0) += 1;
 }
 
-pub fn decrease_ref(frame: PhysFrame) {
+#[must_use]
+pub fn decrease_ref(frame: PhysFrame) -> bool {
     let mut ref_counter_locked = FRAME_REF_COUNT.lock();
     if let Some(count) = ref_counter_locked.get_mut(&frame.start_address().as_u64()) {
         *count -= 1;
 
         if *count == 0 {
             ref_counter_locked.remove(&frame.start_address().as_u64());
-            unsafe {
-                FRAME_ALLOCATOR
-                    .get()
-                    .unwrap()
-                    .lock()
-                    .deallocate_frame(frame);
-            }
+            return true;
         }
     }
+
+    false
 }
