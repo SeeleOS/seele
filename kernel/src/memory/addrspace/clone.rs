@@ -28,6 +28,10 @@ impl AddrSpace {
         let old_page_table = &mut self.page_table;
 
         for area in self.memory_areas.clone() {
+            if area.pages() == 0 {
+                continue;
+            }
+
             let start = Page::<Size4KiB>::containing_address(area.start);
             let end = Page::<Size4KiB>::containing_address(area.end - 1u64);
             let pages = Page::<Size4KiB>::range_inclusive(start, end);
