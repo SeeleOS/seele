@@ -46,6 +46,8 @@ impl Manager {
     pub fn remove_process(&mut self, process: ProcessRef) {
         log::debug!("remove process {}", process.lock().pid.0);
         self.processes.remove(&process.lock().pid);
+
+        process.lock().addrspace.clean();
     }
 
     pub fn load_process(&mut self, process: ProcessRef) {
