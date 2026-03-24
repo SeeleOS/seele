@@ -6,9 +6,7 @@ use x86_64::{
 };
 
 use crate::memory::{
-    page_table_wrapper::PageTableWrapped,
-    paging::FRAME_ALLOCATOR,
-    utils::apply_offset,
+    page_table_wrapper::PageTableWrapped, paging::FRAME_ALLOCATOR, utils::apply_offset,
 };
 
 use super::AddrSpace;
@@ -17,7 +15,7 @@ const KERNEL_MEM_START: u64 = 0xffff_8000_0000_0000;
 pub const COW_FLAG: PageTableFlags = PageTableFlags::BIT_9;
 
 impl AddrSpace {
-    pub fn clone_all(&self) -> Self {
+    pub fn clone_all(&mut self) -> Self {
         log::debug!("addrspace fork");
         let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
         log::debug!("frame allocator locked");

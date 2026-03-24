@@ -1,17 +1,13 @@
 use alloc::{sync::Arc, vec::Vec};
 use spin::{MutexGuard, mutex::Mutex};
 
-use crate::{
-    multitasking::{
-        process::{
-            manager::Manager, misc::ProcessID, Process,
-        },
-        thread::THREAD_MANAGER,
-    },
+use crate::multitasking::{
+    process::{Process, manager::Manager, misc::ProcessID},
+    thread::THREAD_MANAGER,
 };
 
 impl Process {
-    pub fn fork(&self, manager: &mut MutexGuard<Manager>) -> ProcessID {
+    pub fn fork(&mut self, manager: &mut MutexGuard<Manager>) -> ProcessID {
         log::debug!("inside fork");
         let pid = ProcessID::default();
         let current_thread = THREAD_MANAGER
