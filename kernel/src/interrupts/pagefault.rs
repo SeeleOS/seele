@@ -16,7 +16,7 @@ pub extern "x86-interrupt" fn pagefault_handler(_: InterruptStackFrame, _: PageF
 
     match addrspace.get_area(addr) {
         Some(area) => {
-            addrspace.apply_region(*area);
+            addrspace.apply_area(*area);
         }
         None => {
             todo!()

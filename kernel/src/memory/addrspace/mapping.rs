@@ -20,7 +20,7 @@ impl AddrSpace {
         self.memory_areas.push(area);
 
         if !area.lazy {
-            self.apply_region(area)
+            self.apply_area(area)
         } else {
             panic!("called map with a lazy mem area")
         }
@@ -32,14 +32,14 @@ impl AddrSpace {
         area.start
     }
 
-    pub fn apply_region(&mut self, region: MemoryArea) -> AllocResult {
+    pub fn apply_area(&mut self, area: MemoryArea) -> AllocResult {
         log::trace!(
             "addrspace: apply_region start {:#x} pages {}",
-            region.start.as_u64(),
-            region.pages()
+            area.start.as_u64(),
+            area.pages()
         );
-        let start = region.start_page();
-        let pages = region.pages();
+        let start = area.start_page();
+        let pages = area.pages();
 
         let mut last_frame = None;
         let mut frame_allocator = FRAME_ALLOCATOR.try_get().unwrap().lock();
@@ -51,7 +51,7 @@ impl AddrSpace {
             unsafe {
                 self.page_table
                     .inner
-                    .map_to(page, frame, region.flags, &mut *frame_allocator)
+                    .map_to(page, frame, area.flags, &mut *frame_allocator)
                     .unwrap()
                     .flush();
             };
