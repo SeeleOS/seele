@@ -33,6 +33,14 @@ impl File for Ext4File {
         self.inner.write_bytes(buffer).map_err(Into::into)
     }
 
+    fn read_at(
+        &mut self,
+        buffer: &mut [u8],
+        offset: u64,
+    ) -> crate::filesystem::vfs::FSResult<usize> {
+        self.inner.read_bytes_at(buffer, offset).map_err(Into::into)
+    }
+
     fn info(&mut self) -> crate::filesystem::vfs::FSResult<FileLikeInfo> {
         let size = self.size()?;
         Ok(FileLikeInfo::new(
