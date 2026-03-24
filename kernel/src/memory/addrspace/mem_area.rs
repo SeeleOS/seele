@@ -9,6 +9,7 @@ pub struct MemoryArea {
     pub end: VirtAddr,
     pub flags: PageTableFlags,
     pub data: Data,
+    pub lazy: bool,
 }
 
 // The data a memory area contains. Aka backing
@@ -19,12 +20,13 @@ pub enum Data {
 }
 
 impl MemoryArea {
-    pub fn new(start: VirtAddr, pages: u64, flags: PageTableFlags, data: Data) -> Self {
+    pub fn new(start: VirtAddr, pages: u64, flags: PageTableFlags, data: Data, lazy: bool) -> Self {
         Self {
             start,
             end: start + (pages * 4096),
             flags,
             data,
+            lazy,
         }
     }
 

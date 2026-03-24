@@ -22,7 +22,7 @@ impl AddrSpace {
             pages
         );
         let actual_start = start + 4096;
-        let region = MemoryArea::new(actual_start, pages, flags, Data::Normal);
+        let region = MemoryArea::new(actual_start, pages, flags, Data::Normal, false);
 
         self.memory_areas.push(region);
 
@@ -40,7 +40,7 @@ impl AddrSpace {
             start.as_u64(),
             pages
         );
-        let region = MemoryArea::new(start, pages, flags, Data::Normal);
+        let region = MemoryArea::new(start, pages, flags, Data::Normal, false);
 
         self.memory_areas.push(region);
 
