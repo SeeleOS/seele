@@ -11,7 +11,7 @@ use x86_64::{
 use crate::{
     misc::hlt_loop,
     multitasking::{MANAGER, process::manager::get_current_process},
-    println, s_print,
+    println, s_print, s_println,
 };
 
 pub extern "x86-interrupt" fn pagefault_handler(
@@ -40,6 +40,12 @@ fn actual_pagefault_handler(
     error_code: PageFaultErrorCode,
     address: VirtAddr,
 ) -> ! {
-    interrupts::disable();
-    todo!()
+    s_println!("pagefaulted on {:?}", get_current_process().lock().pid);
+    s_println!("error code {:?}", error_code);
+    s_println!("stack frame {:#?}", stack_frame);
+    s_println!("address {:?}", address);
+
+    MANAGER.lock().kill_process(get_current_process());
+
+    unreachable!()
 }
