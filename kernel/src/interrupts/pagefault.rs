@@ -10,7 +10,9 @@ use x86_64::{
 
 use crate::{
     misc::hlt_loop,
-    multitasking::{MANAGER, process::manager::get_current_process},
+    multitasking::{
+        MANAGER, process::manager::get_current_process, scheduling::return_to_executor_no_save,
+    },
     println, s_print, s_println,
 };
 
@@ -46,6 +48,8 @@ fn actual_pagefault_handler(
     s_println!("address {:?}", address);
 
     MANAGER.lock().kill_process(get_current_process());
+
+    return_to_executor_no_save();
 
     unreachable!()
 }
