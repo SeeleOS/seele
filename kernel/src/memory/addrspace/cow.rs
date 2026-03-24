@@ -52,6 +52,9 @@ impl AddrSpace {
                 .unwrap()
                 .flush()
         };
+
+        increase_ref(new_frame);
+        decrease_ref(old_frame);
     }
 }
 

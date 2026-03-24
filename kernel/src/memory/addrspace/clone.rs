@@ -1,4 +1,3 @@
-
 use x86_64::{
     VirtAddr,
     structures::paging::{
@@ -7,8 +6,7 @@ use x86_64::{
 };
 
 use crate::memory::{
-    page_table_wrapper::PageTableWrapped,
-    paging::FRAME_ALLOCATOR,
+    addrspace::cow::increase_ref, page_table_wrapper::PageTableWrapped, paging::FRAME_ALLOCATOR,
     utils::as_cow_flags,
 };
 
@@ -55,7 +53,8 @@ impl AddrSpace {
                                 .inner
                                 .map_to(page, frame, as_cow_flags(flags), &mut *frame_allocator)
                                 .unwrap()
-                                .flush()
+                                .flush();
+                            increase_ref(frame);
                         };
                     } else {
                         unsafe {

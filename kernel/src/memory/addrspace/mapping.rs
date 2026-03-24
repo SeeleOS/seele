@@ -5,7 +5,7 @@ use x86_64::{
 
 use crate::{
     memory::{
-        addrspace::mem_area::MemoryArea,
+        addrspace::{cow::increase_ref, mem_area::MemoryArea},
         paging::FRAME_ALLOCATOR,
         utils::apply_offset,
     },
@@ -50,6 +50,8 @@ impl AddrSpace {
             let start_ptr = (write_addr as usize - bytes as usize) as *mut u8;
             core::ptr::write_bytes(start_ptr, 0, bytes as usize);
         }
+
+        increase_ref(frame);
     }
 
     fn apply_area(&mut self, area: MemoryArea) -> AllocResult {
@@ -84,6 +86,8 @@ impl AddrSpace {
             }
 
             last_frame = Some(frame);
+
+            increase_ref(frame);
         }
 
         let start_addr = start.start_address();
