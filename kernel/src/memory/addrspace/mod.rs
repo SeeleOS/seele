@@ -79,7 +79,7 @@ impl AddrSpace {
         let mem = self.user_mem;
         self.user_mem += (pages + 1) * 4096;
 
-        self.map(MemoryArea::new(
+        self.map_lazy(MemoryArea::new(
             mem,
             pages,
             PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE,
