@@ -1,13 +1,20 @@
 use core::intrinsics::copy_nonoverlapping;
 
+use alloc::collections::btree_map::BTreeMap;
+use ext4plus::sync::Mutex;
 use x86_64::{
     VirtAddr,
     structures::paging::{
-        FrameAllocator, Mapper, Page, PageTableFlags, Translate, mapper::TranslateResult,
+        FrameAllocator, FrameDeallocator, Mapper, Page, PageTableFlags, PhysFrame, Translate,
+        mapper::TranslateResult,
     },
 };
 
 use crate::memory::{addrspace::AddrSpace, paging::FRAME_ALLOCATOR, utils::apply_offset};
+
+lazy_static::lazy_static! {
+    static ref FRAME_REF_COUNT: Mutex<BTreeMap<u64, usize>> = Mutex::new(BTreeMap::new());
+}
 
 pub const COW_FLAG: PageTableFlags = PageTableFlags::BIT_9;
 impl AddrSpace {
@@ -45,5 +52,30 @@ impl AddrSpace {
                 .unwrap()
                 .flush()
         };
+    }
+}
+
+pub fn increase_ref(frame: PhysFrame) {
+    *FRAME_REF_COUNT
+        .lock()
+        .entry(frame.start_address().as_u64())
+        .or_insert(0) += 1;
+}
+
+pub fn decrease_ref(frame: PhysFrame) {
+    let mut ref_counter_locked = FRAME_REF_COUNT.lock();
+    if let Some(count) = ref_counter_locked.get_mut(&frame.start_address().as_u64()) {
+        *count -= 1;
+
+        if *count == 0 {
+            ref_counter_locked.remove(&frame.start_address().as_u64());
+            unsafe {
+                FRAME_ALLOCATOR
+                    .get()
+                    .unwrap()
+                    .lock()
+                    .deallocate_frame(frame);
+            }
+        }
     }
 }
