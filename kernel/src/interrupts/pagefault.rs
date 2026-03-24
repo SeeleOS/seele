@@ -4,11 +4,12 @@ use x86_64::{
     registers::control::Cr2,
     structures::{
         idt::{InterruptStackFrame, PageFaultErrorCode},
-        paging::Page,
+        paging::{Mapper, Page, Translate, mapper::TranslateResult},
     },
 };
 
 use crate::{
+    memory::addrspace::clone::COW_FLAG,
     misc::hlt_loop,
     multitasking::{
         MANAGER, process::manager::get_current_process, scheduling::return_to_executor_no_save,
@@ -21,6 +22,21 @@ pub extern "x86-interrupt" fn pagefault_handler(
     error_code: PageFaultErrorCode,
 ) {
     let address = Cr2::read().unwrap();
+
+    if let TranslateResult::Mapped {
+        frame,
+        offset,
+        flags,
+    } = get_current_process()
+        .lock()
+        .addrspace
+        .page_table
+        .inner
+        .translate(address)
+        && flags.contains(COW_FLAG)
+    {
+        process_cow(address);
+    }
 
     if error_code.contains(PageFaultErrorCode::PROTECTION_VIOLATION) {
         actual_pagefault_handler(stack_frame, error_code, address);
@@ -35,6 +51,10 @@ pub extern "x86-interrupt" fn pagefault_handler(
         }
         _ => actual_pagefault_handler(stack_frame, error_code, address),
     }
+}
+
+fn process_cow(address: VirtAddr) {
+    todo!()
 }
 
 fn actual_pagefault_handler(
