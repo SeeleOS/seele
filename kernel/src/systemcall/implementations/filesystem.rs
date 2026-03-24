@@ -6,6 +6,7 @@ use crate::{
     define_syscall,
     filesystem::{info::LinuxStat, path::Path, vfs::VirtualFS},
     multitasking::process::manager::get_current_process,
+    object::misc::ObjectRef,
     systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
 };
 
@@ -73,8 +74,7 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
             *linux_stat_ptr = get_current_process()
                 .lock()
                 .get_object(object)?
-                .as_file_like()
-                .ok_or(SyscallError::InvalidArguments)?
+                .as_file_like()?
                 .info()?
                 .as_linux()
         };
@@ -84,4 +84,18 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
     let info = VirtualFS.lock().file_info(path).unwrap();
     unsafe { *linux_stat_ptr = info.as_linux() };
     Ok(0)
+});
+
+define_syscall!(MapFile, |object: ObjectRef, len: usize, offset: u64| {
+    let current = get_current_process();
+    let (mem_start, _) = current
+        .lock()
+        .addrspace
+        .allocate_user(len.div_ceil(4096) as u64);
+
+    let slice = unsafe { slice::from_raw_parts_mut(mem_start.as_mut_ptr(), len) };
+
+    object.as_file_like()?.read_at(slice, offset)?;
+
+    Ok(mem_start.as_u64() as usize)
 });

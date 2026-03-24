@@ -38,6 +38,8 @@ pub enum SyscallNo {
 
     CloneObject,
     CloneObjectTo,
+
+    MapFile,
 }
 
 impl SyscallNo {
