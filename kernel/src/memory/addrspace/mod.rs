@@ -98,4 +98,8 @@ impl AddrSpace {
             false,
         ))
     }
+
+    pub fn get_area(&self, addr: VirtAddr) -> Option<&MemoryArea> {
+        self.memory_areas.iter().find(|p| p.contains(addr))
+    }
 }
