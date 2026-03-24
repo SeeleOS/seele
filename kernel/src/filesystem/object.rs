@@ -40,6 +40,13 @@ impl FileLikeObject {
             FileLike::Directory(dir) => Ok(dir.lock().contents()?),
         }
     }
+
+    pub fn read_at(&self, buf: &mut [u8], offset: u64) -> FSResult<usize> {
+        match &self.file {
+            FileLike::File(file) => file.lock().read_at(buf, offset),
+            FileLike::Directory(_) => Err(FSError::NotAFile),
+        }
+    }
 }
 
 impl Debug for FileLikeObject {
