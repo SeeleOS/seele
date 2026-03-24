@@ -20,9 +20,7 @@ static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeM
 define_syscall!(
     GetDirectoryContents,
     |object_index: u64, buf: *mut u8, len: usize| {
-        let obj = get_object_current_process(object_index)?
-            .as_file_like()
-            .ok_or(SyscallError::BadFileDescriptor)?;
+        let obj = get_object_current_process(object_index)?.as_file_like()?;
         let contents = obj.directory_contents()?;
         let current_pid = get_current_process().lock().pid;
         let mut offsets = DIR_OFFSETS.lock();
@@ -77,8 +75,7 @@ define_syscall!(ReadObject, |object: ObjectRef,
                              len: usize| {
     unsafe {
         Ok(object
-            .as_readable()
-            .ok_or(SyscallError::BadFileDescriptor)?
+            .as_readable()?
             .read(slice::from_raw_parts_mut(buf_ptr, len))?)
     }
 });
@@ -88,8 +85,7 @@ define_syscall!(WriteObject, |object: ObjectRef,
                               len: usize| {
     unsafe {
         Ok(object
-            .as_writable()
-            .ok_or(SyscallError::BadFileDescriptor)?
+            .as_writable()?
             .write(slice::from_raw_parts(buf_ptr, len))?)
     }
 });
@@ -112,8 +108,7 @@ define_syscall!(
     ConfigurateObject,
     |object: ObjectRef, request: u64, request_ptr: u64| {
         let res = object
-            .as_configuratable()
-            .ok_or(SyscallError::InappropriateIoctl)?
+            .as_configuratable()?
             .configure(ConfigurateRequest::new(request, request_ptr)?);
 
         res.map(|val| val as usize).map_err(Into::into)
@@ -124,8 +119,7 @@ define_syscall!(ControlObject, |object: ObjectRef,
                                 command: u64,
                                 arg: u64| {
     object
-        .as_controllable()
-        .ok_or(SyscallError::InvalidArguments)?
+        .as_controllable()?
         .control(Command::new(command)?, arg)?;
 
     Ok(0)

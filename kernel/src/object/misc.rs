@@ -11,8 +11,8 @@ pub type ObjectResult<T> = Result<T, ObjectError>;
 macro_rules! impl_cast_function_non_trait {
     ($fn_name: expr, $type:ty) => {
         paste::paste! {
-        fn [<as_$fn_name>](self: alloc::sync::Arc<Self>) -> Option<alloc::sync::Arc<$type>> {
-            Some(self)
+        fn [<as_$fn_name>](self: alloc::sync::Arc<Self>) -> Result<alloc::sync::Arc<$type>, $crate::systemcall::error::SyscallError> {
+            Ok(self)
         }
         }
     };
@@ -22,8 +22,8 @@ macro_rules! impl_cast_function_non_trait {
 macro_rules! impl_cast_function {
     ($fn_name: expr, $type:ty) => {
         paste::paste! {
-        fn [<as_$fn_name>](self: alloc::sync::Arc<Self>) -> Option<alloc::sync::Arc<dyn $type>> {
-            Some(self)
+        fn [<as_$fn_name>](self: alloc::sync::Arc<Self>) -> Result<alloc::sync::Arc<dyn $type>, $crate::systemcall::error::SyscallError> {
+            Ok(self)
         }
         }
     };

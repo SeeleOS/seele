@@ -19,31 +19,31 @@ pub mod traits;
 pub mod tty_device;
 
 macro_rules! define_cast_function_non_trait {
-    ($name: expr, $type: ty) => {
+    ($name: expr, $type: ty, $err: ty) => {
         paste::paste! {
-            fn [<as_$name>](self: Arc<Self>) -> Option<Arc<$type>> {
-                None
+            fn [<as_$name>](self: Arc<Self>) -> Result<Arc<$type>, $crate::systemcall::error::SyscallError> {
+                Err($crate::systemcall::error::SyscallError::$err)
             }
         }
     };
 }
 
 macro_rules! define_cast_function {
-    ($name: expr, $type: ty) => {
+    ($name: expr, $type: ty, $err: ty) => {
         paste::paste! {
-            fn [<as_$name>](self: Arc<Self>) -> Option<Arc<dyn $type>> {
-                None
+            fn [<as_$name>](self: Arc<Self>) -> Result<Arc<dyn $type>, $crate::systemcall::error::SyscallError> {
+                Err($crate::systemcall::error::SyscallError::$err)
             }
         }
     };
 }
 
 pub trait Object: Send + Sync + Debug {
-    define_cast_function!(writable, Writable);
-    define_cast_function!(readable, Readable);
-    define_cast_function!(configuratable, Configuratable);
-    define_cast_function!(controllable, Controllable);
+    define_cast_function!(writable, Writable, BadFileDescriptor);
+    define_cast_function!(readable, Readable, BadFileDescriptor);
+    define_cast_function!(configuratable, Configuratable, InappropriateIoctl);
+    define_cast_function!(controllable, Controllable, InvalidArguments);
 
-    define_cast_function_non_trait!(file_like, FileLikeObject);
-    define_cast_function_non_trait!(poller, PollerObject);
+    define_cast_function_non_trait!(file_like, FileLikeObject, BadFileDescriptor);
+    define_cast_function_non_trait!(poller, PollerObject, BadFileDescriptor);
 }

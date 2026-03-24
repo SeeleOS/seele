@@ -42,8 +42,7 @@ define_syscall!(PollerAdd, |poller: ObjectRef,
                             event: PollableEvent,
                             data: u64| {
     poller
-        .as_poller()
-        .ok_or(SyscallError::InvalidArguments)?
+        .as_poller()?
         .register_obj(target_object, event, data);
 
     Ok(0)
@@ -53,8 +52,7 @@ define_syscall!(
     PollerRemove,
     |poller: ObjectRef, target_object: ObjectRef, event: PollableEvent| {
         poller
-            .as_poller()
-            .ok_or(SyscallError::InvalidArguments)?
+            .as_poller()?
             .unregister_obj(target_object, event);
 
         Ok(0)
@@ -69,7 +67,7 @@ define_syscall!(PollerWait, |poller: ObjectRef,
         return Err(SyscallError::InvalidArguments);
     }
 
-    let poller = poller.as_poller().ok_or(SyscallError::InvalidArguments)?;
+    let poller = poller.as_poller()?;
 
     if !poller.has_woken_events() {
         poller.push_already_ready_events();
