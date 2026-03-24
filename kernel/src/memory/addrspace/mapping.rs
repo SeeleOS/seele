@@ -15,36 +15,10 @@ use crate::{
 use super::{AddrSpace, AllocResult};
 
 impl AddrSpace {
-    pub fn map(&mut self, start: VirtAddr, pages: u64, flags: PageTableFlags) -> AllocResult {
-        log::trace!(
-            "addrspace: map guard start {:#x} pages {}",
-            start.as_u64(),
-            pages
-        );
-        let actual_start = start + 4096;
-        let region = MemoryArea::new(actual_start, pages, flags, Data::Normal, false);
-
-        self.memory_areas.push(region);
-
-        self.apply_region(region)
-    }
-
-    pub fn map_no_guard_page(
-        &mut self,
-        start: VirtAddr,
-        pages: u64,
-        flags: PageTableFlags,
-    ) -> AllocResult {
-        log::trace!(
-            "addrspace: map_no_guard_page start {:#x} pages {}",
-            start.as_u64(),
-            pages
-        );
-        let region = MemoryArea::new(start, pages, flags, Data::Normal, false);
-
-        self.memory_areas.push(region);
-
-        self.apply_region(region)
+    pub fn map(&mut self, area: MemoryArea) -> AllocResult {
+        log::trace!("addrspace: mapping {:?}", area);
+        self.memory_areas.push(area);
+        self.apply_region(area)
     }
 
     fn apply_region(&mut self, region: MemoryArea) -> AllocResult {
