@@ -15,7 +15,7 @@ use x86_64::{
 };
 
 use crate::{
-    memory::{addrspace::clone::COW_FLAG, paging::FRAME_ALLOCATOR, utils::apply_offset},
+    memory::{addrspace::cow::COW_FLAG, paging::FRAME_ALLOCATOR, utils::apply_offset},
     misc::hlt_loop,
     multitasking::{
         MANAGER,

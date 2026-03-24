@@ -3,7 +3,7 @@ use x86_64::{
     structures::paging::{Page, PageTable, PageTableFlags, Size4KiB, page::PageRangeInclusive},
 };
 
-use crate::memory::{PHYSICAL_MEMORY_OFFSET, addrspace::clone::COW_FLAG, paging::MAPPER};
+use crate::memory::{PHYSICAL_MEMORY_OFFSET, addrspace::cow::COW_FLAG, paging::MAPPER};
 
 pub struct Locked<A> {
     inner: spin::Mutex<A>,

@@ -7,12 +7,9 @@ use x86_64::{
     },
 };
 
-use crate::memory::{
-    addrspace::{AddrSpace, clone::COW_FLAG},
-    paging::FRAME_ALLOCATOR,
-    utils::apply_offset,
-};
+use crate::memory::{addrspace::AddrSpace, paging::FRAME_ALLOCATOR, utils::apply_offset};
 
+pub const COW_FLAG: PageTableFlags = PageTableFlags::BIT_9;
 impl AddrSpace {
     // Replace the readonly CoW page with a normal page.
     pub fn replace_cow_page(&mut self, addr: VirtAddr) {
