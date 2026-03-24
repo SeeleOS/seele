@@ -1,11 +1,11 @@
 use x86_64::{
     VirtAddr,
-    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
+    structures::paging::{FrameAllocator, Mapper, Page, Size4KiB},
 };
 
 use crate::{
     memory::{
-        addrspace::mem_area::{Data, MemoryArea},
+        addrspace::mem_area::MemoryArea,
         paging::FRAME_ALLOCATOR,
         utils::apply_offset,
     },

@@ -1,7 +1,4 @@
-use x86_64::{
-    registers::control::Cr2,
-    structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
-};
+use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
 use crate::{
     interrupts::{pagefault::pagefault_handler, print_stackframe_m},

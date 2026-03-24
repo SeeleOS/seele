@@ -1,4 +1,4 @@
-use core::{char, str::from_utf8};
+use core::str::from_utf8;
 
 use alloc::collections::vec_deque::VecDeque;
 use pc_keyboard::KeyCode;
@@ -9,10 +9,7 @@ use crate::{
     multitasking::thread::THREAD_MANAGER,
     object::tty_device::wake_tty_poller_readable,
     print,
-    terminal::{
-        misc::{LINE_BUFFER, flush_line_buffer},
-        state::DEFAULT_TERMINAL,
-    },
+    terminal::state::DEFAULT_TERMINAL,
 };
 
 pub fn process_key(key: KeyCode) {

@@ -1,6 +1,6 @@
 use x86_64::{
     VirtAddr,
-    structures::paging::{Page, PageTable, PageTableFlags, Size4KiB, page::PageRangeInclusive},
+    structures::paging::{Page, PageTable, PageTableFlags, page::PageRangeInclusive},
 };
 
 use crate::memory::{PHYSICAL_MEMORY_OFFSET, addrspace::cow::COW_FLAG, paging::MAPPER};

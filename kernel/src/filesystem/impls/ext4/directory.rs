@@ -21,7 +21,6 @@ use crate::filesystem::{
     errors::FSError,
     impls::ext4::file::Ext4File,
     info::DirectoryContentInfo,
-    path,
     vfs_traits::{Directory, DirectoryContentType, FileLike},
 };
 

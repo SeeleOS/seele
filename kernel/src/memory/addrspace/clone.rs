@@ -1,16 +1,15 @@
-use core::ptr::copy_nonoverlapping;
 
 use x86_64::{
     VirtAddr,
     structures::paging::{
-        FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, Translate, mapper::TranslateResult,
+        Mapper, Page, PageTableFlags, Size4KiB, Translate, mapper::TranslateResult,
     },
 };
 
 use crate::memory::{
     page_table_wrapper::PageTableWrapped,
     paging::FRAME_ALLOCATOR,
-    utils::{apply_offset, as_cow_flags},
+    utils::as_cow_flags,
 };
 
 use super::AddrSpace;

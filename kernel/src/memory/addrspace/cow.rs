@@ -3,7 +3,7 @@ use core::intrinsics::copy_nonoverlapping;
 use x86_64::{
     VirtAddr,
     structures::paging::{
-        FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, Translate, mapper::TranslateResult,
+        FrameAllocator, Mapper, Page, PageTableFlags, Translate, mapper::TranslateResult,
     },
 };
 

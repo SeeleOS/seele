@@ -4,14 +4,10 @@ use futures_util::StreamExt;
 use pc_keyboard::DecodedKey;
 use spin::Mutex;
 
-use crate::{
-    keyboard::{
-        char_processing::process_char, key_to_escape_sequence::to_escape_sequence,
+use crate::keyboard::{
+        char_processing::process_char,
         ps2::_PS2_KEYBOARD, raw_key_processing::process_key, scancode_stream::ScancodeStream,
-    },
-    multitasking::thread::THREAD_MANAGER,
-    object::tty_device::wake_tty_poller_readable,
-};
+    };
 
 pub static KEYBOARD_QUEUE: OnceCell<Mutex<VecDeque<u8>>> = OnceCell::uninit();
 

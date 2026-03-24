@@ -1,28 +1,23 @@
-use core::intrinsics::copy_nonoverlapping;
 
 use x86_64::{
     VirtAddr,
-    instructions::interrupts,
     registers::control::Cr2,
     structures::{
         idt::{InterruptStackFrame, PageFaultErrorCode},
         paging::{
-            FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame,
-            Size4KiB, Translate,
-            mapper::{MappedFrame, TranslateResult},
+            Page, Translate,
+            mapper::TranslateResult,
         },
     },
 };
 
 use crate::{
-    memory::{addrspace::cow::COW_FLAG, paging::FRAME_ALLOCATOR, utils::apply_offset},
-    misc::hlt_loop,
+    memory::addrspace::cow::COW_FLAG,
     multitasking::{
         MANAGER,
-        process::{manager::get_current_process, new},
+        process::manager::get_current_process,
         scheduling::return_to_executor_no_save,
-    },
-    println, s_print, s_println,
+    }, s_println,
 };
 
 pub extern "x86-interrupt" fn pagefault_handler(

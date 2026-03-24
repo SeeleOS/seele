@@ -8,7 +8,7 @@ use crate::{
     },
     memory::utils::apply_offset,
     misc::with_cpu_core_context,
-    print, test,
+    print,
 };
 pub mod exception_interrupt;
 pub mod hardware_interrupt;

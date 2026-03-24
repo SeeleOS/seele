@@ -1,6 +1,6 @@
 use x86_64::{
     VirtAddr,
-    structures::paging::{Page, PageTable, PageTableFlags, Size4KiB, page::PageRangeInclusive},
+    structures::paging::{Page, PageTableFlags, Size4KiB},
 };
 
 #[derive(Clone, Copy, Debug)]

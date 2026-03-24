@@ -1,4 +1,4 @@
-use ext4plus::{Ext4Write, error::Ext4Error};
+use ext4plus::error::Ext4Error;
 
 use crate::filesystem::{block_device::BlockDeviceError, errors::FSError};
 
