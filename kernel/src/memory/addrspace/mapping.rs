@@ -1,6 +1,6 @@
 use x86_64::{
     VirtAddr,
-    structures::paging::{FrameAllocator, Mapper, PageTableFlags},
+    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
 };
 
 use crate::{
@@ -30,6 +30,26 @@ impl AddrSpace {
         self.memory_areas.push(area);
 
         area.start
+    }
+
+    pub fn apply_page(&mut self, page: Page<Size4KiB>, area: MemoryArea) {
+        let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
+        let frame = frame_allocator.allocate_frame().expect("memory full;");
+
+        unsafe {
+            self.page_table
+                .inner
+                .map_to(page, frame, area.flags, &mut *frame_allocator)
+                .unwrap()
+                .flush();
+        };
+
+        let write_addr = apply_offset(frame.start_address().as_u64() + 4096);
+        unsafe {
+            let bytes = 4096;
+            let start_ptr = (write_addr as usize - bytes as usize) as *mut u8;
+            core::ptr::write_bytes(start_ptr, 0, bytes as usize);
+        }
     }
 
     pub fn apply_area(&mut self, area: MemoryArea) -> AllocResult {
