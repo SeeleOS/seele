@@ -7,10 +7,7 @@ use x86_64::{
 };
 
 use crate::{
-    memory::{
-        page_table_wrapper::PageTableWrapped,
-        utils::MemoryRegion,
-    },
+    memory::{page_table_wrapper::PageTableWrapped, utils::MemoryArea},
     misc::stack_builder::StackBuilder,
 };
 
@@ -23,7 +20,7 @@ pub type AllocResult = (VirtAddr, StackBuilder);
 
 #[derive(Debug)]
 pub struct AddrSpace {
-    pub used_memories: Vec<MemoryRegion>,
+    pub memory_areas: Vec<MemoryArea>,
     pub page_table: PageTableWrapped,
 
     pub user_mem: VirtAddr,
@@ -32,7 +29,7 @@ pub struct AddrSpace {
 impl Default for AddrSpace {
     fn default() -> Self {
         Self {
-            used_memories: Vec::default(),
+            memory_areas: Vec::default(),
             page_table: PageTableWrapped::default(),
             user_mem: VirtAddr::new(USER_MEM_START),
         }
@@ -49,7 +46,7 @@ impl AddrSpace {
         // TODO: properly "clean" the memory lmao
         self.user_mem = VirtAddr::new(USER_MEM_START);
         self.page_table = PageTableWrapped::default();
-        self.used_memories = Vec::new();
+        self.memory_areas = Vec::new();
     }
 
     pub fn translate_addr(&self, addr: VirtAddr) -> Option<PhysAddr> {

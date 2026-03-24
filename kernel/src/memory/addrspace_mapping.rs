@@ -7,18 +7,22 @@ use crate::{
     memory::{
         addrspace::{AddrSpace, AllocResult},
         paging::FRAME_ALLOCATOR,
-        utils::{MemoryRegion, apply_offset},
+        utils::{MemoryArea, apply_offset},
     },
     misc::stack_builder::StackBuilder,
 };
 
 impl AddrSpace {
     pub fn map(&mut self, start: VirtAddr, pages: u64, flags: PageTableFlags) -> AllocResult {
-        log::trace!("addrspace: map guard start {:#x} pages {}", start.as_u64(), pages);
+        log::trace!(
+            "addrspace: map guard start {:#x} pages {}",
+            start.as_u64(),
+            pages
+        );
         let actual_start = start + 4096;
-        let region = MemoryRegion::new(actual_start, pages, flags);
+        let region = MemoryArea::new(actual_start, pages, flags);
 
-        self.used_memories.push(region);
+        self.memory_areas.push(region);
 
         self.apply_region(region)
     }
@@ -34,14 +38,14 @@ impl AddrSpace {
             start.as_u64(),
             pages
         );
-        let region = MemoryRegion::new(start, pages, flags);
+        let region = MemoryArea::new(start, pages, flags);
 
-        self.used_memories.push(region);
+        self.memory_areas.push(region);
 
         self.apply_region(region)
     }
 
-    fn apply_region(&mut self, region: MemoryRegion) -> AllocResult {
+    fn apply_region(&mut self, region: MemoryArea) -> AllocResult {
         log::trace!(
             "addrspace: apply_region start {:#x} pages {}",
             region.start.as_u64(),

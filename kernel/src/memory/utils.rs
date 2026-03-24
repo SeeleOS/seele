@@ -50,13 +50,13 @@ pub fn page_range_from_addr(start: u64, end: u64) -> PageRangeInclusive {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct MemoryRegion {
+pub struct MemoryArea {
     pub start: VirtAddr,
     pub end: VirtAddr,
     pub flags: PageTableFlags,
 }
 
-impl MemoryRegion {
+impl MemoryArea {
     pub fn new(start: VirtAddr, pages: u64, flags: PageTableFlags) -> Self {
         Self {
             start,

@@ -5,11 +5,9 @@ use x86_64::{
     structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, Translate},
 };
 
-use crate::{
-    memory::{
-        addrspace::AddrSpace, page_table_wrapper::PageTableWrapped, paging::FRAME_ALLOCATOR,
-        utils::apply_offset,
-    },
+use crate::memory::{
+    addrspace::AddrSpace, page_table_wrapper::PageTableWrapped, paging::FRAME_ALLOCATOR,
+    utils::apply_offset,
 };
 
 const KERNEL_MEM_START: u64 = 0xffff_8000_0000_0000;
@@ -23,7 +21,7 @@ impl AddrSpace {
         let mut new_page_table = PageTableWrapped::new_with_frame_allocator(&mut frame_allocator);
         let old_page_table = &self.page_table;
 
-        for region in self.used_memories.clone() {
+        for region in self.memory_areas.clone() {
             let pages = Page::<Size4KiB>::range(
                 Page::containing_address(region.start),
                 Page::containing_address(region.end),
@@ -61,7 +59,7 @@ impl AddrSpace {
 
         Self {
             page_table: new_page_table,
-            used_memories: self.used_memories.clone(),
+            memory_areas: self.memory_areas.clone(),
             user_mem: self.user_mem,
         }
     }
