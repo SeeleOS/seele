@@ -54,7 +54,11 @@ impl AddrSpace {
         };
 
         increase_ref(new_frame);
-        decrease_ref(old_frame);
+        if decrease_ref(old_frame) {
+            unsafe {
+                frame_allocator.deallocate_frame(old_frame);
+            }
+        }
     }
 }
 
