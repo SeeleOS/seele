@@ -1,4 +1,4 @@
-use alloc::sync::Arc;
+use alloc::{collections::vec_deque::VecDeque, sync::Arc, vec::Vec};
 use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
@@ -7,7 +7,6 @@ use x86_64::{
     registers::control::Cr3,
     structures::paging::{FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB},
 };
-
 
 pub static MAPPER: OnceCell<Arc<Mutex<OffsetPageTable<'static>>>> = OnceCell::uninit();
 pub static FRAME_ALLOCATOR: OnceCell<Arc<Mutex<BootinfoFrameAllocator>>> = OnceCell::uninit();
@@ -34,6 +33,7 @@ pub fn get_l4_table(phys_mem_offset: VirtAddr) -> &'static mut PageTable {
 #[derive(Clone, Copy)]
 pub struct BootinfoFrameAllocator {
     memory_map: &'static MemoryRegions,
+    free_frames: Vec<PhysFrame<Size4KiB>>,
     index: usize,
 }
 
@@ -41,6 +41,7 @@ impl BootinfoFrameAllocator {
     pub unsafe fn new(memory_map: &'static MemoryRegions) -> Self {
         Self {
             memory_map,
+            free_frames: Vec::new(),
             index: 0,
         }
     }
