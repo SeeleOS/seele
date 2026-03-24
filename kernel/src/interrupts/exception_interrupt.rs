@@ -4,7 +4,7 @@ use x86_64::{
 };
 
 use crate::{
-    interrupts::print_stackframe_m,
+    interrupts::{pagefault::pagefault_handler, print_stackframe_m},
     misc::hlt_loop,
     tss::{DOUBLE_FAULT_IST_LOCATION, GP_IST_LOCATION, PAGE_FAULT_IST_LOCATION},
 };
@@ -40,16 +40,4 @@ extern "x86-interrupt" fn double_fault_handler(
         "Double fault:\n\n{:#?}\nError code: {err_code}",
         _stack_frame
     );
-}
-
-// i gave up on trying to wrap everything behind a abstraction layer.
-extern "x86-interrupt" fn pagefault_handler(
-    _stack_frame: InterruptStackFrame,
-    err_code: PageFaultErrorCode,
-) {
-    log::error!("Page fault");
-    log::error!("Address: {:?}", Cr2::read());
-    log::error!("Error code: {:?}", err_code);
-    print_stackframe_m(_stack_frame);
-    hlt_loop();
 }
