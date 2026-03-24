@@ -32,7 +32,7 @@ impl AddrSpace {
         area.start
     }
 
-    fn apply_region(&mut self, region: MemoryArea) -> AllocResult {
+    pub fn apply_region(&mut self, region: MemoryArea) -> AllocResult {
         log::trace!(
             "addrspace: apply_region start {:#x} pages {}",
             region.start.as_u64(),
