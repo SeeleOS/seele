@@ -1,15 +1,11 @@
-
-use alloc::{
-    collections::btree_map::BTreeMap,
-    vec::Vec,
-};
+use alloc::{collections::btree_map::BTreeMap, vec::Vec};
 use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::multitasking::{
-        MANAGER,
-        process::{Process, ProcessRef, misc::ProcessID},
-        thread::manager::ThreadManager,
-    };
+    MANAGER,
+    process::{Process, ProcessRef, misc::ProcessID},
+    thread::{THREAD_MANAGER, manager::ThreadManager},
+};
 
 #[derive(Debug, Default)]
 pub struct Manager {
@@ -35,6 +31,16 @@ impl Manager {
     pub fn wake_process_exit(&mut self, process: ProcessRef, thread_manager: &mut ThreadManager) {
         log::debug!("wake process exit {}", process.lock().pid.0);
         thread_manager.wake_process_exit(process.lock().pid);
+    }
+
+    pub fn kill_process(&mut self, process: ProcessRef) {
+        for thread in &process.lock().threads {
+            THREAD_MANAGER
+                .get()
+                .unwrap()
+                .lock()
+                .mark_as_zombie(thread.upgrade().unwrap());
+        }
     }
 
     pub fn remove_process(&mut self, process: ProcessRef) {
