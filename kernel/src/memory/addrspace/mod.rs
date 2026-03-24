@@ -7,13 +7,16 @@ use x86_64::{
 };
 
 use crate::{
-    memory::{addrspace::mem_area::MemoryArea, page_table_wrapper::PageTableWrapped},
+    memory::{
+        addrspace::mem_area::{Data, MemoryArea},
+        page_table_wrapper::PageTableWrapped,
+    },
     misc::stack_builder::StackBuilder,
 };
 
-mod clone;
-mod mapping;
-mod mem_area;
+pub mod clone;
+pub mod mapping;
+pub mod mem_area;
 
 const USER_MEM_START: u64 = 0x30_0000_0000;
 const KERNEL_MEM_START: u64 = 0xFFFF_8000_1000_0000;
@@ -62,19 +65,23 @@ impl AddrSpace {
         let mem = self.user_mem;
         self.user_mem += (pages + 1) * 4096;
 
-        self.map(
+        self.map(MemoryArea::new(
             mem,
             pages,
             PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE,
-        )
+            Data::Normal,
+            false,
+        ))
     }
 
     pub fn allocate_kernel(&mut self, pages: u64) -> AllocResult {
         log::trace!("addrspace: allocate_kernel pages {}", pages);
-        self.map(
+        self.map(MemoryArea::new(
             VirtAddr::new(KERNEL_MEM.fetch_add((pages + 1) * 4096, Ordering::Relaxed)),
             pages,
             PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
-        )
+            Data::Normal,
+            false,
+        ))
     }
 }

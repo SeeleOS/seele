@@ -4,7 +4,10 @@ use elfloader::ElfBinary;
 use x86_64::{VirtAddr, structures::paging::PageTableFlags};
 
 use crate::memory::{
-    addrspace::AddrSpace,
+    addrspace::{
+        AddrSpace,
+        mem_area::{Data, MemoryArea},
+    },
     utils::{apply_offset, page_range_from_size},
 };
 
@@ -49,8 +52,13 @@ impl<'a> elfloader::ElfLoader for ElfLoader<'a> {
                 mem_size,
                 pages
             );
-            self.addrspace
-                .map_no_guard_page(VirtAddr::new(header.virtual_addr()), pages, flags);
+            self.addrspace.map(MemoryArea::new(
+                VirtAddr::new(header.virtual_addr()),
+                pages,
+                flags,
+                Data::Normal,
+                false,
+            ));
         }
         Ok(())
     }
