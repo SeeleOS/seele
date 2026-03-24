@@ -30,6 +30,16 @@ impl MemoryArea {
         }
     }
 
+    pub fn new_with_guard(
+        start: VirtAddr,
+        pages: u64,
+        flags: PageTableFlags,
+        data: Data,
+        lazy: bool,
+    ) -> Self {
+        Self::new(start + 4096, pages, flags, data, lazy)
+    }
+
     pub fn pages(&self) -> u64 {
         (self.end - self.start) / 4096
     }
