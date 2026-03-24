@@ -1,7 +1,12 @@
 use x86_64::{
     VirtAddr,
-    structures::paging::{Page, PageTableFlags, Size4KiB, page::PageRangeInclusive},
+    structures::paging::{
+        Page, PageTableFlags, Size4KiB,
+        page::{PageRange, PageRangeInclusive},
+    },
 };
+
+use crate::memory::addrspace::KERNEL_MEM_START;
 
 #[derive(Clone, Copy, Debug)]
 pub struct MemoryArea {
@@ -52,11 +57,15 @@ impl MemoryArea {
         Page::containing_address(self.end)
     }
 
-    pub fn page_range(&self) -> PageRangeInclusive<Size4KiB> {
-        Page::range_inclusive(self.start_page(), self.end_page())
+    pub fn page_range(&self) -> PageRange<Size4KiB> {
+        Page::range(self.start_page(), self.end_page())
     }
 
     pub fn contains(&self, addr: VirtAddr) -> bool {
         addr >= self.start && addr < self.end
+    }
+
+    pub fn is_user(&self) -> bool {
+        self.start.as_u64() < KERNEL_MEM_START
     }
 }
