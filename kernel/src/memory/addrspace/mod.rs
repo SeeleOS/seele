@@ -3,15 +3,20 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use alloc::vec::Vec;
 use x86_64::{
     PhysAddr, VirtAddr,
-    structures::paging::{PageTableFlags, Translate},
+    structures::paging::{FrameDeallocator, Mapper, PageTableFlags, Translate, page},
 };
 
 use crate::{
     memory::{
-        addrspace::mem_area::{Data, MemoryArea},
+        addrspace::{
+            cow::decrease_ref,
+            mem_area::{Data, MemoryArea},
+        },
         page_table_wrapper::PageTableWrapped,
+        paging::{FRAME_ALLOCATOR, MAPPER},
     },
     misc::stack_builder::StackBuilder,
+    s_print,
 };
 
 pub mod clone;
@@ -51,10 +56,34 @@ impl AddrSpace {
 
     pub fn clean(&mut self) {
         log::debug!("addrspace: clean");
-        // TODO: properly "clean" the memory lmao
+        s_print!("clean");
+        for area in &self.memory_areas {
+            if !area.is_user() {
+                continue;
+            }
+
+            for page in area.page_range() {
+                if let Ok((frame, flush)) = self.page_table.inner.unmap(page) {
+                    flush.flush();
+                    if decrease_ref(frame) {
+                        unsafe {
+                            s_print!("a");
+                            FRAME_ALLOCATOR
+                                .get()
+                                .unwrap()
+                                .lock()
+                                .deallocate_frame(frame);
+                        }
+                    }
+                    s_print!("v");
+                }
+            }
+        }
+        s_print!("b");
         self.user_mem = VirtAddr::new(USER_MEM_START);
         self.page_table = PageTableWrapped::default();
         self.memory_areas = Vec::new();
+        s_print!("ret");
     }
 
     pub fn translate_addr(&self, addr: VirtAddr) -> Option<PhysAddr> {
