@@ -3,7 +3,7 @@ use x86_64::{
     structures::paging::{Page, PageTable, PageTableFlags, Size4KiB, page::PageRangeInclusive},
 };
 
-use crate::memory::{PHYSICAL_MEMORY_OFFSET, paging::MAPPER};
+use crate::memory::{PHYSICAL_MEMORY_OFFSET, addrspace::clone::COW_FLAG, paging::MAPPER};
 
 pub struct Locked<A> {
     inner: spin::Mutex<A>,
@@ -47,4 +47,8 @@ pub fn page_range_from_addr(start: u64, end: u64) -> PageRangeInclusive {
     let heap_start_page = Page::containing_address(heap_start);
     let heap_end_page = Page::containing_address(heap_end);
     Page::range_inclusive(heap_start_page, heap_end_page)
+}
+
+pub fn as_cow_flags(flags: PageTableFlags) -> PageTableFlags {
+    (flags | COW_FLAG) & !PageTableFlags::WRITABLE
 }
