@@ -9,8 +9,6 @@ use crate::memory::{
 };
 
 pub mod addrspace;
-pub mod addrspace_mapping;
-pub mod clone;
 pub mod fixed_block_size;
 pub mod heap;
 pub mod page_table_wrapper;

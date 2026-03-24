@@ -4,13 +4,11 @@ use x86_64::{
 };
 
 use crate::{
-    memory::{
-        addrspace::{AddrSpace, AllocResult},
-        paging::FRAME_ALLOCATOR,
-        utils::{MemoryArea, apply_offset},
-    },
+    memory::{addrspace::mem_area::MemoryArea, paging::FRAME_ALLOCATOR, utils::apply_offset},
     misc::stack_builder::StackBuilder,
 };
+
+use super::{AddrSpace, AllocResult};
 
 impl AddrSpace {
     pub fn map(&mut self, start: VirtAddr, pages: u64, flags: PageTableFlags) -> AllocResult {

@@ -7,9 +7,13 @@ use x86_64::{
 };
 
 use crate::{
-    memory::{page_table_wrapper::PageTableWrapped, utils::MemoryArea},
+    memory::{addrspace::mem_area::MemoryArea, page_table_wrapper::PageTableWrapped},
     misc::stack_builder::StackBuilder,
 };
+
+mod clone;
+mod mapping;
+mod mem_area;
 
 const USER_MEM_START: u64 = 0x30_0000_0000;
 const KERNEL_MEM_START: u64 = 0xFFFF_8000_1000_0000;

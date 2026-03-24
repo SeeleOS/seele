@@ -6,9 +6,12 @@ use x86_64::{
 };
 
 use crate::memory::{
-    addrspace::AddrSpace, page_table_wrapper::PageTableWrapped, paging::FRAME_ALLOCATOR,
+    page_table_wrapper::PageTableWrapped,
+    paging::FRAME_ALLOCATOR,
     utils::apply_offset,
 };
+
+use super::AddrSpace;
 
 const KERNEL_MEM_START: u64 = 0xffff_8000_0000_0000;
 
