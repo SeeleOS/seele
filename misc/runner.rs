@@ -1,5 +1,10 @@
 use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
-use std::{env, path::{Path, PathBuf}, process::Command, task::Context};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    process::Command,
+    task::Context,
+};
 
 fn main() {
     umount_sysroot();
@@ -9,7 +14,7 @@ fn main() {
 
     let mut cmd = Command::new("qemu-system-x86_64");
     // give the guest 8 GiB of RAM
-    cmd.arg("-m").arg("8G");
+    cmd.arg("-m").arg("290M");
     // print serial output to the shell
     cmd.arg("-serial").arg("mon:stdio");
     // enable the guest to exit qemu
