@@ -1,12 +1,13 @@
-use alloc::{
-    collections::{btree_map::BTreeMap, vec_deque::VecDeque},
-};
+use alloc::collections::{btree_map::BTreeMap, vec_deque::VecDeque};
 use spin::Mutex;
-use x86_64::{registers::model_specific::FsBase, VirtAddr};
+use x86_64::{VirtAddr, registers::model_specific::FsBase};
 
 use crate::{
     define_syscall,
-    multitasking::{MANAGER, process::{manager::get_current_process, ProcessRef}},
+    multitasking::{
+        MANAGER,
+        process::{ProcessRef, manager::get_current_process},
+    },
     systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
 };
 
@@ -48,21 +49,16 @@ define_syscall!(FutexWake, |arg1: u64, arg2: u64| {
     Ok(woken)
 });
 
-define_syscall!(SetGs, {
-    Err(SyscallError::other("setgs unimplemented"))
-});
+define_syscall!(SetGs, { Err(SyscallError::other("setgs unimplemented")) });
 
 define_syscall!(SetFs, |fs: u64| {
     FsBase::write(VirtAddr::new(fs));
     Ok(0)
 });
 
-define_syscall!(GetFs, {
-    Ok(FsBase::read().as_u64() as usize)
-});
+define_syscall!(GetFs, { Ok(FsBase::read().as_u64() as usize) });
 
 define_syscall!(AllocateMem, |pages: u64| {
     let current = get_current_process();
-    let (mem_start, _) = current.lock().addrspace.allocate_user(pages);
-    Ok(mem_start.as_u64() as usize)
+    Ok(current.lock().addrspace.allocate_user_lazy(pages).as_u64() as usize)
 });
