@@ -53,6 +53,6 @@ impl MemoryArea {
     }
 
     pub fn contains(&self, addr: VirtAddr) -> bool {
-        addr > self.start && addr < self.end
+        addr >= self.start && addr < self.end
     }
 }
