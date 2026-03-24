@@ -27,11 +27,10 @@ impl AddrSpace {
         let mut new_page_table = PageTableWrapped::new_with_frame_allocator(&mut frame_allocator);
         let old_page_table = &mut self.page_table;
 
-        for region in self.memory_areas.clone() {
-            let pages = Page::<Size4KiB>::range_inclusive(
-                Page::containing_address(region.start),
-                Page::containing_address(region.end),
-            );
+        for area in self.memory_areas.clone() {
+            let start = Page::<Size4KiB>::containing_address(area.start);
+            let end = Page::<Size4KiB>::containing_address(area.end - 1u64);
+            let pages = Page::<Size4KiB>::range_inclusive(start, end);
 
             // Loops through all of the mapped pages of the previous addr space
             for page in pages {
