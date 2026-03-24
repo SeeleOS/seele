@@ -1,4 +1,6 @@
 use x86_64::{
+    VirtAddr,
+    instructions::interrupts,
     registers::control::Cr2,
     structures::{
         idt::{InterruptStackFrame, PageFaultErrorCode},
@@ -7,22 +9,37 @@ use x86_64::{
 };
 
 use crate::{
+    misc::hlt_loop,
     multitasking::{MANAGER, process::manager::get_current_process},
-    println,
+    println, s_print,
 };
 
-pub extern "x86-interrupt" fn pagefault_handler(_: InterruptStackFrame, _: PageFaultErrorCode) {
-    let addr = Cr2::read().unwrap();
+pub extern "x86-interrupt" fn pagefault_handler(
+    stack_frame: InterruptStackFrame,
+    error_code: PageFaultErrorCode,
+) {
+    let address = Cr2::read().unwrap();
+
+    if error_code.contains(PageFaultErrorCode::PROTECTION_VIOLATION) {
+        actual_pagefault_handler(stack_frame, error_code, address);
+    }
 
     let process = get_current_process();
     let addrspace = &mut process.lock().addrspace;
 
-    match addrspace.get_area(addr) {
-        Some(area) => {
-            addrspace.apply_page(Page::containing_address(addr), *area);
+    match addrspace.get_area(address) {
+        Some(area) if area.lazy => {
+            addrspace.apply_page(Page::containing_address(address), *area);
         }
-        None => {
-            todo!()
-        }
+        _ => actual_pagefault_handler(stack_frame, error_code, address),
     }
+}
+
+fn actual_pagefault_handler(
+    stack_frame: InterruptStackFrame,
+    error_code: PageFaultErrorCode,
+    address: VirtAddr,
+) -> ! {
+    interrupts::disable();
+    todo!()
 }
