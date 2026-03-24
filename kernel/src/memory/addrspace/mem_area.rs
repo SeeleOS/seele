@@ -8,14 +8,23 @@ pub struct MemoryArea {
     pub start: VirtAddr,
     pub end: VirtAddr,
     pub flags: PageTableFlags,
+    pub data: Data,
+}
+
+// The data a memory area contains. Aka backing
+#[derive(Clone, Copy, Debug)]
+pub enum Data {
+    // Normal data that a process/thread can write to. Aka anonymus.
+    Normal,
 }
 
 impl MemoryArea {
-    pub fn new(start: VirtAddr, pages: u64, flags: PageTableFlags) -> Self {
+    pub fn new(start: VirtAddr, pages: u64, flags: PageTableFlags, data: Data) -> Self {
         Self {
             start,
             end: start + (pages * 4096),
             flags,
+            data,
         }
     }
 

@@ -4,7 +4,11 @@ use x86_64::{
 };
 
 use crate::{
-    memory::{addrspace::mem_area::MemoryArea, paging::FRAME_ALLOCATOR, utils::apply_offset},
+    memory::{
+        addrspace::mem_area::{Data, MemoryArea},
+        paging::FRAME_ALLOCATOR,
+        utils::apply_offset,
+    },
     misc::stack_builder::StackBuilder,
 };
 
@@ -18,7 +22,7 @@ impl AddrSpace {
             pages
         );
         let actual_start = start + 4096;
-        let region = MemoryArea::new(actual_start, pages, flags);
+        let region = MemoryArea::new(actual_start, pages, flags, Data::Normal);
 
         self.memory_areas.push(region);
 
@@ -36,7 +40,7 @@ impl AddrSpace {
             start.as_u64(),
             pages
         );
-        let region = MemoryArea::new(start, pages, flags);
+        let region = MemoryArea::new(start, pages, flags, Data::Normal);
 
         self.memory_areas.push(region);
 
