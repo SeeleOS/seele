@@ -5,7 +5,9 @@ use spin::Mutex;
 use x86_64::{
     PhysAddr, VirtAddr,
     registers::control::Cr3,
-    structures::paging::{FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB},
+    structures::paging::{
+        FrameAllocator, FrameDeallocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB,
+    },
 };
 
 pub static MAPPER: OnceCell<Arc<Mutex<OffsetPageTable<'static>>>> = OnceCell::uninit();
@@ -30,7 +32,7 @@ pub fn get_l4_table(phys_mem_offset: VirtAddr) -> &'static mut PageTable {
 }
 
 // allocates avalible frames based on bootinfos memory map
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct BootinfoFrameAllocator {
     memory_map: &'static MemoryRegions,
     free_frames: Vec<PhysFrame<Size4KiB>>,
@@ -60,6 +62,10 @@ impl BootinfoFrameAllocator {
     }
 
     fn next_usable_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
+        if let Some(frame) = self.free_frames.pop() {
+            return Some(frame);
+        }
+
         let frame = self.get_usable_frames().nth(self.index);
         self.index += 1;
         frame
@@ -69,5 +75,11 @@ impl BootinfoFrameAllocator {
 unsafe impl FrameAllocator<Size4KiB> for BootinfoFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
         self.next_usable_frame()
+    }
+}
+
+impl FrameDeallocator<Size4KiB> for BootinfoFrameAllocator {
+    unsafe fn deallocate_frame(&mut self, frame: PhysFrame<Size4KiB>) {
+        self.free_frames.push(frame);
     }
 }
