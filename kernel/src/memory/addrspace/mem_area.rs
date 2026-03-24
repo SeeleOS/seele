@@ -51,4 +51,8 @@ impl MemoryArea {
     pub fn end_page(&self) -> Page<Size4KiB> {
         Page::containing_address(self.end)
     }
+
+    pub fn contains(&self, addr: VirtAddr) -> bool {
+        addr > self.start && addr < self.end
+    }
 }
