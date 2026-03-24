@@ -44,21 +44,30 @@ impl AddrSpace {
                         // Get the flags
                     && let TranslateResult::Mapped { flags, .. } =
                         old_page_table.inner.translate(page.start_address())
-                    && flags.contains(PageTableFlags::WRITABLE)
                 {
-                    unsafe {
-                        old_page_table
-                            .inner
-                            .update_flags(page, as_cow_flags(flags))
-                            .unwrap()
-                            .flush();
-                        // Maps the new page with the frame of the old page
-                        new_page_table
-                            .inner
-                            .map_to(page, frame, as_cow_flags(flags), &mut *frame_allocator)
-                            .unwrap()
-                            .flush()
-                    };
+                    if flags.contains(PageTableFlags::WRITABLE) {
+                        unsafe {
+                            old_page_table
+                                .inner
+                                .update_flags(page, as_cow_flags(flags))
+                                .unwrap()
+                                .flush();
+                            // Maps the new page with the frame of the old page
+                            new_page_table
+                                .inner
+                                .map_to(page, frame, as_cow_flags(flags), &mut *frame_allocator)
+                                .unwrap()
+                                .flush()
+                        };
+                    } else {
+                        unsafe {
+                            new_page_table
+                                .inner
+                                .map_to(page, frame, flags, &mut *frame_allocator)
+                                .unwrap()
+                                .flush();
+                        }
+                    }
                 }
             }
         }
