@@ -18,7 +18,16 @@ impl AddrSpace {
     pub fn map(&mut self, area: MemoryArea) -> AllocResult {
         log::trace!("addrspace: mapping {:?}", area);
         self.memory_areas.push(area);
-        self.apply_region(area)
+
+        if !area.lazy {
+            self.apply_region(area)
+        } else {
+            panic!("called map with a lazy mem area")
+        }
+    }
+
+    pub fn map_lazy(&mut self, area: MemoryArea) {
+        self.memory_areas.push(area);
     }
 
     fn apply_region(&mut self, region: MemoryArea) -> AllocResult {
