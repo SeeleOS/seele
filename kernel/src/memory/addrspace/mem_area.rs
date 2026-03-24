@@ -1,6 +1,6 @@
 use x86_64::{
     VirtAddr,
-    structures::paging::{Page, PageTableFlags, Size4KiB},
+    structures::paging::{Page, PageTableFlags, Size4KiB, page::PageRangeInclusive},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -50,6 +50,10 @@ impl MemoryArea {
 
     pub fn end_page(&self) -> Page<Size4KiB> {
         Page::containing_address(self.end)
+    }
+
+    pub fn page_range(&self) -> PageRangeInclusive<Size4KiB> {
+        Page::range_inclusive(self.start_page(), self.end_page())
     }
 
     pub fn contains(&self, addr: VirtAddr) -> bool {
