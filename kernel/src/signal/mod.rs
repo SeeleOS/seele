@@ -1,6 +1,9 @@
-#[derive(Debug)]
+use num_enum::TryFromPrimitive;
+
+#[derive(TryFromPrimitive, Debug)]
+#[repr(u64)]
 pub enum Signal {
-    Terminate,
+    Terminate = 0,
     Kill,
     Interrupt,
 }
