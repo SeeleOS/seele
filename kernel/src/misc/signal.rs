@@ -1,4 +1,9 @@
-use crate::{process::Process, signal};
+use crate::{
+    process::{
+        Process,
+        manager::{MANAGER, get_current_process},
+    },
+};
 use alloc::vec::Vec;
 
 pub use seele_sys::signal::{SIGNAL_AMOUNT, Signal, SignalHandlerFn};
@@ -28,16 +33,16 @@ impl Process {
 
     pub fn process_signals(&mut self) {
         for signal in Signal::iter() {
-            if self.pending_signals.contains(Signals::from(signal)) {
-                let signal_action = &mut self.signal_actions[signal as usize];
+            let signal_bits = Signals::from(signal);
+            if self.pending_signals.contains(signal_bits) {
+                let handling_type = self.signal_actions[signal as usize].handling_type.clone();
+                self.pending_signals.remove(signal_bits);
 
-                match signal_action.handling_type {
+                match handling_type {
                     SignalHandlingType::Default => signal.default_action(),
                     SignalHandlingType::Ignore => {}
                     SignalHandlingType::Function(_) => todo!(),
                 }
-
-                self.pending_signals.remove(Signals::from(signal));
             }
         }
     }
@@ -50,9 +55,25 @@ pub trait SignalExtension {
 impl SignalExtension for Signal {
     fn default_action(&self) {
         match self {
-            Self::Terminate => {}
-            Self::Kill => {}
-            Self::Interrupt => {}
+            Self::Terminate
+            | Self::Kill
+            | Self::Interrupt
+            | Self::Quit
+            | Self::Abort
+            | Self::SegmentationFault
+            | Self::BrokenPipe
+            | Self::Hangup
+            | Self::FloatingPointError
+            | Self::IllegalInstruction
+            | Self::Trap => {
+                let current = get_current_process();
+                MANAGER.lock().destroy_process(current);
+            }
+            Self::ChildChanged => {}
+            Self::Stop => todo!(),
+            Self::Continue => {}
+            Self::Alarm => {}
+            Self::TerminalStop => todo!(),
         }
     }
 }
