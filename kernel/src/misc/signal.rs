@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 
 pub use seele_sys::signal::{SIGNAL_AMOUNT, Signal, SignalHandlerFn};
 use seele_sys::signal::{SignalHandlingType, Signals};
+use strum::IntoEnumIterator;
 
 pub mod action {
     pub use seele_sys::signal::{SignalAction, SignalHandlingType, Signals};
@@ -26,12 +27,18 @@ impl Process {
     }
 
     pub fn process_signals(&mut self) {
-        for (i, action) in self.signal_actions.iter().enumerate() {
-            match action.handling_type {
-                SignalHandlingType::Default => Signal::try_from(i as u64).unwrap().default_action(),
-                SignalHandlingType::Function(func) => func(i as i32),
-                SignalHandlingType::Ignore => {}
-            };
+        for signal in Signal::iter() {
+            if self.pending_signals.contains(Signals::from(signal)) {
+                let signal_action = &mut self.signal_actions[signal as usize];
+
+                match signal_action.handling_type {
+                    SignalHandlingType::Default => signal.default_action(),
+                    SignalHandlingType::Ignore => {}
+                    SignalHandlingType::Function(_) => todo!(),
+                }
+
+                self.pending_signals.remove(Signals::from(signal));
+            }
         }
     }
 }
