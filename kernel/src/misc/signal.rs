@@ -1,6 +1,7 @@
+use crate::{process::Process, signal};
 use alloc::vec::Vec;
-use crate::process::Process;
 
+use seele_sys::signal::Signals;
 pub use seele_sys::signal::{SIGNAL_AMOUNT, Signal, SignalHandlerFn};
 
 pub mod action {
@@ -18,5 +19,23 @@ pub mod misc {
 impl Process {
     pub fn get_signal_action(&mut self, signal: Signal) -> &mut action::SignalAction {
         &mut self.signal_actions[signal as usize]
+    }
+
+    pub fn send_signal(&mut self, signal: Signal) {
+        self.pending_signals.insert(Signals::from(signal));
+    }
+}
+
+pub trait SignalExtension {
+    fn do_default_action(&self);
+}
+
+impl SignalExtension for Signal {
+    fn do_default_action(&self) {
+        match self {
+            Self::Terminate => {}
+            Self::Kill => {}
+            Self::Interrupt => {}
+        }
     }
 }
