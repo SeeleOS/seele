@@ -1,5 +1,6 @@
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
+use seele_sys::signal::Signals;
 use spin::Mutex;
 use x86_64::VirtAddr;
 
@@ -29,11 +30,13 @@ pub struct Process {
     pub exit_code: Option<u64>,
     pub parent: Option<ProcessRef>,
     pub signal_actions: Vec<SignalAction>,
+    pub pending_signals: Signals,
 }
 
 impl Process {
     pub fn empty() -> ProcessRef {
         Arc::new(Mutex::new(Process {
+            pending_signals: Signals::default(),
             signal_actions: default_signal_action_vec(),
             pid: ProcessID::default(),
             current_directory: AbsolutePath::default(),
