@@ -1,8 +1,8 @@
 use crate::{process::Process, signal};
 use alloc::vec::Vec;
 
-use seele_sys::signal::Signals;
 pub use seele_sys::signal::{SIGNAL_AMOUNT, Signal, SignalHandlerFn};
+use seele_sys::signal::{SignalHandlingType, Signals};
 
 pub mod action {
     pub use seele_sys::signal::{SignalAction, SignalHandlingType, Signals};
@@ -23,6 +23,16 @@ impl Process {
 
     pub fn send_signal(&mut self, signal: Signal) {
         self.pending_signals.insert(Signals::from(signal));
+    }
+
+    pub fn process_signals(&mut self) {
+        for (i, action) in self.signal_actions.iter().enumerate() {
+            match action.handling_type {
+                SignalHandlingType::Default => Signal::try_from(i as u64).unwrap().default_action(),
+                SignalHandlingType::Function(func) => func(i as i32),
+                SignalHandlingType::Ignore => {}
+            };
+        }
     }
 }
 
