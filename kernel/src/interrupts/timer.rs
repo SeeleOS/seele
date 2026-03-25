@@ -3,7 +3,7 @@ use core::arch::naked_asm;
 use crate::{
     interrupts::hardware_interrupt::send_eoi,
     misc::snapshot::Snapshot,
-    multitasking::{scheduling::return_to_executor, thread::snapshot::ThreadSnapshotType},
+    thread::{scheduling::return_to_executor, snapshot::ThreadSnapshotType},
 };
 
 #[unsafe(naked)]

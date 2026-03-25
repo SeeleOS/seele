@@ -12,12 +12,14 @@ pub mod interrupts;
 pub mod keyboard;
 pub mod memory;
 pub mod misc;
-pub mod multitasking;
 pub mod object;
 pub mod polling;
+pub mod process;
 pub mod signal;
 pub mod systemcall;
+pub mod task;
 pub mod terminal;
+pub mod thread;
 pub mod userspace;
 
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
@@ -33,7 +35,7 @@ use crate::filesystem::block_device::initrd::{self};
 use crate::filesystem::vfs::VirtualFS;
 use crate::misc::others::enable_sse;
 use crate::misc::{cpu_core_context, framebuffer, gdt, logging, tss};
-use crate::multitasking::kernel_task;
+use crate::process::manager::MANAGER;
 use crate::terminal::misc::clear;
 use bootloader_api::BootInfo;
 use bootloader_api::{BootloaderConfig, config::Mapping};
@@ -83,9 +85,10 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     log::info!("init: syscall ready");
     acpi::init(bootinfo.rsdp_addr.into_option().unwrap());
     log::info!("init: acpi ready");
-    let mut executor = kernel_task::init();
+    let mut executor = task::init();
     log::info!("init: kernel task executor ready");
-    multitasking::init();
+    thread::init();
+    MANAGER.lock().init();
     log::info!("init: multitasking ready");
     keyboard::init();
     log::info!("init: keyboard ready");

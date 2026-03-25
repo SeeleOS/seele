@@ -5,10 +5,7 @@ use x86_64::VirtAddr;
 
 use crate::filesystem::absolute_path::AbsolutePath;
 use crate::memory::addrspace::AddrSpace;
-use crate::{
-    multitasking::{process::misc::ProcessID, thread::thread::Thread},
-    object::Object,
-};
+use crate::{object::Object, process::misc::ProcessID, thread::thread::Thread};
 
 pub mod execve;
 pub mod fork;

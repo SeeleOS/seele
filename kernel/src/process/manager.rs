@@ -1,11 +1,15 @@
 use alloc::{collections::btree_map::BTreeMap, vec::Vec};
+use lazy_static::lazy_static;
 use x86_64::instructions::interrupts::without_interrupts;
 
-use crate::multitasking::{
-    MANAGER,
+use crate::{
     process::{Process, ProcessRef, misc::ProcessID},
     thread::{THREAD_MANAGER, manager::ThreadManager},
 };
+
+lazy_static! {
+    pub static ref MANAGER: spin::Mutex<Manager> = spin::Mutex::new(Manager::default());
+}
 
 #[derive(Debug, Default)]
 pub struct Manager {

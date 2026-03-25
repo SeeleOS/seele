@@ -12,10 +12,7 @@ lazy_static! {
         ));
 }
 
-use crate::{
-    interrupts::hardware_interrupt::send_eoi,
-    keyboard::push_scancode,
-};
+use crate::{interrupts::hardware_interrupt::send_eoi, keyboard::push_scancode};
 
 pub fn init() {
     let dropped = drain_output_buffer();

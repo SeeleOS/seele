@@ -6,10 +6,10 @@ use spin::mutex::Mutex;
 
 use crate::{
     keyboard::{decoding_task::KEYBOARD_QUEUE, key_to_escape_sequence::to_escape_sequence},
-    multitasking::thread::THREAD_MANAGER,
     object::tty_device::wake_tty_poller_readable,
     print,
     terminal::state::DEFAULT_TERMINAL,
+    thread::THREAD_MANAGER,
 };
 
 pub fn process_key(key: KeyCode) {

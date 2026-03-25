@@ -1,7 +1,8 @@
 use crate::{
     misc::snapshot::Snapshot,
-    multitasking::thread::THREAD_MANAGER, s_println,
+    s_println,
     systemcall::{error::SyscallError, numbers::SyscallNo, table::SYSCALL_TABLE},
+    thread::THREAD_MANAGER,
 };
 
 #[unsafe(no_mangle)]

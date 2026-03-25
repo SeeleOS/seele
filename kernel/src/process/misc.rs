@@ -6,7 +6,7 @@ use elfloader::ElfBinary;
 use crate::{
     filesystem::{absolute_path::AbsolutePath, errors::FSError, vfs::VirtualFS},
     misc::stack_builder::StackBuilder,
-    multitasking::process::Process,
+    process::Process,
 };
 
 impl Process {

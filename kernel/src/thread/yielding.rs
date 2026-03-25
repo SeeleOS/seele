@@ -1,17 +1,14 @@
-
 use alloc::{collections::vec_deque::VecDeque, vec::Vec};
 
 use crate::{
-    multitasking::{
-        kernel_task::{TASK_SPAWNER, task::Task},
-        process::misc::ProcessID,
-        scheduling::return_to_executor_from_current,
-        thread::{
-            THREAD_MANAGER, ThreadRef, future::ThreadFuture, manager::ThreadManager, misc::State,
-        },
-    },
     object::misc::ObjectRef,
     polling::event::PollableEvent,
+    process::misc::ProcessID,
+    task::{TASK_SPAWNER, task::Task},
+    thread::{
+        THREAD_MANAGER, ThreadRef, future::ThreadFuture, manager::ThreadManager, misc::State,
+        scheduling::return_to_executor_from_current,
+    },
 };
 
 use paste::paste;

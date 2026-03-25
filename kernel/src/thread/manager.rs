@@ -1,22 +1,17 @@
-
-use alloc::{
-    collections::btree_map::BTreeMap,
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{collections::btree_map::BTreeMap, sync::Arc, vec::Vec};
 use spin::Mutex;
 
-use crate::multitasking::{
-        MANAGER,
-        kernel_task::{TASK_SPAWNER, task::Task},
-        thread::{
-            ThreadRef,
-            future::ThreadFuture,
-            misc::{State, ThreadID},
-            thread::Thread,
-            yielding::BlockedQueues,
-        },
-    };
+use crate::{
+    process::manager::MANAGER,
+    task::{TASK_SPAWNER, task::Task},
+    thread::{
+        ThreadRef,
+        future::ThreadFuture,
+        misc::{State, ThreadID},
+        thread::Thread,
+        yielding::BlockedQueues,
+    },
+};
 
 #[derive(Default, Debug)]
 pub struct ThreadManager {
@@ -112,7 +107,9 @@ impl ThreadManager {
         }
 
         for dead_process in to_remove {
-            MANAGER.lock().notify_process_exit_waiters(dead_process, self);
+            MANAGER
+                .lock()
+                .notify_process_exit_waiters(dead_process, self);
         }
         log::debug!("cleanup_exited_threads done");
     }

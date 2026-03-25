@@ -2,14 +2,14 @@ use alloc::{string::String, sync::Arc, vec::Vec};
 
 use crate::{
     define_syscall,
-    multitasking::{
-        MANAGER,
-        process::{execve::execve, manager::get_current_process, misc::ProcessID},
-        scheduling::return_to_executor_no_save,
-        thread::THREAD_MANAGER,
+    process::{
+        execve::execve,
+        manager::{MANAGER, get_current_process},
+        misc::ProcessID,
     },
     s_print,
     systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
+    thread::{THREAD_MANAGER, scheduling::return_to_executor_no_save},
 };
 
 define_syscall!(GetProcessParentID, {
@@ -53,7 +53,11 @@ define_syscall!(
             }
         };
 
-        THREAD_MANAGER.get().unwrap().lock().cleanup_exited_threads();
+        THREAD_MANAGER
+            .get()
+            .unwrap()
+            .lock()
+            .cleanup_exited_threads();
 
         match check_result {
             Some((process, exit_code)) => {

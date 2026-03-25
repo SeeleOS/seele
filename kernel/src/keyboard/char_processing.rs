@@ -5,13 +5,13 @@ use spin::mutex::Mutex;
 
 use crate::{
     keyboard::decoding_task::KEYBOARD_QUEUE,
-    multitasking::thread::THREAD_MANAGER,
     object::tty_device::wake_tty_poller_readable,
     print,
     terminal::{
         misc::{LINE_BUFFER, flush_line_buffer},
         state::DEFAULT_TERMINAL,
     },
+    thread::THREAD_MANAGER,
 };
 
 pub fn process_char(char: char) {

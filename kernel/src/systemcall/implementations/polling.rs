@@ -1,15 +1,12 @@
-use crate::multitasking::thread::yielding::{BlockType, WakeType, block_current};
 use crate::object::misc::ObjectRef;
 use crate::polling::event::PollableEvent;
 use crate::systemcall::error::SyscallError;
 use crate::systemcall::numbers::*;
 use crate::systemcall::utils::SyscallImpl;
+use crate::thread::yielding::{BlockType, WakeType, block_current};
 use alloc::sync::Arc;
 
-use crate::{
-    define_syscall, multitasking::process::manager::get_current_process,
-    polling::poller::PollerObject,
-};
+use crate::{define_syscall, polling::poller::PollerObject, process::manager::get_current_process};
 
 #[repr(C)]
 pub struct PollResult {
@@ -41,9 +38,7 @@ define_syscall!(PollerAdd, |poller: ObjectRef,
                             target_object: ObjectRef,
                             event: PollableEvent,
                             data: u64| {
-    poller
-        .as_poller()?
-        .register_obj(target_object, event, data);
+    poller.as_poller()?.register_obj(target_object, event, data);
 
     Ok(0)
 });
@@ -51,9 +46,7 @@ define_syscall!(PollerAdd, |poller: ObjectRef,
 define_syscall!(
     PollerRemove,
     |poller: ObjectRef, target_object: ObjectRef, event: PollableEvent| {
-        poller
-            .as_poller()?
-            .unregister_obj(target_object, event);
+        poller.as_poller()?.unregister_obj(target_object, event);
 
         Ok(0)
     }

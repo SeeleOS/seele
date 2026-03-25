@@ -1,7 +1,4 @@
-use x86_64::{
-    VirtAddr,
-    structures::tss::TaskStateSegment,
-};
+use x86_64::{VirtAddr, structures::tss::TaskStateSegment};
 
 pub const DOUBLE_FAULT_IST_LOCATION: u16 = 0;
 pub const PAGE_FAULT_IST_LOCATION: u16 = 1;

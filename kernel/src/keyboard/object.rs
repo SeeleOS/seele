@@ -4,8 +4,8 @@ use spin::mutex::Mutex;
 use crate::{
     impl_cast_function,
     keyboard::decoding_task::KEYBOARD_QUEUE,
-    multitasking::thread::yielding::{BlockType, WakeType, block_current},
     object::{Object, misc::ObjectResult, traits::Readable},
+    thread::yielding::{BlockType, WakeType, block_current},
 };
 
 #[derive(Debug)]

@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 use spin::Mutex;
 
-use crate::multitasking::{
+use crate::{
     process::{Process, ProcessRef},
     thread::{
         ThreadRef,

@@ -16,8 +16,8 @@ use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use crossbeam_queue::ArrayQueue;
 use kernel::{
-    init, memory::heap::HEAP_SIZE, misc::hlt_loop, multitasking::task::TaskID,
-    panic_handler::test_handle_panic, test,
+    init, memory::heap::HEAP_SIZE, misc::hlt_loop, panic_handler::test_handle_panic,
+    task::task::TaskID, test,
 };
 
 entry_point!(main);

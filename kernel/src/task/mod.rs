@@ -3,7 +3,7 @@ use spin::Mutex;
 
 use crate::{
     keyboard::decoding_task::process_keypresses,
-    multitasking::kernel_task::{executor::Executor, spawner::TaskSpawner, task::Task},
+    task::{executor::Executor, spawner::TaskSpawner, task::Task},
 };
 
 pub mod executor;

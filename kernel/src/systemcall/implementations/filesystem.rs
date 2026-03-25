@@ -5,8 +5,8 @@ use alloc::{string::String, sync::Arc};
 use crate::{
     define_syscall,
     filesystem::{info::LinuxStat, path::Path, vfs::VirtualFS},
-    multitasking::process::manager::get_current_process,
     object::misc::ObjectRef,
+    process::manager::get_current_process,
     systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
 };
 

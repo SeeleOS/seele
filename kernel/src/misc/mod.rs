@@ -1,6 +1,5 @@
 use x86_64::instructions::hlt;
 
-
 pub mod aux;
 pub mod c_types;
 pub mod debug_exit;

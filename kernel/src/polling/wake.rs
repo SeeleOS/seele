@@ -10,7 +10,9 @@ impl PollerObject {
             .entries
             .lock()
             .iter()
-            .filter(|entry| entry.event == event && alloc::sync::Arc::ptr_eq(&entry.object, &object))
+            .filter(|entry| {
+                entry.event == event && alloc::sync::Arc::ptr_eq(&entry.object, &object)
+            })
             .map(|entry| entry.data)
             .collect();
 

@@ -6,7 +6,7 @@ use crate::{
         vfs::{FSResult, WrappedDirectory},
         vfs_traits::FileLike,
     },
-    multitasking::process::manager::get_current_process,
+    process::manager::get_current_process,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

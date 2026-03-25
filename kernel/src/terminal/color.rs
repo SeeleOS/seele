@@ -26,4 +26,3 @@ pub const COLOR_SCHEME: Palette = Palette {
         (255, 255, 255), // bright white
     ],
 };
-

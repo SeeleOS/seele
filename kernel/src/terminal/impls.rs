@@ -1,6 +1,5 @@
 use core::fmt::{Debug, Write};
 
-
 use crate::{
     misc::framebuffer::FRAME_BUFFER,
     terminal::{

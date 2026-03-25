@@ -1,7 +1,7 @@
 use crate::filesystem::{
-        block_device::{BlockDevice, BlockDeviceError, initrd::RAMDISK},
-        storage_operator::{SeekFrom, StorageOperator},
-    };
+    block_device::{BlockDevice, BlockDeviceError, initrd::RAMDISK},
+    storage_operator::{SeekFrom, StorageOperator},
+};
 
 #[derive(Default, Debug)]
 pub struct RamDiskOperator {

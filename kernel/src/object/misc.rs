@@ -1,8 +1,8 @@
 use alloc::sync::Arc;
 
 use crate::{
-    multitasking::MANAGER,
     object::{Object, error::ObjectError},
+    process::manager::MANAGER,
 };
 
 pub type ObjectRef = Arc<dyn Object>;

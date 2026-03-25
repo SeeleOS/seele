@@ -6,7 +6,6 @@ use crate::{
     impl_cast_function,
     keyboard::decoding_task::KEYBOARD_QUEUE,
     keyboard::object::KeyboardObject,
-    multitasking::thread::THREAD_MANAGER,
     object::{
         Object,
         misc::ObjectRef,
@@ -14,6 +13,7 @@ use crate::{
     },
     polling::event::PollableEvent,
     terminal::object::TerminalObject,
+    thread::THREAD_MANAGER,
 };
 
 pub static DEFAULT_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();

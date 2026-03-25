@@ -5,9 +5,7 @@ use x86_64::{
     structures::gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector},
 };
 
-use crate::{
-    tss::{self},
-};
+use crate::tss::{self};
 
 lazy_static! {
     pub static ref GDT: (GlobalDescriptorTable, GDTSelectors)= {

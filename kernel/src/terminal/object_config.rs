@@ -1,10 +1,7 @@
 use core::ptr::{read_volatile, write_volatile};
 
-
 use crate::{
-    object::{
-        config::ConfigurateRequest, misc::ObjectResult, traits::Configuratable,
-    },
+    object::{config::ConfigurateRequest, misc::ObjectResult, traits::Configuratable},
     terminal::{TerminalObject, term_trait::TerminalSize},
 };
 

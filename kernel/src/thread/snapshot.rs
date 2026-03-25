@@ -1,8 +1,6 @@
 use crate::{
-    gdt::GDT,
-    memory::addrspace::AddrSpace,
-    misc::snapshot::Snapshot,
-    multitasking::memory::allocate_kernel_stack,
+    gdt::GDT, memory::addrspace::AddrSpace, misc::snapshot::Snapshot,
+    thread::stack::allocate_kernel_stack,
 };
 
 #[repr(C)]

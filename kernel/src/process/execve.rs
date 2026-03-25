@@ -2,14 +2,8 @@ use alloc::{string::String, vec::Vec};
 
 use crate::{
     filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
-    multitasking::{
-        MANAGER,
-        process::{Process, new::setup_process},
-        thread::{
-            THREAD_MANAGER,
-            snapshot::ThreadSnapshot,
-        },
-    },
+    process::{Process, manager::MANAGER, new::setup_process},
+    thread::{THREAD_MANAGER, snapshot::ThreadSnapshot},
 };
 
 impl Process {

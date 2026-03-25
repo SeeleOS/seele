@@ -5,12 +5,10 @@ use crossbeam_queue::ArrayQueue;
 use spin::Mutex;
 use x86_64::instructions::interrupts::{self, enable_and_hlt};
 
-use crate::{
-    multitasking::kernel_task::{
-        TASK_SPAWNER,
-        spawner::TaskSpawner,
-        task::{Task, TaskID, TaskWaker},
-    },
+use crate::task::{
+    TASK_SPAWNER,
+    spawner::TaskSpawner,
+    task::{Task, TaskID, TaskWaker},
 };
 
 // When a task was awoken, the taskid will be pushed to the

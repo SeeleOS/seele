@@ -1,13 +1,13 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use crate::{
-    multitasking::process::Process,
     object::{
         Object,
         error::ObjectError,
         misc::{ObjectRef, ObjectResult},
         tty_device::get_default_tty,
     },
+    process::Process,
 };
 
 pub fn init_objects(objects: &mut Vec<Option<Arc<dyn Object>>>) {

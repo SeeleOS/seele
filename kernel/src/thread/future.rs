@@ -5,10 +5,8 @@ use x86_64::{VirtAddr, instructions::interrupts::without_interrupts};
 
 use crate::{
     misc::snapshot::Snapshot,
-    multitasking::{
-        MANAGER,
-        thread::{THREAD_MANAGER, ThreadRef, misc::State, snapshot::ThreadSnapshot},
-    },
+    process::manager::MANAGER,
+    thread::{THREAD_MANAGER, ThreadRef, misc::State, snapshot::ThreadSnapshot},
     tss::TSS,
 };
 
@@ -86,7 +84,11 @@ impl Future for ThreadFuture {
         match state {
             State::Zombie => {
                 log::debug!("thread poll: zombie");
-                THREAD_MANAGER.get().unwrap().lock().cleanup_exited_threads();
+                THREAD_MANAGER
+                    .get()
+                    .unwrap()
+                    .lock()
+                    .cleanup_exited_threads();
                 Poll::Ready(())
             }
             State::Running => {

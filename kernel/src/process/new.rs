@@ -7,23 +7,20 @@ use spin::Mutex;
 
 use crate::{
     filesystem::{
-        absolute_path::AbsolutePath, errors::FSError, path::Path,
-        vfs_operations::read_all,
+        absolute_path::AbsolutePath, errors::FSError, path::Path, vfs_operations::read_all,
     },
     memory::addrspace::AddrSpace,
-    multitasking::{
-        process::{
-            Process, ProcessRef,
-            misc::{ProcessID, init_stack_layout},
-            object::init_objects,
-        },
-        thread::{
-            THREAD_MANAGER,
-            snapshot::{ThreadSnapshot, ThreadSnapshotType},
-            thread::Thread,
-        },
-    },
     object::Object,
+    process::{
+        Process, ProcessRef,
+        misc::{ProcessID, init_stack_layout},
+        object::init_objects,
+    },
+    thread::{
+        THREAD_MANAGER,
+        snapshot::{ThreadSnapshot, ThreadSnapshotType},
+        thread::Thread,
+    },
     userspace::elf_loader::load_elf,
 };
 

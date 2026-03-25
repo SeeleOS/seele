@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use x2apic::lapic::LocalApic;
 
-use crate::{interrupts::default_local_apic, multitasking::memory::allocate_kernel_stack};
+use crate::{interrupts::default_local_apic, thread::stack::allocate_kernel_stack};
 
 #[derive(Debug)]
 #[repr(C)]

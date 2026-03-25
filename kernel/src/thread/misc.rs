@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use crate::multitasking::thread::yielding::BlockType;
+use crate::thread::yielding::BlockType;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ThreadID(pub u64);

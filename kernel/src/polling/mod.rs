@@ -33,10 +33,10 @@
 //! - `poller.rs`: the poller object and its watched registrations
 //! - `wake.rs`: logic that wakes threads waiting on affected pollers
 
-pub mod event;
-pub mod poller;
 mod entry;
+pub mod event;
 mod object;
+pub mod poller;
 mod ready;
 mod registration;
 mod wake;

@@ -6,12 +6,12 @@ use spin::Mutex;
 use crate::{
     define_syscall,
     filesystem::vfs_traits::DirectoryContentType,
-    multitasking::process::{manager::get_current_process, misc::ProcessID},
     object::{
         config::ConfigurateRequest,
         control::Command,
         misc::{ObjectRef, get_object_current_process},
     },
+    process::{manager::get_current_process, misc::ProcessID},
     systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
 };
 

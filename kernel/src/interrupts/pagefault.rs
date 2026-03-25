@@ -1,23 +1,17 @@
-
 use x86_64::{
     VirtAddr,
     registers::control::Cr2,
     structures::{
         idt::{InterruptStackFrame, PageFaultErrorCode},
-        paging::{
-            Page, Translate,
-            mapper::TranslateResult,
-        },
+        paging::{Page, Translate, mapper::TranslateResult},
     },
 };
 
 use crate::{
     memory::addrspace::cow::COW_FLAG,
-    multitasking::{
-        MANAGER,
-        process::manager::get_current_process,
-        scheduling::return_to_executor_no_save,
-    }, s_println,
+    process::manager::{MANAGER, get_current_process},
+    s_println,
+    thread::scheduling::return_to_executor_no_save,
 };
 
 pub extern "x86-interrupt" fn pagefault_handler(

@@ -1,11 +1,7 @@
-use x86_64::{
-    VirtAddr,
-    structures::idt::InterruptDescriptorTable,
-};
+use x86_64::{VirtAddr, structures::idt::InterruptDescriptorTable};
 
 use crate::{
-    interrupts::timer::timer_interrupt_handler_wrapper,
-    keyboard::ps2::keyboard_interrupt_handler,
+    interrupts::timer::timer_interrupt_handler_wrapper, keyboard::ps2::keyboard_interrupt_handler,
     misc::with_cpu_core_context,
 };
 

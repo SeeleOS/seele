@@ -15,7 +15,6 @@ use kernel::s_println;
 
 use core::panic::PanicInfo;
 
-
 entry_point!(_start);
 fn _start(bootinfo: &'static BootInfo) -> ! {
     s_print!("\nStack overflow double-fault handling ");

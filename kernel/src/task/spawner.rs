@@ -2,7 +2,7 @@ use alloc::{collections::btree_map::BTreeMap, sync::Arc};
 use crossbeam_queue::ArrayQueue;
 use spin::Mutex;
 
-use crate::multitasking::kernel_task::task::{Task, TaskID};
+use crate::task::task::{Task, TaskID};
 
 pub struct TaskSpawner {
     tasks: Arc<Mutex<BTreeMap<TaskID, Task>>>,

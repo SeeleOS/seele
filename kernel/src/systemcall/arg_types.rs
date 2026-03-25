@@ -6,9 +6,9 @@ use crate::{
         c_types::{CString, CVec},
         others::KernelFrom,
     },
-    multitasking::process::misc::ProcessID,
     object::misc::{ObjectRef, get_object_current_process},
     polling::event::PollableEvent,
+    process::misc::ProcessID,
     systemcall::{error::SyscallError, implementations::PollResult},
 };
 

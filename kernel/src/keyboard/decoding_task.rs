@@ -5,9 +5,9 @@ use pc_keyboard::DecodedKey;
 use spin::Mutex;
 
 use crate::keyboard::{
-        char_processing::process_char,
-        ps2::_PS2_KEYBOARD, raw_key_processing::process_key, scancode_stream::ScancodeStream,
-    };
+    char_processing::process_char, ps2::_PS2_KEYBOARD, raw_key_processing::process_key,
+    scancode_stream::ScancodeStream,
+};
 
 pub static KEYBOARD_QUEUE: OnceCell<Mutex<VecDeque<u8>>> = OnceCell::uninit();
 

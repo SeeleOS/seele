@@ -4,9 +4,9 @@ use x86_64::{VirtAddr, registers::model_specific::FsBase};
 
 use crate::{
     define_syscall,
-    multitasking::{
-        MANAGER,
-        process::{ProcessRef, manager::get_current_process},
+    process::{
+        ProcessRef,
+        manager::{MANAGER, get_current_process},
     },
     systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
 };

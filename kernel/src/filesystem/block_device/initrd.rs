@@ -13,8 +13,12 @@ pub fn init(addr: u64, len: u64) {
     unsafe {
         // The bootloader-provided ramdisk memory remains mapped for the
         // kernel lifetime, so storing a mutable slice here is valid.
-        RAMDISK
-            .get_or_init(|| RamDisk(Mutex::new(slice::from_raw_parts_mut(addr as *mut u8, len as usize))));
+        RAMDISK.get_or_init(|| {
+            RamDisk(Mutex::new(slice::from_raw_parts_mut(
+                addr as *mut u8,
+                len as usize,
+            )))
+        });
     }
 }
 

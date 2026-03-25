@@ -2,13 +2,15 @@ use alloc::sync::Arc;
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
 
-use crate::multitasking::thread::{manager::ThreadManager, thread::Thread};
+use crate::thread::{manager::ThreadManager, thread::Thread};
 
 pub mod clone;
 pub mod future;
 pub mod manager;
 pub mod misc;
+pub mod scheduling;
 pub mod snapshot;
+pub mod stack;
 pub mod switch;
 pub mod thread;
 pub mod yielding;
