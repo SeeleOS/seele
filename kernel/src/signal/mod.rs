@@ -1,12 +1,14 @@
 use num_enum::TryFromPrimitive;
 
-#[derive(TryFromPrimitive, Debug)]
+#[derive(Clone, Copy, TryFromPrimitive, Debug)]
 #[repr(u64)]
 pub enum Signal {
     Terminate = 0,
     Kill,
     Interrupt,
 }
+
+pub const SIGNAL_AMOUNT: usize = 3;
 
 pub mod action;
 
