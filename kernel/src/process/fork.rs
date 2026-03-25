@@ -26,6 +26,7 @@ impl Process {
         let parent = manager.current.clone().unwrap();
         let new_process = Arc::new(Mutex::new(Self {
             pid,
+            pending_signals: self.pending_signals,
             addrspace: self.addrspace.clone_all(),
             kernel_stack_top: self.kernel_stack_top,
             threads: Vec::new(),

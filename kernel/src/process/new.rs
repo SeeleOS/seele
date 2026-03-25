@@ -3,6 +3,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
+use seele_sys::signal::Signals;
 use spin::Mutex;
 
 use crate::{
@@ -36,6 +37,7 @@ impl Process {
         let kernel_stack_top = addrspace.allocate_kernel(16).1.finish();
 
         let process_arc = Arc::new(Mutex::new(Process {
+            pending_signals: Signals::default(),
             pid,
             addrspace,
             kernel_stack_top,
