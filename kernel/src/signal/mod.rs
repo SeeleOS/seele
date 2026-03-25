@@ -3,3 +3,5 @@ pub enum Signal {
     Kill,
     Interrupt,
 }
+
+pub type SignalHandler = *const fn(i32);
