@@ -40,6 +40,8 @@ pub enum SyscallNo {
     CloneObjectTo,
 
     MapFile,
+
+    RegisterSignalAction,
 }
 
 impl SyscallNo {
