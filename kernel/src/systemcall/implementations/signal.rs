@@ -6,11 +6,24 @@ use crate::{
     process::manager::get_current_process,
     signal::{Signal, action::SignalAction},
 };
-define_syscall!(RegisterSignalAction, |action: u64, signal: Signal| {
-    get_current_process().lock().signal_actions[signal as usize] = SignalAction {
-        handling_type: SignalHandlingType::from(action),
-        ignored_signals: Signals::empty(),
-    };
 
-    Ok(0)
-});
+define_syscall!(
+    RegisterSignalAction,
+    |signal: Signal, new_action: *const SignalAction, old_action: *mut SignalAction| {
+        let process = get_current_process();
+        let mut process = process.lock();
+        let current_signal_action = process.get_signal_action(signal);
+
+        unsafe {
+            if !old_action.is_null() {
+                *old_action = current_signal_action.clone();
+            }
+
+            if !new_action.is_null() {
+                *current_signal_action = (*new_action).clone();
+            }
+        }
+
+        Ok(0)
+    }
+);
