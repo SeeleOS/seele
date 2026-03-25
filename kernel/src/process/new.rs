@@ -16,6 +16,7 @@ use crate::{
         misc::{ProcessID, init_stack_layout},
         object::init_objects,
     },
+    signal::{SIGNAL_AMOUNT, action::SignalAction, misc::default_signal_action_vec},
     thread::{
         THREAD_MANAGER,
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
@@ -41,6 +42,7 @@ impl Process {
             current_directory: AbsolutePath::default(),
             threads: Vec::new(),
             exit_code: None,
+            signal_actions: default_signal_action_vec(),
             objects: Vec::new(),
             parent: None,
         }));

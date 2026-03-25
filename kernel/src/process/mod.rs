@@ -5,6 +5,8 @@ use x86_64::VirtAddr;
 
 use crate::filesystem::absolute_path::AbsolutePath;
 use crate::memory::addrspace::AddrSpace;
+use crate::signal::action::SignalAction;
+use crate::signal::misc::default_signal_action_vec;
 use crate::{object::Object, process::misc::ProcessID, thread::thread::Thread};
 
 pub mod execve;
@@ -26,11 +28,13 @@ pub struct Process {
     pub current_directory: AbsolutePath,
     pub exit_code: Option<u64>,
     pub parent: Option<ProcessRef>,
+    pub signal_actions: Vec<SignalAction>,
 }
 
 impl Process {
     pub fn empty() -> ProcessRef {
         Arc::new(Mutex::new(Process {
+            signal_actions: default_signal_action_vec(),
             pid: ProcessID::default(),
             current_directory: AbsolutePath::default(),
             addrspace: AddrSpace::default(),

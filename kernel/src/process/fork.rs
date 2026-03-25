@@ -33,6 +33,7 @@ impl Process {
             current_directory: self.current_directory.clone(),
             exit_code: None,
             parent: Some(parent),
+            signal_actions: self.signal_actions.clone(),
         }));
 
         let new_thread = current_thread.lock().clone_and_spawn(new_process.clone());
