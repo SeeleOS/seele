@@ -4,4 +4,6 @@ pub enum Signal {
     Interrupt,
 }
 
-pub type SignalHandler = *const fn(i32);
+pub mod action;
+
+pub type SignalHandlerFn = extern "C" fn(i32);
