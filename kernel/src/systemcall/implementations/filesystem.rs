@@ -7,7 +7,7 @@ use crate::{
     filesystem::{info::LinuxStat, path::Path, vfs::VirtualFS},
     object::misc::ObjectRef,
     process::manager::get_current_process,
-    systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
+    systemcall::{error::SyscallError, utils::SyscallImpl},
 };
 
 define_syscall!(OpenFile, |path_str: String, create: bool| {

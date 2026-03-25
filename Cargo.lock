@@ -731,6 +731,7 @@ name = "kernel"
 version = "0.1.0"
 dependencies = [
  "acpi",
+ "bitflags 2.11.0",
  "bootloader_api",
  "conquer-once",
  "const-random",
@@ -1188,6 +1189,7 @@ dependencies = [
  "cbindgen",
  "num-derive",
  "num-traits",
+ "num_enum",
  "paste",
 ]
 

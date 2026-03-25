@@ -1,9 +1,10 @@
 use crate::{
     misc::snapshot::Snapshot,
     s_println,
-    systemcall::{error::SyscallError, numbers::SyscallNo, table::SYSCALL_TABLE},
+    systemcall::{error::SyscallError, table::SYSCALL_TABLE},
     thread::THREAD_MANAGER,
 };
+use seele_sys::numbers::SyscallNumber as SyscallNo;
 
 #[unsafe(no_mangle)]
 extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {

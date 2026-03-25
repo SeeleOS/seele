@@ -12,7 +12,7 @@ use crate::{
         misc::{ObjectRef, get_object_current_process},
     },
     process::{manager::get_current_process, misc::ProcessID},
-    systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
+    systemcall::{error::SyscallError, utils::SyscallImpl},
 };
 
 static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeMap::new());

@@ -24,6 +24,7 @@ const-random = "0.1.18"
 uart_16550 = "0.2.0"
 qemu-exit = "3.0.2"
 log = "0.4"
+bitflags = "2.9.1"
 # You can also access strum_macros exports directly through strum using the "derive" feature
 strum = { version = "0.28", default-features = false, features = ["derive"] }
 spleen-font = { version = "0.2" }

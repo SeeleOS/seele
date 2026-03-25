@@ -8,7 +8,7 @@ use crate::{
         ProcessRef,
         manager::{MANAGER, get_current_process},
     },
-    systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
+    systemcall::{error::SyscallError, utils::SyscallImpl},
 };
 
 static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ProcessRef>>> = Mutex::new(BTreeMap::new());

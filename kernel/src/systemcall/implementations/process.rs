@@ -8,7 +8,7 @@ use crate::{
         misc::ProcessID,
     },
     s_print,
-    systemcall::{error::SyscallError, numbers::SyscallNo, utils::SyscallImpl},
+    systemcall::{error::SyscallError, utils::SyscallImpl},
     thread::{THREAD_MANAGER, scheduling::return_to_executor_no_save},
 };
 

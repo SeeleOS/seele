@@ -1,7 +1,6 @@
 use crate::object::misc::ObjectRef;
 use crate::polling::event::PollableEvent;
 use crate::systemcall::error::SyscallError;
-use crate::systemcall::numbers::*;
 use crate::systemcall::utils::SyscallImpl;
 use crate::thread::yielding::{BlockType, WakeType, block_current};
 use alloc::sync::Arc;

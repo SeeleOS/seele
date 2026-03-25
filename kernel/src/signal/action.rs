@@ -1,5 +1,4 @@
-use alloc::vec::Vec;
-
+use bitflags::bitflags;
 use crate::signal::{Signal, SignalHandlerFn};
 
 /// The action that a process will take when it got a signal
@@ -8,7 +7,7 @@ use crate::signal::{Signal, SignalHandlerFn};
 pub struct SignalAction {
     pub handling_type: SignalHandlingType,
     // Signals which the process will ignore when its in the signal handler
-    pub ignored_signals: Vec<Signal>,
+    pub ignored_signals: SignalSet,
 }
 
 #[derive(Default, Clone, Debug)]
@@ -27,6 +26,26 @@ impl From<u64> for SignalHandlingType {
             _ => Self::Function(unsafe {
                 core::mem::transmute::<usize, SignalHandlerFn>(value as usize)
             }),
+        }
+    }
+}
+
+bitflags! {
+    #[derive(Default, Clone, Copy, Debug)]
+    #[repr(transparent)]
+    pub struct SignalSet: u64 {
+        const TERMINATE = 1 << Signal::Terminate as u64;
+        const KILL = 1 << Signal::Kill as u64;
+        const INTERRUPT = 1 << Signal::Interrupt as u64;
+    }
+}
+
+impl From<Signal> for SignalSet {
+    fn from(value: Signal) -> Self {
+        match value {
+            Signal::Terminate => Self::TERMINATE,
+            Signal::Kill => Self::KILL,
+            Signal::Interrupt => Self::INTERRUPT,
         }
     }
 }

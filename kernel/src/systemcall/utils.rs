@@ -1,11 +1,11 @@
-use crate::systemcall::{error::SyscallError, numbers::SyscallNo};
+use crate::systemcall::error::SyscallError;
 
 #[macro_export]
 macro_rules! register_syscalls {
     // 注意这里的 $( ... ),* 模式
     ($table: expr, $($no: ident),*) => {
         $(
-            $table[SyscallNo::$no as usize] = Some(
+            $table[seele_sys::numbers::SyscallNumber::$no as usize] = Some(
                 <$no as SyscallImpl>::handle_call
                     as fn(u64, u64, u64, u64, u64, u64) -> Result<usize, SyscallError>,
             );
@@ -19,7 +19,8 @@ macro_rules! define_syscall {
         pub struct $name;
 
         impl SyscallImpl for $name {
-            const ENTRY: SyscallNo = SyscallNo::$name;
+            const ENTRY: seele_sys::numbers::SyscallNumber =
+                seele_sys::numbers::SyscallNumber::$name;
 
             fn handle_call(
                 arg1: u64, arg2: u64, arg3: u64,
@@ -44,7 +45,8 @@ macro_rules! define_syscall {
         pub struct $name;
 
         impl SyscallImpl for $name {
-            const ENTRY: SyscallNo = SyscallNo::$name;
+            const ENTRY: seele_sys::numbers::SyscallNumber =
+                seele_sys::numbers::SyscallNumber::$name;
 
             fn handle_call(
                 _arg1: u64, _arg2: u64, _arg3: u64,
@@ -57,7 +59,7 @@ macro_rules! define_syscall {
 }
 
 pub trait SyscallImpl {
-    const ENTRY: SyscallNo;
+    const ENTRY: seele_sys::numbers::SyscallNumber;
 
     fn handle_call(
         arg1: u64,
