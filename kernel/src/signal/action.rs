@@ -17,3 +17,15 @@ pub enum SignalHandler {
     Ignore,
     Function(SignalHandlerFn),
 }
+
+impl From<u64> for SignalHandler {
+    fn from(value: u64) -> Self {
+        match value {
+            0 => Self::Default,
+            1 => Self::Ignore,
+            _ => Self::Function(unsafe {
+                core::mem::transmute::<usize, SignalHandlerFn>(value as usize)
+            }),
+        }
+    }
+}

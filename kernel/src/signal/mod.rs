@@ -13,4 +13,4 @@ pub const SIGNAL_AMOUNT: usize = 3;
 pub mod action;
 pub mod misc;
 
-pub type SignalHandlerFn = *const extern "C" fn(i32);
+pub type SignalHandlerFn = extern "C" fn(i32);
