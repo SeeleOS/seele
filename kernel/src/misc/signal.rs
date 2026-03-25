@@ -27,11 +27,11 @@ impl Process {
 }
 
 pub trait SignalExtension {
-    fn do_default_action(&self);
+    fn default_action(&self);
 }
 
 impl SignalExtension for Signal {
-    fn do_default_action(&self) {
+    fn default_action(&self) {
         match self {
             Self::Terminate => {}
             Self::Kill => {}
