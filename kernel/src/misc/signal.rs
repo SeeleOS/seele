@@ -60,7 +60,7 @@ impl SignalExtension for Signal {
             | Self::Interrupt
             | Self::Quit
             | Self::Abort
-            | Self::SegmentationFault
+            | Self::InvalidMemoryAccess
             | Self::BrokenPipe
             | Self::Hangup
             | Self::FloatingPointError
