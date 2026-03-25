@@ -79,6 +79,8 @@ impl Future for ThreadFuture {
             )
         };
 
+        self.0.lock().parent.lock().process_signals();
+
         let state = self.0.lock().state.clone();
 
         match state {
