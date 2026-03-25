@@ -11,5 +11,6 @@ pub enum Signal {
 pub const SIGNAL_AMOUNT: usize = 3;
 
 pub mod action;
+pub mod misc;
 
 pub type SignalHandlerFn = extern "C" fn(i32);
