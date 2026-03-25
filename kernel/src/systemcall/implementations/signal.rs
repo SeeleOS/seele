@@ -1,3 +1,6 @@
+use crate::process::ProcessRef;
+use crate::process::manager::MANAGER;
+use crate::process::misc::ProcessID;
 use crate::signal::action::{SignalHandlingType, Signals};
 use crate::systemcall::error::*;
 use crate::systemcall::utils::*;
@@ -27,3 +30,8 @@ define_syscall!(
         Ok(0)
     }
 );
+
+define_syscall!(SendSignal, |process: ProcessRef, signal: Signal| {
+    process.lock().send_signal(signal);
+    Ok(0)
+});
