@@ -8,7 +8,7 @@ use crate::{
     },
     object::misc::{ObjectRef, get_object_current_process},
     polling::event::PollableEvent,
-    process::misc::ProcessID,
+    process::{ProcessRef, manager::MANAGER, misc::ProcessID},
     signal::{Signal, action::SignalAction},
     systemcall::{error::SyscallError, implementations::PollResult},
 };
@@ -101,5 +101,20 @@ impl SyscallArg for Signal {
         Self: Sized,
     {
         Signal::try_from(val).map_err(|_| SyscallError::InvalidArguments)
+    }
+}
+
+impl SyscallArg for ProcessRef {
+    fn from_u64(val: u64) -> Result<Self, SyscallError>
+    where
+        Self: Sized,
+    {
+        MANAGER
+            .lock()
+            .processes
+            .get(&ProcessID(val))
+            .ok_or(SyscallError::NoProcess)
+            .cloned()
+            .map_err(Into::into)
     }
 }
