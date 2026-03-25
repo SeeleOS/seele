@@ -9,7 +9,7 @@ use crate::{
     object::misc::{ObjectRef, get_object_current_process},
     polling::event::PollableEvent,
     process::misc::ProcessID,
-    signal::Signal,
+    signal::{Signal, action::SignalAction},
     systemcall::{error::SyscallError, implementations::PollResult},
 };
 
@@ -39,7 +39,9 @@ add_syscall_arg_type!(
     *mut u8,
     *mut u64,
     *mut PollResult,
-    i32
+    i32,
+    *mut SignalAction,
+    *const SignalAction
 );
 
 impl SyscallArg for Vec<String> {
