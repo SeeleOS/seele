@@ -4,6 +4,7 @@ use crate::signal::{Signal, SignalHandlerFn};
 
 /// The action that a process will take when it got a signal
 #[derive(Default, Clone, Debug)]
+#[repr(C)]
 pub struct SignalAction {
     pub handling_type: SignalHandlingType,
     // Signals which the process will ignore when its in the signal handler
