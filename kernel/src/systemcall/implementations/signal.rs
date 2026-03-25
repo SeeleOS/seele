@@ -1,4 +1,4 @@
-use crate::signal::action::{SignalHandlingType, SignalSet};
+use crate::signal::action::{SignalHandlingType, Signals};
 use crate::systemcall::error::*;
 use crate::systemcall::utils::*;
 use crate::{
@@ -9,7 +9,7 @@ use crate::{
 define_syscall!(RegisterSignalAction, |action: u64, signal: Signal| {
     get_current_process().lock().signal_actions[signal as usize] = SignalAction {
         handling_type: SignalHandlingType::from(action),
-        ignored_signals: SignalSet::empty(),
+        ignored_signals: Signals::empty(),
     };
 
     Ok(0)

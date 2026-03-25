@@ -1,16 +1,5 @@
-use num_enum::TryFromPrimitive;
-
-#[derive(Clone, Copy, TryFromPrimitive, Debug)]
-#[repr(u64)]
-pub enum Signal {
-    Terminate = 0,
-    Kill,
-    Interrupt,
-}
-
-pub const SIGNAL_AMOUNT: usize = 3;
-
-pub mod action;
+pub use seele_sys::signal::{SIGNAL_AMOUNT, Signal, SignalHandlerFn};
 pub mod misc;
-
-pub type SignalHandlerFn = extern "C" fn(i32);
+pub mod action {
+    pub use seele_sys::signal::{SignalAction, SignalHandlingType, Signals};
+}
