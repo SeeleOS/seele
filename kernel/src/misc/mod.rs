@@ -12,6 +12,7 @@ pub mod logging;
 pub mod others;
 pub mod panic;
 pub mod serial_print;
+pub mod signal;
 pub mod snapshot;
 pub mod stack_builder;
 pub mod testing;

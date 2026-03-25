@@ -15,12 +15,12 @@ pub mod misc;
 pub mod object;
 pub mod polling;
 pub mod process;
-pub mod signal;
 pub mod systemcall;
 pub mod task;
 pub mod terminal;
 pub mod thread;
 pub mod userspace;
+pub use misc::signal;
 
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
