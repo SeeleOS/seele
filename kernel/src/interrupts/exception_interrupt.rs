@@ -14,6 +14,7 @@ use crate::{
 
 pub fn init_exception_interrupts(idt: &mut InterruptDescriptorTable) {
     idt.breakpoint.set_handler_fn(breakpoint_handler);
+    idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
     unsafe {
         idt.double_fault
             .set_handler_fn(double_fault_handler)
@@ -28,6 +29,12 @@ pub fn init_exception_interrupts(idt: &mut InterruptDescriptorTable) {
 }
 
 extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) {}
+
+extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
+    log::error!("invalid opcode");
+    print_stackframe_m(stack_frame);
+    hlt_loop()
+}
 
 extern "x86-interrupt" fn gp_handler(_stack_frame: InterruptStackFrame, _err_code: u64) {
     log::error!("general protection fault");
