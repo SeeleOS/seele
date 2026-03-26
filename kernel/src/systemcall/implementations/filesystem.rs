@@ -1,6 +1,7 @@
 use core::slice;
 
 use alloc::{string::String, sync::Arc};
+use seele_sys::permission::Permissions;
 
 use crate::{
     define_syscall,
@@ -86,10 +87,18 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
     Ok(0)
 });
 
-define_syscall!(MapFile, |object: ObjectRef, len: u64, offset: u64| {
-    Ok(get_current_process()
-        .lock()
-        .addrspace
-        .map_file(object.as_file_like()?, offset, len.div_ceil(4096))
-        .as_u64() as usize)
-});
+define_syscall!(
+    MapFile,
+    |object: ObjectRef, len: u64, offset: u64, permissions: Permissions| {
+        Ok(get_current_process()
+            .lock()
+            .addrspace
+            .map_file(
+                object.as_file_like()?,
+                offset,
+                len.div_ceil(4096),
+                permissions,
+            )
+            .as_u64() as usize)
+    }
+);

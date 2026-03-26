@@ -1,4 +1,7 @@
-use alloc::sync::Arc;
+use core::simd::cmp;
+
+use alloc::{slice, sync::Arc};
+use seele_sys::permission::Permissions;
 use x86_64::{
     VirtAddr,
     structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
@@ -14,7 +17,7 @@ use crate::{
         paging::FRAME_ALLOCATOR,
         utils::apply_offset,
     },
-    misc::stack_builder::StackBuilder,
+    misc::{others::permissions_to_flags, stack_builder::StackBuilder},
     object::misc::ObjectRef,
 };
 
@@ -38,12 +41,18 @@ impl AddrSpace {
         area.start
     }
 
-    pub fn map_file(&mut self, file: Arc<FileLikeObject>, offset: u64, pages: u64) -> VirtAddr {
+    pub fn map_file(
+        &mut self,
+        file: Arc<FileLikeObject>,
+        offset: u64,
+        pages: u64,
+        permissions: Permissions,
+    ) -> VirtAddr {
         let mem = self.fetch_add_user_mem(pages);
         self.map_lazy(MemoryArea::new(
             mem,
             pages,
-            PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE,
+            permissions_to_flags(permissions),
             Data::File { offset, file },
             true,
         ))
