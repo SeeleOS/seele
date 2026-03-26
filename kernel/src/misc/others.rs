@@ -34,7 +34,7 @@ pub trait KernelFrom<T> {
 }
 
 pub fn permissions_to_flags(permissions: Permissions) -> PageTableFlags {
-    let mut flags = PageTableFlags::PRESENT;
+    let mut flags = PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE;
 
     if permissions.contains(Permissions::WRITABLE) {
         flags |= PageTableFlags::WRITABLE;
@@ -42,10 +42,6 @@ pub fn permissions_to_flags(permissions: Permissions) -> PageTableFlags {
 
     if !permissions.contains(Permissions::EXECUTABLE) {
         flags |= PageTableFlags::NO_EXECUTE;
-    }
-
-    if permissions.contains(Permissions::READABLE) {
-        flags |= PageTableFlags::USER_ACCESSIBLE;
     }
 
     flags
