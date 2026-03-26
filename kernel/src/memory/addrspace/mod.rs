@@ -1,6 +1,7 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use alloc::vec::Vec;
+use seele_sys::permission::Permissions;
 use x86_64::{
     PhysAddr, VirtAddr,
     structures::paging::{FrameDeallocator, Mapper, PageTableFlags, Translate, page},
@@ -15,7 +16,7 @@ use crate::{
         page_table_wrapper::PageTableWrapped,
         paging::{FRAME_ALLOCATOR, MAPPER},
     },
-    misc::stack_builder::StackBuilder,
+    misc::{others::permissions_to_flags, stack_builder::StackBuilder},
     s_print,
 };
 
@@ -101,7 +102,7 @@ impl AddrSpace {
         ))
     }
 
-    pub fn allocate_user_lazy(&mut self, pages: u64) -> VirtAddr {
+    pub fn allocate_user_lazy(&mut self, pages: u64, permissions: Permissions) -> VirtAddr {
         log::trace!("addrspace: allocate_user_lazy pages {}", pages);
         let mem = self.user_mem;
         self.user_mem += (pages + 1) * 4096;
@@ -109,7 +110,7 @@ impl AddrSpace {
         self.map_lazy(MemoryArea::new(
             mem,
             pages,
-            PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE,
+            permissions_to_flags(permissions),
             Data::Normal,
             true,
         ))
