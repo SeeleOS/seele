@@ -86,16 +86,10 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
     Ok(0)
 });
 
-define_syscall!(MapFile, |object: ObjectRef, len: usize, offset: u64| {
-    let current = get_current_process();
-    let (mem_start, _) = current
+define_syscall!(MapFile, |object: ObjectRef, len: u64, offset: u64| {
+    Ok(get_current_process()
         .lock()
         .addrspace
-        .allocate_user(len.div_ceil(4096) as u64);
-
-    let slice = unsafe { slice::from_raw_parts_mut(mem_start.as_mut_ptr(), len) };
-
-    object.as_file_like()?.read_at(slice, offset)?;
-
-    Ok(mem_start.as_u64() as usize)
+        .map_file(object.as_file_like()?, offset, len.div_ceil(4096))
+        .as_u64() as usize)
 });
