@@ -84,6 +84,26 @@ impl AddrSpace {
         s_print!("ret");
     }
 
+    pub fn update_permissions(&mut self, start: VirtAddr, end: VirtAddr, permissions: Permissions) {
+        for area in &mut self.memory_areas {
+            if area.start > start && area.end < end {
+                area.flags = permissions_to_flags(permissions);
+
+                for page in area.page_range() {
+                    unsafe {
+                        if let Ok(flush) = self
+                            .page_table
+                            .inner
+                            .update_flags(page, permissions_to_flags(permissions))
+                        {
+                            flush.flush();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub fn translate_addr(&self, addr: VirtAddr) -> Option<PhysAddr> {
         self.page_table.inner.translate_addr(addr)
     }
