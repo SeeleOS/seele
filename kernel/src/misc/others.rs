@@ -1,6 +1,8 @@
+use seele_sys::permission::Permissions;
 use x86_64::{
     PhysAddr,
     registers::control::{Cr0, Cr0Flags, Cr3Flags, Cr4, Cr4Flags},
+    structures::paging::PageTableFlags,
 };
 
 use crate::misc::error::KernelResult;
@@ -29,4 +31,22 @@ pub trait KernelFrom<T> {
     fn k_from(val: T) -> KernelResult<Self>
     where
         Self: Sized;
+}
+
+pub fn permissions_to_flags(permissions: Permissions) -> PageTableFlags {
+    let mut flags = PageTableFlags::PRESENT;
+
+    if permissions.contains(Permissions::WRITABLE) {
+        flags |= PageTableFlags::WRITABLE;
+    }
+
+    if !permissions.contains(Permissions::EXECUTABLE) {
+        flags |= PageTableFlags::NO_EXECUTE;
+    }
+
+    if permissions.contains(Permissions::READABLE) {
+        flags |= PageTableFlags::USER_ACCESSIBLE;
+    }
+
+    flags
 }
