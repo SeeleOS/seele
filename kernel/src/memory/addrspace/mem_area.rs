@@ -1,3 +1,4 @@
+use alloc::sync::Arc;
 use x86_64::{
     VirtAddr,
     structures::paging::{
@@ -6,7 +7,11 @@ use x86_64::{
     },
 };
 
-use crate::{filesystem::path::Path, memory::addrspace::KERNEL_MEM_START, object::misc::ObjectRef};
+use crate::{
+    filesystem::{object::FileLikeObject, path::Path},
+    memory::addrspace::KERNEL_MEM_START,
+    object::misc::ObjectRef,
+};
 
 #[derive(Clone, Debug)]
 pub struct MemoryArea {
@@ -22,7 +27,10 @@ pub struct MemoryArea {
 pub enum Data {
     // Normal data that a process/thread can write to. Aka anonymus.
     Normal,
-    File { offset: u64, file: ObjectRef },
+    File {
+        offset: u64,
+        file: Arc<FileLikeObject>,
+    },
 }
 
 impl MemoryArea {
