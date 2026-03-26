@@ -1,5 +1,6 @@
 use alloc::{string::String, vec::Vec};
 use seele_sys::permission::Permissions;
+use x86_64::VirtAddr;
 
 use crate::{
     filesystem::info::LinuxStat,
@@ -117,6 +118,15 @@ impl SyscallArg for ProcessRef {
             .ok_or(SyscallError::NoProcess)
             .cloned()
             .map_err(Into::into)
+    }
+}
+
+impl SyscallArg for VirtAddr {
+    fn from_u64(val: u64) -> Result<Self, SyscallError>
+    where
+        Self: Sized,
+    {
+        Ok(VirtAddr::new(val))
     }
 }
 
