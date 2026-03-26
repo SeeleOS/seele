@@ -1,17 +1,17 @@
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::AtomicU64;
 
 use alloc::vec::Vec;
 use seele_sys::permission::Permissions;
 use x86_64::{
     PhysAddr, VirtAddr,
-    structures::paging::{FrameDeallocator, Mapper, PageTableFlags, Translate, page},
+    structures::paging::{FrameDeallocator, Mapper, Translate, page},
 };
 
 use crate::{
     memory::{
         addrspace::{
             cow::decrease_ref,
-            mem_area::{Data, MemoryArea},
+            mem_area::MemoryArea,
         },
         page_table_wrapper::PageTableWrapped,
         paging::{FRAME_ALLOCATOR, MAPPER},
@@ -20,6 +20,7 @@ use crate::{
     s_print,
 };
 
+pub mod allocate;
 pub mod clone;
 pub mod cow;
 pub mod mapping;
@@ -106,45 +107,6 @@ impl AddrSpace {
 
     pub fn translate_addr(&self, addr: VirtAddr) -> Option<PhysAddr> {
         self.page_table.inner.translate_addr(addr)
-    }
-
-    pub fn allocate_user(&mut self, pages: u64) -> AllocResult {
-        log::trace!("addrspace: allocate_user pages {}", pages);
-        let mem = self.user_mem;
-        self.user_mem += (pages + 1) * 4096;
-
-        self.map(MemoryArea::new(
-            mem,
-            pages,
-            PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE,
-            Data::Normal,
-            false,
-        ))
-    }
-
-    pub fn allocate_user_lazy(&mut self, pages: u64, permissions: Permissions) -> VirtAddr {
-        log::trace!("addrspace: allocate_user_lazy pages {}", pages);
-        let mem = self.user_mem;
-        self.user_mem += (pages + 1) * 4096;
-
-        self.map_lazy(MemoryArea::new(
-            mem,
-            pages,
-            permissions_to_flags(permissions),
-            Data::Normal,
-            true,
-        ))
-    }
-
-    pub fn allocate_kernel(&mut self, pages: u64) -> AllocResult {
-        log::trace!("addrspace: allocate_kernel pages {}", pages);
-        self.map(MemoryArea::new(
-            VirtAddr::new(KERNEL_MEM.fetch_add((pages + 1) * 4096, Ordering::Relaxed)),
-            pages,
-            PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
-            Data::Normal,
-            false,
-        ))
     }
 
     pub fn get_area(&self, addr: VirtAddr) -> Option<&MemoryArea> {
