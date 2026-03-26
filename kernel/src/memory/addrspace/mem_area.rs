@@ -6,7 +6,7 @@ use x86_64::{
     },
 };
 
-use crate::memory::addrspace::KERNEL_MEM_START;
+use crate::{filesystem::path::Path, memory::addrspace::KERNEL_MEM_START};
 
 #[derive(Clone, Debug)]
 pub struct MemoryArea {
@@ -22,6 +22,7 @@ pub struct MemoryArea {
 pub enum Data {
     // Normal data that a process/thread can write to. Aka anonymus.
     Normal,
+    File { offset: u64, path: Path },
 }
 
 impl MemoryArea {
