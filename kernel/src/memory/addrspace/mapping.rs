@@ -50,25 +50,30 @@ impl AddrSpace {
     }
 
     pub fn apply_page(&mut self, page: Page<Size4KiB>, area: MemoryArea) {
-        let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
-        let frame = frame_allocator.allocate_frame().expect("memory full;");
+        match area.data {
+            Data::Normal => {
+                let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
+                let frame = frame_allocator.allocate_frame().expect("memory full;");
 
-        unsafe {
-            self.page_table
-                .inner
-                .map_to(page, frame, area.flags, &mut *frame_allocator)
-                .unwrap()
-                .flush();
-        };
+                unsafe {
+                    self.page_table
+                        .inner
+                        .map_to(page, frame, area.flags, &mut *frame_allocator)
+                        .unwrap()
+                        .flush();
+                };
 
-        let write_addr = apply_offset(frame.start_address().as_u64() + 4096);
-        unsafe {
-            let bytes = 4096;
-            let start_ptr = (write_addr as usize - bytes as usize) as *mut u8;
-            core::ptr::write_bytes(start_ptr, 0, bytes as usize);
+                let write_addr = apply_offset(frame.start_address().as_u64() + 4096);
+                unsafe {
+                    let bytes = 4096;
+                    let start_ptr = (write_addr as usize - bytes as usize) as *mut u8;
+                    core::ptr::write_bytes(start_ptr, 0, bytes as usize);
+                }
+
+                increase_ref(frame);
+            }
+            _ => todo!(),
         }
-
-        increase_ref(frame);
     }
 
     fn apply_area(&mut self, area: MemoryArea) -> AllocResult {
