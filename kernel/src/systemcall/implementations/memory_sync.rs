@@ -1,4 +1,5 @@
 use alloc::collections::{btree_map::BTreeMap, vec_deque::VecDeque};
+use seele_sys::permission::Permissions;
 use spin::Mutex;
 use x86_64::{VirtAddr, registers::model_specific::FsBase};
 
@@ -58,7 +59,11 @@ define_syscall!(SetFs, |fs: u64| {
 
 define_syscall!(GetFs, { Ok(FsBase::read().as_u64() as usize) });
 
-define_syscall!(AllocateMem, |pages: u64| {
+define_syscall!(AllocateMem, |pages: u64, permissions: Permissions| {
     let current = get_current_process();
-    Ok(current.lock().addrspace.allocate_user_lazy(pages).as_u64() as usize)
+    Ok(current
+        .lock()
+        .addrspace
+        .allocate_user_lazy(pages, permissions)
+        .as_u64() as usize)
 });
