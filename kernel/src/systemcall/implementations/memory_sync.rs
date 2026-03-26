@@ -9,6 +9,7 @@ use crate::{
         ProcessRef,
         manager::{MANAGER, get_current_process},
     },
+    s_print,
     systemcall::{error::SyscallError, utils::SyscallImpl},
 };
 
@@ -59,14 +60,17 @@ define_syscall!(SetFs, |fs: u64| {
 
 define_syscall!(GetFs, { Ok(FsBase::read().as_u64() as usize) });
 
-define_syscall!(AllocateMem, |pages: u64, permissions: Permissions| {
-    let current = get_current_process();
-    Ok(current
-        .lock()
-        .addrspace
-        .allocate_user_lazy(pages, permissions)
-        .as_u64() as usize)
-});
+define_syscall!(
+    AllocateMem,
+    |pages: u64, _unused: u64, permissions: Permissions| {
+        let current = get_current_process();
+        Ok(current
+            .lock()
+            .addrspace
+            .allocate_user_lazy(pages, permissions)
+            .as_u64() as usize)
+    }
+);
 
 define_syscall!(
     UpdateMemPerms,
