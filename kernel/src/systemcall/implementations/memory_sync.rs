@@ -67,3 +67,15 @@ define_syscall!(AllocateMem, |pages: u64, permissions: Permissions| {
         .allocate_user_lazy(pages, permissions)
         .as_u64() as usize)
 });
+
+define_syscall!(
+    UpdateMemPerms,
+    |addr: VirtAddr, pages: u64, permissions: Permissions| {
+        get_current_process().lock().addrspace.update_permissions(
+            addr,
+            addr + pages * 4096,
+            permissions,
+        );
+        Ok(0)
+    }
+);
