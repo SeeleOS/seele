@@ -19,6 +19,12 @@ pub extern "x86-interrupt" fn pagefault_handler(
     error_code: PageFaultErrorCode,
 ) {
     let address = Cr2::read().unwrap();
+    s_println!(
+        "pagefault entry rip={:#x} addr={:#x} err={:?}",
+        stack_frame.instruction_pointer.as_u64(),
+        address.as_u64(),
+        error_code
+    );
 
     let process_ref = get_current_process();
     let mut process = process_ref.lock();
