@@ -45,7 +45,7 @@ pub extern "x86-interrupt" fn pagefault_handler(
 
     match addrspace.get_area(address) {
         Some(area) if area.lazy => {
-            addrspace.apply_page(Page::containing_address(address), *area);
+            addrspace.apply_page(Page::containing_address(address), area.clone());
         }
         _ => actual_pagefault_handler(stack_frame, error_code, address),
     }

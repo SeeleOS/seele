@@ -17,7 +17,7 @@ use super::{AddrSpace, AllocResult};
 impl AddrSpace {
     pub fn map(&mut self, area: MemoryArea) -> AllocResult {
         log::trace!("addrspace: mapping {:?}", area);
-        self.memory_areas.push(area);
+        self.memory_areas.push(area.clone());
 
         if !area.lazy {
             self.apply_area(area)
@@ -27,7 +27,7 @@ impl AddrSpace {
     }
 
     pub fn map_lazy(&mut self, area: MemoryArea) -> VirtAddr {
-        self.memory_areas.push(area);
+        self.memory_areas.push(area.clone());
 
         area.start
     }

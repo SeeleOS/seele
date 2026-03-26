@@ -8,7 +8,7 @@ use x86_64::{
 
 use crate::memory::addrspace::KERNEL_MEM_START;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct MemoryArea {
     pub start: VirtAddr,
     pub end: VirtAddr,
@@ -18,7 +18,7 @@ pub struct MemoryArea {
 }
 
 // The data a memory area contains. Aka backing
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum Data {
     // Normal data that a process/thread can write to. Aka anonymus.
     Normal,
