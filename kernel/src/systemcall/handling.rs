@@ -1,10 +1,8 @@
 use crate::{
     misc::snapshot::Snapshot,
-    s_println,
     systemcall::{error::SyscallError, table::SYSCALL_TABLE},
     thread::THREAD_MANAGER,
 };
-use seele_sys::numbers::SyscallNumber as SyscallNo;
 
 #[unsafe(no_mangle)]
 extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
@@ -44,7 +42,6 @@ fn syscall_handler_unwrapped(
     arg6: u64,
 ) -> isize {
     if let Some(Some(handler)) = SYSCALL_TABLE.get(syscall_no as usize) {
-        s_println!("called {:?}", SyscallNo::from_number(syscall_no as usize));
         match handler(arg1, arg2, arg3, arg4, arg5, arg6) {
             Ok(value) => value as isize,
             Err(err) => err as isize,
