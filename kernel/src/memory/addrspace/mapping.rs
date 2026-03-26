@@ -1,15 +1,21 @@
+use alloc::sync::Arc;
 use x86_64::{
     VirtAddr,
-    structures::paging::{FrameAllocator, Mapper, Page, Size4KiB},
+    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
 };
 
 use crate::{
+    filesystem::object::FileLikeObject,
     memory::{
-        addrspace::{cow::increase_ref, mem_area::MemoryArea},
+        addrspace::{
+            cow::increase_ref,
+            mem_area::{Data, MemoryArea},
+        },
         paging::FRAME_ALLOCATOR,
         utils::apply_offset,
     },
     misc::stack_builder::StackBuilder,
+    object::misc::ObjectRef,
 };
 
 use super::{AddrSpace, AllocResult};
@@ -30,6 +36,17 @@ impl AddrSpace {
         self.memory_areas.push(area.clone());
 
         area.start
+    }
+
+    pub fn map_file(&mut self, file: Arc<FileLikeObject>, offset: u64, pages: u64) -> VirtAddr {
+        let mem = self.fetch_add_user_mem(pages);
+        self.map_lazy(MemoryArea::new(
+            mem,
+            pages,
+            PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE,
+            Data::File { offset, file },
+            true,
+        ))
     }
 
     pub fn apply_page(&mut self, page: Page<Size4KiB>, area: MemoryArea) {
