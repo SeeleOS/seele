@@ -1,7 +1,7 @@
 use core::sync::atomic::AtomicU64;
 
 use alloc::{string::String, vec::Vec};
-use elfloader::ElfBinary;
+use elfloader::LoadedElf;
 
 use crate::{
     filesystem::{absolute_path::AbsolutePath, errors::FSError, vfs::VirtualFS},
@@ -33,7 +33,8 @@ impl Default for ProcessID {
 
 pub fn init_stack_layout(
     builder: &mut StackBuilder,
-    file: &ElfBinary,
+    file: &LoadedElf,
+    interpreter_base: Option<u64>,
     args: Vec<String>,
     env_vars: Vec<String>,
 ) {
@@ -45,11 +46,12 @@ pub fn init_stack_layout(
         .iter()
         .for_each(|f| env_ptrs.push(builder.push_str(f)));
 
-    let aux_bytes = 6 * 2 * 8;
+    let aux_entries = if interpreter_base.is_some() { 7 } else { 6 };
+    let aux_bytes = aux_entries * 2 * 8;
     let argv_env_bytes = (arg_ptrs.len() + env_ptrs.len() + 3) as u64 * 8;
     builder.align_for_pushes(aux_bytes + argv_env_bytes, 16);
 
-    builder.push_aux_entries(file);
+    builder.push_aux_entries(file, interpreter_base);
 
     builder.push(0); // envp terminator
     env_ptrs.iter().rev().for_each(|f| builder.push(*f));

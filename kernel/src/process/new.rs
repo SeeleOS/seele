@@ -3,6 +3,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
+use elfloader::{ElfBinary, LoadedElf};
 use seele_sys::signal::Signals;
 use spin::Mutex;
 
@@ -29,6 +30,10 @@ use crate::{
 const DEFAULT_PATH: &str = "PATH=/programs";
 const DEFAULT_TERM: &str = "TERM=xterm-256color";
 const INIT_PATH: &str = "/programs/bash";
+
+fn interp_load_base(image: &LoadedElf, binary: &ElfBinary) -> u64 {
+    image.program_header_table() - binary.file.header.pt2.ph_offset()
+}
 
 impl Process {
     pub fn init() -> ProcessRef {
@@ -75,29 +80,46 @@ impl Process {
 
 pub fn setup_process(
     path: Path,
-    args: Vec<String>,
+    mut args: Vec<String>,
     env: Vec<String>,
     addrspace: &mut AddrSpace,
     objects: &mut Vec<Option<Arc<dyn Object>>>,
 ) -> Result<ThreadSnapshot, FSError> {
-    let program = read_all(path.clone())?;
-    log::debug!("setup_process: loaded {} bytes", program.len());
+    let path_string = path.clone().as_string();
+    if args.first().is_none_or(|arg| arg != &path_string) {
+        args.insert(0, path_string);
+    }
+
+    let program_bytes = read_all(path.clone())?;
+    log::debug!("setup_process: loaded {} bytes", program_bytes.len());
 
     let mut stack_builder = addrspace.allocate_user(32).1;
-    let program = load_elf(addrspace, &program);
-    log::debug!(
-        "setup_process: ELF entry_point = {:#x}",
-        program.entry_point()
-    );
+    let program_binary = ElfBinary::new(&program_bytes).expect("Failed to parse elf binary");
+    let program = load_elf(addrspace, &program_binary);
 
-    assert!(!program.is_pie(), "Pie program is not supported for now");
+    let (entry_point, interpreter_base) = match &program {
+        LoadedElf::Basic(info) => (info.entry_point, None),
+        LoadedElf::Dynamic(info) => {
+            let interp_bytes = read_all(Path::new(info.interpreter))?;
+            log::debug!(
+                "setup_process: loaded interpreter {} ({} bytes)",
+                info.interpreter,
+                interp_bytes.len()
+            );
+            let interp_binary =
+                ElfBinary::new(&interp_bytes).expect("Failed to parse interpreter ELF");
+            let interp = load_elf(addrspace, &interp_binary);
+            let interp_base = interp_load_base(&interp, &interp_binary);
+            (interp.entry_point(), Some(interp_base))
+        }
+    };
 
-    init_stack_layout(&mut stack_builder, &program, args, env);
+    init_stack_layout(&mut stack_builder, &program, interpreter_base, args, env);
 
     init_objects(objects);
 
     Ok(ThreadSnapshot::new(
-        program.entry_point() as u64,
+        entry_point,
         addrspace,
         stack_builder.finish().as_u64(),
         ThreadSnapshotType::Thread,

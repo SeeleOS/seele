@@ -1,6 +1,5 @@
-use elfloader::ElfBinary;
+use elfloader::LoadedElf;
 use x86_64::VirtAddr;
-use xmas_elf::program;
 
 use crate::misc::aux::AuxType;
 
@@ -18,28 +17,21 @@ impl StackBuilder {
         }
     }
 
-    pub fn push_aux_entries(&mut self, file: &ElfBinary) {
-        let mut base = 0;
-
-        for ele in file.program_headers() {
-            if matches!(ele.get_type().unwrap(), program::Type::Load) && base == 0 {
-                base = ele.virtual_addr();
-            }
-        }
-
-        log::trace!("stack_builder base: {base}");
-
+    pub fn push_aux_entries(&mut self, file: &LoadedElf, interpreter_base: Option<u64>) {
         self.push_aux_entry(AuxType::Null, 0);
         self.push_aux_entry(AuxType::EntryPointAddress, file.entry_point());
         self.push_aux_entry(
             AuxType::ProgramHeaderAmount,
-            file.program_headers().count() as u64,
+            file.program_header_count() as u64,
         );
-        self.push_aux_entry(AuxType::ProgramHeaderEntrySize, 56);
         self.push_aux_entry(
-            AuxType::ProgramHeaderTable,
-            base + file.file.header.pt2.ph_offset(),
+            AuxType::ProgramHeaderEntrySize,
+            file.program_header_entry_size() as u64,
         );
+        self.push_aux_entry(AuxType::ProgramHeaderTable, file.program_header_table());
+        if let Some(base) = interpreter_base {
+            self.push_aux_entry(AuxType::BaseAddress, base);
+        }
         self.push_aux_entry(AuxType::PageSize, 4096);
     }
 

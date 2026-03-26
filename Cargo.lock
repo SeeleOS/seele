@@ -446,12 +446,11 @@ dependencies = [
 [[package]]
 name = "elfloader"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a7b18d35bf8ec3bac59c3ec29cf1f1b46e764e00b42a9c0c754d06e38e78f3b"
+source = "git+https://github.com/SeeleOS/rust-elfloader#d307def4503d7dc15addee277c49d01f27d6a58e"
 dependencies = [
  "bitflags 1.3.2",
  "log",
- "xmas-elf",
+ "xmas-elf 0.10.0",
 ]
 
 [[package]]
@@ -758,7 +757,7 @@ dependencies = [
  "vte",
  "x2apic",
  "x86_64 0.15.4",
- "xmas-elf",
+ "xmas-elf 0.8.0",
 ]
 
 [[package]]
@@ -1989,6 +1988,15 @@ name = "xmas-elf"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d29b4d8e7beaceb4e77447ba941a7600d23d0319ab52da0461abea214832d5a"
+dependencies = [
+ "zero",
+]
+
+[[package]]
+name = "xmas-elf"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18245fcbb8b3de8dd198ce7944fdd4096986fd6cd306b0fcfa27df817bd545d6"
 dependencies = [
  "zero",
 ]
