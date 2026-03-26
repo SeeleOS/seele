@@ -9,10 +9,7 @@ use x86_64::{
 
 use crate::{
     memory::{
-        addrspace::{
-            cow::decrease_ref,
-            mem_area::MemoryArea,
-        },
+        addrspace::{cow::decrease_ref, mem_area::MemoryArea},
         page_table_wrapper::PageTableWrapped,
         paging::{FRAME_ALLOCATOR, MAPPER},
     },
@@ -25,6 +22,7 @@ pub mod clone;
 pub mod cow;
 pub mod mapping;
 pub mod mem_area;
+pub mod misc;
 
 const USER_MEM_START: u64 = 0x30_0000_0000;
 const KERNEL_MEM_START: u64 = 0xFFFF_8000_1000_0000;
