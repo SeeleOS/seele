@@ -32,7 +32,7 @@ const DEFAULT_TERM: &str = "TERM=xterm-256color";
 const INIT_PATH: &str = "/programs/bash";
 
 fn interp_load_base(image: &LoadedElf, binary: &ElfBinary) -> u64 {
-    image.program_header_table() - binary.file.header.pt2.ph_offset()
+    image.program_header_table() - binary.program_header_table()
 }
 
 impl Process {
