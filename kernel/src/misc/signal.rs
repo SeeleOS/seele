@@ -57,10 +57,7 @@ impl Process {
                         let current_proc = get_current_process();
                         let mut current_proc = current_proc.lock();
 
-                        let stack = current_proc
-                            .addrspace
-                            .allocate_user_lazy(16, Permissions::all())
-                            .as_u64();
+                        let (stack, _) = current_proc.addrspace.allocate_user(16);
 
                         let sig_handler_ignored_signals =
                             current_proc.signal_actions[signal as usize].sig_handler_ignored_sigs;
@@ -68,7 +65,7 @@ impl Process {
                         let mut thread_snapshot = ThreadSnapshot::new(
                             func as u64,
                             &mut current_proc.addrspace,
-                            stack,
+                            stack.as_u64(),
                             crate::thread::snapshot::ThreadSnapshotType::Thread,
                         );
 
