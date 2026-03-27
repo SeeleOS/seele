@@ -18,6 +18,7 @@ use crate::{
 };
 
 pub mod allocate;
+pub mod apply;
 pub mod clone;
 pub mod cow;
 pub mod mapping;
