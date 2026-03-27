@@ -1,5 +1,5 @@
 use alloc::{string::String, vec::Vec};
-use seele_sys::permission::Permissions;
+use seele_sys::{permission::Permissions, signal::Signals};
 use x86_64::VirtAddr;
 
 use crate::{
@@ -43,7 +43,8 @@ add_syscall_arg_type!(
     *mut PollResult,
     i32,
     *mut SignalAction,
-    *const SignalAction
+    *const SignalAction,
+    *mut Signals
 );
 
 impl SyscallArg for Vec<String> {
