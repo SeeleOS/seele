@@ -82,7 +82,7 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
         return Ok(0);
     }
 
-    let info = VirtualFS.lock().file_info(path).unwrap();
+    let info = VirtualFS.lock().file_info(path)?;
     unsafe { *linux_stat_ptr = info.as_linux() };
     Ok(0)
 });
