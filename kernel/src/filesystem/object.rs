@@ -47,6 +47,22 @@ impl FileLikeObject {
             FileLike::Directory(_) => Err(FSError::NotAFile),
         }
     }
+
+    pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> FSResult<usize> {
+        match &self.file {
+            FileLike::File(file) => {
+                let len = buf.len();
+                let mut read = 0;
+
+                while read < len {
+                    read += file.lock().read_at(buf, offset + read as u64)?;
+                }
+
+                Ok(len)
+            }
+            FileLike::Directory(_) => Err(FSError::NotAFile),
+        }
+    }
 }
 
 impl Debug for FileLikeObject {
