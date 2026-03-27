@@ -72,6 +72,11 @@ define_syscall!(
     }
 );
 
+define_syscall!(DeallocateMem, |addr: VirtAddr, len: u64| {
+    get_current_process().lock().addrspace.unmap(addr, len);
+    Ok(0)
+});
+
 define_syscall!(
     UpdateMemPerms,
     |addr: VirtAddr, pages: u64, permissions: Permissions| {
