@@ -40,7 +40,9 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         CloneObjectTo,
         MapFile,
         RegisterSignalAction,
-        SendSignal
+        SendSignal,
+        UpdateMemPerms,
+        DeallocateMem
     );
 
     table
