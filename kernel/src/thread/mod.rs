@@ -25,3 +25,7 @@ pub fn init() {
 }
 
 pub type ThreadRef = Arc<Mutex<Thread>>;
+
+pub fn get_current_thread() -> ThreadRef {
+    THREAD_MANAGER.get().unwrap().lock().current.unwrap()
+}
