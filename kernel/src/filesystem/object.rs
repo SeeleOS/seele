@@ -53,12 +53,18 @@ impl FileLikeObject {
             FileLike::File(file) => {
                 let len = buf.len();
                 let mut read = 0;
+                let mut file = file.lock();
 
                 while read < len {
-                    read += file.lock().read_at(buf, offset + read as u64)?;
+                    let bytes_read =
+                        file.read_at(&mut buf[read..], offset + read as u64)?;
+                    if bytes_read == 0 {
+                        return Err(FSError::Other);
+                    }
+                    read += bytes_read;
                 }
 
-                Ok(len)
+                Ok(read)
             }
             FileLike::Directory(_) => Err(FSError::NotAFile),
         }
