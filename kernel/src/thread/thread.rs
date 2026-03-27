@@ -1,4 +1,7 @@
+use core::fmt::Sign;
+
 use alloc::sync::Arc;
+use seele_sys::signal::Signals;
 use spin::Mutex;
 
 use crate::{
@@ -20,6 +23,8 @@ pub struct Thread {
     // Kernel stack for the cpu to switch to a clean stack on interrupts
     // not to be confused with the kernel_rsp in ThreadSnapshot
     pub kernel_stack_top: u64,
+
+    pub blocked_signals: Signals,
 }
 
 impl Thread {
@@ -31,6 +36,7 @@ impl Thread {
             executor_snapshot: ThreadSnapshot::new_executor(),
             state: State::Ready,
             kernel_stack_top: 0,
+            blocked_signals: Signals::default(),
         }))
     }
 }
@@ -57,6 +63,7 @@ impl Thread {
             kernel_stack_top,
             state: State::Ready,
             id: ThreadID::default(),
+            blocked_signals: Signals::default(),
         }
     }
 
@@ -72,6 +79,7 @@ impl Thread {
             state: State::Ready,
             id: ThreadID::default(),
             kernel_stack_top,
+            blocked_signals: Signals::default(),
         }
     }
 }
