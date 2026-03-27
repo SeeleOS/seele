@@ -31,13 +31,11 @@ pub struct Process {
     pub parent: Option<ProcessRef>,
     pub signal_actions: Vec<SignalAction>,
     pub pending_signals: Signals,
-    pub blocked_signals: Signals,
 }
 
 impl Process {
     pub fn empty() -> ProcessRef {
         Arc::new(Mutex::new(Process {
-            blocked_signals: Signals::default(),
             pending_signals: Signals::default(),
             signal_actions: default_signal_action_vec(),
             pid: ProcessID::default(),

@@ -42,7 +42,6 @@ impl Process {
         let kernel_stack_top = addrspace.allocate_kernel(16).1.finish();
 
         let process_arc = Arc::new(Mutex::new(Process {
-            blocked_signals: Signals::default(),
             pending_signals: Signals::default(),
             pid,
             addrspace,
