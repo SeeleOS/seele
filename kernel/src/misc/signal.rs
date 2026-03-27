@@ -1,6 +1,9 @@
-use crate::process::{
-    Process,
-    manager::{MANAGER, get_current_process},
+use crate::{
+    process::{
+        Process,
+        manager::{MANAGER, get_current_process},
+    },
+    thread::get_current_thread,
 };
 use alloc::vec::Vec;
 
@@ -33,7 +36,10 @@ impl Process {
         for signal in Signal::iter() {
             let signal_bits = Signals::from(signal);
             if self.pending_signals.contains(signal_bits)
-                && !self.blocked_signals.contains(signal_bits)
+                && !get_current_thread()
+                    .lock()
+                    .blocked_signals
+                    .contains(signal_bits)
             {
                 let handling_type = self.signal_actions[signal as usize].handling_type.clone();
                 self.pending_signals.remove(signal_bits);
