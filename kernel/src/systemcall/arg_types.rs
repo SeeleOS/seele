@@ -47,6 +47,15 @@ add_syscall_arg_type!(
     *mut Signals
 );
 
+impl SyscallArg for Signals {
+    fn from_u64(val: u64) -> Result<Self, SyscallError>
+    where
+        Self: Sized,
+    {
+        Signals::from_bits(val).ok_or(SyscallError::InvalidArguments)
+    }
+}
+
 impl SyscallArg for Vec<String> {
     fn from_u64(val: u64) -> Result<Self, SyscallError>
     where
