@@ -15,12 +15,9 @@ impl Thread {
         log::debug!("clone_and_spawn: start");
         let id = ThreadID::default();
         let thread = Self {
-            snapshot_state: SnapshotState::default(),
             parent: process.clone(),
             id,
             snapshot: self.snapshot,
-            executor_snapshot: ThreadSnapshot::new_executor(),
-            state: State::Ready,
             kernel_stack_top: process
                 .lock()
                 .addrspace
@@ -28,7 +25,7 @@ impl Thread {
                 .1
                 .finish()
                 .as_u64(),
-            blocked_signals: Signals::default(),
+            ..Default::default()
         };
 
         log::debug!("clone_and_spawn: thread manager lock start");

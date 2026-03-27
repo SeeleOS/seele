@@ -26,9 +26,9 @@ pub struct Thread {
     pub blocked_signals: Signals,
 }
 
-impl Thread {
-    pub fn empty() -> ThreadRef {
-        Arc::new(Mutex::new(Thread {
+impl Default for Thread {
+    fn default() -> Self {
+        Self {
             snapshot_state: SnapshotState::default(),
             parent: Process::empty(),
             id: ThreadID::default(),
@@ -37,7 +37,13 @@ impl Thread {
             state: State::Ready,
             kernel_stack_top: 0,
             blocked_signals: Signals::default(),
-        }))
+        }
+    }
+}
+
+impl Thread {
+    pub fn empty() -> ThreadRef {
+        Arc::new(Mutex::new(Thread::default()))
     }
 }
 
@@ -52,19 +58,15 @@ impl Thread {
             .finish()
             .as_u64();
         Self {
-            snapshot_state: SnapshotState::default(),
             snapshot: ThreadSnapshot::new(
                 entry_point,
                 &mut parent.clone().lock().addrspace,
                 stack.finish().as_u64(),
                 ThreadSnapshotType::Thread,
             ),
-            executor_snapshot: ThreadSnapshot::new_executor(),
             parent: parent.clone(),
             kernel_stack_top,
-            state: State::Ready,
-            id: ThreadID::default(),
-            blocked_signals: Signals::default(),
+            ..Default::default()
         }
     }
 
@@ -74,14 +76,10 @@ impl Thread {
         kernel_stack_top: u64,
     ) -> Self {
         Self {
-            snapshot_state: SnapshotState::Normal,
             snapshot,
-            executor_snapshot: ThreadSnapshot::new_executor(),
             parent,
-            state: State::Ready,
-            id: ThreadID::default(),
             kernel_stack_top,
-            blocked_signals: Signals::default(),
+            ..Default::default()
         }
     }
 }
