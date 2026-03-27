@@ -1,5 +1,6 @@
-use alloc::{slice, sync::Arc};
+use alloc::{slice, sync::Arc, vec::Vec};
 use seele_sys::permission::Permissions;
+use spleen_font::Size;
 use x86_64::{
     VirtAddr,
     structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
@@ -37,6 +38,54 @@ impl AddrSpace {
         self.memory_areas.push(area.clone());
 
         area.start
+    }
+
+    pub fn unmap(&mut self, start: VirtAddr, end: VirtAddr) {
+        for page in Page::<Size4KiB>::range_inclusive(
+            Page::containing_address(start),
+            Page::containing_address(end),
+        ) {
+            if let Ok((_, flush)) = self.page_table.inner.unmap(page) {
+                flush.flush();
+            }
+        }
+
+        let mut new_areas = Vec::new();
+
+        for area in self.memory_areas.drain(..) {
+            let area_start = area.start;
+            let area_end = area.end;
+
+            let overlap_start = core::cmp::max(area_start, start);
+            let overlap_end = core::cmp::min(area_end, end);
+
+            if overlap_start >= overlap_end {
+                new_areas.push(area);
+                continue;
+            }
+
+            if area_start < overlap_start {
+                let mut left = area.clone();
+                left.end = overlap_start;
+                new_areas.push(left);
+            }
+
+            if overlap_end < area_end {
+                let mut right = area.clone();
+                right.start = overlap_end;
+
+                if let Data::File { offset, file } = &area.data {
+                    right.data = Data::File {
+                        offset: *offset + (overlap_end.as_u64() - area_start.as_u64()),
+                        file: file.clone(),
+                    };
+                }
+
+                new_areas.push(right);
+            }
+        }
+
+        self.memory_areas = new_areas;
     }
 
     pub fn map_file(
