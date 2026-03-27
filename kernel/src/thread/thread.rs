@@ -24,11 +24,14 @@ pub struct Thread {
     pub kernel_stack_top: u64,
 
     pub blocked_signals: Signals,
+
+    pub sig_handler_snapshot: ThreadSnapshot,
 }
 
 impl Default for Thread {
     fn default() -> Self {
         Self {
+            sig_handler_snapshot: ThreadSnapshot::default(),
             snapshot_state: SnapshotState::default(),
             parent: Process::empty(),
             id: ThreadID::default(),

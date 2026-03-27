@@ -37,12 +37,14 @@ pub enum State {
 pub enum SnapshotState {
     #[default]
     Normal,
+    SignalHandler,
 }
 
 impl Thread {
     pub fn get_appropriate_snapshot(&mut self) -> &mut ThreadSnapshot {
         match self.snapshot_state {
             SnapshotState::Normal => &mut self.snapshot,
+            SnapshotState::SignalHandler => &mut self.sig_handler_snapshot,
         }
     }
 }
