@@ -56,7 +56,7 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
                            path_str: String,
                            linux_stat_ptr: *mut LinuxStat,
                            use_object: bool,
-                           object: u64| {
+                           object: ObjectRef| {
     let path: Path;
     if !use_object {
         if path_str.starts_with('/') {
@@ -71,14 +71,7 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
             ));
         }
     } else {
-        unsafe {
-            *linux_stat_ptr = get_current_process()
-                .lock()
-                .get_object(object)?
-                .as_file_like()?
-                .info()?
-                .as_linux()
-        };
+        unsafe { *linux_stat_ptr = object.as_file_like()?.info()?.as_linux() };
         return Ok(0);
     }
 
