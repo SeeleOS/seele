@@ -4,12 +4,16 @@ use alloc::vec::Vec;
 use seele_sys::permission::Permissions;
 use x86_64::{
     PhysAddr, VirtAddr,
-    structures::paging::{FrameDeallocator, Mapper, Translate, page},
+    structures::paging::{FrameDeallocator, Mapper, Page, Size4KiB, Translate, page},
 };
 
 use crate::{
     memory::{
-        addrspace::{cow::decrease_ref, mem_area::MemoryArea},
+        addrspace::{
+            cow::decrease_ref,
+            mem_area::{Data, MemoryArea},
+            misc::split_memory_area,
+        },
         page_table_wrapper::PageTableWrapped,
         paging::{FRAME_ALLOCATOR, MAPPER},
     },
@@ -77,28 +81,58 @@ impl AddrSpace {
                 }
             }
         }
-        s_print!("b");
         self.user_mem = VirtAddr::new(USER_MEM_START);
         self.page_table = PageTableWrapped::default();
         self.memory_areas = Vec::new();
-        s_print!("ret");
     }
 
     pub fn update_permissions(&mut self, start: VirtAddr, end: VirtAddr, permissions: Permissions) {
-        for area in &mut self.memory_areas {
-            if area.start > start && area.end < end {
-                area.flags = permissions_to_flags(permissions);
+        let new_flags = permissions_to_flags(permissions);
+        let mut new_areas = Vec::new();
 
-                for page in area.page_range() {
-                    unsafe {
-                        if let Ok(flush) = self
-                            .page_table
-                            .inner
-                            .update_flags(page, permissions_to_flags(permissions))
-                        {
-                            flush.flush();
-                        }
-                    }
+        for area in self.memory_areas.drain(..) {
+            let overlap_start = core::cmp::max(area.start, start);
+            let overlap_end = core::cmp::min(area.end, end);
+
+            if overlap_start >= overlap_end {
+                new_areas.push(area);
+                continue;
+            }
+
+            let (left, right) = split_memory_area(&area, start, end);
+
+            if let Some(left) = left {
+                new_areas.push(left);
+            }
+
+            let mut middle = area.clone();
+            middle.start = overlap_start;
+            middle.end = overlap_end;
+            middle.flags = new_flags;
+
+            if let Data::File { offset, file } = &area.data {
+                middle.data = Data::File {
+                    offset: *offset + (overlap_start.as_u64() - area.start.as_u64()),
+                    file: file.clone(),
+                };
+            }
+
+            new_areas.push(middle);
+
+            if let Some(right) = right {
+                new_areas.push(right);
+            }
+        }
+
+        self.memory_areas = new_areas;
+
+        for page in Page::<Size4KiB>::range(
+            Page::<Size4KiB>::containing_address(start),
+            Page::<Size4KiB>::containing_address(end),
+        ) {
+            unsafe {
+                if let Ok(flush) = self.page_table.inner.update_flags(page, new_flags) {
+                    flush.flush();
                 }
             }
         }
