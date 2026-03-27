@@ -6,7 +6,7 @@ use crate::{
     process::{Process, ProcessRef},
     thread::{
         ThreadRef,
-        misc::{State, ThreadID},
+        misc::{SnapshotState, State, ThreadID},
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
     },
 };
@@ -15,6 +15,7 @@ use crate::{
 pub struct Thread {
     pub parent: ProcessRef,
     pub id: ThreadID,
+    pub snapshot_state: SnapshotState,
     pub snapshot: ThreadSnapshot,
     pub executor_snapshot: ThreadSnapshot,
     pub state: State,
@@ -28,6 +29,7 @@ pub struct Thread {
 impl Thread {
     pub fn empty() -> ThreadRef {
         Arc::new(Mutex::new(Thread {
+            snapshot_state: SnapshotState::default(),
             parent: Process::empty(),
             id: ThreadID::default(),
             snapshot: ThreadSnapshot::default(),
@@ -50,6 +52,7 @@ impl Thread {
             .finish()
             .as_u64();
         Self {
+            snapshot_state: SnapshotState::default(),
             snapshot: ThreadSnapshot::new(
                 entry_point,
                 &mut parent.clone().lock().addrspace,
@@ -71,6 +74,7 @@ impl Thread {
         kernel_stack_top: u64,
     ) -> Self {
         Self {
+            snapshot_state: SnapshotState::Normal,
             snapshot,
             executor_snapshot: ThreadSnapshot::new_executor(),
             parent,

@@ -4,7 +4,7 @@ use crate::{
     process::ProcessRef,
     thread::{
         THREAD_MANAGER, ThreadRef,
-        misc::{State, ThreadID},
+        misc::{SnapshotState, State, ThreadID},
         snapshot::ThreadSnapshot,
         thread::Thread,
     },
@@ -15,6 +15,7 @@ impl Thread {
         log::debug!("clone_and_spawn: start");
         let id = ThreadID::default();
         let thread = Self {
+            snapshot_state: SnapshotState::default(),
             parent: process.clone(),
             id,
             snapshot: self.snapshot,

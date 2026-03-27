@@ -66,7 +66,7 @@ impl Future for ThreadFuture {
                 };
 
                 (
-                    &mut thread.snapshot as *mut ThreadSnapshot,
+                    thread.get_appropriate_snapshot() as *mut ThreadSnapshot,
                     &mut thread.executor_snapshot as *mut ThreadSnapshot,
                 )
             })
