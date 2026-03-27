@@ -50,6 +50,11 @@ impl AddrSpace {
             }
         }
 
+        self.unmap_areas(start, end);
+    }
+
+    // Unmaps the memory_areas inside AddrSpace, not the actual memory.
+    fn unmap_areas(&mut self, start: VirtAddr, end: VirtAddr) {
         let mut new_areas = Vec::new();
 
         for area in self.memory_areas.drain(..) {
