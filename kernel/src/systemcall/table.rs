@@ -42,7 +42,8 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         RegisterSignalAction,
         SendSignal,
         UpdateMemPerms,
-        DeallocateMem
+        DeallocateMem,
+        GetTime
     );
 
     table

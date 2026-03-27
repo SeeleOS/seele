@@ -757,6 +757,7 @@ dependencies = [
  "vte",
  "x2apic",
  "x86_64 0.15.4",
+ "x86_rtc",
  "xmas-elf 0.8.0",
 ]
 
@@ -1971,6 +1972,16 @@ dependencies = [
  "const_fn",
  "rustversion",
  "volatile 0.4.6",
+]
+
+[[package]]
+name = "x86_rtc"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1a42420da20c01d82e5d42231570efa3b9e16a5515eaaf9ee4e964f49cc1313"
+dependencies = [
+ "cfg-if",
+ "x86_64 0.15.4",
 ]
 
 [[package]]
