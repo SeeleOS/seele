@@ -1,4 +1,4 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use seele_sys::signal::Signals;
 use spin::Mutex;
 
@@ -23,6 +23,7 @@ pub struct Thread {
     // not to be confused with the kernel_rsp in ThreadSnapshot
     pub kernel_stack_top: u64,
 
+    pub saved_blocked_signals: Vec<Signals>,
     pub blocked_signals: Signals,
 
     pub sig_handler_snapshot: ThreadSnapshot,
@@ -31,6 +32,7 @@ pub struct Thread {
 impl Default for Thread {
     fn default() -> Self {
         Self {
+            saved_blocked_signals: Vec::new(),
             sig_handler_snapshot: ThreadSnapshot::default(),
             snapshot_state: SnapshotState::default(),
             parent: Process::empty(),

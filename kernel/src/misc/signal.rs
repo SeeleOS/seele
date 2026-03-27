@@ -3,7 +3,7 @@ use crate::{
         Process,
         manager::{MANAGER, get_current_process},
     },
-    thread::{get_current_thread, misc::SnapshotState, snapshot::ThreadSnapshot},
+    thread::{get_current_thread, misc::SnapshotState, snapshot::ThreadSnapshot, thread::Thread},
 };
 use alloc::vec::Vec;
 
@@ -62,17 +62,38 @@ impl Process {
                             .allocate_user_lazy(16, Permissions::all())
                             .as_u64();
 
-                        current_thread.snapshot_state = SnapshotState::SignalHandler;
-                        current_thread.sig_handler_snapshot = ThreadSnapshot::new(
+                        let sig_handler_ignored_signals =
+                            current_proc.signal_actions[signal as usize].sig_handler_ignored_sigs;
+
+                        let mut thread_snapshot = ThreadSnapshot::new(
                             func as u64,
                             &mut current_proc.addrspace,
                             stack,
                             crate::thread::snapshot::ThreadSnapshotType::Thread,
-                        )
+                        );
+
+                        thread_snapshot.inner.rdi = signal as u64;
+
+                        current_thread
+                            .block_signals_for_handler(sig_handler_ignored_signals, signal);
+                        current_thread.snapshot_state = SnapshotState::SignalHandler;
+                        current_thread.sig_handler_snapshot = thread_snapshot;
                     }
                 }
             }
         }
+    }
+}
+
+impl Thread {
+    fn block_signals_for_handler(&mut self, mut signals_to_block: Signals, signal: Signal) {
+        signals_to_block.insert(Signals::from(signal));
+        self.saved_blocked_signals.push(self.blocked_signals);
+        self.blocked_signals.insert(signals_to_block);
+    }
+
+    pub fn restore_blocked_signals(&mut self) {
+        self.blocked_signals = self.saved_blocked_signals.pop().unwrap();
     }
 }
 
