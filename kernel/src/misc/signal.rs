@@ -3,12 +3,15 @@ use crate::{
         Process,
         manager::{MANAGER, get_current_process},
     },
-    thread::get_current_thread,
+    thread::{get_current_thread, misc::SnapshotState, snapshot::ThreadSnapshot},
 };
 use alloc::vec::Vec;
 
 pub use seele_sys::signal::{SIGNAL_AMOUNT, Signal, SignalHandlerFn};
-use seele_sys::signal::{SignalHandlingType, Signals};
+use seele_sys::{
+    permission::Permissions,
+    signal::{SignalHandlingType, Signals},
+};
 use strum::IntoEnumIterator;
 
 pub mod action {
@@ -47,7 +50,26 @@ impl Process {
                 match handling_type {
                     SignalHandlingType::Default => signal.default_action(),
                     SignalHandlingType::Ignore => {}
-                    SignalHandlingType::Function(_) => todo!(),
+                    SignalHandlingType::Function(func) => {
+                        let current_thread_ref = get_current_thread();
+                        let mut current_thread = current_thread_ref.lock();
+
+                        let current_proc = get_current_process();
+                        let mut current_proc = current_proc.lock();
+
+                        let stack = current_proc
+                            .addrspace
+                            .allocate_user_lazy(16, Permissions::all())
+                            .as_u64();
+
+                        current_thread.snapshot_state = SnapshotState::SignalHandler;
+                        current_thread.sig_handler_snapshot = ThreadSnapshot::new(
+                            func as u64,
+                            &mut current_proc.addrspace,
+                            stack,
+                            crate::thread::snapshot::ThreadSnapshotType::Thread,
+                        )
+                    }
                 }
             }
         }
