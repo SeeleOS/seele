@@ -1,5 +1,3 @@
-use core::fmt::Sign;
-
 use alloc::sync::Arc;
 use seele_sys::signal::Signals;
 use spin::Mutex;
