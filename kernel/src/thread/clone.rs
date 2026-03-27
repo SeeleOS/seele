@@ -1,3 +1,5 @@
+use seele_sys::signal::Signals;
+
 use crate::{
     process::ProcessRef,
     thread::{
@@ -25,6 +27,7 @@ impl Thread {
                 .1
                 .finish()
                 .as_u64(),
+            blocked_signals: Signals::default(),
         };
 
         log::debug!("clone_and_spawn: thread manager lock start");
