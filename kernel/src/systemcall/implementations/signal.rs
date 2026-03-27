@@ -35,3 +35,41 @@ define_syscall!(SendSignal, |process: ProcessRef, signal: Signal| {
     process.lock().send_signal(signal);
     Ok(0)
 });
+
+define_syscall!(
+    BlockSignals,
+    |signals: Signals, old_signals: *mut Signals| {
+        unsafe {
+            *old_signals = get_current_process().lock().blocked_signals;
+
+            get_current_process().lock().blocked_signals.insert(signals);
+        }
+        Ok(0)
+    }
+);
+
+define_syscall!(
+    UnblockSignals,
+    |signals: Signals, old_signals: *mut Signals| {
+        unsafe {
+            *old_signals = get_current_process().lock().blocked_signals;
+
+            get_current_process().lock().blocked_signals.remove(signals);
+        }
+
+        Ok(0)
+    }
+);
+
+define_syscall!(
+    SetBlockedSignals,
+    |signals: Signals, old_signals: *mut Signals| {
+        unsafe {
+            *old_signals = get_current_process().lock().blocked_signals;
+
+            get_current_process().lock().blocked_signals = signals;
+        }
+
+        Ok(0)
+    }
+);
