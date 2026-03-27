@@ -5,6 +5,8 @@ use crate::signal::action::{SignalHandlingType, Signals};
 use crate::systemcall::error::*;
 use crate::systemcall::utils::*;
 use crate::thread::get_current_thread;
+use crate::thread::misc::SnapshotState;
+use crate::thread::scheduling::return_to_executor_no_save;
 use crate::{
     define_syscall,
     process::manager::get_current_process,
@@ -74,3 +76,11 @@ define_syscall!(
         Ok(0)
     }
 );
+
+define_syscall!(SigHandlerReturn, {
+    get_current_thread().lock().snapshot_state = SnapshotState::Normal;
+
+    return_to_executor_no_save();
+
+    unreachable!()
+});

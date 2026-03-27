@@ -46,7 +46,8 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         GetTime,
         BlockSignals,
         UnblockSignals,
-        SetBlockedSignals
+        SetBlockedSignals,
+        SigHandlerReturn
     );
 
     table
