@@ -1,4 +1,5 @@
 use alloc::{sync::Arc, vec::Vec};
+use seele_sys::signal::Signals;
 use spin::{MutexGuard, mutex::Mutex};
 
 use crate::{
@@ -35,6 +36,7 @@ impl Process {
             exit_code: None,
             parent: Some(parent),
             signal_actions: self.signal_actions.clone(),
+            blocked_signals: Signals::default(),
         }));
 
         let new_thread = current_thread.lock().clone_and_spawn(new_process.clone());
