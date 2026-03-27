@@ -40,7 +40,9 @@ impl AddrSpace {
         area.start
     }
 
-    pub fn unmap(&mut self, start: VirtAddr, end: VirtAddr) {
+    pub fn unmap(&mut self, start: VirtAddr, len: u64) {
+        let end = start + len;
+
         for page in Page::<Size4KiB>::range_inclusive(
             Page::containing_address(start),
             Page::containing_address(end),
