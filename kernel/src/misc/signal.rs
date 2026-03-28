@@ -5,9 +5,11 @@ use crate::{
         manager::{MANAGER, get_current_process},
         misc::with_current_process,
     },
+    s_println,
     thread::{
         get_current_thread,
         misc::{SnapshotState, with_current_thread},
+        scheduling::{return_to_executor_from_current, return_to_executor_no_save},
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
         thread::Thread,
     },
@@ -39,7 +41,12 @@ impl Process {
         self.pending_signals.insert(Signals::from(signal));
     }
 
-    pub fn process_signals(&mut self) {
+    /// Returns `true` if a user-space signal handler was installed and the
+    /// caller should stop the current return path so the handler can run next.
+    #[must_use]
+    pub fn process_signals(&mut self) -> bool {
+        let mut ret = false;
+
         for signal in Signal::iter() {
             let signal_bits = Signals::from(signal);
             if self.pending_signals.contains(signal_bits)
@@ -54,71 +61,63 @@ impl Process {
                 match action.handling_type {
                     SignalHandlingType::Default => signal.default_action(),
                     SignalHandlingType::Ignore => {}
-                    SignalHandlingType::Function1(func) => {
-                        with_current_process(|current_proc| {
-                            with_current_thread(|current_thread| {
-                                let (_, mut stack_builder) =
-                                    current_proc.addrspace.allocate_user(16);
-                                stack_builder.push(action.restorer as u64);
+                    SignalHandlingType::Function1(func) => with_current_thread(|current_thread| {
+                        let (_, mut stack_builder) = self.addrspace.allocate_user(16);
+                        stack_builder.push(action.restorer as u64);
 
-                                let mut thread_snapshot = ThreadSnapshot::new(
-                                    func as u64,
-                                    &mut current_proc.addrspace,
-                                    stack_builder.finish().as_u64(),
-                                    ThreadSnapshotType::Thread,
-                                );
+                        let mut thread_snapshot = ThreadSnapshot::new(
+                            func as u64,
+                            &mut self.addrspace,
+                            stack_builder.finish().as_u64(),
+                            ThreadSnapshotType::Thread,
+                        );
 
-                                thread_snapshot.inner.rdi = signal as u64;
+                        thread_snapshot.inner.rdi = signal as u64;
 
-                                current_thread.block_signals_for_handler(
-                                    action.sig_handler_ignored_sigs,
-                                    signal,
-                                );
-                                current_thread.enter_signal_handler(thread_snapshot);
-                            })
-                        });
-                    }
-                    SignalHandlingType::Function2(func) => {
-                        with_current_process(|current_proc| {
-                            with_current_thread(|current_thread| {
-                                let (_, mut stack_builder) =
-                                    current_proc.addrspace.allocate_user(16);
-                                let (_, mut frame_builder) =
-                                    current_proc.addrspace.allocate_user(1);
+                        current_thread
+                            .block_signals_for_handler(action.sig_handler_ignored_sigs, signal);
+                        current_thread.enter_signal_handler(thread_snapshot);
 
-                                let siginfo = SigInfo {
-                                    si_signo: signal as i32,
-                                    ..Default::default()
-                                };
-                                let ucontext = build_signal_ucontext(&current_thread);
+                        ret = true;
+                    }),
+                    SignalHandlingType::Function2(func) => with_current_thread(|current_thread| {
+                        let (_, mut stack_builder) = self.addrspace.allocate_user(16);
+                        let (_, mut frame_builder) = self.addrspace.allocate_user(1);
 
-                                let ucontext_ptr = frame_builder.push_struct(&ucontext);
-                                let siginfo_ptr = frame_builder.push_struct(&siginfo);
+                        let siginfo = SigInfo {
+                            si_signo: signal as i32,
+                            ..Default::default()
+                        };
+                        let ucontext = build_signal_ucontext(&current_thread);
 
-                                stack_builder.push(action.restorer as u64);
+                        let ucontext_ptr = frame_builder.push_struct(&ucontext);
+                        let siginfo_ptr = frame_builder.push_struct(&siginfo);
 
-                                let mut thread_snapshot = ThreadSnapshot::new(
-                                    func as u64,
-                                    &mut current_proc.addrspace,
-                                    stack_builder.finish().as_u64(),
-                                    ThreadSnapshotType::Thread,
-                                );
+                        stack_builder.push(action.restorer as u64);
 
-                                thread_snapshot.inner.rdi = signal as u64;
-                                thread_snapshot.inner.rsi = siginfo_ptr;
-                                thread_snapshot.inner.rdx = ucontext_ptr;
+                        let mut thread_snapshot = ThreadSnapshot::new(
+                            func as u64,
+                            &mut self.addrspace,
+                            stack_builder.finish().as_u64(),
+                            ThreadSnapshotType::Thread,
+                        );
 
-                                current_thread.block_signals_for_handler(
-                                    action.sig_handler_ignored_sigs,
-                                    signal,
-                                );
-                                current_thread.enter_signal_handler(thread_snapshot);
-                            })
-                        });
-                    }
+                        thread_snapshot.inner.rdi = signal as u64;
+                        thread_snapshot.inner.rsi = siginfo_ptr;
+                        thread_snapshot.inner.rdx = ucontext_ptr;
+
+                        s_println!("a");
+                        current_thread
+                            .block_signals_for_handler(action.sig_handler_ignored_sigs, signal);
+                        current_thread.enter_signal_handler(thread_snapshot);
+
+                        ret = true;
+                    }),
                 }
             }
         }
+
+        ret
     }
 }
 

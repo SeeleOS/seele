@@ -1,7 +1,12 @@
 use crate::{
     misc::snapshot::Snapshot,
+    process::misc::with_current_process,
     systemcall::{error::SyscallError, table::SYSCALL_TABLE},
-    thread::THREAD_MANAGER,
+    thread::{
+        THREAD_MANAGER,
+        misc::with_current_thread,
+        scheduling::{return_to_executor_from_current, return_to_executor_no_save},
+    },
 };
 
 #[unsafe(no_mangle)]
@@ -30,6 +35,14 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     );
 
     snapshot.rax = result;
+
+    with_current_thread(|thread| thread.get_appropriate_snapshot().inner = *snapshot);
+
+    if with_current_process(|proc| proc.process_signals()) {
+        // Its fine to no_save becuase we've already saved everything manually
+        // And returned the value (snapshot.rax = result)
+        return_to_executor_no_save();
+    }
 }
 
 fn syscall_handler_unwrapped(
