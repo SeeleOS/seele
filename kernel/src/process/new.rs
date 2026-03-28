@@ -82,7 +82,7 @@ pub fn setup_process(
     objects: &mut Vec<Option<Arc<dyn Object>>>,
 ) -> Result<ThreadSnapshot, FSError> {
     let path_string = path.clone().as_string();
-    if args.first().is_none_or(|arg| arg != &path_string) {
+    if args.first().is_none() {
         args.insert(0, path_string);
     }
 
