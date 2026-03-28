@@ -23,5 +23,5 @@ panic = "abort"
 ovmf-prebuilt = "0.2"
 
 [build-dependencies]
-bootloader = { git = "https://github.com/SeeleOS/bootloader" }
+bootloader = { path = "../bootloader" }
 kernel = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
