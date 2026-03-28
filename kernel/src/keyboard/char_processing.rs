@@ -6,7 +6,7 @@ use spin::mutex::Mutex;
 
 use crate::{
     keyboard::decoding_task::KEYBOARD_QUEUE,
-    object::tty_device::wake_tty_poller_readable,
+    object::tty_device::{get_default_tty, wake_tty_poller_readable},
     print,
     process::misc::with_current_process,
     terminal::{
@@ -54,7 +54,16 @@ pub fn process_char(char: char) {
                 }
             }
         }
-        '\x03' => with_current_process(|proc| proc.send_signal(Signal::Interrupt)),
+        '\x03' => {
+            if let Some(group_id) = *get_default_tty().active_group.lock() {
+                LINE_BUFFER.lock().clear();
+
+                group_id
+                    .get_processes()
+                    .iter()
+                    .for_each(|f| f.lock().send_signal(Signal::Interrupt));
+            }
+        }
         _ => {
             if info.echo {
                 print!("{char}");
