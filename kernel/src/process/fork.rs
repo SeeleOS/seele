@@ -34,6 +34,7 @@ impl Process {
             current_directory: self.current_directory.clone(),
             parent: Some(parent),
             signal_actions: self.signal_actions.clone(),
+            group_id: self.group_id,
             ..Default::default()
         }));
 

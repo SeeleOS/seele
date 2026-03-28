@@ -6,6 +6,7 @@ use x86_64::VirtAddr;
 
 use crate::filesystem::absolute_path::AbsolutePath;
 use crate::memory::addrspace::AddrSpace;
+use crate::process::misc::ProcessGroupID;
 use crate::signal::action::SignalAction;
 use crate::signal::misc::default_signal_action_vec;
 use crate::{object::Object, process::misc::ProcessID, thread::thread::Thread};
@@ -31,11 +32,13 @@ pub struct Process {
     pub parent: Option<ProcessRef>,
     pub signal_actions: Vec<SignalAction>,
     pub pending_signals: Signals,
+    pub group_id: ProcessGroupID,
 }
 
 impl Default for Process {
     fn default() -> Self {
         Process {
+            group_id: ProcessGroupID::default(),
             pending_signals: Signals::default(),
             signal_actions: default_signal_action_vec(),
             pid: ProcessID::default(),
