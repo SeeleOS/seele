@@ -64,6 +64,19 @@ impl StackBuilder {
         user_vaddr.as_u64()
     }
 
+    pub fn push_struct<T: Copy>(&mut self, value: &T) -> u64 {
+        let size = core::mem::size_of::<T>() as u64;
+
+        self.sp -= size;
+        self.write_sp = unsafe { self.write_sp.sub(size as usize) };
+
+        unsafe {
+            self.write_sp.cast::<T>().write_unaligned(*value);
+        }
+
+        self.sp.as_u64()
+    }
+
     pub fn align_down(&mut self, align: u64) {
         let misalignment = self.sp.as_u64() & (align - 1);
         if misalignment == 0 {
