@@ -1,0 +1,14 @@
+[binaries]
+c = ['clang', '--target=x86_64-seele']
+cpp = ['clang++', '--target=x86_64-seele']
+ar = 'llvm-ar'
+strip = 'llvm-strip'
+
+[properties]
+needs_exe_wrapper = true
+
+[host_machine]
+system = 'seele'
+cpu_family = 'x86_64'
+cpu = 'x86_64'
+endian = 'little'
