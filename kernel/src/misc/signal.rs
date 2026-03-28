@@ -32,7 +32,7 @@ pub mod misc {
 
 impl Process {
     pub fn get_signal_action(&mut self, signal: Signal) -> &mut action::SignalAction {
-        &mut self.signal_actions[signal as usize]
+        &mut self.signal_actions[signal.index()]
     }
 
     pub fn send_signal(&mut self, signal: Signal) {
@@ -48,7 +48,7 @@ impl Process {
                     .blocked_signals
                     .contains(signal_bits)
             {
-                let action = self.signal_actions[signal as usize].clone();
+                let action = self.signal_actions[signal.index()].clone();
                 self.pending_signals.remove(signal_bits);
 
                 match action.handling_type {
@@ -195,7 +195,9 @@ impl SignalExtension for Signal {
             | Self::Hangup
             | Self::FloatingPointError
             | Self::IllegalInstruction
-            | Self::Trap => {
+            | Self::Trap
+            | Self::User1
+            | Self::User2 => {
                 let current = get_current_process();
                 MANAGER.lock().destroy_process(current);
             }
