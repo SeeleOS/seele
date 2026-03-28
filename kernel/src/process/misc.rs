@@ -6,7 +6,7 @@ use elfloader::LoadedElf;
 use crate::{
     filesystem::{absolute_path::AbsolutePath, errors::FSError, vfs::VirtualFS},
     misc::stack_builder::StackBuilder,
-    process::Process,
+    process::{Process, manager::get_current_process},
 };
 
 impl Process {
@@ -62,4 +62,13 @@ pub fn init_stack_layout(
 
     // argc
     builder.push(args.len() as u64);
+}
+
+pub fn with_current_process<R, F>(func: F) -> R
+where
+    F: FnOnce(&mut Process) -> R,
+{
+    let current_process_ref = get_current_process();
+    let mut current_process = current_process_ref.lock();
+    func(&mut current_process)
 }
