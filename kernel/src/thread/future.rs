@@ -79,7 +79,11 @@ impl Future for ThreadFuture {
             )
         };
 
-        let _ = self.0.lock().parent.lock().process_signals();
+        let process = {
+            let thread = self.0.lock();
+            thread.parent.clone()
+        };
+        let _ = process.lock().process_signals();
 
         let state = self.0.lock().state.clone();
 
