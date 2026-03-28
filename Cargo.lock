@@ -181,7 +181,7 @@ dependencies = [
 [[package]]
 name = "bootloader"
 version = "0.11.15"
-source = "git+https://github.com/rust-osdev/bootloader?branch=enhancement%2Fbios-disk-speed#65f5385421b6e887a685a445f68ad278d07810dd"
+source = "git+https://github.com/SeeleOS/bootloader#d937698e2098168e60bbd3cc954e2d67549685f0"
 dependencies = [
  "anyhow",
  "bootloader-boot-config",
@@ -196,7 +196,7 @@ dependencies = [
 [[package]]
 name = "bootloader-boot-config"
 version = "0.11.15"
-source = "git+https://github.com/rust-osdev/bootloader?branch=enhancement%2Fbios-disk-speed#65f5385421b6e887a685a445f68ad278d07810dd"
+source = "git+https://github.com/SeeleOS/bootloader#d937698e2098168e60bbd3cc954e2d67549685f0"
 dependencies = [
  "serde",
 ]
