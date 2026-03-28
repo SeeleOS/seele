@@ -1,8 +1,10 @@
 use alloc::{string::String, vec::Vec};
-use seele_sys::{permission::Permissions, signal::Signals};
+use futures_util::future::OkInto;
+use seele_sys::{misc::SystemInfo, permission::Permissions, signal::Signals};
 use x86_64::VirtAddr;
 
 use crate::{
+    define_syscall,
     filesystem::info::LinuxStat,
     misc::{
         c_types::{CString, CVec},
@@ -58,104 +60,43 @@ add_syscall_arg_type!(
     *mut Signals
 );
 
-impl SyscallArg for Signals {
-    fn from_u64(val: u64) -> Result<Self, SyscallError>
-    where
-        Self: Sized,
-    {
-        Signals::from_bits(val).ok_or(SyscallError::InvalidArguments)
-    }
-}
+add_syscall_arg_type!(Signals, val, {
+    Signals::from_bits(val).ok_or(SyscallError::InvalidArguments)
+});
 
-impl SyscallArg for Vec<String> {
-    fn from_u64(val: u64) -> Result<Self, SyscallError>
-    where
-        Self: Sized,
-    {
-        Ok(Vec::k_from(val as CVec<CString>)?)
-    }
-}
+add_syscall_arg_type!(Vec<String>, val, {
+    Vec::k_from(val as CVec<CString>).map_err(Into::into)
+});
 
-impl SyscallArg for String {
-    fn from_u64(val: u64) -> Result<Self, SyscallError> {
-        Ok(String::k_from(val as *const u8)?)
-    }
-}
+add_syscall_arg_type!(String, val, {
+    String::k_from(val as *const u8).map_err(Into::into)
+});
 
-impl SyscallArg for bool {
-    fn from_u64(val: u64) -> Result<Self, SyscallError>
-    where
-        Self: Sized,
-    {
-        Ok(val != 0)
-    }
-}
+add_syscall_arg_type!(bool, val, { Ok(val != 0) });
 
-impl SyscallArg for ProcessID {
-    fn from_u64(val: u64) -> Result<Self, SyscallError>
-    where
-        Self: Sized,
-    {
-        Ok(ProcessID(val))
-    }
-}
+add_syscall_arg_type!(ProcessID, val, { Ok(ProcessID(val)) });
 
-impl SyscallArg for ObjectRef {
-    fn from_u64(val: u64) -> Result<Self, SyscallError>
-    where
-        Self: Sized,
-    {
-        get_object_current_process(val).map_err(Into::into)
-    }
-}
+add_syscall_arg_type!(ObjectRef, val, {
+    get_object_current_process(val).map_err(Into::into)
+});
 
-impl SyscallArg for PollableEvent {
-    fn from_u64(val: u64) -> Result<Self, SyscallError>
-    where
-        Self: Sized,
-    {
-        Ok(PollableEvent::from(val))
-    }
-}
+add_syscall_arg_type!(PollableEvent, val, { Ok(PollableEvent::from(val)) });
 
-impl SyscallArg for Signal {
-    fn from_u64(val: u64) -> Result<Self, SyscallError>
-    where
-        Self: Sized,
-    {
-        Signal::try_from(val).map_err(|_| SyscallError::InvalidArguments)
-    }
-}
+add_syscall_arg_type!(Signal, val, {
+    Signal::try_from(val).map_err(|_| SyscallError::InvalidArguments)
+});
 
-impl SyscallArg for ProcessRef {
-    fn from_u64(val: u64) -> Result<Self, SyscallError>
-    where
-        Self: Sized,
-    {
-        MANAGER
-            .lock()
-            .processes
-            .get(&ProcessID(val))
-            .ok_or(SyscallError::NoProcess)
-            .cloned()
-            .map_err(Into::into)
-    }
-}
+add_syscall_arg_type!(ProcessRef, val, {
+    MANAGER
+        .lock()
+        .processes
+        .get(&ProcessID(val))
+        .ok_or(SyscallError::NoProcess)
+        .cloned()
+});
 
-impl SyscallArg for VirtAddr {
-    fn from_u64(val: u64) -> Result<Self, SyscallError>
-    where
-        Self: Sized,
-    {
-        Ok(VirtAddr::new(val))
-    }
-}
+add_syscall_arg_type!(VirtAddr, val, { Ok(VirtAddr::new(val)) });
 
-impl SyscallArg for Permissions {
-    fn from_u64(val: u64) -> Result<Self, SyscallError>
-    where
-        Self: Sized,
-    {
-        Permissions::from_bits(val).ok_or(SyscallError::InvalidArguments)
-    }
-}
+add_syscall_arg_type!(Permissions, val, {
+    Permissions::from_bits(val).ok_or(SyscallError::InvalidArguments)
+});
