@@ -1,12 +1,14 @@
 use core::char;
 
 use alloc::collections::vec_deque::VecDeque;
+use seele_sys::signal::Signal;
 use spin::mutex::Mutex;
 
 use crate::{
     keyboard::decoding_task::KEYBOARD_QUEUE,
     object::tty_device::wake_tty_poller_readable,
     print,
+    process::misc::with_current_process,
     terminal::{
         misc::{LINE_BUFFER, flush_line_buffer},
         state::DEFAULT_TERMINAL,
@@ -52,6 +54,7 @@ pub fn process_char(char: char) {
                 }
             }
         }
+        '\x03' => with_current_process(|proc| proc.send_signal(Signal::Interrupt)),
         _ => {
             if info.echo {
                 print!("{char}");

@@ -8,7 +8,7 @@ lazy_static! {
         Mutex::new(Keyboard::new(
             ScancodeSet1::new(),
             layouts::Us104Key,
-            pc_keyboard::HandleControl::Ignore
+            pc_keyboard::HandleControl::MapLettersToUnicode
         ));
 }
 
