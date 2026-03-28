@@ -5,8 +5,9 @@ use core::{
 
 use spin::MutexGuard;
 
-use crate::thread::{
-    get_current_thread, snapshot::ThreadSnapshot, thread::Thread, yielding::BlockType,
+use crate::{
+    define_with_accessor,
+    thread::{get_current_thread, snapshot::ThreadSnapshot, thread::Thread, yielding::BlockType},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -53,11 +54,4 @@ impl Thread {
     }
 }
 
-pub fn with_current_thread<R, F>(func: F) -> R
-where
-    F: FnOnce(&mut Thread) -> R,
-{
-    let current_thread_ref = get_current_thread();
-    let mut current_thread = current_thread_ref.lock();
-    func(&mut current_thread)
-}
+define_with_accessor!("current_thread", Thread, get_current_thread);

@@ -46,3 +46,19 @@ pub fn permissions_to_flags(permissions: Permissions) -> PageTableFlags {
 
     flags
 }
+
+#[macro_export]
+macro_rules! define_with_accessor {
+    ($name: literal, $type: ty, $getter: ident) => {
+        paste::paste! {
+            pub fn [<with_$name>]<R, F>(func: F) -> R
+            where
+                F: FnOnce(&mut $type) -> R,
+            {
+                let current_thread_ref = $getter();
+                let mut current_thread = current_thread_ref.lock();
+                func(&mut current_thread)
+            }
+        }
+    };
+}
