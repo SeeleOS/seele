@@ -35,7 +35,8 @@ fn main() {
     let vars = prebuilt.get_file(Arch::X64, FileType::Vars);
 
     cmd.arg("-drive")
-        .arg(format!("format=raw,file={uefi_path}"));
+        .arg(format!("if=none,format=raw,file={uefi_path},id=bootdisk"));
+    cmd.arg("-device").arg("virtio-blk-pci,drive=bootdisk");
     cmd.arg("-drive").arg(format!(
         "if=pflash,format=raw,unit=0,file={},readonly=on",
         code.display()
