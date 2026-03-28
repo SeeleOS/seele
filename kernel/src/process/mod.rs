@@ -33,9 +33,9 @@ pub struct Process {
     pub pending_signals: Signals,
 }
 
-impl Process {
-    pub fn empty() -> ProcessRef {
-        Arc::new(Mutex::new(Process {
+impl Default for Process {
+    fn default() -> Self {
+        Process {
             pending_signals: Signals::default(),
             signal_actions: default_signal_action_vec(),
             pid: ProcessID::default(),
@@ -46,6 +46,12 @@ impl Process {
             objects: Vec::new(),
             exit_code: None,
             parent: None,
-        }))
+        }
+    }
+}
+
+impl Process {
+    pub fn empty() -> ProcessRef {
+        Arc::new(Mutex::new(Self::default()))
     }
 }
