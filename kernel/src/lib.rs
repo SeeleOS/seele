@@ -6,6 +6,8 @@
 
 extern crate alloc;
 
+pub const NAME: &str = "Seele";
+
 pub mod acpi;
 pub mod filesystem;
 pub mod interrupts;

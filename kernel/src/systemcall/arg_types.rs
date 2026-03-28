@@ -57,7 +57,8 @@ add_syscall_arg_type!(
     i32,
     *mut SignalAction,
     *const SignalAction,
-    *mut Signals
+    *mut Signals,
+    *mut SystemInfo
 );
 
 add_syscall_arg_type!(Signals, val, {
