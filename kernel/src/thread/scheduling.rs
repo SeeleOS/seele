@@ -13,7 +13,7 @@ pub fn return_to_executor(snapshot: &mut Snapshot, snapshot_type: ThreadSnapshot
         let mut current = current_ref.lock();
 
         (
-            &mut current.snapshot as *mut ThreadSnapshot,
+            current.get_appropriate_snapshot() as *mut ThreadSnapshot,
             &mut current.executor_snapshot as *mut ThreadSnapshot,
         )
     };
@@ -53,7 +53,7 @@ pub fn return_to_executor_no_save() {
         let mut current = current_ref.lock();
 
         (
-            &mut current.snapshot as *mut ThreadSnapshot,
+            current.get_appropriate_snapshot() as *mut ThreadSnapshot,
             &mut current.executor_snapshot as *mut ThreadSnapshot,
         )
     };

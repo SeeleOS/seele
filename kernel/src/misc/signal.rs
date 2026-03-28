@@ -1,17 +1,21 @@
 use crate::{
+    misc::snapshot::Snapshot,
     process::{
         Process,
         manager::{MANAGER, get_current_process},
+        misc::with_current_process,
     },
-    thread::{get_current_thread, misc::SnapshotState, snapshot::ThreadSnapshot, thread::Thread},
+    thread::{
+        get_current_thread,
+        misc::{SnapshotState, with_current_thread},
+        snapshot::{ThreadSnapshot, ThreadSnapshotType},
+        thread::Thread,
+    },
 };
 use alloc::vec::Vec;
 
-pub use seele_sys::signal::{SIGNAL_AMOUNT, Signal, SignalHandlerFn};
-use seele_sys::{
-    permission::Permissions,
-    signal::{SignalHandlingType, Signals},
-};
+pub use seele_sys::signal::{SIGNAL_AMOUNT, SigHandlerFn2, Signal, SignalHandlerFn};
+use seele_sys::signal::{SigInfo, SignalHandlingType, Signals, UContext};
 use strum::IntoEnumIterator;
 
 pub mod action {
@@ -44,37 +48,73 @@ impl Process {
                     .blocked_signals
                     .contains(signal_bits)
             {
-                let handling_type = self.signal_actions[signal as usize].handling_type.clone();
+                let action = self.signal_actions[signal as usize].clone();
                 self.pending_signals.remove(signal_bits);
 
-                match handling_type {
+                match action.handling_type {
                     SignalHandlingType::Default => signal.default_action(),
                     SignalHandlingType::Ignore => {}
-                    SignalHandlingType::Function(func) => {
-                        let current_thread_ref = get_current_thread();
-                        let mut current_thread = current_thread_ref.lock();
+                    SignalHandlingType::Function1(func) => {
+                        with_current_process(|current_proc| {
+                            with_current_thread(|current_thread| {
+                                let (_, mut stack_builder) =
+                                    current_proc.addrspace.allocate_user(16);
+                                stack_builder.push(action.restorer as u64);
 
-                        let current_proc = get_current_process();
-                        let mut current_proc = current_proc.lock();
+                                let mut thread_snapshot = ThreadSnapshot::new(
+                                    func as u64,
+                                    &mut current_proc.addrspace,
+                                    stack_builder.finish().as_u64(),
+                                    ThreadSnapshotType::Thread,
+                                );
 
-                        let (stack, _) = current_proc.addrspace.allocate_user(16);
+                                thread_snapshot.inner.rdi = signal as u64;
 
-                        let sig_handler_ignored_signals =
-                            current_proc.signal_actions[signal as usize].sig_handler_ignored_sigs;
+                                current_thread.block_signals_for_handler(
+                                    action.sig_handler_ignored_sigs,
+                                    signal,
+                                );
+                                current_thread.enter_signal_handler(thread_snapshot);
+                            })
+                        });
+                    }
+                    SignalHandlingType::Function2(func) => {
+                        with_current_process(|current_proc| {
+                            with_current_thread(|current_thread| {
+                                let (_, mut stack_builder) =
+                                    current_proc.addrspace.allocate_user(16);
+                                let (_, mut frame_builder) =
+                                    current_proc.addrspace.allocate_user(1);
 
-                        let mut thread_snapshot = ThreadSnapshot::new(
-                            func as u64,
-                            &mut current_proc.addrspace,
-                            stack.as_u64(),
-                            crate::thread::snapshot::ThreadSnapshotType::Thread,
-                        );
+                                let siginfo = SigInfo {
+                                    si_signo: signal as i32,
+                                    ..Default::default()
+                                };
+                                let ucontext = build_signal_ucontext(&current_thread);
 
-                        thread_snapshot.inner.rdi = signal as u64;
+                                let ucontext_ptr = frame_builder.push_struct(&ucontext);
+                                let siginfo_ptr = frame_builder.push_struct(&siginfo);
 
-                        current_thread
-                            .block_signals_for_handler(sig_handler_ignored_signals, signal);
-                        current_thread.snapshot_state = SnapshotState::SignalHandler;
-                        current_thread.sig_handler_snapshot = thread_snapshot;
+                                stack_builder.push(action.restorer as u64);
+
+                                let mut thread_snapshot = ThreadSnapshot::new(
+                                    func as u64,
+                                    &mut current_proc.addrspace,
+                                    stack_builder.finish().as_u64(),
+                                    ThreadSnapshotType::Thread,
+                                );
+
+                                thread_snapshot.inner.rdi = signal as u64;
+                                thread_snapshot.inner.rsi = siginfo_ptr;
+                                thread_snapshot.inner.rdx = ucontext_ptr;
+
+                                current_thread.block_signals_for_handler(
+                                    action.sig_handler_ignored_sigs,
+                                    signal,
+                                );
+                                current_thread.enter_signal_handler(thread_snapshot);
+                            })
+                        });
                     }
                 }
             }
@@ -89,9 +129,53 @@ impl Thread {
         self.blocked_signals.insert(signals_to_block);
     }
 
-    pub fn restore_blocked_signals(&mut self) {
-        self.blocked_signals = self.saved_blocked_signals.pop().unwrap();
+    fn enter_signal_handler(&mut self, snapshot: ThreadSnapshot) {
+        self.snapshot_state = SnapshotState::SignalHandler;
+        self.sig_handler_snapshot = snapshot;
     }
+
+    pub fn restore_blocked_signals(&mut self) {
+        if let Some(mask) = self.saved_blocked_signals.pop() {
+            self.blocked_signals = mask;
+        }
+    }
+}
+
+fn build_signal_ucontext(thread: &Thread) -> UContext {
+    let snapshot = match thread.snapshot_state {
+        SnapshotState::Normal => &thread.snapshot.inner,
+        SnapshotState::SignalHandler => &thread.sig_handler_snapshot.inner,
+    };
+
+    UContext {
+        blocked_signals: thread.blocked_signals.bits(),
+        gregs: snapshot_to_gregs(snapshot),
+    }
+}
+
+fn snapshot_to_gregs(snapshot: &Snapshot) -> [u64; 20] {
+    [
+        snapshot.r15,
+        snapshot.r14,
+        snapshot.r13,
+        snapshot.r12,
+        snapshot.r11,
+        snapshot.r10,
+        snapshot.r9,
+        snapshot.r8,
+        snapshot.rdi,
+        snapshot.rsi,
+        snapshot.rbp,
+        snapshot.rbx,
+        snapshot.rdx,
+        snapshot.rcx,
+        snapshot.rax as u64,
+        snapshot.rip,
+        snapshot.cs,
+        snapshot.rflags,
+        snapshot.rsp,
+        snapshot.ss,
+    ]
 }
 
 pub trait SignalExtension {
