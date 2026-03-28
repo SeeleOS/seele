@@ -25,6 +25,17 @@ macro_rules! add_syscall_arg_type {
             }
         )*
     };
+
+    ($type: ty, $name: ident, $convert: expr) => {
+        impl SyscallArg for $type {
+            fn from_u64($name: u64) -> Result<Self, SyscallError>
+            where
+                Self: Sized,
+            {
+                $convert
+            }
+        }
+    }
 }
 
 pub trait SyscallArg {
