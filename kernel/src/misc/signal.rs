@@ -1,15 +1,10 @@
 use crate::{
     misc::snapshot::Snapshot,
-    process::{
-        Process,
-        manager::{MANAGER, get_current_process},
-        misc::with_current_process,
-    },
-    s_println,
+    process::Process,
     thread::{
+        THREAD_MANAGER,
         get_current_thread,
         misc::{SnapshotState, with_current_thread},
-        scheduling::{return_to_executor_from_current, return_to_executor_no_save},
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
         thread::Thread,
     },
@@ -59,7 +54,11 @@ impl Process {
                 self.pending_signals.remove(signal_bits);
 
                 match action.handling_type {
-                    SignalHandlingType::Default => signal.default_action(),
+                    SignalHandlingType::Default => {
+                        if self.default_signal_action(signal) {
+                            ret = true;
+                        }
+                    }
                     SignalHandlingType::Ignore => {}
                     SignalHandlingType::Function1(func) => with_current_thread(|current_thread| {
                         let (_, mut stack_builder) = self.addrspace.allocate_user(16);
@@ -106,7 +105,6 @@ impl Process {
                         thread_snapshot.inner.rsi = siginfo_ptr;
                         thread_snapshot.inner.rdx = ucontext_ptr;
 
-                        s_println!("a");
                         current_thread
                             .block_signals_for_handler(action.sig_handler_ignored_sigs, signal);
                         current_thread.enter_signal_handler(thread_snapshot);
@@ -118,6 +116,41 @@ impl Process {
         }
 
         ret
+    }
+
+    fn default_signal_action(&mut self, signal: Signal) -> bool {
+        match signal {
+            Signal::Terminate
+            | Signal::Kill
+            | Signal::Interrupt
+            | Signal::Quit
+            | Signal::Abort
+            | Signal::InvalidMemoryAccess
+            | Signal::BrokenPipe
+            | Signal::Hangup
+            | Signal::FloatingPointError
+            | Signal::IllegalInstruction
+            | Signal::Trap
+            | Signal::User1
+            | Signal::User2 => {
+                let threads = self.threads.clone();
+                let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+
+                for thread in threads {
+                    if let Some(thread) = thread.upgrade() {
+                        thread_manager.mark_thread_exited(thread);
+                    }
+                }
+
+                self.exit_code = Some(signal as u64);
+                true
+            }
+            Signal::ChildChanged => false,
+            Signal::Stop => todo!(),
+            Signal::Continue => false,
+            Signal::Alarm => false,
+            Signal::TerminalStop => todo!(),
+        }
     }
 }
 
@@ -175,36 +208,4 @@ fn snapshot_to_gregs(snapshot: &Snapshot) -> [u64; 20] {
         snapshot.rsp,
         snapshot.ss,
     ]
-}
-
-pub trait SignalExtension {
-    fn default_action(&self);
-}
-
-impl SignalExtension for Signal {
-    fn default_action(&self) {
-        match self {
-            Self::Terminate
-            | Self::Kill
-            | Self::Interrupt
-            | Self::Quit
-            | Self::Abort
-            | Self::InvalidMemoryAccess
-            | Self::BrokenPipe
-            | Self::Hangup
-            | Self::FloatingPointError
-            | Self::IllegalInstruction
-            | Self::Trap
-            | Self::User1
-            | Self::User2 => {
-                let current = get_current_process();
-                MANAGER.lock().destroy_process(current);
-            }
-            Self::ChildChanged => {}
-            Self::Stop => todo!(),
-            Self::Continue => {}
-            Self::Alarm => {}
-            Self::TerminalStop => todo!(),
-        }
-    }
 }
