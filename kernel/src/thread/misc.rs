@@ -3,7 +3,11 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::thread::{snapshot::ThreadSnapshot, thread::Thread, yielding::BlockType};
+use spin::MutexGuard;
+
+use crate::thread::{
+    get_current_thread, snapshot::ThreadSnapshot, thread::Thread, yielding::BlockType,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ThreadID(pub u64);
@@ -47,4 +51,13 @@ impl Thread {
             SnapshotState::SignalHandler => &mut self.sig_handler_snapshot,
         }
     }
+}
+
+pub fn with_current_thread<R, F>(func: F) -> R
+where
+    F: FnOnce(&mut Thread) -> R,
+{
+    let current_thread_ref = get_current_thread();
+    let mut current_thread = current_thread_ref.lock();
+    func(&mut current_thread)
 }
