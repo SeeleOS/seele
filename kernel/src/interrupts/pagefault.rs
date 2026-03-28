@@ -9,10 +9,11 @@ use x86_64::{
 
 use crate::{
     memory::addrspace::cow::COW_FLAG,
-    process::manager::{MANAGER, get_current_process},
+    process::manager::{get_current_process, terminate_process},
     s_println,
     thread::scheduling::return_to_executor_no_save,
 };
+use seele_sys::signal::Signal;
 
 pub extern "x86-interrupt" fn pagefault_handler(
     stack_frame: InterruptStackFrame,
@@ -55,7 +56,7 @@ fn actual_pagefault_handler(
     s_println!("stack frame {:#?}", stack_frame);
     s_println!("address {:?}", address);
 
-    MANAGER.lock().terminate_process(get_current_process());
+    terminate_process(get_current_process(), Signal::InvalidMemoryAccess as u64);
 
     return_to_executor_no_save();
 

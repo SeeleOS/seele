@@ -4,7 +4,7 @@ use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
     process::{Process, ProcessRef, misc::ProcessID},
-    thread::{THREAD_MANAGER, manager::ThreadManager},
+    thread::{THREAD_MANAGER, ThreadRef, manager::ThreadManager},
 };
 
 lazy_static! {
@@ -41,20 +41,8 @@ impl Manager {
         thread_manager.wake_process_exit_waiters(process.lock().pid);
     }
 
-    pub fn terminate_process(&mut self, process: ProcessRef) {
-        for thread in &process.lock().threads {
-            THREAD_MANAGER
-                .get()
-                .unwrap()
-                .lock()
-                .mark_thread_exited(thread.upgrade().unwrap());
-        }
-    }
-
-    pub fn destroy_process(&mut self, process: ProcessRef) {
-        log::debug!("destroy process {}", process.lock().pid.0);
+    pub fn reap_process(&mut self, process: ProcessRef) {
         self.processes.remove(&process.lock().pid);
-
         process.lock().addrspace.clean();
     }
 
@@ -68,4 +56,30 @@ impl Manager {
 
 pub fn get_current_process() -> ProcessRef {
     MANAGER.lock().current.clone().unwrap()
+}
+
+pub fn terminate_process(process: ProcessRef, exit_code: u64) {
+    let threads = {
+        let mut process = process.lock();
+        process.terminate_inner(exit_code)
+    };
+
+    let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+    for thread in threads {
+        thread_manager.mark_thread_exited(thread);
+    }
+}
+
+impl Process {
+    #[must_use]
+    pub fn terminate_inner(&mut self, exit_code: u64) -> Vec<ThreadRef> {
+        if self.exit_code.is_none() {
+            self.exit_code = Some(exit_code);
+        }
+
+        self.threads
+            .iter()
+            .filter_map(|thread| thread.upgrade())
+            .collect()
+    }
 }

@@ -4,7 +4,7 @@ use crate::{
     define_syscall,
     process::{
         execve::execve,
-        manager::{MANAGER, get_current_process},
+        manager::{MANAGER, get_current_process, terminate_process},
         misc::ProcessID,
     },
     s_print,
@@ -67,7 +67,7 @@ define_syscall!(
                     }
                 }
                 let pid = process.lock().pid.0;
-                MANAGER.lock().destroy_process(process);
+                MANAGER.lock().reap_process(process);
                 s_print!("exit");
                 Ok(pid as usize)
             }
@@ -89,15 +89,7 @@ define_syscall!(Execve, |path_str: String,
 });
 
 define_syscall!(Exit, |exit_code: u64| {
-    let mut manager = THREAD_MANAGER.get().unwrap().lock();
-    log::debug!(
-        "exit: pid {} code {}",
-        get_current_process().lock().pid.0,
-        exit_code
-    );
-    manager.mark_current_thread_exited();
-    get_current_process().lock().exit_code = Some(exit_code);
-    drop(manager);
+    terminate_process(get_current_process(), exit_code);
     return_to_executor_no_save();
     panic!("What the fuck")
 });

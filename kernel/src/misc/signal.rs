@@ -2,8 +2,7 @@ use crate::{
     misc::snapshot::Snapshot,
     process::Process,
     thread::{
-        THREAD_MANAGER,
-        get_current_thread,
+        THREAD_MANAGER, get_current_thread,
         misc::{SnapshotState, with_current_thread},
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
         thread::Thread,
@@ -133,16 +132,12 @@ impl Process {
             | Signal::Trap
             | Signal::User1
             | Signal::User2 => {
-                let threads = self.threads.clone();
+                let threads = self.terminate_inner(signal as u64);
                 let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-
                 for thread in threads {
-                    if let Some(thread) = thread.upgrade() {
-                        thread_manager.mark_thread_exited(thread);
-                    }
+                    thread_manager.mark_thread_exited(thread);
                 }
 
-                self.exit_code = Some(signal as u64);
                 true
             }
             Signal::ChildChanged => false,
