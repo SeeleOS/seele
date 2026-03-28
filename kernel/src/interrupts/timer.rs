@@ -57,5 +57,5 @@ pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
 
     return_to_executor(snapshot, ThreadSnapshotType::Thread);
 
-    panic!("What the fuck");
+    unreachable!();
 }

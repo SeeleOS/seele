@@ -56,5 +56,6 @@ pub fn execve(path: Path, args: Vec<String>, env: Vec<String>) -> Result<(), FSE
     };
 
     unsafe { (*snapshot).switch_from(None, None) };
-    panic!("What the fuck")
+
+    unreachable!();
 }
