@@ -30,12 +30,11 @@ impl Process {
             pending_signals: self.pending_signals,
             addrspace: self.addrspace.clone_all(),
             kernel_stack_top: self.kernel_stack_top,
-            threads: Vec::new(),
             objects: self.objects.clone(),
             current_directory: self.current_directory.clone(),
-            exit_code: None,
             parent: Some(parent),
             signal_actions: self.signal_actions.clone(),
+            ..Default::default()
         }));
 
         let new_thread = current_thread.lock().clone_and_spawn(new_process.clone());

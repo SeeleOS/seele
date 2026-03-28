@@ -42,16 +42,10 @@ impl Process {
         let kernel_stack_top = addrspace.allocate_kernel(16).1.finish();
 
         let process_arc = Arc::new(Mutex::new(Process {
-            pending_signals: Signals::default(),
             pid,
             addrspace,
             kernel_stack_top,
-            current_directory: AbsolutePath::default(),
-            threads: Vec::new(),
-            exit_code: None,
-            signal_actions: default_signal_action_vec(),
-            objects: Vec::new(),
-            parent: None,
+            ..Default::default()
         }));
 
         let process = &mut *process_arc.lock();
