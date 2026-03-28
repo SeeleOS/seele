@@ -1,17 +1,17 @@
 use alloc::sync::Arc;
 use conquer_once::spin::OnceCell;
-use spin::Mutex;
+use spin::{Mutex, mutex::Mutex};
 
 use crate::{
     impl_cast_function,
-    keyboard::decoding_task::KEYBOARD_QUEUE,
-    keyboard::object::KeyboardObject,
+    keyboard::{decoding_task::KEYBOARD_QUEUE, object::KeyboardObject},
     object::{
         Object,
         misc::ObjectRef,
         traits::{Configuratable, Controllable, Readable, Writable},
     },
     polling::event::PollableEvent,
+    process::group::ProcessGroupID,
     terminal::object::TerminalObject,
     thread::THREAD_MANAGER,
 };
@@ -44,11 +44,17 @@ pub fn wake_tty_poller_readable() {
 #[derive(Debug)]
 pub struct TtyDevice {
     terminal: Arc<Mutex<TerminalObject>>,
+    /// The foreground process group currently attached to this tty.
+    /// Line-discipline generated signals such as Ctrl+C should be sent here.
+    pub active_group: Mutex<Option<ProcessGroupID>>,
 }
 
 impl TtyDevice {
     pub fn new(terminal: Arc<Mutex<TerminalObject>>) -> Self {
-        Self { terminal }
+        Self {
+            terminal,
+            active_group: Mutex::new(None),
+        }
     }
 }
 

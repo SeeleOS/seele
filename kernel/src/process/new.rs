@@ -12,7 +12,7 @@ use crate::{
         absolute_path::AbsolutePath, errors::FSError, path::Path, vfs_operations::read_all,
     },
     memory::addrspace::AddrSpace,
-    object::Object,
+    object::{Object, tty_device::get_default_tty},
     process::{
         Process, ProcessRef,
         misc::{ProcessID, init_stack_layout},
@@ -67,6 +67,8 @@ impl Process {
             .push(Arc::downgrade(&THREAD_MANAGER.get().unwrap().lock().spawn(
                 Thread::from_snapshot(context, process_arc.clone(), kernel_stack_top.as_u64()),
             )));
+
+        *get_default_tty().active_group.lock() = Some(process.group_id);
 
         process_arc.clone()
     }
