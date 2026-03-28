@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 use conquer_once::spin::OnceCell;
-use spin::{Mutex, mutex::Mutex};
+use spin::Mutex;
 
 use crate::{
     impl_cast_function,
