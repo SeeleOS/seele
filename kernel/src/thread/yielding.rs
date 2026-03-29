@@ -89,6 +89,21 @@ macro_rules! register_wake_func {
 }
 
 impl ThreadManager {
+    // Process all the blocked thread for timed out ones and wake them
+    pub fn process_timed_out_threads(&mut self) {
+        let mut to_wake = Vec::new();
+
+        for thread in &self.blocked_queues.any {
+            if let State::Blocked(block_type) = &mut thread.clone().lock().state
+                && block_type.is_timed_out()
+            {
+                to_wake.push(thread.clone());
+            }
+        }
+
+        to_wake.iter().for_each(|f| self.wake(f.clone()));
+    }
+
     fn block(&mut self, thread_ref: ThreadRef, block_type: BlockType) {
         log::debug!("thread block: {:?}", block_type);
         let mut thread = thread_ref.lock();
