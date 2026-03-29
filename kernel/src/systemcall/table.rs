@@ -43,12 +43,13 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         SendSignal,
         UpdateMemPerms,
         DeallocateMem,
-        GetTime,
         BlockSignals,
         UnblockSignals,
         SetBlockedSignals,
         SigHandlerReturn,
-        GetSystemInfo
+        GetSystemInfo,
+        GetCurrentTime,
+        TimeSinceBoot
     );
 
     table
