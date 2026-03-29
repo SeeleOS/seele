@@ -16,6 +16,7 @@ pub mod signal;
 pub mod snapshot;
 pub mod stack_builder;
 pub mod testing;
+pub mod time;
 pub mod tss;
 
 pub use cpu_core_context::*;

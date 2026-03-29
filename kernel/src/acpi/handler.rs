@@ -3,7 +3,9 @@ use core::ptr::NonNull;
 use acpi::{Handler, PhysicalMapping};
 use x86_64::instructions::port::Port;
 
-use crate::{memory::utils::apply_offset, read_addr, read_port, write_addr, write_port};
+use crate::{
+    memory::utils::apply_offset, misc::time::Time, read_addr, read_port, write_addr, write_port,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ACPIHandler;
@@ -108,7 +110,7 @@ impl Handler for ACPIHandler {
     }
 
     fn nanos_since_boot(&self) -> u64 {
-        0
+        Time::since_boot().as_nanoseconds()
     }
 
     fn stall(&self, _microseconds: u64) {
