@@ -71,7 +71,9 @@ define_syscall!(PollerWait, |poller: ObjectRef,
         }
 
         let poller_ref: Arc<dyn crate::object::Object> = poller.clone();
-        block_current(BlockType::WakeRequired(WakeType::Poller(poller_ref)));
+        block_current(BlockType::WakeRequired {
+            wake_type: WakeType::Poller(poller_ref),
+        });
     }
 
     let woken_events = poller.take_woken_events(maxevents);

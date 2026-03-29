@@ -24,7 +24,9 @@ impl Readable for KeyboardObject {
 
             if queue.is_empty() {
                 drop(queue);
-                block_current(BlockType::WakeRequired(WakeType::Keyboard));
+                block_current(BlockType::WakeRequired {
+                    wake_type: WakeType::Keyboard,
+                });
             } else {
                 let mut read_chars = 0;
                 while read_chars < buffer.len() {
