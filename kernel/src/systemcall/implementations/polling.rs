@@ -54,7 +54,7 @@ define_syscall!(
 define_syscall!(PollerWait, |poller: ObjectRef,
                              events_ptr: *mut PollResult,
                              maxevents: usize,
-                             timeout: i32| {
+                             timeout: u64| {
     if maxevents == 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -73,6 +73,7 @@ define_syscall!(PollerWait, |poller: ObjectRef,
         let poller_ref: Arc<dyn crate::object::Object> = poller.clone();
         block_current(BlockType::WakeRequired {
             wake_type: WakeType::Poller(poller_ref),
+            timeout: Some(timeout),
         });
     }
 

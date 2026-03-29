@@ -26,6 +26,7 @@ impl Readable for KeyboardObject {
                 drop(queue);
                 block_current(BlockType::WakeRequired {
                     wake_type: WakeType::Keyboard,
+                    timeout: None,
                 });
             } else {
                 let mut read_chars = 0;

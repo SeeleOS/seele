@@ -18,7 +18,10 @@ use paste::paste;
 #[derive(Clone, Debug)]
 pub enum BlockType {
     SetTime,
-    WakeRequired { wake_type: WakeType },
+    WakeRequired {
+        wake_type: WakeType,
+        timeout: Option<u64>,
+    },
     Futex,
 }
 
@@ -44,7 +47,7 @@ pub struct BlockedQueues {
 impl BlockedQueues {
     pub fn push(&mut self, thread_ref: ThreadRef, block_type: BlockType) {
         match block_type {
-            BlockType::WakeRequired { wake_type } => match wake_type {
+            BlockType::WakeRequired { wake_type, .. } => match wake_type {
                 WakeType::ProcsesExit(_) => self.process_exit.push_back(thread_ref),
                 WakeType::Keyboard => self.keyboard.push_back(thread_ref),
                 WakeType::IO => self.io.push_back(thread_ref),
@@ -98,6 +101,7 @@ impl ThreadManager {
         self.blocked_queues.process_exit.retain(|f| {
             if let State::Blocked(BlockType::WakeRequired {
                 wake_type: WakeType::ProcsesExit(target_pid),
+                ..
             }) = f.lock().state
                 && target_pid.0 == pid.0
             {
@@ -119,6 +123,7 @@ impl ThreadManager {
         self.blocked_queues.poller.retain(|f| {
             if let State::Blocked(BlockType::WakeRequired {
                 wake_type: WakeType::Poller(poller),
+                ..
             }) = &f.lock().state
             {
                 let should_wake = poller
