@@ -1,3 +1,4 @@
+use crate::misc::time::Time;
 use crate::object::misc::ObjectRef;
 use crate::polling::event::PollableEvent;
 use crate::systemcall::error::SyscallError;
@@ -73,7 +74,7 @@ define_syscall!(PollerWait, |poller: ObjectRef,
         let poller_ref: Arc<dyn crate::object::Object> = poller.clone();
         block_current(BlockType::WakeRequired {
             wake_type: WakeType::Poller(poller_ref),
-            timeout: Some(timeout),
+            deadline: Some(Time::since_boot().add_ms(timeout)),
         });
     }
 

@@ -1,6 +1,7 @@
 use alloc::{collections::vec_deque::VecDeque, vec::Vec};
 
 use crate::{
+    misc::time::Time,
     object::misc::ObjectRef,
     polling::event::PollableEvent,
     process::misc::ProcessID,
@@ -20,7 +21,7 @@ pub enum BlockType {
     SetTime,
     WakeRequired {
         wake_type: WakeType,
-        timeout: Option<u64>,
+        deadline: Option<Time>,
     },
     Futex,
 }
