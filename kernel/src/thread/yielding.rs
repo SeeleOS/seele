@@ -60,16 +60,22 @@ pub struct BlockedQueues {
 }
 
 impl BlockedQueues {
+    pub fn get_appropriate_queue(&mut self, wake_type: WakeType) -> &mut VecDeque<ThreadRef> {
+        match wake_type {
+            WakeType::Keyboard => &mut self.keyboard,
+            WakeType::ProcsesExit(_) => &mut self.process_exit,
+            WakeType::Poller(_) => &mut self.poller,
+            WakeType::IO => &mut self.io,
+        }
+    }
+
     pub fn push(&mut self, thread_ref: ThreadRef, block_type: BlockType) {
         self.any.push_back(thread_ref.clone());
 
         match block_type {
-            BlockType::WakeRequired { wake_type, .. } => match wake_type {
-                WakeType::ProcsesExit(_) => self.process_exit.push_back(thread_ref),
-                WakeType::Keyboard => self.keyboard.push_back(thread_ref),
-                WakeType::IO => self.io.push_back(thread_ref),
-                WakeType::Poller(_) => self.poller.push_back(thread_ref),
-            },
+            BlockType::WakeRequired { wake_type, .. } => {
+                self.get_appropriate_queue(wake_type).push_back(thread_ref)
+            }
             _ => unimplemented!(),
         }
     }
