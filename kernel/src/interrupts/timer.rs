@@ -3,7 +3,7 @@ use core::arch::naked_asm;
 use crate::{
     interrupts::hardware_interrupt::send_eoi,
     misc::snapshot::Snapshot,
-    thread::{scheduling::return_to_executor, snapshot::ThreadSnapshotType},
+    thread::{THREAD_MANAGER, scheduling::return_to_executor, snapshot::ThreadSnapshotType},
 };
 
 #[unsafe(naked)]
@@ -49,6 +49,12 @@ pub extern "C" fn timer_interrupt_handler_wrapper() {
 }
 
 pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
+    THREAD_MANAGER
+        .get()
+        .unwrap()
+        .lock()
+        .process_timed_out_threads();
+
     send_eoi();
     // Don't preempt kernel mode; it can corrupt in-flight kernel snapshots.
     if (snapshot.cs & 0x3) == 0 {
