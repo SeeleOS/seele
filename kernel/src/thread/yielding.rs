@@ -42,10 +42,14 @@ pub struct BlockedQueues {
     pub io: VecDeque<ThreadRef>,
     pub process_exit: VecDeque<ThreadRef>,
     pub poller: VecDeque<ThreadRef>,
+
+    pub any: VecDeque<ThreadRef>,
 }
 
 impl BlockedQueues {
     pub fn push(&mut self, thread_ref: ThreadRef, block_type: BlockType) {
+        self.any.push_back(thread_ref.clone());
+
         match block_type {
             BlockType::WakeRequired { wake_type, .. } => match wake_type {
                 WakeType::ProcsesExit(_) => self.process_exit.push_back(thread_ref),
