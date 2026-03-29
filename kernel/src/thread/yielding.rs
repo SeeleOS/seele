@@ -26,6 +26,18 @@ pub enum BlockType {
     Futex,
 }
 
+impl BlockType {
+    pub fn is_timed_out(&self) -> bool {
+        matches!(
+            self,
+            BlockType::WakeRequired {
+                deadline: Some(deadline),
+                ..
+            } if *deadline <= Time::since_boot()
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum WakeType {
     Keyboard,
