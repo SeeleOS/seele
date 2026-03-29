@@ -62,6 +62,22 @@ impl Time {
         self.nanoseconds
     }
 
+    pub const fn add_ns(self, nanoseconds: u64) -> Self {
+        Self::from_nanoseconds(self.nanoseconds.saturating_add(nanoseconds))
+    }
+
+    pub const fn add_ms(self, milliseconds: u64) -> Self {
+        self.add_ns(milliseconds.saturating_mul(NANOSECONDS_PER_MILLISECOND))
+    }
+
+    pub const fn add_sec(self, seconds: u64) -> Self {
+        self.add_ns(seconds.saturating_mul(NANOSECONDS_PER_SECOND))
+    }
+
+    pub const fn sub(self, other: Self) -> Self {
+        Self::from_nanoseconds(self.nanoseconds.saturating_sub(other.nanoseconds))
+    }
+
     pub const fn as_microseconds(self) -> u64 {
         self.nanoseconds / NANOSECONDS_PER_MICROSECOND
     }
