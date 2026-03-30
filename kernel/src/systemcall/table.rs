@@ -1,9 +1,9 @@
 use crate::systemcall::implementations::*;
 use crate::systemcall::utils::SyscallImpl;
 use crate::register_syscalls;
-use seele_sys::errors::SyscallError;
+use crate::systemcall::utils::SyscallResult;
 
-type SyscallHandler = fn(u64, u64, u64, u64, u64, u64) -> Result<usize, SyscallError>;
+type SyscallHandler = fn(u64, u64, u64, u64, u64, u64) -> SyscallResult;
 
 pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
     let mut table = [None; 1500];

@@ -1,6 +1,9 @@
 use alloc::{string::String, vec::Vec};
 use futures_util::future::OkInto;
-use seele_sys::{errors::SyscallError, misc::SystemInfo, permission::Permissions, signal::Signals};
+use seele_sys::{
+    errors::SyscallError, misc::SystemInfo, permission::Permissions, signal::Signals,
+    SyscallResult,
+};
 use x86_64::VirtAddr;
 
 use crate::{
@@ -22,7 +25,7 @@ macro_rules! add_syscall_arg_type {
     ($($type: ty),*) => {
         $(
             impl SyscallArg for $type {
-                fn from_u64(val: u64) -> Result<Self, SyscallError> {
+                fn from_u64(val: u64) -> SyscallResult<Self> {
                     Ok(val as $type)
                 }
             }
@@ -31,7 +34,7 @@ macro_rules! add_syscall_arg_type {
 
     ($type: ty, $name: ident, $convert: expr) => {
         impl SyscallArg for $type {
-            fn from_u64($name: u64) -> Result<Self, SyscallError>
+            fn from_u64($name: u64) -> SyscallResult<Self>
             where
                 Self: Sized,
             {
@@ -42,7 +45,7 @@ macro_rules! add_syscall_arg_type {
 }
 
 pub trait SyscallArg {
-    fn from_u64(val: u64) -> Result<Self, SyscallError>
+    fn from_u64(val: u64) -> SyscallResult<Self>
     where
         Self: Sized;
 }

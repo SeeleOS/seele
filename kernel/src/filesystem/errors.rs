@@ -1,7 +1,7 @@
 use crate::{
     filesystem::block_device::BlockDeviceError, misc::error::AsSyscallError,
+    systemcall::utils::SyscallError,
 };
-use seele_sys::errors::SyscallError;
 
 #[derive(Clone, Copy, Debug)]
 pub enum FSError {

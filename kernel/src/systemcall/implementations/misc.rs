@@ -1,9 +1,8 @@
 use seele_sys::misc::SystemInfo;
-use seele_sys::errors::SyscallError;
 use x86_rtc::Rtc;
 
 use crate::misc::time::Time;
-use crate::systemcall::utils::SyscallImpl;
+use crate::systemcall::utils::{SyscallError, SyscallImpl};
 use crate::{NAME, define_syscall};
 
 define_syscall!(GetCurrentTime, {

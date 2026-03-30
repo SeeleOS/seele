@@ -11,7 +11,6 @@ use crate::{
     process::manager::get_current_process,
     signal::{Signal, action::SignalAction},
 };
-use seele_sys::errors::SyscallError;
 
 define_syscall!(
     RegisterSignalAction,

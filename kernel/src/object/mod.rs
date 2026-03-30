@@ -1,6 +1,7 @@
 use core::fmt::Debug;
 
 use alloc::sync::Arc;
+use seele_sys::{SyscallResult, errors::SyscallError};
 
 use crate::{
     filesystem::object::FileLikeObject,
@@ -21,8 +22,8 @@ pub mod tty_device;
 macro_rules! define_cast_function_non_trait {
     ($name: literal, $type: ty, $err: ty) => {
         paste::paste! {
-            fn [<as_$name>](self: Arc<Self>) -> Result<Arc<$type>, seele_sys::errors::SyscallError> {
-                Err(seele_sys::errors::SyscallError::$err)
+            fn [<as_$name>](self: Arc<Self>) -> SyscallResult<Arc<$type>> {
+                Err(SyscallError::$err)
             }
         }
     };
@@ -31,8 +32,8 @@ macro_rules! define_cast_function_non_trait {
 macro_rules! define_cast_function {
     ($name: literal, $type: ty, $err: ty) => {
         paste::paste! {
-            fn [<as_$name>](self: Arc<Self>) -> Result<Arc<dyn $type>, seele_sys::errors::SyscallError> {
-                Err(seele_sys::errors::SyscallError::$err)
+            fn [<as_$name>](self: Arc<Self>) -> SyscallResult<Arc<dyn $type>> {
+                Err(SyscallError::$err)
             }
         }
     };

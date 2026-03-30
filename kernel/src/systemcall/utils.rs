@@ -1,4 +1,5 @@
-use seele_sys::errors::SyscallError;
+pub use seele_sys::errors::SyscallError;
+pub use seele_sys::SyscallResult;
 
 #[macro_export]
 macro_rules! register_syscalls {
@@ -7,7 +8,7 @@ macro_rules! register_syscalls {
         $(
             $table[seele_sys::numbers::SyscallNumber::$no as usize] = Some(
                 <$no as SyscallImpl>::handle_call
-                    as fn(u64, u64, u64, u64, u64, u64) -> Result<usize, SyscallError>,
+                    as fn(u64, u64, u64, u64, u64, u64) -> $crate::systemcall::utils::SyscallResult,
             );
         )*
     };
@@ -25,7 +26,7 @@ macro_rules! define_syscall {
             fn handle_call(
                 arg1: u64, arg2: u64, arg3: u64,
                 arg4: u64, arg5: u64, arg6: u64,
-            ) -> Result<usize, SyscallError> {
+            ) -> $crate::systemcall::utils::SyscallResult {
                 let args = [arg1, arg2, arg3, arg4, arg5, arg6];
                 let mut _idx = 0;
 
@@ -51,7 +52,7 @@ macro_rules! define_syscall {
             fn handle_call(
                 _arg1: u64, _arg2: u64, _arg3: u64,
                 _arg4: u64, _arg5: u64, _arg6: u64,
-            ) -> Result<usize, SyscallError> {
+            ) -> $crate::systemcall::utils::SyscallResult {
                 $body
             }
         }
@@ -68,5 +69,5 @@ pub trait SyscallImpl {
         arg4: u64,
         arg5: u64,
         arg6: u64,
-    ) -> Result<usize, SyscallError>;
+    ) -> SyscallResult;
 }

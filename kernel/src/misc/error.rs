@@ -1,8 +1,8 @@
 use crate::{
     filesystem::{block_device::BlockDeviceError, errors::FSError},
     object::error::ObjectError,
+    systemcall::utils::SyscallError,
 };
-use seele_sys::errors::SyscallError;
 
 pub type KernelResult<T> = Result<T, KernelError>;
 

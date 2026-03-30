@@ -1,7 +1,7 @@
 use fatfs::IoError;
 
 use crate::misc::error::AsSyscallError;
-use seele_sys::errors::SyscallError;
+use crate::systemcall::utils::SyscallError;
 
 pub mod initrd;
 

@@ -1,7 +1,7 @@
 use crate::{
     filesystem::errors::FSError, misc::error::AsSyscallError,
+    systemcall::utils::SyscallError,
 };
-use seele_sys::errors::SyscallError;
 
 #[derive(Debug)]
 pub enum ObjectError {

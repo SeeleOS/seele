@@ -2,13 +2,13 @@ use crate::{
     misc::snapshot::Snapshot,
     process::misc::with_current_process,
     systemcall::table::SYSCALL_TABLE,
+    systemcall::utils::SyscallError,
     thread::{
         THREAD_MANAGER,
         misc::with_current_thread,
         scheduling::{return_to_executor_from_current, return_to_executor_no_save},
     },
 };
-use seele_sys::errors::SyscallError;
 
 #[unsafe(no_mangle)]
 extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
