@@ -1,6 +1,7 @@
 use crate::systemcall::implementations::*;
 use crate::systemcall::utils::SyscallImpl;
-use crate::{register_syscalls, systemcall::error::SyscallError};
+use crate::register_syscalls;
+use seele_sys::errors::SyscallError;
 
 type SyscallHandler = fn(u64, u64, u64, u64, u64, u64) -> Result<usize, SyscallError>;
 

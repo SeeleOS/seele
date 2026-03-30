@@ -1,12 +1,12 @@
 use crate::misc::time::Time;
 use crate::object::misc::ObjectRef;
 use crate::polling::event::PollableEvent;
-use crate::systemcall::error::SyscallError;
 use crate::systemcall::utils::SyscallImpl;
 use crate::thread::yielding::{BlockType, WakeType, block_current};
 use alloc::sync::Arc;
 
 use crate::{define_syscall, polling::poller::PollerObject, process::manager::get_current_process};
+use seele_sys::errors::SyscallError;
 
 #[repr(C)]
 pub struct PollResult {

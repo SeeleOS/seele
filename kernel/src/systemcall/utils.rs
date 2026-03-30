@@ -1,4 +1,4 @@
-use crate::systemcall::error::SyscallError;
+use seele_sys::errors::SyscallError;
 
 #[macro_export]
 macro_rules! register_syscalls {

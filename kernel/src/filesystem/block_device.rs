@@ -1,6 +1,7 @@
 use fatfs::IoError;
 
-use crate::{misc::error::AsSyscallError, systemcall::error::SyscallError};
+use crate::misc::error::AsSyscallError;
+use seele_sys::errors::SyscallError;
 
 pub mod initrd;
 
@@ -13,7 +14,7 @@ pub enum BlockDeviceError {
 }
 
 impl AsSyscallError for BlockDeviceError {
-    fn as_syscall_error(&self) -> crate::systemcall::error::SyscallError {
+    fn as_syscall_error(&self) -> SyscallError {
         match self {
             Self::Readonly => SyscallError::ReadOnlyFileSystem,
             Self::OutOfBounds => SyscallError::InvalidArguments,

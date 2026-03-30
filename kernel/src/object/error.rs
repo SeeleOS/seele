@@ -1,6 +1,7 @@
 use crate::{
-    filesystem::errors::FSError, misc::error::AsSyscallError, systemcall::error::SyscallError,
+    filesystem::errors::FSError, misc::error::AsSyscallError,
 };
+use seele_sys::errors::SyscallError;
 
 #[derive(Debug)]
 pub enum ObjectError {
@@ -18,7 +19,7 @@ impl From<FSError> for ObjectError {
 }
 
 impl AsSyscallError for ObjectError {
-    fn as_syscall_error(&self) -> crate::systemcall::error::SyscallError {
+    fn as_syscall_error(&self) -> SyscallError {
         match self {
             Self::TryAgain => SyscallError::TryAgain,
             Self::DoesNotExist => SyscallError::BadFileDescriptor,

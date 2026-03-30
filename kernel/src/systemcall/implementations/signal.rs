@@ -2,7 +2,6 @@ use crate::process::ProcessRef;
 use crate::process::manager::MANAGER;
 use crate::process::misc::ProcessID;
 use crate::signal::action::{SignalHandlingType, Signals};
-use crate::systemcall::error::*;
 use crate::systemcall::utils::*;
 use crate::thread::get_current_thread;
 use crate::thread::misc::SnapshotState;
@@ -12,6 +11,7 @@ use crate::{
     process::manager::get_current_process,
     signal::{Signal, action::SignalAction},
 };
+use seele_sys::errors::SyscallError;
 
 define_syscall!(
     RegisterSignalAction,

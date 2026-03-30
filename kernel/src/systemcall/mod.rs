@@ -16,7 +16,6 @@ use crate::{
 
 pub mod arg_types;
 pub mod entry;
-pub mod error;
 pub mod handling;
 pub mod implementations;
 pub mod table;

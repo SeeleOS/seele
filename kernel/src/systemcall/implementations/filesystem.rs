@@ -8,8 +8,9 @@ use crate::{
     filesystem::{info::LinuxStat, path::Path, vfs::VirtualFS},
     object::misc::ObjectRef,
     process::manager::get_current_process,
-    systemcall::{error::SyscallError, utils::SyscallImpl},
+    systemcall::utils::SyscallImpl,
 };
+use seele_sys::errors::SyscallError;
 
 define_syscall!(OpenFile, |path_str: String, create: bool| {
     let path = Path::new(path_str.as_str());

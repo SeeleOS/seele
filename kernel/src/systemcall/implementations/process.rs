@@ -8,9 +8,10 @@ use crate::{
         misc::ProcessID,
     },
     s_print,
-    systemcall::{error::SyscallError, utils::SyscallImpl},
+    systemcall::utils::SyscallImpl,
     thread::{THREAD_MANAGER, scheduling::return_to_executor_no_save},
 };
+use seele_sys::errors::SyscallError;
 
 define_syscall!(GetProcessParentID, {
     if let Some(parent) = get_current_process().lock().parent.clone() {

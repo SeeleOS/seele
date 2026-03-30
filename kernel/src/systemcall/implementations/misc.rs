@@ -1,8 +1,8 @@
 use seele_sys::misc::SystemInfo;
+use seele_sys::errors::SyscallError;
 use x86_rtc::Rtc;
 
 use crate::misc::time::Time;
-use crate::systemcall::error::SyscallError;
 use crate::systemcall::utils::SyscallImpl;
 use crate::{NAME, define_syscall};
 

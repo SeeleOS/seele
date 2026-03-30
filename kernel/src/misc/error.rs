@@ -1,8 +1,8 @@
 use crate::{
     filesystem::{block_device::BlockDeviceError, errors::FSError},
     object::error::ObjectError,
-    systemcall::error::SyscallError,
 };
+use seele_sys::errors::SyscallError;
 
 pub type KernelResult<T> = Result<T, KernelError>;
 
@@ -18,7 +18,7 @@ macro_rules! register_error {
     ($err_type:ty, $kerror_type: ident) => {
         impl From<$err_type> for SyscallError {
             fn from(err: $err_type) -> Self {
-                SyscallError::from(KernelError::from(err))
+                KernelError::from(err).as_syscall_error()
             }
         }
 

@@ -1,6 +1,6 @@
 use alloc::{string::String, vec::Vec};
 use futures_util::future::OkInto;
-use seele_sys::{misc::SystemInfo, permission::Permissions, signal::Signals};
+use seele_sys::{errors::SyscallError, misc::SystemInfo, permission::Permissions, signal::Signals};
 use x86_64::VirtAddr;
 
 use crate::{
@@ -8,13 +8,14 @@ use crate::{
     filesystem::info::LinuxStat,
     misc::{
         c_types::{CString, CVec},
+        error::AsSyscallError,
         others::KernelFrom,
     },
     object::misc::{ObjectRef, get_object_current_process},
     polling::event::PollableEvent,
     process::{ProcessRef, manager::MANAGER, misc::ProcessID},
     signal::{Signal, action::SignalAction},
-    systemcall::{error::SyscallError, implementations::PollResult},
+    systemcall::implementations::PollResult,
 };
 
 macro_rules! add_syscall_arg_type {
@@ -66,11 +67,11 @@ add_syscall_arg_type!(Signals, val, {
 });
 
 add_syscall_arg_type!(Vec<String>, val, {
-    Vec::k_from(val as CVec<CString>).map_err(Into::into)
+    Vec::k_from(val as CVec<CString>).map_err(|err| err.as_syscall_error())
 });
 
 add_syscall_arg_type!(String, val, {
-    String::k_from(val as *const u8).map_err(Into::into)
+    String::k_from(val as *const u8).map_err(|err| err.as_syscall_error())
 });
 
 add_syscall_arg_type!(bool, val, { Ok(val != 0) });
