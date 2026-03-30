@@ -98,6 +98,10 @@ impl Readable for TtyDevice {
                 .lock();
 
             if queue.is_empty() {
+                if self.flags.lock().contains(ObjectFlags::NONBLOCK) {
+                    return Err(ObjectError::TryAgain);
+                }
+
                 drop(queue);
                 block_current(BlockType::WakeRequired {
                     wake_type: WakeType::Keyboard,
