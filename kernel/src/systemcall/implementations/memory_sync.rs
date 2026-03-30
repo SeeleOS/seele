@@ -11,9 +11,13 @@ use crate::{
     },
     s_print,
     systemcall::utils::{SyscallError, SyscallImpl},
+    thread::{
+        THREAD_MANAGER, ThreadRef, get_current_thread,
+        yielding::{BlockType, block_current},
+    },
 };
 
-static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ProcessRef>>> = Mutex::new(BTreeMap::new());
+static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ThreadRef>>> = Mutex::new(BTreeMap::new());
 
 define_syscall!(FutexWait, |arg1: u64, arg2: u64| {
     let mut queue = FUTEX_QUEUE.lock();
@@ -29,7 +33,10 @@ define_syscall!(FutexWait, |arg1: u64, arg2: u64| {
     queue
         .get_mut(&arg1)
         .unwrap()
-        .push_back(MANAGER.lock().current.clone().unwrap());
+        .push_back(get_current_thread());
+
+    block_current(BlockType::Futex);
+
     Ok(0)
 });
 
@@ -39,8 +46,8 @@ define_syscall!(FutexWake, |arg1: u64, arg2: u64| {
 
     if let Some(queue) = queue.get_mut(&arg1) {
         for _ in 0..arg2 {
-            if let Some(_process) = queue.pop_front() {
-                log::warn!("[TODO] Futex wake not implemented");
+            if let Some(thread) = queue.pop_front() {
+                THREAD_MANAGER.get().unwrap().lock().wake(thread);
                 woken += 1;
             } else {
                 break;
