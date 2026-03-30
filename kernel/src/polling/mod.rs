@@ -35,8 +35,7 @@
 
 mod entry;
 pub mod event;
-pub mod misc;
-mod object;
+pub mod object;
 pub mod poller;
 mod ready;
 mod registration;

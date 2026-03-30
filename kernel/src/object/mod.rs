@@ -8,7 +8,7 @@ use crate::{
         misc::ObjectResult,
         traits::{Configuratable, Controllable, Readable, Writable},
     },
-    polling::{misc::Pollable, poller::PollerObject},
+    polling::{object::Pollable, poller::PollerObject},
 };
 
 pub mod config;

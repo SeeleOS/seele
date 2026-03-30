@@ -10,7 +10,7 @@ use crate::{
         misc::ObjectRef,
         traits::{Configuratable, Controllable, Readable, Writable},
     },
-    polling::{event::PollableEvent, misc::Pollable},
+    polling::{event::PollableEvent, object::Pollable},
     process::group::ProcessGroupID,
     terminal::object::TerminalObject,
     thread::THREAD_MANAGER,

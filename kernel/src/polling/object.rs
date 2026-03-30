@@ -4,7 +4,7 @@ use spin::Mutex;
 use crate::{
     impl_cast_function_non_trait,
     object::Object,
-    polling::{PollerEntry, PollerReadyEvent},
+    polling::{PollerEntry, PollerReadyEvent, event::PollableEvent},
 };
 
 #[derive(Debug)]
@@ -26,4 +26,8 @@ impl PollerObject {
 
 impl Object for PollerObject {
     impl_cast_function_non_trait!(poller, PollerObject);
+}
+
+pub trait Pollable: Object {
+    fn is_event_ready(&self, event: PollableEvent) -> bool;
 }
