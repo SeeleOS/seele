@@ -78,10 +78,10 @@ impl Debug for FileLikeObject {
 }
 
 impl Object for FileLikeObject {
-    impl_cast_function!(writable, Writable);
-    impl_cast_function!(readable, Readable);
+    impl_cast_function!("writable", Writable);
+    impl_cast_function!("readable", Readable);
 
-    impl_cast_function_non_trait!(file_like, FileLikeObject);
+    impl_cast_function_non_trait!("file_like", FileLikeObject);
 }
 
 impl Writable for FileLikeObject {

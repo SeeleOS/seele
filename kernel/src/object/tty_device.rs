@@ -62,11 +62,11 @@ impl TtyDevice {
 }
 
 impl Object for TtyDevice {
-    impl_cast_function!(writable, Writable);
-    impl_cast_function!(readable, Readable);
-    impl_cast_function!(configuratable, Configuratable);
-    impl_cast_function!(controllable, Controllable);
-    impl_cast_function!(pollable, Pollable);
+    impl_cast_function!("writable", Writable);
+    impl_cast_function!("readable", Readable);
+    impl_cast_function!("configuratable", Configuratable);
+    impl_cast_function!("controllable", Controllable);
+    impl_cast_function!("pollable", Pollable);
 }
 
 impl Configuratable for TtyDevice {

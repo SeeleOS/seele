@@ -31,8 +31,8 @@ impl TerminalObject {
 }
 
 impl Object for TerminalObject {
-    impl_cast_function!(configuratable, Configuratable);
-    impl_cast_function!(writable, Writable);
+    impl_cast_function!("configuratable", Configuratable);
+    impl_cast_function!("writable", Writable);
 }
 
 impl Writable for TerminalObject {

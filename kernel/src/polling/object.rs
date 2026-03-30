@@ -25,7 +25,7 @@ impl PollerObject {
 }
 
 impl Object for PollerObject {
-    impl_cast_function_non_trait!(poller, PollerObject);
+    impl_cast_function_non_trait!("poller", PollerObject);
 }
 
 pub trait Pollable: Object {

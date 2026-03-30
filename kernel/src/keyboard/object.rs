@@ -12,7 +12,7 @@ use crate::{
 pub struct KeyboardObject;
 
 impl Object for KeyboardObject {
-    impl_cast_function!(readable, Readable);
+    impl_cast_function!("readable", Readable);
 }
 
 impl Readable for KeyboardObject {
