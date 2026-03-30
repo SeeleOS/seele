@@ -91,7 +91,7 @@ impl Readable for TtyDevice {
 impl Controllable for TtyDevice {
     fn control(
         &self,
-        _command: super::control::Command,
+        _command: super::control::ControlCommand,
         _arg: u64,
     ) -> super::misc::ObjectResult<isize> {
         // Stub

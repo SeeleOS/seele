@@ -1,1 +1,1 @@
-pub use seele_sys::syscalls::object::Command;
+pub use seele_sys::syscalls::object::ControlCommand;

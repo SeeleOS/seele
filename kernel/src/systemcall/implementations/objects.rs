@@ -1,7 +1,7 @@
 use core::slice;
 
 use alloc::collections::btree_map::BTreeMap;
-use seele_sys::syscalls::object::Command;
+use seele_sys::syscalls::object::ControlCommand;
 use spin::Mutex;
 
 use crate::{
@@ -118,12 +118,10 @@ define_syscall!(
 define_syscall!(ControlObject, |object: ObjectRef,
                                 command: u64,
                                 arg: u64| {
-    object
-        .as_controllable()?
-        .control(
-            Command::from_raw_u64(command).ok_or(SyscallError::InvalidArguments)?,
-            arg,
-        )?;
+    object.as_controllable()?.control(
+        ControlCommand::from_raw_u64(command).ok_or(SyscallError::InvalidArguments)?,
+        arg,
+    )?;
 
     Ok(0)
 });
