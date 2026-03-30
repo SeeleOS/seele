@@ -1,6 +1,7 @@
 use core::str::from_utf8;
 
 use alloc::sync::Arc;
+use seele_sys::syscalls::object::TerminalInfo;
 use spin::Mutex;
 
 use crate::{
@@ -11,7 +12,7 @@ use crate::{
         traits::{Configuratable, Writable},
     },
     s_print, s_println,
-    terminal::{object_config::TerminalInfo, term_trait::AbstractTerminal},
+    terminal::term_trait::AbstractTerminal,
 };
 
 #[derive(Debug)]
@@ -24,7 +25,7 @@ impl TerminalObject {
     pub fn new(term: Arc<Mutex<dyn AbstractTerminal>>) -> Self {
         let window_size = term.lock().size();
         Self {
-            info: Mutex::new(TerminalInfo::new(window_size)),
+            info: Mutex::new(TerminalInfo::new(window_size.rows, window_size.cols)),
             inner: term,
         }
     }

@@ -1,6 +1,7 @@
 use core::slice;
 
 use alloc::collections::btree_map::BTreeMap;
+use seele_sys::syscalls::object::Command;
 use spin::Mutex;
 
 use crate::{
@@ -8,7 +9,6 @@ use crate::{
     filesystem::vfs_traits::DirectoryContentType,
     object::{
         config::ConfigurateRequest,
-        control::Command,
         misc::{ObjectRef, get_object_current_process},
     },
     process::{manager::get_current_process, misc::ProcessID},
@@ -120,7 +120,10 @@ define_syscall!(ControlObject, |object: ObjectRef,
                                 arg: u64| {
     object
         .as_controllable()?
-        .control(Command::new(command)?, arg)?;
+        .control(
+            Command::from_raw_u64(command).ok_or(SyscallError::InvalidArguments)?,
+            arg,
+        )?;
 
     Ok(0)
 });
