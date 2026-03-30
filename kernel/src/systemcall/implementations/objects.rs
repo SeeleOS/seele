@@ -9,6 +9,7 @@ use crate::{
     filesystem::vfs_traits::DirectoryContentType,
     object::{
         config::ConfigurateRequest,
+        control::ControlRequest,
         misc::{ObjectRef, get_object_current_process},
     },
     process::{manager::get_current_process, misc::ProcessID},
@@ -118,10 +119,10 @@ define_syscall!(
 define_syscall!(ControlObject, |object: ObjectRef,
                                 command: u64,
                                 arg: u64| {
-    object.as_controllable()?.control(
-        ControlCommand::from_raw_u64(command).ok_or(SyscallError::InvalidArguments)?,
+    object.as_controllable()?.control(ControlRequest::new(
+        ControlCommand::from_raw_u64(command).unwrap(),
         arg,
-    )?;
+    )?)?;
 
     Ok(0)
 });

@@ -1,4 +1,9 @@
-use crate::object::{Object, config::ConfigurateRequest, control, misc::ObjectResult};
+use crate::object::{
+    Object,
+    config::ConfigurateRequest,
+    control::{self, ControlRequest},
+    misc::ObjectResult,
+};
 
 pub trait Writable: Object {
     /// Write the content of [`buffer`] to [`self`]
@@ -15,5 +20,5 @@ pub trait Configuratable: Object {
 }
 
 pub trait Controllable: Object {
-    fn control(&self, command: control::ControlCommand, arg: u64) -> ObjectResult<isize>;
+    fn control(&self, request: ControlRequest) -> ObjectResult<isize>;
 }

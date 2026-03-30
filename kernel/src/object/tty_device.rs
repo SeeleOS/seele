@@ -7,6 +7,7 @@ use crate::{
     keyboard::{decoding_task::KEYBOARD_QUEUE, object::KeyboardObject},
     object::{
         Object,
+        control::ControlRequest,
         misc::ObjectRef,
         traits::{Configuratable, Controllable, Readable, Writable},
     },
@@ -89,11 +90,7 @@ impl Readable for TtyDevice {
 }
 
 impl Controllable for TtyDevice {
-    fn control(
-        &self,
-        _command: super::control::ControlCommand,
-        _arg: u64,
-    ) -> super::misc::ObjectResult<isize> {
+    fn control(&self, request: ControlRequest) -> super::misc::ObjectResult<isize> {
         // Stub
         Ok(0)
     }
