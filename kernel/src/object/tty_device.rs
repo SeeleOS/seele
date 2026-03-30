@@ -1,21 +1,25 @@
-use alloc::sync::Arc;
+use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 use conquer_once::spin::OnceCell;
 use seele_sys::syscalls::object::ObjectFlags;
 use spin::Mutex;
 
 use crate::{
     impl_cast_function,
-    keyboard::{decoding_task::KEYBOARD_QUEUE, object::KeyboardObject},
+    keyboard::decoding_task::KEYBOARD_QUEUE,
     object::{
         Object,
         control::ControlRequest,
+        error::ObjectError,
         misc::ObjectRef,
         traits::{Configuratable, Controllable, Readable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
     process::group::ProcessGroupID,
     terminal::object::TerminalObject,
-    thread::THREAD_MANAGER,
+    thread::{
+        THREAD_MANAGER,
+        yielding::{BlockType, WakeType, block_current},
+    },
 };
 
 pub static DEFAULT_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();
@@ -88,7 +92,32 @@ impl Writable for TtyDevice {
 
 impl Readable for TtyDevice {
     fn read(&self, buffer: &mut [u8]) -> super::ObjectResult<usize> {
-        KeyboardObject.read(buffer)
+        loop {
+            let mut queue = KEYBOARD_QUEUE
+                .get_or_init(|| Mutex::new(VecDeque::new()))
+                .lock();
+
+            if queue.is_empty() {
+                drop(queue);
+                block_current(BlockType::WakeRequired {
+                    wake_type: WakeType::Keyboard,
+                    deadline: None,
+                });
+            } else {
+                let mut read_chars = 0;
+                while read_chars < buffer.len() {
+                    match queue.pop_front() {
+                        Some(val) => {
+                            buffer[read_chars] = val;
+                            read_chars += 1;
+                        }
+                        None => break,
+                    }
+                }
+
+                return Ok(read_chars);
+            }
+        }
     }
 }
 
