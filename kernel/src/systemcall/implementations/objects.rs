@@ -119,10 +119,9 @@ define_syscall!(
 define_syscall!(ControlObject, |object: ObjectRef,
                                 command: u64,
                                 arg: u64| {
-    object.as_controllable()?.control(ControlRequest::new(
-        ControlCommand::from_raw_u64(command).unwrap(),
-        arg,
-    )?)?;
+    object
+        .as_controllable()?
+        .control(ControlRequest::new(command, arg)?)?;
 
     Ok(0)
 });
