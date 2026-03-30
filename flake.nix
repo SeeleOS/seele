@@ -29,6 +29,22 @@
               ninja
               rust-script
               cmake
+              gawk
+              gnugrep
+              gnutar
+              wget
+              which
+              findutils
+              gzip
+              xz
+              zstd
+              util-linux
+              procps
+              perl
+              file
+              pkg-config
+              libarchive
+              openssl
               lld
               zlib
               rustc
