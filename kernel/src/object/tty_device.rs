@@ -1,5 +1,6 @@
 use alloc::sync::Arc;
 use conquer_once::spin::OnceCell;
+use seele_sys::syscalls::object::ObjectFlags;
 use spin::Mutex;
 
 use crate::{
@@ -51,6 +52,7 @@ pub struct TtyDevice {
     /// The foreground process group currently attached to this tty.
     /// Line-discipline generated signals such as Ctrl+C should be sent here.
     pub active_group: Mutex<Option<ProcessGroupID>>,
+    pub flags: Mutex<ObjectFlags>,
 }
 
 impl TtyDevice {
@@ -58,6 +60,7 @@ impl TtyDevice {
         Self {
             terminal,
             active_group: Mutex::new(None),
+            flags: Mutex::new(ObjectFlags::empty()),
         }
     }
 }
@@ -91,7 +94,13 @@ impl Readable for TtyDevice {
 
 impl Controllable for TtyDevice {
     fn control(&self, request: ControlRequest) -> super::misc::ObjectResult<isize> {
-        // Stub
-        Ok(0)
+        match request {
+            ControlRequest::GetFlags => Ok(self.flags.lock().bits() as isize),
+            ControlRequest::SetFlags(flags) => {
+                *self.flags.lock() = flags;
+
+                Ok(0)
+            }
+        }
     }
 }
