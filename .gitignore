@@ -1,4 +1,5 @@
 /target
+/old
 /AGENTS.md
 /.llvm
 /porting_dev
