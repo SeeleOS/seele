@@ -1,5 +1,5 @@
 use crate::{
-    object::{misc::ObjectRef, tty_device::is_tty_readable},
+    object::misc::ObjectRef,
     polling::{PollerEntry, PollerObject, PollerReadyEvent, event::PollableEvent},
 };
 
@@ -29,7 +29,11 @@ impl PollerObject {
     }
 
     fn is_entry_ready(entry: &PollerEntry) -> bool {
-        matches!(entry.event, PollableEvent::CanBeRead) && is_tty_readable(&entry.object)
+        if let Ok(object) = entry.object.clone().as_pollable() {
+            return object.is_event_ready(entry.event);
+        }
+
+        false
     }
 
     // Pushes the events that are already ready and do not need waiting.

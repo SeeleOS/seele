@@ -10,7 +10,7 @@ use crate::{
         misc::ObjectRef,
         traits::{Configuratable, Controllable, Readable, Writable},
     },
-    polling::event::PollableEvent,
+    polling::{event::PollableEvent, misc::Pollable},
     process::group::ProcessGroupID,
     terminal::object::TerminalObject,
     thread::THREAD_MANAGER,
@@ -22,14 +22,17 @@ pub fn get_default_tty() -> Arc<TtyDevice> {
     DEFAULT_TTY.get().unwrap().clone()
 }
 
-// Is the tty already readable? (for polling)
-pub fn is_tty_readable(object: &ObjectRef) -> bool {
-    let default_tty: ObjectRef = get_default_tty();
-    Arc::ptr_eq(object, &default_tty)
-        && !KEYBOARD_QUEUE
-            .get_or_init(|| Mutex::new(Default::default()))
-            .lock()
-            .is_empty()
+impl Pollable for TtyDevice {
+    fn is_event_ready(&self, event: PollableEvent) -> bool {
+        match event {
+            PollableEvent::CanBeRead => !KEYBOARD_QUEUE
+                .get_or_init(|| Mutex::new(Default::default()))
+                .lock()
+                .is_empty(),
+            PollableEvent::CanBeWritten => true,
+            _ => false,
+        }
+    }
 }
 
 pub fn wake_tty_poller_readable() {

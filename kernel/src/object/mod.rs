@@ -8,7 +8,7 @@ use crate::{
         misc::ObjectResult,
         traits::{Configuratable, Controllable, Readable, Writable},
     },
-    polling::poller::PollerObject,
+    polling::{misc::Pollable, poller::PollerObject},
 };
 
 pub mod config;
@@ -43,6 +43,7 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function!(readable, Readable, BadFileDescriptor);
     define_cast_function!(configuratable, Configuratable, InappropriateIoctl);
     define_cast_function!(controllable, Controllable, InvalidArguments);
+    define_cast_function!(pollable, Pollable, InvalidArguments);
 
     define_cast_function_non_trait!(file_like, FileLikeObject, BadFileDescriptor);
     define_cast_function_non_trait!(poller, PollerObject, BadFileDescriptor);
