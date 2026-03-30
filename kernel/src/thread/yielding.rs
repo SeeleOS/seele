@@ -1,4 +1,4 @@
-use alloc::{collections::vec_deque::VecDeque, vec::Vec};
+use alloc::{collections::vec_deque::VecDeque, sync::Arc, vec::Vec};
 
 use crate::{
     misc::time::Time,
@@ -107,7 +107,19 @@ impl ThreadManager {
             }
         }
 
-        to_wake.iter().for_each(|f| self.wake(f.clone()));
+        for thread in to_wake {
+            self.remove_from_blocked_queues(&thread);
+            self.wake(thread.clone());
+        }
+    }
+
+    fn remove_from_blocked_queues(&mut self, thread: &ThreadRef) {
+        if let State::Blocked(BlockType::WakeRequired { wake_type, .. }) = &thread.lock().state {
+            self.blocked_queues
+                .get_appropriate_queue(wake_type.clone())
+                .retain(|t| !Arc::ptr_eq(t, thread));
+            self.blocked_queues.any.retain(|t| !Arc::ptr_eq(t, thread));
+        }
     }
 
     fn block(&mut self, thread_ref: ThreadRef, block_type: BlockType) {
@@ -123,6 +135,7 @@ impl ThreadManager {
         log::debug!("thread wake");
         let mut locked_thread = thread.lock();
         if matches!(locked_thread.state, State::Blocked(_)) {
+            self.remove_from_blocked_queues(&thread);
             locked_thread.state = State::Ready;
             TASK_SPAWNER
                 .get()
