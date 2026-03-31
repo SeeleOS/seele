@@ -15,6 +15,7 @@ pub mod panic;
 pub mod serial_print;
 pub mod signal;
 pub mod snapshot;
+pub mod socket;
 pub mod stack_builder;
 pub mod testing;
 pub mod time;

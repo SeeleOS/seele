@@ -51,7 +51,12 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         GetCurrentTime,
         TimeSinceBoot,
         OpenDevice,
-        MmapObject
+        MmapObject,
+        Socket,
+        SocketBind,
+        SocketListen,
+        SocketConnect,
+        SocketAccept
     );
 
     table

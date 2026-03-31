@@ -5,6 +5,7 @@ use seele_sys::{SyscallResult, errors::SyscallError};
 
 use crate::{
     filesystem::object::FileLikeObject,
+    misc::socket::UnixSocketObject,
     object::{
         misc::ObjectResult,
         traits::{Configuratable, Controllable, MemoryMappable, Readable, Writable},
@@ -50,4 +51,5 @@ pub trait Object: Send + Sync + Debug {
 
     define_cast_function_non_trait!("file_like", FileLikeObject, BadFileDescriptor);
     define_cast_function_non_trait!("poller", PollerObject, BadFileDescriptor);
+    define_cast_function_non_trait!("unix_socket", UnixSocketObject, BadFileDescriptor);
 }
