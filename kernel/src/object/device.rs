@@ -10,7 +10,7 @@ lazy_static::lazy_static! {
     pub static ref DEVICES: BTreeMap<String,ObjectRef> = {
         let mut devices = BTreeMap::new();
 
-        devices.insert("framebuffer".into(), Arc::new(FramebufferObject) as ObjectRef);
+        devices.insert("framebuffer".into(), Arc::new(FramebufferObject::default()) as ObjectRef);
 
         devices
     };
