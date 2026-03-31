@@ -17,6 +17,7 @@ pub mod misc;
 pub mod object;
 pub mod polling;
 pub mod process;
+pub mod socket;
 pub mod systemcall;
 pub mod task;
 pub mod terminal;

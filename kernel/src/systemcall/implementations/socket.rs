@@ -8,7 +8,7 @@ use crate::{
 };
 
 define_syscall!(Socket, |domain: u64, kind: u64, protocol: u64| {
-    let socket = crate::misc::socket::UnixSocketObject::create(domain, kind, protocol)?;
+    let socket = crate::socket::UnixSocketObject::create(domain, kind, protocol)?;
     let fd = get_current_process().lock().push_object(socket);
     Ok(fd)
 });

@@ -5,12 +5,12 @@ use seele_sys::{SyscallResult, errors::SyscallError};
 
 use crate::{
     filesystem::object::FileLikeObject,
-    misc::socket::UnixSocketObject,
     object::{
         misc::ObjectResult,
         traits::{Configuratable, Controllable, MemoryMappable, Readable, Writable},
     },
     polling::{object::Pollable, poller::PollerObject},
+    socket::UnixSocketObject,
 };
 
 pub mod config;
