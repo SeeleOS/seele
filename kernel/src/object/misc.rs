@@ -7,6 +7,7 @@ use crate::{
 
 pub type ObjectRef = Arc<dyn Object>;
 pub type ObjectResult<T> = Result<T, ObjectError>;
+
 #[macro_export]
 macro_rules! impl_cast_function_non_trait {
     ($fn_name: literal, $type:ty) => {
