@@ -10,12 +10,14 @@ use crate::{
         vfs_traits::FileLike,
     },
     impl_cast_function, impl_cast_function_non_trait,
+    memory::addrspace::mem_area::Data,
     object::{
         Object,
         error::ObjectError,
         misc::ObjectResult,
-        traits::{Readable, Writable},
+        traits::{MemoryMappable, Readable, Writable},
     },
+    process::misc::with_current_process,
 };
 
 pub struct FileLikeObject {
@@ -56,8 +58,7 @@ impl FileLikeObject {
                 let mut file = file.lock();
 
                 while read < len {
-                    let bytes_read =
-                        file.read_at(&mut buf[read..], offset + read as u64)?;
+                    let bytes_read = file.read_at(&mut buf[read..], offset + read as u64)?;
                     if bytes_read == 0 {
                         return Err(FSError::Other);
                     }
@@ -99,5 +100,23 @@ impl Readable for FileLikeObject {
             FileLike::File(file) => Ok(file.lock().read(buffer)?),
             FileLike::Directory(_) => Err(ObjectError::FSError(FSError::NotAFile)),
         }
+    }
+}
+
+impl MemoryMappable for FileLikeObject {
+    fn map(
+        self: alloc::sync::Arc<Self>,
+        offset: u64,
+        pages: u64,
+        permissions: seele_sys::permission::Permissions,
+    ) -> ObjectResult<x86_64::VirtAddr> {
+        with_current_process(|process| {
+            let data = Data::File { offset, file: self };
+            let addr = process
+                .addrspace
+                .allocate_user_lazy(pages, permissions, data);
+
+            Ok(addr)
+        })
     }
 }
