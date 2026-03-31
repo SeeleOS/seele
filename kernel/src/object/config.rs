@@ -1,9 +1,15 @@
 use crate::object::{ObjectResult, error::ObjectError};
-use seele_sys::abi::object::{ConfigCommand, TerminalInfo};
+use seele_sys::abi::{
+    framebuffer::FramebufferInfo,
+    object::{ConfigCommand, TerminalInfo},
+};
 
 pub enum ConfigurateRequest {
     GetTerminalInfo(*mut TerminalInfo),
     SetTerminalInfo(*const TerminalInfo),
+    GetFramebufferInfo(*mut FramebufferInfo),
+    FbTakeControl,
+    FbRelease,
 }
 
 impl ConfigurateRequest {
@@ -12,6 +18,11 @@ impl ConfigurateRequest {
             match ConfigCommand::from_raw_u64(request).ok_or(ObjectError::InvalidRequest)? {
                 ConfigCommand::GetTerminalInfo => Self::GetTerminalInfo(ptr as *mut TerminalInfo),
                 ConfigCommand::SetTerminalInfo => Self::SetTerminalInfo(ptr as *const TerminalInfo),
+                ConfigCommand::GetFramebufferInfo => {
+                    Self::GetFramebufferInfo(ptr as *mut FramebufferInfo)
+                }
+                ConfigCommand::FbTakeControl => Self::FbTakeControl,
+                ConfigCommand::FbRelease => Self::FbRelease,
             },
         )
     }
