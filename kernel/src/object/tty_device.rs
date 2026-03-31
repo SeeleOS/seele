@@ -1,6 +1,6 @@
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 use conquer_once::spin::OnceCell;
-use seele_sys::syscalls::object::ObjectFlags;
+use seele_sys::abi::object::ObjectFlags;
 use spin::Mutex;
 
 use crate::{

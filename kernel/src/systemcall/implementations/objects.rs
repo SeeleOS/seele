@@ -1,7 +1,7 @@
 use core::slice;
 
 use alloc::{collections::btree_map::BTreeMap, string::String};
-use seele_sys::{permission::Permissions, syscalls::object::ControlCommand};
+use seele_sys::{abi::object::ControlCommand, permission::Permissions};
 use spin::Mutex;
 
 use crate::{

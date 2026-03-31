@@ -1,5 +1,5 @@
 use crate::object::{ObjectResult, error::ObjectError};
-use seele_sys::syscalls::object::{ConfigCommand, TerminalInfo};
+use seele_sys::abi::object::{ConfigCommand, TerminalInfo};
 
 pub enum ConfigurateRequest {
     GetTerminalInfo(*mut TerminalInfo),

@@ -1,5 +1,5 @@
-pub use seele_sys::syscalls::object::ControlCommand;
-use seele_sys::syscalls::object::ObjectFlags;
+pub use seele_sys::abi::object::ControlCommand;
+use seele_sys::abi::object::ObjectFlags;
 use seele_sys::{SyscallResult, errors::SyscallError};
 use x86_64::instructions::interrupts::are_enabled;
 

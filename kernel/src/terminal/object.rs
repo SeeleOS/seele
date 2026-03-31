@@ -1,7 +1,7 @@
 use core::str::from_utf8;
 
 use alloc::sync::Arc;
-use seele_sys::syscalls::object::TerminalInfo;
+use seele_sys::abi::object::TerminalInfo;
 use spin::Mutex;
 
 use crate::{
