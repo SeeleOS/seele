@@ -6,6 +6,7 @@ pub mod debug_exit;
 
 pub mod cpu_core_context;
 pub mod error;
+pub mod fb_object;
 pub mod framebuffer;
 pub mod gdt;
 pub mod logging;
