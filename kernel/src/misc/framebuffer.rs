@@ -1,6 +1,6 @@
 use bootloader_api::info::PixelFormat;
 use conquer_once::spin::OnceCell;
-use seele_sys::abi::{framebuffer::FramebufferInfo, object::FramebufferPixelFormat};
+use seele_sys::abi::{framebuffer::FramebufferInfo, framebuffer::FramebufferPixelFormat};
 use spin::Mutex;
 
 use crate::terminal::Color;
