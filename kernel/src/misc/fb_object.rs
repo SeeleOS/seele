@@ -1,3 +1,4 @@
+use spin::Mutex;
 use x86_64::{VirtAddr, structures::paging::Translate};
 
 use crate::{
@@ -9,14 +10,17 @@ use crate::{
     misc::{framebuffer::FRAME_BUFFER, others::permissions_to_flags},
     object::{
         Object,
+        config::ConfigurateRequest,
         error::ObjectError,
-        traits::{MemoryMappable, Readable, Writable},
+        traits::{Configuratable, MemoryMappable, Readable, Writable},
     },
     process::misc::with_current_process,
 };
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct FramebufferObject;
+#[derive(Default, Debug)]
+pub struct FramebufferObject {
+    used_by_user: Mutex<bool>,
+}
 
 impl Object for FramebufferObject {
     impl_cast_function!("mappable", MemoryMappable);
@@ -62,5 +66,22 @@ impl MemoryMappable for FramebufferObject {
         });
 
         Ok(user_addr)
+    }
+}
+
+impl Configuratable for FramebufferObject {
+    fn configure(
+        &self,
+        request: crate::object::config::ConfigurateRequest,
+    ) -> crate::object::misc::ObjectResult<isize> {
+        match request {
+            ConfigurateRequest::GetFramebufferInfo(fb_info) => unsafe {
+                fb_info.write(FRAME_BUFFER.get().unwrap().lock().fb_info());
+            },
+            ConfigurateRequest::FbTakeControl => *self.used_by_user.lock() = true,
+            ConfigurateRequest::FbRelease => *self.used_by_user.lock() = false,
+            _ => return Err(ObjectError::InvalidArguments),
+        }
+        Ok(0)
     }
 }
