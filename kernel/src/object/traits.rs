@@ -1,3 +1,4 @@
+use alloc::sync::Arc;
 use seele_sys::permission::Permissions;
 use x86_64::VirtAddr;
 
@@ -27,5 +28,10 @@ pub trait Controllable: Object {
 }
 
 pub trait MemoryMappable: Object {
-    fn map(&self, offset: u64, pages: u64, permissions: Permissions) -> ObjectResult<VirtAddr>;
+    fn map(
+        self: Arc<Self>,
+        offset: u64,
+        pages: u64,
+        permissions: Permissions,
+    ) -> ObjectResult<VirtAddr>;
 }

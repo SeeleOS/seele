@@ -1,3 +1,4 @@
+use alloc::sync::Arc;
 use spin::Mutex;
 use x86_64::{VirtAddr, structures::paging::Translate};
 
@@ -28,7 +29,7 @@ impl Object for FramebufferObject {
 
 impl MemoryMappable for FramebufferObject {
     fn map(
-        &self,
+        self: Arc<Self>,
         offset: u64,
         pages: u64,
         permissions: seele_sys::permission::Permissions,
