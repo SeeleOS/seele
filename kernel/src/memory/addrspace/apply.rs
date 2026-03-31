@@ -41,7 +41,7 @@ impl AddrSpace {
 
                 frame
             },
-            Data::Shared { frame } => unsafe {
+            Data::Shared(frame) => unsafe {
                 self.page_table
                     .inner
                     .map_to(
