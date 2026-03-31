@@ -148,7 +148,8 @@ define_syscall!(CloneObjectTo, |source: ObjectRef, dest: usize| {
 define_syscall!(OpenDevice, |name: String| {
     with_current_process(|process| {
         let device = get_device(name)?;
+        let slot = process.push_object(device);
 
-        Ok(process.push_object(device))
+        Ok(slot)
     })
 });
