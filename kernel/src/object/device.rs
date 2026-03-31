@@ -14,7 +14,7 @@ lazy_static::lazy_static! {
 pub fn get_device(name: String) -> SyscallResult<ObjectRef> {
     DEVICES
         .iter()
-        .find(|(name, _)| name == name)
+        .find(|(obj_name, _)| **obj_name == name)
         .ok_or(SyscallError::InvalidArguments)
         .map(|(_, obj)| obj)
         .cloned()
