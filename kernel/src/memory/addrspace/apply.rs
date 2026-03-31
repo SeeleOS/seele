@@ -41,7 +41,10 @@ impl AddrSpace {
 
                 frame
             },
-            Data::Shared(frame) => unsafe {
+            Data::Shared { start } => unsafe {
+                let page_index = (page.start_address().as_u64() - area.start.as_u64()) / 4096;
+                let frame = start + page_index;
+
                 self.page_table
                     .inner
                     .map_to(

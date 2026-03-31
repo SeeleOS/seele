@@ -31,7 +31,9 @@ pub enum Data {
         offset: u64,
         file: Arc<FileLikeObject>,
     },
-    Shared(PhysFrame),
+    Shared {
+        start: PhysFrame,
+    },
 }
 
 impl MemoryArea {
