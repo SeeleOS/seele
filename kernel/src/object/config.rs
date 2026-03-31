@@ -15,7 +15,7 @@ pub enum ConfigurateRequest {
 impl ConfigurateRequest {
     pub fn new(request: u64, ptr: u64) -> ObjectResult<Self> {
         Ok(
-            match ConfigCommand::from_raw_u64(request).ok_or(ObjectError::InvalidRequest)? {
+            match ConfigCommand::try_from(request).map_err(|_| ObjectError::InvalidRequest)? {
                 ConfigCommand::GetTerminalInfo => Self::GetTerminalInfo(ptr as *mut TerminalInfo),
                 ConfigCommand::SetTerminalInfo => Self::SetTerminalInfo(ptr as *const TerminalInfo),
                 ConfigCommand::GetFramebufferInfo => {
