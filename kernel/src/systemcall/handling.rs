@@ -9,6 +9,7 @@ use crate::{
         scheduling::{return_to_executor_from_current, return_to_executor_no_save},
     },
 };
+use x86_64::registers::model_specific::FsBase;
 
 #[unsafe(no_mangle)]
 extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
@@ -23,6 +24,7 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
         .unwrap();
     let mut thread = thread_ref.lock();
     thread.get_appropriate_snapshot().inner = *snapshot;
+    thread.get_appropriate_snapshot().fs_base = FsBase::read().as_u64();
     drop(thread);
 
     let result = syscall_handler_unwrapped(
@@ -37,7 +39,10 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
 
     snapshot.rax = result;
 
-    with_current_thread(|thread| thread.get_appropriate_snapshot().inner = *snapshot);
+    with_current_thread(|thread| {
+        thread.get_appropriate_snapshot().inner = *snapshot;
+        thread.get_appropriate_snapshot().fs_base = FsBase::read().as_u64();
+    });
 
     if with_current_process(|proc| proc.process_signals()) {
         // Its fine to no_save becuase we've already saved everything manually
