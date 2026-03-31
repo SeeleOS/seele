@@ -46,4 +46,12 @@ impl Process {
         self.objects[dest] = Some(object.clone());
         Ok(dest)
     }
+
+    pub fn push_object(&mut self, object: ObjectRef) -> usize {
+        let slot = self.alloc_object_slot();
+
+        self.objects[slot] = Some(object);
+
+        slot
+    }
 }
