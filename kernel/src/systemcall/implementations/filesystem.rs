@@ -80,22 +80,3 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
     unsafe { *linux_stat_ptr = info.as_linux() };
     Ok(0)
 });
-
-define_syscall!(
-    MapFile,
-    |object: ObjectRef, len: u64, offset: u64, permissions: Permissions| {
-        with_current_process(|process| {
-            let pages = len.div_ceil(4096);
-            let data = Data::File {
-                offset,
-                file: object.as_file_like()?,
-            };
-
-            let addr = process
-                .addrspace
-                .allocate_user_lazy(pages, permissions, data);
-
-            Ok(addr.as_u64() as usize)
-        })
-    }
-);
