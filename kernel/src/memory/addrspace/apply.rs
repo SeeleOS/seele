@@ -41,7 +41,20 @@ impl AddrSpace {
 
                 frame
             },
-            Data::Shared { frame } => todo!(),
+            Data::Shared { frame } => unsafe {
+                self.page_table
+                    .inner
+                    .map_to(
+                        page,
+                        frame,
+                        area.flags,
+                        &mut *FRAME_ALLOCATOR.get().unwrap().lock(),
+                    )
+                    .unwrap()
+                    .flush();
+
+                frame
+            },
         }
     }
 
