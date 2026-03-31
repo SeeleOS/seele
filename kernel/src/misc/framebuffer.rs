@@ -13,9 +13,9 @@ pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
 pub static FRAME_BUFFER: OnceCell<Mutex<Canvas>> = OnceCell::uninit();
 
 pub struct Canvas {
-    fb: &'static mut [u8],
+    pub fb: &'static mut [u8],
     buffer: alloc::vec::Vec<u8>,
-    info: bootloader_api::info::FrameBufferInfo,
+    pub info: bootloader_api::info::FrameBufferInfo,
 
     pub width: u32,
     pub height: u32,
