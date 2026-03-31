@@ -1,18 +1,23 @@
 use core::slice;
 
-use alloc::collections::btree_map::BTreeMap;
+use alloc::{collections::btree_map::BTreeMap, string::String};
 use seele_sys::syscalls::object::ControlCommand;
 use spin::Mutex;
 
 use crate::{
     define_syscall,
     filesystem::vfs_traits::DirectoryContentType,
+    misc::c_types::CString,
     object::{
         config::ConfigurateRequest,
         control::ControlRequest,
+        device::get_device,
         misc::{ObjectRef, get_object_current_process},
     },
-    process::{manager::get_current_process, misc::ProcessID},
+    process::{
+        manager::get_current_process,
+        misc::{ProcessID, with_current_process},
+    },
     systemcall::utils::{SyscallError, SyscallImpl},
 };
 
@@ -138,4 +143,12 @@ define_syscall!(CloneObjectTo, |source: ObjectRef, dest: usize| {
         .lock()
         .clone_object_to(source, dest)
         .map_err(Into::into)
+});
+
+define_syscall!(OpenDevice, |name: String| {
+    with_current_process(|process| {
+        let device = get_device(name)?;
+
+        Ok(process.push_object(device))
+    })
 });

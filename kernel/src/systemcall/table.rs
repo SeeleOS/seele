@@ -1,6 +1,6 @@
+use crate::register_syscalls;
 use crate::systemcall::implementations::*;
 use crate::systemcall::utils::SyscallImpl;
-use crate::register_syscalls;
 use crate::systemcall::utils::SyscallResult;
 
 type SyscallHandler = fn(u64, u64, u64, u64, u64, u64) -> SyscallResult;
@@ -50,7 +50,8 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         SigHandlerReturn,
         GetSystemInfo,
         GetCurrentTime,
-        TimeSinceBoot
+        TimeSinceBoot,
+        OpenDevice
     );
 
     table
