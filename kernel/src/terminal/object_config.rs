@@ -1,7 +1,9 @@
 use core::ptr::{read_volatile, write_volatile};
 
 use crate::{
-    object::{config::ConfigurateRequest, misc::ObjectResult, traits::Configuratable},
+    object::{
+        config::ConfigurateRequest, error::ObjectError, misc::ObjectResult, traits::Configuratable,
+    },
     terminal::TerminalObject,
 };
 
@@ -16,6 +18,7 @@ impl Configuratable for TerminalObject {
 
                 *self.info.lock() = new_info;
             },
+            _ => return Err(ObjectError::InvalidArguments),
         }
         Ok(0)
     }
