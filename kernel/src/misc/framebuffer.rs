@@ -1,5 +1,6 @@
 use bootloader_api::info::PixelFormat;
 use conquer_once::spin::OnceCell;
+use seele_sys::abi::{framebuffer::FramebufferInfo, object::FramebufferPixelFormat};
 use spin::Mutex;
 
 use crate::terminal::Color;
@@ -73,5 +74,20 @@ impl Canvas {
 
     pub fn clear(&mut self) {
         self.fb.fill(0);
+    }
+
+    pub fn fb_info(&self) -> FramebufferInfo {
+        FramebufferInfo {
+            width: self.info.width,
+            height: self.info.height,
+            stride: self.info.stride,
+            bytes_per_pixel: self.info.bytes_per_pixel,
+            byte_len: self.info.byte_len,
+            pixel_format: match self.info.pixel_format {
+                PixelFormat::Rgb => FramebufferPixelFormat::Rgb,
+                PixelFormat::Bgr => FramebufferPixelFormat::Bgr,
+                _ => panic!("Unsupported pixel format"),
+            },
+        }
     }
 }
