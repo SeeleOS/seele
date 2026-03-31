@@ -1,6 +1,5 @@
 use crate::{
-    filesystem::errors::FSError, misc::error::AsSyscallError,
-    systemcall::utils::SyscallError,
+    filesystem::errors::FSError, misc::error::AsSyscallError, systemcall::utils::SyscallError,
 };
 
 #[derive(Debug)]
@@ -8,6 +7,7 @@ pub enum ObjectError {
     DoesNotExist,
     TryAgain,
     InvalidRequest,
+    InvalidArguments,
     FSError(FSError),
     Other,
 }
@@ -21,6 +21,7 @@ impl From<FSError> for ObjectError {
 impl AsSyscallError for ObjectError {
     fn as_syscall_error(&self) -> SyscallError {
         match self {
+            Self::InvalidArguments => SyscallError::InvalidArguments,
             Self::TryAgain => SyscallError::TryAgain,
             Self::DoesNotExist => SyscallError::BadFileDescriptor,
             Self::InvalidRequest => SyscallError::InappropriateIoctl,
