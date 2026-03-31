@@ -24,6 +24,7 @@ pub struct FramebufferObject {
 }
 
 impl Object for FramebufferObject {
+    impl_cast_function!("configuratable", Configuratable);
     impl_cast_function!("mappable", MemoryMappable);
 }
 
