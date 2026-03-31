@@ -6,8 +6,9 @@ use seele_sys::permission::Permissions;
 use crate::{
     define_syscall,
     filesystem::{info::LinuxStat, path::Path, vfs::VirtualFS},
+    memory::addrspace::mem_area::Data,
     object::misc::ObjectRef,
-    process::manager::get_current_process,
+    process::{manager::get_current_process, misc::with_current_process},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
 
@@ -83,15 +84,18 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
 define_syscall!(
     MapFile,
     |object: ObjectRef, len: u64, offset: u64, permissions: Permissions| {
-        Ok(get_current_process()
-            .lock()
-            .addrspace
-            .map_file(
-                object.as_file_like()?,
+        with_current_process(|process| {
+            let pages = len.div_ceil(4096);
+            let data = Data::File {
                 offset,
-                len.div_ceil(4096),
-                permissions,
-            )
-            .as_u64() as usize)
+                file: object.as_file_like()?,
+            };
+
+            let addr = process
+                .addrspace
+                .allocate_user_lazy(pages, permissions, data);
+
+            Ok(addr.as_u64() as usize)
+        })
     }
 );

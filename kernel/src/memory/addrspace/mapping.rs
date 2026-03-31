@@ -34,12 +34,6 @@ impl AddrSpace {
         }
     }
 
-    pub fn map_lazy(&mut self, area: MemoryArea) -> VirtAddr {
-        self.memory_areas.push(area.clone());
-
-        area.start
-    }
-
     pub fn unmap(&mut self, start: VirtAddr, len: u64) {
         let end = start + len;
 
@@ -93,38 +87,5 @@ impl AddrSpace {
         }
 
         self.memory_areas = new_areas;
-    }
-
-    pub fn alloc_and_map_lazy(
-        &mut self,
-        pages: u64,
-        permissions: Permissions,
-        data: Data,
-    ) -> VirtAddr {
-        let mem = self.fetch_add_user_mem(pages);
-        self.map_lazy(MemoryArea::new(
-            mem,
-            pages,
-            permissions_to_flags(permissions),
-            data,
-            true,
-        ))
-    }
-
-    pub fn map_file(
-        &mut self,
-        file: Arc<FileLikeObject>,
-        offset: u64,
-        pages: u64,
-        permissions: Permissions,
-    ) -> VirtAddr {
-        let mem = self.fetch_add_user_mem(pages);
-        self.map_lazy(MemoryArea::new(
-            mem,
-            pages,
-            permissions_to_flags(permissions),
-            Data::File { offset, file },
-            true,
-        ))
     }
 }

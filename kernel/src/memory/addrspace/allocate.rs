@@ -25,18 +25,19 @@ impl AddrSpace {
         ))
     }
 
-    pub fn allocate_user_lazy(&mut self, pages: u64, permissions: Permissions) -> VirtAddr {
+    pub fn allocate_user_lazy(
+        &mut self,
+        pages: u64,
+        permissions: Permissions,
+        data: Data,
+    ) -> VirtAddr {
         log::trace!("addrspace: allocate_user_lazy pages {}", pages);
-        let mem = self.user_mem;
-        self.user_mem += (pages + 1) * 4096;
+        let mem = self.fetch_add_user_mem(pages);
+        let area = MemoryArea::new(mem, pages, permissions_to_flags(permissions), data, true);
 
-        self.map_lazy(MemoryArea::new(
-            mem,
-            pages,
-            permissions_to_flags(permissions),
-            Data::Normal,
-            true,
-        ))
+        self.memory_areas.push(area.clone());
+
+        area.start
     }
 
     pub fn allocate_kernel(&mut self, pages: u64) -> AllocResult {

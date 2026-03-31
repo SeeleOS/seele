@@ -5,6 +5,7 @@ use x86_64::{VirtAddr, registers::model_specific::FsBase};
 
 use crate::{
     define_syscall,
+    memory::addrspace::mem_area::Data,
     process::{
         ProcessRef,
         manager::{MANAGER, get_current_process},
@@ -74,7 +75,7 @@ define_syscall!(
         Ok(current
             .lock()
             .addrspace
-            .allocate_user_lazy(pages, permissions)
+            .allocate_user_lazy(pages, permissions, Data::Normal)
             .as_u64() as usize)
     }
 );
