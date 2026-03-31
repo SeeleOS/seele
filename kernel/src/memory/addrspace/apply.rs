@@ -23,28 +23,11 @@ use crate::{
 
 impl AddrSpace {
     pub fn apply_page(&mut self, page: Page<Size4KiB>, area: MemoryArea) -> PhysFrame {
-        let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
-        let frame = frame_allocator.allocate_frame().expect("memory full;");
-
-        unsafe {
-            self.page_table
-                .inner
-                .map_to(page, frame, area.flags, &mut *frame_allocator)
-                .unwrap()
-                .flush();
-        };
-
-        let write_addr = apply_offset(frame.start_address().as_u64());
-        increase_ref(frame);
-
-        unsafe {
-            let start_ptr = (write_addr as usize) as *mut u8;
-            core::ptr::write_bytes(start_ptr, 0, 4096);
-        }
-
         match area.data {
-            Data::Normal => {}
-            Data::File { offset, file } => unsafe {
+            Data::Normal => self.alloc_and_map(page, area).0,
+            Data::File { offset, ref file } => unsafe {
+                let (frame, write_addr) = self.alloc_and_map(page, area.clone());
+
                 let info = file.info().unwrap();
                 let file_size = info.size as u64;
                 let offset_in_area = offset + (page.start_address().as_u64() - area.start.as_u64());
@@ -55,10 +38,11 @@ impl AddrSpace {
                     offset_in_area,
                 )
                 .expect("Failed to lazyload page with file data");
-            },
-        }
 
-        frame
+                frame
+            },
+            Data::Shared { frame } => todo!(),
+        }
     }
 
     pub fn apply_area(&mut self, area: MemoryArea) -> AllocResult {
@@ -85,5 +69,28 @@ impl AddrSpace {
             start_addr,
             StackBuilder::new(end_addr.as_u64(), write_addr as *mut u8),
         )
+    }
+
+    pub fn alloc_and_map(&mut self, page: Page<Size4KiB>, area: MemoryArea) -> (PhysFrame, u64) {
+        let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
+        let frame = frame_allocator.allocate_frame().expect("memory full;");
+
+        unsafe {
+            self.page_table
+                .inner
+                .map_to(page, frame, area.flags, &mut *frame_allocator)
+                .unwrap()
+                .flush();
+        };
+
+        let write_addr = apply_offset(frame.start_address().as_u64());
+        increase_ref(frame);
+
+        unsafe {
+            let start_ptr = (write_addr as usize) as *mut u8;
+            core::ptr::write_bytes(start_ptr, 0, 4096);
+        }
+
+        (frame, write_addr)
     }
 }

@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use x86_64::{
     VirtAddr,
     structures::paging::{
-        Page, PageTableFlags, Size4KiB,
+        Page, PageTableFlags, PhysFrame, Size4KiB,
         page::{PageRange, PageRangeInclusive},
     },
 };
@@ -30,6 +30,9 @@ pub enum Data {
     File {
         offset: u64,
         file: Arc<FileLikeObject>,
+    },
+    Shared {
+        frame: PhysFrame,
     },
 }
 
