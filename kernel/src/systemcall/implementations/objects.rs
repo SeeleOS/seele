@@ -1,7 +1,7 @@
 use core::slice;
 
 use alloc::{collections::btree_map::BTreeMap, string::String};
-use seele_sys::syscalls::object::ControlCommand;
+use seele_sys::{permission::Permissions, syscalls::object::ControlCommand};
 use spin::Mutex;
 
 use crate::{
@@ -153,3 +153,13 @@ define_syscall!(OpenDevice, |name: String| {
         Ok(slot)
     })
 });
+
+define_syscall!(
+    MmapObject,
+    |object: ObjectRef, pages: u64, offset: u64, permissions: Permissions| {
+        let object = object.as_mappable()?;
+        let address = object.map(offset, pages, permissions)?;
+
+        Ok(address.as_u64() as usize)
+    }
+);
