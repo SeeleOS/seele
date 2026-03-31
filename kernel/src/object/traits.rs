@@ -1,4 +1,5 @@
 use seele_sys::permission::Permissions;
+use x86_64::VirtAddr;
 
 use crate::object::{
     Object,
@@ -26,5 +27,5 @@ pub trait Controllable: Object {
 }
 
 pub trait MemoryMappable: Object {
-    fn map(&self, offset: u64, pages: u64, permissions: Permissions) -> ObjectResult<()>;
+    fn map(&self, offset: u64, pages: u64, permissions: Permissions) -> ObjectResult<VirtAddr>;
 }
