@@ -24,9 +24,9 @@ use crate::{
 impl AddrSpace {
     pub fn apply_page(&mut self, page: Page<Size4KiB>, area: MemoryArea) -> PhysFrame {
         match area.data {
-            Data::Normal => self.alloc_and_map(page, area).0,
+            Data::Normal => self.alloc_map_zeroed_page(page, area).0,
             Data::File { offset, ref file } => unsafe {
-                let (frame, write_addr) = self.alloc_and_map(page, area.clone());
+                let (frame, write_addr) = self.alloc_map_zeroed_page(page, area.clone());
 
                 let info = file.info().unwrap();
                 let file_size = info.size as u64;
@@ -87,7 +87,11 @@ impl AddrSpace {
         )
     }
 
-    pub fn alloc_and_map(&mut self, page: Page<Size4KiB>, area: MemoryArea) -> (PhysFrame, u64) {
+    fn alloc_map_zeroed_page(
+        &mut self,
+        page: Page<Size4KiB>,
+        area: MemoryArea,
+    ) -> (PhysFrame, u64) {
         let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
         let frame = frame_allocator.allocate_frame().expect("memory full;");
 
