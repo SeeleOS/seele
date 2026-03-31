@@ -7,7 +7,7 @@ use crate::{
     filesystem::object::FileLikeObject,
     object::{
         misc::ObjectResult,
-        traits::{Configuratable, Controllable, Readable, Writable},
+        traits::{Configuratable, Controllable, MemoryMappable, Readable, Writable},
     },
     polling::{object::Pollable, poller::PollerObject},
 };
@@ -46,6 +46,7 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function!("configuratable", Configuratable, InappropriateIoctl);
     define_cast_function!("controllable", Controllable, InvalidArguments);
     define_cast_function!("pollable", Pollable, InvalidArguments);
+    define_cast_function!("mappable", MemoryMappable, InvalidArguments);
 
     define_cast_function_non_trait!("file_like", FileLikeObject, BadFileDescriptor);
     define_cast_function_non_trait!("poller", PollerObject, BadFileDescriptor);

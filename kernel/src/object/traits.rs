@@ -1,3 +1,5 @@
+use seele_sys::permission::Permissions;
+
 use crate::object::{
     Object,
     config::ConfigurateRequest,
@@ -21,4 +23,8 @@ pub trait Configuratable: Object {
 
 pub trait Controllable: Object {
     fn control(&self, request: ControlRequest) -> ObjectResult<isize>;
+}
+
+pub trait MemoryMappable: Object {
+    fn map(&self, offset: u64, pages: u64, permissions: Permissions) -> ObjectResult<()>;
 }
