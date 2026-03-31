@@ -1,11 +1,16 @@
-use alloc::{collections::btree_map::BTreeMap, string::String, vec::Vec};
+use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc, vec::Vec};
 use seele_sys::{SyscallResult, errors::SyscallError};
 
-use crate::object::misc::ObjectRef;
+use crate::{
+    misc::fb_object::FramebufferObject,
+    object::{Object, misc::ObjectRef},
+};
 
 lazy_static::lazy_static! {
     pub static ref DEVICES: BTreeMap<String,ObjectRef> = {
-        let devices = BTreeMap::new();
+        let mut devices = BTreeMap::new();
+
+        devices.insert("framebuffer".into(), Arc::new(FramebufferObject) as ObjectRef);
 
         devices
     };
