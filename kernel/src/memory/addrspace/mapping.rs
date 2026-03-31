@@ -95,6 +95,22 @@ impl AddrSpace {
         self.memory_areas = new_areas;
     }
 
+    pub fn alloc_and_map_lazy(
+        &mut self,
+        pages: u64,
+        permissions: Permissions,
+        data: Data,
+    ) -> VirtAddr {
+        let mem = self.fetch_add_user_mem(pages);
+        self.map_lazy(MemoryArea::new(
+            mem,
+            pages,
+            permissions_to_flags(permissions),
+            data,
+            true,
+        ))
+    }
+
     pub fn map_file(
         &mut self,
         file: Arc<FileLikeObject>,
