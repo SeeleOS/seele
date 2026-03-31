@@ -71,30 +71,10 @@ impl AddrSpace {
         let pages = area.pages();
 
         let mut last_frame = None;
-        let mut frame_allocator = FRAME_ALLOCATOR.try_get().unwrap().lock();
 
         for i in 0..pages {
             let page = start + i;
-            let frame = frame_allocator.allocate_frame().expect("Memory full.");
-
-            unsafe {
-                self.page_table
-                    .inner
-                    .map_to(page, frame, area.flags, &mut *frame_allocator)
-                    .unwrap()
-                    .flush();
-            };
-
-            let write_addr = apply_offset(frame.start_address().as_u64() + 4096);
-            unsafe {
-                let bytes = 4096;
-                let start_ptr = (write_addr as usize - bytes as usize) as *mut u8;
-                core::ptr::write_bytes(start_ptr, 0, bytes as usize);
-            }
-
-            last_frame = Some(frame);
-
-            increase_ref(frame);
+            last_frame = Some(self.apply_page(page, area.clone()));
         }
 
         let start_addr = start.start_address();
