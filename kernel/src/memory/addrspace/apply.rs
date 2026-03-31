@@ -4,7 +4,7 @@ use seele_sys::permission::Permissions;
 use spleen_font::Size;
 use x86_64::{
     VirtAddr,
-    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
+    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, PhysFrame, Size4KiB},
 };
 
 use crate::{
@@ -22,7 +22,7 @@ use crate::{
 };
 
 impl AddrSpace {
-    pub fn apply_page(&mut self, page: Page<Size4KiB>, area: MemoryArea) {
+    pub fn apply_page(&mut self, page: Page<Size4KiB>, area: MemoryArea) -> PhysFrame {
         let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
         let frame = frame_allocator.allocate_frame().expect("memory full;");
 
@@ -57,6 +57,8 @@ impl AddrSpace {
                 .expect("Failed to lazyload page with file data");
             },
         }
+
+        frame
     }
 
     pub fn apply_area(&mut self, area: MemoryArea) -> AllocResult {
