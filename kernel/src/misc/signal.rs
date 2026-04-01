@@ -124,6 +124,7 @@ impl Process {
             | Signal::Interrupt
             | Signal::Quit
             | Signal::Abort
+            | Signal::BusError
             | Signal::InvalidMemoryAccess
             | Signal::BrokenPipe
             | Signal::Hangup
@@ -131,7 +132,10 @@ impl Process {
             | Signal::IllegalInstruction
             | Signal::Trap
             | Signal::User1
-            | Signal::User2 => {
+            | Signal::User2
+            | Signal::CpuTimeLimitExceeded
+            | Signal::FileSizeLimitExceeded
+            | Signal::BadSystemCall => {
                 let threads = self.terminate_inner(signal as u64);
                 let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
                 for thread in threads {
