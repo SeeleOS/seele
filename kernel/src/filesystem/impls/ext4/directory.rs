@@ -1,3 +1,4 @@
+use core::any::Any;
 use core::time::Duration;
 
 use alloc::{
@@ -48,9 +49,21 @@ impl Ext4Directory {
             format!("{}/{}", self.path, child)
         }
     }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub fn fs(&self) -> &Ext4 {
+        &self.fs
+    }
 }
 
 impl Directory for Ext4Directory {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn name(&self) -> crate::filesystem::vfs::FSResult<String> {
         Ok(self.name.clone())
     }

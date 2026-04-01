@@ -1,3 +1,4 @@
+use core::any::Any;
 use core::fmt::Debug;
 
 use alloc::{string::String, vec::Vec};
@@ -8,6 +9,7 @@ use crate::filesystem::{
 };
 
 pub trait File: Send + Sync {
+    fn as_any(&self) -> &dyn Any;
     fn info(&mut self) -> FSResult<FileLikeInfo>;
 
     fn read_at(&mut self, buffer: &mut [u8], offset: u64) -> FSResult<usize>;
@@ -16,6 +18,7 @@ pub trait File: Send + Sync {
 }
 
 pub trait Directory: Send + Sync {
+    fn as_any(&self) -> &dyn Any;
     fn info(&self) -> FSResult<FileLikeInfo> {
         Ok(FileLikeInfo::new(self.name()?, 0, FileLikeType::Directory))
     }

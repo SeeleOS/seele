@@ -1,6 +1,7 @@
+use core::any::Any;
 use alloc::string::String;
 
-use ext4plus::file::File as Ext4InnerFile;
+use ext4plus::{file::File as Ext4InnerFile, inode::Inode};
 
 use crate::filesystem::{
     errors::FSError,
@@ -22,9 +23,17 @@ impl Ext4File {
         let meta = self.inner.inode().metadata();
         Ok(usize::try_from(meta.len()).unwrap())
     }
+
+    pub fn inode(&self) -> Inode {
+        self.inner.inode().clone()
+    }
 }
 
 impl File for Ext4File {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn read(&mut self, buffer: &mut [u8]) -> crate::filesystem::vfs::FSResult<usize> {
         self.inner.read_bytes(buffer).map_err(Into::into)
     }
