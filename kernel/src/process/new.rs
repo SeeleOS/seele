@@ -1,8 +1,10 @@
 use alloc::{
     string::{String, ToString},
     sync::Arc,
+    vec,
     vec::Vec,
 };
+use core::{mem::size_of, slice};
 use elfloader::{ElfBinary, LoadedElf};
 use seele_sys::signal::Signals;
 use spin::Mutex;
@@ -30,6 +32,32 @@ use crate::{
 const DEFAULT_PATH: &str = "PATH=/programs";
 const DEFAULT_TERM: &str = "TERM=xterm-256color";
 const INIT_PATH: &str = "/programs/bash";
+
+struct AlignedElfBuffer {
+    storage: Vec<u64>,
+    len: usize,
+}
+
+impl AlignedElfBuffer {
+    fn new(bytes: &[u8]) -> Self {
+        let words = bytes.len().div_ceil(size_of::<u64>());
+        let mut storage = vec![0u64; words];
+
+        unsafe {
+            let dst = slice::from_raw_parts_mut(storage.as_mut_ptr() as *mut u8, bytes.len());
+            dst.copy_from_slice(bytes);
+        }
+
+        Self {
+            storage,
+            len: bytes.len(),
+        }
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        unsafe { slice::from_raw_parts(self.storage.as_ptr() as *const u8, self.len) }
+    }
+}
 
 fn interp_load_base(image: &LoadedElf, binary: &ElfBinary) -> u64 {
     image.program_header_table() - binary.program_header_table()
@@ -88,9 +116,11 @@ pub fn setup_process(
 
     let program_bytes = read_all(path.clone())?;
     log::debug!("setup_process: loaded {} bytes", program_bytes.len());
+    let program_bytes = AlignedElfBuffer::new(&program_bytes);
 
     let mut stack_builder = addrspace.allocate_user(32).1;
-    let program_binary = ElfBinary::new(&program_bytes).expect("Failed to parse elf binary");
+    let program_binary =
+        ElfBinary::new(program_bytes.as_bytes()).expect("Failed to parse elf binary");
     let program = load_elf(addrspace, &program_binary);
 
     let (entry_point, interpreter_base) = match &program {
@@ -102,8 +132,9 @@ pub fn setup_process(
                 info.interpreter,
                 interp_bytes.len()
             );
+            let interp_bytes = AlignedElfBuffer::new(&interp_bytes);
             let interp_binary =
-                ElfBinary::new(&interp_bytes).expect("Failed to parse interpreter ELF");
+                ElfBinary::new(interp_bytes.as_bytes()).expect("Failed to parse interpreter ELF");
             let interp = load_elf(addrspace, &interp_binary);
             let interp_base = interp_load_base(&interp, &interp_binary);
             (interp.entry_point(), Some(interp_base))
