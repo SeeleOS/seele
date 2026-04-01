@@ -119,9 +119,22 @@ impl Directory for Ext4Directory {
             .map_err(Into::into)
     }
 
-    fn delete(&self, _name: &str) -> crate::filesystem::vfs::FSResult<()> {
-        // The initrd-backed filesystem is effectively read-only right now.
-        Err(FSError::Other)
+    fn delete(&self, name: &str) -> crate::filesystem::vfs::FSResult<()> {
+        let parent_inode = self
+            .fs
+            .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
+            .map_err(map_ext4_error)?;
+        let parent = Dir::open_inode(&self.fs, parent_inode).map_err(map_ext4_error)?;
+
+        let entry_name = DirEntryName::try_from(name).map_err(|_| FSError::Other)?;
+        let inode = parent.get_entry(entry_name).map_err(map_ext4_error)?;
+
+        if inode.metadata().is_dir() {
+            return Err(FSError::Other);
+        }
+
+        parent.unlink(entry_name, inode).map_err(map_ext4_error)?;
+        Ok(())
     }
 
     fn get(&self, name: &str) -> crate::filesystem::vfs::FSResult<FileLike> {
