@@ -46,8 +46,11 @@ impl VFS {
         path.navigate(self.root.clone().unwrap())?.info()
     }
 
-    pub fn delete_file(&mut self, _path: Path) -> FSResult<()> {
-        unimplemented!("Just dont create files that your gonna delete lmao its not my problem")
+    pub fn delete_file(&mut self, path: Path) -> FSResult<()> {
+        let (dir, name) = path.navigate_to_parent(self.root.clone().unwrap())?;
+        dir.lock().delete(&name)?;
+
+        Ok(())
     }
 
     pub fn list_contents(&self, path: Path) -> FSResult<Vec<DirectoryContentInfo>> {
@@ -66,6 +69,7 @@ pub fn read_all(path: Path) -> FSResult<Vec<u8>> {
     log::debug!("read_all: {}", path.clone().as_string());
     let file_object = VirtualFS.lock().open(path)?;
     let mut content = Vec::with_capacity(file_object.info().unwrap().size);
+
     let mut total_read = 0;
 
     content.resize(file_object.info().unwrap().size, 0);
