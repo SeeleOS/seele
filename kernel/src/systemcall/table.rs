@@ -56,7 +56,8 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         SocketBind,
         SocketListen,
         SocketConnect,
-        SocketAccept
+        SocketAccept,
+        DeleteFile
     );
 
     table
