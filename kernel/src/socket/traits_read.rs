@@ -1,6 +1,6 @@
 use alloc::sync::Weak;
 
-use super::{UnixSocketObject, UnixSocketState};
+use super::{SocketError, SocketResult, UnixSocketObject, UnixSocketState};
 use crate::{
     object::{error::ObjectError, traits::Readable},
     thread::yielding::{BlockType, WakeType, block_current},
@@ -8,10 +8,16 @@ use crate::{
 
 impl Readable for UnixSocketObject {
     fn read(&self, buffer: &mut [u8]) -> Result<usize, ObjectError> {
+        self.read_socket(buffer).map_err(Into::into)
+    }
+}
+
+impl UnixSocketObject {
+    pub fn read_socket(&self, buffer: &mut [u8]) -> SocketResult<usize> {
         loop {
             let stream = match &*self.state.lock() {
                 UnixSocketState::Stream(stream) => stream.clone(),
-                _ => return Err(ObjectError::InvalidArguments),
+                _ => return Err(SocketError::InvalidArguments),
             };
 
             let mut recv_buf = stream.recv_buf.lock();
@@ -33,7 +39,7 @@ impl Readable for UnixSocketObject {
                 return Ok(0);
             }
             if self.is_nonblocking() {
-                return Err(ObjectError::TryAgain);
+                return Err(SocketError::TryAgain);
             }
             block_current(BlockType::WakeRequired { wake_type: WakeType::IO, deadline: None });
         }

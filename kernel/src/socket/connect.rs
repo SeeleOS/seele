@@ -3,25 +3,25 @@ use seele_sys::abi::object::ObjectFlags;
 use spin::Mutex;
 
 use super::{
-    UNIX_SOCKET_REGISTRY, UnixSocketObject, UnixSocketState, UnixStreamInner, wake_io,
-    wake_pollers,
+    SocketError, SocketResult, UNIX_SOCKET_REGISTRY, UnixSocketObject, UnixSocketState,
+    UnixStreamInner, wake_io, wake_pollers,
 };
-use crate::{object::{error::ObjectError, misc::ObjectResult}, polling::event::PollableEvent};
+use crate::polling::event::PollableEvent;
 
 impl UnixSocketObject {
-    pub fn connect(self: &Arc<Self>, path: String) -> ObjectResult<()> {
+    pub fn connect(self: &Arc<Self>, path: String) -> SocketResult<()> {
         let listener = {
             let registry = UNIX_SOCKET_REGISTRY.lock();
             match registry.get(&path) {
                 Some(Some(listener)) => listener.clone(),
-                _ => return Err(ObjectError::ConnectionRefused),
+                _ => return Err(SocketError::ConnectionRefused),
             }
         };
 
         match &*self.state.lock() {
             UnixSocketState::Unbound => {}
-            UnixSocketState::Stream(_) => return Err(ObjectError::IsConnected),
-            _ => return Err(ObjectError::InvalidArguments),
+            UnixSocketState::Stream(_) => return Err(SocketError::IsConnected),
+            _ => return Err(SocketError::InvalidArguments),
         }
 
         let (client_stream, server_stream) = UnixStreamInner::pair();
@@ -34,7 +34,7 @@ impl UnixSocketObject {
 
         let mut pending = listener.pending.lock();
         if pending.len() >= listener.backlog {
-            return Err(ObjectError::TryAgain);
+            return Err(SocketError::TryAgain);
         }
         pending.push_back(server_socket);
         *self.state.lock() = UnixSocketState::Stream(client_stream);

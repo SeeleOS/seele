@@ -2,8 +2,7 @@ use alloc::sync::Arc;
 use seele_sys::{abi::object::ObjectFlags, abi::socket};
 use spin::Mutex;
 
-use super::{UnixSocketObject, UnixSocketState};
-use crate::object::{error::ObjectError, misc::ObjectResult};
+use super::{SocketError, SocketResult, UnixSocketObject, UnixSocketState};
 
 impl UnixSocketObject {
     pub fn new() -> Self {
@@ -13,12 +12,12 @@ impl UnixSocketObject {
         }
     }
 
-    pub fn create(domain: u64, kind: u64, protocol: u64) -> ObjectResult<Arc<Self>> {
+    pub fn create(domain: u64, kind: u64, protocol: u64) -> SocketResult<Arc<Self>> {
         if domain != socket::AF_UNIX {
-            return Err(ObjectError::AddressFamilyNotSupported);
+            return Err(SocketError::AddressFamilyNotSupported);
         }
         if kind != socket::SOCK_STREAM || protocol != 0 {
-            return Err(ObjectError::ProtocolNotSupported);
+            return Err(SocketError::ProtocolNotSupported);
         }
 
         Ok(Arc::new(Self::new()))

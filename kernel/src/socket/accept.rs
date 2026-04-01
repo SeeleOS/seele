@@ -1,18 +1,17 @@
 use alloc::sync::Arc;
 
-use super::{UnixSocketObject, UnixSocketState};
+use super::{SocketError, SocketResult, UnixSocketObject, UnixSocketState};
 use crate::{
-    object::{error::ObjectError, misc::ObjectResult},
     process::manager::get_current_process,
     thread::yielding::{BlockType, WakeType, block_current},
 };
 
 impl UnixSocketObject {
-    pub fn accept(self: &Arc<Self>) -> ObjectResult<usize> {
+    pub fn accept(self: &Arc<Self>) -> SocketResult<usize> {
         loop {
             let listener = match &*self.state.lock() {
                 UnixSocketState::Listener(listener) => listener.clone(),
-                _ => return Err(ObjectError::InvalidArguments),
+                _ => return Err(SocketError::InvalidArguments),
             };
 
             if let Some(socket) = listener.pending.lock().pop_front() {
@@ -20,7 +19,7 @@ impl UnixSocketObject {
             }
 
             if self.is_nonblocking() {
-                return Err(ObjectError::TryAgain);
+                return Err(SocketError::TryAgain);
             }
 
             block_current(BlockType::WakeRequired {
