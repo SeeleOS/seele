@@ -1,11 +1,11 @@
-use core::slice;
+use core::{arch::x86_64::_store_mask8, slice};
 
 use alloc::{string::String, sync::Arc};
 use seele_sys::permission::Permissions;
 
 use crate::{
     define_syscall,
-    filesystem::{info::LinuxStat, path::Path, vfs::VirtualFS},
+    filesystem::{info::LinuxStat, misc::smart_navigate, path::Path, vfs::VirtualFS},
     memory::addrspace::mem_area::Data,
     object::misc::ObjectRef,
     process::{manager::get_current_process, misc::with_current_process},
@@ -58,25 +58,12 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
                            linux_stat_ptr: *mut LinuxStat,
                            use_object: bool,
                            object: ObjectRef| {
-    let path: Path;
-    if !use_object {
-        if path_str.starts_with('/') {
-            path = Path::new(&path_str);
-        } else if start_from_current_dir {
-            let mut cur_path = get_current_process().lock().current_directory.clone();
-            cur_path.push_path_str(&path_str);
-            path = cur_path.clone().as_normal();
-        } else {
-            return Err(SyscallError::other(
-                "Non-absolute paths are not supported yet",
-            ));
-        }
-    } else {
-        unsafe { *linux_stat_ptr = object.as_file_like()?.info()?.as_linux() };
-        return Ok(0);
+    unsafe {
+        let result = smart_navigate(path_str, object, start_from_current_dir, use_object)
+            .ok_or(SyscallError::FileNotFound)?;
+
+        *linux_stat_ptr = result.as_file_like()?.info()?.as_linux();
     }
 
-    let info = VirtualFS.lock().file_info(path)?;
-    unsafe { *linux_stat_ptr = info.as_linux() };
     Ok(0)
 });
