@@ -5,6 +5,7 @@ pub mod c_types;
 pub mod debug_exit;
 
 pub mod cpu_core_context;
+pub mod devices;
 pub mod error;
 pub mod fb_object;
 pub mod framebuffer;
