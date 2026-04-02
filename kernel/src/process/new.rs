@@ -84,9 +84,9 @@ impl Process {
             Path::new(INIT_PATH),
             Vec::new(),
             alloc::vec![
-                DEFAULT_PATH.to_string(),
-                DEFAULT_TERM.to_string(),
-                DEFAULT_HOME.to_string(),
+                DEFAULT_PATH.into(),
+                DEFAULT_TERM.into(),
+                DEFAULT_HOME.into(),
             ],
             &mut process.addrspace,
             &mut process.objects,
