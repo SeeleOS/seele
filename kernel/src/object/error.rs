@@ -30,7 +30,7 @@ impl From<SocketError> for ObjectError {
 impl AsSyscallError for ObjectError {
     fn as_syscall_error(&self) -> SyscallError {
         match self {
-            Self::Unimplemented => SyscallError::NoSyscall,
+            Self::Unimplemented => SyscallError::other("unimplemented object result thingy"),
             Self::InvalidArguments => SyscallError::InvalidArguments,
             Self::TryAgain => SyscallError::TryAgain,
             Self::DoesNotExist => SyscallError::BadFileDescriptor,
