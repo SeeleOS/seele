@@ -78,20 +78,9 @@ define_syscall!(DeleteFile, |object: ObjectRef, path: String| {
     Ok(0)
 });
 
-define_syscall!(LinkFile, |old_object: ObjectRef,
-                           old_path: String,
-                           new_object: ObjectRef,
-                           new_path: String,
-                           from_current_dir: bool,
-                           use_object: bool| {
-    if use_object {
-        return Err(SyscallError::NoSyscall);
-    }
-
-    let old_path =
-        smart_resolve_path(old_path, from_current_dir).ok_or(SyscallError::InvalidArguments)?;
-    let new_path =
-        smart_resolve_path(new_path, from_current_dir).ok_or(SyscallError::InvalidArguments)?;
+define_syscall!(LinkFile, |old_path: String, new_path: String| {
+    let old_path = Path::new(&old_path);
+    let new_path = Path::new(&new_path);
 
     VirtualFS.lock().link_file(old_path, new_path)?;
 
