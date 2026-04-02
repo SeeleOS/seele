@@ -15,6 +15,22 @@ fn open_as_object(path: Path) -> Option<ObjectRef> {
         .map(|f| f as ObjectRef)
 }
 
+pub fn smart_resolve_path(
+    path: String,
+    // Start the path with the current directory
+    start_from_current_dir: bool,
+) -> Option<Path> {
+    if path.starts_with('/') {
+        Some(Path::new(&path))
+    } else if start_from_current_dir {
+        let mut cur_path = get_current_process().lock().current_directory.clone();
+        cur_path.push_path_str(&path);
+        Some(cur_path.as_normal())
+    } else {
+        None
+    }
+}
+
 pub fn smart_navigate(
     path: String,
     object: ObjectRef,
@@ -23,21 +39,9 @@ pub fn smart_navigate(
     // Just navigate to the object without doing anything else
     use_object: bool,
 ) -> Option<ObjectRef> {
-    match use_object {
-        false => {
-            if path.starts_with('/') {
-                // Just use the path and ignore other stuff
-                // if its a absolute path
-                let path = Path::new(&path);
-                open_as_object(path)
-            } else if start_from_current_dir {
-                let mut cur_path = get_current_process().lock().current_directory.clone();
-                cur_path.push_path_str(&path);
-                open_as_object(cur_path.as_normal())
-            } else {
-                None
-            }
-        }
-        true => Some(object),
+    if use_object {
+        Some(object)
+    } else {
+        smart_resolve_path(path, start_from_current_dir).and_then(open_as_object)
     }
 }
