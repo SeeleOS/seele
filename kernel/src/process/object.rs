@@ -27,7 +27,7 @@ impl Process {
 
     // Allocates a slot on the objects vec
     pub fn alloc_object_slot(&mut self) -> usize {
-        if let Some((i, _)) = self.objects.iter().enumerate().find(|(_, p)| p.is_none()) {
+        if let Some(i) = self.find_empty_object_slot() {
             i
         } else {
             self.objects.push(None);
