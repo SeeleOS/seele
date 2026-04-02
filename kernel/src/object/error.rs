@@ -1,7 +1,7 @@
+use crate::socket::SocketError;
 use crate::{
     filesystem::errors::FSError, misc::error::AsSyscallError, systemcall::utils::SyscallError,
 };
-use crate::socket::SocketError;
 
 #[derive(Debug)]
 pub enum ObjectError {
@@ -9,6 +9,7 @@ pub enum ObjectError {
     TryAgain,
     InvalidRequest,
     InvalidArguments,
+    Unimplemented,
     SocketError(SocketError),
     FSError(FSError),
     Other,
@@ -29,6 +30,7 @@ impl From<SocketError> for ObjectError {
 impl AsSyscallError for ObjectError {
     fn as_syscall_error(&self) -> SyscallError {
         match self {
+            Self::Unimplemented => SyscallError::NoSyscall,
             Self::InvalidArguments => SyscallError::InvalidArguments,
             Self::TryAgain => SyscallError::TryAgain,
             Self::DoesNotExist => SyscallError::BadFileDescriptor,
