@@ -17,6 +17,14 @@ pub fn init_objects(objects: &mut Vec<Option<Arc<dyn Object>>>) {
 }
 
 impl Process {
+    pub fn find_empty_object_slot(&self) -> Option<usize> {
+        self.objects
+            .iter()
+            .enumerate()
+            .find(|(_, p)| p.is_none())
+            .map(|(i, _)| i)
+    }
+
     // Allocates a slot on the objects vec
     pub fn alloc_object_slot(&mut self) -> usize {
         if let Some((i, _)) = self.objects.iter().enumerate().find(|(_, p)| p.is_none()) {
