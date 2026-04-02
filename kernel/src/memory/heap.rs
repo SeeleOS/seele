@@ -1,7 +1,8 @@
 use x86_64::{
     VirtAddr,
     structures::paging::{
-        FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, mapper::MapToError,
+        FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB,
+        mapper::{MapToError, MapperFlushAll},
     },
 };
 
@@ -32,14 +33,18 @@ pub fn init_heap(
         Page::range_inclusive(heap_start_page, heap_end_page)
     };
 
-    // map the pages of heap memory to virtual memory
     for page in page_range {
         let frame = frame_allocator
             .allocate_frame()
             .ok_or(MapToError::FrameAllocationFailed)?;
         let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
-        unsafe { mapper.map_to(page, frame, flags, frame_allocator)?.flush() };
+
+        unsafe {
+            mapper.map_to(page, frame, flags, frame_allocator)?.ignore();
+        }
     }
+
+    MapperFlushAll::new().flush_all();
 
     // initalize the heap allocator with the heap memory
     unsafe {
