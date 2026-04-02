@@ -18,7 +18,7 @@ use paste::paste;
 
 #[derive(Clone, Debug)]
 pub enum BlockType {
-    SetTime,
+    SetTime(Time),
     WakeRequired {
         wake_type: WakeType,
         deadline: Option<Time>,
@@ -28,13 +28,14 @@ pub enum BlockType {
 
 impl BlockType {
     pub fn is_timed_out(&self) -> bool {
-        matches!(
-            self,
+        match self {
+            BlockType::SetTime(time) => *time <= Time::since_boot(),
             BlockType::WakeRequired {
                 deadline: Some(deadline),
                 ..
-            } if *deadline <= Time::since_boot()
-        )
+            } => *deadline <= Time::since_boot(),
+            _ => false,
+        }
     }
 }
 
@@ -72,11 +73,8 @@ impl BlockedQueues {
     pub fn push(&mut self, thread_ref: ThreadRef, block_type: BlockType) {
         self.any.push_back(thread_ref.clone());
 
-        match block_type {
-            BlockType::WakeRequired { wake_type, .. } => {
-                self.get_appropriate_queue(wake_type).push_back(thread_ref)
-            }
-            _ => unimplemented!(),
+        if let BlockType::WakeRequired { wake_type, .. } = block_type {
+            self.get_appropriate_queue(wake_type).push_back(thread_ref)
         }
     }
 }
