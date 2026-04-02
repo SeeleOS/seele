@@ -73,7 +73,7 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
     Ok(0)
 });
 
-define_syscall!(DeleteFile, |object: ObjectRef, path: String| {
+define_syscall!(DeleteFile, |path: String| {
     VirtualFS.lock().delete_file(Path::new(&path))?;
     Ok(0)
 });
