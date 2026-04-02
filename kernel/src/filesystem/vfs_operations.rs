@@ -11,6 +11,7 @@ use alloc::vec::Vec;
 
 use crate::filesystem::{
     errors::FSError,
+    impls::ext4::{directory::Ext4Directory, file::Ext4File},
     path::Path,
     vfs_traits::{DirectoryContentType, FileLike},
 };
@@ -49,6 +50,48 @@ impl VFS {
     pub fn delete_file(&mut self, path: Path) -> FSResult<()> {
         let (dir, name) = path.navigate_to_parent(self.root.clone().unwrap())?;
         dir.lock().delete(&name)?;
+
+        Ok(())
+    }
+
+    pub fn link_file(&mut self, old_path: Path, new_path: Path) -> FSResult<()> {
+        log::trace!(
+            "vfs: link_file {} -> {}",
+            old_path.clone().as_string(),
+            new_path.clone().as_string()
+        );
+
+        let source = old_path.navigate(self.root.clone().unwrap())?;
+        let source_inode = match source {
+            FileLike::File(file) => {
+                let file = file.lock();
+                let ext4_file = file.as_any().downcast_ref::<Ext4File>().ok_or(FSError::Other)?;
+                ext4_file.inode()
+            }
+            FileLike::Directory(_) => return Err(FSError::Other),
+        };
+
+        let (parent_dir, name) = new_path.navigate_to_parent(self.root.clone().unwrap())?;
+        let parent = parent_dir.lock();
+        let ext4_parent = parent
+            .as_any()
+            .downcast_ref::<Ext4Directory>()
+            .ok_or(FSError::Other)?;
+
+        let parent_inode = ext4_parent
+            .fs()
+            .path_to_inode(ext4plus::path::Path::new(ext4_parent.path()), ext4plus::FollowSymlinks::All)
+            .map_err(FSError::from)?;
+        let parent_dir = ext4plus::dir::Dir::open_inode(ext4_parent.fs(), parent_inode)
+            .map_err(FSError::from)?;
+
+        let mut source_inode = source_inode;
+        parent_dir
+            .link(
+                ext4plus::DirEntryName::try_from(name.as_str()).map_err(|_| FSError::Other)?,
+                &mut source_inode,
+            )
+            .map_err(FSError::from)?;
 
         Ok(())
     }
