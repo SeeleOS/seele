@@ -10,6 +10,7 @@ static BOOT_UNIX_SECONDS: AtomicU64 = AtomicU64::new(0);
 pub const NANOSECONDS_PER_MICROSECOND: u64 = 1_000;
 pub const NANOSECONDS_PER_MILLISECOND: u64 = 1_000_000;
 pub const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
+const DEFAULT_TSC_FREQ_HZ: u64 = 1_000_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Time {
@@ -18,7 +19,10 @@ pub struct Time {
 
 pub fn init() {
     BOOT_TSC.store(get_cycles(), Ordering::SeqCst);
-    TSC_FREQ_HZ.store(detect_tsc_frequency_hz().unwrap_or(0), Ordering::SeqCst);
+    TSC_FREQ_HZ.store(
+        detect_tsc_frequency_hz().unwrap_or(DEFAULT_TSC_FREQ_HZ),
+        Ordering::SeqCst,
+    );
     BOOT_UNIX_SECONDS.store(Rtc::new().get_unix_timestamp() as u64, Ordering::SeqCst);
 }
 
