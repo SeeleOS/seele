@@ -1,11 +1,16 @@
-use core::{arch::x86_64::_store_mask8, slice};
+use core::{arch::x86_64::_store_mask8, result, slice};
 
 use alloc::{string::String, sync::Arc};
 use seele_sys::permission::Permissions;
 
 use crate::{
     define_syscall,
-    filesystem::{info::LinuxStat, misc::smart_navigate, path::Path, vfs::VirtualFS},
+    filesystem::{
+        info::LinuxStat,
+        misc::{smart_navigate, smart_resolve_path},
+        path::Path,
+        vfs::VirtualFS,
+    },
     memory::addrspace::mem_area::Data,
     object::misc::ObjectRef,
     process::{manager::get_current_process, misc::with_current_process},
@@ -70,5 +75,25 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
 
 define_syscall!(DeleteFile, |object: ObjectRef, path: String| {
     VirtualFS.lock().delete_file(Path::new(&path))?;
+    Ok(0)
+});
+
+define_syscall!(LinkFile, |old_object: ObjectRef,
+                           old_path: String,
+                           new_object: ObjectRef,
+                           new_path: String,
+                           from_current_dir: bool,
+                           use_object: bool| {
+    if use_object {
+        return Err(SyscallError::NoSyscall);
+    }
+
+    let old_path =
+        smart_resolve_path(old_path, from_current_dir).ok_or(SyscallError::InvalidArguments)?;
+    let new_path =
+        smart_resolve_path(new_path, from_current_dir).ok_or(SyscallError::InvalidArguments)?;
+
+    VirtualFS.lock().link_file(old_path, new_path)?;
+
     Ok(0)
 });
