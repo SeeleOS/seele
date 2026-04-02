@@ -1,18 +1,17 @@
 mod accept;
 mod bind;
 mod connect;
-mod control;
 mod create;
 mod drop_impl;
 mod error;
 mod object;
 mod registry;
+mod state;
+mod stream;
 mod traits_object;
 mod traits_poll;
 mod traits_read;
 mod traits_write;
-mod state;
-mod stream;
 mod wake;
 
 pub use error::{SocketError, SocketResult};

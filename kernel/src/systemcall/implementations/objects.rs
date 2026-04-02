@@ -10,7 +10,7 @@ use crate::{
     misc::c_types::CString,
     object::{
         config::ConfigurateRequest,
-        control::ControlRequest,
+        control::control_object,
         device::get_device,
         misc::{ObjectRef, get_object_current_process},
     },
@@ -124,11 +124,7 @@ define_syscall!(
 define_syscall!(ControlObject, |object: ObjectRef,
                                 command: u64,
                                 arg: u64| {
-    object
-        .as_controllable()?
-        .control(ControlRequest::new(command, arg)?)?;
-
-    Ok(0)
+    control_object(object, command, arg)
 });
 
 define_syscall!(CloneObject, |object: ObjectRef| {

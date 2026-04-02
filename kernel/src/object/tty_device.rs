@@ -8,10 +8,9 @@ use crate::{
     keyboard::decoding_task::KEYBOARD_QUEUE,
     object::{
         Object,
-        control::ControlRequest,
         error::ObjectError,
         misc::ObjectRef,
-        traits::{Configuratable, Controllable, Readable, Writable},
+        traits::{Configuratable, Readable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
     process::group::ProcessGroupID,
@@ -73,7 +72,6 @@ impl Object for TtyDevice {
     impl_cast_function!("writable", Writable);
     impl_cast_function!("readable", Readable);
     impl_cast_function!("configuratable", Configuratable);
-    impl_cast_function!("controllable", Controllable);
     impl_cast_function!("pollable", Pollable);
 }
 
@@ -120,19 +118,6 @@ impl Readable for TtyDevice {
                 }
 
                 return Ok(read_chars);
-            }
-        }
-    }
-}
-
-impl Controllable for TtyDevice {
-    fn control(&self, request: ControlRequest) -> super::misc::ObjectResult<isize> {
-        match request {
-            ControlRequest::GetFlags => Ok(self.flags.lock().bits() as isize),
-            ControlRequest::SetFlags(flags) => {
-                *self.flags.lock() = flags;
-
-                Ok(0)
             }
         }
     }

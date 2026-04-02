@@ -1,6 +1,7 @@
 use crate::{
     misc::snapshot::Snapshot,
     process::misc::with_current_process,
+    s_println,
     systemcall::table::SYSCALL_TABLE,
     systemcall::utils::SyscallError,
     thread::{
@@ -9,6 +10,7 @@ use crate::{
         scheduling::{return_to_executor_from_current, return_to_executor_no_save},
     },
 };
+use seele_sys::numbers::SyscallNumber;
 use x86_64::registers::model_specific::FsBase;
 
 #[unsafe(no_mangle)]
@@ -60,13 +62,50 @@ fn syscall_handler_unwrapped(
     arg5: u64,
     arg6: u64,
 ) -> isize {
+    let syscall = SyscallNumber::from_number(syscall_no as usize);
+    let should_log = false; //matches!(syscall, Some(SyscallNumber::WaitForProcessExit));
+
+    if should_log {
+        match syscall {
+            Some(number) => s_println!(
+                "syscall enter: {:?}({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x})",
+                number,
+                arg1,
+                arg2,
+                arg3,
+                arg4,
+                arg5,
+                arg6
+            ),
+            None => s_println!(
+                "syscall enter: {}({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x})",
+                syscall_no,
+                arg1,
+                arg2,
+                arg3,
+                arg4,
+                arg5,
+                arg6
+            ),
+        }
+    }
+
     if let Some(Some(handler)) = SYSCALL_TABLE.get(syscall_no as usize) {
-        match handler(arg1, arg2, arg3, arg4, arg5, arg6) {
+        let result = match handler(arg1, arg2, arg3, arg4, arg5, arg6) {
             Ok(value) => value as isize,
             Err(err) => err as isize,
+        };
+
+        if should_log {
+            match syscall {
+                Some(number) => s_println!("syscall exit: {:?} -> {}", number, result),
+                None => s_println!("syscall exit: {} -> {}", syscall_no, result),
+            }
         }
+
+        result
     } else {
-        log::error!("Attempted to call invalid syscall {}", syscall_no);
+        s_println!("Attempted to call invalid syscall {}", syscall_no);
         SyscallError::NoSyscall as isize
     }
 }

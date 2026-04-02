@@ -1,13 +1,14 @@
 use core::fmt::Debug;
 
 use alloc::sync::Arc;
-use seele_sys::{SyscallResult, errors::SyscallError};
+use seele_sys::{SyscallResult, abi::object::ObjectFlags, errors::SyscallError};
 
 use crate::{
     filesystem::object::FileLikeObject,
     object::{
+        error::ObjectError,
         misc::ObjectResult,
-        traits::{Configuratable, Controllable, MemoryMappable, Readable, Writable},
+        traits::{Configuratable, MemoryMappable, Readable, Writable},
     },
     polling::{object::Pollable, poller::PollerObject},
     socket::UnixSocketObject,
@@ -42,10 +43,17 @@ macro_rules! define_cast_function {
 }
 
 pub trait Object: Send + Sync + Debug {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<ObjectFlags> {
+        Err(ObjectError::Unimplemented)
+    }
+
+    fn set_flags(self: Arc<Self>, flags: ObjectFlags) -> ObjectResult<()> {
+        Err(ObjectError::Unimplemented)
+    }
+
     define_cast_function!("writable", Writable, BadFileDescriptor);
     define_cast_function!("readable", Readable, BadFileDescriptor);
     define_cast_function!("configuratable", Configuratable, InappropriateIoctl);
-    define_cast_function!("controllable", Controllable, InvalidArguments);
     define_cast_function!("pollable", Pollable, InvalidArguments);
     define_cast_function!("mappable", MemoryMappable, InvalidArguments);
 

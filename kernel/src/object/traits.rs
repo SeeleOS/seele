@@ -2,12 +2,7 @@ use alloc::sync::Arc;
 use seele_sys::permission::Permissions;
 use x86_64::VirtAddr;
 
-use crate::object::{
-    Object,
-    config::ConfigurateRequest,
-    control::{self, ControlRequest},
-    misc::ObjectResult,
-};
+use crate::object::{Object, config::ConfigurateRequest, misc::ObjectResult};
 
 pub trait Writable: Object {
     /// Write the content of [`buffer`] to [`self`]
@@ -21,10 +16,6 @@ pub trait Readable: Object {
 
 pub trait Configuratable: Object {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize>;
-}
-
-pub trait Controllable: Object {
-    fn control(self: Arc<Self>, request: ControlRequest) -> ObjectResult<isize>;
 }
 
 pub trait MemoryMappable: Object {
