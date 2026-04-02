@@ -24,7 +24,7 @@ pub trait Configuratable: Object {
 }
 
 pub trait Controllable: Object {
-    fn control(&self, request: ControlRequest) -> ObjectResult<isize>;
+    fn control(self: Arc<Self>, request: ControlRequest) -> ObjectResult<isize>;
 }
 
 pub trait MemoryMappable: Object {
