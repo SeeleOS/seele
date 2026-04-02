@@ -36,6 +36,21 @@ impl Process {
         }
     }
 
+    /// Same as alloc_object_slot, but with a minimum index requirement
+    pub fn alloc_object_slot_with_min(&mut self, min: usize) -> usize {
+        if let Some(i) = self.find_empty_object_slot(min) {
+            return i;
+        }
+
+        if self.objects.len() <= min {
+            self.objects.resize(min + 1, None);
+            min
+        } else {
+            self.objects.push(None);
+            self.objects.len() - 1
+        }
+    }
+
     pub fn get_object(&mut self, index: u64) -> ObjectResult<ObjectRef> {
         self.objects
             .get(index as usize)
