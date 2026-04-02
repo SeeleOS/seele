@@ -86,3 +86,20 @@ define_syscall!(LinkFile, |old_path: String, new_path: String| {
 
     Ok(0)
 });
+
+define_syscall!(CreateDirectory, |path: String, from_current_dir: bool| {
+    let path = match from_current_dir {
+        true => {
+            let mut current_dir = with_current_process(|process| process.current_directory.clone());
+
+            current_dir.push_path_str(&path);
+
+            current_dir.as_normal()
+        }
+        false => Path::new(&path),
+    };
+
+    VirtualFS.lock().create_dir(path)?;
+
+    Ok(0)
+});
