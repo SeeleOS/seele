@@ -3,6 +3,7 @@ use core::arch::naked_asm;
 use crate::{
     interrupts::hardware_interrupt::send_eoi,
     misc::snapshot::Snapshot,
+    process::manager::MANAGER,
     thread::{THREAD_MANAGER, scheduling::return_to_executor, snapshot::ThreadSnapshotType},
 };
 
@@ -49,6 +50,13 @@ pub extern "C" fn timer_interrupt_handler_wrapper() {
 }
 
 pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
+    {
+        let manager = MANAGER.lock();
+        for process in manager.processes.values() {
+            process.lock().process_timers();
+        }
+    }
+
     THREAD_MANAGER
         .get()
         .unwrap()

@@ -6,6 +6,7 @@ use x86_64::VirtAddr;
 
 use crate::filesystem::absolute_path::AbsolutePath;
 use crate::memory::addrspace::AddrSpace;
+use crate::misc::timer::Timer;
 use crate::process::group::ProcessGroupID;
 use crate::signal::action::SignalAction;
 use crate::signal::misc::default_signal_action_vec;
@@ -34,6 +35,7 @@ pub struct Process {
     pub signal_actions: Vec<SignalAction>,
     pub pending_signals: Signals,
     pub group_id: ProcessGroupID,
+    pub timers: Vec<Option<Timer>>,
 }
 
 impl Default for Process {
@@ -50,6 +52,7 @@ impl Default for Process {
             objects: Vec::new(),
             exit_code: None,
             parent: None,
+            timers: Vec::new(),
         }
     }
 }
