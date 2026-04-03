@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use seele_sys::permission::Permissions;
 use x86_64::{
     PhysAddr,
@@ -61,4 +62,9 @@ macro_rules! define_with_accessor {
             }
         }
     };
+}
+
+pub fn push_and_return_index<T>(vec: &mut Vec<T>, item: T) -> usize {
+    vec.push(item);
+    vec.len() - 1
 }
