@@ -29,5 +29,7 @@ pub fn control_object(object: ObjectRef, command: u64, arg: u64) -> SyscallResul
                 .clone_object_with_min(object, arg as usize)
                 .map_err(Into::into)
         }),
+        ControlCommand::SetObjectFlags => Ok(0),
+        ControlCommand::GetObjectFlags => Ok(0),
     }
 }
