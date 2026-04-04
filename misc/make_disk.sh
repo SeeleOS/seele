@@ -17,6 +17,11 @@ mkfs.ext4 -F "${DISK_IMG}"
 sudo mount -o loop "${DISK_IMG}" "${SYSROOT_DIR}"
 
 (
+    cd "${ROOT_DIR}/toolchain"
+    ./install.rs
+)
+
+(
     cd "${ROOT_DIR}"
     cargo run -p packages -- install base
 )
