@@ -17,6 +17,11 @@ mkfs.ext4 -F "${DISK_IMG}"
 sudo mount -o loop "${DISK_IMG}" "${SYSROOT_DIR}"
 
 (
+    cd "${ROOT_DIR}/relibc-seele"
+    make install-headers install-libs
+)
+
+(
     cd "${ROOT_DIR}/toolchain"
     ./install.rs
 )
