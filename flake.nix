@@ -38,7 +38,6 @@
               findutils
               gzip
               xz
-              zstd
               util-linux
               procps
               perl
@@ -72,8 +71,8 @@
               export SYSROOT_DIR="$REPO_ROOT/sysroot"
               export TOOLCHAIN_DIR="$REPO_ROOT/toolchain"
               export LLVM_BUILD_BIN="$TOOLCHAIN_DIR/llvm-project/build-seele/bin"
-              export LD_LIBRARY_PATH=${pkgs.zstd}/lib:${pkgs.zlib}/lib:${pkgs.stdenv.cc.cc.lib}/lib:$LD_LIBRARY_PATH
-              export PATH="$LLVM_BUILD_BIN:$REPO_ROOT/.llvm/bin:$HOME/.cargo/bin:$PATH"
+              export LD_LIBRARY_PATH=${pkgs.zstd.out}/lib:${pkgs.zlib}/lib:${pkgs.stdenv.cc.cc.lib}/lib:$LD_LIBRARY_PATH
+              export PATH="$REPO_ROOT/.llvm/bin:$HOME/.cargo/bin:$PATH"
               echo "[devshell] Ensuring Rust toolchain 'seele'..."
               #(cd "$TOOLCHAIN_DIR" && ./install.rs) || echo "[devshell] install.rs failed"
               sudo mount disk.img sysroot
