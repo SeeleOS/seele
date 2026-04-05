@@ -18,6 +18,9 @@ sudo mount -o loop "${DISK_IMG}" "${SYSROOT_DIR}"
 
 sudo mkdir -p "${SYSROOT_DIR}/tmp"
 sudo chmod 1777 "${SYSROOT_DIR}/tmp"
+sudo mkdir -p "${SYSROOT_DIR}/var/log"
+sudo mkdir -p "${SYSROOT_DIR}/var/tmp"
+sudo chmod 1777 "${SYSROOT_DIR}/var/tmp"
 
 (
     cd "${ROOT_DIR}/relibc"
