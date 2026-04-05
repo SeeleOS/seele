@@ -68,15 +68,16 @@
             ];
             RUST_SRC_PATH = rustPlatform.rustLibSrc;
             shellHook = ''
-                                               export SYSROOT_DIR="/home/elysia/coding-project/seeleos/sysroot"
-                            		      export TOOLCHAIN_DIR="/home/elysia/coding-project/seeleos/toolchain"
-                                                  export REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-                                                  export LD_LIBRARY_PATH=${pkgs.zstd}/lib:${pkgs.zlib}/lib:${pkgs.stdenv.cc.cc.lib}/lib:$LD_LIBRARY_PATH
-                                                  export PATH="$REPO_ROOT/.llvm/bin:$HOME/.cargo/bin:$TOOLCHAIN_DIR/misc/toolchain/bin:$PATH"
-                                                  echo "[devshell] Ensuring Rust toolchain 'seele'..."
-                                                  #(cd /home/elysia/coding-project/elysia-os/toolchain && ./install.rs) || echo "[devshell] install.rs failed"
-              				    sudo mount disk.img sysroot
-                                                                                   	  '';
+              export REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+              export SYSROOT_DIR="$REPO_ROOT/sysroot"
+              export TOOLCHAIN_DIR="$REPO_ROOT/toolchain"
+              export LLVM_BUILD_BIN="$TOOLCHAIN_DIR/llvm-project/build-seele/bin"
+              export LD_LIBRARY_PATH=${pkgs.zstd}/lib:${pkgs.zlib}/lib:${pkgs.stdenv.cc.cc.lib}/lib:$LD_LIBRARY_PATH
+              export PATH="$LLVM_BUILD_BIN:$REPO_ROOT/.llvm/bin:$HOME/.cargo/bin:$PATH"
+              echo "[devshell] Ensuring Rust toolchain 'seele'..."
+              #(cd "$TOOLCHAIN_DIR" && ./install.rs) || echo "[devshell] install.rs failed"
+              sudo mount disk.img sysroot
+            '';
           };
       }
     );
