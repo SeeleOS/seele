@@ -1,6 +1,6 @@
 use x86_64::instructions::hlt;
 
-pub mod aux;
+pub mod auxv;
 pub mod c_types;
 pub mod debug_exit;
 
@@ -17,9 +17,9 @@ pub mod serial_print;
 pub mod signal;
 pub mod snapshot;
 pub mod stack_builder;
-pub mod timer;
 pub mod testing;
 pub mod time;
+pub mod timer;
 pub mod tss;
 
 pub use cpu_core_context::*;

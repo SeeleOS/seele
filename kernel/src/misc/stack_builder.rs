@@ -1,7 +1,7 @@
 use elfloader::LoadedElf;
 use x86_64::VirtAddr;
 
-use crate::misc::aux::AuxType;
+use crate::misc::auxv::AuxType;
 
 #[derive(Debug)]
 pub struct StackBuilder {
