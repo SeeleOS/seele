@@ -1,5 +1,5 @@
 use alloc::sync::Arc;
-use seele_sys::permission::Permissions;
+use seele_sys::{abi::object::SeekType, permission::Permissions};
 use x86_64::VirtAddr;
 
 use crate::object::{Object, config::ConfigurateRequest, misc::ObjectResult};
@@ -25,4 +25,8 @@ pub trait MemoryMappable: Object {
         pages: u64,
         permissions: Permissions,
     ) -> ObjectResult<VirtAddr>;
+}
+
+pub trait Seekable: Object {
+    fn seek(self: Arc<Self>, offset: u64, seek_type: SeekType) -> ObjectResult<usize>;
 }

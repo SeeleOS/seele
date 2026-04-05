@@ -8,7 +8,7 @@ use crate::{
     object::{
         error::ObjectError,
         misc::ObjectResult,
-        traits::{Configuratable, MemoryMappable, Readable, Writable},
+        traits::{Configuratable, MemoryMappable, Readable, Seekable, Writable},
     },
     polling::{object::Pollable, poller::PollerObject},
     socket::UnixSocketObject,
@@ -56,6 +56,7 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function!("configuratable", Configuratable, InappropriateIoctl);
     define_cast_function!("pollable", Pollable, InvalidArguments);
     define_cast_function!("mappable", MemoryMappable, InvalidArguments);
+    define_cast_function!("seekable", Seekable, InvalidArguments);
 
     define_cast_function_non_trait!("file_like", FileLikeObject, BadFileDescriptor);
     define_cast_function_non_trait!("poller", PollerObject, BadFileDescriptor);
