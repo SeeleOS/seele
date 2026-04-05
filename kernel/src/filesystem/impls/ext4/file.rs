@@ -68,7 +68,7 @@ impl File for Ext4File {
         let pos = match seek_type {
             SeekType::Start => offset,
             SeekType::Current => self.inner.position() as i64 + offset,
-            SeekType::End => self.inner.inode().size_in_bytes() as i64 - offset,
+            SeekType::End => self.inner.inode().size_in_bytes() as i64 + offset,
         };
 
         self.inner.seek_to(pos as u64);
