@@ -17,7 +17,7 @@ mkfs.ext4 -F "${DISK_IMG}"
 sudo mount -o loop "${DISK_IMG}" "${SYSROOT_DIR}"
 
 (
-    cd "${ROOT_DIR}/relibc-seele"
+    cd "${ROOT_DIR}/relibc"
     make
 )
 

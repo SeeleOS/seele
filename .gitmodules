@@ -1,6 +1,6 @@
-[submodule "relibc-seele"]
-	path = relibc-seele
-	url = https://github.com/SeeleOS/relibc-seele
+[submodule "relibc"]
+	path = relibc
+	url = https://github.com/SeeleOS/relibc
 [submodule "toolchain"]
 	path = toolchain
 	url = https://github.com/SeeleOS/toolchain
