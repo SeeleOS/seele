@@ -8,6 +8,7 @@ rr = "run --release"
 rustflags = [
   # relibc 的库搜索路径（-lc/-lm/-lpthread/-lrt）
   "-C", "link-arg=-L/home/elysia/coding-project/elysia-os/relibc-seele/target/x86_64-seele/release",
+  "-C", "link-arg=-lm",
   # 显式把 ELF 入口设为 relibc crt0 里的 `_start`
   "-C", "link-arg=-e",
   "-C", "link-arg=_start",
