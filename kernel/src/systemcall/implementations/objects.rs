@@ -165,7 +165,7 @@ define_syscall!(
 
 define_syscall!(
     SeekObject,
-    |object: ObjectRef, offset: u64, seek_type: SeekType| {
+    |object: ObjectRef, offset: i64, seek_type: SeekType| {
         object
             .as_seekable()?
             .seek(offset, seek_type)

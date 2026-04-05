@@ -28,5 +28,5 @@ pub trait MemoryMappable: Object {
 }
 
 pub trait Seekable: Object {
-    fn seek(self: Arc<Self>, offset: u64, seek_type: SeekType) -> ObjectResult<usize>;
+    fn seek(self: Arc<Self>, offset: i64, seek_type: SeekType) -> ObjectResult<usize>;
 }
