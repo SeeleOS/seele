@@ -9,4 +9,4 @@
 	url = https://github.com/SeeleOS/packages
 [submodule "seele-sys"]
 	path = seele-sys
-	url = ./seele-sys
+	url = https://github.com/SeeleOS/seele-sys
