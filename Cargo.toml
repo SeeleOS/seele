@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["seele-sys", "kernel", "rust-test", "packages"]
-exclude = ["toolchain/rust-seele"]
+exclude = ["toolchain/rust"]
 
 [package]
 name = "seeleos-runner"
