@@ -15,7 +15,7 @@ use crate::{
         Object,
         error::ObjectError,
         misc::ObjectResult,
-        traits::{MemoryMappable, Readable, Writable},
+        traits::{MemoryMappable, Readable, Seekable, Writable},
     },
     process::misc::with_current_process,
 };
@@ -82,6 +82,7 @@ impl Object for FileLikeObject {
     impl_cast_function!("writable", Writable);
     impl_cast_function!("readable", Readable);
     impl_cast_function!("mappable", MemoryMappable);
+    impl_cast_function!("seekable", Seekable);
 
     impl_cast_function_non_trait!("file_like", FileLikeObject);
 }
@@ -119,5 +120,19 @@ impl MemoryMappable for FileLikeObject {
 
             Ok(addr)
         })
+    }
+}
+
+impl Seekable for FileLikeObject {
+    fn seek(
+        self: alloc::sync::Arc<Self>,
+        offset: i64,
+        seek_type: seele_sys::abi::object::SeekType,
+    ) -> ObjectResult<usize> {
+        if let FileLike::File(file) = &self.file {
+            file.lock().seek(offset, seek_type).map_err(Into::into)
+        } else {
+            Err(ObjectError::FSError(FSError::NotAFile))
+        }
     }
 }

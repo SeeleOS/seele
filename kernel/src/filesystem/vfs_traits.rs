@@ -2,6 +2,7 @@ use core::any::Any;
 use core::fmt::Debug;
 
 use alloc::{string::String, vec::Vec};
+use seele_sys::abi::object::SeekType;
 
 use crate::filesystem::{
     info::{DirectoryContentInfo, FileLikeInfo},
@@ -15,6 +16,7 @@ pub trait File: Send + Sync {
     fn read_at(&mut self, buffer: &mut [u8], offset: u64) -> FSResult<usize>;
     fn read(&mut self, buffer: &mut [u8]) -> FSResult<usize>;
     fn write(&mut self, buffer: &[u8]) -> FSResult<usize>;
+    fn seek(&mut self, offset: i64, seek_type: SeekType) -> FSResult<usize>;
 }
 
 pub trait Directory: Send + Sync {
