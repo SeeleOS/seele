@@ -1,7 +1,0 @@
-  [build]
-  target = "x86_64-seele"
-
-  [target.x86_64-seele]
-  rustflags = [
-    "-C", "link-arg=-L/home/elysia/coding-project/elysia-os/relibc-seele/target/x86_64-seele/release",
-  ]
