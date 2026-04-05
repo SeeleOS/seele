@@ -16,6 +16,9 @@ mkfs.ext4 -F "${DISK_IMG}"
 
 sudo mount -o loop "${DISK_IMG}" "${SYSROOT_DIR}"
 
+sudo mkdir -p "${SYSROOT_DIR}/tmp"
+sudo chmod 1777 "${SYSROOT_DIR}/tmp"
+
 (
     cd "${ROOT_DIR}/relibc"
     make
