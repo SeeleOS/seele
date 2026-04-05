@@ -1,7 +1,10 @@
 use core::slice;
 
 use alloc::{collections::btree_map::BTreeMap, string::String};
-use seele_sys::{abi::object::ControlCommand, permission::Permissions};
+use seele_sys::{
+    abi::object::{ControlCommand, SeekType},
+    permission::Permissions,
+};
 use spin::Mutex;
 
 use crate::{
@@ -157,5 +160,15 @@ define_syscall!(
         let address = object.map(offset, pages, permissions)?;
 
         Ok(address.as_u64() as usize)
+    }
+);
+
+define_syscall!(
+    SeekObject,
+    |object: ObjectRef, offset: u64, seek_type: SeekType| {
+        object
+            .as_seekable()?
+            .seek(offset, seek_type)
+            .map_err(Into::into)
     }
 );

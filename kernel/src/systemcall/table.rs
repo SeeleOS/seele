@@ -60,7 +60,8 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         DeleteFile,
         LinkFile,
         Sleep,
-        CreateDirectory
+        CreateDirectory,
+        SeekObject
     );
 
     table

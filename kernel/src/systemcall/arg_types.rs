@@ -1,8 +1,8 @@
 use alloc::{string::String, vec::Vec};
 use futures_util::future::OkInto;
 use seele_sys::{
-    errors::SyscallError, misc::SystemInfo, permission::Permissions, signal::Signals,
-    SyscallResult,
+    SyscallResult, abi::object::SeekType, errors::SyscallError, misc::SystemInfo,
+    permission::Permissions, signal::Signals,
 };
 use x86_64::VirtAddr;
 
@@ -104,4 +104,8 @@ add_syscall_arg_type!(VirtAddr, val, { Ok(VirtAddr::new(val)) });
 
 add_syscall_arg_type!(Permissions, val, {
     Permissions::from_bits(val).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(SeekType, val, {
+    SeekType::try_from(val).map_err(|_| SyscallError::InvalidArguments)
 });
