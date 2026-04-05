@@ -18,7 +18,7 @@ sudo mount -o loop "${DISK_IMG}" "${SYSROOT_DIR}"
 
 (
     cd "${ROOT_DIR}/relibc-seele"
-    make install-headers install-libs
+    make
 )
 
 (
