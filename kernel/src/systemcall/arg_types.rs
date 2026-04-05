@@ -59,6 +59,7 @@ add_syscall_arg_type!(
     *mut u64,
     *mut PollResult,
     i32,
+    i64,
     *mut SignalAction,
     *const SignalAction,
     *mut Signals,
