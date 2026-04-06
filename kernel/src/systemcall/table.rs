@@ -65,7 +65,9 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         SeekObject,
         ThreadClone,
         LinkFile,
-        SendSignalGroup
+        SendSignalGroup,
+        GetProcessGroupID,
+        SetProcessGroupID
     );
 
     table

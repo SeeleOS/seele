@@ -3,6 +3,7 @@ use alloc::{string::String, sync::Arc, vec::Vec};
 use crate::{
     define_syscall,
     process::{
+        ProcessRef,
         execve::execve,
         manager::{MANAGER, get_current_process, terminate_process},
         misc::ProcessID,
@@ -107,4 +108,13 @@ define_syscall!(GetProcessID, {
 
 define_syscall!(GetThreadID, {
     Err(SyscallError::other("get tid unimplemented"))
+});
+
+define_syscall!(GetProcessGroupID, |process: ProcessRef| {
+    Ok(process.lock().group_id.0 as usize)
+});
+
+define_syscall!(SetProcessGroupID, |process: ProcessRef, group_id: u64| {
+    process.lock().group_id.0 = group_id;
+    Ok(0)
 });
