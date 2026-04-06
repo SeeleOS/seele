@@ -12,7 +12,7 @@ pub struct ScancodeStream;
 impl Default for ScancodeStream {
     fn default() -> Self {
         SCANCODE_QUEUE
-            .try_init_once(|| ArrayQueue::new(128))
+            .try_init_once(|| ArrayQueue::new(512))
             .expect("Dont call this twice");
 
         Self
