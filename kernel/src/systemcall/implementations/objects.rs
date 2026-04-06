@@ -99,14 +99,16 @@ define_syscall!(WriteObject, |object: ObjectRef,
     }
 });
 
-define_syscall!(RemoveObject, |object: usize| {
+define_syscall!(RemoveObject, |object_num: usize| {
     let process_ref = get_current_process();
     let mut process = process_ref.lock();
+    let current_pid = process.pid;
     let objects = &mut process.objects;
 
-    if objects.len() > object {
-        let object = objects[object].take();
+    if objects.len() > object_num {
+        let object = objects[object_num].take();
         drop(object);
+        DIR_OFFSETS.lock().remove(&(current_pid, object_num as u64));
         Ok(0)
     } else {
         Err(SyscallError::BadFileDescriptor)
