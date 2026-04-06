@@ -1,6 +1,8 @@
 // Snapshot of the operating system. Including registers.
 // Also known as Frame, Context, etc.
 
+use x86_64::structures::idt::InterruptStackFrame;
+
 #[repr(C)]
 #[derive(Clone, Copy, Default, Debug)]
 pub struct Snapshot {
@@ -37,6 +39,14 @@ impl Snapshot {
             ss: ss as u64,
             ..Default::default()
         }
+    }
+
+    pub fn update_with_stackframe(&mut self, stackframe: &InterruptStackFrame) {
+        self.rip = stackframe.instruction_pointer.as_u64();
+        self.cs = stackframe.code_segment.0 as u64;
+        self.ss = stackframe.stack_segment.0 as u64;
+        self.rsp = stackframe.stack_pointer.as_u64();
+        self.rflags = stackframe.cpu_flags.bits();
     }
 
     pub fn from_current() -> Self {
