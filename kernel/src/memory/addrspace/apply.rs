@@ -41,7 +41,10 @@ impl AddrSpace {
 
                 frame
             },
-            Data::Shared { ref frames } => unsafe {
+            Data::Shared {
+                ref frames,
+                flags: shared_flags,
+            } => unsafe {
                 let page_index = (page.start_address().as_u64() - area.start.as_u64()) / 4096;
                 let frame = frames[page_index as usize];
 
@@ -50,7 +53,7 @@ impl AddrSpace {
                     .map_to(
                         page,
                         frame,
-                        area.flags,
+                        area.flags | shared_flags,
                         &mut *FRAME_ALLOCATOR.get().unwrap().lock(),
                     )
                     .unwrap()

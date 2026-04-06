@@ -40,18 +40,21 @@ impl MemoryMappable for FramebufferObject {
     ) -> crate::object::misc::ObjectResult<VirtAddr> {
         use alloc::vec::Vec;
         use x86_64::structures::paging::PhysFrame;
+        use x86_64::structures::paging::{PageTableFlags, mapper::TranslateResult};
 
         let mut framebuffer = FRAME_BUFFER.get().unwrap().lock();
 
         let fb_ptr = framebuffer.fb.as_mut_ptr();
         let fb_len = framebuffer.info.byte_len as u64;
 
-        let map_offset = offset * 4096;
-        let map_len = pages * 4096;
-
-        if map_offset + map_len > fb_len {
+        if pages == 0 || offset % 4096 != 0 {
             return Err(ObjectError::InvalidArguments);
         }
+
+        let map_offset = offset;
+        let map_len = pages
+            .checked_mul(4096)
+            .ok_or(ObjectError::InvalidArguments)?;
 
         let fb_start_virt = VirtAddr::new(fb_ptr as u64);
         let fb_start_phys = MAPPER
@@ -61,20 +64,39 @@ impl MemoryMappable for FramebufferObject {
             .translate_addr(fb_start_virt)
             .ok_or(ObjectError::InvalidArguments)?;
         let fb_page_offset = fb_start_phys.as_u64() & 0xfff;
-        let fb_window_len = fb_page_offset + fb_len;
-        if map_offset + map_len > fb_window_len {
+        let fb_window_len = fb_page_offset
+            .checked_add(fb_len)
+            .ok_or(ObjectError::InvalidArguments)?;
+        let fb_window_len_aligned = fb_window_len.div_ceil(4096) * 4096;
+        if map_offset
+            .checked_add(map_len)
+            .ok_or(ObjectError::InvalidArguments)?
+            > fb_window_len_aligned
+        {
             return Err(ObjectError::InvalidArguments);
         }
 
-        let total_pages = (fb_window_len).div_ceil(4096);
-        let mut frames = Vec::with_capacity(total_pages as usize);
+        let start_page_index = map_offset / 4096;
+        let fb_base_virt = VirtAddr::new(fb_start_virt.as_u64() - fb_page_offset);
+        let mut frames = Vec::with_capacity(pages as usize);
+        let mut shared_flags = PageTableFlags::empty();
 
         {
             let mapper = MAPPER.get().unwrap().lock();
 
-            for page_index in 0..total_pages {
-                let page_virt = VirtAddr::new(fb_start_virt.as_u64() - fb_page_offset)
-                    + page_index * 4096;
+            if let TranslateResult::Mapped { flags, .. } = mapper.translate(fb_base_virt) {
+                shared_flags = flags & (PageTableFlags::WRITE_THROUGH | PageTableFlags::NO_CACHE);
+            }
+
+            // Framebuffer memory is device memory, not normal DRAM. If the
+            // bootloader left it cacheable, inheriting no cache bits would map
+            // it as write-back in userspace, which can lead to corrupted or
+            // stale scanout contents. Force uncached mappings for /dev/fb0.
+            shared_flags |= PageTableFlags::NO_CACHE;
+
+            for relative_page in 0..pages {
+                let page_index = start_page_index + relative_page;
+                let page_virt = fb_base_virt + page_index * 4096;
                 let page_phys = mapper
                     .translate_addr(page_virt)
                     .ok_or(ObjectError::InvalidArguments)?;
@@ -84,17 +106,21 @@ impl MemoryMappable for FramebufferObject {
 
         let user_addr = with_current_process(|process| {
             process.addrspace.allocate_user_lazy(
-                total_pages,
+                pages,
                 permissions,
                 Data::Shared {
                     frames: Arc::<[PhysFrame]>::from(frames),
+                    flags: shared_flags,
                 },
             )
         });
 
         framebuffer_set_user_controlled(true);
 
-        Ok(user_addr + map_offset)
+        // Xorg fbdev expects mmap(/dev/fb0) to return the page-aligned base.
+        // It separately adds fix.smem_start's intra-page offset to compute
+        // the first visible pixel address.
+        Ok(user_addr)
     }
 }
 

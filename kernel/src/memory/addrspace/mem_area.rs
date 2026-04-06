@@ -33,6 +33,7 @@ pub enum Data {
     },
     Shared {
         frames: Arc<[PhysFrame]>,
+        flags: PageTableFlags,
     },
 }
 
