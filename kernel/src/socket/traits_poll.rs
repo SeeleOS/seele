@@ -13,14 +13,27 @@ impl Pollable for UnixSocketObject {
                 PollableEvent::CanBeRead => {
                     !stream.recv_buf.lock().is_empty()
                         || *stream.write_closed.lock()
-                        || stream.peer.lock().as_ref().and_then(Weak::upgrade).is_none()
+                        || stream
+                            .peer
+                            .lock()
+                            .as_ref()
+                            .and_then(Weak::upgrade)
+                            .is_none()
                 }
-                PollableEvent::CanBeWritten => {
-                    stream.peer.lock().as_ref().and_then(Weak::upgrade).is_some()
-                }
+                PollableEvent::CanBeWritten => stream
+                    .peer
+                    .lock()
+                    .as_ref()
+                    .and_then(Weak::upgrade)
+                    .is_some(),
                 PollableEvent::Closed => {
                     *stream.write_closed.lock()
-                        || stream.peer.lock().as_ref().and_then(Weak::upgrade).is_none()
+                        || stream
+                            .peer
+                            .lock()
+                            .as_ref()
+                            .and_then(Weak::upgrade)
+                            .is_none()
                 }
                 _ => false,
             },

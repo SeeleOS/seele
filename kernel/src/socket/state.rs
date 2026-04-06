@@ -1,4 +1,8 @@
-use alloc::{collections::VecDeque, string::String, sync::{Arc, Weak}};
+use alloc::{
+    collections::VecDeque,
+    string::String,
+    sync::{Arc, Weak},
+};
 use spin::Mutex;
 
 use super::{UnixSocketObject, UnixStreamInner};

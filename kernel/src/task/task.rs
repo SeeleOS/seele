@@ -1,6 +1,6 @@
 use core::{
     pin::Pin,
-    sync::atomic::AtomicU64,
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     task::{Context, Poll, Waker},
 };
 
@@ -24,6 +24,7 @@ impl TaskID {
 pub struct Task {
     pub id: TaskID,
     future: Pin<Box<dyn Future<Output = ()> + Send>>,
+    queued: Arc<AtomicBool>,
 }
 
 impl Task {
@@ -31,26 +32,46 @@ impl Task {
         Self {
             id: TaskID::new(),
             future: Box::pin(future),
+            queued: Arc::new(AtomicBool::new(true)),
         }
     }
 
     pub fn poll(&mut self, context: &mut Context) -> Poll<()> {
         self.future.as_mut().poll(context)
     }
+
+    pub fn mark_dequeued(&self) {
+        self.queued.store(false, Ordering::Release);
+    }
+
+    pub fn wake_handle(&self) -> Arc<AtomicBool> {
+        self.queued.clone()
+    }
 }
 
 pub struct TaskWaker {
     taskid: TaskID,
     task_queue: Arc<ArrayQueue<TaskID>>,
+    queued: Arc<AtomicBool>,
 }
 
 impl TaskWaker {
-    pub fn new(taskid: TaskID, task_queue: Arc<ArrayQueue<TaskID>>) -> Waker {
-        Waker::from(Arc::new(Self { taskid, task_queue }))
+    pub fn new(
+        taskid: TaskID,
+        task_queue: Arc<ArrayQueue<TaskID>>,
+        queued: Arc<AtomicBool>,
+    ) -> Waker {
+        Waker::from(Arc::new(Self {
+            taskid,
+            task_queue,
+            queued,
+        }))
     }
 
     fn t_wake(&self) {
-        self.task_queue.push(self.taskid).expect("Task queue full");
+        if !self.queued.swap(true, Ordering::AcqRel) {
+            self.task_queue.push(self.taskid).expect("Task queue full");
+        }
     }
 }
 

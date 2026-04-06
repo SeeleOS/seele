@@ -65,7 +65,10 @@ impl VFS {
         let source_inode = match source {
             FileLike::File(file) => {
                 let file = file.lock();
-                let ext4_file = file.as_any().downcast_ref::<Ext4File>().ok_or(FSError::Other)?;
+                let ext4_file = file
+                    .as_any()
+                    .downcast_ref::<Ext4File>()
+                    .ok_or(FSError::Other)?;
                 ext4_file.inode()
             }
             FileLike::Directory(_) => return Err(FSError::Other),
@@ -80,7 +83,10 @@ impl VFS {
 
         let parent_inode = ext4_parent
             .fs()
-            .path_to_inode(ext4plus::path::Path::new(ext4_parent.path()), ext4plus::FollowSymlinks::All)
+            .path_to_inode(
+                ext4plus::path::Path::new(ext4_parent.path()),
+                ext4plus::FollowSymlinks::All,
+            )
             .map_err(FSError::from)?;
         let parent_dir = ext4plus::dir::Dir::open_inode(ext4_parent.fs(), parent_inode)
             .map_err(FSError::from)?;

@@ -1,8 +1,8 @@
 use bootloader_api::info::PixelFormat;
 use conquer_once::spin::OnceCell;
+use core::sync::atomic::{AtomicBool, Ordering};
 use seele_sys::abi::{framebuffer::FramebufferInfo, framebuffer::FramebufferPixelFormat};
 use spin::Mutex;
-use core::sync::atomic::{AtomicBool, Ordering};
 use x86_64::{VirtAddr, structures::paging::Translate};
 
 use crate::{memory::paging::MAPPER, terminal::Color};

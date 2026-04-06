@@ -5,8 +5,8 @@ use crate::systemcall::utils::SyscallImpl;
 use crate::thread::yielding::{BlockType, WakeType, block_current};
 use alloc::sync::Arc;
 
-use crate::{define_syscall, polling::poller::PollerObject, process::manager::get_current_process};
 use crate::systemcall::utils::SyscallError;
+use crate::{define_syscall, polling::poller::PollerObject, process::manager::get_current_process};
 
 #[repr(C)]
 pub struct PollResult {

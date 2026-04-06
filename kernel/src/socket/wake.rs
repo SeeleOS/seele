@@ -1,11 +1,7 @@
 use alloc::sync::Arc;
 
 use super::UnixSocketObject;
-use crate::{
-    object::misc::ObjectRef,
-    polling::event::PollableEvent,
-    thread::THREAD_MANAGER,
-};
+use crate::{object::misc::ObjectRef, polling::event::PollableEvent, thread::THREAD_MANAGER};
 
 pub(crate) fn wake_io() {
     if let Some(manager) = THREAD_MANAGER.get() {

@@ -13,7 +13,7 @@ pub fn init() {
 
 pub(crate) fn push_scancode(scancode: u8) {
     let queue = SCANCODE_QUEUE.get().unwrap();
-    queue.push(scancode).unwrap();
+    let _ = queue.push(scancode);
 
     // wake up the registered waker
     WAKER.wake();

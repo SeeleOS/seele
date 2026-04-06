@@ -1,5 +1,5 @@
-pub use seele_sys::errors::SyscallError;
 pub use seele_sys::SyscallResult;
+pub use seele_sys::errors::SyscallError;
 
 #[macro_export]
 macro_rules! register_syscalls {

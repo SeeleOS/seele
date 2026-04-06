@@ -34,14 +34,22 @@ impl UnixSocketObject {
             }
             drop(recv_buf);
 
-            let peer_gone = stream.peer.lock().as_ref().and_then(Weak::upgrade).is_none();
+            let peer_gone = stream
+                .peer
+                .lock()
+                .as_ref()
+                .and_then(Weak::upgrade)
+                .is_none();
             if peer_gone || *stream.write_closed.lock() {
                 return Ok(0);
             }
             if self.is_nonblocking() {
                 return Err(SocketError::TryAgain);
             }
-            block_current(BlockType::WakeRequired { wake_type: WakeType::IO, deadline: None });
+            block_current(BlockType::WakeRequired {
+                wake_type: WakeType::IO,
+                deadline: None,
+            });
         }
     }
 }

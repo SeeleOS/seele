@@ -3,14 +3,12 @@ use core::{cmp::min, ptr::copy_nonoverlapping};
 use elfloader::{BasicElf, DynamicElf, ElfBinary, LoadedElf};
 use x86_64::{VirtAddr, structures::paging::PageTableFlags};
 
-use crate::{
-    memory::{
-        addrspace::{
-            AddrSpace,
-            mem_area::{Data, MemoryArea},
-        },
-        utils::{apply_offset, page_range_from_size},
+use crate::memory::{
+    addrspace::{
+        AddrSpace,
+        mem_area::{Data, MemoryArea},
     },
+    utils::{apply_offset, page_range_from_size},
 };
 
 pub type Function = *const extern "C" fn() -> !;

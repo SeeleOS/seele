@@ -46,12 +46,16 @@ impl Executor {
         while let Some(taskid) = task_queue.pop() {
             let mut task = {
                 let mut task_guard = tasks.lock();
-                task_guard.remove(&taskid).unwrap()
+                match task_guard.remove(&taskid) {
+                    Some(task) => task,
+                    None => continue,
+                }
             };
+            task.mark_dequeued();
             let waker = wakers
                 .entry(taskid)
                 // inserts a new waker if there is no waker assigned to the task
-                .or_insert_with(|| TaskWaker::new(taskid, task_queue.clone()));
+                .or_insert_with(|| TaskWaker::new(taskid, task_queue.clone(), task.wake_handle()));
             let mut context = Context::from_waker(waker);
 
             match task.poll(&mut context) {

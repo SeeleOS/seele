@@ -45,7 +45,12 @@ impl UnixSocketObject {
         }
         pending.push_back(server_socket);
         *self.state.lock() = UnixSocketState::Stream(client_stream);
-        if let Some(owner) = listener.owner.lock().as_ref().and_then(alloc::sync::Weak::upgrade) {
+        if let Some(owner) = listener
+            .owner
+            .lock()
+            .as_ref()
+            .and_then(alloc::sync::Weak::upgrade)
+        {
             wake_pollers(&owner, PollableEvent::CanBeRead);
         }
         wake_io();

@@ -16,7 +16,12 @@ struct SocketUcred {
 }
 
 impl UnixSocketObject {
-    pub fn getsockopt(&self, level: u64, option_name: u64, option_len: usize) -> SocketResult<Vec<u8>> {
+    pub fn getsockopt(
+        &self,
+        level: u64,
+        option_name: u64,
+        option_len: usize,
+    ) -> SocketResult<Vec<u8>> {
         if level != socket::SOL_SOCKET {
             return Err(SocketError::InvalidArguments);
         }
