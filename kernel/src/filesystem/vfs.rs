@@ -5,7 +5,7 @@ use crate::filesystem::{
     errors::FSError,
     impls::ext4::{EXT4, operator::Ext4RamDiskOperator},
     storage_operator::initrd::RamDiskOperator,
-    vfs_traits::{Directory, File, FileSystem},
+    vfs_traits::{Directory, File, FileSystem, Symlink},
 };
 use ext4plus::Ext4 as Ext4Inner;
 use lazy_static::lazy_static;
@@ -24,6 +24,7 @@ lazy_static! {
 pub type FSResult<T> = Result<T, FSError>;
 pub type WrappedDirectory = Arc<Mutex<dyn Directory>>;
 pub type WrappedFile = Arc<Mutex<dyn File>>;
+pub type WrappedSymlink = Arc<Mutex<dyn Symlink>>;
 
 pub struct VFS {
     pub root: Option<WrappedDirectory>,

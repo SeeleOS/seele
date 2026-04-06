@@ -1,12 +1,13 @@
 use core::any::Any;
 use core::fmt::Debug;
 
-use alloc::{string::String, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
+use ext4plus::path::Path;
 use seele_sys::abi::object::SeekType;
 
 use crate::filesystem::{
     info::{DirectoryContentInfo, FileLikeInfo},
-    vfs::{FSResult, WrappedDirectory, WrappedFile},
+    vfs::{FSResult, WrappedDirectory, WrappedFile, WrappedSymlink},
 };
 
 pub trait File: Send + Sync {
@@ -31,6 +32,11 @@ pub trait Directory: Send + Sync {
     fn get(&self, name: &str) -> FSResult<FileLike>;
 }
 
+pub trait Symlink: Send + Sync {
+    fn info(&self) -> FSResult<FileLikeInfo>;
+    fn target(&self) -> FSResult<Path>;
+}
+
 #[derive(Debug)]
 pub enum DirectoryContentType {
     File,
@@ -47,11 +53,13 @@ pub trait FileSystem: Send + Sync {
 pub enum FileLikeType {
     File,
     Directory,
+    Symlink,
 }
 
 pub enum FileLike {
     File(WrappedFile),
     Directory(WrappedDirectory),
+    Symlink(WrappedSymlink),
 }
 
 impl FileLike {
@@ -59,6 +67,7 @@ impl FileLike {
         match self {
             FileLike::File(file) => file.lock().info(),
             FileLike::Directory(dir) => dir.lock().info(),
+            FileLike::Symlink(symlink) => symlink.lock().info(),
         }
     }
 }
