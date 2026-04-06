@@ -1,9 +1,9 @@
 use alloc::vec::Vec;
 use seele_sys::permission::Permissions;
 use x86_64::{
-    PhysAddr,
+    PhysAddr, PrivilegeLevel,
     registers::control::{Cr0, Cr0Flags, Cr3Flags, Cr4, Cr4Flags},
-    structures::paging::PageTableFlags,
+    structures::{idt::InterruptStackFrame, paging::PageTableFlags},
 };
 
 use crate::misc::error::KernelResult;
@@ -67,4 +67,9 @@ macro_rules! define_with_accessor {
 pub fn push_and_return_index<T>(vec: &mut Vec<T>, item: T) -> usize {
     vec.push(item);
     vec.len() - 1
+}
+
+pub fn is_user_mode(stackframe: &InterruptStackFrame) -> bool {
+    stackframe.code_segment.rpl() == PrivilegeLevel::Ring3
+        && stackframe.stack_segment.rpl() == PrivilegeLevel::Ring3
 }
