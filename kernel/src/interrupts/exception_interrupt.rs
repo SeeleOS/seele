@@ -1,14 +1,19 @@
 use seele_sys::signal::Signal;
 use x86_64::{
+    PrivilegeLevel,
     instructions::interrupts,
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame},
 };
 
 use crate::{
     interrupts::{pagefault::pagefault_handler, print_stackframe_m},
-    misc::hlt_loop,
-    process::manager::{MANAGER, get_current_process},
-    thread::scheduling::return_to_executor_no_save,
+    misc::{hlt_loop, others::is_user_mode},
+    process::{
+        manager::{MANAGER, get_current_process, terminate_process},
+        misc::with_current_process,
+    },
+    s_println,
+    thread::{misc::with_current_thread, scheduling::return_to_executor_no_save},
     tss::{DOUBLE_FAULT_IST_LOCATION, GP_IST_LOCATION, PAGE_FAULT_IST_LOCATION},
 };
 
@@ -31,15 +36,19 @@ pub fn init_exception_interrupts(idt: &mut InterruptDescriptorTable) {
 extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) {}
 
 extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
-    log::error!("invalid opcode");
-    print_stackframe_m(stack_frame);
-    hlt_loop()
+    if is_user_mode(&stack_frame) {
+        handle_usermode_exception(&stack_frame, Signal::IllegalInstruction);
+    }
+
+    panic!("invalid opcode.\n {:#?}", stack_frame);
 }
 
-extern "x86-interrupt" fn gp_handler(_stack_frame: InterruptStackFrame, _err_code: u64) {
-    log::error!("general protection fault");
-    print_stackframe_m(_stack_frame);
-    hlt_loop()
+extern "x86-interrupt" fn gp_handler(stack_frame: InterruptStackFrame, _err_code: u64) {
+    if is_user_mode(&stack_frame) {
+        handle_usermode_exception(&stack_frame, Signal::InvalidMemoryAccess);
+    }
+
+    panic!("GP fault. \n {:#?}", stack_frame);
 }
 
 extern "x86-interrupt" fn double_fault_handler(
@@ -51,4 +60,27 @@ extern "x86-interrupt" fn double_fault_handler(
         "Double fault:\n\n{:#?}\nError code: {err_code}",
         _stack_frame
     );
+}
+
+pub fn handle_usermode_exception(stackframe: &InterruptStackFrame, sig: Signal) -> ! {
+    // Save the state of the current thread manually with the stackframe.
+    // We need to do this because the snapshot wont
+    // get automatically saved, unlike in syscalls.
+    with_current_thread(|thread| {
+        thread
+            .get_appropriate_snapshot()
+            .inner
+            .update_with_stackframe(stackframe);
+    });
+
+    let should_switch = with_current_process(|process| {
+        process.send_signal(sig);
+        process.process_signals()
+    });
+
+    if should_switch {
+        return_to_executor_no_save();
+    }
+
+    unreachable!()
 }

@@ -8,7 +8,9 @@ use x86_64::{
 };
 
 use crate::{
+    interrupts::exception_interrupt::handle_usermode_exception,
     memory::addrspace::cow::COW_FLAG,
+    misc::others::is_user_mode,
     process::manager::{get_current_process, terminate_process},
     s_println,
     thread::scheduling::return_to_executor_no_save,
@@ -19,6 +21,10 @@ pub extern "x86-interrupt" fn pagefault_handler(
     stack_frame: InterruptStackFrame,
     error_code: PageFaultErrorCode,
 ) {
+    if !is_user_mode(&stack_frame) {
+        panic!("OOPS PAGEFALT");
+    }
+
     let address = Cr2::read().unwrap();
 
     let process_ref = get_current_process();
@@ -35,30 +41,19 @@ pub extern "x86-interrupt" fn pagefault_handler(
     }
 
     if error_code.contains(PageFaultErrorCode::PROTECTION_VIOLATION) {
-        actual_pagefault_handler(stack_frame, error_code, address);
+        actual_pagefault_handler(stack_frame);
     }
 
     match addrspace.get_area(address) {
         Some(area) if area.lazy => {
             addrspace.apply_page(Page::containing_address(address), area.clone());
         }
-        _ => actual_pagefault_handler(stack_frame, error_code, address),
+        _ => actual_pagefault_handler(stack_frame),
     }
 }
 
-fn actual_pagefault_handler(
-    stack_frame: InterruptStackFrame,
-    error_code: PageFaultErrorCode,
-    address: VirtAddr,
-) -> ! {
-    s_println!("pagefaulted on {:?}", get_current_process().lock().pid);
-    s_println!("error code {:?}", error_code);
-    s_println!("stack frame {:#?}", stack_frame);
-    s_println!("address {:?}", address);
-
-    terminate_process(get_current_process(), Signal::InvalidMemoryAccess as u64);
-
-    return_to_executor_no_save();
+fn actual_pagefault_handler(stack_frame: InterruptStackFrame) -> ! {
+    handle_usermode_exception(&stack_frame, Signal::InvalidMemoryAccess);
 
     unreachable!()
 }
