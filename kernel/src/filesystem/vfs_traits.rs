@@ -2,11 +2,11 @@ use core::any::Any;
 use core::fmt::Debug;
 
 use alloc::{boxed::Box, string::String, vec::Vec};
-use ext4plus::path::Path;
 use seele_sys::abi::object::SeekType;
 
 use crate::filesystem::{
     info::{DirectoryContentInfo, FileLikeInfo},
+    path::Path,
     vfs::{FSResult, WrappedDirectory, WrappedFile, WrappedSymlink},
 };
 
