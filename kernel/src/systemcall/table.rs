@@ -63,7 +63,8 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         Sleep,
         CreateDirectory,
         SeekObject,
-        ThreadClone
+        ThreadClone,
+        LinkFile
     );
 
     table
