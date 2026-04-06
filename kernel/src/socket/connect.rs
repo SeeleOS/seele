@@ -3,10 +3,11 @@ use seele_sys::abi::object::ObjectFlags;
 use spin::Mutex;
 
 use super::{
-    SocketError, SocketResult, UNIX_SOCKET_REGISTRY, UnixSocketObject, UnixSocketState,
-    UnixStreamInner, wake_io, wake_pollers,
+    SocketError, SocketPeerCred, SocketResult, UNIX_SOCKET_REGISTRY, UnixSocketObject,
+    UnixSocketState, UnixStreamInner, wake_io, wake_pollers,
 };
 use crate::polling::event::PollableEvent;
+use crate::process::manager::get_current_process;
 
 impl UnixSocketObject {
     pub fn connect(self: &Arc<Self>, path: String) -> SocketResult<()> {
@@ -25,12 +26,18 @@ impl UnixSocketObject {
         }
 
         let (client_stream, server_stream) = UnixStreamInner::pair();
+        let peer_pid = get_current_process().lock().pid.0;
         *client_stream.owner.lock() = Some(Arc::downgrade(self));
         let server_socket = Arc::new(Self {
             state: Mutex::new(UnixSocketState::Stream(server_stream.clone())),
             flags: Mutex::new(ObjectFlags::empty()),
         });
         *server_stream.owner.lock() = Some(Arc::downgrade(&server_socket));
+        *server_stream.peer_cred.lock() = SocketPeerCred {
+            pid: peer_pid,
+            uid: 0,
+            gid: 0,
+        };
 
         let mut pending = listener.pending.lock();
         if pending.len() >= listener.backlog {

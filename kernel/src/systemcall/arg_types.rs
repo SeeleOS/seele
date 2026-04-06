@@ -54,6 +54,7 @@ add_syscall_arg_type!(
     u32,
     usize,
     *mut LinuxStat,
+    *mut u32,
     u64,
     *mut u8,
     *mut u64,

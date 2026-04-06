@@ -2,7 +2,9 @@ use alloc::{
     collections::{BTreeMap, VecDeque},
     string::String,
     sync::{Arc, Weak},
+    vec::Vec,
 };
+use core::{mem, slice};
 use lazy_static::lazy_static;
 use seele_sys::{abi::object::ObjectFlags, abi::socket};
 use spin::Mutex;
@@ -27,6 +29,23 @@ use crate::{
 lazy_static! {
     static ref UNIX_SOCKET_REGISTRY: Mutex<BTreeMap<String, Option<Arc<UnixListenerInner>>>> =
         Mutex::new(BTreeMap::new());
+}
+
+const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SocketPeerCred {
+    pub pid: u64,
+    pub uid: u32,
+    pub gid: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SocketUcred {
+    pid: i32,
+    uid: u32,
+    gid: u32,
 }
 
 #[derive(Debug)]
@@ -131,6 +150,7 @@ impl UnixSocketObject {
         }
 
         let (client_stream, server_stream) = UnixStreamInner::pair();
+        let peer_pid = get_current_process().lock().pid.0;
         *client_stream.owner.lock() = Some(Arc::downgrade(self));
 
         let server_socket = Arc::new(Self {
@@ -138,6 +158,11 @@ impl UnixSocketObject {
             flags: Mutex::new(ObjectFlags::empty()),
         });
         *server_stream.owner.lock() = Some(Arc::downgrade(&server_socket));
+        *server_stream.peer_cred.lock() = SocketPeerCred {
+            pid: peer_pid,
+            uid: 0,
+            gid: 0,
+        };
 
         {
             let mut pending = listener.pending.lock();
@@ -153,6 +178,64 @@ impl UnixSocketObject {
         }
         Self::wake_io();
         Ok(())
+    }
+
+    pub fn getsockopt(&self, level: u64, option_name: u64, option_len: usize) -> ObjectResult<Vec<u8>> {
+        if level != socket::SOL_SOCKET {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        match option_name {
+            socket::SO_ERROR => Self::encode_i32(option_len, 0),
+            socket::SO_TYPE => Self::encode_i32(option_len, socket::SOCK_STREAM as i32),
+            socket::SO_ACCEPTCONN => Self::encode_i32(
+                option_len,
+                matches!(&*self.state.lock(), UnixSocketState::Listener(_)) as i32,
+            ),
+            socket::SO_DOMAIN => Self::encode_i32(option_len, socket::AF_UNIX as i32),
+            socket::SO_PROTOCOL => Self::encode_i32(option_len, 0),
+            socket::SO_SNDBUF | socket::SO_RCVBUF => {
+                Self::encode_i32(option_len, DEFAULT_SOCKET_BUFFER_SIZE)
+            }
+            socket::SO_REUSEADDR | socket::SO_PASSCRED => Self::encode_i32(option_len, 0),
+            socket::SO_PEERCRED => match &*self.state.lock() {
+                UnixSocketState::Stream(stream) => {
+                    let cred = *stream.peer_cred.lock();
+                    Self::encode_ucred(
+                        option_len,
+                        SocketUcred {
+                            pid: i32::try_from(cred.pid).unwrap_or(i32::MAX),
+                            uid: cred.uid,
+                            gid: cred.gid,
+                        },
+                    )
+                }
+                _ => Err(ObjectError::InvalidArguments),
+            },
+            _ => Err(ObjectError::InvalidArguments),
+        }
+    }
+
+    fn encode_i32(option_len: usize, value: i32) -> ObjectResult<Vec<u8>> {
+        if option_len < mem::size_of::<i32>() {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        Ok(value.to_ne_bytes().to_vec())
+    }
+
+    fn encode_ucred(option_len: usize, value: SocketUcred) -> ObjectResult<Vec<u8>> {
+        if option_len < mem::size_of::<SocketUcred>() {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        Ok(unsafe {
+            slice::from_raw_parts(
+                (&value as *const SocketUcred).cast::<u8>(),
+                mem::size_of::<SocketUcred>(),
+            )
+        }
+        .to_vec())
     }
 
     pub fn accept(self: &Arc<Self>) -> ObjectResult<usize> {
@@ -236,6 +319,7 @@ pub struct UnixStreamInner {
     pub recv_buf: Mutex<VecDeque<u8>>,
     pub peer: Mutex<Option<Weak<UnixStreamInner>>>,
     pub owner: Mutex<Option<Weak<UnixSocketObject>>>,
+    pub peer_cred: Mutex<SocketPeerCred>,
     pub write_closed: Mutex<bool>,
 }
 
@@ -245,6 +329,7 @@ impl UnixStreamInner {
             recv_buf: Mutex::new(VecDeque::new()),
             peer: Mutex::new(None),
             owner: Mutex::new(None),
+            peer_cred: Mutex::new(SocketPeerCred::default()),
             write_closed: Mutex::new(false),
         }
     }
