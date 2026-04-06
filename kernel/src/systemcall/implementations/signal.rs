@@ -1,4 +1,5 @@
 use crate::process::ProcessRef;
+use crate::process::group::ProcessGroupID;
 use crate::process::manager::MANAGER;
 use crate::process::misc::ProcessID;
 use crate::signal::action::{SignalHandlingType, Signals};
@@ -35,6 +36,14 @@ define_syscall!(
 
 define_syscall!(SendSignal, |process: ProcessRef, signal: Signal| {
     process.lock().send_signal(signal);
+    Ok(0)
+});
+
+define_syscall!(SendSignalGroup, |group: ProcessGroupID, signal: Signal| {
+    for ele in group.get_processes() {
+        ele.lock().send_signal(signal);
+    }
+
     Ok(0)
 });
 
