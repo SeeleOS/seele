@@ -1,7 +1,7 @@
 use core::fmt::{Debug, Write};
 
 use crate::{
-    misc::framebuffer::FRAME_BUFFER,
+    misc::framebuffer::{FRAME_BUFFER, framebuffer_user_controlled},
     terminal::{
         KernelTerminal,
         term_trait::{AbstractTerminal, TerminalSize},
@@ -12,7 +12,9 @@ impl AbstractTerminal for KernelTerminal {
     fn push_str(&mut self, str: &str) {
         self.0.write_str(str).unwrap();
         self.0.flush();
-        FRAME_BUFFER.get().unwrap().lock().flush();
+        if !framebuffer_user_controlled() {
+            FRAME_BUFFER.get().unwrap().lock().flush();
+        }
     }
 
     fn size(&self) -> TerminalSize {

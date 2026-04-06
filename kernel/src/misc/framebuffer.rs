@@ -2,8 +2,10 @@ use bootloader_api::info::PixelFormat;
 use conquer_once::spin::OnceCell;
 use seele_sys::abi::{framebuffer::FramebufferInfo, framebuffer::FramebufferPixelFormat};
 use spin::Mutex;
+use core::sync::atomic::{AtomicBool, Ordering};
+use x86_64::{VirtAddr, structures::paging::Translate};
 
-use crate::terminal::Color;
+use crate::{memory::paging::MAPPER, terminal::Color};
 
 pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
     log::info!("graphics: init start");
@@ -12,6 +14,7 @@ pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
 }
 
 pub static FRAME_BUFFER: OnceCell<Mutex<Canvas>> = OnceCell::uninit();
+pub static FRAMEBUFFER_USER_CONTROLLED: AtomicBool = AtomicBool::new(false);
 
 pub struct Canvas {
     pub fb: &'static mut [u8],
@@ -77,7 +80,16 @@ impl Canvas {
     }
 
     pub fn fb_info(&self) -> FramebufferInfo {
+        let phys_addr = MAPPER
+            .get()
+            .unwrap()
+            .lock()
+            .translate_addr(VirtAddr::new(self.fb.as_ptr() as u64))
+            .expect("framebuffer must have a physical backing")
+            .as_u64() as usize;
+
         FramebufferInfo {
+            phys_addr,
             width: self.info.width,
             height: self.info.height,
             stride: self.info.stride,
@@ -90,4 +102,12 @@ impl Canvas {
             },
         }
     }
+}
+
+pub fn framebuffer_set_user_controlled(controlled: bool) {
+    FRAMEBUFFER_USER_CONTROLLED.store(controlled, Ordering::SeqCst);
+}
+
+pub fn framebuffer_user_controlled() -> bool {
+    FRAMEBUFFER_USER_CONTROLLED.load(Ordering::SeqCst)
 }

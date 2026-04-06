@@ -8,7 +8,10 @@ use crate::{
         addrspace::mem_area::{Data, MemoryArea},
         paging::MAPPER,
     },
-    misc::{framebuffer::FRAME_BUFFER, others::permissions_to_flags},
+    misc::{
+        framebuffer::{FRAME_BUFFER, framebuffer_set_user_controlled},
+        others::permissions_to_flags,
+    },
     object::{
         Object,
         config::ConfigurateRequest,
@@ -35,7 +38,8 @@ impl MemoryMappable for FramebufferObject {
         pages: u64,
         permissions: seele_sys::permission::Permissions,
     ) -> crate::object::misc::ObjectResult<VirtAddr> {
-        use x86_64::{VirtAddr, structures::paging::PhysFrame};
+        use alloc::vec::Vec;
+        use x86_64::structures::paging::PhysFrame;
 
         let mut framebuffer = FRAME_BUFFER.get().unwrap().lock();
 
@@ -49,25 +53,48 @@ impl MemoryMappable for FramebufferObject {
             return Err(ObjectError::InvalidArguments);
         }
 
-        let start_virt = VirtAddr::new(fb_ptr as u64 + map_offset);
-        let start_phys = MAPPER
+        let fb_start_virt = VirtAddr::new(fb_ptr as u64);
+        let fb_start_phys = MAPPER
             .get()
             .unwrap()
             .lock()
-            .translate_addr(start_virt)
+            .translate_addr(fb_start_virt)
             .ok_or(ObjectError::InvalidArguments)?;
+        let fb_page_offset = fb_start_phys.as_u64() & 0xfff;
+        let fb_window_len = fb_page_offset + fb_len;
+        if map_offset + map_len > fb_window_len {
+            return Err(ObjectError::InvalidArguments);
+        }
 
-        let start_frame = PhysFrame::containing_address(start_phys);
+        let total_pages = (fb_window_len).div_ceil(4096);
+        let mut frames = Vec::with_capacity(total_pages as usize);
+
+        {
+            let mapper = MAPPER.get().unwrap().lock();
+
+            for page_index in 0..total_pages {
+                let page_virt = VirtAddr::new(fb_start_virt.as_u64() - fb_page_offset)
+                    + page_index * 4096;
+                let page_phys = mapper
+                    .translate_addr(page_virt)
+                    .ok_or(ObjectError::InvalidArguments)?;
+                frames.push(PhysFrame::containing_address(page_phys));
+            }
+        }
 
         let user_addr = with_current_process(|process| {
             process.addrspace.allocate_user_lazy(
-                pages,
+                total_pages,
                 permissions,
-                Data::Shared { start: start_frame },
+                Data::Shared {
+                    frames: Arc::<[PhysFrame]>::from(frames),
+                },
             )
         });
 
-        Ok(user_addr)
+        framebuffer_set_user_controlled(true);
+
+        Ok(user_addr + map_offset)
     }
 }
 
@@ -80,8 +107,14 @@ impl Configuratable for FramebufferObject {
             ConfigurateRequest::GetFramebufferInfo(fb_info) => unsafe {
                 fb_info.write(FRAME_BUFFER.get().unwrap().lock().fb_info());
             },
-            ConfigurateRequest::FbTakeControl => *self.used_by_user.lock() = true,
-            ConfigurateRequest::FbRelease => *self.used_by_user.lock() = false,
+            ConfigurateRequest::FbTakeControl => {
+                *self.used_by_user.lock() = true;
+                framebuffer_set_user_controlled(true);
+            }
+            ConfigurateRequest::FbRelease => {
+                *self.used_by_user.lock() = false;
+                framebuffer_set_user_controlled(false);
+            }
             _ => return Err(ObjectError::InvalidArguments),
         }
         Ok(0)
