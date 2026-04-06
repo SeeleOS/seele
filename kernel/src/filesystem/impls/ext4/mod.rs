@@ -13,6 +13,7 @@ pub mod directory;
 pub mod error;
 pub mod file;
 pub mod operator;
+pub mod symlink;
 
 /// Wrapper around the `ext4plus::Ext4` filesystem so it can be used
 /// through the kernel's generic `FileSystem` trait.

@@ -20,7 +20,7 @@ use ext4plus::{
 
 use crate::filesystem::{
     errors::FSError,
-    impls::ext4::file::Ext4File,
+    impls::ext4::{file::Ext4File, symlink::Ext4Symlink},
     info::DirectoryContentInfo,
     vfs_traits::{Directory, DirectoryContentType, FileLike},
 };
@@ -165,6 +165,13 @@ impl Directory for Ext4Directory {
             Ok(FileLike::Directory(Arc::new(Mutex::new(
                 Ext4Directory::new(name.to_string(), path, self.fs.clone()),
             ))))
+        } else if meta.is_symlink() {
+            Ok(FileLike::Symlink(Arc::new(Mutex::new(Ext4Symlink {
+                fs: self.fs.clone(),
+                inode,
+                name: name.into(),
+                parent_path: self.path.clone(),
+            }))))
         } else {
             let inner_file = Ext4InnerFile::open_inode(&self.fs, inode).map_err(map_ext4_error)?;
             Ok(FileLike::File(Arc::new(Mutex::new(Ext4File::new(

@@ -2,7 +2,8 @@ use crate::{
     filesystem::{
         info::{DirectoryContentInfo, FileLikeInfo},
         object::FileLikeObject,
-        vfs::{FSResult, VFS, VirtualFS},
+        path,
+        vfs::{FSResult, VFS, VirtualFS, WrappedDirectory, WrappedFile},
     },
     object::traits::Readable,
 };
@@ -71,6 +72,7 @@ impl VFS {
                     .ok_or(FSError::Other)?;
                 ext4_file.inode()
             }
+            FileLike::Symlink(symlink) => todo!(),
             FileLike::Directory(_) => return Err(FSError::Other),
         };
 
@@ -102,15 +104,24 @@ impl VFS {
         Ok(())
     }
 
-    pub fn list_contents(&self, path: Path) -> FSResult<Vec<DirectoryContentInfo>> {
-        log::trace!("vfs: list_contents {}", path.clone().as_string());
-        let dir = path.navigate(self.root.clone().unwrap())?;
-
-        if let FileLike::Directory(dir) = dir {
-            Ok(dir.lock().contents()?)
-        } else {
-            Err(FSError::NotADirectory)
+    pub fn resolve_file(&self, path: Path) -> FSResult<WrappedFile> {
+        match path.navigate(self.root.clone().unwrap())? {
+            FileLike::File(file) => Ok(file),
+            FileLike::Symlink(symlink) => self.resolve_file(symlink.lock().target()?),
+            FileLike::Directory(_) => Err(FSError::NotAFile),
         }
+    }
+
+    pub fn resolve_dir(&self, path: Path) -> FSResult<WrappedDirectory> {
+        match path.navigate(self.root.clone().unwrap())? {
+            FileLike::File(_) => Err(FSError::NotADirectory),
+            FileLike::Directory(dir) => Ok(dir),
+            FileLike::Symlink(symlink) => self.resolve_dir(symlink.lock().target()?),
+        }
+    }
+
+    pub fn list_contents(&self, path: Path) -> FSResult<Vec<DirectoryContentInfo>> {
+        self.resolve_dir(path)?.lock().contents()
     }
 }
 

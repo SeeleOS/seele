@@ -3,7 +3,7 @@ use alloc::{string::String, vec::Vec};
 use crate::{
     filesystem::{
         errors::FSError,
-        vfs::{FSResult, WrappedDirectory},
+        vfs::{FSResult, VirtualFS, WrappedDirectory},
         vfs_traits::FileLike,
     },
     process::manager::get_current_process,
@@ -95,6 +95,11 @@ impl Path {
             match part {
                 PathPart::Root => continue,
                 PathPart::Normal(name) => {
+                    while let FileLike::Symlink(symlink) = &current {
+                        let target = symlink.lock().target()?;
+                        current = FileLike::Directory(VirtualFS.lock().resolve_dir(target)?);
+                    }
+
                     current = {
                         if let FileLike::Directory(current) = current {
                             let current = current.lock();
@@ -140,6 +145,20 @@ impl Path {
                     PathPart::ParentDir => todo!(),
                 },
             )),
+
+            FileLike::Symlink(symlink) => {
+                let target = symlink.lock().target()?;
+                let dir = VirtualFS.lock().resolve_dir(target)?;
+                Ok((
+                    dir,
+                    match name {
+                        PathPart::Normal(s) => s.clone(),
+                        PathPart::Root => todo!("Find a proper error name for this case"),
+                        PathPart::CurrentDir => todo!(),
+                        PathPart::ParentDir => todo!(),
+                    },
+                ))
+            }
         }
     }
 

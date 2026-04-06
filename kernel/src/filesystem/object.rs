@@ -6,7 +6,7 @@ use crate::{
     filesystem::{
         errors::FSError,
         info::{DirectoryContentInfo, FileLikeInfo},
-        vfs::FSResult,
+        vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
         vfs_traits::FileLike,
     },
     impl_cast_function, impl_cast_function_non_trait,
@@ -33,41 +33,54 @@ impl FileLikeObject {
         match &self.file {
             FileLike::File(file) => file.lock().info(),
             FileLike::Directory(dir) => dir.lock().info(),
+            FileLike::Symlink(symlink) => symlink.lock().info(),
         }
     }
 
     pub fn directory_contents(&self) -> ObjectResult<Vec<DirectoryContentInfo>> {
-        match &self.file {
-            FileLike::File(_) => Err(ObjectError::FSError(FSError::NotADirectory)),
-            FileLike::Directory(dir) => Ok(dir.lock().contents()?),
-        }
+        self.resolve_dir()?.lock().contents().map_err(Into::into)
     }
 
     pub fn read_at(&self, buf: &mut [u8], offset: u64) -> FSResult<usize> {
+        self.resolve_file()?.lock().read_at(buf, offset)
+    }
+
+    pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> FSResult<usize> {
+        let file = self.resolve_file()?;
+        let len = buf.len();
+        let mut read = 0;
+        let mut file = file.lock();
+
+        while read < len {
+            let bytes_read = file.read_at(&mut buf[read..], offset + read as u64)?;
+            if bytes_read == 0 {
+                return Err(FSError::Other);
+            }
+            read += bytes_read;
+        }
+
+        Ok(read)
+    }
+
+    fn resolve_file(&self) -> FSResult<WrappedFile> {
         match &self.file {
-            FileLike::File(file) => file.lock().read_at(buf, offset),
+            FileLike::File(file) => Ok(file.clone()),
+            FileLike::Symlink(symlink) => {
+                let target = symlink.lock().target()?;
+                VirtualFS.lock().resolve_file(target)
+            }
             FileLike::Directory(_) => Err(FSError::NotAFile),
         }
     }
 
-    pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> FSResult<usize> {
+    fn resolve_dir(&self) -> FSResult<WrappedDirectory> {
         match &self.file {
-            FileLike::File(file) => {
-                let len = buf.len();
-                let mut read = 0;
-                let mut file = file.lock();
-
-                while read < len {
-                    let bytes_read = file.read_at(&mut buf[read..], offset + read as u64)?;
-                    if bytes_read == 0 {
-                        return Err(FSError::Other);
-                    }
-                    read += bytes_read;
-                }
-
-                Ok(read)
+            FileLike::Directory(dir) => Ok(dir.clone()),
+            FileLike::Symlink(symlink) => {
+                let target = symlink.lock().target()?;
+                VirtualFS.lock().resolve_dir(target)
             }
-            FileLike::Directory(_) => Err(FSError::NotAFile),
+            FileLike::File(_) => Err(FSError::NotADirectory),
         }
     }
 }
@@ -89,19 +102,16 @@ impl Object for FileLikeObject {
 
 impl Writable for FileLikeObject {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
-        match &self.file {
-            FileLike::File(file) => Ok(file.lock().write(buffer)?),
-            FileLike::Directory(_) => Err(ObjectError::FSError(FSError::NotAFile)),
-        }
+        self.resolve_file()?
+            .lock()
+            .write(buffer)
+            .map_err(Into::into)
     }
 }
 
 impl Readable for FileLikeObject {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
-        match &self.file {
-            FileLike::File(file) => Ok(file.lock().read(buffer)?),
-            FileLike::Directory(_) => Err(ObjectError::FSError(FSError::NotAFile)),
-        }
+        self.resolve_file()?.lock().read(buffer).map_err(Into::into)
     }
 }
 

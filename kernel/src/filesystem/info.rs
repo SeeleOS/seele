@@ -45,6 +45,7 @@ impl LinuxStat {
         pub const S_IFDIR: u32 = 0o040000;
         pub const S_IFREG: u32 = 0o100000;
         pub const FILE_PERMS: u32 = 0o666;
+        pub const S_IFLNK: u32 = 0o120000;
         pub const DIR_PERMS: u32 = 0o777;
 
         Self {
@@ -53,6 +54,7 @@ impl LinuxStat {
             st_mode: match info.file_like_type {
                 FileLikeType::File => S_IFREG | FILE_PERMS,
                 FileLikeType::Directory => S_IFDIR | DIR_PERMS,
+                FileLikeType::Symlink => S_IFLNK | FILE_PERMS,
             },
             st_size: info.size as i64,
             st_blksize: 4096,
