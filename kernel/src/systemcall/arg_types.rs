@@ -16,7 +16,7 @@ use crate::{
     },
     object::misc::{ObjectRef, get_object_current_process},
     polling::event::PollableEvent,
-    process::{ProcessRef, manager::MANAGER, misc::ProcessID},
+    process::{ProcessRef, group::ProcessGroupID, manager::MANAGER, misc::ProcessID},
     signal::{Signal, action::SignalAction},
     systemcall::implementations::PollResult,
 };
@@ -111,3 +111,5 @@ add_syscall_arg_type!(Permissions, val, {
 add_syscall_arg_type!(SeekType, val, {
     SeekType::try_from(val).map_err(|_| SyscallError::InvalidArguments)
 });
+
+add_syscall_arg_type!(ProcessGroupID, val, { Ok(ProcessGroupID(val)) });
