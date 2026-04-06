@@ -32,7 +32,7 @@ pub enum Data {
         file: Arc<FileLikeObject>,
     },
     Shared {
-        start: PhysFrame,
+        frames: Arc<[PhysFrame]>,
     },
 }
 
