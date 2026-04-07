@@ -41,6 +41,7 @@ fn main() {
         "if=pflash,format=raw,unit=0,file={},readonly=on",
         code.display()
     ));
+    cmd.arg("-no-reboot").arg("-no-shutdown");
     // copy vars and enable rw instead of snapshot if you want to store data (e.g. enroll secure boot keys)
     cmd.arg("-drive").arg(format!(
         "if=pflash,format=raw,unit=1,file={},snapshot=on",
