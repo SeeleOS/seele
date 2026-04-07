@@ -29,6 +29,8 @@ pub enum Data {
     Normal,
     File {
         offset: u64,
+        // Bytes from `offset` that belong to this mapping; the rest stays zeroed.
+        file_bytes: u64,
         file: Arc<FileLikeObject>,
     },
     Shared {

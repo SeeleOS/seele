@@ -1,10 +1,10 @@
 use core::sync::atomic::AtomicU64;
 
 use alloc::{string::String, vec::Vec};
-use elfloader::LoadedElf;
 
 use crate::{
     define_with_accessor,
+    elfloader::ElfInfo,
     filesystem::{absolute_path::AbsolutePath, errors::FSError, vfs::VirtualFS},
     misc::stack_builder::StackBuilder,
     process::{Process, manager::get_current_process},
@@ -34,7 +34,7 @@ impl Default for ProcessID {
 
 pub fn init_stack_layout(
     builder: &mut StackBuilder,
-    file: &LoadedElf,
+    file: &ElfInfo,
     interpreter_base: Option<u64>,
     args: Vec<String>,
     env_vars: Vec<String>,

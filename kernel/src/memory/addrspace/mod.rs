@@ -110,9 +110,16 @@ impl AddrSpace {
             middle.end = overlap_end;
             middle.flags = new_flags;
 
-            if let Data::File { offset, file } = &area.data {
+            if let Data::File {
+                offset,
+                file_bytes,
+                file,
+            } = &area.data
+            {
                 middle.data = Data::File {
                     offset: *offset + (overlap_start.as_u64() - area.start.as_u64()),
+                    file_bytes: file_bytes
+                        .saturating_sub(overlap_start.as_u64() - area.start.as_u64()),
                     file: file.clone(),
                 };
             }

@@ -40,9 +40,15 @@ pub fn split_memory_area(
         let mut right = area.clone();
         right.start = overlap_end;
 
-        if let Data::File { offset, file } = &area.data {
+        if let Data::File {
+            offset,
+            file_bytes,
+            file,
+        } = &area.data
+        {
             right.data = Data::File {
                 offset: *offset + (overlap_end.as_u64() - area.start.as_u64()),
+                file_bytes: file_bytes.saturating_sub(overlap_end.as_u64() - area.start.as_u64()),
                 file: file.clone(),
             };
         }

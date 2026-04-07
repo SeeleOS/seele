@@ -25,13 +25,16 @@ impl AddrSpace {
     pub fn apply_page(&mut self, page: Page<Size4KiB>, area: MemoryArea) -> PhysFrame {
         match area.data {
             Data::Normal => self.alloc_map_zeroed_page(page, area).0,
-            Data::File { offset, ref file } => unsafe {
+            Data::File {
+                offset,
+                file_bytes,
+                ref file,
+            } => unsafe {
                 let (frame, write_addr) = self.alloc_map_zeroed_page(page, area.clone());
 
-                let info = file.info().unwrap();
-                let file_size = info.size as u64;
-                let offset_in_area = offset + (page.start_address().as_u64() - area.start.as_u64());
-                let read_len = core::cmp::min(4096, file_size.saturating_sub(offset_in_area));
+                let page_offset = page.start_address().as_u64() - area.start.as_u64();
+                let offset_in_area = offset + page_offset;
+                let read_len = core::cmp::min(4096, file_bytes.saturating_sub(page_offset));
 
                 file.read_exact_at(
                     slice::from_raw_parts_mut(write_addr as *mut u8, read_len as usize),

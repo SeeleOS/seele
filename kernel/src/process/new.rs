@@ -4,14 +4,14 @@ use alloc::{
     vec,
     vec::Vec,
 };
-use core::{mem::size_of, slice};
-use elfloader::{ElfBinary, LoadedElf};
 use seele_sys::signal::Signals;
 use spin::Mutex;
 
 use crate::{
+    elfloader::{load_elf_lazy, read_elf_header},
     filesystem::{
-        absolute_path::AbsolutePath, errors::FSError, path::Path, vfs_operations::read_all,
+        absolute_path::AbsolutePath, errors::FSError, object::FileLikeObject, path::Path,
+        vfs::VirtualFS,
     },
     memory::addrspace::AddrSpace,
     object::{Object, tty_device::get_default_tty},
@@ -26,7 +26,6 @@ use crate::{
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
         thread::Thread,
     },
-    userspace::elf_loader::load_elf,
 };
 
 const DEFAULT_PATH: &str = "PATH=/programs";
@@ -34,36 +33,6 @@ const DEFAULT_TERM: &str = "TERM=xterm-256color";
 const DEFAULT_HOME: &str = "HOME=/home";
 const INIT_PATH: &str = "/programs/bash";
 const MAX_SHEBANG_DEPTH: usize = 4;
-
-struct AlignedElfBuffer {
-    storage: Vec<u64>,
-    len: usize,
-}
-
-impl AlignedElfBuffer {
-    fn new(bytes: &[u8]) -> Self {
-        let words = bytes.len().div_ceil(size_of::<u64>());
-        let mut storage = vec![0u64; words];
-
-        unsafe {
-            let dst = slice::from_raw_parts_mut(storage.as_mut_ptr() as *mut u8, bytes.len());
-            dst.copy_from_slice(bytes);
-        }
-
-        Self {
-            storage,
-            len: bytes.len(),
-        }
-    }
-
-    fn as_bytes(&self) -> &[u8] {
-        unsafe { slice::from_raw_parts(self.storage.as_ptr() as *const u8, self.len) }
-    }
-}
-
-fn interp_load_base(image: &LoadedElf, binary: &ElfBinary) -> u64 {
-    image.program_header_table() - binary.program_header_table()
-}
 
 fn parse_shebang(program_bytes: &[u8]) -> Result<Option<(Path, Option<String>)>, FSError> {
     if !program_bytes.starts_with(b"#!") {
@@ -90,6 +59,17 @@ fn parse_shebang(program_bytes: &[u8]) -> Result<Option<(Path, Option<String>)>,
     }
 
     Ok(Some((Path::new(interpreter), optional_arg)))
+}
+
+fn open_file(path: Path) -> Result<Arc<FileLikeObject>, FSError> {
+    Ok(Arc::new(VirtualFS.lock().open(path)?))
+}
+
+fn read_shebang_prefix(file: &FileLikeObject) -> Result<Vec<u8>, FSError> {
+    let mut bytes = vec![0u8; 256];
+    let read = file.read_at(&mut bytes, 0)?;
+    bytes.truncate(read);
+    Ok(bytes)
 }
 
 impl Process {
@@ -148,10 +128,10 @@ fn setup_process_inner(
     }
 
     let path_string = path.clone().as_string();
-    let program_bytes = read_all(path.clone())?;
-    log::debug!("setup_process: loaded {} bytes", program_bytes.len());
+    let program_file = open_file(path.clone())?;
+    let program_prefix = read_shebang_prefix(&program_file)?;
 
-    if let Some((interpreter, optional_arg)) = parse_shebang(&program_bytes)? {
+    if let Some((interpreter, optional_arg)) = parse_shebang(&program_prefix)? {
         log::debug!(
             "setup_process: shebang {} -> {}",
             path_string,
@@ -176,29 +156,18 @@ fn setup_process_inner(
         );
     }
 
-    let program_bytes = AlignedElfBuffer::new(&program_bytes);
-
     let mut stack_builder = addrspace.allocate_user(32).1;
-    let program_binary =
-        ElfBinary::new(program_bytes.as_bytes()).expect("Failed to parse elf binary");
-    let program = load_elf(addrspace, &program_binary);
+    let program_headers = read_elf_header(&program_file)?;
+    let program = load_elf_lazy(addrspace, program_file, &program_headers)?;
 
-    let (entry_point, interpreter_base) = match &program {
-        LoadedElf::Basic(info) => (info.entry_point, None),
-        LoadedElf::Dynamic(info) => {
-            let interp_bytes = read_all(Path::new(info.interpreter))?;
-            log::debug!(
-                "setup_process: loaded interpreter {} ({} bytes)",
-                info.interpreter,
-                interp_bytes.len()
-            );
-            let interp_bytes = AlignedElfBuffer::new(&interp_bytes);
-            let interp_binary =
-                ElfBinary::new(interp_bytes.as_bytes()).expect("Failed to parse interpreter ELF");
-            let interp = load_elf(addrspace, &interp_binary);
-            let interp_base = interp_load_base(&interp, &interp_binary);
-            (interp.entry_point(), Some(interp_base))
+    let (entry_point, interpreter_base) = match program.interpreter.as_deref() {
+        Some(interpreter_path) => {
+            let interp_file = open_file(Path::new(interpreter_path))?;
+            let interp_headers = read_elf_header(&interp_file)?;
+            let interp = load_elf_lazy(addrspace, interp_file, &interp_headers)?;
+            (interp.entry_point, Some(interp.load_base))
         }
+        None => (program.entry_point, None),
     };
 
     init_stack_layout(&mut stack_builder, &program, interpreter_base, args, env);

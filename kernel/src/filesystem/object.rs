@@ -123,7 +123,15 @@ impl MemoryMappable for FileLikeObject {
         permissions: seele_sys::permission::Permissions,
     ) -> ObjectResult<x86_64::VirtAddr> {
         with_current_process(|process| {
-            let data = Data::File { offset, file: self };
+            let file_bytes = self
+                .info()
+                .map(|info| (info.size as u64).saturating_sub(offset))
+                .unwrap_or(0);
+            let data = Data::File {
+                offset,
+                file_bytes,
+                file: self,
+            };
             let addr = process
                 .addrspace
                 .allocate_user_lazy(pages, permissions, data);

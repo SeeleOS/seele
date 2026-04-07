@@ -10,6 +10,7 @@ pub const NAME: &str = "Seele";
 
 pub mod acpi;
 pub mod filesystem;
+pub mod elfloader;
 pub mod interrupts;
 pub mod keyboard;
 pub mod memory;
@@ -22,7 +23,6 @@ pub mod systemcall;
 pub mod task;
 pub mod terminal;
 pub mod thread;
-pub mod userspace;
 pub use misc::signal;
 
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
