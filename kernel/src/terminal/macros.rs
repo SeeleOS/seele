@@ -1,6 +1,7 @@
 use core::fmt::Arguments;
 
 use alloc::fmt::format;
+use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
     misc::serial_print::_print, object::traits::Writable, terminal::state::DEFAULT_TERMINAL,
@@ -19,12 +20,14 @@ macro_rules! println {
 
 #[doc(hidden)]
 pub fn term_print(args: Arguments) {
-    _print(args);
+    without_interrupts(|| {
+        _print(args);
 
-    DEFAULT_TERMINAL
-        .get()
-        .unwrap()
-        .lock()
-        .write(format(args).as_bytes())
-        .unwrap();
+        DEFAULT_TERMINAL
+            .get()
+            .unwrap()
+            .lock()
+            .write(format(args).as_bytes())
+            .unwrap();
+    });
 }

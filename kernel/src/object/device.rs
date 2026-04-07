@@ -19,8 +19,12 @@ lazy_static::lazy_static! {
 }
 
 pub fn get_device(name: String) -> SyscallResult<ObjectRef> {
+    get_device_ref(name.as_str())
+}
+
+pub fn get_device_ref(name: &str) -> SyscallResult<ObjectRef> {
     DEVICES
-        .get(name.as_str())
+        .get(name)
         .ok_or(SyscallError::InvalidArguments)
         .cloned()
 }

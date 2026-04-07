@@ -8,6 +8,9 @@ pub mod raw_key_processing;
 pub mod scancode_stream;
 
 pub fn init() {
+    SCANCODE_QUEUE
+        .try_init_once(|| crossbeam_queue::ArrayQueue::new(512))
+        .expect("keyboard scancode queue initialized twice");
     ps2::init();
 }
 

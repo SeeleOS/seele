@@ -13,13 +13,20 @@ pub static KEYBOARD_QUEUE: OnceCell<Mutex<VecDeque<u8>>> = OnceCell::uninit();
 
 pub async fn process_keypresses() {
     let mut scancodes = ScancodeStream::default();
-    let mut keyboard = _PS2_KEYBOARD.lock();
 
     // loop through scancodes infinitely
     while let Some(scancode) = scancodes.next().await {
-        if let Ok(Some(key_event)) = keyboard.add_byte(scancode)
-            && let Some(key) = keyboard.process_keyevent(key_event)
-        {
+        let decoded_key = {
+            let mut keyboard = _PS2_KEYBOARD.lock();
+
+            if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
+                keyboard.process_keyevent(key_event)
+            } else {
+                None
+            }
+        };
+
+        if let Some(key) = decoded_key {
             match key {
                 DecodedKey::RawKey(key_code) => process_key(key_code),
                 DecodedKey::Unicode(character) => process_char(character),

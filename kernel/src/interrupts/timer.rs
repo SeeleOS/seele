@@ -50,6 +50,13 @@ pub extern "C" fn timer_interrupt_handler_wrapper() {
 }
 
 pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
+    send_eoi();
+
+    // Don't preempt kernel mode; it can corrupt in-flight kernel snapshots.
+    if (snapshot.cs & 0x3) == 0 {
+        return;
+    }
+
     {
         let manager = MANAGER.lock();
         for process in manager.processes.values() {
@@ -62,12 +69,6 @@ pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
         .unwrap()
         .lock()
         .process_timed_out_threads();
-
-    send_eoi();
-    // Don't preempt kernel mode; it can corrupt in-flight kernel snapshots.
-    if (snapshot.cs & 0x3) == 0 {
-        return;
-    }
 
     return_to_executor(snapshot, ThreadSnapshotType::Thread);
 

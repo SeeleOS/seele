@@ -1,21 +1,27 @@
-use alloc::collections::vec_deque::VecDeque;
-use heapless::{Deque, mpmc::Queue};
+use core::{
+    pin::Pin,
+    sync::atomic::{AtomicBool, Ordering},
+    task::{Context, Poll},
+};
+
+use futures_util::{Stream, StreamExt, task::AtomicWaker};
+use heapless::Deque;
 use ps2_mouse::Mouse;
 use seele_sys::abi::object::ObjectFlags;
 use spin::Mutex;
 use x86_64::{
+    instructions::interrupts::without_interrupts,
     instructions::port::Port,
-    structures::{self, idt::InterruptStackFrame},
+    structures::idt::InterruptStackFrame,
 };
 
 use crate::{
     impl_cast_function,
     interrupts::hardware_interrupt::send_eoi,
     object::{
-        Object, device::get_device, error::ObjectError, misc::ObjectResult, traits::Readable,
+        Object, device::get_device_ref, error::ObjectError, misc::ObjectResult, traits::Readable,
     },
     polling::{event::PollableEvent, object::Pollable},
-    println, s_print,
     thread::{
         THREAD_MANAGER,
         yielding::{BlockType, WakeType, block_current},
@@ -23,28 +29,58 @@ use crate::{
 };
 
 lazy_static::lazy_static! {
-    pub static ref MOUSE_PACKETS: Mutex<Deque<u8, 1024>> = Mutex::new(Deque::new());
+    pub static ref MOUSE_PACKETS: Mutex<Deque<u8, 4096>> = Mutex::new(Deque::new());
+}
+
+static MOUSE_PENDING: AtomicBool = AtomicBool::new(false);
+static MOUSE_WAKER: AtomicWaker = AtomicWaker::new();
+
+struct MouseInterruptStream;
+
+impl Stream for MouseInterruptStream {
+    type Item = ();
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if MOUSE_PENDING.swap(false, Ordering::AcqRel) {
+            return Poll::Ready(Some(()));
+        }
+
+        MOUSE_WAKER.register(cx.waker());
+
+        if MOUSE_PENDING.swap(false, Ordering::AcqRel) {
+            MOUSE_WAKER.take();
+            Poll::Ready(Some(()))
+        } else {
+            Poll::Pending
+        }
+    }
 }
 
 pub fn init() {
     Mouse::new().init().unwrap();
 }
 
-pub extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    unsafe {
-        MOUSE_PACKETS
-            .lock()
-            .push_back(Port::new(0x60).read())
-            .unwrap();
-    }
+pub async fn process_mouse_events() {
+    let mut interrupts = MouseInterruptStream;
 
-    if let Ok(mouse_obj) = get_device("ps2mouse".into()) {
-        THREAD_MANAGER
-            .get()
-            .unwrap()
-            .lock()
-            .wake_poller(mouse_obj, PollableEvent::CanBeRead);
+    while interrupts.next().await.is_some() {
+        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+        thread_manager.wake_mouse();
+
+        if let Ok(mouse_obj) = get_device_ref("ps2mouse") {
+            thread_manager.wake_poller(mouse_obj, PollableEvent::CanBeRead);
+        }
     }
+}
+
+pub extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    let packet = unsafe { Port::new(0x60).read() };
+    without_interrupts(|| {
+        MOUSE_PACKETS.lock().push_back(packet).unwrap();
+    });
+
+    MOUSE_PENDING.store(true, Ordering::Release);
+    MOUSE_WAKER.wake();
 
     send_eoi();
 }
@@ -72,7 +108,7 @@ impl Object for PS2MouseObject {
 impl Pollable for PS2MouseObject {
     fn is_event_ready(&self, event: PollableEvent) -> bool {
         match event {
-            PollableEvent::CanBeRead => !MOUSE_PACKETS.lock().is_empty(),
+            PollableEvent::CanBeRead => without_interrupts(|| !MOUSE_PACKETS.lock().is_empty()),
             _ => false,
         }
     }
@@ -81,7 +117,7 @@ impl Pollable for PS2MouseObject {
 impl Readable for PS2MouseObject {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
         loop {
-            let mut queue = MOUSE_PACKETS.lock();
+            let mut queue = without_interrupts(|| MOUSE_PACKETS.lock());
 
             if queue.is_empty() {
                 if self.flags.lock().contains(ObjectFlags::NONBLOCK) {

@@ -3,6 +3,7 @@ use spin::Mutex;
 
 use crate::{
     keyboard::decoding_task::process_keypresses,
+    misc::mouse::process_mouse_events,
     task::{executor::Executor, spawner::TaskSpawner, task::Task},
 };
 
@@ -21,6 +22,11 @@ pub fn init() -> Executor {
         .unwrap()
         .lock()
         .spawn(Task::new(process_keypresses()));
+    TASK_SPAWNER
+        .get()
+        .unwrap()
+        .lock()
+        .spawn(Task::new(process_mouse_events()));
 
     executor
 }

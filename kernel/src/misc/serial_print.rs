@@ -3,6 +3,7 @@ use core::fmt::{self, Write};
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
 use uart_16550::SerialPort;
+use x86_64::instructions::interrupts::without_interrupts;
 
 #[macro_export]
 macro_rules! s_print {
@@ -19,13 +20,15 @@ pub static SERIAL_PORT: OnceCell<Mutex<SerialPort>> = OnceCell::uninit();
 
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
-    SERIAL_PORT
-        .get_or_init(|| {
-            let mut serial_port = unsafe { SerialPort::new(0x3F8) };
-            serial_port.init();
-            Mutex::new(serial_port)
-        })
-        .lock()
-        .write_fmt(args)
-        .expect("Failed to print to serial port")
+    without_interrupts(|| {
+        SERIAL_PORT
+            .get_or_init(|| {
+                let mut serial_port = unsafe { SerialPort::new(0x3F8) };
+                serial_port.init();
+                Mutex::new(serial_port)
+            })
+            .lock()
+            .write_fmt(args)
+            .expect("Failed to print to serial port")
+    })
 }
