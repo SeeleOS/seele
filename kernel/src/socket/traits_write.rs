@@ -19,6 +19,10 @@ impl UnixSocketObject {
             _ => return Err(SocketError::InvalidArguments),
         };
 
+        if *stream.write_shutdown.lock() {
+            return Err(SocketError::BrokenPipe);
+        }
+
         let peer = stream
             .peer
             .lock()

@@ -38,6 +38,8 @@ impl UnixSocketObject {
             uid: 0,
             gid: 0,
         };
+        *client_stream.peer_name.lock() = Some(path.clone());
+        *server_stream.local_name.lock() = Some(path.clone());
 
         let mut pending = listener.pending.lock();
         if pending.len() >= listener.backlog {

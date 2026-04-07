@@ -67,7 +67,11 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         LinkFile,
         SendSignalGroup,
         GetProcessGroupID,
-        SetProcessGroupID
+        SetProcessGroupID,
+        SocketGetSockName,
+        SocketGetPeerName,
+        SocketRecvMsg,
+        SocketShutdown
     );
 
     table

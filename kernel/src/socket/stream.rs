@@ -1,5 +1,6 @@
 use alloc::{
     collections::VecDeque,
+    string::String,
     sync::{Arc, Weak},
 };
 use spin::Mutex;
@@ -21,6 +22,10 @@ pub struct UnixStreamInner {
     pub owner: Mutex<Option<Weak<UnixSocketObject>>>,
     pub peer_cred: Mutex<SocketPeerCred>,
     pub write_closed: Mutex<bool>,
+    pub read_shutdown: Mutex<bool>,
+    pub write_shutdown: Mutex<bool>,
+    pub local_name: Mutex<Option<String>>,
+    pub peer_name: Mutex<Option<String>>,
 }
 
 impl UnixStreamInner {
@@ -31,6 +36,10 @@ impl UnixStreamInner {
             owner: Mutex::new(None),
             peer_cred: Mutex::new(SocketPeerCred::default()),
             write_closed: Mutex::new(false),
+            read_shutdown: Mutex::new(false),
+            write_shutdown: Mutex::new(false),
+            local_name: Mutex::new(None),
+            peer_name: Mutex::new(None),
         }
     }
 

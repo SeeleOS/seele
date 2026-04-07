@@ -20,6 +20,10 @@ impl UnixSocketObject {
                 _ => return Err(SocketError::InvalidArguments),
             };
 
+            if *stream.read_shutdown.lock() {
+                return Ok(0);
+            }
+
             let mut recv_buf = stream.recv_buf.lock();
             if !recv_buf.is_empty() {
                 let mut read = 0;

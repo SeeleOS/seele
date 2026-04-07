@@ -4,6 +4,7 @@ mod connect;
 mod create;
 mod drop_impl;
 mod error;
+mod name;
 mod object;
 mod registry;
 mod sockopt;
