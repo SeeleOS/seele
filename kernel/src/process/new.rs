@@ -158,13 +158,13 @@ fn setup_process_inner(
 
     let mut stack_builder = addrspace.allocate_user(32).1;
     let program_headers = read_elf_header(&program_file)?;
-    let program = load_elf_lazy(addrspace, program_file, &program_headers)?;
+    let program = load_elf_lazy(addrspace, program_file, &program_headers).unwrap();
 
     let (entry_point, interpreter_base) = match program.interpreter.as_deref() {
         Some(interpreter_path) => {
             let interp_file = open_file(Path::new(interpreter_path))?;
             let interp_headers = read_elf_header(&interp_file)?;
-            let interp = load_elf_lazy(addrspace, interp_file, &interp_headers)?;
+            let interp = load_elf_lazy(addrspace, interp_file, &interp_headers).unwrap();
             (interp.entry_point, Some(interp.load_base))
         }
         None => (program.entry_point, None),
