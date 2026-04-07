@@ -1,3 +1,4 @@
+use log::error;
 use x86_64::{
     VirtAddr,
     registers::control::Cr2,
@@ -37,21 +38,24 @@ pub extern "x86-interrupt" fn pagefault_handler(
     }
 
     if error_code.contains(PageFaultErrorCode::PROTECTION_VIOLATION) {
-        actual_pagefault_handler(stack_frame);
+        actual_pagefault_handler(stack_frame, error_code);
     }
 
     match addrspace.get_area(address) {
         Some(area) if area.lazy => {
             addrspace.apply_page(Page::containing_address(address), area.clone());
         }
-        _ => actual_pagefault_handler(stack_frame),
+        _ => actual_pagefault_handler(stack_frame, error_code),
     }
 }
 
-fn actual_pagefault_handler(stack_frame: InterruptStackFrame) -> ! {
+fn actual_pagefault_handler(stack_frame: InterruptStackFrame, error_code: PageFaultErrorCode) -> ! {
     if is_user_mode(&stack_frame) {
         handle_usermode_exception(&stack_frame, Signal::InvalidMemoryAccess);
     }
 
-    panic!("Kernel page fault.")
+    panic!(
+        "Kernel page fault. \n {:#?} \n errcode: {:?}",
+        stack_frame, error_code
+    )
 }
