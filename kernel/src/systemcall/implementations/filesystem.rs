@@ -1,4 +1,4 @@
-use core::{arch::x86_64::_store_mask8, result, slice};
+use core::slice;
 
 use alloc::{string::String, sync::Arc};
 use seele_sys::permission::Permissions;
@@ -102,4 +102,21 @@ define_syscall!(CreateDirectory, |path: String, from_current_dir: bool| {
     VirtualFS.lock().create_dir(path)?;
 
     Ok(0)
+});
+
+define_syscall!(ReadLink, |path_str: String,
+                           start_from_current_dir: bool,
+                           out_buf: *mut u8,
+                           out_len: usize| {
+    let path = smart_resolve_path(path_str, start_from_current_dir)
+        .ok_or(SyscallError::InvalidArguments)?;
+    let target = VirtualFS.lock().open(path)?.read_link()?;
+    let bytes = target.as_bytes();
+    let copied = core::cmp::min(bytes.len(), out_len);
+
+    unsafe {
+        slice::from_raw_parts_mut(out_buf, copied).copy_from_slice(&bytes[..copied]);
+    }
+
+    Ok(copied)
 });

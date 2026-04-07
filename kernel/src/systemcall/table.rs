@@ -64,7 +64,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         CreateDirectory,
         SeekObject,
         ThreadClone,
-        LinkFile,
+        ReadLink,
         SendSignalGroup,
         GetProcessGroupID,
         SetProcessGroupID,
