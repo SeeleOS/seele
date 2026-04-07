@@ -92,7 +92,6 @@ define_syscall!(Execve, |path_str: String,
 define_syscall!(Exit, |exit_code: u64| {
     terminate_process(get_current_process(), exit_code);
     return_to_executor_no_save();
-    unreachable!();
 });
 
 define_syscall!(Fork, {

@@ -45,7 +45,7 @@ extern "C" fn return_to_executor_from_current_inner(ret_addr: u64, ret_rsp: u64)
     return_to_executor(&mut snapshot, ThreadSnapshotType::Kernel);
 }
 
-pub fn return_to_executor_no_save() {
+pub fn return_to_executor_no_save() -> ! {
     log::trace!("return_to_executor_no_save");
     let (thread_snapshot, executor_snapshot) = {
         let manager = THREAD_MANAGER.get().unwrap().lock();
@@ -59,4 +59,6 @@ pub fn return_to_executor_no_save() {
     };
 
     unsafe { (*executor_snapshot).switch_from(Some(&mut *thread_snapshot), None) };
+
+    unreachable!()
 }

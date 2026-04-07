@@ -90,6 +90,4 @@ define_syscall!(SigHandlerReturn, {
     get_current_thread().lock().restore_blocked_signals();
 
     return_to_executor_no_save();
-
-    unreachable!()
 });
