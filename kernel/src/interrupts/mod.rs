@@ -1,4 +1,4 @@
-use x2apic::lapic::{LocalApic, LocalApicBuilder, xapic_base};
+use x2apic::lapic::{LocalApic, LocalApicBuilder, TimerDivide, TimerMode, xapic_base};
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
 use crate::{
@@ -48,6 +48,9 @@ pub fn default_local_apic() -> LocalApic {
         .timer_vector(32)
         .error_vector(0xFE)
         .spurious_vector(0xFF)
+        .timer_mode(TimerMode::Periodic)
+        .timer_divide(TimerDivide::Div1)
+        .timer_initial(1_000_000)
         .set_xapic_base(unsafe { apply_offset(xapic_base()) })
         .build()
         .unwrap()
