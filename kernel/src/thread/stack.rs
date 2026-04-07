@@ -22,7 +22,7 @@ pub fn allocate_kernel_stack(pages: u64) -> StackBuilder {
     let start = guard_page + 1;
     let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
 
-    let mut last_frame = None;
+    let mut page_write_bases = alloc::vec::Vec::with_capacity(pages as usize);
     let mut frame_allocator = FRAME_ALLOCATOR.try_get().unwrap().lock();
 
     for i in 0..pages {
@@ -39,18 +39,17 @@ pub fn allocate_kernel_stack(pages: u64) -> StackBuilder {
                 .flush();
         };
 
-        let write_addr = apply_offset(frame.start_address().as_u64() + 4096);
+        let write_addr = apply_offset(frame.start_address().as_u64());
         unsafe {
             let bytes = 4096;
-            let start_ptr = (write_addr as usize - bytes as usize) as *mut u8;
+            let start_ptr = write_addr as *mut u8;
             core::ptr::write_bytes(start_ptr, 0, bytes as usize);
         }
 
-        last_frame = Some(frame);
+        page_write_bases.push(write_addr);
     }
 
     let end_addr = (start + pages).start_address();
-    let write_addr = apply_offset(last_frame.unwrap().start_address().as_u64() + 4096);
 
-    StackBuilder::new(end_addr.as_u64(), write_addr as *mut u8)
+    StackBuilder::new(end_addr.as_u64(), page_write_bases)
 }

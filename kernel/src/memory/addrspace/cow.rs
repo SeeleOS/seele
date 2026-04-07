@@ -63,10 +63,20 @@ impl AddrSpace {
 }
 
 pub fn increase_ref(frame: PhysFrame) {
+    increase_ref_by(frame, 1);
+}
+
+pub fn increase_ref_by(frame: PhysFrame, amount: usize) {
     *FRAME_REF_COUNT
         .lock()
         .entry(frame.start_address().as_u64())
-        .or_insert(0) += 1;
+        .or_insert(0) += amount;
+}
+
+pub fn is_ref_counted(frame: PhysFrame) -> bool {
+    FRAME_REF_COUNT
+        .lock()
+        .contains_key(&frame.start_address().as_u64())
 }
 
 #[must_use]

@@ -35,11 +35,16 @@ impl AddrSpace {
     }
 
     pub fn unmap(&mut self, start: VirtAddr, len: u64) {
+        if len == 0 {
+            return;
+        }
+
         let end = start + len;
+        let last_mapped_addr = end - 1u64;
 
         for page in Page::<Size4KiB>::range_inclusive(
             Page::containing_address(start),
-            Page::containing_address(end),
+            Page::containing_address(last_mapped_addr),
         ) {
             if let Ok((_, flush)) = self.page_table.inner.unmap(page) {
                 flush.flush();

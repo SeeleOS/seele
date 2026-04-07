@@ -76,21 +76,18 @@ impl AddrSpace {
         let start = area.start_page();
         let pages = area.pages();
 
-        let mut last_frame = None;
+        let mut page_write_bases = Vec::with_capacity(pages as usize);
 
         for i in 0..pages {
             let page = start + i;
-            last_frame = Some(self.apply_page(page, area.clone()));
+            let frame = self.apply_page(page, area.clone());
+            page_write_bases.push(apply_offset(frame.start_address().as_u64()));
         }
 
         let start_addr = start.start_address();
         let end_addr = (start + pages).start_address();
-        let write_addr = apply_offset(last_frame.unwrap().start_address().as_u64() + 4096);
 
-        (
-            start_addr,
-            StackBuilder::new(end_addr.as_u64(), write_addr as *mut u8),
-        )
+        (start_addr, StackBuilder::new(end_addr.as_u64(), page_write_bases))
     }
 
     fn alloc_map_zeroed_page(

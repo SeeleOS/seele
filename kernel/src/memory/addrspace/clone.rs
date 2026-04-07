@@ -6,7 +6,9 @@ use x86_64::{
 };
 
 use crate::memory::{
-    addrspace::cow::increase_ref, page_table_wrapper::PageTableWrapped, paging::FRAME_ALLOCATOR,
+    addrspace::cow::{increase_ref, increase_ref_by, is_ref_counted},
+    page_table_wrapper::PageTableWrapped,
+    paging::FRAME_ALLOCATOR,
     utils::as_cow_flags,
 };
 
@@ -42,6 +44,7 @@ impl AddrSpace {
                         old_page_table.inner.translate(page.start_address())
                 {
                     unsafe {
+                        let already_ref_counted = is_ref_counted(frame);
                         let new_flags = if flags.contains(PageTableFlags::WRITABLE) {
                             old_page_table
                                 .inner
@@ -60,7 +63,14 @@ impl AddrSpace {
                             .map_to(page, frame, new_flags, &mut *frame_allocator)
                             .unwrap()
                             .flush();
-                        increase_ref(frame);
+                        if already_ref_counted {
+                            increase_ref(frame);
+                        } else {
+                            // This frame was private before the fork. After cloning,
+                            // both parent and child own one mapping, so the initial
+                            // tracked refcount must start at 2 rather than 1.
+                            increase_ref_by(frame, 2);
+                        }
                     }
                 }
             }

@@ -87,6 +87,10 @@ impl AddrSpace {
     }
 
     pub fn update_permissions(&mut self, start: VirtAddr, end: VirtAddr, permissions: Permissions) {
+        if start >= end {
+            return;
+        }
+
         let new_flags = permissions_to_flags(permissions);
         let mut new_areas = Vec::new();
 
@@ -133,9 +137,10 @@ impl AddrSpace {
 
         self.memory_areas = new_areas;
 
-        for page in Page::<Size4KiB>::range(
+        let last_addr = end - 1u64;
+        for page in Page::<Size4KiB>::range_inclusive(
             Page::<Size4KiB>::containing_address(start),
-            Page::<Size4KiB>::containing_address(end),
+            Page::<Size4KiB>::containing_address(last_addr),
         ) {
             unsafe {
                 if let Ok(flush) = self.page_table.inner.update_flags(page, new_flags) {

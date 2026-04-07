@@ -8,6 +8,7 @@ use crate::{
         ThreadRef,
         misc::{SnapshotState, State, ThreadID},
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
+        stack::allocate_kernel_stack,
     },
 };
 
@@ -56,12 +57,7 @@ impl Thread {
     pub fn new(entry_point: u64, parent: ProcessRef) -> Self {
         let mut parent_lock = parent.lock();
         let (_, stack) = parent_lock.addrspace.allocate_user(64);
-        let kernel_stack_top = parent_lock
-            .addrspace
-            .allocate_kernel(16)
-            .1
-            .finish()
-            .as_u64();
+        let kernel_stack_top = allocate_kernel_stack(16).finish().as_u64();
         Self {
             snapshot: ThreadSnapshot::new(
                 entry_point,

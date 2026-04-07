@@ -45,7 +45,7 @@ impl ThreadSnapshot {
                 virt_stack_addr,
                 GDT.1.user_data.0,
             ),
-            kernel_rsp: addrspace.allocate_kernel(16).1.finish().as_u64(),
+            kernel_rsp: allocate_kernel_stack(16).finish().as_u64(),
             snapshot_type,
             ..Default::default()
         }

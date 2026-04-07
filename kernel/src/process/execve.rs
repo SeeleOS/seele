@@ -1,9 +1,13 @@
 use alloc::{string::String, vec::Vec};
+use seele_sys::signal::Signals;
+use x86_64::VirtAddr;
 
 use crate::{
     filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
     process::{Process, manager::MANAGER, new::setup_process},
-    thread::{THREAD_MANAGER, snapshot::ThreadSnapshot},
+    signal::misc::default_signal_action_vec,
+    thread::{THREAD_MANAGER, misc::SnapshotState, snapshot::ThreadSnapshot, stack::allocate_kernel_stack},
+    tss::TSS,
 };
 
 impl Process {
@@ -31,7 +35,7 @@ impl Process {
         log::trace!("execve: kill all done");
 
         // Reallocates the kernel stack top (just in case)
-        self.kernel_stack_top = self.addrspace.allocate_kernel(16).1.finish();
+        self.kernel_stack_top = allocate_kernel_stack(16).finish();
 
         log::trace!("execve: locking current thread");
         let mut thread_locked = thread.lock();
@@ -39,8 +43,18 @@ impl Process {
 
         thread_locked.snapshot =
             setup_process(path, args, env, &mut self.addrspace, &mut self.objects).unwrap();
+        thread_locked.kernel_stack_top = self.kernel_stack_top.as_u64();
+        thread_locked.snapshot_state = SnapshotState::Normal;
+        thread_locked.sig_handler_snapshot = ThreadSnapshot::default();
+        thread_locked.saved_blocked_signals.clear();
+        thread_locked.blocked_signals = Signals::default();
+        self.pending_signals = Signals::default();
+        self.signal_actions = default_signal_action_vec();
 
         self.addrspace.load();
+        unsafe {
+            TSS.privilege_stack_table[0] = VirtAddr::new(thread_locked.kernel_stack_top);
+        }
 
         Ok(&mut thread_locked.snapshot as *mut ThreadSnapshot)
     }

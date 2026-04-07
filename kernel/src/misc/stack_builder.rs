@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use x86_64::VirtAddr;
 
 use crate::elfloader::ElfInfo;
@@ -6,14 +7,16 @@ use crate::misc::auxv::AuxType;
 #[derive(Debug)]
 pub struct StackBuilder {
     sp: VirtAddr,
-    write_sp: *mut u8,
+    top: VirtAddr,
+    page_write_bases: Vec<u64>,
 }
 
 impl StackBuilder {
-    pub fn new(sp: u64, write_sp: *mut u8) -> Self {
+    pub fn new(top: u64, page_write_bases: Vec<u64>) -> Self {
         Self {
-            sp: VirtAddr::new(sp),
-            write_sp,
+            sp: VirtAddr::new(top),
+            top: VirtAddr::new(top),
+            page_write_bases,
         }
     }
 
@@ -42,7 +45,7 @@ impl StackBuilder {
 
     pub fn push(&mut self, value: u64) {
         self.sp -= 8;
-        unsafe { write_u64_and_sub(&mut self.write_sp, value) };
+        self.write_bytes(self.sp, &value.to_ne_bytes());
     }
 
     pub fn push_str(&mut self, s: &str) -> u64 {
@@ -50,16 +53,10 @@ impl StackBuilder {
         let len_with_null = (bytes.len() + 1) as u64;
 
         self.sp -= len_with_null;
-        self.write_sp = unsafe { self.write_sp.sub(len_with_null as usize) };
-
         let user_vaddr = self.sp;
-        let kernel_vaddr = self.write_sp;
 
-        unsafe {
-            let slice = core::slice::from_raw_parts_mut(kernel_vaddr, len_with_null as usize);
-            slice[..bytes.len()].copy_from_slice(bytes);
-            slice[bytes.len()] = 0;
-        }
+        self.write_bytes(user_vaddr, bytes);
+        self.zero_bytes(user_vaddr + bytes.len() as u64, 1);
 
         user_vaddr.as_u64()
     }
@@ -68,11 +65,9 @@ impl StackBuilder {
         let size = core::mem::size_of::<T>() as u64;
 
         self.sp -= size;
-        self.write_sp = unsafe { self.write_sp.sub(size as usize) };
-
-        unsafe {
-            self.write_sp.cast::<T>().write_unaligned(*value);
-        }
+        let bytes =
+            unsafe { core::slice::from_raw_parts((value as *const T).cast::<u8>(), size as usize) };
+        self.write_bytes(self.sp, bytes);
 
         self.sp.as_u64()
     }
@@ -105,18 +100,51 @@ impl StackBuilder {
 impl StackBuilder {
     fn pad_bytes(&mut self, bytes: u64) {
         self.sp -= bytes;
-        unsafe {
-            self.write_sp = self.write_sp.sub(bytes as usize);
-            core::ptr::write_bytes(self.write_sp, 0, bytes as usize);
+        self.zero_bytes(self.sp, bytes as usize);
+    }
+
+    fn zero_bytes(&self, start: VirtAddr, len: usize) {
+        self.write_repeated_byte(start, len, 0);
+    }
+
+    fn write_repeated_byte(&self, mut start: VirtAddr, mut len: usize, value: u8) {
+        while len > 0 {
+            let (page_base, available) = self.page_ptr_and_available(start);
+            let chunk = len.min(available);
+
+            unsafe {
+                core::ptr::write_bytes(page_base, value, chunk);
+            }
+
+            start += chunk as u64;
+            len -= chunk;
         }
     }
-}
 
-/// # Safety
-/// Must provide valid pointer
-unsafe fn write_u64_and_sub(ptr: &mut *mut u8, data: u64) {
-    unsafe {
-        *ptr = ptr.sub(8);
-        ptr.cast::<u64>().write_unaligned(data);
+    fn write_bytes(&self, mut start: VirtAddr, mut bytes: &[u8]) {
+        while !bytes.is_empty() {
+            let (page_base, available) = self.page_ptr_and_available(start);
+            let chunk = bytes.len().min(available);
+
+            unsafe {
+                core::ptr::copy_nonoverlapping(bytes.as_ptr(), page_base, chunk);
+            }
+
+            start += chunk as u64;
+            bytes = &bytes[chunk..];
+        }
+    }
+
+    fn page_ptr_and_available(&self, addr: VirtAddr) -> (*mut u8, usize) {
+        let stack_bytes = self.page_write_bases.len() as u64 * 4096;
+        let start = self.top - stack_bytes;
+        assert!(addr >= start && addr < self.top, "stack write out of range");
+
+        let offset = (addr - start) as usize;
+        let page_index = offset / 4096;
+        let offset_in_page = offset % 4096;
+        let page_base = self.page_write_bases[page_index] as *mut u8;
+
+        unsafe { (page_base.add(offset_in_page), 4096 - offset_in_page) }
     }
 }

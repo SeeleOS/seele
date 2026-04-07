@@ -6,6 +6,7 @@ use crate::{
         THREAD_MANAGER, ThreadRef,
         misc::{SnapshotState, State, ThreadID},
         snapshot::ThreadSnapshot,
+        stack::allocate_kernel_stack,
         thread::Thread,
     },
 };
@@ -19,22 +20,10 @@ impl Thread {
             parent: process.clone(),
             id,
             snapshot: {
-                snapshot.kernel_rsp = process
-                    .lock()
-                    .addrspace
-                    .allocate_kernel(16)
-                    .1
-                    .finish()
-                    .as_u64();
+                snapshot.kernel_rsp = allocate_kernel_stack(16).finish().as_u64();
                 snapshot
             },
-            kernel_stack_top: process
-                .lock()
-                .addrspace
-                .allocate_kernel(16)
-                .1
-                .finish()
-                .as_u64(),
+            kernel_stack_top: allocate_kernel_stack(16).finish().as_u64(),
             ..Default::default()
         };
 

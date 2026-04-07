@@ -24,6 +24,7 @@ use crate::{
     thread::{
         THREAD_MANAGER,
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
+        stack::allocate_kernel_stack,
         thread::Thread,
     },
 };
@@ -76,7 +77,7 @@ impl Process {
     pub fn init() -> ProcessRef {
         let pid = ProcessID::default();
         let mut addrspace = AddrSpace::default();
-        let kernel_stack_top = addrspace.allocate_kernel(16).1.finish();
+        let kernel_stack_top = allocate_kernel_stack(16).finish();
 
         let process_arc = Arc::new(Mutex::new(Process {
             pid,
