@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ps2-mouse = "0.1"
 x86_64 = "0.15.4"
 xmas-elf = "0.8.0"
 acpi = "6.0.1"

@@ -1,8 +1,9 @@
 use x86_64::{VirtAddr, structures::idt::InterruptDescriptorTable};
 
 use crate::{
-    interrupts::timer::timer_interrupt_handler_wrapper, keyboard::ps2::keyboard_interrupt_handler,
-    misc::with_cpu_core_context,
+    interrupts::timer::timer_interrupt_handler_wrapper,
+    keyboard::ps2::keyboard_interrupt_handler,
+    misc::{mouse::mouse_interrupt_handler, with_cpu_core_context},
 };
 
 pub const PIC_1_OFFSET: u8 = 32;
@@ -13,6 +14,7 @@ pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 pub enum HardwareInterrupt {
     Timer = PIC_1_OFFSET,
     Keyboard,
+    Mouse,
 }
 
 impl HardwareInterrupt {
@@ -34,5 +36,6 @@ pub fn init_hardware_interrupts(idt: &mut InterruptDescriptorTable) {
             timer_interrupt_handler_wrapper as *const () as u64,
         ));
         idt[HardwareInterrupt::Keyboard.as_u8()].set_handler_fn(keyboard_interrupt_handler);
+        idt[HardwareInterrupt::Mouse.as_u8()].set_handler_fn(mouse_interrupt_handler)
     };
 }

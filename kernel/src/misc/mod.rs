@@ -11,6 +11,7 @@ pub mod fb_object;
 pub mod framebuffer;
 pub mod gdt;
 pub mod logging;
+pub mod mouse;
 pub mod others;
 pub mod panic;
 pub mod serial_print;

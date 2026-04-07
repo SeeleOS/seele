@@ -9,8 +9,8 @@ extern crate alloc;
 pub const NAME: &str = "Seele";
 
 pub mod acpi;
-pub mod filesystem;
 pub mod elfloader;
+pub mod filesystem;
 pub mod interrupts;
 pub mod keyboard;
 pub mod memory;
@@ -37,7 +37,7 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
 use crate::filesystem::block_device::initrd::{self};
 use crate::filesystem::vfs::VirtualFS;
 use crate::misc::others::enable_sse;
-use crate::misc::{cpu_core_context, framebuffer, gdt, logging, time, tss};
+use crate::misc::{cpu_core_context, framebuffer, gdt, logging, mouse, time, tss};
 use crate::process::manager::MANAGER;
 use crate::terminal::misc::clear;
 use bootloader_api::BootInfo;
@@ -98,6 +98,8 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     log::info!("init: keyboard ready");
     interrupts::init();
     log::info!("init: interrupts ready");
+
+    mouse::init();
 
     clear();
     executor.run();

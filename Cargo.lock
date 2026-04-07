@@ -637,6 +637,7 @@ dependencies = [
  "owo-colors",
  "paste",
  "pc-keyboard 0.7.0",
+ "ps2-mouse",
  "qemu-exit",
  "seele-sys",
  "spin 0.10.0",
@@ -930,6 +931,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "ps2-mouse"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7a1ea62fa77d411155c765d1ba9d0286b8af83a93cda6109c295a2bde1e04a0"
+dependencies = [
+ "bitflags 1.3.2",
+ "x86_64 0.14.13",
 ]
 
 [[package]]
