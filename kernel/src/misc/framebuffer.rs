@@ -45,6 +45,10 @@ impl Canvas {
 
     #[inline(always)]
     pub fn write_pixel(&mut self, x: usize, y: usize, color: Color) {
+        if framebuffer_user_controlled() {
+            return;
+        }
+
         // Offset of the pixel from the start
         // of the framebuffer (in pixels)
         let pixels_offset = (y * self.info.stride) + x;
@@ -72,6 +76,10 @@ impl Canvas {
 
     // Flushes the contents of the buffer into the real fb
     pub fn flush(&mut self) {
+        if framebuffer_user_controlled() {
+            return;
+        }
+
         self.fb.copy_from_slice(&self.buffer);
     }
 
