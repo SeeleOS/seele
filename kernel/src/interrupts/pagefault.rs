@@ -21,10 +21,6 @@ pub extern "x86-interrupt" fn pagefault_handler(
     stack_frame: InterruptStackFrame,
     error_code: PageFaultErrorCode,
 ) {
-    if !is_user_mode(&stack_frame) {
-        panic!("OOPS PAGEFALT");
-    }
-
     let address = Cr2::read().unwrap();
 
     let process_ref = get_current_process();
@@ -53,7 +49,9 @@ pub extern "x86-interrupt" fn pagefault_handler(
 }
 
 fn actual_pagefault_handler(stack_frame: InterruptStackFrame) -> ! {
-    handle_usermode_exception(&stack_frame, Signal::InvalidMemoryAccess);
+    if is_user_mode(&stack_frame) {
+        handle_usermode_exception(&stack_frame, Signal::InvalidMemoryAccess);
+    }
 
-    unreachable!()
+    panic!("Kernel page fault.")
 }
