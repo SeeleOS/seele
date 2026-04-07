@@ -61,6 +61,10 @@ impl Process {
                     SignalHandlingType::Ignore => {}
                     SignalHandlingType::Function1(func) => with_current_thread(|current_thread| {
                         let (_, mut stack_builder) = self.addrspace.allocate_user(16);
+                        // x86_64 SysV requires %rsp % 16 == 8 on function entry.
+                        // We only push a single synthetic return address, so reserve one
+                        // extra slot before it to keep the handler ABI-compliant.
+                        stack_builder.push(0);
                         stack_builder.push(action.restorer as u64);
 
                         let mut thread_snapshot = ThreadSnapshot::new(
@@ -91,6 +95,8 @@ impl Process {
                         let ucontext_ptr = frame_builder.push_struct(&ucontext);
                         let siginfo_ptr = frame_builder.push_struct(&siginfo);
 
+                        // Keep the signal handler entry stack ABI-aligned.
+                        stack_builder.push(0);
                         stack_builder.push(action.restorer as u64);
 
                         let mut thread_snapshot = ThreadSnapshot::new(
