@@ -1,8 +1,14 @@
-use std::path::{Path, PathBuf};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 fn main() {
     println!("cargo:rerun-if-changed=misc/build.rs");
     println!("cargo:rerun-if-changed=disk.img");
+
+    umount_sysroot();
 
     // set by cargo, build scripts should use this directory for output files
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
@@ -27,4 +33,29 @@ fn main() {
     // pass the disk image paths as env variables to the
     println!("cargo:rustc-env=UEFI_PATH={}", uefi_path.display());
     println!("cargo:rustc-env=BIOS_PATH={}", bios_path.display());
+}
+
+fn umount_sysroot() {
+    let project_root = discover_project_root();
+    let sysroot = project_root.join("sysroot");
+
+    Command::new("sudo")
+        .arg("umount")
+        .arg(&sysroot)
+        .spawn()
+        .unwrap()
+        .wait()
+        .unwrap();
+}
+
+fn discover_project_root() -> PathBuf {
+    let cwd = env::current_dir().expect("failed to get current working directory");
+
+    for dir in cwd.ancestors() {
+        if dir.join("disk.img").is_file() && dir.join("sysroot").is_dir() {
+            return dir.to_path_buf();
+        }
+    }
+
+    panic!("could not locate project root from current working directory");
 }

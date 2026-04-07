@@ -7,8 +7,6 @@ use std::{
 };
 
 fn main() {
-    umount_sysroot();
-
     // read env variables that were set in build script
     let uefi_path = env!("UEFI_PATH");
 
@@ -55,27 +53,4 @@ fn main() {
         0x11 => 1, // failure
         _ => 2,    // unknown fault
     };
-}
-
-fn umount_sysroot() {
-    let project_root = discover_project_root();
-    let sysroot = project_root.join("sysroot");
-
-    Command::new("sudo")
-        .arg("umount")
-        .arg(&sysroot)
-        .spawn()
-        .unwrap();
-}
-
-fn discover_project_root() -> PathBuf {
-    let cwd = env::current_dir().expect("failed to get current working directory");
-
-    for dir in cwd.ancestors() {
-        if dir.join("disk.img").is_file() && dir.join("sysroot").is_dir() {
-            return dir.to_path_buf();
-        }
-    }
-
-    panic!("could not locate project root from current working directory");
 }
