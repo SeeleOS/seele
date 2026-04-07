@@ -30,7 +30,8 @@ pub extern "x86-interrupt" fn pagefault_handler(
 
     let page_table = &mut addrspace.page_table.inner;
 
-    if let TranslateResult::Mapped { flags, .. } = page_table.translate(address)
+    if error_code.contains(PageFaultErrorCode::CAUSED_BY_WRITE)
+        && let TranslateResult::Mapped { flags, .. } = page_table.translate(address)
         && flags.contains(COW_FLAG)
     {
         process.addrspace.replace_cow_page(address);

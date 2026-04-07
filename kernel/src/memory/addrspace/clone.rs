@@ -42,18 +42,22 @@ impl AddrSpace {
                         old_page_table.inner.translate(page.start_address())
                 {
                     unsafe {
-                        if flags.contains(PageTableFlags::WRITABLE) {
+                        let new_flags = if flags.contains(PageTableFlags::WRITABLE) {
                             old_page_table
                                 .inner
                                 .update_flags(page, as_cow_flags(flags))
                                 .unwrap()
                                 .flush();
-                        }
+                            as_cow_flags(flags)
+                        } else {
+                            flags
+                        };
 
-                        // Maps the new page with the frame of the old page
+                        // Only writable pages should enter the CoW path. Read-only
+                        // mappings can stay shared with their original permissions.
                         new_page_table
                             .inner
-                            .map_to(page, frame, as_cow_flags(flags), &mut *frame_allocator)
+                            .map_to(page, frame, new_flags, &mut *frame_allocator)
                             .unwrap()
                             .flush();
                         increase_ref(frame);
