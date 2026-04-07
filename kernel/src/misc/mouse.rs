@@ -1,4 +1,5 @@
 use alloc::collections::vec_deque::VecDeque;
+use heapless::{Deque, mpmc::Queue};
 use ps2_mouse::Mouse;
 use seele_sys::abi::object::ObjectFlags;
 use spin::Mutex;
@@ -22,7 +23,7 @@ use crate::{
 };
 
 lazy_static::lazy_static! {
-    pub static ref MOUSE_PACKETS: Mutex<VecDeque<u8>> = Mutex::new(VecDeque::new());
+    pub static ref MOUSE_PACKETS: Mutex<Deque<u8, 1024>> = Mutex::new(Deque::new());
 }
 
 pub fn init() {
@@ -31,7 +32,10 @@ pub fn init() {
 
 pub extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
     unsafe {
-        MOUSE_PACKETS.lock().push_back(Port::new(0x60).read());
+        MOUSE_PACKETS
+            .lock()
+            .push_back(Port::new(0x60).read())
+            .unwrap();
     }
 
     if let Ok(mouse_obj) = get_device("ps2mouse".into()) {

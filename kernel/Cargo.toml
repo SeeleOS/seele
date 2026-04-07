@@ -9,6 +9,7 @@ x86_64 = "0.15.4"
 xmas-elf = "0.8.0"
 acpi = "6.0.1"
 bootloader_api = "0.11"
+heapless = "0.9"
 volatile = "0.6.1"
 x86_rtc = "0.1"
 seele-sys = { path = "../seele-sys" }
