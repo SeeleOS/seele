@@ -24,6 +24,7 @@ pub enum BlockType {
         deadline: Option<Time>,
     },
     Futex,
+    Stopped,
 }
 
 impl BlockType {
