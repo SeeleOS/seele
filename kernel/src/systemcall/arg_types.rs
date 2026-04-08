@@ -16,7 +16,12 @@ use crate::{
     },
     object::misc::{ObjectRef, get_object_current_process},
     polling::event::PollableEvent,
-    process::{ProcessRef, group::ProcessGroupID, manager::MANAGER, misc::ProcessID},
+    process::{
+        ProcessRef,
+        group::ProcessGroupID,
+        manager::MANAGER,
+        misc::{ProcessID, get_process_with_pid},
+    },
     signal::{Signal, action::SignalAction},
     systemcall::implementations::PollResult,
 };
@@ -93,14 +98,7 @@ add_syscall_arg_type!(Signal, val, {
     Signal::try_from(val).map_err(|_| SyscallError::InvalidArguments)
 });
 
-add_syscall_arg_type!(ProcessRef, val, {
-    MANAGER
-        .lock()
-        .processes
-        .get(&ProcessID(val))
-        .ok_or(SyscallError::NoProcess)
-        .cloned()
-});
+add_syscall_arg_type!(ProcessRef, val, { get_process_with_pid(ProcessID(val)) });
 
 add_syscall_arg_type!(VirtAddr, val, { Ok(VirtAddr::new(val)) });
 
