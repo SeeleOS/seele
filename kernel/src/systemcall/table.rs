@@ -71,7 +71,8 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         SocketGetSockName,
         SocketGetPeerName,
         SocketRecvMsg,
-        SocketShutdown
+        SocketShutdown,
+        SendSignalToAll
     );
 
     table

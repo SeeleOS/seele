@@ -91,3 +91,11 @@ define_syscall!(SigHandlerReturn, {
 
     return_to_executor_no_save();
 });
+
+define_syscall!(SendSignalToAll, |signal: Signal| {
+    for process in MANAGER.lock().processes.values() {
+        process.lock().send_signal(signal);
+    }
+
+    Ok(0)
+});
