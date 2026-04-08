@@ -10,6 +10,8 @@ pub enum ConfigurateRequest {
     GetFramebufferInfo(*mut FramebufferInfo),
     FbTakeControl,
     FbRelease,
+    TermSetActiveGroup(u64),
+    TermGetActiveGroup,
 }
 
 impl ConfigurateRequest {
@@ -23,6 +25,8 @@ impl ConfigurateRequest {
                 }
                 ConfigCommand::FbTakeControl => Self::FbTakeControl,
                 ConfigCommand::FbRelease => Self::FbRelease,
+                ConfigCommand::TermSetActiveGroup => Self::TermSetActiveGroup(ptr),
+                ConfigCommand::TermGetActiveGroup => Self::TermGetActiveGroup,
             },
         )
     }

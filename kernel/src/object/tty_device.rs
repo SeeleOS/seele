@@ -8,6 +8,7 @@ use crate::{
     keyboard::decoding_task::KEYBOARD_QUEUE,
     object::{
         Object,
+        config::ConfigurateRequest,
         error::ObjectError,
         misc::ObjectRef,
         traits::{Configuratable, Readable, Writable},
@@ -75,13 +76,6 @@ impl Object for TtyDevice {
     impl_cast_function!("pollable", Pollable);
 }
 
-impl Configuratable for TtyDevice {
-    fn configure(&self, request: super::config::ConfigurateRequest) -> super::ObjectResult<isize> {
-        log::trace!("tty: configure");
-        self.terminal.lock().configure(request)
-    }
-}
-
 impl Writable for TtyDevice {
     fn write(&self, buffer: &[u8]) -> super::ObjectResult<usize> {
         self.terminal.lock().write(buffer)
@@ -119,6 +113,24 @@ impl Readable for TtyDevice {
 
                 return Ok(read_chars);
             }
+        }
+    }
+}
+
+impl Configuratable for TtyDevice {
+    fn configure(
+        &self,
+        request: super::config::ConfigurateRequest,
+    ) -> super::misc::ObjectResult<isize> {
+        match request {
+            ConfigurateRequest::TermGetActiveGroup => {
+                Ok(self.active_group.lock().unwrap().0 as isize)
+            }
+            ConfigurateRequest::TermSetActiveGroup(group) => {
+                *self.active_group.lock() = Some(ProcessGroupID(group));
+                Ok(0)
+            }
+            _ => self.terminal.lock().configure(request),
         }
     }
 }
