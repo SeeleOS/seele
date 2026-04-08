@@ -1,13 +1,17 @@
 use core::sync::atomic::AtomicU64;
 
 use alloc::{string::String, vec::Vec};
+use seele_sys::{SyscallResult, errors::SyscallError};
 
 use crate::{
     define_with_accessor,
     elfloader::ElfInfo,
     filesystem::{absolute_path::AbsolutePath, errors::FSError, vfs::VirtualFS},
     misc::stack_builder::StackBuilder,
-    process::{Process, manager::get_current_process},
+    process::{
+        Process, ProcessRef,
+        manager::{MANAGER, get_current_process},
+    },
 };
 
 impl Process {
@@ -66,3 +70,12 @@ pub fn init_stack_layout(
 }
 
 define_with_accessor!("current_process", Process, get_current_process);
+
+pub fn get_process_with_pid(pid: ProcessID) -> SyscallResult<ProcessRef> {
+    MANAGER
+        .lock()
+        .processes
+        .get(&pid)
+        .ok_or(SyscallError::NoProcess)
+        .cloned()
+}
