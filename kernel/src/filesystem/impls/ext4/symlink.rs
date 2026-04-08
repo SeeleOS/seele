@@ -3,7 +3,7 @@ use ext4plus::{Ext4, FollowSymlinks, inode::Inode};
 
 use crate::filesystem::{
     errors::FSError,
-    info::FileLikeInfo,
+    info::{FileLikeInfo, UnixPermission},
     path::Path,
     vfs_traits::{FileLikeType, Symlink},
 };
@@ -21,6 +21,7 @@ impl Symlink for Ext4Symlink {
             name: self.name.clone(),
             file_like_type: FileLikeType::Symlink,
             size: 0,
+            permission: UnixPermission::symlink(),
         })
     }
 

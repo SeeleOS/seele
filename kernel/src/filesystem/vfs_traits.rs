@@ -5,7 +5,7 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 use seele_sys::abi::object::SeekType;
 
 use crate::filesystem::{
-    info::{DirectoryContentInfo, FileLikeInfo},
+    info::{DirectoryContentInfo, FileLikeInfo, UnixPermission},
     path::Path,
     vfs::{FSResult, WrappedDirectory, WrappedFile, WrappedSymlink},
 };
@@ -23,7 +23,12 @@ pub trait File: Send + Sync {
 pub trait Directory: Send + Sync {
     fn as_any(&self) -> &dyn Any;
     fn info(&self) -> FSResult<FileLikeInfo> {
-        Ok(FileLikeInfo::new(self.name()?, 0, FileLikeType::Directory))
+        Ok(FileLikeInfo::new(
+            self.name()?,
+            0,
+            UnixPermission::directory(),
+            FileLikeType::Directory,
+        ))
     }
     fn name(&self) -> FSResult<String>;
     fn contents(&self) -> FSResult<Vec<DirectoryContentInfo>>;

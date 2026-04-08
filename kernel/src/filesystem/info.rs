@@ -1,4 +1,5 @@
 use alloc::string::String;
+use bootloader_api::info;
 
 use crate::filesystem::vfs_traits::{DirectoryContentType, FileLikeType};
 
@@ -13,6 +14,20 @@ pub struct FileLikeInfo {
     pub name: String,
     pub size: usize,
     pub file_like_type: FileLikeType,
+    pub permission: UnixPermission,
+}
+
+#[derive(Debug)]
+pub struct UnixPermission(pub u32);
+
+impl UnixPermission {
+    pub fn symlink() -> UnixPermission {
+        Self(0o777)
+    }
+
+    pub fn directory() -> Self {
+        Self(0o755)
+    }
 }
 
 #[derive(Default, Debug)]
@@ -51,11 +66,7 @@ impl LinuxStat {
         Self {
             st_dev: 1,
             st_nlink: 1,
-            st_mode: match info.file_like_type {
-                FileLikeType::File => S_IFREG | FILE_PERMS,
-                FileLikeType::Directory => S_IFDIR | DIR_PERMS,
-                FileLikeType::Symlink => S_IFLNK | FILE_PERMS,
-            },
+            st_mode: info.permission.0,
             st_size: info.size as i64,
             st_blksize: 4096,
             st_blocks: (info.size as i64 + 511) / 512,
@@ -65,11 +76,17 @@ impl LinuxStat {
 }
 
 impl FileLikeInfo {
-    pub fn new(name: String, size: usize, file_like_type: FileLikeType) -> Self {
+    pub fn new(
+        name: String,
+        size: usize,
+        permission: UnixPermission,
+        file_like_type: FileLikeType,
+    ) -> Self {
         Self {
             name,
             size,
             file_like_type,
+            permission,
         }
     }
 

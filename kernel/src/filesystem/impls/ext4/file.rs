@@ -6,7 +6,7 @@ use seele_sys::abi::object::SeekType;
 
 use crate::filesystem::{
     errors::FSError,
-    info::{self, FileLikeInfo},
+    info::{self, FileLikeInfo, UnixPermission},
     vfs_traits::{File, FileLikeType},
 };
 
@@ -56,6 +56,7 @@ impl File for Ext4File {
         Ok(FileLikeInfo::new(
             self.name.clone(),
             size,
+            UnixPermission(self.inner.inode().mode().bits() as u32),
             FileLikeType::File,
         ))
     }
