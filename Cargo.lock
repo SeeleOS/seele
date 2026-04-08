@@ -131,6 +131,7 @@ dependencies = [
 [[package]]
 name = "bootloader"
 version = "0.11.15"
+source = "git+https://github.com/SeeleOS/bootloader#80335d71388f72f213ebc64043dde25899934d59"
 dependencies = [
  "anyhow",
  "bootloader-boot-config",
@@ -145,6 +146,7 @@ dependencies = [
 [[package]]
 name = "bootloader-boot-config"
 version = "0.11.15"
+source = "git+https://github.com/SeeleOS/bootloader#80335d71388f72f213ebc64043dde25899934d59"
 dependencies = [
  "serde",
 ]
