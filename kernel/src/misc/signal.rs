@@ -3,9 +3,10 @@ use crate::{
     process::Process,
     thread::{
         THREAD_MANAGER, get_current_thread,
-        misc::{SnapshotState, with_current_thread},
+        misc::{SnapshotState, State, with_current_thread},
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
         thread::Thread,
+        yielding::BlockType,
     },
 };
 use alloc::vec::Vec;
@@ -32,7 +33,21 @@ impl Process {
     }
 
     pub fn send_signal(&mut self, signal: Signal) {
-        self.pending_signals.insert(Signals::from(signal));
+        match signal {
+            Signal::Continue => {
+                let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+                for weak in &self.threads {
+                    let Some(thread) = weak.upgrade() else {
+                        continue;
+                    };
+
+                    if matches!(thread.lock().state, State::Blocked(BlockType::Stopped)) {
+                        thread_manager.wake(thread.clone());
+                    }
+                }
+            }
+            _ => self.pending_signals.insert(Signals::from(signal)),
+        }
     }
 
     /// Returns `true` if a user-space signal handler was installed and the
@@ -151,10 +166,22 @@ impl Process {
                 true
             }
             Signal::ChildChanged => false,
-            Signal::Stop => todo!(),
-            Signal::Continue => false,
+            Signal::Stop
+            | Signal::TerminalStop
+            | Signal::TerminalInput
+            | Signal::TerminalOutput => {
+                for process in self.group_id.get_processes() {
+                    let threads = process.lock().threads.clone();
+                    for weak in threads {
+                        if let Some(thread) = weak.upgrade() {
+                            thread.lock().state = State::Blocked(BlockType::Stopped);
+                        }
+                    }
+                }
+                true
+            }
+            Signal::Continue => unreachable!(),
             Signal::Alarm => false,
-            Signal::TerminalStop => todo!(),
         }
     }
 }
