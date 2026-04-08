@@ -26,43 +26,46 @@
             nativeBuildInputs = [ rustup ];
             buildInputs = [
               cargo
-              ninja
-              rust-script
-              cmake
-              zstd
-              gawk
-              gnugrep
-              gnutar
-              wget
-              which
-              findutils
-              gzip
-              xz
-              util-linux
-              procps
-              perl
-              file
-              pkg-config
-              libarchive
-              openssl
-              lld
-              zlib
-              rustc
-              rustfmt
-              gmp
-              mpfr
-              libmpc
-              stdenv.cc.cc.lib
-              flex
-              pkgsCross.x86_64-embedded.buildPackages.gcc
-              bison
               autoconf
               automake
-              texinfo
-              pre-commit
+              bison
+              cmake
+              file
+              findutils
+              flex
+              gawk
+              gettext
+              gnugrep
+              gnutar
+              gperf
+              gzip
+              libarchive
+              libtool
+              lld
+              libmpc
               meson
-              rustPackages.clippy
+              mpfr
+              ninja
+              openssl
+              perl
+              pkg-config
+              pkgsCross.x86_64-embedded.buildPackages.gcc
+              pre-commit
+              procps
+              python3
               qemu
+              rust-script
+              rustPackages.clippy
+              rustc
+              rustfmt
+              stdenv.cc.cc.lib
+              texinfo
+              util-linux
+              wget
+              which
+              xz
+              zlib
+              zstd
               codex
             ];
             RUST_SRC_PATH = rustPlatform.rustLibSrc;
