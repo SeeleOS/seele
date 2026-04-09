@@ -1,8 +1,15 @@
 use alloc::{string::String, vec::Vec};
 use futures_util::future::OkInto;
 use seele_sys::{
-    SyscallResult, abi::object::SeekType, errors::SyscallError, misc::SystemInfo,
-    permission::Permissions, signal::Signals,
+    SyscallResult,
+    abi::{
+        object::SeekType,
+        time::{TimeType, TimerNotifyStruct, TimerStateStruct},
+    },
+    errors::SyscallError,
+    misc::SystemInfo,
+    permission::Permissions,
+    signal::Signals,
 };
 use x86_64::VirtAddr;
 
@@ -59,12 +66,15 @@ add_syscall_arg_type!(
     u32,
     usize,
     *mut LinuxStat,
+    *const TimerNotifyStruct,
     *mut u32,
     u64,
     *mut u8,
     *mut u64,
     *mut PollResult,
     i32,
+    *const TimerStateStruct,
+    *mut TimerStateStruct,
     i64,
     *mut SignalAction,
     *const SignalAction,
@@ -111,3 +121,7 @@ add_syscall_arg_type!(SeekType, val, {
 });
 
 add_syscall_arg_type!(ProcessGroupID, val, { Ok(ProcessGroupID(val)) });
+
+add_syscall_arg_type!(TimeType, val, {
+    TimeType::try_from(val).map_err(|_| SyscallError::InvalidArguments)
+});

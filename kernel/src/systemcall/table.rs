@@ -72,7 +72,12 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         SocketGetPeerName,
         SocketRecvMsg,
         SocketShutdown,
-        SendSignalToAll
+        SendSignalToAll,
+        GetTimerState,
+        SetTimerState,
+        GetTimerOverrun,
+        CreateTimer,
+        DeleteTimer
     );
 
     table

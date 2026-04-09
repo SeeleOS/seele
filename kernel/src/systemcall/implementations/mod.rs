@@ -6,6 +6,7 @@ mod polling;
 mod process;
 mod signal;
 mod socket;
+mod timer;
 
 pub use filesystem::*;
 pub use memory_sync::*;
@@ -15,3 +16,4 @@ pub use polling::*;
 pub use process::*;
 pub use signal::*;
 pub use socket::*;
+pub use timer::*;

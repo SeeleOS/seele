@@ -13,9 +13,7 @@ pub const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
 const DEFAULT_TSC_FREQ_HZ: u64 = 1_000_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub struct Time {
-    nanoseconds: u64,
-}
+pub struct Time(pub u64);
 
 pub fn init() {
     BOOT_TSC.store(get_cycles(), Ordering::SeqCst);
@@ -51,7 +49,7 @@ pub fn unix_timestamp_nanoseconds() -> u64 {
 
 impl Time {
     pub const fn from_nanoseconds(nanoseconds: u64) -> Self {
-        Self { nanoseconds }
+        Self(nanoseconds)
     }
 
     pub fn current() -> Self {
@@ -63,11 +61,11 @@ impl Time {
     }
 
     pub const fn as_nanoseconds(self) -> u64 {
-        self.nanoseconds
+        self.0
     }
 
     pub const fn add_ns(self, nanoseconds: u64) -> Self {
-        Self::from_nanoseconds(self.nanoseconds.saturating_add(nanoseconds))
+        Self::from_nanoseconds(self.0.saturating_add(nanoseconds))
     }
 
     pub const fn add_ms(self, milliseconds: u64) -> Self {
@@ -79,23 +77,23 @@ impl Time {
     }
 
     pub const fn sub(self, other: Self) -> Self {
-        Self::from_nanoseconds(self.nanoseconds.saturating_sub(other.nanoseconds))
+        Self::from_nanoseconds(self.0.saturating_sub(other.0))
     }
 
     pub const fn as_microseconds(self) -> u64 {
-        self.nanoseconds / NANOSECONDS_PER_MICROSECOND
+        self.0 / NANOSECONDS_PER_MICROSECOND
     }
 
     pub const fn as_milliseconds(self) -> u64 {
-        self.nanoseconds / NANOSECONDS_PER_MILLISECOND
+        self.0 / NANOSECONDS_PER_MILLISECOND
     }
 
     pub const fn as_seconds(self) -> u64 {
-        self.nanoseconds / NANOSECONDS_PER_SECOND
+        self.0 / NANOSECONDS_PER_SECOND
     }
 
     pub const fn subsec_nanoseconds(self) -> u64 {
-        self.nanoseconds % NANOSECONDS_PER_SECOND
+        self.0 % NANOSECONDS_PER_SECOND
     }
 
     pub const fn subsec_microseconds(self) -> u64 {
