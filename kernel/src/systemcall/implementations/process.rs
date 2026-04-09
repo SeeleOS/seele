@@ -13,6 +13,10 @@ use crate::{
     thread::{THREAD_MANAGER, scheduling::return_to_executor_no_save},
 };
 
+fn exit_code_to_status(exit_code: u64) -> u64 {
+    (exit_code & 0xff) << 8
+}
+
 define_syscall!(GetProcessParentID, {
     if let Some(parent) = get_current_process().lock().parent.clone() {
         Ok(parent.lock().pid.0 as usize)
@@ -23,7 +27,7 @@ define_syscall!(GetProcessParentID, {
 
 define_syscall!(
     WaitForProcessExit,
-    |target_process: ProcessID, exit_code_ptr: *mut u64| {
+    |target_process: ProcessID, status_ptr: *mut u64| {
         let current_process = get_current_process();
         let check_result = {
             let manager = MANAGER.lock();
@@ -62,9 +66,9 @@ define_syscall!(
 
         match check_result {
             Some((process, exit_code)) => {
-                if !exit_code_ptr.is_null() {
+                if !status_ptr.is_null() {
                     unsafe {
-                        *exit_code_ptr = exit_code;
+                        *status_ptr = exit_code_to_status(exit_code);
                     }
                 }
                 let pid = process.lock().pid.0;
