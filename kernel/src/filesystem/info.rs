@@ -57,16 +57,26 @@ pub struct LinuxStat {
 
 impl LinuxStat {
     pub fn new(info: FileLikeInfo) -> Self {
+        pub const S_IFMT: u32 = 0o170000;
         pub const S_IFDIR: u32 = 0o040000;
         pub const S_IFREG: u32 = 0o100000;
-        pub const FILE_PERMS: u32 = 0o666;
         pub const S_IFLNK: u32 = 0o120000;
-        pub const DIR_PERMS: u32 = 0o777;
+
+        let file_type_bits = match info.file_like_type {
+            FileLikeType::File => S_IFREG,
+            FileLikeType::Directory => S_IFDIR,
+            FileLikeType::Symlink => S_IFLNK,
+        };
+        let st_mode = if info.permission.0 & S_IFMT == 0 {
+            info.permission.0 | file_type_bits
+        } else {
+            info.permission.0
+        };
 
         Self {
             st_dev: 1,
             st_nlink: 1,
-            st_mode: info.permission.0,
+            st_mode,
             st_size: info.size as i64,
             st_blksize: 4096,
             st_blocks: (info.size as i64 + 511) / 512,
