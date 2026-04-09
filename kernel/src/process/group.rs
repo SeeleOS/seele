@@ -1,5 +1,3 @@
-use core::sync::atomic::AtomicU64;
-
 use alloc::vec::Vec;
 use seele_sys::signal::Signal;
 
@@ -8,14 +6,12 @@ use crate::process::{
     manager::{MANAGER, Manager},
 };
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct ProcessGroupID(pub u64);
 
-impl Default for ProcessGroupID {
-    fn default() -> Self {
-        static NEXT_GID: AtomicU64 = AtomicU64::new(0);
-
-        Self(NEXT_GID.fetch_add(1, core::sync::atomic::Ordering::Relaxed))
+impl ProcessGroupID {
+    pub fn from_leader(pid: crate::process::misc::ProcessID) -> Self {
+        Self(pid.0)
     }
 }
 

@@ -17,10 +17,12 @@ use crate::{
     object::{Object, tty_device::get_default_tty},
     process::{
         Process, ProcessRef,
+        group::ProcessGroupID,
         misc::{ProcessID, init_stack_layout},
         object::init_objects,
     },
     signal::{SIGNAL_AMOUNT, action::SignalAction, misc::default_signal_action_vec},
+    s_println,
     thread::{
         THREAD_MANAGER,
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
@@ -75,7 +77,7 @@ fn read_shebang_prefix(file: &FileLikeObject) -> Result<Vec<u8>, FSError> {
 
 impl Process {
     pub fn init() -> ProcessRef {
-        let pid = ProcessID::default();
+        let pid = ProcessID::new();
         let mut addrspace = AddrSpace::default();
         let kernel_stack_top = allocate_kernel_stack(16).finish();
 
@@ -83,6 +85,7 @@ impl Process {
             pid,
             addrspace,
             kernel_stack_top,
+            group_id: ProcessGroupID::from_leader(pid),
             ..Default::default()
         }));
 

@@ -1,7 +1,4 @@
-use core::{
-    default,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use spin::MutexGuard;
 
@@ -10,12 +7,12 @@ use crate::{
     thread::{get_current_thread, snapshot::ThreadSnapshot, thread::Thread, yielding::BlockType},
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ThreadID(pub u64);
 
-impl Default for ThreadID {
-    fn default() -> Self {
-        static TID: AtomicU64 = AtomicU64::new(0);
+impl ThreadID {
+    pub fn new() -> Self {
+        static TID: AtomicU64 = AtomicU64::new(1);
         Self(TID.fetch_add(1, Ordering::Relaxed))
     }
 }

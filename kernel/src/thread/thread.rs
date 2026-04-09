@@ -59,6 +59,7 @@ impl Thread {
         let (_, stack) = parent_lock.addrspace.allocate_user(64);
         let kernel_stack_top = allocate_kernel_stack(16).finish().as_u64();
         Self {
+            id: ThreadID::new(),
             snapshot: ThreadSnapshot::new(
                 entry_point,
                 &mut parent.clone().lock().addrspace,
@@ -77,6 +78,7 @@ impl Thread {
         kernel_stack_top: u64,
     ) -> Self {
         Self {
+            id: ThreadID::new(),
             snapshot,
             parent,
             kernel_stack_top,

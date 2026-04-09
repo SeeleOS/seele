@@ -25,12 +25,12 @@ impl Process {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct ProcessID(pub u64);
 
-impl Default for ProcessID {
-    fn default() -> Self {
-        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+impl ProcessID {
+    pub fn new() -> Self {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
         Self(NEXT_ID.fetch_add(1, core::sync::atomic::Ordering::Relaxed))
     }

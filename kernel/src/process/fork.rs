@@ -10,7 +10,7 @@ use crate::{
 impl Process {
     pub fn fork(&mut self, manager: &mut MutexGuard<Manager>) -> ProcessID {
         log::debug!("inside fork");
-        let pid = ProcessID::default();
+        let pid = ProcessID::new();
         let current_thread = THREAD_MANAGER
             .get()
             .unwrap()
