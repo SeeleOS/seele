@@ -75,6 +75,10 @@ impl Process {
     pub fn terminate_inner(&mut self, exit_code: u64) -> Vec<ThreadRef> {
         if self.exit_code.is_none() {
             self.exit_code = Some(exit_code);
+            // Release process-owned objects as soon as the process exits so
+            // peers observe EOF/HUP before the parent reaps with waitpid().
+            self.objects.clear();
+            self.timers.clear();
         }
 
         self.threads
