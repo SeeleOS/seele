@@ -46,7 +46,10 @@ impl Process {
                     }
                 }
             }
-            _ => self.pending_signals.insert(Signals::from(signal)),
+            _ => {
+                self.pending_signals.insert(Signals::from(signal));
+                self.wake_blocked_threads();
+            }
         }
     }
 
