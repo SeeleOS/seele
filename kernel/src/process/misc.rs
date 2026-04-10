@@ -12,6 +12,7 @@ use crate::{
         Process, ProcessRef,
         manager::{MANAGER, get_current_process},
     },
+    thread::{THREAD_MANAGER, misc::State, yielding::BlockType},
 };
 
 impl Process {
@@ -21,6 +22,21 @@ impl Process {
             Ok(())
         } else {
             Err(FSError::NotFound)
+        }
+    }
+
+    pub fn wake_blocked_threads(&self) {
+        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+        for weak in &self.threads {
+            let Some(thread) = weak.upgrade() else {
+                continue;
+            };
+
+            if matches!(thread.lock().state, State::Blocked(_))
+                && !matches!(thread.lock().state, State::Blocked(BlockType::Stopped))
+            {
+                thread_manager.wake(thread.clone());
+            }
         }
     }
 }
