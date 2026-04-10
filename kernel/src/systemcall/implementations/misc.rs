@@ -4,10 +4,9 @@ use x86_rtc::Rtc;
 
 use crate::misc::time::Time;
 use crate::process::manager::get_current_process;
-use crate::process::misc::with_current_process;
 use crate::systemcall::utils::{SyscallError, SyscallImpl};
 use crate::thread::misc::with_current_thread;
-use crate::thread::yielding::{BlockType, block_current};
+use crate::thread::yielding::{BlockType, block_current, block_current_with_sig_check};
 use crate::{NAME, define_syscall};
 
 define_syscall!(GetCurrentTime, {
@@ -29,7 +28,7 @@ define_syscall!(GetSystemInfo, |info: *mut SystemInfo| {
 define_syscall!(Sleep, |nanoseconds: u64| {
     let time = Time::since_boot().add_ns(nanoseconds);
 
-    block_current(BlockType::SetTime(time));
+    block_current_with_sig_check(BlockType::SetTime(time))?;
 
     Ok(0)
 });

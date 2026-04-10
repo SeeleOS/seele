@@ -14,11 +14,12 @@ use crate::{
         traits::{Configuratable, Readable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
-    process::group::ProcessGroupID,
+    process::{group::ProcessGroupID, manager::get_current_process},
+    s_println,
     terminal::object::TerminalObject,
     thread::{
         THREAD_MANAGER,
-        yielding::{BlockType, WakeType, block_current},
+        yielding::{BlockType, WakeType, block_current, block_current_with_sig_check},
     },
 };
 
@@ -95,10 +96,10 @@ impl Readable for TtyDevice {
                 }
 
                 drop(queue);
-                block_current(BlockType::WakeRequired {
+                block_current_with_sig_check(BlockType::WakeRequired {
                     wake_type: WakeType::Keyboard,
                     deadline: None,
-                });
+                })?;
             } else {
                 let mut read_chars = 0;
                 while read_chars < buffer.len() {

@@ -1,10 +1,14 @@
 use alloc::{collections::vec_deque::VecDeque, sync::Arc, vec::Vec};
+use seele_sys::SyscallResult;
 
 use crate::{
     misc::time::Time,
-    object::misc::ObjectRef,
+    object::{
+        error::ObjectError,
+        misc::{ObjectRef, ObjectResult},
+    },
     polling::event::PollableEvent,
-    process::misc::ProcessID,
+    process::{manager::get_current_process, misc::ProcessID},
     task::{TASK_SPAWNER, task::Task},
     thread::{
         THREAD_MANAGER, ThreadRef, future::ThreadFuture, manager::ThreadManager, misc::State,
@@ -229,4 +233,18 @@ pub fn block_current(block_type: BlockType) {
         .clone()
         .unwrap();
     block(current, block_type);
+}
+
+// Avoid sleeping forever in interruptible waits by re-checking for pending
+// signals before and after blocking
+#[must_use]
+pub fn block_current_with_sig_check(block_type: BlockType) -> ObjectResult<()> {
+    if !get_current_process().lock().pending_signals.is_empty() {
+        return Err(ObjectError::Interrupted);
+    }
+    block_current(block_type);
+    if !get_current_process().lock().pending_signals.is_empty() {
+        return Err(ObjectError::Interrupted);
+    }
+    Ok(())
 }
