@@ -1,8 +1,8 @@
-use alloc::{string::String, vec};
+use alloc::string::String;
+use core::ptr;
 
 use crate::{
     define_syscall,
-    misc::usercopy::{copy_from_user, copy_to_user, read_user_value, write_user_value},
     object::misc::ObjectRef,
     process::manager::get_current_process,
     systemcall::utils::{SyscallError, SyscallImpl},
@@ -57,8 +57,7 @@ define_syscall!(
             return Err(SyscallError::BadAddress);
         }
 
-        let option_len =
-            read_user_value(option_len_ptr as *const u32).ok_or(SyscallError::BadAddress)? as usize;
+        let option_len = unsafe { *option_len_ptr as usize };
         let value = socket
             .as_unix_socket()?
             .getsockopt(level as u64, option_name as u64, option_len)
@@ -68,11 +67,11 @@ define_syscall!(
             return Err(SyscallError::BadAddress);
         }
 
-        if !value.is_empty() && !copy_to_user(option_value, &value) {
-            return Err(SyscallError::BadAddress);
-        }
-        if !write_user_value(option_len_ptr, value.len() as u32) {
-            return Err(SyscallError::BadAddress);
+        unsafe {
+            if !value.is_empty() {
+                ptr::copy_nonoverlapping(value.as_ptr(), option_value, value.len());
+            }
+            *option_len_ptr = value.len() as u32;
         }
 
         Ok(0)
@@ -90,19 +89,18 @@ define_syscall!(
             .as_unix_socket()?
             .getsockname_bytes()
             .map_err(crate::object::error::ObjectError::from)?;
-        let requested_len = read_user_value(address_len_ptr as *const u32)
-            .ok_or(SyscallError::BadAddress)? as usize;
+        let requested_len = unsafe { *address_len_ptr as usize };
         let copy_len = requested_len.min(name.len());
 
         if copy_len > 0 && address.is_null() {
             return Err(SyscallError::BadAddress);
         }
 
-        if copy_len > 0 && !copy_to_user(address, &name[..copy_len]) {
-            return Err(SyscallError::BadAddress);
-        }
-        if !write_user_value(address_len_ptr, name.len() as u32) {
-            return Err(SyscallError::BadAddress);
+        unsafe {
+            if copy_len > 0 {
+                ptr::copy_nonoverlapping(name.as_ptr(), address, copy_len);
+            }
+            *address_len_ptr = name.len() as u32;
         }
 
         Ok(0)
@@ -120,19 +118,18 @@ define_syscall!(
             .as_unix_socket()?
             .getpeername_bytes()
             .map_err(crate::object::error::ObjectError::from)?;
-        let requested_len = read_user_value(address_len_ptr as *const u32)
-            .ok_or(SyscallError::BadAddress)? as usize;
+        let requested_len = unsafe { *address_len_ptr as usize };
         let copy_len = requested_len.min(name.len());
 
         if copy_len > 0 && address.is_null() {
             return Err(SyscallError::BadAddress);
         }
 
-        if copy_len > 0 && !copy_to_user(address, &name[..copy_len]) {
-            return Err(SyscallError::BadAddress);
-        }
-        if !write_user_value(address_len_ptr, name.len() as u32) {
-            return Err(SyscallError::BadAddress);
+        unsafe {
+            if copy_len > 0 {
+                ptr::copy_nonoverlapping(name.as_ptr(), address, copy_len);
+            }
+            *address_len_ptr = name.len() as u32;
         }
 
         Ok(0)
@@ -144,35 +141,24 @@ define_syscall!(SocketRecvMsg, |socket: ObjectRef, msg_ptr: *mut u8, _flags: u64
         return Err(SyscallError::BadAddress);
     }
 
-    let mut msg =
-        read_user_value(msg_ptr as *const relibc_msg_hdr).ok_or(SyscallError::BadAddress)?;
+    let msg = unsafe { &mut *(msg_ptr as *mut relibc_msg_hdr) };
     if msg.msg_iovlen > isize::MAX as usize {
         return Err(SyscallError::InvalidArguments);
     }
 
     let iovs = if msg.msg_iovlen == 0 {
-        vec![]
+        &[][..]
     } else {
         if msg.msg_iov.is_null() {
             return Err(SyscallError::BadAddress);
         }
-        let mut iovs = vec![relibc_iovec::default(); msg.msg_iovlen];
-        let iov_bytes = unsafe {
-            core::slice::from_raw_parts_mut(
-                iovs.as_mut_ptr().cast::<u8>(),
-                msg.msg_iovlen * core::mem::size_of::<relibc_iovec>(),
-            )
-        };
-        if !copy_from_user(msg.msg_iov.cast::<u8>(), iov_bytes) {
-            return Err(SyscallError::BadAddress);
-        }
-        iovs
+        unsafe { core::slice::from_raw_parts_mut(msg.msg_iov, msg.msg_iovlen) }
     };
 
     let socket = socket.as_unix_socket()?;
     let mut total_read = 0usize;
 
-    for iov in &iovs {
+    for iov in iovs {
         if iov.iov_len == 0 {
             continue;
         }
@@ -180,13 +166,12 @@ define_syscall!(SocketRecvMsg, |socket: ObjectRef, msg_ptr: *mut u8, _flags: u64
             return Err(SyscallError::BadAddress);
         }
 
-        let mut buffer = vec![0u8; iov.iov_len];
-        let read = socket.read_socket(&mut buffer).map_err(crate::object::error::ObjectError::from)?;
-        if !copy_to_user(iov.iov_base, &buffer[..read]) {
-            return Err(SyscallError::BadAddress);
-        }
+        let buffer = unsafe { core::slice::from_raw_parts_mut(iov.iov_base, iov.iov_len) };
+        let read = socket
+            .read_socket(buffer)
+            .map_err(crate::object::error::ObjectError::from)?;
         total_read += read;
-        if read < iov.iov_len {
+        if read < buffer.len() {
             break;
         }
     }
@@ -196,9 +181,6 @@ define_syscall!(SocketRecvMsg, |socket: ObjectRef, msg_ptr: *mut u8, _flags: u64
         msg.msg_namelen = 0;
     }
     msg.msg_controllen = 0;
-    if !write_user_value(msg_ptr as *mut relibc_msg_hdr, msg) {
-        return Err(SyscallError::BadAddress);
-    }
 
     Ok(total_read)
 });
@@ -212,14 +194,12 @@ define_syscall!(SocketShutdown, |socket: ObjectRef, how: u64| {
 });
 
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
 struct relibc_iovec {
     iov_base: *mut u8,
     iov_len: usize,
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
 struct relibc_msg_hdr {
     msg_name: *mut u8,
     msg_namelen: u32,

@@ -1,4 +1,6 @@
-use alloc::{collections::btree_map::BTreeMap, string::String, vec};
+use core::slice;
+
+use alloc::{collections::btree_map::BTreeMap, string::String};
 use seele_sys::{
     abi::object::{ControlCommand, SeekType},
     permission::Permissions,
@@ -19,7 +21,6 @@ use crate::{
         manager::get_current_process,
         misc::{ProcessID, with_current_process},
     },
-    misc::usercopy::{copy_from_user, copy_to_user},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
 
@@ -33,8 +34,7 @@ define_syscall!(
         let current_pid = get_current_process().lock().pid;
         let mut offsets = DIR_OFFSETS.lock();
         let offset_entry = offsets.entry((current_pid, object_index)).or_insert(0usize);
-        let mut output = vec![0u8; len];
-        let mut bytes_written = 0usize;
+        let mut bytes_written = 0;
 
         while *offset_entry < contents.len() {
             let info = &contents[*offset_entry];
@@ -44,30 +44,26 @@ define_syscall!(
                 break;
             }
 
-            {
-                let entry_ptr = unsafe { output.as_mut_ptr().add(bytes_written) };
-                unsafe {
-                    entry_ptr.cast::<u64>().write_unaligned(1);
-                    entry_ptr
-                        .add(8)
-                        .cast::<i64>()
-                        .write_unaligned((*offset_entry as i64) + 1);
-                    entry_ptr.add(16).cast::<u16>().write_unaligned(reclen);
-                }
+            unsafe {
+                let entry_ptr = buf.add(bytes_written);
+                entry_ptr.cast::<u64>().write_unaligned(1);
+                entry_ptr
+                    .add(8)
+                    .cast::<i64>()
+                    .write_unaligned((*offset_entry as i64) + 1);
+                entry_ptr.add(16).cast::<u16>().write_unaligned(reclen);
                 let linux_type = match info.content_type {
                     DirectoryContentType::Directory => 4,
                     DirectoryContentType::File => 8,
                     _ => 0,
                 };
-                unsafe {
-                    entry_ptr.add(18).write(linux_type);
-                    core::ptr::copy_nonoverlapping(
-                        name_bytes.as_ptr(),
-                        entry_ptr.add(19),
-                        name_bytes.len(),
-                    );
-                    entry_ptr.add(19 + name_bytes.len()).write(0);
-                }
+                entry_ptr.add(18).write(linux_type);
+                core::ptr::copy_nonoverlapping(
+                    name_bytes.as_ptr(),
+                    entry_ptr.add(19),
+                    name_bytes.len(),
+                );
+                entry_ptr.add(19 + name_bytes.len()).write(0);
             }
 
             bytes_written += reclen as usize;
@@ -79,10 +75,6 @@ define_syscall!(
             return Ok(0);
         }
 
-        if !copy_to_user(buf, &output[..bytes_written]) {
-            return Err(SyscallError::BadAddress);
-        }
-
         Ok(bytes_written)
     }
 );
@@ -90,22 +82,21 @@ define_syscall!(
 define_syscall!(ReadObject, |object: ObjectRef,
                              buf_ptr: *mut u8,
                              len: usize| {
-    let mut buffer = vec![0u8; len];
-    let read = object.as_readable()?.read(&mut buffer)?;
-    if !copy_to_user(buf_ptr, &buffer[..read]) {
-        return Err(SyscallError::BadAddress);
+    unsafe {
+        Ok(object
+            .as_readable()?
+            .read(slice::from_raw_parts_mut(buf_ptr, len))?)
     }
-    Ok(read)
 });
 
 define_syscall!(WriteObject, |object: ObjectRef,
                               buf_ptr: *mut u8,
                               len: usize| {
-    let mut buffer = vec![0u8; len];
-    if !copy_from_user(buf_ptr, &mut buffer) {
-        return Err(SyscallError::BadAddress);
+    unsafe {
+        Ok(object
+            .as_writable()?
+            .write(slice::from_raw_parts(buf_ptr, len))?)
     }
-    Ok(object.as_writable()?.write(&buffer)?)
 });
 
 define_syscall!(RemoveObject, |object_num: usize| {

@@ -1,3 +1,5 @@
+use core::slice;
+
 use alloc::{string::String, sync::Arc};
 use seele_sys::permission::Permissions;
 
@@ -11,7 +13,6 @@ use crate::{
     },
     memory::addrspace::mem_area::Data,
     object::misc::ObjectRef,
-    misc::usercopy::copy_to_user,
     process::{manager::get_current_process, misc::with_current_process},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
@@ -41,15 +42,15 @@ define_syscall!(ChangeDirectory, |dir: String| {
 });
 
 define_syscall!(GetCurrentDirectory, |buf_ptr: *mut u8, len: usize| {
+    let buf = unsafe { slice::from_raw_parts_mut(buf_ptr, len) };
     let process = get_current_process();
     let path_str = process.lock().current_directory.clone().as_string();
     let path_bytes = path_str.as_bytes();
     let path_len = path_bytes.len();
 
     if len > path_len {
-        if !copy_to_user(buf_ptr, path_bytes) || !copy_to_user(unsafe { buf_ptr.add(path_len) }, &[0]) {
-            return Err(SyscallError::BadAddress);
-        }
+        buf[..path_len].copy_from_slice(path_bytes);
+        buf[path_len] = 0;
     } else {
         return Err(SyscallError::InvalidArguments);
     }
@@ -62,18 +63,11 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
                            linux_stat_ptr: *mut LinuxStat,
                            use_object: bool,
                            object: ObjectRef| {
-    let result = smart_navigate(path_str, object, start_from_current_dir, use_object)
-        .ok_or(SyscallError::FileNotFound)?;
-    let stat = result.as_file_like()?.info()?.as_linux();
-    let stat_bytes = unsafe {
-        core::slice::from_raw_parts(
-            (&stat as *const LinuxStat).cast::<u8>(),
-            core::mem::size_of::<LinuxStat>(),
-        )
-    };
+    unsafe {
+        let result = smart_navigate(path_str, object, start_from_current_dir, use_object)
+            .ok_or(SyscallError::FileNotFound)?;
 
-    if !copy_to_user(linux_stat_ptr.cast::<u8>(), stat_bytes) {
-        return Err(SyscallError::BadAddress);
+        *linux_stat_ptr = result.as_file_like()?.info()?.as_linux();
     }
 
     Ok(0)
@@ -120,8 +114,8 @@ define_syscall!(ReadLink, |path_str: String,
     let bytes = target.as_bytes();
     let copied = core::cmp::min(bytes.len(), out_len);
 
-    if !copy_to_user(out_buf, &bytes[..copied]) {
-        return Err(SyscallError::BadAddress);
+    unsafe {
+        slice::from_raw_parts_mut(out_buf, copied).copy_from_slice(&bytes[..copied]);
     }
 
     Ok(copied)

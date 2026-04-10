@@ -2,7 +2,6 @@ use alloc::{string::String, sync::Arc, vec::Vec};
 
 use crate::{
     define_syscall,
-    misc::usercopy::write_user_value,
     process::{
         ProcessRef,
         execve::execve,
@@ -67,10 +66,10 @@ define_syscall!(
 
         match check_result {
             Some((process, exit_code)) => {
-                if !status_ptr.is_null()
-                    && !write_user_value(status_ptr, exit_code_to_status(exit_code))
-                {
-                    return Err(SyscallError::BadAddress);
+                if !status_ptr.is_null() {
+                    unsafe {
+                        *status_ptr = exit_code_to_status(exit_code);
+                    }
                 }
                 let pid = process.lock().pid.0;
                 MANAGER.lock().reap_process(process);

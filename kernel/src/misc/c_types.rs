@@ -1,6 +1,6 @@
 use alloc::{string::String, vec::Vec};
 
-use crate::misc::{error::KernelError, others::KernelFrom, usercopy::read_user_c_string, usercopy::read_user_value};
+use crate::misc::{error::KernelError, others::KernelFrom};
 
 pub type CString = *const u8;
 pub type CVec<T> = *const T;
@@ -9,8 +9,20 @@ impl KernelFrom<CString> for String {
     fn k_from(val: CString) -> super::error::KernelResult<Self> {
         const MAX_LENGTH: usize = 4096;
 
-        let bytes = read_user_c_string(val, MAX_LENGTH).ok_or(KernelError::InvalidString)?;
-        String::from_utf8(bytes).map_err(|_| KernelError::InvalidString)
+        let mut str = String::new();
+
+        for i in 0..MAX_LENGTH {
+            unsafe {
+                let char = *val.add(i) as char;
+
+                if char == '\0' {
+                    return Ok(str);
+                }
+                str.push(char);
+            }
+        }
+
+        Err(KernelError::InvalidString)
     }
 }
 
@@ -25,12 +37,14 @@ impl KernelFrom<CVec<CString>> for Vec<String> {
         let mut vec = Vec::new();
 
         for i in 0..MAX_LENGTH {
-            let ptr = read_user_value(unsafe { val.add(i) }).ok_or(KernelError::InvalidString)?;
+            unsafe {
+                let ptr = *val.add(i);
 
-            if ptr.is_null() {
-                break;
+                if ptr.is_null() {
+                    break;
+                }
+                vec.push(String::k_from(ptr)?);
             }
-            vec.push(String::k_from(ptr)?);
         }
 
         Ok(vec)
