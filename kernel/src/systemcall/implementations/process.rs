@@ -73,7 +73,6 @@ define_syscall!(
                 }
                 let pid = process.lock().pid.0;
                 MANAGER.lock().reap_process(process);
-                s_print!("exit");
                 Ok(pid as usize)
             }
             None => Err(SyscallError::TryAgain),
