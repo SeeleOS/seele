@@ -30,7 +30,7 @@ pub mod mem_area;
 pub mod misc;
 
 const USER_MEM_START: u64 = 0x30_0000_0000;
-const KERNEL_MEM_START: u64 = 0xFFFF_8000_1000_0000;
+pub const KERNEL_MEM_START: u64 = 0xFFFF_8000_1000_0000;
 
 static KERNEL_MEM: AtomicU64 = AtomicU64::new(KERNEL_MEM_START);
 
