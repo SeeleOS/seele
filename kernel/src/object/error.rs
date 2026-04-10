@@ -6,6 +6,7 @@ use crate::{
 #[derive(Debug)]
 pub enum ObjectError {
     DoesNotExist,
+    Interrupted,
     TryAgain,
     InvalidRequest,
     InvalidArguments,
@@ -32,6 +33,7 @@ impl AsSyscallError for ObjectError {
         match self {
             Self::Unimplemented => SyscallError::other("unimplemented object result thingy"),
             Self::InvalidArguments => SyscallError::InvalidArguments,
+            Self::Interrupted => SyscallError::Interrupted,
             Self::TryAgain => SyscallError::TryAgain,
             Self::DoesNotExist => SyscallError::BadFileDescriptor,
             Self::InvalidRequest => SyscallError::InappropriateIoctl,
