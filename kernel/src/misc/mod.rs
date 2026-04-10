@@ -22,6 +22,7 @@ pub mod testing;
 pub mod time;
 pub mod timer;
 pub mod tss;
+pub mod usercopy;
 
 pub use cpu_core_context::*;
 
@@ -49,14 +50,14 @@ pub fn get_cycles() -> u64 {
 #[macro_export]
 macro_rules! read_addr {
     ($addr: expr, $type: ty) => {
-        *($addr as *mut $type)
+        core::ptr::read_volatile($addr as *const $type)
     };
 }
 
 #[macro_export]
 macro_rules! write_addr {
     ($addr: expr, $type: ty, $value: expr) => {
-        read_addr!($addr, $type) = $value
+        core::ptr::write_volatile($addr as *mut $type, $value)
     };
 }
 

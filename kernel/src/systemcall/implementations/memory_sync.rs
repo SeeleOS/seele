@@ -6,6 +6,7 @@ use x86_64::{VirtAddr, registers::model_specific::FsBase};
 use crate::{
     define_syscall,
     memory::addrspace::mem_area::Data,
+    misc::usercopy::read_user_value,
     process::{
         ProcessRef,
         manager::{MANAGER, get_current_process},
@@ -21,8 +22,12 @@ use crate::{
 static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ThreadRef>>> = Mutex::new(BTreeMap::new());
 
 define_syscall!(FutexWait, |arg1: u64, arg2: u64| {
+    if arg1 as usize % core::mem::align_of::<u64>() != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
     let mut queue = FUTEX_QUEUE.lock();
-    let cur_value = unsafe { *(arg1 as *mut u64) };
+    let cur_value = read_user_value(arg1 as *const u64).ok_or(SyscallError::BadAddress)?;
     if cur_value != arg2 {
         return Err(SyscallError::TryAgain);
     }

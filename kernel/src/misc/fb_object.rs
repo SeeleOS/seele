@@ -11,6 +11,7 @@ use crate::{
     misc::{
         framebuffer::{FRAME_BUFFER, framebuffer_set_user_controlled},
         others::permissions_to_flags,
+        usercopy::write_user_value,
     },
     object::{
         Object,
@@ -130,9 +131,11 @@ impl Configuratable for FramebufferObject {
         request: crate::object::config::ConfigurateRequest,
     ) -> crate::object::misc::ObjectResult<isize> {
         match request {
-            ConfigurateRequest::GetFramebufferInfo(fb_info) => unsafe {
-                fb_info.write(FRAME_BUFFER.get().unwrap().lock().fb_info());
-            },
+            ConfigurateRequest::GetFramebufferInfo(fb_info) => {
+                if !write_user_value(fb_info, FRAME_BUFFER.get().unwrap().lock().fb_info()) {
+                    return Err(ObjectError::InvalidArguments);
+                }
+            }
             ConfigurateRequest::FbTakeControl => {
                 *self.used_by_user.lock() = true;
                 framebuffer_set_user_controlled(true);
