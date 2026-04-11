@@ -1,6 +1,6 @@
 use alloc::{collections::vec_deque::VecDeque, sync::Weak};
 
-use crate::object::Object;
+use crate::object::{Object, misc::ObjectRef};
 
 #[derive(Debug, Default)]
 pub struct PtyShared {
@@ -8,4 +8,14 @@ pub struct PtyShared {
     pub from_slave: VecDeque<u8>,
     pub master: Option<Weak<dyn Object>>,
     pub slave: Option<Weak<dyn Object>>,
+}
+
+impl PtyShared {
+    pub fn get_master(&self) -> ObjectRef {
+        self.master.as_ref().unwrap().upgrade().unwrap()
+    }
+
+    pub fn get_slave(&self) -> ObjectRef {
+        self.slave.as_ref().unwrap().upgrade().unwrap()
+    }
 }
