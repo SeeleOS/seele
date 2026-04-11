@@ -9,18 +9,14 @@ use crate::{
     object::{
         Object,
         config::ConfigurateRequest,
-        error::ObjectError,
         misc::ObjectRef,
+        queue_helpers::{copy_from_queue, read_or_block},
         traits::{Configuratable, Readable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
-    process::{group::ProcessGroupID, manager::get_current_process},
-    s_println,
+    process::group::ProcessGroupID,
     terminal::object::TerminalObject,
-    thread::{
-        THREAD_MANAGER,
-        yielding::{BlockType, WakeType, block_current, block_current_with_sig_check},
-    },
+    thread::{THREAD_MANAGER, yielding::WakeType},
 };
 
 pub static DEFAULT_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();
@@ -85,36 +81,17 @@ impl Writable for TtyDevice {
 
 impl Readable for TtyDevice {
     fn read(&self, buffer: &mut [u8]) -> super::ObjectResult<usize> {
-        loop {
+        read_or_block(buffer, &self.flags, WakeType::Keyboard, |buffer| {
             let mut queue = KEYBOARD_QUEUE
                 .get_or_init(|| Mutex::new(VecDeque::new()))
                 .lock();
 
             if queue.is_empty() {
-                if self.flags.lock().contains(ObjectFlags::NONBLOCK) {
-                    return Err(ObjectError::TryAgain);
-                }
-
-                drop(queue);
-                block_current_with_sig_check(BlockType::WakeRequired {
-                    wake_type: WakeType::Keyboard,
-                    deadline: None,
-                })?;
+                None
             } else {
-                let mut read_chars = 0;
-                while read_chars < buffer.len() {
-                    match queue.pop_front() {
-                        Some(val) => {
-                            buffer[read_chars] = val;
-                            read_chars += 1;
-                        }
-                        None => break,
-                    }
-                }
-
-                return Ok(read_chars);
+                Some(copy_from_queue(&mut queue, buffer))
             }
-        }
+        })
     }
 }
 

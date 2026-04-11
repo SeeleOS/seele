@@ -1,26 +1,20 @@
-use alloc::{collections::vec_deque::VecDeque, sync::Arc};
-use conquer_once::spin::OnceCell;
+use alloc::sync::Arc;
 use seele_sys::abi::object::{ObjectFlags, TerminalInfo};
 use spin::Mutex;
 
 use crate::{
     impl_cast_function,
-    keyboard::decoding_task::KEYBOARD_QUEUE,
     object::{
         Object,
         config::ConfigurateRequest,
-        error::ObjectError,
-        misc::{ObjectRef, ObjectResult},
+        misc::ObjectResult,
+        queue_helpers::{copy_from_queue, push_to_queue, read_or_block},
         traits::{Configuratable, Readable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
-    process::{group::ProcessGroupID, manager::get_current_process},
-    s_println,
-    terminal::{object::TerminalObject, pty::shared::PtyShared},
-    thread::{
-        THREAD_MANAGER,
-        yielding::{BlockType, WakeType, block_current, block_current_with_sig_check},
-    },
+    process::group::ProcessGroupID,
+    terminal::pty::shared::PtyShared,
+    thread::{THREAD_MANAGER, yielding::WakeType},
 };
 
 impl Pollable for PtySlave {
@@ -63,45 +57,29 @@ impl Object for PtySlave {
 
 impl Writable for PtySlave {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
-        for b in buffer {
-            self.shared.lock().from_slave.push_back(*b);
-        }
-        THREAD_MANAGER.get().unwrap().lock().wake_pty();
+        let master = {
+            let mut shared = self.shared.lock();
+            push_to_queue(&mut shared.from_slave, buffer);
+            shared.get_master()
+        };
+
+        let mut manager = THREAD_MANAGER.get().unwrap().lock();
+        manager.wake_pty();
+        manager.wake_poller(master, PollableEvent::CanBeRead);
         Ok(buffer.len())
     }
 }
 
 impl Readable for PtySlave {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
-        loop {
-            {
-                let queue = &mut self.shared.lock().from_master;
-
-                if queue.is_empty() {
-                    if self.flags.lock().contains(ObjectFlags::NONBLOCK) {
-                        return Err(ObjectError::TryAgain);
-                    }
-                } else {
-                    let mut read_chars = 0;
-                    while read_chars < buffer.len() {
-                        match queue.pop_front() {
-                            Some(val) => {
-                                buffer[read_chars] = val;
-                                read_chars += 1;
-                            }
-                            None => break,
-                        }
-                    }
-
-                    return Ok(read_chars);
-                }
+        read_or_block(buffer, &self.flags, WakeType::Pty, |buffer| {
+            let mut shared = self.shared.lock();
+            if shared.from_master.is_empty() {
+                None
+            } else {
+                Some(copy_from_queue(&mut shared.from_master, buffer))
             }
-
-            block_current_with_sig_check(BlockType::WakeRequired {
-                wake_type: WakeType::Pty,
-                deadline: None,
-            })?;
-        }
+        })
     }
 }
 

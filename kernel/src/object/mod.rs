@@ -19,6 +19,7 @@ pub mod control;
 pub mod device;
 pub mod error;
 pub mod misc;
+pub mod queue_helpers;
 pub mod traits;
 pub mod tty_device;
 
