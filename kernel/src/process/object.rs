@@ -72,7 +72,9 @@ impl Process {
     }
 
     pub fn clone_object_to(&mut self, object: ObjectRef, dest: usize) -> ObjectResult<usize> {
-        self.objects.resize(dest + 1, None);
+        if self.objects.len() <= dest {
+            self.objects.resize(dest + 1, None);
+        }
         self.objects[dest] = Some(object.clone());
         Ok(dest)
     }
