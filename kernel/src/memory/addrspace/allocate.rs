@@ -35,9 +35,9 @@ impl AddrSpace {
         let mem = self.fetch_add_user_mem(pages);
         let area = MemoryArea::new(mem, pages, permissions_to_flags(permissions), data, true);
 
-        self.memory_areas.push(area.clone());
+        self.register_area(area);
 
-        area.start
+        mem
     }
 
     pub fn allocate_kernel(&mut self, pages: u64) -> AllocResult {

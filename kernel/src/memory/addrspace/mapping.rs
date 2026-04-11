@@ -20,18 +20,28 @@ use crate::{
     object::misc::ObjectRef,
 };
 
-use super::{AddrSpace, AllocResult};
+use super::{AddrSpace, AllocResult, LAZY_MAP};
 
 impl AddrSpace {
-    pub fn map(&mut self, area: MemoryArea) -> AllocResult {
-        log::trace!("addrspace: mapping {:?}", area);
+    pub fn register_area(&mut self, mut area: MemoryArea) -> Option<AllocResult> {
+        log::trace!("addrspace: register area {:?}", area);
+
+        if !LAZY_MAP {
+            area.lazy = false;
+        }
+
         self.memory_areas.push(area.clone());
 
-        if !area.lazy {
-            self.apply_area(area)
+        if area.lazy {
+            None
         } else {
-            panic!("called map with a lazy mem area")
+            Some(self.apply_area(area))
         }
+    }
+
+    pub fn map(&mut self, area: MemoryArea) -> AllocResult {
+        self.register_area(area)
+            .expect("called map with a lazy mem area")
     }
 
     pub fn unmap(&mut self, start: VirtAddr, len: u64) {
