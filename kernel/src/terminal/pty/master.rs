@@ -101,6 +101,11 @@ impl Readable for PtyMaster {
 
 impl Configuratable for PtyMaster {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
-        Ok(0)
+        self.shared
+            .lock()
+            .get_slave()
+            .as_configuratable()
+            .map_err(|_| ObjectError::InvalidRequest)?
+            .configure(request)
     }
 }
