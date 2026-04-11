@@ -3,7 +3,7 @@ use seele_sys::{SyscallResult, errors::SyscallError};
 
 use crate::{
     misc::{devices::DevNull, fb_object::FramebufferObject, mouse::PS2MouseObject},
-    object::{Object, misc::ObjectRef},
+    object::{Object, misc::ObjectRef, tty_device::get_default_tty},
 };
 
 lazy_static::lazy_static! {
@@ -12,6 +12,7 @@ lazy_static::lazy_static! {
 
         devices.insert("framebuffer", Arc::new(FramebufferObject::default()) as ObjectRef);
         devices.insert("devnull", Arc::new(DevNull) as ObjectRef);
+        devices.insert("tty", get_default_tty() as ObjectRef);
         devices.insert("ps2mouse", Arc::new(PS2MouseObject::default()) as ObjectRef);
 
         devices
