@@ -77,7 +77,8 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         SetTimerState,
         GetTimerOverrun,
         CreateTimer,
-        DeleteTimer
+        DeleteTimer,
+        CreatePty
     );
 
     table

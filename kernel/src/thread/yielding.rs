@@ -46,6 +46,7 @@ impl BlockType {
 
 #[derive(Clone, Debug)]
 pub enum WakeType {
+    Pty,
     Mouse,
     Keyboard,
     // Waiting for a process to exit
@@ -59,6 +60,7 @@ pub enum WakeType {
 #[derive(Clone, Debug, Default)]
 pub struct BlockedQueues {
     pub keyboard: VecDeque<ThreadRef>,
+    pub pty: VecDeque<ThreadRef>,
     pub io: VecDeque<ThreadRef>,
     pub process_exit: VecDeque<ThreadRef>,
     pub mouse: VecDeque<ThreadRef>,
@@ -70,6 +72,7 @@ pub struct BlockedQueues {
 impl BlockedQueues {
     pub fn get_appropriate_queue(&mut self, wake_type: WakeType) -> &mut VecDeque<ThreadRef> {
         match wake_type {
+            WakeType::Pty => &mut self.pty,
             WakeType::Keyboard => &mut self.keyboard,
             WakeType::Mouse => &mut self.mouse,
             WakeType::ProcsesExit(_) => &mut self.process_exit,
@@ -125,6 +128,7 @@ impl ThreadManager {
         self.blocked_queues
             .mouse
             .retain(|t| !Arc::ptr_eq(t, thread));
+        self.blocked_queues.pty.retain(|t| !Arc::ptr_eq(t, thread));
         self.blocked_queues.io.retain(|t| !Arc::ptr_eq(t, thread));
         self.blocked_queues
             .process_exit
@@ -209,6 +213,7 @@ impl ThreadManager {
         to_wake.iter().for_each(|f| self.wake(f.clone()));
     }
 
+    register_wake_func!(pty);
     register_wake_func!(keyboard);
     register_wake_func!(mouse);
     register_wake_func!(io);

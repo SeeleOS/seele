@@ -74,6 +74,7 @@ add_syscall_arg_type!(
     *mut PollResult,
     i32,
     *const TimerStateStruct,
+    *mut i32,
     *mut TimerStateStruct,
     i64,
     *mut SignalAction,
