@@ -1,4 +1,4 @@
-use alloc::sync::Arc;
+use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 use seele_sys::abi::object::ObjectFlags;
 use spin::Mutex;
 
@@ -9,10 +9,12 @@ use crate::{
         config::ConfigurateRequest,
         error::ObjectError,
         misc::ObjectResult,
-        queue_helpers::{copy_from_queue, push_to_queue, read_or_block},
+        queue_helpers::{copy_from_queue, read_or_block},
         traits::{Configuratable, Readable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
+    signal::Signal,
+    terminal::line_discipline::{process_input_byte, process_output_bytes},
     terminal::pty::shared::PtyShared,
     thread::{THREAD_MANAGER, yielding::WakeType},
 };
@@ -51,15 +53,70 @@ impl Object for PtyMaster {
 
 impl Writable for PtyMaster {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
-        let slave = {
+        let (master, slave, wrote_input, wrote_echo, interrupt_group) = {
             let mut shared = self.shared.lock();
-            push_to_queue(&mut shared.from_master, buffer);
-            shared.get_slave()
+            let master = shared.get_master();
+            let slave = shared.get_slave();
+            let info = shared.info;
+            let mut wrote_input = false;
+            let mut wrote_echo = false;
+            let mut interrupt_group = None;
+
+            for byte in buffer.iter().copied() {
+                let mut queued_input = VecDeque::new();
+                let mut queued_echo = VecDeque::new();
+                let mut wants_interrupt = false;
+                process_input_byte(
+                    &info,
+                    &mut shared.line_buffer,
+                    byte,
+                    |byte| {
+                        queued_input.push_back(byte);
+                    },
+                    |bytes| {
+                        process_output_bytes(&info, bytes, |byte| {
+                            queued_echo.push_back(byte);
+                        });
+                    },
+                    || {
+                        wants_interrupt = true;
+                    },
+                );
+
+                if wants_interrupt {
+                    shared.line_buffer.clear();
+                    interrupt_group = shared.active_group;
+                }
+
+                if !queued_input.is_empty() {
+                    shared.from_master.append(&mut queued_input);
+                    wrote_input = true;
+                }
+
+                if !queued_echo.is_empty() {
+                    shared.from_slave.append(&mut queued_echo);
+                    wrote_echo = true;
+                }
+            }
+
+            (master, slave, wrote_input, wrote_echo, interrupt_group)
         };
+
+        if let Some(group_id) = interrupt_group {
+            group_id
+                .get_processes()
+                .iter()
+                .for_each(|process| process.lock().send_signal(Signal::Interrupt));
+        }
 
         let mut manager = THREAD_MANAGER.get().unwrap().lock();
         manager.wake_pty();
-        manager.wake_poller(slave, PollableEvent::CanBeRead);
+        if wrote_input {
+            manager.wake_poller(slave, PollableEvent::CanBeRead);
+        }
+        if wrote_echo {
+            manager.wake_poller(master, PollableEvent::CanBeRead);
+        }
         Ok(buffer.len())
     }
 }
@@ -79,9 +136,12 @@ impl Readable for PtyMaster {
 
 impl Configuratable for PtyMaster {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
-        self.shared
-            .lock()
-            .get_slave()
+        let slave = {
+            let shared = self.shared.lock();
+            shared.get_slave()
+        };
+
+        slave
             .as_configuratable()
             .map_err(|_| ObjectError::InvalidRequest)?
             .configure(request)

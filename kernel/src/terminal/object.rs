@@ -15,10 +15,13 @@ use crate::{
     terminal::term_trait::AbstractTerminal,
 };
 
+use super::linux_kd::LinuxConsoleState;
+
 #[derive(Debug)]
 pub struct TerminalObject {
     pub inner: Arc<Mutex<dyn AbstractTerminal>>,
     pub info: Mutex<TerminalInfo>,
+    pub linux_console: Mutex<LinuxConsoleState>,
 }
 
 impl TerminalObject {
@@ -27,6 +30,7 @@ impl TerminalObject {
         Self {
             info: Mutex::new(TerminalInfo::new(window_size.rows, window_size.cols)),
             inner: term,
+            linux_console: Mutex::new(LinuxConsoleState::default()),
         }
     }
 }

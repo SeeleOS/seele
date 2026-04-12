@@ -1,5 +1,5 @@
 use alloc::sync::Arc;
-use seele_sys::abi::object::{ObjectFlags, TerminalInfo};
+use seele_sys::abi::object::ObjectFlags;
 use spin::Mutex;
 
 use crate::{
@@ -8,12 +8,17 @@ use crate::{
         Object,
         config::ConfigurateRequest,
         misc::ObjectResult,
-        queue_helpers::{copy_from_queue, push_to_queue, read_or_block},
+        queue_helpers::{copy_from_queue, read_or_block},
         traits::{Configuratable, Readable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
     process::group::ProcessGroupID,
-    terminal::pty::shared::PtyShared,
+    terminal::{
+        linux_kd::{LinuxConsoleState, handle_kd_request},
+        line_discipline::process_output_bytes,
+        linux_vt::handle_vt_request,
+        pty::shared::PtyShared,
+    },
     thread::{THREAD_MANAGER, yielding::WakeType},
 };
 
@@ -30,10 +35,7 @@ impl Pollable for PtySlave {
 #[derive(Debug)]
 pub struct PtySlave {
     shared: Arc<Mutex<PtyShared>>,
-    info: Mutex<TerminalInfo>,
-    /// The foreground process group currently attached to this tty.
-    /// Line-discipline generated signals such as Ctrl+C should be sent here.
-    pub active_group: Mutex<Option<ProcessGroupID>>,
+    linux_console: Mutex<LinuxConsoleState>,
     pub flags: Mutex<ObjectFlags>,
 }
 
@@ -41,8 +43,7 @@ impl PtySlave {
     pub fn new(shared: Arc<Mutex<PtyShared>>) -> Self {
         Self {
             shared,
-            info: Mutex::new(TerminalInfo::default()),
-            active_group: Mutex::new(None),
+            linux_console: Mutex::new(LinuxConsoleState::default()),
             flags: Mutex::new(ObjectFlags::default()),
         }
     }
@@ -59,7 +60,10 @@ impl Writable for PtySlave {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
         let master = {
             let mut shared = self.shared.lock();
-            push_to_queue(&mut shared.from_slave, buffer);
+            let info = shared.info;
+            process_output_bytes(&info, buffer, |byte| {
+                shared.from_slave.push_back(byte);
+            });
             shared.get_master()
         };
 
@@ -85,20 +89,28 @@ impl Readable for PtySlave {
 
 impl Configuratable for PtySlave {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
+        if let Some(result) = handle_kd_request(&self.linux_console, &request)? {
+            return Ok(result);
+        }
+
+        if let Some(result) = handle_vt_request(&self.linux_console, &request)? {
+            return Ok(result);
+        }
+
         match request {
             ConfigurateRequest::TermGetActiveGroup => {
-                Ok(self.active_group.lock().unwrap().0 as isize)
+                Ok(self.shared.lock().active_group.unwrap().0 as isize)
             }
             ConfigurateRequest::TermSetActiveGroup(group) => {
-                *self.active_group.lock() = Some(ProcessGroupID(group));
+                self.shared.lock().active_group = Some(ProcessGroupID(group));
                 Ok(0)
             }
             ConfigurateRequest::GetTerminalInfo(term_info) => unsafe {
-                *term_info = *self.info.lock();
+                *term_info = self.shared.lock().info;
                 Ok(0)
             },
             ConfigurateRequest::SetTerminalInfo(term_info) => unsafe {
-                *self.info.lock() = *term_info;
+                self.shared.lock().info = *term_info;
                 Ok(0)
             },
             _ => Ok(0),

@@ -1,7 +1,6 @@
 use core::char;
 
 use alloc::collections::vec_deque::VecDeque;
-use bootloader_api::info;
 use seele_sys::{abi::object::TerminalInfo, signal::Signal};
 use spin::mutex::Mutex;
 
@@ -10,6 +9,7 @@ use crate::{
     object::tty_device::{get_default_tty, wake_tty_poller_readable},
     print,
     terminal::{
+        line_discipline::{process_input_byte, process_output_bytes},
         misc::{LINE_BUFFER, flush_line_buffer},
         state::DEFAULT_TERMINAL,
     },
@@ -32,54 +32,35 @@ fn handle_interrupt_char(info: &TerminalInfo) {
 
 pub fn process_char(char: char) {
     let info = *DEFAULT_TERMINAL.get().unwrap().lock().info.lock();
-
-    if char == '\x03' {
-        handle_interrupt_char(&info);
+    let Ok(byte) = u8::try_from(char as u32) else {
         return;
-    }
+    };
 
-    if !info.canonical {
-        // In noncanonical mode, userspace handles line editing and submission.
-        if info.echo {
-            print!("{char}");
-        }
-
-        KEYBOARD_QUEUE
-            .get_or_init(|| Mutex::new(VecDeque::new()))
-            .lock()
-            .push_back(char as u8);
-        THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
-        wake_tty_poller_readable();
-
-        return;
-    }
-
-    match char {
-        '\n' => {
-            if info.echo_newline {
-                print!("{char}");
+    process_input_byte(
+        &info,
+        &mut LINE_BUFFER.lock(),
+        byte,
+        |byte| {
+            KEYBOARD_QUEUE
+                .get_or_init(|| Mutex::new(VecDeque::new()))
+                .lock()
+                .push_back(byte);
+        },
+        |bytes| {
+            let mut echoed = VecDeque::new();
+            process_output_bytes(&info, bytes, |byte| {
+                echoed.push_back(byte);
+            });
+            if let Ok(string) = core::str::from_utf8(echoed.make_contiguous()) {
+                print!("{string}");
             }
+        },
+        || handle_interrupt_char(&info),
+    );
 
-            LINE_BUFFER.lock().push_back(b'\n');
-            flush_line_buffer();
-            THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
-            wake_tty_poller_readable();
-        }
-        '\x08' | '\x7f' => {
-            let mut lb = LINE_BUFFER.lock();
-            if lb.pop_back().is_some() {
-                if info.echo_delete {
-                    print!("\x08 \x08");
-                }
-            }
-        }
-        '\x03' => handle_interrupt_char(&info),
-        _ => {
-            if info.echo {
-                print!("{char}");
-            }
-
-            LINE_BUFFER.lock().push_back(char as u8);
-        }
+    if byte == b'\n' {
+        flush_line_buffer();
     }
+    THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+    wake_tty_poller_readable();
 }
