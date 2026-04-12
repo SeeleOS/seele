@@ -9,6 +9,11 @@ pub enum FSError {
     NotADirectory,
     NotAFile,
     NotASymlink,
+    AlreadyExists,
+    NoSpace,
+    AccessDenied,
+    PathTooLong,
+    TooManySymlinks,
     Readonly,
     Other,
     StorageDeviceError(BlockDeviceError),
@@ -21,6 +26,11 @@ impl AsSyscallError for FSError {
             Self::NotADirectory => SyscallError::NotADirectory,
             Self::NotAFile => SyscallError::IsADirectory,
             Self::NotASymlink => SyscallError::other("Not a symlink"),
+            Self::AlreadyExists => SyscallError::FileAlreadyExists,
+            Self::NoSpace => SyscallError::NoSpaceLeft,
+            Self::AccessDenied => SyscallError::AccessDenied,
+            Self::PathTooLong => SyscallError::PathTooLong,
+            Self::TooManySymlinks => SyscallError::TooManySymbolicLinks,
 
             Self::Readonly => SyscallError::ReadOnlyFileSystem,
 
