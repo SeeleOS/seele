@@ -100,36 +100,72 @@ impl Directory for Ext4Directory {
     }
 
     fn create(&self, info: DirectoryContentInfo) -> crate::filesystem::vfs::FSResult<()> {
+        let (file_type, mode) = match info.content_type {
+            DirectoryContentType::File => (
+                FileType::Regular,
+                InodeMode::S_IFREG
+                    | InodeMode::S_IRUSR
+                    | InodeMode::S_IWUSR
+                    | InodeMode::S_IRGRP
+                    | InodeMode::S_IROTH,
+            ),
+            DirectoryContentType::Directory => (
+                FileType::Directory,
+                InodeMode::S_IFDIR
+                    | InodeMode::S_IRUSR
+                    | InodeMode::S_IWUSR
+                    | InodeMode::S_IXUSR
+                    | InodeMode::S_IRGRP
+                    | InodeMode::S_IXGRP
+                    | InodeMode::S_IROTH
+                    | InodeMode::S_IXOTH,
+            ),
+            _ => unimplemented!(),
+        };
+
         let mut new_inode = self.fs.create_inode(InodeCreationOptions {
-            file_type: match info.content_type {
-                DirectoryContentType::File => FileType::Regular,
-                DirectoryContentType::Directory => FileType::Directory,
-                _ => unimplemented!(),
-            },
+            file_type,
             uid: 0,
             gid: 0,
             flags: InodeFlags::empty(),
             time: Duration::from_millis(0),
-            mode: InodeMode::S_IFREG
-                | InodeMode::S_IRUSR
-                | InodeMode::S_IWUSR
-                | InodeMode::S_IRGRP
-                | InodeMode::S_IROTH,
+            mode,
         })?;
 
         // Parent inode of the new inode. In this case, the parent inode is [`self`]
-        let parent_inode = self
+        let mut parent_inode = self
             .fs
             .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
             .map_err(map_ext4_error)?;
-        let parent = Dir::open_inode(&self.fs, parent_inode).map_err(map_ext4_error)?;
+        let parent = Dir::open_inode(&self.fs, parent_inode.clone()).map_err(map_ext4_error)?;
+
+        if matches!(info.content_type, DirectoryContentType::Directory) {
+            // A freshly-created ext4 directory needs an initialized first block
+            // containing "." and ".." before new children can be linked into it.
+            new_inode.set_links_count(1);
+            new_inode.write(&self.fs).map_err(map_ext4_error)?;
+            let child_dir =
+                Dir::init(self.fs.clone(), new_inode, parent_inode.index).map_err(map_ext4_error)?;
+            new_inode = child_dir.inode().clone();
+        }
 
         parent
             .link(
                 DirEntryName::try_from(info.name.as_str()).unwrap(),
                 &mut new_inode,
             )
-            .map_err(Into::into)
+            .map_err(map_ext4_error)?;
+
+        if matches!(info.content_type, DirectoryContentType::Directory) {
+            let new_links = parent_inode
+                .links_count()
+                .checked_add(1)
+                .ok_or(FSError::Other)?;
+            parent_inode.set_links_count(new_links);
+            parent_inode.write(&self.fs).map_err(map_ext4_error)?;
+        }
+
+        Ok(())
     }
 
     fn delete(&self, name: &str) -> crate::filesystem::vfs::FSResult<()> {
