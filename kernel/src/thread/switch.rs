@@ -63,14 +63,18 @@ impl ThreadSnapshot {
 
     #[unsafe(naked)]
     extern "C" fn save_executor_rsp(&mut self) {
-        naked_asm!("mov [rdi + 160], rsp", "ret")
+        naked_asm!(
+            "mov [rdi + {K_RSP_OFF}], rsp",
+            "ret",
+            K_RSP_OFF = const offset_of!(ThreadSnapshot, kernel_rsp),
+        )
     }
 
     #[unsafe(naked)]
     extern "C" fn jump_to_executor(&mut self) {
         naked_asm!(
             // Loads the kernel stack so it wont messup the user stack
-            "mov rsp, [rdi + 160]",
+            "mov rsp, [rdi + {K_RSP_OFF}]",
             "mov r15, [rdi + 0]",
             "mov r14, [rdi + 8]",
             "mov r13, [rdi + 16]",
@@ -86,7 +90,8 @@ impl ThreadSnapshot {
             "mov rcx, [rdi + 104]",
             "mov rax, [rdi + 112]",
             "mov rdi, [rdi + 64]",
-            "ret"
+            "ret",
+            K_RSP_OFF = const offset_of!(ThreadSnapshot, kernel_rsp),
         )
     }
 
