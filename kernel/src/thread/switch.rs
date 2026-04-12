@@ -34,10 +34,12 @@ impl ThreadSnapshot {
                     source.inner = *snapshot;
                 }
                 source.save_msr();
+                source.save_fp();
             }
 
             self.update_gs();
             self.load_msr();
+            self.load_fp();
         });
         match self.snapshot_type {
             ThreadSnapshotType::Thread => self.jump_user(),
@@ -59,6 +61,26 @@ impl ThreadSnapshot {
 
     fn load_msr(&mut self) {
         FsBase::write(VirtAddr::new(self.fs_base));
+    }
+
+    fn save_fp(&mut self) {
+        unsafe {
+            core::arch::asm!(
+                "fxsave64 [{ptr}]",
+                ptr = in(reg) self.fx_state.as_mut_ptr(),
+                options(nostack)
+            );
+        }
+    }
+
+    fn load_fp(&self) {
+        unsafe {
+            core::arch::asm!(
+                "fxrstor64 [{ptr}]",
+                ptr = in(reg) self.fx_state.as_ptr(),
+                options(nostack)
+            );
+        }
     }
 
     #[unsafe(naked)]
