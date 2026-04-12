@@ -17,11 +17,15 @@ use crate::{
 
 impl Process {
     pub fn change_directory(&mut self, directory: AbsolutePath) -> Result<(), FSError> {
-        if directory.is_valid(VirtualFS.lock().root.clone().unwrap()) {
+        if VirtualFS
+            .lock()
+            .resolve_dir(directory.as_normal())
+            .is_ok()
+        {
             self.current_directory = directory;
             Ok(())
         } else {
-            Err(FSError::NotFound)
+            Err(FSError::NotADirectory)
         }
     }
 
