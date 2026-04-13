@@ -21,11 +21,7 @@ impl Process {
     }
 
     pub fn change_directory(&mut self, directory: AbsolutePath) -> Result<(), FSError> {
-        if VirtualFS
-            .lock()
-            .resolve_dir(directory.as_normal())
-            .is_ok()
-        {
+        if VirtualFS.lock().resolve_dir(directory.as_normal()).is_ok() {
             self.current_directory = directory;
             Ok(())
         } else {
