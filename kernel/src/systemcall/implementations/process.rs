@@ -13,8 +13,8 @@ use crate::{
     thread::{THREAD_MANAGER, scheduling::return_to_executor_no_save},
 };
 
-fn exit_code_to_status(exit_code: u64) -> u64 {
-    (exit_code & 0xff) << 8
+fn exit_code_to_status(exit_code: u64) -> i32 {
+    ((exit_code & 0xff) << 8) as i32
 }
 
 define_syscall!(GetProcessParentID, {
@@ -27,34 +27,46 @@ define_syscall!(GetProcessParentID, {
 
 define_syscall!(
     WaitForProcessExit,
-    |target_process: ProcessID, status_ptr: *mut u64| {
+    |target_process: ProcessID, status_ptr: *mut i32| {
         let current_process = get_current_process();
         let check_result = {
             let manager = MANAGER.lock();
-            let process = manager
-                .processes
-                .iter()
-                .find(|(pid, process)| {
-                    if target_process.0 == (-1i64) as u64 {
-                        // Waiting for any process to exit
-                        process
-                            .lock()
-                            .parent
-                            .clone()
-                            .is_some_and(|parent| Arc::ptr_eq(&parent, &current_process))
-                    } else if target_process.0 > 0 {
-                        **pid == target_process
-                    } else {
-                        false
-                    }
-                })
-                .ok_or(SyscallError::NoProcess)?;
+            let mut matched_child = false;
+            let mut exited_child = None;
 
-            let p_lock = process.1.lock();
-            if p_lock.threads.is_empty() {
-                Some((process.1.clone(), p_lock.exit_code.unwrap_or(0)))
-            } else {
+            for (pid, process) in manager.processes.iter() {
+                let p_lock = process.lock();
+                let is_current_child = p_lock
+                    .parent
+                    .clone()
+                    .is_some_and(|parent| Arc::ptr_eq(&parent, &current_process));
+
+                let matches = if target_process.0 == (-1i64) as u64 {
+                    is_current_child
+                } else if target_process.0 > 0 {
+                    *pid == target_process && is_current_child
+                } else {
+                    false
+                };
+
+                if !matches {
+                    continue;
+                }
+
+                matched_child = true;
+
+                if p_lock.threads.is_empty() {
+                    exited_child = Some((process.clone(), p_lock.exit_code.unwrap_or(0)));
+                    break;
+                }
+            }
+
+            if let Some(process) = exited_child {
+                Some(process)
+            } else if matched_child {
                 None
+            } else {
+                return Err(SyscallError::NoProcess);
             }
         };
 
