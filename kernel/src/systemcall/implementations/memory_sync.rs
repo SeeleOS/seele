@@ -21,21 +21,25 @@ use crate::{
 static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ThreadRef>>> = Mutex::new(BTreeMap::new());
 
 define_syscall!(FutexWait, |arg1: u64, arg2: u64| {
-    let mut queue = FUTEX_QUEUE.lock();
-    let cur_value = unsafe { *(arg1 as *mut u64) };
-    if cur_value != arg2 {
-        return Err(SyscallError::TryAgain);
+    {
+        let mut queue = FUTEX_QUEUE.lock();
+        let cur_value = unsafe { *(arg1 as *const u32) } as u64;
+        if cur_value != arg2 {
+            return Err(SyscallError::TryAgain);
+        }
+
+        if !queue.contains_key(&arg1) {
+            queue.insert(arg1, VecDeque::new());
+        }
+
+        queue
+            .get_mut(&arg1)
+            .unwrap()
+            .push_back(get_current_thread());
     }
 
-    if !queue.contains_key(&arg1) {
-        queue.insert(arg1, VecDeque::new());
-    }
-
-    queue
-        .get_mut(&arg1)
-        .unwrap()
-        .push_back(get_current_thread());
-
+    // Do not keep FUTEX_QUEUE locked across blocking, or FutexWake will deadlock
+    // trying to take the same lock from another thread.
     block_current(BlockType::Futex);
 
     Ok(0)
