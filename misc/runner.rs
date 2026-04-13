@@ -18,6 +18,7 @@ fn main() {
     // enable the guest to exit qemu
     cmd.arg("-device")
         .arg("isa-debug-exit,iobase=0xf4,iosize=0x04");
+    cmd.arg("-display").arg("sdl");
 
     if Path::new("/dev/kvm").exists() {
         cmd.arg("-enable-kvm");
