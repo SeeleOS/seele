@@ -109,6 +109,33 @@ impl Time {
     }
 }
 
+pub fn with_profiling<T, F>(f: F, label: &str) -> T
+where
+    F: FnOnce() -> T,
+{
+    let start = Time::since_boot();
+    crate::s_println!(
+        "[profile] start {} at {}.{:03}s",
+        label,
+        start.as_seconds(),
+        start.subsec_milliseconds()
+    );
+
+    let result = f();
+
+    let end = Time::since_boot();
+    let elapsed = end.sub(start);
+    crate::s_println!(
+        "[profile] end {} at {}.{:03}s (+{} ms)",
+        label,
+        end.as_seconds(),
+        end.subsec_milliseconds(),
+        elapsed.as_milliseconds()
+    );
+
+    result
+}
+
 fn detect_tsc_frequency_hz() -> Option<u64> {
     detect_tsc_frequency_from_leaf_0x15().or_else(detect_tsc_frequency_from_leaf_0x16)
 }
