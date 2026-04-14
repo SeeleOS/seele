@@ -1,6 +1,4 @@
-use log::error;
 use x86_64::{
-    VirtAddr,
     registers::control::Cr2,
     structures::{
         idt::{InterruptStackFrame, PageFaultErrorCode},
@@ -10,11 +8,9 @@ use x86_64::{
 
 use crate::{
     interrupts::exception_interrupt::handle_usermode_exception,
-    memory::addrspace::cow::COW_FLAG,
+    memory::addrspace::{cow::COW_FLAG, mem_area::Data},
     misc::others::is_user_mode,
-    process::manager::{get_current_process, terminate_process},
-    s_println,
-    thread::scheduling::return_to_executor_no_save,
+    process::manager::get_current_process,
 };
 use seele_sys::signal::Signal;
 
@@ -42,9 +38,20 @@ pub extern "x86-interrupt" fn pagefault_handler(
         actual_pagefault_handler(stack_frame, error_code);
     }
 
-    match addrspace.get_area(address) {
+    let area = addrspace.get_area(address).cloned();
+
+    match area {
         Some(area) if area.lazy => {
-            addrspace.apply_page(Page::containing_address(address), area.clone());
+            let is_file_backed = matches!(&area.data, Data::File { .. });
+            if is_file_backed {
+                addrspace.apply_page_cluster(
+                    Page::containing_address(address),
+                    area.clone(),
+                    crate::memory::addrspace::AddrSpace::file_lazy_cluster_pages(),
+                );
+            } else {
+                addrspace.apply_page(Page::containing_address(address), area.clone());
+            }
         }
         _ => actual_pagefault_handler(stack_frame, error_code),
     }
