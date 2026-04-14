@@ -7,8 +7,9 @@ use crate::{
         ElfInfo, headers::read_interp, load_base::choose_load_base_offset,
         segment::load_segment_to_area,
     },
-    filesystem::{errors::FSError, object::FileLikeObject},
+    filesystem::object::FileLikeObject,
     memory::addrspace::AddrSpace,
+    misc::time::with_profiling,
 };
 
 fn program_header_table_addr(elf: &ElfFile, load_base: u64) -> u64 {
@@ -43,22 +44,27 @@ pub fn load_elf_lazy(
     let load_base = choose_load_base_offset(addrspace, &elf);
     let mut interpreter = None;
 
-    // Load all headers
-    for header in elf.program_iter() {
-        match header.get_type()? {
-            Type::Load => {
-                if header.mem_size() == 0 {
-                    continue;
-                }
+    with_profiling(
+        || {
+            for header in elf.program_iter() {
+                match header.get_type()? {
+                    Type::Load => {
+                        if header.mem_size() == 0 {
+                            continue;
+                        }
 
-                addrspace.register_area(load_segment_to_area(header, load_base, file.clone()));
+                        addrspace.register_area(load_segment_to_area(header, load_base, file.clone()));
+                    }
+                    Type::Interp => {
+                        interpreter = Some(read_interp(&file, header).unwrap());
+                    }
+                    _ => {}
+                }
             }
-            Type::Interp => {
-                interpreter = Some(read_interp(&file, header).unwrap());
-            }
-            _ => {}
-        }
-    }
+            Ok::<(), ElfLoaderErr>(())
+        },
+        "load_elf_lazy map segments",
+    )?;
 
     Ok(ElfInfo {
         entry_point: load_base + elf.header.pt2.entry_point(),
