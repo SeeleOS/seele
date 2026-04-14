@@ -26,6 +26,7 @@
             nativeBuildInputs = [ rustup ];
             buildInputs = [
               cargo
+              cargo-c
               autoconf
               automake
               bison
@@ -34,7 +35,16 @@
               findutils
               flex
               gawk
+              desktop-file-utils
               gettext
+              glib
+              gdk-pixbuf
+              gtk4
+              libgee
+              libadwaita
+              librsvg
+              libgnome-games-support
+              shared-mime-info
               gnugrep
               gnutar
               gperf
@@ -58,12 +68,17 @@
               rustPackages.clippy
               rustc
               rustfmt
+              sassc
               stdenv.cc.cc.lib
+              appstream
               texinfo
+              itstool
               util-linux
+              vala
               wget
               which
               xz
+              yelp-tools
               zlib
               zstd
               codex
