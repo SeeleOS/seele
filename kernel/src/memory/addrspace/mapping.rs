@@ -30,7 +30,12 @@ impl AddrSpace {
             area.lazy = false;
         }
 
-        self.memory_areas.push(area.clone());
+        let insert_index = self
+            .memory_areas
+            .binary_search_by_key(&area.start, |existing| existing.start)
+            .unwrap_or_else(|index| index);
+        self.memory_areas.insert(insert_index, area.clone());
+        self.last_area_index = None;
 
         if area.lazy {
             None
@@ -109,5 +114,6 @@ impl AddrSpace {
         }
 
         self.memory_areas = new_areas;
+        self.last_area_index = None;
     }
 }

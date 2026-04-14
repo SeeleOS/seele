@@ -80,6 +80,7 @@ impl AddrSpace {
             page_table: new_page_table,
             memory_areas: self.memory_areas.clone(),
             user_mem: self.user_mem,
+            last_area_index: None,
         }
     }
 }

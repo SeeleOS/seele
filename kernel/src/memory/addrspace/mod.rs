@@ -44,6 +44,7 @@ pub struct AddrSpace {
     pub page_table: PageTableWrapped,
 
     pub user_mem: VirtAddr,
+    pub last_area_index: Option<usize>,
 }
 
 impl Default for AddrSpace {
@@ -52,6 +53,7 @@ impl Default for AddrSpace {
             memory_areas: Vec::default(),
             page_table: PageTableWrapped::default(),
             user_mem: VirtAddr::new(USER_MEM_START),
+            last_area_index: None,
         }
     }
 }
@@ -86,6 +88,7 @@ impl AddrSpace {
         self.user_mem = VirtAddr::new(USER_MEM_START);
         self.page_table = PageTableWrapped::default();
         self.memory_areas = Vec::new();
+        self.last_area_index = None;
     }
 
     pub fn update_permissions(&mut self, start: VirtAddr, end: VirtAddr, permissions: Permissions) {
@@ -138,6 +141,7 @@ impl AddrSpace {
         }
 
         self.memory_areas = new_areas;
+        self.last_area_index = None;
 
         let last_addr = end - 1u64;
         for page in Page::<Size4KiB>::range_inclusive(
