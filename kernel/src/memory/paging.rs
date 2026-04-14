@@ -36,7 +36,8 @@ pub fn get_l4_table(phys_mem_offset: VirtAddr) -> &'static mut PageTable {
 pub struct BootinfoFrameAllocator {
     memory_map: &'static MemoryRegions,
     free_frames: Vec<PhysFrame<Size4KiB>>,
-    index: usize,
+    next_region_index: usize,
+    next_frame_addr: u64,
 }
 
 impl BootinfoFrameAllocator {
@@ -44,21 +45,9 @@ impl BootinfoFrameAllocator {
         Self {
             memory_map,
             free_frames: Vec::new(),
-            index: 0,
+            next_region_index: 0,
+            next_frame_addr: 0,
         }
-    }
-
-    fn get_usable_frames(&self) -> impl Iterator<Item = PhysFrame> {
-        let regions = self.memory_map.iter();
-        let usable_regions = regions.filter(|r| r.kind == MemoryRegionKind::Usable);
-
-        // Converts a list of usable regions into a list of addresses of usable regions
-        let usable_regions_addr = usable_regions.map(|r| r.start..r.end);
-        // aglien them. note to future me: i also dont know wtf is
-        // happening here, just ask AI or something lolz
-        let frame_addresses = usable_regions_addr.flat_map(|r| r.step_by(4096));
-        // convert them into physical frames
-        frame_addresses.map(|addr| PhysFrame::containing_address(PhysAddr::new(addr)))
     }
 
     fn next_usable_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
@@ -66,10 +55,48 @@ impl BootinfoFrameAllocator {
             return Some(frame);
         }
 
-        let frame = self.get_usable_frames().nth(self.index);
-        self.index += 1;
-        frame
+        while let Some(region) = self.memory_map.get(self.next_region_index) {
+            if region.kind != MemoryRegionKind::Usable {
+                self.next_region_index += 1;
+                self.next_frame_addr = 0;
+                continue;
+            }
+
+            let start = align_up_4k(region.start);
+            let end = align_down_4k(region.end);
+
+            if start >= end {
+                self.next_region_index += 1;
+                self.next_frame_addr = 0;
+                continue;
+            }
+
+            if self.next_frame_addr == 0 || self.next_frame_addr < start {
+                self.next_frame_addr = start;
+            }
+
+            if self.next_frame_addr >= end {
+                self.next_region_index += 1;
+                self.next_frame_addr = 0;
+                continue;
+            }
+
+            let addr = self.next_frame_addr;
+            self.next_frame_addr = self.next_frame_addr.saturating_add(4096);
+
+            return Some(PhysFrame::containing_address(PhysAddr::new(addr)));
+        }
+
+        None
     }
+}
+
+const fn align_up_4k(addr: u64) -> u64 {
+    (addr + 4095) & !4095
+}
+
+const fn align_down_4k(addr: u64) -> u64 {
+    addr & !4095
 }
 
 unsafe impl FrameAllocator<Size4KiB> for BootinfoFrameAllocator {
