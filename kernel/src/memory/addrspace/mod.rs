@@ -156,7 +156,34 @@ impl AddrSpace {
         self.page_table.inner.translate_addr(addr)
     }
 
-    pub fn get_area(&self, addr: VirtAddr) -> Option<&MemoryArea> {
-        self.memory_areas.iter().find(|p| p.contains(addr))
+    pub fn get_area(&mut self, addr: VirtAddr) -> Option<&MemoryArea> {
+        if let Some(index) = self.last_area_index
+            && self
+                .memory_areas
+                .get(index)
+                .is_some_and(|area| area.contains(addr))
+        {
+            return self.memory_areas.get(index);
+        }
+
+        let mut left = 0usize;
+        let mut right = self.memory_areas.len();
+
+        while left < right {
+            let mid = left + (right - left) / 2;
+            let area = &self.memory_areas[mid];
+
+            if addr < area.start {
+                right = mid;
+            } else if addr >= area.end {
+                left = mid + 1;
+            } else {
+                self.last_area_index = Some(mid);
+                return self.memory_areas.get(mid);
+            }
+        }
+
+        self.last_area_index = None;
+        None
     }
 }
