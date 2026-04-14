@@ -11,6 +11,7 @@ pub const NANOSECONDS_PER_MICROSECOND: u64 = 1_000;
 pub const NANOSECONDS_PER_MILLISECOND: u64 = 1_000_000;
 pub const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
 const DEFAULT_TSC_FREQ_HZ: u64 = 1_000_000_000;
+const PROFILING: bool = true;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Time(pub u64);
@@ -113,6 +114,10 @@ pub fn with_profiling<T, F>(f: F, label: &str) -> T
 where
     F: FnOnce() -> T,
 {
+    if !PROFILING {
+        return f();
+    }
+
     let start = Time::since_boot();
     crate::s_println!(
         "[profile] start {} at {}.{:03}s",
