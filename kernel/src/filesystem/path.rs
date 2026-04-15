@@ -1,8 +1,9 @@
-use alloc::{string::String, vec::Vec};
+use alloc::{string::{String, ToString}, vec::Vec};
 
 use crate::{
     filesystem::{
         errors::FSError,
+        impls::ext4::directory::Ext4Directory,
         vfs::{FSResult, VirtualFS, WrappedDirectory},
         vfs_traits::FileLike,
     },
@@ -30,6 +31,45 @@ pub struct Path {
 }
 
 impl Path {
+    fn parent_directory(current: FileLike) -> FSResult<FileLike> {
+        match current {
+            FileLike::Directory(dir) => {
+                let parent_path = {
+                    let guard = dir.lock();
+                    let ext4_dir = guard
+                        .as_any()
+                        .downcast_ref::<Ext4Directory>()
+                        .ok_or(FSError::Other)?;
+                    let current_path = ext4_dir.path();
+
+                    if current_path == "/" {
+                        "/".to_string()
+                    } else {
+                        current_path
+                            .rsplit_once('/')
+                            .map(|(parent, _)| {
+                                if parent.is_empty() {
+                                    "/".to_string()
+                                } else {
+                                    parent.to_string()
+                                }
+                            })
+                            .unwrap_or_else(|| "/".to_string())
+                    }
+                };
+
+                Ok(FileLike::Directory(
+                    VirtualFS.lock().resolve_dir(Path::new(&parent_path))?,
+                ))
+            }
+            FileLike::Symlink(symlink) => {
+                let target = symlink.lock().target()?;
+                Self::parent_directory(FileLike::Directory(VirtualFS.lock().resolve_dir(target)?))
+            }
+            FileLike::File(_) => Err(FSError::NotADirectory),
+        }
+    }
+
     pub fn new(path: &str) -> Self {
         if path.is_empty() {
             Self::new("/")
@@ -111,7 +151,7 @@ impl Path {
                 }
                 PathPart::CurrentDir => {}
                 PathPart::ParentDir => {
-                    unimplemented!()
+                    current = Self::parent_directory(current)?;
                 }
             }
         }
