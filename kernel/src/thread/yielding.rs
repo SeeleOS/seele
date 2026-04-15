@@ -229,15 +229,44 @@ pub fn block(thread_ref: ThreadRef, block_type: BlockType) {
     return_to_executor_from_current();
 }
 
-pub fn block_current(block_type: BlockType) {
-    let current = THREAD_MANAGER
+fn current_thread_ref() -> ThreadRef {
+    THREAD_MANAGER
         .get()
         .unwrap()
         .lock()
         .current
         .clone()
-        .unwrap();
-    block(current, block_type);
+        .unwrap()
+}
+
+pub fn prepare_block_current(block_type: BlockType) -> ThreadRef {
+    let current = current_thread_ref();
+
+    {
+        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+        thread_manager.block(current.clone(), block_type);
+    }
+
+    current
+}
+
+pub fn cancel_block(thread_ref: &ThreadRef) {
+    let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+    thread_manager.remove_from_blocked_queues(thread_ref);
+
+    let mut thread = thread_ref.lock();
+    if matches!(thread.state, State::Blocked(_)) {
+        thread.state = State::Running;
+    }
+}
+
+pub fn finish_block_current() {
+    return_to_executor_from_current();
+}
+
+pub fn block_current(block_type: BlockType) {
+    prepare_block_current(block_type);
+    finish_block_current();
 }
 
 // Avoid sleeping forever in interruptible waits by re-checking for pending
@@ -247,7 +276,8 @@ pub fn block_current_with_sig_check(block_type: BlockType) -> ObjectResult<()> {
     if !get_current_process().lock().pending_signals.is_empty() {
         return Err(ObjectError::Interrupted);
     }
-    block_current(block_type);
+    prepare_block_current(block_type);
+    finish_block_current();
     if !get_current_process().lock().pending_signals.is_empty() {
         return Err(ObjectError::Interrupted);
     }

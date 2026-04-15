@@ -9,6 +9,7 @@ extern crate alloc;
 pub const NAME: &str = "Seele";
 
 pub mod acpi;
+pub mod drivers;
 pub mod elfloader;
 pub mod filesystem;
 pub mod interrupts;
@@ -34,7 +35,6 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     config
 };
 
-use crate::filesystem::block_device::initrd::{self};
 use crate::filesystem::vfs::VirtualFS;
 use crate::misc::others::enable_sse;
 use crate::misc::{cpu_core_context, framebuffer, gdt, logging, mouse, time, tss};
@@ -73,11 +73,8 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     log::info!("init: sse enabled");
     tss::init();
     log::info!("init: tss ready");
-    initrd::init(
-        bootinfo.ramdisk_addr.into_option().expect("No ramdisk."),
-        bootinfo.ramdisk_len,
-    );
-    log::info!("init: initrd ready");
+    drivers::init();
+    log::info!("init: drivers ready");
 
     VirtualFS.lock().init().unwrap();
 

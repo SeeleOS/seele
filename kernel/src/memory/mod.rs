@@ -11,6 +11,7 @@ use crate::memory::{
 pub mod addrspace;
 pub mod fixed_block_size;
 pub mod heap;
+pub mod mmio;
 pub mod page_table_wrapper;
 pub mod paging;
 pub mod utils;

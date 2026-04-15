@@ -4,7 +4,9 @@ use spin::Mutex;
 
 use crate::{
     object::{error::ObjectError, misc::ObjectResult},
-    thread::yielding::{BlockType, WakeType, block_current_with_sig_check},
+    thread::yielding::{
+        BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
+    },
 };
 
 pub fn copy_from_queue(queue: &mut VecDeque<u8>, buffer: &mut [u8]) -> usize {
@@ -44,9 +46,32 @@ where
             return Err(ObjectError::TryAgain);
         }
 
-        block_current_with_sig_check(BlockType::WakeRequired {
+        if !crate::process::manager::get_current_process()
+            .lock()
+            .pending_signals
+            .is_empty()
+        {
+            return Err(ObjectError::Interrupted);
+        }
+
+        let current = prepare_block_current(BlockType::WakeRequired {
             wake_type: wake_type.clone(),
             deadline: None,
-        })?;
+        });
+
+        if let Some(read_chars) = try_read(buffer) {
+            cancel_block(&current);
+            return Ok(read_chars);
+        }
+
+        finish_block_current();
+
+        if !crate::process::manager::get_current_process()
+            .lock()
+            .pending_signals
+            .is_empty()
+        {
+            return Err(ObjectError::Interrupted);
+        }
     }
 }

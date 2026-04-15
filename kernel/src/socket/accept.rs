@@ -3,7 +3,9 @@ use alloc::sync::Arc;
 use super::{SocketError, SocketResult, UnixSocketObject, UnixSocketState};
 use crate::{
     process::manager::get_current_process,
-    thread::yielding::{BlockType, WakeType, block_current},
+    thread::yielding::{
+        BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
+    },
 };
 
 impl UnixSocketObject {
@@ -22,10 +24,16 @@ impl UnixSocketObject {
                 return Err(SocketError::TryAgain);
             }
 
-            block_current(BlockType::WakeRequired {
+            let current = prepare_block_current(BlockType::WakeRequired {
                 wake_type: WakeType::IO,
                 deadline: None,
             });
+
+            if !listener.pending.lock().is_empty() {
+                cancel_block(&current);
+            } else {
+                finish_block_current();
+            }
         }
     }
 }

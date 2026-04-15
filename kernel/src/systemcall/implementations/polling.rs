@@ -2,11 +2,18 @@ use crate::misc::time::Time;
 use crate::object::misc::ObjectRef;
 use crate::polling::event::PollableEvent;
 use crate::systemcall::utils::SyscallImpl;
-use crate::thread::yielding::{BlockType, WakeType, block_current};
+use crate::thread::yielding::{
+    BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
+};
 use alloc::sync::Arc;
 
 use crate::systemcall::utils::SyscallError;
-use crate::{define_syscall, polling::poller::PollerObject, process::manager::get_current_process};
+use crate::{
+    define_syscall, polling::poller::PollerObject, process::manager::get_current_process,
+    s_println,
+};
+
+const DEADLOCK_LOG: bool = false;
 
 #[repr(C)]
 pub struct PollResult {
@@ -38,6 +45,17 @@ define_syscall!(PollerAdd, |poller: ObjectRef,
                             target_object: ObjectRef,
                             event: PollableEvent,
                             data: u64| {
+    if target_object.clone().as_pollable().is_err() {
+        if DEADLOCK_LOG {
+            s_println!(
+                "poller_add reject: event={:?} data={:#x} target not pollable",
+                event,
+                data
+            );
+        }
+        return Err(SyscallError::PermissionDenied);
+    }
+
     poller.as_poller()?.register_obj(target_object, event, data);
 
     Ok(0)
@@ -78,13 +96,26 @@ define_syscall!(PollerWait, |poller: ObjectRef,
         };
 
         let poller_ref: Arc<dyn crate::object::Object> = poller.clone();
-        block_current(BlockType::WakeRequired {
+        let current = prepare_block_current(BlockType::WakeRequired {
             wake_type: WakeType::Poller(poller_ref),
             deadline,
         });
+
+        if !poller.has_woken_events() {
+            poller.push_already_ready_events();
+        }
+
+        if poller.has_woken_events() {
+            cancel_block(&current);
+        } else {
+            finish_block_current();
+        }
     }
 
     let woken_events = poller.take_woken_events(maxevents);
+    if DEADLOCK_LOG && !woken_events.is_empty() {
+        s_println!("poller_wait: woke {} event(s)", woken_events.len());
+    }
 
     if !events_ptr.is_null() {
         for (index, woken) in woken_events.iter().enumerate() {

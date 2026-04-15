@@ -24,7 +24,9 @@ use crate::{
     polling::{event::PollableEvent, object::Pollable},
     thread::{
         THREAD_MANAGER,
-        yielding::{BlockType, WakeType, block_current},
+        yielding::{
+            BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
+        },
     },
 };
 
@@ -125,10 +127,16 @@ impl Readable for PS2MouseObject {
                 }
 
                 drop(queue);
-                block_current(BlockType::WakeRequired {
+                let current = prepare_block_current(BlockType::WakeRequired {
                     wake_type: WakeType::Mouse,
                     deadline: None,
                 });
+
+                if without_interrupts(|| !MOUSE_PACKETS.lock().is_empty()) {
+                    cancel_block(&current);
+                } else {
+                    finish_block_current();
+                }
             } else {
                 let mut read_chars = 0;
                 while read_chars < buffer.len() {

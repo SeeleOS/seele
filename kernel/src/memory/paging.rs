@@ -6,7 +6,8 @@ use x86_64::{
     PhysAddr, VirtAddr,
     registers::control::Cr3,
     structures::paging::{
-        FrameAllocator, FrameDeallocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB,
+        FrameAllocator, FrameDeallocator, OffsetPageTable, PageSize, PageTable, PhysFrame,
+        Size4KiB,
     },
 };
 
@@ -88,6 +89,41 @@ impl BootinfoFrameAllocator {
         }
 
         None
+    }
+
+    pub fn allocate_contiguous(&mut self, pages: usize) -> Option<PhysFrame<Size4KiB>> {
+        if pages == 0 {
+            return None;
+        }
+
+        let start = self.allocate_frame()?;
+        let mut expected = start.start_address().as_u64() + Size4KiB::SIZE;
+
+        for _ in 1..pages {
+            let frame = match self.allocate_frame() {
+                Some(frame) => frame,
+                None => return None,
+            };
+
+            if frame.start_address().as_u64() != expected {
+                return None;
+            }
+
+            expected += Size4KiB::SIZE;
+        }
+
+        Some(start)
+    }
+
+    pub unsafe fn deallocate_contiguous(&mut self, start: PhysFrame<Size4KiB>, pages: usize) {
+        for page in 0..pages {
+            let frame = PhysFrame::containing_address(PhysAddr::new(
+                start.start_address().as_u64() + (page as u64 * Size4KiB::SIZE),
+            ));
+            unsafe {
+                self.deallocate_frame(frame);
+            }
+        }
     }
 }
 

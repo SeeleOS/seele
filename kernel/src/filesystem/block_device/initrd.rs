@@ -7,6 +7,9 @@ use crate::filesystem::block_device::{BlockDevice, BlockDeviceError};
 #[derive(Debug)]
 pub struct RamDisk(Mutex<&'static mut [u8]>);
 
+#[derive(Debug, Default)]
+pub struct RamDiskHandle;
+
 pub static RAMDISK: OnceCell<RamDisk> = OnceCell::uninit();
 
 pub fn init(addr: u64, len: u64) {
@@ -76,5 +79,31 @@ impl BlockDevice for RamDisk {
 
     fn total_bytes(&self) -> usize {
         self.0.lock().len()
+    }
+}
+
+impl BlockDevice for RamDiskHandle {
+    fn block_size(&self) -> usize {
+        RAMDISK.get().unwrap().block_size()
+    }
+
+    fn read_single_block(
+        &self,
+        id: usize,
+        buffer: &mut [u8],
+    ) -> crate::filesystem::block_device::BlockDeviceResult {
+        RAMDISK.get().unwrap().read_single_block(id, buffer)
+    }
+
+    fn write_single_block(
+        &self,
+        id: usize,
+        buffer: &[u8],
+    ) -> crate::filesystem::block_device::BlockDeviceResult {
+        RAMDISK.get().unwrap().write_single_block(id, buffer)
+    }
+
+    fn total_blocks(&self) -> usize {
+        RAMDISK.get().unwrap().total_blocks()
     }
 }

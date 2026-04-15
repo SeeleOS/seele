@@ -9,6 +9,7 @@ use std::{
 fn main() {
     // read env variables that were set in build script
     let uefi_path = env!("UEFI_PATH");
+    let root_disk = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("disk.img");
 
     let mut cmd = Command::new("qemu-system-x86_64");
     // give the guest 8 GiB of RAM
@@ -35,7 +36,16 @@ fn main() {
 
     cmd.arg("-drive")
         .arg(format!("if=none,format=raw,file={uefi_path},id=bootdisk"));
-    cmd.arg("-device").arg("virtio-blk-pci,drive=bootdisk");
+    cmd.arg("-device")
+        .arg("virtio-blk-pci,drive=bootdisk,disable-legacy=on,disable-modern=off");
+    if root_disk.exists() {
+        cmd.arg("-drive").arg(format!(
+            "if=none,format=raw,file={},id=rootdisk",
+            root_disk.display()
+        ));
+        cmd.arg("-device")
+            .arg("virtio-blk-pci,drive=rootdisk,disable-legacy=on,disable-modern=off");
+    }
     cmd.arg("-drive").arg(format!(
         "if=pflash,format=raw,unit=0,file={},readonly=on",
         code.display()

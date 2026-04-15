@@ -6,21 +6,33 @@ use x86_64::{VirtAddr, registers::model_specific::FsBase};
 use crate::{
     define_syscall,
     memory::addrspace::mem_area::Data,
-    process::{
-        ProcessRef,
-        manager::{MANAGER, get_current_process},
-    },
-    s_print,
+    process::{manager::get_current_process},
+    s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
         THREAD_MANAGER, ThreadRef, get_current_thread,
-        yielding::{BlockType, block_current},
+        yielding::{BlockType, finish_block_current, prepare_block_current},
     },
 };
 
-static FUTEX_QUEUE: Mutex<BTreeMap<u64, VecDeque<ThreadRef>>> = Mutex::new(BTreeMap::new());
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct FutexKey {
+    pid: u64,
+    addr: u64,
+}
+
+static FUTEX_QUEUE: Mutex<BTreeMap<FutexKey, VecDeque<ThreadRef>>> = Mutex::new(BTreeMap::new());
+const DEADLOCK_LOG: bool = false;
+
+fn current_futex_key(addr: u64) -> FutexKey {
+    let pid = get_current_process().lock().pid.0;
+    FutexKey { pid, addr }
+}
 
 define_syscall!(FutexWait, |arg1: u64, arg2: u64| {
+    let key = current_futex_key(arg1);
+    let current = get_current_thread();
+
     {
         let mut queue = FUTEX_QUEUE.lock();
         let cur_value = unsafe { *(arg1 as *const u32) } as u64;
@@ -28,28 +40,49 @@ define_syscall!(FutexWait, |arg1: u64, arg2: u64| {
             return Err(SyscallError::TryAgain);
         }
 
-        if !queue.contains_key(&arg1) {
-            queue.insert(arg1, VecDeque::new());
+        if !queue.contains_key(&key) {
+            queue.insert(key, VecDeque::new());
         }
 
         queue
-            .get_mut(&arg1)
+            .get_mut(&key)
             .unwrap()
-            .push_back(get_current_thread());
+            .push_back(current);
+
+        if DEADLOCK_LOG {
+            let len = queue.get(&key).map(|bucket| bucket.len()).unwrap_or(0);
+            s_println!(
+                "futex_wait block: pid={} addr={:#x} value={} queued={}",
+                key.pid,
+                key.addr,
+                arg2,
+                len
+            );
+        }
+
+        // Mark the thread blocked before releasing the futex bucket so a
+        // concurrent wake cannot slip between queue insertion and scheduling.
+        prepare_block_current(BlockType::Futex);
     }
 
-    // Do not keep FUTEX_QUEUE locked across blocking, or FutexWake will deadlock
-    // trying to take the same lock from another thread.
-    block_current(BlockType::Futex);
+    // Do not keep FUTEX_QUEUE locked across scheduling, or FutexWake will
+    // deadlock trying to take the same lock from another thread.
+    finish_block_current();
+
+    if DEADLOCK_LOG {
+        s_println!("futex_wait resume: pid={} addr={:#x}", key.pid, key.addr);
+    }
 
     Ok(0)
 });
 
 define_syscall!(FutexWake, |arg1: u64, arg2: u64| {
+    let key = current_futex_key(arg1);
     let mut queue = FUTEX_QUEUE.lock();
     let mut woken = 0;
+    let mut remove_key = false;
 
-    if let Some(queue) = queue.get_mut(&arg1) {
+    if let Some(queue) = queue.get_mut(&key) {
         for _ in 0..arg2 {
             if let Some(thread) = queue.pop_front() {
                 THREAD_MANAGER.get().unwrap().lock().wake(thread);
@@ -58,6 +91,22 @@ define_syscall!(FutexWake, |arg1: u64, arg2: u64| {
                 break;
             }
         }
+
+        remove_key = queue.is_empty();
+    }
+
+    if remove_key {
+        queue.remove(&key);
+    }
+
+    if DEADLOCK_LOG && woken > 0 {
+        s_println!(
+            "futex_wake: pid={} addr={:#x} requested={} woke={}",
+            key.pid,
+            key.addr,
+            arg2,
+            woken
+        );
     }
 
     Ok(woken)

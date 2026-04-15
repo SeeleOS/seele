@@ -3,6 +3,7 @@ use fatfs::IoError;
 use crate::misc::error::AsSyscallError;
 use crate::systemcall::utils::SyscallError;
 
+pub mod cache;
 pub mod initrd;
 
 #[derive(Clone, Copy, Debug)]
@@ -45,6 +46,9 @@ pub trait BlockDevice: Send + Sync {
     fn block_size(&self) -> usize;
     fn read_single_block(&self, id: usize, buffer: &mut [u8]) -> BlockDeviceResult;
     fn write_single_block(&self, id: usize, buffer: &[u8]) -> BlockDeviceResult;
+    fn flush(&self) -> Result<(), BlockDeviceError> {
+        Ok(())
+    }
 
     fn read_blocks(&self, start: usize, buffer: &mut [u8]) -> BlockDeviceResult {
         // 向上取整：(len + size - 1) / size
@@ -106,12 +110,23 @@ pub trait BlockDevice: Send + Sync {
         // NOTE: we need to read the original data of the block because we can only
         // write by block, and we dont wanna write nonsense into the block, so we
         // have to read it first.
-        let write_len = tmp_buffer.len() / block_size;
+        self.write_blocks(starting_block, &tmp_buffer)?;
+
+        Ok(buffer.len())
+    }
+
+    fn write_blocks(&self, start: usize, buffer: &[u8]) -> BlockDeviceResult {
+        let block_size = self.block_size();
+        if !buffer.len().is_multiple_of(block_size) {
+            return Err(BlockDeviceError::BufferTooSmall);
+        }
+
+        let write_len = buffer.len() / block_size;
         for i in 0..write_len {
-            let block = starting_block + i;
+            let block = start + i;
             let byte_start = i * block_size;
             let byte_end = byte_start + block_size;
-            self.write_single_block(block, &tmp_buffer[byte_start..byte_end])?;
+            self.write_single_block(block, &buffer[byte_start..byte_end])?;
         }
 
         Ok(buffer.len())

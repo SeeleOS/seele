@@ -20,5 +20,5 @@ pub use error::{SocketError, SocketResult};
 pub use object::UnixSocketObject;
 pub(crate) use registry::UNIX_SOCKET_REGISTRY;
 pub use state::{UnixListenerInner, UnixSocketState};
-pub use stream::{SocketPeerCred, UnixStreamInner};
+pub use stream::{STREAM_RECV_CAPACITY, SocketPeerCred, UnixStreamInner};
 pub(crate) use wake::{wake_io, wake_pollers};

@@ -4,6 +4,21 @@ use crate::{
 };
 
 impl PollerObject {
+    fn queue_ready_event(
+        woken_events: &mut alloc::vec::Vec<PollerReadyEvent>,
+        object: &ObjectRef,
+        event: PollableEvent,
+        data: u64,
+    ) {
+        let already_queued = woken_events.iter().any(|ready| {
+            ready.event == event && ready.data == data && alloc::sync::Arc::ptr_eq(&ready.object, object)
+        });
+
+        if !already_queued {
+            woken_events.push(PollerReadyEvent::new(object.clone(), event, data));
+        }
+    }
+
     // Checks for all matching entries that should be woken, and pushes them to woken_events.
     pub fn push_woken_event(&self, object: ObjectRef, event: PollableEvent) -> bool {
         let matching_entries: alloc::vec::Vec<u64> = self
@@ -21,7 +36,7 @@ impl PollerObject {
         if interested {
             let mut woken_events = self.woken_events.lock();
             for data in matching_entries {
-                woken_events.push(PollerReadyEvent::new(object.clone(), event, data));
+                Self::queue_ready_event(&mut woken_events, &object, event, data);
             }
         }
 
@@ -51,7 +66,7 @@ impl PollerObject {
         if has_ready {
             let mut woken_events = self.woken_events.lock();
             for (object, event, data) in ready_entries {
-                woken_events.push(PollerReadyEvent::new(object, event, data));
+                Self::queue_ready_event(&mut woken_events, &object, event, data);
             }
         }
 

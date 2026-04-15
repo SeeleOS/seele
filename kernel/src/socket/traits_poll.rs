@@ -1,6 +1,6 @@
 use alloc::sync::Weak;
 
-use super::{UnixSocketObject, UnixSocketState};
+use super::{STREAM_RECV_CAPACITY, UnixSocketObject, UnixSocketState};
 use crate::polling::{event::PollableEvent, object::Pollable};
 
 impl Pollable for UnixSocketObject {
@@ -20,12 +20,21 @@ impl Pollable for UnixSocketObject {
                             .and_then(Weak::upgrade)
                             .is_none()
                 }
-                PollableEvent::CanBeWritten => stream
-                    .peer
-                    .lock()
-                    .as_ref()
-                    .and_then(Weak::upgrade)
-                    .is_some(),
+                PollableEvent::CanBeWritten => {
+                    if *stream.write_shutdown.lock() {
+                        return false;
+                    }
+
+                    let Some(peer) = stream.peer.lock().as_ref().and_then(Weak::upgrade) else {
+                        return false;
+                    };
+
+                    if *peer.read_shutdown.lock() {
+                        return false;
+                    }
+
+                    peer.recv_buf.lock().len() < STREAM_RECV_CAPACITY
+                }
                 PollableEvent::Closed => {
                     *stream.write_closed.lock()
                         || stream

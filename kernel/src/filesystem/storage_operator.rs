@@ -1,3 +1,4 @@
+pub mod block;
 pub mod initrd;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SeekFrom {

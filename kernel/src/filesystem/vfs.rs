@@ -2,13 +2,16 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use spin::Mutex;
 
 use crate::filesystem::{
+    block_device::cache::CachedBlockDevice,
     errors::FSError,
-    impls::ext4::{EXT4, operator::Ext4RamDiskOperator},
-    storage_operator::initrd::RamDiskOperator,
+    impls::ext4::{EXT4, operator::Ext4BlockOperator},
+    block_device::BlockDevice,
     vfs_traits::{Directory, File, FileSystem, Symlink},
 };
 use ext4plus::Ext4 as Ext4Inner;
 use lazy_static::lazy_static;
+
+use crate::drivers::virtio::block::root_device as virtio_root_device;
 
 lazy_static! {
     pub static ref VirtualFS: Mutex<VFS> = Mutex::new(VFS::new());
@@ -41,13 +44,19 @@ impl VFS {
 
     pub fn init(&mut self) -> FSResult<()> {
         log::debug!("vfs: init start");
-        // 使用 ext4plus + RamDiskOperator 作为根文件系统。
-        let reader = Ext4RamDiskOperator(Mutex::new(RamDiskOperator::default()));
-        let writer = Ext4RamDiskOperator(Mutex::new(RamDiskOperator::default()));
+        let block_device: Arc<dyn BlockDevice> = Arc::new(CachedBlockDevice::new(
+            virtio_root_device().ok_or(FSError::NotFound)?,
+        ));
+        log::info!("vfs: loading ext4 from root block device");
+        let reader = Ext4BlockOperator::new(block_device.clone());
+        let writer = Ext4BlockOperator::new(block_device);
         let ext4 = Ext4Inner::load_with_writer(Box::new(reader), Some(Box::new(writer))).unwrap();
+        log::info!("vfs: ext4 loaded");
         self.register_fs(EXT4(ext4));
 
+        log::info!("vfs: building root dir");
         self.root = Some(self.filesystems[0].lock().root_dir().unwrap());
+        log::info!("vfs: root dir ready");
 
         log::debug!("vfs: init done");
         Ok(())

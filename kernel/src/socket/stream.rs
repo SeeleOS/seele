@@ -8,6 +8,8 @@ use spin::Mutex;
 use super::{UnixSocketObject, wake_io, wake_pollers};
 use crate::polling::event::PollableEvent;
 
+pub const STREAM_RECV_CAPACITY: usize = 64 * 1024;
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SocketPeerCred {
     pub pid: u64,
@@ -59,6 +61,7 @@ impl UnixStreamInner {
             if let Some(owner) = peer.owner.lock().as_ref().and_then(Weak::upgrade) {
                 wake_pollers(&owner, PollableEvent::CanBeRead);
                 wake_pollers(&owner, PollableEvent::Closed);
+                wake_pollers(&owner, PollableEvent::CanBeWritten);
             }
         }
         wake_io();
