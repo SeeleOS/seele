@@ -11,7 +11,7 @@ pub const NANOSECONDS_PER_MICROSECOND: u64 = 1_000;
 pub const NANOSECONDS_PER_MILLISECOND: u64 = 1_000_000;
 pub const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
 const DEFAULT_TSC_FREQ_HZ: u64 = 1_000_000_000;
-const PROFILING: bool = true;
+const PROFILING: bool = false;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Time(pub u64);
