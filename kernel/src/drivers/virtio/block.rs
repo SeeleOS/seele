@@ -27,7 +27,7 @@ pub fn init() {
 
     for record in enumerate_devices() {
         if record.info.device_id < 0x1040 {
-            log::warn!(
+            log::debug!(
                 "virtio-blk: skipping legacy/transitional PCI function {:02x}:{:02x}.{} device={:#06x}",
                 record.function.bus,
                 record.function.device,
@@ -45,7 +45,7 @@ pub fn init() {
             continue;
         }
 
-        log::info!(
+        log::debug!(
             "virtio-blk: found PCI function {:02x}:{:02x}.{} device={:#06x}",
             record.function.bus,
             record.function.device,
@@ -57,7 +57,7 @@ pub fn init() {
             continue;
         };
 
-        log::info!(
+        log::debug!(
             "virtio-blk: capacity={} sectors readonly={}",
             device.total_blocks(),
             device.readonly,
@@ -81,7 +81,7 @@ pub fn root_device() -> Option<Arc<dyn BlockDevice>> {
 }
 
 fn is_ext4_candidate(device: &dyn BlockDevice) -> bool {
-    log::info!("virtio-blk: probing ext4 superblock");
+    log::debug!("virtio-blk: probing ext4 superblock");
     let mut magic = [0u8; 2];
     if device.read_by_bytes(1024 + 56, &mut magic).is_err() {
         log::warn!("virtio-blk: failed to read ext4 superblock");
@@ -89,7 +89,7 @@ fn is_ext4_candidate(device: &dyn BlockDevice) -> bool {
     }
 
     let is_ext4 = u16::from_le_bytes(magic) == 0xef53;
-    log::info!("virtio-blk: ext4 superblock match={}", is_ext4);
+    log::debug!("virtio-blk: ext4 superblock match={}", is_ext4);
     is_ext4
 }
 
@@ -110,7 +110,7 @@ impl VirtioBlockDevice {
             root.set_command(function, desired);
         }
 
-        log::info!(
+        log::debug!(
             "virtio-blk: PCI command for {:02x}:{:02x}.{} = {:?}",
             function.bus,
             function.device,
@@ -122,7 +122,7 @@ impl VirtioBlockDevice {
             Ok(bars) => {
                 for (index, bar) in bars.into_iter().enumerate() {
                     if let Some(bar) = bar {
-                        log::info!("virtio-blk: BAR{index} = {bar}");
+                        log::debug!("virtio-blk: BAR{index} = {bar}");
                     }
                 }
             }
@@ -131,7 +131,7 @@ impl VirtioBlockDevice {
             }
         }
 
-        log::info!("virtio-blk: building PCI transport");
+        log::debug!("virtio-blk: building PCI transport");
 
         let transport = match PciTransport::new::<KernelHal, _>(&mut root, function) {
             Ok(transport) => transport,
@@ -141,7 +141,7 @@ impl VirtioBlockDevice {
             }
         };
 
-        log::info!("virtio-blk: PCI transport ready, building block queue");
+        log::debug!("virtio-blk: PCI transport ready, building block queue");
 
         let block = match VirtIOBlk::<KernelHal, _>::new(transport) {
             Ok(block) => block,
@@ -151,7 +151,7 @@ impl VirtioBlockDevice {
             }
         };
 
-        log::info!("virtio-blk: block queue ready");
+        log::debug!("virtio-blk: block queue ready");
 
         let capacity = block.capacity() as usize;
         let readonly = block.readonly();

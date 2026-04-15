@@ -78,7 +78,7 @@ pub fn map_mmio(phys_addr: u64, size: usize) -> u64 {
         .mappings
         .insert((aligned_phys, aligned_size), MmioMapping { virt_base });
 
-    log::info!(
+    log::debug!(
         "mmio: mapped phys={:#x} size={:#x} -> virt={:#x}",
         aligned_phys,
         aligned_size,

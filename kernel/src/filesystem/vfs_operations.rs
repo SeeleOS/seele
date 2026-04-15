@@ -2,7 +2,6 @@ use crate::{
     filesystem::{
         info::{DirectoryContentInfo, FileLikeInfo},
         object::FileLikeObject,
-        path,
         vfs::{FSResult, VFS, VirtualFS, WrappedDirectory, WrappedFile},
     },
     object::traits::Readable,
@@ -122,6 +121,30 @@ impl VFS {
 
     pub fn list_contents(&self, path: Path) -> FSResult<Vec<DirectoryContentInfo>> {
         self.resolve_dir(path)?.lock().contents()
+    }
+
+    pub fn clear_directory(&mut self, path: Path) -> FSResult<()> {
+        let entries = self.list_contents(path.clone())?;
+
+        for entry in entries {
+            if entry.name == "." || entry.name == ".." {
+                continue;
+            }
+
+            let child_path = Path::new(&(path.clone().as_string() + "/" + &entry.name));
+
+            match entry.content_type {
+                DirectoryContentType::Directory => {
+                    self.clear_directory(child_path.clone())?;
+                    self.delete_file(child_path)?;
+                }
+                DirectoryContentType::File | DirectoryContentType::Symlink => {
+                    self.delete_file(child_path)?;
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 

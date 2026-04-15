@@ -169,17 +169,34 @@ impl Directory for Ext4Directory {
     }
 
     fn delete(&self, name: &str) -> crate::filesystem::vfs::FSResult<()> {
-        let parent_inode = self
+        let mut parent_inode = self
             .fs
             .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
             .map_err(map_ext4_error)?;
-        let parent = Dir::open_inode(&self.fs, parent_inode).map_err(map_ext4_error)?;
+        let parent = Dir::open_inode(&self.fs, parent_inode.clone()).map_err(map_ext4_error)?;
 
         let entry_name = DirEntryName::try_from(name).map_err(|_| FSError::Other)?;
         let inode = parent.get_entry(entry_name).map_err(map_ext4_error)?;
 
         if inode.metadata().is_dir() {
-            return Err(FSError::Other);
+            let path = self.join_child(name);
+            let mut iter = self.fs.read_dir(path.as_str()).map_err(map_ext4_error)?;
+            while let Some(entry) = iter.next() {
+                let entry = entry.map_err(map_ext4_error)?;
+                let entry_name = entry
+                    .file_name()
+                    .as_str()
+                    .map_err(|_| FSError::Other)?
+                    .to_string();
+
+                if entry_name != "." && entry_name != ".." {
+                    return Err(FSError::Other);
+                }
+            }
+
+            let new_links = parent_inode.links_count().checked_sub(1).ok_or(FSError::Other)?;
+            parent_inode.set_links_count(new_links);
+            parent_inode.write(&self.fs).map_err(map_ext4_error)?;
         }
 
         parent.unlink(entry_name, inode).map_err(map_ext4_error)?;
