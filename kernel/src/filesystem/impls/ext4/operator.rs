@@ -76,8 +76,6 @@ impl Ext4Write for Ext4BlockOperator {
         if n != src.len() {
             return Err(Box::new(Ext4BlockIoError(BlockDeviceError::Other)));
         }
-
-        op.flush().map_err(Ext4BlockIoError::from)?;
         Ok(())
     }
 }

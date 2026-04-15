@@ -1,13 +1,14 @@
 use alloc::{
     collections::{BTreeMap, VecDeque},
     sync::Arc,
+    vec,
     vec::Vec,
 };
 use spin::Mutex;
 
 use crate::filesystem::block_device::{BlockDevice, BlockDeviceError, BlockDeviceResult};
 
-const DEFAULT_CACHE_ENTRIES: usize = 256;
+const DEFAULT_CACHE_ENTRIES: usize = 2048;
 
 #[derive(Debug)]
 struct CacheEntry {
@@ -70,6 +71,43 @@ impl CachedBlockDevice {
         }
         Ok(())
     }
+
+    fn write_back_dirty(&self, state: &mut CacheState) -> Result<(), BlockDeviceError> {
+        let block_size = self.block_size();
+        let mut dirty_blocks = state
+            .entries
+            .iter()
+            .filter_map(|(&block_id, entry)| entry.dirty.then_some(block_id))
+            .collect::<Vec<_>>();
+        dirty_blocks.sort_unstable();
+
+        let mut index = 0;
+        while index < dirty_blocks.len() {
+            let start_block = dirty_blocks[index];
+            let mut end = index + 1;
+            while end < dirty_blocks.len() && dirty_blocks[end] == dirty_blocks[end - 1] + 1 {
+                end += 1;
+            }
+
+            let block_count = end - index;
+            let mut buffer = Vec::with_capacity(block_count * block_size);
+            for &block_id in &dirty_blocks[index..end] {
+                buffer.extend_from_slice(&state.entries.get(&block_id).unwrap().data);
+            }
+
+            self.inner.write_blocks(start_block, &buffer)?;
+
+            for &block_id in &dirty_blocks[index..end] {
+                if let Some(entry) = state.entries.get_mut(&block_id) {
+                    entry.dirty = false;
+                }
+            }
+
+            index = end;
+        }
+
+        Ok(())
+    }
 }
 
 impl BlockDevice for CachedBlockDevice {
@@ -108,6 +146,64 @@ impl BlockDevice for CachedBlockDevice {
         Ok(block_size)
     }
 
+    fn read_blocks(&self, start: usize, buffer: &mut [u8]) -> BlockDeviceResult {
+        let block_size = self.block_size();
+        if !buffer.len().is_multiple_of(block_size) {
+            return Err(BlockDeviceError::BufferTooSmall);
+        }
+
+        let total_blocks = buffer.len() / block_size;
+        if start + total_blocks > self.total_blocks() {
+            return Err(BlockDeviceError::OutOfBounds);
+        }
+
+        let mut state = self.state.lock();
+        let mut index = 0;
+        while index < total_blocks {
+            let block_id = start + index;
+
+            if let Some(entry) = state.entries.get(&block_id) {
+                let byte_start = index * block_size;
+                buffer[byte_start..byte_start + block_size].copy_from_slice(&entry.data);
+                state.touch(block_id);
+                index += 1;
+                continue;
+            }
+
+            let miss_start = index;
+            let mut miss_end = index + 1;
+            while miss_end < total_blocks && !state.entries.contains_key(&(start + miss_end)) {
+                miss_end += 1;
+            }
+
+            let mut temp = vec![0u8; (miss_end - miss_start) * block_size];
+            drop(state);
+            self.inner.read_blocks(start + miss_start, &mut temp)?;
+            state = self.state.lock();
+
+            for block_offset in miss_start..miss_end {
+                self.evict_if_needed(&mut state)?;
+                let cache_block_id = start + block_offset;
+                let temp_offset = (block_offset - miss_start) * block_size;
+                let data = temp[temp_offset..temp_offset + block_size].to_vec();
+                let byte_start = block_offset * block_size;
+                buffer[byte_start..byte_start + block_size].copy_from_slice(&data);
+                state.entries.insert(
+                    cache_block_id,
+                    CacheEntry {
+                        data,
+                        dirty: false,
+                    },
+                );
+                state.touch(cache_block_id);
+            }
+
+            index = miss_end;
+        }
+
+        Ok(buffer.len())
+    }
+
     fn write_single_block(&self, id: usize, buffer: &[u8]) -> BlockDeviceResult {
         let block_size = self.block_size();
         if buffer.len() < block_size {
@@ -122,14 +218,38 @@ impl BlockDevice for CachedBlockDevice {
         Ok(block_size)
     }
 
+    fn write_blocks(&self, start: usize, buffer: &[u8]) -> BlockDeviceResult {
+        let block_size = self.block_size();
+        if !buffer.len().is_multiple_of(block_size) {
+            return Err(BlockDeviceError::BufferTooSmall);
+        }
+
+        let total_blocks = buffer.len() / block_size;
+        if start + total_blocks > self.total_blocks() {
+            return Err(BlockDeviceError::OutOfBounds);
+        }
+
+        let mut state = self.state.lock();
+        for index in 0..total_blocks {
+            self.evict_if_needed(&mut state)?;
+            let block_id = start + index;
+            let byte_start = index * block_size;
+            state.entries.insert(
+                block_id,
+                CacheEntry {
+                    data: buffer[byte_start..byte_start + block_size].to_vec(),
+                    dirty: true,
+                },
+            );
+            state.touch(block_id);
+        }
+
+        Ok(buffer.len())
+    }
+
     fn flush(&self) -> Result<(), BlockDeviceError> {
         let mut state = self.state.lock();
-        for (&block_id, entry) in state.entries.iter_mut() {
-            if entry.dirty {
-                self.inner.write_single_block(block_id, &entry.data)?;
-                entry.dirty = false;
-            }
-        }
+        self.write_back_dirty(&mut state)?;
         self.inner.flush()
     }
 }
