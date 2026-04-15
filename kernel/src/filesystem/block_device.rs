@@ -78,39 +78,96 @@ pub trait BlockDevice: Send + Sync {
     }
 
     fn read_by_bytes(&self, offset: usize, buffer: &mut [u8]) -> BlockDeviceResult {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+
         let block_size = self.block_size();
         let starting_block = offset / block_size;
         let offset_in_block = offset % block_size;
+        let ending_offset = offset + buffer.len();
+        let ending_block = ending_offset.div_ceil(block_size);
 
-        let tmpbuffer_size =
-            (buffer.len() + offset_in_block + block_size - 1) / block_size * block_size;
+        if offset_in_block == 0 && buffer.len().is_multiple_of(block_size) {
+            self.read_blocks(starting_block, buffer)?;
+            return Ok(buffer.len());
+        }
 
-        let mut tmp_buffer = alloc::vec![0u8; tmpbuffer_size];
-        self.read_blocks(starting_block, &mut tmp_buffer)?;
+        let mut copied = 0;
 
-        buffer.copy_from_slice(&tmp_buffer[offset_in_block..offset_in_block + buffer.len()]);
+        if offset_in_block != 0 {
+            let mut temp = alloc::vec![0u8; block_size];
+            self.read_single_block(starting_block, &mut temp)?;
+            let head_len = core::cmp::min(block_size - offset_in_block, buffer.len());
+            buffer[..head_len].copy_from_slice(&temp[offset_in_block..offset_in_block + head_len]);
+            copied += head_len;
+        }
+
+        let full_blocks_start = starting_block + usize::from(offset_in_block != 0);
+        let full_blocks_end = ending_block - usize::from(!ending_offset.is_multiple_of(block_size));
+        let full_blocks = full_blocks_end.saturating_sub(full_blocks_start);
+        if full_blocks != 0 {
+            let full_bytes = full_blocks * block_size;
+            self.read_blocks(
+                full_blocks_start,
+                &mut buffer[copied..copied + full_bytes],
+            )?;
+            copied += full_bytes;
+        }
+
+        if copied < buffer.len() {
+            let mut temp = alloc::vec![0u8; block_size];
+            self.read_single_block(ending_block - 1, &mut temp)?;
+            let tail_len = buffer.len() - copied;
+            buffer[copied..].copy_from_slice(&temp[..tail_len]);
+        }
 
         Ok(buffer.len())
     }
 
     fn write_by_bytes(&self, offset: usize, buffer: &[u8]) -> BlockDeviceResult {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+
         let block_size = self.block_size();
         let starting_block = offset / block_size;
         let offset_in_block = offset % block_size;
-        let tmpbuffer_size =
-            (buffer.len() + offset_in_block + block_size - 1) / block_size * block_size;
+        let ending_offset = offset + buffer.len();
+        let ending_block = ending_offset.div_ceil(block_size);
 
-        let mut tmp_buffer = alloc::vec![0u8; tmpbuffer_size];
-        // Read the existing data into the tmp buffer
-        self.read_blocks(starting_block, &mut tmp_buffer)?;
-        // Overwrite the tmp buffer with the actual data that we wanna write
-        tmp_buffer[offset_in_block..offset_in_block + buffer.len()].copy_from_slice(buffer);
+        if offset_in_block == 0 && buffer.len().is_multiple_of(block_size) {
+            self.write_blocks(starting_block, buffer)?;
+            return Ok(buffer.len());
+        }
 
-        // Write the blocks with the previous data and the actual data
-        // NOTE: we need to read the original data of the block because we can only
-        // write by block, and we dont wanna write nonsense into the block, so we
-        // have to read it first.
-        self.write_blocks(starting_block, &tmp_buffer)?;
+        let mut written = 0;
+
+        if offset_in_block != 0 {
+            let mut temp = alloc::vec![0u8; block_size];
+            self.read_single_block(starting_block, &mut temp)?;
+            let head_len = core::cmp::min(block_size - offset_in_block, buffer.len());
+            temp[offset_in_block..offset_in_block + head_len].copy_from_slice(&buffer[..head_len]);
+            self.write_single_block(starting_block, &temp)?;
+            written += head_len;
+        }
+
+        let full_blocks_start = starting_block + usize::from(offset_in_block != 0);
+        let full_blocks_end = ending_block - usize::from(!ending_offset.is_multiple_of(block_size));
+        let full_blocks = full_blocks_end.saturating_sub(full_blocks_start);
+        if full_blocks != 0 {
+            let full_bytes = full_blocks * block_size;
+            self.write_blocks(full_blocks_start, &buffer[written..written + full_bytes])?;
+            written += full_bytes;
+        }
+
+        if written < buffer.len() {
+            let last_block = ending_block - 1;
+            let mut temp = alloc::vec![0u8; block_size];
+            self.read_single_block(last_block, &mut temp)?;
+            temp[..buffer.len() - written].copy_from_slice(&buffer[written..]);
+            self.write_single_block(last_block, &temp)?;
+        }
 
         Ok(buffer.len())
     }

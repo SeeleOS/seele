@@ -1,4 +1,4 @@
-use alloc::{slice, vec::Vec};
+use alloc::{vec, vec::Vec};
 use x86_64::structures::paging::{
     FrameAllocator, Mapper, Page, PhysFrame, Size4KiB, Translate,
 };
@@ -13,13 +13,10 @@ use crate::{
         paging::FRAME_ALLOCATOR,
         utils::apply_offset,
     },
-    misc::{
-        stack_builder::StackBuilder,
-        time::Time,
-    },
+    misc::stack_builder::StackBuilder,
 };
 
-const FILE_LAZY_CLUSTER_PAGES: u64 = 4;
+const FILE_LAZY_CLUSTER_PAGES: u64 = 16;
 
 impl AddrSpace {
     pub fn apply_page(&mut self, page: Page<Size4KiB>, area: MemoryArea) -> PhysFrame {
@@ -43,6 +40,9 @@ impl AddrSpace {
                 let max_pages =
                     core::cmp::min(cluster_pages, area.pages().saturating_sub(page_index));
                 let mut first_frame = None;
+                let mut mapped_pages = Vec::with_capacity(max_pages as usize);
+                let mut total_read_len = 0usize;
+                let first_page_offset = page.start_address().as_u64() - area.start.as_u64();
 
                 for i in 0..max_pages {
                     let current_page = page + i;
@@ -67,14 +67,31 @@ impl AddrSpace {
                         first_frame = Some(frame);
                     }
 
+                    let read_len = read_len as usize;
                     if read_len != 0 {
-                        let read_start = Time::since_boot();
-                        file.read_exact_at(
-                            slice::from_raw_parts_mut(write_addr as *mut u8, read_len as usize),
-                            offset + page_offset,
-                        )
-                        .expect("Failed to lazyload page with file data");
-                        let _ = Time::since_boot().sub(read_start);
+                        total_read_len += read_len;
+                    }
+
+                    mapped_pages.push((write_addr, read_len));
+                }
+
+                if total_read_len != 0 {
+                    let mut cluster_data = vec![0u8; total_read_len];
+                    file.read_exact_at(&mut cluster_data, offset + first_page_offset)
+                        .expect("Failed to lazyload page cluster with file data");
+
+                    let mut data_offset = 0usize;
+                    for (write_addr, read_len) in mapped_pages {
+                        if read_len == 0 {
+                            continue;
+                        }
+
+                        core::ptr::copy_nonoverlapping(
+                            cluster_data.as_ptr().add(data_offset),
+                            write_addr as *mut u8,
+                            read_len,
+                        );
+                        data_offset += read_len;
                     }
                 }
 

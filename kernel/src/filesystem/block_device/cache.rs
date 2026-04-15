@@ -8,7 +8,8 @@ use spin::Mutex;
 
 use crate::filesystem::block_device::{BlockDevice, BlockDeviceError, BlockDeviceResult};
 
-const DEFAULT_CACHE_ENTRIES: usize = 2048;
+const DEFAULT_CACHE_ENTRIES: usize = 4_096;
+const DEFAULT_READAHEAD_BLOCKS: usize = 32;
 
 #[derive(Debug)]
 struct CacheEntry {
@@ -31,9 +32,6 @@ impl CacheState {
     }
 
     fn touch(&mut self, block_id: usize) {
-        if let Some(index) = self.lru.iter().position(|&id| id == block_id) {
-            self.lru.remove(index);
-        }
         self.lru.push_back(block_id);
     }
 }
@@ -41,6 +39,7 @@ impl CacheState {
 pub struct CachedBlockDevice {
     inner: Arc<dyn BlockDevice>,
     max_entries: usize,
+    readahead_blocks: usize,
     state: Mutex<CacheState>,
 }
 
@@ -53,6 +52,7 @@ impl CachedBlockDevice {
         Self {
             inner,
             max_entries: max_entries.max(1),
+            readahead_blocks: DEFAULT_READAHEAD_BLOCKS,
             state: Mutex::new(CacheState::new()),
         }
     }
@@ -126,10 +126,9 @@ impl BlockDevice for CachedBlockDevice {
         }
 
         {
-            let mut state = self.state.lock();
+            let state = self.state.lock();
             if let Some(entry) = state.entries.get(&id) {
                 buffer[..block_size].copy_from_slice(&entry.data);
-                state.touch(id);
                 return Ok(block_size);
             }
         }
@@ -165,7 +164,6 @@ impl BlockDevice for CachedBlockDevice {
             if let Some(entry) = state.entries.get(&block_id) {
                 let byte_start = index * block_size;
                 buffer[byte_start..byte_start + block_size].copy_from_slice(&entry.data);
-                state.touch(block_id);
                 index += 1;
                 continue;
             }
@@ -176,18 +174,22 @@ impl BlockDevice for CachedBlockDevice {
                 miss_end += 1;
             }
 
-            let mut temp = vec![0u8; (miss_end - miss_start) * block_size];
+            let readahead_end = core::cmp::min(total_blocks, miss_end + self.readahead_blocks);
+            let fetch_blocks = readahead_end - miss_start;
+            let mut temp = vec![0u8; fetch_blocks * block_size];
             drop(state);
             self.inner.read_blocks(start + miss_start, &mut temp)?;
             state = self.state.lock();
 
-            for block_offset in miss_start..miss_end {
+            for block_offset in miss_start..readahead_end {
                 self.evict_if_needed(&mut state)?;
                 let cache_block_id = start + block_offset;
                 let temp_offset = (block_offset - miss_start) * block_size;
                 let data = temp[temp_offset..temp_offset + block_size].to_vec();
-                let byte_start = block_offset * block_size;
-                buffer[byte_start..byte_start + block_size].copy_from_slice(&data);
+                if block_offset < miss_end {
+                    let byte_start = block_offset * block_size;
+                    buffer[byte_start..byte_start + block_size].copy_from_slice(&data);
+                }
                 state.entries.insert(
                     cache_block_id,
                     CacheEntry {

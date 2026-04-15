@@ -89,7 +89,7 @@ impl VFS {
                 ext4plus::FollowSymlinks::All,
             )
             .map_err(FSError::from)?;
-        let parent_dir = ext4plus::dir::Dir::open_inode(ext4_parent.fs(), parent_inode)
+        let mut parent_dir = ext4plus::dir::Dir::open_inode(ext4_parent.fs(), parent_inode)
             .map_err(FSError::from)?;
 
         let mut source_inode = source_inode;

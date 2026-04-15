@@ -137,7 +137,7 @@ impl Directory for Ext4Directory {
             .fs
             .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
             .map_err(map_ext4_error)?;
-        let parent = Dir::open_inode(&self.fs, parent_inode.clone()).map_err(map_ext4_error)?;
+        let mut parent = Dir::open_inode(&self.fs, parent_inode.clone()).map_err(map_ext4_error)?;
 
         if matches!(info.content_type, DirectoryContentType::Directory) {
             // A freshly-created ext4 directory needs an initialized first block
@@ -173,7 +173,7 @@ impl Directory for Ext4Directory {
             .fs
             .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
             .map_err(map_ext4_error)?;
-        let parent = Dir::open_inode(&self.fs, parent_inode.clone()).map_err(map_ext4_error)?;
+        let mut parent = Dir::open_inode(&self.fs, parent_inode.clone()).map_err(map_ext4_error)?;
 
         let entry_name = DirEntryName::try_from(name).map_err(|_| FSError::Other)?;
         let inode = parent.get_entry(entry_name).map_err(map_ext4_error)?;
