@@ -43,7 +43,10 @@ impl Manager {
 
     pub fn reap_process(&mut self, process: ProcessRef) {
         self.processes.remove(&process.lock().pid);
-        process.lock().addrspace.clean();
+        let mut process = process.lock();
+        process.objects.clear();
+        process.timers.clear();
+        process.addrspace.clean();
     }
 
     pub fn load_process(&mut self, process: ProcessRef) {
@@ -75,10 +78,6 @@ impl Process {
     pub fn terminate_inner(&mut self, exit_code: u64) -> Vec<ThreadRef> {
         if self.exit_code.is_none() {
             self.exit_code = Some(exit_code);
-            // Release process-owned objects as soon as the process exits so
-            // peers observe EOF/HUP before the parent reaps with waitpid().
-            self.objects.clear();
-            self.timers.clear();
         }
 
         self.threads
