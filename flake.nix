@@ -69,6 +69,7 @@
               rustc
               rustfmt
               sassc
+              lzip
               stdenv.cc.cc.lib
               appstream
               texinfo
