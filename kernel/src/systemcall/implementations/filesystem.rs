@@ -20,13 +20,6 @@ use crate::{
 
 define_syscall!(OpenFile, |path_str: String, create: bool| {
     let current_process = get_current_process();
-    let pid = current_process.lock().pid.0;
-    s_println!(
-        "open_file: pid={} path={} create={}",
-        pid,
-        path_str.as_str(),
-        create
-    );
 
     let path = Path::new(path_str.as_str());
     let object;
