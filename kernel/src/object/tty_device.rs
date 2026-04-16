@@ -4,6 +4,7 @@ use seele_sys::abi::object::ObjectFlags;
 use spin::Mutex;
 
 use crate::{
+    filesystem::info::LinuxStat,
     impl_cast_function,
     keyboard::decoding_task::{KEYBOARD_QUEUE, RAW_QUEUE},
     object::{
@@ -11,7 +12,7 @@ use crate::{
         config::ConfigurateRequest,
         misc::ObjectRef,
         queue_helpers::{copy_from_queue, read_or_block},
-        traits::{Configuratable, Readable, Writable},
+        traits::{Configuratable, Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
     process::group::ProcessGroupID,
@@ -93,6 +94,7 @@ impl Object for TtyDevice {
     impl_cast_function!("readable", Readable);
     impl_cast_function!("configuratable", Configuratable);
     impl_cast_function!("pollable", Pollable);
+    impl_cast_function!("statable", Statable);
 }
 
 impl Writable for TtyDevice {
@@ -139,5 +141,11 @@ impl Configuratable for TtyDevice {
             }
             _ => self.terminal.lock().configure(request),
         }
+    }
+}
+
+impl Statable for TtyDevice {
+    fn stat(&self) -> LinuxStat {
+        LinuxStat::char_device(0o666)
     }
 }

@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use crate::{
     filesystem::{
         errors::FSError,
-        info::{DirectoryContentInfo, FileLikeInfo},
+        info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
         vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
         vfs_traits::FileLike,
     },
@@ -16,7 +16,7 @@ use crate::{
         Object,
         error::ObjectError,
         misc::ObjectResult,
-        traits::{MemoryMappable, Readable, Seekable, Writable},
+        traits::{MemoryMappable, Readable, Seekable, Statable, Writable},
     },
     process::misc::with_current_process,
 };
@@ -105,6 +105,7 @@ impl Object for FileLikeObject {
     impl_cast_function!("readable", Readable);
     impl_cast_function!("mappable", MemoryMappable);
     impl_cast_function!("seekable", Seekable);
+    impl_cast_function!("statable", Statable);
 
     impl_cast_function_non_trait!("file_like", FileLikeObject);
 }
@@ -161,5 +162,11 @@ impl Seekable for FileLikeObject {
         } else {
             Err(ObjectError::FSError(FSError::NotAFile))
         }
+    }
+}
+
+impl Statable for FileLikeObject {
+    fn stat(&self) -> LinuxStat {
+        self.info().map(FileLikeInfo::as_linux).unwrap_or_default()
     }
 }

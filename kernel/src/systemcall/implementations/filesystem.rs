@@ -14,10 +14,20 @@ use crate::{
     memory::addrspace::mem_area::Data,
     object::misc::ObjectRef,
     process::{manager::get_current_process, misc::with_current_process},
+    s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
 };
 
 define_syscall!(OpenFile, |path_str: String, create: bool| {
+    let current_process = get_current_process();
+    let pid = current_process.lock().pid.0;
+    s_println!(
+        "open_file: pid={} path={} create={}",
+        pid,
+        path_str.as_str(),
+        create
+    );
+
     let path = Path::new(path_str.as_str());
     let object;
     if let Ok(file) = VirtualFS.lock().open(path.clone()) {
@@ -29,7 +39,6 @@ define_syscall!(OpenFile, |path_str: String, create: bool| {
         return Err(SyscallError::FileNotFound);
     }
 
-    let current_process = get_current_process();
     let slot = current_process.lock().alloc_object_slot();
     current_process.lock().objects[slot] = Some(object);
     Ok(slot)
@@ -67,7 +76,7 @@ define_syscall!(FileInfo, |start_from_current_dir: bool,
         let result = smart_navigate(path_str, object, start_from_current_dir, use_object)
             .ok_or(SyscallError::FileNotFound)?;
 
-        *linux_stat_ptr = result.as_file_like()?.info()?.as_linux();
+        *linux_stat_ptr = result.as_statable()?.stat();
     }
 
     Ok(0)

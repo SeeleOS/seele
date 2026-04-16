@@ -1,8 +1,9 @@
 use crate::{
+    filesystem::info::LinuxStat,
     impl_cast_function,
     object::{
         Object,
-        traits::{Readable, Writable},
+        traits::{Readable, Statable, Writable},
     },
 };
 
@@ -12,6 +13,7 @@ pub struct DevNull;
 impl Object for DevNull {
     impl_cast_function!("writable", Writable);
     impl_cast_function!("readable", Readable);
+    impl_cast_function!("statable", Statable);
 }
 
 impl Writable for DevNull {
@@ -24,5 +26,11 @@ impl Readable for DevNull {
     fn read(&self, buffer: &mut [u8]) -> crate::object::misc::ObjectResult<usize> {
         buffer.fill(0);
         Ok(buffer.len())
+    }
+}
+
+impl Statable for DevNull {
+    fn stat(&self) -> LinuxStat {
+        LinuxStat::char_device(0o666)
     }
 }

@@ -3,6 +3,7 @@ use seele_sys::abi::object::ObjectFlags;
 use spin::Mutex;
 
 use crate::{
+    filesystem::info::LinuxStat,
     impl_cast_function,
     object::{
         Object,
@@ -10,7 +11,7 @@ use crate::{
         error::ObjectError,
         misc::ObjectResult,
         queue_helpers::{copy_from_queue, read_or_block},
-        traits::{Configuratable, Readable, Writable},
+        traits::{Configuratable, Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
     signal::Signal,
@@ -49,6 +50,7 @@ impl Object for PtyMaster {
     impl_cast_function!("readable", Readable);
     impl_cast_function!("configuratable", Configuratable);
     impl_cast_function!("pollable", Pollable);
+    impl_cast_function!("statable", Statable);
 }
 
 impl Writable for PtyMaster {
@@ -145,5 +147,11 @@ impl Configuratable for PtyMaster {
             .as_configuratable()
             .map_err(|_| ObjectError::InvalidRequest)?
             .configure(request)
+    }
+}
+
+impl Statable for PtyMaster {
+    fn stat(&self) -> LinuxStat {
+        LinuxStat::char_device(0o666)
     }
 }

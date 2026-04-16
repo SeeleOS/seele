@@ -2,7 +2,10 @@ use alloc::sync::Arc;
 use seele_sys::{abi::object::SeekType, permission::Permissions};
 use x86_64::VirtAddr;
 
-use crate::object::{Object, config::ConfigurateRequest, misc::ObjectResult};
+use crate::{
+    filesystem::info::LinuxStat,
+    object::{Object, config::ConfigurateRequest, misc::ObjectResult},
+};
 
 pub trait Writable: Object {
     /// Write the content of [`buffer`] to [`self`]
@@ -29,4 +32,8 @@ pub trait MemoryMappable: Object {
 
 pub trait Seekable: Object {
     fn seek(self: Arc<Self>, offset: i64, seek_type: SeekType) -> ObjectResult<usize>;
+}
+
+pub trait Statable: Object {
+    fn stat(&self) -> LinuxStat;
 }

@@ -83,6 +83,18 @@ impl LinuxStat {
             ..Default::default()
         }
     }
+
+    pub fn char_device(permission: u32) -> Self {
+        pub const S_IFCHR: u32 = 0o020000;
+
+        Self {
+            st_dev: 1,
+            st_nlink: 1,
+            st_mode: S_IFCHR | permission,
+            st_blksize: 4096,
+            ..Default::default()
+        }
+    }
 }
 
 impl FileLikeInfo {
