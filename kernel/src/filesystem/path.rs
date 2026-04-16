@@ -4,7 +4,7 @@ use crate::{
     filesystem::{
         errors::FSError,
         impls::ext4::directory::Ext4Directory,
-        vfs::{FSResult, VirtualFS, WrappedDirectory},
+        vfs::{FSResult, WrappedDirectory},
         vfs_traits::FileLike,
     },
     process::manager::get_current_process,
@@ -31,7 +31,15 @@ pub struct Path {
 }
 
 impl Path {
-    fn parent_directory(current: FileLike) -> FSResult<FileLike> {
+    fn resolve_dir_from_root(root: WrappedDirectory, path: Path) -> FSResult<WrappedDirectory> {
+        match path.navigate(root.clone())? {
+            FileLike::Directory(dir) => Ok(dir),
+            FileLike::Symlink(symlink) => Self::resolve_dir_from_root(root, symlink.lock().target()?),
+            FileLike::File(_) => Err(FSError::NotADirectory),
+        }
+    }
+
+    fn parent_directory(current: FileLike, root: WrappedDirectory) -> FSResult<FileLike> {
         match current {
             FileLike::Directory(dir) => {
                 let parent_path = {
@@ -58,13 +66,17 @@ impl Path {
                     }
                 };
 
-                Ok(FileLike::Directory(
-                    VirtualFS.lock().resolve_dir(Path::new(&parent_path))?,
-                ))
+                Ok(FileLike::Directory(Self::resolve_dir_from_root(
+                    root,
+                    Path::new(&parent_path),
+                )?))
             }
             FileLike::Symlink(symlink) => {
                 let target = symlink.lock().target()?;
-                Self::parent_directory(FileLike::Directory(VirtualFS.lock().resolve_dir(target)?))
+                Self::parent_directory(
+                    FileLike::Directory(Self::resolve_dir_from_root(root.clone(), target)?),
+                    root,
+                )
             }
             FileLike::File(_) => Err(FSError::NotADirectory),
         }
@@ -113,19 +125,19 @@ impl Path {
     fn navigate_with_depth(&self, root: WrappedDirectory, depth: usize) -> FSResult<FileLike> {
         let first = self.parts.first().ok_or(FSError::NotFound)?;
         let mut current = match first {
-            PathPart::Root => FileLike::Directory(root),
+            PathPart::Root => FileLike::Directory(root.clone()),
             PathPart::CurrentDir => get_current_process()
                 .lock()
                 .current_directory
                 .clone()
                 .as_normal()
-                .navigate(root)?,
+                .navigate(root.clone())?,
             _ => get_current_process()
                 .lock()
                 .current_directory
                 .clone()
                 .as_normal()
-                .navigate(root)?,
+                .navigate(root.clone())?,
         };
 
         let end = self.parts.len().saturating_sub(depth);
@@ -137,7 +149,8 @@ impl Path {
                 PathPart::Normal(name) => {
                     while let FileLike::Symlink(symlink) = &current {
                         let target = symlink.lock().target()?;
-                        current = FileLike::Directory(VirtualFS.lock().resolve_dir(target)?);
+                        current =
+                            FileLike::Directory(Self::resolve_dir_from_root(root.clone(), target)?);
                     }
 
                     current = {
@@ -151,7 +164,7 @@ impl Path {
                 }
                 PathPart::CurrentDir => {}
                 PathPart::ParentDir => {
-                    current = Self::parent_directory(current)?;
+                    current = Self::parent_directory(current, root.clone())?;
                 }
             }
         }
@@ -172,7 +185,7 @@ impl Path {
         root: WrappedDirectory,
     ) -> FSResult<(WrappedDirectory, String)> {
         let name = self.parts.last().ok_or(FSError::NotFound)?;
-        let nav = self.navigate_with_depth(root, 1)?;
+        let nav = self.navigate_with_depth(root.clone(), 1)?;
 
         match nav {
             FileLike::File(_) => Err(FSError::NotADirectory),
@@ -188,7 +201,7 @@ impl Path {
 
             FileLike::Symlink(symlink) => {
                 let target = symlink.lock().target()?;
-                let dir = VirtualFS.lock().resolve_dir(target)?;
+                let dir = Self::resolve_dir_from_root(root.clone(), target)?;
                 Ok((
                     dir,
                     match name {
