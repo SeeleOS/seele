@@ -1,6 +1,7 @@
 use crate::{
     misc::snapshot::Snapshot,
     process::Process,
+    s_println,
     thread::{
         THREAD_MANAGER, get_current_thread,
         misc::{SnapshotState, State, with_current_thread},
@@ -160,6 +161,11 @@ impl Process {
             | Signal::CpuTimeLimitExceeded
             | Signal::FileSizeLimitExceeded
             | Signal::BadSystemCall => {
+                s_println!(
+                    "fatal signal: pid={} signal={:?}",
+                    self.pid.0,
+                    signal
+                );
                 let threads = self.terminate_inner(signal as u64);
                 let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
                 for thread in threads {
