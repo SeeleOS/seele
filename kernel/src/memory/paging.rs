@@ -91,28 +91,88 @@ impl BootinfoFrameAllocator {
         None
     }
 
+    fn take_contiguous_free_frames(&mut self, pages: usize) -> Option<PhysFrame<Size4KiB>> {
+        if self.free_frames.len() < pages {
+            return None;
+        }
+
+        self.free_frames
+            .sort_unstable_by_key(|frame| frame.start_address().as_u64());
+
+        let mut run_start = 0usize;
+        let mut run_len = 1usize;
+
+        for i in 1..self.free_frames.len() {
+            let prev = self.free_frames[i - 1].start_address().as_u64();
+            let current = self.free_frames[i].start_address().as_u64();
+
+            if current == prev + Size4KiB::SIZE {
+                run_len += 1;
+            } else {
+                run_start = i;
+                run_len = 1;
+            }
+
+            if run_len == pages {
+                let first = run_start + 1 - pages;
+                let start = self.free_frames[first];
+                self.free_frames.drain(first..=run_start);
+                return Some(start);
+            }
+        }
+
+        None
+    }
+
+    fn next_contiguous_usable_frames(&mut self, pages: usize) -> Option<PhysFrame<Size4KiB>> {
+        let span = (pages as u64).checked_mul(Size4KiB::SIZE)?;
+
+        while let Some(region) = self.memory_map.get(self.next_region_index) {
+            if region.kind != MemoryRegionKind::Usable {
+                self.next_region_index += 1;
+                self.next_frame_addr = 0;
+                continue;
+            }
+
+            let start = align_up_4k(region.start);
+            let end = align_down_4k(region.end);
+
+            if start >= end {
+                self.next_region_index += 1;
+                self.next_frame_addr = 0;
+                continue;
+            }
+
+            if self.next_frame_addr == 0 || self.next_frame_addr < start {
+                self.next_frame_addr = start;
+            }
+
+            let candidate = align_up_4k(self.next_frame_addr);
+            let candidate_end = candidate.checked_add(span)?;
+
+            if candidate_end <= end {
+                self.next_frame_addr = candidate_end;
+                return Some(PhysFrame::containing_address(PhysAddr::new(candidate)));
+            }
+
+            self.next_region_index += 1;
+            self.next_frame_addr = 0;
+        }
+
+        None
+    }
+
     pub fn allocate_contiguous(&mut self, pages: usize) -> Option<PhysFrame<Size4KiB>> {
         if pages == 0 {
             return None;
         }
 
-        let start = self.allocate_frame()?;
-        let mut expected = start.start_address().as_u64() + Size4KiB::SIZE;
-
-        for _ in 1..pages {
-            let frame = match self.allocate_frame() {
-                Some(frame) => frame,
-                None => return None,
-            };
-
-            if frame.start_address().as_u64() != expected {
-                return None;
-            }
-
-            expected += Size4KiB::SIZE;
+        if pages == 1 {
+            return self.allocate_frame();
         }
 
-        Some(start)
+        self.take_contiguous_free_frames(pages)
+            .or_else(|| self.next_contiguous_usable_frames(pages))
     }
 
     pub unsafe fn deallocate_contiguous(&mut self, start: PhysFrame<Size4KiB>, pages: usize) {
