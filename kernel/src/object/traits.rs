@@ -34,6 +34,7 @@ pub trait Seekable: Object {
     fn seek(self: Arc<Self>, offset: i64, seek_type: SeekType) -> ObjectResult<usize>;
 }
 
+/// Objects that can synthesize a Linux-style stat result for `fstat`/`stat`.
 pub trait Statable: Object {
     fn stat(&self) -> LinuxStat;
 }
