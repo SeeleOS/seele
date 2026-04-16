@@ -11,9 +11,15 @@ use crate::{
 };
 
 pub fn init_objects(objects: &mut Vec<Option<Arc<dyn Object>>>) {
-    objects.push(Some(get_default_tty())); // stdin (unimpllemented)
-    objects.push(Some(get_default_tty())); // stdout
-    objects.push(Some(get_default_tty())); // stderr
+    if objects.len() < 3 {
+        objects.resize(3, None);
+    }
+
+    for slot in 0..3 {
+        if objects[slot].is_none() {
+            objects[slot] = Some(get_default_tty());
+        }
+    }
 }
 
 impl Process {
