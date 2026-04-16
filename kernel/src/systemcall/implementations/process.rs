@@ -10,7 +10,7 @@ use crate::{
     },
     s_print,
     systemcall::utils::{SyscallError, SyscallImpl},
-    thread::{THREAD_MANAGER, scheduling::return_to_executor_no_save},
+    thread::{THREAD_MANAGER, get_current_thread, scheduling::return_to_executor_no_save},
 };
 
 fn exit_code_to_status(exit_code: u64) -> i32 {
@@ -121,7 +121,7 @@ define_syscall!(GetProcessID, {
 });
 
 define_syscall!(GetThreadID, {
-    Err(SyscallError::other("get tid unimplemented"))
+    Ok(get_current_thread().lock().id.0 as usize)
 });
 
 define_syscall!(GetProcessGroupID, |process: ProcessRef| {
