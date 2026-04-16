@@ -122,3 +122,18 @@ define_syscall!(ReadLink, |path_str: String,
 
     Ok(copied)
 });
+
+define_syscall!(RenameFile, |old_from_currentdir: bool,
+                             old_path: String,
+                             new_from_currentdir: bool,
+                             new_path: String| {
+    let old_path =
+        smart_resolve_path(old_path, old_from_currentdir).ok_or(SyscallError::InvalidArguments)?;
+    let new_path =
+        smart_resolve_path(new_path, new_from_currentdir).ok_or(SyscallError::InvalidArguments)?;
+
+    VirtualFS.lock().link_file(old_path.clone(), new_path)?;
+    VirtualFS.lock().delete_file(old_path)?;
+
+    Ok(0)
+});
