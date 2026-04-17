@@ -177,6 +177,21 @@ define_syscall!(Chdir, |dir: String| {
     Ok(0)
 });
 
+define_syscall!(Link, |old_path: CString, new_path: CString| {
+    LinkAt::handle_call(
+        AT_FDCWD as u64,
+        old_path as u64,
+        AT_FDCWD as u64,
+        new_path as u64,
+        0,
+        0,
+    )
+});
+
+define_syscall!(Unlink, |path: CString| {
+    UnlinkAt::handle_call(AT_FDCWD as u64, path as u64, 0, 0, 0, 0)
+});
+
 define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
     if buf_ptr.is_null() {
         return Err(SyscallError::BadAddress);
@@ -203,6 +218,11 @@ define_syscall!(Fstat, |fd: u64, linux_stat_ptr: *mut LinuxStat| {
     unsafe {
         *linux_stat_ptr = object.as_statable()?.stat();
     }
+    Ok(0)
+});
+
+define_syscall!(Fchmod, |fd: u64, _mode: u32| {
+    let _ = get_object_current_process(fd).map_err(SyscallError::from)?;
     Ok(0)
 });
 

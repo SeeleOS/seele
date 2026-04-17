@@ -76,6 +76,7 @@ const RSEQ_CPU_ID_UNINITIALIZED: u32 = u32::MAX;
 const RSEQ_CPU_ID_SINGLE_CORE: u32 = 0;
 const RLIM64_INFINITY: u64 = u64::MAX;
 const INITIAL_BRK_RESERVE: u64 = 0x4000_0000;
+const TIMER_ABSTIME: i32 = 1;
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -252,6 +253,55 @@ define_syscall!(Nanosleep, |req: u64, rem: u64| {
     let time = KernelTime::since_boot().add_ns(nanoseconds);
 
     block_current_with_sig_check(BlockType::SetTime(time))?;
+
+    if !rem.is_null() {
+        unsafe {
+            *rem = LinuxTimespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+        }
+    }
+
+    Ok(0)
+});
+
+define_syscall!(ClockNanosleep, |clock_id: i32,
+                                 flags: i32,
+                                 req: u64,
+                                 rem: u64| {
+    let req = req as *const LinuxTimespec;
+    let rem = rem as *mut LinuxTimespec;
+    if req.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+    if (flags & !TIMER_ABSTIME) != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let requested = unsafe { &*req };
+    if requested.tv_sec < 0 || requested.tv_nsec < 0 || requested.tv_nsec >= 1_000_000_000 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let clock = crate::misc::timer::ClockId::try_from(clock_id as u64)
+        .map_err(|_| SyscallError::InvalidArguments)?;
+    let requested_ns =
+        (requested.tv_sec as u64).saturating_mul(1_000_000_000) + (requested.tv_nsec as u64);
+
+    let now = match clock {
+        crate::misc::timer::ClockId::Realtime => KernelTime::current(),
+        crate::misc::timer::ClockId::SinceBoot => KernelTime::since_boot(),
+    };
+    let deadline = if (flags & TIMER_ABSTIME) != 0 {
+        KernelTime::from_nanoseconds(requested_ns)
+    } else {
+        now.add_ns(requested_ns)
+    };
+
+    if deadline > now {
+        block_current_with_sig_check(BlockType::SetTime(deadline))?;
+    }
 
     if !rem.is_null() {
         unsafe {
