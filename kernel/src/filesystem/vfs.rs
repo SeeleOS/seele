@@ -4,9 +4,11 @@ use spin::Mutex;
 use crate::filesystem::{
     block_device::BlockDevice,
     block_device::cache::CachedBlockDevice,
+    devfs::DevFs,
     errors::FSError,
     impls::ext4::{EXT4, operator::Ext4BlockOperator},
     path::Path,
+    sysfs::SysFs,
     vfs_traits::{Directory, File, FileLike, FileSystem, Symlink},
 };
 use ext4plus::Ext4 as Ext4Inner;
@@ -49,6 +51,8 @@ impl VFS {
         let ext4 = Ext4Inner::load_with_writer(Box::new(reader), Some(Box::new(writer))).unwrap();
         log::info!("vfs: ext4 loaded");
         self.mount(Path::new("/"), EXT4(ext4))?;
+        self.mount(Path::new("/dev"), DevFs::new())?;
+        self.mount(Path::new("/sys"), SysFs::new())?;
 
         for temp_dir in ["/tmp", "/var/tmp"] {
             if let Err(err) = self.clear_directory(Path::new(temp_dir)) {

@@ -77,30 +77,6 @@ bitflags! {
     }
 }
 
-fn device_from_path(path: &str) -> Option<&'static str> {
-    match path {
-        "/dev/fb0" => Some("framebuffer"),
-        "/dev/null" => Some("devnull"),
-        "/dev/tty" | "/dev/console" | "/dev/tty0" | "/dev/tty1" => Some("tty"),
-        "/dev/psaux" | "/dev/mouse" => Some("ps2mouse"),
-        _ => None,
-    }
-}
-
-fn pseudo_readlink_target(path: &str) -> Option<&'static str> {
-    match path {
-        // Upstream Xorg fbdev treats EINVAL from readlink(devnode) as
-        // "not a symlink", but ENOENT as fatal. Linux device nodes behave
-        // like the former.
-        "/dev/fb0" | "/dev/null" | "/dev/tty" | "/dev/console" | "/dev/tty0" | "/dev/tty1"
-        | "/dev/psaux" | "/dev/mouse" => None,
-        // Unpatched fbdevhw probes this sysfs symlink and rejects PCI-backed
-        // framebuffers. Return a non-PCI subsystem path so it accepts fb0.
-        "/sys/class/graphics/fb0/device/subsystem" => Some("/sys/bus/platform"),
-        _ => None,
-    }
-}
-
 fn path_from_raw(path: CString) -> Result<String, SyscallError> {
     String::k_from(path).map_err(|_| SyscallError::InvalidArguments)
 }
@@ -139,24 +115,13 @@ fn readlink_impl(
     out_buf: *mut u8,
     out_len: usize,
 ) -> Result<usize, SyscallError> {
-    if let Some(target) = pseudo_readlink_target(&path_str) {
-        let bytes = target.as_bytes();
-        let copied = core::cmp::min(bytes.len(), out_len);
-
-        unsafe {
-            slice::from_raw_parts_mut(out_buf, copied).copy_from_slice(&bytes[..copied]);
-        }
-
-        return Ok(copied);
-    }
-
-    if device_from_path(&path_str).is_some() {
-        return Err(SyscallError::InvalidArguments);
-    }
-
     let path = smart_resolve_path(path_str, start_from_current_dir)
         .ok_or(SyscallError::InvalidArguments)?;
-    let target = VirtualFS.lock().open(path)?.read_link()?;
+    let target = match VirtualFS.lock().open(path)?.read_link() {
+        Ok(target) => target,
+        Err(FSError::NotASymlink) => return Err(SyscallError::InvalidArguments),
+        Err(err) => return Err(err.into()),
+    };
     let bytes = target.as_bytes();
     let copied = core::cmp::min(bytes.len(), out_len);
 
@@ -213,7 +178,7 @@ define_syscall!(OpenAt, |dirfd: i32,
     let flags = OpenFlags::from_bits_truncate(flags);
     let create = flags.contains(OpenFlags::CREAT);
 
-    let path = Path::new(path_str.as_str());
+    let path = resolve_path_at(dirfd, &path_str)?;
     let object;
     if let Ok(file) = VirtualFS.lock().open(path.clone()) {
         if create && flags.contains(OpenFlags::EXCL) {
@@ -223,18 +188,10 @@ define_syscall!(OpenAt, |dirfd: i32,
     } else if create {
         VirtualFS.lock().create_file(path.clone())?;
         object = Arc::new(VirtualFS.lock().open(path)?);
-    } else if let Some(device) = device_from_path(&path_str) {
-        let device = crate::object::device::get_device(device.into())
-            .map_err(|_| SyscallError::FileNotFound)?;
-        let slot = current_process.lock().push_object(device);
-        s_println!("openat path={} flags={:#x} -> fd {}", path_str, flags.bits(), slot);
-        return Ok(slot);
     } else {
         s_println!("openat path={} flags={:#x} -> err {:?}", path_str, flags.bits(), SyscallError::FileNotFound);
         return Err(SyscallError::FileNotFound);
     }
-
-    let _ = path_is_relative_to_cwd(dirfd)?;
 
     let slot = current_process.lock().alloc_object_slot();
     current_process.lock().objects[slot] = Some(object);

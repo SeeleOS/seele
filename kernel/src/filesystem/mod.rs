@@ -1,12 +1,16 @@
 pub mod absolute_path;
 pub mod block_device;
+pub mod devfs;
 pub mod errors;
 pub mod impls;
 pub mod info;
 pub mod misc;
 pub mod object;
 pub mod path;
+pub mod procfs;
+pub mod staticfs;
 pub mod storage_operator;
+pub mod sysfs;
 pub mod vfs;
 pub mod vfs_operations;
 pub mod vfs_traits;
