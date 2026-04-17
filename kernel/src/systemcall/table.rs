@@ -50,8 +50,10 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         Execve,
         Exit,
         Wait4,
+        Alarm,
         Kill,
         Uname,
+        Umask,
         Getuid,
         Getgid,
         Geteuid,
@@ -119,7 +121,10 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         ExitGroup,
         Faccessat2,
         Getrandom,
-        Rseq
+        Rseq,
+        RtSigsuspend,
+        ClockGetres,
+        Setpriority
     );
 
     table

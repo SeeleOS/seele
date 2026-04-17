@@ -36,6 +36,7 @@ pub struct Process {
     pub group_id: ProcessGroupID,
     pub timers: Vec<Option<Timer>>,
     pub program_break: u64,
+    pub file_mode_creation_mask: u32,
 }
 
 impl Default for Process {
@@ -54,6 +55,7 @@ impl Default for Process {
             exit_code: None,
             parent: None,
             timers: Vec::new(),
+            file_mode_creation_mask: 0,
         }
     }
 }

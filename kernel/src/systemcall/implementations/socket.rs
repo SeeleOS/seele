@@ -28,17 +28,20 @@ fn path_from_sockaddr(address: *const u8, address_len: u32) -> Result<String, Sy
         .saturating_sub(2)
         .min(addr.sun_path.len());
     if path_len == 0 {
-        return Ok(String::new());
+        return Err(SyscallError::InvalidArguments);
     }
 
     if addr.sun_path[0] == 0 {
-        return Ok(String::from_utf8_lossy(&addr.sun_path[..path_len]).into_owned());
+        return Err(SyscallError::InvalidArguments);
     }
 
     let len = addr.sun_path[..path_len]
         .iter()
         .position(|&b| b == 0)
         .unwrap_or(path_len);
+    if len == 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
     Ok(String::from_utf8_lossy(&addr.sun_path[..len]).into_owned())
 }
 

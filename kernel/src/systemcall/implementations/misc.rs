@@ -151,6 +151,29 @@ define_syscall!(ClockGettime, |clock_id: i32, tp: u64| {
     Ok(0)
 });
 
+define_syscall!(ClockGetres, |clock_id: i32, tp: u64| {
+    let _ = crate::misc::timer::ClockId::try_from(clock_id as u64)
+        .map_err(|_| SyscallError::InvalidArguments)?;
+
+    if tp == 0 {
+        return Ok(0);
+    }
+
+    let tp = tp as *mut LinuxTimespec;
+    if tp.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    unsafe {
+        *tp = LinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 1,
+        };
+    }
+
+    Ok(0)
+});
+
 define_syscall!(TimeSinceBoot, {
     Ok(KernelTime::since_boot().as_nanoseconds() as usize)
 });
@@ -179,6 +202,14 @@ define_syscall!(Gettimeofday, |tv: u64, tz: u64| {
     }
 
     Ok(0)
+});
+
+define_syscall!(Umask, |mask: u32| {
+    let process = get_current_process();
+    let mut process = process.lock();
+    let old_mask = process.file_mode_creation_mask;
+    process.file_mode_creation_mask = mask & 0o777;
+    Ok(old_mask as usize)
 });
 
 define_syscall!(Brk, |addr: u64| {
@@ -264,6 +295,21 @@ define_syscall!(Nanosleep, |req: u64, rem: u64| {
     }
 
     Ok(0)
+});
+
+define_syscall!(Alarm, |_seconds: u32| { Ok(0) });
+
+define_syscall!(RtSigsuspend, |_mask: u64, sigset_size: usize| {
+    if sigset_size != 8 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    block_current_with_sig_check(BlockType::WakeRequired {
+        wake_type: crate::thread::yielding::WakeType::IO,
+        deadline: None,
+    })?;
+
+    Err(SyscallError::Interrupted)
 });
 
 define_syscall!(ClockNanosleep, |clock_id: i32,
@@ -424,6 +470,8 @@ define_syscall!(Clone, |flags: u64,
 define_syscall!(SchedYield, { Ok(0) });
 
 define_syscall!(Getpriority, |_which: i32, _who: i32| { Ok(0) });
+
+define_syscall!(Setpriority, |_which: i32, _who: i32, _prio: i32| { Ok(0) });
 
 define_syscall!(Getresuid, |ruid: u64, euid: u64, suid: u64| {
     for ptr in [ruid, euid, suid] {
