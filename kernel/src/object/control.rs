@@ -1,6 +1,6 @@
 use crate::object::FileFlags;
 use crate::{
-    object::misc::ObjectRef,
+    object::{error::ObjectError, misc::ObjectRef},
     process::misc::with_current_process,
     systemcall::utils::{SyscallError, SyscallResult},
 };
@@ -34,18 +34,22 @@ fn access_mode_bits(object: &ObjectRef) -> usize {
 
 pub fn control_object(object: ObjectRef, command: u64, arg: u64) -> SyscallResult {
     match FcntlCmd::try_from(command).map_err(|_| SyscallError::InvalidArguments)? {
-        FcntlCmd::SetFl => object
-            .set_flags(
-                FileFlags::from_bits(arg & O_NONBLOCK as u64)
-                    .ok_or(SyscallError::InvalidArguments)?,
-            )
-            .map(|_| 0usize)
-            .map_err(Into::into),
-        FcntlCmd::GetFl => object
-            .clone()
-            .get_flags()
-            .map_err(Into::into)
-            .map(|f| access_mode_bits(&object) | f.bits() as usize),
+        FcntlCmd::SetFl => match object.set_flags(
+            FileFlags::from_bits(arg & O_NONBLOCK as u64)
+                .ok_or(SyscallError::InvalidArguments)?,
+        ) {
+            Ok(()) | Err(ObjectError::Unimplemented) => Ok(0),
+            Err(err) => Err(err.into()),
+        },
+        FcntlCmd::GetFl => {
+            let flags = match object.clone().get_flags() {
+                Ok(flags) => flags.bits() as usize,
+                Err(ObjectError::Unimplemented) => 0,
+                Err(err) => return Err(err.into()),
+            };
+
+            Ok(access_mode_bits(&object) | flags)
+        }
         FcntlCmd::DupFd => with_current_process(|process| {
             process
                 .clone_object_with_min(object, arg as usize)
