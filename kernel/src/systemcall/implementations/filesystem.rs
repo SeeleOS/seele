@@ -168,6 +168,10 @@ define_syscall!(Chdir, |dir: String| {
 });
 
 define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
+    if buf_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
     let buf = unsafe { slice::from_raw_parts_mut(buf_ptr, len) };
     let process = get_current_process();
     let path_str = process.lock().current_directory.clone().as_string();
@@ -181,7 +185,7 @@ define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
         return Err(SyscallError::InvalidArguments);
     }
 
-    Ok(buf_ptr as usize)
+    Ok(path_len + 1)
 });
 
 define_syscall!(Fstat, |fd: u64, linux_stat_ptr: *mut LinuxStat| {
