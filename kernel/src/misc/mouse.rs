@@ -7,7 +7,6 @@ use core::{
 use futures_util::{Stream, StreamExt, task::AtomicWaker};
 use heapless::Deque;
 use ps2_mouse::Mouse;
-use seele_sys::abi::object::ObjectFlags;
 use spin::Mutex;
 use x86_64::{
     instructions::interrupts::without_interrupts,
@@ -19,7 +18,8 @@ use crate::{
     impl_cast_function,
     interrupts::hardware_interrupt::send_eoi,
     object::{
-        Object, device::get_device_ref, error::ObjectError, misc::ObjectResult, traits::Readable,
+        FileFlags, Object, device::get_device_ref, error::ObjectError, misc::ObjectResult,
+        traits::Readable,
     },
     polling::{event::PollableEvent, object::Pollable},
     thread::{
@@ -89,15 +89,15 @@ pub extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptSta
 
 #[derive(Debug, Default)]
 pub struct PS2MouseObject {
-    flags: Mutex<ObjectFlags>,
+    flags: Mutex<FileFlags>,
 }
 
 impl Object for PS2MouseObject {
-    fn get_flags(self: alloc::sync::Arc<Self>) -> ObjectResult<ObjectFlags> {
+    fn get_flags(self: alloc::sync::Arc<Self>) -> ObjectResult<FileFlags> {
         Ok(*self.flags.lock())
     }
 
-    fn set_flags(self: alloc::sync::Arc<Self>, flags: ObjectFlags) -> ObjectResult<()> {
+    fn set_flags(self: alloc::sync::Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
         *self.flags.lock() = flags;
 
         Ok(())
@@ -122,7 +122,7 @@ impl Readable for PS2MouseObject {
             let mut queue = without_interrupts(|| MOUSE_PACKETS.lock());
 
             if queue.is_empty() {
-                if self.flags.lock().contains(ObjectFlags::NONBLOCK) {
+                if self.flags.lock().contains(FileFlags::NONBLOCK) {
                     return Err(ObjectError::TryAgain);
                 }
 

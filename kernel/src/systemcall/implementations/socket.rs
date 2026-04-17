@@ -6,11 +6,9 @@ use crate::{
     object::Object,
     object::misc::ObjectRef,
     process::manager::get_current_process,
+    socket::{AF_UNIX, SOCK_NONBLOCK},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
-
-const AF_UNIX: u16 = 1;
-const SOCK_NONBLOCK: u64 = 0o4_000;
 
 #[repr(C)]
 struct LinuxSockAddrUn {
@@ -23,10 +21,22 @@ fn path_from_sockaddr(address: *const u8, address_len: u32) -> Result<String, Sy
         return Err(SyscallError::BadAddress);
     }
     let addr = unsafe { &*(address as *const LinuxSockAddrUn) };
-    if addr.sun_family != AF_UNIX {
+    if addr.sun_family != AF_UNIX as u16 {
         return Err(SyscallError::AddressFamilyNotSupported);
     }
-    let len = addr.sun_path.iter().position(|&b| b == 0).unwrap_or(addr.sun_path.len());
+    let path_len = (address_len as usize).saturating_sub(2).min(addr.sun_path.len());
+    if path_len == 0 {
+        return Ok(String::new());
+    }
+
+    if addr.sun_path[0] == 0 {
+        return Ok(String::from_utf8_lossy(&addr.sun_path[..path_len]).into_owned());
+    }
+
+    let len = addr.sun_path[..path_len]
+        .iter()
+        .position(|&b| b == 0)
+        .unwrap_or(path_len);
     Ok(String::from_utf8_lossy(&addr.sun_path[..len]).into_owned())
 }
 
@@ -36,7 +46,7 @@ define_syscall!(Socket, |domain: u64, kind: u64, protocol: u64| {
     if (kind & SOCK_NONBLOCK) != 0 {
         let _ = socket
             .clone()
-            .set_flags(seele_sys::abi::object::ObjectFlags::NONBLOCK);
+            .set_flags(crate::object::FileFlags::NONBLOCK);
     }
     let fd = get_current_process().lock().push_object(socket);
     Ok(fd)

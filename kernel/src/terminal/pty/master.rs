@@ -1,12 +1,11 @@
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
-use seele_sys::abi::object::ObjectFlags;
 use spin::Mutex;
 
 use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function,
     object::{
-        Object,
+        FileFlags, Object,
         config::ConfigurateRequest,
         error::ObjectError,
         misc::ObjectResult,
@@ -33,14 +32,14 @@ impl Pollable for PtyMaster {
 #[derive(Debug)]
 pub struct PtyMaster {
     shared: Arc<Mutex<PtyShared>>,
-    pub flags: Mutex<ObjectFlags>,
+    pub flags: Mutex<FileFlags>,
 }
 
 impl PtyMaster {
     pub fn new(shared: Arc<Mutex<PtyShared>>) -> Self {
         Self {
             shared,
-            flags: Mutex::new(ObjectFlags::default()),
+            flags: Mutex::new(FileFlags::default()),
         }
     }
 }

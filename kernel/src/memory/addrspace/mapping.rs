@@ -30,6 +30,10 @@ impl AddrSpace {
             area.lazy = false;
         }
 
+        // Keep metadata non-overlapping so page-fault lookup sees a single
+        // definitive backing/permission source for each virtual page.
+        self.unmap_areas(area.start, area.end);
+
         let insert_index = self
             .memory_areas
             .binary_search_by_key(&area.start, |existing| existing.start)
@@ -88,6 +92,19 @@ impl AddrSpace {
             if area_start < overlap_start {
                 let mut left = area.clone();
                 left.end = overlap_start;
+                if let Data::File {
+                    offset,
+                    file_bytes,
+                    file,
+                } = &area.data
+                {
+                    let span = left.end.as_u64() - left.start.as_u64();
+                    left.data = Data::File {
+                        offset: *offset,
+                        file_bytes: (*file_bytes).min(span),
+                        file: file.clone(),
+                    };
+                }
                 new_areas.push(left);
             }
 
@@ -101,10 +118,12 @@ impl AddrSpace {
                     file,
                 } = &area.data
                 {
+                    let span = right.end.as_u64() - right.start.as_u64();
                     right.data = Data::File {
                         offset: *offset + (overlap_end.as_u64() - area_start.as_u64()),
                         file_bytes: file_bytes
-                            .saturating_sub(overlap_end.as_u64() - area_start.as_u64()),
+                            .saturating_sub(overlap_end.as_u64() - area_start.as_u64())
+                            .min(span),
                         file: file.clone(),
                     };
                 }

@@ -40,9 +40,6 @@ impl AddrSpace {
                 let max_pages =
                     core::cmp::min(cluster_pages, area.pages().saturating_sub(page_index));
                 let mut first_frame = None;
-                let mut mapped_pages = Vec::with_capacity(max_pages as usize);
-                let mut total_read_len = 0usize;
-                let first_page_offset = page.start_address().as_u64() - area.start.as_u64();
 
                 for i in 0..max_pages {
                     let current_page = page + i;
@@ -69,29 +66,9 @@ impl AddrSpace {
 
                     let read_len = read_len as usize;
                     if read_len != 0 {
-                        total_read_len += read_len;
-                    }
-
-                    mapped_pages.push((write_addr, read_len));
-                }
-
-                if total_read_len != 0 {
-                    let mut cluster_data = vec![0u8; total_read_len];
-                    file.read_exact_at(&mut cluster_data, offset + first_page_offset)
-                        .expect("Failed to lazyload page cluster with file data");
-
-                    let mut data_offset = 0usize;
-                    for (write_addr, read_len) in mapped_pages {
-                        if read_len == 0 {
-                            continue;
-                        }
-
-                        core::ptr::copy_nonoverlapping(
-                            cluster_data.as_ptr().add(data_offset),
-                            write_addr as *mut u8,
-                            read_len,
-                        );
-                        data_offset += read_len;
+                        let dst = core::slice::from_raw_parts_mut(write_addr as *mut u8, read_len);
+                        file.read_exact_at(dst, offset + page_offset)
+                            .expect("Failed to lazyload file-backed page");
                     }
                 }
 

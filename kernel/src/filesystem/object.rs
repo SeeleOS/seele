@@ -8,7 +8,7 @@ use crate::{
         errors::FSError,
         info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
         vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
-        vfs_traits::FileLike,
+        vfs_traits::{FileLike, Whence},
     },
     impl_cast_function, impl_cast_function_non_trait,
     memory::addrspace::mem_area::Data,
@@ -159,7 +159,7 @@ impl Seekable for FileLikeObject {
     fn seek(
         self: alloc::sync::Arc<Self>,
         offset: i64,
-        seek_type: seele_sys::abi::object::SeekType,
+        seek_type: Whence,
     ) -> ObjectResult<usize> {
         if let FileLike::File(file) = &self.file {
             file.lock().seek(offset, seek_type).map_err(Into::into)

@@ -2,12 +2,11 @@ use alloc::string::String;
 use core::any::Any;
 
 use ext4plus::{file::File as Ext4InnerFile, inode::Inode};
-use seele_sys::abi::object::SeekType;
 
 use crate::filesystem::{
     errors::FSError,
     info::{self, FileLikeInfo, UnixPermission},
-    vfs_traits::{File, FileLikeType},
+    vfs_traits::{File, FileLikeType, Whence},
 };
 
 pub struct Ext4File {
@@ -65,12 +64,12 @@ impl File for Ext4File {
     fn seek(
         &mut self,
         offset: i64,
-        seek_type: seele_sys::abi::object::SeekType,
+        seek_type: Whence,
     ) -> crate::filesystem::vfs::FSResult<usize> {
         let pos = match seek_type {
-            SeekType::Start => offset,
-            SeekType::Current => self.inner.position() as i64 + offset,
-            SeekType::End => self.inner.inode().size_in_bytes() as i64 + offset,
+            Whence::Start => offset,
+            Whence::Current => self.inner.position() as i64 + offset,
+            Whence::End => self.inner.inode().size_in_bytes() as i64 + offset,
         };
 
         self.inner.seek_to(pos as u64);

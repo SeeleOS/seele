@@ -22,8 +22,8 @@ use crate::{
         misc::{ProcessID, init_stack_layout},
         object::init_objects,
     },
-    signal::{SIGNAL_AMOUNT, action::SignalAction, misc::default_signal_action_vec},
     s_println,
+    signal::{SIGNAL_AMOUNT, action::SignalAction, misc::default_signal_action_vec},
     thread::{
         THREAD_MANAGER,
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
@@ -32,10 +32,10 @@ use crate::{
     },
 };
 
-const DEFAULT_PATH: &str = "PATH=/programs";
+const DEFAULT_PATH: &str = "PATH=/bin:/usr/bin";
 const DEFAULT_TERM: &str = "TERM=xterm-256color";
 const DEFAULT_HOME: &str = "HOME=/home";
-const INIT_PATH: &str = "/programs/bash";
+const INIT_PATH: &str = "/bin/bash";
 const MAX_SHEBANG_DEPTH: usize = 4;
 
 fn parse_shebang(program_bytes: &[u8]) -> Result<Option<(Path, Option<String>)>, FSError> {
@@ -208,7 +208,14 @@ fn setup_process_inner(
     };
 
     with_profiling(
-        || init_stack_layout(&mut stack_builder, &program, interpreter_base, args, env),
+        || init_stack_layout(
+            &mut stack_builder,
+            &program,
+            interpreter_base,
+            &path_string,
+            args,
+            env,
+        ),
         alloc::format!("init_stack_layout {}", path_string).as_str(),
     );
 

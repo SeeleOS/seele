@@ -5,8 +5,9 @@ use x86_64::{VirtAddr, registers::model_specific::FsBase};
 
 use crate::{
     define_syscall,
-    memory::addrspace::mem_area::Data,
-    process::{manager::get_current_process},
+    memory::addrspace::mem_area::{Data, MemoryArea},
+    misc::others::permissions_to_flags,
+    process::manager::get_current_process,
     s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
@@ -159,15 +160,81 @@ fn prot_to_permissions(prot: i32) -> Result<Permissions, SyscallError> {
     Ok(permissions)
 }
 
+fn mapping_overlaps(
+    areas: &[crate::memory::addrspace::mem_area::MemoryArea],
+    start: VirtAddr,
+    end: VirtAddr,
+) -> bool {
+    areas.iter().any(|area| area.start < end && area.end > start)
+}
+
 define_syscall!(Mmap, |addr: u64, len: u64, prot: i32, flags: i32, fd: i32, offset: u64| {
     if len == 0 {
         return Err(SyscallError::InvalidArguments);
     }
-    if addr != 0 || (flags & (MAP_FIXED | MAP_FIXED_NOREPLACE)) != 0 {
-        return Err(SyscallError::NoSyscall);
-    }
     let permissions = prot_to_permissions(prot)?;
     let pages = len.div_ceil(4096);
+    let fixed = (flags & (MAP_FIXED | MAP_FIXED_NOREPLACE)) != 0;
+    let start = VirtAddr::new(addr);
+    let end = start + pages * 4096;
+
+    if fixed {
+        if addr == 0 || offset % 4096 != 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
+
+        let file_mapping = if (flags & MAP_ANONYMOUS) != 0 {
+            None
+        } else {
+            if fd < 0 {
+                return Err(SyscallError::InvalidArguments);
+            }
+            let object = crate::object::misc::get_object_current_process(fd as u64)
+                .map_err(SyscallError::from)?;
+            let file = object.as_file_like()?;
+            let file_bytes = file
+                .info()
+                .map(|info| {
+                    (info.size as u64)
+                        .saturating_sub(offset)
+                        .min(pages * 4096)
+                })
+                .unwrap_or(0);
+            Some(Data::File {
+                offset,
+                file_bytes,
+                file,
+            })
+        };
+
+        let current = get_current_process();
+        let mut current = current.lock();
+
+        if (flags & MAP_FIXED_NOREPLACE) != 0
+            && mapping_overlaps(&current.addrspace.memory_areas, start, end)
+        {
+            return Err(SyscallError::FileAlreadyExists);
+        }
+
+        if (flags & MAP_FIXED) != 0 {
+            current.addrspace.unmap(start, pages * 4096);
+        }
+
+        let data = file_mapping.unwrap_or(Data::Normal);
+
+        current.addrspace.register_area(MemoryArea::new(
+            start,
+            pages,
+            permissions_to_flags(permissions),
+            data,
+            true,
+        ));
+        return Ok(addr as usize);
+    }
+
+    if addr != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
 
     if (flags & MAP_ANONYMOUS) != 0 {
         let current = get_current_process();

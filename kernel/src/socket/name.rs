@@ -1,9 +1,7 @@
 use alloc::{vec, vec::Vec};
 use core::cmp::min;
 
-use seele_sys::abi::socket::AF_UNIX;
-
-use super::{SocketError, SocketResult, UnixSocketObject, UnixSocketState};
+use super::{AF_UNIX, SocketError, SocketResult, UnixSocketObject, UnixSocketState};
 
 const SOCKADDR_UN_PATH_LEN: usize = 108;
 const SA_FAMILY_LEN: usize = 2;
@@ -14,7 +12,11 @@ fn serialize_unix_addr(path: Option<&str>) -> Vec<u8> {
 
     if let Some(path) = path {
         let path_bytes = path.as_bytes();
-        let copy_len = min(path_bytes.len(), SOCKADDR_UN_PATH_LEN.saturating_sub(1));
+        let copy_len = if path_bytes.first() == Some(&0) {
+            min(path_bytes.len(), SOCKADDR_UN_PATH_LEN)
+        } else {
+            min(path_bytes.len(), SOCKADDR_UN_PATH_LEN.saturating_sub(1))
+        };
         out.resize(SA_FAMILY_LEN + SOCKADDR_UN_PATH_LEN, 0);
         out[SA_FAMILY_LEN..SA_FAMILY_LEN + copy_len].copy_from_slice(&path_bytes[..copy_len]);
     }

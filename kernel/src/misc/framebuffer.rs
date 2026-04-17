@@ -1,11 +1,30 @@
 use bootloader_api::info::PixelFormat;
 use conquer_once::spin::OnceCell;
 use core::sync::atomic::{AtomicBool, Ordering};
-use seele_sys::abi::{framebuffer::FramebufferInfo, framebuffer::FramebufferPixelFormat};
 use spin::Mutex;
 use x86_64::{VirtAddr, structures::paging::Translate};
 
 use crate::{memory::paging::MAPPER, terminal::Color};
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FramebufferPixelFormat {
+    #[default]
+    Rgb = 0,
+    Bgr = 1,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FramebufferInfo {
+    pub phys_addr: usize,
+    pub width: usize,
+    pub height: usize,
+    pub stride: usize,
+    pub bytes_per_pixel: usize,
+    pub byte_len: usize,
+    pub pixel_format: FramebufferPixelFormat,
+}
 
 pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
     log::info!("graphics: init start");

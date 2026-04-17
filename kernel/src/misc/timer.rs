@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
+use num_enum::TryFromPrimitive;
 use seele_sys::{
     SyscallResult,
-    abi::time::{TimeType, TimerNotifyStruct, TimerStateStruct, TimerStateType},
     errors::SyscallError,
     signal::Signal,
 };
@@ -10,6 +10,55 @@ use crate::{
     misc::{others::push_and_return_index, time::Time},
     process::Process,
 };
+
+#[derive(TryFromPrimitive, Debug, Clone, Copy, Default, Eq, PartialEq)]
+#[repr(u64)]
+pub enum ClockId {
+    Realtime,
+    #[default]
+    SinceBoot,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+#[repr(u8)]
+pub enum TimerNotify {
+    #[default]
+    None = 0,
+    Signal = 1,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct Sigevent {
+    pub notify_type: TimerNotify,
+    pub signal: Signal,
+}
+
+impl Default for Sigevent {
+    fn default() -> Self {
+        Self {
+            notify_type: TimerNotify::None,
+            signal: Signal::Alarm,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(u64)]
+pub enum TimerMode {
+    #[default]
+    Disabled = 0,
+    OneShot,
+    Periodic,
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct TimerSpec {
+    pub state_type: TimerMode,
+    pub deadline: u64,
+    pub interval: u64,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum TimerState {
@@ -24,23 +73,23 @@ pub enum TimerNotifyMethod {
     Signal(Signal),
 }
 
-impl From<TimerNotifyStruct> for TimerNotifyMethod {
-    fn from(value: TimerNotifyStruct) -> Self {
+impl From<Sigevent> for TimerNotifyMethod {
+    fn from(value: Sigevent) -> Self {
         match value.notify_type {
-            seele_sys::abi::time::TimerNotifyType::None => Self::None,
-            seele_sys::abi::time::TimerNotifyType::Signal => Self::Signal(value.signal),
+            TimerNotify::None => Self::None,
+            TimerNotify::Signal => Self::Signal(value.signal),
         }
     }
 }
 
-impl From<TimerStateStruct> for TimerState {
-    fn from(value: TimerStateStruct) -> Self {
+impl From<TimerSpec> for TimerState {
+    fn from(value: TimerSpec) -> Self {
         match value.state_type {
-            TimerStateType::Disabled => Self::Disabled,
-            TimerStateType::OneShot => Self::OneShot {
+            TimerMode::Disabled => Self::Disabled,
+            TimerMode::OneShot => Self::OneShot {
                 deadline: Time(value.deadline),
             },
-            TimerStateType::Periodic => Self::Periodic {
+            TimerMode::Periodic => Self::Periodic {
                 deadline: Time(value.deadline),
                 interval: Time(value.interval),
             },
@@ -48,21 +97,21 @@ impl From<TimerStateStruct> for TimerState {
     }
 }
 
-impl From<TimerState> for TimerStateStruct {
+impl From<TimerState> for TimerSpec {
     fn from(value: TimerState) -> Self {
         match value {
             TimerState::Disabled => Self {
-                state_type: TimerStateType::Disabled,
+                state_type: TimerMode::Disabled,
                 deadline: 0,
                 interval: 0,
             },
             TimerState::OneShot { deadline } => Self {
-                state_type: TimerStateType::OneShot,
+                state_type: TimerMode::OneShot,
                 deadline: deadline.0,
                 interval: 0,
             },
             TimerState::Periodic { deadline, interval } => Self {
-                state_type: TimerStateType::Periodic,
+                state_type: TimerMode::Periodic,
                 deadline: deadline.0,
                 interval: interval.0,
             },
@@ -79,7 +128,7 @@ pub enum TimerAction {
 #[derive(Debug)]
 pub struct Timer {
     pub notify_method: TimerNotifyMethod,
-    pub time_type: TimeType,
+    pub time_type: ClockId,
     pub state: TimerState,
     pub overrun: u64,
 }
@@ -87,8 +136,8 @@ pub struct Timer {
 impl Timer {
     pub fn get_appropriate_time(&self) -> Time {
         match self.time_type {
-            TimeType::Realtime => Time::current(),
-            TimeType::SinceBoot => Time::since_boot(),
+            ClockId::Realtime => Time::current(),
+            ClockId::SinceBoot => Time::since_boot(),
         }
     }
 
@@ -133,7 +182,11 @@ impl Timer {
 }
 
 impl Process {
-    pub fn create_timer(&mut self, time_type: TimeType, notify_method: TimerNotifyMethod) -> usize {
+    pub fn create_timer(
+        &mut self,
+        time_type: ClockId,
+        notify_method: TimerNotifyMethod,
+    ) -> usize {
         let timer = Timer {
             notify_method,
             time_type,

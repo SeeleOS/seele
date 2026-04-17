@@ -1,7 +1,7 @@
 use core::char;
 
 use alloc::collections::vec_deque::VecDeque;
-use seele_sys::{abi::object::TerminalInfo, signal::Signal};
+use seele_sys::signal::Signal;
 use spin::mutex::Mutex;
 
 use crate::{
@@ -11,12 +11,13 @@ use crate::{
     terminal::{
         line_discipline::{process_input_byte, process_output_bytes},
         misc::{LINE_BUFFER, flush_line_buffer},
+        object::TerminalSettings,
         state::DEFAULT_TERMINAL,
     },
     thread::THREAD_MANAGER,
 };
 
-fn handle_interrupt_char(info: &TerminalInfo) {
+fn handle_interrupt_char(info: &TerminalSettings) {
     if let Some(group_id) = *get_default_tty().active_group.lock()
         && info.send_sig_on_special_chars
     {

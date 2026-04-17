@@ -1,6 +1,5 @@
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 use conquer_once::spin::OnceCell;
-use seele_sys::abi::object::ObjectFlags;
 use spin::Mutex;
 
 use crate::{
@@ -8,7 +7,7 @@ use crate::{
     impl_cast_function,
     keyboard::decoding_task::{KEYBOARD_QUEUE, RAW_QUEUE},
     object::{
-        Object,
+        FileFlags, Object,
         config::ConfigurateRequest,
         misc::ObjectRef,
         queue_helpers::{copy_from_queue, read_or_block},
@@ -71,7 +70,7 @@ pub struct TtyDevice {
     /// The foreground process group currently attached to this tty.
     /// Line-discipline generated signals such as Ctrl+C should be sent here.
     pub active_group: Mutex<Option<ProcessGroupID>>,
-    pub flags: Mutex<ObjectFlags>,
+    pub flags: Mutex<FileFlags>,
 }
 
 impl TtyDevice {
@@ -80,7 +79,7 @@ impl TtyDevice {
             terminal,
             linux_console: Mutex::new(LinuxConsoleState::default()),
             active_group: Mutex::new(None),
-            flags: Mutex::new(ObjectFlags::empty()),
+            flags: Mutex::new(FileFlags::empty()),
         }
     }
 
@@ -132,13 +131,14 @@ impl Configuratable for TtyDevice {
         }
 
         match request {
-            ConfigurateRequest::TermGetActiveGroup => {
-                Ok(self.active_group.lock().unwrap().0 as isize)
-            }
-            ConfigurateRequest::TermSetActiveGroup(group) => {
-                *self.active_group.lock() = Some(ProcessGroupID(group));
+            ConfigurateRequest::LinuxTiocgPgrp(ptr) => unsafe {
+                *ptr = self.active_group.lock().unwrap().0 as i32;
                 Ok(0)
-            }
+            },
+            ConfigurateRequest::LinuxTiocspgrp(ptr) => unsafe {
+                *self.active_group.lock() = Some(ProcessGroupID((*ptr) as u64));
+                Ok(0)
+            },
             _ => self.terminal.lock().configure(request),
         }
     }

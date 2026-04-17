@@ -3,7 +3,7 @@ use crate::process::manager::MANAGER;
 use crate::process::misc::ProcessID;
 use crate::signal::action::{SignalHandlingType, Signals};
 use crate::systemcall::utils::*;
-use crate::thread::get_current_thread;
+use crate::thread::{THREAD_MANAGER, get_current_thread};
 use crate::thread::misc::SnapshotState;
 use crate::thread::scheduling::return_to_executor_no_save;
 use crate::{
@@ -146,6 +146,29 @@ define_syscall!(Kill, |pid: i32, signal: i32| {
         }
     }
 
+    Ok(0)
+});
+
+define_syscall!(Tgkill, |tgid: i32, tid: i32, signal: i32| {
+    let signal = Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?;
+    let tgid = ProcessID(tgid as u64);
+    let tid = crate::thread::misc::ThreadID(tid as u64);
+
+    let thread = THREAD_MANAGER
+        .get()
+        .unwrap()
+        .lock()
+        .threads
+        .get(&tid)
+        .cloned()
+        .ok_or(SyscallError::NoProcess)?;
+
+    let process = thread.lock().parent.clone();
+    if process.lock().pid != tgid {
+        return Err(SyscallError::NoProcess);
+    }
+
+    process.lock().send_signal(signal);
     Ok(0)
 });
 

@@ -1,15 +1,14 @@
 use crate::{
-    misc::timer::{TimerNotifyMethod, TimerState},
+    misc::timer::{ClockId, Sigevent, TimerSpec, TimerNotifyMethod, TimerState},
     process::misc::with_current_process,
     systemcall::utils::{SyscallError, SyscallImpl, SyscallResult},
 };
-use seele_sys::abi::time::{TimeType, TimerNotifyStruct, TimerStateStruct};
 
 use crate::define_syscall;
 
 define_syscall!(
     TimerCreate,
-    |time_type: TimeType, notify_method: *const TimerNotifyStruct| {
+    |time_type: ClockId, notify_method: *const Sigevent| {
         unsafe {
             with_current_process(|process| {
                 Ok(process.create_timer(time_type, TimerNotifyMethod::from(*notify_method)))
@@ -29,7 +28,7 @@ define_syscall!(TimerGetoverrun, |id: usize| {
 
 define_syscall!(
     TimerSettime,
-    |id: usize, timer_state: *const TimerStateStruct| {
+    |id: usize, timer_state: *const TimerSpec| {
         unsafe {
             with_current_process(|process| {
                 process
@@ -47,10 +46,10 @@ define_syscall!(
 
 define_syscall!(
     TimerGettime,
-    |id: usize, timer_state: *mut TimerStateStruct| {
+    |id: usize, timer_state: *mut TimerSpec| {
         unsafe {
             with_current_process(|process| {
-                *timer_state = TimerStateStruct::from(
+                *timer_state = TimerSpec::from(
                     process
                         .timers
                         .get_mut(id)

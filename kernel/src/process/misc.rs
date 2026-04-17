@@ -60,6 +60,7 @@ pub fn init_stack_layout(
     builder: &mut StackBuilder,
     file: &ElfInfo,
     interpreter_base: Option<u64>,
+    exec_path: &str,
     args: Vec<String>,
     env_vars: Vec<String>,
 ) {
@@ -71,12 +72,20 @@ pub fn init_stack_layout(
         .iter()
         .for_each(|f| env_ptrs.push(builder.push_str(f)));
 
-    let aux_entries = if interpreter_base.is_some() { 7 } else { 6 };
+    let execfn_ptr = builder.push_str(exec_path);
+    let platform_ptr = builder.push_str("x86_64");
+    let random_bytes = [
+        crate::misc::time::Time::current().as_nanoseconds(),
+        crate::misc::time::Time::since_boot().as_nanoseconds(),
+    ];
+    let random_ptr = builder.push_struct(&random_bytes);
+
+    let aux_entries = if interpreter_base.is_some() { 20 } else { 19 };
     let aux_bytes = aux_entries * 2 * 8;
     let argv_env_bytes = (arg_ptrs.len() + env_ptrs.len() + 3) as u64 * 8;
     builder.align_for_pushes(aux_bytes + argv_env_bytes, 16);
 
-    builder.push_aux_entries(file, interpreter_base);
+    builder.push_aux_entries(file, interpreter_base, execfn_ptr, platform_ptr, random_ptr);
 
     builder.push(0); // envp terminator
     env_ptrs.iter().rev().for_each(|f| builder.push(*f));

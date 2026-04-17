@@ -1,19 +1,17 @@
 use alloc::sync::Arc;
-use seele_sys::abi::object::ObjectFlags;
 use spin::Mutex;
 
 use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function,
     object::{
-        Object,
+        FileFlags, Object,
         config::ConfigurateRequest,
         misc::ObjectResult,
         queue_helpers::{copy_from_queue, read_or_block},
         traits::{Configuratable, Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
-    process::group::ProcessGroupID,
     terminal::{
         linux_kd::{LinuxConsoleState, handle_kd_request},
         line_discipline::process_output_bytes,
@@ -37,7 +35,7 @@ impl Pollable for PtySlave {
 pub struct PtySlave {
     shared: Arc<Mutex<PtyShared>>,
     linux_console: Mutex<LinuxConsoleState>,
-    pub flags: Mutex<ObjectFlags>,
+    pub flags: Mutex<FileFlags>,
 }
 
 impl PtySlave {
@@ -45,7 +43,7 @@ impl PtySlave {
         Self {
             shared,
             linux_console: Mutex::new(LinuxConsoleState::default()),
-            flags: Mutex::new(ObjectFlags::default()),
+            flags: Mutex::new(FileFlags::default()),
         }
     }
 }
@@ -99,24 +97,7 @@ impl Configuratable for PtySlave {
             return Ok(result);
         }
 
-        match request {
-            ConfigurateRequest::TermGetActiveGroup => {
-                Ok(self.shared.lock().active_group.unwrap().0 as isize)
-            }
-            ConfigurateRequest::TermSetActiveGroup(group) => {
-                self.shared.lock().active_group = Some(ProcessGroupID(group));
-                Ok(0)
-            }
-            ConfigurateRequest::GetTerminalInfo(term_info) => unsafe {
-                *term_info = self.shared.lock().info;
-                Ok(0)
-            },
-            ConfigurateRequest::SetTerminalInfo(term_info) => unsafe {
-                self.shared.lock().info = *term_info;
-                Ok(0)
-            },
-            _ => Ok(0),
-        }
+        Ok(0)
     }
 }
 

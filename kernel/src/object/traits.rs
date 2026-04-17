@@ -1,9 +1,9 @@
 use alloc::sync::Arc;
-use seele_sys::{abi::object::SeekType, permission::Permissions};
+use seele_sys::permission::Permissions;
 use x86_64::VirtAddr;
 
 use crate::{
-    filesystem::info::LinuxStat,
+    filesystem::{info::LinuxStat, vfs_traits::Whence},
     object::{Object, config::ConfigurateRequest, misc::ObjectResult},
 };
 
@@ -31,7 +31,7 @@ pub trait MemoryMappable: Object {
 }
 
 pub trait Seekable: Object {
-    fn seek(self: Arc<Self>, offset: i64, seek_type: SeekType) -> ObjectResult<usize>;
+    fn seek(self: Arc<Self>, offset: i64, seek_type: Whence) -> ObjectResult<usize>;
 }
 
 /// Objects that can synthesize a Linux-style stat result for `fstat`/`stat`.

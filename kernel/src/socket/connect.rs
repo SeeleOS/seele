@@ -1,5 +1,4 @@
 use alloc::{string::String, sync::Arc};
-use seele_sys::abi::object::ObjectFlags;
 use spin::Mutex;
 
 use super::{
@@ -8,6 +7,7 @@ use super::{
 };
 use crate::polling::event::PollableEvent;
 use crate::process::manager::get_current_process;
+use crate::object::FileFlags;
 
 impl UnixSocketObject {
     pub fn connect(self: &Arc<Self>, path: String) -> SocketResult<()> {
@@ -30,7 +30,7 @@ impl UnixSocketObject {
         *client_stream.owner.lock() = Some(Arc::downgrade(self));
         let server_socket = Arc::new(Self {
             state: Mutex::new(UnixSocketState::Stream(server_stream.clone())),
-            flags: Mutex::new(ObjectFlags::empty()),
+            flags: Mutex::new(FileFlags::empty()),
         });
         *server_stream.owner.lock() = Some(Arc::downgrade(&server_socket));
         *server_stream.peer_cred.lock() = SocketPeerCred {

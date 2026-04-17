@@ -1,7 +1,7 @@
 use crate::{
     impl_cast_function, impl_cast_function_non_trait,
     object::{
-        Object,
+        FileFlags, Object,
         traits::{Readable, Writable},
     },
     polling::object::Pollable,
@@ -12,13 +12,13 @@ use super::UnixSocketObject;
 impl Object for UnixSocketObject {
     fn get_flags(
         self: alloc::sync::Arc<Self>,
-    ) -> crate::object::misc::ObjectResult<seele_sys::abi::object::ObjectFlags> {
+    ) -> crate::object::misc::ObjectResult<FileFlags> {
         Ok(*self.flags.lock())
     }
 
     fn set_flags(
         self: alloc::sync::Arc<Self>,
-        flags: seele_sys::abi::object::ObjectFlags,
+        flags: FileFlags,
     ) -> crate::object::misc::ObjectResult<()> {
         *self.flags.lock() = flags;
         Ok(())

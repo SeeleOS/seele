@@ -125,10 +125,12 @@ impl AddrSpace {
                 file,
             } = &area.data
             {
+                let span = middle.end.as_u64() - middle.start.as_u64();
                 middle.data = Data::File {
                     offset: *offset + (overlap_start.as_u64() - area.start.as_u64()),
                     file_bytes: file_bytes
-                        .saturating_sub(overlap_start.as_u64() - area.start.as_u64()),
+                        .saturating_sub(overlap_start.as_u64() - area.start.as_u64())
+                        .min(span),
                     file: file.clone(),
                 };
             }

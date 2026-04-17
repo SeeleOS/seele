@@ -2,10 +2,6 @@ use alloc::{string::String, vec::Vec};
 use futures_util::future::OkInto;
 use seele_sys::{
     SyscallResult,
-    abi::{
-        object::SeekType,
-        time::{TimeType, TimerNotifyStruct, TimerStateStruct},
-    },
     errors::SyscallError,
     misc::SystemInfo,
     permission::Permissions,
@@ -19,6 +15,7 @@ use crate::{
     misc::{
         c_types::{CString, CVec},
         error::AsSyscallError,
+        timer::{ClockId, Sigevent, TimerSpec},
         others::KernelFrom,
     },
     object::misc::{ObjectRef, get_object_current_process},
@@ -29,6 +26,7 @@ use crate::{
         manager::MANAGER,
         misc::{ProcessID, get_process_with_pid},
     },
+    filesystem::vfs_traits::Whence,
     signal::{Signal, action::SignalAction},
     systemcall::implementations::PollResult,
 };
@@ -67,16 +65,16 @@ add_syscall_arg_type!(
     usize,
     *const u8,
     *mut LinuxStat,
-    *const TimerNotifyStruct,
+    *const Sigevent,
     *mut u32,
     u64,
     *mut u8,
     *mut u64,
     *mut PollResult,
     i32,
-    *const TimerStateStruct,
+    *const TimerSpec,
     *mut i32,
-    *mut TimerStateStruct,
+    *mut TimerSpec,
     i64,
     *mut SignalAction,
     *const SignalAction,
@@ -118,12 +116,12 @@ add_syscall_arg_type!(Permissions, val, {
     Permissions::from_bits(val).ok_or(SyscallError::InvalidArguments)
 });
 
-add_syscall_arg_type!(SeekType, val, {
-    SeekType::try_from(val).map_err(|_| SyscallError::InvalidArguments)
+add_syscall_arg_type!(Whence, val, {
+    Whence::try_from(val).map_err(|_| SyscallError::InvalidArguments)
 });
 
 add_syscall_arg_type!(ProcessGroupID, val, { Ok(ProcessGroupID(val)) });
 
-add_syscall_arg_type!(TimeType, val, {
-    TimeType::try_from(val).map_err(|_| SyscallError::InvalidArguments)
+add_syscall_arg_type!(ClockId, val, {
+    ClockId::try_from(val).map_err(|_| SyscallError::InvalidArguments)
 });

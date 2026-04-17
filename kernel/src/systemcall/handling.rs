@@ -63,7 +63,7 @@ fn syscall_handler_unwrapped(
     arg6: u64,
 ) -> isize {
     let syscall = SyscallNumber::from_number(syscall_no as usize);
-    let should_log = false; //matches!(syscall, Some(SyscallNumber::WaitForProcessExit));
+    let should_log = true;
 
     if should_log {
         match syscall {

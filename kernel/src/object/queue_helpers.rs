@@ -1,9 +1,8 @@
 use alloc::collections::vec_deque::VecDeque;
-use seele_sys::abi::object::ObjectFlags;
 use spin::Mutex;
 
 use crate::{
-    object::{error::ObjectError, misc::ObjectResult},
+    object::{FileFlags, error::ObjectError, misc::ObjectResult},
     thread::yielding::{
         BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
     },
@@ -30,7 +29,7 @@ pub fn push_to_queue(queue: &mut VecDeque<u8>, buffer: &[u8]) {
 
 pub fn read_or_block<F>(
     buffer: &mut [u8],
-    flags: &Mutex<ObjectFlags>,
+    flags: &Mutex<FileFlags>,
     wake_type: WakeType,
     mut try_read: F,
 ) -> ObjectResult<usize>
@@ -42,7 +41,7 @@ where
             return Ok(read_chars);
         }
 
-        if flags.lock().contains(ObjectFlags::NONBLOCK) {
+        if flags.lock().contains(FileFlags::NONBLOCK) {
             return Err(ObjectError::TryAgain);
         }
 

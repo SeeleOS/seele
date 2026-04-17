@@ -27,6 +27,10 @@ define_syscall!(Getppid, {
     }
 });
 
+define_syscall!(Getpgrp, {
+    Ok(get_current_process().lock().group_id.0 as usize)
+});
+
 define_syscall!(
     Wait4,
     |target_process: i32, status_ptr: *mut i32, options: i32, _rusage: u64| {
@@ -114,6 +118,11 @@ define_syscall!(Exit, |exit_code: u64| {
     return_to_executor_no_save();
 });
 
+define_syscall!(ExitGroup, |exit_code: u64| {
+    terminate_process(get_current_process(), exit_code);
+    return_to_executor_no_save();
+});
+
 define_syscall!(Fork, {
     let mut manager = MANAGER.lock();
     log::debug!("start fork");
@@ -127,6 +136,16 @@ define_syscall!(Getpid, {
 
 define_syscall!(Gettid, {
     Ok(get_current_thread().lock().id.0 as usize)
+});
+
+define_syscall!(SetTidAddress, |tidptr: *mut i32| {
+    let tid = get_current_thread().lock().id.0 as i32;
+    if !tidptr.is_null() {
+        unsafe {
+            *tidptr = tid;
+        }
+    }
+    Ok(tid as usize)
 });
 
 define_syscall!(Getpgid, |pid: i32| {

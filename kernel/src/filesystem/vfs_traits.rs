@@ -2,13 +2,21 @@ use core::any::Any;
 use core::fmt::Debug;
 
 use alloc::{boxed::Box, string::String, vec::Vec};
-use seele_sys::abi::object::SeekType;
+use num_enum::TryFromPrimitive;
 
 use crate::filesystem::{
     info::{DirectoryContentInfo, FileLikeInfo, UnixPermission},
     path::Path,
     vfs::{FSResult, WrappedDirectory, WrappedFile, WrappedSymlink},
 };
+
+#[repr(u64)]
+#[derive(Clone, Copy, TryFromPrimitive, Debug)]
+pub enum Whence {
+    Start = 0,
+    Current = 1,
+    End = 2,
+}
 
 pub trait File: Send + Sync {
     fn as_any(&self) -> &dyn Any;
@@ -17,7 +25,7 @@ pub trait File: Send + Sync {
     fn read_at(&mut self, buffer: &mut [u8], offset: u64) -> FSResult<usize>;
     fn read(&mut self, buffer: &mut [u8]) -> FSResult<usize>;
     fn write(&mut self, buffer: &[u8]) -> FSResult<usize>;
-    fn seek(&mut self, offset: i64, seek_type: SeekType) -> FSResult<usize>;
+    fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize>;
 }
 
 pub trait Directory: Send + Sync {

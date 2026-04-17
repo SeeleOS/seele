@@ -26,6 +26,12 @@ pub struct Thread {
 
     pub saved_blocked_signals: Vec<Signals>,
     pub blocked_signals: Signals,
+    pub robust_list_head: u64,
+    pub robust_list_len: usize,
+    pub rseq_area: u64,
+    pub rseq_len: u32,
+    pub rseq_flags: u32,
+    pub rseq_sig: u32,
 
     pub sig_handler_snapshot: ThreadSnapshot,
 }
@@ -43,6 +49,12 @@ impl Default for Thread {
             state: State::Ready,
             kernel_stack_top: 0,
             blocked_signals: Signals::default(),
+            robust_list_head: 0,
+            robust_list_len: 0,
+            rseq_area: 0,
+            rseq_len: 0,
+            rseq_flags: 0,
+            rseq_sig: 0,
         }
     }
 }

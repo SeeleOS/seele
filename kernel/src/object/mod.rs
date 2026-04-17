@@ -1,7 +1,14 @@
 use core::fmt::Debug;
 
 use alloc::sync::Arc;
-use seele_sys::{SyscallResult, abi::object::ObjectFlags, errors::SyscallError};
+use seele_sys::{SyscallResult, errors::SyscallError};
+
+bitflags::bitflags! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    pub struct FileFlags: u64 {
+        const NONBLOCK = 1 << 0;
+    }
+}
 
 use crate::{
     filesystem::object::FileLikeObject,
@@ -48,11 +55,11 @@ pub trait Object: Send + Sync + Debug {
         core::any::type_name::<Self>()
     }
 
-    fn get_flags(self: Arc<Self>) -> ObjectResult<ObjectFlags> {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
         Err(ObjectError::Unimplemented)
     }
 
-    fn set_flags(self: Arc<Self>, flags: ObjectFlags) -> ObjectResult<()> {
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
         Err(ObjectError::Unimplemented)
     }
 

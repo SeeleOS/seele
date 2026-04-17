@@ -1,5 +1,6 @@
 use alloc::collections::vec_deque::VecDeque;
-use seele_sys::abi::object::TerminalInfo;
+
+use super::object::TerminalSettings;
 
 /// Apply the terminal input line discipline to one incoming byte.
 ///
@@ -11,7 +12,7 @@ use seele_sys::abi::object::TerminalInfo;
 /// `Interrupt` runs when the input byte should trigger a line-discipline
 /// generated signal such as Ctrl-C.
 pub fn process_input_byte<QueueByte, EchoBytes, Interrupt>(
-    info: &TerminalInfo,
+    info: &TerminalSettings,
     line_buffer: &mut VecDeque<u8>,
     byte: u8,
     mut queue_byte: QueueByte,
@@ -70,7 +71,7 @@ pub fn process_input_byte<QueueByte, EchoBytes, Interrupt>(
 ///
 /// At the moment this only models ONLCR, while preserving existing CRLF
 /// sequences instead of expanding them into CRCRLF.
-pub fn process_output_bytes<EmitByte>(info: &TerminalInfo, buffer: &[u8], mut emit_byte: EmitByte)
+pub fn process_output_bytes<EmitByte>(info: &TerminalSettings, buffer: &[u8], mut emit_byte: EmitByte)
 where
     EmitByte: FnMut(u8),
 {

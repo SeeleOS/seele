@@ -14,7 +14,6 @@ use crate::{
     },
     object::{
         Object,
-        config::ConfigurateRequest,
         error::ObjectError,
         traits::{Configuratable, MemoryMappable, Readable, Writable},
     },
@@ -127,22 +126,8 @@ impl MemoryMappable for FramebufferObject {
 impl Configuratable for FramebufferObject {
     fn configure(
         &self,
-        request: crate::object::config::ConfigurateRequest,
+        _request: crate::object::config::ConfigurateRequest,
     ) -> crate::object::misc::ObjectResult<isize> {
-        match request {
-            ConfigurateRequest::GetFramebufferInfo(fb_info) => unsafe {
-                fb_info.write(FRAME_BUFFER.get().unwrap().lock().fb_info());
-            },
-            ConfigurateRequest::FbTakeControl => {
-                *self.used_by_user.lock() = true;
-                framebuffer_set_user_controlled(true);
-            }
-            ConfigurateRequest::FbRelease => {
-                *self.used_by_user.lock() = false;
-                framebuffer_set_user_controlled(false);
-            }
-            _ => return Err(ObjectError::InvalidArguments),
-        }
-        Ok(0)
+        Err(ObjectError::InvalidArguments)
     }
 }

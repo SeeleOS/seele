@@ -1,9 +1,11 @@
 use alloc::vec::Vec;
 use core::{mem, slice};
 
-use seele_sys::abi::socket;
-
-use super::{SocketError, SocketResult, UnixSocketObject, UnixSocketState};
+use super::{
+    AF_UNIX, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PASSCRED, SO_PEERCRED, SO_PROTOCOL,
+    SO_RCVBUF, SO_REUSEADDR, SO_SNDBUF, SO_TYPE, SOCK_STREAM, SOL_SOCKET, SocketError,
+    SocketResult, UnixSocketObject, UnixSocketState,
+};
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
 
@@ -22,24 +24,24 @@ impl UnixSocketObject {
         option_name: u64,
         option_len: usize,
     ) -> SocketResult<Vec<u8>> {
-        if level != socket::SOL_SOCKET {
+        if level != SOL_SOCKET {
             return Err(SocketError::InvalidArguments);
         }
 
         match option_name {
-            socket::SO_ERROR => Self::encode_i32(option_len, 0),
-            socket::SO_TYPE => Self::encode_i32(option_len, socket::SOCK_STREAM as i32),
-            socket::SO_ACCEPTCONN => Self::encode_i32(
+            SO_ERROR => Self::encode_i32(option_len, 0),
+            SO_TYPE => Self::encode_i32(option_len, SOCK_STREAM as i32),
+            SO_ACCEPTCONN => Self::encode_i32(
                 option_len,
                 matches!(&*self.state.lock(), UnixSocketState::Listener(_)) as i32,
             ),
-            socket::SO_DOMAIN => Self::encode_i32(option_len, socket::AF_UNIX as i32),
-            socket::SO_PROTOCOL => Self::encode_i32(option_len, 0),
-            socket::SO_SNDBUF | socket::SO_RCVBUF => {
+            SO_DOMAIN => Self::encode_i32(option_len, AF_UNIX as i32),
+            SO_PROTOCOL => Self::encode_i32(option_len, 0),
+            SO_SNDBUF | SO_RCVBUF => {
                 Self::encode_i32(option_len, DEFAULT_SOCKET_BUFFER_SIZE)
             }
-            socket::SO_REUSEADDR | socket::SO_PASSCRED => Self::encode_i32(option_len, 0),
-            socket::SO_PEERCRED => match &*self.state.lock() {
+            SO_REUSEADDR | SO_PASSCRED => Self::encode_i32(option_len, 0),
+            SO_PEERCRED => match &*self.state.lock() {
                 UnixSocketState::Stream(stream) => {
                     let cred = *stream.peer_cred.lock();
                     Self::encode_ucred(

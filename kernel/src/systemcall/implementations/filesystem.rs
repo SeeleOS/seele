@@ -1,7 +1,6 @@
 use core::slice;
 
 use alloc::{string::String, sync::Arc};
-use seele_sys::abi::object::device_from_path;
 
 use crate::{
     define_syscall,
@@ -27,6 +26,16 @@ const UTIME_OMIT: i64 = 0x3fff_ffff;
 
 const O_CREAT: i32 = 0x40;
 const O_EXCL: i32 = 0x80;
+
+fn device_from_path(path: &str) -> Option<&'static str> {
+    match path {
+        "/dev/fb0" => Some("framebuffer"),
+        "/dev/null" => Some("devnull"),
+        "/dev/tty" | "/dev/console" | "/dev/tty0" | "/dev/tty1" => Some("tty"),
+        "/dev/psaux" | "/dev/mouse" => Some("ps2mouse"),
+        _ => None,
+    }
+}
 
 fn path_from_raw(path: CString) -> Result<String, SyscallError> {
     String::k_from(path).map_err(|_| SyscallError::InvalidArguments)
@@ -112,10 +121,8 @@ define_syscall!(OpenAt, |dirfd: i32, path: CString, flags: i32, _mode: u32| {
         VirtualFS.lock().create_file(path.clone())?;
         object = Arc::new(VirtualFS.lock().open(path)?);
     } else if let Some(device) = device_from_path(&path_str) {
-        let device = crate::object::device::get_device(
-            String::k_from(device).map_err(|_| SyscallError::InvalidArguments)?,
-        )
-        .map_err(|_| SyscallError::FileNotFound)?;
+        let device =
+            crate::object::device::get_device(device.into()).map_err(|_| SyscallError::FileNotFound)?;
         let slot = current_process.lock().push_object(device);
         return Ok(slot);
     } else {
@@ -127,6 +134,10 @@ define_syscall!(OpenAt, |dirfd: i32, path: CString, flags: i32, _mode: u32| {
     let slot = current_process.lock().alloc_object_slot();
     current_process.lock().objects[slot] = Some(object);
     Ok(slot)
+});
+
+define_syscall!(Open, |path: CString, flags: i32, mode: u32| {
+    OpenAt::handle_call((-100i32) as u64, path as u64, flags as u64, mode as u64, 0, 0)
 });
 
 define_syscall!(Access, |path: CString, mode: i32| {

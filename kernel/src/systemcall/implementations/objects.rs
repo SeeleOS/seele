@@ -1,15 +1,13 @@
 use core::slice;
 
 use alloc::{collections::btree_map::BTreeMap, string::String};
-use seele_sys::{
-    abi::object::{ControlCommand, SeekType},
-    permission::Permissions,
-};
+use seele_sys::permission::Permissions;
 use spin::Mutex;
 
 use crate::{
     define_syscall,
     filesystem::vfs_traits::DirectoryContentType,
+    filesystem::vfs_traits::Whence,
     misc::c_types::CString,
     object::{
         config::ConfigurateRequest,
@@ -25,6 +23,12 @@ use crate::{
 };
 
 static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeMap::new());
+
+#[repr(C)]
+struct LinuxIovec {
+    iov_base: *const u8,
+    iov_len: usize,
+}
 
 define_syscall!(
     Getdents,
@@ -97,6 +101,37 @@ define_syscall!(Write, |object: ObjectRef,
             .as_writable()?
             .write(slice::from_raw_parts(buf_ptr, len))?)
     }
+});
+
+define_syscall!(Writev, |object: ObjectRef, iov_ptr: u64, iovcnt: i32| {
+    if iovcnt < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let writable = object.as_writable()?;
+    let mut written = 0usize;
+    let iov_ptr = iov_ptr as *const LinuxIovec;
+    if iovcnt > 0 && iov_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let iovs = unsafe { slice::from_raw_parts(iov_ptr, iovcnt as usize) };
+    for iov in iovs {
+        if iov.iov_len == 0 {
+            continue;
+        }
+        if iov.iov_base.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+        let buf = unsafe { slice::from_raw_parts(iov.iov_base, iov.iov_len) };
+        let count = writable.write(buf)?;
+        written += count;
+        if count < iov.iov_len {
+            break;
+        }
+    }
+
+    Ok(written)
 });
 
 define_syscall!(Close, |object_num: usize| {
@@ -185,7 +220,7 @@ define_syscall!(
 
 define_syscall!(
     Lseek,
-    |object: ObjectRef, offset: i64, seek_type: SeekType| {
+    |object: ObjectRef, offset: i64, seek_type: Whence| {
         object
             .as_seekable()?
             .seek(offset, seek_type)
@@ -208,9 +243,9 @@ define_syscall!(Pwrite64, |object: ObjectRef, buf_ptr: *const u8, len: usize, of
 
     let seekable = object.clone().as_seekable()?;
     let writable = object.as_writable()?;
-    let current = seekable.clone().seek(0, SeekType::Current)? as i64;
-    seekable.clone().seek(offset, SeekType::Start)?;
+    let current = seekable.clone().seek(0, Whence::Current)? as i64;
+    seekable.clone().seek(offset, Whence::Start)?;
     let written = unsafe { writable.write(slice::from_raw_parts(buf_ptr, len))? };
-    let _ = seekable.seek(current, SeekType::Start);
+    let _ = seekable.seek(current, Whence::Start);
     Ok(written)
 });
