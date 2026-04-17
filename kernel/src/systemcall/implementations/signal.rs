@@ -111,10 +111,10 @@ define_syscall!(Kill, |pid: i32, signal: i32| {
         Some(Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?)
     };
 
+    let current_group = get_current_process().lock().group_id;
     let mut targets = alloc::vec::Vec::new();
     {
         let manager = MANAGER.lock();
-        let current_group = get_current_process().lock().group_id;
 
         match pid {
             i32::MIN..=-2 => {
