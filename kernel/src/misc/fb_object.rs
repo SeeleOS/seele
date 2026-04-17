@@ -1,22 +1,28 @@
 use alloc::sync::Arc;
+use core::ptr::{read_volatile, write_bytes, write_volatile};
 use spin::Mutex;
 use x86_64::{VirtAddr, structures::paging::Translate};
 
 use crate::{
     impl_cast_function,
     memory::{
-        addrspace::mem_area::{Data, MemoryArea},
+        addrspace::mem_area::Data,
         paging::MAPPER,
         protection::Protection,
     },
     misc::{
-        framebuffer::{FRAME_BUFFER, framebuffer_set_user_controlled},
-        others::protection_to_page_flags,
+        framebuffer::{FRAME_BUFFER, FramebufferInfo, FramebufferPixelFormat, framebuffer_set_user_controlled},
+        framebuffer_ioctl::{
+            FB_TYPE_PACKED_PIXELS, FB_VISUAL_TRUECOLOR, FbBitfield, FbCmap, FbFixScreeninfo,
+            FbVarScreeninfo,
+        },
     },
     object::{
         Object,
+        config::ConfigurateRequest,
         error::ObjectError,
-        traits::{Configuratable, MemoryMappable, Readable, Writable},
+        misc::ObjectResult,
+        traits::{Configuratable, MemoryMappable},
     },
     process::misc::with_current_process,
 };
@@ -125,10 +131,199 @@ impl MemoryMappable for FramebufferObject {
 }
 
 impl Configuratable for FramebufferObject {
-    fn configure(
-        &self,
-        _request: crate::object::config::ConfigurateRequest,
-    ) -> crate::object::misc::ObjectResult<isize> {
-        Err(ObjectError::InvalidArguments)
+    fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
+        match request {
+            ConfigurateRequest::FbGetFixedScreenInfo(ptr) => {
+                if ptr.is_null() {
+                    return Err(ObjectError::InvalidArguments);
+                }
+                unsafe { write_volatile(ptr, current_fb_fix_info()) };
+                Ok(0)
+            }
+            ConfigurateRequest::FbGetVariableScreenInfo(ptr) => {
+                if ptr.is_null() {
+                    return Err(ObjectError::InvalidArguments);
+                }
+                unsafe { write_volatile(ptr, current_fb_var_info()) };
+                Ok(0)
+            }
+            ConfigurateRequest::FbPutVariableScreenInfo(ptr) => {
+                if ptr.is_null() {
+                    return Err(ObjectError::InvalidArguments);
+                }
+
+                let requested = unsafe { read_volatile(ptr) };
+                let current = current_fb_var_info();
+                if !fb_var_matches_current(&requested, &current) {
+                    return Err(ObjectError::InvalidArguments);
+                }
+                unsafe { write_volatile(ptr, current) };
+                Ok(0)
+            }
+            ConfigurateRequest::FbPanDisplay(ptr) => {
+                if ptr.is_null() {
+                    return Err(ObjectError::InvalidArguments);
+                }
+
+                let requested = unsafe { read_volatile(ptr) };
+                if requested.xoffset != 0 || requested.yoffset != 0 {
+                    return Err(ObjectError::InvalidArguments);
+                }
+                unsafe { write_volatile(ptr, current_fb_var_info()) };
+                Ok(0)
+            }
+            ConfigurateRequest::FbGetColorMap(ptr) => {
+                if ptr.is_null() {
+                    return Err(ObjectError::InvalidArguments);
+                }
+                unsafe { fill_fb_cmap(&mut *ptr) };
+                Ok(0)
+            }
+            ConfigurateRequest::FbPutColorMap(ptr) => {
+                if ptr.is_null() {
+                    return Err(ObjectError::InvalidArguments);
+                }
+                Ok(0)
+            }
+            ConfigurateRequest::FbBlank(_) => Ok(0),
+            _ => Err(ObjectError::InvalidArguments),
+        }
+    }
+}
+
+fn current_fb_info() -> FramebufferInfo {
+    FRAME_BUFFER.get().unwrap().lock().fb_info()
+}
+
+fn framebuffer_bitfields(pixel_format: FramebufferPixelFormat) -> (FbBitfield, FbBitfield, FbBitfield) {
+    match pixel_format {
+        FramebufferPixelFormat::Rgb => (
+            FbBitfield {
+                offset: 0,
+                length: 8,
+                msb_right: 0,
+            },
+            FbBitfield {
+                offset: 8,
+                length: 8,
+                msb_right: 0,
+            },
+            FbBitfield {
+                offset: 16,
+                length: 8,
+                msb_right: 0,
+            },
+        ),
+        FramebufferPixelFormat::Bgr => (
+            FbBitfield {
+                offset: 16,
+                length: 8,
+                msb_right: 0,
+            },
+            FbBitfield {
+                offset: 8,
+                length: 8,
+                msb_right: 0,
+            },
+            FbBitfield {
+                offset: 0,
+                length: 8,
+                msb_right: 0,
+            },
+        ),
+    }
+}
+
+fn framebuffer_transparency(bytes_per_pixel: usize) -> FbBitfield {
+    if bytes_per_pixel >= 4 {
+        FbBitfield {
+            offset: 24,
+            length: 8,
+            msb_right: 0,
+        }
+    } else {
+        FbBitfield::default()
+    }
+}
+
+fn current_fb_fix_info() -> FbFixScreeninfo {
+    let info = current_fb_info();
+    let mut out = FbFixScreeninfo::default();
+    let id = b"seelefb\0";
+    for (dst, src) in out.id.iter_mut().zip(id.iter().copied()) {
+        *dst = src as i8;
+    }
+    out.smem_start = info.phys_addr as u64;
+    out.smem_len = info.byte_len as u32;
+    out.type_ = FB_TYPE_PACKED_PIXELS;
+    out.visual = FB_VISUAL_TRUECOLOR;
+    out.line_length = (info.stride * info.bytes_per_pixel) as u32;
+    out
+}
+
+fn current_fb_var_info() -> FbVarScreeninfo {
+    let info = current_fb_info();
+    let mut out = FbVarScreeninfo {
+        xres: info.width as u32,
+        yres: info.height as u32,
+        xres_virtual: info.stride as u32,
+        yres_virtual: info.height as u32,
+        bits_per_pixel: (info.bytes_per_pixel * 8) as u32,
+        height: u32::MAX,
+        width: u32::MAX,
+        ..FbVarScreeninfo::default()
+    };
+    let (red, green, blue) = framebuffer_bitfields(info.pixel_format);
+    out.red = red;
+    out.green = green;
+    out.blue = blue;
+    out.transp = framebuffer_transparency(info.bytes_per_pixel);
+    out
+}
+
+fn fb_var_matches_current(requested: &FbVarScreeninfo, current: &FbVarScreeninfo) -> bool {
+    requested.xres == current.xres
+        && requested.yres == current.yres
+        && requested.xres_virtual == current.xres_virtual
+        && requested.yres_virtual == current.yres_virtual
+        && requested.xoffset == current.xoffset
+        && requested.yoffset == current.yoffset
+        && requested.bits_per_pixel == current.bits_per_pixel
+        && requested.grayscale == 0
+        && requested.nonstd == 0
+        && requested.rotate == 0
+        && requested.red.offset == current.red.offset
+        && requested.red.length == current.red.length
+        && requested.red.msb_right == current.red.msb_right
+        && requested.green.offset == current.green.offset
+        && requested.green.length == current.green.length
+        && requested.green.msb_right == current.green.msb_right
+        && requested.blue.offset == current.blue.offset
+        && requested.blue.length == current.blue.length
+        && requested.blue.msb_right == current.blue.msb_right
+        && requested.transp.offset == current.transp.offset
+        && requested.transp.length == current.transp.length
+        && requested.transp.msb_right == current.transp.msb_right
+}
+
+fn fill_fb_cmap(out: &mut FbCmap) {
+    let len = out.len as usize;
+    if len == 0 {
+        return;
+    }
+
+    unsafe {
+        if !out.red.is_null() {
+            write_bytes(out.red, 0, len);
+        }
+        if !out.green.is_null() {
+            write_bytes(out.green, 0, len);
+        }
+        if !out.blue.is_null() {
+            write_bytes(out.blue, 0, len);
+        }
+        if !out.transp.is_null() {
+            write_bytes(out.transp, 0, len);
+        }
     }
 }

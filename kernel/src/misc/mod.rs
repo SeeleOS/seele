@@ -9,6 +9,7 @@ pub mod devices;
 pub mod error;
 pub mod fb_object;
 pub mod framebuffer;
+pub mod framebuffer_ioctl;
 pub mod gdt;
 pub mod logging;
 pub mod mouse;

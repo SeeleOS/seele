@@ -1,8 +1,16 @@
 use crate::object::{ObjectResult, error::ObjectError};
 
+use crate::misc::framebuffer_ioctl::{FbCmap, FbFixScreeninfo, FbVarScreeninfo};
 use crate::terminal::linux_kd::{LinuxKbEntry, LinuxVtMode, LinuxVtStat};
 
 pub enum ConfigurateRequest {
+    FbGetVariableScreenInfo(*mut FbVarScreeninfo),
+    FbPutVariableScreenInfo(*mut FbVarScreeninfo),
+    FbGetFixedScreenInfo(*mut FbFixScreeninfo),
+    FbGetColorMap(*mut FbCmap),
+    FbPutColorMap(*mut FbCmap),
+    FbPanDisplay(*mut FbVarScreeninfo),
+    FbBlank(u32),
     LinuxTcGets(*mut LinuxTermios),
     LinuxTcSets(*const LinuxTermios),
     LinuxTcGets2(*mut LinuxTermios2),
@@ -61,6 +69,13 @@ pub struct LinuxWinsize {
 impl ConfigurateRequest {
     pub fn new(request: u64, ptr: u64) -> ObjectResult<Self> {
         Ok(match request {
+            0x4600 => Self::FbGetVariableScreenInfo(ptr as *mut FbVarScreeninfo),
+            0x4601 => Self::FbPutVariableScreenInfo(ptr as *mut FbVarScreeninfo),
+            0x4602 => Self::FbGetFixedScreenInfo(ptr as *mut FbFixScreeninfo),
+            0x4604 => Self::FbGetColorMap(ptr as *mut FbCmap),
+            0x4605 => Self::FbPutColorMap(ptr as *mut FbCmap),
+            0x4606 => Self::FbPanDisplay(ptr as *mut FbVarScreeninfo),
+            0x4611 => Self::FbBlank(ptr as u32),
             0x5401 => Self::LinuxTcGets(ptr as *mut LinuxTermios),
             0x5402 | 0x5403 | 0x5404 => Self::LinuxTcSets(ptr as *const LinuxTermios),
             0x802C542A => Self::LinuxTcGets2(ptr as *mut LinuxTermios2),
