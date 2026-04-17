@@ -82,5 +82,6 @@ pub fn handle_usermode_exception(stackframe: &InterruptStackFrame, sig: Signal) 
         return_to_executor_no_save();
     }
 
-    unreachable!()
+    terminate_process(get_current_process(), sig as u64);
+    return_to_executor_no_save();
 }
