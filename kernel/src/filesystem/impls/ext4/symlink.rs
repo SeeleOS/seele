@@ -21,6 +21,7 @@ impl Symlink for Ext4Symlink {
             name: self.name.clone(),
             file_like_type: FileLikeType::Symlink,
             size: 0,
+            inode: self.inode.index.get().into(),
             permission: UnixPermission::symlink(),
         })
     }

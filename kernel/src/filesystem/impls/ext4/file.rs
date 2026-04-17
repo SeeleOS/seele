@@ -58,7 +58,8 @@ impl File for Ext4File {
             size,
             UnixPermission(self.inner.inode().mode().bits() as u32),
             FileLikeType::File,
-        ))
+        )
+        .with_inode(self.inner.inode().index.get().into()))
     }
 
     fn seek(

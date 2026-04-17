@@ -13,6 +13,7 @@ pub struct DirectoryContentInfo {
 pub struct FileLikeInfo {
     pub name: String,
     pub size: usize,
+    pub inode: u64,
     pub file_like_type: FileLikeType,
     pub permission: UnixPermission,
 }
@@ -75,6 +76,7 @@ impl LinuxStat {
 
         Self {
             st_dev: 1,
+            st_ino: info.inode,
             st_nlink: 1,
             st_mode,
             st_size: info.size as i64,
@@ -107,9 +109,15 @@ impl FileLikeInfo {
         Self {
             name,
             size,
+            inode: 0,
             file_like_type,
             permission,
         }
+    }
+
+    pub fn with_inode(mut self, inode: u64) -> Self {
+        self.inode = inode;
+        self
     }
 
     pub fn as_linux(self) -> LinuxStat {

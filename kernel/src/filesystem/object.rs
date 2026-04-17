@@ -135,7 +135,11 @@ impl MemoryMappable for FileLikeObject {
         with_current_process(|process| {
             let file_bytes = self
                 .info()
-                .map(|info| (info.size as u64).saturating_sub(offset))
+                .map(|info| {
+                    (info.size as u64)
+                        .saturating_sub(offset)
+                        .min(pages * 4096)
+                })
                 .unwrap_or(0);
             let data = Data::File {
                 offset,

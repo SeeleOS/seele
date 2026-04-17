@@ -64,6 +64,20 @@ impl Directory for Ext4Directory {
         self
     }
 
+    fn info(&self) -> crate::filesystem::vfs::FSResult<crate::filesystem::info::FileLikeInfo> {
+        let inode = self
+            .fs
+            .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
+            .map_err(map_ext4_error)?;
+        Ok(crate::filesystem::info::FileLikeInfo::new(
+            self.name.clone(),
+            0,
+            crate::filesystem::info::UnixPermission::directory(),
+            crate::filesystem::vfs_traits::FileLikeType::Directory,
+        )
+        .with_inode(inode.index.get().into()))
+    }
+
     fn name(&self) -> crate::filesystem::vfs::FSResult<String> {
         Ok(self.name.clone())
     }
