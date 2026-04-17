@@ -25,7 +25,7 @@
           mkShell {
             nativeBuildInputs = [ rustup ];
             buildInputs = [
-              apk-tools
+              arch-install-scripts
               cargo
               cargo-c
               autoconf
@@ -59,6 +59,7 @@
               ninja
               openssl
               perl
+              pacman
               pkg-config
               pkgsCross.x86_64-embedded.buildPackages.gcc
               pre-commit
