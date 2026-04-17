@@ -20,8 +20,27 @@ impl StackBuilder {
         }
     }
 
-    pub fn push_aux_entries(&mut self, file: &ElfInfo, interpreter_base: Option<u64>) {
+    pub fn push_aux_entries(
+        &mut self,
+        file: &ElfInfo,
+        interpreter_base: Option<u64>,
+        execfn: u64,
+        platform: u64,
+        random: u64,
+    ) {
         self.push_aux_entry(AuxType::Null, 0);
+        self.push_aux_entry(AuxType::ExecFilename, execfn);
+        self.push_aux_entry(AuxType::Random, random);
+        self.push_aux_entry(AuxType::Secure, 0);
+        self.push_aux_entry(AuxType::ClockTick, 100);
+        self.push_aux_entry(AuxType::HardwareCapabilities, 0);
+        self.push_aux_entry(AuxType::Platform, platform);
+        self.push_aux_entry(AuxType::EffectiveGroupId, 0);
+        self.push_aux_entry(AuxType::GroupId, 0);
+        self.push_aux_entry(AuxType::EffectiveUserId, 0);
+        self.push_aux_entry(AuxType::UserId, 0);
+        self.push_aux_entry(AuxType::NotElf, 0);
+        self.push_aux_entry(AuxType::Flags, 0);
         self.push_aux_entry(AuxType::EntryPointAddress, file.entry_point);
         self.push_aux_entry(
             AuxType::ProgramHeaderAmount,
