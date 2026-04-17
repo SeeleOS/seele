@@ -57,6 +57,16 @@ impl Ext4Directory {
     pub fn fs(&self) -> &Ext4 {
         &self.fs
     }
+
+    pub fn chmod(&self, mode: InodeMode) -> crate::filesystem::vfs::FSResult<()> {
+        let mut inode = self
+            .fs
+            .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
+            .map_err(map_ext4_error)?;
+        inode.set_mode(mode).map_err(map_ext4_error)?;
+        inode.write(&self.fs).map_err(map_ext4_error)?;
+        Ok(())
+    }
 }
 
 impl Directory for Ext4Directory {
@@ -72,7 +82,7 @@ impl Directory for Ext4Directory {
         Ok(crate::filesystem::info::FileLikeInfo::new(
             self.name.clone(),
             0,
-            crate::filesystem::info::UnixPermission::directory(),
+            crate::filesystem::info::UnixPermission(inode.mode().bits().into()),
             crate::filesystem::vfs_traits::FileLikeType::Directory,
         )
         .with_inode(inode.index.get().into()))
