@@ -1,6 +1,7 @@
 use core::slice;
 
 use alloc::{string::String, sync::Arc};
+use bitflags::bitflags;
 
 use crate::{
     define_syscall,
@@ -19,13 +20,24 @@ use crate::{
 };
 
 const AT_FDCWD: i32 = -100;
-const AT_REMOVEDIR: i32 = 0x200;
-const AT_SYMLINK_NOFOLLOW: i32 = 0x100;
-const AT_EMPTY_PATH: i32 = 0x1000;
 const UTIME_OMIT: i64 = 0x3fff_ffff;
 
-const O_CREAT: i32 = 0x40;
-const O_EXCL: i32 = 0x80;
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct AtFlags: i32 {
+        const REMOVEDIR = 0x200;
+        const SYMLINK_NOFOLLOW = 0x100;
+        const EMPTY_PATH = 0x1000;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct OpenFlags: i32 {
+        const CREAT = 0x40;
+        const EXCL = 0x80;
+    }
+}
 
 fn device_from_path(path: &str) -> Option<&'static str> {
     match path {
@@ -108,12 +120,13 @@ fn rename_impl(
 define_syscall!(OpenAt, |dirfd: i32, path: CString, flags: i32, _mode: u32| {
     let current_process = get_current_process();
     let path_str = path_from_raw(path)?;
-    let create = (flags & O_CREAT) != 0;
+    let flags = OpenFlags::from_bits_truncate(flags);
+    let create = flags.contains(OpenFlags::CREAT);
 
     let path = Path::new(path_str.as_str());
     let object;
     if let Ok(file) = VirtualFS.lock().open(path.clone()) {
-        if create && (flags & O_EXCL) != 0 {
+        if create && flags.contains(OpenFlags::EXCL) {
             return Err(SyscallError::FileAlreadyExists);
         }
         object = Arc::new(file);
@@ -192,12 +205,12 @@ define_syscall!(Newfstatat, |dirfd: i32,
     }
 
     let path_str = path_from_raw(path)?;
-    let unsupported_flags = flags & !(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH);
-    if unsupported_flags != 0 {
+    let flags = AtFlags::from_bits_truncate(flags);
+    if flags.bits() != flags.bits() & (AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH).bits() {
         return Err(SyscallError::NoSyscall);
     }
 
-    let stat = if path_str.is_empty() && (flags & AT_EMPTY_PATH) != 0 {
+    let stat = if path_str.is_empty() && flags.contains(AtFlags::EMPTY_PATH) {
         let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
         object.as_statable()?.stat()
     } else {
@@ -223,7 +236,7 @@ define_syscall!(Faccessat, |dirfd: i32, path: CString, mode: i32, _flags: i32| {
 define_syscall!(UnlinkAt, |dirfd: i32, path: CString, flags: i32| {
     let _ = path_is_relative_to_cwd(dirfd)?;
     let path = path_from_raw(path)?;
-    if flags == AT_REMOVEDIR {
+    if AtFlags::from_bits_truncate(flags).contains(AtFlags::REMOVEDIR) {
         return Err(SyscallError::NoSyscall);
     }
     VirtualFS.lock().delete_file(Path::new(&path))?;

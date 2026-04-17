@@ -1,4 +1,5 @@
 use alloc::sync::Arc;
+use bitflags::bitflags;
 use x86_64::VirtAddr;
 use x86_rtc::Rtc;
 
@@ -12,25 +13,41 @@ use crate::thread::misc::with_current_thread;
 use crate::thread::yielding::{BlockType, block_current, block_current_with_sig_check};
 use crate::{NAME, define_syscall};
 
-const CLOCK_REALTIME: i32 = 0;
-const CLOCK_MONOTONIC: i32 = 1;
-const CLONE_VM: u64 = 0x0000_0100;
-const CLONE_FS: u64 = 0x0000_0200;
-const CLONE_FILES: u64 = 0x0000_0400;
-const CLONE_SIGHAND: u64 = 0x0000_0800;
-const CLONE_THREAD: u64 = 0x0001_0000;
-const CLONE_SETTLS: u64 = 0x0008_0000;
-const CLONE_PARENT_SETTID: u64 = 0x0010_0000;
-const CLONE_CHILD_CLEARTID: u64 = 0x0020_0000;
-const CLONE_CHILD_SETTID: u64 = 0x0100_0000;
-const RSEQ_FLAG_UNREGISTER: u32 = 1;
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct CloneFlags: u64 {
+        const VM = 0x0000_0100;
+        const FS = 0x0000_0200;
+        const FILES = 0x0000_0400;
+        const SIGHAND = 0x0000_0800;
+        const THREAD = 0x0001_0000;
+        const SETTLS = 0x0008_0000;
+        const PARENT_SETTID = 0x0010_0000;
+        const CHILD_CLEARTID = 0x0020_0000;
+        const CHILD_SETTID = 0x0100_0000;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct RseqFlags: u32 {
+        const UNREGISTER = 1;
+    }
+}
+
 const RSEQ_LEN_X86_64: u32 = 32;
 const RSEQ_CPU_ID_UNINITIALIZED: u32 = u32::MAX;
 const RSEQ_CPU_ID_SINGLE_CORE: u32 = 0;
-const GRND_NONBLOCK: u32 = 0x0001;
-const GRND_RANDOM: u32 = 0x0002;
 const RLIM64_INFINITY: u64 = u64::MAX;
 const INITIAL_BRK_RESERVE: u64 = 0x4000_0000;
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct GetRandomFlags: u32 {
+        const NONBLOCK = 0x0001;
+        const RANDOM = 0x0002;
+    }
+}
 
 #[repr(C)]
 struct LinuxRlimit64 {
@@ -82,10 +99,11 @@ define_syscall!(ClockGettime, |clock_id: i32, tp: u64| {
     if tp.is_null() {
         return Err(SyscallError::BadAddress);
     }
-    let ns = match clock_id {
-        CLOCK_REALTIME => Time::current().as_nanoseconds() as i64,
-        CLOCK_MONOTONIC => Time::since_boot().as_nanoseconds() as i64,
-        _ => return Err(SyscallError::InvalidArguments),
+    let ns = match crate::misc::timer::ClockId::try_from(clock_id as u64)
+        .map_err(|_| SyscallError::InvalidArguments)?
+    {
+        crate::misc::timer::ClockId::Realtime => Time::current().as_nanoseconds() as i64,
+        crate::misc::timer::ClockId::SinceBoot => Time::since_boot().as_nanoseconds() as i64,
     };
     unsafe {
         *tp = LinuxTimespec {
@@ -208,8 +226,13 @@ define_syscall!(Nanosleep, |req: u64, rem: u64| {
 });
 
 define_syscall!(Clone, |flags: u64, stack_pointer: u64, parent_tid: u64, child_tid: u64, tls: u64| {
-    let required = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD;
-    if (flags & CLONE_THREAD) == 0 || (flags & required) != required {
+    let flags = CloneFlags::from_bits_truncate(flags);
+    let required = CloneFlags::VM
+        | CloneFlags::FS
+        | CloneFlags::FILES
+        | CloneFlags::SIGHAND
+        | CloneFlags::THREAD;
+    if !flags.contains(CloneFlags::THREAD) || !flags.contains(required) {
         return Err(SyscallError::NoSyscall);
     }
 
@@ -223,7 +246,7 @@ define_syscall!(Clone, |flags: u64, stack_pointer: u64, parent_tid: u64, child_t
                 child.snapshot.inner.rsp = stack_pointer;
             }
             child.snapshot.inner.rax = 0;
-            if (flags & CLONE_SETTLS) != 0 {
+            if flags.contains(CloneFlags::SETTLS) {
                 child.snapshot.fs_base = tls;
             }
         }
@@ -231,7 +254,7 @@ define_syscall!(Clone, |flags: u64, stack_pointer: u64, parent_tid: u64, child_t
         let tid = thread.lock().id.0 as i32;
 
         unsafe {
-            if (flags & CLONE_PARENT_SETTID) != 0 {
+            if flags.contains(CloneFlags::PARENT_SETTID) {
                 let parent_tid = parent_tid as *mut i32;
                 if parent_tid.is_null() {
                     return Err(SyscallError::BadAddress);
@@ -239,7 +262,7 @@ define_syscall!(Clone, |flags: u64, stack_pointer: u64, parent_tid: u64, child_t
                 *parent_tid = tid;
             }
 
-            if (flags & CLONE_CHILD_SETTID) != 0 || (flags & CLONE_CHILD_CLEARTID) != 0 {
+            if flags.intersects(CloneFlags::CHILD_SETTID | CloneFlags::CHILD_CLEARTID) {
                 let child_tid = child_tid as *mut i32;
                 if child_tid.is_null() {
                     return Err(SyscallError::BadAddress);
@@ -338,14 +361,15 @@ define_syscall!(SetRobustList, |head: u64, len: usize| {
 });
 
 define_syscall!(Rseq, |rseq_ptr: u64, rseq_len: u32, flags: u32, sig: u32| {
-    if (flags & !RSEQ_FLAG_UNREGISTER) != 0 || rseq_len != RSEQ_LEN_X86_64 {
+    let flags = RseqFlags::from_bits_truncate(flags);
+    if flags.bits() != flags.bits() & RseqFlags::UNREGISTER.bits() || rseq_len != RSEQ_LEN_X86_64 {
         return Err(SyscallError::InvalidArguments);
     }
 
     let current = crate::thread::get_current_thread();
     let mut current = current.lock();
 
-    if (flags & RSEQ_FLAG_UNREGISTER) != 0 {
+    if flags.contains(RseqFlags::UNREGISTER) {
         if current.rseq_area != rseq_ptr
             || current.rseq_len != rseq_len
             || current.rseq_sig != sig
@@ -374,13 +398,14 @@ define_syscall!(Rseq, |rseq_ptr: u64, rseq_len: u32, flags: u32, sig: u32| {
 
     current.rseq_area = rseq_ptr;
     current.rseq_len = rseq_len;
-    current.rseq_flags = flags;
+    current.rseq_flags = flags.bits();
     current.rseq_sig = sig;
     Ok(0)
 });
 
 define_syscall!(Getrandom, |buf: u64, len: usize, flags: u32| {
-    if (flags & !(GRND_NONBLOCK | GRND_RANDOM)) != 0 {
+    let flags = GetRandomFlags::from_bits_truncate(flags);
+    if flags.bits() != flags.bits() & (GetRandomFlags::NONBLOCK | GetRandomFlags::RANDOM).bits() {
         return Err(SyscallError::InvalidArguments);
     }
     if len == 0 {

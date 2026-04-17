@@ -1,4 +1,5 @@
 use core::ptr::{read_volatile, write_volatile};
+use bitflags::bitflags;
 
 use crate::{
     object::{
@@ -15,32 +16,52 @@ use crate::{
     },
 };
 
-const LINUX_ISIG: u32 = 0x0000_0001;
-const LINUX_ICANON: u32 = 0x0000_0002;
-const LINUX_ECHO: u32 = 0x0000_0008;
-const LINUX_ECHONL: u32 = 0x0000_0040;
-const LINUX_OPOST: u32 = 0x0000_0001;
-const LINUX_ONLCR: u32 = 0x0000_0004;
-const LINUX_CREAD: u32 = 0x0000_0080;
-const LINUX_CS8: u32 = 0x0000_0030;
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct LocalFlags: u32 {
+        const ISIG = 0x0000_0001;
+        const ICANON = 0x0000_0002;
+        const ECHO = 0x0000_0008;
+        const ECHONL = 0x0000_0040;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct OutputFlags: u32 {
+        const OPOST = 0x0000_0001;
+        const ONLCR = 0x0000_0004;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct ControlFlags: u32 {
+        const CREAD = 0x0000_0080;
+        const CS8 = 0x0000_0030;
+    }
+}
 
 fn info_to_linux_termios(info: &TerminalSettings) -> LinuxTermios {
-    let mut termios = LinuxTermios { c_cflag: LINUX_CREAD | LINUX_CS8, ..LinuxTermios::default() };
+    let mut termios = LinuxTermios {
+        c_cflag: (ControlFlags::CREAD | ControlFlags::CS8).bits(),
+        ..LinuxTermios::default()
+    };
 
     if info.echo {
-        termios.c_lflag |= LINUX_ECHO;
+        termios.c_lflag |= LocalFlags::ECHO.bits();
     }
     if info.canonical {
-        termios.c_lflag |= LINUX_ICANON;
+        termios.c_lflag |= LocalFlags::ICANON.bits();
     }
     if info.send_sig_on_special_chars {
-        termios.c_lflag |= LINUX_ISIG;
+        termios.c_lflag |= LocalFlags::ISIG.bits();
     }
     if info.echo_newline {
-        termios.c_lflag |= LINUX_ECHONL;
+        termios.c_lflag |= LocalFlags::ECHONL.bits();
     }
     if info.map_output_newline_to_crlf {
-        termios.c_oflag |= LINUX_OPOST | LINUX_ONLCR;
+        termios.c_oflag |= (OutputFlags::OPOST | OutputFlags::ONLCR).bits();
     }
 
     termios
@@ -48,26 +69,26 @@ fn info_to_linux_termios(info: &TerminalSettings) -> LinuxTermios {
 
 fn info_to_linux_termios2(info: &TerminalSettings) -> LinuxTermios2 {
     let mut termios = LinuxTermios2 {
-        c_cflag: LINUX_CREAD | LINUX_CS8,
+        c_cflag: (ControlFlags::CREAD | ControlFlags::CS8).bits(),
         c_ispeed: 38_400,
         c_ospeed: 38_400,
         ..LinuxTermios2::default()
     };
 
     if info.echo {
-        termios.c_lflag |= LINUX_ECHO;
+        termios.c_lflag |= LocalFlags::ECHO.bits();
     }
     if info.canonical {
-        termios.c_lflag |= LINUX_ICANON;
+        termios.c_lflag |= LocalFlags::ICANON.bits();
     }
     if info.send_sig_on_special_chars {
-        termios.c_lflag |= LINUX_ISIG;
+        termios.c_lflag |= LocalFlags::ISIG.bits();
     }
     if info.echo_newline {
-        termios.c_lflag |= LINUX_ECHONL;
+        termios.c_lflag |= LocalFlags::ECHONL.bits();
     }
     if info.map_output_newline_to_crlf {
-        termios.c_oflag |= LINUX_OPOST | LINUX_ONLCR;
+        termios.c_oflag |= (OutputFlags::OPOST | OutputFlags::ONLCR).bits();
     }
 
     termios
@@ -90,12 +111,14 @@ impl Configuratable for TerminalObject {
             ConfigurateRequest::LinuxTcSets(termios) => unsafe {
                 let termios = read_volatile(termios);
                 let mut info = self.info.lock();
-                info.echo = (termios.c_lflag & LINUX_ECHO) != 0;
-                info.canonical = (termios.c_lflag & LINUX_ICANON) != 0;
-                info.send_sig_on_special_chars = (termios.c_lflag & LINUX_ISIG) != 0;
-                info.echo_newline = (termios.c_lflag & LINUX_ECHONL) != 0;
+                let lflag = LocalFlags::from_bits_truncate(termios.c_lflag);
+                let oflag = OutputFlags::from_bits_truncate(termios.c_oflag);
+                info.echo = lflag.contains(LocalFlags::ECHO);
+                info.canonical = lflag.contains(LocalFlags::ICANON);
+                info.send_sig_on_special_chars = lflag.contains(LocalFlags::ISIG);
+                info.echo_newline = lflag.contains(LocalFlags::ECHONL);
                 info.map_output_newline_to_crlf =
-                    (termios.c_oflag & (LINUX_OPOST | LINUX_ONLCR)) != 0;
+                    oflag.contains(OutputFlags::OPOST | OutputFlags::ONLCR);
             },
             ConfigurateRequest::LinuxTcGets2(termios) => unsafe {
                 write_volatile(termios, info_to_linux_termios2(&self.info.lock()));
@@ -103,12 +126,14 @@ impl Configuratable for TerminalObject {
             ConfigurateRequest::LinuxTcSets2(termios) => unsafe {
                 let termios = read_volatile(termios);
                 let mut info = self.info.lock();
-                info.echo = (termios.c_lflag & LINUX_ECHO) != 0;
-                info.canonical = (termios.c_lflag & LINUX_ICANON) != 0;
-                info.send_sig_on_special_chars = (termios.c_lflag & LINUX_ISIG) != 0;
-                info.echo_newline = (termios.c_lflag & LINUX_ECHONL) != 0;
+                let lflag = LocalFlags::from_bits_truncate(termios.c_lflag);
+                let oflag = OutputFlags::from_bits_truncate(termios.c_oflag);
+                info.echo = lflag.contains(LocalFlags::ECHO);
+                info.canonical = lflag.contains(LocalFlags::ICANON);
+                info.send_sig_on_special_chars = lflag.contains(LocalFlags::ISIG);
+                info.echo_newline = lflag.contains(LocalFlags::ECHONL);
                 info.map_output_newline_to_crlf =
-                    (termios.c_oflag & (LINUX_OPOST | LINUX_ONLCR)) != 0;
+                    oflag.contains(OutputFlags::OPOST | OutputFlags::ONLCR);
             },
             ConfigurateRequest::LinuxTiocgwinsz(winsize) => unsafe {
                 let info = self.info.lock();

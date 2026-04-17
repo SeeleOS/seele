@@ -1,4 +1,6 @@
 use alloc::collections::{btree_map::BTreeMap, vec_deque::VecDeque};
+use bitflags::bitflags;
+use num_enum::TryFromPrimitive;
 use spin::Mutex;
 use x86_64::{VirtAddr, registers::model_specific::FsBase};
 
@@ -15,16 +17,28 @@ use crate::{
     },
 };
 
-const FUTEX_WAIT: u64 = 0;
-const FUTEX_WAKE: u64 = 1;
-const ARCH_SET_FS: u64 = 0x1002;
-const ARCH_GET_FS: u64 = 0x1003;
-const PROT_READ: i32 = 0x1;
-const PROT_WRITE: i32 = 0x2;
-const PROT_EXEC: i32 = 0x4;
-const MAP_FIXED: i32 = 0x10;
-const MAP_ANONYMOUS: i32 = 0x20;
-const MAP_FIXED_NOREPLACE: i32 = 0x100000;
+#[derive(Clone, Copy, Debug, TryFromPrimitive)]
+#[repr(u64)]
+enum FutexOp {
+    Wait = 0,
+    Wake = 1,
+}
+
+#[derive(Clone, Copy, Debug, TryFromPrimitive)]
+#[repr(u64)]
+enum ArchPrctlCode {
+    SetFs = 0x1002,
+    GetFs = 0x1003,
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct MmapFlags: i32 {
+        const FIXED = 0x10;
+        const ANONYMOUS = 0x20;
+        const FIXED_NOREPLACE = 0x100000;
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct FutexKey {
@@ -124,36 +138,34 @@ fn futex_wake_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
 }
 
 define_syscall!(Futex, |arg1: u64, op: u64, arg2: u64| {
-    match op & 0x7f {
-        FUTEX_WAIT => futex_wait_impl(arg1, arg2),
-        FUTEX_WAKE => futex_wake_impl(arg1, arg2),
-        _ => Err(SyscallError::InvalidArguments),
+    match FutexOp::try_from(op & 0x7f).map_err(|_| SyscallError::InvalidArguments)? {
+        FutexOp::Wait => futex_wait_impl(arg1, arg2),
+        FutexOp::Wake => futex_wake_impl(arg1, arg2),
     }
 });
 
 define_syscall!(ArchPrctl, |code: u64, addr: u64| {
-    match code {
-        ARCH_SET_FS => {
+    match ArchPrctlCode::try_from(code).map_err(|_| SyscallError::InvalidArguments)? {
+        ArchPrctlCode::SetFs => {
             FsBase::write(VirtAddr::new(addr));
             Ok(0)
         }
-        ARCH_GET_FS => unsafe {
+        ArchPrctlCode::GetFs => unsafe {
             *(addr as *mut u64) = FsBase::read().as_u64();
             Ok(0)
         },
-        _ => Err(SyscallError::InvalidArguments),
     }
 });
 
 fn prot_to_protection(prot: i32) -> Result<Protection, SyscallError> {
     let mut protection = Protection::empty();
-    if (prot & PROT_READ) != 0 {
+    if (prot & Protection::READ.bits() as i32) != 0 {
         protection |= Protection::READ;
     }
-    if (prot & PROT_WRITE) != 0 {
+    if (prot & Protection::WRITE.bits() as i32) != 0 {
         protection |= Protection::WRITE;
     }
-    if (prot & PROT_EXEC) != 0 {
+    if (prot & Protection::EXEC.bits() as i32) != 0 {
         protection |= Protection::EXEC;
     }
     Ok(protection)
@@ -172,8 +184,9 @@ define_syscall!(Mmap, |addr: u64, len: u64, prot: i32, flags: i32, fd: i32, offs
         return Err(SyscallError::InvalidArguments);
     }
     let protection = prot_to_protection(prot)?;
+    let flags = MmapFlags::from_bits_truncate(flags);
     let pages = len.div_ceil(4096);
-    let fixed = (flags & (MAP_FIXED | MAP_FIXED_NOREPLACE)) != 0;
+    let fixed = flags.intersects(MmapFlags::FIXED | MmapFlags::FIXED_NOREPLACE);
     let start = VirtAddr::new(addr);
     let end = start + pages * 4096;
 
@@ -182,7 +195,7 @@ define_syscall!(Mmap, |addr: u64, len: u64, prot: i32, flags: i32, fd: i32, offs
             return Err(SyscallError::InvalidArguments);
         }
 
-        let file_mapping = if (flags & MAP_ANONYMOUS) != 0 {
+        let file_mapping = if flags.contains(MmapFlags::ANONYMOUS) {
             None
         } else {
             if fd < 0 {
@@ -209,13 +222,13 @@ define_syscall!(Mmap, |addr: u64, len: u64, prot: i32, flags: i32, fd: i32, offs
         let current = get_current_process();
         let mut current = current.lock();
 
-        if (flags & MAP_FIXED_NOREPLACE) != 0
+        if flags.contains(MmapFlags::FIXED_NOREPLACE)
             && mapping_overlaps(&current.addrspace.memory_areas, start, end)
         {
             return Err(SyscallError::FileAlreadyExists);
         }
 
-        if (flags & MAP_FIXED) != 0 {
+        if flags.contains(MmapFlags::FIXED) {
             current.addrspace.unmap(start, pages * 4096);
         }
 
@@ -235,7 +248,7 @@ define_syscall!(Mmap, |addr: u64, len: u64, prot: i32, flags: i32, fd: i32, offs
         return Err(SyscallError::InvalidArguments);
     }
 
-    if (flags & MAP_ANONYMOUS) != 0 {
+    if flags.contains(MmapFlags::ANONYMOUS) {
         let current = get_current_process();
         return Ok(current
             .lock()

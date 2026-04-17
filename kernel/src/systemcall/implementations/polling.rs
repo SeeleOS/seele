@@ -6,6 +6,7 @@ use crate::thread::yielding::{
     BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
 };
 use alloc::sync::Arc;
+use num_enum::TryFromPrimitive;
 
 use crate::systemcall::utils::SyscallError;
 use crate::{
@@ -14,13 +15,24 @@ use crate::{
 };
 
 const DEADLOCK_LOG: bool = false;
-const EPOLL_CTL_ADD: u64 = 1;
-const EPOLL_CTL_DEL: u64 = 2;
-const EPOLL_CTL_MOD: u64 = 3;
-const EPOLLIN: u32 = 0x001;
-const EPOLLOUT: u32 = 0x004;
-const EPOLLERR: u32 = 0x008;
-const EPOLLHUP: u32 = 0x010;
+
+#[derive(Clone, Copy, Debug, TryFromPrimitive)]
+#[repr(u64)]
+enum EpollCtlOp {
+    Add = 1,
+    Del = 2,
+    Mod = 3,
+}
+
+bitflags::bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct EpollEvents: u32 {
+        const IN = 0x001;
+        const OUT = 0x004;
+        const ERR = 0x008;
+        const HUP = 0x010;
+    }
+}
 
 #[repr(C)]
 union LinuxEpollData {
@@ -45,20 +57,21 @@ pub struct PollResult {
 
 fn pollable_event_to_linux_bits(event: PollableEvent) -> u32 {
     match event {
-        PollableEvent::CanBeRead => 0x001,
-        PollableEvent::CanBeWritten => 0x004,
-        PollableEvent::Error => 0x008,
-        PollableEvent::Closed => 0x010,
+        PollableEvent::CanBeRead => EpollEvents::IN.bits(),
+        PollableEvent::CanBeWritten => EpollEvents::OUT.bits(),
+        PollableEvent::Error => EpollEvents::ERR.bits(),
+        PollableEvent::Closed => EpollEvents::HUP.bits(),
         PollableEvent::Other(bits) => bits as u32,
     }
 }
 
 fn linux_bits_to_events(bits: u32) -> [Option<PollableEvent>; 4] {
+    let bits = EpollEvents::from_bits_truncate(bits);
     [
-        (bits & EPOLLIN != 0).then_some(PollableEvent::CanBeRead),
-        (bits & EPOLLOUT != 0).then_some(PollableEvent::CanBeWritten),
-        (bits & EPOLLERR != 0).then_some(PollableEvent::Error),
-        (bits & EPOLLHUP != 0).then_some(PollableEvent::Closed),
+        bits.contains(EpollEvents::IN).then_some(PollableEvent::CanBeRead),
+        bits.contains(EpollEvents::OUT).then_some(PollableEvent::CanBeWritten),
+        bits.contains(EpollEvents::ERR).then_some(PollableEvent::Error),
+        bits.contains(EpollEvents::HUP).then_some(PollableEvent::Closed),
     ]
 }
 
@@ -99,8 +112,8 @@ fn epoll_update_impl(
 }
 
 define_syscall!(EpollCtl, |poller: ObjectRef, op: u64, target_object: ObjectRef, event: u64| {
-    match op {
-        EPOLL_CTL_ADD | EPOLL_CTL_MOD => {
+    match EpollCtlOp::try_from(op).map_err(|_| SyscallError::InvalidArguments)? {
+        EpollCtlOp::Add | EpollCtlOp::Mod => {
             let event = event as *const LinuxEpollEvent;
             if event.is_null() {
                 return Err(SyscallError::BadAddress);
@@ -114,7 +127,7 @@ define_syscall!(EpollCtl, |poller: ObjectRef, op: u64, target_object: ObjectRef,
             }
             epoll_update_impl(poller, target_object, event.events, unsafe { event.data.u64_ })
         }
-        EPOLL_CTL_DEL => {
+        EpollCtlOp::Del => {
             for existing in [PollableEvent::CanBeRead, PollableEvent::CanBeWritten, PollableEvent::Error, PollableEvent::Closed] {
                 poller
                     .clone()
@@ -123,7 +136,6 @@ define_syscall!(EpollCtl, |poller: ObjectRef, op: u64, target_object: ObjectRef,
             }
             Ok(0)
         }
-        _ => Err(SyscallError::InvalidArguments),
     }
 });
 

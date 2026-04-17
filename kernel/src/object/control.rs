@@ -4,35 +4,39 @@ use crate::{
     process::misc::with_current_process,
     systemcall::utils::{SyscallError, SyscallResult},
 };
+use num_enum::TryFromPrimitive;
 
-const F_DUPFD: u64 = 0;
-const F_GETFD: u64 = 1;
-const F_SETFD: u64 = 2;
-const F_GETFL: u64 = 3;
-const F_SETFL: u64 = 4;
-const F_DUPFD_CLOEXEC: u64 = 1030;
+#[derive(Clone, Copy, Debug, TryFromPrimitive)]
+#[repr(u64)]
+enum FcntlCmd {
+    DupFd = 0,
+    GetFd = 1,
+    SetFd = 2,
+    GetFl = 3,
+    SetFl = 4,
+    DupFdCloexec = 1030,
+}
 
 pub fn control_object(object: ObjectRef, command: u64, arg: u64) -> SyscallResult {
-    match command {
-        F_SETFL => object
+    match FcntlCmd::try_from(command).map_err(|_| SyscallError::InvalidArguments)? {
+        FcntlCmd::SetFl => object
             .set_flags(FileFlags::from_bits(arg).ok_or(SyscallError::InvalidArguments)?)
             .map(|_| 0usize)
             .map_err(Into::into),
-        F_GETFL => object
+        FcntlCmd::GetFl => object
             .get_flags()
             .map_err(Into::into)
             .map(|f| f.bits() as usize),
-        F_DUPFD => with_current_process(|process| {
+        FcntlCmd::DupFd => with_current_process(|process| {
             process
                 .clone_object_with_min(object, arg as usize)
                 .map_err(Into::into)
         }),
-        F_DUPFD_CLOEXEC => with_current_process(|process| {
+        FcntlCmd::DupFdCloexec => with_current_process(|process| {
             process
                 .clone_object_with_min(object, arg as usize)
                 .map_err(Into::into)
         }),
-        F_SETFD | F_GETFD => Ok(0),
-        _ => Err(SyscallError::InvalidArguments),
+        FcntlCmd::SetFd | FcntlCmd::GetFd => Ok(0),
     }
 }

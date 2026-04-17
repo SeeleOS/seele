@@ -12,14 +12,25 @@ use crate::{
     signal::{Signal, action::SignalAction},
 };
 use core::mem::size_of;
+use num_enum::TryFromPrimitive;
 
-const SA_SIGINFO: u64 = 0x0000_0004;
 const SIG_DFL: usize = 0;
 const SIG_IGN: usize = 1;
 
-const SIG_BLOCK: i32 = 0;
-const SIG_UNBLOCK: i32 = 1;
-const SIG_SETMASK: i32 = 2;
+bitflags::bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct SigActionFlags: u64 {
+        const SIGINFO = 0x0000_0004;
+    }
+}
+
+#[derive(Clone, Copy, Debug, TryFromPrimitive)]
+#[repr(i32)]
+enum SigMaskHow {
+    Block = 0,
+    Unblock = 1,
+    SetMask = 2,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -35,7 +46,7 @@ fn encode_sigaction(action: &SignalAction) -> LinuxSigAction {
         SignalHandlingType::Default => (SIG_DFL, 0),
         SignalHandlingType::Ignore => (SIG_IGN, 0),
         SignalHandlingType::Function1(func) => (func as usize, 0),
-        SignalHandlingType::Function2(func) => (func as usize, SA_SIGINFO),
+        SignalHandlingType::Function2(func) => (func as usize, SigActionFlags::SIGINFO.bits()),
     };
 
     LinuxSigAction {
@@ -50,7 +61,7 @@ fn decode_sigaction(action: LinuxSigAction) -> SignalAction {
     let handling_type = match action.handler {
         SIG_DFL => SignalHandlingType::Default,
         SIG_IGN => SignalHandlingType::Ignore,
-        handler if (action.flags & SA_SIGINFO) != 0 => unsafe {
+        handler if SigActionFlags::from_bits_truncate(action.flags).contains(SigActionFlags::SIGINFO) => unsafe {
             SignalHandlingType::Function2(core::mem::transmute(handler))
         },
         handler => unsafe { SignalHandlingType::Function1(core::mem::transmute(handler)) },
@@ -223,11 +234,10 @@ define_syscall!(
 
             if !set.is_null() {
                 let set = Signals::from_bits_truncate(*set);
-                match how {
-                    SIG_BLOCK => current.blocked_signals.insert(set),
-                    SIG_UNBLOCK => current.blocked_signals.remove(set),
-                    SIG_SETMASK => current.blocked_signals = set,
-                    _ => return Err(SyscallError::InvalidArguments),
+                match SigMaskHow::try_from(how).map_err(|_| SyscallError::InvalidArguments)? {
+                    SigMaskHow::Block => current.blocked_signals.insert(set),
+                    SigMaskHow::Unblock => current.blocked_signals.remove(set),
+                    SigMaskHow::SetMask => current.blocked_signals = set,
                 }
             }
         }
