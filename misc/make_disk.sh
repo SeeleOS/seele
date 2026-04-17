@@ -19,6 +19,9 @@ ARCH_PACKAGES=(
     xorg-xkbcomp
     xkeyboard-config
     xf86-input-libinput
+    fish
+    yazi
+    eza
     xf86-video-fbdev
     xf86-video-vesa
     icewm
@@ -70,3 +73,5 @@ sudo pacman \
     "${ARCH_PACKAGES[@]}"
 
 sudo cp "${ROOT_DIR}/misc/xorg.conf" "${SYSROOT_DIR}/etc/X11/xorg.conf"
+sudo install -Dm755 "${ROOT_DIR}/misc/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
+sudo install -Dm755 "${ROOT_DIR}/misc/init.sh" "${SYSROOT_DIR}/init"

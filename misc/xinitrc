@@ -1,0 +1,62 @@
+#!/bin/sh
+
+prefix="/usr"
+xinitdir="/etc/X11/xinit"
+xrdb="xrdb"
+xmodmap="xmodmap"
+
+userresources="$HOME/.Xresources"
+usermodmap="$HOME/.Xmodmap"
+sysresources="$xinitdir/.Xresources"
+sysmodmap="$xinitdir/.Xmodmap"
+
+if [ -f "$sysresources" ]; then
+    if [ -x /usr/bin/cpp ]; then
+        "$xrdb" -merge "$sysresources"
+    else
+        "$xrdb" -nocpp -merge "$sysresources"
+    fi
+fi
+
+if [ -f "$sysmodmap" ]; then
+    "$xmodmap" "$sysmodmap"
+fi
+
+if [ -f "$userresources" ]; then
+    if [ -x /usr/bin/cpp ]; then
+        "$xrdb" -merge "$userresources"
+    else
+        "$xrdb" -nocpp -merge "$userresources"
+    fi
+fi
+
+if [ -f "$usermodmap" ]; then
+    "$xmodmap" "$usermodmap"
+fi
+
+if [ -d "$xinitdir/xinitrc.d" ]; then
+    for f in "$xinitdir"/xinitrc.d/?*.sh; do
+        [ -x "$f" ] && . "$f"
+    done
+    unset f
+fi
+
+echo "xinitrc: starting session"
+
+if command -v icewm-session >/dev/null 2>&1; then
+    echo "xinitrc: exec icewm-session"
+    exec icewm-session
+fi
+
+if command -v icewm >/dev/null 2>&1; then
+    echo "xinitrc: exec icewm"
+    exec icewm
+fi
+
+if command -v xterm >/dev/null 2>&1; then
+    echo "xinitrc: exec xterm"
+    exec xterm
+fi
+
+echo "xinitrc: fallback sh"
+exec sh
