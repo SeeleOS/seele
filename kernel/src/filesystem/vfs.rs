@@ -86,6 +86,9 @@ impl VFS {
     pub fn resolve(&self, path: Path) -> FSResult<FileLike> {
         let normalized_path = self.normalize_path(path);
         let (mount, mount_path) = self.find_mount(&normalized_path)?;
+        // `mount_path` is rooted at the matched mount itself. For example,
+        // resolving `/dev/null` with a `/dev` mount passes `"/null"` into
+        // that filesystem's `lookup()` instead of the global `"/dev/null"`.
         mount.fs.lock().lookup(&mount_path)
     }
 
