@@ -233,6 +233,10 @@ define_syscall!(Faccessat, |dirfd: i32, path: CString, mode: i32, _flags: i32| {
     Ok(0)
 });
 
+define_syscall!(Faccessat2, |dirfd: i32, path: CString, mode: i32, flags: i32| {
+    Faccessat::handle_call(dirfd as u64, path as u64, mode as u64, flags as u64, 0, 0)
+});
+
 define_syscall!(UnlinkAt, |dirfd: i32, path: CString, flags: i32| {
     let _ = path_is_relative_to_cwd(dirfd)?;
     let path = path_from_raw(path)?;

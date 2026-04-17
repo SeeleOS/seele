@@ -6,6 +6,7 @@ mod drop_impl;
 mod error;
 mod name;
 mod object;
+mod pair;
 mod registry;
 mod sockopt;
 mod state;

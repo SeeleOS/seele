@@ -130,10 +130,11 @@ define_syscall!(ExitGroup, |exit_code: u64| {
 });
 
 define_syscall!(Fork, {
-    let mut manager = MANAGER.lock();
-    log::debug!("start fork");
-    let current = manager.current.clone().unwrap();
-    Ok(current.lock().fork(&mut manager).0 as usize)
+    let current = get_current_process();
+    let (child_process, _child_thread) = crate::process::Process::fork(current);
+    let pid = child_process.lock().pid.0;
+    MANAGER.lock().processes.insert(child_process.lock().pid, child_process.clone());
+    Ok(pid as usize)
 });
 
 define_syscall!(Getpid, {

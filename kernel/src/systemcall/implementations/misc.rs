@@ -5,8 +5,8 @@ use x86_rtc::Rtc;
 
 use crate::memory::{addrspace::mem_area::{Data, MemoryArea}, protection::Protection};
 use crate::misc::{others::protection_to_page_flags, utsname::UtsName};
-use crate::misc::time::Time;
-use crate::process::manager::get_current_process;
+use crate::misc::time::Time as KernelTime;
+use crate::process::manager::{MANAGER, get_current_process};
 use crate::systemcall::utils::{SyscallError, SyscallImpl};
 use crate::terminal::pty::create_pty;
 use crate::thread::misc::with_current_thread;
@@ -102,8 +102,10 @@ define_syscall!(ClockGettime, |clock_id: i32, tp: u64| {
     let ns = match crate::misc::timer::ClockId::try_from(clock_id as u64)
         .map_err(|_| SyscallError::InvalidArguments)?
     {
-        crate::misc::timer::ClockId::Realtime => Time::current().as_nanoseconds() as i64,
-        crate::misc::timer::ClockId::SinceBoot => Time::since_boot().as_nanoseconds() as i64,
+        crate::misc::timer::ClockId::Realtime => KernelTime::current().as_nanoseconds() as i64,
+        crate::misc::timer::ClockId::SinceBoot => {
+            KernelTime::since_boot().as_nanoseconds() as i64
+        }
     };
     unsafe {
         *tp = LinuxTimespec {
@@ -115,7 +117,7 @@ define_syscall!(ClockGettime, |clock_id: i32, tp: u64| {
 });
 
 define_syscall!(TimeSinceBoot, {
-    Ok(Time::since_boot().as_nanoseconds() as usize)
+    Ok(KernelTime::since_boot().as_nanoseconds() as usize)
 });
 
 define_syscall!(Gettimeofday, |tv: u64, tz: u64| {
@@ -125,7 +127,7 @@ define_syscall!(Gettimeofday, |tv: u64, tz: u64| {
             return Err(SyscallError::BadAddress);
         }
 
-        let now_ns = Time::current().as_nanoseconds() as i64;
+        let now_ns = KernelTime::current().as_nanoseconds() as i64;
         unsafe {
             *tv = LinuxTimeval {
                 tv_sec: now_ns / 1_000_000_000,
@@ -209,7 +211,7 @@ define_syscall!(Nanosleep, |req: u64, rem: u64| {
     }
     let nanoseconds =
         (requested.tv_sec as u64) * 1_000_000_000 + (requested.tv_nsec as u64);
-    let time = Time::since_boot().add_ns(nanoseconds);
+    let time = KernelTime::since_boot().add_ns(nanoseconds);
 
     block_current_with_sig_check(BlockType::SetTime(time))?;
 
@@ -226,13 +228,62 @@ define_syscall!(Nanosleep, |req: u64, rem: u64| {
 });
 
 define_syscall!(Clone, |flags: u64, stack_pointer: u64, parent_tid: u64, child_tid: u64, tls: u64| {
-    let flags = CloneFlags::from_bits_truncate(flags);
+    let clone_flags = CloneFlags::from_bits_truncate(flags);
+    let exit_signal = (flags & 0xff) as u8;
     let required = CloneFlags::VM
         | CloneFlags::FS
         | CloneFlags::FILES
         | CloneFlags::SIGHAND
         | CloneFlags::THREAD;
-    if !flags.contains(CloneFlags::THREAD) || !flags.contains(required) {
+    if !clone_flags.contains(CloneFlags::THREAD) {
+        let unsupported = flags & !(0xff
+            | CloneFlags::PARENT_SETTID.bits()
+            | CloneFlags::CHILD_SETTID.bits()
+            | CloneFlags::CHILD_CLEARTID.bits()
+            | CloneFlags::SETTLS.bits());
+        if unsupported != 0 || (exit_signal != 0 && exit_signal != 17) {
+            return Err(SyscallError::NoSyscall);
+        }
+
+        let current = get_current_process();
+        let (child_process, child_thread) = crate::process::Process::fork(current);
+        let pid = child_process.lock().pid;
+        MANAGER.lock().processes.insert(pid, child_process.clone());
+
+        {
+            let mut child = child_thread.lock();
+            if stack_pointer != 0 {
+                child.snapshot.inner.rsp = stack_pointer;
+            }
+            child.snapshot.inner.rax = 0;
+            if clone_flags.contains(CloneFlags::SETTLS) {
+                child.snapshot.fs_base = tls;
+            }
+        }
+
+        unsafe {
+            if clone_flags.contains(CloneFlags::PARENT_SETTID) {
+                let parent_tid = parent_tid as *mut i32;
+                if parent_tid.is_null() {
+                    return Err(SyscallError::BadAddress);
+                }
+                *parent_tid = pid.0 as i32;
+            }
+
+            if clone_flags.intersects(CloneFlags::CHILD_SETTID | CloneFlags::CHILD_CLEARTID) {
+                let child_tid = child_tid as *mut i32;
+                if child_tid.is_null() {
+                    return Err(SyscallError::BadAddress);
+                }
+                *child_tid = pid.0 as i32;
+            }
+        }
+
+        return Ok(pid.0 as usize);
+    }
+
+    let flags = clone_flags;
+    if !flags.contains(required) {
         return Err(SyscallError::NoSyscall);
     }
 
@@ -313,6 +364,41 @@ define_syscall!(Getresgid, |rgid: u64, egid: u64, sgid: u64| {
     }
 
     Ok(0)
+});
+
+define_syscall!(Getuid, {
+    Ok(0)
+});
+
+define_syscall!(Getgid, {
+    Ok(0)
+});
+
+define_syscall!(Geteuid, {
+    Ok(0)
+});
+
+define_syscall!(Getegid, {
+    Ok(0)
+});
+
+define_syscall!(Setfsuid, |_uid: u32| {
+    Ok(0)
+});
+
+define_syscall!(Setfsgid, |_gid: u32| {
+    Ok(0)
+});
+
+define_syscall!(Time, |time_ptr: u64| {
+    let time_ptr = time_ptr as *mut i64;
+    let seconds = (KernelTime::current().as_nanoseconds() / 1_000_000_000) as i64;
+    if !time_ptr.is_null() {
+        unsafe {
+            *time_ptr = seconds;
+        }
+    }
+    Ok(seconds as usize)
 });
 
 define_syscall!(Setrlimit, |_resource: i32, _rlimit: u64| {
@@ -416,8 +502,8 @@ define_syscall!(Getrandom, |buf: u64, len: usize, flags: u32| {
     }
 
     let out = unsafe { core::slice::from_raw_parts_mut(buf as *mut u8, len) };
-    let mut state = Time::since_boot().as_nanoseconds()
-        ^ Time::current().as_nanoseconds()
+    let mut state = KernelTime::since_boot().as_nanoseconds()
+        ^ KernelTime::current().as_nanoseconds()
         ^ buf.rotate_left(17)
         ^ (len as u64).rotate_left(33);
 

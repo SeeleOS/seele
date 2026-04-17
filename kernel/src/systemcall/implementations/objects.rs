@@ -192,6 +192,13 @@ define_syscall!(Dup, |object: ObjectRef| {
         .map_err(Into::into)
 });
 
+define_syscall!(Dup2, |source: ObjectRef, dest: usize| {
+    get_current_process()
+        .lock()
+        .clone_object_to(source, dest)
+        .map_err(Into::into)
+});
+
 define_syscall!(Dup3, |source: ObjectRef, dest: usize| {
     get_current_process()
         .lock()

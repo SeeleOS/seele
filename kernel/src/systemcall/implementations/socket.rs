@@ -52,6 +52,29 @@ define_syscall!(Socket, |domain: u64, kind: u64, protocol: u64| {
     Ok(fd)
 });
 
+define_syscall!(Socketpair, |domain: u64, kind: u64, protocol: u64, fds: *mut i32| {
+    if fds.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let (left, right) = crate::socket::UnixSocketObject::pair(domain, kind, protocol)
+        .map_err(crate::object::error::ObjectError::from)?;
+    let (left_fd, right_fd) = {
+        let process = get_current_process();
+        let mut process = process.lock();
+        let left_fd = process.push_object(left);
+        let right_fd = process.push_object(right);
+        (left_fd, right_fd)
+    };
+
+    unsafe {
+        *fds.add(0) = i32::try_from(left_fd).map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
+        *fds.add(1) = i32::try_from(right_fd).map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
+    }
+
+    Ok(0)
+});
+
 define_syscall!(Bind, |socket: ObjectRef, address: *const u8, address_len: u32| {
     let path = path_from_sockaddr(address, address_len)?;
     socket

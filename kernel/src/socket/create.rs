@@ -3,7 +3,10 @@ use spin::Mutex;
 
 use crate::object::FileFlags;
 
-use super::{AF_UNIX, SOCK_STREAM, SocketError, SocketResult, UnixSocketObject, UnixSocketState};
+use super::{
+    AF_UNIX, SOCK_CLOEXEC, SOCK_NONBLOCK, SOCK_STREAM, SocketError, SocketResult,
+    UnixSocketObject, UnixSocketState,
+};
 
 impl UnixSocketObject {
     pub fn new() -> Self {
@@ -14,10 +17,11 @@ impl UnixSocketObject {
     }
 
     pub fn create(domain: u64, kind: u64, protocol: u64) -> SocketResult<Arc<Self>> {
+        let socket_type = kind & !(SOCK_NONBLOCK | SOCK_CLOEXEC);
         if domain != AF_UNIX {
             return Err(SocketError::AddressFamilyNotSupported);
         }
-        if kind != SOCK_STREAM || protocol != 0 {
+        if socket_type != SOCK_STREAM || protocol != 0 {
             return Err(SocketError::ProtocolNotSupported);
         }
 
