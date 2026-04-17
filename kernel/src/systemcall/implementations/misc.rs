@@ -2,6 +2,7 @@ use alloc::sync::Arc;
 use seele_sys::misc::SystemInfo;
 use x86_rtc::Rtc;
 
+use crate::memory::addrspace::mem_area::Data;
 use crate::misc::time::Time;
 use crate::process::manager::get_current_process;
 use crate::systemcall::utils::{SyscallError, SyscallImpl};
@@ -9,6 +10,7 @@ use crate::terminal::pty::create_pty;
 use crate::thread::misc::with_current_thread;
 use crate::thread::yielding::{BlockType, block_current, block_current_with_sig_check};
 use crate::{NAME, define_syscall};
+use seele_sys::permission::Permissions;
 
 const CLOCK_REALTIME: i32 = 0;
 const CLOCK_MONOTONIC: i32 = 1;
@@ -65,6 +67,35 @@ define_syscall!(ClockGettime, |clock_id: i32, tp: u64| {
 
 define_syscall!(TimeSinceBoot, {
     Ok(Time::since_boot().as_nanoseconds() as usize)
+});
+
+define_syscall!(Brk, |addr: u64| {
+    let process = get_current_process();
+    let mut process = process.lock();
+
+    if process.program_break == 0 {
+        process.program_break = process.addrspace.user_mem.as_u64();
+    }
+
+    let current = process.program_break;
+    if addr == 0 {
+        return Ok(current as usize);
+    }
+
+    if addr > current {
+        let old_aligned = current.div_ceil(4096) * 4096;
+        let new_aligned = addr.div_ceil(4096) * 4096;
+        if new_aligned > old_aligned {
+            process.addrspace.allocate_user_lazy(
+                (new_aligned - old_aligned) / 4096,
+                Permissions::READABLE | Permissions::WRITABLE,
+                Data::Normal,
+            );
+        }
+    }
+
+    process.program_break = addr;
+    Ok(addr as usize)
 });
 
 define_syscall!(Uname, |info: u64| {
@@ -163,6 +194,22 @@ define_syscall!(Clone, |flags: u64, stack_pointer: u64, parent_tid: u64, child_t
 
         Ok(tid as usize)
     })
+});
+
+define_syscall!(SchedYield, {
+    Ok(0)
+});
+
+define_syscall!(Getpriority, |_which: i32, _who: i32| {
+    Ok(0)
+});
+
+define_syscall!(Setrlimit, |_resource: i32, _rlimit: u64| {
+    Ok(0)
+});
+
+define_syscall!(Sync, {
+    Ok(0)
 });
 
 define_syscall!(CreatePty, |master_ptr: *mut i32, slave_ptr: *mut i32| {

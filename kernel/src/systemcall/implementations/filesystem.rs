@@ -23,6 +23,7 @@ const AT_FDCWD: i32 = -100;
 const AT_REMOVEDIR: i32 = 0x200;
 const AT_SYMLINK_NOFOLLOW: i32 = 0x100;
 const AT_EMPTY_PATH: i32 = 0x1000;
+const UTIME_OMIT: i64 = 0x3fff_ffff;
 
 const O_CREAT: i32 = 0x40;
 const O_EXCL: i32 = 0x80;
@@ -50,6 +51,13 @@ fn resolve_path_at(dirfd: i32, path_str: &str) -> Result<Path, SyscallError> {
     }
 
     Err(SyscallError::NoSyscall)
+}
+
+fn check_access_mode(mode: i32) -> Result<(), SyscallError> {
+    if (mode & !7) != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    Ok(())
 }
 
 fn readlink_impl(
@@ -121,6 +129,14 @@ define_syscall!(OpenAt, |dirfd: i32, path: CString, flags: i32, _mode: u32| {
     Ok(slot)
 });
 
+define_syscall!(Access, |path: CString, mode: i32| {
+    check_access_mode(mode)?;
+    let path_str = path_from_raw(path)?;
+    let path = resolve_path_at(AT_FDCWD, &path_str)?;
+    let _ = VirtualFS.lock().open(path)?;
+    Ok(0)
+});
+
 define_syscall!(Chdir, |dir: String| {
     let path = Path::new(&dir).as_absolute();
     get_current_process().lock().change_directory(path)?;
@@ -182,6 +198,14 @@ define_syscall!(Newfstatat, |dirfd: i32,
     unsafe {
         *linux_stat_ptr = stat;
     }
+    Ok(0)
+});
+
+define_syscall!(Faccessat, |dirfd: i32, path: CString, mode: i32, _flags: i32| {
+    check_access_mode(mode)?;
+    let path_str = path_from_raw(path)?;
+    let path = resolve_path_at(dirfd, &path_str)?;
+    let _ = VirtualFS.lock().open(path)?;
     Ok(0)
 });
 
@@ -278,4 +302,23 @@ define_syscall!(RenameAt2, |old_dirfd: i32,
         new_from_currentdir,
         new_path,
     )
+});
+
+define_syscall!(Utimensat, |dirfd: i32, path: u64, times: u64, _flags: i32| {
+    let path = path as CString;
+    if !path.is_null() {
+        let path_str = path_from_raw(path)?;
+        let _ = resolve_path_at(dirfd, &path_str)?;
+    }
+
+    if times != 0 {
+        let times = times as *const [i64; 2];
+        unsafe {
+            if (*times)[1] != UTIME_OMIT && (*times)[1] < 0 {
+                return Err(SyscallError::InvalidArguments);
+            }
+        }
+    }
+
+    Ok(0)
 });

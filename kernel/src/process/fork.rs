@@ -35,6 +35,7 @@ impl Process {
             parent: Some(parent),
             signal_actions: self.signal_actions.clone(),
             group_id: self.group_id,
+            program_break: self.program_break,
             ..Default::default()
         }));
 

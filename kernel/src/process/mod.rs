@@ -36,6 +36,7 @@ pub struct Process {
     pub pending_signals: Signals,
     pub group_id: ProcessGroupID,
     pub timers: Vec<Option<Timer>>,
+    pub program_break: u64,
 }
 
 impl Default for Process {
@@ -44,6 +45,7 @@ impl Default for Process {
             group_id: ProcessGroupID::default(),
             pending_signals: Signals::default(),
             signal_actions: default_signal_action_vec(),
+            program_break: 0,
             pid: ProcessID::default(),
             current_directory: AbsolutePath::default(),
             addrspace: AddrSpace::default(),

@@ -130,6 +130,26 @@ define_syscall!(Fcntl, |object: ObjectRef, command: u64, arg: u64| {
     control_object(object, command, arg)
 });
 
+define_syscall!(Flock, |_object: ObjectRef, _operation: i32| {
+    Ok(0)
+});
+
+define_syscall!(Fsync, |_object: ObjectRef| {
+    Ok(0)
+});
+
+define_syscall!(Fdatasync, |_object: ObjectRef| {
+    Ok(0)
+});
+
+define_syscall!(Ftruncate, |_object: ObjectRef, _length: i64| {
+    Ok(0)
+});
+
+define_syscall!(Fallocate, |_object: ObjectRef, _mode: i32, _offset: i64, _len: i64| {
+    Ok(0)
+});
+
 define_syscall!(Dup, |object: ObjectRef| {
     get_current_process()
         .lock()
@@ -172,3 +192,25 @@ define_syscall!(
             .map_err(Into::into)
     }
 );
+
+define_syscall!(Pread64, |object: ObjectRef, buf_ptr: *mut u8, len: usize, offset: i64| {
+    if offset < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    let file = object.as_file_like()?;
+    unsafe { Ok(file.read_at(slice::from_raw_parts_mut(buf_ptr, len), offset as u64)?) }
+});
+
+define_syscall!(Pwrite64, |object: ObjectRef, buf_ptr: *const u8, len: usize, offset: i64| {
+    if offset < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let seekable = object.clone().as_seekable()?;
+    let writable = object.as_writable()?;
+    let current = seekable.clone().seek(0, SeekType::Current)? as i64;
+    seekable.clone().seek(offset, SeekType::Start)?;
+    let written = unsafe { writable.write(slice::from_raw_parts(buf_ptr, len))? };
+    let _ = seekable.seek(current, SeekType::Start);
+    Ok(written)
+});

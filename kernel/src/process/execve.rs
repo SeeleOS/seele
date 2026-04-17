@@ -61,6 +61,7 @@ impl Process {
         thread_locked.blocked_signals = Signals::default();
         self.pending_signals = Signals::default();
         self.signal_actions = default_signal_action_vec();
+        self.program_break = 0;
 
         with_profiling(
             || self.addrspace.load(),
