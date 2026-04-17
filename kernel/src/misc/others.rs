@@ -1,12 +1,11 @@
 use alloc::vec::Vec;
-use seele_sys::permission::Permissions;
 use x86_64::{
     PhysAddr, PrivilegeLevel,
     registers::control::{Cr0, Cr0Flags, Cr3Flags, Cr4, Cr4Flags},
     structures::{idt::InterruptStackFrame, paging::PageTableFlags},
 };
 
-use crate::misc::error::KernelResult;
+use crate::{memory::protection::Protection, misc::error::KernelResult};
 pub fn calc_cr3_value(addr: PhysAddr, flags: Cr3Flags) -> u64 {
     ((false as u64) << 63) | addr.as_u64() | flags.bits()
 }
@@ -34,14 +33,14 @@ pub trait KernelFrom<T> {
         Self: Sized;
 }
 
-pub fn permissions_to_flags(permissions: Permissions) -> PageTableFlags {
+pub fn protection_to_page_flags(protection: Protection) -> PageTableFlags {
     let mut flags = PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE;
 
-    if permissions.contains(Permissions::WRITABLE) {
+    if protection.contains(Protection::WRITE) {
         flags |= PageTableFlags::WRITABLE;
     }
 
-    if !permissions.contains(Permissions::EXECUTABLE) {
+    if !protection.contains(Protection::EXEC) {
         flags |= PageTableFlags::NO_EXECUTE;
     }
 

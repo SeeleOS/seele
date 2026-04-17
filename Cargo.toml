@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["kernel", "packages"]
+members = ["kernel"]
 exclude = ["toolchain/rust"]
 
 [package]

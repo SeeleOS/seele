@@ -1,7 +1,6 @@
 use core::sync::atomic::AtomicU64;
 
 use alloc::vec::Vec;
-use seele_sys::permission::Permissions;
 use x86_64::{
     PhysAddr, VirtAddr,
     structures::paging::{FrameDeallocator, Mapper, Page, Size4KiB, Translate, page},
@@ -16,8 +15,9 @@ use crate::{
         },
         page_table_wrapper::PageTableWrapped,
         paging::{FRAME_ALLOCATOR, MAPPER},
+        protection::Protection,
     },
-    misc::{others::permissions_to_flags, stack_builder::StackBuilder},
+    misc::{others::protection_to_page_flags, stack_builder::StackBuilder},
     s_print,
 };
 
@@ -91,12 +91,12 @@ impl AddrSpace {
         self.last_area_index = None;
     }
 
-    pub fn update_permissions(&mut self, start: VirtAddr, end: VirtAddr, permissions: Permissions) {
+    pub fn update_permissions(&mut self, start: VirtAddr, end: VirtAddr, protection: Protection) {
         if start >= end {
             return;
         }
 
-        let new_flags = permissions_to_flags(permissions);
+        let new_flags = protection_to_page_flags(protection);
         let mut new_areas = Vec::new();
 
         for area in self.memory_areas.drain(..) {

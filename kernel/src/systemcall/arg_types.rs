@@ -1,21 +1,16 @@
 use alloc::{string::String, vec::Vec};
 use futures_util::future::OkInto;
-use seele_sys::{
-    SyscallResult,
-    errors::SyscallError,
-    misc::SystemInfo,
-    permission::Permissions,
-    signal::Signals,
-};
 use x86_64::VirtAddr;
 
 use crate::{
     define_syscall,
     filesystem::info::LinuxStat,
+    memory::protection::Protection,
     misc::{
         c_types::{CString, CVec},
         error::AsSyscallError,
         timer::{ClockId, Sigevent, TimerSpec},
+        utsname::UtsName,
         others::KernelFrom,
     },
     object::misc::{ObjectRef, get_object_current_process},
@@ -27,8 +22,9 @@ use crate::{
         misc::{ProcessID, get_process_with_pid},
     },
     filesystem::vfs_traits::Whence,
-    signal::{Signal, action::SignalAction},
+    signal::{Signal, Signals, action::SignalAction},
     systemcall::implementations::PollResult,
+    systemcall::utils::{SyscallError, SyscallResult},
 };
 
 macro_rules! add_syscall_arg_type {
@@ -79,7 +75,7 @@ add_syscall_arg_type!(
     *mut SignalAction,
     *const SignalAction,
     *mut Signals,
-    *mut SystemInfo
+    *mut UtsName
 );
 
 add_syscall_arg_type!(Signals, val, {
@@ -112,8 +108,8 @@ add_syscall_arg_type!(ProcessRef, val, { get_process_with_pid(ProcessID(val)) })
 
 add_syscall_arg_type!(VirtAddr, val, { Ok(VirtAddr::new(val)) });
 
-add_syscall_arg_type!(Permissions, val, {
-    Permissions::from_bits(val).ok_or(SyscallError::InvalidArguments)
+add_syscall_arg_type!(Protection, val, {
+    Protection::from_bits(val).ok_or(SyscallError::InvalidArguments)
 });
 
 add_syscall_arg_type!(Whence, val, {

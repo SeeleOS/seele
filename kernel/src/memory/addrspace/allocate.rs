@@ -1,11 +1,10 @@
 use core::sync::atomic::Ordering;
 
-use seele_sys::permission::Permissions;
 use x86_64::{VirtAddr, structures::paging::PageTableFlags};
 
 use crate::{
-    memory::addrspace::mem_area::{Data, MemoryArea},
-    misc::others::permissions_to_flags,
+    memory::{addrspace::mem_area::{Data, MemoryArea}, protection::Protection},
+    misc::others::protection_to_page_flags,
 };
 
 use super::{AddrSpace, AllocResult, KERNEL_MEM};
@@ -28,12 +27,12 @@ impl AddrSpace {
     pub fn allocate_user_lazy(
         &mut self,
         pages: u64,
-        permissions: Permissions,
+        protection: Protection,
         data: Data,
     ) -> VirtAddr {
         log::trace!("addrspace: allocate_user_lazy pages {}", pages);
         let mem = self.fetch_add_user_mem(pages);
-        let area = MemoryArea::new(mem, pages, permissions_to_flags(permissions), data, true);
+        let area = MemoryArea::new(mem, pages, protection_to_page_flags(protection), data, true);
 
         self.register_area(area);
 

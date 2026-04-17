@@ -1,9 +1,9 @@
 use alloc::{sync::Arc, vec::Vec};
-use seele_sys::signal::Signals;
 use spin::Mutex;
 
 use crate::{
     process::{Process, ProcessRef},
+    signal::Signals,
     thread::{
         ThreadRef,
         misc::{SnapshotState, State, ThreadID},

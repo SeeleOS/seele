@@ -14,7 +14,6 @@ virtio-drivers = "0.13.0"
 heapless = "0.9"
 volatile = "0.6.1"
 x86_rtc = "0.1"
-seele-sys = { path = "../seele-sys" }
 x2apic = "0.5"
 ext4plus = { git = "https://github.com/SeeleOS/ext4plus", features = ["sync"] }
 owo-colors = { version = "4.3", default-features = false }

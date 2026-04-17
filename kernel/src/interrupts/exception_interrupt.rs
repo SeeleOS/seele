@@ -1,4 +1,3 @@
-use seele_sys::signal::Signal;
 use x86_64::{
     PrivilegeLevel,
     instructions::interrupts,
@@ -13,6 +12,7 @@ use crate::{
         misc::with_current_process,
     },
     s_println,
+    signal::Signal,
     thread::{misc::with_current_thread, scheduling::return_to_executor_no_save},
     tss::{DOUBLE_FAULT_IST_LOCATION, GP_IST_LOCATION, PAGE_FAULT_IST_LOCATION},
 };

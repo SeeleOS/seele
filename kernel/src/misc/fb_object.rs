@@ -7,10 +7,11 @@ use crate::{
     memory::{
         addrspace::mem_area::{Data, MemoryArea},
         paging::MAPPER,
+        protection::Protection,
     },
     misc::{
         framebuffer::{FRAME_BUFFER, framebuffer_set_user_controlled},
-        others::permissions_to_flags,
+        others::protection_to_page_flags,
     },
     object::{
         Object,
@@ -35,7 +36,7 @@ impl MemoryMappable for FramebufferObject {
         self: Arc<Self>,
         offset: u64,
         pages: u64,
-        permissions: seele_sys::permission::Permissions,
+        protection: Protection,
     ) -> crate::object::misc::ObjectResult<VirtAddr> {
         use alloc::vec::Vec;
         use x86_64::structures::paging::PhysFrame;
@@ -106,7 +107,7 @@ impl MemoryMappable for FramebufferObject {
         let user_addr = with_current_process(|process| {
             process.addrspace.allocate_user_lazy(
                 pages,
-                permissions,
+                protection,
                 Data::Shared {
                     frames: Arc::<[PhysFrame]>::from(frames),
                     flags: shared_flags,

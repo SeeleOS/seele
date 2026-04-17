@@ -1,8 +1,9 @@
 use crate::object::FileFlags;
-use seele_sys::{SyscallResult, errors::SyscallError};
-
-use crate::object::misc::ObjectRef;
-use crate::process::misc::with_current_process;
+use crate::{
+    object::misc::ObjectRef,
+    process::misc::with_current_process,
+    systemcall::utils::{SyscallError, SyscallResult},
+};
 
 const F_DUPFD: u64 = 0;
 const F_GETFD: u64 = 1;

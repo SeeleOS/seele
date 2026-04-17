@@ -1,13 +1,13 @@
 use core::slice;
 
 use alloc::{collections::btree_map::BTreeMap, string::String};
-use seele_sys::permission::Permissions;
 use spin::Mutex;
 
 use crate::{
     define_syscall,
     filesystem::vfs_traits::DirectoryContentType,
     filesystem::vfs_traits::Whence,
+    memory::protection::Protection,
     misc::c_types::CString,
     object::{
         config::ConfigurateRequest,
@@ -210,9 +210,9 @@ define_syscall!(OpenDevice, |name: String| {
 
 define_syscall!(
     MmapObject,
-    |object: ObjectRef, pages: u64, offset: u64, permissions: Permissions| {
+    |object: ObjectRef, pages: u64, offset: u64, protection: Protection| {
         let object = object.as_mappable()?;
-        let address = object.map(offset, pages, permissions)?;
+        let address = object.map(offset, pages, protection)?;
 
         Ok(address.as_u64() as usize)
     }

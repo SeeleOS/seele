@@ -1,9 +1,9 @@
 use alloc::{sync::Arc, vec::Vec};
-use seele_sys::signal::Signals;
 use spin::{MutexGuard, mutex::Mutex};
 
 use crate::{
     process::{Process, manager::Manager, misc::ProcessID},
+    signal::Signals,
     thread::THREAD_MANAGER,
 };
 

@@ -2,6 +2,7 @@ use crate::{
     misc::snapshot::Snapshot,
     process::misc::with_current_process,
     s_println,
+    systemcall::numbers::SyscallNumber,
     systemcall::table::SYSCALL_TABLE,
     systemcall::utils::SyscallError,
     thread::{
@@ -10,7 +11,6 @@ use crate::{
         scheduling::{return_to_executor_from_current, return_to_executor_no_save},
     },
 };
-use seele_sys::numbers::SyscallNumber;
 use x86_64::registers::model_specific::FsBase;
 
 #[unsafe(no_mangle)]

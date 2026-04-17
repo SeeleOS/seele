@@ -1,13 +1,13 @@
 use core::char;
 
 use alloc::collections::vec_deque::VecDeque;
-use seele_sys::signal::Signal;
 use spin::mutex::Mutex;
 
 use crate::{
     keyboard::decoding_task::KEYBOARD_QUEUE,
     object::tty_device::{get_default_tty, wake_tty_poller_readable},
     print,
+    signal::Signal,
     terminal::{
         line_discipline::{process_input_byte, process_output_bytes},
         misc::{LINE_BUFFER, flush_line_buffer},

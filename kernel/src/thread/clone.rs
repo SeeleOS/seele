@@ -1,7 +1,6 @@
-use seele_sys::signal::Signals;
-
 use crate::{
     process::ProcessRef,
+    signal::Signals,
     thread::{
         THREAD_MANAGER, ThreadRef,
         misc::{SnapshotState, State, ThreadID},
@@ -24,6 +23,8 @@ impl Thread {
                 snapshot
             },
             kernel_stack_top: allocate_kernel_stack(16).finish().as_u64(),
+            blocked_signals: self.blocked_signals,
+            saved_blocked_signals: self.saved_blocked_signals.clone(),
             ..Default::default()
         };
 

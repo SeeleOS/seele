@@ -1,5 +1,4 @@
 use alloc::{collections::vec_deque::VecDeque, sync::Arc, vec::Vec};
-use seele_sys::SyscallResult;
 
 use crate::{
     misc::time::Time,
@@ -9,6 +8,7 @@ use crate::{
     },
     polling::event::PollableEvent,
     process::{manager::get_current_process, misc::ProcessID},
+    systemcall::utils::SyscallResult,
     task::{TASK_SPAWNER, task::Task},
     thread::{
         THREAD_MANAGER, ThreadRef, future::ThreadFuture, manager::ThreadManager, misc::State,

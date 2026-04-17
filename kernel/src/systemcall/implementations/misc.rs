@@ -1,10 +1,9 @@
 use alloc::sync::Arc;
-use seele_sys::misc::SystemInfo;
 use x86_64::VirtAddr;
 use x86_rtc::Rtc;
 
-use crate::memory::addrspace::mem_area::{Data, MemoryArea};
-use crate::misc::others::permissions_to_flags;
+use crate::memory::{addrspace::mem_area::{Data, MemoryArea}, protection::Protection};
+use crate::misc::{others::protection_to_page_flags, utsname::UtsName};
 use crate::misc::time::Time;
 use crate::process::manager::get_current_process;
 use crate::systemcall::utils::{SyscallError, SyscallImpl};
@@ -12,7 +11,6 @@ use crate::terminal::pty::create_pty;
 use crate::thread::misc::with_current_thread;
 use crate::thread::yielding::{BlockType, block_current, block_current_with_sig_check};
 use crate::{NAME, define_syscall};
-use seele_sys::permission::Permissions;
 
 const CLOCK_REALTIME: i32 = 0;
 const CLOCK_MONOTONIC: i32 = 1;
@@ -77,22 +75,6 @@ fn write_rseq_area(rseq_ptr: u64, registered: bool) -> Result<(), SyscallError> 
 struct LinuxTimespec {
     tv_sec: i64,
     tv_nsec: i64,
-}
-
-#[repr(C)]
-struct LinuxUtsname {
-    sysname: [u8; 65],
-    nodename: [u8; 65],
-    release: [u8; 65],
-    version: [u8; 65],
-    machine: [u8; 65],
-    domainname: [u8; 65],
-}
-
-fn write_c_field(dst: &mut [u8], src: &[u8]) {
-    let len = src.iter().position(|&b| b == 0).unwrap_or(src.len());
-    let len = len.min(dst.len().saturating_sub(1));
-    dst[..len].copy_from_slice(&src[..len]);
 }
 
 define_syscall!(ClockGettime, |clock_id: i32, tp: u64| {
@@ -168,7 +150,7 @@ define_syscall!(Brk, |addr: u64| {
         process.addrspace.register_area(MemoryArea::new(
             VirtAddr::new(old_aligned),
             (new_aligned - old_aligned) / 4096,
-            permissions_to_flags(Permissions::READABLE | Permissions::WRITABLE),
+            protection_to_page_flags(Protection::READ | Protection::WRITE),
             Data::Normal,
             true,
         ));
@@ -187,24 +169,12 @@ define_syscall!(Brk, |addr: u64| {
 });
 
 define_syscall!(Uname, |info: u64| {
-    let info = info as *mut LinuxUtsname;
+    let info = info as *mut UtsName;
     if info.is_null() {
         return Err(SyscallError::BadAddress);
     }
-    let sys = SystemInfo::new(NAME, env!("CARGO_PKG_VERSION"));
     unsafe {
-        (*info) = LinuxUtsname {
-            sysname: [0; 65],
-            nodename: [0; 65],
-            release: [0; 65],
-            version: [0; 65],
-            machine: [0; 65],
-            domainname: [0; 65],
-        };
-        write_c_field(&mut (*info).sysname, sys.name());
-        write_c_field(&mut (*info).release, sys.version());
-        write_c_field(&mut (*info).version, sys.version());
-        write_c_field(&mut (*info).machine, b"x86_64");
+        *info = UtsName::new(NAME, env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_VERSION"), "x86_64");
     }
     Ok(0)
 });

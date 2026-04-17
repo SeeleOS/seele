@@ -1,5 +1,4 @@
 use alloc::{slice, sync::Arc, vec::Vec};
-use seele_sys::permission::Permissions;
 use spleen_font::Size;
 use x86_64::{
     VirtAddr,
@@ -14,9 +13,10 @@ use crate::{
             mem_area::{Data, MemoryArea},
         },
         paging::FRAME_ALLOCATOR,
+        protection::Protection,
         utils::apply_offset,
     },
-    misc::{others::permissions_to_flags, stack_builder::StackBuilder},
+    misc::{others::protection_to_page_flags, stack_builder::StackBuilder},
     object::misc::ObjectRef,
 };
 

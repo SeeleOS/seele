@@ -1,12 +1,11 @@
 use alloc::{string::String, vec::Vec};
-use seele_sys::signal::Signals;
 use x86_64::VirtAddr;
 
 use crate::{
     filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
     misc::time::with_profiling,
     process::{Process, manager::MANAGER, new::setup_process},
-    signal::misc::default_signal_action_vec,
+    signal::{Signals, misc::default_signal_action_vec},
     thread::{THREAD_MANAGER, misc::SnapshotState, snapshot::ThreadSnapshot, stack::allocate_kernel_stack},
     tss::TSS,
 };

@@ -1,7 +1,6 @@
 use core::fmt::Debug;
 
 use alloc::sync::Arc;
-use seele_sys::{SyscallResult, errors::SyscallError};
 
 bitflags::bitflags! {
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +18,7 @@ use crate::{
     },
     polling::{object::Pollable, poller::PollerObject},
     socket::UnixSocketObject,
+    systemcall::utils::{SyscallError, SyscallResult},
 };
 
 pub mod config;

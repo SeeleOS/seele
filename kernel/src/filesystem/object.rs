@@ -11,7 +11,7 @@ use crate::{
         vfs_traits::{FileLike, Whence},
     },
     impl_cast_function, impl_cast_function_non_trait,
-    memory::addrspace::mem_area::Data,
+    memory::{addrspace::mem_area::Data, protection::Protection},
     object::{
         Object,
         error::ObjectError,
@@ -130,7 +130,7 @@ impl MemoryMappable for FileLikeObject {
         self: alloc::sync::Arc<Self>,
         offset: u64,
         pages: u64,
-        permissions: seele_sys::permission::Permissions,
+        protection: Protection,
     ) -> ObjectResult<x86_64::VirtAddr> {
         with_current_process(|process| {
             let file_bytes = self
@@ -148,7 +148,7 @@ impl MemoryMappable for FileLikeObject {
             };
             let addr = process
                 .addrspace
-                .allocate_user_lazy(pages, permissions, data);
+                .allocate_user_lazy(pages, protection, data);
 
             Ok(addr)
         })

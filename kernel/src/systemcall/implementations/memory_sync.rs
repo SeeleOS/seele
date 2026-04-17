@@ -1,12 +1,11 @@
 use alloc::collections::{btree_map::BTreeMap, vec_deque::VecDeque};
-use seele_sys::permission::Permissions;
 use spin::Mutex;
 use x86_64::{VirtAddr, registers::model_specific::FsBase};
 
 use crate::{
     define_syscall,
-    memory::addrspace::mem_area::{Data, MemoryArea},
-    misc::others::permissions_to_flags,
+    memory::{addrspace::mem_area::{Data, MemoryArea}, protection::Protection},
+    misc::others::protection_to_page_flags,
     process::manager::get_current_process,
     s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
@@ -146,18 +145,18 @@ define_syscall!(ArchPrctl, |code: u64, addr: u64| {
     }
 });
 
-fn prot_to_permissions(prot: i32) -> Result<Permissions, SyscallError> {
-    let mut permissions = Permissions::empty();
+fn prot_to_protection(prot: i32) -> Result<Protection, SyscallError> {
+    let mut protection = Protection::empty();
     if (prot & PROT_READ) != 0 {
-        permissions |= Permissions::READABLE;
+        protection |= Protection::READ;
     }
     if (prot & PROT_WRITE) != 0 {
-        permissions |= Permissions::WRITABLE;
+        protection |= Protection::WRITE;
     }
     if (prot & PROT_EXEC) != 0 {
-        permissions |= Permissions::EXECUTABLE;
+        protection |= Protection::EXEC;
     }
-    Ok(permissions)
+    Ok(protection)
 }
 
 fn mapping_overlaps(
@@ -172,7 +171,7 @@ define_syscall!(Mmap, |addr: u64, len: u64, prot: i32, flags: i32, fd: i32, offs
     if len == 0 {
         return Err(SyscallError::InvalidArguments);
     }
-    let permissions = prot_to_permissions(prot)?;
+    let protection = prot_to_protection(prot)?;
     let pages = len.div_ceil(4096);
     let fixed = (flags & (MAP_FIXED | MAP_FIXED_NOREPLACE)) != 0;
     let start = VirtAddr::new(addr);
@@ -225,7 +224,7 @@ define_syscall!(Mmap, |addr: u64, len: u64, prot: i32, flags: i32, fd: i32, offs
         current.addrspace.register_area(MemoryArea::new(
             start,
             pages,
-            permissions_to_flags(permissions),
+            protection_to_page_flags(protection),
             data,
             true,
         ));
@@ -241,7 +240,7 @@ define_syscall!(Mmap, |addr: u64, len: u64, prot: i32, flags: i32, fd: i32, offs
         return Ok(current
             .lock()
             .addrspace
-            .allocate_user_lazy(pages, permissions, Data::Normal)
+            .allocate_user_lazy(pages, protection, Data::Normal)
             .as_u64() as usize);
     }
 
@@ -251,7 +250,7 @@ define_syscall!(Mmap, |addr: u64, len: u64, prot: i32, flags: i32, fd: i32, offs
     let object =
         crate::object::misc::get_object_current_process(fd as u64).map_err(SyscallError::from)?;
     let object = object.as_mappable()?;
-    let address = object.map(offset, pages, permissions)?;
+    let address = object.map(offset, pages, protection)?;
     Ok(address.as_u64() as usize)
 });
 
@@ -261,11 +260,11 @@ define_syscall!(Munmap, |addr: VirtAddr, len: u64| {
 });
 
 define_syscall!(Mprotect, |addr: VirtAddr, len: u64, prot: i32| {
-    let permissions = prot_to_permissions(prot)?;
+    let protection = prot_to_protection(prot)?;
     let pages = len.div_ceil(4096);
     get_current_process()
         .lock()
         .addrspace
-        .update_permissions(addr, addr + pages * 4096, permissions);
+        .update_permissions(addr, addr + pages * 4096, protection);
     Ok(0)
 });

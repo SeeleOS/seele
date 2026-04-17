@@ -4,7 +4,6 @@ use alloc::{
     vec,
     vec::Vec,
 };
-use seele_sys::signal::Signals;
 use spin::Mutex;
 
 use crate::{
@@ -23,7 +22,7 @@ use crate::{
         object::init_objects,
     },
     s_println,
-    signal::{SIGNAL_AMOUNT, action::SignalAction, misc::default_signal_action_vec},
+    signal::{SIGNAL_AMOUNT, Signals, action::SignalAction, misc::default_signal_action_vec},
     thread::{
         THREAD_MANAGER,
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
@@ -208,14 +207,16 @@ fn setup_process_inner(
     };
 
     with_profiling(
-        || init_stack_layout(
-            &mut stack_builder,
-            &program,
-            interpreter_base,
-            &path_string,
-            args,
-            env,
-        ),
+        || {
+            init_stack_layout(
+                &mut stack_builder,
+                &program,
+                interpreter_base,
+                &path_string,
+                args,
+                env,
+            )
+        },
         alloc::format!("init_stack_layout {}", path_string).as_str(),
     );
 

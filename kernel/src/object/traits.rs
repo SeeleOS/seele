@@ -1,9 +1,9 @@
 use alloc::sync::Arc;
-use seele_sys::permission::Permissions;
 use x86_64::VirtAddr;
 
 use crate::{
     filesystem::{info::LinuxStat, vfs_traits::Whence},
+    memory::protection::Protection,
     object::{Object, config::ConfigurateRequest, misc::ObjectResult},
 };
 
@@ -26,7 +26,7 @@ pub trait MemoryMappable: Object {
         self: Arc<Self>,
         offset: u64,
         pages: u64,
-        permissions: Permissions,
+        protection: Protection,
     ) -> ObjectResult<VirtAddr>;
 }
 

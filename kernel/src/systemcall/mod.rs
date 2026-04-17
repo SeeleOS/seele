@@ -18,6 +18,7 @@ pub mod arg_types;
 pub mod entry;
 pub mod handling;
 pub mod implementations;
+pub mod numbers;
 pub mod table;
 pub mod utils;
 

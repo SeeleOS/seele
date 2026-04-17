@@ -1,9 +1,9 @@
 use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc, vec::Vec};
-use seele_sys::{SyscallResult, errors::SyscallError};
 
 use crate::{
     misc::{devices::DevNull, fb_object::FramebufferObject, mouse::PS2MouseObject},
     object::{Object, misc::ObjectRef, tty_device::get_default_tty},
+    systemcall::utils::{SyscallError, SyscallResult},
 };
 
 lazy_static::lazy_static! {

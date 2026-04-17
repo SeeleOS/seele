@@ -1,7 +1,6 @@
 use core::sync::atomic::AtomicU64;
 
 use alloc::{string::String, vec::Vec};
-use seele_sys::{SyscallResult, errors::SyscallError};
 
 use crate::{
     define_with_accessor,
@@ -12,6 +11,7 @@ use crate::{
         Process, ProcessRef,
         manager::{MANAGER, get_current_process},
     },
+    systemcall::utils::{SyscallError, SyscallResult},
     thread::{THREAD_MANAGER, misc::State, yielding::BlockType},
 };
 

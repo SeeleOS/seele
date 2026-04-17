@@ -1,14 +1,11 @@
 use alloc::vec::Vec;
 use num_enum::TryFromPrimitive;
-use seele_sys::{
-    SyscallResult,
-    errors::SyscallError,
-    signal::Signal,
-};
 
 use crate::{
     misc::{others::push_and_return_index, time::Time},
     process::Process,
+    signal::Signal,
+    systemcall::utils::{SyscallError, SyscallResult},
 };
 
 #[derive(TryFromPrimitive, Debug, Clone, Copy, Default, Eq, PartialEq)]

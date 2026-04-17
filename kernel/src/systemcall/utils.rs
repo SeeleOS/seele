@@ -1,12 +1,97 @@
-pub use seele_sys::SyscallResult;
-pub use seele_sys::errors::SyscallError;
+pub type SyscallResult<T = usize> = Result<T, SyscallError>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(isize)]
+pub enum SyscallError {
+    PermissionDenied = -1,
+    FileNotFound = -2,
+    NoProcess = -3,
+    Interrupted = -4,
+    IOError = -5,
+    BadFileDescriptor = -9,
+    TryAgain = -11,
+    NoMemory = -12,
+    AccessDenied = -13,
+    BadAddress = -14,
+    DeviceOrResourceBusy = -16,
+    FileAlreadyExists = -17,
+    NotADirectory = -20,
+    IsADirectory = -21,
+    InvalidArguments = -22,
+    TooManyOpenFilesSystem = -23,
+    TooManyOpenFilesProcess = -24,
+    InappropriateIoctl = -25,
+    FileTooLarge = -27,
+    NoSpaceLeft = -28,
+    ReadOnlyFileSystem = -30,
+    BrokenPipe = -32,
+    PathTooLong = -36,
+    NoSyscall = -38,
+    DirectoryNotEmpty = -39,
+    TooManySymbolicLinks = -40,
+    ProtocolNotSupported = -93,
+    AddressFamilyNotSupported = -97,
+    AddressInUse = -98,
+    IsConnected = -106,
+    ConnectionRefused = -111,
+    Other = -256,
+}
+
+impl SyscallError {
+    pub fn as_isize(self) -> isize {
+        self as isize
+    }
+
+    pub fn other(_message: &str) -> SyscallError {
+        Self::Other
+    }
+}
+
+impl From<isize> for SyscallError {
+    fn from(value: isize) -> Self {
+        match value {
+            -1 => Self::PermissionDenied,
+            -2 => Self::FileNotFound,
+            -3 => Self::NoProcess,
+            -4 => Self::Interrupted,
+            -5 => Self::IOError,
+            -9 => Self::BadFileDescriptor,
+            -11 => Self::TryAgain,
+            -12 => Self::NoMemory,
+            -13 => Self::AccessDenied,
+            -14 => Self::BadAddress,
+            -16 => Self::DeviceOrResourceBusy,
+            -17 => Self::FileAlreadyExists,
+            -20 => Self::NotADirectory,
+            -21 => Self::IsADirectory,
+            -22 => Self::InvalidArguments,
+            -23 => Self::TooManyOpenFilesSystem,
+            -24 => Self::TooManyOpenFilesProcess,
+            -25 => Self::InappropriateIoctl,
+            -27 => Self::FileTooLarge,
+            -28 => Self::NoSpaceLeft,
+            -30 => Self::ReadOnlyFileSystem,
+            -32 => Self::BrokenPipe,
+            -36 => Self::PathTooLong,
+            -38 => Self::NoSyscall,
+            -39 => Self::DirectoryNotEmpty,
+            -40 => Self::TooManySymbolicLinks,
+            -93 => Self::ProtocolNotSupported,
+            -97 => Self::AddressFamilyNotSupported,
+            -98 => Self::AddressInUse,
+            -106 => Self::IsConnected,
+            -111 => Self::ConnectionRefused,
+            _ => Self::Other,
+        }
+    }
+}
 
 #[macro_export]
 macro_rules! register_syscalls {
     // 注意这里的 $( ... ),* 模式
     ($table: expr, $($no: ident),*) => {
         $(
-            $table[seele_sys::numbers::SyscallNumber::$no as usize] = Some(
+            $table[$crate::systemcall::numbers::SyscallNumber::$no as usize] = Some(
                 <$no as SyscallImpl>::handle_call
                     as fn(u64, u64, u64, u64, u64, u64) -> $crate::systemcall::utils::SyscallResult,
             );

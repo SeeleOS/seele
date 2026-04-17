@@ -22,6 +22,7 @@ pub mod testing;
 pub mod time;
 pub mod timer;
 pub mod tss;
+pub mod utsname;
 
 pub use cpu_core_context::*;
 
