@@ -320,17 +320,36 @@ define_syscall!(Nanosleep, |req: u64, rem: u64| {
 
 define_syscall!(Alarm, |_seconds: u32| { Ok(0) });
 
-define_syscall!(RtSigsuspend, |_mask: u64, sigset_size: usize| {
+define_syscall!(RtSigsuspend, |mask: u64, sigset_size: usize| {
     if sigset_size != 8 {
         return Err(SyscallError::InvalidArguments);
     }
 
-    block_current_with_sig_check(BlockType::WakeRequired {
-        wake_type: crate::thread::yielding::WakeType::IO,
-        deadline: None,
-    })?;
+    let mask = mask as *const u64;
+    if mask.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
 
-    Err(SyscallError::Interrupted)
+    let new_mask = crate::signal::Signals::from_bits_truncate(unsafe { *mask });
+    let old_mask = {
+        let current = crate::thread::get_current_thread();
+        let mut current = current.lock();
+        let old = current.blocked_signals;
+        current.blocked_signals = new_mask;
+        old
+    };
+
+    loop {
+        let result = block_current_with_sig_check(BlockType::WakeRequired {
+            wake_type: crate::thread::yielding::WakeType::IO,
+            deadline: None,
+        });
+
+        if result.is_err() {
+            crate::thread::get_current_thread().lock().blocked_signals = old_mask;
+            return Err(SyscallError::Interrupted);
+        }
+    }
 });
 
 define_syscall!(ClockNanosleep, |clock_id: i32,
@@ -460,9 +479,19 @@ define_syscall!(Clone, |flags: u64,
             if flags.contains(CloneFlags::SETTLS) {
                 child.snapshot.fs_base = tls;
             }
+            if flags.contains(CloneFlags::CHILD_CLEARTID) {
+                child.clear_child_tid = child_tid;
+            }
         }
 
         let tid = thread.lock().id.0 as i32;
+        crate::s_println!(
+            "clone thread: pid={} tid={} flags={:#x} child_tid={:#x}",
+            process.lock().pid.0,
+            tid,
+            flags.bits(),
+            child_tid
+        );
 
         unsafe {
             if flags.contains(CloneFlags::PARENT_SETTID) {
