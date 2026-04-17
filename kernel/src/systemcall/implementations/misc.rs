@@ -75,8 +75,26 @@ const RSEQ_LEN_X86_64: u32 = 32;
 const RSEQ_CPU_ID_UNINITIALIZED: u32 = u32::MAX;
 const RSEQ_CPU_ID_SINGLE_CORE: u32 = 0;
 const RLIM64_INFINITY: u64 = u64::MAX;
+const RLIMIT_NOFILE_DEFAULT: u64 = 1024;
 const INITIAL_BRK_RESERVE: u64 = 0x4000_0000;
 const TIMER_ABSTIME: i32 = 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+enum RlimitResource {
+    NoFile = 7,
+}
+
+impl TryFrom<u32> for RlimitResource {
+    type Error = ();
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        Ok(match value {
+            7 => Self::NoFile,
+            _ => return Err(()),
+        })
+    }
+}
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -131,17 +149,21 @@ struct LinuxTimespec {
     tv_nsec: i64,
 }
 
+fn linux_clock_now_ns(clock_id: i32) -> Result<i64, SyscallError> {
+    match clock_id {
+        0 | 5 | 8 | 11 => Ok(KernelTime::current().as_nanoseconds() as i64),
+        1 | 4 | 6 | 7 | 9 => Ok(KernelTime::since_boot().as_nanoseconds() as i64),
+        2 | 3 => Ok(0),
+        _ => Err(SyscallError::InvalidArguments),
+    }
+}
+
 define_syscall!(ClockGettime, |clock_id: i32, tp: u64| {
     let tp = tp as *mut LinuxTimespec;
     if tp.is_null() {
         return Err(SyscallError::BadAddress);
     }
-    let ns = match crate::misc::timer::ClockId::try_from(clock_id as u64)
-        .map_err(|_| SyscallError::InvalidArguments)?
-    {
-        crate::misc::timer::ClockId::Realtime => KernelTime::current().as_nanoseconds() as i64,
-        crate::misc::timer::ClockId::SinceBoot => KernelTime::since_boot().as_nanoseconds() as i64,
-    };
+    let ns = linux_clock_now_ns(clock_id)?;
     unsafe {
         *tp = LinuxTimespec {
             tv_sec: ns / 1_000_000_000,
@@ -152,8 +174,7 @@ define_syscall!(ClockGettime, |clock_id: i32, tp: u64| {
 });
 
 define_syscall!(ClockGetres, |clock_id: i32, tp: u64| {
-    let _ = crate::misc::timer::ClockId::try_from(clock_id as u64)
-        .map_err(|_| SyscallError::InvalidArguments)?;
+    let _ = linux_clock_now_ns(clock_id)?;
 
     if tp == 0 {
         return Ok(0);
@@ -473,6 +494,16 @@ define_syscall!(Getpriority, |_which: i32, _who: i32| { Ok(0) });
 
 define_syscall!(Setpriority, |_which: i32, _who: i32, _prio: i32| { Ok(0) });
 
+define_syscall!(Iopl, |level: i32| {
+    if !(0..=3).contains(&level) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    Ok(0)
+});
+
+define_syscall!(Ioperm, |_from: u64, _num: u64, _turn_on: i32| { Ok(0) });
+
 define_syscall!(Getresuid, |ruid: u64, euid: u64, suid: u64| {
     for ptr in [ruid, euid, suid] {
         let ptr = ptr as *mut u32;
@@ -506,6 +537,10 @@ define_syscall!(Getresgid, |rgid: u64, egid: u64, sgid: u64| {
 define_syscall!(Getuid, { Ok(0) });
 
 define_syscall!(Getgid, { Ok(0) });
+
+define_syscall!(Setuid, |_uid: u32| { Ok(0) });
+
+define_syscall!(Setgid, |_gid: u32| { Ok(0) });
 
 define_syscall!(Geteuid, { Ok(0) });
 
@@ -566,7 +601,7 @@ define_syscall!(Prctl, |option: i32,
 });
 
 define_syscall!(Prlimit64, |pid: i32,
-                            _resource: u32,
+                            resource: u32,
                             new_limit: u64,
                             old_limit: u64| {
     if pid != 0 {
@@ -586,10 +621,15 @@ define_syscall!(Prlimit64, |pid: i32,
             return Err(SyscallError::BadAddress);
         }
 
+        let (rlim_cur, rlim_max) = match RlimitResource::try_from(resource) {
+            Ok(RlimitResource::NoFile) => (RLIMIT_NOFILE_DEFAULT, RLIMIT_NOFILE_DEFAULT),
+            Err(_) => (RLIM64_INFINITY, RLIM64_INFINITY),
+        };
+
         unsafe {
             *old_limit = LinuxRlimit64 {
-                rlim_cur: RLIM64_INFINITY,
-                rlim_max: RLIM64_INFINITY,
+                rlim_cur,
+                rlim_max,
             };
         }
     }

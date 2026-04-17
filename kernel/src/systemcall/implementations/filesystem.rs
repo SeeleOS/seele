@@ -2,10 +2,10 @@ use core::slice;
 
 use alloc::{string::String, sync::Arc};
 use bitflags::bitflags;
-
 use crate::{
     define_syscall,
     filesystem::{
+        errors::FSError,
         info::LinuxStat,
         misc::{smart_navigate, smart_resolve_path},
         path::Path,
@@ -21,6 +21,7 @@ use crate::{
 
 const AT_FDCWD: i32 = -100;
 const UTIME_OMIT: i64 = 0x3fff_ffff;
+const STATX_BASIC_STATS: u32 = 0x0000_07ff;
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -29,6 +30,43 @@ bitflags! {
         const SYMLINK_NOFOLLOW = 0x100;
         const EMPTY_PATH = 0x1000;
     }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct StatxTimestamp {
+    tv_sec: i64,
+    tv_nsec: u32,
+    __reserved: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxStatx {
+    stx_mask: u32,
+    stx_blksize: u32,
+    stx_attributes: u64,
+    stx_nlink: u32,
+    stx_uid: u32,
+    stx_gid: u32,
+    stx_mode: u16,
+    __spare0: u16,
+    stx_ino: u64,
+    stx_size: u64,
+    stx_blocks: u64,
+    stx_attributes_mask: u64,
+    stx_atime: StatxTimestamp,
+    stx_btime: StatxTimestamp,
+    stx_ctime: StatxTimestamp,
+    stx_mtime: StatxTimestamp,
+    stx_rdev_major: u32,
+    stx_rdev_minor: u32,
+    stx_dev_major: u32,
+    stx_dev_minor: u32,
+    stx_mnt_id: u64,
+    stx_dio_mem_align: u32,
+    stx_dio_offset_align: u32,
+    __spare3: [u64; 12],
 }
 
 bitflags! {
@@ -45,6 +83,20 @@ fn device_from_path(path: &str) -> Option<&'static str> {
         "/dev/null" => Some("devnull"),
         "/dev/tty" | "/dev/console" | "/dev/tty0" | "/dev/tty1" => Some("tty"),
         "/dev/psaux" | "/dev/mouse" => Some("ps2mouse"),
+        _ => None,
+    }
+}
+
+fn pseudo_readlink_target(path: &str) -> Option<&'static str> {
+    match path {
+        // Upstream Xorg fbdev treats EINVAL from readlink(devnode) as
+        // "not a symlink", but ENOENT as fatal. Linux device nodes behave
+        // like the former.
+        "/dev/fb0" | "/dev/null" | "/dev/tty" | "/dev/console" | "/dev/tty0" | "/dev/tty1"
+        | "/dev/psaux" | "/dev/mouse" => None,
+        // Unpatched fbdevhw probes this sysfs symlink and rejects PCI-backed
+        // framebuffers. Return a non-PCI subsystem path so it accepts fb0.
+        "/sys/class/graphics/fb0/device/subsystem" => Some("/sys/bus/platform"),
         _ => None,
     }
 }
@@ -87,6 +139,21 @@ fn readlink_impl(
     out_buf: *mut u8,
     out_len: usize,
 ) -> Result<usize, SyscallError> {
+    if let Some(target) = pseudo_readlink_target(&path_str) {
+        let bytes = target.as_bytes();
+        let copied = core::cmp::min(bytes.len(), out_len);
+
+        unsafe {
+            slice::from_raw_parts_mut(out_buf, copied).copy_from_slice(&bytes[..copied]);
+        }
+
+        return Ok(copied);
+    }
+
+    if device_from_path(&path_str).is_some() {
+        return Err(SyscallError::InvalidArguments);
+    }
+
     let path = smart_resolve_path(path_str, start_from_current_dir)
         .ok_or(SyscallError::InvalidArguments)?;
     let target = VirtualFS.lock().open(path)?.read_link()?;
@@ -111,10 +178,30 @@ fn rename_impl(
     let new_path =
         smart_resolve_path(new_path, new_from_currentdir).ok_or(SyscallError::InvalidArguments)?;
 
-    VirtualFS.lock().link_file(old_path.clone(), new_path)?;
-    VirtualFS.lock().delete_file(old_path)?;
+    if old_path.clone().as_string() == new_path.clone().as_string() {
+        return Ok(0);
+    }
+
+    match VirtualFS.lock().delete_file(new_path.clone()) {
+        Ok(()) | Err(FSError::NotFound) => {}
+        Err(err) => return Err(err.into()),
+    }
+
+    VirtualFS.lock().link_file(old_path.clone(), new_path.clone())?;
+    VirtualFS.lock().delete_file(old_path.clone())?;
 
     Ok(0)
+}
+
+fn stat_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<LinuxStat, SyscallError> {
+    if path_str.is_empty() && flags.contains(AtFlags::EMPTY_PATH) {
+        let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
+        return Ok(object.as_statable()?.stat());
+    }
+
+    let path = resolve_path_at(dirfd, path_str)?;
+    let object: ObjectRef = Arc::new(VirtualFS.lock().open(path)?);
+    Ok(object.as_statable()?.stat())
 }
 
 define_syscall!(OpenAt, |dirfd: i32,
@@ -140,8 +227,10 @@ define_syscall!(OpenAt, |dirfd: i32,
         let device = crate::object::device::get_device(device.into())
             .map_err(|_| SyscallError::FileNotFound)?;
         let slot = current_process.lock().push_object(device);
+        s_println!("openat path={} flags={:#x} -> fd {}", path_str, flags.bits(), slot);
         return Ok(slot);
     } else {
+        s_println!("openat path={} flags={:#x} -> err {:?}", path_str, flags.bits(), SyscallError::FileNotFound);
         return Err(SyscallError::FileNotFound);
     }
 
@@ -149,6 +238,7 @@ define_syscall!(OpenAt, |dirfd: i32,
 
     let slot = current_process.lock().alloc_object_slot();
     current_process.lock().objects[slot] = Some(object);
+    s_println!("openat path={} flags={:#x} -> fd {}", path_str, flags.bits(), slot);
     Ok(slot)
 });
 
@@ -188,6 +278,17 @@ define_syscall!(Link, |old_path: CString, new_path: CString| {
     )
 });
 
+define_syscall!(Rename, |old_path: CString, new_path: CString| {
+    RenameAt::handle_call(
+        AT_FDCWD as u64,
+        old_path as u64,
+        AT_FDCWD as u64,
+        new_path as u64,
+        0,
+        0,
+    )
+});
+
 define_syscall!(Unlink, |path: CString| {
     UnlinkAt::handle_call(AT_FDCWD as u64, path as u64, 0, 0, 0, 0)
 });
@@ -215,8 +316,18 @@ define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
 
 define_syscall!(Fstat, |fd: u64, linux_stat_ptr: *mut LinuxStat| {
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
+    let stat = object.as_statable()?.stat();
+    if stat.st_mode & 0o170000 == 0o040000 {
+        s_println!(
+            "fstat fd={} mode={:#o} uid={} gid={}",
+            fd,
+            stat.st_mode,
+            stat.st_uid,
+            stat.st_gid
+        );
+    }
     unsafe {
-        *linux_stat_ptr = object.as_statable()?.stat();
+        *linux_stat_ptr = stat;
     }
     Ok(0)
 });
@@ -244,18 +355,77 @@ define_syscall!(Newfstatat, |dirfd: i32,
         return Err(SyscallError::NoSyscall);
     }
 
-    let stat = if path_str.is_empty() && flags.contains(AtFlags::EMPTY_PATH) {
-        let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
-        object.as_statable()?.stat()
-    } else {
-        let path = resolve_path_at(dirfd, &path_str)?;
-        let object: ObjectRef = Arc::new(VirtualFS.lock().open(path)?);
-        object.as_statable()?.stat()
-    };
+    let stat = stat_at(dirfd, &path_str, flags)?;
 
+    if path_str.contains("X11")
+        || path_str.contains(".X")
+        || path_str.contains("/tmp")
+        || path_str.contains("local")
+    {
+        s_println!(
+            "newfstatat dirfd={} path={} flags={:#x} mode={:#o} uid={} gid={}",
+            dirfd,
+            path_str,
+            flags.bits(),
+            stat.st_mode,
+            stat.st_uid,
+            stat.st_gid
+        );
+    }
     unsafe {
         *linux_stat_ptr = stat;
     }
+    Ok(0)
+});
+
+define_syscall!(Statx, |dirfd: i32,
+                         path: CString,
+                         flags: i32,
+                         _mask: u32,
+                         statx_ptr: u64| {
+    let statx_ptr = statx_ptr as *mut LinuxStatx;
+    if statx_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let path_str = path_from_raw(path)?;
+    let flags = AtFlags::from_bits_truncate(flags);
+    if flags.bits() != flags.bits() & (AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH).bits() {
+        return Err(SyscallError::NoSyscall);
+    }
+
+    let stat = stat_at(dirfd, &path_str, flags)?;
+
+    unsafe {
+        *statx_ptr = LinuxStatx {
+            stx_mask: STATX_BASIC_STATS,
+            stx_blksize: stat.st_blksize as u32,
+            stx_nlink: stat.st_nlink as u32,
+            stx_uid: stat.st_uid,
+            stx_gid: stat.st_gid,
+            stx_mode: stat.st_mode as u16,
+            stx_ino: stat.st_ino,
+            stx_size: stat.st_size as u64,
+            stx_blocks: stat.st_blocks as u64,
+            stx_atime: StatxTimestamp {
+                tv_sec: stat.st_atime,
+                tv_nsec: stat.st_atime_nsec as u32,
+                __reserved: 0,
+            },
+            stx_ctime: StatxTimestamp {
+                tv_sec: stat.st_ctime,
+                tv_nsec: stat.st_ctime_nsec as u32,
+                __reserved: 0,
+            },
+            stx_mtime: StatxTimestamp {
+                tv_sec: stat.st_mtime,
+                tv_nsec: stat.st_mtime_nsec as u32,
+                __reserved: 0,
+            },
+            ..Default::default()
+        };
+    }
+
     Ok(0)
 });
 
