@@ -42,6 +42,7 @@ sudo chmod 1777 "${SYSROOT_DIR}/tmp"
 sudo mkdir -p "${SYSROOT_DIR}/var/log"
 sudo mkdir -p "${SYSROOT_DIR}/var/tmp"
 sudo chmod 1777 "${SYSROOT_DIR}/var/tmp"
+sudo mkdir -p "${SYSROOT_DIR}/etc/X11"
 sudo mkdir -p "${SYSROOT_DIR}/var/lib/pacman"
 sudo mkdir -p "${SYSROOT_DIR}/var/cache/pacman/pkg"
 cat <<EOF > "${PACMAN_CONF}"
@@ -67,3 +68,5 @@ sudo pacman \
     --needed \
     -Sy \
     "${ARCH_PACKAGES[@]}"
+
+sudo cp "${ROOT_DIR}/misc/xorg.conf" "${SYSROOT_DIR}/etc/X11/xorg.conf"
