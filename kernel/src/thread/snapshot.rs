@@ -69,6 +69,22 @@ impl ThreadSnapshot {
         virt_stack_addr: u64,
         snapshot_type: ThreadSnapshotType,
     ) -> Self {
+        Self::new_with_fx_state(
+            entry_point,
+            addrspace,
+            virt_stack_addr,
+            snapshot_type,
+            FxState::capture_current(),
+        )
+    }
+
+    pub fn new_with_fx_state(
+        entry_point: u64,
+        addrspace: &mut AddrSpace,
+        virt_stack_addr: u64,
+        snapshot_type: ThreadSnapshotType,
+        fx_state: FxState,
+    ) -> Self {
         log::trace!(
             "ThreadSnapshot::new: entry_point = {:#x}, user_rsp = {:#x}",
             entry_point,
@@ -83,18 +99,19 @@ impl ThreadSnapshot {
                 GDT.1.user_data.0,
             ),
             kernel_rsp: allocate_kernel_stack(16).finish().as_u64(),
-            fx_state: FxState::capture_current(),
+            fx_state,
+            fs_base: 0,
             snapshot_type,
-            ..Default::default()
         }
     }
 
     pub fn new_executor() -> Self {
         Self {
+            inner: Snapshot::default(),
             snapshot_type: ThreadSnapshotType::Executor,
             kernel_rsp: allocate_kernel_stack(16).finish().as_u64(),
             fx_state: FxState::capture_current(),
-            ..Default::default()
+            fs_base: 0,
         }
     }
 

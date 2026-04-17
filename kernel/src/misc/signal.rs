@@ -269,11 +269,13 @@ impl Process {
                         stack_builder.push(0);
                         stack_builder.push(action.restorer as u64);
 
-                        let mut thread_snapshot = ThreadSnapshot::new(
+                        let current_fx_state = current_thread.get_appropriate_snapshot().fx_state;
+                        let mut thread_snapshot = ThreadSnapshot::new_with_fx_state(
                             func as u64,
                             &mut self.addrspace,
                             stack_builder.finish().as_u64(),
                             ThreadSnapshotType::Thread,
+                            current_fx_state,
                         );
 
                         thread_snapshot.inner.rdi = signal as u64;
@@ -301,11 +303,13 @@ impl Process {
                         stack_builder.push(0);
                         stack_builder.push(action.restorer as u64);
 
-                        let mut thread_snapshot = ThreadSnapshot::new(
+                        let current_fx_state = current_thread.get_appropriate_snapshot().fx_state;
+                        let mut thread_snapshot = ThreadSnapshot::new_with_fx_state(
                             func as u64,
                             &mut self.addrspace,
                             stack_builder.finish().as_u64(),
                             ThreadSnapshotType::Thread,
+                            current_fx_state,
                         );
 
                         thread_snapshot.inner.rdi = signal as u64;
