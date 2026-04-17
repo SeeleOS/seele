@@ -6,6 +6,7 @@ use crate::{
     object::Object,
     object::misc::ObjectRef,
     process::manager::get_current_process,
+    s_println,
     socket::{AF_UNIX, SOCK_NONBLOCK},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
@@ -32,7 +33,10 @@ fn path_from_sockaddr(address: *const u8, address_len: u32) -> Result<String, Sy
     }
 
     if addr.sun_path[0] == 0 {
-        return Err(SyscallError::InvalidArguments);
+        if path_len <= 1 {
+            return Err(SyscallError::InvalidArguments);
+        }
+        return Ok(String::from_utf8_lossy(&addr.sun_path[..path_len]).into_owned());
     }
 
     let len = addr.sun_path[..path_len]
@@ -85,18 +89,27 @@ define_syscall!(Bind, |socket: ObjectRef,
                        address: *const u8,
                        address_len: u32| {
     let path = path_from_sockaddr(address, address_len)?;
-    socket
+    let display_path = path.clone();
+    let result = socket
         .as_unix_socket()?
         .bind(path)
-        .map_err(crate::object::error::ObjectError::from)?;
+        .map_err(crate::object::error::ObjectError::from);
+    if let Err(ref err) = result {
+        s_println!("bind failed: path={} err={:?}", display_path, err);
+    }
+    result?;
     Ok(0)
 });
 
 define_syscall!(Listen, |socket: ObjectRef, backlog: usize| {
-    socket
+    let result = socket
         .as_unix_socket()?
         .listen(backlog)
-        .map_err(crate::object::error::ObjectError::from)?;
+        .map_err(crate::object::error::ObjectError::from);
+    if let Err(ref err) = result {
+        s_println!("listen failed: backlog={} err={:?}", backlog, err);
+    }
+    result?;
     Ok(0)
 });
 
