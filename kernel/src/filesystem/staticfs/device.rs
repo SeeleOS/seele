@@ -23,7 +23,7 @@ impl StaticDeviceHandle {
         Self { node }
     }
 
-    fn object(&self) -> Result<ObjectRef, FSError> {
+    pub fn object(&self) -> Result<ObjectRef, FSError> {
         get_device_ref(self.node.device_name)
             .map_err(|_| FSError::NotFound)
     }

@@ -7,6 +7,7 @@ use crate::{
     filesystem::{
         errors::FSError,
         info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
+        staticfs::device::StaticDeviceHandle,
         vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
         vfs_traits::{FileLike, Whence},
     },
@@ -14,9 +15,10 @@ use crate::{
     memory::{addrspace::mem_area::Data, protection::Protection},
     object::{
         Object,
+        config::ConfigurateRequest,
         error::ObjectError,
         misc::ObjectResult,
-        traits::{MemoryMappable, Readable, Seekable, Statable, Writable},
+        traits::{Configuratable, MemoryMappable, Readable, Seekable, Statable, Writable},
     },
     process::misc::with_current_process,
 };
@@ -92,6 +94,24 @@ impl FileLikeObject {
             FileLike::File(_) => Err(FSError::NotADirectory),
         }
     }
+
+    fn resolve_device_object(&self) -> FSResult<Option<crate::object::misc::ObjectRef>> {
+        match &self.file {
+            FileLike::File(file) => {
+                let file = file.lock();
+                let Some(device) = file.as_any().downcast_ref::<StaticDeviceHandle>() else {
+                    return Ok(None);
+                };
+                Ok(Some(device.object()?))
+            }
+            FileLike::Symlink(symlink) => {
+                let target = symlink.lock().target()?;
+                let nested = VirtualFS.lock().open(target)?;
+                nested.resolve_device_object()
+            }
+            FileLike::Directory(_) => Ok(None),
+        }
+    }
 }
 
 impl Debug for FileLikeObject {
@@ -103,6 +123,7 @@ impl Debug for FileLikeObject {
 impl Object for FileLikeObject {
     impl_cast_function!("writable", Writable);
     impl_cast_function!("readable", Readable);
+    impl_cast_function!("configuratable", Configuratable);
     impl_cast_function!("mappable", MemoryMappable);
     impl_cast_function!("seekable", Seekable);
     impl_cast_function!("statable", Statable);
@@ -132,6 +153,11 @@ impl MemoryMappable for FileLikeObject {
         pages: u64,
         protection: Protection,
     ) -> ObjectResult<x86_64::VirtAddr> {
+        if let Some(device) = self.resolve_device_object()? {
+            let mappable = device.as_mappable().map_err(|_| ObjectError::InvalidArguments)?;
+            return mappable.map(offset, pages, protection);
+        }
+
         with_current_process(|process| {
             let file_bytes = self
                 .info()
@@ -148,6 +174,19 @@ impl MemoryMappable for FileLikeObject {
 
             Ok(addr)
         })
+    }
+}
+
+impl Configuratable for FileLikeObject {
+    fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
+        let Some(device) = self.resolve_device_object()? else {
+            return Err(ObjectError::InvalidRequest);
+        };
+
+        let configurable = device
+            .as_configuratable()
+            .map_err(|_| ObjectError::InvalidRequest)?;
+        configurable.configure(request)
     }
 }
 
