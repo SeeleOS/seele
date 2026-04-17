@@ -4,6 +4,7 @@ use super::{
     SocketError, SocketResult, UNIX_SOCKET_REGISTRY, UnixListenerInner, UnixSocketObject,
     UnixSocketState,
 };
+use crate::filesystem::{errors::FSError, path::Path, vfs::VirtualFS};
 
 impl UnixSocketObject {
     pub fn bind(self: &Arc<Self>, path: String) -> SocketResult<()> {
@@ -12,8 +13,22 @@ impl UnixSocketObject {
             return Err(SocketError::InvalidArguments);
         }
 
+        let is_abstract = path.as_bytes().first() == Some(&0);
+        if !is_abstract {
+            VirtualFS
+                .lock()
+                .create_file(Path::new(&path))
+                .map_err(|err| match err {
+                    FSError::AlreadyExists => SocketError::AddressInUse,
+                    _ => SocketError::InvalidArguments,
+                })?;
+        }
+
         let mut registry = UNIX_SOCKET_REGISTRY.lock();
         if registry.contains_key(&path) {
+            if !is_abstract {
+                let _ = VirtualFS.lock().delete_file(Path::new(&path));
+            }
             return Err(SocketError::AddressInUse);
         }
 
