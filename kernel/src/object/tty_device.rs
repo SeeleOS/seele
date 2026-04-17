@@ -16,7 +16,7 @@ use crate::{
     polling::{event::PollableEvent, object::Pollable},
     process::group::ProcessGroupID,
     terminal::{
-        linux_kd::{LinuxConsoleState, handle_kd_request},
+        linux_kd::{KeyboardMode, LinuxConsoleState, handle_kd_request},
         linux_vt::handle_vt_request,
         object::TerminalObject,
     },
@@ -29,12 +29,9 @@ pub fn get_default_tty() -> Arc<TtyDevice> {
     DEFAULT_TTY.get().unwrap().clone()
 }
 
-fn get_appropriate_keyboard_queue(mode: u32) -> &'static Mutex<VecDeque<u8>> {
+fn get_appropriate_keyboard_queue(mode: KeyboardMode) -> &'static Mutex<VecDeque<u8>> {
     // Linux raw/off keyboard modes expose scancodes; cooked modes read decoded bytes.
-    if matches!(
-        mode,
-        crate::terminal::linux_kd::K_RAW | crate::terminal::linux_kd::K_OFF
-    ) {
+    if matches!(mode, KeyboardMode::Raw | KeyboardMode::Off) {
         RAW_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
     } else {
         KEYBOARD_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
@@ -83,7 +80,7 @@ impl TtyDevice {
         }
     }
 
-    pub fn keyboard_mode(&self) -> u32 {
+    pub fn keyboard_mode(&self) -> KeyboardMode {
         self.linux_console.lock().keyboard_mode
     }
 }

@@ -8,7 +8,7 @@ use crate::keyboard::{
     char_processing::process_char, ps2::_PS2_KEYBOARD, raw_key_processing::process_key,
     scancode_stream::ScancodeStream,
 };
-use crate::{object::tty_device::get_default_tty, terminal::linux_kd::{K_OFF, K_RAW}};
+use crate::{object::tty_device::get_default_tty, terminal::linux_kd::KeyboardMode};
 
 pub static KEYBOARD_QUEUE: OnceCell<Mutex<VecDeque<u8>>> = OnceCell::uninit();
 /// Raw keyboard modes consume untranslated scancodes from this queue.
@@ -44,5 +44,5 @@ pub async fn process_keypresses() {
 
 fn keyboard_mode_blocks_terminal_decode() -> bool {
     let mode = get_default_tty().keyboard_mode();
-    mode == K_RAW || mode == K_OFF
+    matches!(mode, KeyboardMode::Raw | KeyboardMode::Off)
 }

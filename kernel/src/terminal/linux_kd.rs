@@ -1,5 +1,6 @@
 use core::ptr::write_volatile;
 
+use num_enum::TryFromPrimitive;
 use spin::Mutex;
 
 use crate::{
@@ -8,93 +9,174 @@ use crate::{
     terminal::misc::LINE_BUFFER,
 };
 
-pub const K_RAW: u32 = 0x00;
-pub const K_XLATE: u32 = 0x01;
-pub const K_MEDIUMRAW: u32 = 0x02;
-pub const K_UNICODE: u32 = 0x03;
-pub const K_OFF: u32 = 0x04;
-
-pub const KD_TEXT: u32 = 0x00;
-pub const KD_GRAPHICS: u32 = 0x01;
-pub const KD_TEXT0: u32 = 0x02;
-pub const KD_TEXT1: u32 = 0x03;
-
-const KT_LATIN: u16 = 0;
-const KT_FN: u16 = 1;
-const KT_SPEC: u16 = 2;
-const KT_PAD: u16 = 3;
-const KT_CUR: u16 = 6;
-const KT_SHIFT: u16 = 7;
-const KT_LETTER: u16 = 11;
-
-const fn k(ty: u16, value: u16) -> u16 {
-    (ty << 8) | value
+#[derive(Debug, Clone, Copy, TryFromPrimitive, PartialEq, Eq)]
+#[repr(u32)]
+pub enum KeyboardMode {
+    Raw = 0x00,
+    Xlate = 0x01,
+    MediumRaw = 0x02,
+    Unicode = 0x03,
+    Off = 0x04,
 }
 
-const K_ENTER: u16 = k(KT_SPEC, 1);
-const K_BREAK: u16 = k(KT_SPEC, 2);
-const K_CAPS: u16 = k(KT_SPEC, 8);
-const K_NUM: u16 = k(KT_SPEC, 9);
-const K_HOLD: u16 = k(KT_SPEC, 10);
-const K_ALT: u16 = k(KT_SPEC, 12);
-const K_ALTGR: u16 = k(KT_SPEC, 13);
-const K_CTRL: u16 = k(KT_SPEC, 14);
-const K_CTRLL: u16 = k(KT_SPEC, 15);
-const K_CTRLR: u16 = k(KT_SPEC, 16);
-const K_SHIFT: u16 = k(KT_SPEC, 17);
-const K_SHIFTL: u16 = k(KT_SPEC, 18);
-const K_SHIFTR: u16 = k(KT_SPEC, 19);
-const K_COMPOSE: u16 = k(KT_SPEC, 127);
+#[derive(Debug, Clone, Copy, TryFromPrimitive, PartialEq, Eq)]
+#[repr(u32)]
+pub enum DisplayMode {
+    Text = 0x00,
+    Graphics = 0x01,
+    Text0 = 0x02,
+    Text1 = 0x03,
+}
 
-const K_F1: u16 = k(KT_FN, 0);
-const K_F2: u16 = k(KT_FN, 1);
-const K_F3: u16 = k(KT_FN, 2);
-const K_F4: u16 = k(KT_FN, 3);
-const K_F5: u16 = k(KT_FN, 4);
-const K_F6: u16 = k(KT_FN, 5);
-const K_F7: u16 = k(KT_FN, 6);
-const K_F8: u16 = k(KT_FN, 7);
-const K_F9: u16 = k(KT_FN, 8);
-const K_F10: u16 = k(KT_FN, 9);
-const K_F11: u16 = k(KT_FN, 10);
-const K_F12: u16 = k(KT_FN, 11);
-const K_FIND: u16 = k(KT_FN, 20);
-const K_INSERT: u16 = k(KT_FN, 21);
-const K_REMOVE: u16 = k(KT_FN, 22);
-const K_SELECT: u16 = k(KT_FN, 23);
-const K_PGUP: u16 = k(KT_FN, 24);
-const K_PGDN: u16 = k(KT_FN, 25);
-const K_MACRO: u16 = k(KT_FN, 26);
-const K_PAUSE: u16 = k(KT_FN, 29);
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+enum KeyboardType {
+    Kb101 = 0x02,
+}
 
-const K_PPLUS: u16 = k(KT_PAD, 0);
-const K_PMINUS: u16 = k(KT_PAD, 1);
-const K_PSTAR: u16 = k(KT_PAD, 2);
-const K_PSLASH: u16 = k(KT_PAD, 3);
-const K_PENTER: u16 = k(KT_PAD, 4);
-const K_PCOMMA: u16 = k(KT_PAD, 5);
-const K_PDOT: u16 = k(KT_PAD, 6);
-const K_PPLUSMINUS: u16 = k(KT_PAD, 7);
-const K_P0: u16 = k(KT_PAD, 0);
-const K_P1: u16 = k(KT_PAD, 1);
-const K_P2: u16 = k(KT_PAD, 2);
-const K_P3: u16 = k(KT_PAD, 3);
-const K_P4: u16 = k(KT_PAD, 4);
-const K_P5: u16 = k(KT_PAD, 5);
-const K_P6: u16 = k(KT_PAD, 6);
-const K_P7: u16 = k(KT_PAD, 7);
-const K_P8: u16 = k(KT_PAD, 8);
-const K_P9: u16 = k(KT_PAD, 9);
+#[derive(Debug, Clone, Copy)]
+#[repr(u16)]
+enum KeyType {
+    Latin = 0,
+    Function = 1,
+    Special = 2,
+    Pad = 3,
+    Cursor = 6,
+    Shift = 7,
+    Letter = 11,
+}
 
-const K_DOWN: u16 = k(KT_CUR, 0);
-const K_LEFT: u16 = k(KT_CUR, 1);
-const K_RIGHT: u16 = k(KT_CUR, 2);
-const K_UP: u16 = k(KT_CUR, 3);
+const fn k(ty: KeyType, value: u16) -> u16 {
+    ((ty as u16) << 8) | value
+}
+
+#[derive(Debug, Clone, Copy)]
+enum KeyValue {
+    Enter,
+    Break,
+    Caps,
+    Num,
+    Hold,
+    Alt,
+    AltGr,
+    Ctrl,
+    CtrlL,
+    CtrlR,
+    Shift,
+    ShiftL,
+    ShiftR,
+    Compose,
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
+    Find,
+    Insert,
+    Remove,
+    Select,
+    PgUp,
+    PgDn,
+    Macro,
+    Pause,
+    PPlus,
+    PMinus,
+    PStar,
+    PSlash,
+    PEnter,
+    PComma,
+    PDot,
+    PPlusMinus,
+    P0,
+    P1,
+    P2,
+    P3,
+    P4,
+    P5,
+    P6,
+    P7,
+    P8,
+    P9,
+    Down,
+    Left,
+    Right,
+    Up,
+}
+
+impl KeyValue {
+    const fn code(self) -> u16 {
+        match self {
+            Self::Enter => k(KeyType::Special, 1),
+            Self::Break => k(KeyType::Special, 2),
+            Self::Caps => k(KeyType::Special, 8),
+            Self::Num => k(KeyType::Special, 9),
+            Self::Hold => k(KeyType::Special, 10),
+            Self::Alt => k(KeyType::Special, 12),
+            Self::AltGr => k(KeyType::Special, 13),
+            Self::Ctrl => k(KeyType::Special, 14),
+            Self::CtrlL => k(KeyType::Special, 15),
+            Self::CtrlR => k(KeyType::Special, 16),
+            Self::Shift => k(KeyType::Special, 17),
+            Self::ShiftL => k(KeyType::Special, 18),
+            Self::ShiftR => k(KeyType::Special, 19),
+            Self::Compose => k(KeyType::Special, 127),
+            Self::F1 => k(KeyType::Function, 0),
+            Self::F2 => k(KeyType::Function, 1),
+            Self::F3 => k(KeyType::Function, 2),
+            Self::F4 => k(KeyType::Function, 3),
+            Self::F5 => k(KeyType::Function, 4),
+            Self::F6 => k(KeyType::Function, 5),
+            Self::F7 => k(KeyType::Function, 6),
+            Self::F8 => k(KeyType::Function, 7),
+            Self::F9 => k(KeyType::Function, 8),
+            Self::F10 => k(KeyType::Function, 9),
+            Self::F11 => k(KeyType::Function, 10),
+            Self::F12 => k(KeyType::Function, 11),
+            Self::Find => k(KeyType::Function, 20),
+            Self::Insert => k(KeyType::Function, 21),
+            Self::Remove => k(KeyType::Function, 22),
+            Self::Select => k(KeyType::Function, 23),
+            Self::PgUp => k(KeyType::Function, 24),
+            Self::PgDn => k(KeyType::Function, 25),
+            Self::Macro => k(KeyType::Function, 26),
+            Self::Pause => k(KeyType::Function, 29),
+            Self::PPlus => k(KeyType::Pad, 0),
+            Self::PMinus => k(KeyType::Pad, 1),
+            Self::PStar => k(KeyType::Pad, 2),
+            Self::PSlash => k(KeyType::Pad, 3),
+            Self::PEnter => k(KeyType::Pad, 4),
+            Self::PComma => k(KeyType::Pad, 5),
+            Self::PDot => k(KeyType::Pad, 6),
+            Self::PPlusMinus => k(KeyType::Pad, 7),
+            Self::P0 => k(KeyType::Pad, 0),
+            Self::P1 => k(KeyType::Pad, 1),
+            Self::P2 => k(KeyType::Pad, 2),
+            Self::P3 => k(KeyType::Pad, 3),
+            Self::P4 => k(KeyType::Pad, 4),
+            Self::P5 => k(KeyType::Pad, 5),
+            Self::P6 => k(KeyType::Pad, 6),
+            Self::P7 => k(KeyType::Pad, 7),
+            Self::P8 => k(KeyType::Pad, 8),
+            Self::P9 => k(KeyType::Pad, 9),
+            Self::Down => k(KeyType::Cursor, 0),
+            Self::Left => k(KeyType::Cursor, 1),
+            Self::Right => k(KeyType::Cursor, 2),
+            Self::Up => k(KeyType::Cursor, 3),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct LinuxConsoleState {
-    pub keyboard_mode: u32,
-    pub display_mode: u32,
+    pub keyboard_mode: KeyboardMode,
+    pub display_mode: DisplayMode,
     pub vt_mode: LinuxVtMode,
     pub active_vt: u32,
 }
@@ -102,8 +184,8 @@ pub struct LinuxConsoleState {
 impl Default for LinuxConsoleState {
     fn default() -> Self {
         Self {
-            keyboard_mode: K_UNICODE,
-            display_mode: KD_TEXT,
+            keyboard_mode: KeyboardMode::Unicode,
+            display_mode: DisplayMode::Text,
             vt_mode: LinuxVtMode::default(),
             active_vt: 1,
         }
@@ -140,21 +222,21 @@ fn linux_kb_entry_value(table: u8, index: u8) -> Option<u16> {
     let shifted = matches!(table, 1 | 9);
 
     let value = match index {
-        1 => k(KT_SPEC, 27),
-        2 => k(KT_LATIN, if shifted { b'!' } else { b'1' } as u16),
-        3 => k(KT_LATIN, if shifted { b'@' } else { b'2' } as u16),
-        4 => k(KT_LATIN, if shifted { b'#' } else { b'3' } as u16),
-        5 => k(KT_LATIN, if shifted { b'$' } else { b'4' } as u16),
-        6 => k(KT_LATIN, if shifted { b'%' } else { b'5' } as u16),
-        7 => k(KT_LATIN, if shifted { b'^' } else { b'6' } as u16),
-        8 => k(KT_LATIN, if shifted { b'&' } else { b'7' } as u16),
-        9 => k(KT_LATIN, if shifted { b'*' } else { b'8' } as u16),
-        10 => k(KT_LATIN, if shifted { b'(' } else { b'9' } as u16),
-        11 => k(KT_LATIN, if shifted { b')' } else { b'0' } as u16),
-        12 => k(KT_LATIN, if shifted { b'_' } else { b'-' } as u16),
-        13 => k(KT_LATIN, if shifted { b'+' } else { b'=' } as u16),
-        14 => k(KT_LATIN, 127),
-        15 => k(KT_LATIN, 9),
+        1 => k(KeyType::Special, 27),
+        2 => k(KeyType::Latin, if shifted { b'!' } else { b'1' } as u16),
+        3 => k(KeyType::Latin, if shifted { b'@' } else { b'2' } as u16),
+        4 => k(KeyType::Latin, if shifted { b'#' } else { b'3' } as u16),
+        5 => k(KeyType::Latin, if shifted { b'$' } else { b'4' } as u16),
+        6 => k(KeyType::Latin, if shifted { b'%' } else { b'5' } as u16),
+        7 => k(KeyType::Latin, if shifted { b'^' } else { b'6' } as u16),
+        8 => k(KeyType::Latin, if shifted { b'&' } else { b'7' } as u16),
+        9 => k(KeyType::Latin, if shifted { b'*' } else { b'8' } as u16),
+        10 => k(KeyType::Latin, if shifted { b'(' } else { b'9' } as u16),
+        11 => k(KeyType::Latin, if shifted { b')' } else { b'0' } as u16),
+        12 => k(KeyType::Latin, if shifted { b'_' } else { b'-' } as u16),
+        13 => k(KeyType::Latin, if shifted { b'+' } else { b'=' } as u16),
+        14 => k(KeyType::Latin, 127),
+        15 => k(KeyType::Latin, 9),
         16..=25 => {
             let base = b"qwertyuiop"[(index - 16) as usize];
             let ch = if shifted {
@@ -162,12 +244,12 @@ fn linux_kb_entry_value(table: u8, index: u8) -> Option<u16> {
             } else {
                 base
             };
-            k(KT_LETTER, ch as u16)
+            k(KeyType::Letter, ch as u16)
         }
-        26 => k(KT_LATIN, if shifted { b'{' } else { b'[' } as u16),
-        27 => k(KT_LATIN, if shifted { b'}' } else { b']' } as u16),
-        28 => K_ENTER,
-        29 => K_CTRLL,
+        26 => k(KeyType::Latin, if shifted { b'{' } else { b'[' } as u16),
+        27 => k(KeyType::Latin, if shifted { b'}' } else { b']' } as u16),
+        28 => KeyValue::Enter.code(),
+        29 => KeyValue::CtrlL.code(),
         30..=38 => {
             let base = b"asdfghjkl"[(index - 30) as usize];
             let ch = if shifted {
@@ -175,13 +257,13 @@ fn linux_kb_entry_value(table: u8, index: u8) -> Option<u16> {
             } else {
                 base
             };
-            k(KT_LETTER, ch as u16)
+            k(KeyType::Letter, ch as u16)
         }
-        39 => k(KT_LATIN, if shifted { b':' } else { b';' } as u16),
-        40 => k(KT_LATIN, if shifted { b'"' } else { b'\'' } as u16),
-        41 => k(KT_LATIN, if shifted { b'~' } else { b'`' } as u16),
-        42 => K_SHIFTL,
-        43 => k(KT_LATIN, if shifted { b'|' } else { b'\\' } as u16),
+        39 => k(KeyType::Latin, if shifted { b':' } else { b';' } as u16),
+        40 => k(KeyType::Latin, if shifted { b'"' } else { b'\'' } as u16),
+        41 => k(KeyType::Latin, if shifted { b'~' } else { b'`' } as u16),
+        42 => KeyValue::ShiftL.code(),
+        43 => k(KeyType::Latin, if shifted { b'|' } else { b'\\' } as u16),
         44..=50 => {
             let base = b"zxcvbnm"[(index - 44) as usize];
             let ch = if shifted {
@@ -189,62 +271,62 @@ fn linux_kb_entry_value(table: u8, index: u8) -> Option<u16> {
             } else {
                 base
             };
-            k(KT_LETTER, ch as u16)
+            k(KeyType::Letter, ch as u16)
         }
-        51 => k(KT_LATIN, if shifted { b'<' } else { b',' } as u16),
-        52 => k(KT_LATIN, if shifted { b'>' } else { b'.' } as u16),
-        53 => k(KT_LATIN, if shifted { b'?' } else { b'/' } as u16),
-        54 => K_SHIFTR,
-        55 => K_PSTAR,
-        56 => K_ALT,
-        57 => k(KT_LATIN, b' ' as u16),
-        58 => K_CAPS,
-        59 => K_F1,
-        60 => K_F2,
-        61 => K_F3,
-        62 => K_F4,
-        63 => K_F5,
-        64 => K_F6,
-        65 => K_F7,
-        66 => K_F8,
-        67 => K_F9,
-        68 => K_F10,
-        69 => K_NUM,
-        70 => K_HOLD,
-        71 => if shifted { K_FIND } else { K_P7 },
-        72 => if shifted { K_UP } else { K_P8 },
-        73 => if shifted { K_PGUP } else { K_P9 },
-        74 => K_PMINUS,
-        75 => if shifted { K_LEFT } else { K_P4 },
-        76 => K_P5,
-        77 => if shifted { K_RIGHT } else { K_P6 },
-        78 => K_PPLUS,
-        79 => if shifted { K_SELECT } else { K_P1 },
-        80 => if shifted { K_DOWN } else { K_P2 },
-        81 => if shifted { K_PGDN } else { K_P3 },
-        82 => if shifted { K_INSERT } else { K_P0 },
-        83 => if shifted { K_REMOVE } else { K_PDOT },
-        87 => K_F11,
-        88 => K_F12,
-        96 => K_PENTER,
-        97 => K_CTRLR,
-        98 => K_PSLASH,
-        99 => K_BREAK,
-        100 => K_ALTGR,
-        102 => K_FIND,
-        103 => K_UP,
-        104 => K_PGUP,
-        105 => K_LEFT,
-        106 => K_RIGHT,
-        107 => K_SELECT,
-        108 => K_DOWN,
-        109 => K_PGDN,
-        110 => K_INSERT,
-        111 => K_REMOVE,
-        119 => K_PAUSE,
-        125 => K_ALT,
-        126 => K_ALTGR,
-        127 => K_MACRO,
+        51 => k(KeyType::Latin, if shifted { b'<' } else { b',' } as u16),
+        52 => k(KeyType::Latin, if shifted { b'>' } else { b'.' } as u16),
+        53 => k(KeyType::Latin, if shifted { b'?' } else { b'/' } as u16),
+        54 => KeyValue::ShiftR.code(),
+        55 => KeyValue::PStar.code(),
+        56 => KeyValue::Alt.code(),
+        57 => k(KeyType::Latin, b' ' as u16),
+        58 => KeyValue::Caps.code(),
+        59 => KeyValue::F1.code(),
+        60 => KeyValue::F2.code(),
+        61 => KeyValue::F3.code(),
+        62 => KeyValue::F4.code(),
+        63 => KeyValue::F5.code(),
+        64 => KeyValue::F6.code(),
+        65 => KeyValue::F7.code(),
+        66 => KeyValue::F8.code(),
+        67 => KeyValue::F9.code(),
+        68 => KeyValue::F10.code(),
+        69 => KeyValue::Num.code(),
+        70 => KeyValue::Hold.code(),
+        71 => if shifted { KeyValue::Find.code() } else { KeyValue::P7.code() },
+        72 => if shifted { KeyValue::Up.code() } else { KeyValue::P8.code() },
+        73 => if shifted { KeyValue::PgUp.code() } else { KeyValue::P9.code() },
+        74 => KeyValue::PMinus.code(),
+        75 => if shifted { KeyValue::Left.code() } else { KeyValue::P4.code() },
+        76 => KeyValue::P5.code(),
+        77 => if shifted { KeyValue::Right.code() } else { KeyValue::P6.code() },
+        78 => KeyValue::PPlus.code(),
+        79 => if shifted { KeyValue::Select.code() } else { KeyValue::P1.code() },
+        80 => if shifted { KeyValue::Down.code() } else { KeyValue::P2.code() },
+        81 => if shifted { KeyValue::PgDn.code() } else { KeyValue::P3.code() },
+        82 => if shifted { KeyValue::Insert.code() } else { KeyValue::P0.code() },
+        83 => if shifted { KeyValue::Remove.code() } else { KeyValue::PDot.code() },
+        87 => KeyValue::F11.code(),
+        88 => KeyValue::F12.code(),
+        96 => KeyValue::PEnter.code(),
+        97 => KeyValue::CtrlR.code(),
+        98 => KeyValue::PSlash.code(),
+        99 => KeyValue::Break.code(),
+        100 => KeyValue::AltGr.code(),
+        102 => KeyValue::Find.code(),
+        103 => KeyValue::Up.code(),
+        104 => KeyValue::PgUp.code(),
+        105 => KeyValue::Left.code(),
+        106 => KeyValue::Right.code(),
+        107 => KeyValue::Select.code(),
+        108 => KeyValue::Down.code(),
+        109 => KeyValue::PgDn.code(),
+        110 => KeyValue::Insert.code(),
+        111 => KeyValue::Remove.code(),
+        119 => KeyValue::Pause.code(),
+        125 => KeyValue::Alt.code(),
+        126 => KeyValue::AltGr.code(),
+        127 => KeyValue::Macro.code(),
         _ => return None,
     };
 
@@ -262,13 +344,17 @@ pub fn handle_kd_request(
             }
 
             let mode = state.lock().keyboard_mode;
-            unsafe { write_volatile(*ptr, mode) };
+            unsafe { write_volatile(*ptr, mode as u32) };
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxKdSetKeyboardMode(mode) => {
-            match *mode {
-                K_RAW | K_XLATE | K_UNICODE | K_OFF => {
-                    state.lock().keyboard_mode = *mode;
+            let mode = KeyboardMode::try_from(*mode).map_err(|_| ObjectError::InvalidArguments)?;
+            match mode {
+                KeyboardMode::Raw
+                | KeyboardMode::Xlate
+                | KeyboardMode::Unicode
+                | KeyboardMode::Off => {
+                    state.lock().keyboard_mode = mode;
                     KEYBOARD_QUEUE
                         .get_or_init(|| Mutex::new(Default::default()))
                         .lock()
@@ -276,7 +362,7 @@ pub fn handle_kd_request(
                     LINE_BUFFER.lock().clear();
                     Ok(Some(0))
                 }
-                _ => Err(ObjectError::InvalidArguments),
+                KeyboardMode::MediumRaw => Err(ObjectError::InvalidArguments),
             }
         }
         ConfigurateRequest::LinuxKdGetKeyboardType(ptr) => {
@@ -284,8 +370,7 @@ pub fn handle_kd_request(
                 return Err(ObjectError::InvalidArguments);
             }
 
-            const KB_101: u8 = 0x02;
-            unsafe { write_volatile(*ptr, KB_101) };
+            unsafe { write_volatile(*ptr, KeyboardType::Kb101 as u8) };
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxKdGetKeyboardEntry(ptr) => {
@@ -304,17 +389,13 @@ pub fn handle_kd_request(
             }
 
             let mode = state.lock().display_mode;
-            unsafe { write_volatile(*ptr, mode) };
+            unsafe { write_volatile(*ptr, mode as u32) };
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxKdSetDisplayMode(mode) => {
-            match *mode {
-                KD_TEXT | KD_GRAPHICS | KD_TEXT0 | KD_TEXT1 => {
-                    state.lock().display_mode = *mode;
-                    Ok(Some(0))
-                }
-                _ => Err(ObjectError::InvalidArguments),
-            }
+            let mode = DisplayMode::try_from(*mode).map_err(|_| ObjectError::InvalidArguments)?;
+            state.lock().display_mode = mode;
+            Ok(Some(0))
         }
         _ => Ok(None),
     }

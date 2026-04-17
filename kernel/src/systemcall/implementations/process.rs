@@ -1,4 +1,5 @@
 use alloc::{string::String, sync::Arc, vec::Vec};
+use bitflags::bitflags;
 
 use crate::{
     define_syscall,
@@ -13,7 +14,12 @@ use crate::{
     thread::{THREAD_MANAGER, get_current_thread, scheduling::return_to_executor_no_save},
 };
 
-const WNOHANG: i32 = 1;
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct WaitOptions: i32 {
+        const NOHANG = 1;
+    }
+}
 
 fn exit_code_to_status(exit_code: u64) -> i32 {
     ((exit_code & 0xff) << 8) as i32
@@ -95,7 +101,7 @@ define_syscall!(
                 MANAGER.lock().reap_process(process);
                 Ok(pid as usize)
             }
-            None if (options & WNOHANG) != 0 => Ok(0),
+            None if WaitOptions::from_bits_truncate(options).contains(WaitOptions::NOHANG) => Ok(0),
             None => Err(SyscallError::TryAgain),
         }
     }
