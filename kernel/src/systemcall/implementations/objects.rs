@@ -27,7 +27,7 @@ use crate::{
 static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeMap::new());
 
 define_syscall!(
-    GetDirectoryContents,
+    Getdents,
     |object_index: u64, buf: *mut u8, len: usize| {
         let obj = get_object_current_process(object_index)?.as_file_like()?;
         let contents = obj.directory_contents()?;
@@ -79,7 +79,7 @@ define_syscall!(
     }
 );
 
-define_syscall!(ReadObject, |object: ObjectRef,
+define_syscall!(Read, |object: ObjectRef,
                              buf_ptr: *mut u8,
                              len: usize| {
     unsafe {
@@ -89,7 +89,7 @@ define_syscall!(ReadObject, |object: ObjectRef,
     }
 });
 
-define_syscall!(WriteObject, |object: ObjectRef,
+define_syscall!(Write, |object: ObjectRef,
                               buf_ptr: *mut u8,
                               len: usize| {
     unsafe {
@@ -99,7 +99,7 @@ define_syscall!(WriteObject, |object: ObjectRef,
     }
 });
 
-define_syscall!(RemoveObject, |object_num: usize| {
+define_syscall!(Close, |object_num: usize| {
     let process_ref = get_current_process();
     let mut process = process_ref.lock();
     let current_pid = process.pid;
@@ -116,7 +116,7 @@ define_syscall!(RemoveObject, |object_num: usize| {
 });
 
 define_syscall!(
-    ConfigurateObject,
+    Ioctl,
     |object: ObjectRef, request: u64, request_ptr: u64| {
         let res = object
             .as_configuratable()?
@@ -126,20 +126,18 @@ define_syscall!(
     }
 );
 
-define_syscall!(ControlObject, |object: ObjectRef,
-                                command: u64,
-                                arg: u64| {
+define_syscall!(Fcntl, |object: ObjectRef, command: u64, arg: u64| {
     control_object(object, command, arg)
 });
 
-define_syscall!(CloneObject, |object: ObjectRef| {
+define_syscall!(Dup, |object: ObjectRef| {
     get_current_process()
         .lock()
         .clone_object(object)
         .map_err(Into::into)
 });
 
-define_syscall!(CloneObjectTo, |source: ObjectRef, dest: usize| {
+define_syscall!(Dup3, |source: ObjectRef, dest: usize| {
     get_current_process()
         .lock()
         .clone_object_to(source, dest)
@@ -166,7 +164,7 @@ define_syscall!(
 );
 
 define_syscall!(
-    SeekObject,
+    Lseek,
     |object: ObjectRef, offset: i64, seek_type: SeekType| {
         object
             .as_seekable()?

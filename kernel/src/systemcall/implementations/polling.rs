@@ -14,6 +14,27 @@ use crate::{
 };
 
 const DEADLOCK_LOG: bool = false;
+const EPOLL_CTL_ADD: u64 = 1;
+const EPOLL_CTL_DEL: u64 = 2;
+const EPOLL_CTL_MOD: u64 = 3;
+const EPOLLIN: u32 = 0x001;
+const EPOLLOUT: u32 = 0x004;
+const EPOLLERR: u32 = 0x008;
+const EPOLLHUP: u32 = 0x010;
+
+#[repr(C)]
+union LinuxEpollData {
+    ptr: u64,
+    fd: i32,
+    u32_: u32,
+    u64_: u64,
+}
+
+#[repr(C)]
+struct LinuxEpollEvent {
+    events: u32,
+    data: LinuxEpollData,
+}
 
 #[repr(C)]
 pub struct PollResult {
@@ -32,7 +53,16 @@ fn pollable_event_to_linux_bits(event: PollableEvent) -> u32 {
     }
 }
 
-define_syscall!(CreatePoller, {
+fn linux_bits_to_events(bits: u32) -> [Option<PollableEvent>; 4] {
+    [
+        (bits & EPOLLIN != 0).then_some(PollableEvent::CanBeRead),
+        (bits & EPOLLOUT != 0).then_some(PollableEvent::CanBeWritten),
+        (bits & EPOLLERR != 0).then_some(PollableEvent::Error),
+        (bits & EPOLLHUP != 0).then_some(PollableEvent::Closed),
+    ]
+}
+
+define_syscall!(EpollCreate1, {
     let process = get_current_process();
     let objects = &mut process.lock().objects;
 
@@ -41,39 +71,68 @@ define_syscall!(CreatePoller, {
     Ok(objects.len() - 1)
 });
 
-define_syscall!(PollerAdd, |poller: ObjectRef,
-                            target_object: ObjectRef,
-                            event: PollableEvent,
-                            data: u64| {
+fn epoll_update_impl(
+    poller: ObjectRef,
+    target_object: ObjectRef,
+    bits: u32,
+    data: u64,
+) -> Result<usize, SyscallError> {
     if target_object.clone().as_pollable().is_err() {
         if DEADLOCK_LOG {
             s_println!(
-                "poller_add reject: event={:?} data={:#x} target not pollable",
-                event,
+                "poller_add reject: bits=0x{:x} data={:#x} target not pollable",
+                bits,
                 data
             );
         }
         return Err(SyscallError::PermissionDenied);
     }
 
-    poller.as_poller()?.register_obj(target_object, event, data);
+    for event in linux_bits_to_events(bits).into_iter().flatten() {
+        poller
+            .clone()
+            .as_poller()?
+            .register_obj(target_object.clone(), event, data);
+    }
 
     Ok(0)
+}
+
+define_syscall!(EpollCtl, |poller: ObjectRef, op: u64, target_object: ObjectRef, event: u64| {
+    match op {
+        EPOLL_CTL_ADD | EPOLL_CTL_MOD => {
+            let event = event as *const LinuxEpollEvent;
+            if event.is_null() {
+                return Err(SyscallError::BadAddress);
+            }
+            let event = unsafe { &*event };
+            for existing in [PollableEvent::CanBeRead, PollableEvent::CanBeWritten, PollableEvent::Error, PollableEvent::Closed] {
+                poller
+                    .clone()
+                    .as_poller()?
+                    .unregister_obj(target_object.clone(), existing);
+            }
+            epoll_update_impl(poller, target_object, event.events, unsafe { event.data.u64_ })
+        }
+        EPOLL_CTL_DEL => {
+            for existing in [PollableEvent::CanBeRead, PollableEvent::CanBeWritten, PollableEvent::Error, PollableEvent::Closed] {
+                poller
+                    .clone()
+                    .as_poller()?
+                    .unregister_obj(target_object.clone(), existing);
+            }
+            Ok(0)
+        }
+        _ => Err(SyscallError::InvalidArguments),
+    }
 });
 
-define_syscall!(
-    PollerRemove,
-    |poller: ObjectRef, target_object: ObjectRef, event: PollableEvent| {
-        poller.as_poller()?.unregister_obj(target_object, event);
-
-        Ok(0)
-    }
-);
-
-define_syscall!(PollerWait, |poller: ObjectRef,
-                             events_ptr: *mut PollResult,
-                             maxevents: usize,
-                             timeout: i32| {
+fn epoll_wait_impl(
+    poller: ObjectRef,
+    events_ptr: *mut PollResult,
+    maxevents: usize,
+    timeout: i32,
+) -> Result<usize, SyscallError> {
     if maxevents == 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -130,4 +189,18 @@ define_syscall!(PollerWait, |poller: ObjectRef,
     }
 
     Ok(woken_events.len())
+}
+
+define_syscall!(EpollWait, |poller: ObjectRef,
+                           events_ptr: *mut PollResult,
+                           maxevents: usize,
+                           timeout: i32| {
+    epoll_wait_impl(poller, events_ptr, maxevents, timeout)
+});
+
+define_syscall!(EpollPwait, |poller: ObjectRef,
+                            events_ptr: *mut PollResult,
+                            maxevents: usize,
+                            timeout: i32| {
+    epoll_wait_impl(poller, events_ptr, maxevents, timeout)
 });

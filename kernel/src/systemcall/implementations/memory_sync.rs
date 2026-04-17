@@ -15,6 +15,17 @@ use crate::{
     },
 };
 
+const FUTEX_WAIT: u64 = 0;
+const FUTEX_WAKE: u64 = 1;
+const ARCH_SET_FS: u64 = 0x1002;
+const ARCH_GET_FS: u64 = 0x1003;
+const PROT_READ: i32 = 0x1;
+const PROT_WRITE: i32 = 0x2;
+const PROT_EXEC: i32 = 0x4;
+const MAP_FIXED: i32 = 0x10;
+const MAP_ANONYMOUS: i32 = 0x20;
+const MAP_FIXED_NOREPLACE: i32 = 0x100000;
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct FutexKey {
     pid: u64,
@@ -29,7 +40,7 @@ fn current_futex_key(addr: u64) -> FutexKey {
     FutexKey { pid, addr }
 }
 
-define_syscall!(FutexWait, |arg1: u64, arg2: u64| {
+fn futex_wait_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
     let key = current_futex_key(arg1);
     let current = get_current_thread();
 
@@ -74,9 +85,9 @@ define_syscall!(FutexWait, |arg1: u64, arg2: u64| {
     }
 
     Ok(0)
-});
+}
 
-define_syscall!(FutexWake, |arg1: u64, arg2: u64| {
+fn futex_wake_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
     let key = current_futex_key(arg1);
     let mut queue = FUTEX_QUEUE.lock();
     let mut woken = 0;
@@ -110,42 +121,84 @@ define_syscall!(FutexWake, |arg1: u64, arg2: u64| {
     }
 
     Ok(woken)
+}
+
+define_syscall!(Futex, |arg1: u64, op: u64, arg2: u64| {
+    match op & 0x7f {
+        FUTEX_WAIT => futex_wait_impl(arg1, arg2),
+        FUTEX_WAKE => futex_wake_impl(arg1, arg2),
+        _ => Err(SyscallError::InvalidArguments),
+    }
 });
 
-define_syscall!(SetGs, { Err(SyscallError::other("setgs unimplemented")) });
-
-define_syscall!(SetFs, |fs: u64| {
-    FsBase::write(VirtAddr::new(fs));
-    Ok(0)
+define_syscall!(ArchPrctl, |code: u64, addr: u64| {
+    match code {
+        ARCH_SET_FS => {
+            FsBase::write(VirtAddr::new(addr));
+            Ok(0)
+        }
+        ARCH_GET_FS => unsafe {
+            *(addr as *mut u64) = FsBase::read().as_u64();
+            Ok(0)
+        },
+        _ => Err(SyscallError::InvalidArguments),
+    }
 });
 
-define_syscall!(GetFs, { Ok(FsBase::read().as_u64() as usize) });
+fn prot_to_permissions(prot: i32) -> Result<Permissions, SyscallError> {
+    let mut permissions = Permissions::empty();
+    if (prot & PROT_READ) != 0 {
+        permissions |= Permissions::READABLE;
+    }
+    if (prot & PROT_WRITE) != 0 {
+        permissions |= Permissions::WRITABLE;
+    }
+    if (prot & PROT_EXEC) != 0 {
+        permissions |= Permissions::EXECUTABLE;
+    }
+    Ok(permissions)
+}
 
-define_syscall!(
-    AllocateMem,
-    |pages: u64, _unused: u64, permissions: Permissions| {
+define_syscall!(Mmap, |addr: u64, len: u64, prot: i32, flags: i32, fd: i32, offset: u64| {
+    if len == 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if addr != 0 || (flags & (MAP_FIXED | MAP_FIXED_NOREPLACE)) != 0 {
+        return Err(SyscallError::NoSyscall);
+    }
+    let permissions = prot_to_permissions(prot)?;
+    let pages = len.div_ceil(4096);
+
+    if (flags & MAP_ANONYMOUS) != 0 {
         let current = get_current_process();
-        Ok(current
+        return Ok(current
             .lock()
             .addrspace
             .allocate_user_lazy(pages, permissions, Data::Normal)
-            .as_u64() as usize)
+            .as_u64() as usize);
     }
-);
 
-define_syscall!(DeallocateMem, |addr: VirtAddr, len: u64| {
+    if offset % 4096 != 0 || fd < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    let object =
+        crate::object::misc::get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+    let object = object.as_mappable()?;
+    let address = object.map(offset, pages, permissions)?;
+    Ok(address.as_u64() as usize)
+});
+
+define_syscall!(Munmap, |addr: VirtAddr, len: u64| {
     get_current_process().lock().addrspace.unmap(addr, len);
     Ok(0)
 });
 
-define_syscall!(
-    UpdateMemPerms,
-    |addr: VirtAddr, pages: u64, permissions: Permissions| {
-        get_current_process().lock().addrspace.update_permissions(
-            addr,
-            addr + pages * 4096,
-            permissions,
-        );
-        Ok(0)
-    }
-);
+define_syscall!(Mprotect, |addr: VirtAddr, len: u64, prot: i32| {
+    let permissions = prot_to_permissions(prot)?;
+    let pages = len.div_ceil(4096);
+    get_current_process()
+        .lock()
+        .addrspace
+        .update_permissions(addr, addr + pages * 4096, permissions);
+    Ok(0)
+});

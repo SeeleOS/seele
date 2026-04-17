@@ -13,11 +13,13 @@ use crate::{
     thread::{THREAD_MANAGER, get_current_thread, scheduling::return_to_executor_no_save},
 };
 
+const WNOHANG: i32 = 1;
+
 fn exit_code_to_status(exit_code: u64) -> i32 {
     ((exit_code & 0xff) << 8) as i32
 }
 
-define_syscall!(GetProcessParentID, {
+define_syscall!(Getppid, {
     if let Some(parent) = get_current_process().lock().parent.clone() {
         Ok(parent.lock().pid.0 as usize)
     } else {
@@ -26,8 +28,9 @@ define_syscall!(GetProcessParentID, {
 });
 
 define_syscall!(
-    WaitForProcessExit,
-    |target_process: ProcessID, status_ptr: *mut i32| {
+    Wait4,
+    |target_process: i32, status_ptr: *mut i32, options: i32, _rusage: u64| {
+        let current_group = get_current_process().lock().group_id;
         let current_process = get_current_process();
         let check_result = {
             let manager = MANAGER.lock();
@@ -41,12 +44,13 @@ define_syscall!(
                     .clone()
                     .is_some_and(|parent| Arc::ptr_eq(&parent, &current_process));
 
-                let matches = if target_process.0 == (-1i64) as u64 {
-                    is_current_child
-                } else if target_process.0 > 0 {
-                    *pid == target_process && is_current_child
-                } else {
-                    false
+                let matches = match target_process {
+                    -1 => is_current_child,
+                    0 => is_current_child && p_lock.group_id == current_group,
+                    1.. => pid.0 == target_process as u64 && is_current_child,
+                    i32::MIN..=-2 => {
+                        is_current_child && p_lock.group_id.0 == (-target_process) as u64
+                    }
                 };
 
                 if !matches {
@@ -87,6 +91,7 @@ define_syscall!(
                 MANAGER.lock().reap_process(process);
                 Ok(pid as usize)
             }
+            None if (options & WNOHANG) != 0 => Ok(0),
             None => Err(SyscallError::TryAgain),
         }
     }
@@ -116,19 +121,39 @@ define_syscall!(Fork, {
     Ok(current.lock().fork(&mut manager).0 as usize)
 });
 
-define_syscall!(GetProcessID, {
+define_syscall!(Getpid, {
     Ok(get_current_process().lock().pid.0 as usize)
 });
 
-define_syscall!(GetThreadID, {
+define_syscall!(Gettid, {
     Ok(get_current_thread().lock().id.0 as usize)
 });
 
-define_syscall!(GetProcessGroupID, |process: ProcessRef| {
+define_syscall!(Getpgid, |pid: i32| {
+    let pid = if pid == 0 {
+        get_current_process().lock().pid.0
+    } else {
+        pid as u64
+    };
+    let process = crate::process::misc::get_process_with_pid(ProcessID(pid))?;
     Ok(process.lock().group_id.0 as usize)
 });
 
-define_syscall!(SetProcessGroupID, |process: ProcessRef, group_id: u64| {
-    process.lock().group_id.0 = group_id;
+define_syscall!(Setpgid, |pid: i32, group_id: i32| {
+    let pid = if pid == 0 {
+        get_current_process().lock().pid.0
+    } else {
+        pid as u64
+    };
+    let process = crate::process::misc::get_process_with_pid(ProcessID(pid))?;
+    let new_group_id = if group_id == 0 { pid } else { group_id as u64 };
+    process.lock().group_id.0 = new_group_id;
     Ok(0)
+});
+
+define_syscall!(Setsid, {
+    let current = get_current_process();
+    let pid = current.lock().pid.0;
+    current.lock().group_id.0 = pid;
+    Ok(pid as usize)
 });

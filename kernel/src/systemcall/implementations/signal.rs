@@ -1,4 +1,3 @@
-use crate::process::ProcessRef;
 use crate::process::group::ProcessGroupID;
 use crate::process::manager::MANAGER;
 use crate::process::misc::ProcessID;
@@ -12,21 +11,80 @@ use crate::{
     process::manager::get_current_process,
     signal::{Signal, action::SignalAction},
 };
+use core::mem::size_of;
+
+const SA_SIGINFO: u64 = 0x0000_0004;
+const SIG_DFL: usize = 0;
+const SIG_IGN: usize = 1;
+
+const SIG_BLOCK: i32 = 0;
+const SIG_UNBLOCK: i32 = 1;
+const SIG_SETMASK: i32 = 2;
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxSigAction {
+    handler: usize,
+    flags: u64,
+    restorer: usize,
+    mask: u64,
+}
+
+fn encode_sigaction(action: &SignalAction) -> LinuxSigAction {
+    let (handler, extra_flags) = match action.handling_type {
+        SignalHandlingType::Default => (SIG_DFL, 0),
+        SignalHandlingType::Ignore => (SIG_IGN, 0),
+        SignalHandlingType::Function1(func) => (func as usize, 0),
+        SignalHandlingType::Function2(func) => (func as usize, SA_SIGINFO),
+    };
+
+    LinuxSigAction {
+        handler,
+        flags: action.flags | extra_flags,
+        restorer: action.restorer,
+        mask: action.sig_handler_ignored_sigs.bits(),
+    }
+}
+
+fn decode_sigaction(action: LinuxSigAction) -> SignalAction {
+    let handling_type = match action.handler {
+        SIG_DFL => SignalHandlingType::Default,
+        SIG_IGN => SignalHandlingType::Ignore,
+        handler if (action.flags & SA_SIGINFO) != 0 => unsafe {
+            SignalHandlingType::Function2(core::mem::transmute(handler))
+        },
+        handler => unsafe { SignalHandlingType::Function1(core::mem::transmute(handler)) },
+    };
+
+    SignalAction {
+        handling_type,
+        sig_handler_ignored_sigs: Signals::from_bits_truncate(action.mask),
+        flags: action.flags,
+        restorer: action.restorer,
+    }
+}
 
 define_syscall!(
-    RegisterSignalAction,
-    |signal: Signal, new_action: *const SignalAction, old_action: *mut SignalAction| {
+    RtSigaction,
+    |signal: i32, new_action: u64, old_action: u64, sigsetsize: usize| {
+        if sigsetsize != size_of::<u64>() {
+            return Err(SyscallError::InvalidArguments);
+        }
+
+        let signal = Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?;
+        let new_action = new_action as *const LinuxSigAction;
+        let old_action = old_action as *mut LinuxSigAction;
         let process = get_current_process();
         let mut process = process.lock();
         let current_signal_action = process.get_signal_action(signal);
 
         unsafe {
             if !old_action.is_null() {
-                *old_action = current_signal_action.clone();
+                *old_action = encode_sigaction(current_signal_action);
             }
 
             if !new_action.is_null() {
-                *current_signal_action = (*new_action).clone();
+                *current_signal_action = decode_sigaction(*new_action);
             }
         }
 
@@ -34,8 +92,60 @@ define_syscall!(
     }
 );
 
-define_syscall!(SendSignal, |process: ProcessRef, signal: Signal| {
-    process.lock().send_signal(signal);
+define_syscall!(Kill, |pid: i32, signal: i32| {
+    let signal = if signal == 0 {
+        None
+    } else {
+        Some(Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?)
+    };
+
+    let mut targets = alloc::vec::Vec::new();
+    {
+        let manager = MANAGER.lock();
+        let current_group = get_current_process().lock().group_id;
+
+        match pid {
+            i32::MIN..=-2 => {
+                let group = ProcessGroupID((-pid) as u64);
+                for process in manager.processes.values() {
+                    if process.lock().group_id == group {
+                        targets.push(process.clone());
+                    }
+                }
+            }
+            -1 => {
+                for process in manager.processes.values() {
+                    targets.push(process.clone());
+                }
+            }
+            0 => {
+                for process in manager.processes.values() {
+                    if process.lock().group_id == current_group {
+                        targets.push(process.clone());
+                    }
+                }
+            }
+            positive => {
+                let process = manager
+                    .processes
+                    .get(&ProcessID(positive as u64))
+                    .cloned()
+                    .ok_or(SyscallError::NoProcess)?;
+                targets.push(process);
+            }
+        }
+    }
+
+    if targets.is_empty() {
+        return Err(SyscallError::NoProcess);
+    }
+
+    if let Some(signal) = signal {
+        for process in targets {
+            process.lock().send_signal(signal);
+        }
+    }
+
     Ok(0)
 });
 
@@ -73,19 +183,37 @@ define_syscall!(
 );
 
 define_syscall!(
-    SetBlockedSignals,
-    |signals: Signals, old_signals: *mut Signals| {
-        unsafe {
-            *old_signals = get_current_thread().lock().blocked_signals;
+    RtSigprocmask,
+    |how: i32, set: u64, old_set: *mut u64, sigsetsize: usize| {
+        if sigsetsize != size_of::<u64>() {
+            return Err(SyscallError::InvalidArguments);
+        }
 
-            get_current_thread().lock().blocked_signals = signals;
+        let current = get_current_thread();
+        let mut current = current.lock();
+        let set = set as *const u64;
+
+        unsafe {
+            if !old_set.is_null() {
+                *old_set = current.blocked_signals.bits();
+            }
+
+            if !set.is_null() {
+                let set = Signals::from_bits_truncate(*set);
+                match how {
+                    SIG_BLOCK => current.blocked_signals.insert(set),
+                    SIG_UNBLOCK => current.blocked_signals.remove(set),
+                    SIG_SETMASK => current.blocked_signals = set,
+                    _ => return Err(SyscallError::InvalidArguments),
+                }
+            }
         }
 
         Ok(0)
     }
 );
 
-define_syscall!(SigHandlerReturn, {
+define_syscall!(RtSigreturn, {
     get_current_thread().lock().snapshot_state = SnapshotState::Normal;
     get_current_thread().lock().restore_blocked_signals();
 

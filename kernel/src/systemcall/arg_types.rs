@@ -65,6 +65,7 @@ pub trait SyscallArg {
 add_syscall_arg_type!(
     u32,
     usize,
+    *const u8,
     *mut LinuxStat,
     *const TimerNotifyStruct,
     *mut u32,

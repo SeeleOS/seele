@@ -3,19 +3,47 @@ use core::ptr;
 
 use crate::{
     define_syscall,
+    object::Object,
     object::misc::ObjectRef,
     process::manager::get_current_process,
     systemcall::utils::{SyscallError, SyscallImpl},
 };
 
+const AF_UNIX: u16 = 1;
+const SOCK_NONBLOCK: u64 = 0o4_000;
+
+#[repr(C)]
+struct LinuxSockAddrUn {
+    sun_family: u16,
+    sun_path: [u8; 108],
+}
+
+fn path_from_sockaddr(address: *const u8, address_len: u32) -> Result<String, SyscallError> {
+    if address.is_null() || address_len < 2 {
+        return Err(SyscallError::BadAddress);
+    }
+    let addr = unsafe { &*(address as *const LinuxSockAddrUn) };
+    if addr.sun_family != AF_UNIX {
+        return Err(SyscallError::AddressFamilyNotSupported);
+    }
+    let len = addr.sun_path.iter().position(|&b| b == 0).unwrap_or(addr.sun_path.len());
+    Ok(String::from_utf8_lossy(&addr.sun_path[..len]).into_owned())
+}
+
 define_syscall!(Socket, |domain: u64, kind: u64, protocol: u64| {
     let socket = crate::socket::UnixSocketObject::create(domain, kind, protocol)
         .map_err(crate::object::error::ObjectError::from)?;
+    if (kind & SOCK_NONBLOCK) != 0 {
+        let _ = socket
+            .clone()
+            .set_flags(seele_sys::abi::object::ObjectFlags::NONBLOCK);
+    }
     let fd = get_current_process().lock().push_object(socket);
     Ok(fd)
 });
 
-define_syscall!(SocketBind, |socket: ObjectRef, path: String| {
+define_syscall!(Bind, |socket: ObjectRef, address: *const u8, address_len: u32| {
+    let path = path_from_sockaddr(address, address_len)?;
     socket
         .as_unix_socket()?
         .bind(path)
@@ -23,7 +51,7 @@ define_syscall!(SocketBind, |socket: ObjectRef, path: String| {
     Ok(0)
 });
 
-define_syscall!(SocketListen, |socket: ObjectRef, backlog: usize| {
+define_syscall!(Listen, |socket: ObjectRef, backlog: usize| {
     socket
         .as_unix_socket()?
         .listen(backlog)
@@ -31,7 +59,8 @@ define_syscall!(SocketListen, |socket: ObjectRef, backlog: usize| {
     Ok(0)
 });
 
-define_syscall!(SocketConnect, |socket: ObjectRef, path: String| {
+define_syscall!(Connect, |socket: ObjectRef, address: *const u8, address_len: u32| {
+    let path = path_from_sockaddr(address, address_len)?;
     socket
         .as_unix_socket()?
         .connect(path)
@@ -39,15 +68,35 @@ define_syscall!(SocketConnect, |socket: ObjectRef, path: String| {
     Ok(0)
 });
 
-define_syscall!(SocketAccept, |socket: ObjectRef| {
-    Ok(socket
+define_syscall!(Accept, |socket: ObjectRef, address: *mut u8, address_len_ptr: *mut u32| {
+    let fd = socket
         .as_unix_socket()?
         .accept()
-        .map_err(crate::object::error::ObjectError::from)?)
+        .map_err(crate::object::error::ObjectError::from)?;
+    if !address_len_ptr.is_null() {
+        let accepted =
+            crate::object::misc::get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+        let name = accepted
+            .as_unix_socket()?
+            .getpeername_bytes()
+            .map_err(crate::object::error::ObjectError::from)?;
+        let requested_len = unsafe { *address_len_ptr as usize };
+        let copy_len = requested_len.min(name.len());
+        if copy_len > 0 && address.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+        unsafe {
+            if copy_len > 0 {
+                ptr::copy_nonoverlapping(name.as_ptr(), address, copy_len);
+            }
+            *address_len_ptr = name.len() as u32;
+        }
+    }
+    Ok(fd)
 });
 
 define_syscall!(
-    SocketGetSockOpt,
+    Getsockopt,
     |socket: ObjectRef,
      level: i32,
      option_name: i32,
@@ -79,7 +128,7 @@ define_syscall!(
 );
 
 define_syscall!(
-    SocketGetSockName,
+    Getsockname,
     |socket: ObjectRef, address: *mut u8, address_len_ptr: *mut u32| {
         if address_len_ptr.is_null() {
             return Err(SyscallError::BadAddress);
@@ -108,7 +157,7 @@ define_syscall!(
 );
 
 define_syscall!(
-    SocketGetPeerName,
+    Getpeername,
     |socket: ObjectRef, address: *mut u8, address_len_ptr: *mut u32| {
         if address_len_ptr.is_null() {
             return Err(SyscallError::BadAddress);
@@ -136,7 +185,7 @@ define_syscall!(
     }
 );
 
-define_syscall!(SocketRecvMsg, |socket: ObjectRef, msg_ptr: *mut u8, _flags: u64| {
+define_syscall!(Recvmsg, |socket: ObjectRef, msg_ptr: *mut u8, _flags: u64| {
     if msg_ptr.is_null() {
         return Err(SyscallError::BadAddress);
     }
@@ -185,7 +234,7 @@ define_syscall!(SocketRecvMsg, |socket: ObjectRef, msg_ptr: *mut u8, _flags: u64
     Ok(total_read)
 });
 
-define_syscall!(SocketShutdown, |socket: ObjectRef, how: u64| {
+define_syscall!(Shutdown, |socket: ObjectRef, how: u64| {
     socket
         .as_unix_socket()?
         .shutdown(how)

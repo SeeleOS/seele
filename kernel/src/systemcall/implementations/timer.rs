@@ -8,7 +8,7 @@ use seele_sys::abi::time::{TimeType, TimerNotifyStruct, TimerStateStruct};
 use crate::define_syscall;
 
 define_syscall!(
-    CreateTimer,
+    TimerCreate,
     |time_type: TimeType, notify_method: *const TimerNotifyStruct| {
         unsafe {
             with_current_process(|process| {
@@ -18,17 +18,17 @@ define_syscall!(
     }
 );
 
-define_syscall!(DeleteTimer, |id: usize| {
+define_syscall!(TimerDelete, |id: usize| {
     with_current_process(|process| process.delete_timer(id))?;
     Ok(0)
 });
 
-define_syscall!(GetTimerOverrun, |id: usize| {
+define_syscall!(TimerGetoverrun, |id: usize| {
     with_current_process(|process| process.get_timer_overrun(id))
 });
 
 define_syscall!(
-    SetTimerState,
+    TimerSettime,
     |id: usize, timer_state: *const TimerStateStruct| {
         unsafe {
             with_current_process(|process| {
@@ -46,7 +46,7 @@ define_syscall!(
 );
 
 define_syscall!(
-    GetTimerState,
+    TimerGettime,
     |id: usize, timer_state: *mut TimerStateStruct| {
         unsafe {
             with_current_process(|process| {
