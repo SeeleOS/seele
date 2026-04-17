@@ -11,7 +11,10 @@ use crate::{
     },
     s_print,
     systemcall::utils::{SyscallError, SyscallImpl},
-    thread::{THREAD_MANAGER, get_current_thread, scheduling::return_to_executor_no_save},
+    thread::{
+        THREAD_MANAGER, get_current_thread, scheduling::return_to_executor_no_save,
+        yielding::{BlockType, WakeType, block_current_with_sig_check},
+    },
 };
 
 bitflags! {
@@ -41,67 +44,82 @@ define_syscall!(Wait4, |target_process: i32,
                         status_ptr: *mut i32,
                         options: i32,
                         _rusage: u64| {
-    let current_group = get_current_process().lock().group_id;
     let current_process = get_current_process();
-    let check_result = {
-        let manager = MANAGER.lock();
-        let mut matched_child = false;
-        let mut exited_child = None;
+    loop {
+        THREAD_MANAGER
+            .get()
+            .unwrap()
+            .lock()
+            .cleanup_exited_threads();
 
-        for (pid, process) in manager.processes.iter() {
-            let p_lock = process.lock();
-            let is_current_child = p_lock
-                .parent
-                .clone()
-                .is_some_and(|parent| Arc::ptr_eq(&parent, &current_process));
+        let current_group = current_process.lock().group_id;
+        let check_result = {
+            let manager = MANAGER.lock();
+            let mut matched_child = false;
+            let mut exited_child = None;
 
-            let matches = match target_process {
-                -1 => is_current_child,
-                0 => is_current_child && p_lock.group_id == current_group,
-                1.. => pid.0 == target_process as u64 && is_current_child,
-                i32::MIN..=-2 => is_current_child && p_lock.group_id.0 == (-target_process) as u64,
-            };
+            for (pid, process) in manager.processes.iter() {
+                let p_lock = process.lock();
+                let is_current_child = p_lock
+                    .parent
+                    .clone()
+                    .is_some_and(|parent| Arc::ptr_eq(&parent, &current_process));
 
-            if !matches {
-                continue;
-            }
+                let matches = match target_process {
+                    -1 => is_current_child,
+                    0 => is_current_child && p_lock.group_id == current_group,
+                    1.. => pid.0 == target_process as u64 && is_current_child,
+                    i32::MIN..=-2 => {
+                        is_current_child && p_lock.group_id.0 == (-target_process) as u64
+                    }
+                };
 
-            matched_child = true;
+                if !matches {
+                    continue;
+                }
 
-            if p_lock.threads.is_empty() {
-                exited_child = Some((process.clone(), p_lock.exit_code.unwrap_or(0)));
-                break;
-            }
-        }
+                matched_child = true;
 
-        if let Some(process) = exited_child {
-            Some(process)
-        } else if matched_child {
-            None
-        } else {
-            return Err(SyscallError::NoProcess);
-        }
-    };
-
-    THREAD_MANAGER
-        .get()
-        .unwrap()
-        .lock()
-        .cleanup_exited_threads();
-
-    match check_result {
-        Some((process, exit_code)) => {
-            if !status_ptr.is_null() {
-                unsafe {
-                    *status_ptr = exit_code_to_status(exit_code);
+                if p_lock.threads.is_empty() {
+                    exited_child = Some((process.clone(), p_lock.exit_code.unwrap_or(0)));
+                    break;
                 }
             }
-            let pid = process.lock().pid.0;
-            MANAGER.lock().reap_process(process);
-            Ok(pid as usize)
+
+            if let Some(process) = exited_child {
+                Some(process)
+            } else if matched_child {
+                None
+            } else {
+                return Err(SyscallError::NoProcess);
+            }
+        };
+
+        match check_result {
+            Some((process, exit_code)) => {
+                if !status_ptr.is_null() {
+                    unsafe {
+                        *status_ptr = exit_code_to_status(exit_code);
+                    }
+                }
+                let pid = process.lock().pid.0;
+                MANAGER.lock().reap_process(process);
+                return Ok(pid as usize);
+            }
+            None if WaitOptions::from_bits_truncate(options).contains(WaitOptions::NOHANG) => {
+                return Ok(0);
+            }
+            None => {
+                block_current_with_sig_check(BlockType::WakeRequired {
+                    wake_type: WakeType::ProcsesExit,
+                    deadline: None,
+                })
+                .map_err(|err| match err {
+                    crate::object::error::ObjectError::Interrupted => SyscallError::Interrupted,
+                    _ => SyscallError::TryAgain,
+                })?;
+            }
         }
-        None if WaitOptions::from_bits_truncate(options).contains(WaitOptions::NOHANG) => Ok(0),
-        None => Err(SyscallError::TryAgain),
     }
 });
 
@@ -143,7 +161,9 @@ define_syscall!(Getpid, { Ok(get_current_process().lock().pid.0 as usize) });
 define_syscall!(Gettid, { Ok(get_current_thread().lock().id.0 as usize) });
 
 define_syscall!(SetTidAddress, |tidptr: *mut i32| {
-    let tid = get_current_thread().lock().id.0 as i32;
+    let current = get_current_thread();
+    let tid = current.lock().id.0 as i32;
+    current.lock().clear_child_tid = tidptr as u64;
     if !tidptr.is_null() {
         unsafe {
             *tidptr = tid;
