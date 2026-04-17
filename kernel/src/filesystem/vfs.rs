@@ -58,10 +58,12 @@ impl VFS {
         self.root = Some(self.filesystems[0].lock().root_dir().unwrap());
         log::info!("vfs: root dir ready");
 
-        if let Err(err) = self.clear_directory(crate::filesystem::path::Path::new("/tmp")) {
-            log::warn!("vfs: failed to clean /tmp: {:?}", err);
-        } else {
-            log::info!("vfs: cleaned /tmp");
+        for temp_dir in ["/tmp", "/var/tmp"] {
+            if let Err(err) = self.clear_directory(crate::filesystem::path::Path::new(temp_dir)) {
+                log::warn!("vfs: failed to clean {}: {:?}", temp_dir, err);
+            } else {
+                log::info!("vfs: cleaned {}", temp_dir);
+            }
         }
 
         log::debug!("vfs: init done");
