@@ -3,14 +3,11 @@ use spin::Mutex;
 
 use crate::filesystem::{
     errors::FSError,
-    staticfs::{
-        device::StaticDeviceHandle,
-        directory::StaticDirectoryHandle,
-        file::StaticFileHandle,
-        node::StaticNode,
-        symlink::StaticSymlinkHandle,
-    },
     path::{Path, PathPart},
+    staticfs::{
+        device::StaticDeviceHandle, directory::StaticDirectoryHandle, file::StaticFileHandle,
+        node::StaticNode, symlink::StaticSymlinkHandle,
+    },
     vfs::FSResult,
     vfs_traits::{FileLike, FileSystem},
 };

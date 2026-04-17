@@ -217,6 +217,9 @@ impl Process {
     }
 
     pub fn send_signal(&mut self, signal: Signal) {
+        if matches!(signal, Signal::User1) {
+            crate::s_println!("signal: send SIGUSR1 pid={}", self.pid.0);
+        }
         match signal {
             Signal::Continue => {
                 let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
@@ -251,6 +254,9 @@ impl Process {
                     .blocked_signals
                     .contains(signal_bits)
             {
+                if matches!(signal, Signal::User1) {
+                    crate::s_println!("signal: process SIGUSR1 pid={}", self.pid.0);
+                }
                 let action = self.signal_actions[signal.index()].clone();
                 self.pending_signals.remove(signal_bits);
 

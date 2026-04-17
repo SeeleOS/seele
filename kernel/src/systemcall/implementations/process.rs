@@ -12,7 +12,8 @@ use crate::{
     s_print,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
-        THREAD_MANAGER, get_current_thread, scheduling::return_to_executor_no_save,
+        THREAD_MANAGER, get_current_thread,
+        scheduling::return_to_executor_no_save,
         yielding::{BlockType, WakeType, block_current_with_sig_check},
     },
 };

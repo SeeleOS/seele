@@ -1,4 +1,3 @@
-use alloc::string::String;
 use crate::{
     filesystem::{
         info::{DirectoryContentInfo, FileLikeInfo},
@@ -7,6 +6,7 @@ use crate::{
     },
     object::traits::Readable,
 };
+use alloc::string::String;
 
 use alloc::vec::Vec;
 
@@ -139,6 +139,7 @@ impl VFS {
 
     pub fn clear_directory(&mut self, path: Path) -> FSResult<()> {
         let entries = self.list_contents(path.clone())?;
+        let mut first_error = None;
 
         for entry in entries {
             if entry.name == "." || entry.name == ".." {
@@ -149,16 +150,48 @@ impl VFS {
 
             match entry.content_type {
                 DirectoryContentType::Directory => {
-                    self.clear_directory(child_path.clone())?;
-                    self.delete_file(child_path)?;
+                    if let Err(err) = self.clear_directory(child_path.clone()) {
+                        log::warn!(
+                            "vfs: failed to clear {}: {:?}",
+                            child_path.clone().as_string(),
+                            err
+                        );
+                        if first_error.is_none() {
+                            first_error = Some(err);
+                        }
+                    }
+
+                    if let Err(err) = self.delete_file(child_path.clone()) {
+                        log::warn!(
+                            "vfs: failed to delete {}: {:?}",
+                            child_path.clone().as_string(),
+                            err
+                        );
+                        if first_error.is_none() {
+                            first_error = Some(err);
+                        }
+                    }
                 }
                 DirectoryContentType::File | DirectoryContentType::Symlink => {
-                    self.delete_file(child_path)?;
+                    if let Err(err) = self.delete_file(child_path.clone()) {
+                        log::warn!(
+                            "vfs: failed to delete {}: {:?}",
+                            child_path.clone().as_string(),
+                            err
+                        );
+                        if first_error.is_none() {
+                            first_error = Some(err);
+                        }
+                    }
                 }
             }
         }
 
-        Ok(())
+        if let Some(err) = first_error {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
 }
 

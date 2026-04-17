@@ -8,10 +8,7 @@ use crate::{
         vfs::FSResult,
         vfs_traits::{File, FileLikeType, Whence},
     },
-    object::{
-        device::get_device_ref,
-        misc::ObjectRef,
-    },
+    object::{device::get_device_ref, misc::ObjectRef},
 };
 
 pub struct StaticDeviceHandle {
@@ -24,8 +21,7 @@ impl StaticDeviceHandle {
     }
 
     pub fn object(&self) -> Result<ObjectRef, FSError> {
-        get_device_ref(self.node.device_name)
-            .map_err(|_| FSError::NotFound)
+        get_device_ref(self.node.device_name).map_err(|_| FSError::NotFound)
     }
 }
 

@@ -7,8 +7,8 @@ use crate::filesystem::{
     errors::FSError,
     info::{DirectoryContentInfo, FileLikeInfo, UnixPermission},
     staticfs::{
-        device::StaticDeviceHandle, file::StaticFileHandle, node::StaticNode,
-        symlink::StaticSymlinkHandle, StaticDirectoryNode,
+        StaticDirectoryNode, device::StaticDeviceHandle, file::StaticFileHandle, node::StaticNode,
+        symlink::StaticSymlinkHandle,
     },
     vfs::FSResult,
     vfs_traits::{Directory, FileLike, FileLikeType},

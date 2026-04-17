@@ -14,6 +14,7 @@ mod stream;
 mod traits_object;
 mod traits_poll;
 mod traits_read;
+mod traits_stat;
 mod traits_write;
 mod wake;
 

@@ -35,8 +35,7 @@ fn access_mode_bits(object: &ObjectRef) -> usize {
 pub fn control_object(object: ObjectRef, command: u64, arg: u64) -> SyscallResult {
     match FcntlCmd::try_from(command).map_err(|_| SyscallError::InvalidArguments)? {
         FcntlCmd::SetFl => match object.set_flags(
-            FileFlags::from_bits(arg & O_NONBLOCK as u64)
-                .ok_or(SyscallError::InvalidArguments)?,
+            FileFlags::from_bits(arg & O_NONBLOCK as u64).ok_or(SyscallError::InvalidArguments)?,
         ) {
             Ok(()) | Err(ObjectError::Unimplemented) => Ok(0),
             Err(err) => Err(err.into()),

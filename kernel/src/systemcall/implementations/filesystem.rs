@@ -1,7 +1,5 @@
 use core::slice;
 
-use alloc::{string::String, sync::Arc};
-use bitflags::bitflags;
 use crate::{
     define_syscall,
     filesystem::{
@@ -18,6 +16,8 @@ use crate::{
     s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
 };
+use alloc::{string::String, sync::Arc};
+use bitflags::bitflags;
 
 const AT_FDCWD: i32 = -100;
 const UTIME_OMIT: i64 = 0x3fff_ffff;
@@ -67,6 +67,23 @@ struct LinuxStatx {
     stx_dio_mem_align: u32,
     stx_dio_offset_align: u32,
     __spare3: [u64; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxStatFs {
+    f_type: i64,
+    f_bsize: i64,
+    f_blocks: u64,
+    f_bfree: u64,
+    f_bavail: u64,
+    f_files: u64,
+    f_ffree: u64,
+    f_fsid: i64,
+    f_namelen: i64,
+    f_frsize: i64,
+    f_flags: i64,
+    f_spare: [i64; 4],
 }
 
 bitflags! {
@@ -152,7 +169,9 @@ fn rename_impl(
         Err(err) => return Err(err.into()),
     }
 
-    VirtualFS.lock().link_file(old_path.clone(), new_path.clone())?;
+    VirtualFS
+        .lock()
+        .link_file(old_path.clone(), new_path.clone())?;
     VirtualFS.lock().delete_file(old_path.clone())?;
 
     Ok(0)
@@ -189,13 +208,23 @@ define_syscall!(OpenAt, |dirfd: i32,
         VirtualFS.lock().create_file(path.clone())?;
         object = Arc::new(VirtualFS.lock().open(path)?);
     } else {
-        s_println!("openat path={} flags={:#x} -> err {:?}", path_str, flags.bits(), SyscallError::FileNotFound);
+        s_println!(
+            "openat path={} flags={:#x} -> err {:?}",
+            path_str,
+            flags.bits(),
+            SyscallError::FileNotFound
+        );
         return Err(SyscallError::FileNotFound);
     }
 
     let slot = current_process.lock().alloc_object_slot();
     current_process.lock().objects[slot] = Some(object);
-    s_println!("openat path={} flags={:#x} -> fd {}", path_str, flags.bits(), slot);
+    s_println!(
+        "openat path={} flags={:#x} -> fd {}",
+        path_str,
+        flags.bits(),
+        slot
+    );
     Ok(slot)
 });
 
@@ -336,10 +365,10 @@ define_syscall!(Newfstatat, |dirfd: i32,
 });
 
 define_syscall!(Statx, |dirfd: i32,
-                         path: CString,
-                         flags: i32,
-                         _mask: u32,
-                         statx_ptr: u64| {
+                        path: CString,
+                        flags: i32,
+                        _mask: u32,
+                        statx_ptr: u64| {
     let statx_ptr = statx_ptr as *mut LinuxStatx;
     if statx_ptr.is_null() {
         return Err(SyscallError::BadAddress);
@@ -446,6 +475,49 @@ define_syscall!(MkdirAt, |dirfd: i32, path: CString, _mode: u32| {
     };
 
     VirtualFS.lock().create_dir(path)?;
+
+    Ok(0)
+});
+
+define_syscall!(Mkdir, |path: CString, mode: u32| {
+    let _ = mode;
+    let path = path_from_raw(path)?;
+    let mut current_dir = with_current_process(|process| process.current_directory.clone());
+    current_dir.push_path_str(&path);
+
+    VirtualFS.lock().create_dir(current_dir.as_normal())?;
+    Ok(0)
+});
+
+define_syscall!(Statfs, |path: CString, buf: u64| {
+    let buf = buf as *mut LinuxStatFs;
+    if buf.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let path = path_from_raw(path)?;
+    let mut current_dir = with_current_process(|process| process.current_directory.clone());
+    current_dir.push_path_str(&path);
+    let path = current_dir.as_normal();
+
+    let _ = VirtualFS.lock().open(path)?;
+
+    unsafe {
+        *buf = LinuxStatFs {
+            f_type: 0xEF53,
+            f_bsize: 4096,
+            f_blocks: 262_144,
+            f_bfree: 131_072,
+            f_bavail: 131_072,
+            f_files: 262_144,
+            f_ffree: 131_072,
+            f_fsid: 1,
+            f_namelen: 255,
+            f_frsize: 4096,
+            f_flags: 0,
+            f_spare: [0; 4],
+        };
+    }
 
     Ok(0)
 });

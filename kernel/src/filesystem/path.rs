@@ -1,8 +1,4 @@
-use alloc::{
-    string::String,
-    vec,
-    vec::Vec,
-};
+use alloc::{string::String, vec, vec::Vec};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PathPart {
@@ -91,10 +87,14 @@ impl Path {
     }
 
     pub fn file_name(&self) -> Option<String> {
-        self.normalize().parts.into_iter().rev().find_map(|part| match part {
-            PathPart::Normal(name) => Some(name),
-            _ => None,
-        })
+        self.normalize()
+            .parts
+            .into_iter()
+            .rev()
+            .find_map(|part| match part {
+                PathPart::Normal(name) => Some(name),
+                _ => None,
+            })
     }
 
     pub fn parent(&self) -> Option<Self> {

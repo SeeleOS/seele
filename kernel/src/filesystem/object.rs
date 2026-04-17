@@ -154,7 +154,9 @@ impl MemoryMappable for FileLikeObject {
         protection: Protection,
     ) -> ObjectResult<x86_64::VirtAddr> {
         if let Some(device) = self.resolve_device_object()? {
-            let mappable = device.as_mappable().map_err(|_| ObjectError::InvalidArguments)?;
+            let mappable = device
+                .as_mappable()
+                .map_err(|_| ObjectError::InvalidArguments)?;
             return mappable.map(offset, pages, protection);
         }
 

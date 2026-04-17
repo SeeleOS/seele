@@ -43,6 +43,13 @@ bitflags! {
     }
 }
 
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct MremapFlags: u64 {
+        const MAYMOVE = 0x1;
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct FutexKey {
     pid: u64,
@@ -57,9 +64,84 @@ fn current_futex_key(addr: u64) -> FutexKey {
     FutexKey { pid, addr }
 }
 
+fn describe_addrspace_area(process: &crate::process::Process, addr: u64) -> alloc::string::String {
+    process
+        .addrspace
+        .memory_areas
+        .iter()
+        .find(|area| area.contains(VirtAddr::new(addr)))
+        .map(|area| match &area.data {
+            Data::Normal => alloc::string::String::from("anon"),
+            Data::File { file, .. } => {
+                let name = file
+                    .info()
+                    .map(|info| info.name)
+                    .unwrap_or_else(|_| alloc::string::String::from("unknown-file"));
+                alloc::format!("file:{name}@{:#x}-{:#x}", area.start, area.end)
+            }
+            Data::Shared { .. } => alloc::string::String::from("shared"),
+        })
+        .unwrap_or_else(|| alloc::string::String::from("unknown"))
+}
+
+pub fn wake_futex_for_process(pid: u64, addr: u64, count: usize) -> usize {
+    let key = FutexKey { pid, addr };
+    let mut queue = FUTEX_QUEUE.lock();
+    let mut woken = 0;
+    let mut remove_key = false;
+
+    if let Some(queue) = queue.get_mut(&key) {
+        for _ in 0..count {
+            if let Some(thread) = queue.pop_front() {
+                THREAD_MANAGER.get().unwrap().lock().wake(thread);
+                woken += 1;
+            } else {
+                break;
+            }
+        }
+
+        remove_key = queue.is_empty();
+    }
+
+    if remove_key {
+        queue.remove(&key);
+    }
+
+    if woken > 0 {
+        s_println!(
+            "futex_wake helper: pid={} addr={:#x} requested={} woke={}",
+            pid,
+            addr,
+            count,
+            woken
+        );
+    }
+
+    woken
+}
+
 fn futex_wait_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
     let key = current_futex_key(arg1);
     let current = get_current_thread();
+    if key.pid == 3 && arg2 == 2 {
+        let process = get_current_process();
+        let process = process.lock();
+        let current_locked = current.lock();
+        let rip = current_locked.snapshot.inner.rip;
+        let tid = current_locked.id.0;
+        let area = describe_addrspace_area(&process, arg1);
+        let rip_area = describe_addrspace_area(&process, rip);
+        s_println!(
+            "futex_wait interesting: pid={} tid={} addr={:#x} val={} rip={:#x} area={} rip_area={}",
+            key.pid,
+            tid,
+            arg1,
+            arg2,
+            rip,
+            area,
+            rip_area
+        );
+    }
 
     {
         let mut queue = FUTEX_QUEUE.lock();
@@ -103,26 +185,7 @@ fn futex_wait_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
 
 fn futex_wake_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
     let key = current_futex_key(arg1);
-    let mut queue = FUTEX_QUEUE.lock();
-    let mut woken = 0;
-    let mut remove_key = false;
-
-    if let Some(queue) = queue.get_mut(&key) {
-        for _ in 0..arg2 {
-            if let Some(thread) = queue.pop_front() {
-                THREAD_MANAGER.get().unwrap().lock().wake(thread);
-                woken += 1;
-            } else {
-                break;
-            }
-        }
-
-        remove_key = queue.is_empty();
-    }
-
-    if remove_key {
-        queue.remove(&key);
-    }
+    let woken = wake_futex_for_process(key.pid, key.addr, arg2 as usize);
 
     if DEADLOCK_LOG && woken > 0 {
         s_println!(
@@ -273,6 +336,65 @@ define_syscall!(Mmap, |addr: u64,
 define_syscall!(Munmap, |addr: VirtAddr, len: u64| {
     get_current_process().lock().addrspace.unmap(addr, len);
     Ok(0)
+});
+
+define_syscall!(Mremap, |old_addr: VirtAddr,
+                         old_len: u64,
+                         new_len: u64,
+                         flags: u64,
+                         _new_addr: u64| {
+    if old_len == 0 || new_len == 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let flags = MremapFlags::from_bits_truncate(flags);
+    let old_pages = old_len.div_ceil(4096);
+    let new_pages = new_len.div_ceil(4096);
+
+    let current = get_current_process();
+    let mut current = current.lock();
+    let area = current
+        .addrspace
+        .get_area(old_addr)
+        .cloned()
+        .ok_or(SyscallError::InvalidArguments)?;
+
+    if area.start != old_addr || !matches!(area.data, Data::Normal) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    if new_pages <= old_pages {
+        if new_len < old_len {
+            current
+                .addrspace
+                .unmap(old_addr + new_len, old_len - new_len);
+        }
+        return Ok(old_addr.as_u64() as usize);
+    }
+
+    if !flags.contains(MremapFlags::MAYMOVE) {
+        return Err(SyscallError::NoMemory);
+    }
+
+    let new_start = current.addrspace.fetch_add_user_mem(new_pages);
+    current.addrspace.map(MemoryArea::new(
+        new_start,
+        new_pages,
+        area.flags,
+        Data::Normal,
+        false,
+    ));
+
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            old_addr.as_u64() as *const u8,
+            new_start.as_u64() as *mut u8,
+            old_len as usize,
+        );
+    }
+
+    current.addrspace.unmap(old_addr, old_len);
+    Ok(new_start.as_u64() as usize)
 });
 
 define_syscall!(Mprotect, |addr: VirtAddr, len: u64, prot: i32| {

@@ -46,7 +46,6 @@ impl AbsolutePath {
     pub fn as_string(self) -> String {
         self.as_normal().as_string()
     }
-
 }
 
 impl Path {

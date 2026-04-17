@@ -31,6 +31,22 @@ bitflags! {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxCloneArgs {
+    flags: u64,
+    pidfd: u64,
+    child_tid: u64,
+    parent_tid: u64,
+    exit_signal: u64,
+    stack: u64,
+    stack_size: u64,
+    tls: u64,
+    set_tid: u64,
+    set_tid_size: u64,
+    cgroup: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(i32)]
 enum PrctlOption {
@@ -517,7 +533,39 @@ define_syscall!(Clone, |flags: u64,
     })
 });
 
+define_syscall!(Clone3, |args: u64, size: usize| {
+    if size < core::mem::size_of::<LinuxCloneArgs>() {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if args == 0 {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let args = unsafe { &*(args as *const LinuxCloneArgs) };
+    if args.pidfd != 0 || args.set_tid != 0 || args.set_tid_size != 0 || args.cgroup != 0 {
+        return Err(SyscallError::NoSyscall);
+    }
+
+    let stack_pointer = if args.stack == 0 {
+        0
+    } else {
+        args.stack.saturating_add(args.stack_size)
+    };
+    let flags = args.flags | (args.exit_signal & 0xff);
+
+    <Clone as SyscallImpl>::handle_call(
+        flags,
+        stack_pointer,
+        args.parent_tid,
+        args.child_tid,
+        args.tls,
+        0,
+    )
+});
+
 define_syscall!(SchedYield, { Ok(0) });
+
+define_syscall!(Madvise, |_addr: u64, _len: usize, _advice: i32| { Ok(0) });
 
 define_syscall!(Getpriority, |_which: i32, _who: i32| { Ok(0) });
 
@@ -590,6 +638,27 @@ define_syscall!(Time, |time_ptr: u64| {
     Ok(seconds as usize)
 });
 
+define_syscall!(
+    SchedGetaffinity,
+    |pid: i32, cpusetsize: usize, mask_ptr: u64| {
+        if pid != 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if cpusetsize < core::mem::size_of::<usize>() {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if mask_ptr == 0 {
+            return Err(SyscallError::BadAddress);
+        }
+
+        let mask = unsafe { core::slice::from_raw_parts_mut(mask_ptr as *mut u8, cpusetsize) };
+        mask.fill(0);
+        mask[0] = 1;
+
+        Ok(core::mem::size_of::<usize>())
+    }
+);
+
 define_syscall!(Setrlimit, |_resource: i32, _rlimit: u64| { Ok(0) });
 
 define_syscall!(Prctl, |option: i32,
@@ -656,10 +725,7 @@ define_syscall!(Prlimit64, |pid: i32,
         };
 
         unsafe {
-            *old_limit = LinuxRlimit64 {
-                rlim_cur,
-                rlim_max,
-            };
+            *old_limit = LinuxRlimit64 { rlim_cur, rlim_max };
         }
     }
 

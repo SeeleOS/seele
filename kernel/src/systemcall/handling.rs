@@ -63,12 +63,39 @@ fn syscall_handler_unwrapped(
     arg6: u64,
 ) -> isize {
     let syscall = SyscallNumber::from_number(syscall_no as usize);
-    let should_log = false;
+    let should_log = with_current_process(|proc| {
+        matches!(proc.pid.0, 1 | 2)
+            && matches!(
+                syscall,
+                Some(
+                    SyscallNumber::Wait4
+                        | SyscallNumber::Clone
+                        | SyscallNumber::Read
+                        | SyscallNumber::Write
+                        | SyscallNumber::Pselect6
+                        | SyscallNumber::EpollWait
+                        | SyscallNumber::EpollPwait
+                        | SyscallNumber::Ioctl
+                        | SyscallNumber::Fcntl
+                        | SyscallNumber::Dup
+                        | SyscallNumber::Dup2
+                        | SyscallNumber::Dup3
+                        | SyscallNumber::Pipe
+                        | SyscallNumber::Pipe2
+                        | SyscallNumber::Futex
+                        | SyscallNumber::Nanosleep
+                        | SyscallNumber::ClockNanosleep
+                        | SyscallNumber::OpenAt
+                        | SyscallNumber::Close
+                )
+            )
+    });
 
     if should_log {
         match syscall {
             Some(number) => s_println!(
-                "syscall enter: {:?}({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x})",
+                "syscall enter: pid={} {:?}({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x})",
+                with_current_process(|proc| proc.pid.0),
                 number,
                 arg1,
                 arg2,
@@ -98,7 +125,12 @@ fn syscall_handler_unwrapped(
 
         if should_log {
             match syscall {
-                Some(number) => s_println!("syscall exit: {:?} -> {}", number, result),
+                Some(number) => s_println!(
+                    "syscall exit: pid={} {:?} -> {}",
+                    with_current_process(|proc| proc.pid.0),
+                    number,
+                    result
+                ),
                 None => s_println!("syscall exit: {} -> {}", syscall_no, result),
             }
         }

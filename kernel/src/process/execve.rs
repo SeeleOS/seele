@@ -5,12 +5,29 @@ use crate::{
     filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
     misc::time::with_profiling,
     process::{Process, manager::MANAGER, new::setup_process},
-    signal::{Signals, misc::default_signal_action_vec},
+    signal::{
+        Signals,
+        action::{SignalAction, SignalHandlingType},
+        misc::default_signal_action_vec,
+    },
     thread::{
         THREAD_MANAGER, misc::SnapshotState, snapshot::ThreadSnapshot, stack::allocate_kernel_stack,
     },
     tss::TSS,
 };
+
+fn execve_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalAction> {
+    let defaults = default_signal_action_vec();
+    old_actions
+        .iter()
+        .zip(defaults)
+        .map(|(old, default)| match old.handling_type {
+            SignalHandlingType::Ignore => old.clone(),
+            SignalHandlingType::Default => default,
+            SignalHandlingType::Function1(_) | SignalHandlingType::Function2(_) => default,
+        })
+        .collect()
+}
 
 impl Process {
     fn execve(
@@ -74,9 +91,14 @@ impl Process {
         thread_locked.snapshot_state = SnapshotState::Normal;
         thread_locked.sig_handler_snapshot = ThreadSnapshot::default();
         thread_locked.saved_blocked_signals.clear();
-        thread_locked.blocked_signals = Signals::default();
         self.pending_signals = Signals::default();
-        self.signal_actions = default_signal_action_vec();
+        self.signal_actions = execve_signal_actions(&self.signal_actions);
+        crate::s_println!(
+            "execve: pid={} path={} sigusr1={:?}",
+            self.pid.0,
+            path_string,
+            self.signal_actions[crate::signal::Signal::User1.index()].handling_type
+        );
         self.program_break = 0;
 
         with_profiling(

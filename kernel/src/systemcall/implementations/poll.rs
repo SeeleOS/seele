@@ -136,8 +136,10 @@ fn sleep_without_fds(timeout_ms: i32) -> Result<(), SyscallError> {
         }
     }
 
-    block_current_with_sig_check(BlockType::SetTime(Time::since_boot().add_ms(timeout_ms as u64)))
-        .map_err(|err| err.as_syscall_error())
+    block_current_with_sig_check(BlockType::SetTime(
+        Time::since_boot().add_ms(timeout_ms as u64),
+    ))
+    .map_err(|err| err.as_syscall_error())
 }
 
 fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallError> {
@@ -194,12 +196,14 @@ fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallE
     for ready in poller.take_woken_events(fds.len()) {
         ready_by_index
             .entry(ready.data as usize)
-            .and_modify(|events| *events |= match ready.event {
-                PollableEvent::CanBeRead => POLLIN as u32,
-                PollableEvent::CanBeWritten => POLLOUT as u32,
-                PollableEvent::Error => POLLERR as u32,
-                PollableEvent::Closed => POLLHUP as u32,
-                PollableEvent::Other(bits) => bits as u32,
+            .and_modify(|events| {
+                *events |= match ready.event {
+                    PollableEvent::CanBeRead => POLLIN as u32,
+                    PollableEvent::CanBeWritten => POLLOUT as u32,
+                    PollableEvent::Error => POLLERR as u32,
+                    PollableEvent::Closed => POLLHUP as u32,
+                    PollableEvent::Other(bits) => bits as u32,
+                }
             })
             .or_insert_with(|| match ready.event {
                 PollableEvent::CanBeRead => POLLIN as u32,
@@ -230,10 +234,10 @@ define_syscall!(Poll, |fds: u64, nfds: usize, timeout: i32| {
 });
 
 define_syscall!(Ppoll, |fds: u64,
-                          nfds: usize,
-                          timeout: u64,
-                          sigmask: u64,
-                          sigsetsize: usize| {
+                        nfds: usize,
+                        timeout: u64,
+                        sigmask: u64,
+                        sigsetsize: usize| {
     if sigmask != 0 && sigsetsize != core::mem::size_of::<u64>() {
         return Err(SyscallError::InvalidArguments);
     }

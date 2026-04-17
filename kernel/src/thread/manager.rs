@@ -3,6 +3,7 @@ use spin::Mutex;
 
 use crate::{
     process::manager::MANAGER,
+    systemcall::implementations::wake_futex_for_process,
     task::{TASK_SPAWNER, task::Task},
     thread::{
         ThreadRef,
@@ -72,7 +73,25 @@ impl ThreadManager {
 
     pub fn mark_thread_exited(&mut self, thread: ThreadRef) {
         log::debug!("mark_thread_exited");
-        thread.lock().state = State::Zombie;
+        {
+            let mut thread = thread.lock();
+            log::debug!("mark_thread_exited tid={:?}", thread.id);
+            if thread.clear_child_tid != 0 {
+                crate::s_println!(
+                    "thread exit clear_child_tid: pid={} tid={} addr={:#x}",
+                    thread.parent.lock().pid.0,
+                    thread.id.0,
+                    thread.clear_child_tid
+                );
+                unsafe {
+                    *(thread.clear_child_tid as *mut i32) = 0;
+                }
+                let pid = thread.parent.lock().pid.0;
+                wake_futex_for_process(pid, thread.clear_child_tid, 1);
+                thread.clear_child_tid = 0;
+            }
+            thread.state = State::Zombie;
+        }
         self.zombies.push(thread);
     }
 

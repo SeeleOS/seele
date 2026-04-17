@@ -1,10 +1,8 @@
 use crate::filesystem::{
-    staticfs::{
-        StaticDeviceNode, StaticDirEntry, StaticDirectoryNode, StaticFs, StaticNode,
-    },
+    path::Path,
+    staticfs::{StaticDeviceNode, StaticDirEntry, StaticDirectoryNode, StaticFs, StaticNode},
     vfs::FSResult,
     vfs_traits::{FileLike, FileSystem},
-    path::Path,
 };
 
 static DEV_NULL_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {

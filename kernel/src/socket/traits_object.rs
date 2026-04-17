@@ -2,7 +2,7 @@ use crate::{
     impl_cast_function, impl_cast_function_non_trait,
     object::{
         FileFlags, Object,
-        traits::{Readable, Writable},
+        traits::{Readable, Statable, Writable},
     },
     polling::object::Pollable,
 };
@@ -25,5 +25,6 @@ impl Object for UnixSocketObject {
     impl_cast_function!("readable", Readable);
     impl_cast_function!("writable", Writable);
     impl_cast_function!("pollable", Pollable);
+    impl_cast_function!("statable", Statable);
     impl_cast_function_non_trait!("unix_socket", UnixSocketObject);
 }

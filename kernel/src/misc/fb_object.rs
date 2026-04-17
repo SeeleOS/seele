@@ -5,13 +5,11 @@ use x86_64::{VirtAddr, structures::paging::Translate};
 
 use crate::{
     impl_cast_function,
-    memory::{
-        addrspace::mem_area::Data,
-        paging::MAPPER,
-        protection::Protection,
-    },
+    memory::{addrspace::mem_area::Data, paging::MAPPER, protection::Protection},
     misc::{
-        framebuffer::{FRAME_BUFFER, FramebufferInfo, FramebufferPixelFormat, framebuffer_set_user_controlled},
+        framebuffer::{
+            FRAME_BUFFER, FramebufferInfo, FramebufferPixelFormat, framebuffer_set_user_controlled,
+        },
         framebuffer_ioctl::{
             FB_TYPE_PACKED_PIXELS, FB_VISUAL_TRUECOLOR, FbBitfield, FbCmap, FbFixScreeninfo,
             FbVarScreeninfo,
@@ -195,7 +193,9 @@ fn current_fb_info() -> FramebufferInfo {
     FRAME_BUFFER.get().unwrap().lock().fb_info()
 }
 
-fn framebuffer_bitfields(pixel_format: FramebufferPixelFormat) -> (FbBitfield, FbBitfield, FbBitfield) {
+fn framebuffer_bitfields(
+    pixel_format: FramebufferPixelFormat,
+) -> (FbBitfield, FbBitfield, FbBitfield) {
     match pixel_format {
         FramebufferPixelFormat::Rgb => (
             FbBitfield {

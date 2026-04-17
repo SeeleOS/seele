@@ -49,8 +49,9 @@ pub enum WakeType {
     Pty,
     Mouse,
     Keyboard,
-    // Waiting for a process to exit
-    ProcsesExit(ProcessID),
+    // Waiting for any child-process state change. The waiter re-checks its
+    // exact waitpid/wait4 filter after wakeup.
+    ProcsesExit,
     IO,
     // Blocked by the polling system
     // the first argument points to the poller.
@@ -75,7 +76,7 @@ impl BlockedQueues {
             WakeType::Pty => &mut self.pty,
             WakeType::Keyboard => &mut self.keyboard,
             WakeType::Mouse => &mut self.mouse,
-            WakeType::ProcsesExit(_) => &mut self.process_exit,
+            WakeType::ProcsesExit => &mut self.process_exit,
             WakeType::Poller(_) => &mut self.poller,
             WakeType::IO => &mut self.io,
         }
@@ -168,10 +169,9 @@ impl ThreadManager {
 
         self.blocked_queues.process_exit.retain(|f| {
             if let State::Blocked(BlockType::WakeRequired {
-                wake_type: WakeType::ProcsesExit(target_pid),
+                wake_type: WakeType::ProcsesExit,
                 ..
             }) = f.lock().state
-                && target_pid.0 == pid.0
             {
                 to_wake.push(f.clone());
                 false

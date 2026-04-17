@@ -1,8 +1,6 @@
 use crate::filesystem::{
     path::Path,
-    staticfs::{
-        StaticDirEntry, StaticDirectoryNode, StaticFs, StaticNode, StaticSymlinkNode,
-    },
+    staticfs::{StaticDirEntry, StaticDirectoryNode, StaticFs, StaticNode, StaticSymlinkNode},
     vfs::FSResult,
     vfs_traits::{FileLike, FileSystem},
 };
@@ -20,12 +18,13 @@ static SYS_CLASS_GRAPHICS_FB0_DEVICE_ENTRIES: &[StaticDirEntry] = &[StaticDirEnt
     node: &SYS_CLASS_GRAPHICS_FB0_DEVICE_SUBSYSTEM_NODE,
 }];
 
-static SYS_CLASS_GRAPHICS_FB0_DEVICE_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
-    name: "device",
-    inode: 0x2005,
-    mode: 0o040755,
-    entries: SYS_CLASS_GRAPHICS_FB0_DEVICE_ENTRIES,
-});
+static SYS_CLASS_GRAPHICS_FB0_DEVICE_NODE: StaticNode =
+    StaticNode::Directory(StaticDirectoryNode {
+        name: "device",
+        inode: 0x2005,
+        mode: 0o040755,
+        entries: SYS_CLASS_GRAPHICS_FB0_DEVICE_ENTRIES,
+    });
 
 static SYS_CLASS_GRAPHICS_FB0_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
     name: "device",
