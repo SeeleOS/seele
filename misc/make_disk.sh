@@ -11,6 +11,7 @@ ARCH_PACKAGES=(
     bash
     gcc
     busybox
+    fastfetch
     iptables
     xorg-server
     xorg-xinit
