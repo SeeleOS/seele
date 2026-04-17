@@ -25,6 +25,7 @@
           mkShell {
             nativeBuildInputs = [ rustup ];
             buildInputs = [
+              apk-tools
               cargo
               cargo-c
               autoconf
