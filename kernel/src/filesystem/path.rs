@@ -1,16 +1,7 @@
 use alloc::{
-    string::{String, ToString},
+    string::String,
+    vec,
     vec::Vec,
-};
-
-use crate::{
-    filesystem::{
-        errors::FSError,
-        impls::ext4::directory::Ext4Directory,
-        vfs::{FSResult, WrappedDirectory},
-        vfs_traits::FileLike,
-    },
-    process::manager::get_current_process,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -27,66 +18,13 @@ impl Default for Path {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Path {
     pub parts: Vec<PathPart>,
     ends_with_slash: bool,
 }
 
 impl Path {
-    fn resolve_dir_from_root(root: WrappedDirectory, path: Path) -> FSResult<WrappedDirectory> {
-        match path.navigate(root.clone())? {
-            FileLike::Directory(dir) => Ok(dir),
-            FileLike::Symlink(symlink) => {
-                Self::resolve_dir_from_root(root, symlink.lock().target()?)
-            }
-            FileLike::File(_) => Err(FSError::NotADirectory),
-        }
-    }
-
-    fn parent_directory(current: FileLike, root: WrappedDirectory) -> FSResult<FileLike> {
-        match current {
-            FileLike::Directory(dir) => {
-                let parent_path = {
-                    let guard = dir.lock();
-                    let ext4_dir = guard
-                        .as_any()
-                        .downcast_ref::<Ext4Directory>()
-                        .ok_or(FSError::Other)?;
-                    let current_path = ext4_dir.path();
-
-                    if current_path == "/" {
-                        "/".to_string()
-                    } else {
-                        current_path
-                            .rsplit_once('/')
-                            .map(|(parent, _)| {
-                                if parent.is_empty() {
-                                    "/".to_string()
-                                } else {
-                                    parent.to_string()
-                                }
-                            })
-                            .unwrap_or_else(|| "/".to_string())
-                    }
-                };
-
-                Ok(FileLike::Directory(Self::resolve_dir_from_root(
-                    root,
-                    Path::new(&parent_path),
-                )?))
-            }
-            FileLike::Symlink(symlink) => {
-                let target = symlink.lock().target()?;
-                Self::parent_directory(
-                    FileLike::Directory(Self::resolve_dir_from_root(root.clone(), target)?),
-                    root,
-                )
-            }
-            FileLike::File(_) => Err(FSError::NotADirectory),
-        }
-    }
-
     pub fn new(path: &str) -> Self {
         if path.is_empty() {
             Self::new("/")
@@ -96,10 +34,6 @@ impl Path {
                 ends_with_slash: path.len() > 1 && path.ends_with('/'),
             }
         }
-    }
-
-    pub fn is_valid(&self, root: WrappedDirectory) -> bool {
-        self.navigate(root).is_ok()
     }
 
     fn parse(path: &str) -> Vec<PathPart> {
@@ -124,100 +58,100 @@ impl Path {
         vec
     }
 
-    /// NOTE:
-    /// If you do navigate_with_depth with a depth of 1 and a
-    /// path len of 6, the actrual depth that will be 5 (6 - 1)
-    fn navigate_with_depth(&self, root: WrappedDirectory, depth: usize) -> FSResult<FileLike> {
-        let first = self.parts.first().ok_or(FSError::NotFound)?;
-        let mut current = match first {
-            PathPart::Root => FileLike::Directory(root.clone()),
-            PathPart::CurrentDir => get_current_process()
-                .lock()
-                .current_directory
-                .clone()
-                .as_normal()
-                .navigate(root.clone())?,
-            _ => get_current_process()
-                .lock()
-                .current_directory
-                .clone()
-                .as_normal()
-                .navigate(root.clone())?,
-        };
+    pub fn is_absolute(&self) -> bool {
+        matches!(self.parts.first(), Some(PathPart::Root))
+    }
 
-        let end = self.parts.len().saturating_sub(depth);
+    pub fn normalize(&self) -> Self {
+        let mut normalized = Vec::new();
+        let is_absolute = self.is_absolute();
 
-        for i in 0..end {
-            let part = &self.parts[i];
+        if is_absolute {
+            normalized.push(PathPart::Root);
+        }
+
+        for part in &self.parts {
             match part {
-                PathPart::Root => continue,
-                PathPart::Normal(name) => {
-                    while let FileLike::Symlink(symlink) = &current {
-                        let target = symlink.lock().target()?;
-                        current =
-                            FileLike::Directory(Self::resolve_dir_from_root(root.clone(), target)?);
+                PathPart::Root | PathPart::CurrentDir => {}
+                PathPart::Normal(component) => normalized.push(PathPart::Normal(component.clone())),
+                PathPart::ParentDir => match normalized.last() {
+                    Some(PathPart::Normal(_)) => {
+                        normalized.pop();
                     }
-
-                    current = {
-                        if let FileLike::Directory(current) = current {
-                            let current = current.lock();
-                            current.get(name.as_str())?
-                        } else {
-                            return Err(FSError::NotADirectory);
-                        }
-                    };
-                }
-                PathPart::CurrentDir => {}
-                PathPart::ParentDir => {
-                    current = Self::parent_directory(current, root.clone())?;
-                }
-            }
-        }
-
-        Ok(current)
-    }
-
-    pub fn navigate(&self, root: WrappedDirectory) -> FSResult<FileLike> {
-        let current = self.navigate_with_depth(root, 0)?;
-        if self.ends_with_slash && matches!(current, FileLike::File(_)) {
-            return Err(FSError::NotADirectory);
-        }
-        Ok(current)
-    }
-
-    pub fn navigate_to_parent(
-        &self,
-        root: WrappedDirectory,
-    ) -> FSResult<(WrappedDirectory, String)> {
-        let name = self.parts.last().ok_or(FSError::NotFound)?;
-        let nav = self.navigate_with_depth(root.clone(), 1)?;
-
-        match nav {
-            FileLike::File(_) => Err(FSError::NotADirectory),
-            FileLike::Directory(dir) => Ok((
-                dir,
-                match name {
-                    PathPart::Normal(s) => s.clone(),
-                    PathPart::Root => todo!("Find a proper error name for this case"),
-                    PathPart::CurrentDir => todo!(),
-                    PathPart::ParentDir => todo!(),
+                    Some(PathPart::Root) | None if is_absolute => {}
+                    _ => normalized.push(PathPart::ParentDir),
                 },
-            )),
-
-            FileLike::Symlink(symlink) => {
-                let target = symlink.lock().target()?;
-                let dir = Self::resolve_dir_from_root(root.clone(), target)?;
-                Ok((
-                    dir,
-                    match name {
-                        PathPart::Normal(s) => s.clone(),
-                        PathPart::Root => todo!("Find a proper error name for this case"),
-                        PathPart::CurrentDir => todo!(),
-                        PathPart::ParentDir => todo!(),
-                    },
-                ))
             }
         }
+
+        Self {
+            parts: normalized,
+            ends_with_slash: self.ends_with_slash,
+        }
+    }
+
+    pub fn file_name(&self) -> Option<String> {
+        self.normalize().parts.into_iter().rev().find_map(|part| match part {
+            PathPart::Normal(name) => Some(name),
+            _ => None,
+        })
+    }
+
+    pub fn parent(&self) -> Option<Self> {
+        let normalized = self.normalize();
+        let is_absolute = normalized.is_absolute();
+
+        if normalized.parts == [PathPart::Root] {
+            return None;
+        }
+
+        let mut parts = normalized.parts;
+        while let Some(part) = parts.pop() {
+            if matches!(part, PathPart::Normal(_)) {
+                break;
+            }
+        }
+
+        if parts.is_empty() && is_absolute {
+            parts.push(PathPart::Root);
+        }
+
+        Some(Self {
+            parts,
+            ends_with_slash: false,
+        })
+    }
+
+    pub fn starts_with(&self, prefix: &Self) -> bool {
+        let path = self.normalize();
+        let prefix = prefix.normalize();
+
+        if prefix.parts.len() > path.parts.len() {
+            return false;
+        }
+
+        path.parts
+            .iter()
+            .zip(prefix.parts.iter())
+            .all(|(lhs, rhs)| lhs == rhs)
+    }
+
+    pub fn strip_prefix(&self, prefix: &Self) -> Option<Self> {
+        let path = self.normalize();
+        let prefix = prefix.normalize();
+
+        if !path.starts_with(&prefix) {
+            return None;
+        }
+
+        let remaining = path.parts[prefix.parts.len()..].to_vec();
+        let mut parts = vec![PathPart::Root];
+        parts.extend(remaining);
+
+        Some(Self {
+            ends_with_slash: path.ends_with_slash,
+            parts,
+        })
     }
 
     pub fn as_string(self) -> String {

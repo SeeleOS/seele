@@ -1,3 +1,4 @@
+use alloc::string::String;
 use crate::{
     filesystem::{
         info::{DirectoryContentInfo, FileLikeInfo},
@@ -17,8 +18,15 @@ use crate::filesystem::{
 };
 
 impl VFS {
+    fn resolve_parent(&self, path: Path) -> FSResult<(WrappedDirectory, String)> {
+        let normalized = self.normalize_path(path);
+        let name = normalized.file_name().ok_or(FSError::NotFound)?;
+        let parent = normalized.parent().ok_or(FSError::NotFound)?;
+        Ok((self.resolve_dir(parent)?, name))
+    }
+
     pub fn create_file(&mut self, path: Path) -> FSResult<()> {
-        let (parent_dir, name) = path.navigate_to_parent(self.root.clone().unwrap())?;
+        let (parent_dir, name) = self.resolve_parent(path)?;
 
         parent_dir
             .clone()
@@ -27,7 +35,7 @@ impl VFS {
     }
 
     pub fn create_dir(&mut self, path: Path) -> FSResult<()> {
-        let (parent_dir, name) = path.navigate_to_parent(self.root.clone().unwrap())?;
+        let (parent_dir, name) = self.resolve_parent(path)?;
 
         parent_dir.clone().lock().create(DirectoryContentInfo::new(
             name,
@@ -36,32 +44,38 @@ impl VFS {
     }
 
     pub fn open(&mut self, path: Path) -> FSResult<FileLikeObject> {
-        log::trace!("vfs: open {}", path.clone().as_string());
-        Ok(FileLikeObject::new(
-            path.navigate(self.root.clone().unwrap())?,
-        ))
+        let normalized = self.normalize_path(path);
+        log::trace!("vfs: open {}", normalized.clone().as_string());
+        Ok(FileLikeObject::new(self.resolve(normalized)?))
     }
 
     pub fn file_info(&mut self, path: Path) -> FSResult<FileLikeInfo> {
-        log::trace!("vfs: file_info {}", path.clone().as_string());
-        path.navigate(self.root.clone().unwrap())?.info()
+        let normalized = self.normalize_path(path);
+        log::trace!("vfs: file_info {}", normalized.clone().as_string());
+        self.resolve(normalized)?.info()
     }
 
     pub fn delete_file(&mut self, path: Path) -> FSResult<()> {
-        let (dir, name) = path.navigate_to_parent(self.root.clone().unwrap())?;
+        let (dir, name) = self.resolve_parent(path)?;
         dir.lock().delete(&name)?;
 
         Ok(())
     }
 
     pub fn link_file(&mut self, old_path: Path, new_path: Path) -> FSResult<()> {
+        let old_mount = self.mount_path(old_path.clone())?;
+        let new_mount = self.mount_path(new_path.clone())?;
+        if old_mount != new_mount {
+            return Err(FSError::Other);
+        }
+
         log::trace!(
             "vfs: link_file {} -> {}",
             old_path.clone().as_string(),
             new_path.clone().as_string()
         );
 
-        let source = old_path.navigate(self.root.clone().unwrap())?;
+        let source = self.resolve(old_path)?;
         let source_inode = match source {
             FileLike::File(file) => {
                 let file = file.lock();
@@ -71,11 +85,11 @@ impl VFS {
                     .ok_or(FSError::Other)?;
                 ext4_file.inode()
             }
-            FileLike::Symlink(symlink) => todo!(),
+            FileLike::Symlink(_) => todo!(),
             FileLike::Directory(_) => return Err(FSError::Other),
         };
 
-        let (parent_dir, name) = new_path.navigate_to_parent(self.root.clone().unwrap())?;
+        let (parent_dir, name) = self.resolve_parent(new_path)?;
         let parent = parent_dir.lock();
         let ext4_parent = parent
             .as_any()
@@ -104,7 +118,7 @@ impl VFS {
     }
 
     pub fn resolve_file(&self, path: Path) -> FSResult<WrappedFile> {
-        match path.navigate(self.root.clone().unwrap())? {
+        match self.resolve(path)? {
             FileLike::File(file) => Ok(file),
             FileLike::Symlink(symlink) => self.resolve_file(symlink.lock().target()?),
             FileLike::Directory(_) => Err(FSError::NotAFile),
@@ -112,7 +126,7 @@ impl VFS {
     }
 
     pub fn resolve_dir(&self, path: Path) -> FSResult<WrappedDirectory> {
-        match path.navigate(self.root.clone().unwrap())? {
+        match self.resolve(path)? {
             FileLike::File(_) => Err(FSError::NotADirectory),
             FileLike::Directory(dir) => Ok(dir),
             FileLike::Symlink(symlink) => self.resolve_dir(symlink.lock().target()?),

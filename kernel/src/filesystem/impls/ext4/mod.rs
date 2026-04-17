@@ -4,9 +4,11 @@ use spin::mutex::Mutex;
 use ext4plus::Ext4;
 
 use crate::filesystem::{
+    errors::FSError,
     impls::ext4::{directory::Ext4Directory, file::Ext4File},
+    path::{Path, PathPart},
     vfs::WrappedDirectory,
-    vfs_traits::FileSystem,
+    vfs_traits::{FileLike, FileSystem},
 };
 
 pub mod directory;
@@ -19,15 +21,68 @@ pub mod symlink;
 /// through the kernel's generic `FileSystem` trait.
 pub struct EXT4(pub Ext4);
 
+impl EXT4 {
+    fn root_dir(&self) -> WrappedDirectory {
+        Arc::new(Mutex::new(Ext4Directory::new(
+            "".to_string(),
+            "/".to_string(),
+            self.0.clone(),
+        )))
+    }
+}
+
 impl FileSystem for EXT4 {
     fn init(&mut self) -> crate::filesystem::vfs::FSResult<()> {
         Ok(())
     }
 
-    fn root_dir(&mut self) -> crate::filesystem::vfs::FSResult<WrappedDirectory> {
-        // The root directory path is always `/` for ext4.
-        let dir = Ext4Directory::new("".to_string(), "/".to_string(), self.0.clone());
-        Ok(Arc::new(Mutex::new(dir)))
+    fn lookup(&self, path: &Path) -> crate::filesystem::vfs::FSResult<FileLike> {
+        let normalized = path.normalize();
+        let path_string = normalized.clone().as_string();
+        let mut current = FileLike::Directory(self.root_dir());
+        let components = normalized.parts.clone();
+
+        if components.len() == 1 && matches!(components.first(), Some(PathPart::Root)) {
+            return Ok(current);
+        }
+
+        for (index, component) in components.iter().enumerate() {
+            let is_last = index + 1 == components.len();
+
+            match component {
+                PathPart::Root | PathPart::CurrentDir => {}
+                PathPart::ParentDir => return Err(FSError::NotADirectory),
+                PathPart::Normal(name) => {
+                    loop {
+                        let next = match &current {
+                            FileLike::Directory(dir) => Some(dir.lock().get(name)?),
+                            FileLike::Symlink(symlink) => {
+                                Some(self.lookup(&symlink.lock().target()?)?)
+                            }
+                            FileLike::File(_) => return Err(FSError::NotADirectory),
+                        };
+
+                        current = next.expect("ext4 lookup next node");
+                        if matches!(current, FileLike::Directory(_) | FileLike::File(_)) {
+                            break;
+                        }
+                    }
+
+                    if !is_last {
+                        while let FileLike::Symlink(symlink) = &current {
+                            let target = symlink.lock().target()?;
+                            current = self.lookup(&target)?;
+                        }
+                    }
+                }
+            }
+        }
+
+        if path_string.ends_with('/') && matches!(current, FileLike::File(_)) {
+            return Err(FSError::NotADirectory);
+        }
+
+        Ok(current)
     }
 }
 

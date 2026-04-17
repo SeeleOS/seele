@@ -59,7 +59,7 @@ pub enum DirectoryContentType {
 
 pub trait FileSystem: Send + Sync {
     fn init(&mut self) -> FSResult<()>;
-    fn root_dir(&mut self) -> FSResult<WrappedDirectory>;
+    fn lookup(&self, path: &Path) -> FSResult<FileLike>;
 }
 
 #[derive(Debug)]

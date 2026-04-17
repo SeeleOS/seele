@@ -236,7 +236,10 @@ impl Directory for Ext4Directory {
         // Use `path_to_inode` so we can decide whether this is a file or directory.
         let inode = self
             .fs
-            .path_to_inode(ext4plus::path::Path::new(&path), FollowSymlinks::All)
+            .path_to_inode(
+                ext4plus::path::Path::new(&path),
+                FollowSymlinks::ExcludeFinalComponent,
+            )
             .map_err(map_ext4_error)?;
 
         let meta = inode.metadata();

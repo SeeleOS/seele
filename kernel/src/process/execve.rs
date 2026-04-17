@@ -19,7 +19,7 @@ impl Process {
         args: Vec<String>,
         env: Vec<String>,
     ) -> Result<*mut ThreadSnapshot, FSError> {
-        if !path.is_valid(VirtualFS.lock().root.clone().unwrap()) {
+        if VirtualFS.lock().resolve(path.clone()).is_err() {
             return Err(FSError::NotFound);
         }
         let path_string = path.clone().as_string();

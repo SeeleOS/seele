@@ -1,11 +1,7 @@
 use alloc::{string::String, vec::Vec};
 
 use crate::{
-    filesystem::{
-        path::{Path, PathPart},
-        vfs::{FSResult, WrappedDirectory},
-        vfs_traits::FileLike,
-    },
+    filesystem::path::{Path, PathPart},
     process::manager::get_current_process,
 };
 
@@ -51,15 +47,6 @@ impl AbsolutePath {
         self.as_normal().as_string()
     }
 
-    // Wrappers for the normal Path
-
-    pub fn navigate(&mut self, root: WrappedDirectory) -> FSResult<FileLike> {
-        self.as_normal().navigate(root)
-    }
-
-    pub fn is_valid(&self, root: WrappedDirectory) -> bool {
-        self.as_normal().is_valid(root)
-    }
 }
 
 impl Path {
