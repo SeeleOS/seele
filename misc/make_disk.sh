@@ -16,7 +16,10 @@ ARCH_PACKAGES=(
     iptables
     xorg-server
     xorg-xinit
+    xorg-xkbcomp
+    xkeyboard-config
     xf86-input-libinput
+    xf86-video-fbdev
     xf86-video-vesa
     icewm
 )
