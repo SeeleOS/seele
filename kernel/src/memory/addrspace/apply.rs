@@ -1,14 +1,12 @@
 use alloc::{vec, vec::Vec};
-use x86_64::structures::paging::{
-    FrameAllocator, Mapper, Page, PhysFrame, Size4KiB, Translate,
-};
+use x86_64::structures::paging::{FrameAllocator, Mapper, Page, PhysFrame, Size4KiB, Translate};
 
 use crate::{
     memory::{
         addrspace::{
+            AddrSpace, AllocResult,
             cow::increase_ref,
             mem_area::{Data, MemoryArea},
-            AddrSpace, AllocResult,
         },
         paging::FRAME_ALLOCATOR,
         utils::apply_offset,
@@ -54,11 +52,8 @@ impl AddrSpace {
 
                     let page_offset = current_page.start_address().as_u64() - area.start.as_u64();
                     let read_len = core::cmp::min(4096, file_bytes.saturating_sub(page_offset));
-                    let (frame, write_addr) = self.alloc_map_zeroed_page(
-                        current_page,
-                        area.clone(),
-                        read_len < 4096,
-                    );
+                    let (frame, write_addr) =
+                        self.alloc_map_zeroed_page(current_page, area.clone(), read_len < 4096);
 
                     if first_frame.is_none() {
                         first_frame = Some(frame);
@@ -135,7 +130,10 @@ impl AddrSpace {
         let start_addr = start.start_address();
         let end_addr = (start + pages).start_address();
 
-        (start_addr, StackBuilder::new(end_addr.as_u64(), page_write_bases))
+        (
+            start_addr,
+            StackBuilder::new(end_addr.as_u64(), page_write_bases),
+        )
     }
 
     pub fn file_lazy_cluster_pages() -> u64 {

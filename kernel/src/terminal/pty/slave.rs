@@ -13,8 +13,8 @@ use crate::{
     },
     polling::{event::PollableEvent, object::Pollable},
     terminal::{
-        linux_kd::{LinuxConsoleState, handle_kd_request},
         line_discipline::process_output_bytes,
+        linux_kd::{LinuxConsoleState, handle_kd_request},
         linux_vt::handle_vt_request,
         pty::shared::PtyShared,
     },

@@ -57,6 +57,8 @@ pub enum SyscallNumber {
     Fdatasync = 75,
     Ftruncate = 77,
     Getdents = 78,
+    Prctl = 157,
+    Getdents64 = 217,
     Getcwd = 79,
     Chdir = 80,
     Readlink = 89,

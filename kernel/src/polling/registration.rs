@@ -38,8 +38,8 @@ impl PollerObject {
             }
         }
 
-        self.woken_events.lock().retain(|ready| {
-            !(ready.event == event && Arc::ptr_eq(&ready.object, &object))
-        });
+        self.woken_events
+            .lock()
+            .retain(|ready| !(ready.event == event && Arc::ptr_eq(&ready.object, &object)));
     }
 }

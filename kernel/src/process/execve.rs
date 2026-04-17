@@ -6,7 +6,9 @@ use crate::{
     misc::time::with_profiling,
     process::{Process, manager::MANAGER, new::setup_process},
     signal::{Signals, misc::default_signal_action_vec},
-    thread::{THREAD_MANAGER, misc::SnapshotState, snapshot::ThreadSnapshot, stack::allocate_kernel_stack},
+    thread::{
+        THREAD_MANAGER, misc::SnapshotState, snapshot::ThreadSnapshot, stack::allocate_kernel_stack,
+    },
     tss::TSS,
 };
 
@@ -25,7 +27,12 @@ impl Process {
         log::trace!("execve: start {}", path.clone().as_string());
         with_profiling(
             || self.addrspace.clean(),
-            alloc::format!("execve clean addrspace pid={} path={}", self.pid.0, path_string).as_str(),
+            alloc::format!(
+                "execve clean addrspace pid={} path={}",
+                self.pid.0,
+                path_string
+            )
+            .as_str(),
         );
 
         log::trace!("execve: locking thread manager");
@@ -41,7 +48,12 @@ impl Process {
         // Reallocates the kernel stack top (just in case)
         self.kernel_stack_top = with_profiling(
             || allocate_kernel_stack(16).finish(),
-            alloc::format!("execve allocate kernel stack pid={} path={}", self.pid.0, path_string).as_str(),
+            alloc::format!(
+                "execve allocate kernel stack pid={} path={}",
+                self.pid.0,
+                path_string
+            )
+            .as_str(),
         );
 
         log::trace!("execve: locking current thread");
@@ -50,7 +62,12 @@ impl Process {
 
         thread_locked.snapshot = with_profiling(
             || setup_process(path, args, env, &mut self.addrspace, &mut self.objects),
-            alloc::format!("execve setup_process pid={} path={}", self.pid.0, path_string).as_str(),
+            alloc::format!(
+                "execve setup_process pid={} path={}",
+                self.pid.0,
+                path_string
+            )
+            .as_str(),
         )
         .unwrap();
         thread_locked.kernel_stack_top = self.kernel_stack_top.as_u64();
@@ -64,7 +81,12 @@ impl Process {
 
         with_profiling(
             || self.addrspace.load(),
-            alloc::format!("execve addrspace.load pid={} path={}", self.pid.0, path_string).as_str(),
+            alloc::format!(
+                "execve addrspace.load pid={} path={}",
+                self.pid.0,
+                path_string
+            )
+            .as_str(),
         );
         unsafe {
             TSS.privilege_stack_table[0] = VirtAddr::new(thread_locked.kernel_stack_top);

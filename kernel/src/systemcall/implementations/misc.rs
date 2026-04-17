@@ -3,9 +3,12 @@ use bitflags::bitflags;
 use x86_64::VirtAddr;
 use x86_rtc::Rtc;
 
-use crate::memory::{addrspace::mem_area::{Data, MemoryArea}, protection::Protection};
-use crate::misc::{others::protection_to_page_flags, utsname::UtsName};
+use crate::memory::{
+    addrspace::mem_area::{Data, MemoryArea},
+    protection::Protection,
+};
 use crate::misc::time::Time as KernelTime;
+use crate::misc::{others::protection_to_page_flags, utsname::UtsName};
 use crate::process::manager::{MANAGER, get_current_process};
 use crate::systemcall::utils::{SyscallError, SyscallImpl};
 use crate::terminal::pty::create_pty;
@@ -25,6 +28,39 @@ bitflags! {
         const PARENT_SETTID = 0x0010_0000;
         const CHILD_CLEARTID = 0x0020_0000;
         const CHILD_SETTID = 0x0100_0000;
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(i32)]
+enum PrctlOption {
+    SetPdeathsig = 1,
+    GetPdeathsig = 2,
+    GetDumpable = 3,
+    SetDumpable = 4,
+    SetName = 15,
+    GetName = 16,
+    CapbsetRead = 23,
+    SetNoNewPrivs = 38,
+    GetNoNewPrivs = 39,
+}
+
+impl TryFrom<i32> for PrctlOption {
+    type Error = ();
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        Ok(match value {
+            1 => Self::SetPdeathsig,
+            2 => Self::GetPdeathsig,
+            3 => Self::GetDumpable,
+            4 => Self::SetDumpable,
+            15 => Self::SetName,
+            16 => Self::GetName,
+            23 => Self::CapbsetRead,
+            38 => Self::SetNoNewPrivs,
+            39 => Self::GetNoNewPrivs,
+            _ => return Err(()),
+        })
     }
 }
 
@@ -103,9 +139,7 @@ define_syscall!(ClockGettime, |clock_id: i32, tp: u64| {
         .map_err(|_| SyscallError::InvalidArguments)?
     {
         crate::misc::timer::ClockId::Realtime => KernelTime::current().as_nanoseconds() as i64,
-        crate::misc::timer::ClockId::SinceBoot => {
-            KernelTime::since_boot().as_nanoseconds() as i64
-        }
+        crate::misc::timer::ClockId::SinceBoot => KernelTime::since_boot().as_nanoseconds() as i64,
     };
     unsafe {
         *tp = LinuxTimespec {
@@ -194,7 +228,12 @@ define_syscall!(Uname, |info: u64| {
         return Err(SyscallError::BadAddress);
     }
     unsafe {
-        *info = UtsName::new(NAME, env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_VERSION"), "x86_64");
+        *info = UtsName::new(
+            NAME,
+            env!("CARGO_PKG_VERSION"),
+            env!("CARGO_PKG_VERSION"),
+            "x86_64",
+        );
     }
     Ok(0)
 });
@@ -209,8 +248,7 @@ define_syscall!(Nanosleep, |req: u64, rem: u64| {
     if requested.tv_sec < 0 || requested.tv_nsec < 0 || requested.tv_nsec >= 1_000_000_000 {
         return Err(SyscallError::InvalidArguments);
     }
-    let nanoseconds =
-        (requested.tv_sec as u64) * 1_000_000_000 + (requested.tv_nsec as u64);
+    let nanoseconds = (requested.tv_sec as u64) * 1_000_000_000 + (requested.tv_nsec as u64);
     let time = KernelTime::since_boot().add_ns(nanoseconds);
 
     block_current_with_sig_check(BlockType::SetTime(time))?;
@@ -227,7 +265,11 @@ define_syscall!(Nanosleep, |req: u64, rem: u64| {
     Ok(0)
 });
 
-define_syscall!(Clone, |flags: u64, stack_pointer: u64, parent_tid: u64, child_tid: u64, tls: u64| {
+define_syscall!(Clone, |flags: u64,
+                        stack_pointer: u64,
+                        parent_tid: u64,
+                        child_tid: u64,
+                        tls: u64| {
     let clone_flags = CloneFlags::from_bits_truncate(flags);
     let exit_signal = (flags & 0xff) as u8;
     let required = CloneFlags::VM
@@ -236,11 +278,12 @@ define_syscall!(Clone, |flags: u64, stack_pointer: u64, parent_tid: u64, child_t
         | CloneFlags::SIGHAND
         | CloneFlags::THREAD;
     if !clone_flags.contains(CloneFlags::THREAD) {
-        let unsupported = flags & !(0xff
-            | CloneFlags::PARENT_SETTID.bits()
-            | CloneFlags::CHILD_SETTID.bits()
-            | CloneFlags::CHILD_CLEARTID.bits()
-            | CloneFlags::SETTLS.bits());
+        let unsupported = flags
+            & !(0xff
+                | CloneFlags::PARENT_SETTID.bits()
+                | CloneFlags::CHILD_SETTID.bits()
+                | CloneFlags::CHILD_CLEARTID.bits()
+                | CloneFlags::SETTLS.bits());
         if unsupported != 0 || (exit_signal != 0 && exit_signal != 17) {
             return Err(SyscallError::NoSyscall);
         }
@@ -328,13 +371,9 @@ define_syscall!(Clone, |flags: u64, stack_pointer: u64, parent_tid: u64, child_t
     })
 });
 
-define_syscall!(SchedYield, {
-    Ok(0)
-});
+define_syscall!(SchedYield, { Ok(0) });
 
-define_syscall!(Getpriority, |_which: i32, _who: i32| {
-    Ok(0)
-});
+define_syscall!(Getpriority, |_which: i32, _who: i32| { Ok(0) });
 
 define_syscall!(Getresuid, |ruid: u64, euid: u64, suid: u64| {
     for ptr in [ruid, euid, suid] {
@@ -366,29 +405,17 @@ define_syscall!(Getresgid, |rgid: u64, egid: u64, sgid: u64| {
     Ok(0)
 });
 
-define_syscall!(Getuid, {
-    Ok(0)
-});
+define_syscall!(Getuid, { Ok(0) });
 
-define_syscall!(Getgid, {
-    Ok(0)
-});
+define_syscall!(Getgid, { Ok(0) });
 
-define_syscall!(Geteuid, {
-    Ok(0)
-});
+define_syscall!(Geteuid, { Ok(0) });
 
-define_syscall!(Getegid, {
-    Ok(0)
-});
+define_syscall!(Getegid, { Ok(0) });
 
-define_syscall!(Setfsuid, |_uid: u32| {
-    Ok(0)
-});
+define_syscall!(Setfsuid, |_uid: u32| { Ok(0) });
 
-define_syscall!(Setfsgid, |_gid: u32| {
-    Ok(0)
-});
+define_syscall!(Setfsgid, |_gid: u32| { Ok(0) });
 
 define_syscall!(Time, |time_ptr: u64| {
     let time_ptr = time_ptr as *mut i64;
@@ -401,11 +428,49 @@ define_syscall!(Time, |time_ptr: u64| {
     Ok(seconds as usize)
 });
 
-define_syscall!(Setrlimit, |_resource: i32, _rlimit: u64| {
-    Ok(0)
+define_syscall!(Setrlimit, |_resource: i32, _rlimit: u64| { Ok(0) });
+
+define_syscall!(Prctl, |option: i32,
+                        arg2: u64,
+                        _arg3: u64,
+                        _arg4: u64,
+                        _arg5: u64| {
+    match PrctlOption::try_from(option).map_err(|_| SyscallError::InvalidArguments)? {
+        PrctlOption::SetPdeathsig
+        | PrctlOption::SetDumpable
+        | PrctlOption::SetName
+        | PrctlOption::SetNoNewPrivs => Ok(0),
+        PrctlOption::GetPdeathsig => {
+            let ptr = arg2 as *mut i32;
+            if ptr.is_null() {
+                return Err(SyscallError::BadAddress);
+            }
+            unsafe {
+                *ptr = 0;
+            }
+            Ok(0)
+        }
+        PrctlOption::GetDumpable | PrctlOption::GetNoNewPrivs => Ok(0),
+        PrctlOption::GetName => {
+            let ptr = arg2 as *mut u8;
+            if ptr.is_null() {
+                return Err(SyscallError::BadAddress);
+            }
+            let name = b"main\0";
+            unsafe {
+                core::ptr::write_bytes(ptr, 0, 16);
+                core::ptr::copy_nonoverlapping(name.as_ptr(), ptr, name.len());
+            }
+            Ok(0)
+        }
+        PrctlOption::CapbsetRead => Ok(0),
+    }
 });
 
-define_syscall!(Prlimit64, |pid: i32, _resource: u32, new_limit: u64, old_limit: u64| {
+define_syscall!(Prlimit64, |pid: i32,
+                            _resource: u32,
+                            new_limit: u64,
+                            old_limit: u64| {
     if pid != 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -434,9 +499,7 @@ define_syscall!(Prlimit64, |pid: i32, _resource: u32, new_limit: u64, old_limit:
     Ok(0)
 });
 
-define_syscall!(Sync, {
-    Ok(0)
-});
+define_syscall!(Sync, { Ok(0) });
 
 define_syscall!(SetRobustList, |head: u64, len: usize| {
     let current = crate::thread::get_current_thread();
@@ -446,7 +509,10 @@ define_syscall!(SetRobustList, |head: u64, len: usize| {
     Ok(0)
 });
 
-define_syscall!(Rseq, |rseq_ptr: u64, rseq_len: u32, flags: u32, sig: u32| {
+define_syscall!(Rseq, |rseq_ptr: u64,
+                       rseq_len: u32,
+                       flags: u32,
+                       sig: u32| {
     let flags = RseqFlags::from_bits_truncate(flags);
     if flags.bits() != flags.bits() & RseqFlags::UNREGISTER.bits() || rseq_len != RSEQ_LEN_X86_64 {
         return Err(SyscallError::InvalidArguments);
@@ -456,9 +522,7 @@ define_syscall!(Rseq, |rseq_ptr: u64, rseq_len: u32, flags: u32, sig: u32| {
     let mut current = current.lock();
 
     if flags.contains(RseqFlags::UNREGISTER) {
-        if current.rseq_area != rseq_ptr
-            || current.rseq_len != rseq_len
-            || current.rseq_sig != sig
+        if current.rseq_area != rseq_ptr || current.rseq_len != rseq_len || current.rseq_sig != sig
         {
             return Err(SyscallError::InvalidArguments);
         }

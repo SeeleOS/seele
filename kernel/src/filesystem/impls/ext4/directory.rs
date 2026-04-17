@@ -158,8 +158,8 @@ impl Directory for Ext4Directory {
             // containing "." and ".." before new children can be linked into it.
             new_inode.set_links_count(1);
             new_inode.write(&self.fs).map_err(map_ext4_error)?;
-            let child_dir =
-                Dir::init(self.fs.clone(), new_inode, parent_inode.index).map_err(map_ext4_error)?;
+            let child_dir = Dir::init(self.fs.clone(), new_inode, parent_inode.index)
+                .map_err(map_ext4_error)?;
             new_inode = child_dir.inode().clone();
         }
 
@@ -208,7 +208,10 @@ impl Directory for Ext4Directory {
                 }
             }
 
-            let new_links = parent_inode.links_count().checked_sub(1).ok_or(FSError::Other)?;
+            let new_links = parent_inode
+                .links_count()
+                .checked_sub(1)
+                .ok_or(FSError::Other)?;
             parent_inode.set_links_count(new_links);
             parent_inode.write(&self.fs).map_err(map_ext4_error)?;
         }

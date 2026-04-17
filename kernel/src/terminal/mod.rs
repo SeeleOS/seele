@@ -1,8 +1,8 @@
 pub mod color;
 pub mod impls;
+pub mod line_discipline;
 pub mod linux_kd;
 pub mod linux_vt;
-pub mod line_discipline;
 pub mod macros;
 pub mod misc;
 pub mod pty;

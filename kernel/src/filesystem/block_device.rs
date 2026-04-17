@@ -108,10 +108,7 @@ pub trait BlockDevice: Send + Sync {
         let full_blocks = full_blocks_end.saturating_sub(full_blocks_start);
         if full_blocks != 0 {
             let full_bytes = full_blocks * block_size;
-            self.read_blocks(
-                full_blocks_start,
-                &mut buffer[copied..copied + full_bytes],
-            )?;
+            self.read_blocks(full_blocks_start, &mut buffer[copied..copied + full_bytes])?;
             copied += full_bytes;
         }
 

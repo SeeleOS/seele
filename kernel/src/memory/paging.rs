@@ -6,8 +6,7 @@ use x86_64::{
     PhysAddr, VirtAddr,
     registers::control::Cr3,
     structures::paging::{
-        FrameAllocator, FrameDeallocator, OffsetPageTable, PageSize, PageTable, PhysFrame,
-        Size4KiB,
+        FrameAllocator, FrameDeallocator, OffsetPageTable, PageSize, PageTable, PhysFrame, Size4KiB,
     },
 };
 

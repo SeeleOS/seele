@@ -1,5 +1,5 @@
-use core::ptr::{read_volatile, write_volatile};
 use bitflags::bitflags;
+use core::ptr::{read_volatile, write_volatile};
 
 use crate::{
     object::{
@@ -9,9 +9,7 @@ use crate::{
         traits::Configuratable,
     },
     terminal::{
-        TerminalObject,
-        linux_kd::handle_kd_request,
-        linux_vt::handle_vt_request,
+        TerminalObject, linux_kd::handle_kd_request, linux_vt::handle_vt_request,
         object::TerminalSettings,
     },
 };

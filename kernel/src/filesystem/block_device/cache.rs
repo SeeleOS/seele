@@ -190,13 +190,9 @@ impl BlockDevice for CachedBlockDevice {
                     let byte_start = block_offset * block_size;
                     buffer[byte_start..byte_start + block_size].copy_from_slice(&data);
                 }
-                state.entries.insert(
-                    cache_block_id,
-                    CacheEntry {
-                        data,
-                        dirty: false,
-                    },
-                );
+                state
+                    .entries
+                    .insert(cache_block_id, CacheEntry { data, dirty: false });
                 state.touch(cache_block_id);
             }
 

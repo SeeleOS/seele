@@ -4,8 +4,8 @@ use spin::Mutex;
 use crate::object::FileFlags;
 
 use super::{
-    AF_UNIX, SOCK_CLOEXEC, SOCK_NONBLOCK, SOCK_STREAM, SocketError, SocketResult,
-    UnixSocketObject, UnixSocketState,
+    AF_UNIX, SOCK_CLOEXEC, SOCK_NONBLOCK, SOCK_STREAM, SocketError, SocketResult, UnixSocketObject,
+    UnixSocketState,
 };
 
 impl UnixSocketObject {

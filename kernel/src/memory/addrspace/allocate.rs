@@ -3,7 +3,10 @@ use core::sync::atomic::Ordering;
 use x86_64::{VirtAddr, structures::paging::PageTableFlags};
 
 use crate::{
-    memory::{addrspace::mem_area::{Data, MemoryArea}, protection::Protection},
+    memory::{
+        addrspace::mem_area::{Data, MemoryArea},
+        protection::Protection,
+    },
     misc::others::protection_to_page_flags,
 };
 

@@ -5,7 +5,7 @@ use crate::{
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
     },
 };
-use core::{arch::naked_asm, mem::size_of, mem::offset_of};
+use core::{arch::naked_asm, mem::offset_of, mem::size_of};
 
 pub fn return_to_executor(snapshot: &mut Snapshot, snapshot_type: ThreadSnapshotType) {
     let (thread_snapshot, executor_snapshot) = {

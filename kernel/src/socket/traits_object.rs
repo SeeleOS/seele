@@ -10,9 +10,7 @@ use crate::{
 use super::UnixSocketObject;
 
 impl Object for UnixSocketObject {
-    fn get_flags(
-        self: alloc::sync::Arc<Self>,
-    ) -> crate::object::misc::ObjectResult<FileFlags> {
+    fn get_flags(self: alloc::sync::Arc<Self>) -> crate::object::misc::ObjectResult<FileFlags> {
         Ok(*self.flags.lock())
     }
 

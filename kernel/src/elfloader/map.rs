@@ -53,7 +53,11 @@ pub fn load_elf_lazy(
                             continue;
                         }
 
-                        addrspace.register_area(load_segment_to_area(header, load_base, file.clone()));
+                        addrspace.register_area(load_segment_to_area(
+                            header,
+                            load_base,
+                            file.clone(),
+                        ));
                     }
                     Type::Interp => {
                         interpreter = Some(read_interp(&file, header).unwrap());

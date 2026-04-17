@@ -30,62 +30,69 @@ struct LinuxIovec {
     iov_len: usize,
 }
 
-define_syscall!(
-    Getdents,
-    |object_index: u64, buf: *mut u8, len: usize| {
-        let obj = get_object_current_process(object_index)?.as_file_like()?;
-        let contents = obj.directory_contents()?;
-        let current_pid = get_current_process().lock().pid;
-        let mut offsets = DIR_OFFSETS.lock();
-        let offset_entry = offsets.entry((current_pid, object_index)).or_insert(0usize);
-        let mut bytes_written = 0;
+fn write_dirents64(
+    object_index: u64,
+    buf: *mut u8,
+    len: usize,
+) -> crate::systemcall::utils::SyscallResult {
+    let obj = get_object_current_process(object_index)?.as_file_like()?;
+    let contents = obj.directory_contents()?;
+    let current_pid = get_current_process().lock().pid;
+    let mut offsets = DIR_OFFSETS.lock();
+    let offset_entry = offsets.entry((current_pid, object_index)).or_insert(0usize);
+    let mut bytes_written = 0;
 
-        while *offset_entry < contents.len() {
-            let info = &contents[*offset_entry];
-            let name_bytes = info.name.as_bytes();
-            let reclen = ((20 + name_bytes.len() + 7) & !7) as u16;
-            if bytes_written + reclen as usize > len {
-                break;
-            }
-
-            unsafe {
-                let entry_ptr = buf.add(bytes_written);
-                entry_ptr.cast::<u64>().write_unaligned(1);
-                entry_ptr
-                    .add(8)
-                    .cast::<i64>()
-                    .write_unaligned((*offset_entry as i64) + 1);
-                entry_ptr.add(16).cast::<u16>().write_unaligned(reclen);
-                let linux_type = match info.content_type {
-                    DirectoryContentType::Directory => 4,
-                    DirectoryContentType::File => 8,
-                    _ => 0,
-                };
-                entry_ptr.add(18).write(linux_type);
-                core::ptr::copy_nonoverlapping(
-                    name_bytes.as_ptr(),
-                    entry_ptr.add(19),
-                    name_bytes.len(),
-                );
-                entry_ptr.add(19 + name_bytes.len()).write(0);
-            }
-
-            bytes_written += reclen as usize;
-            *offset_entry += 1;
+    while *offset_entry < contents.len() {
+        let info = &contents[*offset_entry];
+        let name_bytes = info.name.as_bytes();
+        let reclen = ((20 + name_bytes.len() + 7) & !7) as u16;
+        if bytes_written + reclen as usize > len {
+            break;
         }
 
-        if *offset_entry >= contents.len() && bytes_written == 0 {
-            offsets.remove(&(current_pid, object_index));
-            return Ok(0);
+        unsafe {
+            let entry_ptr = buf.add(bytes_written);
+            entry_ptr.cast::<u64>().write_unaligned(1);
+            entry_ptr
+                .add(8)
+                .cast::<i64>()
+                .write_unaligned((*offset_entry as i64) + 1);
+            entry_ptr.add(16).cast::<u16>().write_unaligned(reclen);
+            let linux_type = match info.content_type {
+                DirectoryContentType::Directory => 4,
+                DirectoryContentType::File => 8,
+                _ => 0,
+            };
+            entry_ptr.add(18).write(linux_type);
+            core::ptr::copy_nonoverlapping(
+                name_bytes.as_ptr(),
+                entry_ptr.add(19),
+                name_bytes.len(),
+            );
+            entry_ptr.add(19 + name_bytes.len()).write(0);
         }
 
-        Ok(bytes_written)
+        bytes_written += reclen as usize;
+        *offset_entry += 1;
     }
-);
 
-define_syscall!(Read, |object: ObjectRef,
-                             buf_ptr: *mut u8,
-                             len: usize| {
+    if *offset_entry >= contents.len() && bytes_written == 0 {
+        offsets.remove(&(current_pid, object_index));
+        return Ok(0);
+    }
+
+    Ok(bytes_written)
+}
+
+define_syscall!(Getdents, |object_index: u64, buf: *mut u8, len: usize| {
+    write_dirents64(object_index, buf, len)
+});
+
+define_syscall!(Getdents64, |object_index: u64, buf: *mut u8, len: usize| {
+    write_dirents64(object_index, buf, len)
+});
+
+define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
     unsafe {
         Ok(object
             .as_readable()?
@@ -93,9 +100,7 @@ define_syscall!(Read, |object: ObjectRef,
     }
 });
 
-define_syscall!(Write, |object: ObjectRef,
-                              buf_ptr: *mut u8,
-                              len: usize| {
+define_syscall!(Write, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
     unsafe {
         Ok(object
             .as_writable()?
@@ -150,40 +155,32 @@ define_syscall!(Close, |object_num: usize| {
     }
 });
 
-define_syscall!(
-    Ioctl,
-    |object: ObjectRef, request: u64, request_ptr: u64| {
-        let res = object
-            .as_configuratable()?
-            .configure(ConfigurateRequest::new(request, request_ptr)?);
+define_syscall!(Ioctl, |object: ObjectRef,
+                        request: u64,
+                        request_ptr: u64| {
+    let res = object
+        .as_configuratable()?
+        .configure(ConfigurateRequest::new(request, request_ptr)?);
 
-        res.map(|val| val as usize).map_err(Into::into)
-    }
-);
+    res.map(|val| val as usize).map_err(Into::into)
+});
 
 define_syscall!(Fcntl, |object: ObjectRef, command: u64, arg: u64| {
     control_object(object, command, arg)
 });
 
-define_syscall!(Flock, |_object: ObjectRef, _operation: i32| {
-    Ok(0)
-});
+define_syscall!(Flock, |_object: ObjectRef, _operation: i32| { Ok(0) });
 
-define_syscall!(Fsync, |_object: ObjectRef| {
-    Ok(0)
-});
+define_syscall!(Fsync, |_object: ObjectRef| { Ok(0) });
 
-define_syscall!(Fdatasync, |_object: ObjectRef| {
-    Ok(0)
-});
+define_syscall!(Fdatasync, |_object: ObjectRef| { Ok(0) });
 
-define_syscall!(Ftruncate, |_object: ObjectRef, _length: i64| {
-    Ok(0)
-});
+define_syscall!(Ftruncate, |_object: ObjectRef, _length: i64| { Ok(0) });
 
-define_syscall!(Fallocate, |_object: ObjectRef, _mode: i32, _offset: i64, _len: i64| {
-    Ok(0)
-});
+define_syscall!(Fallocate, |_object: ObjectRef,
+                            _mode: i32,
+                            _offset: i64,
+                            _len: i64| { Ok(0) });
 
 define_syscall!(Dup, |object: ObjectRef| {
     get_current_process()
@@ -225,17 +222,19 @@ define_syscall!(
     }
 );
 
-define_syscall!(
-    Lseek,
-    |object: ObjectRef, offset: i64, seek_type: Whence| {
-        object
-            .as_seekable()?
-            .seek(offset, seek_type)
-            .map_err(Into::into)
-    }
-);
+define_syscall!(Lseek, |object: ObjectRef,
+                        offset: i64,
+                        seek_type: Whence| {
+    object
+        .as_seekable()?
+        .seek(offset, seek_type)
+        .map_err(Into::into)
+});
 
-define_syscall!(Pread64, |object: ObjectRef, buf_ptr: *mut u8, len: usize, offset: i64| {
+define_syscall!(Pread64, |object: ObjectRef,
+                          buf_ptr: *mut u8,
+                          len: usize,
+                          offset: i64| {
     if offset < 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -243,7 +242,10 @@ define_syscall!(Pread64, |object: ObjectRef, buf_ptr: *mut u8, len: usize, offse
     unsafe { Ok(file.read_at(slice::from_raw_parts_mut(buf_ptr, len), offset as u64)?) }
 });
 
-define_syscall!(Pwrite64, |object: ObjectRef, buf_ptr: *const u8, len: usize, offset: i64| {
+define_syscall!(Pwrite64, |object: ObjectRef,
+                           buf_ptr: *const u8,
+                           len: usize,
+                           offset: i64| {
     if offset < 0 {
         return Err(SyscallError::InvalidArguments);
     }

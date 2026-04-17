@@ -1,4 +1,7 @@
-use alloc::{string::{String, ToString}, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 
 use crate::{
     filesystem::{
@@ -34,7 +37,9 @@ impl Path {
     fn resolve_dir_from_root(root: WrappedDirectory, path: Path) -> FSResult<WrappedDirectory> {
         match path.navigate(root.clone())? {
             FileLike::Directory(dir) => Ok(dir),
-            FileLike::Symlink(symlink) => Self::resolve_dir_from_root(root, symlink.lock().target()?),
+            FileLike::Symlink(symlink) => {
+                Self::resolve_dir_from_root(root, symlink.lock().target()?)
+            }
             FileLike::File(_) => Err(FSError::NotADirectory),
         }
     }

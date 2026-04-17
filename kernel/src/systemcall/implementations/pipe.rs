@@ -16,7 +16,12 @@ fn create_pipe(fds: *mut i32, flags: i32) -> Result<usize, SyscallError> {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let kind = SOCK_STREAM | if (flags & O_NONBLOCK) != 0 { SOCK_NONBLOCK } else { 0 };
+    let kind = SOCK_STREAM
+        | if (flags & O_NONBLOCK) != 0 {
+            SOCK_NONBLOCK
+        } else {
+            0
+        };
     let (read_end, write_end) = UnixSocketObject::pair(AF_UNIX, kind, 0)
         .map_err(crate::object::error::ObjectError::from)?;
 
@@ -43,9 +48,7 @@ fn create_pipe(fds: *mut i32, flags: i32) -> Result<usize, SyscallError> {
     Ok(0)
 }
 
-define_syscall!(Pipe, |fds: *mut i32| {
-    create_pipe(fds, 0)
-});
+define_syscall!(Pipe, |fds: *mut i32| { create_pipe(fds, 0) });
 
 define_syscall!(Pipe2, |fds: *mut i32, flags: i32| {
     create_pipe(fds, flags)

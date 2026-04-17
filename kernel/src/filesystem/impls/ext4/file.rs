@@ -61,11 +61,7 @@ impl File for Ext4File {
         .with_inode(self.inner.inode().index.get().into()))
     }
 
-    fn seek(
-        &mut self,
-        offset: i64,
-        seek_type: Whence,
-    ) -> crate::filesystem::vfs::FSResult<usize> {
+    fn seek(&mut self, offset: i64, seek_type: Whence) -> crate::filesystem::vfs::FSResult<usize> {
         let pos = match seek_type {
             Whence::Start => offset,
             Whence::Current => self.inner.position() as i64 + offset,

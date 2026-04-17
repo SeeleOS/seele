@@ -53,8 +53,7 @@ pub fn handle_vt_request(
             state.lock().vt_mode = new_mode;
             Ok(Some(0))
         }
-        ConfigurateRequest::LinuxVtActivate(vt)
-        | ConfigurateRequest::LinuxVtWaitActive(vt) => {
+        ConfigurateRequest::LinuxVtActivate(vt) | ConfigurateRequest::LinuxVtWaitActive(vt) => {
             if *vt == 0 {
                 return Err(ObjectError::InvalidArguments);
             }

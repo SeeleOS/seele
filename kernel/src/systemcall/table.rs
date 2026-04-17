@@ -65,6 +65,8 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         Fdatasync,
         Ftruncate,
         Getdents,
+        Prctl,
+        Getdents64,
         Getcwd,
         Chdir,
         Readlink,

@@ -9,6 +9,7 @@ ARCH_MIRROR="${ARCH_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/archlinux/\$rep
 ARCH_PACKAGES=(
     base
     bash
+    vim
     gcc
     busybox
     fastfetch

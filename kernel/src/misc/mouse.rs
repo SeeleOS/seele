@@ -9,8 +9,7 @@ use heapless::Deque;
 use ps2_mouse::Mouse;
 use spin::Mutex;
 use x86_64::{
-    instructions::interrupts::without_interrupts,
-    instructions::port::Port,
+    instructions::interrupts::without_interrupts, instructions::port::Port,
     structures::idt::InterruptStackFrame,
 };
 

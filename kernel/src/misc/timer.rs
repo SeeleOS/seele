@@ -179,11 +179,7 @@ impl Timer {
 }
 
 impl Process {
-    pub fn create_timer(
-        &mut self,
-        time_type: ClockId,
-        notify_method: TimerNotifyMethod,
-    ) -> usize {
+    pub fn create_timer(&mut self, time_type: ClockId, notify_method: TimerNotifyMethod) -> usize {
         let timer = Timer {
             notify_method,
             time_type,

@@ -5,9 +5,9 @@ use super::{
     SocketError, SocketPeerCred, SocketResult, UNIX_SOCKET_REGISTRY, UnixSocketObject,
     UnixSocketState, UnixStreamInner, wake_io, wake_pollers,
 };
+use crate::object::FileFlags;
 use crate::polling::event::PollableEvent;
 use crate::process::manager::get_current_process;
-use crate::object::FileFlags;
 
 impl UnixSocketObject {
     pub fn connect(self: &Arc<Self>, path: String) -> SocketResult<()> {

@@ -10,8 +10,7 @@ use num_enum::TryFromPrimitive;
 
 use crate::systemcall::utils::SyscallError;
 use crate::{
-    define_syscall, polling::poller::PollerObject, process::manager::get_current_process,
-    s_println,
+    define_syscall, polling::poller::PollerObject, process::manager::get_current_process, s_println,
 };
 
 const DEADLOCK_LOG: bool = false;
@@ -68,10 +67,14 @@ fn pollable_event_to_linux_bits(event: PollableEvent) -> u32 {
 fn linux_bits_to_events(bits: u32) -> [Option<PollableEvent>; 4] {
     let bits = EpollEvents::from_bits_truncate(bits);
     [
-        bits.contains(EpollEvents::IN).then_some(PollableEvent::CanBeRead),
-        bits.contains(EpollEvents::OUT).then_some(PollableEvent::CanBeWritten),
-        bits.contains(EpollEvents::ERR).then_some(PollableEvent::Error),
-        bits.contains(EpollEvents::HUP).then_some(PollableEvent::Closed),
+        bits.contains(EpollEvents::IN)
+            .then_some(PollableEvent::CanBeRead),
+        bits.contains(EpollEvents::OUT)
+            .then_some(PollableEvent::CanBeWritten),
+        bits.contains(EpollEvents::ERR)
+            .then_some(PollableEvent::Error),
+        bits.contains(EpollEvents::HUP)
+            .then_some(PollableEvent::Closed),
     ]
 }
 
@@ -111,7 +114,10 @@ fn epoll_update_impl(
     Ok(0)
 }
 
-define_syscall!(EpollCtl, |poller: ObjectRef, op: u64, target_object: ObjectRef, event: u64| {
+define_syscall!(EpollCtl, |poller: ObjectRef,
+                           op: u64,
+                           target_object: ObjectRef,
+                           event: u64| {
     match EpollCtlOp::try_from(op).map_err(|_| SyscallError::InvalidArguments)? {
         EpollCtlOp::Add | EpollCtlOp::Mod => {
             let event = event as *const LinuxEpollEvent;
@@ -119,16 +125,28 @@ define_syscall!(EpollCtl, |poller: ObjectRef, op: u64, target_object: ObjectRef,
                 return Err(SyscallError::BadAddress);
             }
             let event = unsafe { &*event };
-            for existing in [PollableEvent::CanBeRead, PollableEvent::CanBeWritten, PollableEvent::Error, PollableEvent::Closed] {
+            for existing in [
+                PollableEvent::CanBeRead,
+                PollableEvent::CanBeWritten,
+                PollableEvent::Error,
+                PollableEvent::Closed,
+            ] {
                 poller
                     .clone()
                     .as_poller()?
                     .unregister_obj(target_object.clone(), existing);
             }
-            epoll_update_impl(poller, target_object, event.events, unsafe { event.data.u64_ })
+            epoll_update_impl(poller, target_object, event.events, unsafe {
+                event.data.u64_
+            })
         }
         EpollCtlOp::Del => {
-            for existing in [PollableEvent::CanBeRead, PollableEvent::CanBeWritten, PollableEvent::Error, PollableEvent::Closed] {
+            for existing in [
+                PollableEvent::CanBeRead,
+                PollableEvent::CanBeWritten,
+                PollableEvent::Error,
+                PollableEvent::Closed,
+            ] {
                 poller
                     .clone()
                     .as_poller()?
@@ -204,15 +222,15 @@ fn epoll_wait_impl(
 }
 
 define_syscall!(EpollWait, |poller: ObjectRef,
-                           events_ptr: *mut PollResult,
-                           maxevents: usize,
-                           timeout: i32| {
+                            events_ptr: *mut PollResult,
+                            maxevents: usize,
+                            timeout: i32| {
     epoll_wait_impl(poller, events_ptr, maxevents, timeout)
 });
 
 define_syscall!(EpollPwait, |poller: ObjectRef,
-                            events_ptr: *mut PollResult,
-                            maxevents: usize,
-                            timeout: i32| {
+                             events_ptr: *mut PollResult,
+                             maxevents: usize,
+                             timeout: i32| {
     epoll_wait_impl(poller, events_ptr, maxevents, timeout)
 });

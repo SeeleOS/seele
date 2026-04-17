@@ -1,6 +1,9 @@
 use alloc::sync::Weak;
 
-use super::{STREAM_RECV_CAPACITY, SocketError, SocketResult, UnixSocketObject, UnixSocketState, wake_io, wake_pollers};
+use super::{
+    STREAM_RECV_CAPACITY, SocketError, SocketResult, UnixSocketObject, UnixSocketState, wake_io,
+    wake_pollers,
+};
 use crate::{
     object::{error::ObjectError, traits::Readable},
     polling::event::PollableEvent,

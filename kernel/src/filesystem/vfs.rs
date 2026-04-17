@@ -2,10 +2,10 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use spin::Mutex;
 
 use crate::filesystem::{
+    block_device::BlockDevice,
     block_device::cache::CachedBlockDevice,
     errors::FSError,
     impls::ext4::{EXT4, operator::Ext4BlockOperator},
-    block_device::BlockDevice,
     vfs_traits::{Directory, File, FileSystem, Symlink},
 };
 use ext4plus::Ext4 as Ext4Inner;

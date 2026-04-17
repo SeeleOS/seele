@@ -6,7 +6,10 @@ use x86_64::{
     structures::paging::{Mapper, Page, PageSize, PageTableFlags, PhysFrame, Size4KiB},
 };
 
-use crate::memory::{paging::{FRAME_ALLOCATOR, MAPPER}, utils::page_range_from_addr};
+use crate::memory::{
+    paging::{FRAME_ALLOCATOR, MAPPER},
+    utils::page_range_from_addr,
+};
 
 const MMIO_BASE: u64 = 0xffff_fe00_0000_0000;
 
@@ -40,8 +43,8 @@ pub fn map_mmio(phys_addr: u64, size: usize) -> u64 {
     let page_mask = Size4KiB::SIZE - 1;
     let aligned_phys = phys_addr & !page_mask;
     let offset = phys_addr - aligned_phys;
-    let aligned_size = ((offset as usize + size).div_ceil(Size4KiB::SIZE as usize))
-        * Size4KiB::SIZE as usize;
+    let aligned_size =
+        ((offset as usize + size).div_ceil(Size4KiB::SIZE as usize)) * Size4KiB::SIZE as usize;
 
     let mut state = state().lock();
     if let Some(mapping) = state.mappings.get(&(aligned_phys, aligned_size)) {

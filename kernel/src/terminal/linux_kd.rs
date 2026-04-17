@@ -293,19 +293,79 @@ fn linux_kb_entry_value(table: u8, index: u8) -> Option<u16> {
         68 => KeyValue::F10.code(),
         69 => KeyValue::Num.code(),
         70 => KeyValue::Hold.code(),
-        71 => if shifted { KeyValue::Find.code() } else { KeyValue::P7.code() },
-        72 => if shifted { KeyValue::Up.code() } else { KeyValue::P8.code() },
-        73 => if shifted { KeyValue::PgUp.code() } else { KeyValue::P9.code() },
+        71 => {
+            if shifted {
+                KeyValue::Find.code()
+            } else {
+                KeyValue::P7.code()
+            }
+        }
+        72 => {
+            if shifted {
+                KeyValue::Up.code()
+            } else {
+                KeyValue::P8.code()
+            }
+        }
+        73 => {
+            if shifted {
+                KeyValue::PgUp.code()
+            } else {
+                KeyValue::P9.code()
+            }
+        }
         74 => KeyValue::PMinus.code(),
-        75 => if shifted { KeyValue::Left.code() } else { KeyValue::P4.code() },
+        75 => {
+            if shifted {
+                KeyValue::Left.code()
+            } else {
+                KeyValue::P4.code()
+            }
+        }
         76 => KeyValue::P5.code(),
-        77 => if shifted { KeyValue::Right.code() } else { KeyValue::P6.code() },
+        77 => {
+            if shifted {
+                KeyValue::Right.code()
+            } else {
+                KeyValue::P6.code()
+            }
+        }
         78 => KeyValue::PPlus.code(),
-        79 => if shifted { KeyValue::Select.code() } else { KeyValue::P1.code() },
-        80 => if shifted { KeyValue::Down.code() } else { KeyValue::P2.code() },
-        81 => if shifted { KeyValue::PgDn.code() } else { KeyValue::P3.code() },
-        82 => if shifted { KeyValue::Insert.code() } else { KeyValue::P0.code() },
-        83 => if shifted { KeyValue::Remove.code() } else { KeyValue::PDot.code() },
+        79 => {
+            if shifted {
+                KeyValue::Select.code()
+            } else {
+                KeyValue::P1.code()
+            }
+        }
+        80 => {
+            if shifted {
+                KeyValue::Down.code()
+            } else {
+                KeyValue::P2.code()
+            }
+        }
+        81 => {
+            if shifted {
+                KeyValue::PgDn.code()
+            } else {
+                KeyValue::P3.code()
+            }
+        }
+        82 => {
+            if shifted {
+                KeyValue::Insert.code()
+            } else {
+                KeyValue::P0.code()
+            }
+        }
+        83 => {
+            if shifted {
+                KeyValue::Remove.code()
+            } else {
+                KeyValue::PDot.code()
+            }
+        }
         87 => KeyValue::F11.code(),
         88 => KeyValue::F12.code(),
         96 => KeyValue::PEnter.code(),

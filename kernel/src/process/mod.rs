@@ -7,8 +7,8 @@ use crate::filesystem::absolute_path::AbsolutePath;
 use crate::memory::addrspace::AddrSpace;
 use crate::misc::timer::Timer;
 use crate::process::group::ProcessGroupID;
-use crate::signal::{Signals, action::SignalAction};
 use crate::signal::misc::default_signal_action_vec;
+use crate::signal::{Signals, action::SignalAction};
 use crate::{object::Object, process::misc::ProcessID, thread::thread::Thread};
 
 pub mod execve;

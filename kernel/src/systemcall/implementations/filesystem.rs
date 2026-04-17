@@ -117,7 +117,10 @@ fn rename_impl(
     Ok(0)
 }
 
-define_syscall!(OpenAt, |dirfd: i32, path: CString, flags: i32, _mode: u32| {
+define_syscall!(OpenAt, |dirfd: i32,
+                         path: CString,
+                         flags: i32,
+                         _mode: u32| {
     let current_process = get_current_process();
     let path_str = path_from_raw(path)?;
     let flags = OpenFlags::from_bits_truncate(flags);
@@ -134,8 +137,8 @@ define_syscall!(OpenAt, |dirfd: i32, path: CString, flags: i32, _mode: u32| {
         VirtualFS.lock().create_file(path.clone())?;
         object = Arc::new(VirtualFS.lock().open(path)?);
     } else if let Some(device) = device_from_path(&path_str) {
-        let device =
-            crate::object::device::get_device(device.into()).map_err(|_| SyscallError::FileNotFound)?;
+        let device = crate::object::device::get_device(device.into())
+            .map_err(|_| SyscallError::FileNotFound)?;
         let slot = current_process.lock().push_object(device);
         return Ok(slot);
     } else {
@@ -150,7 +153,14 @@ define_syscall!(OpenAt, |dirfd: i32, path: CString, flags: i32, _mode: u32| {
 });
 
 define_syscall!(Open, |path: CString, flags: i32, mode: u32| {
-    OpenAt::handle_call((-100i32) as u64, path as u64, flags as u64, mode as u64, 0, 0)
+    OpenAt::handle_call(
+        (-100i32) as u64,
+        path as u64,
+        flags as u64,
+        mode as u64,
+        0,
+        0,
+    )
 });
 
 define_syscall!(Access, |path: CString, mode: i32| {
@@ -197,9 +207,9 @@ define_syscall!(Fstat, |fd: u64, linux_stat_ptr: *mut LinuxStat| {
 });
 
 define_syscall!(Newfstatat, |dirfd: i32,
-                              path: u64,
-                              linux_stat_ptr: *mut LinuxStat,
-                              flags: i32| {
+                             path: u64,
+                             linux_stat_ptr: *mut LinuxStat,
+                             flags: i32| {
     if linux_stat_ptr.is_null() {
         return Err(SyscallError::BadAddress);
     }
@@ -229,7 +239,10 @@ define_syscall!(Newfstatat, |dirfd: i32,
     Ok(0)
 });
 
-define_syscall!(Faccessat, |dirfd: i32, path: CString, mode: i32, _flags: i32| {
+define_syscall!(Faccessat, |dirfd: i32,
+                            path: CString,
+                            mode: i32,
+                            _flags: i32| {
     check_access_mode(mode)?;
     let path_str = path_from_raw(path)?;
     let path = resolve_path_at(dirfd, &path_str)?;
@@ -237,7 +250,10 @@ define_syscall!(Faccessat, |dirfd: i32, path: CString, mode: i32, _flags: i32| {
     Ok(0)
 });
 
-define_syscall!(Faccessat2, |dirfd: i32, path: CString, mode: i32, flags: i32| {
+define_syscall!(Faccessat2, |dirfd: i32,
+                             path: CString,
+                             mode: i32,
+                             flags: i32| {
     Faccessat::handle_call(dirfd as u64, path as u64, mode as u64, flags as u64, 0, 0)
 });
 
@@ -251,7 +267,11 @@ define_syscall!(UnlinkAt, |dirfd: i32, path: CString, flags: i32| {
     Ok(0)
 });
 
-define_syscall!(LinkAt, |old_dirfd: i32, old_path: CString, new_dirfd: i32, new_path: CString, _flags: i32| {
+define_syscall!(LinkAt, |old_dirfd: i32,
+                         old_path: CString,
+                         new_dirfd: i32,
+                         new_path: CString,
+                         _flags: i32| {
     let _ = path_is_relative_to_cwd(old_dirfd)?;
     let _ = path_is_relative_to_cwd(new_dirfd)?;
     let old_path = path_from_raw(old_path)?;
@@ -284,17 +304,17 @@ define_syscall!(MkdirAt, |dirfd: i32, path: CString, _mode: u32| {
 });
 
 define_syscall!(Readlink, |path: CString,
-                            out_buf: *mut u8,
-                            out_len: usize| {
+                           out_buf: *mut u8,
+                           out_len: usize| {
     let path_str = path_from_raw(path)?;
     let start_from_current_dir = true;
     readlink_impl(path_str, start_from_current_dir, out_buf, out_len)
 });
 
 define_syscall!(ReadlinkAt, |dirfd: i32,
-                              path: CString,
-                              out_buf: *mut u8,
-                              out_len: usize| {
+                             path: CString,
+                             out_buf: *mut u8,
+                             out_len: usize| {
     let path_str = path_from_raw(path)?;
     let start_from_current_dir = path_is_relative_to_cwd(dirfd)?;
     readlink_impl(path_str, start_from_current_dir, out_buf, out_len)
@@ -308,12 +328,7 @@ define_syscall!(RenameAt, |old_dirfd: i32,
     let new_from_currentdir = path_is_relative_to_cwd(new_dirfd)?;
     let old_path = path_from_raw(old_path)?;
     let new_path = path_from_raw(new_path)?;
-    rename_impl(
-        old_from_currentdir,
-        old_path,
-        new_from_currentdir,
-        new_path,
-    )
+    rename_impl(old_from_currentdir, old_path, new_from_currentdir, new_path)
 });
 
 define_syscall!(RenameAt2, |old_dirfd: i32,
@@ -328,15 +343,13 @@ define_syscall!(RenameAt2, |old_dirfd: i32,
     let new_from_currentdir = path_is_relative_to_cwd(new_dirfd)?;
     let old_path = path_from_raw(old_path)?;
     let new_path = path_from_raw(new_path)?;
-    rename_impl(
-        old_from_currentdir,
-        old_path,
-        new_from_currentdir,
-        new_path,
-    )
+    rename_impl(old_from_currentdir, old_path, new_from_currentdir, new_path)
 });
 
-define_syscall!(Utimensat, |dirfd: i32, path: u64, times: u64, _flags: i32| {
+define_syscall!(Utimensat, |dirfd: i32,
+                            path: u64,
+                            times: u64,
+                            _flags: i32| {
     let path = path as CString;
     if !path.is_null() {
         let path_str = path_from_raw(path)?;

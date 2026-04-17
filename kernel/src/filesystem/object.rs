@@ -135,11 +135,7 @@ impl MemoryMappable for FileLikeObject {
         with_current_process(|process| {
             let file_bytes = self
                 .info()
-                .map(|info| {
-                    (info.size as u64)
-                        .saturating_sub(offset)
-                        .min(pages * 4096)
-                })
+                .map(|info| (info.size as u64).saturating_sub(offset).min(pages * 4096))
                 .unwrap_or(0);
             let data = Data::File {
                 offset,
@@ -156,11 +152,7 @@ impl MemoryMappable for FileLikeObject {
 }
 
 impl Seekable for FileLikeObject {
-    fn seek(
-        self: alloc::sync::Arc<Self>,
-        offset: i64,
-        seek_type: Whence,
-    ) -> ObjectResult<usize> {
+    fn seek(self: alloc::sync::Arc<Self>, offset: i64, seek_type: Whence) -> ObjectResult<usize> {
         if let FileLike::File(file) = &self.file {
             file.lock().seek(offset, seek_type).map_err(Into::into)
         } else {

@@ -2,18 +2,10 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use conquer_once::spin::OnceCell;
 use core::ptr::NonNull;
 use spin::Mutex;
-use virtio_drivers::{
-    BufferDirection, Hal, PhysAddr,
-};
-use x86_64::{
-    structures::paging::{PageSize, Size4KiB},
-};
+use virtio_drivers::{BufferDirection, Hal, PhysAddr};
+use x86_64::structures::paging::{PageSize, Size4KiB};
 
-use crate::memory::{
-    mmio::map_mmio,
-    paging::FRAME_ALLOCATOR,
-    utils::apply_offset,
-};
+use crate::memory::{mmio::map_mmio, paging::FRAME_ALLOCATOR, utils::apply_offset};
 
 const PAGE_SIZE: usize = Size4KiB::SIZE as usize;
 
@@ -30,8 +22,7 @@ unsafe impl Send for SharedAllocation {}
 
 static SHARED_ALLOCATIONS: OnceCell<Mutex<BTreeMap<PhysAddr, SharedAllocation>>> =
     OnceCell::uninit();
-static DMA_PAGE_POOL: OnceCell<Mutex<BTreeMap<usize, Vec<(PhysAddr, usize)>>>> =
-    OnceCell::uninit();
+static DMA_PAGE_POOL: OnceCell<Mutex<BTreeMap<usize, Vec<(PhysAddr, usize)>>>> = OnceCell::uninit();
 
 fn shared_allocations() -> &'static Mutex<BTreeMap<PhysAddr, SharedAllocation>> {
     SHARED_ALLOCATIONS.get_or_init(|| Mutex::new(BTreeMap::new()))

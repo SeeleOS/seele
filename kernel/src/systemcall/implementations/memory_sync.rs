@@ -6,7 +6,10 @@ use x86_64::{VirtAddr, registers::model_specific::FsBase};
 
 use crate::{
     define_syscall,
-    memory::{addrspace::mem_area::{Data, MemoryArea}, protection::Protection},
+    memory::{
+        addrspace::mem_area::{Data, MemoryArea},
+        protection::Protection,
+    },
     misc::others::protection_to_page_flags,
     process::manager::get_current_process,
     s_println,
@@ -69,10 +72,7 @@ fn futex_wait_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
             queue.insert(key, VecDeque::new());
         }
 
-        queue
-            .get_mut(&key)
-            .unwrap()
-            .push_back(current);
+        queue.get_mut(&key).unwrap().push_back(current);
 
         if DEADLOCK_LOG {
             let len = queue.get(&key).map(|bucket| bucket.len()).unwrap_or(0);
@@ -176,10 +176,17 @@ fn mapping_overlaps(
     start: VirtAddr,
     end: VirtAddr,
 ) -> bool {
-    areas.iter().any(|area| area.start < end && area.end > start)
+    areas
+        .iter()
+        .any(|area| area.start < end && area.end > start)
 }
 
-define_syscall!(Mmap, |addr: u64, len: u64, prot: i32, flags: i32, fd: i32, offset: u64| {
+define_syscall!(Mmap, |addr: u64,
+                       len: u64,
+                       prot: i32,
+                       flags: i32,
+                       fd: i32,
+                       offset: u64| {
     if len == 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -206,11 +213,7 @@ define_syscall!(Mmap, |addr: u64, len: u64, prot: i32, flags: i32, fd: i32, offs
             let file = object.as_file_like()?;
             let file_bytes = file
                 .info()
-                .map(|info| {
-                    (info.size as u64)
-                        .saturating_sub(offset)
-                        .min(pages * 4096)
-                })
+                .map(|info| (info.size as u64).saturating_sub(offset).min(pages * 4096))
                 .unwrap_or(0);
             Some(Data::File {
                 offset,
@@ -275,9 +278,10 @@ define_syscall!(Munmap, |addr: VirtAddr, len: u64| {
 define_syscall!(Mprotect, |addr: VirtAddr, len: u64, prot: i32| {
     let protection = prot_to_protection(prot)?;
     let pages = len.div_ceil(4096);
-    get_current_process()
-        .lock()
-        .addrspace
-        .update_permissions(addr, addr + pages * 4096, protection);
+    get_current_process().lock().addrspace.update_permissions(
+        addr,
+        addr + pages * 4096,
+        protection,
+    );
     Ok(0)
 });

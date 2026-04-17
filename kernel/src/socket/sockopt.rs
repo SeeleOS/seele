@@ -2,9 +2,9 @@ use alloc::vec::Vec;
 use core::{mem, slice};
 
 use super::{
-    AF_UNIX, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PASSCRED, SO_PEERCRED, SO_PROTOCOL,
-    SO_RCVBUF, SO_REUSEADDR, SO_SNDBUF, SO_TYPE, SOCK_STREAM, SOL_SOCKET, SocketError,
-    SocketResult, UnixSocketObject, UnixSocketState,
+    AF_UNIX, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PASSCRED, SO_PEERCRED, SO_PROTOCOL, SO_RCVBUF,
+    SO_REUSEADDR, SO_SNDBUF, SO_TYPE, SOCK_STREAM, SOL_SOCKET, SocketError, SocketResult,
+    UnixSocketObject, UnixSocketState,
 };
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
@@ -37,9 +37,7 @@ impl UnixSocketObject {
             ),
             SO_DOMAIN => Self::encode_i32(option_len, AF_UNIX as i32),
             SO_PROTOCOL => Self::encode_i32(option_len, 0),
-            SO_SNDBUF | SO_RCVBUF => {
-                Self::encode_i32(option_len, DEFAULT_SOCKET_BUFFER_SIZE)
-            }
+            SO_SNDBUF | SO_RCVBUF => Self::encode_i32(option_len, DEFAULT_SOCKET_BUFFER_SIZE),
             SO_REUSEADDR | SO_PASSCRED => Self::encode_i32(option_len, 0),
             SO_PEERCRED => match &*self.state.lock() {
                 UnixSocketState::Stream(stream) => {

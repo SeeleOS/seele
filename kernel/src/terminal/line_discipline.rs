@@ -71,8 +71,11 @@ pub fn process_input_byte<QueueByte, EchoBytes, Interrupt>(
 ///
 /// At the moment this only models ONLCR, while preserving existing CRLF
 /// sequences instead of expanding them into CRCRLF.
-pub fn process_output_bytes<EmitByte>(info: &TerminalSettings, buffer: &[u8], mut emit_byte: EmitByte)
-where
+pub fn process_output_bytes<EmitByte>(
+    info: &TerminalSettings,
+    buffer: &[u8],
+    mut emit_byte: EmitByte,
+) where
     EmitByte: FnMut(u8),
 {
     let mut prev_was_cr = false;

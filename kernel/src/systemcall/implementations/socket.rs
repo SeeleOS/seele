@@ -24,7 +24,9 @@ fn path_from_sockaddr(address: *const u8, address_len: u32) -> Result<String, Sy
     if addr.sun_family != AF_UNIX as u16 {
         return Err(SyscallError::AddressFamilyNotSupported);
     }
-    let path_len = (address_len as usize).saturating_sub(2).min(addr.sun_path.len());
+    let path_len = (address_len as usize)
+        .saturating_sub(2)
+        .min(addr.sun_path.len());
     if path_len == 0 {
         return Ok(String::new());
     }
@@ -44,15 +46,16 @@ define_syscall!(Socket, |domain: u64, kind: u64, protocol: u64| {
     let socket = crate::socket::UnixSocketObject::create(domain, kind, protocol)
         .map_err(crate::object::error::ObjectError::from)?;
     if (kind & SOCK_NONBLOCK) != 0 {
-        let _ = socket
-            .clone()
-            .set_flags(crate::object::FileFlags::NONBLOCK);
+        let _ = socket.clone().set_flags(crate::object::FileFlags::NONBLOCK);
     }
     let fd = get_current_process().lock().push_object(socket);
     Ok(fd)
 });
 
-define_syscall!(Socketpair, |domain: u64, kind: u64, protocol: u64, fds: *mut i32| {
+define_syscall!(Socketpair, |domain: u64,
+                             kind: u64,
+                             protocol: u64,
+                             fds: *mut i32| {
     if fds.is_null() {
         return Err(SyscallError::BadAddress);
     }
@@ -75,7 +78,9 @@ define_syscall!(Socketpair, |domain: u64, kind: u64, protocol: u64, fds: *mut i3
     Ok(0)
 });
 
-define_syscall!(Bind, |socket: ObjectRef, address: *const u8, address_len: u32| {
+define_syscall!(Bind, |socket: ObjectRef,
+                       address: *const u8,
+                       address_len: u32| {
     let path = path_from_sockaddr(address, address_len)?;
     socket
         .as_unix_socket()?
@@ -92,7 +97,9 @@ define_syscall!(Listen, |socket: ObjectRef, backlog: usize| {
     Ok(0)
 });
 
-define_syscall!(Connect, |socket: ObjectRef, address: *const u8, address_len: u32| {
+define_syscall!(Connect, |socket: ObjectRef,
+                          address: *const u8,
+                          address_len: u32| {
     let path = path_from_sockaddr(address, address_len)?;
     socket
         .as_unix_socket()?
@@ -101,14 +108,16 @@ define_syscall!(Connect, |socket: ObjectRef, address: *const u8, address_len: u3
     Ok(0)
 });
 
-define_syscall!(Accept, |socket: ObjectRef, address: *mut u8, address_len_ptr: *mut u32| {
+define_syscall!(Accept, |socket: ObjectRef,
+                         address: *mut u8,
+                         address_len_ptr: *mut u32| {
     let fd = socket
         .as_unix_socket()?
         .accept()
         .map_err(crate::object::error::ObjectError::from)?;
     if !address_len_ptr.is_null() {
-        let accepted =
-            crate::object::misc::get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+        let accepted = crate::object::misc::get_object_current_process(fd as u64)
+            .map_err(SyscallError::from)?;
         let name = accepted
             .as_unix_socket()?
             .getpeername_bytes()
@@ -218,7 +227,9 @@ define_syscall!(
     }
 );
 
-define_syscall!(Recvmsg, |socket: ObjectRef, msg_ptr: *mut u8, _flags: u64| {
+define_syscall!(Recvmsg, |socket: ObjectRef,
+                          msg_ptr: *mut u8,
+                          _flags: u64| {
     if msg_ptr.is_null() {
         return Err(SyscallError::BadAddress);
     }

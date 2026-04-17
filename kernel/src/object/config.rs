@@ -64,9 +64,7 @@ impl ConfigurateRequest {
             0x5401 => Self::LinuxTcGets(ptr as *mut LinuxTermios),
             0x5402 | 0x5403 | 0x5404 => Self::LinuxTcSets(ptr as *const LinuxTermios),
             0x802C542A => Self::LinuxTcGets2(ptr as *mut LinuxTermios2),
-            0x402C542B | 0x402C542C | 0x402C542D => {
-                Self::LinuxTcSets2(ptr as *const LinuxTermios2)
-            }
+            0x402C542B | 0x402C542C | 0x402C542D => Self::LinuxTcSets2(ptr as *const LinuxTermios2),
             0x540F => Self::LinuxTiocgPgrp(ptr as *mut i32),
             0x5410 => Self::LinuxTiocspgrp(ptr as *const i32),
             0x5413 => Self::LinuxTiocgwinsz(ptr as *mut LinuxWinsize),

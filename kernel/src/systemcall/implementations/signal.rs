@@ -3,9 +3,9 @@ use crate::process::manager::MANAGER;
 use crate::process::misc::ProcessID;
 use crate::signal::action::{SignalHandlingType, Signals};
 use crate::systemcall::utils::*;
-use crate::thread::{THREAD_MANAGER, get_current_thread};
 use crate::thread::misc::SnapshotState;
 use crate::thread::scheduling::return_to_executor_no_save;
+use crate::thread::{THREAD_MANAGER, get_current_thread};
 use crate::{
     define_syscall,
     process::manager::get_current_process,
@@ -61,9 +61,10 @@ fn decode_sigaction(action: LinuxSigAction) -> SignalAction {
     let handling_type = match action.handler {
         SIG_DFL => SignalHandlingType::Default,
         SIG_IGN => SignalHandlingType::Ignore,
-        handler if SigActionFlags::from_bits_truncate(action.flags).contains(SigActionFlags::SIGINFO) => unsafe {
-            SignalHandlingType::Function2(core::mem::transmute(handler))
-        },
+        handler
+            if SigActionFlags::from_bits_truncate(action.flags)
+                .contains(SigActionFlags::SIGINFO) =>
+        unsafe { SignalHandlingType::Function2(core::mem::transmute(handler)) },
         handler => unsafe { SignalHandlingType::Function1(core::mem::transmute(handler)) },
     };
 

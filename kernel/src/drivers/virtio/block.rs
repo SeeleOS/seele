@@ -100,9 +100,7 @@ struct VirtioBlockDevice {
 }
 
 impl VirtioBlockDevice {
-    fn new(
-        function: virtio_drivers::transport::pci::bus::DeviceFunction,
-    ) -> Option<Self> {
+    fn new(function: virtio_drivers::transport::pci::bus::DeviceFunction) -> Option<Self> {
         let mut root = PciRoot::new(PciConfigPorts);
         let (_, command) = root.get_status_command(function);
         let desired = command | Command::BUS_MASTER | Command::MEMORY_SPACE;

@@ -11,7 +11,9 @@ impl PollerObject {
         data: u64,
     ) {
         let already_queued = woken_events.iter().any(|ready| {
-            ready.event == event && ready.data == data && alloc::sync::Arc::ptr_eq(&ready.object, object)
+            ready.event == event
+                && ready.data == data
+                && alloc::sync::Arc::ptr_eq(&ready.object, object)
         });
 
         if !already_queued {

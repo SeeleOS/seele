@@ -344,11 +344,7 @@ impl Process {
             | Signal::CpuTimeLimitExceeded
             | Signal::FileSizeLimitExceeded
             | Signal::BadSystemCall => {
-                s_println!(
-                    "fatal signal: pid={} signal={:?}",
-                    self.pid.0,
-                    signal
-                );
+                s_println!("fatal signal: pid={} signal={:?}", self.pid.0, signal);
                 let threads = self.terminate_inner(signal as u64);
                 let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
                 for thread in threads {
