@@ -1,6 +1,9 @@
 use crate::{
     object::misc::ObjectRef,
-    polling::{PollerEntry, PollerObject, PollerReadyEvent, event::PollableEvent},
+    polling::{
+        PollerEntry, PollerObject, PollerReadyEvent, event::PollableEvent,
+        registration::PollWakeResult,
+    },
 };
 
 impl PollerObject {
@@ -9,7 +12,7 @@ impl PollerObject {
         object: &ObjectRef,
         event: PollableEvent,
         data: u64,
-    ) {
+    ) -> bool {
         let already_queued = woken_events.iter().any(|ready| {
             ready.event == event
                 && ready.data == data
@@ -18,11 +21,14 @@ impl PollerObject {
 
         if !already_queued {
             woken_events.push(PollerReadyEvent::new(object.clone(), event, data));
+            return true;
         }
+
+        false
     }
 
     // Checks for all matching entries that should be woken, and pushes them to woken_events.
-    pub fn push_woken_event(&self, object: ObjectRef, event: PollableEvent) -> bool {
+    pub fn push_woken_event(&self, object: ObjectRef, event: PollableEvent) -> PollWakeResult {
         let matching_entries: alloc::vec::Vec<u64> = self
             .entries
             .lock()
@@ -34,15 +40,21 @@ impl PollerObject {
             .collect();
 
         let interested = !matching_entries.is_empty();
+        let mut became_readable = false;
 
         if interested {
             let mut woken_events = self.woken_events.lock();
+            let was_empty = woken_events.is_empty();
             for data in matching_entries {
-                Self::queue_ready_event(&mut woken_events, &object, event, data);
+                let _ = Self::queue_ready_event(&mut woken_events, &object, event, data);
             }
+            became_readable = was_empty && !woken_events.is_empty();
         }
 
-        interested
+        PollWakeResult {
+            interested,
+            became_readable,
+        }
     }
 
     fn is_entry_ready(entry: &PollerEntry) -> bool {
@@ -68,7 +80,7 @@ impl PollerObject {
         if has_ready {
             let mut woken_events = self.woken_events.lock();
             for (object, event, data) in ready_entries {
-                Self::queue_ready_event(&mut woken_events, &object, event, data);
+                let _ = Self::queue_ready_event(&mut woken_events, &object, event, data);
             }
         }
 

@@ -44,3 +44,4 @@ mod wake;
 pub use entry::PollerEntry;
 pub use object::PollerObject;
 pub use ready::PollerReadyEvent;
+pub use registration::notify_pollers;

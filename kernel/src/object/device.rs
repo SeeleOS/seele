@@ -1,12 +1,8 @@
 use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc};
 
 use crate::{
-    evdev::{KEYBOARD_EVENT_DEVICE, MOUSE_EVENT_DEVICE},
-    misc::{
-        devices::DevNull,
-        fb_object::FramebufferObject,
-        mouse::PS2MouseObject,
-    },
+    evdev::open_event_device,
+    misc::{devices::DevNull, fb_object::FramebufferObject, mouse::PS2MouseObject},
     object::{misc::ObjectRef, tty_device::get_default_tty},
     systemcall::utils::{SyscallError, SyscallResult},
 };
@@ -19,8 +15,6 @@ lazy_static::lazy_static! {
         devices.insert("devnull", Arc::new(DevNull) as ObjectRef);
         devices.insert("tty", get_default_tty() as ObjectRef);
         devices.insert("ps2mouse", Arc::new(PS2MouseObject::default()) as ObjectRef);
-        devices.insert("event-kbd", KEYBOARD_EVENT_DEVICE.clone() as ObjectRef);
-        devices.insert("event-mouse", MOUSE_EVENT_DEVICE.clone() as ObjectRef);
 
         devices
     };
@@ -31,6 +25,10 @@ pub fn get_device(name: String) -> SyscallResult<ObjectRef> {
 }
 
 pub fn get_device_ref(name: &str) -> SyscallResult<ObjectRef> {
+    if let Some(device) = open_event_device(name) {
+        return Ok(device);
+    }
+
     DEVICES
         .get(name)
         .ok_or(SyscallError::InvalidArguments)

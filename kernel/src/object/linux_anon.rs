@@ -1,4 +1,4 @@
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use spin::Mutex;
 
 use crate::{
@@ -8,8 +8,8 @@ use crate::{
     object::{
         FileFlags, Object,
         error::ObjectError,
-        misc::ObjectResult,
-        traits::{Readable, Statable},
+        misc::{ObjectRef, ObjectResult},
+        traits::{Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
     thread::{
@@ -19,6 +19,9 @@ use crate::{
         },
     },
 };
+
+const EVENTFD_SEMAPHORE: i32 = 0x1;
+const EVENTFD_COUNTER_MAX: u64 = u64::MAX - 1;
 
 #[derive(Debug, Default)]
 pub struct InotifyObject {
@@ -79,6 +82,184 @@ impl Readable for InotifyObject {
 }
 
 impl Statable for InotifyObject {
+    fn stat(&self) -> LinuxStat {
+        LinuxStat::char_device(0o600)
+    }
+}
+
+#[derive(Debug)]
+struct EventFdState {
+    counter: u64,
+}
+
+#[derive(Debug)]
+pub struct EventFdObject {
+    flags: Mutex<FileFlags>,
+    state: Mutex<EventFdState>,
+    semaphore: bool,
+    self_ref: Mutex<Option<Weak<EventFdObject>>>,
+}
+
+impl EventFdObject {
+    pub fn new(initial: u64, flags: i32) -> Arc<Self> {
+        let eventfd = Arc::new(Self {
+            flags: Mutex::new(FileFlags::empty()),
+            state: Mutex::new(EventFdState { counter: initial }),
+            semaphore: (flags & EVENTFD_SEMAPHORE) != 0,
+            self_ref: Mutex::new(None),
+        });
+        *eventfd.self_ref.lock() = Some(Arc::downgrade(&eventfd));
+        if (flags & 0o4_000) != 0 {
+            let _ = eventfd.clone().set_flags(FileFlags::NONBLOCK);
+        }
+        eventfd
+    }
+
+    fn self_object(&self) -> Option<ObjectRef> {
+        self.self_ref
+            .lock()
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .map(|object| object as ObjectRef)
+    }
+
+    fn is_read_ready(&self) -> bool {
+        self.state.lock().counter > 0
+    }
+
+    fn is_write_ready(&self) -> bool {
+        self.state.lock().counter < EVENTFD_COUNTER_MAX
+    }
+
+    fn wake_waiters(&self, event: PollableEvent) {
+        let mut manager = THREAD_MANAGER.get().unwrap().lock();
+        manager.wake_io();
+        if let Some(object) = self.self_object() {
+            manager.wake_poller(object, event);
+        }
+    }
+}
+
+impl Object for EventFdObject {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(*self.flags.lock())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        *self.flags.lock() = flags;
+        Ok(())
+    }
+
+    impl_cast_function!("readable", Readable);
+    impl_cast_function!("writable", Writable);
+    impl_cast_function!("pollable", Pollable);
+    impl_cast_function!("statable", Statable);
+    impl_cast_function_non_trait!("eventfd", EventFdObject);
+}
+
+impl Pollable for EventFdObject {
+    fn is_event_ready(&self, event: PollableEvent) -> bool {
+        match event {
+            PollableEvent::CanBeRead => self.is_read_ready(),
+            PollableEvent::CanBeWritten => self.is_write_ready(),
+            _ => false,
+        }
+    }
+}
+
+impl Readable for EventFdObject {
+    fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
+        if buffer.len() < core::mem::size_of::<u64>() {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        loop {
+            let value = {
+                let mut state = self.state.lock();
+                if state.counter == 0 {
+                    None
+                } else if self.semaphore {
+                    state.counter -= 1;
+                    Some(1u64)
+                } else {
+                    let value = state.counter;
+                    state.counter = 0;
+                    Some(value)
+                }
+            };
+
+            if let Some(value) = value {
+                buffer[..8].copy_from_slice(&value.to_ne_bytes());
+                self.wake_waiters(PollableEvent::CanBeWritten);
+                return Ok(8);
+            }
+
+            if self.flags.lock().contains(FileFlags::NONBLOCK) {
+                return Err(ObjectError::TryAgain);
+            }
+
+            let current = prepare_block_current(BlockType::WakeRequired {
+                wake_type: WakeType::IO,
+                deadline: None,
+            });
+
+            if self.is_read_ready() {
+                cancel_block(&current);
+                continue;
+            }
+
+            finish_block_current();
+        }
+    }
+}
+
+impl Writable for EventFdObject {
+    fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
+        if buffer.len() < core::mem::size_of::<u64>() {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        let value = u64::from_ne_bytes(buffer[..8].try_into().unwrap());
+        if value == u64::MAX {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        loop {
+            let wrote = {
+                let mut state = self.state.lock();
+                if value <= EVENTFD_COUNTER_MAX.saturating_sub(state.counter) {
+                    state.counter += value;
+                    true
+                } else {
+                    false
+                }
+            };
+
+            if wrote {
+                self.wake_waiters(PollableEvent::CanBeRead);
+                return Ok(8);
+            }
+
+            if self.flags.lock().contains(FileFlags::NONBLOCK) {
+                return Err(ObjectError::TryAgain);
+            }
+
+            let current = prepare_block_current(BlockType::WakeRequired {
+                wake_type: WakeType::IO,
+                deadline: None,
+            });
+
+            if self.is_write_ready() {
+                cancel_block(&current);
+                continue;
+            }
+
+            finish_block_current();
+        }
+    }
+}
+
+impl Statable for EventFdObject {
     fn stat(&self) -> LinuxStat {
         LinuxStat::char_device(0o600)
     }
