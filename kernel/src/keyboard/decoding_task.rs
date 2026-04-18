@@ -9,6 +9,7 @@ use crate::keyboard::{
     scancode_stream::ScancodeStream,
 };
 use crate::{
+    evdev::push_keyboard_event,
     object::tty_device::{get_default_tty, wake_tty_poller_readable},
     terminal::linux_kd::{KeyboardMode, linux_keycode_from_keycode},
     thread::THREAD_MANAGER,
@@ -30,6 +31,7 @@ pub async fn process_keypresses() {
             let mut keyboard = _PS2_KEYBOARD.lock();
 
             if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
+                push_keyboard_event(&key_event);
                 match get_default_tty().keyboard_mode() {
                     KeyboardMode::Raw | KeyboardMode::Off => continue,
                     KeyboardMode::MediumRaw => {
