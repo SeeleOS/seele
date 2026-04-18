@@ -14,14 +14,27 @@ impl UnixSocketObject {
         }
 
         let is_abstract = path.as_bytes().first() == Some(&0);
+        let registry = UNIX_SOCKET_REGISTRY.lock();
+        if registry.contains_key(&path) {
+            return Err(SocketError::AddressInUse);
+        }
+        drop(registry);
+
         if !is_abstract {
-            VirtualFS
-                .lock()
-                .create_file(Path::new(&path))
-                .map_err(|err| match err {
-                    FSError::AlreadyExists => SocketError::AddressInUse,
-                    _ => SocketError::InvalidArguments,
-                })?;
+            let mut vfs = VirtualFS.lock();
+            match vfs.create_file(Path::new(&path)) {
+                Ok(()) => {}
+                Err(FSError::AlreadyExists) => {
+                    // Pathname sockets can leave a stale inode behind after an
+                    // unclean exit. Remove it and recreate the node if the
+                    // in-kernel listener registry no longer owns the path.
+                    vfs.delete_file(Path::new(&path))
+                        .map_err(|_| SocketError::AddressInUse)?;
+                    vfs.create_file(Path::new(&path))
+                        .map_err(|_| SocketError::AddressInUse)?;
+                }
+                Err(_) => return Err(SocketError::InvalidArguments),
+            }
         }
 
         let mut registry = UNIX_SOCKET_REGISTRY.lock();
@@ -31,7 +44,6 @@ impl UnixSocketObject {
             }
             return Err(SocketError::AddressInUse);
         }
-
         registry.insert(path.clone(), None);
         *state = UnixSocketState::Bound { path };
         Ok(())
