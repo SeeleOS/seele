@@ -11,6 +11,10 @@ use crate::memory::{
 use crate::misc::time::Time as KernelTime;
 use crate::misc::{others::protection_to_page_flags, utsname::UtsName};
 use crate::process::manager::{MANAGER, get_current_process};
+use crate::signal::{
+    action::{SignalAction, SignalHandlingType},
+    misc::default_signal_action_vec,
+};
 use crate::systemcall::utils::{SyscallError, SyscallImpl};
 use crate::terminal::pty::create_pty;
 use crate::thread::misc::with_current_thread;
@@ -24,11 +28,13 @@ bitflags! {
         const FS = 0x0000_0200;
         const FILES = 0x0000_0400;
         const SIGHAND = 0x0000_0800;
+        const VFORK = 0x0000_4000;
         const THREAD = 0x0001_0000;
         const SETTLS = 0x0008_0000;
         const PARENT_SETTID = 0x0010_0000;
         const CHILD_CLEARTID = 0x0020_0000;
         const CHILD_SETTID = 0x0100_0000;
+        const CLEAR_SIGHAND = 0x1_0000_0000;
     }
 }
 
@@ -95,6 +101,20 @@ const RLIM64_INFINITY: u64 = u64::MAX;
 const RLIMIT_NOFILE_DEFAULT: u64 = 1024;
 const INITIAL_BRK_RESERVE: u64 = 0x4000_0000;
 const TIMER_ABSTIME: i32 = 1;
+
+fn clone_cleared_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalAction> {
+    let defaults = default_signal_action_vec();
+    old_actions
+        .iter()
+        .zip(defaults)
+        .map(|(old, default)| match old.handling_type {
+            SignalHandlingType::Ignore => old.clone(),
+            SignalHandlingType::Default
+            | SignalHandlingType::Function1(_)
+            | SignalHandlingType::Function2(_) => default,
+        })
+        .collect()
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -420,6 +440,9 @@ define_syscall!(Clone, |flags: u64,
     if !clone_flags.contains(CloneFlags::THREAD) {
         let unsupported = flags
             & !(0xff
+                | CloneFlags::VM.bits()
+                | CloneFlags::VFORK.bits()
+                | CloneFlags::CLEAR_SIGHAND.bits()
                 | CloneFlags::PARENT_SETTID.bits()
                 | CloneFlags::CHILD_SETTID.bits()
                 | CloneFlags::CHILD_CLEARTID.bits()
@@ -432,6 +455,11 @@ define_syscall!(Clone, |flags: u64,
         let (child_process, child_thread) = crate::process::Process::fork(current.clone());
         let pid = child_process.lock().pid;
         MANAGER.lock().processes.insert(pid, child_process.clone());
+
+        if clone_flags.contains(CloneFlags::CLEAR_SIGHAND) {
+            let mut child = child_process.lock();
+            child.signal_actions = clone_cleared_signal_actions(&child.signal_actions);
+        }
 
         {
             let mut child = child_thread.lock();
