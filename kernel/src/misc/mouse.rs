@@ -32,6 +32,7 @@ use crate::{
 
 lazy_static::lazy_static! {
     pub static ref MOUSE_PACKETS: Mutex<Deque<u8, 4096>> = Mutex::new(Deque::new());
+    pub static ref MOUSE_EVENT_BYTES: Mutex<Deque<u8, 4096>> = Mutex::new(Deque::new());
 }
 
 static MOUSE_PENDING: AtomicBool = AtomicBool::new(false);
@@ -78,6 +79,10 @@ pub async fn process_mouse_events() {
     let mut interrupts = MouseInterruptStream;
 
     while interrupts.next().await.is_some() {
+        while let Some(packet) = without_interrupts(|| MOUSE_EVENT_BYTES.lock().pop_front()) {
+            process_ps2_mouse_packet(packet);
+        }
+
         let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
         thread_manager.wake_mouse();
 
@@ -110,8 +115,13 @@ pub fn poll_controller() {
                 let _ = packets.pop_front();
             }
             let _ = packets.push_back(packet);
+
+            let mut event_bytes = MOUSE_EVENT_BYTES.lock();
+            if event_bytes.is_full() {
+                let _ = event_bytes.pop_front();
+            }
+            let _ = event_bytes.push_back(packet);
         });
-        process_ps2_mouse_packet(packet);
         saw_packet = true;
     }
 
