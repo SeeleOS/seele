@@ -61,6 +61,38 @@ static DEV_MOUSE_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     device_name: "ps2mouse",
 });
 
+static DEV_INPUT_EVENT0_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
+    name: "event0",
+    inode: 0x100A,
+    mode: 0o020660,
+    device_name: "event-kbd",
+});
+
+static DEV_INPUT_EVENT1_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
+    name: "event1",
+    inode: 0x100B,
+    mode: 0o020660,
+    device_name: "event-mouse",
+});
+
+static DEV_INPUT_ENTRIES: &[StaticDirEntry] = &[
+    StaticDirEntry {
+        name: "event0",
+        node: &DEV_INPUT_EVENT0_NODE,
+    },
+    StaticDirEntry {
+        name: "event1",
+        node: &DEV_INPUT_EVENT1_NODE,
+    },
+];
+
+static DEV_INPUT_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "input",
+    inode: 0x1009,
+    mode: 0o040755,
+    entries: DEV_INPUT_ENTRIES,
+});
+
 static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "null",
@@ -93,6 +125,10 @@ static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "mouse",
         node: &DEV_MOUSE_NODE,
+    },
+    StaticDirEntry {
+        name: "input",
+        node: &DEV_INPUT_NODE,
     },
 ];
 
