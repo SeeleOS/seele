@@ -1,3 +1,4 @@
+use crate::filesystem::object::poll_identity_object;
 use crate::misc::time::Time;
 use crate::object::misc::ObjectRef;
 use crate::polling::event::PollableEvent;
@@ -94,7 +95,7 @@ define_syscall!(EpollCreate1, {
     let process = get_current_process();
     let objects = &mut process.lock().objects;
 
-    objects.push(Some(Arc::new(PollerObject::new())));
+    objects.push(Some(PollerObject::new()));
 
     Ok(objects.len() - 1)
 });
