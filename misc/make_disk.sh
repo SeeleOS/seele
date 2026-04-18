@@ -9,6 +9,9 @@ ARCH_MIRROR="${ARCH_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/archlinux/\$rep
 ARCH_PACKAGES=(
     base
     bash
+    alacritty
+    evtest
+    libinput
     vim
     gcc
     busybox

@@ -43,6 +43,8 @@ fi
 
 echo "xinitrc: starting session"
 
+alacritty &
+
 if command -v icewm-session >/dev/null 2>&1; then
     echo "xinitrc: exec icewm-session"
     exec icewm-session
