@@ -48,6 +48,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         Getsockname,
         Getpeername,
         Socketpair,
+        Setsockopt,
         Getsockopt,
         Clone,
         Fork,

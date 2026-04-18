@@ -92,6 +92,7 @@ fn syscall_handler_unwrapped(
                         | SyscallNumber::Accept
                         | SyscallNumber::Getsockname
                         | SyscallNumber::Getpeername
+                        | SyscallNumber::Setsockopt
                         | SyscallNumber::Getsockopt
                         | SyscallNumber::OpenAt
                         | SyscallNumber::Close

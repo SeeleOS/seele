@@ -41,6 +41,7 @@ pub enum SyscallNumber {
     Getsockname = 51,
     Getpeername = 52,
     Socketpair = 53,
+    Setsockopt = 54,
     Getsockopt = 55,
     Clone = 56,
     Fork = 57,

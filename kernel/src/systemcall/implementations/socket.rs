@@ -9,6 +9,7 @@ use crate::{
     systemcall::utils::{SyscallError, SyscallImpl},
 };
 use alloc::{string::String, vec::Vec};
+use core::slice;
 
 #[repr(C)]
 struct LinuxSockAddrUn {
@@ -196,6 +197,24 @@ define_syscall!(
         Ok(read)
     }
 );
+
+define_syscall!(Setsockopt, |socket: ObjectRef,
+                             level: i32,
+                             option_name: i32,
+                             option_value: *const u8,
+                             option_len: u32| {
+    if option_len > 0 && option_value.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let option_value = unsafe { slice::from_raw_parts(option_value, option_len as usize) };
+    socket
+        .as_unix_socket()?
+        .setsockopt(level as u64, option_name as u64, option_value)
+        .map_err(crate::object::error::ObjectError::from)?;
+
+    Ok(0)
+});
 
 define_syscall!(
     Getsockopt,
