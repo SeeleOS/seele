@@ -5,8 +5,8 @@ use ext4plus::{Ext4, file::File as Ext4InnerFile, inode::Inode};
 
 use crate::filesystem::{
     errors::FSError,
-    info::{FileLikeInfo, UnixPermission},
     impls::ext4::chmod_path,
+    info::{FileLikeInfo, UnixPermission},
     vfs_traits::{File, FileLikeType, Whence},
 };
 

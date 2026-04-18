@@ -1,10 +1,7 @@
 use alloc::{string::String, sync::Arc, vec::Vec};
 use spin::Mutex;
 
-use crate::filesystem::{
-    info::DirectoryContentInfo,
-    vfs_traits::FileLike,
-};
+use crate::filesystem::{info::DirectoryContentInfo, vfs_traits::FileLike};
 
 mod directory;
 mod file;

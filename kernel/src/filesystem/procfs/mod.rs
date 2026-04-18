@@ -70,25 +70,23 @@ impl FileSystem for ProcFs {
             ["self", "fd", fd] => {
                 let pid = current_pid()?;
                 let fd = parse_fd(fd)?;
-                Ok(proc_symlink(
-                    fd,
-                    pid_fd_inode(pid, fd),
-                    fd_target(pid, fd)?,
-                ))
+                Ok(proc_symlink(fd, pid_fd_inode(pid, fd), fd_target(pid, fd)?))
             }
             [pid] => {
                 let pid = parse_pid(pid)?;
                 ensure_pid_exists(pid)?;
-                Ok(proc_dir(pid_string(pid).as_str(), pid_dir_inode(pid), pid_dir_entries()))
+                Ok(proc_dir(
+                    pid_string(pid).as_str(),
+                    pid_dir_inode(pid),
+                    pid_dir_entries(),
+                ))
             }
             [pid, "cmdline"] => {
                 let pid = parse_pid(pid)?;
                 ensure_pid_exists(pid)?;
-                Ok(proc_file(
-                    "cmdline",
-                    pid_cmdline_inode(pid),
-                    move || proc_pid_cmdline_bytes(pid),
-                ))
+                Ok(proc_file("cmdline", pid_cmdline_inode(pid), move || {
+                    proc_pid_cmdline_bytes(pid)
+                }))
             }
             [pid, "fd"] => {
                 let pid = parse_pid(pid)?;
@@ -99,11 +97,7 @@ impl FileSystem for ProcFs {
                 let pid = parse_pid(pid)?;
                 ensure_pid_exists(pid)?;
                 let fd = parse_fd(fd)?;
-                Ok(proc_symlink(
-                    fd,
-                    pid_fd_inode(pid, fd),
-                    fd_target(pid, fd)?,
-                ))
+                Ok(proc_symlink(fd, pid_fd_inode(pid, fd), fd_target(pid, fd)?))
             }
             _ => Err(FSError::NotFound),
         }

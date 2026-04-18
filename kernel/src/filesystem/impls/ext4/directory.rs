@@ -57,7 +57,6 @@ impl Ext4Directory {
     pub fn fs(&self) -> &Ext4 {
         &self.fs
     }
-
 }
 
 impl Directory for Ext4Directory {

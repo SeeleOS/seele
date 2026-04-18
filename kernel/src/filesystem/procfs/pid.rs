@@ -2,9 +2,7 @@ use alloc::{format, string::String, vec, vec::Vec};
 
 use crate::{
     filesystem::{
-        errors::FSError,
-        info::DirectoryContentInfo,
-        vfs::FSResult,
+        errors::FSError, info::DirectoryContentInfo, vfs::FSResult,
         vfs_traits::DirectoryContentType,
     },
     process::{
