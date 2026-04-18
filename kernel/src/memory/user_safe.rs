@@ -3,7 +3,7 @@ use crate::{
     systemcall::utils::{SyscallError, SyscallResult},
 };
 
-pub fn write<T>(ptr: *mut T, value: &T) -> SyscallResult<()> {
+pub fn write<T: ?Sized, U>(ptr: *mut U, value: &T) -> SyscallResult<()> {
     if ptr.is_null() {
         return Err(SyscallError::BadAddress);
     }
