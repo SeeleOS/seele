@@ -40,7 +40,24 @@ impl AbsolutePath {
     }
 
     pub fn push_path_str(&mut self, string: &str) {
-        self.push_path(Path::new(string).as_absolute());
+        let path = Path::new(string);
+
+        if path.is_absolute() {
+            *self = path.as_absolute();
+            return;
+        }
+
+        for part in path.parts {
+            match part {
+                PathPart::Root | PathPart::CurrentDir => {}
+                PathPart::Normal(str) => self.0.push(AbsolutePathPart::Normal(str)),
+                PathPart::ParentDir => {
+                    if matches!(self.0.last(), Some(AbsolutePathPart::Normal(_))) {
+                        self.0.pop();
+                    }
+                }
+            }
+        }
     }
 
     pub fn as_string(self) -> String {
