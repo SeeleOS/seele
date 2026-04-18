@@ -73,25 +73,29 @@ impl ThreadManager {
 
     pub fn mark_thread_exited(&mut self, thread: ThreadRef) {
         log::debug!("mark_thread_exited");
-        {
+        let (process, clear_child_tid, pid) = {
             let mut thread = thread.lock();
             log::debug!("mark_thread_exited tid={:?}", thread.id);
-            if thread.clear_child_tid != 0 {
-                crate::s_println!(
-                    "thread exit clear_child_tid: pid={} tid={} addr={:#x}",
-                    thread.parent.lock().pid.0,
-                    thread.id.0,
-                    thread.clear_child_tid
-                );
-                unsafe {
-                    *(thread.clear_child_tid as *mut i32) = 0;
-                }
-                let pid = thread.parent.lock().pid.0;
-                wake_futex_for_process(pid, thread.clear_child_tid, 1);
+            let process = thread.parent.clone();
+            let pid = process.lock().pid.0;
+            let clear_child_tid = thread.clear_child_tid;
+
+            if clear_child_tid != 0 {
                 thread.clear_child_tid = 0;
             }
+
             thread.state = State::Zombie;
+            (process, clear_child_tid, pid)
+        };
+
+        if clear_child_tid != 0 {
+            let _ = process
+                .lock()
+                .addrspace
+                .write(clear_child_tid as *mut u8, &0i32);
+            wake_futex_for_process(pid, clear_child_tid, 1);
         }
+
         self.zombies.push(thread);
     }
 
