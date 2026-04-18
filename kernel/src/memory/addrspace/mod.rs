@@ -3,7 +3,7 @@ use core::sync::atomic::AtomicU64;
 use alloc::vec::Vec;
 use x86_64::{
     PhysAddr, VirtAddr,
-    structures::paging::{FrameDeallocator, Mapper, Page, Size4KiB, Translate, page},
+    structures::paging::{FrameDeallocator, Mapper, Page, Size4KiB, Translate},
 };
 
 use crate::{
@@ -14,11 +14,10 @@ use crate::{
             misc::split_memory_area,
         },
         page_table_wrapper::PageTableWrapped,
-        paging::{FRAME_ALLOCATOR, MAPPER},
+        paging::FRAME_ALLOCATOR,
         protection::Protection,
     },
     misc::{others::protection_to_page_flags, stack_builder::StackBuilder},
-    s_print,
 };
 
 pub mod allocate;
@@ -28,10 +27,11 @@ pub mod cow;
 pub mod mapping;
 pub mod mem_area;
 pub mod misc;
+pub mod user;
 
 pub const LAZY_MAP: bool = true;
 
-const USER_MEM_START: u64 = 0x30_0000_0000;
+const USER_MEM_START: u64 = 0x0000_0000_c000_0000;
 pub const KERNEL_MEM_START: u64 = 0xFFFF_8000_1000_0000;
 
 static KERNEL_MEM: AtomicU64 = AtomicU64::new(KERNEL_MEM_START);
