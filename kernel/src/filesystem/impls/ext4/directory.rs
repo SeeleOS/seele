@@ -20,7 +20,7 @@ use ext4plus::{
 
 use crate::filesystem::{
     errors::FSError,
-    impls::ext4::{file::Ext4File, symlink::Ext4Symlink},
+    impls::ext4::{chmod_path, file::Ext4File, symlink::Ext4Symlink},
     info::DirectoryContentInfo,
     vfs_traits::{Directory, DirectoryContentType, FileLike},
 };
@@ -58,15 +58,6 @@ impl Ext4Directory {
         &self.fs
     }
 
-    pub fn chmod(&self, mode: InodeMode) -> crate::filesystem::vfs::FSResult<()> {
-        let mut inode = self
-            .fs
-            .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
-            .map_err(map_ext4_error)?;
-        inode.set_mode(mode).map_err(map_ext4_error)?;
-        inode.write(&self.fs).map_err(map_ext4_error)?;
-        Ok(())
-    }
 }
 
 impl Directory for Ext4Directory {
@@ -259,8 +250,14 @@ impl Directory for Ext4Directory {
             let inner_file = Ext4InnerFile::open_inode(&self.fs, inode).map_err(map_ext4_error)?;
             Ok(FileLike::File(Arc::new(Mutex::new(Ext4File::new(
                 name.to_string(),
+                path,
+                self.fs.clone(),
                 inner_file,
             )))))
         }
+    }
+
+    fn chmod(&self, mode: u32) -> crate::filesystem::vfs::FSResult<()> {
+        chmod_path(&self.fs, &self.path, mode)
     }
 }

@@ -1,7 +1,7 @@
 use alloc::{string::ToString, sync::Arc};
 use spin::mutex::Mutex;
 
-use ext4plus::Ext4;
+use ext4plus::{Ext4, FollowSymlinks, inode::InodeMode, path::Path as Ext4Path};
 
 use crate::filesystem::{
     errors::FSError,
@@ -16,6 +16,22 @@ pub mod error;
 pub mod file;
 pub mod operator;
 pub mod symlink;
+
+const CHMOD_PERMISSION_BITS: u16 = 0o7777;
+const FILE_TYPE_BITS: u16 = 0o170000;
+
+pub(super) fn chmod_path(fs: &Ext4, path: &str, mode: u32) -> crate::filesystem::vfs::FSResult<()> {
+    let requested_bits = (mode as u16) & CHMOD_PERMISSION_BITS;
+    let requested_mode = InodeMode::from_bits(requested_bits).ok_or(FSError::Other)?;
+    let mut inode = fs
+        .path_to_inode(Ext4Path::new(path), FollowSymlinks::All)
+        .map_err(FSError::from)?;
+    let merged_bits = (inode.mode().bits() & FILE_TYPE_BITS) | requested_mode.bits();
+    let merged_mode = InodeMode::from_bits(merged_bits).ok_or(FSError::Other)?;
+    inode.set_mode(merged_mode).map_err(FSError::from)?;
+    inode.write(fs).map_err(FSError::from)?;
+    Ok(())
+}
 
 /// Wrapper around the `ext4plus::Ext4` filesystem so it can be used
 /// through the kernel's generic `FileSystem` trait.

@@ -5,6 +5,7 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 use num_enum::TryFromPrimitive;
 
 use crate::filesystem::{
+    errors::FSError,
     info::{DirectoryContentInfo, FileLikeInfo, UnixPermission},
     path::Path,
     vfs::{FSResult, WrappedDirectory, WrappedFile, WrappedSymlink},
@@ -26,6 +27,9 @@ pub trait File: Send + Sync {
     fn read(&mut self, buffer: &mut [u8]) -> FSResult<usize>;
     fn write(&mut self, buffer: &[u8]) -> FSResult<usize>;
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize>;
+    fn chmod(&self, _mode: u32) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
 }
 
 pub trait Directory: Send + Sync {
@@ -43,11 +47,17 @@ pub trait Directory: Send + Sync {
     fn create(&self, info: DirectoryContentInfo) -> FSResult<()>;
     fn delete(&self, name: &str) -> FSResult<()>;
     fn get(&self, name: &str) -> FSResult<FileLike>;
+    fn chmod(&self, _mode: u32) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
 }
 
 pub trait Symlink: Send + Sync {
     fn info(&self) -> FSResult<FileLikeInfo>;
     fn target(&self) -> FSResult<Path>;
+    fn chmod(&self, _mode: u32) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
 }
 
 #[derive(Clone, Debug)]
