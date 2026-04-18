@@ -1,4 +1,5 @@
 use alloc::sync::Arc;
+use core::fmt;
 use spin::Mutex;
 
 use crate::{
@@ -8,7 +9,7 @@ use crate::{
         FileFlags, Object,
         config::ConfigurateRequest,
         error::ObjectError,
-        misc::ObjectResult,
+        misc::{ObjectRef, ObjectResult},
         queue_helpers::{copy_from_queue, read_or_block},
         traits::{Configuratable, Readable, Statable},
     },
@@ -19,24 +20,37 @@ use crate::{
 use super::{
     device_info::EventDeviceKind,
     ioctl::handle_ioctl,
-    queue::{EventDeviceState, INPUT_EVENT_SIZE},
+    queue::{EventDeviceHubState, EventDeviceState, INPUT_EVENT_SIZE},
 };
 
-#[derive(Debug)]
-pub struct EventDeviceObject {
+pub struct EventDeviceHub {
+    pub(super) kind: EventDeviceKind,
+    pub(super) state: Mutex<EventDeviceHubState>,
+    pub(super) clients: Mutex<alloc::vec::Vec<alloc::sync::Weak<EventDeviceClientObject>>>,
+}
+
+pub struct EventDeviceClientObject {
     pub(super) kind: EventDeviceKind,
     pub(super) flags: Mutex<FileFlags>,
     pub(super) state: Mutex<EventDeviceState>,
 }
 
 lazy_static::lazy_static! {
-    pub static ref KEYBOARD_EVENT_DEVICE: Arc<EventDeviceObject> =
-        Arc::new(EventDeviceObject::new(EventDeviceKind::Keyboard));
-    pub static ref MOUSE_EVENT_DEVICE: Arc<EventDeviceObject> =
-        Arc::new(EventDeviceObject::new(EventDeviceKind::Mouse));
+    pub static ref KEYBOARD_EVENT_DEVICE: Arc<EventDeviceHub> =
+        Arc::new(EventDeviceHub::new(EventDeviceKind::Keyboard));
+    pub static ref MOUSE_EVENT_DEVICE: Arc<EventDeviceHub> =
+        Arc::new(EventDeviceHub::new(EventDeviceKind::Mouse));
 }
 
-impl EventDeviceObject {
+pub fn open_event_device(name: &str) -> Option<ObjectRef> {
+    match name {
+        "event-kbd" => Some(KEYBOARD_EVENT_DEVICE.open() as ObjectRef),
+        "event-mouse" => Some(MOUSE_EVENT_DEVICE.open() as ObjectRef),
+        _ => None,
+    }
+}
+
+impl EventDeviceClientObject {
     pub(super) fn wake_type(&self) -> WakeType {
         match self.kind {
             EventDeviceKind::Keyboard => WakeType::Keyboard,
@@ -44,21 +58,30 @@ impl EventDeviceObject {
         }
     }
 
-    pub(super) fn wake_readers(&self) {
+    pub(super) fn wake_readers(self: &Arc<Self>) {
         let mut manager = THREAD_MANAGER.get().unwrap().lock();
         match self.kind {
             EventDeviceKind::Keyboard => manager.wake_keyboard(),
             EventDeviceKind::Mouse => manager.wake_mouse(),
         }
-        let object: crate::object::misc::ObjectRef = match self.kind {
-            EventDeviceKind::Keyboard => KEYBOARD_EVENT_DEVICE.clone(),
-            EventDeviceKind::Mouse => MOUSE_EVENT_DEVICE.clone(),
-        };
+        let object: ObjectRef = self.clone();
         manager.wake_poller(object, PollableEvent::CanBeRead);
     }
 }
 
-impl Object for EventDeviceObject {
+impl fmt::Debug for EventDeviceHub {
+    fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Ok(())
+    }
+}
+
+impl fmt::Debug for EventDeviceClientObject {
+    fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Ok(())
+    }
+}
+
+impl Object for EventDeviceClientObject {
     fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
         Ok(*self.flags.lock())
     }
@@ -74,7 +97,7 @@ impl Object for EventDeviceObject {
     impl_cast_function!("statable", Statable);
 }
 
-impl Readable for EventDeviceObject {
+impl Readable for EventDeviceClientObject {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
         if buffer.len() < INPUT_EVENT_SIZE {
             return Err(ObjectError::InvalidArguments);
@@ -99,7 +122,7 @@ impl Readable for EventDeviceObject {
     }
 }
 
-impl Configuratable for EventDeviceObject {
+impl Configuratable for EventDeviceClientObject {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
         match request {
             ConfigurateRequest::RawIoctl { request, arg } => {
@@ -110,13 +133,14 @@ impl Configuratable for EventDeviceObject {
     }
 }
 
-impl Pollable for EventDeviceObject {
+impl Pollable for EventDeviceClientObject {
     fn is_event_ready(&self, event: PollableEvent) -> bool {
-        matches!(event, PollableEvent::CanBeRead) && self.state.lock().queue.len() >= INPUT_EVENT_SIZE
+        matches!(event, PollableEvent::CanBeRead)
+            && self.state.lock().queue.len() >= INPUT_EVENT_SIZE
     }
 }
 
-impl Statable for EventDeviceObject {
+impl Statable for EventDeviceClientObject {
     fn stat(&self) -> LinuxStat {
         let rdev = (13u64 << 8) | self.kind.minor();
         LinuxStat::char_device_with_rdev(0o660, rdev)

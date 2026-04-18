@@ -104,6 +104,10 @@ pub(super) fn btn_right() -> u16 {
     BTN_RIGHT
 }
 
+pub(super) fn btn_middle() -> u16 {
+    BTN_MIDDLE
+}
+
 fn set_bit(bits: &mut [u8], bit: usize) {
     let index = bit / 8;
     if index < bits.len() {
