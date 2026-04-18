@@ -50,7 +50,7 @@ pub trait Symlink: Send + Sync {
     fn target(&self) -> FSResult<Path>;
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum DirectoryContentType {
     File,
     Directory,
