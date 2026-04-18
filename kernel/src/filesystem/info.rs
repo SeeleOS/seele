@@ -87,12 +87,17 @@ impl LinuxStat {
     }
 
     pub fn char_device(permission: u32) -> Self {
+        Self::char_device_with_rdev(permission, 0)
+    }
+
+    pub fn char_device_with_rdev(permission: u32, rdev: u64) -> Self {
         pub const S_IFCHR: u32 = 0o020000;
 
         Self {
             st_dev: 1,
             st_nlink: 1,
             st_mode: S_IFCHR | permission,
+            st_rdev: rdev,
             st_blksize: 4096,
             ..Default::default()
         }
