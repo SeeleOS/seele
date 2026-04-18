@@ -34,17 +34,6 @@ impl Future for ThreadFuture {
         self: core::pin::Pin<&mut Self>,
         cx: &mut core::task::Context<'_>,
     ) -> core::task::Poll<Self::Output> {
-        {
-            let thread = self.0.lock();
-            if thread.id.0 == 2 {
-                crate::s_println!(
-                    "thread future poll start: pid={} tid={} state={:?}",
-                    thread.parent.lock().pid.0,
-                    thread.id.0,
-                    thread.state
-                );
-            }
-        }
         let (thread_snapshot, executor_snapshot) = {
             without_interrupts(|| {
                 let mut manager = THREAD_MANAGER.get().unwrap().lock();
@@ -97,18 +86,6 @@ impl Future for ThreadFuture {
         let _ = process.lock().process_signals();
 
         let state = self.0.lock().state.clone();
-
-        {
-            let thread = self.0.lock();
-            if thread.id.0 == 2 {
-                crate::s_println!(
-                    "thread future poll end: pid={} tid={} state={:?}",
-                    thread.parent.lock().pid.0,
-                    thread.id.0,
-                    state
-                );
-            }
-        }
 
         match state {
             State::Zombie => {
