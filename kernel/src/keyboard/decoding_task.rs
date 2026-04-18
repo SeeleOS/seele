@@ -5,8 +5,8 @@ use pc_keyboard::DecodedKey;
 use spin::Mutex;
 
 use crate::keyboard::{
-    char_processing::process_char, ps2::_PS2_KEYBOARD, raw_key_processing::process_key,
-    scancode_stream::ScancodeStream,
+    char_processing::process_char, encode_linux_raw_byte, ps2::_PS2_KEYBOARD,
+    raw_key_processing::process_key, scancode_stream::ScancodeStream,
 };
 use crate::{
     evdev::push_keyboard_event,
@@ -27,6 +27,13 @@ pub async fn process_keypresses() {
 
     // loop through scancodes infinitely
     while let Some(scancode) = scancodes.next().await {
+        RAW_QUEUE
+            .get_or_init(|| Mutex::new(VecDeque::new()))
+            .lock()
+            .push_back(encode_linux_raw_byte(scancode));
+        THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+        wake_tty_poller_readable();
+
         let decoded_key = {
             let mut keyboard = _PS2_KEYBOARD.lock();
 
