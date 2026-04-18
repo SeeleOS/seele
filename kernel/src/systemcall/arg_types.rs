@@ -76,7 +76,11 @@ add_syscall_arg_type!(Vec<String>, val, {
 });
 
 add_syscall_arg_type!(String, val, {
-    String::k_from(val as *const u8).map_err(|err| err.as_syscall_error())
+    if val == 0 {
+        Err(SyscallError::BadAddress)
+    } else {
+        String::k_from(val as *const u8).map_err(|err| err.as_syscall_error())
+    }
 });
 
 add_syscall_arg_type!(bool, val, { Ok(val != 0) });
