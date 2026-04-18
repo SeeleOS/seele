@@ -9,3 +9,5 @@
 /disk.img
 /sysroot
 /libc-test
+/third_party
+/xserver
