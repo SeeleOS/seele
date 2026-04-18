@@ -11,6 +11,7 @@ pub const NAME: &str = "Seele";
 pub mod acpi;
 pub mod drivers;
 pub mod elfloader;
+pub mod evdev;
 pub mod filesystem;
 pub mod interrupts;
 pub mod keyboard;

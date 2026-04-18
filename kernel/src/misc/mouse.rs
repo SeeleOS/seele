@@ -14,6 +14,7 @@ use x86_64::{
 };
 
 use crate::{
+    evdev::{init_mouse_packet_decoder, process_ps2_mouse_packet},
     impl_cast_function,
     interrupts::hardware_interrupt::send_eoi,
     object::{
@@ -58,6 +59,7 @@ impl Stream for MouseInterruptStream {
 }
 
 pub fn init() {
+    init_mouse_packet_decoder();
     Mouse::new().init().unwrap();
 }
 
@@ -79,6 +81,7 @@ pub extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptSta
     without_interrupts(|| {
         MOUSE_PACKETS.lock().push_back(packet).unwrap();
     });
+    process_ps2_mouse_packet(packet);
 
     MOUSE_PENDING.store(true, Ordering::Release);
     MOUSE_WAKER.wake();

@@ -1,8 +1,13 @@
-use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc};
 
 use crate::{
-    misc::{devices::DevNull, fb_object::FramebufferObject, mouse::PS2MouseObject},
-    object::{Object, misc::ObjectRef, tty_device::get_default_tty},
+    evdev::{KEYBOARD_EVENT_DEVICE, MOUSE_EVENT_DEVICE},
+    misc::{
+        devices::DevNull,
+        fb_object::FramebufferObject,
+        mouse::PS2MouseObject,
+    },
+    object::{misc::ObjectRef, tty_device::get_default_tty},
     systemcall::utils::{SyscallError, SyscallResult},
 };
 
@@ -14,6 +19,8 @@ lazy_static::lazy_static! {
         devices.insert("devnull", Arc::new(DevNull) as ObjectRef);
         devices.insert("tty", get_default_tty() as ObjectRef);
         devices.insert("ps2mouse", Arc::new(PS2MouseObject::default()) as ObjectRef);
+        devices.insert("event-kbd", KEYBOARD_EVENT_DEVICE.clone() as ObjectRef);
+        devices.insert("event-mouse", MOUSE_EVENT_DEVICE.clone() as ObjectRef);
 
         devices
     };
