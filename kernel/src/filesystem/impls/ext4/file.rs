@@ -1,22 +1,37 @@
 use alloc::string::String;
 use core::any::Any;
 
-use ext4plus::{file::File as Ext4InnerFile, inode::Inode};
+use ext4plus::{
+    Ext4,
+    FollowSymlinks,
+    file::File as Ext4InnerFile,
+    inode::{Inode, InodeMode},
+    path::Path,
+};
 
 use crate::filesystem::{
     errors::FSError,
-    info::{self, FileLikeInfo, UnixPermission},
+    info::{FileLikeInfo, UnixPermission},
     vfs_traits::{File, FileLikeType, Whence},
 };
 
 pub struct Ext4File {
     name: String,
+    path: String,
+    fs: Ext4,
     inner: Ext4InnerFile,
 }
 
 impl Ext4File {
-    pub fn new(name: String, inner: Ext4InnerFile) -> Self {
-        Self { name, inner }
+    const FILE_TYPE_BITS: u16 = 0o170000;
+
+    pub fn new(name: String, path: String, fs: Ext4, inner: Ext4InnerFile) -> Self {
+        Self {
+            name,
+            path,
+            fs,
+            inner,
+        }
     }
 
     fn size(&self) -> Result<usize, FSError> {
@@ -26,6 +41,19 @@ impl Ext4File {
 
     pub fn inode(&self) -> Inode {
         self.inner.inode().clone()
+    }
+
+    pub fn chmod(&self, mode: InodeMode) -> Result<(), FSError> {
+        let mut inode = self
+            .fs
+            .path_to_inode(Path::new(self.path.as_str()), FollowSymlinks::All)
+            .map_err(FSError::from)?;
+        let merged_mode =
+            (inode.mode().bits() & Self::FILE_TYPE_BITS) | (mode.bits() & !Self::FILE_TYPE_BITS);
+        let merged_mode = InodeMode::from_bits(merged_mode).ok_or(FSError::Other)?;
+        inode.set_mode(merged_mode).map_err(FSError::from)?;
+        inode.write(&self.fs).map_err(FSError::from)?;
+        Ok(())
     }
 }
 
