@@ -156,6 +156,37 @@ define_syscall!(Accept, |socket: ObjectRef,
     Ok(fd)
 });
 
+define_syscall!(Sendto, |socket: ObjectRef,
+                         buffer: *const u8,
+                         len: usize,
+                         _flags: u64,
+                         address: *const u8,
+                         address_len: u32| {
+    if len > 0 && buffer.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let socket = socket.as_unix_socket()?;
+    if !address.is_null() {
+        let path = path_from_sockaddr(address, address_len)?;
+        if matches!(
+            &*socket.state.lock(),
+            crate::socket::UnixSocketState::Unbound
+        ) {
+            socket
+                .connect(path)
+                .map_err(crate::object::error::ObjectError::from)?;
+        }
+    }
+
+    let buffer = unsafe { slice::from_raw_parts(buffer, len) };
+    let written = socket
+        .write_socket(buffer)
+        .map_err(crate::object::error::ObjectError::from)?;
+
+    Ok(written)
+});
+
 define_syscall!(
     Recvfrom,
     |socket: ObjectRef,

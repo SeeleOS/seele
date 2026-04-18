@@ -33,6 +33,7 @@ pub enum SyscallNumber {
     Socket = 41,
     Connect = 42,
     Accept = 43,
+    Sendto = 44,
     Recvfrom = 45,
     Recvmsg = 47,
     Shutdown = 48,
