@@ -449,10 +449,7 @@ define_syscall!(Clone, |flags: u64,
             if parent_tid == 0 {
                 return Err(SyscallError::BadAddress);
             }
-            current
-                .lock()
-                .addrspace
-                .write(parent_tid as *mut u8, &(pid.0 as i32))?;
+            user_safe::write(parent_tid as *mut u8, &(pid.0 as i32))?;
         }
 
         if clone_flags.intersects(CloneFlags::CHILD_SETTID | CloneFlags::CHILD_CLEARTID) {
