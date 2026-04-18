@@ -1,17 +1,16 @@
 use crate::{
     define_syscall,
     filesystem::{
-        errors::FSError,
-        info::LinuxStat,
-        misc::{smart_navigate, smart_resolve_path},
-        object::FileLikeObject,
-        path::Path,
-        vfs::VirtualFS,
-        vfs_traits::FileLikeType,
+        errors::FSError, info::LinuxStat, misc::smart_resolve_path, object::FileLikeObject,
+        path::Path, vfs::VirtualFS, vfs_traits::FileLikeType,
     },
-    memory::{addrspace::mem_area::Data, user_safe},
+    memory::user_safe,
     misc::{c_types::CString, others::KernelFrom},
-    object::{Object, misc::{ObjectRef, get_object_current_process}},
+    object::{
+        FileFlags, Object,
+        error::ObjectError,
+        misc::{ObjectRef, get_object_current_process},
+    },
     process::{manager::get_current_process, misc::with_current_process},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
@@ -99,6 +98,7 @@ bitflags! {
     struct OpenFlags: i32 {
         const CREAT = 0x40;
         const EXCL = 0x80;
+        const NONBLOCK = 0o4_000;
         const DIRECTORY = 0o200000;
         const NOFOLLOW = 0o400000;
         const CLOEXEC = 0o2000000;
@@ -107,45 +107,11 @@ bitflags! {
 }
 
 fn path_from_raw(path: CString) -> Result<String, SyscallError> {
+    if path.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
     String::k_from(path).map_err(|_| SyscallError::InvalidArguments)
-}
-
-fn should_trace_path(path: &Path) -> bool {
-    let path = path.clone().as_string();
-    path.starts_with("/dev/input/event")
-        || path.starts_with("/sys/")
-        || path == "/sys"
-        || path.starts_with("/run/")
-        || path == "/run"
-        || path.starts_with("/run/udev/")
-        || path.starts_with("/proc/self")
-        || path == "/proc/mounts"
-        || path.ends_with("/mountinfo")
-}
-
-fn trace_path_op(op: &str, path: &Path) {
-    if should_trace_path(path) {
-        log::info!("path-trace: {} {}", op, path.clone().as_string());
-    }
-}
-
-fn trace_path_result<T>(op: &str, path: &Path, result: &Result<T, SyscallError>) {
-    if should_trace_path(path)
-        && let Err(err) = result
-    {
-        log::info!("path-trace: {} {} -> {:?}", op, path.clone().as_string(), err);
-    }
-}
-
-fn trace_stat_value(path: &Path, stat: &LinuxStat) {
-    if should_trace_path(path) {
-        log::info!(
-            "path-trace: stat-value {} mode={:#o} rdev={:#x}",
-            path.clone().as_string(),
-            stat.st_mode,
-            stat.st_rdev
-        );
-    }
 }
 
 fn path_is_relative_to_cwd(dirfd: i32) -> Result<bool, SyscallError> {
@@ -250,7 +216,6 @@ fn linux_statfs(f_type: i64) -> LinuxStatFs {
 }
 
 fn readlink_impl(path: Path, out_buf: *mut u8, out_len: usize) -> Result<usize, SyscallError> {
-    trace_path_op("readlink", &path);
     let target = match VirtualFS.lock().open_nofollow(path)?.read_link() {
         Ok(target) => target,
         Err(FSError::NotASymlink) => return Err(SyscallError::InvalidArguments),
@@ -300,16 +265,13 @@ fn stat_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<LinuxStat, Sysc
     }
 
     let path = resolve_path_at(dirfd, path_str)?;
-    trace_path_op("stat", &path);
     let open_result = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
         VirtualFS.lock().open_nofollow(path.clone())
     } else {
         VirtualFS.lock().open(path.clone())
     };
-    trace_path_result("stat-open", &path, &open_result.as_ref().map(|_| ()).map_err(|err| err.clone().into()));
     let object: ObjectRef = Arc::new(open_result?);
     let stat = object.as_statable()?.stat();
-    trace_stat_value(&path, &stat);
     Ok(stat)
 }
 
@@ -326,13 +288,11 @@ define_syscall!(OpenAt, |dirfd: i32,
     let path_only = flags.contains(OpenFlags::PATH);
 
     let path = resolve_path_at(dirfd, &path_str)?;
-    trace_path_op("open", &path);
     let open_result = if nofollow {
         VirtualFS.lock().open_nofollow(path.clone())
     } else {
         VirtualFS.lock().open(path.clone())
     };
-    trace_path_result("open", &path, &open_result.as_ref().map(|_| ()).map_err(|err| err.clone().into()));
     let object;
     if let Ok(file) = open_result {
         if create && flags.contains(OpenFlags::EXCL) {
@@ -341,10 +301,8 @@ define_syscall!(OpenAt, |dirfd: i32,
         object = Arc::new(file);
     } else if create {
         let create_result = VirtualFS.lock().create_file(path.clone());
-        trace_path_result("create", &path, &create_result.as_ref().map(|_| ()).map_err(|err| err.clone().into()));
         create_result?;
         let reopen_result = VirtualFS.lock().open(path.clone());
-        trace_path_result("open", &path, &reopen_result.as_ref().map(|_| ()).map_err(|err| err.clone().into()));
         object = Arc::new(reopen_result?);
     } else {
         return Err(SyscallError::FileNotFound);
@@ -356,6 +314,12 @@ define_syscall!(OpenAt, |dirfd: i32,
     }
     if directory_only && !matches!(info.file_like_type, FileLikeType::Directory) {
         return Err(SyscallError::NotADirectory);
+    }
+    if flags.contains(OpenFlags::NONBLOCK) {
+        match object.clone().set_flags(FileFlags::NONBLOCK) {
+            Ok(()) | Err(ObjectError::Unimplemented) => {}
+            Err(err) => return Err(err.into()),
+        }
     }
 
     let slot = current_process.lock().alloc_object_slot();
@@ -378,16 +342,13 @@ define_syscall!(Access, |path: CString, mode: i32| {
     check_access_mode(mode)?;
     let path_str = path_from_raw(path)?;
     let path = resolve_path_at(AT_FDCWD, &path_str)?;
-    trace_path_op("access", &path);
-    let open_result = VirtualFS.lock().open(path.clone());
-    trace_path_result("access", &path, &open_result.as_ref().map(|_| ()).map_err(|err| err.clone().into()));
+    let open_result = VirtualFS.lock().open(path);
     let _ = open_result?;
     Ok(0)
 });
 
 define_syscall!(Chdir, |dir: String| {
     let path = Path::new(&dir).as_absolute();
-    trace_path_op("chdir", &path.as_normal());
     get_current_process().lock().change_directory(path)?;
     Ok(0)
 });
@@ -399,7 +360,6 @@ define_syscall!(Fchdir, |fd: u64| {
         return Err(SyscallError::NotADirectory);
     }
 
-    trace_path_op("fchdir", &file_like.path());
     get_current_process()
         .lock()
         .change_directory(file_like.path().as_absolute())?;
@@ -480,11 +440,6 @@ define_syscall!(Newfstatat, |dirfd: i32,
                              linux_stat_ptr: *mut LinuxStat,
                              flags: i32| {
     let path = path as CString;
-    if path.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-
-    let path_str = path_from_raw(path)?;
     let flags = AtFlags::from_bits_truncate(flags);
     if flags.bits()
         != flags.bits()
@@ -492,6 +447,15 @@ define_syscall!(Newfstatat, |dirfd: i32,
     {
         return Err(SyscallError::NoSyscall);
     }
+    let path_str = if path.is_null() {
+        if flags.contains(AtFlags::EMPTY_PATH) {
+            String::new()
+        } else {
+            return Err(SyscallError::BadAddress);
+        }
+    } else {
+        path_from_raw(path)?
+    };
 
     let stat = stat_at(dirfd, &path_str, flags)?;
 
@@ -504,14 +468,25 @@ define_syscall!(Statx, |dirfd: i32,
                         flags: i32,
                         _mask: u32,
                         statx_ptr: *mut LinuxStatx| {
-    let path_str = path_from_raw(path)?;
     let flags = AtFlags::from_bits_truncate(flags);
-    let allowed_flags =
-        (AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT | AtFlags::EMPTY_PATH).bits()
-            | AT_STATX_FORCE_SYNC
-            | AT_STATX_DONT_SYNC;
+    let allowed_flags = (AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT | AtFlags::EMPTY_PATH)
+        .bits()
+        | AT_STATX_FORCE_SYNC
+        | AT_STATX_DONT_SYNC;
     if flags.bits() != flags.bits() & allowed_flags {
         return Err(SyscallError::NoSyscall);
+    }
+    let path_str = if path.is_null() {
+        if flags.contains(AtFlags::EMPTY_PATH) {
+            String::new()
+        } else {
+            return Err(SyscallError::BadAddress);
+        }
+    } else {
+        path_from_raw(path)?
+    };
+    if statx_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
     }
 
     let stat = stat_at(dirfd, &path_str, flags)?;
@@ -561,9 +536,7 @@ define_syscall!(Faccessat, |dirfd: i32,
     check_access_mode(mode)?;
     let path_str = path_from_raw(path)?;
     let path = resolve_path_at(dirfd, &path_str)?;
-    trace_path_op("faccessat", &path);
-    let open_result = VirtualFS.lock().open(path.clone());
-    trace_path_result("faccessat", &path, &open_result.as_ref().map(|_| ()).map_err(|err| err.clone().into()));
+    let open_result = VirtualFS.lock().open(path);
     let _ = open_result?;
     Ok(0)
 });
@@ -616,9 +589,7 @@ define_syscall!(MkdirAt, |dirfd: i32, path: CString, _mode: u32| {
         false => Path::new(&path),
     };
 
-    trace_path_op("mkdir", &path);
-    let result = VirtualFS.lock().create_dir(path.clone());
-    trace_path_result("mkdir", &path, &result.as_ref().map(|_| ()).map_err(|err| err.clone().into()));
+    let result = VirtualFS.lock().create_dir(path);
     result?;
 
     Ok(0)
@@ -637,7 +608,6 @@ define_syscall!(Mkdir, |path: CString, mode: u32| {
 define_syscall!(Statfs, |path: CString, buf: *mut LinuxStatFs| {
     let path = path_from_raw(path)?;
     let path = resolve_path_at(AT_FDCWD, &path)?;
-    trace_path_op("statfs", &path);
 
     let _ = VirtualFS.lock().open(path.clone())?;
     let statfs = linux_statfs(filesystem_magic_for_path(&path)?);
@@ -649,7 +619,6 @@ define_syscall!(Statfs, |path: CString, buf: *mut LinuxStatFs| {
 define_syscall!(Fstatfs, |fd: u64, buf: *mut LinuxStatFs| {
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
     let file_like = object.as_file_like()?;
-    trace_path_op("fstatfs", &file_like.path());
     let statfs = linux_statfs(filesystem_magic_for_file_like(&file_like)?);
     user_safe::write(buf, &statfs)?;
     Ok(0)
