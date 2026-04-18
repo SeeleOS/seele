@@ -1,8 +1,24 @@
+mod keyboard;
+mod mouse;
+
 use crate::filesystem::{
     path::Path,
-    staticfs::{StaticDirEntry, StaticDirectoryNode, StaticFs, StaticNode, StaticSymlinkNode},
+    staticfs::{
+        StaticDirEntry, StaticDirectoryNode, StaticFs, StaticNode, StaticSymlinkNode,
+    },
     vfs::FSResult,
     vfs_traits::{FileLike, FileSystem},
+};
+
+use self::{
+    keyboard::{
+        SYS_CLASS_INPUT_EVENT0_NODE, SYS_CLASS_INPUT_INPUT0_NODE, SYS_DEV_CHAR_13_64_NODE,
+        SYS_SERIO0_NODE,
+    },
+    mouse::{
+        SYS_CLASS_INPUT_EVENT1_NODE, SYS_CLASS_INPUT_INPUT1_NODE, SYS_DEV_CHAR_13_65_NODE,
+        SYS_SERIO1_NODE,
+    },
 };
 
 static SYS_CLASS_GRAPHICS_FB0_DEVICE_SUBSYSTEM_NODE: StaticNode =
@@ -50,10 +66,42 @@ static SYS_CLASS_GRAPHICS_NODE: StaticNode = StaticNode::Directory(StaticDirecto
     entries: SYS_CLASS_GRAPHICS_ENTRIES,
 });
 
-static SYS_CLASS_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
-    name: "graphics",
-    node: &SYS_CLASS_GRAPHICS_NODE,
-}];
+static SYS_CLASS_INPUT_ENTRIES: &[StaticDirEntry] = &[
+    StaticDirEntry {
+        name: "event0",
+        node: &SYS_CLASS_INPUT_EVENT0_NODE,
+    },
+    StaticDirEntry {
+        name: "event1",
+        node: &SYS_CLASS_INPUT_EVENT1_NODE,
+    },
+    StaticDirEntry {
+        name: "input0",
+        node: &SYS_CLASS_INPUT_INPUT0_NODE,
+    },
+    StaticDirEntry {
+        name: "input1",
+        node: &SYS_CLASS_INPUT_INPUT1_NODE,
+    },
+];
+
+static SYS_CLASS_INPUT_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "input",
+    inode: 0x200f,
+    mode: 0o040755,
+    entries: SYS_CLASS_INPUT_ENTRIES,
+});
+
+static SYS_CLASS_ENTRIES: &[StaticDirEntry] = &[
+    StaticDirEntry {
+        name: "graphics",
+        node: &SYS_CLASS_GRAPHICS_NODE,
+    },
+    StaticDirEntry {
+        name: "input",
+        node: &SYS_CLASS_INPUT_NODE,
+    },
+];
 
 static SYS_CLASS_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     name: "class",
@@ -69,16 +117,113 @@ static SYS_BUS_PLATFORM_NODE: StaticNode = StaticNode::Directory(StaticDirectory
     entries: &[],
 });
 
-static SYS_BUS_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
-    name: "platform",
-    node: &SYS_BUS_PLATFORM_NODE,
-}];
+static SYS_BUS_SERIO_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "serio",
+    inode: 0x2009,
+    mode: 0o040755,
+    entries: &[],
+});
+
+static SYS_BUS_ENTRIES: &[StaticDirEntry] = &[
+    StaticDirEntry {
+        name: "platform",
+        node: &SYS_BUS_PLATFORM_NODE,
+    },
+    StaticDirEntry {
+        name: "serio",
+        node: &SYS_BUS_SERIO_NODE,
+    },
+];
 
 static SYS_BUS_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     name: "bus",
     inode: 0x2007,
     mode: 0o040755,
     entries: SYS_BUS_ENTRIES,
+});
+
+static SYS_DEV_CHAR_ENTRIES: &[StaticDirEntry] = &[
+    StaticDirEntry {
+        name: "13:64",
+        node: &SYS_DEV_CHAR_13_64_NODE,
+    },
+    StaticDirEntry {
+        name: "13:65",
+        node: &SYS_DEV_CHAR_13_65_NODE,
+    },
+];
+
+static SYS_DEV_CHAR_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "char",
+    inode: 0x201f,
+    mode: 0o040755,
+    entries: SYS_DEV_CHAR_ENTRIES,
+});
+
+static SYS_DEV_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
+    name: "char",
+    node: &SYS_DEV_CHAR_NODE,
+}];
+
+static SYS_DEV_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "dev",
+    inode: 0x201e,
+    mode: 0o040755,
+    entries: SYS_DEV_ENTRIES,
+});
+
+static SYS_DEVICES_PLATFORM_I8042_SUBSYSTEM_NODE: StaticNode =
+    StaticNode::Symlink(StaticSymlinkNode {
+        name: "subsystem",
+        inode: 0x2030,
+        mode: 0o120777,
+        target: "/sys/bus/platform",
+    });
+
+static SYS_DEVICES_PLATFORM_I8042_ENTRIES: &[StaticDirEntry] = &[
+    StaticDirEntry {
+        name: "subsystem",
+        node: &SYS_DEVICES_PLATFORM_I8042_SUBSYSTEM_NODE,
+    },
+    StaticDirEntry {
+        name: "serio0",
+        node: &SYS_SERIO0_NODE,
+    },
+    StaticDirEntry {
+        name: "serio1",
+        node: &SYS_SERIO1_NODE,
+    },
+];
+
+static SYS_DEVICES_PLATFORM_I8042_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "i8042",
+    inode: 0x2061,
+    mode: 0o040755,
+    entries: SYS_DEVICES_PLATFORM_I8042_ENTRIES,
+});
+
+static SYS_DEVICES_PLATFORM_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
+    name: "i8042",
+    node: &SYS_DEVICES_PLATFORM_I8042_NODE,
+}];
+
+static SYS_DEVICES_PLATFORM_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "platform",
+    inode: 0x2062,
+    mode: 0o040755,
+    entries: SYS_DEVICES_PLATFORM_ENTRIES,
+});
+
+static SYS_DEVICES_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
+    name: "platform",
+    node: &SYS_DEVICES_PLATFORM_NODE,
+}];
+
+static SYS_DEVICES_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "devices",
+    inode: 0x2063,
+    mode: 0o040755,
+    entries: SYS_DEVICES_ENTRIES,
 });
 
 static SYS_ROOT_ENTRIES: &[StaticDirEntry] = &[
@@ -89,6 +234,14 @@ static SYS_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "bus",
         node: &SYS_BUS_NODE,
+    },
+    StaticDirEntry {
+        name: "dev",
+        node: &SYS_DEV_NODE,
+    },
+    StaticDirEntry {
+        name: "devices",
+        node: &SYS_DEVICES_NODE,
     },
 ];
 
