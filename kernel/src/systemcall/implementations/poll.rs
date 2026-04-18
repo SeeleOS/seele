@@ -2,6 +2,7 @@ use alloc::{collections::BTreeMap, sync::Arc};
 
 use crate::{
     define_syscall,
+    filesystem::object::poll_identity_object,
     misc::{error::AsSyscallError, time::Time},
     object::misc::get_object_current_process,
     polling::{event::PollableEvent, poller::PollerObject},
@@ -152,7 +153,7 @@ fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallE
         return Ok(0);
     }
 
-    let poller = Arc::new(PollerObject::new());
+    let poller = PollerObject::new();
     let mut active = 0usize;
     let mut invalid = 0usize;
 
@@ -174,13 +175,15 @@ fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallE
             }
         };
 
-        if object.clone().as_pollable().is_err() {
+        let poll_object = poll_identity_object(object.clone());
+
+        if poll_object.clone().as_pollable().is_err() {
             pfd.revents |= pfd.events & (READABLE_BITS | WRITABLE_BITS);
             continue;
         }
 
         for event in kernel_events_for(pfd.events).into_iter().flatten() {
-            poller.register_obj(object.clone(), event, index as u64);
+            poller.register_obj(poll_object.clone(), event, index as u64);
         }
     }
 
