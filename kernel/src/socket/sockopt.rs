@@ -18,6 +18,28 @@ struct SocketUcred {
 }
 
 impl UnixSocketObject {
+    pub fn setsockopt(
+        &self,
+        level: u64,
+        option_name: u64,
+        option_value: &[u8],
+    ) -> SocketResult<()> {
+        if level != SOL_SOCKET {
+            return Err(SocketError::InvalidArguments);
+        }
+
+        match option_name {
+            SO_REUSEADDR | SO_PASSCRED | SO_SNDBUF | SO_RCVBUF => {
+                let _ = Self::decode_i32(option_value)?;
+                Ok(())
+            }
+            SO_ERROR | SO_TYPE | SO_ACCEPTCONN | SO_DOMAIN | SO_PROTOCOL | SO_PEERCRED => {
+                Err(SocketError::InvalidArguments)
+            }
+            _ => Err(SocketError::InvalidArguments),
+        }
+    }
+
     pub fn getsockopt(
         &self,
         level: u64,
@@ -63,6 +85,18 @@ impl UnixSocketObject {
         }
 
         Ok(value.to_ne_bytes().to_vec())
+    }
+
+    fn decode_i32(option_value: &[u8]) -> SocketResult<i32> {
+        if option_value.len() < mem::size_of::<i32>() {
+            return Err(SocketError::InvalidArguments);
+        }
+
+        Ok(i32::from_ne_bytes(
+            option_value[..mem::size_of::<i32>()]
+                .try_into()
+                .map_err(|_| SocketError::InvalidArguments)?,
+        ))
     }
 
     fn encode_ucred(option_len: usize, value: SocketUcred) -> SocketResult<Vec<u8>> {
