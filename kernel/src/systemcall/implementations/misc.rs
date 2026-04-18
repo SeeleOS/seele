@@ -11,7 +11,9 @@ use crate::memory::{
 use crate::misc::time::Time as KernelTime;
 use crate::misc::{others::protection_to_page_flags, utsname::UtsName};
 use crate::object::Object;
-use crate::object::linux_anon::{InotifyObject, TimerFdObject, wake_linux_io_waiters};
+use crate::object::linux_anon::{
+    EventFdObject, InotifyObject, TimerFdObject, wake_linux_io_waiters,
+};
 use crate::process::manager::{MANAGER, get_current_process};
 use crate::signal::{
     action::{SignalAction, SignalHandlingType},
@@ -107,6 +109,9 @@ const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
 const LINUX_CAPABILITY_U32S_3: usize = 2;
 const TFD_TIMER_ABSTIME: i32 = 1;
 const TFD_NONBLOCK: i32 = 0o4_000;
+const EFD_SEMAPHORE: i32 = 0x1;
+const EFD_NONBLOCK: i32 = 0o4_000;
+const EFD_ALLOWED_FLAGS: i32 = EFD_SEMAPHORE | EFD_NONBLOCK | 0o2_000_000;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -305,6 +310,23 @@ define_syscall!(InotifyInit1, |flags: i32| {
     }
     let fd = get_current_process().lock().push_object(object);
     Ok(fd)
+});
+
+fn create_eventfd(initval: u32, flags: i32) -> Result<usize, SyscallError> {
+    if (flags & !EFD_ALLOWED_FLAGS) != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let fd = get_current_process()
+        .lock()
+        .push_object(EventFdObject::new(initval as u64, flags));
+    Ok(fd)
+}
+
+define_syscall!(Eventfd, |initval: u32| { create_eventfd(initval, 0) });
+
+define_syscall!(Eventfd2, |initval: u32, flags: i32| {
+    create_eventfd(initval, flags)
 });
 
 define_syscall!(
@@ -680,13 +702,6 @@ define_syscall!(Clone, |flags: u64,
         }
 
         let tid = thread.lock().id.0 as i32;
-        crate::s_println!(
-            "clone thread: pid={} tid={} flags={:#x} child_tid={:#x}",
-            process.lock().pid.0,
-            tid,
-            flags.bits(),
-            child_tid as usize
-        );
 
         if flags.contains(CloneFlags::PARENT_SETTID) {
             user_safe::write(parent_tid, &tid)?;
@@ -797,7 +812,7 @@ define_syscall!(Time, |time_ptr: *mut i64| {
 define_syscall!(
     SchedGetaffinity,
     |pid: i32, cpusetsize: usize, mask_ptr: *mut u8| {
-        if pid != 0 {
+        if pid < 0 {
             return Err(SyscallError::InvalidArguments);
         }
         if cpusetsize < core::mem::size_of::<usize>() {
