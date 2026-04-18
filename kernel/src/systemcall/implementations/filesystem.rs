@@ -1,5 +1,3 @@
-use core::slice;
-
 use crate::{
     define_syscall,
     filesystem::{
@@ -9,14 +7,14 @@ use crate::{
         path::Path,
         vfs::VirtualFS,
     },
-    memory::addrspace::mem_area::Data,
+    memory::{addrspace::mem_area::Data, user_safe},
     misc::{c_types::CString, others::KernelFrom},
     object::misc::{ObjectRef, get_object_current_process},
     process::{manager::get_current_process, misc::with_current_process},
     s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
 };
-use alloc::{string::String, sync::Arc};
+use alloc::{string::String, sync::Arc, vec::Vec};
 use bitflags::bitflags;
 
 const AT_FDCWD: i32 = -100;
@@ -141,9 +139,8 @@ fn readlink_impl(
     };
     let bytes = target.as_bytes();
     let copied = core::cmp::min(bytes.len(), out_len);
-
-    unsafe {
-        slice::from_raw_parts_mut(out_buf, copied).copy_from_slice(&bytes[..copied]);
+    if copied > 0 {
+        user_safe::write(out_buf, &bytes[..copied])?;
     }
 
     Ok(copied)
@@ -292,15 +289,16 @@ define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
         return Err(SyscallError::BadAddress);
     }
 
-    let buf = unsafe { slice::from_raw_parts_mut(buf_ptr, len) };
     let process = get_current_process();
     let path_str = process.lock().current_directory.clone().as_string();
     let path_bytes = path_str.as_bytes();
     let path_len = path_bytes.len();
 
     if len > path_len {
-        buf[..path_len].copy_from_slice(path_bytes);
-        buf[path_len] = 0;
+        let mut buffer = Vec::with_capacity(path_len + 1);
+        buffer.extend_from_slice(path_bytes);
+        buffer.push(0);
+        user_safe::write(buf_ptr, &buffer)?;
     } else {
         return Err(SyscallError::InvalidArguments);
     }
@@ -320,9 +318,7 @@ define_syscall!(Fstat, |fd: u64, linux_stat_ptr: *mut LinuxStat| {
             stat.st_gid
         );
     }
-    unsafe {
-        *linux_stat_ptr = stat;
-    }
+    user_safe::write(linux_stat_ptr, &stat)?;
     Ok(0)
 });
 
@@ -336,9 +332,6 @@ define_syscall!(Newfstatat, |dirfd: i32,
                              path: u64,
                              linux_stat_ptr: *mut LinuxStat,
                              flags: i32| {
-    if linux_stat_ptr.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
     let path = path as CString;
     if path.is_null() {
         return Err(SyscallError::BadAddress);
@@ -367,9 +360,7 @@ define_syscall!(Newfstatat, |dirfd: i32,
             stat.st_gid
         );
     }
-    unsafe {
-        *linux_stat_ptr = stat;
-    }
+    user_safe::write(linux_stat_ptr, &stat)?;
     Ok(0)
 });
 
@@ -379,10 +370,6 @@ define_syscall!(Statx, |dirfd: i32,
                         _mask: u32,
                         statx_ptr: u64| {
     let statx_ptr = statx_ptr as *mut LinuxStatx;
-    if statx_ptr.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-
     let path_str = path_from_raw(path)?;
     let flags = AtFlags::from_bits_truncate(flags);
     if flags.bits() != flags.bits() & (AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH).bits() {
@@ -391,35 +378,34 @@ define_syscall!(Statx, |dirfd: i32,
 
     let stat = stat_at(dirfd, &path_str, flags)?;
 
-    unsafe {
-        *statx_ptr = LinuxStatx {
-            stx_mask: STATX_BASIC_STATS,
-            stx_blksize: stat.st_blksize as u32,
-            stx_nlink: stat.st_nlink as u32,
-            stx_uid: stat.st_uid,
-            stx_gid: stat.st_gid,
-            stx_mode: stat.st_mode as u16,
-            stx_ino: stat.st_ino,
-            stx_size: stat.st_size as u64,
-            stx_blocks: stat.st_blocks as u64,
-            stx_atime: StatxTimestamp {
-                tv_sec: stat.st_atime,
-                tv_nsec: stat.st_atime_nsec as u32,
-                __reserved: 0,
-            },
-            stx_ctime: StatxTimestamp {
-                tv_sec: stat.st_ctime,
-                tv_nsec: stat.st_ctime_nsec as u32,
-                __reserved: 0,
-            },
-            stx_mtime: StatxTimestamp {
-                tv_sec: stat.st_mtime,
-                tv_nsec: stat.st_mtime_nsec as u32,
-                __reserved: 0,
-            },
-            ..Default::default()
-        };
-    }
+    let statx = LinuxStatx {
+        stx_mask: STATX_BASIC_STATS,
+        stx_blksize: stat.st_blksize as u32,
+        stx_nlink: stat.st_nlink as u32,
+        stx_uid: stat.st_uid,
+        stx_gid: stat.st_gid,
+        stx_mode: stat.st_mode as u16,
+        stx_ino: stat.st_ino,
+        stx_size: stat.st_size as u64,
+        stx_blocks: stat.st_blocks as u64,
+        stx_atime: StatxTimestamp {
+            tv_sec: stat.st_atime,
+            tv_nsec: stat.st_atime_nsec as u32,
+            __reserved: 0,
+        },
+        stx_ctime: StatxTimestamp {
+            tv_sec: stat.st_ctime,
+            tv_nsec: stat.st_ctime_nsec as u32,
+            __reserved: 0,
+        },
+        stx_mtime: StatxTimestamp {
+            tv_sec: stat.st_mtime,
+            tv_nsec: stat.st_mtime_nsec as u32,
+            __reserved: 0,
+        },
+        ..Default::default()
+    };
+    user_safe::write(statx_ptr as *mut LinuxStatx, &statx)?;
 
     Ok(0)
 });
@@ -500,10 +486,6 @@ define_syscall!(Mkdir, |path: CString, mode: u32| {
 
 define_syscall!(Statfs, |path: CString, buf: u64| {
     let buf = buf as *mut LinuxStatFs;
-    if buf.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-
     let path = path_from_raw(path)?;
     let mut current_dir = with_current_process(|process| process.current_directory.clone());
     current_dir.push_path_str(&path);
@@ -511,22 +493,21 @@ define_syscall!(Statfs, |path: CString, buf: u64| {
 
     let _ = VirtualFS.lock().open(path)?;
 
-    unsafe {
-        *buf = LinuxStatFs {
-            f_type: 0xEF53,
-            f_bsize: 4096,
-            f_blocks: 262_144,
-            f_bfree: 131_072,
-            f_bavail: 131_072,
-            f_files: 262_144,
-            f_ffree: 131_072,
-            f_fsid: 1,
-            f_namelen: 255,
-            f_frsize: 4096,
-            f_flags: 0,
-            f_spare: [0; 4],
-        };
-    }
+    let statfs = LinuxStatFs {
+        f_type: 0xEF53,
+        f_bsize: 4096,
+        f_blocks: 262_144,
+        f_bfree: 131_072,
+        f_bavail: 131_072,
+        f_files: 262_144,
+        f_ffree: 131_072,
+        f_fsid: 1,
+        f_namelen: 255,
+        f_frsize: 4096,
+        f_flags: 0,
+        f_spare: [0; 4],
+    };
+    user_safe::write(buf as *mut LinuxStatFs, &statfs)?;
 
     Ok(0)
 });

@@ -8,6 +8,7 @@ use crate::thread::scheduling::return_to_executor_no_save;
 use crate::thread::{THREAD_MANAGER, get_current_thread};
 use crate::{
     define_syscall,
+    memory::user_safe,
     process::manager::get_current_process,
     signal::{Signal, action::SignalAction},
 };
@@ -104,13 +105,13 @@ define_syscall!(
         let signal = Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?;
         let new_action = new_action as *const LinuxSigAction;
         let old_action = old_action as *mut LinuxSigAction;
-        let process = get_current_process();
-        let mut process = process.lock();
-        let pid = process.pid.0;
-        let current_signal_action = process.get_signal_action(signal);
+        let new_action_decoded = unsafe { (!new_action.is_null()).then(|| decode_sigaction(*new_action)) };
+        let (pid, old_encoded) = {
+            let process = get_current_process();
+            let mut process = process.lock();
+            let pid = process.pid.0;
+            let current_signal_action = process.get_signal_action(signal);
 
-        unsafe {
-            if !old_action.is_null() {
                 if matches!(signal, Signal::User1) {
                     crate::s_println!(
                         "sigaction: SIGUSR1 pid={} old={:?}",
@@ -118,20 +119,26 @@ define_syscall!(
                         current_signal_action.handling_type
                     );
                 }
-                *old_action = encode_sigaction(current_signal_action);
-            }
+            let old_encoded = encode_sigaction(current_signal_action);
 
-            if !new_action.is_null() {
+            if let Some(decoded) = new_action_decoded {
                 if matches!(signal, Signal::User1) {
-                    let decoded = decode_sigaction(*new_action);
                     crate::s_println!(
                         "sigaction: SIGUSR1 pid={} new={:?}",
                         pid,
                         decoded.handling_type
                     );
                 }
-                *current_signal_action = decode_sigaction(*new_action);
+                *current_signal_action = decoded;
             }
+
+            (pid, old_encoded)
+        };
+
+        let _ = pid;
+
+        if !old_action.is_null() {
+            user_safe::write(old_action, &old_encoded)?;
         }
 
         Ok(0)
@@ -146,7 +153,7 @@ define_syscall!(Sigaltstack, |new_stack: u64, old_stack: u64| {
 
     unsafe {
         if !old_stack.is_null() {
-            *old_stack = *state;
+            user_safe::write(old_stack, &*state)?;
         }
 
         if new_stack.is_null() {
@@ -275,11 +282,9 @@ define_syscall!(SendSignalGroup, |group: ProcessGroupID, signal: Signal| {
 define_syscall!(
     BlockSignals,
     |signals: Signals, old_signals: *mut Signals| {
-        unsafe {
-            *old_signals = get_current_thread().lock().blocked_signals;
-
-            get_current_thread().lock().blocked_signals.insert(signals);
-        }
+        let previous = get_current_thread().lock().blocked_signals;
+        user_safe::write(old_signals, &previous)?;
+        get_current_thread().lock().blocked_signals.insert(signals);
         Ok(0)
     }
 );
@@ -287,11 +292,9 @@ define_syscall!(
 define_syscall!(
     UnblockSignals,
     |signals: Signals, old_signals: *mut Signals| {
-        unsafe {
-            *old_signals = get_current_thread().lock().blocked_signals;
-
-            get_current_thread().lock().blocked_signals.remove(signals);
-        }
+        let previous = get_current_thread().lock().blocked_signals;
+        user_safe::write(old_signals, &previous)?;
+        get_current_thread().lock().blocked_signals.remove(signals);
 
         Ok(0)
     }
@@ -310,7 +313,7 @@ define_syscall!(
 
         unsafe {
             if !old_set.is_null() {
-                *old_set = current.blocked_signals.bits();
+                user_safe::write(old_set, &current.blocked_signals.bits())?;
             }
 
             if !set.is_null() {

@@ -1,11 +1,11 @@
-use alloc::sync::Arc;
-use core::ptr::{read_volatile, write_bytes, write_volatile};
+use alloc::{sync::Arc, vec::Vec};
+use core::ptr::read_volatile;
 use spin::Mutex;
 use x86_64::{VirtAddr, structures::paging::Translate};
 
 use crate::{
     impl_cast_function,
-    memory::{addrspace::mem_area::Data, paging::MAPPER, protection::Protection},
+    memory::{addrspace::mem_area::Data, paging::MAPPER, protection::Protection, user_safe},
     misc::{
         framebuffer::{
             FRAME_BUFFER, FramebufferInfo, FramebufferPixelFormat, framebuffer_set_user_controlled,
@@ -22,7 +22,10 @@ use crate::{
         misc::ObjectResult,
         traits::{Configuratable, MemoryMappable},
     },
-    process::misc::with_current_process,
+    process::{
+        manager::get_current_process,
+        misc::with_current_process,
+    },
 };
 
 #[derive(Default, Debug)]
@@ -132,17 +135,13 @@ impl Configuratable for FramebufferObject {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
         match request {
             ConfigurateRequest::FbGetFixedScreenInfo(ptr) => {
-                if ptr.is_null() {
-                    return Err(ObjectError::InvalidArguments);
-                }
-                unsafe { write_volatile(ptr, current_fb_fix_info()) };
+                user_safe::write(ptr, &current_fb_fix_info())
+                    .map_err(|_| ObjectError::InvalidArguments)?;
                 Ok(0)
             }
             ConfigurateRequest::FbGetVariableScreenInfo(ptr) => {
-                if ptr.is_null() {
-                    return Err(ObjectError::InvalidArguments);
-                }
-                unsafe { write_volatile(ptr, current_fb_var_info()) };
+                user_safe::write(ptr, &current_fb_var_info())
+                    .map_err(|_| ObjectError::InvalidArguments)?;
                 Ok(0)
             }
             ConfigurateRequest::FbPutVariableScreenInfo(ptr) => {
@@ -155,7 +154,7 @@ impl Configuratable for FramebufferObject {
                 if !fb_var_matches_current(&requested, &current) {
                     return Err(ObjectError::InvalidArguments);
                 }
-                unsafe { write_volatile(ptr, current) };
+                user_safe::write(ptr, &current).map_err(|_| ObjectError::InvalidArguments)?;
                 Ok(0)
             }
             ConfigurateRequest::FbPanDisplay(ptr) => {
@@ -167,7 +166,8 @@ impl Configuratable for FramebufferObject {
                 if requested.xoffset != 0 || requested.yoffset != 0 {
                     return Err(ObjectError::InvalidArguments);
                 }
-                unsafe { write_volatile(ptr, current_fb_var_info()) };
+                user_safe::write(ptr, &current_fb_var_info())
+                    .map_err(|_| ObjectError::InvalidArguments)?;
                 Ok(0)
             }
             ConfigurateRequest::FbGetColorMap(ptr) => {
@@ -312,18 +312,10 @@ fn fill_fb_cmap(out: &mut FbCmap) {
         return;
     }
 
-    unsafe {
-        if !out.red.is_null() {
-            write_bytes(out.red, 0, len);
-        }
-        if !out.green.is_null() {
-            write_bytes(out.green, 0, len);
-        }
-        if !out.blue.is_null() {
-            write_bytes(out.blue, 0, len);
-        }
-        if !out.transp.is_null() {
-            write_bytes(out.transp, 0, len);
+    let zeros = Vec::from_iter(core::iter::repeat_n(0u8, len * core::mem::size_of::<u16>()));
+    for ptr in [out.red, out.green, out.blue, out.transp] {
+        if !ptr.is_null() {
+            let _ = get_current_process().lock().addrspace.write(ptr, &zeros);
         }
     }
 }

@@ -9,6 +9,7 @@ use crate::{
     memory::{
         addrspace::mem_area::{Data, MemoryArea},
         protection::Protection,
+        user_safe,
     },
     misc::others::protection_to_page_flags,
     process::manager::get_current_process,
@@ -123,26 +124,6 @@ pub fn wake_futex_for_process(pid: u64, addr: u64, count: usize) -> usize {
 fn futex_wait_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
     let key = current_futex_key(arg1);
     let current = get_current_thread();
-    if key.pid == 3 && arg2 == 2 {
-        let process = get_current_process();
-        let process = process.lock();
-        let current_locked = current.lock();
-        let rip = current_locked.snapshot.inner.rip;
-        let tid = current_locked.id.0;
-        let area = describe_addrspace_area(&process, arg1);
-        let rip_area = describe_addrspace_area(&process, rip);
-        s_println!(
-            "futex_wait interesting: pid={} tid={} addr={:#x} val={} rip={:#x} area={} rip_area={}",
-            key.pid,
-            tid,
-            arg1,
-            arg2,
-            rip,
-            area,
-            rip_area
-        );
-    }
-
     {
         let mut queue = FUTEX_QUEUE.lock();
         let cur_value = unsafe { *(arg1 as *const u32) } as u64;
@@ -213,10 +194,10 @@ define_syscall!(ArchPrctl, |code: u64, addr: u64| {
             FsBase::write(VirtAddr::new(addr));
             Ok(0)
         }
-        ArchPrctlCode::GetFs => unsafe {
-            *(addr as *mut u64) = FsBase::read().as_u64();
+        ArchPrctlCode::GetFs => {
+            user_safe::write(addr as *mut u8, &FsBase::read().as_u64())?;
             Ok(0)
-        },
+        }
     }
 });
 

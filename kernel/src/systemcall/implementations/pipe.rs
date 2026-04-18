@@ -1,5 +1,6 @@
 use crate::{
     define_syscall,
+    memory::user_safe,
     process::manager::get_current_process,
     socket::{AF_UNIX, SOCK_NONBLOCK, SOCK_STREAM, UnixSocketObject},
     systemcall::utils::{SyscallError, SyscallImpl},
@@ -9,9 +10,6 @@ const O_NONBLOCK: i32 = 0o4_000;
 const O_CLOEXEC: i32 = 0o2_000_000;
 
 fn create_pipe(fds: *mut i32, flags: i32) -> Result<usize, SyscallError> {
-    if fds.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
     if (flags & !(O_NONBLOCK | O_CLOEXEC)) != 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -40,10 +38,11 @@ fn create_pipe(fds: *mut i32, flags: i32) -> Result<usize, SyscallError> {
         (read_fd, write_fd)
     };
 
-    unsafe {
-        *fds.add(0) = i32::try_from(read_fd).map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
-        *fds.add(1) = i32::try_from(write_fd).map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
-    }
+    let fds_out = [
+        i32::try_from(read_fd).map_err(|_| SyscallError::TooManyOpenFilesProcess)?,
+        i32::try_from(write_fd).map_err(|_| SyscallError::TooManyOpenFilesProcess)?,
+    ];
+    user_safe::write(fds, &fds_out)?;
 
     Ok(0)
 }

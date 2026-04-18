@@ -3,6 +3,7 @@ use bitflags::bitflags;
 
 use crate::{
     define_syscall,
+    memory::user_safe,
     process::{
         ProcessRef,
         execve::execve,
@@ -99,9 +100,8 @@ define_syscall!(Wait4, |target_process: i32,
         match check_result {
             Some((process, exit_code)) => {
                 if !status_ptr.is_null() {
-                    unsafe {
-                        *status_ptr = exit_code_to_status(exit_code);
-                    }
+                    let status = exit_code_to_status(exit_code);
+                    user_safe::write(status_ptr, &status)?;
                 }
                 let pid = process.lock().pid.0;
                 MANAGER.lock().reap_process(process);
@@ -166,9 +166,7 @@ define_syscall!(SetTidAddress, |tidptr: *mut i32| {
     let tid = current.lock().id.0 as i32;
     current.lock().clear_child_tid = tidptr as u64;
     if !tidptr.is_null() {
-        unsafe {
-            *tidptr = tid;
-        }
+        user_safe::write(tidptr, &tid)?;
     }
     Ok(tid as usize)
 });
