@@ -34,6 +34,7 @@ bitflags::bitflags! {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 union LinuxEpollData {
     ptr: u64,
     fd: i32,
@@ -41,17 +42,28 @@ union LinuxEpollData {
     u64_: u64,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
+#[derive(Clone, Copy)]
 struct LinuxEpollEvent {
     events: u32,
     data: LinuxEpollData,
 }
 
-#[repr(C)]
-pub struct PollResult {
-    events: u32,
-    _pad: u32,
-    data: u64,
+fn read_epoll_event(event_ptr: *const LinuxEpollEvent) -> LinuxEpollEvent {
+    unsafe { event_ptr.read_unaligned() }
+}
+
+fn epoll_event_data_u64(event: &LinuxEpollEvent) -> u64 {
+    unsafe { core::ptr::addr_of!(event.data.u64_).read_unaligned() }
+}
+
+fn write_epoll_event(event_ptr: *mut LinuxEpollEvent, events: u32, data: u64) {
+    unsafe {
+        event_ptr.write_unaligned(LinuxEpollEvent {
+            events,
+            data: LinuxEpollData { u64_: data },
+        });
+    }
 }
 
 fn pollable_event_to_linux_bits(event: PollableEvent) -> u32 {
@@ -122,7 +134,7 @@ define_syscall!(
                 if event.is_null() {
                     return Err(SyscallError::BadAddress);
                 }
-                let event = unsafe { &*event };
+                let event = read_epoll_event(event);
                 for existing in [
                     PollableEvent::CanBeRead,
                     PollableEvent::CanBeWritten,
@@ -134,9 +146,7 @@ define_syscall!(
                         .as_poller()?
                         .unregister_obj(target_object.clone(), existing);
                 }
-                epoll_update_impl(poller, target_object, event.events, unsafe {
-                    event.data.u64_
-                })
+                epoll_update_impl(poller, target_object, event.events, epoll_event_data_u64(&event))
             }
             EpollCtlOp::Del => {
                 for existing in [
@@ -158,7 +168,7 @@ define_syscall!(
 
 fn epoll_wait_impl(
     poller: ObjectRef,
-    events_ptr: *mut PollResult,
+    events_ptr: *mut LinuxEpollEvent,
     maxevents: usize,
     timeout: i32,
 ) -> Result<usize, SyscallError> {
@@ -207,13 +217,11 @@ fn epoll_wait_impl(
 
     if !events_ptr.is_null() {
         for (index, woken) in woken_events.iter().enumerate() {
-            unsafe {
-                events_ptr.add(index).write(PollResult {
-                    events: pollable_event_to_linux_bits(woken.event),
-                    _pad: 0,
-                    data: woken.data,
-                });
-            }
+            write_epoll_event(
+                unsafe { events_ptr.add(index) },
+                pollable_event_to_linux_bits(woken.event),
+                woken.data,
+            );
         }
     }
 
@@ -221,14 +229,14 @@ fn epoll_wait_impl(
 }
 
 define_syscall!(EpollWait, |poller: ObjectRef,
-                            events_ptr: *mut PollResult,
+                            events_ptr: *mut LinuxEpollEvent,
                             maxevents: usize,
                             timeout: i32| {
     epoll_wait_impl(poller, events_ptr, maxevents, timeout)
 });
 
 define_syscall!(EpollPwait, |poller: ObjectRef,
-                             events_ptr: *mut PollResult,
+                             events_ptr: *mut LinuxEpollEvent,
                              maxevents: usize,
                              timeout: i32| {
     epoll_wait_impl(poller, events_ptr, maxevents, timeout)
