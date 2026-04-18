@@ -22,10 +22,7 @@ use crate::{
         misc::ObjectResult,
         traits::{Configuratable, MemoryMappable},
     },
-    process::{
-        manager::get_current_process,
-        misc::with_current_process,
-    },
+    process::misc::with_current_process,
 };
 
 #[derive(Default, Debug)]
@@ -315,7 +312,7 @@ fn fill_fb_cmap(out: &mut FbCmap) {
     let zeros = Vec::from_iter(core::iter::repeat_n(0u8, len * core::mem::size_of::<u16>()));
     for ptr in [out.red, out.green, out.blue, out.transp] {
         if !ptr.is_null() {
-            let _ = get_current_process().lock().addrspace.write(ptr, &zeros);
+            let _ = user_safe::write(ptr, &zeros);
         }
     }
 }
