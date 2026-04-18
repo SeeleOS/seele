@@ -238,6 +238,18 @@ define_syscall!(Chdir, |dir: String| {
     Ok(0)
 });
 
+define_syscall!(Fchdir, |fd: u64| {
+    let object = get_object_current_process(fd).map_err(SyscallError::from)?;
+    let file_like = object.as_file_like()?;
+    if !matches!(file_like.info()?.file_like_type, FileLikeType::Directory) {
+        return Err(SyscallError::NotADirectory);
+    }
+
+    get_current_process()
+        .lock()
+        .change_directory(file_like.path().as_absolute())?;
+    Ok(0)
+});
 define_syscall!(Link, |old_path: CString, new_path: CString| {
     LinkAt::handle_call(
         AT_FDCWD as u64,
