@@ -14,6 +14,7 @@ use crate::{
 pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
     vec![
         DirectoryContentInfo::new("cmdline".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("mountinfo".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("fd".into(), DirectoryContentType::Directory),
     ]
 }
@@ -74,6 +75,10 @@ pub(super) fn pid_cmdline_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 1
 }
 
+pub(super) fn pid_mountinfo_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 2
+}
+
 pub(super) fn pid_fd_dir_inode(pid: ProcessID) -> u64 {
     0x5000_0000 + pid.0 * 0x100
 }
@@ -93,12 +98,7 @@ pub(super) fn fd_target(pid: ProcessID, fd: &str) -> FSResult<String> {
         .ok_or(FSError::NotFound)?;
 
     if let Ok(file_like) = object.clone().as_file_like() {
-        if let Ok(info) = file_like.info() {
-            if info.name.starts_with('/') {
-                return Ok(info.name);
-            }
-            return Ok(format!("/{}", info.name));
-        }
+        return Ok(file_like.path().as_string());
     }
 
     Ok(format!("anon_inode:[{}]", object.debug_name()))

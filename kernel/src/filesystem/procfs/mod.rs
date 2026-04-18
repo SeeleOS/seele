@@ -14,12 +14,12 @@ mod root;
 use nodes::{proc_dir, proc_file, proc_symlink};
 use pid::{
     current_pid, ensure_pid_exists, fd_target, parse_fd, parse_pid, pid_cmdline_inode,
-    pid_dir_entries, pid_dir_inode, pid_fd_dir_inode, pid_fd_entries, pid_fd_inode, pid_string,
-    proc_pid_cmdline_bytes,
+    pid_dir_entries, pid_dir_inode, pid_fd_dir_inode, pid_fd_entries, pid_fd_inode,
+    pid_mountinfo_inode, pid_string, proc_pid_cmdline_bytes,
 };
 use root::{
-    PROC_CMDLINE_INODE, PROC_ROOT_INODE, PROC_SELF_INODE, proc_kernel_cmdline_bytes,
-    proc_root_entries,
+    PROC_CMDLINE_INODE, PROC_MOUNTS_INODE, PROC_ROOT_INODE, PROC_SELF_INODE,
+    proc_kernel_cmdline_bytes, proc_mountinfo_bytes, proc_mounts_bytes, proc_root_entries,
 };
 
 pub struct ProcFs;
@@ -53,6 +53,7 @@ impl FileSystem for ProcFs {
                 PROC_CMDLINE_INODE,
                 proc_kernel_cmdline_bytes,
             )),
+            ["mounts"] => Ok(proc_file("mounts", PROC_MOUNTS_INODE, proc_mounts_bytes)),
             ["self"] => {
                 let pid = current_pid()?;
                 Ok(proc_symlink("self", PROC_SELF_INODE, format!("{}", pid.0)))
@@ -62,6 +63,14 @@ impl FileSystem for ProcFs {
                 Ok(proc_file("cmdline", pid_cmdline_inode(pid), move || {
                     proc_pid_cmdline_bytes(pid)
                 }))
+            }
+            ["self", "mountinfo"] => {
+                let pid = current_pid()?;
+                Ok(proc_file(
+                    "mountinfo",
+                    pid_mountinfo_inode(pid),
+                    proc_mountinfo_bytes,
+                ))
             }
             ["self", "fd"] => {
                 let pid = current_pid()?;
@@ -87,6 +96,15 @@ impl FileSystem for ProcFs {
                 Ok(proc_file("cmdline", pid_cmdline_inode(pid), move || {
                     proc_pid_cmdline_bytes(pid)
                 }))
+            }
+            [pid, "mountinfo"] => {
+                let pid = parse_pid(pid)?;
+                ensure_pid_exists(pid)?;
+                Ok(proc_file(
+                    "mountinfo",
+                    pid_mountinfo_inode(pid),
+                    proc_mountinfo_bytes,
+                ))
             }
             [pid, "fd"] => {
                 let pid = parse_pid(pid)?;
