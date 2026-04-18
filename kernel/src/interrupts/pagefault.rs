@@ -1,9 +1,13 @@
+use alloc::{format, string::String};
 use x86_64::{
     PhysAddr, VirtAddr,
     registers::control::{Cr2, Cr3},
+    registers::model_specific::FsBase,
     structures::{
         idt::{InterruptStackFrame, PageFaultErrorCode},
-        paging::{OffsetPageTable, Page, PageTable, Translate, mapper::TranslateResult},
+        paging::{
+            OffsetPageTable, Page, PageTable, PageTableFlags, Translate, mapper::TranslateResult,
+        },
     },
 };
 
@@ -64,6 +68,42 @@ pub extern "x86-interrupt" fn pagefault_handler(
 
     if handled {
         return;
+    }
+
+    if is_user_mode(&stack_frame) {
+        let (pid, tid, snapshot_state, saved_fs_base) = {
+            let process = get_current_process();
+            let thread = get_current_thread();
+            let process = process.lock();
+            let mut thread = thread.lock();
+            (
+                process.pid.0,
+                thread.id.0,
+                thread.snapshot_state,
+                thread.get_appropriate_snapshot().fs_base,
+            )
+        };
+        let fault_layout = {
+            let process = get_current_process();
+            let mut process = process.lock();
+            describe_fault_layout(
+                &mut process,
+                address.as_u64(),
+                stack_frame.instruction_pointer.as_u64(),
+            )
+        };
+        s_println!(
+            "user pagefault diag: pid={} tid={} state={:?} addr={:#x} rip={:#x} rsp={:#x} fs_live={:#x} fs_saved={:#x}",
+            pid,
+            tid,
+            snapshot_state,
+            address.as_u64(),
+            stack_frame.instruction_pointer.as_u64(),
+            stack_frame.stack_pointer.as_u64(),
+            FsBase::read().as_u64(),
+            saved_fs_base
+        );
+        s_println!("user pagefault layout: {}", fault_layout);
     }
 
     actual_pagefault_handler(stack_frame, error_code)
@@ -176,4 +216,111 @@ fn active_translate_addr(addr: VirtAddr) -> Option<PhysAddr> {
 
 fn global_translate_addr(addr: VirtAddr) -> Option<PhysAddr> {
     MAPPER.get().unwrap().lock().translate_addr(addr)
+}
+
+fn describe_fault_layout(
+    process: &mut crate::process::Process,
+    fault_addr: u64,
+    rip: u64,
+) -> String {
+    let fault_addr = VirtAddr::new(fault_addr);
+    let rip = VirtAddr::new(rip);
+    let addrspace = &mut process.addrspace;
+    let fault_area = describe_area(addrspace.get_area(fault_addr));
+    let rip_area = describe_area(addrspace.get_area(rip));
+    let (prev_area, next_area) = surrounding_areas(&addrspace.memory_areas, fault_addr);
+
+    format!(
+        "program_break={:#x} user_mem={:#x} fault_area={} prev_area={} next_area={} rip_area={}",
+        process.program_break,
+        addrspace.user_mem.as_u64(),
+        fault_area,
+        prev_area,
+        next_area,
+        rip_area
+    )
+}
+
+fn surrounding_areas(
+    areas: &[crate::memory::addrspace::mem_area::MemoryArea],
+    addr: VirtAddr,
+) -> (String, String) {
+    let mut previous = None;
+    let mut next = None;
+
+    for area in areas {
+        if area.end <= addr {
+            previous = Some(area);
+            continue;
+        }
+
+        if area.start > addr {
+            next = Some(area);
+            break;
+        }
+
+        if area.contains(addr) {
+            previous = Some(area);
+            next = Some(area);
+            break;
+        }
+    }
+
+    (describe_area(previous), describe_area(next))
+}
+
+fn describe_area(area: Option<&crate::memory::addrspace::mem_area::MemoryArea>) -> String {
+    let Some(area) = area else {
+        return String::from("none");
+    };
+
+    let kind = match &area.data {
+        crate::memory::addrspace::mem_area::Data::Normal => "anon".into(),
+        crate::memory::addrspace::mem_area::Data::Shared { .. } => "shared".into(),
+        crate::memory::addrspace::mem_area::Data::File {
+            offset,
+            file_bytes,
+            file,
+        } => {
+            let name = file
+                .info()
+                .map(|info| info.name)
+                .unwrap_or_else(|_| String::from("unknown"));
+            format!("file:{name}@off={:#x}/bytes={:#x}", offset, file_bytes)
+        }
+    };
+
+    format!(
+        "{:#x}-{:#x} flags={} lazy={} {}",
+        area.start.as_u64(),
+        area.end.as_u64(),
+        format_area_flags(area.flags),
+        area.lazy,
+        kind
+    )
+}
+
+fn format_area_flags(flags: PageTableFlags) -> String {
+    let mut out = String::new();
+    out.push(if flags.contains(PageTableFlags::PRESENT) {
+        'p'
+    } else {
+        '-'
+    });
+    out.push(if flags.contains(PageTableFlags::USER_ACCESSIBLE) {
+        'u'
+    } else {
+        '-'
+    });
+    out.push(if flags.contains(PageTableFlags::WRITABLE) {
+        'w'
+    } else {
+        '-'
+    });
+    out.push(if flags.contains(PageTableFlags::NO_EXECUTE) {
+        'n'
+    } else {
+        'x'
+    });
+    out
 }
