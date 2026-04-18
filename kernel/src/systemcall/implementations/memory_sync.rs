@@ -26,6 +26,7 @@ use crate::{
 enum FutexOp {
     Wait = 0,
     Wake = 1,
+    WaitBitset = 9,
 }
 
 #[derive(Clone, Copy, Debug, TryFromPrimitive)]
@@ -181,10 +182,21 @@ fn futex_wake_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
     Ok(woken)
 }
 
-define_syscall!(Futex, |arg1: u64, op: u64, arg2: u64| {
+define_syscall!(Futex, |arg1: u64,
+                        op: u64,
+                        arg2: u64,
+                        _timeout: u64,
+                        _uaddr2: u64,
+                        val3: u64| {
     match FutexOp::try_from(op & 0x7f).map_err(|_| SyscallError::InvalidArguments)? {
         FutexOp::Wait => futex_wait_impl(arg1, arg2),
         FutexOp::Wake => futex_wake_impl(arg1, arg2),
+        FutexOp::WaitBitset => {
+            if val3 == 0 {
+                return Err(SyscallError::InvalidArguments);
+            }
+            futex_wait_impl(arg1, arg2)
+        }
     }
 });
 
