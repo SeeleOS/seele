@@ -26,7 +26,7 @@ impl EventDeviceKind {
     pub(super) fn phys(self) -> &'static str {
         match self {
             Self::Keyboard => "isa0060/serio0/input0",
-            Self::Mouse => "isa0060/serio1/input0",
+            Self::Mouse => "isa0060/serio1/input1",
         }
     }
 
