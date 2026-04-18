@@ -187,6 +187,7 @@ impl ThreadManager {
 
     pub fn wake_poller(&mut self, target_object: ObjectRef, event: PollableEvent) {
         let mut to_wake = Vec::new();
+        let affected_pollers = crate::polling::notify_pollers(target_object, event);
 
         self.blocked_queues.poller.retain(|f| {
             if let State::Blocked(BlockType::WakeRequired {
@@ -194,11 +195,9 @@ impl ThreadManager {
                 ..
             }) = &f.lock().state
             {
-                let should_wake = poller
-                    .clone()
-                    .as_poller()
-                    .unwrap()
-                    .push_woken_event(target_object.clone(), event);
+                let should_wake = affected_pollers
+                    .iter()
+                    .any(|affected| Arc::ptr_eq(affected, poller));
                 if should_wake {
                     to_wake.push(f.clone());
                     false
