@@ -279,6 +279,14 @@ define_syscall!(Unlink, |path: CString| {
     UnlinkAt::handle_call(AT_FDCWD as u64, path as u64, 0, 0, 0, 0)
 });
 
+define_syscall!(Chmod, |path: CString, mode: u32| {
+    let path_str = path_from_raw(path)?;
+    let path = resolve_path_at(AT_FDCWD, &path_str)?;
+    let file = VirtualFS.lock().open(path)?;
+    file.chmod(mode)?;
+    Ok(0)
+});
+
 define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
     if buf_ptr.is_null() {
         return Err(SyscallError::BadAddress);
@@ -318,8 +326,9 @@ define_syscall!(Fstat, |fd: u64, linux_stat_ptr: *mut LinuxStat| {
     Ok(0)
 });
 
-define_syscall!(Fchmod, |fd: u64, _mode: u32| {
-    let _ = get_object_current_process(fd).map_err(SyscallError::from)?;
+define_syscall!(Fchmod, |fd: u64, mode: u32| {
+    let object = get_object_current_process(fd).map_err(SyscallError::from)?;
+    object.as_file_like()?.chmod(mode)?;
     Ok(0)
 });
 

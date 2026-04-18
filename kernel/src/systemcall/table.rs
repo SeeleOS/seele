@@ -81,6 +81,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         Link,
         Unlink,
         Readlink,
+        Chmod,
         Fchmod,
         Iopl,
         Ioperm,
