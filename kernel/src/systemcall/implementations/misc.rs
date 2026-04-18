@@ -755,7 +755,7 @@ define_syscall!(Getrandom, |buf: *mut u8, len: usize, flags: u32| {
         *byte = state as u8;
     }
 
-    user_safe::write(buf, &out)?;
+    user_safe::write(buf, &out[..])?;
 
     Ok(len)
 });

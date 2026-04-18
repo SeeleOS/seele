@@ -238,7 +238,7 @@ define_syscall!(
         }
 
         if !value.is_empty() {
-            user_safe::write(option_value, &value)?;
+            user_safe::write(option_value, &value[..])?;
         }
         user_safe::write(option_len_ptr, &(value.len() as u32))?;
 

@@ -298,7 +298,7 @@ define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
         let mut buffer = Vec::with_capacity(path_len + 1);
         buffer.extend_from_slice(path_bytes);
         buffer.push(0);
-        user_safe::write(buf_ptr, &buffer)?;
+        user_safe::write(buf_ptr, &buffer[..])?;
     } else {
         return Err(SyscallError::InvalidArguments);
     }
