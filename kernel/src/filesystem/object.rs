@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use crate::{
     filesystem::{
         errors::FSError,
+        impls::ext4::{directory::Ext4Directory, file::Ext4File},
         info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
         staticfs::device::StaticDeviceHandle,
         vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
@@ -22,12 +23,15 @@ use crate::{
     },
     process::misc::with_current_process,
 };
+use ext4plus::inode::InodeMode;
 
 pub struct FileLikeObject {
     file: FileLike,
 }
 
 impl FileLikeObject {
+    const CHMOD_PERMISSION_BITS: u16 = 0o7777;
+
     pub fn new(file: FileLike) -> Self {
         Self { file }
     }
@@ -71,6 +75,36 @@ impl FileLikeObject {
         }
 
         Ok(read)
+    }
+
+    pub fn chmod(&self, mode: u32) -> FSResult<()> {
+        let mode = Self::inode_mode_from_linux_bits(mode)?;
+
+        match &self.file {
+            FileLike::File(file) => {
+                let file = file.lock();
+                let ext4_file = file.as_any().downcast_ref::<Ext4File>().ok_or(FSError::Other)?;
+                ext4_file.chmod(mode)
+            }
+            FileLike::Directory(dir) => {
+                let dir = dir.lock();
+                let ext4_dir = dir
+                    .as_any()
+                    .downcast_ref::<Ext4Directory>()
+                    .ok_or(FSError::Other)?;
+                ext4_dir.chmod(mode)
+            }
+            FileLike::Symlink(symlink) => {
+                let target = symlink.lock().target()?;
+                let nested = VirtualFS.lock().open(target)?;
+                nested.chmod(mode.bits().into())
+            }
+        }
+    }
+
+    fn inode_mode_from_linux_bits(mode: u32) -> FSResult<InodeMode> {
+        let mode = (mode as u16) & Self::CHMOD_PERMISSION_BITS;
+        InodeMode::from_bits(mode).ok_or(FSError::Other)
     }
 
     fn resolve_file(&self) -> FSResult<WrappedFile> {
