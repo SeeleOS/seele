@@ -8,7 +8,6 @@ use spin::Mutex;
 use crate::{
     object::misc::ObjectRef,
     polling::{PollerEntry, PollerObject, event::PollableEvent},
-    s_println,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -28,13 +27,6 @@ lazy_static::lazy_static! {
 
 fn object_key(object: &ObjectRef) -> usize {
     Arc::as_ptr(object) as *const () as usize
-}
-
-fn should_trace_object(object: &ObjectRef) -> bool {
-    matches!(
-        object.debug_name(),
-        "evdev-client" | "kernel::polling::object::PollerObject"
-    )
 }
 
 fn event_key(event: PollableEvent) -> u64 {
@@ -120,16 +112,6 @@ pub fn notify_pollers(object: ObjectRef, event: PollableEvent) -> Vec<ObjectRef>
         }
 
         let pollers = interested_pollers(&current_object, current_event);
-        if !pollers.is_empty() && should_trace_object(&current_object) {
-            s_println!(
-                "poll: notify object={} ptr={:#x} event={:?} watchers={}",
-                current_object.debug_name(),
-                object_key(&current_object),
-                current_event,
-                pollers.len()
-            );
-        }
-
         for poller in pollers {
             let result = poller.push_woken_event(current_object.clone(), current_event);
             if !result.interested {
@@ -171,19 +153,6 @@ impl PollerObject {
             register_interest(&poller, &object, event);
         }
 
-        if should_trace_object(&object) {
-            let poller_ptr = self as *const Self as usize;
-            s_println!(
-                "poll: register poller={:#x} object={} ptr={:#x} event={:?} data={:#x} new={}",
-                poller_ptr,
-                object.debug_name(),
-                object_key(&object),
-                event,
-                data,
-                is_new_entry
-            );
-        }
-
         self.woken_events
             .lock()
             .retain(|ready| !(ready.event == event && Arc::ptr_eq(&ready.object, &object)));
@@ -207,17 +176,6 @@ impl PollerObject {
 
         if let Some(poller) = self.self_poller() {
             unregister_interest(&poller, &object, event);
-        }
-
-        if should_trace_object(&object) {
-            let poller_ptr = self as *const Self as usize;
-            s_println!(
-                "poll: unregister poller={:#x} object={} ptr={:#x} event={:?}",
-                poller_ptr,
-                object.debug_name(),
-                object_key(&object),
-                event
-            );
         }
 
         self.woken_events
