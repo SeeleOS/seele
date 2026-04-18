@@ -139,6 +139,38 @@ define_syscall!(Accept, |socket: ObjectRef,
     Ok(fd)
 });
 
+define_syscall!(Accept4, |socket: ObjectRef,
+                          address: *mut u8,
+                          address_len_ptr: *mut u32,
+                          flags: u32| {
+    let fd = socket
+        .as_unix_socket()?
+        .accept()
+        .map_err(crate::object::error::ObjectError::from)?;
+    if !address_len_ptr.is_null() {
+        let accepted = crate::object::misc::get_object_current_process(fd as u64)
+            .map_err(SyscallError::from)?;
+        let name = accepted
+            .as_unix_socket()?
+            .getpeername_bytes()
+            .map_err(crate::object::error::ObjectError::from)?;
+        let requested_len = unsafe { *address_len_ptr as usize };
+        let copy_len = requested_len.min(name.len());
+        if copy_len > 0 {
+            user_safe::write(address, &name[..copy_len])?;
+        }
+        user_safe::write(address_len_ptr, &(name.len() as u32))?;
+    }
+    let accepted =
+        crate::object::misc::get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+    let mut file_flags = crate::object::FileFlags::empty();
+    if (flags & SOCK_NONBLOCK as u32) != 0 {
+        file_flags.insert(crate::object::FileFlags::NONBLOCK);
+    }
+    let _ = accepted.set_flags(file_flags);
+    Ok(fd)
+});
+
 define_syscall!(Sendto, |socket: ObjectRef,
                          buffer: *const u8,
                          len: usize,
@@ -211,6 +243,65 @@ define_syscall!(
         Ok(read)
     }
 );
+
+define_syscall!(Sendmsg, |socket: ObjectRef,
+                          msg: *const relibc_msg_hdr,
+                          _flags: u64| {
+    if msg.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let msg = unsafe { &*msg };
+    if msg.msg_iovlen > isize::MAX as usize {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let iovs = if msg.msg_iovlen == 0 {
+        &[][..]
+    } else {
+        if msg.msg_iov.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+        unsafe { core::slice::from_raw_parts(msg.msg_iov, msg.msg_iovlen) }
+    };
+
+    if !msg.msg_name.is_null() {
+        let address_len = msg.msg_namelen;
+        let path = path_from_sockaddr(msg.msg_name.cast(), address_len)?;
+        let socket_ref = socket.clone().as_unix_socket()?;
+        if matches!(
+            &*socket_ref.state.lock(),
+            crate::socket::UnixSocketState::Unbound
+        ) {
+            socket_ref
+                .connect(path)
+                .map_err(crate::object::error::ObjectError::from)?;
+        }
+    }
+
+    let socket = socket.as_unix_socket()?;
+    let mut total_written = 0usize;
+
+    for iov in iovs {
+        if iov.iov_len == 0 {
+            continue;
+        }
+        if iov.iov_base.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+
+        let buffer = unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
+        let written = socket
+            .write_socket(buffer)
+            .map_err(crate::object::error::ObjectError::from)?;
+        total_written += written;
+        if written < buffer.len() {
+            break;
+        }
+    }
+
+    Ok(total_written)
+});
 
 define_syscall!(Setsockopt, |socket: ObjectRef,
                              level: i32,

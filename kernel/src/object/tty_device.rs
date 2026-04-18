@@ -5,7 +5,7 @@ use spin::Mutex;
 use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function,
-    keyboard::decoding_task::{KEYBOARD_QUEUE, RAW_QUEUE},
+    keyboard::decoding_task::{KEYBOARD_QUEUE, MEDIUM_RAW_QUEUE, RAW_QUEUE},
     object::{
         FileFlags, Object,
         config::ConfigurateRequest,
@@ -30,11 +30,16 @@ pub fn get_default_tty() -> Arc<TtyDevice> {
 }
 
 fn get_appropriate_keyboard_queue(mode: KeyboardMode) -> &'static Mutex<VecDeque<u8>> {
-    // Linux raw/off keyboard modes expose scancodes; cooked modes read decoded bytes.
-    if matches!(mode, KeyboardMode::Raw | KeyboardMode::Off) {
-        RAW_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
-    } else {
-        KEYBOARD_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
+    // Linux raw/off expose scan codes, mediumraw exposes Linux keycodes,
+    // cooked modes expose decoded bytes.
+    match mode {
+        KeyboardMode::Raw | KeyboardMode::Off => {
+            RAW_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
+        }
+        KeyboardMode::MediumRaw => MEDIUM_RAW_QUEUE.get_or_init(|| Mutex::new(VecDeque::new())),
+        KeyboardMode::Xlate | KeyboardMode::Unicode => {
+            KEYBOARD_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
+        }
     }
 }
 

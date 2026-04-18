@@ -13,6 +13,7 @@ use crate::{
     filesystem::object::FileLikeObject,
     object::{
         error::ObjectError,
+        linux_anon::{InotifyObject, TimerFdObject},
         misc::ObjectResult,
         traits::{Configuratable, MemoryMappable, Readable, Seekable, Statable, Writable},
     },
@@ -25,6 +26,7 @@ pub mod config;
 pub mod control;
 pub mod device;
 pub mod error;
+pub mod linux_anon;
 pub mod misc;
 pub mod queue_helpers;
 pub mod traits;
@@ -72,6 +74,8 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function!("statable", Statable, BadFileDescriptor);
 
     define_cast_function_non_trait!("file_like", FileLikeObject, BadFileDescriptor);
+    define_cast_function_non_trait!("inotify", InotifyObject, BadFileDescriptor);
     define_cast_function_non_trait!("poller", PollerObject, BadFileDescriptor);
+    define_cast_function_non_trait!("timerfd", TimerFdObject, BadFileDescriptor);
     define_cast_function_non_trait!("unix_socket", UnixSocketObject, BadFileDescriptor);
 }

@@ -146,7 +146,12 @@ define_syscall!(
                         .as_poller()?
                         .unregister_obj(target_object.clone(), existing);
                 }
-                epoll_update_impl(poller, target_object, event.events, epoll_event_data_u64(&event))
+                epoll_update_impl(
+                    poller,
+                    target_object,
+                    event.events,
+                    epoll_event_data_u64(&event),
+                )
             }
             EpollCtlOp::Del => {
                 for existing in [

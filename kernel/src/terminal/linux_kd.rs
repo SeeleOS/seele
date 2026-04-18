@@ -1,10 +1,11 @@
 use core::ptr::write_volatile;
 
 use num_enum::TryFromPrimitive;
+use pc_keyboard::KeyCode;
 use spin::Mutex;
 
 use crate::{
-    keyboard::decoding_task::KEYBOARD_QUEUE,
+    keyboard::decoding_task::{KEYBOARD_QUEUE, MEDIUM_RAW_QUEUE, RAW_QUEUE},
     object::{config::ConfigurateRequest, error::ObjectError, misc::ObjectResult},
     terminal::misc::LINE_BUFFER,
 };
@@ -393,6 +394,117 @@ fn linux_kb_entry_value(table: u8, index: u8) -> Option<u16> {
     Some(value)
 }
 
+pub fn linux_keycode_from_keycode(key: KeyCode) -> Option<u8> {
+    Some(match key {
+        KeyCode::Escape => 1,
+        KeyCode::Key1 => 2,
+        KeyCode::Key2 => 3,
+        KeyCode::Key3 => 4,
+        KeyCode::Key4 => 5,
+        KeyCode::Key5 => 6,
+        KeyCode::Key6 => 7,
+        KeyCode::Key7 => 8,
+        KeyCode::Key8 => 9,
+        KeyCode::Key9 => 10,
+        KeyCode::Key0 => 11,
+        KeyCode::OemMinus => 12,
+        KeyCode::OemPlus => 13,
+        KeyCode::Backspace => 14,
+        KeyCode::Tab => 15,
+        KeyCode::Q => 16,
+        KeyCode::W => 17,
+        KeyCode::E => 18,
+        KeyCode::R => 19,
+        KeyCode::T => 20,
+        KeyCode::Y => 21,
+        KeyCode::U => 22,
+        KeyCode::I => 23,
+        KeyCode::O => 24,
+        KeyCode::P => 25,
+        KeyCode::Oem4 => 26,
+        KeyCode::Oem6 => 27,
+        KeyCode::Return => 28,
+        KeyCode::LControl => 29,
+        KeyCode::A => 30,
+        KeyCode::S => 31,
+        KeyCode::D => 32,
+        KeyCode::F => 33,
+        KeyCode::G => 34,
+        KeyCode::H => 35,
+        KeyCode::J => 36,
+        KeyCode::K => 37,
+        KeyCode::L => 38,
+        KeyCode::Oem1 => 39,
+        KeyCode::Oem3 => 40,
+        KeyCode::Oem8 => 41,
+        KeyCode::LShift => 42,
+        KeyCode::Oem5 => 43,
+        KeyCode::Z => 44,
+        KeyCode::X => 45,
+        KeyCode::C => 46,
+        KeyCode::V => 47,
+        KeyCode::B => 48,
+        KeyCode::N => 49,
+        KeyCode::M => 50,
+        KeyCode::OemComma => 51,
+        KeyCode::OemPeriod => 52,
+        KeyCode::Oem2 => 53,
+        KeyCode::RShift => 54,
+        KeyCode::NumpadMultiply => 55,
+        KeyCode::LAlt => 56,
+        KeyCode::Spacebar => 57,
+        KeyCode::CapsLock => 58,
+        KeyCode::F1 => 59,
+        KeyCode::F2 => 60,
+        KeyCode::F3 => 61,
+        KeyCode::F4 => 62,
+        KeyCode::F5 => 63,
+        KeyCode::F6 => 64,
+        KeyCode::F7 => 65,
+        KeyCode::F8 => 66,
+        KeyCode::F9 => 67,
+        KeyCode::F10 => 68,
+        KeyCode::NumpadLock => 69,
+        KeyCode::ScrollLock => 70,
+        KeyCode::Numpad7 => 71,
+        KeyCode::Numpad8 => 72,
+        KeyCode::Numpad9 => 73,
+        KeyCode::NumpadSubtract => 74,
+        KeyCode::Numpad4 => 75,
+        KeyCode::Numpad5 => 76,
+        KeyCode::Numpad6 => 77,
+        KeyCode::NumpadAdd => 78,
+        KeyCode::Numpad1 => 79,
+        KeyCode::Numpad2 => 80,
+        KeyCode::Numpad3 => 81,
+        KeyCode::Numpad0 => 82,
+        KeyCode::NumpadPeriod => 83,
+        KeyCode::Oem7 => 86,
+        KeyCode::F11 => 87,
+        KeyCode::F12 => 88,
+        KeyCode::NumpadEnter => 96,
+        KeyCode::RControl | KeyCode::RControl2 => 97,
+        KeyCode::NumpadDivide => 98,
+        KeyCode::PrintScreen | KeyCode::SysRq => 99,
+        KeyCode::RAltGr | KeyCode::RAlt2 => 100,
+        KeyCode::Home => 102,
+        KeyCode::ArrowUp => 103,
+        KeyCode::PageUp => 104,
+        KeyCode::ArrowLeft => 105,
+        KeyCode::ArrowRight => 106,
+        KeyCode::End => 107,
+        KeyCode::ArrowDown => 108,
+        KeyCode::PageDown => 109,
+        KeyCode::Insert => 110,
+        KeyCode::Delete => 111,
+        KeyCode::PauseBreak => 119,
+        KeyCode::LWin => 125,
+        KeyCode::RWin => 126,
+        KeyCode::Apps => 127,
+        _ => return None,
+    })
+}
+
 pub fn handle_kd_request(
     state: &Mutex<LinuxConsoleState>,
     request: &ConfigurateRequest,
@@ -409,21 +521,21 @@ pub fn handle_kd_request(
         }
         ConfigurateRequest::LinuxKdSetKeyboardMode(mode) => {
             let mode = KeyboardMode::try_from(*mode).map_err(|_| ObjectError::InvalidArguments)?;
-            match mode {
-                KeyboardMode::Raw
-                | KeyboardMode::Xlate
-                | KeyboardMode::Unicode
-                | KeyboardMode::Off => {
-                    state.lock().keyboard_mode = mode;
-                    KEYBOARD_QUEUE
-                        .get_or_init(|| Mutex::new(Default::default()))
-                        .lock()
-                        .clear();
-                    LINE_BUFFER.lock().clear();
-                    Ok(Some(0))
-                }
-                KeyboardMode::MediumRaw => Err(ObjectError::InvalidArguments),
-            }
+            state.lock().keyboard_mode = mode;
+            KEYBOARD_QUEUE
+                .get_or_init(|| Mutex::new(Default::default()))
+                .lock()
+                .clear();
+            RAW_QUEUE
+                .get_or_init(|| Mutex::new(Default::default()))
+                .lock()
+                .clear();
+            MEDIUM_RAW_QUEUE
+                .get_or_init(|| Mutex::new(Default::default()))
+                .lock()
+                .clear();
+            LINE_BUFFER.lock().clear();
+            Ok(Some(0))
         }
         ConfigurateRequest::LinuxKdGetKeyboardType(ptr) => {
             if ptr.is_null() {

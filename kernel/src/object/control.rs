@@ -34,15 +34,25 @@ fn access_mode_bits(object: &ObjectRef) -> usize {
 
 pub fn control_object(object: ObjectRef, command: u64, arg: u64) -> SyscallResult {
     match FcntlCmd::try_from(command).map_err(|_| SyscallError::InvalidArguments)? {
-        FcntlCmd::SetFl => match object.set_flags(
-            FileFlags::from_bits(arg & O_NONBLOCK as u64).ok_or(SyscallError::InvalidArguments)?,
-        ) {
-            Ok(()) | Err(ObjectError::Unimplemented) => Ok(0),
-            Err(err) => Err(err.into()),
-        },
+        FcntlCmd::SetFl => {
+            let mut flags = FileFlags::empty();
+            if (arg & O_NONBLOCK as u64) != 0 {
+                flags.insert(FileFlags::NONBLOCK);
+            }
+            match object.set_flags(flags) {
+                Ok(()) | Err(ObjectError::Unimplemented) => Ok(0),
+                Err(err) => Err(err.into()),
+            }
+        }
         FcntlCmd::GetFl => {
             let flags = match object.clone().get_flags() {
-                Ok(flags) => flags.bits() as usize,
+                Ok(flags) => {
+                    let mut linux_flags = 0;
+                    if flags.contains(FileFlags::NONBLOCK) {
+                        linux_flags |= O_NONBLOCK;
+                    }
+                    linux_flags
+                }
                 Err(ObjectError::Unimplemented) => 0,
                 Err(err) => return Err(err.into()),
             };

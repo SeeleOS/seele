@@ -10,6 +10,8 @@ use crate::memory::{
 };
 use crate::misc::time::Time as KernelTime;
 use crate::misc::{others::protection_to_page_flags, utsname::UtsName};
+use crate::object::Object;
+use crate::object::linux_anon::{InotifyObject, TimerFdObject, wake_linux_io_waiters};
 use crate::process::manager::{MANAGER, get_current_process};
 use crate::signal::{
     action::{SignalAction, SignalHandlingType},
@@ -101,6 +103,25 @@ const RLIM64_INFINITY: u64 = u64::MAX;
 const RLIMIT_NOFILE_DEFAULT: u64 = 1024;
 const INITIAL_BRK_RESERVE: u64 = 0x4000_0000;
 const TIMER_ABSTIME: i32 = 1;
+const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
+const LINUX_CAPABILITY_U32S_3: usize = 2;
+const TFD_TIMER_ABSTIME: i32 = 1;
+const TFD_NONBLOCK: i32 = 0o4_000;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct LinuxCapHeader {
+    version: u32,
+    pid: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxCapData {
+    effective: u32,
+    permitted: u32,
+    inheritable: u32,
+}
 
 fn clone_cleared_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalAction> {
     let defaults = default_signal_action_vec();
@@ -188,10 +209,34 @@ fn write_rseq_area(rseq_ptr: *mut LinuxRseq, registered: bool) -> Result<(), Sys
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct LinuxTimespec {
     tv_sec: i64,
     tv_nsec: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxItimerspec {
+    it_interval: LinuxTimespec,
+    it_value: LinuxTimespec,
+}
+
+fn linux_timespec_to_ns(timespec: LinuxTimespec) -> Result<u64, SyscallError> {
+    if timespec.tv_sec < 0 || timespec.tv_nsec < 0 || timespec.tv_nsec >= 1_000_000_000 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    Ok((timespec.tv_sec as u64)
+        .saturating_mul(1_000_000_000)
+        .saturating_add(timespec.tv_nsec as u64))
+}
+
+fn ns_to_linux_timespec(ns: u64) -> LinuxTimespec {
+    LinuxTimespec {
+        tv_sec: (ns / 1_000_000_000) as i64,
+        tv_nsec: (ns % 1_000_000_000) as i64,
+    }
 }
 
 fn linux_clock_now_ns(clock_id: i32) -> Result<i64, SyscallError> {
@@ -231,6 +276,127 @@ define_syscall!(ClockGetres, |clock_id: i32, tp: *mut LinuxTimespec| {
 
     Ok(0)
 });
+
+define_syscall!(Capget, |header: *mut LinuxCapHeader,
+                         data: *mut LinuxCapData| {
+    if header.is_null() || data.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let mut header_value = unsafe { *header };
+    header_value.version = LINUX_CAPABILITY_VERSION_3;
+    user_safe::write(header, &header_value)?;
+    user_safe::write(data, &[LinuxCapData::default(); LINUX_CAPABILITY_U32S_3])?;
+
+    Ok(0)
+});
+
+define_syscall!(InotifyInit, {
+    let fd = get_current_process()
+        .lock()
+        .push_object(Arc::new(InotifyObject::default()));
+    Ok(fd)
+});
+
+define_syscall!(InotifyInit1, |flags: i32| {
+    let object = Arc::new(InotifyObject::default());
+    if (flags & TFD_NONBLOCK) != 0 {
+        let _ = object.clone().set_flags(crate::object::FileFlags::NONBLOCK);
+    }
+    let fd = get_current_process().lock().push_object(object);
+    Ok(fd)
+});
+
+define_syscall!(
+    InotifyAddWatch,
+    |object: crate::object::misc::ObjectRef, _path: alloc::string::String, _mask: u32| {
+        Ok(object.as_inotify()?.add_watch() as usize)
+    }
+);
+
+define_syscall!(InotifyRmWatch, |object: crate::object::misc::ObjectRef,
+                                 _wd: i32| {
+    let _ = object.as_inotify()?;
+    Ok(0)
+});
+
+define_syscall!(TimerfdCreate, |clock_id: i32, flags: i32| {
+    if !matches!(clock_id, 0 | 1) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let object = Arc::new(TimerFdObject::default());
+    if (flags & TFD_NONBLOCK) != 0 {
+        let _ = object.clone().set_flags(crate::object::FileFlags::NONBLOCK);
+    }
+    let fd = get_current_process().lock().push_object(object);
+    Ok(fd)
+});
+
+define_syscall!(
+    TimerfdSettime,
+    |object: crate::object::misc::ObjectRef,
+     flags: i32,
+     new_value: *const LinuxItimerspec,
+     old_value: *mut LinuxItimerspec| {
+        if new_value.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+
+        let timerfd = object.as_timerfd()?;
+        let now = KernelTime::since_boot();
+        let (old_deadline, old_interval_ns) = timerfd.current_timer();
+        if !old_value.is_null() {
+            let remaining_ns = old_deadline
+                .map(|deadline| deadline.sub(now).as_nanoseconds())
+                .unwrap_or(0);
+            let old_spec = LinuxItimerspec {
+                it_interval: ns_to_linux_timespec(old_interval_ns),
+                it_value: ns_to_linux_timespec(remaining_ns),
+            };
+            user_safe::write(old_value, &old_spec)?;
+        }
+
+        let new_spec = unsafe { *new_value };
+        let value_ns = linux_timespec_to_ns(new_spec.it_value)?;
+        let interval_ns = linux_timespec_to_ns(new_spec.it_interval)?;
+        let deadline = if value_ns == 0 {
+            None
+        } else if (flags & TFD_TIMER_ABSTIME) != 0 {
+            Some(KernelTime::from_nanoseconds(value_ns))
+        } else {
+            Some(now.add_ns(value_ns))
+        };
+        timerfd.set_timer(deadline, interval_ns);
+        wake_linux_io_waiters();
+
+        Ok(0)
+    }
+);
+
+define_syscall!(
+    TimerfdGettime,
+    |object: crate::object::misc::ObjectRef, curr_value: *mut LinuxItimerspec| {
+        if curr_value.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+
+        let timerfd = object.as_timerfd()?;
+        let now = KernelTime::since_boot();
+        let (deadline, interval_ns) = timerfd.current_timer();
+        let remaining_ns = deadline
+            .map(|deadline| deadline.sub(now).as_nanoseconds())
+            .unwrap_or(0);
+
+        let spec = LinuxItimerspec {
+            it_interval: ns_to_linux_timespec(interval_ns),
+            it_value: ns_to_linux_timespec(remaining_ns),
+        };
+        user_safe::write(curr_value, &spec)?;
+
+        Ok(0)
+    }
+);
 
 define_syscall!(TimeSinceBoot, {
     Ok(KernelTime::since_boot().as_nanoseconds() as usize)

@@ -204,6 +204,21 @@ define_syscall!(Dup3, |source: ObjectRef, dest: usize| {
         .map_err(Into::into)
 });
 
+define_syscall!(CloseRange, |first: usize, last: usize, _flags: u32| {
+    let process_ref = get_current_process();
+    let mut process = process_ref.lock();
+    if first >= process.objects.len() {
+        return Ok(0);
+    }
+
+    let end = last.min(process.objects.len().saturating_sub(1));
+    for fd in first..=end {
+        process.objects[fd] = None;
+    }
+
+    Ok(0)
+});
+
 define_syscall!(OpenDevice, |name: String| {
     with_current_process(|process| {
         let device = get_device(name)?;
