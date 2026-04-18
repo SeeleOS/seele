@@ -3,10 +3,7 @@ use alloc::{
     sync::{Arc, Weak},
     vec::Vec,
 };
-use core::{
-    mem::size_of,
-    slice,
-};
+use core::{mem::size_of, slice};
 
 use crate::{misc::time::Time, object::FileFlags};
 

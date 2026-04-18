@@ -35,6 +35,8 @@ pub struct EventDeviceClientObject {
     pub(super) state: Mutex<EventDeviceState>,
 }
 
+pub type EventDeviceObject = EventDeviceClientObject;
+
 lazy_static::lazy_static! {
     pub static ref KEYBOARD_EVENT_DEVICE: Arc<EventDeviceHub> =
         Arc::new(EventDeviceHub::new(EventDeviceKind::Keyboard));
