@@ -63,60 +63,7 @@ fn syscall_handler_unwrapped(
     arg6: u64,
 ) -> isize {
     let syscall = SyscallNumber::from_number(syscall_no as usize);
-    let should_log = with_current_process(|proc| {
-        (3..=6).contains(&proc.pid.0)
-            && matches!(
-                syscall,
-                Some(
-                    SyscallNumber::ArchPrctl
-                        | SyscallNumber::Brk
-                        | SyscallNumber::RtSigaction
-                        | SyscallNumber::Sigaltstack
-                        | SyscallNumber::RtSigprocmask
-                        | SyscallNumber::Clone
-                        | SyscallNumber::Clone3
-                        | SyscallNumber::SetTidAddress
-                        | SyscallNumber::Futex
-                        | SyscallNumber::Rseq
-                        | SyscallNumber::Prctl
-                        | SyscallNumber::Getrandom
-                        | SyscallNumber::ClockGettime
-                        | SyscallNumber::Gettimeofday
-                        | SyscallNumber::Pipe
-                        | SyscallNumber::Pipe2
-                        | SyscallNumber::Socket
-                        | SyscallNumber::Socketpair
-                        | SyscallNumber::Connect
-                        | SyscallNumber::Bind
-                        | SyscallNumber::Listen
-                        | SyscallNumber::Accept
-                        | SyscallNumber::Getsockname
-                        | SyscallNumber::Getpeername
-                        | SyscallNumber::Setsockopt
-                        | SyscallNumber::Getsockopt
-                        | SyscallNumber::OpenAt
-                        | SyscallNumber::Close
-                        | SyscallNumber::Read
-                        | SyscallNumber::Write
-                        | SyscallNumber::Readlink
-                        | SyscallNumber::ReadlinkAt
-                        | SyscallNumber::Getcwd
-                        | SyscallNumber::Fstat
-                        | SyscallNumber::Newfstatat
-                        | SyscallNumber::Statx
-                        | SyscallNumber::Statfs
-                        | SyscallNumber::Getdents
-                        | SyscallNumber::Getdents64
-                        | SyscallNumber::Prlimit64
-                        | SyscallNumber::Mmap
-                        | SyscallNumber::Munmap
-                        | SyscallNumber::Mremap
-                        | SyscallNumber::Mprotect
-                        | SyscallNumber::Madvise
-                        | SyscallNumber::Ioctl
-                )
-            )
-    });
+    let should_log = false;
 
     if should_log {
         match syscall {

@@ -108,36 +108,18 @@ define_syscall!(
         let signal = Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?;
         let new_action_decoded =
             unsafe { (!new_action.is_null()).then(|| decode_sigaction(*new_action)) };
-        let (pid, old_encoded) = {
+        let old_encoded = {
             let process = get_current_process();
             let mut process = process.lock();
-            let pid = process.pid.0;
             let current_signal_action = process.get_signal_action(signal);
-
-            if matches!(signal, Signal::User1) {
-                crate::s_println!(
-                    "sigaction: SIGUSR1 pid={} old={:?}",
-                    pid,
-                    current_signal_action.handling_type
-                );
-            }
             let old_encoded = encode_sigaction(current_signal_action);
 
             if let Some(decoded) = new_action_decoded {
-                if matches!(signal, Signal::User1) {
-                    crate::s_println!(
-                        "sigaction: SIGUSR1 pid={} new={:?}",
-                        pid,
-                        decoded.handling_type
-                    );
-                }
                 *current_signal_action = decoded;
             }
 
-            (pid, old_encoded)
+            old_encoded
         };
-
-        let _ = pid;
 
         if !old_action.is_null() {
             user_safe::write(old_action, &old_encoded)?;

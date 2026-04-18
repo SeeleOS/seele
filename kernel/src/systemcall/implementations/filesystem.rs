@@ -205,23 +205,11 @@ define_syscall!(OpenAt, |dirfd: i32,
         VirtualFS.lock().create_file(path.clone())?;
         object = Arc::new(VirtualFS.lock().open(path)?);
     } else {
-        s_println!(
-            "openat path={} flags={:#x} -> err {:?}",
-            path_str,
-            flags.bits(),
-            SyscallError::FileNotFound
-        );
         return Err(SyscallError::FileNotFound);
     }
 
     let slot = current_process.lock().alloc_object_slot();
     current_process.lock().objects[slot] = Some(object);
-    s_println!(
-        "openat path={} flags={:#x} -> fd {}",
-        path_str,
-        flags.bits(),
-        slot
-    );
     Ok(slot)
 });
 
@@ -309,15 +297,6 @@ define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
 define_syscall!(Fstat, |fd: u64, linux_stat_ptr: *mut LinuxStat| {
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
     let stat = object.as_statable()?.stat();
-    if stat.st_mode & 0o170000 == 0o040000 {
-        s_println!(
-            "fstat fd={} mode={:#o} uid={} gid={}",
-            fd,
-            stat.st_mode,
-            stat.st_uid,
-            stat.st_gid
-        );
-    }
     user_safe::write(linux_stat_ptr, &stat)?;
     Ok(0)
 });
@@ -345,21 +324,6 @@ define_syscall!(Newfstatat, |dirfd: i32,
 
     let stat = stat_at(dirfd, &path_str, flags)?;
 
-    if path_str.contains("X11")
-        || path_str.contains(".X")
-        || path_str.contains("/tmp")
-        || path_str.contains("local")
-    {
-        s_println!(
-            "newfstatat dirfd={} path={} flags={:#x} mode={:#o} uid={} gid={}",
-            dirfd,
-            path_str,
-            flags.bits(),
-            stat.st_mode,
-            stat.st_uid,
-            stat.st_gid
-        );
-    }
     user_safe::write(linux_stat_ptr, &stat)?;
     Ok(0)
 });

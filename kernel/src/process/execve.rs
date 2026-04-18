@@ -93,12 +93,6 @@ impl Process {
         thread_locked.saved_blocked_signals.clear();
         self.pending_signals = Signals::default();
         self.signal_actions = execve_signal_actions(&self.signal_actions);
-        crate::s_println!(
-            "execve: pid={} path={} sigusr1={:?}",
-            self.pid.0,
-            path_string,
-            self.signal_actions[crate::signal::Signal::User1.index()].handling_type
-        );
         self.program_break = 0;
 
         with_profiling(

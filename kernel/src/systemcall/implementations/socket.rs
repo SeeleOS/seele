@@ -86,30 +86,19 @@ define_syscall!(Bind, |socket: ObjectRef,
                        address: *const u8,
                        address_len: u32| {
     let path = path_from_sockaddr(address, address_len)?;
-    let display_path = path.clone();
-    s_println!("bind path={}", display_path);
     let result = socket
         .as_unix_socket()?
         .bind(path)
         .map_err(crate::object::error::ObjectError::from);
-    match &result {
-        Ok(_) => s_println!("bind ok path={}", display_path),
-        Err(err) => s_println!("bind failed: path={} err={:?}", display_path, err),
-    }
     result?;
     Ok(0)
 });
 
 define_syscall!(Listen, |socket: ObjectRef, backlog: usize| {
-    s_println!("listen backlog={}", backlog);
     let result = socket
         .as_unix_socket()?
         .listen(backlog)
         .map_err(crate::object::error::ObjectError::from);
-    match &result {
-        Ok(_) => s_println!("listen ok backlog={}", backlog),
-        Err(err) => s_println!("listen failed: backlog={} err={:?}", backlog, err),
-    }
     result?;
     Ok(0)
 });
@@ -118,14 +107,10 @@ define_syscall!(Connect, |socket: ObjectRef,
                           address: *const u8,
                           address_len: u32| {
     let path = path_from_sockaddr(address, address_len)?;
-    s_println!("connect path={}", path);
     let result = socket
         .as_unix_socket()?
         .connect(path)
         .map_err(crate::object::error::ObjectError::from);
-    if let Err(ref err) = result {
-        s_println!("connect failed err={:?}", err);
-    }
     result?;
     Ok(0)
 });
@@ -133,12 +118,10 @@ define_syscall!(Connect, |socket: ObjectRef,
 define_syscall!(Accept, |socket: ObjectRef,
                          address: *mut u8,
                          address_len_ptr: *mut u32| {
-    s_println!("accept");
     let fd = socket
         .as_unix_socket()?
         .accept()
         .map_err(crate::object::error::ObjectError::from)?;
-    s_println!("accept ok fd={}", fd);
     if !address_len_ptr.is_null() {
         let accepted = crate::object::misc::get_object_current_process(fd as u64)
             .map_err(SyscallError::from)?;
