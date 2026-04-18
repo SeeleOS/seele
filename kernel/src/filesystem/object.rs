@@ -1,8 +1,8 @@
 use core::fmt::Debug;
 
-use alloc::string::String;
-use alloc::vec::Vec;
+use alloc::{string::String, sync::Arc, vec::Vec};
 
+use crate::object::misc::ObjectRef;
 use crate::{
     filesystem::{
         errors::FSError,
@@ -22,6 +22,7 @@ use crate::{
         misc::ObjectResult,
         traits::{Configuratable, MemoryMappable, Readable, Seekable, Statable, Writable},
     },
+    polling::{event::PollableEvent, object::Pollable},
     process::misc::with_current_process,
 };
 
@@ -127,7 +128,7 @@ impl FileLikeObject {
         }
     }
 
-    fn resolve_device_object(&self) -> FSResult<Option<crate::object::misc::ObjectRef>> {
+    fn resolve_device_object(&self) -> FSResult<Option<ObjectRef>> {
         match &self.file {
             FileLike::File(file) => {
                 let file = file.lock();
@@ -146,6 +147,16 @@ impl FileLikeObject {
     }
 }
 
+pub fn poll_identity_object(object: ObjectRef) -> ObjectRef {
+    if let Ok(file_like) = object.clone().as_file_like()
+        && let Ok(Some(device)) = file_like.resolve_device_object()
+    {
+        return device;
+    }
+
+    object
+}
+
 impl Debug for FileLikeObject {
     fn fmt(&self, _f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         Ok(())
@@ -153,9 +164,26 @@ impl Debug for FileLikeObject {
 }
 
 impl Object for FileLikeObject {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<crate::object::FileFlags> {
+        let Some(device) = self.resolve_device_object()? else {
+            return Err(ObjectError::Unimplemented);
+        };
+
+        device.clone().get_flags()
+    }
+
+    fn set_flags(self: Arc<Self>, flags: crate::object::FileFlags) -> ObjectResult<()> {
+        let Some(device) = self.resolve_device_object()? else {
+            return Err(ObjectError::Unimplemented);
+        };
+
+        device.clone().set_flags(flags)
+    }
+
     impl_cast_function!("writable", Writable);
     impl_cast_function!("readable", Readable);
     impl_cast_function!("configuratable", Configuratable);
+    impl_cast_function!("pollable", Pollable);
     impl_cast_function!("mappable", MemoryMappable);
     impl_cast_function!("seekable", Seekable);
     impl_cast_function!("statable", Statable);
@@ -165,6 +193,13 @@ impl Object for FileLikeObject {
 
 impl Writable for FileLikeObject {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
+        if let Some(device) = self.resolve_device_object()? {
+            let writable = device
+                .as_writable()
+                .map_err(|_| ObjectError::InvalidArguments)?;
+            return writable.write(buffer);
+        }
+
         self.resolve_file()?
             .lock()
             .write(buffer)
@@ -174,6 +209,13 @@ impl Writable for FileLikeObject {
 
 impl Readable for FileLikeObject {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
+        if let Some(device) = self.resolve_device_object()? {
+            let readable = device
+                .as_readable()
+                .map_err(|_| ObjectError::InvalidArguments)?;
+            return readable.read(buffer);
+        }
+
         self.resolve_file()?.lock().read(buffer).map_err(Into::into)
     }
 }
@@ -224,8 +266,25 @@ impl Configuratable for FileLikeObject {
     }
 }
 
+impl Pollable for FileLikeObject {
+    fn is_event_ready(&self, event: PollableEvent) -> bool {
+        self.resolve_device_object()
+            .ok()
+            .flatten()
+            .and_then(|device| device.as_pollable().ok())
+            .is_some_and(|pollable| pollable.is_event_ready(event))
+    }
+}
+
 impl Seekable for FileLikeObject {
     fn seek(self: alloc::sync::Arc<Self>, offset: i64, seek_type: Whence) -> ObjectResult<usize> {
+        if let Ok(Some(device)) = self.resolve_device_object() {
+            let seekable = device
+                .as_seekable()
+                .map_err(|_| ObjectError::FSError(FSError::NotAFile))?;
+            return seekable.seek(offset, seek_type);
+        }
+
         if let FileLike::File(file) = &self.file {
             file.lock().seek(offset, seek_type).map_err(Into::into)
         } else {

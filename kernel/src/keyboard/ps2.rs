@@ -3,6 +3,9 @@ use pc_keyboard::{Keyboard, ScancodeSet1, layouts};
 use spin::Mutex;
 use x86_64::{instructions::port::Port, structures::idt::InterruptStackFrame};
 
+const STATUS_OUTPUT_FULL: u8 = 1 << 0;
+const STATUS_AUX_DATA: u8 = 1 << 5;
+
 lazy_static! {
     pub static ref _PS2_KEYBOARD: Mutex<Keyboard<layouts::Us104Key, ScancodeSet1>> =
         Mutex::new(Keyboard::new(
@@ -22,6 +25,13 @@ pub fn init() {
 }
 
 pub extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    let mut status_port: Port<u8> = Port::new(0x64);
+    let status = unsafe { status_port.read() };
+    if (status & STATUS_OUTPUT_FULL) == 0 || (status & STATUS_AUX_DATA) != 0 {
+        send_eoi();
+        return;
+    }
+
     let mut keyboard_port = Port::new(0x60);
     let scancode = unsafe { keyboard_port.read() };
     push_scancode(scancode);

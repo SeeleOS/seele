@@ -13,15 +13,17 @@ use crate::{
 
 pub struct StaticDeviceHandle {
     node: &'static StaticDeviceNode,
+    object: ObjectRef,
 }
 
 impl StaticDeviceHandle {
     pub fn new(node: &'static StaticDeviceNode) -> Self {
-        Self { node }
+        let object = get_device_ref(node.device_name).expect("static device must resolve");
+        Self { node, object }
     }
 
     pub fn object(&self) -> Result<ObjectRef, FSError> {
-        get_device_ref(self.node.device_name).map_err(|_| FSError::NotFound)
+        Ok(self.object.clone())
     }
 }
 

@@ -17,6 +17,14 @@ fn mouse_input_uevent() -> Vec<u8> {
         .to_vec()
 }
 
+fn mouse_input_dir_uevent() -> Vec<u8> {
+    b"SUBSYSTEM=input\n".to_vec()
+}
+
+fn mouse_serio_uevent() -> Vec<u8> {
+    b"DRIVER=psmouse\nMODALIAS=serio:ty06pr00id00ex00\nSUBSYSTEM=serio\n".to_vec()
+}
+
 fn mouse_event_dev() -> Vec<u8> {
     b"13:65\n".to_vec()
 }
@@ -41,19 +49,21 @@ fn mouse_caps_prop() -> Vec<u8> {
     b"1\n".to_vec()
 }
 
-pub(super) static SYS_CLASS_INPUT_EVENT1_NODE: StaticNode = StaticNode::Symlink(StaticSymlinkNode {
-    name: "event1",
-    inode: 0x2011,
-    mode: 0o120777,
-    target: "/sys/devices/platform/i8042/serio1/input/input1/event1",
-});
+pub(super) static SYS_CLASS_INPUT_EVENT1_NODE: StaticNode =
+    StaticNode::Symlink(StaticSymlinkNode {
+        name: "event1",
+        inode: 0x2011,
+        mode: 0o120777,
+        target: "/sys/devices/platform/i8042/serio1/input/input1/event1",
+    });
 
-pub(super) static SYS_CLASS_INPUT_INPUT1_NODE: StaticNode = StaticNode::Symlink(StaticSymlinkNode {
-    name: "input1",
-    inode: 0x2013,
-    mode: 0o120777,
-    target: "/sys/devices/platform/i8042/serio1/input/input1",
-});
+pub(super) static SYS_CLASS_INPUT_INPUT1_NODE: StaticNode =
+    StaticNode::Symlink(StaticSymlinkNode {
+        name: "input1",
+        inode: 0x2013,
+        mode: 0o120777,
+        target: "/sys/devices/platform/i8042/serio1/input/input1",
+    });
 
 pub(super) static SYS_DEV_CHAR_13_65_NODE: StaticNode = StaticNode::Symlink(StaticSymlinkNode {
     name: "13:65",
@@ -240,10 +250,23 @@ static SYS_MOUSE_INPUT_NODE: StaticNode = StaticNode::Directory(StaticDirectoryN
     entries: SYS_MOUSE_INPUT_ENTRIES,
 });
 
-static SYS_MOUSE_INPUT_DIR_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
-    name: "input1",
-    node: &SYS_MOUSE_INPUT_NODE,
-}];
+static SYS_MOUSE_INPUT_DIR_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "uevent",
+    inode: 0x2069,
+    mode: 0o100444,
+    read: mouse_input_dir_uevent,
+});
+
+static SYS_MOUSE_INPUT_DIR_ENTRIES: &[StaticDirEntry] = &[
+    StaticDirEntry {
+        name: "uevent",
+        node: &SYS_MOUSE_INPUT_DIR_UEVENT_NODE,
+    },
+    StaticDirEntry {
+        name: "input1",
+        node: &SYS_MOUSE_INPUT_NODE,
+    },
+];
 
 static SYS_MOUSE_INPUT_DIR_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     name: "input",
@@ -252,10 +275,21 @@ static SYS_MOUSE_INPUT_DIR_NODE: StaticNode = StaticNode::Directory(StaticDirect
     entries: SYS_MOUSE_INPUT_DIR_ENTRIES,
 });
 
+static SYS_SERIO1_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "uevent",
+    inode: 0x206a,
+    mode: 0o100444,
+    read: mouse_serio_uevent,
+});
+
 static SYS_SERIO1_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "subsystem",
         node: &SYS_DEVICES_PLATFORM_I8042_SERIO1_SUBSYSTEM_NODE,
+    },
+    StaticDirEntry {
+        name: "uevent",
+        node: &SYS_SERIO1_UEVENT_NODE,
     },
     StaticDirEntry {
         name: "input",

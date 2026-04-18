@@ -16,6 +16,14 @@ fn keyboard_input_uevent() -> Vec<u8> {
     b"PRODUCT=11/1/1/100\nNAME=\"AT Translated Set 2 keyboard\"\nPHYS=\"isa0060/serio0/input0\"\nPROP=0\nSUBSYSTEM=input\n".to_vec()
 }
 
+fn keyboard_input_dir_uevent() -> Vec<u8> {
+    b"SUBSYSTEM=input\n".to_vec()
+}
+
+fn keyboard_serio_uevent() -> Vec<u8> {
+    b"DRIVER=atkbd\nMODALIAS=serio:ty06pr00id00ex00\nSUBSYSTEM=serio\n".to_vec()
+}
+
 fn keyboard_event_dev() -> Vec<u8> {
     b"13:64\n".to_vec()
 }
@@ -36,19 +44,21 @@ fn keyboard_caps_prop() -> Vec<u8> {
     b"0\n".to_vec()
 }
 
-pub(super) static SYS_CLASS_INPUT_EVENT0_NODE: StaticNode = StaticNode::Symlink(StaticSymlinkNode {
-    name: "event0",
-    inode: 0x2010,
-    mode: 0o120777,
-    target: "/sys/devices/platform/i8042/serio0/input/input0/event0",
-});
+pub(super) static SYS_CLASS_INPUT_EVENT0_NODE: StaticNode =
+    StaticNode::Symlink(StaticSymlinkNode {
+        name: "event0",
+        inode: 0x2010,
+        mode: 0o120777,
+        target: "/sys/devices/platform/i8042/serio0/input/input0/event0",
+    });
 
-pub(super) static SYS_CLASS_INPUT_INPUT0_NODE: StaticNode = StaticNode::Symlink(StaticSymlinkNode {
-    name: "input0",
-    inode: 0x2012,
-    mode: 0o120777,
-    target: "/sys/devices/platform/i8042/serio0/input/input0",
-});
+pub(super) static SYS_CLASS_INPUT_INPUT0_NODE: StaticNode =
+    StaticNode::Symlink(StaticSymlinkNode {
+        name: "input0",
+        inode: 0x2012,
+        mode: 0o120777,
+        target: "/sys/devices/platform/i8042/serio0/input/input0",
+    });
 
 pub(super) static SYS_DEV_CHAR_13_64_NODE: StaticNode = StaticNode::Symlink(StaticSymlinkNode {
     name: "13:64",
@@ -224,10 +234,23 @@ static SYS_KEYBOARD_INPUT_NODE: StaticNode = StaticNode::Directory(StaticDirecto
     entries: SYS_KEYBOARD_INPUT_ENTRIES,
 });
 
-static SYS_KEYBOARD_INPUT_DIR_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
-    name: "input0",
-    node: &SYS_KEYBOARD_INPUT_NODE,
-}];
+static SYS_KEYBOARD_INPUT_DIR_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "uevent",
+    inode: 0x2067,
+    mode: 0o100444,
+    read: keyboard_input_dir_uevent,
+});
+
+static SYS_KEYBOARD_INPUT_DIR_ENTRIES: &[StaticDirEntry] = &[
+    StaticDirEntry {
+        name: "uevent",
+        node: &SYS_KEYBOARD_INPUT_DIR_UEVENT_NODE,
+    },
+    StaticDirEntry {
+        name: "input0",
+        node: &SYS_KEYBOARD_INPUT_NODE,
+    },
+];
 
 static SYS_KEYBOARD_INPUT_DIR_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     name: "input",
@@ -236,10 +259,21 @@ static SYS_KEYBOARD_INPUT_DIR_NODE: StaticNode = StaticNode::Directory(StaticDir
     entries: SYS_KEYBOARD_INPUT_DIR_ENTRIES,
 });
 
+static SYS_SERIO0_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "uevent",
+    inode: 0x2068,
+    mode: 0o100444,
+    read: keyboard_serio_uevent,
+});
+
 static SYS_SERIO0_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "subsystem",
         node: &SYS_DEVICES_PLATFORM_I8042_SERIO0_SUBSYSTEM_NODE,
+    },
+    StaticDirEntry {
+        name: "uevent",
+        node: &SYS_SERIO0_UEVENT_NODE,
     },
     StaticDirEntry {
         name: "input",
