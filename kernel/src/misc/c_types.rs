@@ -9,6 +9,10 @@ impl KernelFrom<CString> for String {
     fn k_from(val: CString) -> super::error::KernelResult<Self> {
         const MAX_LENGTH: usize = 4096;
 
+        if val.is_null() {
+            return Err(KernelError::InvalidString);
+        }
+
         let mut str = String::new();
 
         for i in 0..MAX_LENGTH {
