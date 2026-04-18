@@ -3,7 +3,7 @@ use bootloader_api::info;
 
 use crate::filesystem::vfs_traits::{DirectoryContentType, FileLikeType};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DirectoryContentInfo {
     pub name: String,
     pub content_type: DirectoryContentType,

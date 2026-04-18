@@ -8,6 +8,7 @@ use crate::filesystem::{
     errors::FSError,
     impls::ext4::{EXT4, operator::Ext4BlockOperator},
     path::Path,
+    procfs::ProcFs,
     sysfs::SysFs,
     vfs_traits::{Directory, File, FileLike, FileSystem, Symlink},
 };
@@ -52,6 +53,7 @@ impl VFS {
         log::info!("vfs: ext4 loaded");
         self.mount(Path::new("/"), EXT4(ext4))?;
         self.mount(Path::new("/dev"), DevFs::new())?;
+        self.mount(Path::new("/proc"), ProcFs::new())?;
         self.mount(Path::new("/sys"), SysFs::new())?;
 
         for temp_dir in ["/tmp", "/var/tmp"] {
