@@ -146,8 +146,8 @@ struct LinuxRseq {
     _padding2: u64,
 }
 
-fn write_rseq_area(rseq_ptr: u64, registered: bool) -> Result<(), SyscallError> {
-    if rseq_ptr == 0 {
+fn write_rseq_area(rseq_ptr: *mut LinuxRseq, registered: bool) -> Result<(), SyscallError> {
+    if rseq_ptr.is_null() {
         return Err(SyscallError::BadAddress);
     }
 
@@ -163,7 +163,7 @@ fn write_rseq_area(rseq_ptr: u64, registered: bool) -> Result<(), SyscallError> 
         rseq.cpu_id_start = RSEQ_CPU_ID_SINGLE_CORE;
         rseq.cpu_id = RSEQ_CPU_ID_SINGLE_CORE;
     }
-    user_safe::write(rseq_ptr as *mut u8, &rseq)?;
+    user_safe::write(rseq_ptr, &rseq)?;
     Ok(())
 }
 
@@ -183,8 +183,8 @@ fn linux_clock_now_ns(clock_id: i32) -> Result<i64, SyscallError> {
     }
 }
 
-define_syscall!(ClockGettime, |clock_id: i32, tp: u64| {
-    if tp == 0 {
+define_syscall!(ClockGettime, |clock_id: i32, tp: *mut LinuxTimespec| {
+    if tp.is_null() {
         return Err(SyscallError::BadAddress);
     }
     let ns = linux_clock_now_ns(clock_id)?;
@@ -192,14 +192,14 @@ define_syscall!(ClockGettime, |clock_id: i32, tp: u64| {
         tv_sec: ns / 1_000_000_000,
         tv_nsec: ns % 1_000_000_000,
     };
-    user_safe::write(tp as *mut u8, &timespec)?;
+    user_safe::write(tp, &timespec)?;
     Ok(0)
 });
 
-define_syscall!(ClockGetres, |clock_id: i32, tp: u64| {
+define_syscall!(ClockGetres, |clock_id: i32, tp: *mut LinuxTimespec| {
     let _ = linux_clock_now_ns(clock_id)?;
 
-    if tp == 0 {
+    if tp.is_null() {
         return Ok(0);
     }
 
@@ -207,7 +207,7 @@ define_syscall!(ClockGetres, |clock_id: i32, tp: u64| {
         tv_sec: 0,
         tv_nsec: 1,
     };
-    user_safe::write(tp as *mut u8, &timespec)?;
+    user_safe::write(tp, &timespec)?;
 
     Ok(0)
 });
@@ -216,18 +216,17 @@ define_syscall!(TimeSinceBoot, {
     Ok(KernelTime::since_boot().as_nanoseconds() as usize)
 });
 
-define_syscall!(Gettimeofday, |tv: u64, tz: u64| {
-    if tv != 0 {
+define_syscall!(Gettimeofday, |tv: *mut LinuxTimeval, tz: *mut u8| {
+    if !tv.is_null() {
         let now_ns = KernelTime::current().as_nanoseconds() as i64;
         let timeval = LinuxTimeval {
             tv_sec: now_ns / 1_000_000_000,
             tv_usec: (now_ns % 1_000_000_000) / 1_000,
         };
-        user_safe::write(tv as *mut u8, &timeval)?;
+        user_safe::write(tv, &timeval)?;
     }
 
-    if tz != 0 {
-        let tz = tz as *mut u8;
+    if !tz.is_null() {
         if tz.is_null() {
             return Err(SyscallError::BadAddress);
         }
@@ -286,8 +285,8 @@ define_syscall!(Brk, |addr: u64| {
     Ok(addr as usize)
 });
 
-define_syscall!(Uname, |info: u64| {
-    if info == 0 {
+define_syscall!(Uname, |info: *mut UtsName| {
+    if info.is_null() {
         return Err(SyscallError::BadAddress);
     }
     let uts = UtsName::new(
@@ -296,43 +295,44 @@ define_syscall!(Uname, |info: u64| {
         env!("CARGO_PKG_VERSION"),
         "x86_64",
     );
-    user_safe::write(info as *mut u8, &uts)?;
+    user_safe::write(info, &uts)?;
     Ok(0)
 });
 
-define_syscall!(Nanosleep, |req: u64, rem: u64| {
-    let req = req as *const LinuxTimespec;
-    if req.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-    let requested = unsafe { &*req };
-    if requested.tv_sec < 0 || requested.tv_nsec < 0 || requested.tv_nsec >= 1_000_000_000 {
-        return Err(SyscallError::InvalidArguments);
-    }
-    let nanoseconds = (requested.tv_sec as u64) * 1_000_000_000 + (requested.tv_nsec as u64);
-    let time = KernelTime::since_boot().add_ns(nanoseconds);
+define_syscall!(
+    Nanosleep,
+    |req: *const LinuxTimespec, rem: *mut LinuxTimespec| {
+        if req.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+        let requested = unsafe { &*req };
+        if requested.tv_sec < 0 || requested.tv_nsec < 0 || requested.tv_nsec >= 1_000_000_000 {
+            return Err(SyscallError::InvalidArguments);
+        }
+        let nanoseconds = (requested.tv_sec as u64) * 1_000_000_000 + (requested.tv_nsec as u64);
+        let time = KernelTime::since_boot().add_ns(nanoseconds);
 
-    block_current_with_sig_check(BlockType::SetTime(time))?;
+        block_current_with_sig_check(BlockType::SetTime(time))?;
 
-    if rem != 0 {
-        let remaining = LinuxTimespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        user_safe::write(rem as *mut u8, &remaining)?;
+        if !rem.is_null() {
+            let remaining = LinuxTimespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            user_safe::write(rem, &remaining)?;
+        }
+
+        Ok(0)
     }
-
-    Ok(0)
-});
+);
 
 define_syscall!(Alarm, |_seconds: u32| { Ok(0) });
 
-define_syscall!(RtSigsuspend, |mask: u64, sigset_size: usize| {
+define_syscall!(RtSigsuspend, |mask: *const u64, sigset_size: usize| {
     if sigset_size != 8 {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let mask = mask as *const u64;
     if mask.is_null() {
         return Err(SyscallError::BadAddress);
     }
@@ -359,57 +359,56 @@ define_syscall!(RtSigsuspend, |mask: u64, sigset_size: usize| {
     }
 });
 
-define_syscall!(ClockNanosleep, |clock_id: i32,
-                                 flags: i32,
-                                 req: u64,
-                                 rem: u64| {
-    let req = req as *const LinuxTimespec;
-    if req.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-    if (flags & !TIMER_ABSTIME) != 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
+define_syscall!(
+    ClockNanosleep,
+    |clock_id: i32, flags: i32, req: *const LinuxTimespec, rem: *mut LinuxTimespec| {
+        if req.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+        if (flags & !TIMER_ABSTIME) != 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
 
-    let requested = unsafe { &*req };
-    if requested.tv_sec < 0 || requested.tv_nsec < 0 || requested.tv_nsec >= 1_000_000_000 {
-        return Err(SyscallError::InvalidArguments);
-    }
+        let requested = unsafe { &*req };
+        if requested.tv_sec < 0 || requested.tv_nsec < 0 || requested.tv_nsec >= 1_000_000_000 {
+            return Err(SyscallError::InvalidArguments);
+        }
 
-    let clock = crate::misc::timer::ClockId::try_from(clock_id as u64)
-        .map_err(|_| SyscallError::InvalidArguments)?;
-    let requested_ns =
-        (requested.tv_sec as u64).saturating_mul(1_000_000_000) + (requested.tv_nsec as u64);
+        let clock = crate::misc::timer::ClockId::try_from(clock_id as u64)
+            .map_err(|_| SyscallError::InvalidArguments)?;
+        let requested_ns =
+            (requested.tv_sec as u64).saturating_mul(1_000_000_000) + (requested.tv_nsec as u64);
 
-    let now = match clock {
-        crate::misc::timer::ClockId::Realtime => KernelTime::current(),
-        crate::misc::timer::ClockId::SinceBoot => KernelTime::since_boot(),
-    };
-    let deadline = if (flags & TIMER_ABSTIME) != 0 {
-        KernelTime::from_nanoseconds(requested_ns)
-    } else {
-        now.add_ns(requested_ns)
-    };
-
-    if deadline > now {
-        block_current_with_sig_check(BlockType::SetTime(deadline))?;
-    }
-
-    if rem != 0 {
-        let remaining = LinuxTimespec {
-            tv_sec: 0,
-            tv_nsec: 0,
+        let now = match clock {
+            crate::misc::timer::ClockId::Realtime => KernelTime::current(),
+            crate::misc::timer::ClockId::SinceBoot => KernelTime::since_boot(),
         };
-        user_safe::write(rem as *mut u8, &remaining)?;
-    }
+        let deadline = if (flags & TIMER_ABSTIME) != 0 {
+            KernelTime::from_nanoseconds(requested_ns)
+        } else {
+            now.add_ns(requested_ns)
+        };
 
-    Ok(0)
-});
+        if deadline > now {
+            block_current_with_sig_check(BlockType::SetTime(deadline))?;
+        }
+
+        if !rem.is_null() {
+            let remaining = LinuxTimespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            user_safe::write(rem, &remaining)?;
+        }
+
+        Ok(0)
+    }
+);
 
 define_syscall!(Clone, |flags: u64,
                         stack_pointer: u64,
-                        parent_tid: u64,
-                        child_tid: u64,
+                        parent_tid: *mut i32,
+                        child_tid: *mut i32,
                         tls: u64| {
     let clone_flags = CloneFlags::from_bits_truncate(flags);
     let exit_signal = (flags & 0xff) as u8;
@@ -446,24 +445,18 @@ define_syscall!(Clone, |flags: u64,
         }
 
         if clone_flags.contains(CloneFlags::PARENT_SETTID) {
-            if parent_tid == 0 {
-                return Err(SyscallError::BadAddress);
-            }
-            user_safe::write(parent_tid as *mut u8, &(pid.0 as i32))?;
+            user_safe::write(parent_tid, &(pid.0 as i32))?;
         }
 
         if clone_flags.intersects(CloneFlags::CHILD_SETTID | CloneFlags::CHILD_CLEARTID) {
-            if child_tid == 0 {
-                return Err(SyscallError::BadAddress);
-            }
             child_process
                 .lock()
                 .addrspace
-                .write(child_tid as *mut u8, &(pid.0 as i32))?;
+                .write(child_tid, &(pid.0 as i32))?;
         }
 
         if clone_flags.contains(CloneFlags::CHILD_CLEARTID) {
-            child_thread.lock().clear_child_tid = child_tid;
+            child_thread.lock().clear_child_tid = child_tid as u64;
         }
 
         return Ok(pid.0 as usize);
@@ -488,7 +481,7 @@ define_syscall!(Clone, |flags: u64,
                 child.snapshot.fs_base = tls;
             }
             if flags.contains(CloneFlags::CHILD_CLEARTID) {
-                child.clear_child_tid = child_tid;
+                child.clear_child_tid = child_tid as u64;
             }
         }
 
@@ -498,21 +491,15 @@ define_syscall!(Clone, |flags: u64,
             process.lock().pid.0,
             tid,
             flags.bits(),
-            child_tid
+            child_tid as usize
         );
 
         if flags.contains(CloneFlags::PARENT_SETTID) {
-            if parent_tid == 0 {
-                return Err(SyscallError::BadAddress);
-            }
-            user_safe::write(parent_tid as *mut u8, &tid)?;
+            user_safe::write(parent_tid, &tid)?;
         }
 
         if flags.intersects(CloneFlags::CHILD_SETTID | CloneFlags::CHILD_CLEARTID) {
-            if child_tid == 0 {
-                return Err(SyscallError::BadAddress);
-            }
-            user_safe::write(child_tid as *mut u8, &tid)?;
+            user_safe::write(child_tid, &tid)?;
         }
 
         process.clone().lock().threads.push(Arc::downgrade(&thread));
@@ -521,15 +508,15 @@ define_syscall!(Clone, |flags: u64,
     })
 });
 
-define_syscall!(Clone3, |args: u64, size: usize| {
+define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
     if size < core::mem::size_of::<LinuxCloneArgs>() {
         return Err(SyscallError::InvalidArguments);
     }
-    if args == 0 {
+    if args.is_null() {
         return Err(SyscallError::BadAddress);
     }
 
-    let args = unsafe { &*(args as *const LinuxCloneArgs) };
+    let args = unsafe { &*args };
     if args.pidfd != 0 || args.set_tid != 0 || args.set_tid_size != 0 || args.cgroup != 0 {
         return Err(SyscallError::NoSyscall);
     }
@@ -569,17 +556,21 @@ define_syscall!(Iopl, |level: i32| {
 
 define_syscall!(Ioperm, |_from: u64, _num: u64, _turn_on: i32| { Ok(0) });
 
-define_syscall!(Getresuid, |ruid: u64, euid: u64, suid: u64| {
+define_syscall!(Getresuid, |ruid: *mut u32,
+                            euid: *mut u32,
+                            suid: *mut u32| {
     for ptr in [ruid, euid, suid] {
-        user_safe::write(ptr as *mut u8, &0u32)?;
+        user_safe::write(ptr, &0u32)?;
     }
 
     Ok(0)
 });
 
-define_syscall!(Getresgid, |rgid: u64, egid: u64, sgid: u64| {
+define_syscall!(Getresgid, |rgid: *mut u32,
+                            egid: *mut u32,
+                            sgid: *mut u32| {
     for ptr in [rgid, egid, sgid] {
-        user_safe::write(ptr as *mut u8, &0u32)?;
+        user_safe::write(ptr, &0u32)?;
     }
 
     Ok(0)
@@ -601,17 +592,17 @@ define_syscall!(Setfsuid, |_uid: u32| { Ok(0) });
 
 define_syscall!(Setfsgid, |_gid: u32| { Ok(0) });
 
-define_syscall!(Time, |time_ptr: u64| {
+define_syscall!(Time, |time_ptr: *mut i64| {
     let seconds = (KernelTime::current().as_nanoseconds() / 1_000_000_000) as i64;
-    if time_ptr != 0 {
-        user_safe::write(time_ptr as *mut u8, &seconds)?;
+    if !time_ptr.is_null() {
+        user_safe::write(time_ptr, &seconds)?;
     }
     Ok(seconds as usize)
 });
 
 define_syscall!(
     SchedGetaffinity,
-    |pid: i32, cpusetsize: usize, mask_ptr: u64| {
+    |pid: i32, cpusetsize: usize, mask_ptr: *mut u8| {
         if pid != 0 {
             return Err(SyscallError::InvalidArguments);
         }
@@ -622,7 +613,7 @@ define_syscall!(
         let mut mask = Vec::with_capacity(cpusetsize);
         mask.resize(cpusetsize, 0);
         mask[0] = 1;
-        user_safe::write(mask_ptr as *mut u8, &mask)?;
+        user_safe::write(mask_ptr, &mask)?;
 
         Ok(core::mem::size_of::<usize>())
     }
@@ -656,32 +647,31 @@ define_syscall!(Prctl, |option: i32,
     }
 });
 
-define_syscall!(Prlimit64, |pid: i32,
-                            resource: u32,
-                            new_limit: u64,
-                            old_limit: u64| {
-    if pid != 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
-
-    if new_limit != 0 {
-        let new_limit = new_limit as *const LinuxRlimit64;
-        if new_limit.is_null() {
-            return Err(SyscallError::BadAddress);
+define_syscall!(
+    Prlimit64,
+    |pid: i32, resource: u32, new_limit: *const LinuxRlimit64, old_limit: *mut LinuxRlimit64| {
+        if pid != 0 {
+            return Err(SyscallError::InvalidArguments);
         }
-    }
 
-    if old_limit != 0 {
-        let (rlim_cur, rlim_max) = match RlimitResource::try_from(resource) {
-            Ok(RlimitResource::NoFile) => (RLIMIT_NOFILE_DEFAULT, RLIMIT_NOFILE_DEFAULT),
-            Err(_) => (RLIM64_INFINITY, RLIM64_INFINITY),
-        };
-        let limit = LinuxRlimit64 { rlim_cur, rlim_max };
-        user_safe::write(old_limit as *mut u8, &limit)?;
-    }
+        if !new_limit.is_null() {
+            if new_limit.is_null() {
+                return Err(SyscallError::BadAddress);
+            }
+        }
 
-    Ok(0)
-});
+        if !old_limit.is_null() {
+            let (rlim_cur, rlim_max) = match RlimitResource::try_from(resource) {
+                Ok(RlimitResource::NoFile) => (RLIMIT_NOFILE_DEFAULT, RLIMIT_NOFILE_DEFAULT),
+                Err(_) => (RLIM64_INFINITY, RLIM64_INFINITY),
+            };
+            let limit = LinuxRlimit64 { rlim_cur, rlim_max };
+            user_safe::write(old_limit, &limit)?;
+        }
+
+        Ok(0)
+    }
+);
 
 define_syscall!(Sync, { Ok(0) });
 
@@ -693,7 +683,7 @@ define_syscall!(SetRobustList, |head: u64, len: usize| {
     Ok(0)
 });
 
-define_syscall!(Rseq, |rseq_ptr: u64,
+define_syscall!(Rseq, |rseq_ptr: *mut LinuxRseq,
                        rseq_len: u32,
                        flags: u32,
                        sig: u32| {
@@ -706,7 +696,9 @@ define_syscall!(Rseq, |rseq_ptr: u64,
     let mut current = current.lock();
 
     if flags.contains(RseqFlags::UNREGISTER) {
-        if current.rseq_area != rseq_ptr || current.rseq_len != rseq_len || current.rseq_sig != sig
+        if current.rseq_area != rseq_ptr as u64
+            || current.rseq_len != rseq_len
+            || current.rseq_sig != sig
         {
             return Err(SyscallError::InvalidArguments);
         }
@@ -720,7 +712,7 @@ define_syscall!(Rseq, |rseq_ptr: u64,
         return Ok(0);
     }
 
-    if rseq_ptr == 0 {
+    if rseq_ptr.is_null() {
         return Err(SyscallError::InvalidArguments);
     }
 
@@ -730,14 +722,14 @@ define_syscall!(Rseq, |rseq_ptr: u64,
 
     write_rseq_area(rseq_ptr, true)?;
 
-    current.rseq_area = rseq_ptr;
+    current.rseq_area = rseq_ptr as u64;
     current.rseq_len = rseq_len;
     current.rseq_flags = flags.bits();
     current.rseq_sig = sig;
     Ok(0)
 });
 
-define_syscall!(Getrandom, |buf: u64, len: usize, flags: u32| {
+define_syscall!(Getrandom, |buf: *mut u8, len: usize, flags: u32| {
     let flags = GetRandomFlags::from_bits_truncate(flags);
     if flags.bits() != flags.bits() & (GetRandomFlags::NONBLOCK | GetRandomFlags::RANDOM).bits() {
         return Err(SyscallError::InvalidArguments);
@@ -745,13 +737,13 @@ define_syscall!(Getrandom, |buf: u64, len: usize, flags: u32| {
     if len == 0 {
         return Ok(0);
     }
-    if buf == 0 {
+    if buf.is_null() {
         return Err(SyscallError::BadAddress);
     }
 
     let mut state = KernelTime::since_boot().as_nanoseconds()
         ^ KernelTime::current().as_nanoseconds()
-        ^ buf.rotate_left(17)
+        ^ (buf as u64).rotate_left(17)
         ^ (len as u64).rotate_left(33);
     let mut out = Vec::with_capacity(len);
     out.resize(len, 0);
@@ -763,7 +755,7 @@ define_syscall!(Getrandom, |buf: u64, len: usize, flags: u32| {
         *byte = state as u8;
     }
 
-    user_safe::write(buf as *mut u8, &out)?;
+    user_safe::write(buf, &out)?;
 
     Ok(len)
 });

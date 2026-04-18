@@ -4,15 +4,13 @@ use x86_64::VirtAddr;
 
 use crate::{
     define_syscall,
-    filesystem::info::LinuxStat,
     filesystem::vfs_traits::Whence,
     memory::protection::Protection,
     misc::{
         c_types::{CString, CVec},
         error::AsSyscallError,
         others::KernelFrom,
-        timer::{ClockId, Sigevent, TimerSpec},
-        utsname::UtsName,
+        timer::ClockId,
     },
     object::misc::{ObjectRef, get_object_current_process},
     polling::event::PollableEvent,
@@ -22,8 +20,7 @@ use crate::{
         manager::MANAGER,
         misc::{ProcessID, get_process_with_pid},
     },
-    signal::{Signal, Signals, action::SignalAction},
-    systemcall::implementations::PollResult,
+    signal::{Signal, Signals},
     systemcall::utils::{SyscallError, SyscallResult},
 };
 
@@ -56,27 +53,19 @@ pub trait SyscallArg {
         Self: Sized;
 }
 
-add_syscall_arg_type!(
-    u32,
-    usize,
-    *const u8,
-    *mut LinuxStat,
-    *const Sigevent,
-    *mut u32,
-    u64,
-    *mut u8,
-    *mut u64,
-    *mut PollResult,
-    i32,
-    *const TimerSpec,
-    *mut i32,
-    *mut TimerSpec,
-    i64,
-    *mut SignalAction,
-    *const SignalAction,
-    *mut Signals,
-    *mut UtsName
-);
+impl<T> SyscallArg for *const T {
+    fn from_u64(val: u64) -> SyscallResult<Self> {
+        Ok(val as *const T)
+    }
+}
+
+impl<T> SyscallArg for *mut T {
+    fn from_u64(val: u64) -> SyscallResult<Self> {
+        Ok(val as *mut T)
+    }
+}
+
+add_syscall_arg_type!(u32, usize, u64, i32, i64);
 
 add_syscall_arg_type!(Signals, val, {
     Signals::from_bits(val).ok_or(SyscallError::InvalidArguments)

@@ -114,48 +114,47 @@ fn epoll_update_impl(
     Ok(0)
 }
 
-define_syscall!(EpollCtl, |poller: ObjectRef,
-                           op: u64,
-                           target_object: ObjectRef,
-                           event: u64| {
-    match EpollCtlOp::try_from(op).map_err(|_| SyscallError::InvalidArguments)? {
-        EpollCtlOp::Add | EpollCtlOp::Mod => {
-            let event = event as *const LinuxEpollEvent;
-            if event.is_null() {
-                return Err(SyscallError::BadAddress);
+define_syscall!(
+    EpollCtl,
+    |poller: ObjectRef, op: u64, target_object: ObjectRef, event: *const LinuxEpollEvent| {
+        match EpollCtlOp::try_from(op).map_err(|_| SyscallError::InvalidArguments)? {
+            EpollCtlOp::Add | EpollCtlOp::Mod => {
+                if event.is_null() {
+                    return Err(SyscallError::BadAddress);
+                }
+                let event = unsafe { &*event };
+                for existing in [
+                    PollableEvent::CanBeRead,
+                    PollableEvent::CanBeWritten,
+                    PollableEvent::Error,
+                    PollableEvent::Closed,
+                ] {
+                    poller
+                        .clone()
+                        .as_poller()?
+                        .unregister_obj(target_object.clone(), existing);
+                }
+                epoll_update_impl(poller, target_object, event.events, unsafe {
+                    event.data.u64_
+                })
             }
-            let event = unsafe { &*event };
-            for existing in [
-                PollableEvent::CanBeRead,
-                PollableEvent::CanBeWritten,
-                PollableEvent::Error,
-                PollableEvent::Closed,
-            ] {
-                poller
-                    .clone()
-                    .as_poller()?
-                    .unregister_obj(target_object.clone(), existing);
+            EpollCtlOp::Del => {
+                for existing in [
+                    PollableEvent::CanBeRead,
+                    PollableEvent::CanBeWritten,
+                    PollableEvent::Error,
+                    PollableEvent::Closed,
+                ] {
+                    poller
+                        .clone()
+                        .as_poller()?
+                        .unregister_obj(target_object.clone(), existing);
+                }
+                Ok(0)
             }
-            epoll_update_impl(poller, target_object, event.events, unsafe {
-                event.data.u64_
-            })
-        }
-        EpollCtlOp::Del => {
-            for existing in [
-                PollableEvent::CanBeRead,
-                PollableEvent::CanBeWritten,
-                PollableEvent::Error,
-                PollableEvent::Closed,
-            ] {
-                poller
-                    .clone()
-                    .as_poller()?
-                    .unregister_obj(target_object.clone(), existing);
-            }
-            Ok(0)
         }
     }
-});
+);
 
 fn epoll_wait_impl(
     poller: ObjectRef,

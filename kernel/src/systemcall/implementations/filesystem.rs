@@ -368,8 +368,7 @@ define_syscall!(Statx, |dirfd: i32,
                         path: CString,
                         flags: i32,
                         _mask: u32,
-                        statx_ptr: u64| {
-    let statx_ptr = statx_ptr as *mut LinuxStatx;
+                        statx_ptr: *mut LinuxStatx| {
     let path_str = path_from_raw(path)?;
     let flags = AtFlags::from_bits_truncate(flags);
     if flags.bits() != flags.bits() & (AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH).bits() {
@@ -405,7 +404,7 @@ define_syscall!(Statx, |dirfd: i32,
         },
         ..Default::default()
     };
-    user_safe::write(statx_ptr as *mut LinuxStatx, &statx)?;
+    user_safe::write(statx_ptr, &statx)?;
 
     Ok(0)
 });
@@ -484,8 +483,7 @@ define_syscall!(Mkdir, |path: CString, mode: u32| {
     Ok(0)
 });
 
-define_syscall!(Statfs, |path: CString, buf: u64| {
-    let buf = buf as *mut LinuxStatFs;
+define_syscall!(Statfs, |path: CString, buf: *mut LinuxStatFs| {
     let path = path_from_raw(path)?;
     let mut current_dir = with_current_process(|process| process.current_directory.clone());
     current_dir.push_path_str(&path);
@@ -507,7 +505,7 @@ define_syscall!(Statfs, |path: CString, buf: u64| {
         f_flags: 0,
         f_spare: [0; 4],
     };
-    user_safe::write(buf as *mut LinuxStatFs, &statfs)?;
+    user_safe::write(buf, &statfs)?;
 
     Ok(0)
 });
@@ -556,17 +554,15 @@ define_syscall!(RenameAt2, |old_dirfd: i32,
 });
 
 define_syscall!(Utimensat, |dirfd: i32,
-                            path: u64,
-                            times: u64,
+                            path: CString,
+                            times: *const [i64; 2],
                             _flags: i32| {
-    let path = path as CString;
     if !path.is_null() {
         let path_str = path_from_raw(path)?;
         let _ = resolve_path_at(dirfd, &path_str)?;
     }
 
-    if times != 0 {
-        let times = times as *const [i64; 2];
+    if !times.is_null() {
         unsafe {
             if (*times)[1] != UTIME_OMIT && (*times)[1] < 0 {
                 return Err(SyscallError::InvalidArguments);

@@ -97,28 +97,30 @@ fn decode_sigaction(action: LinuxSigAction) -> SignalAction {
 
 define_syscall!(
     RtSigaction,
-    |signal: i32, new_action: u64, old_action: u64, sigsetsize: usize| {
+    |signal: i32,
+     new_action: *const LinuxSigAction,
+     old_action: *mut LinuxSigAction,
+     sigsetsize: usize| {
         if sigsetsize != size_of::<u64>() {
             return Err(SyscallError::InvalidArguments);
         }
 
         let signal = Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?;
-        let new_action = new_action as *const LinuxSigAction;
-        let old_action = old_action as *mut LinuxSigAction;
-        let new_action_decoded = unsafe { (!new_action.is_null()).then(|| decode_sigaction(*new_action)) };
+        let new_action_decoded =
+            unsafe { (!new_action.is_null()).then(|| decode_sigaction(*new_action)) };
         let (pid, old_encoded) = {
             let process = get_current_process();
             let mut process = process.lock();
             let pid = process.pid.0;
             let current_signal_action = process.get_signal_action(signal);
 
-                if matches!(signal, Signal::User1) {
-                    crate::s_println!(
-                        "sigaction: SIGUSR1 pid={} old={:?}",
-                        pid,
-                        current_signal_action.handling_type
-                    );
-                }
+            if matches!(signal, Signal::User1) {
+                crate::s_println!(
+                    "sigaction: SIGUSR1 pid={} old={:?}",
+                    pid,
+                    current_signal_action.handling_type
+                );
+            }
             let old_encoded = encode_sigaction(current_signal_action);
 
             if let Some(decoded) = new_action_decoded {
@@ -145,51 +147,51 @@ define_syscall!(
     }
 );
 
-define_syscall!(Sigaltstack, |new_stack: u64, old_stack: u64| {
-    let new_stack = new_stack as *const LinuxStack;
-    let old_stack = old_stack as *mut LinuxStack;
+define_syscall!(
+    Sigaltstack,
+    |new_stack: *const LinuxStack, old_stack: *mut LinuxStack| {
+        let mut state = SIGALTSTACK_STATE.lock();
 
-    let mut state = SIGALTSTACK_STATE.lock();
+        unsafe {
+            if !old_stack.is_null() {
+                user_safe::write(old_stack, &*state)?;
+            }
 
-    unsafe {
-        if !old_stack.is_null() {
-            user_safe::write(old_stack, &*state)?;
-        }
+            if new_stack.is_null() {
+                return Ok(0);
+            }
 
-        if new_stack.is_null() {
-            return Ok(0);
-        }
+            let new_stack = &*new_stack;
+            if (new_stack.ss_flags & !(SS_DISABLE)) != 0 {
+                return Err(SyscallError::InvalidArguments);
+            }
 
-        let new_stack = &*new_stack;
-        if (new_stack.ss_flags & !(SS_DISABLE)) != 0 {
-            return Err(SyscallError::InvalidArguments);
-        }
+            if (new_stack.ss_flags & SS_DISABLE) != 0 {
+                *state = LinuxStack {
+                    ss_sp: 0,
+                    ss_flags: SS_DISABLE,
+                    ss_size: 0,
+                };
+                return Ok(0);
+            }
 
-        if (new_stack.ss_flags & SS_DISABLE) != 0 {
+            if new_stack.ss_sp == 0 {
+                return Err(SyscallError::InvalidArguments);
+            }
+            if new_stack.ss_size < MINSIGSTKSZ {
+                return Err(SyscallError::NoMemory);
+            }
+
             *state = LinuxStack {
-                ss_sp: 0,
-                ss_flags: SS_DISABLE,
-                ss_size: 0,
+                ss_sp: new_stack.ss_sp,
+                ss_flags: new_stack.ss_flags & !SS_ONSTACK,
+                ss_size: new_stack.ss_size,
             };
-            return Ok(0);
         }
 
-        if new_stack.ss_sp == 0 {
-            return Err(SyscallError::InvalidArguments);
-        }
-        if new_stack.ss_size < MINSIGSTKSZ {
-            return Err(SyscallError::NoMemory);
-        }
-
-        *state = LinuxStack {
-            ss_sp: new_stack.ss_sp,
-            ss_flags: new_stack.ss_flags & !SS_ONSTACK,
-            ss_size: new_stack.ss_size,
-        };
+        Ok(0)
     }
-
-    Ok(0)
-});
+);
 
 define_syscall!(Kill, |pid: i32, signal: i32| {
     let signal = if signal == 0 {
@@ -302,14 +304,13 @@ define_syscall!(
 
 define_syscall!(
     RtSigprocmask,
-    |how: i32, set: u64, old_set: *mut u64, sigsetsize: usize| {
+    |how: i32, set: *const u64, old_set: *mut u64, sigsetsize: usize| {
         if sigsetsize != size_of::<u64>() {
             return Err(SyscallError::InvalidArguments);
         }
 
         let current = get_current_thread();
         let mut current = current.lock();
-        let set = set as *const u64;
 
         unsafe {
             if !old_set.is_null() {

@@ -108,14 +108,15 @@ define_syscall!(Write, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
     }
 });
 
-define_syscall!(Writev, |object: ObjectRef, iov_ptr: u64, iovcnt: i32| {
+define_syscall!(Writev, |object: ObjectRef,
+                         iov_ptr: *const LinuxIovec,
+                         iovcnt: i32| {
     if iovcnt < 0 {
         return Err(SyscallError::InvalidArguments);
     }
 
     let writable = object.as_writable()?;
     let mut written = 0usize;
-    let iov_ptr = iov_ptr as *const LinuxIovec;
     if iovcnt > 0 && iov_ptr.is_null() {
         return Err(SyscallError::BadAddress);
     }

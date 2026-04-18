@@ -223,8 +223,7 @@ fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallE
     Ok(count_ready(fds))
 }
 
-define_syscall!(Poll, |fds: u64, nfds: usize, timeout: i32| {
-    let fds = fds as *mut LinuxPollFd;
+define_syscall!(Poll, |fds: *mut LinuxPollFd, nfds: usize, timeout: i32| {
     if fds.is_null() && nfds != 0 {
         return Err(SyscallError::BadAddress);
     }
@@ -233,23 +232,22 @@ define_syscall!(Poll, |fds: u64, nfds: usize, timeout: i32| {
     poll_impl(fds, timeout)
 });
 
-define_syscall!(Ppoll, |fds: u64,
+define_syscall!(Ppoll, |fds: *mut LinuxPollFd,
                         nfds: usize,
-                        timeout: u64,
-                        sigmask: u64,
+                        timeout: *const Timespec,
+                        sigmask: *const u64,
                         sigsetsize: usize| {
-    if sigmask != 0 && sigsetsize != core::mem::size_of::<u64>() {
+    if !sigmask.is_null() && sigsetsize != core::mem::size_of::<u64>() {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let timeout_ms = if timeout == 0 {
+    let timeout_ms = if timeout.is_null() {
         -1
     } else {
-        let timeout = unsafe { &*(timeout as *const Timespec) };
+        let timeout = unsafe { &*timeout };
         saturating_timeout_ms(timeout)?
     };
 
-    let fds = fds as *mut LinuxPollFd;
     if fds.is_null() && nfds != 0 {
         return Err(SyscallError::BadAddress);
     }

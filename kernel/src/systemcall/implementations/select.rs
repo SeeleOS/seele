@@ -172,100 +172,99 @@ fn collect_ready(
     }
 }
 
-define_syscall!(Pselect6, |nfds: i32,
-                           readfds: u64,
-                           writefds: u64,
-                           exceptfds: u64,
-                           timeout: u64,
-                           sigmask: u64| {
-    if nfds < 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
-
-    if sigmask != 0 {
-        let sigmask = unsafe { &*(sigmask as *const SigSetWithSize) };
-        if !sigmask.sigmask.is_null() && sigmask.sigsetsize != core::mem::size_of::<u64>() {
+define_syscall!(
+    Pselect6,
+    |nfds: i32,
+     readfds: *mut u64,
+     writefds: *mut u64,
+     exceptfds: *mut u64,
+     timeout: *const Timespec,
+     sigmask: *const SigSetWithSize| {
+        if nfds < 0 {
             return Err(SyscallError::InvalidArguments);
         }
+
+        if !sigmask.is_null() {
+            let sigmask = unsafe { &*sigmask };
+            if !sigmask.sigmask.is_null() && sigmask.sigsetsize != core::mem::size_of::<u64>() {
+                return Err(SyscallError::InvalidArguments);
+            }
+        }
+
+        let nfds = nfds as usize;
+
+        let poller = Arc::new(PollerObject::new());
+        let mut ready_fds = vec![false; nfds];
+        let mut read_ready = vec![false; nfds];
+        let mut write_ready = vec![false; nfds];
+        let mut except_ready = vec![false; nfds];
+        let mut ready_count = 0usize;
+
+        register_interest(
+            &poller,
+            readfds.cast_const(),
+            nfds,
+            PollableEvent::CanBeRead,
+            &mut read_ready,
+            &mut ready_fds,
+            &mut ready_count,
+        )?;
+        register_interest(
+            &poller,
+            readfds.cast_const(),
+            nfds,
+            PollableEvent::Closed,
+            &mut read_ready,
+            &mut ready_fds,
+            &mut ready_count,
+        )?;
+        register_interest(
+            &poller,
+            writefds.cast_const(),
+            nfds,
+            PollableEvent::CanBeWritten,
+            &mut write_ready,
+            &mut ready_fds,
+            &mut ready_count,
+        )?;
+        register_interest(
+            &poller,
+            writefds.cast_const(),
+            nfds,
+            PollableEvent::Closed,
+            &mut write_ready,
+            &mut ready_fds,
+            &mut ready_count,
+        )?;
+        register_interest(
+            &poller,
+            exceptfds.cast_const(),
+            nfds,
+            PollableEvent::Error,
+            &mut except_ready,
+            &mut ready_fds,
+            &mut ready_count,
+        )?;
+
+        if ready_count == 0 && !timeout_is_zero(timeout) {
+            let deadline = timeout_to_deadline(timeout)?;
+            block_on_poller(poller.clone(), deadline);
+        }
+
+        collect_ready(
+            &poller,
+            nfds,
+            &mut read_ready,
+            &mut write_ready,
+            &mut except_ready,
+            &mut ready_fds,
+            &mut ready_count,
+        );
+
+        rewrite_fdset(readfds, &read_ready, nfds);
+        rewrite_fdset(writefds, &write_ready, nfds);
+        rewrite_fdset(exceptfds, &except_ready, nfds);
+
+        Ok(ready_count)
     }
-
-    let nfds = nfds as usize;
-    let readfds = readfds as *mut u64;
-    let writefds = writefds as *mut u64;
-    let exceptfds = exceptfds as *mut u64;
-    let timeout = timeout as *const Timespec;
-
-    let poller = Arc::new(PollerObject::new());
-    let mut ready_fds = vec![false; nfds];
-    let mut read_ready = vec![false; nfds];
-    let mut write_ready = vec![false; nfds];
-    let mut except_ready = vec![false; nfds];
-    let mut ready_count = 0usize;
-
-    register_interest(
-        &poller,
-        readfds.cast_const(),
-        nfds,
-        PollableEvent::CanBeRead,
-        &mut read_ready,
-        &mut ready_fds,
-        &mut ready_count,
-    )?;
-    register_interest(
-        &poller,
-        readfds.cast_const(),
-        nfds,
-        PollableEvent::Closed,
-        &mut read_ready,
-        &mut ready_fds,
-        &mut ready_count,
-    )?;
-    register_interest(
-        &poller,
-        writefds.cast_const(),
-        nfds,
-        PollableEvent::CanBeWritten,
-        &mut write_ready,
-        &mut ready_fds,
-        &mut ready_count,
-    )?;
-    register_interest(
-        &poller,
-        writefds.cast_const(),
-        nfds,
-        PollableEvent::Closed,
-        &mut write_ready,
-        &mut ready_fds,
-        &mut ready_count,
-    )?;
-    register_interest(
-        &poller,
-        exceptfds.cast_const(),
-        nfds,
-        PollableEvent::Error,
-        &mut except_ready,
-        &mut ready_fds,
-        &mut ready_count,
-    )?;
-
-    if ready_count == 0 && !timeout_is_zero(timeout) {
-        let deadline = timeout_to_deadline(timeout)?;
-        block_on_poller(poller.clone(), deadline);
-    }
-
-    collect_ready(
-        &poller,
-        nfds,
-        &mut read_ready,
-        &mut write_ready,
-        &mut except_ready,
-        &mut ready_fds,
-        &mut ready_count,
-    );
-
-    rewrite_fdset(readfds, &read_ready, nfds);
-    rewrite_fdset(writefds, &write_ready, nfds);
-    rewrite_fdset(exceptfds, &except_ready, nfds);
-
-    Ok(ready_count)
-});
+);

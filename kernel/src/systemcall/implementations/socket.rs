@@ -1,4 +1,3 @@
-use alloc::{string::String, vec::Vec};
 use crate::{
     define_syscall,
     memory::user_safe,
@@ -9,6 +8,7 @@ use crate::{
     socket::{AF_UNIX, SOCK_NONBLOCK},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
+use alloc::{string::String, vec::Vec};
 
 #[repr(C)]
 struct LinuxSockAddrUn {
@@ -155,44 +155,47 @@ define_syscall!(Accept, |socket: ObjectRef,
     Ok(fd)
 });
 
-define_syscall!(Recvfrom, |socket: ObjectRef,
-                            buffer: *mut u8,
-                            len: usize,
-                            _flags: u64,
-                            address: *mut u8,
-                            address_len_ptr: *mut u32| {
-    if len > 0 && buffer.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-
-    let socket = socket.as_unix_socket()?;
-    let mut data = Vec::new();
-    data.resize(len, 0);
-    let read = socket
-        .read_socket(&mut data)
-        .map_err(crate::object::error::ObjectError::from)?;
-
-    if read > 0 {
-        user_safe::write(buffer, &data[..read])?;
-    }
-
-    if !address.is_null() {
-        if address_len_ptr.is_null() {
+define_syscall!(
+    Recvfrom,
+    |socket: ObjectRef,
+     buffer: *mut u8,
+     len: usize,
+     _flags: u64,
+     address: *mut u8,
+     address_len_ptr: *mut u32| {
+        if len > 0 && buffer.is_null() {
             return Err(SyscallError::BadAddress);
         }
-        let name = socket
-            .getpeername_bytes()
-            .map_err(crate::object::error::ObjectError::from)?;
-        let requested_len = unsafe { *address_len_ptr as usize };
-        let copy_len = requested_len.min(name.len());
-        if copy_len > 0 {
-            user_safe::write(address, &name[..copy_len])?;
-        }
-        user_safe::write(address_len_ptr, &(name.len() as u32))?;
-    }
 
-    Ok(read)
-});
+        let socket = socket.as_unix_socket()?;
+        let mut data = Vec::new();
+        data.resize(len, 0);
+        let read = socket
+            .read_socket(&mut data)
+            .map_err(crate::object::error::ObjectError::from)?;
+
+        if read > 0 {
+            user_safe::write(buffer, &data[..read])?;
+        }
+
+        if !address.is_null() {
+            if address_len_ptr.is_null() {
+                return Err(SyscallError::BadAddress);
+            }
+            let name = socket
+                .getpeername_bytes()
+                .map_err(crate::object::error::ObjectError::from)?;
+            let requested_len = unsafe { *address_len_ptr as usize };
+            let copy_len = requested_len.min(name.len());
+            if copy_len > 0 {
+                user_safe::write(address, &name[..copy_len])?;
+            }
+            user_safe::write(address_len_ptr, &(name.len() as u32))?;
+        }
+
+        Ok(read)
+    }
+);
 
 define_syscall!(
     Getsockopt,
@@ -279,13 +282,13 @@ define_syscall!(
 );
 
 define_syscall!(Recvmsg, |socket: ObjectRef,
-                          msg_ptr: *mut u8,
+                          msg: *mut relibc_msg_hdr,
                           _flags: u64| {
-    if msg_ptr.is_null() {
+    if msg.is_null() {
         return Err(SyscallError::BadAddress);
     }
 
-    let msg = unsafe { &mut *(msg_ptr as *mut relibc_msg_hdr) };
+    let msg = unsafe { &mut *msg };
     if msg.msg_iovlen > isize::MAX as usize {
         return Err(SyscallError::InvalidArguments);
     }
