@@ -1,4 +1,4 @@
-use crate::object::{ObjectResult, error::ObjectError};
+use crate::object::ObjectResult;
 
 use crate::misc::framebuffer_ioctl::{FbCmap, FbFixScreeninfo, FbVarScreeninfo};
 use crate::terminal::linux_kd::{LinuxKbEntry, LinuxVtMode, LinuxVtStat};
@@ -31,6 +31,7 @@ pub enum ConfigurateRequest {
     LinuxVtActivate(u32),
     LinuxVtWaitActive(u32),
     LinuxVtRelDisp(u32),
+    RawIoctl { request: u64, arg: u64 },
 }
 
 #[repr(C)]
@@ -96,7 +97,7 @@ impl ConfigurateRequest {
             0x5606 => Self::LinuxVtActivate(ptr as u32),
             0x5607 => Self::LinuxVtWaitActive(ptr as u32),
             0x5605 => Self::LinuxVtRelDisp(ptr as u32),
-            _ => return Err(ObjectError::InvalidRequest),
+            _ => Self::RawIoctl { request, arg: ptr },
         })
     }
 }
