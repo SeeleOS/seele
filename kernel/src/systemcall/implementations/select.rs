@@ -1,6 +1,7 @@
 use alloc::{sync::Arc, vec};
 
 use crate::define_syscall;
+use crate::filesystem::object::poll_identity_object;
 use crate::misc::time::Time;
 use crate::object::misc::get_object_current_process;
 use crate::polling::event::PollableEvent;
@@ -107,7 +108,8 @@ fn register_interest(
         }
 
         let object = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
-        if let Ok(pollable) = object.clone().as_pollable() {
+        let poll_object = poll_identity_object(object);
+        if let Ok(pollable) = poll_object.clone().as_pollable() {
             if pollable.is_event_ready(watched) {
                 event_ready[fd] = true;
                 if !ready_fds[fd] {
@@ -115,7 +117,7 @@ fn register_interest(
                     *ready_count += 1;
                 }
             }
-            poller.register_obj(object, watched, fd as u64);
+            poller.register_obj(poll_object, watched, fd as u64);
         } else {
             // Match relibc: non-epoll-capable descriptors should make select
             // return immediately rather than block forever.
@@ -193,7 +195,7 @@ define_syscall!(
 
         let nfds = nfds as usize;
 
-        let poller = Arc::new(PollerObject::new());
+        let poller = PollerObject::new();
         let mut ready_fds = vec![false; nfds];
         let mut read_ready = vec![false; nfds];
         let mut write_ready = vec![false; nfds];
