@@ -7,7 +7,9 @@ use crate::{
     filesystem::{
         errors::FSError,
         info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
-        staticfs::device::StaticDeviceHandle,
+        staticfs::{
+            device::StaticDeviceHandle, directory::StaticDirectoryHandle, file::StaticFileHandle,
+        },
         vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
         vfs_traits::{FileLike, Whence},
     },
@@ -25,11 +27,16 @@ use crate::{
 
 pub struct FileLikeObject {
     file: FileLike,
+    path: crate::filesystem::path::Path,
 }
 
 impl FileLikeObject {
-    pub fn new(file: FileLike) -> Self {
-        Self { file }
+    pub fn new(file: FileLike, path: crate::filesystem::path::Path) -> Self {
+        Self { file, path }
+    }
+
+    pub fn path(&self) -> crate::filesystem::path::Path {
+        self.path.clone()
     }
 
     pub fn info(&self) -> FSResult<FileLikeInfo> {
@@ -53,6 +60,19 @@ impl FileLikeObject {
             Ok(symlink.lock().target()?.as_string())
         } else {
             Err(FSError::NotASymlink)
+        }
+    }
+
+    pub fn is_static_fs(&self) -> bool {
+        match &self.file {
+            FileLike::File(file) => {
+                let file = file.lock();
+                file.as_any().is::<StaticDeviceHandle>() || file.as_any().is::<StaticFileHandle>()
+            }
+            FileLike::Directory(directory) => {
+                directory.lock().as_any().is::<StaticDirectoryHandle>()
+            }
+            FileLike::Symlink(_) => true,
         }
     }
 
@@ -216,6 +236,12 @@ impl Seekable for FileLikeObject {
 
 impl Statable for FileLikeObject {
     fn stat(&self) -> LinuxStat {
+        if let Ok(Some(device)) = self.resolve_device_object()
+            && let Ok(statable) = device.as_statable()
+        {
+            return statable.stat();
+        }
+
         self.info().map(FileLikeInfo::as_linux).unwrap_or_default()
     }
 }

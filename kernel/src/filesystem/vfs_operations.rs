@@ -46,7 +46,15 @@ impl VFS {
     pub fn open(&mut self, path: Path) -> FSResult<FileLikeObject> {
         let normalized = self.normalize_path(path);
         log::trace!("vfs: open {}", normalized.clone().as_string());
-        Ok(FileLikeObject::new(self.resolve(normalized)?))
+        let (file, resolved_path) = self.resolve_with_path(normalized)?;
+        Ok(FileLikeObject::new(file, resolved_path))
+    }
+
+    pub fn open_nofollow(&mut self, path: Path) -> FSResult<FileLikeObject> {
+        let normalized = self.normalize_path(path);
+        log::trace!("vfs: open_nofollow {}", normalized.clone().as_string());
+        let (file, resolved_path) = self.resolve_nofollow_with_path(normalized)?;
+        Ok(FileLikeObject::new(file, resolved_path))
     }
 
     pub fn file_info(&mut self, path: Path) -> FSResult<FileLikeInfo> {

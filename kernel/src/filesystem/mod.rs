@@ -8,6 +8,7 @@ pub mod misc;
 pub mod object;
 pub mod path;
 pub mod procfs;
+mod resolve;
 pub mod staticfs;
 pub mod storage_operator;
 pub mod sysfs;

@@ -10,7 +10,7 @@ use crate::filesystem::{
     path::Path,
     procfs::ProcFs,
     sysfs::SysFs,
-    vfs_traits::{Directory, File, FileLike, FileSystem, Symlink},
+    vfs_traits::{Directory, File, FileSystem, Symlink},
 };
 use ext4plus::Ext4 as Ext4Inner;
 use lazy_static::lazy_static;
@@ -33,7 +33,7 @@ pub struct Mount {
 }
 
 pub struct VFS {
-    mounts: Vec<Mount>,
+    pub(super) mounts: Vec<Mount>,
 }
 
 impl VFS {
@@ -87,30 +87,5 @@ impl VFS {
         } else {
             path.as_absolute().as_normal().normalize()
         }
-    }
-
-    pub fn resolve(&self, path: Path) -> FSResult<FileLike> {
-        let normalized_path = self.normalize_path(path);
-        let (mount, mount_path) = self.find_mount(&normalized_path)?;
-        // `mount_path` is rooted at the matched mount itself. For example,
-        // resolving `/dev/null` with a `/dev` mount passes `"/null"` into
-        // that filesystem's `lookup()` instead of the global `"/dev/null"`.
-        mount.fs.lock().lookup(&mount_path)
-    }
-
-    pub fn mount_path(&self, path: Path) -> FSResult<Path> {
-        let normalized_path = self.normalize_path(path);
-        let (mount, _) = self.find_mount(&normalized_path)?;
-        Ok(mount.path.clone())
-    }
-
-    fn find_mount(&self, path: &Path) -> FSResult<(&Mount, Path)> {
-        for mount in &self.mounts {
-            if let Some(stripped) = path.strip_prefix(&mount.path) {
-                return Ok((mount, stripped));
-            }
-        }
-
-        Err(FSError::NotFound)
     }
 }
