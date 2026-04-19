@@ -192,6 +192,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         Bpf,
         Statx,
         Rseq,
+        OpenTree,
         Fsopen,
         PidfdOpen,
         Clone3,

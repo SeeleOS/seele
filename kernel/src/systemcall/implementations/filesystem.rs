@@ -31,6 +31,8 @@ const AT_NO_AUTOMOUNT: i32 = 0x800;
 const AT_STATX_FORCE_SYNC: i32 = 0x2000;
 const AT_STATX_DONT_SYNC: i32 = 0x4000;
 const AT_EACCESS: i32 = 0x200;
+const OPEN_TREE_CLONE: u32 = 0x1;
+const OPEN_TREE_CLOEXEC: u32 = 0x0008_0000;
 const S_IFMT: u32 = 0o170000;
 const S_IFREG: u32 = 0o100000;
 const S_IFIFO: u32 = 0o010000;
@@ -972,6 +974,44 @@ define_syscall!(Umount2, |target: CString, flags: i32| {
 define_syscall!(Fsopen, |fs_name: CString, _flags: u32| {
     let _ = path_from_raw(fs_name)?;
     Err(SyscallError::NoSyscall)
+});
+
+define_syscall!(OpenTree, |dirfd: i32, path: CString, flags: u32| {
+    let allowed_flags = OPEN_TREE_CLONE
+        | OPEN_TREE_CLOEXEC
+        | AtFlags::SYMLINK_NOFOLLOW.bits() as u32
+        | AtFlags::EMPTY_PATH.bits() as u32
+        | AT_NO_AUTOMOUNT as u32;
+    if flags & !allowed_flags != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let object = if path.is_null() {
+        if (flags & AtFlags::EMPTY_PATH.bits() as u32) == 0 {
+            return Err(SyscallError::BadAddress);
+        }
+        get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
+    } else {
+        let path = path_from_raw(path)?;
+        let path = resolve_path_at(dirfd, &path)?;
+        let file = if (flags & AtFlags::SYMLINK_NOFOLLOW.bits() as u32) != 0 {
+            VirtualFS.lock().open_nofollow(path)?
+        } else {
+            VirtualFS.lock().open(path)?
+        };
+        Arc::new(file)
+    };
+
+    if !matches!(
+        object.clone().as_file_like()?.info()?.file_like_type,
+        FileLikeType::Directory
+    ) {
+        return Err(SyscallError::NotADirectory);
+    }
+
+    let process = get_current_process();
+    let fd = process.lock().push_object(object);
+    Ok(fd)
 });
 
 define_syscall!(NameToHandleAt, |dirfd: i32,

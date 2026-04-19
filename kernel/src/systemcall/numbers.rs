@@ -189,6 +189,7 @@ pub enum SyscallNumber {
     Statx = 332,
     Rseq = 334,
     Fsopen = 430,
+    OpenTree = 428,
     PidfdOpen = 434,
     Clone3 = 435,
     CloseRange = 436,
