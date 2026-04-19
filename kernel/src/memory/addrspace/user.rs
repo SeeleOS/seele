@@ -11,6 +11,25 @@ use crate::{
 };
 
 impl AddrSpace {
+    fn ensure_user_page_readable(&mut self, addr: VirtAddr) -> bool {
+        match self.page_table.inner.translate(addr) {
+            TranslateResult::Mapped { .. } => true,
+            _ => match self.get_area(addr).cloned() {
+                Some(area) if area.lazy => {
+                    let page = Page::<Size4KiB>::containing_address(addr);
+                    let is_file_backed = matches!(area.data, Data::File { .. });
+                    if is_file_backed {
+                        self.apply_page_cluster(page, area, Self::file_lazy_cluster_pages());
+                    } else {
+                        self.apply_page(page, area);
+                    }
+                    true
+                }
+                _ => false,
+            },
+        }
+    }
+
     fn ensure_user_page_writable(&mut self, addr: VirtAddr) -> bool {
         match self.page_table.inner.translate(addr) {
             TranslateResult::Mapped { flags, .. } => {
@@ -63,6 +82,32 @@ impl AddrSpace {
         Ok(())
     }
 
+    fn read_bytes(&mut self, mut addr: u64, mut dst: &mut [u8]) -> SyscallResult<()> {
+        while !dst.is_empty() {
+            let virt = VirtAddr::new(addr);
+            if !self.ensure_user_page_readable(virt) {
+                return Err(SyscallError::BadAddress);
+            }
+
+            let Some(phys) = self.translate_addr(virt) else {
+                return Err(SyscallError::BadAddress);
+            };
+
+            let page_offset = (virt.as_u64() & 0xfff) as usize;
+            let chunk_len = dst.len().min(4096 - page_offset);
+            let src = (crate::memory::utils::apply_offset(phys.as_u64()) + page_offset as u64) as *const u8;
+
+            unsafe {
+                copy_nonoverlapping(src, dst.as_mut_ptr(), chunk_len);
+            }
+
+            addr += chunk_len as u64;
+            dst = &mut dst[chunk_len..];
+        }
+
+        Ok(())
+    }
+
     pub fn write<T: ?Sized, U>(&mut self, ptr: *mut U, value: &T) -> SyscallResult<()> {
         let bytes = unsafe {
             core::slice::from_raw_parts(
@@ -71,5 +116,17 @@ impl AddrSpace {
             )
         };
         self.write_bytes(ptr as u64, bytes)
+    }
+
+    pub fn read<T: Copy>(&mut self, ptr: *const T) -> SyscallResult<T> {
+        let mut value = core::mem::MaybeUninit::<T>::uninit();
+        let bytes = unsafe {
+            core::slice::from_raw_parts_mut(
+                value.as_mut_ptr().cast::<u8>(),
+                core::mem::size_of::<T>(),
+            )
+        };
+        self.read_bytes(ptr as u64, bytes)?;
+        Ok(unsafe { value.assume_init() })
     }
 }
