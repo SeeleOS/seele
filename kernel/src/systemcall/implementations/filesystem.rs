@@ -266,6 +266,13 @@ fn stat_mount_root_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<bool
     Ok(path.as_string() == mount_path.as_string())
 }
 
+#[repr(C)]
+struct LinuxFileHandle {
+    handle_bytes: u32,
+    handle_type: i32,
+    f_handle: [u8; 0],
+}
+
 fn linux_statfs(f_type: i64) -> LinuxStatFs {
     LinuxStatFs {
         f_type,
@@ -916,6 +923,20 @@ define_syscall!(Mount, |source: CString,
 define_syscall!(Fsopen, |fs_name: CString, _flags: u32| {
     let _ = path_from_raw(fs_name)?;
     Err(SyscallError::NoSyscall)
+});
+
+define_syscall!(NameToHandleAt, |dirfd: i32,
+                                 path: CString,
+                                 _handle: *mut LinuxFileHandle,
+                                 _mount_id: *mut i32,
+                                 flags: i32| {
+    if flags != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let path = path_from_raw(path)?;
+    ensure_path_exists_at(dirfd, &path, false)?;
+    Err(SyscallError::OperationNotSupported)
 });
 
 define_syscall!(Statfs, |path: CString, buf: *mut LinuxStatFs| {
