@@ -29,6 +29,7 @@ const AT_NO_AUTOMOUNT: i32 = 0x800;
 const AT_STATX_FORCE_SYNC: i32 = 0x2000;
 const AT_STATX_DONT_SYNC: i32 = 0x4000;
 const AT_EACCESS: i32 = 0x200;
+const AT_RECURSIVE: u32 = 0x8000;
 const OPEN_TREE_CLONE: u32 = 0x1;
 const OPEN_TREE_CLOEXEC: u32 = 0x0008_0000;
 const S_IFMT: u32 = 0o170000;
@@ -100,6 +101,15 @@ struct LinuxStatFs {
     f_frsize: i64,
     f_flags: i64,
     f_spare: [i64; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxMountAttr {
+    attr_set: u64,
+    attr_clr: u64,
+    propagation: u64,
+    userns_fd: u64,
 }
 
 bitflags! {
@@ -1107,6 +1117,62 @@ define_syscall!(OpenTree, |dirfd: i32, path: CString, flags: u32| {
     let fd = process.lock().push_object_with_flags(object, fd_flags);
     Ok(fd)
 });
+
+define_syscall!(
+    MountSetattr,
+    |dirfd: i32, path: CString, flags: u32, attr: *const LinuxMountAttr, size: usize| {
+        let allowed_flags = AtFlags::SYMLINK_NOFOLLOW.bits() as u32
+            | AtFlags::EMPTY_PATH.bits() as u32
+            | AT_RECURSIVE;
+        if flags & !allowed_flags != 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if size < core::mem::size_of::<LinuxMountAttr>() {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if attr.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+
+        let object = if path.is_null() {
+            if (flags & AtFlags::EMPTY_PATH.bits() as u32) == 0 {
+                return Err(SyscallError::BadAddress);
+            }
+            get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
+        } else {
+            let path = path_from_raw(path)?;
+            if path.is_empty() {
+                if (flags & AtFlags::EMPTY_PATH.bits() as u32) == 0 {
+                    return Err(SyscallError::BadAddress);
+                }
+                get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
+            } else {
+                let path = resolve_path_at(dirfd, &path)?;
+                let file = if (flags & AtFlags::SYMLINK_NOFOLLOW.bits() as u32) != 0 {
+                    VirtualFS.lock().open_nofollow(path)?
+                } else {
+                    VirtualFS.lock().open(path)?
+                };
+                Arc::new(file)
+            }
+        };
+
+        if !matches!(
+            object.clone().as_file_like()?.info()?.file_like_type,
+            FileLikeType::Directory
+        ) {
+            return Err(SyscallError::NotADirectory);
+        }
+
+        let attr = unsafe { &*attr };
+        if attr.attr_set != 0 || attr.attr_clr != 0 || attr.propagation != 0 || attr.userns_fd != 0
+        {
+            return Err(SyscallError::OperationNotSupported);
+        }
+
+        Ok(0)
+    }
+);
 
 define_syscall!(
     NameToHandleAt,

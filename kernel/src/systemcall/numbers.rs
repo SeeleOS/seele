@@ -201,6 +201,7 @@ pub enum SyscallNumber {
     CloseRange = 436,
     Faccessat2 = 439,
     EpollPwait2 = 441,
+    MountSetattr = 442,
     Fchmodat2 = 452,
 }
 
