@@ -202,7 +202,8 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         RtSigsuspend,
         ClockGetres,
         Setpriority,
-        EpollPwait2
+        EpollPwait2,
+        Fchmodat2
     );
 
     table

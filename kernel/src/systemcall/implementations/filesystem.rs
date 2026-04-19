@@ -12,6 +12,7 @@ use crate::{
         misc::{ObjectRef, get_object_current_process},
     },
     process::{manager::get_current_process, misc::with_current_process},
+    s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
 };
 use alloc::{string::String, sync::Arc, vec::Vec};
@@ -36,6 +37,9 @@ const OPEN_TREE_CLOEXEC: u32 = 0x0008_0000;
 const S_IFMT: u32 = 0o170000;
 const S_IFREG: u32 = 0o100000;
 const S_IFIFO: u32 = 0o010000;
+const S_IFCHR: u32 = 0o020000;
+const S_IFBLK: u32 = 0o060000;
+const S_IFSOCK: u32 = 0o140000;
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -232,6 +236,7 @@ fn filesystem_magic_for_file_like(file_like: &FileLikeObject) -> Result<i64, Sys
 fn filesystem_magic_for_path(path: &Path) -> Result<i64, SyscallError> {
     let mount_path = VirtualFS.lock().mount_path(path.clone())?;
     Ok(match mount_path.as_string().as_str() {
+        "/run" => TMPFS_MAGIC,
         "/dev" => TMPFS_MAGIC,
         "/proc" => PROC_SUPER_MAGIC,
         "/sys/fs/cgroup" => CGROUP2_SUPER_MAGIC,
@@ -244,6 +249,7 @@ fn mount_id_for_path(path: &Path) -> Result<u64, SyscallError> {
     let mount_path = VirtualFS.lock().mount_path(path.clone())?;
     Ok(match mount_path.as_string().as_str() {
         "/" => 1,
+        "/run" => 6,
         "/proc" => 2,
         "/sys" => 3,
         "/sys/fs/cgroup" => 4,
@@ -445,6 +451,40 @@ fn stat_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<LinuxStat, Sysc
     Ok(stat)
 }
 
+fn chmod_at(dirfd: i32, path_str: &str, mode: u32, flags: AtFlags) -> Result<usize, SyscallError> {
+    let allowed_flags = AtFlags::EMPTY_PATH | AtFlags::SYMLINK_NOFOLLOW;
+    if flags.bits() != (flags & allowed_flags).bits() {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let mode = mode & !S_IFMT;
+    if path_str.is_empty() {
+        if !flags.contains(AtFlags::EMPTY_PATH) {
+            return Err(SyscallError::InvalidArguments);
+        }
+        get_object_current_process(dirfd as u64)
+            .map_err(SyscallError::from)?
+            .as_file_like()?
+            .chmod(mode)?;
+        return Ok(0);
+    }
+
+    let path = resolve_path_at(dirfd, path_str)?;
+    let file = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
+        VirtualFS.lock().open_nofollow(path)?
+    } else {
+        VirtualFS.lock().open(path)?
+    };
+    if flags.contains(AtFlags::SYMLINK_NOFOLLOW)
+        && matches!(file.info()?.file_like_type, FileLikeType::Symlink)
+    {
+        return Err(SyscallError::OperationNotSupported);
+    }
+
+    file.chmod(mode)?;
+    Ok(0)
+}
+
 define_syscall!(OpenAt, |dirfd: i32,
                          path: CString,
                          flags: i32,
@@ -619,6 +659,22 @@ define_syscall!(Fchmod, |fd: u64, mode: u32| {
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
     object.as_file_like()?.chmod(mode)?;
     Ok(0)
+});
+
+define_syscall!(Fchmodat2, |dirfd: i32, path: u64, mode: u32, flags: i32| {
+    let flags = AtFlags::from_bits_truncate(flags);
+    let path = path as CString;
+    let path_str = if path.is_null() {
+        if flags.contains(AtFlags::EMPTY_PATH) {
+            String::new()
+        } else {
+            return Err(SyscallError::BadAddress);
+        }
+    } else {
+        path_from_raw(path)?
+    };
+
+    chmod_at(dirfd, &path_str, mode, flags)
 });
 
 define_syscall!(Newfstatat, |dirfd: i32,
@@ -883,24 +939,23 @@ define_syscall!(SymlinkAt, |target: CString,
     let link_path = path_from_raw(link_path)?;
     let link_path = resolve_path_at(new_dirfd, &link_path)?;
 
-    VirtualFS.lock().create_symlink(link_path, &target)?;
+    let result = VirtualFS.lock().create_symlink(link_path.clone(), &target);
+    if let Err(err) = &result {
+        s_println!(
+            "symlinkat failed link={} target={} err={:?}",
+            link_path.as_string(),
+            target,
+            err
+        );
+    }
+    result?;
 
     Ok(0)
 });
 
 define_syscall!(MkdirAt, |dirfd: i32, path: CString, _mode: u32| {
     let path = path_from_raw(path)?;
-    let from_current_dir = path_is_relative_to_cwd(dirfd)?;
-    let path = match from_current_dir {
-        true => {
-            let mut current_dir = with_current_process(|process| process.current_directory.clone());
-
-            current_dir.push_path_str(&path);
-
-            current_dir.as_normal()
-        }
-        false => Path::new(&path),
-    };
+    let path = resolve_path_at(dirfd, &path)?;
 
     let result = VirtualFS.lock().create_dir(path);
     result?;
@@ -908,12 +963,15 @@ define_syscall!(MkdirAt, |dirfd: i32, path: CString, _mode: u32| {
     Ok(0)
 });
 
-define_syscall!(Mknodat, |dirfd: i32, path: CString, mode: u32, _dev: u64| {
+define_syscall!(Mknodat, |dirfd: i32,
+                          path: CString,
+                          mode: u32,
+                          _dev: u64| {
     let path = path_from_raw(path)?;
     let path = resolve_path_at(dirfd, &path)?;
 
     match mode & S_IFMT {
-        0 | S_IFREG | S_IFIFO => {
+        0 | S_IFREG | S_IFIFO | S_IFCHR | S_IFBLK | S_IFSOCK => {
             VirtualFS.lock().create_file(path.clone())?;
             VirtualFS.lock().open(path)?.chmod(mode & !S_IFMT)?;
             Ok(0)
@@ -980,7 +1038,7 @@ define_syscall!(Umount2, |target: CString, flags: i32| {
 
 define_syscall!(Fsopen, |fs_name: CString, _flags: u32| {
     let _ = path_from_raw(fs_name)?;
-    Err(SyscallError::NoSyscall)
+    Err(SyscallError::OperationNotSupported)
 });
 
 define_syscall!(OpenTree, |dirfd: i32, path: CString, flags: u32| {
@@ -1021,19 +1079,18 @@ define_syscall!(OpenTree, |dirfd: i32, path: CString, flags: u32| {
     Ok(fd)
 });
 
-define_syscall!(NameToHandleAt, |dirfd: i32,
-                                 path: CString,
-                                 _handle: *mut LinuxFileHandle,
-                                 _mount_id: *mut i32,
-                                 flags: i32| {
-    if flags != 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
+define_syscall!(
+    NameToHandleAt,
+    |dirfd: i32, path: CString, _handle: *mut LinuxFileHandle, _mount_id: *mut i32, flags: i32| {
+        if flags != 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
 
-    let path = path_from_raw(path)?;
-    ensure_path_exists_at(dirfd, &path, false)?;
-    Err(SyscallError::OperationNotSupported)
-});
+        let path = path_from_raw(path)?;
+        ensure_path_exists_at(dirfd, &path, false)?;
+        Err(SyscallError::OperationNotSupported)
+    }
+);
 
 define_syscall!(Statfs, |path: CString, buf: *mut LinuxStatFs| {
     let path = path_from_raw(path)?;

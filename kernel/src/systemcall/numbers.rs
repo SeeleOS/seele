@@ -197,6 +197,7 @@ pub enum SyscallNumber {
     CloseRange = 436,
     Faccessat2 = 439,
     EpollPwait2 = 441,
+    Fchmodat2 = 452,
 }
 
 impl SyscallNumber {
