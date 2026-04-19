@@ -109,6 +109,14 @@ bitflags! {
     }
 }
 
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct XattrFlags: u32 {
+        const CREATE = 0x1;
+        const REPLACE = 0x2;
+    }
+}
+
 fn path_from_raw(path: CString) -> Result<String, SyscallError> {
     if path.is_null() {
         return Err(SyscallError::BadAddress);
@@ -306,6 +314,17 @@ fn ensure_path_exists_at(dirfd: i32, path_str: &str, nofollow: bool) -> Result<(
 
 fn ensure_object_supports_xattrs(object: &ObjectRef) -> Result<(), SyscallError> {
     let _ = object.clone().as_file_like()?;
+    Ok(())
+}
+
+fn validate_xattr_flags(flags: u32) -> Result<(), SyscallError> {
+    let flags = XattrFlags::from_bits_truncate(flags);
+    if flags.bits() != flags.bits() & (XattrFlags::CREATE | XattrFlags::REPLACE).bits() {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if flags.contains(XattrFlags::CREATE) && flags.contains(XattrFlags::REPLACE) {
+        return Err(SyscallError::InvalidArguments);
+    }
     Ok(())
 }
 
@@ -700,6 +719,41 @@ define_syscall!(Fgetxattr, |object: ObjectRef,
     Err(SyscallError::NoData)
 });
 
+define_syscall!(Setxattr, |path: CString,
+                           name: CString,
+                           _value: *const u8,
+                           _size: usize,
+                           flags: u32| {
+    let path_str = path_from_raw(path)?;
+    let _name = xattr_name_from_raw(name)?;
+    validate_xattr_flags(flags)?;
+    ensure_path_exists_at(AT_FDCWD, &path_str, false)?;
+    Ok(0)
+});
+
+define_syscall!(Lsetxattr, |path: CString,
+                            name: CString,
+                            _value: *const u8,
+                            _size: usize,
+                            flags: u32| {
+    let path_str = path_from_raw(path)?;
+    let _name = xattr_name_from_raw(name)?;
+    validate_xattr_flags(flags)?;
+    ensure_path_exists_at(AT_FDCWD, &path_str, true)?;
+    Ok(0)
+});
+
+define_syscall!(Fsetxattr, |object: ObjectRef,
+                            name: CString,
+                            _value: *const u8,
+                            _size: usize,
+                            flags: u32| {
+    let _name = xattr_name_from_raw(name)?;
+    validate_xattr_flags(flags)?;
+    ensure_object_supports_xattrs(&object)?;
+    Ok(0)
+});
+
 define_syscall!(Listxattr, |path: CString, _list: *mut u8, _size: usize| {
     let path_str = path_from_raw(path)?;
     ensure_path_exists_at(AT_FDCWD, &path_str, false)?;
@@ -717,6 +771,26 @@ define_syscall!(Flistxattr, |object: ObjectRef,
                              _size: usize| {
     ensure_object_supports_xattrs(&object)?;
     Ok(0)
+});
+
+define_syscall!(Removexattr, |path: CString, name: CString| {
+    let path_str = path_from_raw(path)?;
+    let _name = xattr_name_from_raw(name)?;
+    ensure_path_exists_at(AT_FDCWD, &path_str, false)?;
+    Err(SyscallError::NoData)
+});
+
+define_syscall!(Lremovexattr, |path: CString, name: CString| {
+    let path_str = path_from_raw(path)?;
+    let _name = xattr_name_from_raw(name)?;
+    ensure_path_exists_at(AT_FDCWD, &path_str, true)?;
+    Err(SyscallError::NoData)
+});
+
+define_syscall!(Fremovexattr, |object: ObjectRef, name: CString| {
+    let _name = xattr_name_from_raw(name)?;
+    ensure_object_supports_xattrs(&object)?;
+    Err(SyscallError::NoData)
 });
 
 define_syscall!(UnlinkAt, |dirfd: i32, path: CString, flags: i32| {
