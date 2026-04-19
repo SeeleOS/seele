@@ -36,6 +36,41 @@ fn i8042_uevent() -> Vec<u8> {
     b"DRIVER=i8042\nMODALIAS=platform:i8042\nSUBSYSTEM=platform\n".to_vec()
 }
 
+fn parse_uevent_action(buffer: &[u8]) -> &str {
+    core::str::from_utf8(buffer)
+        .ok()
+        .map(str::trim)
+        .filter(|action| !action.is_empty())
+        .unwrap_or("change")
+}
+
+pub(super) fn emit_uevent(
+    buffer: &[u8],
+    devpath: &str,
+    subsystem: &str,
+    devname: Option<&str>,
+) -> FSResult<usize> {
+    crate::object::netlink::broadcast_kobject_uevent(
+        parse_uevent_action(buffer),
+        devpath,
+        subsystem,
+        devname,
+    );
+    Ok(buffer.len())
+}
+
+fn i8042_uevent_write(buffer: &[u8]) -> FSResult<usize> {
+    emit_uevent(buffer, "/devices/platform/i8042", "platform", None)
+}
+
+fn platform_uevent_write(buffer: &[u8]) -> FSResult<usize> {
+    emit_uevent(buffer, "/devices/platform", "platform", None)
+}
+
+fn devices_uevent_write(buffer: &[u8]) -> FSResult<usize> {
+    emit_uevent(buffer, "/devices", "devices", None)
+}
+
 static SYS_CLASS_GRAPHICS_FB0_DEVICE_SUBSYSTEM_NODE: StaticNode =
     StaticNode::Symlink(StaticSymlinkNode {
         name: "subsystem",
@@ -260,8 +295,9 @@ static SYS_DEVICES_PLATFORM_I8042_SUBSYSTEM_NODE: StaticNode =
 static SYS_DEVICES_PLATFORM_I8042_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
     name: "uevent",
     inode: 0x2064,
-    mode: 0o100444,
+    mode: 0o100644,
     read: i8042_uevent,
+    write: Some(i8042_uevent_write),
 });
 
 static SYS_DEVICES_PLATFORM_I8042_ENTRIES: &[StaticDirEntry] = &[
@@ -293,8 +329,9 @@ static SYS_DEVICES_PLATFORM_I8042_NODE: StaticNode = StaticNode::Directory(Stati
 static SYS_DEVICES_PLATFORM_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
     name: "uevent",
     inode: 0x2065,
-    mode: 0o100444,
+    mode: 0o100644,
     read: platform_uevent,
+    write: Some(platform_uevent_write),
 });
 
 static SYS_DEVICES_PLATFORM_ENTRIES: &[StaticDirEntry] = &[
@@ -318,8 +355,9 @@ static SYS_DEVICES_PLATFORM_NODE: StaticNode = StaticNode::Directory(StaticDirec
 static SYS_DEVICES_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
     name: "uevent",
     inode: 0x2066,
-    mode: 0o100444,
+    mode: 0o100644,
     read: devices_uevent,
+    write: Some(devices_uevent_write),
 });
 
 static SYS_DEVICES_ENTRIES: &[StaticDirEntry] = &[

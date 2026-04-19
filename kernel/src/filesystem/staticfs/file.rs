@@ -52,7 +52,7 @@ impl File for StaticFileHandle {
     }
 
     fn write(&mut self, _buffer: &[u8]) -> FSResult<usize> {
-        Ok(0)
+        self.node.write.map(|write| write(_buffer)).unwrap_or(Err(crate::filesystem::errors::FSError::Readonly))
     }
 
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {

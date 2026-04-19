@@ -4,6 +4,8 @@ use crate::filesystem::staticfs::{
     StaticDirEntry, StaticDirectoryNode, StaticFileNode, StaticNode, StaticSymlinkNode,
 };
 
+use super::emit_uevent;
+
 fn mouse_name() -> Vec<u8> {
     b"PS/2 Generic Mouse\n".to_vec()
 }
@@ -49,6 +51,27 @@ fn mouse_caps_prop() -> Vec<u8> {
     b"1\n".to_vec()
 }
 
+fn mouse_input_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+    emit_uevent(buffer, "/devices/platform/i8042/serio1/input/input1", "input", None)
+}
+
+fn mouse_event_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+    emit_uevent(
+        buffer,
+        "/devices/platform/i8042/serio1/input/input1/event1",
+        "input",
+        Some("input/event1"),
+    )
+}
+
+fn mouse_input_dir_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+    emit_uevent(buffer, "/devices/platform/i8042/serio1/input", "input", None)
+}
+
+fn mouse_serio_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+    emit_uevent(buffer, "/devices/platform/i8042/serio1", "serio", None)
+}
+
 pub(super) static SYS_CLASS_INPUT_EVENT1_NODE: StaticNode =
     StaticNode::Symlink(StaticSymlinkNode {
         name: "event1",
@@ -85,6 +108,7 @@ static SYS_MOUSE_NAME_NODE: StaticNode = StaticNode::File(StaticFileNode {
     inode: 0x2050,
     mode: 0o100444,
     read: mouse_name,
+    write: None,
 });
 
 static SYS_MOUSE_PHYS_NODE: StaticNode = StaticNode::File(StaticFileNode {
@@ -92,13 +116,15 @@ static SYS_MOUSE_PHYS_NODE: StaticNode = StaticNode::File(StaticFileNode {
     inode: 0x2051,
     mode: 0o100444,
     read: mouse_phys,
+    write: None,
 });
 
 static SYS_MOUSE_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
     name: "uevent",
     inode: 0x2052,
-    mode: 0o100444,
+    mode: 0o100644,
     read: mouse_input_uevent,
+    write: Some(mouse_input_uevent_write),
 });
 
 static SYS_MOUSE_CAP_EV_NODE: StaticNode = StaticNode::File(StaticFileNode {
@@ -106,6 +132,7 @@ static SYS_MOUSE_CAP_EV_NODE: StaticNode = StaticNode::File(StaticFileNode {
     inode: 0x2053,
     mode: 0o100444,
     read: mouse_caps_ev,
+    write: None,
 });
 
 static SYS_MOUSE_CAP_KEY_NODE: StaticNode = StaticNode::File(StaticFileNode {
@@ -113,6 +140,7 @@ static SYS_MOUSE_CAP_KEY_NODE: StaticNode = StaticNode::File(StaticFileNode {
     inode: 0x2054,
     mode: 0o100444,
     read: mouse_caps_key,
+    write: None,
 });
 
 static SYS_MOUSE_CAP_REL_NODE: StaticNode = StaticNode::File(StaticFileNode {
@@ -120,6 +148,7 @@ static SYS_MOUSE_CAP_REL_NODE: StaticNode = StaticNode::File(StaticFileNode {
     inode: 0x2055,
     mode: 0o100444,
     read: mouse_caps_rel,
+    write: None,
 });
 
 static SYS_MOUSE_CAP_PROP_NODE: StaticNode = StaticNode::File(StaticFileNode {
@@ -127,6 +156,7 @@ static SYS_MOUSE_CAP_PROP_NODE: StaticNode = StaticNode::File(StaticFileNode {
     inode: 0x2056,
     mode: 0o100444,
     read: mouse_caps_prop,
+    write: None,
 });
 
 static SYS_MOUSE_CAP_ENTRIES: &[StaticDirEntry] = &[
@@ -167,13 +197,15 @@ static SYS_MOUSE_EVENT_DEV_NODE: StaticNode = StaticNode::File(StaticFileNode {
     inode: 0x2059,
     mode: 0o100444,
     read: mouse_event_dev,
+    write: None,
 });
 
 static SYS_MOUSE_EVENT_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
     name: "uevent",
     inode: 0x205a,
-    mode: 0o100444,
+    mode: 0o100644,
     read: mouse_event_uevent,
+    write: Some(mouse_event_uevent_write),
 });
 
 static SYS_MOUSE_EVENT_SUBSYSTEM_NODE: StaticNode = StaticNode::Symlink(StaticSymlinkNode {
@@ -253,8 +285,9 @@ static SYS_MOUSE_INPUT_NODE: StaticNode = StaticNode::Directory(StaticDirectoryN
 static SYS_MOUSE_INPUT_DIR_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
     name: "uevent",
     inode: 0x2069,
-    mode: 0o100444,
+    mode: 0o100644,
     read: mouse_input_dir_uevent,
+    write: Some(mouse_input_dir_uevent_write),
 });
 
 static SYS_MOUSE_INPUT_DIR_ENTRIES: &[StaticDirEntry] = &[
@@ -278,8 +311,9 @@ static SYS_MOUSE_INPUT_DIR_NODE: StaticNode = StaticNode::Directory(StaticDirect
 static SYS_SERIO1_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
     name: "uevent",
     inode: 0x206a,
-    mode: 0o100444,
+    mode: 0o100644,
     read: mouse_serio_uevent,
+    write: Some(mouse_serio_uevent_write),
 });
 
 static SYS_SERIO1_ENTRIES: &[StaticDirEntry] = &[

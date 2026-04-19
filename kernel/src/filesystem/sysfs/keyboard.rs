@@ -4,6 +4,8 @@ use crate::filesystem::staticfs::{
     StaticDirEntry, StaticDirectoryNode, StaticFileNode, StaticNode, StaticSymlinkNode,
 };
 
+use super::emit_uevent;
+
 fn keyboard_name() -> Vec<u8> {
     b"AT Translated Set 2 keyboard\n".to_vec()
 }
@@ -44,6 +46,27 @@ fn keyboard_caps_prop() -> Vec<u8> {
     b"0\n".to_vec()
 }
 
+fn keyboard_input_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+    emit_uevent(buffer, "/devices/platform/i8042/serio0/input/input0", "input", None)
+}
+
+fn keyboard_event_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+    emit_uevent(
+        buffer,
+        "/devices/platform/i8042/serio0/input/input0/event0",
+        "input",
+        Some("input/event0"),
+    )
+}
+
+fn keyboard_input_dir_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+    emit_uevent(buffer, "/devices/platform/i8042/serio0/input", "input", None)
+}
+
+fn keyboard_serio_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+    emit_uevent(buffer, "/devices/platform/i8042/serio0", "serio", None)
+}
+
 pub(super) static SYS_CLASS_INPUT_EVENT0_NODE: StaticNode =
     StaticNode::Symlink(StaticSymlinkNode {
         name: "event0",
@@ -80,6 +103,7 @@ static SYS_KEYBOARD_NAME_NODE: StaticNode = StaticNode::File(StaticFileNode {
     inode: 0x2040,
     mode: 0o100444,
     read: keyboard_name,
+    write: None,
 });
 
 static SYS_KEYBOARD_PHYS_NODE: StaticNode = StaticNode::File(StaticFileNode {
@@ -87,13 +111,15 @@ static SYS_KEYBOARD_PHYS_NODE: StaticNode = StaticNode::File(StaticFileNode {
     inode: 0x2041,
     mode: 0o100444,
     read: keyboard_phys,
+    write: None,
 });
 
 static SYS_KEYBOARD_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
     name: "uevent",
     inode: 0x2042,
-    mode: 0o100444,
+    mode: 0o100644,
     read: keyboard_input_uevent,
+    write: Some(keyboard_input_uevent_write),
 });
 
 static SYS_KEYBOARD_CAP_EV_NODE: StaticNode = StaticNode::File(StaticFileNode {
@@ -101,6 +127,7 @@ static SYS_KEYBOARD_CAP_EV_NODE: StaticNode = StaticNode::File(StaticFileNode {
     inode: 0x2043,
     mode: 0o100444,
     read: keyboard_caps_ev,
+    write: None,
 });
 
 static SYS_KEYBOARD_CAP_KEY_NODE: StaticNode = StaticNode::File(StaticFileNode {
@@ -108,6 +135,7 @@ static SYS_KEYBOARD_CAP_KEY_NODE: StaticNode = StaticNode::File(StaticFileNode {
     inode: 0x2044,
     mode: 0o100444,
     read: keyboard_caps_key,
+    write: None,
 });
 
 static SYS_KEYBOARD_CAP_PROP_NODE: StaticNode = StaticNode::File(StaticFileNode {
@@ -115,6 +143,7 @@ static SYS_KEYBOARD_CAP_PROP_NODE: StaticNode = StaticNode::File(StaticFileNode 
     inode: 0x2045,
     mode: 0o100444,
     read: keyboard_caps_prop,
+    write: None,
 });
 
 static SYS_KEYBOARD_CAP_ENTRIES: &[StaticDirEntry] = &[
@@ -151,13 +180,15 @@ static SYS_KEYBOARD_EVENT_DEV_NODE: StaticNode = StaticNode::File(StaticFileNode
     inode: 0x2048,
     mode: 0o100444,
     read: keyboard_event_dev,
+    write: None,
 });
 
 static SYS_KEYBOARD_EVENT_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
     name: "uevent",
     inode: 0x2049,
-    mode: 0o100444,
+    mode: 0o100644,
     read: keyboard_event_uevent,
+    write: Some(keyboard_event_uevent_write),
 });
 
 static SYS_KEYBOARD_EVENT_SUBSYSTEM_NODE: StaticNode = StaticNode::Symlink(StaticSymlinkNode {
@@ -237,8 +268,9 @@ static SYS_KEYBOARD_INPUT_NODE: StaticNode = StaticNode::Directory(StaticDirecto
 static SYS_KEYBOARD_INPUT_DIR_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
     name: "uevent",
     inode: 0x2067,
-    mode: 0o100444,
+    mode: 0o100644,
     read: keyboard_input_dir_uevent,
+    write: Some(keyboard_input_dir_uevent_write),
 });
 
 static SYS_KEYBOARD_INPUT_DIR_ENTRIES: &[StaticDirEntry] = &[
@@ -262,8 +294,9 @@ static SYS_KEYBOARD_INPUT_DIR_NODE: StaticNode = StaticNode::Directory(StaticDir
 static SYS_SERIO0_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
     name: "uevent",
     inode: 0x2068,
-    mode: 0o100444,
+    mode: 0o100644,
     read: keyboard_serio_uevent,
+    write: Some(keyboard_serio_uevent_write),
 });
 
 static SYS_SERIO0_ENTRIES: &[StaticDirEntry] = &[

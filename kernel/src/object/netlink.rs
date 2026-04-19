@@ -1,4 +1,6 @@
-use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
+use alloc::{collections::VecDeque, format, sync::{Arc, Weak}, vec::Vec};
+use core::sync::atomic::{AtomicU64, Ordering};
+use lazy_static::lazy_static;
 use spin::Mutex;
 
 use crate::{
@@ -8,6 +10,7 @@ use crate::{
         FileFlags, Object,
         config::ConfigurateRequest,
         error::ObjectError,
+        linux_anon::wake_linux_io_waiters,
         misc::ObjectResult,
         traits::{Configuratable, Readable, Statable},
     },
@@ -27,6 +30,11 @@ const FIONBIO: u64 = 0x5421;
 const FIOCLEX: u64 = 0x5451;
 const S_IFSOCK: u32 = 0o140000;
 const NLMSG_ERROR: u16 = 0x2;
+static NEXT_UEVENT_SEQNUM: AtomicU64 = AtomicU64::new(1);
+
+lazy_static! {
+    static ref NETLINK_SOCKETS: Mutex<Vec<Weak<NetlinkSocketObject>>> = Mutex::new(Vec::new());
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -71,14 +79,18 @@ impl NetlinkSocketObject {
             return Err(SocketError::ProtocolNotSupported);
         }
 
-        Ok(Arc::new(Self {
+        let socket = Arc::new(Self {
             flags: Mutex::new(FileFlags::empty()),
             socket_type,
             protocol,
             address: Mutex::new(NetlinkSocketAddress::default()),
             memberships: Mutex::new(Vec::new()),
             recv_queue: Mutex::new(VecDeque::new()),
-        }))
+        });
+        if protocol == NETLINK_KOBJECT_UEVENT {
+            NETLINK_SOCKETS.lock().push(Arc::downgrade(&socket));
+        }
+        Ok(socket)
     }
 
     pub fn bind(&self, address: NetlinkSocketAddress) -> SocketResult<()> {
@@ -255,10 +267,41 @@ impl NetlinkSocketObject {
             )
         });
         self.recv_queue.lock().push_back(bytes);
+        wake_linux_io_waiters();
     }
 
     fn is_nonblocking(&self) -> bool {
         self.flags.lock().contains(FileFlags::NONBLOCK)
+    }
+}
+
+pub fn broadcast_kobject_uevent(
+    action: &str,
+    devpath: &str,
+    subsystem: &str,
+    devname: Option<&str>,
+) {
+    let seqnum = NEXT_UEVENT_SEQNUM.fetch_add(1, Ordering::Relaxed);
+    let mut message = format!("{action}@{devpath}\0ACTION={action}\0DEVPATH={devpath}\0SUBSYSTEM={subsystem}\0").into_bytes();
+    if let Some(devname) = devname {
+        message.extend_from_slice(format!("DEVNAME={devname}\0").as_bytes());
+    }
+    message.extend_from_slice(format!("SEQNUM={seqnum}\0").as_bytes());
+
+    let mut sockets = NETLINK_SOCKETS.lock();
+    let mut delivered = false;
+    sockets.retain(|socket| {
+        let Some(socket) = socket.upgrade() else {
+            return false;
+        };
+        if socket.protocol == NETLINK_KOBJECT_UEVENT {
+            socket.recv_queue.lock().push_back(message.clone());
+            delivered = true;
+        }
+        true
+    });
+    if delivered {
+        wake_linux_io_waiters();
     }
 }
 

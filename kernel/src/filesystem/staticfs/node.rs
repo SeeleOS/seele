@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use crate::filesystem::vfs_traits::DirectoryContentType;
+use crate::filesystem::{vfs::FSResult, vfs_traits::DirectoryContentType};
 
 pub struct StaticDirEntry {
     pub name: &'static str,
@@ -19,6 +19,7 @@ pub struct StaticFileNode {
     pub inode: u64,
     pub mode: u32,
     pub read: fn() -> Vec<u8>,
+    pub write: Option<fn(&[u8]) -> FSResult<usize>>,
 }
 
 pub struct StaticSymlinkNode {
