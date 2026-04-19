@@ -15,6 +15,7 @@ use crate::object::Object;
 use crate::object::linux_anon::{
     EventFdObject, InotifyObject, PidFdObject, TimerFdObject, wake_linux_io_waiters,
 };
+use crate::object::misc::get_object_current_process;
 use crate::process::{
     FdFlags,
     manager::{MANAGER, get_current_process},
@@ -78,6 +79,8 @@ enum PrctlOption {
     SetName = 15,
     GetName = 16,
     CapbsetRead = 23,
+    GetSecureBits = 27,
+    SetSecureBits = 28,
     SetNoNewPrivs = 38,
     GetNoNewPrivs = 39,
     CapAmbient = 47,
@@ -97,6 +100,8 @@ impl TryFrom<i32> for PrctlOption {
             15 => Self::SetName,
             16 => Self::GetName,
             23 => Self::CapbsetRead,
+            27 => Self::GetSecureBits,
+            28 => Self::SetSecureBits,
             38 => Self::SetNoNewPrivs,
             39 => Self::GetNoNewPrivs,
             47 => Self::CapAmbient,
@@ -219,6 +224,7 @@ fn clone_process(
     child_tid: *mut i32,
     tls: u64,
     pidfd_ptr: *mut i32,
+    cgroup_fd: u64,
 ) -> Result<usize, SyscallError> {
     let unsupported = flags
         & !(0xff
@@ -244,11 +250,23 @@ fn clone_process(
     {
         return Err(SyscallError::NoSyscall);
     }
+    if clone_flags.contains(CloneFlags::INTO_CGROUP) && cgroup_fd == 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
 
     let current = get_current_process();
     let (child_process, child_thread) = crate::process::Process::fork(current.clone());
     let pid = child_process.lock().pid;
     MANAGER.lock().processes.insert(pid, child_process.clone());
+
+    if clone_flags.contains(CloneFlags::INTO_CGROUP) {
+        let cgroup_path = get_object_current_process(cgroup_fd)
+            .map_err(SyscallError::from)?
+            .as_file_like()?
+            .path();
+        crate::filesystem::cgroupfs::set_pid_cgroup_path_from_fs_path(pid, &cgroup_path)
+            .map_err(SyscallError::from)?;
+    }
 
     if clone_flags.contains(CloneFlags::CLEAR_SIGHAND) {
         let mut child = child_process.lock();
@@ -282,10 +300,28 @@ fn clone_process(
     }
 
     if clone_flags.contains(CloneFlags::PIDFD) {
+        let trace_pidfd = current.lock().pid.0 == 1;
+        let pidfd_before = if trace_pidfd {
+            current.lock().addrspace.read(pidfd_ptr as *const i32).ok()
+        } else {
+            None
+        };
         let pidfd: Arc<dyn Object> = PidFdObject::new(pid.0);
         let pidfd_fd = i32::try_from(current.lock().push_object_with_flags(pidfd, FdFlags::CLOEXEC))
             .map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
         user_safe::write(pidfd_ptr, &pidfd_fd)?;
+        if trace_pidfd {
+            let pidfd_after = current.lock().addrspace.read(pidfd_ptr as *const i32).ok();
+            crate::s_println!(
+                "clone pidfd write pid={} child_pid={} ptr={:#x} before={:?} wrote={} after={:?}",
+                current.lock().pid.0,
+                pid.0,
+                pidfd_ptr as usize,
+                pidfd_before,
+                pidfd_fd,
+                pidfd_after
+            );
+        }
     }
 
     Ok(pid.0 as usize)
@@ -1003,6 +1039,7 @@ define_syscall!(Clone, |flags: u64,
             child_tid,
             tls,
             pidfd_ptr,
+            0,
         );
     }
 
@@ -1053,7 +1090,18 @@ define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
         return Err(SyscallError::BadAddress);
     }
 
-    let args = unsafe { &*args };
+    let args = user_safe::read(args)?;
+    if get_current_process().lock().pid.0 == 1 && (args.flags & CloneFlags::PIDFD.bits()) != 0 {
+        crate::s_println!(
+            "clone3 pid={} flags={:#x} pidfd_ptr={:#x} parent_tid={:#x} child_tid={:#x} cgroup={:#x}",
+            1,
+            args.flags,
+            args.pidfd,
+            args.parent_tid,
+            args.child_tid,
+            args.cgroup
+        );
+    }
     if args.set_tid != 0 || args.set_tid_size != 0 {
         return Err(SyscallError::NoSyscall);
     }
@@ -1093,6 +1141,7 @@ define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
         args.child_tid as *mut i32,
         args.tls,
         args.pidfd as *mut i32,
+        args.cgroup,
     )
 });
 
@@ -1369,12 +1418,17 @@ define_syscall!(Prctl, |option: i32,
             get_current_process().lock().keep_capabilities = arg2 != 0;
             Ok(0)
         }
+        PrctlOption::SetSecureBits => {
+            get_current_process().lock().secure_bits = arg2 as u32;
+            Ok(0)
+        }
         PrctlOption::GetPdeathsig => {
             user_safe::write(arg2 as *mut u8, &0i32)?;
             Ok(0)
         }
         PrctlOption::GetDumpable | PrctlOption::GetNoNewPrivs => Ok(0),
         PrctlOption::GetKeepCaps => Ok(get_current_process().lock().keep_capabilities as usize),
+        PrctlOption::GetSecureBits => Ok(get_current_process().lock().secure_bits as usize),
         PrctlOption::GetName => {
             let name = b"main\0";
             let mut buffer = [0u8; 16];
