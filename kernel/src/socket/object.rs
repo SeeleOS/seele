@@ -8,6 +8,13 @@ use super::UnixSocketState;
 pub enum UnixSocketKind {
     Stream,
     Datagram,
+    SeqPacket,
+}
+
+impl UnixSocketKind {
+    pub fn is_stream_like(self) -> bool {
+        matches!(self, Self::Stream | Self::SeqPacket)
+    }
 }
 
 #[derive(Debug)]

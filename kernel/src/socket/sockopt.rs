@@ -3,8 +3,8 @@ use core::{mem, slice};
 
 use super::{
     AF_UNIX, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PASSCRED, SO_PEERCRED, SO_PROTOCOL, SO_RCVBUF,
-    SO_REUSEADDR, SO_SNDBUF, SO_TYPE, SOCK_DGRAM, SOCK_STREAM, SOL_SOCKET, SocketError,
-    SocketResult, UnixSocketKind, UnixSocketObject, UnixSocketState,
+    SO_REUSEADDR, SO_SNDBUF, SO_TYPE, SOCK_DGRAM, SOCK_SEQPACKET, SOCK_STREAM, SOL_SOCKET,
+    SocketError, SocketResult, UnixSocketKind, UnixSocketObject, UnixSocketState,
 };
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
@@ -57,6 +57,7 @@ impl UnixSocketObject {
                 match self.kind {
                     UnixSocketKind::Stream => SOCK_STREAM as i32,
                     UnixSocketKind::Datagram => SOCK_DGRAM as i32,
+                    UnixSocketKind::SeqPacket => SOCK_SEQPACKET as i32,
                 },
             ),
             SO_ACCEPTCONN => Self::encode_i32(

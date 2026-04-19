@@ -13,7 +13,7 @@ use crate::process::manager::get_current_process;
 impl UnixSocketObject {
     pub fn connect(self: &Arc<Self>, path: String) -> SocketResult<()> {
         match self.kind {
-            UnixSocketKind::Stream => {
+            UnixSocketKind::Stream | UnixSocketKind::SeqPacket => {
                 let listener = {
                     let registry = UNIX_SOCKET_REGISTRY.lock();
                     match registry.get(&path) {
@@ -31,8 +31,9 @@ impl UnixSocketObject {
                 let (client_stream, server_stream) = UnixStreamInner::pair();
                 let peer_pid = get_current_process().lock().pid.0;
                 *client_stream.owner.lock() = Some(Arc::downgrade(self));
+                let kind = self.kind;
                 let server_socket = Arc::new(Self {
-                    kind: UnixSocketKind::Stream,
+                    kind,
                     state: Mutex::new(UnixSocketState::Stream(server_stream.clone())),
                     flags: Mutex::new(FileFlags::empty()),
                 });

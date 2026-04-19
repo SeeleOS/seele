@@ -10,7 +10,7 @@ impl UnixSocketObject {
     pub fn bind(self: &Arc<Self>, path: String) -> SocketResult<()> {
         let mut state = self.state.lock();
         let can_bind = match (&self.kind, &*state) {
-            (UnixSocketKind::Stream, UnixSocketState::Unbound) => true,
+            (kind, UnixSocketState::Unbound) if kind.is_stream_like() => true,
             (UnixSocketKind::Datagram, UnixSocketState::Datagram(datagram)) => {
                 datagram.local_name.lock().is_none()
             }
@@ -52,7 +52,7 @@ impl UnixSocketObject {
             return Err(SocketError::AddressInUse);
         }
         match self.kind {
-            UnixSocketKind::Stream => {
+            UnixSocketKind::Stream | UnixSocketKind::SeqPacket => {
                 registry.insert(path.clone(), UnixSocketRegistryEntry::StreamReserved);
                 *state = UnixSocketState::Bound { path };
             }
@@ -72,7 +72,7 @@ impl UnixSocketObject {
     }
 
     pub fn listen(self: &Arc<Self>, backlog: usize) -> SocketResult<()> {
-        if self.kind != UnixSocketKind::Stream {
+        if !self.kind.is_stream_like() {
             return Err(SocketError::InvalidArguments);
         }
         let path = match &*self.state.lock() {

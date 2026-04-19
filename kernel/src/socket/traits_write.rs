@@ -99,7 +99,7 @@ impl UnixSocketObject {
                     wake_io();
                     return Ok(buffer.len());
                 }
-                UnixSocketKind::Stream => {
+                UnixSocketKind::Stream | UnixSocketKind::SeqPacket => {
                     let stream = match &*self.state.lock() {
                         UnixSocketState::Stream(stream) => stream.clone(),
                         _ => return Err(SocketError::InvalidArguments),

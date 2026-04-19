@@ -4,14 +4,14 @@ use spin::Mutex;
 use crate::object::FileFlags;
 
 use super::{
-    AF_UNIX, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM, SocketError, SocketResult,
-    UnixDatagramInner, UnixSocketKind, UnixSocketObject, UnixSocketState,
+    AF_UNIX, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_SEQPACKET, SOCK_STREAM, SocketError,
+    SocketResult, UnixDatagramInner, UnixSocketKind, UnixSocketObject, UnixSocketState,
 };
 
 impl UnixSocketObject {
     pub fn new(kind: UnixSocketKind) -> Self {
         let state = match kind {
-            UnixSocketKind::Stream => UnixSocketState::Unbound,
+            UnixSocketKind::Stream | UnixSocketKind::SeqPacket => UnixSocketState::Unbound,
             UnixSocketKind::Datagram => {
                 UnixSocketState::Datagram(Arc::new(UnixDatagramInner::new()))
             }
@@ -35,6 +35,7 @@ impl UnixSocketObject {
         let kind = match socket_type {
             SOCK_STREAM => UnixSocketKind::Stream,
             SOCK_DGRAM => UnixSocketKind::Datagram,
+            SOCK_SEQPACKET => UnixSocketKind::SeqPacket,
             _ => return Err(SocketError::ProtocolNotSupported),
         };
 

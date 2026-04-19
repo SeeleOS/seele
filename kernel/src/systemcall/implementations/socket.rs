@@ -85,20 +85,18 @@ define_syscall!(Bind, |socket: ObjectRef,
                        address: *const u8,
                        address_len: u32| {
     let path = path_from_sockaddr(address, address_len)?;
-    let result = socket
+    socket
         .as_unix_socket()?
         .bind(path)
-        .map_err(crate::object::error::ObjectError::from);
-    result?;
+        .map_err(crate::object::error::ObjectError::from)?;
     Ok(0)
 });
 
 define_syscall!(Listen, |socket: ObjectRef, backlog: usize| {
-    let result = socket
+    socket
         .as_unix_socket()?
         .listen(backlog)
-        .map_err(crate::object::error::ObjectError::from);
-    result?;
+        .map_err(crate::object::error::ObjectError::from)?;
     Ok(0)
 });
 

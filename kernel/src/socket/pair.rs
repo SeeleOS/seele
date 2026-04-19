@@ -4,8 +4,9 @@ use spin::Mutex;
 use crate::object::FileFlags;
 
 use super::{
-    AF_UNIX, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM, SocketError, SocketResult,
-    UnixDatagramInner, UnixSocketKind, UnixSocketObject, UnixSocketState, UnixStreamInner,
+    AF_UNIX, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_SEQPACKET, SOCK_STREAM, SocketError,
+    SocketResult, UnixDatagramInner, UnixSocketKind, UnixSocketObject, UnixSocketState,
+    UnixStreamInner,
 };
 
 impl UnixSocketObject {
@@ -20,15 +21,20 @@ impl UnixSocketObject {
         }
 
         let (left, right) = match socket_type {
-            SOCK_STREAM => {
+            SOCK_STREAM | SOCK_SEQPACKET => {
+                let kind = if socket_type == SOCK_SEQPACKET {
+                    UnixSocketKind::SeqPacket
+                } else {
+                    UnixSocketKind::Stream
+                };
                 let (left_stream, right_stream) = UnixStreamInner::pair();
                 let left = Arc::new(Self {
-                    kind: UnixSocketKind::Stream,
+                    kind,
                     state: Mutex::new(UnixSocketState::Stream(left_stream.clone())),
                     flags: Mutex::new(FileFlags::empty()),
                 });
                 let right = Arc::new(Self {
-                    kind: UnixSocketKind::Stream,
+                    kind,
                     state: Mutex::new(UnixSocketState::Stream(right_stream.clone())),
                     flags: Mutex::new(FileFlags::empty()),
                 });
