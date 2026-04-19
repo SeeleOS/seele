@@ -36,6 +36,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         Madvise,
         Dup,
         Dup2,
+        Pause,
         Nanosleep,
         Setitimer,
         Socket,

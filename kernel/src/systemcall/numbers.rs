@@ -29,6 +29,7 @@ pub enum SyscallNumber {
     Shmget = 29,
     Dup = 32,
     Dup2 = 33,
+    Pause = 34,
     Nanosleep = 35,
     Alarm = 37,
     Setitimer = 38,

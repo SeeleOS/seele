@@ -95,7 +95,7 @@ impl AddrSpace {
 
             let page_offset = (virt.as_u64() & 0xfff) as usize;
             let chunk_len = dst.len().min(4096 - page_offset);
-            let src = (crate::memory::utils::apply_offset(phys.as_u64()) + page_offset as u64) as *const u8;
+            let src = crate::memory::utils::apply_offset(phys.as_u64()) as *const u8;
 
             unsafe {
                 copy_nonoverlapping(src, dst.as_mut_ptr(), chunk_len);

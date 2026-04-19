@@ -8,6 +8,7 @@ use crate::memory::{
     protection::Protection,
     user_safe,
 };
+use crate::misc::error::AsSyscallError;
 use crate::misc::time::{self, Time as KernelTime};
 use crate::misc::{others::protection_to_page_flags, utsname::UtsName};
 use crate::object::Object;
@@ -22,7 +23,7 @@ use crate::signal::{
 use crate::systemcall::utils::{SyscallError, SyscallImpl};
 use crate::terminal::pty::create_pty;
 use crate::thread::misc::with_current_thread;
-use crate::thread::yielding::{BlockType, block_current, block_current_with_sig_check};
+use crate::thread::yielding::{BlockType, WakeType, block_current_with_sig_check};
 use crate::{NAME, define_syscall};
 
 bitflags! {
@@ -646,6 +647,18 @@ define_syscall!(Uname, |info: *mut UtsName| {
     );
     user_safe::write(info, &uts)?;
     Ok(0)
+});
+
+define_syscall!(Pause, {
+    loop {
+        match block_current_with_sig_check(BlockType::WakeRequired {
+            wake_type: WakeType::IO,
+            deadline: None,
+        }) {
+            Ok(()) => continue,
+            Err(err) => return Err(err.as_syscall_error()),
+        }
+    }
 });
 
 define_syscall!(
