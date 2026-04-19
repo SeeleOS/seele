@@ -15,6 +15,7 @@ pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
     vec![
         DirectoryContentInfo::new("cmdline".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("cgroup".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("oom_score_adj".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("mountinfo".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("fd".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("fdinfo".into(), DirectoryContentType::Directory),
@@ -44,6 +45,26 @@ pub(super) fn proc_pid_cmdline_bytes(_pid: ProcessID) -> Vec<u8> {
 
 pub(super) fn proc_pid_cgroup_bytes(pid: ProcessID) -> Vec<u8> {
     format!("0::{}\n", pid_cgroup_path(pid)).into_bytes()
+}
+
+pub(super) fn proc_pid_oom_score_adj_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    Ok(format!("{}\n", process.lock().oom_score_adj).into_bytes())
+}
+
+pub(super) fn proc_pid_write_oom_score_adj(pid: ProcessID, buffer: &[u8]) -> FSResult<usize> {
+    let content = core::str::from_utf8(buffer).map_err(|_| FSError::Other)?;
+    let value = content
+        .trim_matches(|c: char| c.is_ascii_whitespace() || c == '\0')
+        .parse::<i32>()
+        .map_err(|_| FSError::Other)?;
+    if !(-1000..=1000).contains(&value) {
+        return Err(FSError::Other);
+    }
+
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    process.lock().oom_score_adj = value;
+    Ok(buffer.len())
 }
 
 pub(super) fn pid_fdinfo_entries(pid: ProcessID) -> FSResult<Vec<DirectoryContentInfo>> {
@@ -121,6 +142,10 @@ pub(super) fn pid_mountinfo_inode(pid: ProcessID) -> u64 {
 
 pub(super) fn pid_cgroup_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 3
+}
+
+pub(super) fn pid_oom_score_adj_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 4
 }
 
 pub(super) fn pid_fd_dir_inode(pid: ProcessID) -> u64 {

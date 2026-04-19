@@ -47,6 +47,7 @@ impl Process {
                 fs_gid: parent_locked.fs_gid,
                 supplementary_groups: parent_locked.supplementary_groups.clone(),
                 keep_capabilities: parent_locked.keep_capabilities,
+                oom_score_adj: parent_locked.oom_score_adj,
                 capability_effective: parent_locked.capability_effective,
                 capability_permitted: parent_locked.capability_permitted,
                 capability_inheritable: parent_locked.capability_inheritable,

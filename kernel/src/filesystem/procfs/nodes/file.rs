@@ -12,7 +12,9 @@ use crate::filesystem::{
 pub(super) struct ProcFile {
     name: String,
     inode: u64,
+    mode: u32,
     read: Arc<dyn Fn() -> Vec<u8> + Send + Sync>,
+    write: Option<Arc<dyn Fn(&[u8]) -> FSResult<usize> + Send + Sync>>,
     offset: usize,
 }
 
@@ -20,12 +22,16 @@ impl ProcFile {
     pub(super) fn new(
         name: String,
         inode: u64,
+        mode: u32,
         read: Arc<dyn Fn() -> Vec<u8> + Send + Sync>,
+        write: Option<Arc<dyn Fn(&[u8]) -> FSResult<usize> + Send + Sync>>,
     ) -> Self {
         Self {
             name,
             inode,
+            mode,
             read,
+            write,
             offset: 0,
         }
     }
@@ -40,7 +46,7 @@ impl File for ProcFile {
         Ok(FileLikeInfo::new(
             self.name.clone(),
             (self.read)().len(),
-            UnixPermission(0o100444),
+            UnixPermission(self.mode),
             FileLikeType::File,
         )
         .with_inode(self.inode))
@@ -64,8 +70,11 @@ impl File for ProcFile {
         Ok(read)
     }
 
-    fn write(&mut self, _buffer: &[u8]) -> FSResult<usize> {
-        Err(FSError::Readonly)
+    fn write(&mut self, buffer: &[u8]) -> FSResult<usize> {
+        match &self.write {
+            Some(write) => write(buffer),
+            None => Err(FSError::Readonly),
+        }
     }
 
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {

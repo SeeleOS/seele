@@ -11,12 +11,13 @@ mod nodes;
 mod pid;
 mod root;
 
-use nodes::{proc_dir, proc_file, proc_symlink};
+use nodes::{proc_dir, proc_file, proc_rw_file, proc_symlink};
 use pid::{
     current_pid, ensure_pid_exists, fd_target, parse_fd, parse_pid, pid_cgroup_inode,
     pid_cmdline_inode, pid_dir_entries, pid_dir_inode, pid_fd_dir_inode, pid_fd_entries,
     pid_fd_inode, pid_fdinfo_dir_inode, pid_fdinfo_entries, pid_fdinfo_inode, pid_mountinfo_inode,
-    pid_string, proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_fdinfo_bytes,
+    pid_oom_score_adj_inode, pid_string, proc_pid_cgroup_bytes, proc_pid_cmdline_bytes,
+    proc_pid_fdinfo_bytes, proc_pid_oom_score_adj_bytes, proc_pid_write_oom_score_adj,
 };
 use root::{
     PROC_CMDLINE_INODE, PROC_MOUNTS_INODE, PROC_ROOT_INODE, PROC_SELF_INODE,
@@ -71,6 +72,15 @@ impl FileSystem for ProcFs {
                     proc_pid_cgroup_bytes(pid)
                 }))
             }
+            ["self", "oom_score_adj"] => {
+                let pid = current_pid()?;
+                Ok(proc_rw_file(
+                    "oom_score_adj",
+                    pid_oom_score_adj_inode(pid),
+                    move || proc_pid_oom_score_adj_bytes(pid).unwrap_or_default(),
+                    move |buffer| proc_pid_write_oom_score_adj(pid, buffer),
+                ))
+            }
             ["self", "mountinfo"] => {
                 let pid = current_pid()?;
                 Ok(proc_file(
@@ -122,6 +132,16 @@ impl FileSystem for ProcFs {
                 Ok(proc_file("cgroup", pid_cgroup_inode(pid), move || {
                     proc_pid_cgroup_bytes(pid)
                 }))
+            }
+            [pid, "oom_score_adj"] => {
+                let pid = parse_pid(pid)?;
+                ensure_pid_exists(pid)?;
+                Ok(proc_rw_file(
+                    "oom_score_adj",
+                    pid_oom_score_adj_inode(pid),
+                    move || proc_pid_oom_score_adj_bytes(pid).unwrap_or_default(),
+                    move |buffer| proc_pid_write_oom_score_adj(pid, buffer),
+                ))
             }
             [pid, "mountinfo"] => {
                 let pid = parse_pid(pid)?;
