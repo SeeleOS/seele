@@ -16,6 +16,7 @@ use crate::object::linux_anon::{
     EventFdObject, InotifyObject, PidFdObject, TimerFdObject, wake_linux_io_waiters,
 };
 use crate::process::{
+    FdFlags,
     manager::{MANAGER, get_current_process},
     misc::{ProcessID, get_process_with_pid},
 };
@@ -36,6 +37,7 @@ bitflags! {
         const FS = 0x0000_0200;
         const FILES = 0x0000_0400;
         const SIGHAND = 0x0000_0800;
+        const PIDFD = 0x0000_1000;
         const VFORK = 0x0000_4000;
         const NEWNS = 0x0002_0000;
         const THREAD = 0x0001_0000;
@@ -44,6 +46,7 @@ bitflags! {
         const CHILD_CLEARTID = 0x0020_0000;
         const CHILD_SETTID = 0x0100_0000;
         const CLEAR_SIGHAND = 0x1_0000_0000;
+        const INTO_CGROUP = 0x2_0000_0000;
     }
 }
 
@@ -143,6 +146,7 @@ const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
 const LINUX_CAPABILITY_U32S_3: usize = 2;
 const TFD_TIMER_ABSTIME: i32 = 1;
 const TFD_NONBLOCK: i32 = 0o4_000;
+const TFD_CLOEXEC: i32 = 0o2_000_000;
 const EFD_SEMAPHORE: i32 = 0x1;
 const EFD_NONBLOCK: i32 = 0o4_000;
 const EFD_ALLOWED_FLAGS: i32 = EFD_SEMAPHORE | EFD_NONBLOCK | 0o2_000_000;
@@ -204,6 +208,87 @@ fn clone_cleared_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalActio
             | SignalHandlingType::Function2(_) => default,
         })
         .collect()
+}
+
+fn clone_process(
+    clone_flags: CloneFlags,
+    flags: u64,
+    exit_signal: u8,
+    stack_pointer: u64,
+    parent_tid: *mut i32,
+    child_tid: *mut i32,
+    tls: u64,
+    pidfd_ptr: *mut i32,
+) -> Result<usize, SyscallError> {
+    let unsupported = flags
+        & !(0xff
+            | CloneFlags::VM.bits()
+            | CloneFlags::VFORK.bits()
+            | CloneFlags::NEWNS.bits()
+            | CloneFlags::CLEAR_SIGHAND.bits()
+            | CloneFlags::PARENT_SETTID.bits()
+            | CloneFlags::CHILD_SETTID.bits()
+            | CloneFlags::CHILD_CLEARTID.bits()
+            | CloneFlags::SETTLS.bits()
+            | CloneFlags::PIDFD.bits()
+            | CloneFlags::INTO_CGROUP.bits());
+    if unsupported != 0 || (exit_signal != 0 && exit_signal != 17) {
+        return Err(SyscallError::NoSyscall);
+    }
+    if clone_flags.contains(CloneFlags::PIDFD) && pidfd_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+    if clone_flags.contains(CloneFlags::PIDFD)
+        && clone_flags.contains(CloneFlags::PARENT_SETTID)
+        && core::ptr::eq(pidfd_ptr, parent_tid)
+    {
+        return Err(SyscallError::NoSyscall);
+    }
+
+    let current = get_current_process();
+    let (child_process, child_thread) = crate::process::Process::fork(current.clone());
+    let pid = child_process.lock().pid;
+    MANAGER.lock().processes.insert(pid, child_process.clone());
+
+    if clone_flags.contains(CloneFlags::CLEAR_SIGHAND) {
+        let mut child = child_process.lock();
+        child.signal_actions = clone_cleared_signal_actions(&child.signal_actions);
+    }
+
+    {
+        let mut child = child_thread.lock();
+        if stack_pointer != 0 {
+            child.snapshot.inner.rsp = stack_pointer;
+        }
+        child.snapshot.inner.rax = 0;
+        if clone_flags.contains(CloneFlags::SETTLS) {
+            child.snapshot.fs_base = tls;
+        }
+    }
+
+    if clone_flags.contains(CloneFlags::PARENT_SETTID) {
+        user_safe::write(parent_tid, &(pid.0 as i32))?;
+    }
+
+    if clone_flags.intersects(CloneFlags::CHILD_SETTID | CloneFlags::CHILD_CLEARTID) {
+        child_process
+            .lock()
+            .addrspace
+            .write(child_tid, &(pid.0 as i32))?;
+    }
+
+    if clone_flags.contains(CloneFlags::CHILD_CLEARTID) {
+        child_thread.lock().clear_child_tid = child_tid as u64;
+    }
+
+    if clone_flags.contains(CloneFlags::PIDFD) {
+        let pidfd: Arc<dyn Object> = PidFdObject::new(pid.0);
+        let pidfd_fd = i32::try_from(current.lock().push_object_with_flags(pidfd, FdFlags::CLOEXEC))
+            .map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
+        user_safe::write(pidfd_ptr, &pidfd_fd)?;
+    }
+
+    Ok(pid.0 as usize)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -478,7 +563,14 @@ define_syscall!(InotifyInit1, |flags: i32| {
     if (flags & TFD_NONBLOCK) != 0 {
         let _ = object.clone().set_flags(crate::object::FileFlags::NONBLOCK);
     }
-    let fd = get_current_process().lock().push_object(object);
+    let fd_flags = if (flags & TFD_CLOEXEC) != 0 {
+        FdFlags::CLOEXEC
+    } else {
+        FdFlags::empty()
+    };
+    let fd = get_current_process()
+        .lock()
+        .push_object_with_flags(object, fd_flags);
     Ok(fd)
 });
 
@@ -489,7 +581,14 @@ fn create_eventfd(initval: u32, flags: i32) -> Result<usize, SyscallError> {
 
     let fd = get_current_process()
         .lock()
-        .push_object(EventFdObject::new(initval as u64, flags));
+        .push_object_with_flags(
+            EventFdObject::new(initval as u64, flags),
+            if (flags & TFD_CLOEXEC) != 0 {
+                FdFlags::CLOEXEC
+            } else {
+                FdFlags::empty()
+            },
+        );
     Ok(fd)
 }
 
@@ -521,7 +620,14 @@ define_syscall!(TimerfdCreate, |clock_id: i32, flags: i32| {
     if (flags & TFD_NONBLOCK) != 0 {
         let _ = object.clone().set_flags(crate::object::FileFlags::NONBLOCK);
     }
-    let fd = get_current_process().lock().push_object(object);
+    let fd_flags = if (flags & TFD_CLOEXEC) != 0 {
+        FdFlags::CLOEXEC
+    } else {
+        FdFlags::empty()
+    };
+    let fd = get_current_process()
+        .lock()
+        .push_object_with_flags(object, fd_flags);
     Ok(fd)
 });
 
@@ -883,57 +989,21 @@ define_syscall!(Clone, |flags: u64,
         | CloneFlags::SIGHAND
         | CloneFlags::THREAD;
     if !clone_flags.contains(CloneFlags::THREAD) {
-        let unsupported = flags
-            & !(0xff
-                | CloneFlags::VM.bits()
-                | CloneFlags::VFORK.bits()
-                | CloneFlags::NEWNS.bits()
-                | CloneFlags::CLEAR_SIGHAND.bits()
-                | CloneFlags::PARENT_SETTID.bits()
-                | CloneFlags::CHILD_SETTID.bits()
-                | CloneFlags::CHILD_CLEARTID.bits()
-                | CloneFlags::SETTLS.bits());
-        if unsupported != 0 || (exit_signal != 0 && exit_signal != 17) {
-            return Err(SyscallError::NoSyscall);
-        }
-
-        let current = get_current_process();
-        let (child_process, child_thread) = crate::process::Process::fork(current.clone());
-        let pid = child_process.lock().pid;
-        MANAGER.lock().processes.insert(pid, child_process.clone());
-
-        if clone_flags.contains(CloneFlags::CLEAR_SIGHAND) {
-            let mut child = child_process.lock();
-            child.signal_actions = clone_cleared_signal_actions(&child.signal_actions);
-        }
-
-        {
-            let mut child = child_thread.lock();
-            if stack_pointer != 0 {
-                child.snapshot.inner.rsp = stack_pointer;
-            }
-            child.snapshot.inner.rax = 0;
-            if clone_flags.contains(CloneFlags::SETTLS) {
-                child.snapshot.fs_base = tls;
-            }
-        }
-
-        if clone_flags.contains(CloneFlags::PARENT_SETTID) {
-            user_safe::write(parent_tid, &(pid.0 as i32))?;
-        }
-
-        if clone_flags.intersects(CloneFlags::CHILD_SETTID | CloneFlags::CHILD_CLEARTID) {
-            child_process
-                .lock()
-                .addrspace
-                .write(child_tid, &(pid.0 as i32))?;
-        }
-
-        if clone_flags.contains(CloneFlags::CHILD_CLEARTID) {
-            child_thread.lock().clear_child_tid = child_tid as u64;
-        }
-
-        return Ok(pid.0 as usize);
+        let pidfd_ptr = if clone_flags.contains(CloneFlags::PIDFD) {
+            parent_tid
+        } else {
+            core::ptr::null_mut()
+        };
+        return clone_process(
+            clone_flags,
+            flags,
+            exit_signal,
+            stack_pointer,
+            parent_tid,
+            child_tid,
+            tls,
+            pidfd_ptr,
+        );
     }
 
     let flags = clone_flags;
@@ -984,7 +1054,7 @@ define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
     }
 
     let args = unsafe { &*args };
-    if args.pidfd != 0 || args.set_tid != 0 || args.set_tid_size != 0 || args.cgroup != 0 {
+    if args.set_tid != 0 || args.set_tid_size != 0 {
         return Err(SyscallError::NoSyscall);
     }
 
@@ -994,14 +1064,35 @@ define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
         args.stack.saturating_add(args.stack_size)
     };
     let flags = args.flags | (args.exit_signal & 0xff);
+    let clone_flags = CloneFlags::from_bits_truncate(flags);
 
-    <Clone as SyscallImpl>::handle_call(
+    if clone_flags.contains(CloneFlags::THREAD) {
+        return <Clone as SyscallImpl>::handle_call(
+            flags,
+            stack_pointer,
+            args.parent_tid,
+            args.child_tid,
+            args.tls,
+            0,
+        );
+    }
+
+    if clone_flags.contains(CloneFlags::PIDFD) != (args.pidfd != 0) {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if clone_flags.contains(CloneFlags::INTO_CGROUP) != (args.cgroup != 0) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    clone_process(
+        clone_flags,
         flags,
+        (args.exit_signal & 0xff) as u8,
         stack_pointer,
-        args.parent_tid,
-        args.child_tid,
+        args.parent_tid as *mut i32,
+        args.child_tid as *mut i32,
         args.tls,
-        0,
+        args.pidfd as *mut i32,
     )
 });
 
@@ -1015,7 +1106,9 @@ define_syscall!(PidfdOpen, |pid: i32, flags: u32| {
 
     get_process_with_pid(ProcessID(pid as u64))?;
     let pidfd: Arc<dyn Object> = PidFdObject::new(pid as u64);
-    Ok(get_current_process().lock().push_object(pidfd))
+    Ok(get_current_process()
+        .lock()
+        .push_object_with_flags(pidfd, FdFlags::CLOEXEC))
 });
 
 define_syscall!(SchedYield, { Ok(0) });

@@ -10,7 +10,13 @@ use alloc::sync::Arc;
 use num_enum::TryFromPrimitive;
 
 use crate::systemcall::utils::SyscallError;
-use crate::{define_syscall, polling::poller::PollerObject, process::manager::get_current_process};
+use crate::{
+    define_syscall,
+    polling::poller::PollerObject,
+    process::{FdFlags, manager::get_current_process},
+};
+
+const EPOLL_CLOEXEC: i32 = 0o2_000_000;
 
 #[derive(Clone, Copy, Debug, TryFromPrimitive)]
 #[repr(u64)]
@@ -94,13 +100,20 @@ fn linux_bits_to_events(bits: u32) -> [Option<PollableEvent>; 4] {
     ]
 }
 
-define_syscall!(EpollCreate1, {
-    let process = get_current_process();
-    let objects = &mut process.lock().objects;
+define_syscall!(EpollCreate1, |flags: i32| {
+    if flags & !EPOLL_CLOEXEC != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
 
-    objects.push(Some(PollerObject::new()));
-
-    Ok(objects.len() - 1)
+    let fd_flags = if (flags & EPOLL_CLOEXEC) != 0 {
+        FdFlags::CLOEXEC
+    } else {
+        FdFlags::empty()
+    };
+    let fd = get_current_process()
+        .lock()
+        .push_object_with_flags(PollerObject::new(), fd_flags);
+    Ok(fd)
 });
 
 fn epoll_update_impl(
@@ -263,12 +276,15 @@ define_syscall!(EpollPwait, |poller: ObjectRef,
     epoll_wait_impl(poller, events_ptr, maxevents, timeout)
 });
 
-define_syscall!(EpollPwait2, |poller: ObjectRef,
-                              events_ptr: *mut LinuxEpollEvent,
-                              maxevents: usize,
-                              timeout: *const LinuxTimespec,
-                              _sigmask: *const u8,
-                              _sigsetsize: usize| {
-    let timeout = epoll_pwait2_timeout_ms(timeout)?;
-    epoll_wait_impl(poller, events_ptr, maxevents, timeout)
-});
+define_syscall!(
+    EpollPwait2,
+    |poller: ObjectRef,
+     events_ptr: *mut LinuxEpollEvent,
+     maxevents: usize,
+     timeout: *const LinuxTimespec,
+     _sigmask: *const u8,
+     _sigsetsize: usize| {
+        let timeout = epoll_pwait2_timeout_ms(timeout)?;
+        epoll_wait_impl(poller, events_ptr, maxevents, timeout)
+    }
+);

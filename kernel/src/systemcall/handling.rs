@@ -1,7 +1,7 @@
 use crate::{
     misc::snapshot::Snapshot,
     process::misc::with_current_process,
-    s_println,
+    systemcall::numbers::SyscallNumber,
     systemcall::table::SYSCALL_TABLE,
     systemcall::utils::SyscallError,
     thread::{THREAD_MANAGER, misc::with_current_thread, scheduling::return_to_executor_no_save},
@@ -59,6 +59,34 @@ fn syscall_handler_unwrapped(
     arg6: u64,
 ) -> isize {
     let current_pid = with_current_process(|proc| proc.pid.0);
+    let syscall_name = SyscallNumber::from_number(syscall_no as usize);
+    let should_trace = current_pid != 0
+        && current_pid <= 32
+        && !matches!(
+            syscall_name,
+            Some(
+                SyscallNumber::Read
+                    | SyscallNumber::Write
+                    | SyscallNumber::Writev
+                    | SyscallNumber::Pread64
+                    | SyscallNumber::Pwrite64
+                    | SyscallNumber::Futex
+            )
+        );
+
+    if should_trace {
+        crate::s_println!(
+            "syscall enter pid={} no={:?} args=({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x})",
+            current_pid,
+            syscall_name,
+            arg1,
+            arg2,
+            arg3,
+            arg4,
+            arg5,
+            arg6
+        );
+    }
 
     if let Some(Some(handler)) = SYSCALL_TABLE.get(syscall_no as usize) {
         let result = match handler(arg1, arg2, arg3, arg4, arg5, arg6) {
@@ -66,8 +94,17 @@ fn syscall_handler_unwrapped(
             Err(err) => err as isize,
         };
 
+        if should_trace {
+            crate::s_println!(
+                "syscall exit pid={} no={:?} result={}",
+                current_pid,
+                syscall_name,
+                result
+            );
+        }
+
         if result == SyscallError::BadAddress as isize {
-            s_println!(
+            crate::s_println!(
                 "bad address syscall: pid={} no={} args=({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x}) -> {}",
                 current_pid,
                 syscall_no,
@@ -83,7 +120,7 @@ fn syscall_handler_unwrapped(
 
         result
     } else {
-        s_println!(
+        crate::s_println!(
             "Attempted to call invalid syscall {} pid={} args=({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x})",
             syscall_no,
             current_pid,

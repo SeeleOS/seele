@@ -11,6 +11,7 @@ use crate::{
         manager::{MANAGER, get_current_process, terminate_process},
         misc::ProcessID,
     },
+    s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
         THREAD_MANAGER, get_current_thread,
@@ -50,6 +51,8 @@ define_syscall!(Wait4, |target_process: i32,
                         status_ptr: *mut i32,
                         options: i32,
                         _rusage: u64| {
+    let wait_options = WaitOptions::from_bits_truncate(options);
+    let preserve_child = wait_options.contains(WaitOptions::WNOWAIT);
     let current_process = get_current_process();
     loop {
         THREAD_MANAGER
@@ -97,7 +100,7 @@ define_syscall!(Wait4, |target_process: i32,
             } else if matched_child {
                 None
             } else {
-                return Err(SyscallError::NoProcess);
+                return Err(SyscallError::NoChildProcesses);
             }
         };
 
@@ -108,10 +111,12 @@ define_syscall!(Wait4, |target_process: i32,
                     user_safe::write(status_ptr, &status)?;
                 }
                 let pid = process.lock().pid.0;
-                MANAGER.lock().reap_process(process);
+                if !preserve_child {
+                    MANAGER.lock().reap_process(process);
+                }
                 return Ok(pid as usize);
             }
-            None if WaitOptions::from_bits_truncate(options).contains(WaitOptions::NOHANG) => {
+            None if wait_options.contains(WaitOptions::NOHANG) => {
                 return Ok(0);
             }
             None => {
@@ -148,7 +153,7 @@ define_syscall!(Waitid, |id_type: i32,
     let pid = Wait4::handle_call(
         target_process as u64,
         (&mut status as *mut i32) as u64,
-        (options & !WaitOptions::WNOWAIT.bits()) as u64,
+        options as u64,
         0,
         0,
         0,
@@ -175,11 +180,21 @@ define_syscall!(Waitid, |id_type: i32,
 define_syscall!(Execve, |path_str: String,
                          args: Vec<String>,
                          env: Vec<String>| {
-    execve(
-        crate::filesystem::path::Path::new(path_str.as_str()),
-        args,
-        env,
-    )?;
+    let current_pid = get_current_process().lock().pid.0;
+    if current_pid <= 32 {
+        s_println!(
+            "execve syscall body pid={} path={} argc={} envc={}",
+            current_pid,
+            path_str,
+            args.len(),
+            env.len()
+        );
+    }
+    let path = crate::filesystem::path::Path::new(path_str.as_str());
+    if current_pid <= 32 {
+        s_println!("execve syscall body pid={} path-built", current_pid);
+    }
+    execve(path, args, env)?;
     log::info!("execve done");
     Ok(0)
 });

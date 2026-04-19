@@ -9,7 +9,7 @@ use crate::filesystem::{
     vfs_traits::{File, FileLikeType, Whence},
 };
 
-use super::{TMPFS_STATE, TmpNodeKind, node_name};
+use super::{S_IFMT, TMPFS_STATE, TmpNodeKind, node_name};
 
 pub(crate) struct TmpfsFileHandle {
     path: String,
@@ -110,15 +110,10 @@ impl File for TmpfsFileHandle {
 
     fn chmod(&self, mode: u32) -> FSResult<()> {
         let mut state = TMPFS_STATE.lock();
-        let node = state.node_mut(&self.path)?;
-        match &mut node.kind {
-            TmpNodeKind::File {
-                mode: file_mode, ..
-            } => {
-                *file_mode = mode & 0o7777;
-                Ok(())
-            }
-            TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => Err(FSError::NotAFile),
+        if (mode & S_IFMT) != 0 {
+            state.update_file_mode(&self.path, mode)
+        } else {
+            state.update_file_mode(&self.path, mode & 0o7777)
         }
     }
 }

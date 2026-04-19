@@ -1,5 +1,6 @@
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
+use bitflags::bitflags;
 use spin::Mutex;
 use x86_64::VirtAddr;
 
@@ -21,6 +22,13 @@ pub mod object;
 
 pub type ProcessRef = Arc<Mutex<Process>>;
 
+bitflags! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    pub struct FdFlags: u32 {
+        const CLOEXEC = 1 << 0;
+    }
+}
+
 #[derive(Debug)]
 pub struct Process {
     pub pid: ProcessID,
@@ -28,6 +36,7 @@ pub struct Process {
     pub kernel_stack_top: VirtAddr,
     pub threads: Vec<Weak<Mutex<Thread>>>,
     pub objects: Vec<Option<Arc<dyn Object>>>,
+    pub object_flags: Vec<FdFlags>,
     pub current_directory: AbsolutePath,
     pub exit_code: Option<u64>,
     pub parent: Option<ProcessRef>,
@@ -66,6 +75,7 @@ impl Default for Process {
             kernel_stack_top: VirtAddr::zero(),
             threads: Vec::new(),
             objects: Vec::new(),
+            object_flags: Vec::new(),
             exit_code: None,
             parent: None,
             timers: Vec::new(),

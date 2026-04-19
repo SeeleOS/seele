@@ -14,7 +14,7 @@ use crate::{
         linux_anon::SignalfdObject,
         misc::{ObjectRef, get_object_current_process},
     },
-    process::manager::get_current_process,
+    process::{FdFlags, manager::get_current_process},
     process::misc::with_current_process,
     signal::{Signal, action::SignalAction},
 };
@@ -119,8 +119,13 @@ define_syscall!(Signalfd4, |fd: i32,
     if fd == -1 {
         let signalfd = SignalfdObject::new(get_current_process().lock().pid.0, mask, flags);
         let signalfd_ref: ObjectRef = signalfd;
+        let fd_flags = if (flags & SFD_CLOEXEC) != 0 {
+            FdFlags::CLOEXEC
+        } else {
+            FdFlags::empty()
+        };
         return Ok(with_current_process(|process| {
-            process.push_object(signalfd_ref)
+            process.push_object_with_flags(signalfd_ref, fd_flags)
         }));
     }
 
@@ -138,6 +143,12 @@ define_syscall!(Signalfd4, |fd: i32,
         .clone()
         .set_flags(file_flags)
         .map_err(SyscallError::from)?;
+    let fd_flags = if (flags & SFD_CLOEXEC) != 0 {
+        FdFlags::CLOEXEC
+    } else {
+        FdFlags::empty()
+    };
+    with_current_process(|process| process.set_fd_flags(fd as usize, fd_flags))?;
 
     Ok(fd as usize)
 });
@@ -302,17 +313,17 @@ define_syscall!(Tgkill, |tgid: i32, tid: i32, signal: i32| {
     Ok(0)
 });
 
-define_syscall!(PidfdSendSignal, |pidfd: ObjectRef,
-                                   signal: i32,
-                                   info: *const u8,
-                                   flags: u32| {
-    if !info.is_null() || flags != 0 {
-        return Err(SyscallError::NoSyscall);
-    }
+define_syscall!(
+    PidfdSendSignal,
+    |pidfd: ObjectRef, signal: i32, info: *const u8, flags: u32| {
+        if !info.is_null() || flags != 0 {
+            return Err(SyscallError::NoSyscall);
+        }
 
-    let pid = pidfd.as_pidfd()?.pid();
-    Kill::handle_call(pid, signal as u64, 0, 0, 0, 0)
-});
+        let pid = pidfd.as_pidfd()?.pid();
+        Kill::handle_call(pid, signal as u64, 0, 0, 0, 0)
+    }
+);
 
 define_syscall!(SendSignalGroup, |group: ProcessGroupID, signal: Signal| {
     for ele in group.get_processes() {

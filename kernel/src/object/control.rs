@@ -3,9 +3,9 @@ use crate::{
     object::{
         error::ObjectError,
         memfd::{memfd_add_seals, memfd_get_seals},
-        misc::ObjectRef,
+        misc::{ObjectRef, get_object_current_process},
     },
-    process::misc::with_current_process,
+    process::{FdFlags, misc::with_current_process},
     systemcall::utils::{SyscallError, SyscallResult},
 };
 use num_enum::TryFromPrimitive;
@@ -26,6 +26,7 @@ enum FcntlCmd {
 const O_WRONLY: usize = 0o1;
 const O_RDWR: usize = 0o2;
 const O_NONBLOCK: usize = 0o4_000;
+const FD_CLOEXEC: u32 = 1;
 
 fn access_mode_bits(object: &ObjectRef) -> usize {
     let readable = object.clone().as_readable().is_ok();
@@ -38,7 +39,8 @@ fn access_mode_bits(object: &ObjectRef) -> usize {
     }
 }
 
-pub fn control_object(object: ObjectRef, command: u64, arg: u64) -> SyscallResult {
+pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
+    let object = get_object_current_process(fd).map_err(SyscallError::from)?;
     match FcntlCmd::try_from(command).map_err(|_| SyscallError::InvalidArguments)? {
         FcntlCmd::SetFl => {
             let mut flags = FileFlags::empty();
@@ -72,10 +74,21 @@ pub fn control_object(object: ObjectRef, command: u64, arg: u64) -> SyscallResul
         }),
         FcntlCmd::DupFdCloexec => with_current_process(|process| {
             process
-                .clone_object_with_min(object, arg as usize)
+                .clone_object_with_min_and_flags(object, arg as usize, FdFlags::CLOEXEC)
                 .map_err(Into::into)
         }),
-        FcntlCmd::SetFd | FcntlCmd::GetFd => Ok(0),
+        FcntlCmd::GetFd => {
+            with_current_process(|process| Ok(process.get_fd_flags(fd as usize)?.bits() as usize))
+        }
+        FcntlCmd::SetFd => with_current_process(|process| {
+            let flags = if (arg as u32 & FD_CLOEXEC) != 0 {
+                FdFlags::CLOEXEC
+            } else {
+                FdFlags::empty()
+            };
+            process.set_fd_flags(fd as usize, flags)?;
+            Ok(0)
+        }),
         FcntlCmd::AddSeals => {
             let file_like = object.as_file_like()?;
             memfd_add_seals(&file_like.path(), arg as u32)

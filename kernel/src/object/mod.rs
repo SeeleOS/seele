@@ -14,6 +14,7 @@ use crate::{
     object::{
         error::ObjectError,
         linux_anon::{EventFdObject, InotifyObject, PidFdObject, SignalfdObject, TimerFdObject},
+        netlink::NetlinkSocketObject,
         misc::ObjectResult,
         traits::{Configuratable, MemoryMappable, Readable, Seekable, Statable, Writable},
     },
@@ -29,6 +30,7 @@ pub mod error;
 pub mod linux_anon;
 pub mod memfd;
 pub mod misc;
+pub mod netlink;
 pub mod queue_helpers;
 pub mod traits;
 pub mod tty_device;
@@ -80,6 +82,7 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function_non_trait!("poller", PollerObject, BadFileDescriptor);
     define_cast_function_non_trait!("pidfd", PidFdObject, BadFileDescriptor);
     define_cast_function_non_trait!("signalfd", SignalfdObject, BadFileDescriptor);
+    define_cast_function_non_trait!("netlink_socket", NetlinkSocketObject, BadFileDescriptor);
     define_cast_function_non_trait!("timerfd", TimerFdObject, BadFileDescriptor);
     define_cast_function_non_trait!("unix_socket", UnixSocketObject, BadFileDescriptor);
 }

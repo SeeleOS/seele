@@ -48,6 +48,7 @@ impl Manager {
         self.processes.remove(&process.lock().pid);
         let mut process = process.lock();
         process.objects.clear();
+        process.object_flags.clear();
         process.timers.clear();
         process.addrspace.clean();
     }

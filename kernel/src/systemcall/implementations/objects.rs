@@ -20,14 +20,19 @@ use crate::{
         misc::{ObjectRef, get_object_current_process},
     },
     process::{
+        FdFlags,
         manager::get_current_process,
         misc::{ProcessID, with_current_process},
     },
+    s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
 };
 
 static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeMap::new());
 static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
+const COPY_CHUNK_SIZE: usize = 16 * 1024;
+const O_CLOEXEC: i32 = 0o2_000_000;
+const CLOSE_RANGE_CLOEXEC: u32 = 0x4;
 
 #[repr(C)]
 struct LinuxIovec {
@@ -41,7 +46,18 @@ fn write_dirents64(
     len: usize,
 ) -> crate::systemcall::utils::SyscallResult {
     let obj = get_object_current_process(object_index)?.as_file_like()?;
-    let contents = obj.directory_contents()?;
+    let contents = match obj.directory_contents() {
+        Ok(contents) => contents,
+        Err(err) => {
+            s_println!(
+                "getdents64 failed fd={} path={} err={:?}",
+                object_index,
+                obj.path().as_string(),
+                err
+            );
+            return Err(err.into());
+        }
+    };
     let current_pid = get_current_process().lock().pid;
     let mut offsets = DIR_OFFSETS.lock();
     let offset_entry = offsets.entry((current_pid, object_index)).or_insert(0usize);
@@ -87,6 +103,42 @@ fn write_dirents64(
     }
 
     Ok(bytes_written)
+}
+
+fn copy_between_objects(
+    input: ObjectRef,
+    output: ObjectRef,
+    mut remaining: usize,
+) -> crate::systemcall::utils::SyscallResult {
+    let readable = input.as_readable()?;
+    let writable = output.as_writable()?;
+    let mut buffer = [0u8; COPY_CHUNK_SIZE];
+    let mut total = 0usize;
+
+    while remaining > 0 {
+        let chunk_len = remaining.min(buffer.len());
+        let read = readable.read(&mut buffer[..chunk_len])?;
+        if read == 0 {
+            break;
+        }
+
+        let mut written = 0usize;
+        while written < read {
+            let count = writable.write(&buffer[written..read])?;
+            if count == 0 {
+                return Err(SyscallError::BrokenPipe);
+            }
+            written += count;
+        }
+
+        total += read;
+        remaining -= read;
+        if read < chunk_len {
+            break;
+        }
+    }
+
+    Ok(total)
 }
 
 define_syscall!(Getdents, |object_index: u64, buf: *mut u8, len: usize| {
@@ -145,15 +197,38 @@ define_syscall!(Writev, |object: ObjectRef,
     Ok(written)
 });
 
+define_syscall!(Sendfile, |out_fd: ObjectRef,
+                           in_fd: ObjectRef,
+                           offset: *mut i64,
+                           count: usize| {
+    if !offset.is_null() {
+        return Err(SyscallError::OperationNotSupported);
+    }
+
+    copy_between_objects(in_fd, out_fd, count)
+});
+
+define_syscall!(CopyFileRange, |fd_in: ObjectRef,
+                                off_in: *mut i64,
+                                fd_out: ObjectRef,
+                                off_out: *mut i64,
+                                len: usize,
+                                flags: u32| {
+    if !off_in.is_null() || !off_out.is_null() {
+        return Err(SyscallError::OperationNotSupported);
+    }
+    if flags != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    copy_between_objects(fd_in, fd_out, len)
+});
+
 define_syscall!(Close, |object_num: usize| {
     let process_ref = get_current_process();
     let mut process = process_ref.lock();
     let current_pid = process.pid;
-    let objects = &mut process.objects;
-
-    if objects.len() > object_num {
-        let object = objects[object_num].take();
-        drop(object);
+    if process.clear_object_slot(object_num).is_ok() {
         DIR_OFFSETS.lock().remove(&(current_pid, object_num as u64));
         Ok(0)
     } else {
@@ -171,8 +246,8 @@ define_syscall!(Ioctl, |object: ObjectRef,
     res.map(|val| val as usize).map_err(Into::into)
 });
 
-define_syscall!(Fcntl, |object: ObjectRef, command: u64, arg: u64| {
-    control_object(object, command, arg)
+define_syscall!(Fcntl, |fd: u64, command: u64, arg: u64| {
+    control_object(fd, command, arg)
 });
 
 define_syscall!(Flock, |_object: ObjectRef, _operation: i32| { Ok(0) });
@@ -205,21 +280,43 @@ define_syscall!(Dup, |object: ObjectRef| {
         .map_err(Into::into)
 });
 
-define_syscall!(Dup2, |source: ObjectRef, dest: usize| {
+define_syscall!(Dup2, |source_fd: usize, dest: usize| {
+    if source_fd == dest {
+        return Ok(dest);
+    }
+
+    let source = get_object_current_process(source_fd as u64).map_err(SyscallError::from)?;
     get_current_process()
         .lock()
         .clone_object_to(source, dest)
         .map_err(Into::into)
 });
 
-define_syscall!(Dup3, |source: ObjectRef, dest: usize| {
+define_syscall!(Dup3, |source_fd: usize, dest: usize, flags: i32| {
+    if (flags & !O_CLOEXEC) != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if source_fd == dest {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let source = get_object_current_process(source_fd as u64).map_err(SyscallError::from)?;
+    let fd_flags = if (flags & O_CLOEXEC) != 0 {
+        FdFlags::CLOEXEC
+    } else {
+        FdFlags::empty()
+    };
     get_current_process()
         .lock()
-        .clone_object_to(source, dest)
+        .clone_object_to_with_flags(source, dest, fd_flags)
         .map_err(Into::into)
 });
 
-define_syscall!(CloseRange, |first: usize, last: usize, _flags: u32| {
+define_syscall!(CloseRange, |first: usize, last: usize, flags: u32| {
+    if flags & !CLOSE_RANGE_CLOEXEC != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
     let process_ref = get_current_process();
     let mut process = process_ref.lock();
     if first >= process.objects.len() {
@@ -228,7 +325,14 @@ define_syscall!(CloseRange, |first: usize, last: usize, _flags: u32| {
 
     let end = last.min(process.objects.len().saturating_sub(1));
     for fd in first..=end {
-        process.objects[fd] = None;
+        if process.objects[fd].is_none() {
+            continue;
+        }
+        if (flags & CLOSE_RANGE_CLOEXEC) != 0 {
+            process.set_fd_flags(fd, FdFlags::CLOEXEC)?;
+        } else {
+            process.clear_object_slot(fd)?;
+        }
     }
 
     Ok(0)
@@ -269,7 +373,14 @@ define_syscall!(MemfdCreate, |name: String, flags: u32| {
         sanitized_name,
         (flags & (MFD_ALLOW_SEALING | MFD_NOEXEC_SEAL)) != 0,
     );
-    let fd = get_current_process().lock().push_object(object);
+    let fd_flags = if (flags & MFD_CLOEXEC) != 0 {
+        FdFlags::CLOEXEC
+    } else {
+        FdFlags::empty()
+    };
+    let fd = get_current_process()
+        .lock()
+        .push_object_with_flags(object, fd_flags);
 
     Ok(fd)
 });

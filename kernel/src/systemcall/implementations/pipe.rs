@@ -1,7 +1,7 @@
 use crate::{
     define_syscall,
     memory::user_safe,
-    process::manager::get_current_process,
+    process::{FdFlags, manager::get_current_process},
     socket::{AF_UNIX, SOCK_NONBLOCK, SOCK_STREAM, UnixSocketObject},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
@@ -33,8 +33,13 @@ fn create_pipe(fds: *mut i32, flags: i32) -> Result<usize, SyscallError> {
     let process = get_current_process();
     let (read_fd, write_fd) = {
         let mut process = process.lock();
-        let read_fd = process.push_object(read_end);
-        let write_fd = process.push_object(write_end);
+        let fd_flags = if (flags & O_CLOEXEC) != 0 {
+            FdFlags::CLOEXEC
+        } else {
+            FdFlags::empty()
+        };
+        let read_fd = process.push_object_with_flags(read_end, fd_flags);
+        let write_fd = process.push_object_with_flags(write_end, fd_flags);
         (read_fd, write_fd)
     };
 

@@ -16,7 +16,7 @@ use crate::{
     misc::time::with_profiling,
     object::{Object, tty_device::get_default_tty},
     process::{
-        Process, ProcessRef,
+        FdFlags, Process, ProcessRef,
         group::ProcessGroupID,
         misc::{ProcessID, init_stack_layout},
         object::init_objects,
@@ -105,6 +105,7 @@ impl Process {
                     ],
                     &mut process.addrspace,
                     &mut process.objects,
+                    &mut process.object_flags,
                 )
             },
             "process init setup_process",
@@ -136,6 +137,7 @@ fn setup_process_inner(
     env: Vec<String>,
     addrspace: &mut AddrSpace,
     objects: &mut Vec<Option<Arc<dyn Object>>>,
+    object_flags: &mut Vec<FdFlags>,
     shebang_depth: usize,
 ) -> Result<ThreadSnapshot, FSError> {
     if shebang_depth > MAX_SHEBANG_DEPTH {
@@ -174,6 +176,7 @@ fn setup_process_inner(
             env,
             addrspace,
             objects,
+            object_flags,
             shebang_depth + 1,
         );
     }
@@ -227,7 +230,7 @@ fn setup_process_inner(
     );
 
     with_profiling(
-        || init_objects(objects),
+        || init_objects(objects, object_flags),
         alloc::format!("init_objects {}", path_string).as_str(),
     );
 
@@ -250,10 +253,11 @@ pub fn setup_process(
     env: Vec<String>,
     addrspace: &mut AddrSpace,
     objects: &mut Vec<Option<Arc<dyn Object>>>,
+    object_flags: &mut Vec<FdFlags>,
 ) -> Result<ThreadSnapshot, FSError> {
     if args.first().is_none() {
         args.insert(0, path.clone().as_string());
     }
 
-    setup_process_inner(path, args, env, addrspace, objects, 0)
+    setup_process_inner(path, args, env, addrspace, objects, object_flags, 0)
 }

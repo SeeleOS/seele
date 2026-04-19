@@ -11,7 +11,7 @@ use crate::{
         error::ObjectError,
         misc::{ObjectRef, get_object_current_process},
     },
-    process::{manager::get_current_process, misc::with_current_process},
+    process::{FdFlags, manager::get_current_process, misc::with_current_process},
     s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
 };
@@ -28,6 +28,8 @@ const TMPFS_MAGIC: i64 = 0x0102_1994;
 const PROC_SUPER_MAGIC: i64 = 0x9fa0;
 const SYSFS_MAGIC: i64 = 0x6265_6572;
 const CGROUP2_SUPER_MAGIC: i64 = 0x6367_7270;
+const ANON_INODE_FS_MAGIC: i64 = 0x0904_1934;
+const SOCKFS_MAGIC: i64 = 0x534f_434b;
 const AT_NO_AUTOMOUNT: i32 = 0x800;
 const AT_STATX_FORCE_SYNC: i32 = 0x2000;
 const AT_STATX_DONT_SYNC: i32 = 0x4000;
@@ -231,6 +233,28 @@ fn linux_minor(dev: u64) -> u32 {
 
 fn filesystem_magic_for_file_like(file_like: &FileLikeObject) -> Result<i64, SyscallError> {
     filesystem_magic_for_path(&file_like.path())
+}
+
+fn filesystem_magic_for_object(object: &ObjectRef) -> Result<i64, SyscallError> {
+    if let Ok(file_like) = object.clone().as_file_like() {
+        return filesystem_magic_for_file_like(&file_like);
+    }
+
+    if object.clone().as_pidfd().is_ok()
+        || object.clone().as_eventfd().is_ok()
+        || object.clone().as_inotify().is_ok()
+        || object.clone().as_poller().is_ok()
+        || object.clone().as_signalfd().is_ok()
+        || object.clone().as_timerfd().is_ok()
+    {
+        return Ok(ANON_INODE_FS_MAGIC);
+    }
+
+    if object.clone().as_netlink_socket().is_ok() || object.clone().as_unix_socket().is_ok() {
+        return Ok(SOCKFS_MAGIC);
+    }
+
+    Err(SyscallError::BadFileDescriptor)
 }
 
 fn filesystem_magic_for_path(path: &Path) -> Result<i64, SyscallError> {
@@ -532,9 +556,14 @@ define_syscall!(OpenAt, |dirfd: i32,
         }
     }
 
-    let slot = current_process.lock().alloc_object_slot();
-    current_process.lock().objects[slot] = Some(object);
-    Ok(slot)
+    let fd_flags = if flags.contains(OpenFlags::CLOEXEC) {
+        FdFlags::CLOEXEC
+    } else {
+        FdFlags::empty()
+    };
+    Ok(current_process
+        .lock()
+        .push_object_with_flags(object, fd_flags))
 });
 
 define_syscall!(Open, |path: CString, flags: i32, mode: u32| {
@@ -973,7 +1002,7 @@ define_syscall!(Mknodat, |dirfd: i32,
     match mode & S_IFMT {
         0 | S_IFREG | S_IFIFO | S_IFCHR | S_IFBLK | S_IFSOCK => {
             VirtualFS.lock().create_file(path.clone())?;
-            VirtualFS.lock().open(path)?.chmod(mode & !S_IFMT)?;
+            VirtualFS.lock().open(path)?.chmod(mode)?;
             Ok(0)
         }
         _ => Err(SyscallError::NoSyscall),
@@ -1074,8 +1103,13 @@ define_syscall!(OpenTree, |dirfd: i32, path: CString, flags: u32| {
         return Err(SyscallError::NotADirectory);
     }
 
+    let fd_flags = if (flags & OPEN_TREE_CLOEXEC) != 0 {
+        FdFlags::CLOEXEC
+    } else {
+        FdFlags::empty()
+    };
     let process = get_current_process();
-    let fd = process.lock().push_object(object);
+    let fd = process.lock().push_object_with_flags(object, fd_flags);
     Ok(fd)
 });
 
@@ -1105,8 +1139,7 @@ define_syscall!(Statfs, |path: CString, buf: *mut LinuxStatFs| {
 
 define_syscall!(Fstatfs, |fd: u64, buf: *mut LinuxStatFs| {
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
-    let file_like = object.as_file_like()?;
-    let statfs = linux_statfs(filesystem_magic_for_file_like(&file_like)?);
+    let statfs = linux_statfs(filesystem_magic_for_object(&object)?);
     user_safe::write(buf, &statfs)?;
     Ok(0)
 });

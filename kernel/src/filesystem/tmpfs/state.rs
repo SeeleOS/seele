@@ -11,6 +11,7 @@ use crate::filesystem::{errors::FSError, path::Path, vfs::FSResult};
 const ROOT_INODE: u64 = 0x7000_0000;
 pub(crate) const DEFAULT_DIR_MODE: u32 = 0o755;
 pub(crate) const DEFAULT_FILE_MODE: u32 = 0o644;
+pub(crate) const S_IFMT: u32 = 0o170000;
 
 pub(crate) enum TmpNodeKind {
     Directory {
@@ -150,6 +151,23 @@ impl TmpfsState {
         self.nodes.remove(&child);
         self.directory_children_mut(&parent)?.remove(name);
         Ok(())
+    }
+
+    pub(crate) fn update_file_mode(&mut self, path: &str, mode: u32) -> FSResult<()> {
+        let node = self.node_mut(path)?;
+        match &mut node.kind {
+            TmpNodeKind::File {
+                mode: file_mode, ..
+            } => {
+                if (mode & S_IFMT) != 0 {
+                    *file_mode = mode;
+                } else {
+                    *file_mode = (*file_mode & S_IFMT) | (mode & 0o7777);
+                }
+                Ok(())
+            }
+            TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => Err(FSError::NotAFile),
+        }
     }
 }
 

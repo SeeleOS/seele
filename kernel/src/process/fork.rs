@@ -30,6 +30,7 @@ impl Process {
                 addrspace: parent_locked.addrspace.clone_all(),
                 kernel_stack_top: parent_locked.kernel_stack_top,
                 objects: parent_locked.objects.clone(),
+                object_flags: parent_locked.object_flags.clone(),
                 current_directory: parent_locked.current_directory.clone(),
                 parent: Some(parent.clone()),
                 signal_actions: parent_locked.signal_actions.clone(),

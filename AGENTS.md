@@ -70,6 +70,7 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 - One logical change per commit when practical.
 - After completing a discrete feature or fix and verifying it, make a git commit for that completed work instead of leaving it uncommitted.
 - For small, focused fixes, make a dedicated commit immediately after the change is verified instead of batching it with later unrelated work.
+- Do not let large batches of unrelated or only partially separated changes accumulate uncommitted. Prefer committing each small verified step promptly while debugging.
 - PRs should explain the behavior change, affected subsystems, and exact verification steps.
 - Include serial log excerpts or screenshots when changing boot, terminal, or shell behavior.
 

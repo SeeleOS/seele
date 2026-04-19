@@ -1,6 +1,9 @@
 use alloc::{string::String, vec::Vec};
 
-use crate::misc::{error::KernelError, others::KernelFrom};
+use crate::{
+    memory::user_safe,
+    misc::{error::KernelError, others::KernelFrom},
+};
 
 pub type CString = *const u8;
 pub type CVec<T> = *const T;
@@ -16,14 +19,13 @@ impl KernelFrom<CString> for String {
         let mut str = String::new();
 
         for i in 0..MAX_LENGTH {
-            unsafe {
-                let char = *val.add(i) as char;
+            let byte = user_safe::read(unsafe { val.add(i) }).map_err(|_| KernelError::InvalidString)?;
+            let char = byte as char;
 
-                if char == '\0' {
-                    return Ok(str);
-                }
-                str.push(char);
+            if char == '\0' {
+                return Ok(str);
             }
+            str.push(char);
         }
 
         Err(KernelError::InvalidString)
@@ -41,14 +43,13 @@ impl KernelFrom<CVec<CString>> for Vec<String> {
         let mut vec = Vec::new();
 
         for i in 0..MAX_LENGTH {
-            unsafe {
-                let ptr = *val.add(i);
+            let ptr =
+                user_safe::read(unsafe { val.add(i) }).map_err(|_| KernelError::InvalidString)?;
 
-                if ptr.is_null() {
-                    break;
-                }
-                vec.push(String::k_from(ptr)?);
+            if ptr.is_null() {
+                break;
             }
+            vec.push(String::k_from(ptr)?);
         }
 
         Ok(vec)
