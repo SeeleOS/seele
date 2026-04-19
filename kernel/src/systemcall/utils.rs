@@ -37,16 +37,11 @@ pub enum SyscallError {
     AddressInUse = -98,
     IsConnected = -106,
     ConnectionRefused = -111,
-    Other = -256,
 }
 
 impl SyscallError {
     pub fn as_isize(self) -> isize {
         self as isize
-    }
-
-    pub fn other(_message: &str) -> SyscallError {
-        Self::Other
     }
 }
 
@@ -87,7 +82,7 @@ impl From<isize> for SyscallError {
             -98 => Self::AddressInUse,
             -106 => Self::IsConnected,
             -111 => Self::ConnectionRefused,
-            _ => Self::Other,
+            _ => Self::IOError,
         }
     }
 }

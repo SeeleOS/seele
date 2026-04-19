@@ -31,7 +31,7 @@ impl From<SocketError> for ObjectError {
 impl AsSyscallError for ObjectError {
     fn as_syscall_error(&self) -> SyscallError {
         match self {
-            Self::Unimplemented => SyscallError::other("unimplemented object result thingy"),
+            Self::Unimplemented => SyscallError::OperationNotSupported,
             Self::InvalidArguments => SyscallError::InvalidArguments,
             Self::Interrupted => SyscallError::Interrupted,
             Self::TryAgain => SyscallError::TryAgain,
@@ -39,7 +39,7 @@ impl AsSyscallError for ObjectError {
             Self::InvalidRequest => SyscallError::InappropriateIoctl,
             Self::SocketError(err) => err.as_syscall_error(),
             Self::FSError(err) => err.as_syscall_error(),
-            Self::Other => SyscallError::other("object error other"),
+            Self::Other => SyscallError::IOError,
         }
     }
 }

@@ -26,7 +26,7 @@ impl AsSyscallError for FSError {
             Self::NotFound => SyscallError::FileNotFound,
             Self::NotADirectory => SyscallError::NotADirectory,
             Self::NotAFile => SyscallError::IsADirectory,
-            Self::NotASymlink => SyscallError::other("Not a symlink"),
+            Self::NotASymlink => SyscallError::InvalidArguments,
             Self::AlreadyExists => SyscallError::FileAlreadyExists,
             Self::DirectoryNotEmpty => SyscallError::DirectoryNotEmpty,
             Self::NoSpace => SyscallError::NoSpaceLeft,
@@ -38,7 +38,7 @@ impl AsSyscallError for FSError {
 
             Self::StorageDeviceError(err) => err.as_syscall_error(),
 
-            Self::Other => SyscallError::other("FS error other"),
+            Self::Other => SyscallError::IOError,
         }
     }
 }

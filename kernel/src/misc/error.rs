@@ -44,7 +44,7 @@ impl KernelError {
             Self::FileSystem(err) => err.as_syscall_error(),
             Self::BlockDevice(err) => err.as_syscall_error(),
             Self::Object(err) => err.as_syscall_error(),
-            Self::InvalidString => SyscallError::other("Invalid string"),
+            Self::InvalidString => SyscallError::InvalidArguments,
         }
     }
 }

@@ -15,7 +15,7 @@ impl From<Ext4Error> for FSError {
             Ext4Error::NoSpace => Self::NoSpace,
             Ext4Error::AlreadyExists => Self::AlreadyExists,
             Ext4Error::Io(_) => Self::StorageDeviceError(BlockDeviceError::Other),
-            _ => Self::Other,
+            _ => Self::StorageDeviceError(BlockDeviceError::Other),
         }
     }
 }
