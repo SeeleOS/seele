@@ -20,6 +20,7 @@ impl UnixSocketObject {
             kind,
             state: Mutex::new(state),
             flags: Mutex::new(FileFlags::empty()),
+            pass_cred: Mutex::new(false),
         }
     }
 

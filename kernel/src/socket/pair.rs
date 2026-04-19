@@ -32,11 +32,13 @@ impl UnixSocketObject {
                     kind,
                     state: Mutex::new(UnixSocketState::Stream(left_stream.clone())),
                     flags: Mutex::new(FileFlags::empty()),
+                    pass_cred: Mutex::new(false),
                 });
                 let right = Arc::new(Self {
                     kind,
                     state: Mutex::new(UnixSocketState::Stream(right_stream.clone())),
                     flags: Mutex::new(FileFlags::empty()),
+                    pass_cred: Mutex::new(false),
                 });
 
                 *left_stream.owner.lock() = Some(Arc::downgrade(&left));
@@ -50,11 +52,13 @@ impl UnixSocketObject {
                     kind: UnixSocketKind::Datagram,
                     state: Mutex::new(UnixSocketState::Datagram(left_inner.clone())),
                     flags: Mutex::new(FileFlags::empty()),
+                    pass_cred: Mutex::new(false),
                 });
                 let right = Arc::new(Self {
                     kind: UnixSocketKind::Datagram,
                     state: Mutex::new(UnixSocketState::Datagram(right_inner.clone())),
                     flags: Mutex::new(FileFlags::empty()),
+                    pass_cred: Mutex::new(false),
                 });
 
                 *left_inner.owner.lock() = Some(Arc::downgrade(&left));

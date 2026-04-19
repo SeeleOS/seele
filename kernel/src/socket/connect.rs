@@ -36,6 +36,7 @@ impl UnixSocketObject {
                     kind,
                     state: Mutex::new(UnixSocketState::Stream(server_stream.clone())),
                     flags: Mutex::new(FileFlags::empty()),
+                    pass_cred: Mutex::new(false),
                 });
                 *server_stream.owner.lock() = Some(Arc::downgrade(&server_socket));
                 *server_stream.peer_cred.lock() = SocketPeerCred {

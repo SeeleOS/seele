@@ -22,4 +22,5 @@ pub struct UnixSocketObject {
     pub kind: UnixSocketKind,
     pub state: Mutex<UnixSocketState>,
     pub flags: Mutex<FileFlags>,
+    pub pass_cred: Mutex<bool>,
 }

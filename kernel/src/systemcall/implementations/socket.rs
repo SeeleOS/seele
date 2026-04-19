@@ -8,8 +8,8 @@ use crate::{
     socket::{AF_NETLINK, AF_UNIX, SOCK_CLOEXEC, SOCK_NONBLOCK},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
-use alloc::{string::String, vec::Vec};
-use core::slice;
+use alloc::{string::String, vec, vec::Vec};
+use core::{mem, slice};
 
 #[repr(C)]
 struct LinuxSockAddrUn {
@@ -25,8 +25,73 @@ struct LinuxSockAddrNl {
     nl_groups: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct LinuxCmsgHdr {
+    cmsg_len: usize,
+    cmsg_level: i32,
+    cmsg_type: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct LinuxUcred {
+    pid: i32,
+    uid: u32,
+    gid: u32,
+}
+
+fn cmsg_align(len: usize) -> usize {
+    let align = mem::size_of::<usize>();
+    (len + align - 1) & !(align - 1)
+}
+
+fn unix_socket_control_bytes(
+    socket: &crate::socket::UnixSocketObject,
+) -> Result<Vec<u8>, SyscallError> {
+    if !*socket.pass_cred.lock() {
+        return Ok(Vec::new());
+    }
+
+    let peer_cred = match &*socket.state.lock() {
+        crate::socket::UnixSocketState::Datagram(datagram) => *datagram.peer_cred.lock(),
+        crate::socket::UnixSocketState::Stream(stream) => *stream.peer_cred.lock(),
+        _ => return Ok(Vec::new()),
+    };
+    let credential = LinuxUcred {
+        pid: i32::try_from(peer_cred.pid).map_err(|_| SyscallError::InvalidArguments)?,
+        uid: peer_cred.uid,
+        gid: peer_cred.gid,
+    };
+    let header_space = cmsg_align(mem::size_of::<LinuxCmsgHdr>());
+    let control_len = header_space + cmsg_align(mem::size_of::<LinuxUcred>());
+    let header = LinuxCmsgHdr {
+        cmsg_len: header_space + mem::size_of::<LinuxUcred>(),
+        cmsg_level: crate::socket::SOL_SOCKET as i32,
+        cmsg_type: SCM_CREDENTIALS,
+    };
+    let mut control = vec![0u8; control_len];
+    let header_bytes = unsafe {
+        slice::from_raw_parts(
+            (&header as *const LinuxCmsgHdr).cast::<u8>(),
+            mem::size_of::<LinuxCmsgHdr>(),
+        )
+    };
+    control[..header_bytes.len()].copy_from_slice(header_bytes);
+    let cred_bytes = unsafe {
+        slice::from_raw_parts(
+            (&credential as *const LinuxUcred).cast::<u8>(),
+            mem::size_of::<LinuxUcred>(),
+        )
+    };
+    control[header_space..header_space + cred_bytes.len()].copy_from_slice(cred_bytes);
+    Ok(control)
+}
+
 const MSG_PEEK: u64 = 0x2;
+const MSG_CTRUNC: i32 = 0x8;
 const MSG_TRUNC: u64 = 0x20;
+const SCM_CREDENTIALS: i32 = 2;
 
 enum SocketAddress {
     Unix(String),
@@ -631,9 +696,35 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
 
     msg.msg_flags = 0;
     if !msg.msg_name.is_null() {
+        let name = socket
+            .getpeername_bytes()
+            .map_err(crate::object::error::ObjectError::from)?;
+        let copy_len = (msg.msg_namelen as usize).min(name.len());
+        if copy_len > 0 {
+            user_safe::write(msg.msg_name.cast::<u8>(), &name[..copy_len])?;
+        }
+        msg.msg_namelen = name.len() as u32;
+    } else {
         msg.msg_namelen = 0;
     }
-    msg.msg_controllen = 0;
+    let control = if total_read > 0 {
+        unix_socket_control_bytes(&socket)?
+    } else {
+        Vec::new()
+    };
+    if control.is_empty() {
+        msg.msg_controllen = 0;
+    } else if msg.msg_control.is_null() || msg.msg_controllen == 0 {
+        msg.msg_flags |= MSG_CTRUNC;
+        msg.msg_controllen = 0;
+    } else {
+        let copy_len = msg.msg_controllen.min(control.len());
+        user_safe::write(msg.msg_control, &control[..copy_len])?;
+        msg.msg_controllen = copy_len;
+        if copy_len < control.len() {
+            msg.msg_flags |= MSG_CTRUNC;
+        }
+    }
 
     Ok(total_read)
 });

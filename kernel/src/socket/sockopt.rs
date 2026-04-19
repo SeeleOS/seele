@@ -29,8 +29,12 @@ impl UnixSocketObject {
         }
 
         match option_name {
-            SO_REUSEADDR | SO_PASSCRED | SO_SNDBUF | SO_RCVBUF => {
+            SO_REUSEADDR | SO_SNDBUF | SO_RCVBUF => {
                 let _ = Self::decode_i32(option_value)?;
+                Ok(())
+            }
+            SO_PASSCRED => {
+                *self.pass_cred.lock() = Self::decode_i32(option_value)? != 0;
                 Ok(())
             }
             SO_ERROR | SO_TYPE | SO_ACCEPTCONN | SO_DOMAIN | SO_PROTOCOL | SO_PEERCRED => {
@@ -67,7 +71,8 @@ impl UnixSocketObject {
             SO_DOMAIN => Self::encode_i32(option_len, AF_UNIX as i32),
             SO_PROTOCOL => Self::encode_i32(option_len, 0),
             SO_SNDBUF | SO_RCVBUF => Self::encode_i32(option_len, DEFAULT_SOCKET_BUFFER_SIZE),
-            SO_REUSEADDR | SO_PASSCRED => Self::encode_i32(option_len, 0),
+            SO_REUSEADDR => Self::encode_i32(option_len, 0),
+            SO_PASSCRED => Self::encode_i32(option_len, *self.pass_cred.lock() as i32),
             SO_PEERCRED => match &*self.state.lock() {
                 UnixSocketState::Datagram(datagram) => {
                     let cred = *datagram.peer_cred.lock();
