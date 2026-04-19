@@ -62,56 +62,42 @@ fn syscall_handler_unwrapped(
     arg5: u64,
     arg6: u64,
 ) -> isize {
+    let current_pid = with_current_process(|proc| proc.pid.0);
     let syscall = SyscallNumber::from_number(syscall_no as usize);
-    let should_log = false;
-
-    if should_log {
-        match syscall {
-            Some(number) => s_println!(
-                "syscall enter: pid={} {:?}({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x})",
-                with_current_process(|proc| proc.pid.0),
-                number,
-                arg1,
-                arg2,
-                arg3,
-                arg4,
-                arg5,
-                arg6
-            ),
-            None => s_println!(
-                "syscall enter: {}({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x})",
-                syscall_no,
-                arg1,
-                arg2,
-                arg3,
-                arg4,
-                arg5,
-                arg6
-            ),
-        }
-    }
-
     if let Some(Some(handler)) = SYSCALL_TABLE.get(syscall_no as usize) {
         let result = match handler(arg1, arg2, arg3, arg4, arg5, arg6) {
             Ok(value) => value as isize,
             Err(err) => err as isize,
         };
 
-        if should_log {
-            match syscall {
-                Some(number) => s_println!(
-                    "syscall exit: pid={} {:?} -> {}",
-                    with_current_process(|proc| proc.pid.0),
-                    number,
-                    result
-                ),
-                None => s_println!("syscall exit: {} -> {}", syscall_no, result),
-            }
+        if result == SyscallError::BadAddress as isize {
+            s_println!(
+                "bad address syscall: pid={} {:?}({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x}) -> {}",
+                current_pid,
+                syscall,
+                arg1,
+                arg2,
+                arg3,
+                arg4,
+                arg5,
+                arg6,
+                result
+            );
         }
 
         result
     } else {
-        s_println!("Attempted to call invalid syscall {}", syscall_no);
+        s_println!(
+            "Attempted to call invalid syscall {} pid={} args=({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x})",
+            syscall_no,
+            current_pid,
+            arg1,
+            arg2,
+            arg3,
+            arg4,
+            arg5,
+            arg6
+        );
         SyscallError::NoSyscall as isize
     }
 }

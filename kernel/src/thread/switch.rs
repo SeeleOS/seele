@@ -21,11 +21,11 @@ impl ThreadSnapshot {
     ) {
         without_interrupts(|| {
             if let Some(source) = source {
-                // Saves the current RSP, which have the RIP saved
-                // on the stacktop when we called switch_from()
-                // So when we use jump_to_executor(), it will load
-                // the RSP, get the RIP, and when RET back
                 if matches!(source.snapshot_type, ThreadSnapshotType::Executor) {
+                    // Saves the current RSP, which have the RIP saved
+                    // on the stacktop when we called switch_from()
+                    // So when we use jump_to_executor(), it will load
+                    // the RSP, get the RIP, and when RET back
                     source.save_executor_rsp();
                 }
 

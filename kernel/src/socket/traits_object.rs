@@ -1,8 +1,8 @@
 use crate::{
     impl_cast_function, impl_cast_function_non_trait,
     object::{
-        config::ConfigurateRequest,
         FileFlags, Object,
+        config::ConfigurateRequest,
         misc::ObjectResult,
         traits::{Configuratable, Readable, Statable, Writable},
     },

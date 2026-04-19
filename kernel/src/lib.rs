@@ -97,9 +97,13 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     interrupts::init();
     log::info!("init: interrupts ready");
 
+    log::info!("init: mouse init start");
     mouse::init();
+    log::info!("init: mouse init done");
 
+    log::info!("init: clearing terminal");
     clear();
+    log::info!("init: entering executor");
     executor.run();
 }
 

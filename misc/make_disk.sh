@@ -25,9 +25,15 @@ ARCH_PACKAGES=(
     fish
     yazi
     eza
+    mesa
     xf86-video-fbdev
     xf86-video-vesa
-    icewm
+    plasma-meta
+    plasma-x11-session
+    konsole
+    dolphin
+    ttf-dejavu
+    xorg-fonts-misc
 )
 
 mkdir -p "${SYSROOT_DIR}"
@@ -75,6 +81,19 @@ sudo pacman \
     -Sy \
     "${ARCH_PACKAGES[@]}"
 
+sudo chmod 0755 "${SYSROOT_DIR}/run"
+sudo install -d -m 0755 "${SYSROOT_DIR}/run/dbus"
+sudo install -d -m 0755 "${SYSROOT_DIR}/run/udev/data"
+sudo install -d -m 0700 "${SYSROOT_DIR}/run/user/0"
+sudo install -d -m 0700 "${SYSROOT_DIR}/root/.config"
+sudo install -d -m 0700 "${SYSROOT_DIR}/root/.cache"
+sudo install -d -m 0700 "${SYSROOT_DIR}/root/.local/share"
+sudo install -d -m 0700 "${SYSROOT_DIR}/root/.local/state"
+sudo install -d -m 1777 "${SYSROOT_DIR}/tmp/.X11-unix"
+sudo install -d -m 0755 "${SYSROOT_DIR}/var/lib/dbus"
+
+sudo install -Dm644 "${ROOT_DIR}/misc/maplemono.ttf" "${SYSROOT_DIR}/usr/share/fonts/TTF/maplemono.ttf"
 sudo cp "${ROOT_DIR}/misc/xorg.conf" "${SYSROOT_DIR}/etc/X11/xorg.conf"
 sudo install -Dm755 "${ROOT_DIR}/misc/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
+sudo install -Dm755 "${ROOT_DIR}/misc/startplasma-manual.sh" "${SYSROOT_DIR}/usr/bin/startplasma-manual.sh"
 sudo install -Dm755 "${ROOT_DIR}/misc/init.sh" "${SYSROOT_DIR}/init"

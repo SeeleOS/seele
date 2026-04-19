@@ -25,6 +25,7 @@ use crate::{
     signal::{SIGNAL_AMOUNT, Signals, action::SignalAction, misc::default_signal_action_vec},
     thread::{
         THREAD_MANAGER,
+        misc::ThreadID,
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
         stack::allocate_kernel_stack,
         thread::Thread,
@@ -115,7 +116,12 @@ impl Process {
         process
             .threads
             .push(Arc::downgrade(&THREAD_MANAGER.get().unwrap().lock().spawn(
-                Thread::from_snapshot(context, process_arc.clone(), kernel_stack_top.as_u64()),
+                Thread::from_snapshot_with_id(
+                    context,
+                    process_arc.clone(),
+                    kernel_stack_top.as_u64(),
+                    ThreadID(pid.0),
+                ),
             )));
 
         *get_default_tty().active_group.lock() = Some(process.group_id);

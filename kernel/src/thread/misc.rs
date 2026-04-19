@@ -1,9 +1,8 @@
-use core::sync::atomic::{AtomicU64, Ordering};
-
 use spin::MutexGuard;
 
 use crate::{
     define_with_accessor,
+    process::misc::next_linux_task_id,
     thread::{get_current_thread, snapshot::ThreadSnapshot, thread::Thread, yielding::BlockType},
 };
 
@@ -12,8 +11,7 @@ pub struct ThreadID(pub u64);
 
 impl ThreadID {
     pub fn new() -> Self {
-        static TID: AtomicU64 = AtomicU64::new(1);
-        Self(TID.fetch_add(1, Ordering::Relaxed))
+        Self(next_linux_task_id())
     }
 }
 

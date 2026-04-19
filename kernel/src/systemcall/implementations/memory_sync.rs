@@ -109,16 +109,6 @@ pub fn wake_futex_for_process(pid: u64, addr: u64, count: usize) -> usize {
         queue.remove(&key);
     }
 
-    if woken > 0 {
-        s_println!(
-            "futex_wake helper: pid={} addr={:#x} requested={} woke={}",
-            pid,
-            addr,
-            count,
-            woken
-        );
-    }
-
     woken
 }
 

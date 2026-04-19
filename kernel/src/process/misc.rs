@@ -1,4 +1,4 @@
-use core::sync::atomic::AtomicU64;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use alloc::{string::String, vec::Vec};
 
@@ -48,11 +48,15 @@ impl Process {
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct ProcessID(pub u64);
 
+pub(crate) fn next_linux_task_id() -> u64 {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+}
+
 impl ProcessID {
     pub fn new() -> Self {
-        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-
-        Self(NEXT_ID.fetch_add(1, core::sync::atomic::Ordering::Relaxed))
+        Self(next_linux_task_id())
     }
 }
 

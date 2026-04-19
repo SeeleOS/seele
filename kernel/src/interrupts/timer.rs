@@ -2,7 +2,7 @@ use core::arch::naked_asm;
 
 use crate::{
     interrupts::hardware_interrupt::send_eoi,
-    misc::{mouse, snapshot::Snapshot},
+    misc::snapshot::Snapshot,
     process::manager::MANAGER,
     thread::{THREAD_MANAGER, scheduling::return_to_executor, snapshot::ThreadSnapshotType},
 };
@@ -51,7 +51,6 @@ pub extern "C" fn timer_interrupt_handler_wrapper() {
 
 pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
     send_eoi();
-    mouse::poll_controller();
 
     // Don't preempt kernel mode; it can corrupt in-flight kernel snapshots.
     if (snapshot.cs & 0x3) == 0 {

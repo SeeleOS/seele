@@ -4,6 +4,7 @@ use bitflags::bitflags;
 use crate::{
     define_syscall,
     memory::user_safe,
+    misc::signal::SigInfo,
     process::{
         ProcessRef,
         execve::execve,
@@ -23,6 +24,8 @@ bitflags! {
     #[derive(Clone, Copy, Debug)]
     struct WaitOptions: i32 {
         const NOHANG = 1;
+        const WEXITED = 4;
+        const WNOWAIT = 0x0100_0000;
     }
 }
 
@@ -122,6 +125,47 @@ define_syscall!(Wait4, |target_process: i32,
             }
         }
     }
+});
+
+define_syscall!(Waitid, |id_type: i32,
+                         id: u32,
+                         info_ptr: *mut SigInfo,
+                         options: i32| {
+    let target_process = match id_type {
+        0 => -1,
+        1 => id as i32,
+        2 => -(id as i32),
+        _ => return Err(SyscallError::InvalidArguments),
+    };
+
+    if options & WaitOptions::WEXITED.bits() == 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let mut status = 0;
+    let pid = Wait4::handle_call(
+        target_process as u64,
+        (&mut status as *mut i32) as u64,
+        (options & !WaitOptions::WNOWAIT.bits()) as u64,
+        0,
+        0,
+        0,
+    )?;
+
+    if !info_ptr.is_null() {
+        let info = if pid == 0 {
+            SigInfo::default()
+        } else {
+            SigInfo {
+                si_pid: pid as i32,
+                si_status: status,
+                ..Default::default()
+            }
+        };
+        user_safe::write(info_ptr, &info)?;
+    }
+
+    Ok(0)
 });
 
 define_syscall!(Execve, |path_str: String,

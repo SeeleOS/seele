@@ -14,7 +14,9 @@ use x86_64::{
 };
 
 use crate::{
-    evdev::{init_mouse_packet_decoder, process_ps2_mouse_packet},
+    evdev::{
+        MOUSE_EVENT_DEVICE, init_mouse_packet_decoder, process_ps2_mouse_packet_deferred_wake,
+    },
     impl_cast_function,
     interrupts::hardware_interrupt::send_eoi,
     object::{
@@ -32,15 +34,11 @@ use crate::{
 
 lazy_static::lazy_static! {
     pub static ref MOUSE_PACKETS: Mutex<Deque<u8, 4096>> = Mutex::new(Deque::new());
-    pub static ref MOUSE_EVENT_BYTES: Mutex<Deque<u8, 4096>> = Mutex::new(Deque::new());
 }
 
 static MOUSE_PENDING: AtomicBool = AtomicBool::new(false);
+static MOUSE_EVDEV_PENDING: AtomicBool = AtomicBool::new(false);
 static MOUSE_WAKER: AtomicWaker = AtomicWaker::new();
-const STATUS_OUTPUT_FULL: u8 = 1 << 0;
-const STATUS_INPUT_FULL: u8 = 1 << 1;
-const STATUS_AUX_DATA: u8 = 1 << 5;
-const ENABLE_AUX_DEVICE: u8 = 0xA8;
 
 struct MouseInterruptStream;
 
@@ -65,11 +63,6 @@ impl Stream for MouseInterruptStream {
 
 pub fn init() {
     init_mouse_packet_decoder();
-    enable_aux_device().expect("ps2: failed to enable aux device");
-    let dropped = drain_output_buffer();
-    if dropped != 0 {
-        log::info!("ps2: dropped {dropped} stale mouse byte(s) before init");
-    }
     Mouse::new()
         .init()
         .expect("ps2: failed to initialize mouse");
@@ -79,8 +72,8 @@ pub async fn process_mouse_events() {
     let mut interrupts = MouseInterruptStream;
 
     while interrupts.next().await.is_some() {
-        while let Some(packet) = without_interrupts(|| MOUSE_EVENT_BYTES.lock().pop_front()) {
-            process_ps2_mouse_packet(packet);
+        if MOUSE_EVDEV_PENDING.swap(false, Ordering::AcqRel) {
+            MOUSE_EVENT_DEVICE.wake_readers();
         }
 
         let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
@@ -93,80 +86,20 @@ pub async fn process_mouse_events() {
 }
 
 pub extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    poll_controller();
+    let packet = unsafe { Port::new(0x60).read() };
+    without_interrupts(|| {
+        let mut packets = MOUSE_PACKETS.lock();
+        if packets.is_full() {
+            let _ = packets.pop_front();
+        }
+        let _ = packets.push_back(packet);
+    });
+    if process_ps2_mouse_packet_deferred_wake(packet) {
+        MOUSE_EVDEV_PENDING.store(true, Ordering::Release);
+    }
+    MOUSE_PENDING.store(true, Ordering::Release);
+    MOUSE_WAKER.wake();
     send_eoi();
-}
-
-pub fn poll_controller() {
-    let mut status_port: Port<u8> = Port::new(0x64);
-    let mut data_port: Port<u8> = Port::new(0x60);
-    let mut saw_packet = false;
-
-    for _ in 0..64 {
-        let status = unsafe { status_port.read() };
-        if (status & STATUS_OUTPUT_FULL) == 0 || (status & STATUS_AUX_DATA) == 0 {
-            break;
-        }
-
-        let packet = unsafe { data_port.read() };
-        without_interrupts(|| {
-            let mut packets = MOUSE_PACKETS.lock();
-            if packets.is_full() {
-                let _ = packets.pop_front();
-            }
-            let _ = packets.push_back(packet);
-
-            let mut event_bytes = MOUSE_EVENT_BYTES.lock();
-            if event_bytes.is_full() {
-                let _ = event_bytes.pop_front();
-            }
-            let _ = event_bytes.push_back(packet);
-        });
-        saw_packet = true;
-    }
-
-    if saw_packet {
-        MOUSE_PENDING.store(true, Ordering::Release);
-        MOUSE_WAKER.wake();
-    }
-}
-
-fn enable_aux_device() -> Result<(), &'static str> {
-    let mut command_port: Port<u8> = Port::new(0x64);
-    wait_for_controller_write(&mut command_port)?;
-    unsafe {
-        command_port.write(ENABLE_AUX_DEVICE);
-    }
-    Ok(())
-}
-
-fn wait_for_controller_write(command_port: &mut Port<u8>) -> Result<(), &'static str> {
-    for _ in 0..100_000 {
-        let status = unsafe { command_port.read() };
-        if (status & STATUS_INPUT_FULL) == 0 {
-            return Ok(());
-        }
-    }
-
-    Err("ps2 controller write timeout")
-}
-
-fn drain_output_buffer() -> usize {
-    let mut status_port: Port<u8> = Port::new(0x64);
-    let mut data_port: Port<u8> = Port::new(0x60);
-    let mut drained = 0;
-
-    while drained < 256 {
-        let status = unsafe { status_port.read() };
-        if (status & STATUS_OUTPUT_FULL) == 0 {
-            break;
-        }
-
-        let _ = unsafe { data_port.read() };
-        drained += 1;
-    }
-
-    drained
 }
 
 #[derive(Debug, Default)]

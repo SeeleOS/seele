@@ -3,7 +3,7 @@ use spin::mutex::Mutex;
 
 use crate::{
     process::{Process, ProcessRef, misc::ProcessID},
-    thread::{THREAD_MANAGER, ThreadRef},
+    thread::{THREAD_MANAGER, ThreadRef, misc::ThreadID},
 };
 
 impl Process {
@@ -36,6 +36,19 @@ impl Process {
                 group_id: parent_locked.group_id,
                 program_break: parent_locked.program_break,
                 file_mode_creation_mask: parent_locked.file_mode_creation_mask,
+                real_uid: parent_locked.real_uid,
+                effective_uid: parent_locked.effective_uid,
+                saved_uid: parent_locked.saved_uid,
+                fs_uid: parent_locked.fs_uid,
+                real_gid: parent_locked.real_gid,
+                effective_gid: parent_locked.effective_gid,
+                saved_gid: parent_locked.saved_gid,
+                fs_gid: parent_locked.fs_gid,
+                supplementary_groups: parent_locked.supplementary_groups.clone(),
+                keep_capabilities: parent_locked.keep_capabilities,
+                capability_effective: parent_locked.capability_effective,
+                capability_permitted: parent_locked.capability_permitted,
+                capability_inheritable: parent_locked.capability_inheritable,
                 ..Default::default()
             }));
             (pid, new_process)
@@ -48,7 +61,9 @@ impl Process {
             .current
             .clone()
             .unwrap();
-        let new_thread = current_thread.lock().clone_and_spawn(new_process.clone());
+        let new_thread = current_thread
+            .lock()
+            .clone_and_spawn_with_id(new_process.clone(), ThreadID(pid.0));
         new_thread.lock().snapshot.inner.rax = 0;
         new_process.lock().threads.push(Arc::downgrade(&new_thread));
 

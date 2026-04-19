@@ -1,12 +1,16 @@
-use core::slice;
+use core::{
+    slice,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
-use alloc::{collections::btree_map::BTreeMap, string::String};
+use alloc::{collections::btree_map::BTreeMap, format, string::String, sync::Arc};
 use spin::Mutex;
 
 use crate::{
     define_syscall,
     filesystem::vfs_traits::DirectoryContentType,
     filesystem::vfs_traits::Whence,
+    filesystem::{path::Path, vfs::VirtualFS},
     memory::protection::Protection,
     misc::c_types::CString,
     object::{
@@ -23,6 +27,7 @@ use crate::{
 };
 
 static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeMap::new());
+static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[repr(C)]
 struct LinuxIovec {
@@ -176,6 +181,16 @@ define_syscall!(Fsync, |_object: ObjectRef| { Ok(0) });
 
 define_syscall!(Fdatasync, |_object: ObjectRef| { Ok(0) });
 
+define_syscall!(Fadvise64, |_object: ObjectRef,
+                            _offset: i64,
+                            _len: i64,
+                            advice: i32| {
+    if !(0..=5).contains(&advice) {
+        return Err(SyscallError::InvalidArguments);
+    }
+    Ok(0)
+});
+
 define_syscall!(Ftruncate, |_object: ObjectRef, _length: i64| { Ok(0) });
 
 define_syscall!(Fallocate, |_object: ObjectRef,
@@ -226,6 +241,30 @@ define_syscall!(OpenDevice, |name: String| {
 
         Ok(slot)
     })
+});
+
+define_syscall!(MemfdCreate, |name: String, flags: u32| {
+    const MFD_CLOEXEC: u32 = 0x0001;
+    const MFD_ALLOW_SEALING: u32 = 0x0002;
+
+    if (flags & !(MFD_CLOEXEC | MFD_ALLOW_SEALING)) != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let pid = get_current_process().lock().pid.0;
+    let id = MEMFD_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let sanitized_name = if name.is_empty() {
+        String::from("anon")
+    } else {
+        name.replace('/', "_")
+    };
+    let path = Path::new(&format!("/tmp/memfd-{pid}-{id}-{sanitized_name}"));
+
+    VirtualFS.lock().create_file(path.clone())?;
+    let object: ObjectRef = Arc::new(VirtualFS.lock().open(path)?);
+    let fd = get_current_process().lock().push_object(object);
+
+    Ok(fd)
 });
 
 define_syscall!(

@@ -106,6 +106,8 @@ fn epoll_update_impl(
     bits: u32,
     data: u64,
 ) -> Result<usize, SyscallError> {
+    let target_object = poll_identity_object(target_object);
+
     if target_object.clone().as_pollable().is_err() {
         if DEADLOCK_LOG {
             s_println!(
@@ -130,6 +132,8 @@ fn epoll_update_impl(
 define_syscall!(
     EpollCtl,
     |poller: ObjectRef, op: u64, target_object: ObjectRef, event: *const LinuxEpollEvent| {
+        let target_object = poll_identity_object(target_object);
+
         match EpollCtlOp::try_from(op).map_err(|_| SyscallError::InvalidArguments)? {
             EpollCtlOp::Add | EpollCtlOp::Mod => {
                 if event.is_null() {

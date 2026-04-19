@@ -230,6 +230,25 @@ fn readlink_impl(path: Path, out_buf: *mut u8, out_len: usize) -> Result<usize, 
     Ok(copied)
 }
 
+fn xattr_name_from_raw(name: CString) -> Result<String, SyscallError> {
+    path_from_raw(name)
+}
+
+fn ensure_path_exists_at(dirfd: i32, path_str: &str, nofollow: bool) -> Result<(), SyscallError> {
+    let path = resolve_path_at(dirfd, path_str)?;
+    let _ = if nofollow {
+        VirtualFS.lock().open_nofollow(path)?
+    } else {
+        VirtualFS.lock().open(path)?
+    };
+    Ok(())
+}
+
+fn ensure_object_supports_xattrs(object: &ObjectRef) -> Result<(), SyscallError> {
+    let _ = object.clone().as_file_like()?;
+    Ok(())
+}
+
 fn rename_impl(
     old_from_currentdir: bool,
     old_path: String,
@@ -546,6 +565,54 @@ define_syscall!(Faccessat2, |dirfd: i32,
                              mode: i32,
                              flags: i32| {
     Faccessat::handle_call(dirfd as u64, path as u64, mode as u64, flags as u64, 0, 0)
+});
+
+define_syscall!(Getxattr, |path: CString,
+                           name: CString,
+                           _value: *mut u8,
+                           _size: usize| {
+    let path_str = path_from_raw(path)?;
+    let _name = xattr_name_from_raw(name)?;
+    ensure_path_exists_at(AT_FDCWD, &path_str, false)?;
+    Err(SyscallError::NoData)
+});
+
+define_syscall!(Lgetxattr, |path: CString,
+                            name: CString,
+                            _value: *mut u8,
+                            _size: usize| {
+    let path_str = path_from_raw(path)?;
+    let _name = xattr_name_from_raw(name)?;
+    ensure_path_exists_at(AT_FDCWD, &path_str, true)?;
+    Err(SyscallError::NoData)
+});
+
+define_syscall!(Fgetxattr, |object: ObjectRef,
+                            name: CString,
+                            _value: *mut u8,
+                            _size: usize| {
+    let _name = xattr_name_from_raw(name)?;
+    ensure_object_supports_xattrs(&object)?;
+    Err(SyscallError::NoData)
+});
+
+define_syscall!(Listxattr, |path: CString, _list: *mut u8, _size: usize| {
+    let path_str = path_from_raw(path)?;
+    ensure_path_exists_at(AT_FDCWD, &path_str, false)?;
+    Ok(0)
+});
+
+define_syscall!(Llistxattr, |path: CString, _list: *mut u8, _size: usize| {
+    let path_str = path_from_raw(path)?;
+    ensure_path_exists_at(AT_FDCWD, &path_str, true)?;
+    Ok(0)
+});
+
+define_syscall!(Flistxattr, |object: ObjectRef,
+                             _list: *mut u8,
+                             _size: usize| {
+    ensure_object_supports_xattrs(&object)?;
+    Ok(0)
 });
 
 define_syscall!(UnlinkAt, |dirfd: i32, path: CString, flags: i32| {

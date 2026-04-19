@@ -109,9 +109,17 @@ define_syscall!(Connect, |socket: ObjectRef,
     let path = path_from_sockaddr(address, address_len)?;
     let result = socket
         .as_unix_socket()?
-        .connect(path)
+        .connect(path.clone())
         .map_err(crate::object::error::ObjectError::from);
-    result?;
+    if let Err(err) = result {
+        s_println!(
+            "socket connect failed: pid={} path={} err={:?}",
+            get_current_process().lock().pid.0,
+            path,
+            err
+        );
+        return Err(err.into());
+    }
     Ok(0)
 });
 

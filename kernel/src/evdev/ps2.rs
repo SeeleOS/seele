@@ -19,6 +19,14 @@ pub fn process_ps2_mouse_packet(packet: u8) {
     }
 }
 
+pub fn process_ps2_mouse_packet_deferred_wake(packet: u8) -> bool {
+    if let Some(state) = PS2_PACKET_DECODER.lock().push_byte(packet) {
+        MOUSE_EVENT_DEVICE.enqueue_mouse_packet(state)
+    } else {
+        false
+    }
+}
+
 pub fn push_keyboard_event(event: &KeyEvent) {
     let Some(code) = linux_keycode_from_keycode(event.code) else {
         return;

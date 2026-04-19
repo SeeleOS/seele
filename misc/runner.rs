@@ -7,6 +7,7 @@ use std::{
 
 fn main() {
     let agent_mode = env::args().any(|arg| arg == "--agent");
+    let agent_timeout = env::var("SEELE_QEMU_TIMEOUT").unwrap_or_else(|_| "10s".to_string());
 
     // read env variables that were set in build script
     let uefi_path = env!("UEFI_PATH");
@@ -15,7 +16,7 @@ fn main() {
 
     let mut cmd = if agent_mode {
         let mut timeout = Command::new("timeout");
-        timeout.arg("10s").arg("qemu-system-x86_64");
+        timeout.arg(&agent_timeout).arg("qemu-system-x86_64");
         timeout
     } else {
         Command::new("qemu-system-x86_64")

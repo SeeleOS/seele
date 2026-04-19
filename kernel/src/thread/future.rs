@@ -64,7 +64,6 @@ impl Future for ThreadFuture {
                         MANAGER.lock().load_process(thread.parent.clone());
                     }
                 };
-
                 (
                     thread.get_appropriate_snapshot() as *mut ThreadSnapshot,
                     &mut thread.executor_snapshot as *mut ThreadSnapshot,

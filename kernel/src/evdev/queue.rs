@@ -94,6 +94,12 @@ impl EventDeviceHub {
     }
 
     pub(crate) fn push_mouse_packet(&self, mouse_state: DecodedMousePacket) {
+        if self.enqueue_mouse_packet(mouse_state) {
+            self.wake_readers();
+        }
+    }
+
+    pub(crate) fn enqueue_mouse_packet(&self, mouse_state: DecodedMousePacket) -> bool {
         {
             let mut state = self.state.lock();
             state.mouse_buttons.left = mouse_state.left;
@@ -112,8 +118,17 @@ impl EventDeviceHub {
             );
         }
 
+        let mut changed = false;
         for client in self.live_clients() {
-            client.push_mouse_packet(mouse_state);
+            changed |= client.enqueue_mouse_packet(mouse_state);
+        }
+
+        changed
+    }
+
+    pub(crate) fn wake_readers(&self) {
+        for client in self.live_clients() {
+            client.wake_readers();
         }
     }
 }
@@ -167,7 +182,7 @@ impl EventDeviceClientObject {
         self.wake_readers();
     }
 
-    pub(crate) fn push_mouse_packet(self: &Arc<Self>, mouse_state: DecodedMousePacket) {
+    pub(crate) fn enqueue_mouse_packet(self: &Arc<Self>, mouse_state: DecodedMousePacket) -> bool {
         let mut state = self.state.lock();
         let mut changed = false;
 
@@ -235,9 +250,7 @@ impl EventDeviceClientObject {
         }
 
         drop(state);
-        if changed {
-            self.wake_readers();
-        }
+        changed
     }
 }
 

@@ -37,6 +37,19 @@ pub struct Process {
     pub timers: Vec<Option<Timer>>,
     pub program_break: u64,
     pub file_mode_creation_mask: u32,
+    pub real_uid: u32,
+    pub effective_uid: u32,
+    pub saved_uid: u32,
+    pub fs_uid: u32,
+    pub real_gid: u32,
+    pub effective_gid: u32,
+    pub saved_gid: u32,
+    pub fs_gid: u32,
+    pub supplementary_groups: Vec<u32>,
+    pub keep_capabilities: bool,
+    pub capability_effective: [u32; 2],
+    pub capability_permitted: [u32; 2],
+    pub capability_inheritable: [u32; 2],
 }
 
 impl Default for Process {
@@ -56,6 +69,19 @@ impl Default for Process {
             parent: None,
             timers: Vec::new(),
             file_mode_creation_mask: 0,
+            real_uid: 0,
+            effective_uid: 0,
+            saved_uid: 0,
+            fs_uid: 0,
+            real_gid: 0,
+            effective_gid: 0,
+            saved_gid: 0,
+            fs_gid: 0,
+            supplementary_groups: Vec::new(),
+            keep_capabilities: false,
+            capability_effective: [u32::MAX; 2],
+            capability_permitted: [u32::MAX; 2],
+            capability_inheritable: [0; 2],
         }
     }
 }

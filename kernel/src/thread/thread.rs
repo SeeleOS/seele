@@ -69,11 +69,15 @@ impl Thread {
 
 impl Thread {
     pub fn new(entry_point: u64, parent: ProcessRef) -> Self {
+        Self::new_with_id(entry_point, parent, ThreadID::new())
+    }
+
+    pub fn new_with_id(entry_point: u64, parent: ProcessRef, id: ThreadID) -> Self {
         let mut parent_lock = parent.lock();
         let (_, stack) = parent_lock.addrspace.allocate_user(64);
         let kernel_stack_top = allocate_kernel_stack(16).finish().as_u64();
         Self {
-            id: ThreadID::new(),
+            id,
             snapshot: ThreadSnapshot::new(
                 entry_point,
                 &mut parent.clone().lock().addrspace,
@@ -91,8 +95,17 @@ impl Thread {
         parent: ProcessRef,
         kernel_stack_top: u64,
     ) -> Self {
+        Self::from_snapshot_with_id(snapshot, parent, kernel_stack_top, ThreadID::new())
+    }
+
+    pub fn from_snapshot_with_id(
+        snapshot: ThreadSnapshot,
+        parent: ProcessRef,
+        kernel_stack_top: u64,
+        id: ThreadID,
+    ) -> Self {
         Self {
-            id: ThreadID::new(),
+            id,
             snapshot,
             parent,
             kernel_stack_top,

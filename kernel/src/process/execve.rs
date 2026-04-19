@@ -5,6 +5,7 @@ use crate::{
     filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
     misc::time::with_profiling,
     process::{Process, manager::MANAGER, new::setup_process},
+    s_println,
     signal::{
         Signals,
         action::{SignalAction, SignalHandlingType},
@@ -40,6 +41,7 @@ impl Process {
             return Err(FSError::NotFound);
         }
         let path_string = path.clone().as_string();
+        s_println!("execve: pid={} path={}", self.pid.0, path_string);
         // TODO: kill all the other threads when execveing
         log::trace!("execve: start {}", path.clone().as_string());
         with_profiling(

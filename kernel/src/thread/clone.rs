@@ -12,8 +12,11 @@ use crate::{
 
 impl Thread {
     pub fn clone_and_spawn(&self, process: ProcessRef) -> ThreadRef {
+        self.clone_and_spawn_with_id(process, ThreadID::new())
+    }
+
+    pub fn clone_and_spawn_with_id(&self, process: ProcessRef, id: ThreadID) -> ThreadRef {
         log::debug!("clone_and_spawn: start");
-        let id = ThreadID::new();
         let mut snapshot = self.snapshot;
         let thread = Self {
             parent: process.clone(),

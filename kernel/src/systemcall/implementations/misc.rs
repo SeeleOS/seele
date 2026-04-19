@@ -65,6 +65,8 @@ enum PrctlOption {
     GetPdeathsig = 2,
     GetDumpable = 3,
     SetDumpable = 4,
+    GetKeepCaps = 7,
+    SetKeepCaps = 8,
     SetName = 15,
     GetName = 16,
     CapbsetRead = 23,
@@ -81,6 +83,8 @@ impl TryFrom<i32> for PrctlOption {
             2 => Self::GetPdeathsig,
             3 => Self::GetDumpable,
             4 => Self::SetDumpable,
+            7 => Self::GetKeepCaps,
+            8 => Self::SetKeepCaps,
             15 => Self::SetName,
             16 => Self::GetName,
             23 => Self::CapbsetRead,
@@ -126,6 +130,20 @@ struct LinuxCapData {
     effective: u32,
     permitted: u32,
     inheritable: u32,
+}
+
+fn capability_header_targets_current_process(header: &LinuxCapHeader) -> bool {
+    header.pid == 0 || header.pid == get_current_process().lock().pid.0 as i32
+}
+
+fn current_capability_data() -> [LinuxCapData; LINUX_CAPABILITY_U32S_3] {
+    let process = get_current_process();
+    let process = process.lock();
+    core::array::from_fn(|index| LinuxCapData {
+        effective: process.capability_effective[index],
+        permitted: process.capability_permitted[index],
+        inheritable: process.capability_inheritable[index],
+    })
 }
 
 fn clone_cleared_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalAction> {
@@ -175,10 +193,41 @@ struct LinuxRlimit64 {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct LinuxTimeval {
     tv_sec: i64,
     tv_usec: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxSchedParam {
+    sched_priority: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxSysinfo {
+    uptime: i64,
+    loads: [u64; 3],
+    totalram: u64,
+    freeram: u64,
+    sharedram: u64,
+    bufferram: u64,
+    totalswap: u64,
+    freeswap: u64,
+    procs: u16,
+    totalhigh: u64,
+    freehigh: u64,
+    mem_unit: u32,
+    _f: [i8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxItimerval {
+    it_interval: LinuxTimeval,
+    it_value: LinuxTimeval,
 }
 
 #[repr(C)]
@@ -284,14 +333,45 @@ define_syscall!(ClockGetres, |clock_id: i32, tp: *mut LinuxTimespec| {
 
 define_syscall!(Capget, |header: *mut LinuxCapHeader,
                          data: *mut LinuxCapData| {
-    if header.is_null() || data.is_null() {
+    if header.is_null() {
         return Err(SyscallError::BadAddress);
     }
 
     let mut header_value = unsafe { *header };
+    if !capability_header_targets_current_process(&header_value) {
+        return Err(SyscallError::InvalidArguments);
+    }
     header_value.version = LINUX_CAPABILITY_VERSION_3;
     user_safe::write(header, &header_value)?;
-    user_safe::write(data, &[LinuxCapData::default(); LINUX_CAPABILITY_U32S_3])?;
+    if !data.is_null() {
+        user_safe::write(data, &current_capability_data())?;
+    }
+
+    Ok(0)
+});
+
+define_syscall!(Capset, |header: *const LinuxCapHeader,
+                         data: *const LinuxCapData| {
+    if header.is_null() || data.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let header_value = unsafe { *header };
+    if header_value.version != LINUX_CAPABILITY_VERSION_3 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if !capability_header_targets_current_process(&header_value) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let cap_data = unsafe { core::slice::from_raw_parts(data, LINUX_CAPABILITY_U32S_3) };
+    let process = get_current_process();
+    let mut process = process.lock();
+    for (index, caps) in cap_data.iter().enumerate() {
+        process.capability_effective[index] = caps.effective;
+        process.capability_permitted[index] = caps.permitted;
+        process.capability_inheritable[index] = caps.inheritable;
+    }
 
     Ok(0)
 });
@@ -536,6 +616,22 @@ define_syscall!(
 
 define_syscall!(Alarm, |_seconds: u32| { Ok(0) });
 
+define_syscall!(
+    Setitimer,
+    |which: i32, new_value: *const LinuxItimerval, old_value: *mut LinuxItimerval| {
+        if !(0..=2).contains(&which) {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if new_value.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+        if !old_value.is_null() {
+            user_safe::write(old_value, &LinuxItimerval::default())?;
+        }
+        Ok(0)
+    }
+);
+
 define_syscall!(RtSigsuspend, |mask: *const u64, sigset_size: usize| {
     if sigset_size != 8 {
         return Err(SyscallError::InvalidArguments);
@@ -747,6 +843,17 @@ define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
     )
 });
 
+define_syscall!(PidfdOpen, |pid: i32, flags: u32| {
+    if pid <= 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if flags != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    Err(SyscallError::NoSyscall)
+});
+
 define_syscall!(SchedYield, { Ok(0) });
 
 define_syscall!(Madvise, |_addr: u64, _len: usize, _advice: i32| { Ok(0) });
@@ -754,6 +861,25 @@ define_syscall!(Madvise, |_addr: u64, _len: usize, _advice: i32| { Ok(0) });
 define_syscall!(Getpriority, |_which: i32, _who: i32| { Ok(0) });
 
 define_syscall!(Setpriority, |_which: i32, _who: i32, _prio: i32| { Ok(0) });
+
+define_syscall!(
+    SchedSetscheduler,
+    |pid: i32, policy: i32, param: *const LinuxSchedParam| {
+        if pid < 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if param.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+
+        let param = unsafe { *param };
+        if policy < 0 || param.sched_priority < 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
+
+        Ok(0)
+    }
+);
 
 define_syscall!(Iopl, |level: i32| {
     if !(0..=3).contains(&level) {
@@ -765,12 +891,31 @@ define_syscall!(Iopl, |level: i32| {
 
 define_syscall!(Ioperm, |_from: u64, _num: u64, _turn_on: i32| { Ok(0) });
 
+define_syscall!(Setgroups, |size: usize, list: *const u32| {
+    let groups = if size == 0 {
+        Vec::new()
+    } else {
+        if list.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+        unsafe { core::slice::from_raw_parts(list, size) }.to_vec()
+    };
+
+    get_current_process().lock().supplementary_groups = groups;
+    Ok(0)
+});
+
 define_syscall!(Getresuid, |ruid: *mut u32,
                             euid: *mut u32,
                             suid: *mut u32| {
-    for ptr in [ruid, euid, suid] {
-        user_safe::write(ptr, &0u32)?;
-    }
+    let (real_uid, effective_uid, saved_uid) = {
+        let process = get_current_process();
+        let process = process.lock();
+        (process.real_uid, process.effective_uid, process.saved_uid)
+    };
+    user_safe::write(ruid, &real_uid)?;
+    user_safe::write(euid, &effective_uid)?;
+    user_safe::write(suid, &saved_uid)?;
 
     Ok(0)
 });
@@ -778,28 +923,101 @@ define_syscall!(Getresuid, |ruid: *mut u32,
 define_syscall!(Getresgid, |rgid: *mut u32,
                             egid: *mut u32,
                             sgid: *mut u32| {
-    for ptr in [rgid, egid, sgid] {
-        user_safe::write(ptr, &0u32)?;
-    }
+    let (real_gid, effective_gid, saved_gid) = {
+        let process = get_current_process();
+        let process = process.lock();
+        (process.real_gid, process.effective_gid, process.saved_gid)
+    };
+    user_safe::write(rgid, &real_gid)?;
+    user_safe::write(egid, &effective_gid)?;
+    user_safe::write(sgid, &saved_gid)?;
 
     Ok(0)
 });
 
-define_syscall!(Getuid, { Ok(0) });
+define_syscall!(Setresuid, |ruid: i32, euid: i32, suid: i32| {
+    let process = get_current_process();
+    let mut process = process.lock();
+    if ruid != -1 {
+        process.real_uid = ruid as u32;
+    }
+    if euid != -1 {
+        process.effective_uid = euid as u32;
+        process.fs_uid = euid as u32;
+    }
+    if suid != -1 {
+        process.saved_uid = suid as u32;
+    }
+    Ok(0)
+});
 
-define_syscall!(Getgid, { Ok(0) });
+define_syscall!(Setresgid, |rgid: i32, egid: i32, sgid: i32| {
+    let process = get_current_process();
+    let mut process = process.lock();
+    if rgid != -1 {
+        process.real_gid = rgid as u32;
+    }
+    if egid != -1 {
+        process.effective_gid = egid as u32;
+        process.fs_gid = egid as u32;
+    }
+    if sgid != -1 {
+        process.saved_gid = sgid as u32;
+    }
+    Ok(0)
+});
 
-define_syscall!(Setuid, |_uid: u32| { Ok(0) });
+define_syscall!(Getuid, {
+    Ok(get_current_process().lock().real_uid as usize)
+});
 
-define_syscall!(Setgid, |_gid: u32| { Ok(0) });
+define_syscall!(Getgid, {
+    Ok(get_current_process().lock().real_gid as usize)
+});
 
-define_syscall!(Geteuid, { Ok(0) });
+define_syscall!(Setuid, |uid: u32| {
+    let process = get_current_process();
+    let mut process = process.lock();
+    process.real_uid = uid;
+    process.effective_uid = uid;
+    process.saved_uid = uid;
+    process.fs_uid = uid;
+    Ok(0)
+});
 
-define_syscall!(Getegid, { Ok(0) });
+define_syscall!(Setgid, |gid: u32| {
+    let process = get_current_process();
+    let mut process = process.lock();
+    process.real_gid = gid;
+    process.effective_gid = gid;
+    process.saved_gid = gid;
+    process.fs_gid = gid;
+    Ok(0)
+});
 
-define_syscall!(Setfsuid, |_uid: u32| { Ok(0) });
+define_syscall!(Geteuid, {
+    Ok(get_current_process().lock().effective_uid as usize)
+});
 
-define_syscall!(Setfsgid, |_gid: u32| { Ok(0) });
+define_syscall!(Getegid, {
+    Ok(get_current_process().lock().effective_gid as usize)
+});
+
+define_syscall!(Setfsuid, |uid: u32| {
+    let process = get_current_process();
+    let mut process = process.lock();
+    let old_uid = process.fs_uid;
+    process.fs_uid = uid;
+    Ok(old_uid as usize)
+});
+
+define_syscall!(Setfsgid, |gid: u32| {
+    let process = get_current_process();
+    let mut process = process.lock();
+    let old_gid = process.fs_gid;
+    process.fs_gid = gid;
+    Ok(old_gid as usize)
+});
 
 define_syscall!(Time, |time_ptr: *mut i64| {
     let seconds = (KernelTime::current().as_nanoseconds() / 1_000_000_000) as i64;
@@ -808,6 +1026,37 @@ define_syscall!(Time, |time_ptr: *mut i64| {
     }
     Ok(seconds as usize)
 });
+
+define_syscall!(Sysinfo, |info_ptr: *mut LinuxSysinfo| {
+    let uptime = (KernelTime::since_boot().as_nanoseconds() / 1_000_000_000) as i64;
+    let info = LinuxSysinfo {
+        uptime,
+        totalram: 4 * 1024 * 1024 * 1024,
+        freeram: 2 * 1024 * 1024 * 1024,
+        procs: 1,
+        mem_unit: 1,
+        ..Default::default()
+    };
+    user_safe::write(info_ptr, &info)?;
+    Ok(0)
+});
+
+define_syscall!(
+    SchedSetaffinity,
+    |pid: i32, cpusetsize: usize, mask_ptr: *const u8| {
+        if pid < 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if cpusetsize == 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if mask_ptr.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+
+        Ok(0)
+    }
+);
 
 define_syscall!(
     SchedGetaffinity,
@@ -828,6 +1077,22 @@ define_syscall!(
     }
 );
 
+define_syscall!(SchedRrGetInterval, |pid: i32, tp: *mut LinuxTimespec| {
+    if pid < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if tp.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let timespec = LinuxTimespec {
+        tv_sec: 0,
+        tv_nsec: 100_000_000,
+    };
+    user_safe::write(tp, &timespec)?;
+    Ok(0)
+});
+
 define_syscall!(Setrlimit, |_resource: i32, _rlimit: u64| { Ok(0) });
 
 define_syscall!(Prctl, |option: i32,
@@ -840,11 +1105,19 @@ define_syscall!(Prctl, |option: i32,
         | PrctlOption::SetDumpable
         | PrctlOption::SetName
         | PrctlOption::SetNoNewPrivs => Ok(0),
+        PrctlOption::SetKeepCaps => {
+            if arg2 > 1 {
+                return Err(SyscallError::InvalidArguments);
+            }
+            get_current_process().lock().keep_capabilities = arg2 != 0;
+            Ok(0)
+        }
         PrctlOption::GetPdeathsig => {
             user_safe::write(arg2 as *mut u8, &0i32)?;
             Ok(0)
         }
         PrctlOption::GetDumpable | PrctlOption::GetNoNewPrivs => Ok(0),
+        PrctlOption::GetKeepCaps => Ok(get_current_process().lock().keep_capabilities as usize),
         PrctlOption::GetName => {
             let name = b"main\0";
             let mut buffer = [0u8; 16];
