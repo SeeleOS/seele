@@ -1,9 +1,14 @@
-use alloc::sync::{Arc, Weak};
+use alloc::{
+    collections::BTreeMap,
+    sync::{Arc, Weak},
+};
 use spin::Mutex;
 
 use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function, impl_cast_function_non_trait,
+    process::manager::MANAGER,
+    signal::{Signal, Signals},
     misc::time::Time,
     object::{
         FileFlags, Object,
@@ -19,9 +24,155 @@ use crate::{
         },
     },
 };
+use strum::IntoEnumIterator;
 
 const EVENTFD_SEMAPHORE: i32 = 0x1;
 const EVENTFD_COUNTER_MAX: u64 = u64::MAX - 1;
+
+#[derive(Default)]
+struct SignalfdRegistry {
+    watchers: BTreeMap<u64, alloc::vec::Vec<Weak<SignalfdObject>>>,
+}
+
+lazy_static::lazy_static! {
+    static ref SIGNALFD_REGISTRY: Mutex<SignalfdRegistry> = Mutex::new(SignalfdRegistry::default());
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxSignalfdSiginfo {
+    ssi_signo: u32,
+    ssi_errno: i32,
+    ssi_code: i32,
+    ssi_pid: u32,
+    ssi_uid: u32,
+    ssi_fd: i32,
+    ssi_tid: u32,
+    ssi_band: u32,
+    ssi_overrun: u32,
+    ssi_trapno: u32,
+    ssi_status: i32,
+    ssi_int: i32,
+    ssi_ptr: u64,
+    ssi_utime: u64,
+    ssi_stime: u64,
+    ssi_addr: u64,
+    ssi_addr_lsb: u16,
+    __pad2: u16,
+    ssi_syscall: i32,
+    ssi_call_addr: u64,
+    ssi_arch: u32,
+    __pad: [u8; 28],
+}
+
+#[derive(Debug)]
+pub struct SignalfdObject {
+    flags: Mutex<FileFlags>,
+    mask: Mutex<u64>,
+    owner_pid: u64,
+    self_ref: Mutex<Option<Weak<SignalfdObject>>>,
+}
+
+impl SignalfdObject {
+    pub fn new(owner_pid: u64, mask: u64, flags: i32) -> Arc<Self> {
+        let signalfd = Arc::new(Self {
+            flags: Mutex::new(FileFlags::empty()),
+            mask: Mutex::new(mask),
+            owner_pid,
+            self_ref: Mutex::new(None),
+        });
+        *signalfd.self_ref.lock() = Some(Arc::downgrade(&signalfd));
+        if (flags & 0o4_000) != 0 {
+            let _ = signalfd.clone().set_flags(FileFlags::NONBLOCK);
+        }
+        register_signalfd(owner_pid, &signalfd);
+        signalfd
+    }
+
+    pub fn set_mask(&self, mask: u64) {
+        *self.mask.lock() = mask;
+    }
+
+    fn self_object(&self) -> Option<ObjectRef> {
+        self.self_ref
+            .lock()
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .map(|object| object as ObjectRef)
+    }
+
+    fn owner_pending_signals(&self) -> Signals {
+        MANAGER
+            .lock()
+            .processes
+            .values()
+            .find_map(|process| {
+                let process = process.lock();
+                (process.pid.0 == self.owner_pid).then_some(process.pending_signals)
+            })
+            .unwrap_or_default()
+    }
+
+    fn next_ready_signal(&self) -> Option<Signal> {
+        let ready_mask = self.owner_pending_signals().bits() & *self.mask.lock();
+        Signal::iter().find(|signal| (ready_mask & Signals::from(*signal).bits()) != 0)
+    }
+
+    fn take_next_signal(&self) -> Option<Signal> {
+        let mut manager = MANAGER.lock();
+        let process = manager
+            .processes
+            .values()
+            .find(|process| process.lock().pid.0 == self.owner_pid)?
+            .clone();
+        let mut process = process.lock();
+        let ready_mask = process.pending_signals.bits() & *self.mask.lock();
+        let signal = Signal::iter().find(|signal| (ready_mask & Signals::from(*signal).bits()) != 0)?;
+        process.pending_signals.remove(Signals::from(signal));
+        Some(signal)
+    }
+
+    fn wake_waiters(&self) {
+        let mut manager = THREAD_MANAGER.get().unwrap().lock();
+        manager.wake_io();
+        if let Some(object) = self.self_object() {
+            manager.wake_poller(object, PollableEvent::CanBeRead);
+        }
+    }
+}
+
+fn register_signalfd(pid: u64, signalfd: &Arc<SignalfdObject>) {
+    let mut registry = SIGNALFD_REGISTRY.lock();
+    let watchers = registry.watchers.entry(pid).or_default();
+    watchers.retain(|watcher| watcher.strong_count() > 0);
+    watchers.push(Arc::downgrade(signalfd));
+}
+
+pub fn wake_signalfd_for_process(pid: u64) {
+    let watchers = {
+        let mut registry = SIGNALFD_REGISTRY.lock();
+        let Some(watchers) = registry.watchers.get_mut(&pid) else {
+            return;
+        };
+
+        let mut strong = alloc::vec::Vec::new();
+        watchers.retain(|watcher| {
+            if let Some(signalfd) = watcher.upgrade() {
+                strong.push(signalfd);
+                true
+            } else {
+                false
+            }
+        });
+        strong
+    };
+
+    for signalfd in watchers {
+        if signalfd.next_ready_signal().is_some() {
+            signalfd.wake_waiters();
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct InotifyObject {
@@ -260,6 +411,75 @@ impl Writable for EventFdObject {
 }
 
 impl Statable for EventFdObject {
+    fn stat(&self) -> LinuxStat {
+        LinuxStat::char_device(0o600)
+    }
+}
+
+impl Object for SignalfdObject {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(*self.flags.lock())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        *self.flags.lock() = flags;
+        Ok(())
+    }
+
+    impl_cast_function!("readable", Readable);
+    impl_cast_function!("pollable", Pollable);
+    impl_cast_function!("statable", Statable);
+    impl_cast_function_non_trait!("signalfd", SignalfdObject);
+}
+
+impl Pollable for SignalfdObject {
+    fn is_event_ready(&self, event: PollableEvent) -> bool {
+        matches!(event, PollableEvent::CanBeRead) && self.next_ready_signal().is_some()
+    }
+}
+
+impl Readable for SignalfdObject {
+    fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
+        if buffer.len() < core::mem::size_of::<LinuxSignalfdSiginfo>() {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        loop {
+            if let Some(signal) = self.take_next_signal() {
+                let info = LinuxSignalfdSiginfo {
+                    ssi_signo: signal as u32,
+                    ..Default::default()
+                };
+                let raw = unsafe {
+                    core::slice::from_raw_parts(
+                        (&info as *const LinuxSignalfdSiginfo).cast::<u8>(),
+                        core::mem::size_of::<LinuxSignalfdSiginfo>(),
+                    )
+                };
+                buffer[..raw.len()].copy_from_slice(raw);
+                return Ok(raw.len());
+            }
+
+            if self.flags.lock().contains(FileFlags::NONBLOCK) {
+                return Err(ObjectError::TryAgain);
+            }
+
+            let current = prepare_block_current(BlockType::WakeRequired {
+                wake_type: WakeType::IO,
+                deadline: None,
+            });
+
+            if self.next_ready_signal().is_some() {
+                cancel_block(&current);
+                continue;
+            }
+
+            finish_block_current();
+        }
+    }
+}
+
+impl Statable for SignalfdObject {
     fn stat(&self) -> LinuxStat {
         LinuxStat::char_device(0o600)
     }

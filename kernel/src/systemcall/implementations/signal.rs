@@ -8,6 +8,13 @@ use crate::thread::scheduling::return_to_executor_no_save;
 use crate::thread::{THREAD_MANAGER, get_current_thread};
 use crate::{
     define_syscall,
+    object::{
+        FileFlags,
+        Object,
+        linux_anon::SignalfdObject,
+        misc::{ObjectRef, get_object_current_process},
+    },
+    process::misc::with_current_process,
     memory::user_safe,
     process::manager::get_current_process,
     signal::{Signal, action::SignalAction},
@@ -18,6 +25,8 @@ use spin::Mutex;
 
 const SIG_DFL: usize = 0;
 const SIG_IGN: usize = 1;
+const SFD_NONBLOCK: i32 = 0o4_000;
+const SFD_CLOEXEC: i32 = 0o2_000_000;
 const SS_ONSTACK: i32 = 1;
 const SS_DISABLE: i32 = 2;
 const MINSIGSTKSZ: usize = 2048;
@@ -94,6 +103,43 @@ fn decode_sigaction(action: LinuxSigAction) -> SignalAction {
         restorer: action.restorer,
     }
 }
+
+define_syscall!(
+    Signalfd4,
+    |fd: i32, mask: *const u64, sigsetsize: usize, flags: i32| {
+        if sigsetsize != size_of::<u64>() {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if (flags & !(SFD_NONBLOCK | SFD_CLOEXEC)) != 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
+
+        let mask = user_safe::read(mask)?;
+
+        if fd == -1 {
+            let signalfd = SignalfdObject::new(get_current_process().lock().pid.0, mask, flags);
+            let signalfd_ref: ObjectRef = signalfd;
+            return Ok(with_current_process(|process| process.push_object(signalfd_ref)));
+        }
+
+        let signalfd = get_object_current_process(fd as u64)
+            .map_err(SyscallError::from)?
+            .as_signalfd()?;
+        signalfd.set_mask(mask);
+
+        let file_flags = if (flags & SFD_NONBLOCK) != 0 {
+            FileFlags::NONBLOCK
+        } else {
+            FileFlags::empty()
+        };
+        signalfd
+            .clone()
+            .set_flags(file_flags)
+            .map_err(SyscallError::from)?;
+
+        Ok(fd as usize)
+    }
+);
 
 define_syscall!(
     RtSigaction,

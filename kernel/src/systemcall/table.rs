@@ -153,6 +153,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         Fallocate,
         TimerfdSettime,
         TimerfdGettime,
+        Signalfd4,
         Eventfd2,
         Pipe2,
         Dup3,

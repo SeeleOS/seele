@@ -1,5 +1,6 @@
 use crate::{
     misc::snapshot::Snapshot,
+    object::linux_anon::wake_signalfd_for_process,
     process::Process,
     s_println,
     thread::{
@@ -232,6 +233,7 @@ impl Process {
             }
             _ => {
                 self.pending_signals.insert(Signals::from(signal));
+                wake_signalfd_for_process(self.pid.0);
                 self.wake_blocked_threads();
             }
         }

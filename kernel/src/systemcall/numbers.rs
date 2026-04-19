@@ -149,6 +149,7 @@ pub enum SyscallNumber {
     TimerfdSettime = 286,
     TimerfdGettime = 287,
     Accept4 = 288,
+    Signalfd4 = 289,
     Eventfd2 = 290,
     Pipe2 = 293,
     EpollCreate1 = 291,
