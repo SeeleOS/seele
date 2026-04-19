@@ -100,7 +100,11 @@ impl FileSystem for ProcFs {
             }
             ["self", "fdinfo"] => {
                 let pid = current_pid()?;
-                Ok(proc_dir("fdinfo", pid_fdinfo_dir_inode(pid), pid_fdinfo_entries(pid)?))
+                Ok(proc_dir(
+                    "fdinfo",
+                    pid_fdinfo_dir_inode(pid),
+                    pid_fdinfo_entries(pid)?,
+                ))
             }
             ["self", "fdinfo", fd] => {
                 let pid = current_pid()?;
@@ -183,5 +187,21 @@ impl FileSystem for ProcFs {
             }
             _ => Err(FSError::NotFound),
         }
+    }
+
+    fn name(&self) -> &'static str {
+        "proc"
+    }
+
+    fn magic(&self) -> i64 {
+        0x9fa0
+    }
+
+    fn mount_source(&self) -> &'static str {
+        "proc"
+    }
+
+    fn mount_options(&self, _path: &Path) -> &'static str {
+        "rw,nosuid,nodev,noexec,relatime"
     }
 }

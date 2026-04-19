@@ -69,4 +69,20 @@ impl FileSystem for StaticFs {
 
         Ok(self.materialize(current))
     }
+
+    fn name(&self) -> &'static str {
+        "staticfs"
+    }
+
+    fn magic(&self) -> i64 {
+        0
+    }
+
+    fn mount_source(&self) -> &'static str {
+        "staticfs"
+    }
+
+    fn mount_options(&self, _path: &Path) -> &'static str {
+        "rw,relatime"
+    }
 }

@@ -9,16 +9,21 @@ use crate::filesystem::{
     vfs_traits::{File, FileLikeType, Whence},
 };
 
-use super::{S_IFMT, TMPFS_STATE, TmpNodeKind, node_name};
+use super::{S_IFMT, TmpNodeKind, TmpfsStateRef, node_name};
 
 pub(crate) struct TmpfsFileHandle {
+    state: TmpfsStateRef,
     path: String,
     offset: usize,
 }
 
 impl TmpfsFileHandle {
-    pub(crate) fn new(path: String) -> Self {
-        Self { path, offset: 0 }
+    pub(crate) fn new(state: TmpfsStateRef, path: String) -> Self {
+        Self {
+            state,
+            path,
+            offset: 0,
+        }
     }
 }
 
@@ -28,7 +33,7 @@ impl File for TmpfsFileHandle {
     }
 
     fn info(&mut self) -> FSResult<FileLikeInfo> {
-        let state = TMPFS_STATE.lock();
+        let state = self.state.lock();
         let node = state.node(&self.path)?;
         match &node.kind {
             TmpNodeKind::File { data, mode } => Ok(FileLikeInfo::new(
@@ -43,7 +48,7 @@ impl File for TmpfsFileHandle {
     }
 
     fn read_at(&mut self, buffer: &mut [u8], offset: u64) -> FSResult<usize> {
-        let state = TMPFS_STATE.lock();
+        let state = self.state.lock();
         let node = state.node(&self.path)?;
         let data = match &node.kind {
             TmpNodeKind::File { data, .. } => data,
@@ -67,7 +72,7 @@ impl File for TmpfsFileHandle {
     }
 
     fn write(&mut self, buffer: &[u8]) -> FSResult<usize> {
-        let mut state = TMPFS_STATE.lock();
+        let mut state = self.state.lock();
         let node = state.node_mut(&self.path)?;
         let data = match &mut node.kind {
             TmpNodeKind::File { data, .. } => data,
@@ -89,7 +94,7 @@ impl File for TmpfsFileHandle {
 
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {
         let len = {
-            let state = TMPFS_STATE.lock();
+            let state = self.state.lock();
             let node = state.node(&self.path)?;
             match &node.kind {
                 TmpNodeKind::File { data, .. } => data.len() as i64,
@@ -109,7 +114,7 @@ impl File for TmpfsFileHandle {
     }
 
     fn chmod(&self, mode: u32) -> FSResult<()> {
-        let mut state = TMPFS_STATE.lock();
+        let mut state = self.state.lock();
         if (mode & S_IFMT) != 0 {
             state.update_file_mode(&self.path, mode)
         } else {

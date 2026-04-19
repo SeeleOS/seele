@@ -14,8 +14,8 @@ use crate::{
     object::{
         error::ObjectError,
         linux_anon::{EventFdObject, InotifyObject, PidFdObject, SignalfdObject, TimerFdObject},
-        netlink::NetlinkSocketObject,
         misc::ObjectResult,
+        netlink::NetlinkSocketObject,
         traits::{Configuratable, MemoryMappable, Readable, Seekable, Statable, Writable},
     },
     polling::{object::Pollable, poller::PollerObject},

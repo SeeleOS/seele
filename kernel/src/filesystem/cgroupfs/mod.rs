@@ -518,6 +518,22 @@ impl FileSystem for CgroupFs {
             parent, kind,
         )))))
     }
+
+    fn name(&self) -> &'static str {
+        "cgroup2"
+    }
+
+    fn magic(&self) -> i64 {
+        0x6367_7270
+    }
+
+    fn mount_source(&self) -> &'static str {
+        "cgroup2"
+    }
+
+    fn mount_options(&self, _path: &Path) -> &'static str {
+        "rw,nosuid,nodev,noexec,relatime"
+    }
 }
 
 pub fn pid_cgroup_path(pid: ProcessID) -> String {

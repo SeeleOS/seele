@@ -112,6 +112,22 @@ impl FileSystem for EXT4 {
 
         Ok(current)
     }
+
+    fn name(&self) -> &'static str {
+        "ext4"
+    }
+
+    fn magic(&self) -> i64 {
+        0xEF53
+    }
+
+    fn mount_source(&self) -> &'static str {
+        "rootfs"
+    }
+
+    fn mount_options(&self, _path: &Path) -> &'static str {
+        "rw,relatime"
+    }
 }
 
 // The underlying ext4plus types are `Send + Sync`, so it is safe to

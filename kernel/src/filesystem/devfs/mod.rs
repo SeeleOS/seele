@@ -181,4 +181,20 @@ impl FileSystem for DevFs {
     fn lookup(&self, path: &Path) -> FSResult<FileLike> {
         self.inner.lookup(path)
     }
+
+    fn name(&self) -> &'static str {
+        "devtmpfs"
+    }
+
+    fn magic(&self) -> i64 {
+        0x0102_1994
+    }
+
+    fn mount_source(&self) -> &'static str {
+        "devtmpfs"
+    }
+
+    fn mount_options(&self, _path: &Path) -> &'static str {
+        "rw,nosuid,relatime"
+    }
 }

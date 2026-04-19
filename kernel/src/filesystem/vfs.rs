@@ -74,6 +74,14 @@ impl VFS {
 
     pub fn mount(&mut self, path: Path, fs: impl FileSystem + 'static) -> FSResult<()> {
         let normalized_path = self.normalize_path(path);
+        let normalized_path_string = normalized_path.clone().as_string();
+        if self
+            .mounts
+            .iter()
+            .any(|mount| mount.path.clone().as_string() == normalized_path_string)
+        {
+            return Ok(());
+        }
         let fs: FileSystemRef = Arc::new(Mutex::new(fs));
         fs.lock().init()?;
         self.mounts.push(Mount {
@@ -83,6 +91,24 @@ impl VFS {
         self.mounts
             .sort_by_key(|mount| core::cmp::Reverse(mount.path.clone().as_string().len()));
         Ok(())
+    }
+
+    pub fn mount_metadata(&self, path: Path) -> FSResult<(Path, FileSystemRef)> {
+        let mount_path = self.mount_path(path)?;
+        let mount_path_string = mount_path.clone().as_string();
+        let mount = self
+            .mounts
+            .iter()
+            .find(|mount| mount.path.clone().as_string() == mount_path_string)
+            .ok_or(FSError::NotFound)?;
+        Ok((mount.path.clone(), mount.fs.clone()))
+    }
+
+    pub fn mount_snapshots(&self) -> Vec<(Path, FileSystemRef)> {
+        self.mounts
+            .iter()
+            .map(|mount| (mount.path.clone(), mount.fs.clone()))
+            .collect()
     }
 
     pub fn normalize_path(&self, path: Path) -> Path {

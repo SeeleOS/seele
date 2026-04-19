@@ -1,9 +1,9 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     string::String,
+    sync::Arc,
     vec::Vec,
 };
-use lazy_static::lazy_static;
 use spin::Mutex;
 
 use crate::filesystem::{errors::FSError, path::Path, vfs::FSResult};
@@ -12,6 +12,7 @@ const ROOT_INODE: u64 = 0x7000_0000;
 pub(crate) const DEFAULT_DIR_MODE: u32 = 0o755;
 pub(crate) const DEFAULT_FILE_MODE: u32 = 0o644;
 pub(crate) const S_IFMT: u32 = 0o170000;
+pub(crate) type TmpfsStateRef = Arc<Mutex<TmpfsState>>;
 
 pub(crate) enum TmpNodeKind {
     Directory {
@@ -169,8 +170,4 @@ impl TmpfsState {
             TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => Err(FSError::NotAFile),
         }
     }
-}
-
-lazy_static! {
-    pub(crate) static ref TMPFS_STATE: Mutex<TmpfsState> = Mutex::new(TmpfsState::new());
 }

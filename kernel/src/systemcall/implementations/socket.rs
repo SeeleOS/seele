@@ -1,9 +1,9 @@
 use crate::{
     define_syscall,
     memory::user_safe,
-    object::netlink::{NetlinkSocketAddress, NetlinkSocketObject},
     object::Object,
     object::misc::ObjectRef,
+    object::netlink::{NetlinkSocketAddress, NetlinkSocketObject},
     process::{FdFlags, manager::get_current_process},
     socket::{AF_NETLINK, AF_UNIX, SOCK_CLOEXEC, SOCK_NONBLOCK},
     systemcall::utils::{SyscallError, SyscallImpl},
@@ -33,7 +33,10 @@ enum SocketAddress {
     Netlink(NetlinkSocketAddress),
 }
 
-fn socket_address_from_raw(address: *const u8, address_len: u32) -> Result<SocketAddress, SyscallError> {
+fn socket_address_from_raw(
+    address: *const u8,
+    address_len: u32,
+) -> Result<SocketAddress, SyscallError> {
     if address.is_null() || address_len < 2 {
         return Err(SyscallError::BadAddress);
     }
@@ -350,7 +353,8 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
 
     if !msg.msg_name.is_null() {
         let address_len = msg.msg_namelen;
-        let SocketAddress::Unix(path) = socket_address_from_raw(msg.msg_name.cast(), address_len)? else {
+        let SocketAddress::Unix(path) = socket_address_from_raw(msg.msg_name.cast(), address_len)?
+        else {
             return Err(SyscallError::InvalidArguments);
         };
         let socket_ref = socket.clone().as_unix_socket()?;
@@ -545,62 +549,67 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         unsafe { core::slice::from_raw_parts_mut(msg.msg_iov, msg.msg_iovlen) }
     };
 
-        if let Ok(socket) = socket.clone().as_netlink_socket() {
-            let peek = (flags & MSG_PEEK) != 0;
-            let report_trunc = (flags & MSG_TRUNC) != 0;
-            let total_capacity = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
-            let message_len = socket.peek_message_len().ok_or(SyscallError::TryAgain)?;
-            let mut scratch = alloc::vec![0u8; total_capacity];
-            let (copied, full_len) = socket.recv_message(&mut scratch, peek).map_err(SyscallError::from)?;
-            let mut copied_total = 0usize;
+    if let Ok(socket) = socket.clone().as_netlink_socket() {
+        let peek = (flags & MSG_PEEK) != 0;
+        let report_trunc = (flags & MSG_TRUNC) != 0;
+        let total_capacity = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
+        let message_len = socket.peek_message_len().ok_or(SyscallError::TryAgain)?;
+        let mut scratch = alloc::vec![0u8; total_capacity];
+        let (copied, full_len) = socket
+            .recv_message(&mut scratch, peek)
+            .map_err(SyscallError::from)?;
+        let mut copied_total = 0usize;
 
-            for iov in iovs {
-                if copied_total >= copied {
-                    break;
-                }
-                if iov.iov_len == 0 {
-                    continue;
-                }
-                if iov.iov_base.is_null() {
-                    return Err(SyscallError::BadAddress);
-                }
-
-                let chunk_len = (copied - copied_total).min(iov.iov_len);
-                user_safe::write(iov.iov_base, &scratch[copied_total..copied_total + chunk_len])?;
-                copied_total += chunk_len;
+        for iov in iovs {
+            if copied_total >= copied {
+                break;
+            }
+            if iov.iov_len == 0 {
+                continue;
+            }
+            if iov.iov_base.is_null() {
+                return Err(SyscallError::BadAddress);
             }
 
-            msg.msg_flags = 0;
-            if !msg.msg_name.is_null() {
-                let name = LinuxSockAddrNl {
-                    nl_family: AF_NETLINK as u16,
-                    nl_pad: 0,
-                    nl_pid: 0,
-                    nl_groups: 0,
-                };
-                let requested_len = msg.msg_namelen as usize;
-                let name_bytes = unsafe {
-                    core::slice::from_raw_parts(
-                        (&name as *const LinuxSockAddrNl).cast::<u8>(),
-                        core::mem::size_of::<LinuxSockAddrNl>(),
-                    )
-                };
-                let copy_len = requested_len.min(name_bytes.len());
-                if copy_len > 0 {
-                    user_safe::write(msg.msg_name.cast::<u8>(), &name_bytes[..copy_len])?;
-                }
-                msg.msg_namelen = name_bytes.len() as u32;
-            }
-            msg.msg_controllen = 0;
-            return Ok(if report_trunc || total_capacity == 0 {
-                full_len.max(message_len)
-            } else {
-                copied_total
-            });
+            let chunk_len = (copied - copied_total).min(iov.iov_len);
+            user_safe::write(
+                iov.iov_base,
+                &scratch[copied_total..copied_total + chunk_len],
+            )?;
+            copied_total += chunk_len;
         }
 
-        let socket = socket.as_unix_socket()?;
-        let mut total_read = 0usize;
+        msg.msg_flags = 0;
+        if !msg.msg_name.is_null() {
+            let name = LinuxSockAddrNl {
+                nl_family: AF_NETLINK as u16,
+                nl_pad: 0,
+                nl_pid: 0,
+                nl_groups: 0,
+            };
+            let requested_len = msg.msg_namelen as usize;
+            let name_bytes = unsafe {
+                core::slice::from_raw_parts(
+                    (&name as *const LinuxSockAddrNl).cast::<u8>(),
+                    core::mem::size_of::<LinuxSockAddrNl>(),
+                )
+            };
+            let copy_len = requested_len.min(name_bytes.len());
+            if copy_len > 0 {
+                user_safe::write(msg.msg_name.cast::<u8>(), &name_bytes[..copy_len])?;
+            }
+            msg.msg_namelen = name_bytes.len() as u32;
+        }
+        msg.msg_controllen = 0;
+        return Ok(if report_trunc || total_capacity == 0 {
+            full_len.max(message_len)
+        } else {
+            copied_total
+        });
+    }
+
+    let socket = socket.as_unix_socket()?;
+    let mut total_read = 0usize;
 
     for iov in iovs {
         if iov.iov_len == 0 {

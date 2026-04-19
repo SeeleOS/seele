@@ -1,7 +1,11 @@
-use alloc::{format, vec, vec::Vec};
+use alloc::{collections::BTreeMap, format, string::String, vec, vec::Vec};
 
 use crate::{
-    filesystem::{info::DirectoryContentInfo, vfs_traits::DirectoryContentType},
+    filesystem::{
+        info::DirectoryContentInfo,
+        vfs::{FileSystemRef, VirtualFS},
+        vfs_traits::DirectoryContentType,
+    },
     process::manager::MANAGER,
 };
 
@@ -31,10 +35,66 @@ pub(super) fn proc_kernel_cmdline_bytes() -> Vec<u8> {
     Vec::new()
 }
 
+fn sorted_mounts() -> Vec<(String, FileSystemRef)> {
+    let mut mounts = VirtualFS
+        .lock()
+        .mount_snapshots()
+        .into_iter()
+        .map(|(path, fs)| (path.as_string(), fs))
+        .collect::<Vec<_>>();
+    mounts.sort_by_key(|(path, _)| (path.matches('/').count(), path.len()));
+    mounts
+}
+
 pub(super) fn proc_mounts_bytes() -> Vec<u8> {
-    b"rootfs / ext4 rw,relatime 0 0\ntmpfs /run tmpfs rw,nosuid,nodev,relatime 0 0\nproc /proc proc rw,nosuid,nodev,noexec,relatime 0 0\nsysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0\ncgroup2 /sys/fs/cgroup cgroup2 rw,nosuid,nodev,noexec,relatime 0 0\ndevtmpfs /dev devtmpfs rw,nosuid,relatime 0 0\n".to_vec()
+    let mut out = String::new();
+    for (path, fs) in sorted_mounts() {
+        let fs = fs.lock();
+        out.push_str(fs.mount_source());
+        out.push(' ');
+        out.push_str(&path);
+        out.push(' ');
+        out.push_str(fs.name());
+        out.push(' ');
+        out.push_str(fs.mount_options(&crate::filesystem::path::Path::new(&path)));
+        out.push_str(" 0 0\n");
+    }
+    out.into_bytes()
 }
 
 pub(super) fn proc_mountinfo_bytes() -> Vec<u8> {
-    b"1 0 0:1 / / rw,relatime - ext4 rootfs rw\n2 1 0:6 / /run rw,nosuid,nodev,relatime - tmpfs tmpfs rw\n3 1 0:2 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw\n4 1 0:3 / /sys rw,nosuid,nodev,noexec,relatime - sysfs sysfs rw\n5 4 0:4 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime - cgroup2 cgroup2 rw\n6 1 0:5 / /dev rw,nosuid,relatime - devtmpfs devtmpfs rw\n".to_vec()
+    let mounts = sorted_mounts();
+    let mut ids = BTreeMap::new();
+    for (index, (path, _)) in mounts.iter().enumerate() {
+        ids.insert(path.clone(), index as u64 + 1);
+    }
+
+    let mut out = String::new();
+    for (path, fs) in mounts {
+        let id = *ids.get(&path).unwrap_or(&1);
+        let parent_id = if path == "/" {
+            0
+        } else {
+            let parent = ids
+                .keys()
+                .filter(|candidate| {
+                    candidate.as_str() != path
+                        && (path == format!("{}/", candidate.trim_end_matches('/'))
+                            || path.starts_with(&format!("{}/", candidate.trim_end_matches('/'))))
+                })
+                .max_by_key(|candidate| candidate.len())
+                .and_then(|candidate| ids.get(candidate))
+                .copied()
+                .unwrap_or(1);
+            parent
+        };
+        let fs = fs.lock();
+        let options = fs.mount_options(&crate::filesystem::path::Path::new(&path));
+        out.push_str(&format!(
+            "{id} {parent_id} 0:{id} / {path} {options} - {} {} rw\n",
+            fs.name(),
+            fs.mount_source()
+        ));
+    }
+    out.into_bytes()
 }

@@ -19,7 +19,8 @@ impl KernelFrom<CString> for String {
         let mut str = String::new();
 
         for i in 0..MAX_LENGTH {
-            let byte = user_safe::read(unsafe { val.add(i) }).map_err(|_| KernelError::InvalidString)?;
+            let byte =
+                user_safe::read(unsafe { val.add(i) }).map_err(|_| KernelError::InvalidString)?;
             let char = byte as char;
 
             if char == '\0' {

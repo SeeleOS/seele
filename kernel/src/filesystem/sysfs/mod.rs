@@ -394,4 +394,20 @@ impl FileSystem for SysFs {
     fn lookup(&self, path: &Path) -> FSResult<FileLike> {
         self.inner.lookup(path)
     }
+
+    fn name(&self) -> &'static str {
+        "sysfs"
+    }
+
+    fn magic(&self) -> i64 {
+        0x6265_6572
+    }
+
+    fn mount_source(&self) -> &'static str {
+        "sysfs"
+    }
+
+    fn mount_options(&self, _path: &Path) -> &'static str {
+        "rw,nosuid,nodev,noexec,relatime"
+    }
 }

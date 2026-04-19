@@ -307,8 +307,12 @@ fn clone_process(
             None
         };
         let pidfd: Arc<dyn Object> = PidFdObject::new(pid.0);
-        let pidfd_fd = i32::try_from(current.lock().push_object_with_flags(pidfd, FdFlags::CLOEXEC))
-            .map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
+        let pidfd_fd = i32::try_from(
+            current
+                .lock()
+                .push_object_with_flags(pidfd, FdFlags::CLOEXEC),
+        )
+        .map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
         user_safe::write(pidfd_ptr, &pidfd_fd)?;
         if trace_pidfd {
             let pidfd_after = current.lock().addrspace.read(pidfd_ptr as *const i32).ok();
@@ -615,16 +619,14 @@ fn create_eventfd(initval: u32, flags: i32) -> Result<usize, SyscallError> {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let fd = get_current_process()
-        .lock()
-        .push_object_with_flags(
-            EventFdObject::new(initval as u64, flags),
-            if (flags & TFD_CLOEXEC) != 0 {
-                FdFlags::CLOEXEC
-            } else {
-                FdFlags::empty()
-            },
-        );
+    let fd = get_current_process().lock().push_object_with_flags(
+        EventFdObject::new(initval as u64, flags),
+        if (flags & TFD_CLOEXEC) != 0 {
+            FdFlags::CLOEXEC
+        } else {
+            FdFlags::empty()
+        },
+    );
     Ok(fd)
 }
 

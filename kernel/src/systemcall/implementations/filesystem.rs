@@ -2,7 +2,7 @@ use crate::{
     define_syscall,
     filesystem::{
         errors::FSError, info::LinuxStat, misc::smart_resolve_path, object::FileLikeObject,
-        path::Path, vfs::VirtualFS, vfs_traits::FileLikeType,
+        path::Path, tmpfs::TmpFs, vfs::VirtualFS, vfs_traits::FileLikeType,
     },
     memory::user_safe,
     misc::{c_types::CString, others::KernelFrom},
@@ -23,11 +23,6 @@ const UTIME_OMIT: i64 = 0x3fff_ffff;
 const STATX_BASIC_STATS: u32 = 0x0000_07ff;
 const STATX_MNT_ID: u32 = 0x0000_1000;
 const STATX_ATTR_MOUNT_ROOT: u64 = 0x0000_2000;
-const EXT4_SUPER_MAGIC: i64 = 0xEF53;
-const TMPFS_MAGIC: i64 = 0x0102_1994;
-const PROC_SUPER_MAGIC: i64 = 0x9fa0;
-const SYSFS_MAGIC: i64 = 0x6265_6572;
-const CGROUP2_SUPER_MAGIC: i64 = 0x6367_7270;
 const ANON_INODE_FS_MAGIC: i64 = 0x0904_1934;
 const SOCKFS_MAGIC: i64 = 0x534f_434b;
 const AT_NO_AUTOMOUNT: i32 = 0x800;
@@ -258,28 +253,24 @@ fn filesystem_magic_for_object(object: &ObjectRef) -> Result<i64, SyscallError> 
 }
 
 fn filesystem_magic_for_path(path: &Path) -> Result<i64, SyscallError> {
-    let mount_path = VirtualFS.lock().mount_path(path.clone())?;
-    Ok(match mount_path.as_string().as_str() {
-        "/run" => TMPFS_MAGIC,
-        "/dev" => TMPFS_MAGIC,
-        "/proc" => PROC_SUPER_MAGIC,
-        "/sys/fs/cgroup" => CGROUP2_SUPER_MAGIC,
-        "/sys" => SYSFS_MAGIC,
-        _ => EXT4_SUPER_MAGIC,
-    })
+    let (_mount_path, fs) = VirtualFS.lock().mount_metadata(path.clone())?;
+    Ok(fs.lock().magic())
 }
 
 fn mount_id_for_path(path: &Path) -> Result<u64, SyscallError> {
-    let mount_path = VirtualFS.lock().mount_path(path.clone())?;
-    Ok(match mount_path.as_string().as_str() {
-        "/" => 1,
-        "/run" => 6,
-        "/proc" => 2,
-        "/sys" => 3,
-        "/sys/fs/cgroup" => 4,
-        "/dev" => 5,
-        _ => 1,
-    })
+    let mount_path = VirtualFS.lock().mount_path(path.clone())?.as_string();
+    let mut mounts = VirtualFS
+        .lock()
+        .mount_snapshots()
+        .into_iter()
+        .map(|(path, _)| path.as_string())
+        .collect::<Vec<_>>();
+    mounts.sort_by_key(|path| (path.matches('/').count(), path.len()));
+    Ok(mounts
+        .iter()
+        .position(|path| *path == mount_path)
+        .map(|index| index as u64 + 1)
+        .unwrap_or(1))
 }
 
 fn mount_id_for_file_like(file_like: &FileLikeObject) -> Result<u64, SyscallError> {
@@ -1055,6 +1046,12 @@ define_syscall!(Mount, |source: CString,
     }
 
     VirtualFS.lock().resolve_dir(Path::new(&target))?;
+    if filesystemtype.as_deref() == Some("tmpfs") {
+        VirtualFS
+            .lock()
+            .mount(Path::new(&target), TmpFs::new())
+            .map_err(SyscallError::from)?;
+    }
     Ok(0)
 });
 
@@ -1067,7 +1064,7 @@ define_syscall!(Umount2, |target: CString, flags: i32| {
 
 define_syscall!(Fsopen, |fs_name: CString, _flags: u32| {
     let _ = path_from_raw(fs_name)?;
-    Err(SyscallError::OperationNotSupported)
+    Err(SyscallError::PermissionDenied)
 });
 
 define_syscall!(OpenTree, |dirfd: i32, path: CString, flags: u32| {

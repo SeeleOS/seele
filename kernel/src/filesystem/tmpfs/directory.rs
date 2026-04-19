@@ -9,15 +9,16 @@ use crate::filesystem::{
     vfs_traits::{Directory, DirectoryContentType, FileLike, FileLikeType},
 };
 
-use super::{TMPFS_STATE, TmpNodeKind, TmpfsState, node_name, tmpfs_lookup_path};
+use super::{TmpNodeKind, TmpfsState, TmpfsStateRef, node_name, tmpfs_lookup_path};
 
 pub(crate) struct TmpfsDirectoryHandle {
+    state: TmpfsStateRef,
     path: String,
 }
 
 impl TmpfsDirectoryHandle {
-    pub(crate) fn new(path: String) -> Self {
-        Self { path }
+    pub(crate) fn new(state: TmpfsStateRef, path: String) -> Self {
+        Self { state, path }
     }
 }
 
@@ -27,7 +28,7 @@ impl Directory for TmpfsDirectoryHandle {
     }
 
     fn info(&self) -> FSResult<FileLikeInfo> {
-        let state = TMPFS_STATE.lock();
+        let state = self.state.lock();
         let node = state.node(&self.path)?;
         let mode = match &node.kind {
             TmpNodeKind::Directory { mode, .. } => *mode,
@@ -49,7 +50,7 @@ impl Directory for TmpfsDirectoryHandle {
     }
 
     fn contents(&self) -> FSResult<Vec<DirectoryContentInfo>> {
-        let state = TMPFS_STATE.lock();
+        let state = self.state.lock();
         let node = state.node(&self.path)?;
         let children = match &node.kind {
             TmpNodeKind::Directory { children, .. } => children,
@@ -73,7 +74,7 @@ impl Directory for TmpfsDirectoryHandle {
     }
 
     fn create(&self, info: DirectoryContentInfo) -> FSResult<()> {
-        let mut state = TMPFS_STATE.lock();
+        let mut state = self.state.lock();
         match info.content_type {
             DirectoryContentType::File => state.create_file(&self.path, &info.name),
             DirectoryContentType::Directory => state.create_directory(&self.path, &info.name),
@@ -82,20 +83,20 @@ impl Directory for TmpfsDirectoryHandle {
     }
 
     fn create_symlink(&self, name: &str, target: &str) -> FSResult<()> {
-        TMPFS_STATE.lock().create_symlink(&self.path, name, target)
+        self.state.lock().create_symlink(&self.path, name, target)
     }
 
     fn delete(&self, name: &str) -> FSResult<()> {
-        TMPFS_STATE.lock().delete_node(&self.path, name)
+        self.state.lock().delete_node(&self.path, name)
     }
 
     fn get(&self, name: &str) -> FSResult<FileLike> {
         let child_path = TmpfsState::child_path(&self.path, name);
-        tmpfs_lookup_path(&child_path)
+        tmpfs_lookup_path(&self.state, &child_path)
     }
 
     fn chmod(&self, mode: u32) -> FSResult<()> {
-        let mut state = TMPFS_STATE.lock();
+        let mut state = self.state.lock();
         let node = state.node_mut(&self.path)?;
         match &mut node.kind {
             TmpNodeKind::Directory { mode: dir_mode, .. } => {

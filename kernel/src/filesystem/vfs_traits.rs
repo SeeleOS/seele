@@ -76,6 +76,10 @@ pub enum DirectoryContentType {
 pub trait FileSystem: Send + Sync {
     fn init(&mut self) -> FSResult<()>;
     fn lookup(&self, path: &Path) -> FSResult<FileLike>;
+    fn name(&self) -> &'static str;
+    fn magic(&self) -> i64;
+    fn mount_source(&self) -> &'static str;
+    fn mount_options(&self, path: &Path) -> &'static str;
 }
 
 #[derive(Debug)]

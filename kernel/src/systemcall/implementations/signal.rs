@@ -14,8 +14,8 @@ use crate::{
         linux_anon::SignalfdObject,
         misc::{ObjectRef, get_object_current_process},
     },
-    process::{FdFlags, manager::get_current_process},
     process::misc::with_current_process,
+    process::{FdFlags, manager::get_current_process},
     signal::{Signal, action::SignalAction},
 };
 use core::mem::size_of;

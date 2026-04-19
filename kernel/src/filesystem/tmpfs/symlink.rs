@@ -8,21 +8,22 @@ use crate::filesystem::{
     vfs_traits::{FileLikeType, Symlink},
 };
 
-use super::{TMPFS_STATE, TmpNodeKind, node_name};
+use super::{TmpNodeKind, TmpfsStateRef, node_name};
 
 pub(crate) struct TmpfsSymlinkHandle {
+    state: TmpfsStateRef,
     path: String,
 }
 
 impl TmpfsSymlinkHandle {
-    pub(crate) fn new(path: String) -> Self {
-        Self { path }
+    pub(crate) fn new(state: TmpfsStateRef, path: String) -> Self {
+        Self { state, path }
     }
 }
 
 impl Symlink for TmpfsSymlinkHandle {
     fn info(&self) -> FSResult<FileLikeInfo> {
-        let state = TMPFS_STATE.lock();
+        let state = self.state.lock();
         let node = state.node(&self.path)?;
         match &node.kind {
             TmpNodeKind::Symlink { target } => Ok(FileLikeInfo::new(
@@ -37,7 +38,7 @@ impl Symlink for TmpfsSymlinkHandle {
     }
 
     fn target(&self) -> FSResult<Path> {
-        let state = TMPFS_STATE.lock();
+        let state = self.state.lock();
         let node = state.node(&self.path)?;
         let target = match &node.kind {
             TmpNodeKind::Symlink { target } => target.clone(),
@@ -57,7 +58,7 @@ impl Symlink for TmpfsSymlinkHandle {
     }
 
     fn read_link_target(&self) -> FSResult<String> {
-        let state = TMPFS_STATE.lock();
+        let state = self.state.lock();
         let node = state.node(&self.path)?;
         match &node.kind {
             TmpNodeKind::Symlink { target } => Ok(target.clone()),

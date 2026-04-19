@@ -132,14 +132,8 @@ impl NetlinkSocketObject {
     ) -> SocketResult<()> {
         if level == SOL_SOCKET {
             return match option_name {
-                SO_REUSEADDR
-                | SO_PASSCRED
-                | SO_SNDBUF
-                | SO_RCVBUF
-                | SO_SNDBUFFORCE
-                | SO_RCVBUFFORCE
-                | SO_ATTACH_FILTER
-                | SO_DETACH_FILTER => Ok(()),
+                SO_REUSEADDR | SO_PASSCRED | SO_SNDBUF | SO_RCVBUF | SO_SNDBUFFORCE
+                | SO_RCVBUFFORCE | SO_ATTACH_FILTER | SO_DETACH_FILTER => Ok(()),
                 _ => Err(SocketError::InvalidArguments),
             };
         }
@@ -234,7 +228,8 @@ impl NetlinkSocketObject {
             return;
         }
 
-        let header = unsafe { core::ptr::read_unaligned(message.as_ptr().cast::<NetlinkMessageHeader>()) };
+        let header =
+            unsafe { core::ptr::read_unaligned(message.as_ptr().cast::<NetlinkMessageHeader>()) };
         let reply_len = core::mem::size_of::<NetlinkMessageHeader>()
             + core::mem::size_of::<NetlinkErrorMessage>();
         let reply_header = NetlinkMessageHeader {
@@ -244,10 +239,7 @@ impl NetlinkSocketObject {
             nlmsg_seq: header.nlmsg_seq,
             nlmsg_pid: 0,
         };
-        let error = NetlinkErrorMessage {
-            error: 0,
-            header,
-        };
+        let error = NetlinkErrorMessage { error: 0, header };
 
         let mut bytes = Vec::with_capacity(reply_len);
         bytes.extend_from_slice(unsafe {
