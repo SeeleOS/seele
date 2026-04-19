@@ -5,7 +5,6 @@ use crate::{
     filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
     misc::time::with_profiling,
     process::{Process, manager::MANAGER, new::setup_process},
-    s_println,
     signal::{
         Signals,
         action::{SignalAction, SignalHandlingType},
@@ -41,13 +40,8 @@ impl Process {
             return Err(FSError::NotFound);
         }
         let path_string = path.clone().as_string();
-        s_println!("execve: pid={} path={}", self.pid.0, path_string);
-        let should_trace_execve = self.pid.0 == 3;
         // TODO: kill all the other threads when execveing
         log::trace!("execve: start {}", path.clone().as_string());
-        if should_trace_execve {
-            s_println!("execve: pid={} stage=clean_addrspace", self.pid.0);
-        }
         with_profiling(
             || self.addrspace.clean(),
             alloc::format!(
@@ -61,9 +55,6 @@ impl Process {
         log::trace!("execve: locking thread manager");
         let thread_manager = THREAD_MANAGER.get().unwrap().lock();
         log::trace!("execve: thread manager locked");
-        if should_trace_execve {
-            s_println!("execve: pid={} stage=thread_manager_locked", self.pid.0);
-        }
 
         let thread = thread_manager.current.clone().unwrap();
 
@@ -85,9 +76,6 @@ impl Process {
         log::trace!("execve: locking current thread");
         let mut thread_locked = thread.lock();
         log::trace!("execve: current thread locked");
-        if should_trace_execve {
-            s_println!("execve: pid={} stage=setup_process", self.pid.0);
-        }
 
         thread_locked.snapshot = with_profiling(
             || setup_process(path, args, env, &mut self.addrspace, &mut self.objects),
@@ -99,9 +87,6 @@ impl Process {
             .as_str(),
         )
         .unwrap();
-        if should_trace_execve {
-            s_println!("execve: pid={} stage=addrspace_load", self.pid.0);
-        }
         thread_locked.kernel_stack_top = self.kernel_stack_top.as_u64();
         thread_locked.snapshot_state = SnapshotState::Normal;
         thread_locked.sig_handler_snapshot = ThreadSnapshot::default();
@@ -119,9 +104,6 @@ impl Process {
             )
             .as_str(),
         );
-        if should_trace_execve {
-            s_println!("execve: pid={} stage=ready_to_switch", self.pid.0);
-        }
         unsafe {
             TSS.privilege_stack_table[0] = VirtAddr::new(thread_locked.kernel_stack_top);
         }

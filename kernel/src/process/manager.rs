@@ -3,9 +3,8 @@ use lazy_static::lazy_static;
 use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
-    object::linux_anon::{wake_pidfd_for_process, wake_pidfd_for_process_with_manager},
+    object::linux_anon::wake_pidfd_for_process_with_manager,
     process::{Process, ProcessRef, misc::ProcessID},
-    s_println,
     thread::{THREAD_MANAGER, ThreadRef, manager::ThreadManager},
 };
 
@@ -40,9 +39,6 @@ impl Manager {
         thread_manager: &mut ThreadManager,
     ) {
         let pid = process.lock().pid;
-        if pid.0 <= 3 {
-            s_println!("process exit ready: pid={}", pid.0);
-        }
         log::debug!("notify process exit waiters {}", pid.0);
         thread_manager.wake_process_exit_waiters(pid);
         wake_pidfd_for_process_with_manager(pid.0, thread_manager);
@@ -71,14 +67,6 @@ pub fn get_current_process() -> ProcessRef {
 pub fn terminate_process(process: ProcessRef, exit_code: u64) {
     let threads = {
         let mut process = process.lock();
-        if process.pid.0 <= 3 {
-            s_println!(
-                "terminate_process: pid={} exit_code={} thread_refs={}",
-                process.pid.0,
-                exit_code,
-                process.threads.len()
-            );
-        }
         process.terminate_inner(exit_code)
     };
 

@@ -4,7 +4,6 @@ use crate::{
     object::Object,
     object::misc::ObjectRef,
     process::manager::get_current_process,
-    s_println,
     socket::{AF_UNIX, SOCK_NONBLOCK},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
@@ -111,15 +110,7 @@ define_syscall!(Connect, |socket: ObjectRef,
         .as_unix_socket()?
         .connect(path.clone())
         .map_err(crate::object::error::ObjectError::from);
-    if let Err(err) = result {
-        s_println!(
-            "socket connect failed: pid={} path={} err={:?}",
-            get_current_process().lock().pid.0,
-            path,
-            err
-        );
-        return Err(err.into());
-    }
+    result?;
     Ok(0)
 });
 

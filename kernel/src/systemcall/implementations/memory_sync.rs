@@ -13,7 +13,6 @@ use crate::{
     },
     misc::others::protection_to_page_flags,
     process::manager::get_current_process,
-    s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
         THREAD_MANAGER, ThreadRef, get_current_thread,
@@ -59,31 +58,10 @@ struct FutexKey {
 }
 
 static FUTEX_QUEUE: Mutex<BTreeMap<FutexKey, VecDeque<ThreadRef>>> = Mutex::new(BTreeMap::new());
-const DEADLOCK_LOG: bool = false;
 
 fn current_futex_key(addr: u64) -> FutexKey {
     let pid = get_current_process().lock().pid.0;
     FutexKey { pid, addr }
-}
-
-fn describe_addrspace_area(process: &crate::process::Process, addr: u64) -> alloc::string::String {
-    process
-        .addrspace
-        .memory_areas
-        .iter()
-        .find(|area| area.contains(VirtAddr::new(addr)))
-        .map(|area| match &area.data {
-            Data::Normal => alloc::string::String::from("anon"),
-            Data::File { file, .. } => {
-                let name = file
-                    .info()
-                    .map(|info| info.name)
-                    .unwrap_or_else(|_| alloc::string::String::from("unknown-file"));
-                alloc::format!("file:{name}@{:#x}-{:#x}", area.start, area.end)
-            }
-            Data::Shared { .. } => alloc::string::String::from("shared"),
-        })
-        .unwrap_or_else(|| alloc::string::String::from("unknown"))
 }
 
 pub fn wake_futex_for_process(pid: u64, addr: u64, count: usize) -> usize {
@@ -128,17 +106,6 @@ fn futex_wait_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
 
         queue.get_mut(&key).unwrap().push_back(current);
 
-        if DEADLOCK_LOG {
-            let len = queue.get(&key).map(|bucket| bucket.len()).unwrap_or(0);
-            s_println!(
-                "futex_wait block: pid={} addr={:#x} value={} queued={}",
-                key.pid,
-                key.addr,
-                arg2,
-                len
-            );
-        }
-
         // Mark the thread blocked before releasing the futex bucket so a
         // concurrent wake cannot slip between queue insertion and scheduling.
         prepare_block_current(BlockType::Futex);
@@ -148,26 +115,12 @@ fn futex_wait_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
     // deadlock trying to take the same lock from another thread.
     finish_block_current();
 
-    if DEADLOCK_LOG {
-        s_println!("futex_wait resume: pid={} addr={:#x}", key.pid, key.addr);
-    }
-
     Ok(0)
 }
 
 fn futex_wake_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
     let key = current_futex_key(arg1);
     let woken = wake_futex_for_process(key.pid, key.addr, arg2 as usize);
-
-    if DEADLOCK_LOG && woken > 0 {
-        s_println!(
-            "futex_wake: pid={} addr={:#x} requested={} woke={}",
-            key.pid,
-            key.addr,
-            arg2,
-            woken
-        );
-    }
 
     Ok(woken)
 }

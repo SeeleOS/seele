@@ -7,12 +7,10 @@ use crate::{
     misc::signal::SigInfo,
     object::misc::get_object_current_process,
     process::{
-        ProcessRef,
         execve::execve,
         manager::{MANAGER, get_current_process, terminate_process},
         misc::ProcessID,
     },
-    s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
         THREAD_MANAGER, get_current_thread,
@@ -99,27 +97,12 @@ define_syscall!(Wait4, |target_process: i32,
             } else if matched_child {
                 None
             } else {
-                if current_process.lock().pid.0 <= 2 {
-                    s_println!(
-                        "wait4: pid={} no matching child for target={}",
-                        current_process.lock().pid.0,
-                        target_process
-                    );
-                }
                 return Err(SyscallError::NoProcess);
             }
         };
 
         match check_result {
             Some((process, exit_code)) => {
-                if current_process.lock().pid.0 <= 2 {
-                    s_println!(
-                        "wait4: pid={} returning child_pid={} exit_code={}",
-                        current_process.lock().pid.0,
-                        process.lock().pid.0,
-                        exit_code
-                    );
-                }
                 if !status_ptr.is_null() {
                     let status = exit_code_to_status(exit_code);
                     user_safe::write(status_ptr, &status)?;
@@ -132,13 +115,6 @@ define_syscall!(Wait4, |target_process: i32,
                 return Ok(0);
             }
             None => {
-                if current_process.lock().pid.0 <= 2 {
-                    s_println!(
-                        "wait4: pid={} blocking for target={}",
-                        current_process.lock().pid.0,
-                        target_process
-                    );
-                }
                 block_current_with_sig_check(BlockType::WakeRequired {
                     wake_type: WakeType::ProcsesExit,
                     deadline: None,
@@ -147,13 +123,6 @@ define_syscall!(Wait4, |target_process: i32,
                     crate::object::error::ObjectError::Interrupted => SyscallError::Interrupted,
                     _ => SyscallError::TryAgain,
                 })?;
-                if current_process.lock().pid.0 <= 2 {
-                    s_println!(
-                        "wait4: pid={} resumed for target={}",
-                        current_process.lock().pid.0,
-                        target_process
-                    );
-                }
             }
         }
     }

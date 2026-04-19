@@ -10,11 +10,7 @@ use alloc::sync::Arc;
 use num_enum::TryFromPrimitive;
 
 use crate::systemcall::utils::SyscallError;
-use crate::{
-    define_syscall, polling::poller::PollerObject, process::manager::get_current_process, s_println,
-};
-
-const DEADLOCK_LOG: bool = false;
+use crate::{define_syscall, polling::poller::PollerObject, process::manager::get_current_process};
 
 #[derive(Clone, Copy, Debug, TryFromPrimitive)]
 #[repr(u64)]
@@ -109,13 +105,6 @@ fn epoll_update_impl(
     let target_object = poll_identity_object(target_object);
 
     if target_object.clone().as_pollable().is_err() {
-        if DEADLOCK_LOG {
-            s_println!(
-                "poller_add reject: bits=0x{:x} data={:#x} target not pollable",
-                bits,
-                data
-            );
-        }
         return Err(SyscallError::PermissionDenied);
     }
 
@@ -221,9 +210,6 @@ fn epoll_wait_impl(
     }
 
     let woken_events = poller.take_woken_events(maxevents);
-    if DEADLOCK_LOG && !woken_events.is_empty() {
-        s_println!("poller_wait: woke {} event(s)", woken_events.len());
-    }
 
     if !events_ptr.is_null() {
         for (index, woken) in woken_events.iter().enumerate() {
