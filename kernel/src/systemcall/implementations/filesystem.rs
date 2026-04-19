@@ -117,6 +117,16 @@ bitflags! {
     }
 }
 
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct UmountFlags: i32 {
+        const FORCE = 0x1;
+        const DETACH = 0x2;
+        const EXPIRE = 0x4;
+        const NOFOLLOW = 0x8;
+    }
+}
+
 fn path_from_raw(path: CString) -> Result<String, SyscallError> {
     if path.is_null() {
         return Err(SyscallError::BadAddress);
@@ -333,6 +343,21 @@ fn validate_xattr_flags(flags: u32) -> Result<(), SyscallError> {
         return Err(SyscallError::InvalidArguments);
     }
     Ok(())
+}
+
+fn validate_umount_flags(flags: i32) -> Result<UmountFlags, SyscallError> {
+    let flags = UmountFlags::from_bits_truncate(flags);
+    if flags.bits()
+        != flags.bits()
+            & (UmountFlags::FORCE
+                | UmountFlags::DETACH
+                | UmountFlags::EXPIRE
+                | UmountFlags::NOFOLLOW)
+                .bits()
+    {
+        return Err(SyscallError::InvalidArguments);
+    }
+    Ok(flags)
 }
 
 fn faccessat_impl(
@@ -917,6 +942,13 @@ define_syscall!(Mount, |source: CString,
     }
 
     VirtualFS.lock().resolve_dir(Path::new(&target))?;
+    Ok(0)
+});
+
+define_syscall!(Umount2, |target: CString, flags: i32| {
+    let target = path_from_raw(target)?;
+    let _flags = validate_umount_flags(flags)?;
+    let _ = resolve_path_at(AT_FDCWD, &target)?;
     Ok(0)
 });
 

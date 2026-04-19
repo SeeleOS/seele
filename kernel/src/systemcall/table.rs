@@ -178,6 +178,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         Setrlimit,
         Sync,
         Mount,
+        Umount2,
         RenameAt2,
         TimerCreate,
         TimerSettime,

@@ -172,6 +172,7 @@ pub enum SyscallNumber {
     Setrlimit = 160,
     Sync = 162,
     Mount = 165,
+    Umount2 = 166,
     SetTidAddress = 218,
     ArchPrctl = 158,
     TimerCreate = 222,
