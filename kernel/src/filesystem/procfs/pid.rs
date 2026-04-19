@@ -13,6 +13,7 @@ use crate::{
 
 pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
     vec![
+        DirectoryContentInfo::new("stat".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("cmdline".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("cgroup".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("oom_score_adj".into(), DirectoryContentType::File),
@@ -37,6 +38,34 @@ pub(super) fn pid_fd_entries(pid: ProcessID) -> FSResult<Vec<DirectoryContentInf
     }
 
     Ok(entries)
+}
+
+pub(super) fn proc_pid_stat_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    let process = process.lock();
+    let parent_pid = process.parent.as_ref().map(|parent| parent.lock().pid.0).unwrap_or(0);
+    let state = if process.have_exited() || process.threads.is_empty() {
+        'Z'
+    } else {
+        'S'
+    };
+    let comm = pid_string(pid);
+    let session = process.group_id.0;
+    let num_threads = process.threads.len().max(1);
+    let content = format!(
+        concat!(
+            "{} ({}) {} {} {} {} 0 0 0 0 0 0 0 0 0 0 0 0 20 0 {} 0 ",
+            "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+        ),
+        pid.0,
+        comm,
+        state,
+        parent_pid,
+        process.group_id.0,
+        session,
+        num_threads,
+    );
+    Ok(content.into_bytes())
 }
 
 pub(super) fn proc_pid_cmdline_bytes(_pid: ProcessID) -> Vec<u8> {
@@ -146,6 +175,10 @@ pub(super) fn pid_cgroup_inode(pid: ProcessID) -> u64 {
 
 pub(super) fn pid_oom_score_adj_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 4
+}
+
+pub(super) fn pid_stat_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 5
 }
 
 pub(super) fn pid_fd_dir_inode(pid: ProcessID) -> u64 {

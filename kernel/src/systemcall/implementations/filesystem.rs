@@ -436,16 +436,7 @@ fn rename_impl(
         return Ok(0);
     }
 
-    match VirtualFS.lock().delete_file(new_path.clone()) {
-        Ok(()) | Err(FSError::NotFound) => {}
-        Err(err) => return Err(err.into()),
-    }
-
-    VirtualFS
-        .lock()
-        .link_file(old_path.clone(), new_path.clone())?;
-    VirtualFS.lock().delete_file(old_path.clone())?;
-
+    VirtualFS.lock().rename_file(old_path, new_path)?;
     Ok(0)
 }
 
@@ -1037,6 +1028,13 @@ define_syscall!(Mount, |source: CString,
     let target = path_from_raw(target)?;
     let filesystemtype = string_from_raw_optional(filesystemtype)?;
     let _data = string_from_raw_optional(data)?;
+    let target_path = {
+        let target_object = VirtualFS.lock().open(Path::new(&target))?;
+        if !matches!(target_object.info()?.file_like_type, FileLikeType::Directory) {
+            return Err(SyscallError::NotADirectory);
+        }
+        target_object.path()
+    };
 
     if filesystemtype
         .as_deref()
@@ -1045,11 +1043,11 @@ define_syscall!(Mount, |source: CString,
         return Err(SyscallError::NoSyscall);
     }
 
-    VirtualFS.lock().resolve_dir(Path::new(&target))?;
+    VirtualFS.lock().resolve_dir(target_path.clone())?;
     if filesystemtype.as_deref() == Some("tmpfs") {
         VirtualFS
             .lock()
-            .mount(Path::new(&target), TmpFs::new())
+            .mount(target_path.clone(), TmpFs::new())
             .map_err(SyscallError::from)?;
     }
     Ok(0)

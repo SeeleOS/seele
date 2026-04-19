@@ -75,6 +75,24 @@ impl VFS {
         Ok(())
     }
 
+    pub fn rename_file(&mut self, old_path: Path, new_path: Path) -> FSResult<()> {
+        let old_path = self.normalize_path(old_path);
+        let new_path = self.normalize_path(new_path);
+        let (old_mount_path, old_fs) = self.mount_metadata(old_path.clone())?;
+        let (new_mount_path, _) = self.mount_metadata(new_path.clone())?;
+        if old_mount_path != new_mount_path {
+            return Err(FSError::Other);
+        }
+
+        let old_relative = old_path
+            .strip_prefix(&old_mount_path)
+            .ok_or(FSError::NotFound)?;
+        let new_relative = new_path
+            .strip_prefix(&old_mount_path)
+            .ok_or(FSError::NotFound)?;
+        old_fs.lock().rename(&old_relative, &new_relative)
+    }
+
     pub fn link_file(&mut self, old_path: Path, new_path: Path) -> FSResult<()> {
         let old_mount = self.mount_path(old_path.clone())?;
         let new_mount = self.mount_path(new_path.clone())?;

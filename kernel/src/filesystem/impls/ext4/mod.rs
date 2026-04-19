@@ -1,7 +1,9 @@
 use alloc::{string::ToString, sync::Arc};
 use spin::mutex::Mutex;
 
-use ext4plus::{Ext4, FollowSymlinks, inode::InodeMode, path::Path as Ext4Path};
+use ext4plus::{
+    DirEntryName, Ext4, FollowSymlinks, dir::Dir, inode::InodeMode, path::Path as Ext4Path,
+};
 
 use crate::filesystem::{
     errors::FSError,
@@ -111,6 +113,99 @@ impl FileSystem for EXT4 {
         }
 
         Ok(current)
+    }
+
+    fn rename(&self, old_path: &Path, new_path: &Path) -> crate::filesystem::vfs::FSResult<()> {
+        let old_path = old_path.normalize();
+        let new_path = new_path.normalize();
+        if old_path == new_path {
+            return Ok(());
+        }
+
+        let source = self.lookup(&old_path)?;
+        if matches!(source, FileLike::Directory(_)) {
+            return Err(FSError::Other);
+        }
+        let source_inode = self
+            .0
+            .path_to_inode(
+                Ext4Path::new(&old_path.clone().as_string()),
+                FollowSymlinks::ExcludeFinalComponent,
+            )
+            .map_err(FSError::from)?;
+
+        let old_parent = old_path.parent().ok_or(FSError::NotFound)?;
+        let old_name = old_path.file_name().ok_or(FSError::NotFound)?;
+        let new_parent = new_path.parent().ok_or(FSError::NotFound)?;
+        let new_name = new_path.file_name().ok_or(FSError::NotFound)?;
+
+        if let Ok(target) = self.lookup(&new_path) {
+            if matches!(target, FileLike::Directory(_)) {
+                return Err(FSError::DirectoryNotEmpty);
+            }
+            let new_parent_inode = self
+                .0
+                .path_to_inode(
+                    Ext4Path::new(&new_parent.clone().as_string()),
+                    FollowSymlinks::All,
+                )
+                .map_err(FSError::from)?;
+            let mut new_parent_dir =
+                Dir::open_inode(&self.0, new_parent_inode).map_err(FSError::from)?;
+            let target_inode = self
+                .0
+                .path_to_inode(
+                    Ext4Path::new(&new_path.clone().as_string()),
+                    FollowSymlinks::ExcludeFinalComponent,
+                )
+                .map_err(FSError::from)?;
+            new_parent_dir
+                .unlink(
+                    DirEntryName::try_from(new_name.as_str()).map_err(|_| FSError::Other)?,
+                    target_inode,
+                )
+                .map_err(FSError::from)?;
+        }
+
+        let new_parent_inode = self
+            .0
+            .path_to_inode(
+                Ext4Path::new(&new_parent.clone().as_string()),
+                FollowSymlinks::All,
+            )
+            .map_err(FSError::from)?;
+        let mut new_parent_dir = Dir::open_inode(&self.0, new_parent_inode).map_err(FSError::from)?;
+        let mut source_inode = source_inode;
+        new_parent_dir
+            .link(
+                DirEntryName::try_from(new_name.as_str()).map_err(|_| FSError::Other)?,
+                &mut source_inode,
+            )
+            .map_err(FSError::from)?;
+
+        let old_parent_inode = self
+            .0
+            .path_to_inode(
+                Ext4Path::new(&old_parent.clone().as_string()),
+                FollowSymlinks::All,
+            )
+            .map_err(FSError::from)?;
+        let mut old_parent_dir = Dir::open_inode(&self.0, old_parent_inode).map_err(FSError::from)?;
+        let old_inode = self
+            .0
+            .path_to_inode(
+                Ext4Path::new(&old_path.clone().as_string()),
+                FollowSymlinks::ExcludeFinalComponent,
+            )
+            .map_err(FSError::from)?;
+        old_parent_dir
+            .unlink(
+                DirEntryName::try_from(old_name.as_str()).map_err(|_| FSError::Other)?,
+                old_inode,
+            )
+            .map_err(FSError::from)?;
+
+        Ok(())
     }
 
     fn name(&self) -> &'static str {

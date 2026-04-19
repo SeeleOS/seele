@@ -154,6 +154,79 @@ impl TmpfsState {
         Ok(())
     }
 
+    fn split_path(path: &str) -> FSResult<(String, String)> {
+        let path = Self::normalize(path);
+        if path == "/" {
+            return Err(FSError::AccessDenied);
+        }
+
+        let path = Path::new(&path);
+        let parent = path.parent().ok_or(FSError::NotFound)?.as_string();
+        let name = path.file_name().ok_or(FSError::NotFound)?;
+        Ok((parent, name))
+    }
+
+    fn delete_path(&mut self, path: &str) -> FSResult<()> {
+        let (parent, name) = Self::split_path(path)?;
+        self.delete_node(&parent, &name)
+    }
+
+    pub(crate) fn rename(&mut self, old_path: &str, new_path: &str) -> FSResult<()> {
+        let old_path = Self::normalize(old_path);
+        let new_path = Self::normalize(new_path);
+        if old_path == new_path {
+            return Ok(());
+        }
+        if old_path == "/" || new_path == "/" {
+            return Err(FSError::AccessDenied);
+        }
+
+        let (old_parent, old_name) = Self::split_path(&old_path)?;
+        let (new_parent, new_name) = Self::split_path(&new_path)?;
+        let source_is_dir = matches!(self.node(&old_path)?.kind, TmpNodeKind::Directory { .. });
+        if source_is_dir && new_path.starts_with(&(old_path.clone() + "/")) {
+            return Err(FSError::AccessDenied);
+        }
+
+        let _ = self.directory_children_mut(&old_parent)?;
+        let _ = self.directory_children_mut(&new_parent)?;
+
+        if let Ok(target) = self.node(&new_path) {
+            let target_is_dir = matches!(target.kind, TmpNodeKind::Directory { .. });
+            if source_is_dir && !target_is_dir {
+                return Err(FSError::NotADirectory);
+            }
+            if !source_is_dir && target_is_dir {
+                return Err(FSError::NotAFile);
+            }
+            self.delete_path(&new_path)?;
+        }
+
+        let prefix = alloc::format!("{old_path}/");
+        let moved_paths = self
+            .nodes
+            .keys()
+            .filter(|path| **path == old_path || path.starts_with(&prefix))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let mut moved_nodes = Vec::with_capacity(moved_paths.len());
+        for path in moved_paths {
+            let suffix: String = path.strip_prefix(&old_path).ok_or(FSError::Other)?.into();
+            let node = self.nodes.remove(&path).ok_or(FSError::NotFound)?;
+            moved_nodes.push((suffix, node));
+        }
+
+        self.directory_children_mut(&old_parent)?.remove(&old_name);
+        self.directory_children_mut(&new_parent)?.insert(new_name);
+
+        for (suffix, node) in moved_nodes {
+            self.nodes.insert(alloc::format!("{new_path}{suffix}"), node);
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn update_file_mode(&mut self, path: &str, mode: u32) -> FSResult<()> {
         let node = self.node_mut(path)?;
         match &mut node.kind {

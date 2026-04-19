@@ -1,7 +1,6 @@
 use crate::{
     misc::snapshot::Snapshot,
     process::misc::with_current_process,
-    systemcall::numbers::SyscallNumber,
     systemcall::table::SYSCALL_TABLE,
     systemcall::utils::SyscallError,
     thread::{THREAD_MANAGER, misc::with_current_thread, scheduling::return_to_executor_no_save},
@@ -59,28 +58,11 @@ fn syscall_handler_unwrapped(
     arg6: u64,
 ) -> isize {
     let current_pid = with_current_process(|proc| proc.pid.0);
-    let syscall_name = SyscallNumber::from_number(syscall_no as usize);
-
     if let Some(Some(handler)) = SYSCALL_TABLE.get(syscall_no as usize) {
         let result = match handler(arg1, arg2, arg3, arg4, arg5, arg6) {
             Ok(value) => value as isize,
             Err(err) => err as isize,
         };
-
-        if result == SyscallError::BadFileDescriptor as isize {
-            crate::s_println!(
-                "bad fd syscall: pid={} no={:?} args=({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x}) -> {}",
-                current_pid,
-                syscall_name,
-                arg1,
-                arg2,
-                arg3,
-                arg4,
-                arg5,
-                arg6,
-                result
-            );
-        }
 
         if result == SyscallError::BadAddress as isize {
             crate::s_println!(

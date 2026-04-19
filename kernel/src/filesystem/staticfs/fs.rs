@@ -70,6 +70,10 @@ impl FileSystem for StaticFs {
         Ok(self.materialize(current))
     }
 
+    fn rename(&self, _old_path: &Path, _new_path: &Path) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+
     fn name(&self) -> &'static str {
         "staticfs"
     }

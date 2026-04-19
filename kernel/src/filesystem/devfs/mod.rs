@@ -182,6 +182,10 @@ impl FileSystem for DevFs {
         self.inner.lookup(path)
     }
 
+    fn rename(&self, _old_path: &Path, _new_path: &Path) -> FSResult<()> {
+        Err(crate::filesystem::errors::FSError::Readonly)
+    }
+
     fn name(&self) -> &'static str {
         "devtmpfs"
     }

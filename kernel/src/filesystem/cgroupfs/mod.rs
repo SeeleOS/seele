@@ -519,6 +519,10 @@ impl FileSystem for CgroupFs {
         )))))
     }
 
+    fn rename(&self, _old_path: &Path, _new_path: &Path) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+
     fn name(&self) -> &'static str {
         "cgroup2"
     }

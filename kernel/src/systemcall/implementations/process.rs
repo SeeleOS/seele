@@ -11,7 +11,6 @@ use crate::{
         manager::{MANAGER, get_current_process, terminate_process},
         misc::ProcessID,
     },
-    s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
         THREAD_MANAGER, get_current_thread,
@@ -137,15 +136,6 @@ define_syscall!(Waitid, |id_type: i32,
                          id: u32,
                          info_ptr: *mut SigInfo,
                          options: i32| {
-    if id_type == 3 && (id == i32::MAX as u32 || id > 1024) {
-        s_println!(
-            "waitid pidfd request pid={} fd={} options={:#x}",
-            get_current_process().lock().pid.0,
-            id,
-            options
-        );
-    }
-
     let target_process = match id_type {
         0 => -1,
         1 => id as i32,

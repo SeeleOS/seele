@@ -16,8 +16,9 @@ use pid::{
     current_pid, ensure_pid_exists, fd_target, parse_fd, parse_pid, pid_cgroup_inode,
     pid_cmdline_inode, pid_dir_entries, pid_dir_inode, pid_fd_dir_inode, pid_fd_entries,
     pid_fd_inode, pid_fdinfo_dir_inode, pid_fdinfo_entries, pid_fdinfo_inode, pid_mountinfo_inode,
-    pid_oom_score_adj_inode, pid_string, proc_pid_cgroup_bytes, proc_pid_cmdline_bytes,
-    proc_pid_fdinfo_bytes, proc_pid_oom_score_adj_bytes, proc_pid_write_oom_score_adj,
+    pid_oom_score_adj_inode, pid_stat_inode, pid_string, proc_pid_cgroup_bytes,
+    proc_pid_cmdline_bytes, proc_pid_fdinfo_bytes, proc_pid_oom_score_adj_bytes,
+    proc_pid_stat_bytes, proc_pid_write_oom_score_adj,
 };
 use root::{
     PROC_CMDLINE_INODE, PROC_MOUNTS_INODE, PROC_ROOT_INODE, PROC_SELF_INODE,
@@ -64,6 +65,12 @@ impl FileSystem for ProcFs {
                 let pid = current_pid()?;
                 Ok(proc_file("cmdline", pid_cmdline_inode(pid), move || {
                     proc_pid_cmdline_bytes(pid)
+                }))
+            }
+            ["self", "stat"] => {
+                let pid = current_pid()?;
+                Ok(proc_file("stat", pid_stat_inode(pid), move || {
+                    proc_pid_stat_bytes(pid).unwrap_or_default()
                 }))
             }
             ["self", "cgroup"] => {
@@ -130,6 +137,13 @@ impl FileSystem for ProcFs {
                     proc_pid_cmdline_bytes(pid)
                 }))
             }
+            [pid, "stat"] => {
+                let pid = parse_pid(pid)?;
+                ensure_pid_exists(pid)?;
+                Ok(proc_file("stat", pid_stat_inode(pid), move || {
+                    proc_pid_stat_bytes(pid).unwrap_or_default()
+                }))
+            }
             [pid, "cgroup"] => {
                 let pid = parse_pid(pid)?;
                 ensure_pid_exists(pid)?;
@@ -187,6 +201,10 @@ impl FileSystem for ProcFs {
             }
             _ => Err(FSError::NotFound),
         }
+    }
+
+    fn rename(&self, _old_path: &Path, _new_path: &Path) -> FSResult<()> {
+        Err(FSError::Readonly)
     }
 
     fn name(&self) -> &'static str {

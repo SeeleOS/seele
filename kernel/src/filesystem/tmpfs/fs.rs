@@ -83,6 +83,12 @@ impl FileSystem for TmpFs {
         tmpfs_lookup_path(&self.state, &absolute_tmp_path(path))
     }
 
+    fn rename(&self, old_path: &Path, new_path: &Path) -> FSResult<()> {
+        self.state
+            .lock()
+            .rename(&absolute_tmp_path(old_path), &absolute_tmp_path(new_path))
+    }
+
     fn name(&self) -> &'static str {
         "tmpfs"
     }
