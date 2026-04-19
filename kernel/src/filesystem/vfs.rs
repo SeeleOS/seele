@@ -11,6 +11,7 @@ use crate::filesystem::{
     path::Path,
     procfs::ProcFs,
     sysfs::SysFs,
+    tmpfs::TmpFs,
     vfs_traits::{Directory, File, FileSystem, Symlink},
 };
 use ext4plus::Ext4 as Ext4Inner;
@@ -53,6 +54,7 @@ impl VFS {
         let ext4 = Ext4Inner::load_with_writer(Box::new(reader), Some(Box::new(writer))).unwrap();
         log::info!("vfs: ext4 loaded");
         self.mount(Path::new("/"), EXT4(ext4))?;
+        self.mount(Path::new("/run"), TmpFs::new())?;
         self.mount(Path::new("/dev"), DevFs::new())?;
         self.mount(Path::new("/proc"), ProcFs::new())?;
         self.mount(Path::new("/sys"), SysFs::new())?;

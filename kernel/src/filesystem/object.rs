@@ -38,6 +38,7 @@ fn mount_device_id_for_path(path: &crate::filesystem::path::Path) -> u64 {
 
     match mount_path.as_string().as_str() {
         "/" => 1,
+        "/run" => 6,
         "/proc" => 2,
         "/sys" => 3,
         "/sys/fs/cgroup" => 4,

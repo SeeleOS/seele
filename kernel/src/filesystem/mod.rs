@@ -13,6 +13,7 @@ mod resolve;
 pub mod staticfs;
 pub mod storage_operator;
 pub mod sysfs;
+pub mod tmpfs;
 pub mod vfs;
 pub mod vfs_operations;
 pub mod vfs_traits;

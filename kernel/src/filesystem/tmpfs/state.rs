@@ -1,0 +1,158 @@
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    string::String,
+    vec::Vec,
+};
+use lazy_static::lazy_static;
+use spin::Mutex;
+
+use crate::filesystem::{errors::FSError, path::Path, vfs::FSResult};
+
+const ROOT_INODE: u64 = 0x7000_0000;
+pub(crate) const DEFAULT_DIR_MODE: u32 = 0o755;
+pub(crate) const DEFAULT_FILE_MODE: u32 = 0o644;
+
+pub(crate) enum TmpNodeKind {
+    Directory {
+        children: BTreeSet<String>,
+        mode: u32,
+    },
+    File {
+        data: Vec<u8>,
+        mode: u32,
+    },
+    Symlink {
+        target: String,
+    },
+}
+
+pub(crate) struct TmpNode {
+    pub(crate) inode: u64,
+    pub(crate) kind: TmpNodeKind,
+}
+
+pub(crate) struct TmpfsState {
+    next_inode: u64,
+    nodes: BTreeMap<String, TmpNode>,
+}
+
+impl TmpfsState {
+    pub(crate) fn new() -> Self {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            "/".into(),
+            TmpNode {
+                inode: ROOT_INODE,
+                kind: TmpNodeKind::Directory {
+                    children: BTreeSet::new(),
+                    mode: DEFAULT_DIR_MODE,
+                },
+            },
+        );
+        Self {
+            next_inode: ROOT_INODE + 1,
+            nodes,
+        }
+    }
+
+    pub(crate) fn normalize(path: &str) -> String {
+        if path.is_empty() || path == "/" {
+            "/".into()
+        } else {
+            Path::new(path).normalize().as_string()
+        }
+    }
+
+    pub(crate) fn child_path(parent: &str, name: &str) -> String {
+        if parent == "/" {
+            alloc::format!("/{name}")
+        } else {
+            alloc::format!("{parent}/{name}")
+        }
+    }
+
+    pub(crate) fn node(&self, path: &str) -> FSResult<&TmpNode> {
+        self.nodes.get(path).ok_or(FSError::NotFound)
+    }
+
+    pub(crate) fn node_mut(&mut self, path: &str) -> FSResult<&mut TmpNode> {
+        self.nodes.get_mut(path).ok_or(FSError::NotFound)
+    }
+
+    fn directory_children_mut(&mut self, path: &str) -> FSResult<&mut BTreeSet<String>> {
+        let node = self.node_mut(path)?;
+        match &mut node.kind {
+            TmpNodeKind::Directory { children, .. } => Ok(children),
+            TmpNodeKind::File { .. } | TmpNodeKind::Symlink { .. } => Err(FSError::NotADirectory),
+        }
+    }
+
+    pub(crate) fn create_file(&mut self, parent: &str, name: &str) -> FSResult<()> {
+        self.create_node(
+            parent,
+            name,
+            TmpNodeKind::File {
+                data: Vec::new(),
+                mode: DEFAULT_FILE_MODE,
+            },
+        )
+    }
+
+    pub(crate) fn create_directory(&mut self, parent: &str, name: &str) -> FSResult<()> {
+        self.create_node(
+            parent,
+            name,
+            TmpNodeKind::Directory {
+                children: BTreeSet::new(),
+                mode: DEFAULT_DIR_MODE,
+            },
+        )
+    }
+
+    pub(crate) fn create_symlink(
+        &mut self,
+        parent: &str,
+        name: &str,
+        target: &str,
+    ) -> FSResult<()> {
+        self.create_node(
+            parent,
+            name,
+            TmpNodeKind::Symlink {
+                target: target.into(),
+            },
+        )
+    }
+
+    fn create_node(&mut self, parent: &str, name: &str, kind: TmpNodeKind) -> FSResult<()> {
+        let parent = Self::normalize(parent);
+        let child = Self::child_path(&parent, name);
+        if self.nodes.contains_key(&child) {
+            return Err(FSError::AlreadyExists);
+        }
+        let _ = self.directory_children_mut(&parent)?;
+        let inode = self.next_inode;
+        self.next_inode += 1;
+        self.nodes.insert(child, TmpNode { inode, kind });
+        self.directory_children_mut(&parent)?.insert(name.into());
+        Ok(())
+    }
+
+    pub(crate) fn delete_node(&mut self, parent: &str, name: &str) -> FSResult<()> {
+        let parent = Self::normalize(parent);
+        let child = Self::child_path(&parent, name);
+        let node = self.node(&child)?;
+        if let TmpNodeKind::Directory { children, .. } = &node.kind
+            && !children.is_empty()
+        {
+            return Err(FSError::DirectoryNotEmpty);
+        }
+        self.nodes.remove(&child);
+        self.directory_children_mut(&parent)?.remove(name);
+        Ok(())
+    }
+}
+
+lazy_static! {
+    pub(crate) static ref TMPFS_STATE: Mutex<TmpfsState> = Mutex::new(TmpfsState::new());
+}
