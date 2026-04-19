@@ -38,6 +38,23 @@ pub(super) fn chmod_path(fs: &Ext4, path: &str, mode: u32) -> crate::filesystem:
 pub struct EXT4(pub Ext4);
 
 impl EXT4 {
+    fn follow_intermediate_symlinks(
+        &self,
+        mut current: FileLike,
+    ) -> crate::filesystem::vfs::FSResult<FileLike> {
+        const MAX_SYMLINKS: usize = 40;
+
+        for _ in 0..MAX_SYMLINKS {
+            let target = match &current {
+                FileLike::Symlink(symlink) => symlink.lock().target()?,
+                FileLike::Directory(_) | FileLike::File(_) => return Ok(current),
+            };
+            current = self.lookup(&target)?;
+        }
+
+        Err(FSError::TooManySymlinks)
+    }
+
     fn root_dir(&self) -> WrappedDirectory {
         Arc::new(Mutex::new(Ext4Directory::new(
             "".to_string(),
@@ -69,29 +86,24 @@ impl FileSystem for EXT4 {
                 PathPart::Root | PathPart::CurrentDir => {}
                 PathPart::ParentDir => return Err(FSError::NotADirectory),
                 PathPart::Normal(name) => {
-                    loop {
-                        let next = match &current {
-                            FileLike::Directory(dir) => Some(dir.lock().get(name)?),
-                            FileLike::Symlink(symlink) => {
-                                Some(self.lookup(&symlink.lock().target()?)?)
-                            }
-                            FileLike::File(_) => return Err(FSError::NotADirectory),
-                        };
-
-                        current = next.expect("ext4 lookup next node");
-                        if matches!(current, FileLike::Directory(_) | FileLike::File(_)) {
-                            break;
+                    current = self.follow_intermediate_symlinks(current)?;
+                    current = match current {
+                        FileLike::Directory(dir) => dir.lock().get(name)?,
+                        FileLike::File(_) => return Err(FSError::NotADirectory),
+                        FileLike::Symlink(_) => {
+                            unreachable!("intermediate symlink was not followed")
                         }
-                    }
+                    };
 
                     if !is_last {
-                        while let FileLike::Symlink(symlink) = &current {
-                            let target = symlink.lock().target()?;
-                            current = self.lookup(&target)?;
-                        }
+                        current = self.follow_intermediate_symlinks(current)?;
                     }
                 }
             }
+        }
+
+        if path_string.ends_with('/') {
+            current = self.follow_intermediate_symlinks(current)?;
         }
 
         if path_string.ends_with('/') && matches!(current, FileLike::File(_)) {
