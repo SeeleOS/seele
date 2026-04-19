@@ -139,6 +139,7 @@ pub enum SyscallNumber {
     UnlinkAt = 263,
     RenameAt = 264,
     LinkAt = 265,
+    SymlinkAt = 266,
     ReadlinkAt = 267,
     Faccessat = 269,
     Pselect6 = 270,

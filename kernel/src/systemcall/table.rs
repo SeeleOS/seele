@@ -144,6 +144,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         UnlinkAt,
         RenameAt,
         LinkAt,
+        SymlinkAt,
         ReadlinkAt,
         Faccessat,
         Pselect6,

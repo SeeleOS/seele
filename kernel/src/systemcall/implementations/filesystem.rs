@@ -758,6 +758,18 @@ define_syscall!(LinkAt, |old_dirfd: i32,
     Ok(0)
 });
 
+define_syscall!(SymlinkAt, |target: CString,
+                            new_dirfd: i32,
+                            link_path: CString| {
+    let target = path_from_raw(target)?;
+    let link_path = path_from_raw(link_path)?;
+    let link_path = resolve_path_at(new_dirfd, &link_path)?;
+
+    VirtualFS.lock().create_symlink(link_path, &target)?;
+
+    Ok(0)
+});
+
 define_syscall!(MkdirAt, |dirfd: i32, path: CString, _mode: u32| {
     let path = path_from_raw(path)?;
     let from_current_dir = path_is_relative_to_cwd(dirfd)?;
