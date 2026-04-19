@@ -77,6 +77,7 @@ enum PrctlOption {
     CapbsetRead = 23,
     SetNoNewPrivs = 38,
     GetNoNewPrivs = 39,
+    CapAmbient = 47,
 }
 
 impl TryFrom<i32> for PrctlOption {
@@ -95,6 +96,30 @@ impl TryFrom<i32> for PrctlOption {
             23 => Self::CapbsetRead,
             38 => Self::SetNoNewPrivs,
             39 => Self::GetNoNewPrivs,
+            47 => Self::CapAmbient,
+            _ => return Err(()),
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(u64)]
+enum PrctlCapAmbientOp {
+    IsSet = 1,
+    Raise = 2,
+    Lower = 3,
+    ClearAll = 4,
+}
+
+impl TryFrom<u64> for PrctlCapAmbientOp {
+    type Error = ();
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        Ok(match value {
+            1 => Self::IsSet,
+            2 => Self::Raise,
+            3 => Self::Lower,
+            4 => Self::ClearAll,
             _ => return Err(()),
         })
     }
@@ -154,6 +179,17 @@ fn current_capability_data() -> [LinuxCapData; LINUX_CAPABILITY_U32S_3] {
         permitted: process.capability_permitted[index],
         inheritable: process.capability_inheritable[index],
     })
+}
+
+fn capability_slot_and_mask(capability: u64) -> Result<(usize, u32), SyscallError> {
+    let slot = (capability / 32) as usize;
+    if slot >= LINUX_CAPABILITY_U32S_3 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    let mask = 1u32
+        .checked_shl((capability % 32) as u32)
+        .ok_or(SyscallError::InvalidArguments)?;
+    Ok((slot, mask))
 }
 
 fn clone_cleared_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalAction> {
@@ -1225,7 +1261,7 @@ define_syscall!(Setrlimit, |_resource: i32, _rlimit: u64| { Ok(0) });
 
 define_syscall!(Prctl, |option: i32,
                         arg2: u64,
-                        _arg3: u64,
+                        arg3: u64,
                         _arg4: u64,
                         _arg5: u64| {
     match PrctlOption::try_from(option).map_err(|_| SyscallError::InvalidArguments)? {
@@ -1254,6 +1290,35 @@ define_syscall!(Prctl, |option: i32,
             Ok(0)
         }
         PrctlOption::CapbsetRead => Ok(0),
+        PrctlOption::CapAmbient => {
+            let op =
+                PrctlCapAmbientOp::try_from(arg2).map_err(|_| SyscallError::InvalidArguments)?;
+            match op {
+                PrctlCapAmbientOp::ClearAll => {
+                    get_current_process().lock().capability_ambient = [0; LINUX_CAPABILITY_U32S_3];
+                    Ok(0)
+                }
+                PrctlCapAmbientOp::IsSet => {
+                    let (slot, mask) = capability_slot_and_mask(arg3)?;
+                    let process = get_current_process();
+                    Ok(((process.lock().capability_ambient[slot] & mask) != 0) as usize)
+                }
+                PrctlCapAmbientOp::Raise => {
+                    let (slot, mask) = capability_slot_and_mask(arg3)?;
+                    let process = get_current_process();
+                    let mut process = process.lock();
+                    process.capability_ambient[slot] |= mask;
+                    Ok(0)
+                }
+                PrctlCapAmbientOp::Lower => {
+                    let (slot, mask) = capability_slot_and_mask(arg3)?;
+                    let process = get_current_process();
+                    let mut process = process.lock();
+                    process.capability_ambient[slot] &= !mask;
+                    Ok(0)
+                }
+            }
+        }
     }
 });
 

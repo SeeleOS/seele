@@ -50,6 +50,7 @@ pub struct Process {
     pub capability_effective: [u32; 2],
     pub capability_permitted: [u32; 2],
     pub capability_inheritable: [u32; 2],
+    pub capability_ambient: [u32; 2],
 }
 
 impl Default for Process {
@@ -82,6 +83,7 @@ impl Default for Process {
             capability_effective: [u32::MAX; 2],
             capability_permitted: [u32::MAX; 2],
             capability_inheritable: [0; 2],
+            capability_ambient: [0; 2],
         }
     }
 }

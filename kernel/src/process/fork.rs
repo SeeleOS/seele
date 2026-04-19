@@ -49,6 +49,7 @@ impl Process {
                 capability_effective: parent_locked.capability_effective,
                 capability_permitted: parent_locked.capability_permitted,
                 capability_inheritable: parent_locked.capability_inheritable,
+                capability_ambient: parent_locked.capability_ambient,
                 ..Default::default()
             }));
             (pid, new_process)
