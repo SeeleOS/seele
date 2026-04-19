@@ -163,6 +163,7 @@ const LINUX_REBOOT_CMD_CAD_ON: u32 = 0x89ab_cdef;
 const BPF_COMMAND_MAX: u32 = 36;
 const KEYCTL_GET_KEYRING_ID: u64 = 0;
 const KEYCTL_JOIN_SESSION_KEYRING: u64 = 1;
+const KEYCTL_SETPERM: u64 = 5;
 const KEYCTL_LINK: u64 = 8;
 const KEYCTL_SESSION_TO_PARENT: u64 = 18;
 const KEY_SPEC_SESSION_KEYRING: i32 = -3;
@@ -237,8 +238,8 @@ fn current_user_keyring(create: bool) -> Result<i32, SyscallError> {
 
 fn resolve_keyring(spec: i32, create: bool) -> Result<i32, SyscallError> {
     match spec {
-        KEY_SPEC_SESSION_KEYRING => current_session_keyring(create),
-        KEY_SPEC_USER_KEYRING => current_user_keyring(create),
+        KEY_SPEC_SESSION_KEYRING => current_session_keyring(true || create),
+        KEY_SPEC_USER_KEYRING => current_user_keyring(true || create),
         serial if serial > 0 => Ok(serial),
         _ => Err(SyscallError::InvalidArguments),
     }
@@ -343,12 +344,6 @@ fn clone_process(
     }
 
     if clone_flags.contains(CloneFlags::PIDFD) {
-        let trace_pidfd = current.lock().pid.0 == 1;
-        let pidfd_before = if trace_pidfd {
-            current.lock().addrspace.read(pidfd_ptr as *const i32).ok()
-        } else {
-            None
-        };
         let pidfd: Arc<dyn Object> = PidFdObject::new(pid.0);
         let pidfd_fd = i32::try_from(
             current
@@ -357,18 +352,6 @@ fn clone_process(
         )
         .map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
         user_safe::write(pidfd_ptr, &pidfd_fd)?;
-        if trace_pidfd {
-            let pidfd_after = current.lock().addrspace.read(pidfd_ptr as *const i32).ok();
-            crate::s_println!(
-                "clone pidfd write pid={} child_pid={} ptr={:#x} before={:?} wrote={} after={:?}",
-                current.lock().pid.0,
-                pid.0,
-                pidfd_ptr as usize,
-                pidfd_before,
-                pidfd_fd,
-                pidfd_after
-            );
-        }
     }
 
     Ok(pid.0 as usize)
@@ -1136,17 +1119,6 @@ define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
     }
 
     let args = user_safe::read(args)?;
-    if get_current_process().lock().pid.0 == 1 && (args.flags & CloneFlags::PIDFD.bits()) != 0 {
-        crate::s_println!(
-            "clone3 pid={} flags={:#x} pidfd_ptr={:#x} parent_tid={:#x} child_tid={:#x} cgroup={:#x}",
-            1,
-            args.flags,
-            args.pidfd,
-            args.parent_tid,
-            args.child_tid,
-            args.cgroup
-        );
-    }
     if args.set_tid != 0 || args.set_tid_size != 0 {
         return Err(SyscallError::NoSyscall);
     }
@@ -1566,13 +1538,26 @@ define_syscall!(Keyctl, |cmd: u64,
             Ok(keyring as usize)
         }
         KEYCTL_JOIN_SESSION_KEYRING => Ok(current_session_keyring(true)? as usize),
+        KEYCTL_SETPERM => {
+            let _keyring = resolve_keyring(arg2 as i32, true)?;
+            Ok(0)
+        }
         KEYCTL_LINK => {
             let _source = resolve_keyring(arg2 as i32, false)?;
             let _target = resolve_keyring(arg3 as i32, true)?;
             Ok(0)
         }
         KEYCTL_SESSION_TO_PARENT => Ok(0),
-        _ => Err(SyscallError::NoSyscall),
+        _ => {
+            crate::s_println!(
+                "unsupported keyctl pid={} cmd={} arg2={:#x} arg3={:#x}",
+                get_current_process().lock().pid.0,
+                cmd,
+                arg2,
+                arg3
+            );
+            Err(SyscallError::NoSyscall)
+        }
     }
 });
 

@@ -189,20 +189,7 @@ define_syscall!(Waitid, |id_type: i32,
 define_syscall!(Execve, |path_str: String,
                          args: Vec<String>,
                          env: Vec<String>| {
-    let current_pid = get_current_process().lock().pid.0;
-    if current_pid <= 32 {
-        s_println!(
-            "execve syscall body pid={} path={} argc={} envc={}",
-            current_pid,
-            path_str,
-            args.len(),
-            env.len()
-        );
-    }
     let path = crate::filesystem::path::Path::new(path_str.as_str());
-    if current_pid <= 32 {
-        s_println!("execve syscall body pid={} path-built", current_pid);
-    }
     execve(path, args, env)?;
     log::info!("execve done");
     Ok(0)
