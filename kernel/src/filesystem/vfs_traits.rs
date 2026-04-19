@@ -45,6 +45,9 @@ pub trait Directory: Send + Sync {
     fn name(&self) -> FSResult<String>;
     fn contents(&self) -> FSResult<Vec<DirectoryContentInfo>>;
     fn create(&self, info: DirectoryContentInfo) -> FSResult<()>;
+    fn create_symlink(&self, _name: &str, _target: &str) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
     fn delete(&self, name: &str) -> FSResult<()>;
     fn get(&self, name: &str) -> FSResult<FileLike>;
     fn chmod(&self, _mode: u32) -> FSResult<()> {
@@ -55,6 +58,9 @@ pub trait Directory: Send + Sync {
 pub trait Symlink: Send + Sync {
     fn info(&self) -> FSResult<FileLikeInfo>;
     fn target(&self) -> FSResult<Path>;
+    fn read_link_target(&self) -> FSResult<String> {
+        Ok(self.target()?.as_string())
+    }
     fn chmod(&self, _mode: u32) -> FSResult<()> {
         Err(FSError::Readonly)
     }

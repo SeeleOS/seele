@@ -15,7 +15,7 @@ use ext4plus::{
     error::Ext4Error,
     file::File as Ext4InnerFile,
     inode::{InodeCreationOptions, InodeFlags, InodeMode},
-    path::Path,
+    path::{Path, PathBuf as Ext4PathBuf},
 };
 
 use crate::filesystem::{
@@ -56,6 +56,15 @@ impl Ext4Directory {
 
     pub fn fs(&self) -> &Ext4 {
         &self.fs
+    }
+
+    fn open_parent_dir(&self) -> crate::filesystem::vfs::FSResult<(ext4plus::inode::Inode, Dir)> {
+        let parent_inode = self
+            .fs
+            .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
+            .map_err(map_ext4_error)?;
+        let parent = Dir::open_inode(&self.fs, parent_inode.clone()).map_err(map_ext4_error)?;
+        Ok((parent_inode, parent))
     }
 }
 
@@ -179,6 +188,17 @@ impl Directory for Ext4Directory {
             parent_inode.write(&self.fs).map_err(map_ext4_error)?;
         }
 
+        Ok(())
+    }
+
+    fn create_symlink(&self, name: &str, target: &str) -> crate::filesystem::vfs::FSResult<()> {
+        let (_, mut parent) = self.open_parent_dir()?;
+        let name = DirEntryName::try_from(name).map_err(|_| FSError::PathTooLong)?;
+        let target = Ext4PathBuf::try_from(target.to_string()).map_err(|_| FSError::PathTooLong)?;
+
+        self.fs
+            .symlink(&mut parent, name, target, 0, 0, Duration::from_millis(0))
+            .map_err(map_ext4_error)?;
         Ok(())
     }
 

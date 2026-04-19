@@ -81,7 +81,7 @@ impl FileLikeObject {
 
     pub fn read_link(&self) -> FSResult<String> {
         if let FileLike::Symlink(symlink) = &self.file {
-            Ok(symlink.lock().target()?.as_string())
+            symlink.lock().read_link_target()
         } else {
             Err(FSError::NotASymlink)
         }

@@ -43,6 +43,11 @@ impl VFS {
         ))
     }
 
+    pub fn create_symlink(&mut self, path: Path, target: &str) -> FSResult<()> {
+        let (parent_dir, name) = self.resolve_parent(path)?;
+        parent_dir.lock().create_symlink(&name, target)
+    }
+
     pub fn open(&mut self, path: Path) -> FSResult<FileLikeObject> {
         let normalized = self.normalize_path(path);
         log::trace!("vfs: open {}", normalized.clone().as_string());

@@ -506,6 +506,15 @@ define_syscall!(Unlink, |path: CString| {
     UnlinkAt::handle_call(AT_FDCWD as u64, path as u64, 0, 0, 0, 0)
 });
 
+define_syscall!(Symlink, |target: CString, link_path: CString| {
+    let target = path_from_raw(target)?;
+    let link_path = path_from_raw(link_path)?;
+    let link_path = resolve_path_at(AT_FDCWD, &link_path)?;
+
+    VirtualFS.lock().create_symlink(link_path, &target)?;
+    Ok(0)
+});
+
 define_syscall!(Chmod, |path: CString, mode: u32| {
     let path_str = path_from_raw(path)?;
     let path = resolve_path_at(AT_FDCWD, &path_str)?;

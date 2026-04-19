@@ -1,5 +1,5 @@
 use alloc::string::String;
-use ext4plus::{Ext4, FollowSymlinks, inode::Inode};
+use ext4plus::{Ext4, inode::Inode};
 
 use crate::filesystem::{
     errors::FSError,
@@ -40,5 +40,13 @@ impl Symlink for Ext4Symlink {
         };
 
         Ok(Path::new(&combined).as_absolute().as_normal())
+    }
+
+    fn read_link_target(&self) -> crate::filesystem::vfs::FSResult<String> {
+        let target = self.inode.symlink_target(&self.fs).map_err(FSError::from)?;
+        target
+            .to_str()
+            .map(String::from)
+            .map_err(|_| FSError::Other)
     }
 }
