@@ -120,6 +120,8 @@ pub enum SyscallNumber {
     SchedRrGetInterval = 148,
     Fadvise64 = 221,
     Waitid = 247,
+    AddKey = 248,
+    Keyctl = 250,
     InotifyInit = 253,
     InotifyAddWatch = 254,
     InotifyRmWatch = 255,

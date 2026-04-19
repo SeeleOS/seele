@@ -142,6 +142,8 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         InotifyAddWatch,
         InotifyRmWatch,
         Waitid,
+        AddKey,
+        Keyctl,
         EpollWait,
         EpollCtl,
         Tgkill,

@@ -1,5 +1,6 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{string::String, sync::Arc, vec::Vec};
 use bitflags::bitflags;
+use core::sync::atomic::{AtomicI32, Ordering};
 use x86_64::VirtAddr;
 use x86_rtc::Rtc;
 
@@ -160,6 +161,15 @@ const LINUX_REBOOT_MAGIC2: u32 = 0x2812_1969;
 const LINUX_REBOOT_CMD_CAD_OFF: u32 = 0x0000_0000;
 const LINUX_REBOOT_CMD_CAD_ON: u32 = 0x89ab_cdef;
 const BPF_COMMAND_MAX: u32 = 36;
+const KEYCTL_GET_KEYRING_ID: u64 = 0;
+const KEYCTL_JOIN_SESSION_KEYRING: u64 = 1;
+const KEYCTL_LINK: u64 = 8;
+const KEYCTL_SESSION_TO_PARENT: u64 = 18;
+const KEY_SPEC_SESSION_KEYRING: i32 = -3;
+const KEY_SPEC_USER_KEYRING: i32 = -4;
+
+static NEXT_SESSION_KEYRING_ID: AtomicI32 = AtomicI32::new(1);
+static NEXT_KEY_SERIAL: AtomicI32 = AtomicI32::new(1024);
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -199,6 +209,39 @@ fn capability_slot_and_mask(capability: u64) -> Result<(usize, u32), SyscallErro
         .checked_shl((capability % 32) as u32)
         .ok_or(SyscallError::InvalidArguments)?;
     Ok((slot, mask))
+}
+
+fn current_session_keyring(create: bool) -> Result<i32, SyscallError> {
+    let process = get_current_process();
+    let mut process = process.lock();
+    if process.session_keyring == 0 {
+        if !create {
+            return Err(SyscallError::NoData);
+        }
+        process.session_keyring = NEXT_SESSION_KEYRING_ID.fetch_add(1, Ordering::Relaxed);
+    }
+    Ok(process.session_keyring)
+}
+
+fn current_user_keyring(create: bool) -> Result<i32, SyscallError> {
+    let process = get_current_process();
+    let mut process = process.lock();
+    if process.user_keyring == 0 {
+        if !create {
+            return Err(SyscallError::NoData);
+        }
+        process.user_keyring = NEXT_SESSION_KEYRING_ID.fetch_add(1, Ordering::Relaxed);
+    }
+    Ok(process.user_keyring)
+}
+
+fn resolve_keyring(spec: i32, create: bool) -> Result<i32, SyscallError> {
+    match spec {
+        KEY_SPEC_SESSION_KEYRING => current_session_keyring(create),
+        KEY_SPEC_USER_KEYRING => current_user_keyring(create),
+        serial if serial > 0 => Ok(serial),
+        _ => Err(SyscallError::InvalidArguments),
+    }
 }
 
 fn clone_cleared_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalAction> {
@@ -1498,6 +1541,40 @@ define_syscall!(
 );
 
 define_syscall!(Sync, { Ok(0) });
+
+define_syscall!(AddKey, |type_name: String,
+                         description: String,
+                         payload: *const u8,
+                         plen: usize,
+                         keyring: i32| {
+    let _ = (type_name, description);
+    if plen != 0 && payload.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+    let _ = resolve_keyring(keyring, true)?;
+    Ok(NEXT_KEY_SERIAL.fetch_add(1, Ordering::Relaxed) as usize)
+});
+
+define_syscall!(Keyctl, |cmd: u64,
+                         arg2: u64,
+                         arg3: u64,
+                         _arg4: u64,
+                         _arg5: u64| {
+    match cmd {
+        KEYCTL_GET_KEYRING_ID => {
+            let keyring = resolve_keyring(arg2 as i32, arg3 != 0)?;
+            Ok(keyring as usize)
+        }
+        KEYCTL_JOIN_SESSION_KEYRING => Ok(current_session_keyring(true)? as usize),
+        KEYCTL_LINK => {
+            let _source = resolve_keyring(arg2 as i32, false)?;
+            let _target = resolve_keyring(arg3 as i32, true)?;
+            Ok(0)
+        }
+        KEYCTL_SESSION_TO_PARENT => Ok(0),
+        _ => Err(SyscallError::NoSyscall),
+    }
+});
 
 define_syscall!(Bpf, |cmd: u32, attr: *const u8, _size: usize| {
     if attr.is_null() {
