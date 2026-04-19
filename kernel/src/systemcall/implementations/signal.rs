@@ -302,6 +302,18 @@ define_syscall!(Tgkill, |tgid: i32, tid: i32, signal: i32| {
     Ok(0)
 });
 
+define_syscall!(PidfdSendSignal, |pidfd: ObjectRef,
+                                   signal: i32,
+                                   info: *const u8,
+                                   flags: u32| {
+    if !info.is_null() || flags != 0 {
+        return Err(SyscallError::NoSyscall);
+    }
+
+    let pid = pidfd.as_pidfd()?.pid();
+    Kill::handle_call(pid, signal as u64, 0, 0, 0, 0)
+});
+
 define_syscall!(SendSignalGroup, |group: ProcessGroupID, signal: Signal| {
     for ele in group.get_processes() {
         ele.lock().send_signal(signal);

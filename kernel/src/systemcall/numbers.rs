@@ -189,6 +189,7 @@ pub enum SyscallNumber {
     Bpf = 321,
     Statx = 332,
     Rseq = 334,
+    PidfdSendSignal = 424,
     Fsopen = 430,
     OpenTree = 428,
     PidfdOpen = 434,
