@@ -31,6 +31,25 @@ pub struct FileLikeObject {
     path: crate::filesystem::path::Path,
 }
 
+fn mount_device_id_for_path(path: &crate::filesystem::path::Path) -> u64 {
+    let Ok(mount_path) = VirtualFS.lock().mount_path(path.clone()) else {
+        return 1;
+    };
+
+    match mount_path.as_string().as_str() {
+        "/" => 1,
+        "/proc" => 2,
+        "/sys" => 3,
+        "/dev" => 4,
+        _ => 1,
+    }
+}
+
+fn stat_with_mount_device_id(mut stat: LinuxStat, path: &crate::filesystem::path::Path) -> LinuxStat {
+    stat.st_dev = mount_device_id_for_path(path);
+    stat
+}
+
 impl FileLikeObject {
     pub fn new(file: FileLike, path: crate::filesystem::path::Path) -> Self {
         Self { file, path }
@@ -298,9 +317,12 @@ impl Statable for FileLikeObject {
         if let Ok(Some(device)) = self.resolve_device_object()
             && let Ok(statable) = device.as_statable()
         {
-            return statable.stat();
+            return stat_with_mount_device_id(statable.stat(), &self.path);
         }
 
-        self.info().map(FileLikeInfo::as_linux).unwrap_or_default()
+        stat_with_mount_device_id(
+            self.info().map(FileLikeInfo::as_linux).unwrap_or_default(),
+            &self.path,
+        )
     }
 }

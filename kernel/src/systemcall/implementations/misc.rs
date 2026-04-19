@@ -8,7 +8,7 @@ use crate::memory::{
     protection::Protection,
     user_safe,
 };
-use crate::misc::time::Time as KernelTime;
+use crate::misc::time::{self, Time as KernelTime};
 use crate::misc::{others::protection_to_page_flags, utsname::UtsName};
 use crate::object::Object;
 use crate::object::linux_anon::{
@@ -201,6 +201,13 @@ struct LinuxTimeval {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
+struct LinuxTimezone {
+    tz_minuteswest: i32,
+    tz_dsttime: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
 struct LinuxSchedParam {
     sched_priority: i32,
 }
@@ -293,6 +300,28 @@ fn ns_to_linux_timespec(ns: u64) -> LinuxTimespec {
     }
 }
 
+fn linux_timespec_to_realtime_ns(timespec: LinuxTimespec) -> Result<i64, SyscallError> {
+    if timespec.tv_sec < 0 || !(0..1_000_000_000).contains(&timespec.tv_nsec) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    Ok(timespec
+        .tv_sec
+        .saturating_mul(1_000_000_000)
+        .saturating_add(timespec.tv_nsec))
+}
+
+fn linux_timeval_to_realtime_ns(timeval: LinuxTimeval) -> Result<i64, SyscallError> {
+    if timeval.tv_sec < 0 || !(0..1_000_000).contains(&timeval.tv_usec) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    Ok(timeval
+        .tv_sec
+        .saturating_mul(1_000_000_000)
+        .saturating_add(timeval.tv_usec.saturating_mul(1_000)))
+}
+
 fn linux_clock_now_ns(clock_id: i32) -> Result<i64, SyscallError> {
     match clock_id {
         0 | 5 | 8 | 11 => Ok(KernelTime::current().as_nanoseconds() as i64),
@@ -312,6 +341,21 @@ define_syscall!(ClockGettime, |clock_id: i32, tp: *mut LinuxTimespec| {
         tv_nsec: ns % 1_000_000_000,
     };
     user_safe::write(tp, &timespec)?;
+    Ok(0)
+});
+
+define_syscall!(ClockSettime, |clock_id: i32, tp: *const LinuxTimespec| {
+    if tp.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    if !matches!(clock_id, 0 | 8) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let timespec = user_safe::read(tp)?;
+    time::set_unix_timestamp_nanoseconds(linux_timespec_to_realtime_ns(timespec)?);
+
     Ok(0)
 });
 
@@ -504,7 +548,7 @@ define_syscall!(TimeSinceBoot, {
     Ok(KernelTime::since_boot().as_nanoseconds() as usize)
 });
 
-define_syscall!(Gettimeofday, |tv: *mut LinuxTimeval, tz: *mut u8| {
+define_syscall!(Gettimeofday, |tv: *mut LinuxTimeval, tz: *mut LinuxTimezone| {
     if !tv.is_null() {
         let now_ns = KernelTime::current().as_nanoseconds() as i64;
         let timeval = LinuxTimeval {
@@ -515,9 +559,26 @@ define_syscall!(Gettimeofday, |tv: *mut LinuxTimeval, tz: *mut u8| {
     }
 
     if !tz.is_null() {
-        if tz.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
+        let (tz_minuteswest, tz_dsttime) = time::timezone();
+        let timezone = LinuxTimezone {
+            tz_minuteswest,
+            tz_dsttime,
+        };
+        user_safe::write(tz, &timezone)?;
+    }
+
+    Ok(0)
+});
+
+define_syscall!(Settimeofday, |tv: *const LinuxTimeval, tz: *const LinuxTimezone| {
+    if !tv.is_null() {
+        let timeval = user_safe::read(tv)?;
+        time::set_unix_timestamp_nanoseconds(linux_timeval_to_realtime_ns(timeval)?);
+    }
+
+    if !tz.is_null() {
+        let timezone = user_safe::read(tz)?;
+        time::set_timezone(timezone.tz_minuteswest, timezone.tz_dsttime);
     }
 
     Ok(0)

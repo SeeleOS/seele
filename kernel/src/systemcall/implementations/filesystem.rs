@@ -21,6 +21,7 @@ const AT_FDCWD: i32 = -100;
 const UTIME_OMIT: i64 = 0x3fff_ffff;
 const STATX_BASIC_STATS: u32 = 0x0000_07ff;
 const STATX_MNT_ID: u32 = 0x0000_1000;
+const STATX_ATTR_MOUNT_ROOT: u64 = 0x0000_2000;
 const EXT4_SUPER_MAGIC: i64 = 0xEF53;
 const TMPFS_MAGIC: i64 = 0x0102_1994;
 const PROC_SUPER_MAGIC: i64 = 0x9fa0;
@@ -196,6 +197,20 @@ fn stat_mount_id_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<u64, S
 
     let path = resolve_path_at(dirfd, path_str)?;
     mount_id_for_path(&path)
+}
+
+fn stat_mount_root_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<bool, SyscallError> {
+    if path_str.is_empty() && flags.contains(AtFlags::EMPTY_PATH) {
+        let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
+        let file_like = object.as_file_like()?;
+        let path = file_like.path().normalize();
+        let mount_path = VirtualFS.lock().mount_path(path.clone())?;
+        return Ok(path.as_string() == mount_path.as_string());
+    }
+
+    let path = resolve_path_at(dirfd, path_str)?.normalize();
+    let mount_path = VirtualFS.lock().mount_path(path.clone())?;
+    Ok(path.as_string() == mount_path.as_string())
 }
 
 fn linux_statfs(f_type: i64) -> LinuxStatFs {
@@ -510,10 +525,12 @@ define_syscall!(Statx, |dirfd: i32,
 
     let stat = stat_at(dirfd, &path_str, flags)?;
     let mount_id = stat_mount_id_at(dirfd, &path_str, flags)?;
+    let mount_root = stat_mount_root_at(dirfd, &path_str, flags)?;
 
     let statx = LinuxStatx {
         stx_mask: STATX_BASIC_STATS | STATX_MNT_ID,
         stx_blksize: stat.st_blksize as u32,
+        stx_attributes: if mount_root { STATX_ATTR_MOUNT_ROOT } else { 0 },
         stx_nlink: stat.st_nlink as u32,
         stx_uid: stat.st_uid,
         stx_gid: stat.st_gid,
@@ -541,6 +558,7 @@ define_syscall!(Statx, |dirfd: i32,
         stx_dev_major: linux_major(stat.st_dev),
         stx_dev_minor: linux_minor(stat.st_dev),
         stx_mnt_id: mount_id,
+        stx_attributes_mask: STATX_ATTR_MOUNT_ROOT,
         ..Default::default()
     };
     user_safe::write(statx_ptr, &statx)?;

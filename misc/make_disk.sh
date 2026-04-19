@@ -96,4 +96,3 @@ sudo install -Dm644 "${ROOT_DIR}/misc/maplemono.ttf" "${SYSROOT_DIR}/usr/share/f
 sudo cp "${ROOT_DIR}/misc/xorg.conf" "${SYSROOT_DIR}/etc/X11/xorg.conf"
 sudo install -Dm755 "${ROOT_DIR}/misc/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
 sudo install -Dm755 "${ROOT_DIR}/misc/startplasma-manual.sh" "${SYSROOT_DIR}/usr/bin/startplasma-manual.sh"
-sudo install -Dm755 "${ROOT_DIR}/misc/init.sh" "${SYSROOT_DIR}/init"

@@ -1,11 +1,13 @@
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
 
 use crate::misc::get_cycles;
 use x86_rtc::Rtc;
 
 static BOOT_TSC: AtomicU64 = AtomicU64::new(0);
 static TSC_FREQ_HZ: AtomicU64 = AtomicU64::new(0);
-static BOOT_UNIX_SECONDS: AtomicU64 = AtomicU64::new(0);
+static REALTIME_BASE_NS: AtomicI64 = AtomicI64::new(0);
+static TIMEZONE_MINUTESWEST: AtomicI32 = AtomicI32::new(0);
+static TIMEZONE_DSTTIME: AtomicI32 = AtomicI32::new(0);
 
 pub const NANOSECONDS_PER_MICROSECOND: u64 = 1_000;
 pub const NANOSECONDS_PER_MILLISECOND: u64 = 1_000_000;
@@ -22,7 +24,10 @@ pub fn init() {
         detect_tsc_frequency_hz().unwrap_or(DEFAULT_TSC_FREQ_HZ),
         Ordering::SeqCst,
     );
-    BOOT_UNIX_SECONDS.store(Rtc::new().get_unix_timestamp() as u64, Ordering::SeqCst);
+    REALTIME_BASE_NS.store(
+        (Rtc::new().get_unix_timestamp() as i64).saturating_mul(NANOSECONDS_PER_SECOND as i64),
+        Ordering::SeqCst,
+    );
 }
 
 fn nanoseconds_since_boot() -> u64 {
@@ -38,14 +43,33 @@ fn nanoseconds_since_boot() -> u64 {
 }
 
 pub fn unix_timestamp_seconds() -> u64 {
-    BOOT_UNIX_SECONDS.load(Ordering::SeqCst) + Time::since_boot().as_seconds()
+    unix_timestamp_nanoseconds() / NANOSECONDS_PER_SECOND
 }
 
 pub fn unix_timestamp_nanoseconds() -> u64 {
-    BOOT_UNIX_SECONDS
+    let current = REALTIME_BASE_NS
         .load(Ordering::SeqCst)
-        .saturating_mul(NANOSECONDS_PER_SECOND)
-        .saturating_add(nanoseconds_since_boot())
+        .saturating_add(nanoseconds_since_boot() as i64);
+    current.max(0) as u64
+}
+
+pub fn set_unix_timestamp_nanoseconds(unix_time_ns: i64) {
+    REALTIME_BASE_NS.store(
+        unix_time_ns.saturating_sub(nanoseconds_since_boot() as i64),
+        Ordering::SeqCst,
+    );
+}
+
+pub fn timezone() -> (i32, i32) {
+    (
+        TIMEZONE_MINUTESWEST.load(Ordering::SeqCst),
+        TIMEZONE_DSTTIME.load(Ordering::SeqCst),
+    )
+}
+
+pub fn set_timezone(minuteswest: i32, dsttime: i32) {
+    TIMEZONE_MINUTESWEST.store(minuteswest, Ordering::SeqCst);
+    TIMEZONE_DSTTIME.store(dsttime, Ordering::SeqCst);
 }
 
 impl Time {

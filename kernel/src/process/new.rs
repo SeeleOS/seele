@@ -35,7 +35,7 @@ use crate::{
 const DEFAULT_PATH: &str = "PATH=/bin:/usr/bin";
 const DEFAULT_TERM: &str = "TERM=xterm-256color";
 const DEFAULT_HOME: &str = "HOME=/home";
-const INIT_PATH: &str = "/init";
+const INIT_PATH: &str = "/sbin/init";
 const MAX_SHEBANG_DEPTH: usize = 4;
 
 fn parse_shebang(program_bytes: &[u8]) -> Result<Option<(Path, Option<String>)>, FSError> {
