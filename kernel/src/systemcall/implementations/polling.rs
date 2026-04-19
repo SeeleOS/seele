@@ -46,6 +46,13 @@ struct LinuxEpollEvent {
     data: LinuxEpollData,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct LinuxTimespec {
+    tv_sec: i64,
+    tv_nsec: i64,
+}
+
 fn read_epoll_event(event_ptr: *const LinuxEpollEvent) -> LinuxEpollEvent {
     unsafe { event_ptr.read_unaligned() }
 }
@@ -224,6 +231,24 @@ fn epoll_wait_impl(
     Ok(woken_events.len())
 }
 
+fn epoll_pwait2_timeout_ms(timeout: *const LinuxTimespec) -> Result<i32, SyscallError> {
+    if timeout.is_null() {
+        return Ok(-1);
+    }
+
+    let timeout = unsafe { timeout.read() };
+    if timeout.tv_sec < 0 || !(0..1_000_000_000).contains(&timeout.tv_nsec) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let timeout_ms = (timeout.tv_sec as u128)
+        .saturating_mul(1_000)
+        .saturating_add(timeout.tv_nsec as u128 / 1_000_000)
+        .saturating_add(u128::from(timeout.tv_nsec % 1_000_000 != 0));
+
+    Ok(timeout_ms.min(i32::MAX as u128) as i32)
+}
+
 define_syscall!(EpollWait, |poller: ObjectRef,
                             events_ptr: *mut LinuxEpollEvent,
                             maxevents: usize,
@@ -235,5 +260,15 @@ define_syscall!(EpollPwait, |poller: ObjectRef,
                              events_ptr: *mut LinuxEpollEvent,
                              maxevents: usize,
                              timeout: i32| {
+    epoll_wait_impl(poller, events_ptr, maxevents, timeout)
+});
+
+define_syscall!(EpollPwait2, |poller: ObjectRef,
+                              events_ptr: *mut LinuxEpollEvent,
+                              maxevents: usize,
+                              timeout: *const LinuxTimespec,
+                              _sigmask: *const u8,
+                              _sigsetsize: usize| {
+    let timeout = epoll_pwait2_timeout_ms(timeout)?;
     epoll_wait_impl(poller, events_ptr, maxevents, timeout)
 });
