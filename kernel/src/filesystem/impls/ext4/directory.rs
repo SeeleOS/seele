@@ -123,6 +123,14 @@ impl Directory for Ext4Directory {
     }
 
     fn create(&self, info: DirectoryContentInfo) -> crate::filesystem::vfs::FSResult<()> {
+        let child_name = info.name.clone();
+        let child_type = info.content_type.clone();
+        crate::s_println!(
+            "ext4 create: start parent={} name={} type={:?}",
+            self.path,
+            child_name,
+            child_type
+        );
         let (file_type, mode) = match info.content_type {
             DirectoryContentType::File => (
                 FileType::Regular,
@@ -146,6 +154,11 @@ impl Directory for Ext4Directory {
             _ => unimplemented!(),
         };
 
+        crate::s_println!(
+            "ext4 create: create_inode start parent={} name={}",
+            self.path,
+            child_name
+        );
         let mut new_inode = self.fs.create_inode(InodeCreationOptions {
             file_type,
             uid: 0,
@@ -154,40 +167,100 @@ impl Directory for Ext4Directory {
             time: Duration::from_millis(0),
             mode,
         })?;
+        crate::s_println!(
+            "ext4 create: create_inode done parent={} name={}",
+            self.path,
+            child_name
+        );
 
         // Parent inode of the new inode. In this case, the parent inode is [`self`]
+        crate::s_println!(
+            "ext4 create: parent inode lookup start parent={} name={}",
+            self.path,
+            child_name
+        );
         let mut parent_inode = self
             .fs
             .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
             .map_err(map_ext4_error)?;
+        crate::s_println!(
+            "ext4 create: parent inode lookup done parent={} name={}",
+            self.path,
+            child_name
+        );
+        crate::s_println!(
+            "ext4 create: open parent dir start parent={} name={}",
+            self.path,
+            child_name
+        );
         let mut parent = Dir::open_inode(&self.fs, parent_inode.clone()).map_err(map_ext4_error)?;
+        crate::s_println!(
+            "ext4 create: open parent dir done parent={} name={}",
+            self.path,
+            child_name
+        );
 
         if matches!(info.content_type, DirectoryContentType::Directory) {
             // A freshly-created ext4 directory needs an initialized first block
             // containing "." and ".." before new children can be linked into it.
+            crate::s_println!(
+                "ext4 create: init child dir start parent={} name={}",
+                self.path,
+                child_name
+            );
             new_inode.set_links_count(1);
             new_inode.write(&self.fs).map_err(map_ext4_error)?;
             let child_dir = Dir::init(self.fs.clone(), new_inode, parent_inode.index)
                 .map_err(map_ext4_error)?;
             new_inode = child_dir.inode().clone();
+            crate::s_println!(
+                "ext4 create: init child dir done parent={} name={}",
+                self.path,
+                child_name
+            );
         }
 
+        crate::s_println!(
+            "ext4 create: link start parent={} name={}",
+            self.path,
+            child_name
+        );
         parent
             .link(
                 DirEntryName::try_from(info.name.as_str()).unwrap(),
                 &mut new_inode,
             )
             .map_err(map_ext4_error)?;
+        crate::s_println!(
+            "ext4 create: link done parent={} name={}",
+            self.path,
+            child_name
+        );
 
         if matches!(info.content_type, DirectoryContentType::Directory) {
+            crate::s_println!(
+                "ext4 create: parent link count update start parent={} name={}",
+                self.path,
+                child_name
+            );
             let new_links = parent_inode
                 .links_count()
                 .checked_add(1)
                 .ok_or(FSError::Other)?;
             parent_inode.set_links_count(new_links);
             parent_inode.write(&self.fs).map_err(map_ext4_error)?;
+            crate::s_println!(
+                "ext4 create: parent link count update done parent={} name={}",
+                self.path,
+                child_name
+            );
         }
 
+        crate::s_println!(
+            "ext4 create: done parent={} name={}",
+            self.path,
+            child_name
+        );
         Ok(())
     }
 

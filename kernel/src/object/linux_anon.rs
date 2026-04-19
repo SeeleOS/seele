@@ -19,6 +19,7 @@ use crate::{
     signal::{Signal, Signals},
     thread::{
         THREAD_MANAGER,
+        manager::ThreadManager,
         yielding::{
             BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
         },
@@ -34,8 +35,29 @@ struct SignalfdRegistry {
     watchers: BTreeMap<u64, alloc::vec::Vec<Weak<SignalfdObject>>>,
 }
 
+#[derive(Default)]
+struct PidFdRegistry {
+    watchers: BTreeMap<u64, alloc::vec::Vec<Weak<PidFdObject>>>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MemFdState {
+    seals: u32,
+    allow_sealing: bool,
+}
+
+#[derive(Default)]
+struct MemFdRegistry {
+    states: BTreeMap<alloc::string::String, MemFdState>,
+}
+
+const F_SEAL_SEAL: u32 = 0x0001;
+const SUPPORTED_MEMFD_SEALS: u32 = 0x001f;
+
 lazy_static::lazy_static! {
     static ref SIGNALFD_REGISTRY: Mutex<SignalfdRegistry> = Mutex::new(SignalfdRegistry::default());
+    static ref PIDFD_REGISTRY: Mutex<PidFdRegistry> = Mutex::new(PidFdRegistry::default());
+    static ref MEMFD_REGISTRY: Mutex<MemFdRegistry> = Mutex::new(MemFdRegistry::default());
 }
 
 #[repr(C)]
@@ -63,6 +85,169 @@ struct LinuxSignalfdSiginfo {
     ssi_call_addr: u64,
     ssi_arch: u32,
     __pad: [u8; 28],
+}
+
+#[derive(Debug)]
+pub struct PidFdObject {
+    flags: Mutex<FileFlags>,
+    pid: u64,
+    self_ref: Mutex<Option<Weak<PidFdObject>>>,
+}
+
+impl PidFdObject {
+    pub fn new(pid: u64) -> Arc<Self> {
+        let pidfd = Arc::new(Self {
+            flags: Mutex::new(FileFlags::empty()),
+            pid,
+            self_ref: Mutex::new(None),
+        });
+        *pidfd.self_ref.lock() = Some(Arc::downgrade(&pidfd));
+        register_pidfd(pid, &pidfd);
+        pidfd
+    }
+
+    pub fn pid(&self) -> u64 {
+        self.pid
+    }
+
+    fn self_object(&self) -> Option<ObjectRef> {
+        self.self_ref
+            .lock()
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .map(|object| object as ObjectRef)
+    }
+
+    fn is_alive(&self) -> bool {
+        MANAGER
+            .lock()
+            .processes
+            .get(&crate::process::misc::ProcessID(self.pid))
+            .is_some_and(|process| !process.lock().have_exited())
+    }
+
+    fn wake_waiters_with_manager(&self, manager: &mut ThreadManager) {
+        manager.wake_io();
+        if let Some(object) = self.self_object() {
+            manager.wake_poller(object, PollableEvent::CanBeRead);
+        }
+    }
+}
+
+fn register_pidfd(pid: u64, pidfd: &Arc<PidFdObject>) {
+    let mut registry = PIDFD_REGISTRY.lock();
+    let watchers = registry.watchers.entry(pid).or_default();
+    watchers.retain(|watcher| watcher.strong_count() > 0);
+    watchers.push(Arc::downgrade(pidfd));
+}
+
+fn pidfds_for_process(pid: u64) -> alloc::vec::Vec<Arc<PidFdObject>> {
+    {
+        let mut registry = PIDFD_REGISTRY.lock();
+        let Some(watchers) = registry.watchers.get_mut(&pid) else {
+            return alloc::vec::Vec::new();
+        };
+
+        let mut strong = alloc::vec::Vec::new();
+        watchers.retain(|watcher| {
+            if let Some(pidfd) = watcher.upgrade() {
+                strong.push(pidfd);
+                true
+            } else {
+                false
+            }
+        });
+        strong
+    }
+}
+
+pub fn wake_pidfd_for_process_with_manager(pid: u64, manager: &mut ThreadManager) {
+    for pidfd in pidfds_for_process(pid) {
+        pidfd.wake_waiters_with_manager(manager);
+    }
+}
+
+pub fn wake_pidfd_for_process(pid: u64) {
+    let watchers = pidfds_for_process(pid);
+    if watchers.is_empty() {
+        return;
+    }
+
+    let mut manager = THREAD_MANAGER.get().unwrap().lock();
+    for pidfd in watchers {
+        pidfd.wake_waiters_with_manager(&mut manager);
+    }
+}
+
+fn memfd_key(path: &crate::filesystem::path::Path) -> alloc::string::String {
+    path.clone().normalize().as_string()
+}
+
+pub fn register_memfd(path: &crate::filesystem::path::Path, allow_sealing: bool) {
+    MEMFD_REGISTRY.lock().states.insert(
+        memfd_key(path),
+        MemFdState {
+            seals: if allow_sealing { 0 } else { F_SEAL_SEAL },
+            allow_sealing,
+        },
+    );
+}
+
+pub fn memfd_get_seals(path: &crate::filesystem::path::Path) -> Option<u32> {
+    MEMFD_REGISTRY
+        .lock()
+        .states
+        .get(&memfd_key(path))
+        .map(|state| state.seals)
+}
+
+pub fn memfd_add_seals(
+    path: &crate::filesystem::path::Path,
+    seals: u32,
+) -> crate::systemcall::utils::SyscallResult {
+    if (seals & !SUPPORTED_MEMFD_SEALS) != 0 {
+        return Err(crate::systemcall::utils::SyscallError::InvalidArguments);
+    }
+
+    let mut registry = MEMFD_REGISTRY.lock();
+    let state = registry
+        .states
+        .get_mut(&memfd_key(path))
+        .ok_or(crate::systemcall::utils::SyscallError::InvalidArguments)?;
+
+    if !state.allow_sealing || (state.seals & F_SEAL_SEAL) != 0 {
+        return Err(crate::systemcall::utils::SyscallError::PermissionDenied);
+    }
+
+    state.seals |= seals;
+    Ok(0)
+}
+
+impl Object for PidFdObject {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(*self.flags.lock())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        *self.flags.lock() = flags;
+        Ok(())
+    }
+
+    impl_cast_function!("pollable", Pollable);
+    impl_cast_function!("statable", Statable);
+    impl_cast_function_non_trait!("pidfd", PidFdObject);
+}
+
+impl Pollable for PidFdObject {
+    fn is_event_ready(&self, event: PollableEvent) -> bool {
+        matches!(event, PollableEvent::CanBeRead) && !self.is_alive()
+    }
+}
+
+impl Statable for PidFdObject {
+    fn stat(&self) -> LinuxStat {
+        LinuxStat::char_device(0o600)
+    }
 }
 
 #[derive(Debug)]

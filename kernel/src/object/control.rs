@@ -1,6 +1,10 @@
 use crate::object::FileFlags;
 use crate::{
-    object::{error::ObjectError, misc::ObjectRef},
+    object::{
+        error::ObjectError,
+        linux_anon::{memfd_add_seals, memfd_get_seals},
+        misc::ObjectRef,
+    },
     process::misc::with_current_process,
     systemcall::utils::{SyscallError, SyscallResult},
 };
@@ -15,6 +19,8 @@ enum FcntlCmd {
     GetFl = 3,
     SetFl = 4,
     DupFdCloexec = 1030,
+    AddSeals = 1033,
+    GetSeals = 1034,
 }
 
 const O_WRONLY: usize = 0o1;
@@ -70,5 +76,15 @@ pub fn control_object(object: ObjectRef, command: u64, arg: u64) -> SyscallResul
                 .map_err(Into::into)
         }),
         FcntlCmd::SetFd | FcntlCmd::GetFd => Ok(0),
+        FcntlCmd::AddSeals => {
+            let file_like = object.as_file_like()?;
+            memfd_add_seals(&file_like.path(), arg as u32)
+        }
+        FcntlCmd::GetSeals => {
+            let file_like = object.as_file_like()?;
+            memfd_get_seals(&file_like.path())
+                .map(|seals| seals as usize)
+                .ok_or(SyscallError::InvalidArguments)
+        }
     }
 }

@@ -6,6 +6,7 @@ use x86_64::{VirtAddr, instructions::interrupts::without_interrupts};
 use crate::{
     misc::snapshot::Snapshot,
     process::manager::MANAGER,
+    s_println,
     thread::{THREAD_MANAGER, ThreadRef, misc::State, snapshot::ThreadSnapshot},
     tss::TSS,
 };
@@ -34,6 +35,32 @@ impl Future for ThreadFuture {
         self: core::pin::Pin<&mut Self>,
         cx: &mut core::task::Context<'_>,
     ) -> core::task::Poll<Self::Output> {
+        let (thread_pid_before, thread_state_before, current_pid_before) = {
+            let thread = self.0.lock();
+            let thread_pid = thread.parent.lock().pid.0;
+            let state = thread.state.clone();
+            drop(thread);
+
+            let current_pid = THREAD_MANAGER
+                .get()
+                .unwrap()
+                .lock()
+                .current
+                .clone()
+                .map(|current| current.lock().parent.lock().pid.0)
+                .unwrap_or(0);
+
+            (thread_pid, state, current_pid)
+        };
+        if thread_pid_before <= 3 && !matches!(thread_state_before, State::Running) {
+            s_println!(
+                "threadfuture poll enter: pid={} state={:?} current_pid={}",
+                thread_pid_before,
+                thread_state_before,
+                current_pid_before
+            );
+        }
+
         let (thread_snapshot, executor_snapshot) = {
             without_interrupts(|| {
                 let mut manager = THREAD_MANAGER.get().unwrap().lock();
@@ -85,10 +112,18 @@ impl Future for ThreadFuture {
         let _ = process.lock().process_signals();
 
         let state = self.0.lock().state.clone();
+        if thread_pid_before <= 3 && !matches!(state, State::Running) {
+            s_println!(
+                "threadfuture poll exit: pid={} state={:?}",
+                thread_pid_before,
+                state
+            );
+        }
 
         match state {
             State::Zombie => {
                 log::debug!("thread poll: zombie");
+                self.0.lock().task_id = None;
                 THREAD_MANAGER
                     .get()
                     .unwrap()
@@ -100,7 +135,7 @@ impl Future for ThreadFuture {
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }
-            State::Blocked(_) => Poll::Ready(()),
+            State::Blocked(_) => Poll::Pending,
             State::Ready => panic!("wat"),
         }
     }

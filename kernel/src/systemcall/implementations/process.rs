@@ -5,13 +5,14 @@ use crate::{
     define_syscall,
     memory::user_safe,
     misc::signal::SigInfo,
+    object::misc::get_object_current_process,
     process::{
         ProcessRef,
         execve::execve,
         manager::{MANAGER, get_current_process, terminate_process},
         misc::ProcessID,
     },
-    s_print,
+    s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
         THREAD_MANAGER, get_current_thread,
@@ -28,6 +29,8 @@ bitflags! {
         const WNOWAIT = 0x0100_0000;
     }
 }
+
+const CLD_EXITED: i32 = 1;
 
 fn exit_code_to_status(exit_code: u64) -> i32 {
     ((exit_code & 0xff) << 8) as i32
@@ -96,12 +99,27 @@ define_syscall!(Wait4, |target_process: i32,
             } else if matched_child {
                 None
             } else {
+                if current_process.lock().pid.0 <= 2 {
+                    s_println!(
+                        "wait4: pid={} no matching child for target={}",
+                        current_process.lock().pid.0,
+                        target_process
+                    );
+                }
                 return Err(SyscallError::NoProcess);
             }
         };
 
         match check_result {
             Some((process, exit_code)) => {
+                if current_process.lock().pid.0 <= 2 {
+                    s_println!(
+                        "wait4: pid={} returning child_pid={} exit_code={}",
+                        current_process.lock().pid.0,
+                        process.lock().pid.0,
+                        exit_code
+                    );
+                }
                 if !status_ptr.is_null() {
                     let status = exit_code_to_status(exit_code);
                     user_safe::write(status_ptr, &status)?;
@@ -114,6 +132,13 @@ define_syscall!(Wait4, |target_process: i32,
                 return Ok(0);
             }
             None => {
+                if current_process.lock().pid.0 <= 2 {
+                    s_println!(
+                        "wait4: pid={} blocking for target={}",
+                        current_process.lock().pid.0,
+                        target_process
+                    );
+                }
                 block_current_with_sig_check(BlockType::WakeRequired {
                     wake_type: WakeType::ProcsesExit,
                     deadline: None,
@@ -122,6 +147,13 @@ define_syscall!(Wait4, |target_process: i32,
                     crate::object::error::ObjectError::Interrupted => SyscallError::Interrupted,
                     _ => SyscallError::TryAgain,
                 })?;
+                if current_process.lock().pid.0 <= 2 {
+                    s_println!(
+                        "wait4: pid={} resumed for target={}",
+                        current_process.lock().pid.0,
+                        target_process
+                    );
+                }
             }
         }
     }
@@ -135,6 +167,7 @@ define_syscall!(Waitid, |id_type: i32,
         0 => -1,
         1 => id as i32,
         2 => -(id as i32),
+        3 => get_object_current_process(id as u64)?.as_pidfd()?.pid() as i32,
         _ => return Err(SyscallError::InvalidArguments),
     };
 
@@ -157,8 +190,10 @@ define_syscall!(Waitid, |id_type: i32,
             SigInfo::default()
         } else {
             SigInfo {
+                si_signo: crate::signal::Signal::ChildChanged as i32,
+                si_code: CLD_EXITED,
                 si_pid: pid as i32,
-                si_status: status,
+                si_status: (status >> 8) & 0xff,
                 ..Default::default()
             }
         };

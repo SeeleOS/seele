@@ -1,4 +1,5 @@
 use alloc::{collections::btree_map::BTreeMap, sync::Arc};
+use core::sync::atomic::Ordering;
 use crossbeam_queue::ArrayQueue;
 use spin::Mutex;
 
@@ -23,5 +24,19 @@ impl TaskSpawner {
             panic!("task with same ID already in tasks");
         }
         self.task_queue.push(task_id).expect("queue full");
+    }
+
+    pub fn wake_existing(&mut self, task_id: TaskID) {
+        let queued = {
+            let tasks = self.tasks.lock();
+            let Some(task) = tasks.get(&task_id) else {
+                return;
+            };
+            task.wake_handle()
+        };
+
+        if !queued.swap(true, Ordering::AcqRel) {
+            self.task_queue.push(task_id).expect("queue full");
+        }
     }
 }

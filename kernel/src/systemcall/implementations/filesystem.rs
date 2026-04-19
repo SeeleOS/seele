@@ -722,8 +722,9 @@ define_syscall!(Flistxattr, |object: ObjectRef,
 define_syscall!(UnlinkAt, |dirfd: i32, path: CString, flags: i32| {
     let _ = path_is_relative_to_cwd(dirfd)?;
     let path = path_from_raw(path)?;
-    if AtFlags::from_bits_truncate(flags).contains(AtFlags::REMOVEDIR) {
-        return Err(SyscallError::NoSyscall);
+    let flags = AtFlags::from_bits_truncate(flags);
+    if flags.bits() & !AtFlags::REMOVEDIR.bits() != 0 {
+        return Err(SyscallError::InvalidArguments);
     }
     VirtualFS.lock().delete_file(Path::new(&path))?;
     Ok(0)
@@ -783,10 +784,13 @@ define_syscall!(Mount, |source: CString,
                         data: CString| {
     let _source = string_from_raw_optional(source)?;
     let target = path_from_raw(target)?;
-    let filesystemtype = path_from_raw(filesystemtype)?;
+    let filesystemtype = string_from_raw_optional(filesystemtype)?;
     let _data = string_from_raw_optional(data)?;
 
-    if !is_supported_api_mount(&filesystemtype) {
+    if filesystemtype
+        .as_deref()
+        .is_some_and(|filesystemtype| !is_supported_api_mount(filesystemtype))
+    {
         return Err(SyscallError::NoSyscall);
     }
 

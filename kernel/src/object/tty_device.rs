@@ -1,4 +1,4 @@
-use alloc::{collections::vec_deque::VecDeque, sync::Arc};
+use alloc::{collections::vec_deque::VecDeque, format, sync::Arc, vec::Vec};
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
 
@@ -41,6 +41,20 @@ fn get_appropriate_keyboard_queue(mode: KeyboardMode) -> &'static Mutex<VecDeque
             KEYBOARD_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
         }
     }
+}
+
+fn terminal_query_responses(buffer: &[u8], rows: u64, cols: u64) -> Vec<u8> {
+    let mut responses = Vec::new();
+
+    for index in 0..buffer.len() {
+        if buffer[index..].starts_with(b"\x1b[18t") {
+            responses.extend_from_slice(format!("\x1b[8;{};{}t", rows, cols).as_bytes());
+        } else if buffer[index..].starts_with(b"\x1b[6n") {
+            responses.extend_from_slice(format!("\x1b[{};{}R", rows, cols).as_bytes());
+        }
+    }
+
+    responses
 }
 
 impl Pollable for TtyDevice {
@@ -100,7 +114,21 @@ impl Object for TtyDevice {
 
 impl Writable for TtyDevice {
     fn write(&self, buffer: &[u8]) -> super::ObjectResult<usize> {
-        self.terminal.lock().write(buffer)
+        let response = {
+            let terminal = self.terminal.lock();
+            let info = *terminal.info.lock();
+            terminal_query_responses(buffer, info.rows, info.cols)
+        };
+
+        let written = self.terminal.lock().write(buffer)?;
+
+        if !response.is_empty() {
+            let queue = get_appropriate_keyboard_queue(self.keyboard_mode());
+            queue.lock().extend(response);
+            wake_tty_poller_readable();
+        }
+
+        Ok(written)
     }
 }
 

@@ -10,12 +10,15 @@ use crate::memory::{
 };
 use crate::misc::error::AsSyscallError;
 use crate::misc::time::{self, Time as KernelTime};
-use crate::misc::{others::protection_to_page_flags, utsname::UtsName};
+use crate::misc::{others::protection_to_page_flags, reboot as reboot_state, utsname::UtsName};
 use crate::object::Object;
 use crate::object::linux_anon::{
-    EventFdObject, InotifyObject, TimerFdObject, wake_linux_io_waiters,
+    EventFdObject, InotifyObject, PidFdObject, TimerFdObject, wake_linux_io_waiters,
 };
-use crate::process::manager::{MANAGER, get_current_process};
+use crate::process::{
+    manager::{MANAGER, get_current_process},
+    misc::{ProcessID, get_process_with_pid},
+};
 use crate::signal::{
     action::{SignalAction, SignalHandlingType},
     misc::default_signal_action_vec,
@@ -34,6 +37,7 @@ bitflags! {
         const FILES = 0x0000_0400;
         const SIGHAND = 0x0000_0800;
         const VFORK = 0x0000_4000;
+        const NEWNS = 0x0002_0000;
         const THREAD = 0x0001_0000;
         const SETTLS = 0x0008_0000;
         const PARENT_SETTID = 0x0010_0000;
@@ -117,6 +121,11 @@ const TFD_NONBLOCK: i32 = 0o4_000;
 const EFD_SEMAPHORE: i32 = 0x1;
 const EFD_NONBLOCK: i32 = 0o4_000;
 const EFD_ALLOWED_FLAGS: i32 = EFD_SEMAPHORE | EFD_NONBLOCK | 0o2_000_000;
+const LINUX_REBOOT_MAGIC1: u32 = 0xfee1_dead;
+const LINUX_REBOOT_MAGIC2: u32 = 0x2812_1969;
+const LINUX_REBOOT_CMD_CAD_OFF: u32 = 0x0000_0000;
+const LINUX_REBOOT_CMD_CAD_ON: u32 = 0x89ab_cdef;
+const BPF_COMMAND_MAX: u32 = 36;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -645,14 +654,50 @@ define_syscall!(Uname, |info: *mut UtsName| {
     if info.is_null() {
         return Err(SyscallError::BadAddress);
     }
-    let uts = UtsName::new(
-        NAME,
+    let mut uts = UtsName::new(
+        "Seele",
         env!("CARGO_PKG_VERSION"),
         env!("CARGO_PKG_VERSION"),
         "x86_64",
     );
+    uts.nodename = crate::misc::utsname::current_hostname(NAME);
     user_safe::write(info, &uts)?;
     Ok(0)
+});
+
+define_syscall!(Sethostname, |name: *const u8, len: usize| {
+    if len > 64 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let mut hostname = Vec::with_capacity(len);
+    for offset in 0..len {
+        hostname.push(user_safe::read(unsafe { name.add(offset) })?);
+    }
+
+    crate::misc::utsname::set_hostname(&hostname).map_err(|_| SyscallError::InvalidArguments)?;
+    Ok(0)
+});
+
+define_syscall!(Reboot, |magic1: u32,
+                         magic2: u32,
+                         cmd: u32,
+                         _arg: *const u8| {
+    if magic1 != LINUX_REBOOT_MAGIC1 || magic2 != LINUX_REBOOT_MAGIC2 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    match cmd {
+        LINUX_REBOOT_CMD_CAD_OFF => {
+            reboot_state::set_ctrl_alt_del_enabled(false);
+            Ok(0)
+        }
+        LINUX_REBOOT_CMD_CAD_ON => {
+            reboot_state::set_ctrl_alt_del_enabled(true);
+            Ok(0)
+        }
+        _ => Err(SyscallError::InvalidArguments),
+    }
 });
 
 define_syscall!(Pause, {
@@ -806,6 +851,7 @@ define_syscall!(Clone, |flags: u64,
             & !(0xff
                 | CloneFlags::VM.bits()
                 | CloneFlags::VFORK.bits()
+                | CloneFlags::NEWNS.bits()
                 | CloneFlags::CLEAR_SIGHAND.bits()
                 | CloneFlags::PARENT_SETTID.bits()
                 | CloneFlags::CHILD_SETTID.bits()
@@ -931,7 +977,9 @@ define_syscall!(PidfdOpen, |pid: i32, flags: u32| {
         return Err(SyscallError::InvalidArguments);
     }
 
-    Err(SyscallError::NoSyscall)
+    get_process_with_pid(ProcessID(pid as u64))?;
+    let pidfd: Arc<dyn Object> = PidFdObject::new(pid as u64);
+    Ok(get_current_process().lock().push_object(pidfd))
 });
 
 define_syscall!(SchedYield, { Ok(0) });
@@ -1236,6 +1284,18 @@ define_syscall!(
 );
 
 define_syscall!(Sync, { Ok(0) });
+
+define_syscall!(Bpf, |cmd: u32, attr: *const u8, _size: usize| {
+    if attr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+    if cmd > BPF_COMMAND_MAX {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    // Report BPF as unsupported until the kernel grows a real verifier/object model.
+    Err(SyscallError::InvalidArguments)
+});
 
 define_syscall!(SetRobustList, |head: u64, len: usize| {
     let current = crate::thread::get_current_thread();

@@ -13,7 +13,7 @@ use crate::{
     filesystem::object::FileLikeObject,
     object::{
         error::ObjectError,
-        linux_anon::{EventFdObject, InotifyObject, SignalfdObject, TimerFdObject},
+        linux_anon::{EventFdObject, InotifyObject, PidFdObject, SignalfdObject, TimerFdObject},
         misc::ObjectResult,
         traits::{Configuratable, MemoryMappable, Readable, Seekable, Statable, Writable},
     },
@@ -77,6 +77,7 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function_non_trait!("eventfd", EventFdObject, BadFileDescriptor);
     define_cast_function_non_trait!("inotify", InotifyObject, BadFileDescriptor);
     define_cast_function_non_trait!("poller", PollerObject, BadFileDescriptor);
+    define_cast_function_non_trait!("pidfd", PidFdObject, BadFileDescriptor);
     define_cast_function_non_trait!("signalfd", SignalfdObject, BadFileDescriptor);
     define_cast_function_non_trait!("timerfd", TimerFdObject, BadFileDescriptor);
     define_cast_function_non_trait!("unix_socket", UnixSocketObject, BadFileDescriptor);

@@ -15,6 +15,7 @@ pub mod logging;
 pub mod mouse;
 pub mod others;
 pub mod panic;
+pub mod reboot;
 pub mod serial_print;
 pub mod signal;
 pub mod snapshot;

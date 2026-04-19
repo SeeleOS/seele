@@ -35,13 +35,11 @@ impl ThreadManager {
         self.threads.insert(id, thread);
 
         let thread = self.threads.get_mut(&id).unwrap();
+        let task = Task::new(ThreadFuture(thread.clone()));
+        thread.lock().task_id = Some(task.id);
 
         log::debug!("thread spawn: {:?}", id);
-        TASK_SPAWNER
-            .get()
-            .unwrap()
-            .lock()
-            .spawn(Task::new(ThreadFuture(thread.clone())));
+        TASK_SPAWNER.get().unwrap().lock().spawn(task);
 
         thread.clone()
     }

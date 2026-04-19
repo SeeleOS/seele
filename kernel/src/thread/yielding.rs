@@ -8,6 +8,7 @@ use crate::{
     },
     polling::event::PollableEvent,
     process::{manager::get_current_process, misc::ProcessID},
+    s_println,
     systemcall::utils::SyscallResult,
     task::{TASK_SPAWNER, task::Task},
     thread::{
@@ -151,15 +152,33 @@ impl ThreadManager {
 
     pub fn wake(&mut self, thread: ThreadRef) {
         log::debug!("thread wake");
+        let (thread_id, parent_pid) = {
+            let locked = thread.lock();
+            (locked.id.0, locked.parent.lock().pid.0)
+        };
+        if parent_pid <= 3 {
+            s_println!("wake: tid={} pid={}", thread_id, parent_pid);
+        }
         self.remove_from_blocked_queues(&thread);
         let mut locked_thread = thread.lock();
         if matches!(locked_thread.state, State::Blocked(_)) {
             locked_thread.state = State::Ready;
-            TASK_SPAWNER
-                .get()
-                .unwrap()
-                .lock()
-                .spawn(Task::new(ThreadFuture(thread.clone())));
+            let task_id = locked_thread.task_id;
+            if parent_pid <= 3 {
+                s_println!("wake: tid={} pid={} -> ready", thread_id, parent_pid);
+            }
+            drop(locked_thread);
+            if let Some(task_id) = task_id {
+                if parent_pid <= 3 {
+                    s_println!(
+                        "wake: tid={} pid={} -> requeue task {:?}",
+                        thread_id,
+                        parent_pid,
+                        task_id
+                    );
+                }
+                TASK_SPAWNER.get().unwrap().lock().wake_existing(task_id);
+            }
         }
     }
 
@@ -180,6 +199,13 @@ impl ThreadManager {
             }
         });
 
+        if pid.0 <= 3 {
+            s_println!(
+                "wake_process_exit_waiters: pid={} waiters={}",
+                pid.0,
+                to_wake.len()
+            );
+        }
         for thread in to_wake {
             self.wake(thread);
         }

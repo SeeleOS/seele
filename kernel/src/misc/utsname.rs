@@ -1,3 +1,7 @@
+use spin::Mutex;
+
+static HOSTNAME: Mutex<Option<[u8; 65]>> = Mutex::new(None);
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct UtsName {
@@ -31,6 +35,28 @@ impl UtsName {
         write_c_field(&mut uts.machine, machine.as_bytes());
         uts
     }
+}
+
+pub fn current_hostname(default: &str) -> [u8; 65] {
+    let hostname = HOSTNAME.lock();
+    if let Some(hostname) = *hostname {
+        hostname
+    } else {
+        let mut field = [0; 65];
+        write_c_field(&mut field, default.as_bytes());
+        field
+    }
+}
+
+pub fn set_hostname(hostname: &[u8]) -> Result<(), ()> {
+    if hostname.len() > 64 || hostname.contains(&0) {
+        return Err(());
+    }
+
+    let mut field = [0; 65];
+    write_c_field(&mut field, hostname);
+    *HOSTNAME.lock() = Some(field);
+    Ok(())
 }
 
 fn write_c_field(dst: &mut [u8], src: &[u8]) {
