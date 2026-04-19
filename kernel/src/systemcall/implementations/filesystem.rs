@@ -115,6 +115,31 @@ fn path_from_raw(path: CString) -> Result<String, SyscallError> {
     String::k_from(path).map_err(|_| SyscallError::InvalidArguments)
 }
 
+fn string_from_raw_optional(value: CString) -> Result<Option<String>, SyscallError> {
+    if value.is_null() {
+        return Ok(None);
+    }
+
+    String::k_from(value)
+        .map(Some)
+        .map_err(|_| SyscallError::InvalidArguments)
+}
+
+fn is_supported_api_mount(fstype: &str) -> bool {
+    matches!(
+        fstype,
+        "proc"
+            | "sysfs"
+            | "devtmpfs"
+            | "tmpfs"
+            | "devpts"
+            | "cgroup2"
+            | "bpf"
+            | "pstore"
+            | "securityfs"
+    )
+}
+
 fn path_is_relative_to_cwd(dirfd: i32) -> Result<bool, SyscallError> {
     match dirfd {
         AT_FDCWD => Ok(true),
@@ -688,6 +713,28 @@ define_syscall!(Mkdir, |path: CString, mode: u32| {
 
     VirtualFS.lock().create_dir(current_dir.as_normal())?;
     Ok(0)
+});
+
+define_syscall!(
+    Mount,
+    |source: CString, target: CString, filesystemtype: CString, _mountflags: u64, data: CString| {
+        let _source = string_from_raw_optional(source)?;
+        let target = path_from_raw(target)?;
+        let filesystemtype = path_from_raw(filesystemtype)?;
+        let _data = string_from_raw_optional(data)?;
+
+        if !is_supported_api_mount(&filesystemtype) {
+            return Err(SyscallError::NoSyscall);
+        }
+
+        VirtualFS.lock().resolve_dir(Path::new(&target))?;
+        Ok(0)
+    }
+);
+
+define_syscall!(Fsopen, |fs_name: CString, _flags: u32| {
+    let _ = path_from_raw(fs_name)?;
+    Err(SyscallError::NoSyscall)
 });
 
 define_syscall!(Statfs, |path: CString, buf: *mut LinuxStatFs| {

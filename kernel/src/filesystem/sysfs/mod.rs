@@ -157,6 +157,68 @@ static SYS_BUS_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     entries: SYS_BUS_ENTRIES,
 });
 
+static SYS_FS_CGROUP_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "cgroup",
+    inode: 0x200a,
+    mode: 0o040755,
+    entries: &[],
+});
+
+static SYS_FS_PSTORE_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "pstore",
+    inode: 0x200b,
+    mode: 0o040755,
+    entries: &[],
+});
+
+static SYS_FS_BPF_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "bpf",
+    inode: 0x200c,
+    mode: 0o040700,
+    entries: &[],
+});
+
+static SYS_FS_ENTRIES: &[StaticDirEntry] = &[
+    StaticDirEntry {
+        name: "cgroup",
+        node: &SYS_FS_CGROUP_NODE,
+    },
+    StaticDirEntry {
+        name: "pstore",
+        node: &SYS_FS_PSTORE_NODE,
+    },
+    StaticDirEntry {
+        name: "bpf",
+        node: &SYS_FS_BPF_NODE,
+    },
+];
+
+static SYS_FS_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "fs",
+    inode: 0x200d,
+    mode: 0o040755,
+    entries: SYS_FS_ENTRIES,
+});
+
+static SYS_KERNEL_SECURITY_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "security",
+    inode: 0x200e,
+    mode: 0o040755,
+    entries: &[],
+});
+
+static SYS_KERNEL_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
+    name: "security",
+    node: &SYS_KERNEL_SECURITY_NODE,
+}];
+
+static SYS_KERNEL_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "kernel",
+    inode: 0x2010,
+    mode: 0o040755,
+    entries: SYS_KERNEL_ENTRIES,
+});
+
 static SYS_DEV_CHAR_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "13:64",
@@ -290,6 +352,14 @@ static SYS_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "dev",
         node: &SYS_DEV_NODE,
+    },
+    StaticDirEntry {
+        name: "fs",
+        node: &SYS_FS_NODE,
+    },
+    StaticDirEntry {
+        name: "kernel",
+        node: &SYS_KERNEL_NODE,
     },
     StaticDirEntry {
         name: "devices",

@@ -93,6 +93,20 @@ static DEV_INPUT_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     entries: DEV_INPUT_ENTRIES,
 });
 
+static DEV_PTS_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "pts",
+    inode: 0x100c,
+    mode: 0o040755,
+    entries: &[],
+});
+
+static DEV_SHM_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "shm",
+    inode: 0x100d,
+    mode: 0o040777,
+    entries: &[],
+});
+
 static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "null",
@@ -129,6 +143,14 @@ static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "input",
         node: &DEV_INPUT_NODE,
+    },
+    StaticDirEntry {
+        name: "pts",
+        node: &DEV_PTS_NODE,
+    },
+    StaticDirEntry {
+        name: "shm",
+        node: &DEV_SHM_NODE,
     },
 ];
 
