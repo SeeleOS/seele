@@ -95,6 +95,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         Fchdir,
         Rename,
         Mkdir,
+        Rmdir,
         Link,
         Unlink,
         Symlink,

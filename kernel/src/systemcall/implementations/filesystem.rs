@@ -800,6 +800,24 @@ define_syscall!(Mkdir, |path: CString, mode: u32| {
     Ok(0)
 });
 
+define_syscall!(Rmdir, |path: CString| {
+    let path = path_from_raw(path)?;
+    let mut current_dir = with_current_process(|process| process.current_directory.clone());
+    current_dir.push_path_str(&path);
+    let path = current_dir.as_normal();
+
+    let is_directory = matches!(
+        VirtualFS.lock().file_info(path.clone())?.file_like_type,
+        FileLikeType::Directory
+    );
+    if !is_directory {
+        return Err(SyscallError::NotADirectory);
+    }
+
+    VirtualFS.lock().delete_file(path)?;
+    Ok(0)
+});
+
 define_syscall!(Mount, |source: CString,
                         target: CString,
                         filesystemtype: CString,

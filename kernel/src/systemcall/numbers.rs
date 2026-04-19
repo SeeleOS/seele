@@ -87,6 +87,7 @@ pub enum SyscallNumber {
     Fchdir = 81,
     Rename = 82,
     Mkdir = 83,
+    Rmdir = 84,
     Link = 86,
     Unlink = 87,
     Symlink = 88,
