@@ -198,7 +198,8 @@ fn syscall_handler_unwrapped(
             Err(err) => err as isize,
         };
 
-        if current_pid == 1 && (result < 0 || should_trace_pid1(syscall) || should_trace_pid1_block(syscall))
+        if current_pid == 1
+            && (result < 0 || should_trace_pid1(syscall) || should_trace_pid1_block(syscall))
         {
             let detail = syscall_trace_detail(syscall, arg1, arg2, arg3).unwrap_or_default();
             s_println!(

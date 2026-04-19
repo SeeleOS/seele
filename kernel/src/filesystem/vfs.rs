@@ -4,6 +4,7 @@ use spin::Mutex;
 use crate::filesystem::{
     block_device::BlockDevice,
     block_device::cache::CachedBlockDevice,
+    cgroupfs::CgroupFs,
     devfs::DevFs,
     errors::FSError,
     impls::ext4::{EXT4, operator::Ext4BlockOperator},
@@ -55,6 +56,7 @@ impl VFS {
         self.mount(Path::new("/dev"), DevFs::new())?;
         self.mount(Path::new("/proc"), ProcFs::new())?;
         self.mount(Path::new("/sys"), SysFs::new())?;
+        self.mount(Path::new("/sys/fs/cgroup"), CgroupFs::new())?;
 
         for temp_dir in ["/tmp", "/var/tmp"] {
             if let Err(err) = self.clear_directory(Path::new(temp_dir)) {

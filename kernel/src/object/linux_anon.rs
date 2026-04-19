@@ -7,8 +7,6 @@ use spin::Mutex;
 use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function, impl_cast_function_non_trait,
-    process::manager::MANAGER,
-    signal::{Signal, Signals},
     misc::time::Time,
     object::{
         FileFlags, Object,
@@ -17,6 +15,8 @@ use crate::{
         traits::{Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
+    process::manager::MANAGER,
+    signal::{Signal, Signals},
     thread::{
         THREAD_MANAGER,
         yielding::{
@@ -127,7 +127,8 @@ impl SignalfdObject {
             .clone();
         let mut process = process.lock();
         let ready_mask = process.pending_signals.bits() & *self.mask.lock();
-        let signal = Signal::iter().find(|signal| (ready_mask & Signals::from(*signal).bits()) != 0)?;
+        let signal =
+            Signal::iter().find(|signal| (ready_mask & Signals::from(*signal).bits()) != 0)?;
         process.pending_signals.remove(Signals::from(signal));
         Some(signal)
     }

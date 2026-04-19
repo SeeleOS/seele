@@ -53,7 +53,12 @@ impl Directory for StaticDirectoryHandle {
     }
 
     fn create(&self, info: DirectoryContentInfo) -> FSResult<()> {
-        if self.node.entries.iter().any(|entry| entry.name == info.name) {
+        if self
+            .node
+            .entries
+            .iter()
+            .any(|entry| entry.name == info.name)
+        {
             return Err(FSError::AlreadyExists);
         }
 

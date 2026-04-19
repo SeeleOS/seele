@@ -26,9 +26,11 @@ const EXT4_SUPER_MAGIC: i64 = 0xEF53;
 const TMPFS_MAGIC: i64 = 0x0102_1994;
 const PROC_SUPER_MAGIC: i64 = 0x9fa0;
 const SYSFS_MAGIC: i64 = 0x6265_6572;
+const CGROUP2_SUPER_MAGIC: i64 = 0x6367_7270;
 const AT_NO_AUTOMOUNT: i32 = 0x800;
 const AT_STATX_FORCE_SYNC: i32 = 0x2000;
 const AT_STATX_DONT_SYNC: i32 = 0x4000;
+const AT_EACCESS: i32 = 0x200;
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -176,6 +178,22 @@ fn check_access_mode(mode: i32) -> Result<(), SyscallError> {
     Ok(())
 }
 
+fn check_access_permissions(stat: &LinuxStat, mode: i32) -> Result<(), SyscallError> {
+    let permission = stat.st_mode & 0o777;
+
+    if (mode & 4) != 0 && permission & 0o444 == 0 {
+        return Err(SyscallError::PermissionDenied);
+    }
+    if (mode & 2) != 0 && permission & 0o222 == 0 {
+        return Err(SyscallError::PermissionDenied);
+    }
+    if (mode & 1) != 0 && permission & 0o111 == 0 {
+        return Err(SyscallError::PermissionDenied);
+    }
+
+    Ok(())
+}
+
 fn linux_major(dev: u64) -> u32 {
     (((dev >> 8) & 0xfff) | ((dev >> 32) & !0xfff)) as u32
 }
@@ -193,6 +211,7 @@ fn filesystem_magic_for_path(path: &Path) -> Result<i64, SyscallError> {
     Ok(match mount_path.as_string().as_str() {
         "/dev" => TMPFS_MAGIC,
         "/proc" => PROC_SUPER_MAGIC,
+        "/sys/fs/cgroup" => CGROUP2_SUPER_MAGIC,
         "/sys" => SYSFS_MAGIC,
         _ => EXT4_SUPER_MAGIC,
     })
@@ -204,7 +223,8 @@ fn mount_id_for_path(path: &Path) -> Result<u64, SyscallError> {
         "/" => 1,
         "/proc" => 2,
         "/sys" => 3,
-        "/dev" => 4,
+        "/sys/fs/cgroup" => 4,
+        "/dev" => 5,
         _ => 1,
     })
 }
@@ -287,6 +307,41 @@ fn ensure_path_exists_at(dirfd: i32, path_str: &str, nofollow: bool) -> Result<(
 fn ensure_object_supports_xattrs(object: &ObjectRef) -> Result<(), SyscallError> {
     let _ = object.clone().as_file_like()?;
     Ok(())
+}
+
+fn faccessat_impl(
+    dirfd: i32,
+    path_str: &str,
+    mode: i32,
+    flags: i32,
+) -> Result<usize, SyscallError> {
+    let flags = AtFlags::from_bits_truncate(flags);
+    let allowed = AtFlags::EMPTY_PATH.bits() | AtFlags::SYMLINK_NOFOLLOW.bits() | AT_EACCESS;
+    if flags.bits() != flags.bits() & allowed {
+        return Err(SyscallError::NoSyscall);
+    }
+
+    check_access_mode(mode)?;
+
+    if path_str.is_empty() {
+        if !flags.contains(AtFlags::EMPTY_PATH) {
+            return Err(SyscallError::InvalidArguments);
+        }
+
+        let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
+        check_access_permissions(&object.as_statable()?.stat(), mode)?;
+        return Ok(0);
+    }
+
+    let path = resolve_path_at(dirfd, path_str)?;
+    let open_result = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
+        VirtualFS.lock().open_nofollow(path)
+    } else {
+        VirtualFS.lock().open(path)
+    };
+    let object: ObjectRef = Arc::new(open_result?);
+    check_access_permissions(&object.as_statable()?.stat(), mode)?;
+    Ok(0)
 }
 
 fn rename_impl(
@@ -594,20 +649,17 @@ define_syscall!(Statx, |dirfd: i32,
 define_syscall!(Faccessat, |dirfd: i32,
                             path: CString,
                             mode: i32,
-                            _flags: i32| {
-    check_access_mode(mode)?;
+                            flags: i32| {
     let path_str = path_from_raw(path)?;
-    let path = resolve_path_at(dirfd, &path_str)?;
-    let open_result = VirtualFS.lock().open(path);
-    let _ = open_result?;
-    Ok(0)
+    faccessat_impl(dirfd, &path_str, mode, flags)
 });
 
 define_syscall!(Faccessat2, |dirfd: i32,
                              path: CString,
                              mode: i32,
                              flags: i32| {
-    Faccessat::handle_call(dirfd as u64, path as u64, mode as u64, flags as u64, 0, 0)
+    let path_str = path_from_raw(path)?;
+    faccessat_impl(dirfd, &path_str, mode, flags)
 });
 
 define_syscall!(Getxattr, |path: CString,
@@ -715,22 +767,23 @@ define_syscall!(Mkdir, |path: CString, mode: u32| {
     Ok(0)
 });
 
-define_syscall!(
-    Mount,
-    |source: CString, target: CString, filesystemtype: CString, _mountflags: u64, data: CString| {
-        let _source = string_from_raw_optional(source)?;
-        let target = path_from_raw(target)?;
-        let filesystemtype = path_from_raw(filesystemtype)?;
-        let _data = string_from_raw_optional(data)?;
+define_syscall!(Mount, |source: CString,
+                        target: CString,
+                        filesystemtype: CString,
+                        _mountflags: u64,
+                        data: CString| {
+    let _source = string_from_raw_optional(source)?;
+    let target = path_from_raw(target)?;
+    let filesystemtype = path_from_raw(filesystemtype)?;
+    let _data = string_from_raw_optional(data)?;
 
-        if !is_supported_api_mount(&filesystemtype) {
-            return Err(SyscallError::NoSyscall);
-        }
-
-        VirtualFS.lock().resolve_dir(Path::new(&target))?;
-        Ok(0)
+    if !is_supported_api_mount(&filesystemtype) {
+        return Err(SyscallError::NoSyscall);
     }
-);
+
+    VirtualFS.lock().resolve_dir(Path::new(&target))?;
+    Ok(0)
+});
 
 define_syscall!(Fsopen, |fs_name: CString, _flags: u32| {
     let _ = path_from_raw(fs_name)?;

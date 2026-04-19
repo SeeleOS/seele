@@ -2,7 +2,7 @@ use alloc::{format, string::String, vec, vec::Vec};
 
 use crate::{
     filesystem::{
-        errors::FSError, info::DirectoryContentInfo, vfs::FSResult,
+        cgroupfs::pid_cgroup_path, errors::FSError, info::DirectoryContentInfo, vfs::FSResult,
         vfs_traits::DirectoryContentType,
     },
     process::{
@@ -14,6 +14,7 @@ use crate::{
 pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
     vec![
         DirectoryContentInfo::new("cmdline".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("cgroup".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("mountinfo".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("fd".into(), DirectoryContentType::Directory),
     ]
@@ -38,6 +39,10 @@ pub(super) fn pid_fd_entries(pid: ProcessID) -> FSResult<Vec<DirectoryContentInf
 
 pub(super) fn proc_pid_cmdline_bytes(_pid: ProcessID) -> Vec<u8> {
     Vec::new()
+}
+
+pub(super) fn proc_pid_cgroup_bytes(pid: ProcessID) -> Vec<u8> {
+    format!("0::{}\n", pid_cgroup_path(pid)).into_bytes()
 }
 
 pub(super) fn parse_pid(pid: &str) -> FSResult<ProcessID> {
@@ -77,6 +82,10 @@ pub(super) fn pid_cmdline_inode(pid: ProcessID) -> u64 {
 
 pub(super) fn pid_mountinfo_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 2
+}
+
+pub(super) fn pid_cgroup_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 3
 }
 
 pub(super) fn pid_fd_dir_inode(pid: ProcessID) -> u64 {

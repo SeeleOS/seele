@@ -40,12 +40,16 @@ fn mount_device_id_for_path(path: &crate::filesystem::path::Path) -> u64 {
         "/" => 1,
         "/proc" => 2,
         "/sys" => 3,
-        "/dev" => 4,
+        "/sys/fs/cgroup" => 4,
+        "/dev" => 5,
         _ => 1,
     }
 }
 
-fn stat_with_mount_device_id(mut stat: LinuxStat, path: &crate::filesystem::path::Path) -> LinuxStat {
+fn stat_with_mount_device_id(
+    mut stat: LinuxStat,
+    path: &crate::filesystem::path::Path,
+) -> LinuxStat {
     stat.st_dev = mount_device_id_for_path(path);
     stat
 }

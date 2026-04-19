@@ -549,41 +549,47 @@ define_syscall!(TimeSinceBoot, {
     Ok(KernelTime::since_boot().as_nanoseconds() as usize)
 });
 
-define_syscall!(Gettimeofday, |tv: *mut LinuxTimeval, tz: *mut LinuxTimezone| {
-    if !tv.is_null() {
-        let now_ns = KernelTime::current().as_nanoseconds() as i64;
-        let timeval = LinuxTimeval {
-            tv_sec: now_ns / 1_000_000_000,
-            tv_usec: (now_ns % 1_000_000_000) / 1_000,
-        };
-        user_safe::write(tv, &timeval)?;
+define_syscall!(
+    Gettimeofday,
+    |tv: *mut LinuxTimeval, tz: *mut LinuxTimezone| {
+        if !tv.is_null() {
+            let now_ns = KernelTime::current().as_nanoseconds() as i64;
+            let timeval = LinuxTimeval {
+                tv_sec: now_ns / 1_000_000_000,
+                tv_usec: (now_ns % 1_000_000_000) / 1_000,
+            };
+            user_safe::write(tv, &timeval)?;
+        }
+
+        if !tz.is_null() {
+            let (tz_minuteswest, tz_dsttime) = time::timezone();
+            let timezone = LinuxTimezone {
+                tz_minuteswest,
+                tz_dsttime,
+            };
+            user_safe::write(tz, &timezone)?;
+        }
+
+        Ok(0)
     }
+);
 
-    if !tz.is_null() {
-        let (tz_minuteswest, tz_dsttime) = time::timezone();
-        let timezone = LinuxTimezone {
-            tz_minuteswest,
-            tz_dsttime,
-        };
-        user_safe::write(tz, &timezone)?;
+define_syscall!(
+    Settimeofday,
+    |tv: *const LinuxTimeval, tz: *const LinuxTimezone| {
+        if !tv.is_null() {
+            let timeval = user_safe::read(tv)?;
+            time::set_unix_timestamp_nanoseconds(linux_timeval_to_realtime_ns(timeval)?);
+        }
+
+        if !tz.is_null() {
+            let timezone = user_safe::read(tz)?;
+            time::set_timezone(timezone.tz_minuteswest, timezone.tz_dsttime);
+        }
+
+        Ok(0)
     }
-
-    Ok(0)
-});
-
-define_syscall!(Settimeofday, |tv: *const LinuxTimeval, tz: *const LinuxTimezone| {
-    if !tv.is_null() {
-        let timeval = user_safe::read(tv)?;
-        time::set_unix_timestamp_nanoseconds(linux_timeval_to_realtime_ns(timeval)?);
-    }
-
-    if !tz.is_null() {
-        let timezone = user_safe::read(tz)?;
-        time::set_timezone(timezone.tz_minuteswest, timezone.tz_dsttime);
-    }
-
-    Ok(0)
-});
+);
 
 define_syscall!(Umask, |mask: u32| {
     let process = get_current_process();
