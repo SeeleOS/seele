@@ -4,14 +4,21 @@ use spin::Mutex;
 use crate::object::FileFlags;
 
 use super::{
-    AF_UNIX, SOCK_CLOEXEC, SOCK_NONBLOCK, SOCK_STREAM, SocketError, SocketResult, UnixSocketObject,
-    UnixSocketState,
+    AF_UNIX, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM, SocketError, SocketResult,
+    UnixDatagramInner, UnixSocketKind, UnixSocketObject, UnixSocketState,
 };
 
 impl UnixSocketObject {
-    pub fn new() -> Self {
+    pub fn new(kind: UnixSocketKind) -> Self {
+        let state = match kind {
+            UnixSocketKind::Stream => UnixSocketState::Unbound,
+            UnixSocketKind::Datagram => {
+                UnixSocketState::Datagram(Arc::new(UnixDatagramInner::new()))
+            }
+        };
         Self {
-            state: Mutex::new(UnixSocketState::Unbound),
+            kind,
+            state: Mutex::new(state),
             flags: Mutex::new(FileFlags::empty()),
         }
     }
@@ -21,11 +28,21 @@ impl UnixSocketObject {
         if domain != AF_UNIX {
             return Err(SocketError::AddressFamilyNotSupported);
         }
-        if socket_type != SOCK_STREAM || protocol != 0 {
+        if protocol != 0 {
             return Err(SocketError::ProtocolNotSupported);
         }
 
-        Ok(Arc::new(Self::new()))
+        let kind = match socket_type {
+            SOCK_STREAM => UnixSocketKind::Stream,
+            SOCK_DGRAM => UnixSocketKind::Datagram,
+            _ => return Err(SocketError::ProtocolNotSupported),
+        };
+
+        let socket = Arc::new(Self::new(kind));
+        if let UnixSocketState::Datagram(datagram) = &*socket.state.lock() {
+            *datagram.owner.lock() = Some(Arc::downgrade(&socket));
+        }
+        Ok(socket)
     }
 
     pub fn is_nonblocking(&self) -> bool {
@@ -35,6 +52,6 @@ impl UnixSocketObject {
 
 impl Default for UnixSocketObject {
     fn default() -> Self {
-        Self::new()
+        Self::new(UnixSocketKind::Stream)
     }
 }

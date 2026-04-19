@@ -720,13 +720,24 @@ define_syscall!(Flistxattr, |object: ObjectRef,
 });
 
 define_syscall!(UnlinkAt, |dirfd: i32, path: CString, flags: i32| {
-    let _ = path_is_relative_to_cwd(dirfd)?;
     let path = path_from_raw(path)?;
     let flags = AtFlags::from_bits_truncate(flags);
     if flags.bits() & !AtFlags::REMOVEDIR.bits() != 0 {
         return Err(SyscallError::InvalidArguments);
     }
-    VirtualFS.lock().delete_file(Path::new(&path))?;
+    let path = resolve_path_at(dirfd, &path)?;
+    let is_directory = matches!(
+        VirtualFS.lock().file_info(path.clone())?.file_like_type,
+        FileLikeType::Directory
+    );
+    if flags.contains(AtFlags::REMOVEDIR) {
+        if !is_directory {
+            return Err(SyscallError::NotADirectory);
+        }
+    } else if is_directory {
+        return Err(SyscallError::IsADirectory);
+    }
+    VirtualFS.lock().delete_file(path)?;
     Ok(0)
 });
 

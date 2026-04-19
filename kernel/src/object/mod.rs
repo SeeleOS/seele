@@ -27,6 +27,7 @@ pub mod control;
 pub mod device;
 pub mod error;
 pub mod linux_anon;
+pub mod memfd;
 pub mod misc;
 pub mod queue_helpers;
 pub mod traits;

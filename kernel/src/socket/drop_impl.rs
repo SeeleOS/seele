@@ -17,6 +17,15 @@ impl Drop for UnixSocketObject {
                 }
                 wake_io();
             }
+            UnixSocketState::Datagram(datagram) => {
+                if let Some(path) = datagram.local_name.lock().clone() {
+                    UNIX_SOCKET_REGISTRY.lock().remove(&path);
+                    if path.as_bytes().first() != Some(&0) {
+                        let _ = VirtualFS.lock().delete_file(Path::new(&path));
+                    }
+                }
+                datagram.close_local();
+            }
             UnixSocketState::Stream(stream) => stream.close_local(),
             UnixSocketState::Unbound | UnixSocketState::Closed => {}
         }

@@ -30,6 +30,10 @@ impl UnixSocketObject {
             UnixSocketState::Unbound => Ok(serialize_unix_addr(None)),
             UnixSocketState::Bound { path } => Ok(serialize_unix_addr(Some(path))),
             UnixSocketState::Listener(listener) => Ok(serialize_unix_addr(Some(&listener.path))),
+            UnixSocketState::Datagram(datagram) => {
+                let local_name = datagram.local_name.lock();
+                Ok(serialize_unix_addr(local_name.as_deref()))
+            }
             UnixSocketState::Stream(stream) => {
                 let local_name = stream.local_name.lock();
                 Ok(serialize_unix_addr(local_name.as_deref()))
@@ -40,6 +44,10 @@ impl UnixSocketObject {
 
     pub fn getpeername_bytes(&self) -> SocketResult<Vec<u8>> {
         match &*self.state.lock() {
+            UnixSocketState::Datagram(datagram) => {
+                let peer_name = datagram.peer_name.lock();
+                Ok(serialize_unix_addr(peer_name.as_deref()))
+            }
             UnixSocketState::Stream(stream) => {
                 let peer_name = stream.peer_name.lock();
                 Ok(serialize_unix_addr(peer_name.as_deref()))
@@ -49,30 +57,47 @@ impl UnixSocketObject {
     }
 
     pub fn shutdown(&self, how: u64) -> SocketResult<()> {
-        let stream = match &*self.state.lock() {
-            UnixSocketState::Stream(stream) => stream.clone(),
+        match &*self.state.lock() {
+            UnixSocketState::Datagram(datagram) => match how {
+                0 => {
+                    *datagram.read_shutdown.lock() = true;
+                }
+                1 => {
+                    if !*datagram.write_shutdown.lock() {
+                        *datagram.write_shutdown.lock() = true;
+                        datagram.close_local();
+                    }
+                }
+                2 => {
+                    *datagram.read_shutdown.lock() = true;
+                    if !*datagram.write_shutdown.lock() {
+                        *datagram.write_shutdown.lock() = true;
+                        datagram.close_local();
+                    }
+                }
+                _ => return Err(SocketError::InvalidArguments),
+            },
+            UnixSocketState::Stream(stream) => match how {
+                0 => {
+                    *stream.read_shutdown.lock() = true;
+                }
+                1 => {
+                    if !*stream.write_shutdown.lock() {
+                        *stream.write_shutdown.lock() = true;
+                        stream.close_local();
+                    }
+                }
+                2 => {
+                    *stream.read_shutdown.lock() = true;
+                    if !*stream.write_shutdown.lock() {
+                        *stream.write_shutdown.lock() = true;
+                        stream.close_local();
+                    }
+                }
+                _ => return Err(SocketError::InvalidArguments),
+            },
             _ => return Err(SocketError::InvalidArguments),
         };
-
-        match how {
-            0 => {
-                *stream.read_shutdown.lock() = true;
-            }
-            1 => {
-                if !*stream.write_shutdown.lock() {
-                    *stream.write_shutdown.lock() = true;
-                    stream.close_local();
-                }
-            }
-            2 => {
-                *stream.read_shutdown.lock() = true;
-                if !*stream.write_shutdown.lock() {
-                    *stream.write_shutdown.lock() = true;
-                    stream.close_local();
-                }
-            }
-            _ => return Err(SocketError::InvalidArguments),
-        }
 
         Ok(())
     }

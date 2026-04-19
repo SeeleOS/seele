@@ -4,8 +4,8 @@ use spin::Mutex;
 use crate::object::FileFlags;
 
 use super::{
-    AF_UNIX, SOCK_CLOEXEC, SOCK_NONBLOCK, SOCK_STREAM, SocketError, SocketResult, UnixSocketObject,
-    UnixSocketState, UnixStreamInner,
+    AF_UNIX, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM, SocketError, SocketResult,
+    UnixDatagramInner, UnixSocketKind, UnixSocketObject, UnixSocketState, UnixStreamInner,
 };
 
 impl UnixSocketObject {
@@ -15,22 +15,50 @@ impl UnixSocketObject {
         }
 
         let socket_type = kind & !(SOCK_NONBLOCK | SOCK_CLOEXEC);
-        if socket_type != SOCK_STREAM || protocol != 0 {
+        if protocol != 0 {
             return Err(SocketError::ProtocolNotSupported);
         }
 
-        let (left_stream, right_stream) = UnixStreamInner::pair();
-        let left = Arc::new(Self {
-            state: Mutex::new(UnixSocketState::Stream(left_stream.clone())),
-            flags: Mutex::new(FileFlags::empty()),
-        });
-        let right = Arc::new(Self {
-            state: Mutex::new(UnixSocketState::Stream(right_stream.clone())),
-            flags: Mutex::new(FileFlags::empty()),
-        });
+        let (left, right) = match socket_type {
+            SOCK_STREAM => {
+                let (left_stream, right_stream) = UnixStreamInner::pair();
+                let left = Arc::new(Self {
+                    kind: UnixSocketKind::Stream,
+                    state: Mutex::new(UnixSocketState::Stream(left_stream.clone())),
+                    flags: Mutex::new(FileFlags::empty()),
+                });
+                let right = Arc::new(Self {
+                    kind: UnixSocketKind::Stream,
+                    state: Mutex::new(UnixSocketState::Stream(right_stream.clone())),
+                    flags: Mutex::new(FileFlags::empty()),
+                });
 
-        *left_stream.owner.lock() = Some(Arc::downgrade(&left));
-        *right_stream.owner.lock() = Some(Arc::downgrade(&right));
+                *left_stream.owner.lock() = Some(Arc::downgrade(&left));
+                *right_stream.owner.lock() = Some(Arc::downgrade(&right));
+                (left, right)
+            }
+            SOCK_DGRAM => {
+                let left_inner = Arc::new(UnixDatagramInner::new());
+                let right_inner = Arc::new(UnixDatagramInner::new());
+                let left = Arc::new(Self {
+                    kind: UnixSocketKind::Datagram,
+                    state: Mutex::new(UnixSocketState::Datagram(left_inner.clone())),
+                    flags: Mutex::new(FileFlags::empty()),
+                });
+                let right = Arc::new(Self {
+                    kind: UnixSocketKind::Datagram,
+                    state: Mutex::new(UnixSocketState::Datagram(right_inner.clone())),
+                    flags: Mutex::new(FileFlags::empty()),
+                });
+
+                *left_inner.owner.lock() = Some(Arc::downgrade(&left));
+                *right_inner.owner.lock() = Some(Arc::downgrade(&right));
+                *left_inner.peer.lock() = Some(Arc::downgrade(&right));
+                *right_inner.peer.lock() = Some(Arc::downgrade(&left));
+                (left, right)
+            }
+            _ => return Err(SocketError::ProtocolNotSupported),
+        };
 
         if (kind & SOCK_NONBLOCK) != 0 {
             *left.flags.lock() = FileFlags::NONBLOCK;

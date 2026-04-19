@@ -40,24 +40,9 @@ struct PidFdRegistry {
     watchers: BTreeMap<u64, alloc::vec::Vec<Weak<PidFdObject>>>,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct MemFdState {
-    seals: u32,
-    allow_sealing: bool,
-}
-
-#[derive(Default)]
-struct MemFdRegistry {
-    states: BTreeMap<alloc::string::String, MemFdState>,
-}
-
-const F_SEAL_SEAL: u32 = 0x0001;
-const SUPPORTED_MEMFD_SEALS: u32 = 0x001f;
-
 lazy_static::lazy_static! {
     static ref SIGNALFD_REGISTRY: Mutex<SignalfdRegistry> = Mutex::new(SignalfdRegistry::default());
     static ref PIDFD_REGISTRY: Mutex<PidFdRegistry> = Mutex::new(PidFdRegistry::default());
-    static ref MEMFD_REGISTRY: Mutex<MemFdRegistry> = Mutex::new(MemFdRegistry::default());
 }
 
 #[repr(C)]
@@ -177,50 +162,6 @@ pub fn wake_pidfd_for_process(pid: u64) {
     for pidfd in watchers {
         pidfd.wake_waiters_with_manager(&mut manager);
     }
-}
-
-fn memfd_key(path: &crate::filesystem::path::Path) -> alloc::string::String {
-    path.clone().normalize().as_string()
-}
-
-pub fn register_memfd(path: &crate::filesystem::path::Path, allow_sealing: bool) {
-    MEMFD_REGISTRY.lock().states.insert(
-        memfd_key(path),
-        MemFdState {
-            seals: if allow_sealing { 0 } else { F_SEAL_SEAL },
-            allow_sealing,
-        },
-    );
-}
-
-pub fn memfd_get_seals(path: &crate::filesystem::path::Path) -> Option<u32> {
-    MEMFD_REGISTRY
-        .lock()
-        .states
-        .get(&memfd_key(path))
-        .map(|state| state.seals)
-}
-
-pub fn memfd_add_seals(
-    path: &crate::filesystem::path::Path,
-    seals: u32,
-) -> crate::systemcall::utils::SyscallResult {
-    if (seals & !SUPPORTED_MEMFD_SEALS) != 0 {
-        return Err(crate::systemcall::utils::SyscallError::InvalidArguments);
-    }
-
-    let mut registry = MEMFD_REGISTRY.lock();
-    let state = registry
-        .states
-        .get_mut(&memfd_key(path))
-        .ok_or(crate::systemcall::utils::SyscallError::InvalidArguments)?;
-
-    if !state.allow_sealing || (state.seals & F_SEAL_SEAL) != 0 {
-        return Err(crate::systemcall::utils::SyscallError::PermissionDenied);
-    }
-
-    state.seals |= seals;
-    Ok(0)
 }
 
 impl Object for PidFdObject {

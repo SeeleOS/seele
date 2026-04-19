@@ -5,13 +5,14 @@ use alloc::{
 };
 use spin::Mutex;
 
-use super::{UnixSocketObject, UnixStreamInner};
+use super::{UnixDatagramInner, UnixSocketObject, UnixStreamInner};
 
 #[derive(Debug)]
 pub enum UnixSocketState {
     Unbound,
     Bound { path: String },
     Listener(Arc<UnixListenerInner>),
+    Datagram(Arc<UnixDatagramInner>),
     Stream(Arc<UnixStreamInner>),
     Closed,
 }

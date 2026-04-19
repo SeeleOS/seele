@@ -3,28 +3,26 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use alloc::{collections::btree_map::BTreeMap, format, string::String, sync::Arc};
+use alloc::{collections::btree_map::BTreeMap, format, string::String};
 use spin::Mutex;
 
 use crate::{
     define_syscall,
+    filesystem::path::Path,
     filesystem::vfs_traits::DirectoryContentType,
     filesystem::vfs_traits::Whence,
-    filesystem::{path::Path, vfs::VirtualFS},
     memory::protection::Protection,
-    misc::c_types::CString,
     object::{
         config::ConfigurateRequest,
         control::control_object,
         device::get_device,
-        linux_anon::register_memfd,
+        memfd::create_memfd_object,
         misc::{ObjectRef, get_object_current_process},
     },
     process::{
         manager::get_current_process,
         misc::{ProcessID, with_current_process},
     },
-    s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
 };
 
@@ -265,16 +263,12 @@ define_syscall!(MemfdCreate, |name: String, flags: u32| {
     } else {
         name.replace('/', "_")
     };
-    let path = Path::new(&format!("/tmp/memfd-{pid}-{id}-{sanitized_name}"));
-    let path_string = path.clone().as_string();
-
-    s_println!("memfd_create: create_file start path={}", path_string);
-    VirtualFS.lock().create_file(path.clone())?;
-    s_println!("memfd_create: create_file done path={}", path_string);
-    register_memfd(&path, (flags & (MFD_ALLOW_SEALING | MFD_NOEXEC_SEAL)) != 0);
-    s_println!("memfd_create: open start path={}", path_string);
-    let object: ObjectRef = Arc::new(VirtualFS.lock().open(path)?);
-    s_println!("memfd_create: open done path={}", path_string);
+    let path = Path::new(&format!("/memfd/{pid}-{id}-{sanitized_name}"));
+    let object = create_memfd_object(
+        path,
+        sanitized_name,
+        (flags & (MFD_ALLOW_SEALING | MFD_NOEXEC_SEAL)) != 0,
+    );
     let fd = get_current_process().lock().push_object(object);
 
     Ok(fd)

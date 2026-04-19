@@ -401,7 +401,6 @@ dependencies = [
 [[package]]
 name = "ext4plus"
 version = "0.1.0-beta.1"
-source = "git+https://github.com/SeeleOS/ext4plus#9cbdf9919ed568d71d797e341a70174f03237c6c"
 dependencies = [
  "async-lock",
  "async-trait",

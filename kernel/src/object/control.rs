@@ -2,7 +2,7 @@ use crate::object::FileFlags;
 use crate::{
     object::{
         error::ObjectError,
-        linux_anon::{memfd_add_seals, memfd_get_seals},
+        memfd::{memfd_add_seals, memfd_get_seals},
         misc::ObjectRef,
     },
     process::misc::with_current_process,

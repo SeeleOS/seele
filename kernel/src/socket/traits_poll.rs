@@ -1,6 +1,6 @@
 use alloc::sync::Weak;
 
-use super::{STREAM_RECV_CAPACITY, UnixSocketObject, UnixSocketState};
+use super::{DATAGRAM_RECV_CAPACITY, STREAM_RECV_CAPACITY, UnixSocketObject, UnixSocketState};
 use crate::polling::{event::PollableEvent, object::Pollable};
 
 impl Pollable for UnixSocketObject {
@@ -44,6 +44,15 @@ impl Pollable for UnixSocketObject {
                             .and_then(Weak::upgrade)
                             .is_none()
                 }
+                _ => false,
+            },
+            UnixSocketState::Datagram(datagram) => match event {
+                PollableEvent::CanBeRead => !datagram.recv_queue.lock().is_empty(),
+                PollableEvent::CanBeWritten => {
+                    !*datagram.write_shutdown.lock()
+                        && datagram.recv_queue.lock().len() < DATAGRAM_RECV_CAPACITY
+                }
+                PollableEvent::Closed => *datagram.write_shutdown.lock(),
                 _ => false,
             },
             _ => false,

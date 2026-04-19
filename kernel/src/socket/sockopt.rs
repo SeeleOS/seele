@@ -3,8 +3,8 @@ use core::{mem, slice};
 
 use super::{
     AF_UNIX, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PASSCRED, SO_PEERCRED, SO_PROTOCOL, SO_RCVBUF,
-    SO_REUSEADDR, SO_SNDBUF, SO_TYPE, SOCK_STREAM, SOL_SOCKET, SocketError, SocketResult,
-    UnixSocketObject, UnixSocketState,
+    SO_REUSEADDR, SO_SNDBUF, SO_TYPE, SOCK_DGRAM, SOCK_STREAM, SOL_SOCKET, SocketError,
+    SocketResult, UnixSocketKind, UnixSocketObject, UnixSocketState,
 };
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
@@ -52,7 +52,13 @@ impl UnixSocketObject {
 
         match option_name {
             SO_ERROR => Self::encode_i32(option_len, 0),
-            SO_TYPE => Self::encode_i32(option_len, SOCK_STREAM as i32),
+            SO_TYPE => Self::encode_i32(
+                option_len,
+                match self.kind {
+                    UnixSocketKind::Stream => SOCK_STREAM as i32,
+                    UnixSocketKind::Datagram => SOCK_DGRAM as i32,
+                },
+            ),
             SO_ACCEPTCONN => Self::encode_i32(
                 option_len,
                 matches!(&*self.state.lock(), UnixSocketState::Listener(_)) as i32,
@@ -62,6 +68,17 @@ impl UnixSocketObject {
             SO_SNDBUF | SO_RCVBUF => Self::encode_i32(option_len, DEFAULT_SOCKET_BUFFER_SIZE),
             SO_REUSEADDR | SO_PASSCRED => Self::encode_i32(option_len, 0),
             SO_PEERCRED => match &*self.state.lock() {
+                UnixSocketState::Datagram(datagram) => {
+                    let cred = *datagram.peer_cred.lock();
+                    Self::encode_ucred(
+                        option_len,
+                        SocketUcred {
+                            pid: i32::try_from(cred.pid).unwrap_or(i32::MAX),
+                            uid: cred.uid,
+                            gid: cred.gid,
+                        },
+                    )
+                }
                 UnixSocketState::Stream(stream) => {
                     let cred = *stream.peer_cred.lock();
                     Self::encode_ucred(

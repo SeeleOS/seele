@@ -1,15 +1,22 @@
 use alloc::{string::String, sync::Arc};
 
 use super::{
-    SocketError, SocketResult, UNIX_SOCKET_REGISTRY, UnixListenerInner, UnixSocketObject,
-    UnixSocketState,
+    SocketError, SocketResult, UNIX_SOCKET_REGISTRY, UnixListenerInner, UnixSocketKind,
+    UnixSocketObject, UnixSocketRegistryEntry, UnixSocketState,
 };
 use crate::filesystem::{errors::FSError, path::Path, vfs::VirtualFS};
 
 impl UnixSocketObject {
     pub fn bind(self: &Arc<Self>, path: String) -> SocketResult<()> {
         let mut state = self.state.lock();
-        if !matches!(*state, UnixSocketState::Unbound) {
+        let can_bind = match (&self.kind, &*state) {
+            (UnixSocketKind::Stream, UnixSocketState::Unbound) => true,
+            (UnixSocketKind::Datagram, UnixSocketState::Datagram(datagram)) => {
+                datagram.local_name.lock().is_none()
+            }
+            _ => false,
+        };
+        if !can_bind {
             return Err(SocketError::InvalidArguments);
         }
 
@@ -44,12 +51,30 @@ impl UnixSocketObject {
             }
             return Err(SocketError::AddressInUse);
         }
-        registry.insert(path.clone(), None);
-        *state = UnixSocketState::Bound { path };
+        match self.kind {
+            UnixSocketKind::Stream => {
+                registry.insert(path.clone(), UnixSocketRegistryEntry::StreamReserved);
+                *state = UnixSocketState::Bound { path };
+            }
+            UnixSocketKind::Datagram => {
+                registry.insert(
+                    path.clone(),
+                    UnixSocketRegistryEntry::Datagram(Arc::downgrade(self)),
+                );
+                let datagram = match &*state {
+                    UnixSocketState::Datagram(datagram) => datagram.clone(),
+                    _ => return Err(SocketError::InvalidArguments),
+                };
+                *datagram.local_name.lock() = Some(path);
+            }
+        }
         Ok(())
     }
 
     pub fn listen(self: &Arc<Self>, backlog: usize) -> SocketResult<()> {
+        if self.kind != UnixSocketKind::Stream {
+            return Err(SocketError::InvalidArguments);
+        }
         let path = match &*self.state.lock() {
             UnixSocketState::Bound { path } => path.clone(),
             _ => return Err(SocketError::InvalidArguments),
@@ -62,7 +87,7 @@ impl UnixSocketObject {
         let slot = registry
             .get_mut(&path)
             .ok_or(SocketError::InvalidArguments)?;
-        *slot = Some(listener.clone());
+        *slot = UnixSocketRegistryEntry::Listener(listener.clone());
         *self.state.lock() = UnixSocketState::Listener(listener);
         Ok(())
     }

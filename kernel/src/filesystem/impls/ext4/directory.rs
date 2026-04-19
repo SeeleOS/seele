@@ -256,11 +256,7 @@ impl Directory for Ext4Directory {
             );
         }
 
-        crate::s_println!(
-            "ext4 create: done parent={} name={}",
-            self.path,
-            child_name
-        );
+        crate::s_println!("ext4 create: done parent={} name={}", self.path, child_name);
         Ok(())
     }
 
@@ -297,7 +293,7 @@ impl Directory for Ext4Directory {
                     .to_string();
 
                 if entry_name != "." && entry_name != ".." {
-                    return Err(FSError::Other);
+                    return Err(FSError::DirectoryNotEmpty);
                 }
             }
 
