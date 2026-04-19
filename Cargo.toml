@@ -25,6 +25,3 @@ ovmf-prebuilt = "0.2"
 [build-dependencies]
 bootloader = { git = "https://github.com/SeeleOS/bootloader" }
 kernel = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
-
-[patch."https://github.com/SeeleOS/ext4plus"]
-ext4plus = { path = "third_party/ext4plus" }
