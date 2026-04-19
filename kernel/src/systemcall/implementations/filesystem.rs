@@ -579,6 +579,13 @@ define_syscall!(Chmod, |path: CString, mode: u32| {
     Ok(0)
 });
 
+define_syscall!(Chown, |path: CString, _owner: u32, _group: u32| {
+    let path_str = path_from_raw(path)?;
+    let path = resolve_path_at(AT_FDCWD, &path_str)?;
+    let _ = VirtualFS.lock().open(path)?;
+    Ok(0)
+});
+
 define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
     if buf_ptr.is_null() {
         return Err(SyscallError::BadAddress);

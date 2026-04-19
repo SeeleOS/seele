@@ -94,6 +94,7 @@ pub enum SyscallNumber {
     Readlink = 89,
     Chmod = 90,
     Fchmod = 91,
+    Chown = 92,
     Iopl = 172,
     Ioperm = 173,
     Getpid = 39,
