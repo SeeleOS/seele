@@ -17,6 +17,7 @@ pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("cgroup".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("mountinfo".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("fd".into(), DirectoryContentType::Directory),
+        DirectoryContentInfo::new("fdinfo".into(), DirectoryContentType::Directory),
     ]
 }
 
@@ -43,6 +44,40 @@ pub(super) fn proc_pid_cmdline_bytes(_pid: ProcessID) -> Vec<u8> {
 
 pub(super) fn proc_pid_cgroup_bytes(pid: ProcessID) -> Vec<u8> {
     format!("0::{}\n", pid_cgroup_path(pid)).into_bytes()
+}
+
+pub(super) fn pid_fdinfo_entries(pid: ProcessID) -> FSResult<Vec<DirectoryContentInfo>> {
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    let process = process.lock();
+    let mut entries = Vec::new();
+
+    for (fd, object) in process.objects.iter().enumerate() {
+        if object.is_some() {
+            entries.push(DirectoryContentInfo::new(
+                format!("{fd}"),
+                DirectoryContentType::File,
+            ));
+        }
+    }
+
+    Ok(entries)
+}
+
+pub(super) fn proc_pid_fdinfo_bytes(pid: ProcessID, fd: usize) -> FSResult<Vec<u8>> {
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    let process = process.lock();
+    let object = process
+        .objects
+        .get(fd)
+        .and_then(|entry| entry.clone())
+        .ok_or(FSError::NotFound)?;
+
+    let mut content = format!("pos:\t0\nflags:\t0\nmnt_id:\t0\nino:\t0\n");
+    if let Ok(pidfd) = object.as_pidfd() {
+        content.push_str(&format!("Pid:\t{}\n", pidfd.pid()));
+    }
+
+    Ok(content.into_bytes())
 }
 
 pub(super) fn parse_pid(pid: &str) -> FSResult<ProcessID> {
@@ -92,8 +127,16 @@ pub(super) fn pid_fd_dir_inode(pid: ProcessID) -> u64 {
     0x5000_0000 + pid.0 * 0x100
 }
 
+pub(super) fn pid_fdinfo_dir_inode(pid: ProcessID) -> u64 {
+    0x5100_0000 + pid.0 * 0x100
+}
+
 pub(super) fn pid_fd_inode(pid: ProcessID, fd: &str) -> u64 {
     pid_fd_dir_inode(pid) + 1 + fd.parse::<u64>().unwrap_or(0)
+}
+
+pub(super) fn pid_fdinfo_inode(pid: ProcessID, fd: &str) -> u64 {
+    pid_fdinfo_dir_inode(pid) + 1 + fd.parse::<u64>().unwrap_or(0)
 }
 
 pub(super) fn fd_target(pid: ProcessID, fd: &str) -> FSResult<String> {

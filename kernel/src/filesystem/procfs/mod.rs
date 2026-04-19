@@ -15,7 +15,8 @@ use nodes::{proc_dir, proc_file, proc_symlink};
 use pid::{
     current_pid, ensure_pid_exists, fd_target, parse_fd, parse_pid, pid_cgroup_inode,
     pid_cmdline_inode, pid_dir_entries, pid_dir_inode, pid_fd_dir_inode, pid_fd_entries,
-    pid_fd_inode, pid_mountinfo_inode, pid_string, proc_pid_cgroup_bytes, proc_pid_cmdline_bytes,
+    pid_fd_inode, pid_fdinfo_dir_inode, pid_fdinfo_entries, pid_fdinfo_inode, pid_mountinfo_inode,
+    pid_string, proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_fdinfo_bytes,
 };
 use root::{
     PROC_CMDLINE_INODE, PROC_MOUNTS_INODE, PROC_ROOT_INODE, PROC_SELF_INODE,
@@ -87,6 +88,18 @@ impl FileSystem for ProcFs {
                 let fd = parse_fd(fd)?;
                 Ok(proc_symlink(fd, pid_fd_inode(pid, fd), fd_target(pid, fd)?))
             }
+            ["self", "fdinfo"] => {
+                let pid = current_pid()?;
+                Ok(proc_dir("fdinfo", pid_fdinfo_dir_inode(pid), pid_fdinfo_entries(pid)?))
+            }
+            ["self", "fdinfo", fd] => {
+                let pid = current_pid()?;
+                let fd = parse_fd(fd)?;
+                let fd_num = fd.parse::<usize>().map_err(|_| FSError::NotFound)?;
+                Ok(proc_file("fdinfo", pid_fdinfo_inode(pid, fd), move || {
+                    proc_pid_fdinfo_bytes(pid, fd_num).unwrap_or_default()
+                }))
+            }
             [pid] => {
                 let pid = parse_pid(pid)?;
                 ensure_pid_exists(pid)?;
@@ -129,6 +142,24 @@ impl FileSystem for ProcFs {
                 ensure_pid_exists(pid)?;
                 let fd = parse_fd(fd)?;
                 Ok(proc_symlink(fd, pid_fd_inode(pid, fd), fd_target(pid, fd)?))
+            }
+            [pid, "fdinfo"] => {
+                let pid = parse_pid(pid)?;
+                ensure_pid_exists(pid)?;
+                Ok(proc_dir(
+                    "fdinfo",
+                    pid_fdinfo_dir_inode(pid),
+                    pid_fdinfo_entries(pid)?,
+                ))
+            }
+            [pid, "fdinfo", fd] => {
+                let pid = parse_pid(pid)?;
+                ensure_pid_exists(pid)?;
+                let fd = parse_fd(fd)?;
+                let fd_num = fd.parse::<usize>().map_err(|_| FSError::NotFound)?;
+                Ok(proc_file("fdinfo", pid_fdinfo_inode(pid, fd), move || {
+                    proc_pid_fdinfo_bytes(pid, fd_num).unwrap_or_default()
+                }))
             }
             _ => Err(FSError::NotFound),
         }

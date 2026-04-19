@@ -523,3 +523,16 @@ impl FileSystem for CgroupFs {
 pub fn pid_cgroup_path(pid: ProcessID) -> String {
     CGROUP_STATE.lock().pid_path(pid)
 }
+
+pub fn set_pid_cgroup_path_from_fs_path(pid: ProcessID, path: &Path) -> FSResult<()> {
+    let normalized = path.normalize().as_string();
+    let cgroup_path = if normalized == "/sys/fs/cgroup" {
+        "/".into()
+    } else if let Some(relative) = normalized.strip_prefix("/sys/fs/cgroup/") {
+        format!("/{}", relative.trim_start_matches('/'))
+    } else {
+        return Err(FSError::NotFound);
+    };
+
+    CGROUP_STATE.lock().set_pid_path(pid, &cgroup_path)
+}
