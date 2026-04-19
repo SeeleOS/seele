@@ -147,6 +147,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         ClockGettime,
         ClockNanosleep,
         MkdirAt,
+        Mknodat,
         Newfstatat,
         UnlinkAt,
         RenameAt,

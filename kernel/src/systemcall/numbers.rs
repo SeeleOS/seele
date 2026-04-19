@@ -125,6 +125,7 @@ pub enum SyscallNumber {
     EpollCtl = 233,
     Tgkill = 234,
     Gettid = 186,
+    Mknodat = 259,
     Setxattr = 188,
     Lsetxattr = 189,
     Fsetxattr = 190,

@@ -31,6 +31,9 @@ const AT_NO_AUTOMOUNT: i32 = 0x800;
 const AT_STATX_FORCE_SYNC: i32 = 0x2000;
 const AT_STATX_DONT_SYNC: i32 = 0x4000;
 const AT_EACCESS: i32 = 0x200;
+const S_IFMT: u32 = 0o170000;
+const S_IFREG: u32 = 0o100000;
+const S_IFIFO: u32 = 0o010000;
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -894,6 +897,20 @@ define_syscall!(MkdirAt, |dirfd: i32, path: CString, _mode: u32| {
     result?;
 
     Ok(0)
+});
+
+define_syscall!(Mknodat, |dirfd: i32, path: CString, mode: u32, _dev: u64| {
+    let path = path_from_raw(path)?;
+    let path = resolve_path_at(dirfd, &path)?;
+
+    match mode & S_IFMT {
+        0 | S_IFREG | S_IFIFO => {
+            VirtualFS.lock().create_file(path.clone())?;
+            VirtualFS.lock().open(path)?.chmod(mode & !S_IFMT)?;
+            Ok(0)
+        }
+        _ => Err(SyscallError::NoSyscall),
+    }
 });
 
 define_syscall!(Mkdir, |path: CString, mode: u32| {
