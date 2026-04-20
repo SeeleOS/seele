@@ -26,8 +26,10 @@ use pid::{
     proc_pid_write_oom_score_adj,
 };
 use root::{
-    PROC_CMDLINE_INODE, PROC_MOUNTS_INODE, PROC_ROOT_INODE, PROC_SELF_INODE, PROC_SYS_FS_FILE_MAX_INODE,
-    PROC_SYS_FS_INODE, PROC_SYS_FS_NR_OPEN_INODE, PROC_SYS_INODE, proc_kernel_cmdline_bytes,
+    PROC_CMDLINE_INODE, PROC_MOUNTS_INODE, PROC_ROOT_INODE, PROC_SELF_INODE,
+    PROC_SYS_FS_FILE_MAX_INODE, PROC_SYS_FS_INODE, PROC_SYS_FS_NR_OPEN_INODE, PROC_SYS_INODE,
+    PROC_SYS_KERNEL_INODE, PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE, PROC_SYS_KERNEL_RANDOM_INODE,
+    proc_boot_id_bytes, proc_kernel_cmdline_bytes, proc_kernel_entries, proc_kernel_random_entries,
     proc_mountinfo_bytes, proc_mounts_bytes, proc_root_entries,
 };
 
@@ -45,10 +47,10 @@ fn proc_fs_entries() -> Vec<DirectoryContentInfo> {
 }
 
 fn proc_sys_entries() -> Vec<DirectoryContentInfo> {
-    vec![DirectoryContentInfo::new(
-        "fs".into(),
-        DirectoryContentType::Directory,
-    )]
+    vec![
+        DirectoryContentInfo::new("fs".into(), DirectoryContentType::Directory),
+        DirectoryContentInfo::new("kernel".into(), DirectoryContentType::Directory),
+    ]
 }
 
 fn proc_sysctl_value_bytes(value: &AtomicU64) -> Vec<u8> {
@@ -99,6 +101,21 @@ impl FileSystem for ProcFs {
             ["mounts"] => Ok(proc_file("mounts", PROC_MOUNTS_INODE, proc_mounts_bytes)),
             ["sys"] => Ok(proc_dir("sys", PROC_SYS_INODE, proc_sys_entries())),
             ["sys", "fs"] => Ok(proc_dir("fs", PROC_SYS_FS_INODE, proc_fs_entries())),
+            ["sys", "kernel"] => Ok(proc_dir(
+                "kernel",
+                PROC_SYS_KERNEL_INODE,
+                proc_kernel_entries(),
+            )),
+            ["sys", "kernel", "random"] => Ok(proc_dir(
+                "random",
+                PROC_SYS_KERNEL_RANDOM_INODE,
+                proc_kernel_random_entries(),
+            )),
+            ["sys", "kernel", "random", "boot_id"] => Ok(proc_file(
+                "boot_id",
+                PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE,
+                proc_boot_id_bytes,
+            )),
             ["sys", "fs", "file-max"] => Ok(proc_rw_file(
                 "file-max",
                 PROC_SYS_FS_FILE_MAX_INODE,

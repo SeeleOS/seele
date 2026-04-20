@@ -1,4 +1,5 @@
 use alloc::{collections::BTreeMap, format, string::String, vec, vec::Vec};
+use lazy_static::lazy_static;
 
 use crate::{
     filesystem::{
@@ -6,6 +7,7 @@ use crate::{
         vfs::{FileSystemRef, VirtualFS},
         vfs_traits::DirectoryContentType,
     },
+    misc::time::Time,
     process::manager::MANAGER,
 };
 
@@ -17,6 +19,13 @@ pub(super) const PROC_SYS_INODE: u64 = 0x3004;
 pub(super) const PROC_SYS_FS_INODE: u64 = 0x3005;
 pub(super) const PROC_SYS_FS_FILE_MAX_INODE: u64 = 0x3006;
 pub(super) const PROC_SYS_FS_NR_OPEN_INODE: u64 = 0x3007;
+pub(super) const PROC_SYS_KERNEL_INODE: u64 = 0x3008;
+pub(super) const PROC_SYS_KERNEL_RANDOM_INODE: u64 = 0x3009;
+pub(super) const PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE: u64 = 0x300a;
+
+lazy_static! {
+    static ref PROC_BOOT_ID: String = generate_boot_id();
+}
 
 pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
     let mut entries = vec![
@@ -38,6 +47,61 @@ pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
 
 pub(super) fn proc_kernel_cmdline_bytes() -> Vec<u8> {
     Vec::new()
+}
+
+pub(super) fn proc_kernel_entries() -> Vec<DirectoryContentInfo> {
+    vec![DirectoryContentInfo::new(
+        "random".into(),
+        DirectoryContentType::Directory,
+    )]
+}
+
+pub(super) fn proc_kernel_random_entries() -> Vec<DirectoryContentInfo> {
+    vec![DirectoryContentInfo::new(
+        "boot_id".into(),
+        DirectoryContentType::File,
+    )]
+}
+
+pub(super) fn proc_boot_id_bytes() -> Vec<u8> {
+    format!("{}\n", PROC_BOOT_ID.as_str()).into_bytes()
+}
+
+fn generate_boot_id() -> String {
+    let mut state = Time::current().as_nanoseconds()
+        ^ Time::since_boot().as_nanoseconds().rotate_left(19)
+        ^ 0x6a09_e667_f3bc_c908;
+    let mut bytes = [0u8; 16];
+
+    for byte in &mut bytes {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        *byte = state as u8;
+    }
+
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15],
+    )
 }
 
 fn sorted_mounts() -> Vec<(String, FileSystemRef)> {
