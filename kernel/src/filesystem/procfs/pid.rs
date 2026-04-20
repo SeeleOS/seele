@@ -14,6 +14,7 @@ use crate::{
 pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
     vec![
         DirectoryContentInfo::new("stat".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("status".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("cmdline".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("cgroup".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("oom_score_adj".into(), DirectoryContentType::File),
@@ -70,6 +71,78 @@ pub(super) fn proc_pid_stat_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
 
 pub(super) fn proc_pid_cmdline_bytes(_pid: ProcessID) -> Vec<u8> {
     Vec::new()
+}
+
+fn format_capability_set(low: u32, high: u32) -> String {
+    format!("{:08x}{:08x}", high, low)
+}
+
+pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    let process = process.lock();
+    let parent_pid = process.parent.as_ref().map(|parent| parent.lock().pid.0).unwrap_or(0);
+    let state = if process.have_exited() || process.threads.is_empty() {
+        "Z (zombie)"
+    } else {
+        "S (sleeping)"
+    };
+    let groups = if process.supplementary_groups.is_empty() {
+        String::new()
+    } else {
+        process
+            .supplementary_groups
+            .iter()
+            .map(|group| format!("{group}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let content = format!(
+        concat!(
+            "Name:\t{}\n",
+            "Umask:\t0000\n",
+            "State:\t{}\n",
+            "Tgid:\t{}\n",
+            "Pid:\t{}\n",
+            "PPid:\t{}\n",
+            "TracerPid:\t0\n",
+            "Uid:\t{}\t{}\t{}\t{}\n",
+            "Gid:\t{}\t{}\t{}\t{}\n",
+            "FDSize:\t{}\n",
+            "Groups:\t{}\n",
+            "CapInh:\t{}\n",
+            "CapPrm:\t{}\n",
+            "CapEff:\t{}\n",
+            "CapBnd:\t{}\n",
+            "CapAmb:\t{}\n",
+            "NoNewPrivs:\t0\n",
+            "Seccomp:\t0\n",
+            "Seccomp_filters:\t0\n",
+        ),
+        pid_string(pid),
+        state,
+        pid.0,
+        pid.0,
+        parent_pid,
+        process.real_uid,
+        process.effective_uid,
+        process.saved_uid,
+        process.fs_uid,
+        process.real_gid,
+        process.effective_gid,
+        process.saved_gid,
+        process.fs_gid,
+        process.objects.len().max(64),
+        groups,
+        format_capability_set(
+            process.capability_inheritable[0],
+            process.capability_inheritable[1],
+        ),
+        format_capability_set(process.capability_permitted[0], process.capability_permitted[1]),
+        format_capability_set(process.capability_effective[0], process.capability_effective[1]),
+        format_capability_set(process.capability_permitted[0], process.capability_permitted[1]),
+        format_capability_set(process.capability_ambient[0], process.capability_ambient[1]),
+    );
+    Ok(content.into_bytes())
 }
 
 pub(super) fn proc_pid_cgroup_bytes(pid: ProcessID) -> Vec<u8> {
@@ -179,6 +252,10 @@ pub(super) fn pid_oom_score_adj_inode(pid: ProcessID) -> u64 {
 
 pub(super) fn pid_stat_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 5
+}
+
+pub(super) fn pid_status_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 6
 }
 
 pub(super) fn pid_fd_dir_inode(pid: ProcessID) -> u64 {

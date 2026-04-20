@@ -13,12 +13,17 @@ pub(super) const PROC_ROOT_INODE: u64 = 0x3000;
 pub(super) const PROC_CMDLINE_INODE: u64 = 0x3001;
 pub(super) const PROC_SELF_INODE: u64 = 0x3002;
 pub(super) const PROC_MOUNTS_INODE: u64 = 0x3003;
+pub(super) const PROC_SYS_INODE: u64 = 0x3004;
+pub(super) const PROC_SYS_FS_INODE: u64 = 0x3005;
+pub(super) const PROC_SYS_FS_FILE_MAX_INODE: u64 = 0x3006;
+pub(super) const PROC_SYS_FS_NR_OPEN_INODE: u64 = 0x3007;
 
 pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
     let mut entries = vec![
         DirectoryContentInfo::new("cmdline".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("mounts".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("self".into(), DirectoryContentType::Symlink),
+        DirectoryContentInfo::new("sys".into(), DirectoryContentType::Directory),
     ];
 
     for pid in MANAGER.lock().processes.keys() {

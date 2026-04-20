@@ -1,10 +1,14 @@
 use alloc::format;
 
+use alloc::{vec, vec::Vec};
+use core::sync::atomic::{AtomicU64, Ordering};
+
 use crate::filesystem::{
     errors::FSError,
+    info::DirectoryContentInfo,
     path::{Path, PathPart},
     vfs::FSResult,
-    vfs_traits::{FileLike, FileSystem},
+    vfs_traits::{DirectoryContentType, FileLike, FileSystem},
 };
 
 mod nodes;
@@ -16,14 +20,50 @@ use pid::{
     current_pid, ensure_pid_exists, fd_target, parse_fd, parse_pid, pid_cgroup_inode,
     pid_cmdline_inode, pid_dir_entries, pid_dir_inode, pid_fd_dir_inode, pid_fd_entries,
     pid_fd_inode, pid_fdinfo_dir_inode, pid_fdinfo_entries, pid_fdinfo_inode, pid_mountinfo_inode,
-    pid_oom_score_adj_inode, pid_stat_inode, pid_string, proc_pid_cgroup_bytes,
-    proc_pid_cmdline_bytes, proc_pid_fdinfo_bytes, proc_pid_oom_score_adj_bytes,
-    proc_pid_stat_bytes, proc_pid_write_oom_score_adj,
+    pid_oom_score_adj_inode, pid_stat_inode, pid_status_inode, pid_string,
+    proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_fdinfo_bytes,
+    proc_pid_oom_score_adj_bytes, proc_pid_stat_bytes, proc_pid_status_bytes,
+    proc_pid_write_oom_score_adj,
 };
 use root::{
-    PROC_CMDLINE_INODE, PROC_MOUNTS_INODE, PROC_ROOT_INODE, PROC_SELF_INODE,
-    proc_kernel_cmdline_bytes, proc_mountinfo_bytes, proc_mounts_bytes, proc_root_entries,
+    PROC_CMDLINE_INODE, PROC_MOUNTS_INODE, PROC_ROOT_INODE, PROC_SELF_INODE, PROC_SYS_FS_FILE_MAX_INODE,
+    PROC_SYS_FS_INODE, PROC_SYS_FS_NR_OPEN_INODE, PROC_SYS_INODE, proc_kernel_cmdline_bytes,
+    proc_mountinfo_bytes, proc_mounts_bytes, proc_root_entries,
 };
+
+const DEFAULT_FILE_MAX: u64 = 1_048_576;
+const DEFAULT_NR_OPEN: u64 = 1_048_576;
+
+static PROC_FILE_MAX: AtomicU64 = AtomicU64::new(DEFAULT_FILE_MAX);
+static PROC_NR_OPEN: AtomicU64 = AtomicU64::new(DEFAULT_NR_OPEN);
+
+fn proc_fs_entries() -> Vec<DirectoryContentInfo> {
+    vec![
+        DirectoryContentInfo::new("file-max".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("nr_open".into(), DirectoryContentType::File),
+    ]
+}
+
+fn proc_sys_entries() -> Vec<DirectoryContentInfo> {
+    vec![DirectoryContentInfo::new(
+        "fs".into(),
+        DirectoryContentType::Directory,
+    )]
+}
+
+fn proc_sysctl_value_bytes(value: &AtomicU64) -> Vec<u8> {
+    format!("{}\n", value.load(Ordering::Relaxed)).into_bytes()
+}
+
+fn proc_write_sysctl_u64(target: &AtomicU64, buffer: &[u8]) -> FSResult<usize> {
+    let content = core::str::from_utf8(buffer).map_err(|_| FSError::Other)?;
+    let value = content
+        .trim_matches(|c: char| c.is_ascii_whitespace() || c == '\0')
+        .parse::<u64>()
+        .map_err(|_| FSError::Other)?;
+    target.store(value, Ordering::Relaxed);
+    Ok(buffer.len())
+}
 
 pub struct ProcFs;
 
@@ -57,6 +97,20 @@ impl FileSystem for ProcFs {
                 proc_kernel_cmdline_bytes,
             )),
             ["mounts"] => Ok(proc_file("mounts", PROC_MOUNTS_INODE, proc_mounts_bytes)),
+            ["sys"] => Ok(proc_dir("sys", PROC_SYS_INODE, proc_sys_entries())),
+            ["sys", "fs"] => Ok(proc_dir("fs", PROC_SYS_FS_INODE, proc_fs_entries())),
+            ["sys", "fs", "file-max"] => Ok(proc_rw_file(
+                "file-max",
+                PROC_SYS_FS_FILE_MAX_INODE,
+                || proc_sysctl_value_bytes(&PROC_FILE_MAX),
+                |buffer| proc_write_sysctl_u64(&PROC_FILE_MAX, buffer),
+            )),
+            ["sys", "fs", "nr_open"] => Ok(proc_rw_file(
+                "nr_open",
+                PROC_SYS_FS_NR_OPEN_INODE,
+                || proc_sysctl_value_bytes(&PROC_NR_OPEN),
+                |buffer| proc_write_sysctl_u64(&PROC_NR_OPEN, buffer),
+            )),
             ["self"] => {
                 let pid = current_pid()?;
                 Ok(proc_symlink("self", PROC_SELF_INODE, format!("{}", pid.0)))
@@ -71,6 +125,12 @@ impl FileSystem for ProcFs {
                 let pid = current_pid()?;
                 Ok(proc_file("stat", pid_stat_inode(pid), move || {
                     proc_pid_stat_bytes(pid).unwrap_or_default()
+                }))
+            }
+            ["self", "status"] => {
+                let pid = current_pid()?;
+                Ok(proc_file("status", pid_status_inode(pid), move || {
+                    proc_pid_status_bytes(pid).unwrap_or_default()
                 }))
             }
             ["self", "cgroup"] => {
@@ -142,6 +202,13 @@ impl FileSystem for ProcFs {
                 ensure_pid_exists(pid)?;
                 Ok(proc_file("stat", pid_stat_inode(pid), move || {
                     proc_pid_stat_bytes(pid).unwrap_or_default()
+                }))
+            }
+            [pid, "status"] => {
+                let pid = parse_pid(pid)?;
+                ensure_pid_exists(pid)?;
+                Ok(proc_file("status", pid_status_inode(pid), move || {
+                    proc_pid_status_bytes(pid).unwrap_or_default()
                 }))
             }
             [pid, "cgroup"] => {
