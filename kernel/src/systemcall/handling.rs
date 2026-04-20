@@ -11,13 +11,21 @@ use x86_64::registers::model_specific::FsBase;
 
 pub fn register_traced_process(_pid: u64, _path: String) {}
 
-fn current_process_is_journald() -> bool {
+fn current_process_matches_suffix(suffix: &str) -> bool {
     with_current_process(|process| {
         process
             .command_line
             .first()
-            .is_some_and(|path| path.ends_with("/systemd-journald"))
+            .is_some_and(|path| path.ends_with(suffix))
     })
+}
+
+fn current_process_is_journald() -> bool {
+    current_process_matches_suffix("/systemd-journald")
+}
+
+fn current_process_is_udevd() -> bool {
+    current_process_matches_suffix("/systemd-udevd")
 }
 
 #[unsafe(no_mangle)]
@@ -93,6 +101,7 @@ fn syscall_handler_unwrapped(
 ) -> isize {
     let current_pid = with_current_process(|proc| proc.pid.0);
     let current_is_journald = current_process_is_journald();
+    let current_is_udevd = current_process_is_udevd();
     let syscall = SyscallNumber::try_from(syscall_no as usize).ok();
 
     if let Some(Some(handler)) = SYSCALL_TABLE.get(syscall_no as usize) {
@@ -104,6 +113,46 @@ fn syscall_handler_unwrapped(
         if current_is_journald && result < 0 {
             crate::s_println!(
                 "journald syscall error: pid={} no={:?} args=({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x}) -> {}",
+                current_pid,
+                syscall,
+                arg1,
+                arg2,
+                arg3,
+                arg4,
+                arg5,
+                arg6,
+                result
+            );
+        }
+
+        if current_is_udevd
+            && matches!(
+                syscall,
+                Some(
+                    SyscallNumber::Exit
+                        | SyscallNumber::ExitGroup
+                        | SyscallNumber::Sendmsg
+                        | SyscallNumber::Recvmsg
+                )
+            )
+        {
+            crate::s_println!(
+                "udevd syscall trace: pid={} no={:?} args=({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x}) -> {}",
+                current_pid,
+                syscall,
+                arg1,
+                arg2,
+                arg3,
+                arg4,
+                arg5,
+                arg6,
+                result
+            );
+        }
+
+        if current_is_udevd && result < 0 {
+            crate::s_println!(
+                "udevd syscall error: pid={} no={:?} args=({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x}) -> {}",
                 current_pid,
                 syscall,
                 arg1,
