@@ -142,6 +142,25 @@ static SYS_CLASS_INPUT_NODE: StaticNode = StaticNode::Directory(StaticDirectoryN
     entries: SYS_CLASS_INPUT_ENTRIES,
 });
 
+static SYS_CLASS_MISC_AUTOFS_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "autofs",
+    inode: 0x2070,
+    mode: 0o040755,
+    entries: &[],
+});
+
+static SYS_CLASS_MISC_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
+    name: "autofs",
+    node: &SYS_CLASS_MISC_AUTOFS_NODE,
+}];
+
+static SYS_CLASS_MISC_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "misc",
+    inode: 0x2071,
+    mode: 0o040755,
+    entries: SYS_CLASS_MISC_ENTRIES,
+});
+
 static SYS_CLASS_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "graphics",
@@ -150,6 +169,10 @@ static SYS_CLASS_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "input",
         node: &SYS_CLASS_INPUT_NODE,
+    },
+    StaticDirEntry {
+        name: "misc",
+        node: &SYS_CLASS_MISC_NODE,
     },
 ];
 
