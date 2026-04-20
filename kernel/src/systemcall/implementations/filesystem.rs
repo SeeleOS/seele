@@ -1096,7 +1096,7 @@ define_syscall!(Fsopen, |fs_name: CString, _flags: u32| {
 define_syscall!(Fsconfig, |fd: i32, cmd: u32, key: CString, value: CString, _aux: i32| {
     let object = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
     let fs_context = object.as_fs_context()?;
-    let command = FsConfigCommand::try_from(cmd)?;
+    let command = FsConfigCommand::try_from(cmd).map_err(|_| SyscallError::InvalidArguments)?;
     let key = string_from_raw_optional(key)?;
     let value = string_from_raw_optional(value)?;
     fs_context.configure(command, key.as_deref(), value.as_deref())?;

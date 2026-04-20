@@ -1,4 +1,5 @@
 use alloc::{string::String, sync::Arc};
+use num_enum::TryFromPrimitive;
 
 use crate::{
     impl_cast_function, impl_cast_function_non_trait,
@@ -6,24 +7,12 @@ use crate::{
     systemcall::utils::SyscallError,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
+#[repr(u32)]
 pub enum FsConfigCommand {
-    SetFlag,
-    SetString,
-    SetFd,
-}
-
-impl TryFrom<u32> for FsConfigCommand {
-    type Error = SyscallError;
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::SetFlag),
-            1 => Ok(Self::SetString),
-            5 => Ok(Self::SetFd),
-            _ => Err(SyscallError::InvalidArguments),
-        }
-    }
+    SetFlag = 0,
+    SetString = 1,
+    SetFd = 5,
 }
 
 #[derive(Debug)]
