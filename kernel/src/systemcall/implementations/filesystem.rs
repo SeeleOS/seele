@@ -32,34 +32,14 @@ const STATX_MNT_ID: u32 = 0x0000_1000;
 const STATX_ATTR_MOUNT_ROOT: u64 = 0x0000_2000;
 const ANON_INODE_FS_MAGIC: i64 = 0x0904_1934;
 const SOCKFS_MAGIC: i64 = 0x534f_434b;
-const AT_NO_AUTOMOUNT: i32 = 0x800;
 const AT_STATX_FORCE_SYNC: i32 = 0x2000;
 const AT_STATX_DONT_SYNC: i32 = 0x4000;
-const AT_EACCESS: i32 = 0x200;
-const AT_RECURSIVE: u32 = 0x8000;
-const OPEN_TREE_CLONE: u32 = 0x1;
-const OPEN_TREE_CLOEXEC: u32 = 0x0008_0000;
-const FSOPEN_CLOEXEC: u32 = 0x1;
-const FSMOUNT_CLOEXEC: u32 = 0x1;
-const O_TMPFILE: i32 = 0o20200000;
 const S_IFMT: u32 = 0o170000;
 const S_IFREG: u32 = 0o100000;
 const S_IFIFO: u32 = 0o010000;
 const S_IFCHR: u32 = 0o020000;
 const S_IFBLK: u32 = 0o060000;
 const S_IFSOCK: u32 = 0o140000;
-const MOVE_MOUNT_F_EMPTY_PATH: u32 = 0x0000_0004;
-const MOVE_MOUNT_T_EMPTY_PATH: u32 = 0x0000_0040;
-const MOVE_MOUNT_BENEATH: u32 = 0x0000_0200;
-const MOVE_MOUNT_ALLOWED_FLAGS: u32 = 0x0000_0377;
-const MS_REMOUNT: u64 = 32;
-const MS_BIND: u64 = 4096;
-const MS_MOVE: u64 = 8192;
-const MS_REC: u64 = 16384;
-const MS_PRIVATE: u64 = 1 << 18;
-const MS_SLAVE: u64 = 1 << 19;
-const MS_SHARED: u64 = 1 << 20;
-const MS_UNBINDABLE: u64 = 1 << 17;
 const API_MOUNT_ROOT: &str = "/run/.api-mounts";
 
 static NEXT_API_MOUNT_ID: AtomicU64 = AtomicU64::new(1);
@@ -69,8 +49,10 @@ bitflags! {
     struct AtFlags: i32 {
         const REMOVEDIR = 0x200;
         const SYMLINK_NOFOLLOW = 0x100;
-        const NO_AUTOMOUNT = AT_NO_AUTOMOUNT;
+        const NO_AUTOMOUNT = 0x800;
         const EMPTY_PATH = 0x1000;
+        const EACCESS = 0x200;
+        const RECURSIVE = 0x8000;
     }
 }
 
@@ -147,6 +129,7 @@ bitflags! {
         const NOFOLLOW = 0o400000;
         const CLOEXEC = 0o2000000;
         const PATH = 0o10000000;
+        const TMPFILE = 0o20200000;
     }
 }
 
@@ -165,6 +148,59 @@ bitflags! {
         const DETACH = 0x2;
         const EXPIRE = 0x4;
         const NOFOLLOW = 0x8;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct FsOpenFlags: u32 {
+        const FSCONTEXT_CLOEXEC = 0x1;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct FsMountFlags: u32 {
+        const FSMOUNT_CLOEXEC = 0x1;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct MoveMountFlags: u32 {
+        const MOVE_MOUNT_F_SYMLINKS = 0x0000_0001;
+        const MOVE_MOUNT_F_AUTOMOUNTS = 0x0000_0002;
+        const MOVE_MOUNT_F_EMPTY_PATH = 0x0000_0004;
+        const MOVE_MOUNT_T_SYMLINKS = 0x0000_0010;
+        const MOVE_MOUNT_T_AUTOMOUNTS = 0x0000_0020;
+        const MOVE_MOUNT_T_EMPTY_PATH = 0x0000_0040;
+        const MOVE_MOUNT_SET_GROUP = 0x0000_0100;
+        const MOVE_MOUNT_BENEATH = 0x0000_0200;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct OpenTreeFlags: u32 {
+        const OPEN_TREE_CLONE = 0x0000_0001;
+        const AT_SYMLINK_NOFOLLOW = AtFlags::SYMLINK_NOFOLLOW.bits() as u32;
+        const AT_NO_AUTOMOUNT = AtFlags::NO_AUTOMOUNT.bits() as u32;
+        const AT_EMPTY_PATH = AtFlags::EMPTY_PATH.bits() as u32;
+        const OPEN_TREE_CLOEXEC = 0x0008_0000;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct MountOperationFlags: u64 {
+        const MS_REMOUNT = 32;
+        const MS_BIND = 4096;
+        const MS_MOVE = 8192;
+        const MS_REC = 16384;
+        const MS_UNBINDABLE = 1 << 17;
+        const MS_PRIVATE = 1 << 18;
+        const MS_SLAVE = 1 << 19;
+        const MS_SHARED = 1 << 20;
     }
 }
 
@@ -488,7 +524,7 @@ fn faccessat_impl(
     flags: i32,
 ) -> Result<usize, SyscallError> {
     let flags = AtFlags::from_bits_truncate(flags);
-    let allowed = AtFlags::EMPTY_PATH.bits() | AtFlags::SYMLINK_NOFOLLOW.bits() | AT_EACCESS;
+    let allowed = (AtFlags::EMPTY_PATH | AtFlags::SYMLINK_NOFOLLOW | AtFlags::EACCESS).bits();
     if flags.bits() != flags.bits() & allowed {
         return Err(SyscallError::NoSyscall);
     }
@@ -614,10 +650,10 @@ define_syscall!(OpenAt, |dirfd: i32,
             flags
         );
     }
-    if (flags & O_TMPFILE) == O_TMPFILE {
+    let flags = OpenFlags::from_bits_truncate(flags);
+    if flags.contains(OpenFlags::TMPFILE) {
         return Err(SyscallError::OperationNotSupported);
     }
-    let flags = OpenFlags::from_bits_truncate(flags);
     let create = flags.contains(OpenFlags::CREAT);
     let nofollow = flags.contains(OpenFlags::NOFOLLOW);
     let directory_only = flags.contains(OpenFlags::DIRECTORY);
@@ -1194,9 +1230,10 @@ define_syscall!(Mount, |source: CString,
         target_object.info()?.file_like_type,
         FileLikeType::Directory
     );
+    let operation_flags = MountOperationFlags::from_bits_retain(mountflags);
 
-    if (mountflags & MS_BIND) != 0 {
-        if (mountflags & MS_REMOUNT) != 0 {
+    if operation_flags.contains(MountOperationFlags::MS_BIND) {
+        if operation_flags.contains(MountOperationFlags::MS_REMOUNT) {
             let (remount_flags, remount_mask) = remount_bind_flag_update(mountflags);
             VirtualFS
                 .lock()
@@ -1207,18 +1244,27 @@ define_syscall!(Mount, |source: CString,
             let source_path = resolve_path_at(AT_FDCWD, &source)?;
             VirtualFS
                 .lock()
-                .bind_mount(source_path, target_path, (mountflags & MS_REC) != 0)
+                .bind_mount(
+                    source_path,
+                    target_path,
+                    operation_flags.contains(MountOperationFlags::MS_REC),
+                )
                 .map_err(SyscallError::from)?;
         }
         return Ok(0);
     }
 
-    if (mountflags & MS_MOVE) != 0 {
+    if operation_flags.contains(MountOperationFlags::MS_MOVE) {
         return Err(SyscallError::OperationNotSupported);
     }
 
-    if (mountflags & MS_REMOUNT) != 0
-        || (mountflags & (MS_PRIVATE | MS_SLAVE | MS_SHARED | MS_UNBINDABLE)) != 0
+    if operation_flags.contains(MountOperationFlags::MS_REMOUNT)
+        || operation_flags.intersects(
+            MountOperationFlags::MS_PRIVATE
+                | MountOperationFlags::MS_SLAVE
+                | MountOperationFlags::MS_SHARED
+                | MountOperationFlags::MS_UNBINDABLE,
+        )
         || mountflags == 0
         || (mountflags & MountFlags::all().bits()) != 0
     {
@@ -1256,7 +1302,8 @@ define_syscall!(Umount2, |target: CString, flags: i32| {
 
 define_syscall!(Fsopen, |fs_name: CString, _flags: u32| {
     let fs_name = path_from_raw(fs_name)?;
-    let fd_flags = if (_flags & FSOPEN_CLOEXEC) != 0 {
+    let flags = FsOpenFlags::from_bits_retain(_flags);
+    let fd_flags = if flags.contains(FsOpenFlags::FSCONTEXT_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
         FdFlags::empty()
@@ -1282,9 +1329,7 @@ define_syscall!(Fsconfig, |fd: i32,
 });
 
 define_syscall!(Fsmount, |fd: i32, flags: u32, _mount_attrs: u32| {
-    if flags & !FSMOUNT_CLOEXEC != 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
+    let flags = FsMountFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
 
     let object = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
     let fs_context = object.as_fs_context()?;
@@ -1299,7 +1344,7 @@ define_syscall!(Fsmount, |fd: i32, flags: u32, _mount_attrs: u32| {
     }
 
     let mount_root: ObjectRef = Arc::new(VirtualFS.lock().open(mount_path)?);
-    let fd_flags = if (flags & FSMOUNT_CLOEXEC) != 0 {
+    let fd_flags = if flags.contains(FsMountFlags::FSMOUNT_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
         FdFlags::empty()
@@ -1314,12 +1359,10 @@ define_syscall!(MoveMount, |from_dirfd: i32,
                             to_dirfd: i32,
                             to_path: CString,
                             flags: u32| {
-    if flags & !MOVE_MOUNT_ALLOWED_FLAGS != 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
+    let flags = MoveMountFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
 
     let source_path = if from_path.is_null() {
-        if (flags & MOVE_MOUNT_F_EMPTY_PATH) == 0 {
+        if !flags.contains(MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH) {
             return Err(SyscallError::BadAddress);
         }
         let object = get_object_current_process(from_dirfd as u64).map_err(SyscallError::from)?;
@@ -1327,7 +1370,7 @@ define_syscall!(MoveMount, |from_dirfd: i32,
     } else {
         let from_path = path_from_raw(from_path)?;
         if from_path.is_empty() {
-            if (flags & MOVE_MOUNT_F_EMPTY_PATH) == 0 {
+            if !flags.contains(MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH) {
                 return Err(SyscallError::InvalidArguments);
             }
             let object =
@@ -1345,7 +1388,7 @@ define_syscall!(MoveMount, |from_dirfd: i32,
     }
 
     let target_path = if to_path.is_null() {
-        if (flags & MOVE_MOUNT_T_EMPTY_PATH) == 0 {
+        if !flags.contains(MoveMountFlags::MOVE_MOUNT_T_EMPTY_PATH) {
             return Err(SyscallError::BadAddress);
         }
         let object = get_object_current_process(to_dirfd as u64).map_err(SyscallError::from)?;
@@ -1353,7 +1396,7 @@ define_syscall!(MoveMount, |from_dirfd: i32,
     } else {
         let to_path = path_from_raw(to_path)?;
         if to_path.is_empty() {
-            if (flags & MOVE_MOUNT_T_EMPTY_PATH) == 0 {
+            if !flags.contains(MoveMountFlags::MOVE_MOUNT_T_EMPTY_PATH) {
                 return Err(SyscallError::InvalidArguments);
             }
             let object = get_object_current_process(to_dirfd as u64).map_err(SyscallError::from)?;
@@ -1377,22 +1420,15 @@ define_syscall!(MoveMount, |from_dirfd: i32,
         let _ = VirtualFS.lock().delete_file(source_path);
     }
 
-    let _ = flags & MOVE_MOUNT_BENEATH;
+    let _ = flags.contains(MoveMountFlags::MOVE_MOUNT_BENEATH);
     Ok(0)
 });
 
 define_syscall!(OpenTree, |dirfd: i32, path: CString, flags: u32| {
-    let allowed_flags = OPEN_TREE_CLONE
-        | OPEN_TREE_CLOEXEC
-        | AtFlags::SYMLINK_NOFOLLOW.bits() as u32
-        | AtFlags::EMPTY_PATH.bits() as u32
-        | AT_NO_AUTOMOUNT as u32;
-    if flags & !allowed_flags != 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
+    let flags = OpenTreeFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
 
     let object = if path.is_null() {
-        if (flags & AtFlags::EMPTY_PATH.bits() as u32) == 0 {
+        if !flags.contains(OpenTreeFlags::AT_EMPTY_PATH) {
             return Err(SyscallError::BadAddress);
         }
         get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
@@ -1403,17 +1439,17 @@ define_syscall!(OpenTree, |dirfd: i32, path: CString, flags: u32| {
                 "open_tree trace dirfd={} path={} flags={:#x}",
                 dirfd,
                 path,
-                flags
+                flags.bits()
             );
         }
-        if path.is_empty() && (flags & AtFlags::EMPTY_PATH.bits() as u32) != 0 {
+        if path.is_empty() && flags.contains(OpenTreeFlags::AT_EMPTY_PATH) {
             get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
         } else {
             let path = resolve_path_at(dirfd, &path)?;
             if should_trace_namespace_path(&path.clone().as_string()) {
                 crate::s_println!("open_tree resolved {}", path.clone().as_string());
             }
-            let file = if (flags & AtFlags::SYMLINK_NOFOLLOW.bits() as u32) != 0 {
+            let file = if flags.contains(OpenTreeFlags::AT_SYMLINK_NOFOLLOW) {
                 VirtualFS.lock().open_nofollow(path)?
             } else {
                 VirtualFS.lock().open(path)?
@@ -1424,7 +1460,7 @@ define_syscall!(OpenTree, |dirfd: i32, path: CString, flags: u32| {
 
     let _ = object.clone().as_file_like()?;
 
-    let fd_flags = if (flags & OPEN_TREE_CLOEXEC) != 0 {
+    let fd_flags = if flags.contains(OpenTreeFlags::OPEN_TREE_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
         FdFlags::empty()
@@ -1440,7 +1476,7 @@ define_syscall!(MountSetattr, |dirfd: i32,
                                attr: *const LinuxMountAttr,
                                size: usize| {
     let allowed_flags =
-        AtFlags::SYMLINK_NOFOLLOW.bits() as u32 | AtFlags::EMPTY_PATH.bits() as u32 | AT_RECURSIVE;
+        (AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH | AtFlags::RECURSIVE).bits() as u32;
     if flags & !allowed_flags != 0 {
         return Err(SyscallError::InvalidArguments);
     }
