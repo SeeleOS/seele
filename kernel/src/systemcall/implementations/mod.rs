@@ -1,3 +1,4 @@
+mod bpf;
 mod filesystem;
 mod memory_sync;
 mod misc;
@@ -11,6 +12,7 @@ mod signal;
 mod socket;
 mod timer;
 
+pub use bpf::*;
 pub use filesystem::*;
 pub use memory_sync::*;
 pub use misc::*;

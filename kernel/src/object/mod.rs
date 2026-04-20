@@ -12,6 +12,7 @@ bitflags::bitflags! {
 use crate::{
     filesystem::object::FileLikeObject,
     object::{
+        bpf::BpfObject,
         error::ObjectError,
         fs_context::FsContextObject,
         linux_anon::{EventFdObject, InotifyObject, PidFdObject, SignalfdObject, TimerFdObject},
@@ -24,6 +25,7 @@ use crate::{
     systemcall::utils::{SyscallError, SyscallResult},
 };
 
+pub mod bpf;
 pub mod config;
 pub mod control;
 pub mod device;
@@ -82,6 +84,7 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function_non_trait!("file_like", FileLikeObject, BadFileDescriptor);
     define_cast_function_non_trait!("eventfd", EventFdObject, BadFileDescriptor);
     define_cast_function_non_trait!("fs_context", FsContextObject, BadFileDescriptor);
+    define_cast_function_non_trait!("bpf", BpfObject, BadFileDescriptor);
     define_cast_function_non_trait!("inotify", InotifyObject, BadFileDescriptor);
     define_cast_function_non_trait!("poller", PollerObject, BadFileDescriptor);
     define_cast_function_non_trait!("pidfd", PidFdObject, BadFileDescriptor);

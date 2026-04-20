@@ -184,7 +184,6 @@ const LINUX_REBOOT_MAGIC1: u32 = 0xfee1_dead;
 const LINUX_REBOOT_MAGIC2: u32 = 0x2812_1969;
 const LINUX_REBOOT_CMD_CAD_OFF: u32 = 0x0000_0000;
 const LINUX_REBOOT_CMD_CAD_ON: u32 = 0x89ab_cdef;
-const BPF_COMMAND_MAX: u32 = 36;
 const KEY_SPEC_SESSION_KEYRING: i32 = -3;
 const KEY_SPEC_USER_KEYRING: i32 = -4;
 
@@ -1603,18 +1602,6 @@ define_syscall!(Keyctl, |cmd: u64,
             Err(SyscallError::NoSyscall)
         }
     }
-});
-
-define_syscall!(Bpf, |cmd: u32, attr: *const u8, _size: usize| {
-    if attr.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-    if cmd > BPF_COMMAND_MAX {
-        return Err(SyscallError::InvalidArguments);
-    }
-
-    // Report BPF as unsupported until the kernel grows a real verifier/object model.
-    Err(SyscallError::InvalidArguments)
 });
 
 define_syscall!(SetRobustList, |head: u64, len: usize| {
