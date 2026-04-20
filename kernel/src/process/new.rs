@@ -9,8 +9,7 @@ use spin::Mutex;
 use crate::{
     elfloader::{load_elf_lazy, read_elf_header},
     filesystem::{
-        absolute_path::AbsolutePath, errors::FSError, object::FileLikeObject, path::Path,
-        vfs::VirtualFS,
+        errors::FSError, object::FileLikeObject, path::Path, vfs::VirtualFS,
     },
     memory::addrspace::AddrSpace,
     misc::time::with_profiling,
@@ -21,8 +20,6 @@ use crate::{
         misc::{ProcessID, init_stack_layout},
         object::init_objects,
     },
-    s_println,
-    signal::{SIGNAL_AMOUNT, Signals, action::SignalAction, misc::default_signal_action_vec},
     thread::{
         THREAD_MANAGER,
         misc::ThreadID,
@@ -79,7 +76,7 @@ fn read_shebang_prefix(file: &FileLikeObject) -> Result<Vec<u8>, FSError> {
 impl Process {
     pub fn init() -> ProcessRef {
         let pid = ProcessID::new();
-        let mut addrspace = AddrSpace::default();
+        let addrspace = AddrSpace::default();
         let kernel_stack_top = allocate_kernel_stack(16).finish();
 
         let process_arc = Arc::new(Mutex::new(Process {

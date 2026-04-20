@@ -66,7 +66,7 @@ pub trait Object: Send + Sync + Debug {
         Err(ObjectError::Unimplemented)
     }
 
-    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+    fn set_flags(self: Arc<Self>, _flags: FileFlags) -> ObjectResult<()> {
         Err(ObjectError::Unimplemented)
     }
 

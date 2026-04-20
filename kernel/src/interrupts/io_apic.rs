@@ -1,5 +1,4 @@
 use acpi::sdt::madt::{Madt, MadtEntry};
-use alloc::vec;
 use x2apic::ioapic::{IoApic, IrqFlags, IrqMode, RedirectionTableEntry};
 
 use crate::{

@@ -245,7 +245,7 @@ impl SignalfdObject {
     }
 
     fn take_next_signal(&self) -> Option<Signal> {
-        let mut manager = MANAGER.lock();
+        let manager = MANAGER.lock();
         let process = manager
             .processes
             .values()

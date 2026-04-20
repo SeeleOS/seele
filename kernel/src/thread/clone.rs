@@ -1,10 +1,8 @@
 use crate::{
     process::ProcessRef,
-    signal::Signals,
     thread::{
         THREAD_MANAGER, ThreadRef,
-        misc::{SnapshotState, State, ThreadID},
-        snapshot::ThreadSnapshot,
+        misc::ThreadID,
         stack::allocate_kernel_stack,
         thread::Thread,
     },

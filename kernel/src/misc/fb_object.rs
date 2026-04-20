@@ -1,6 +1,5 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::ptr::read_volatile;
-use spin::Mutex;
 use x86_64::{VirtAddr, structures::paging::Translate};
 
 use crate::{
@@ -26,9 +25,7 @@ use crate::{
 };
 
 #[derive(Default, Debug)]
-pub struct FramebufferObject {
-    used_by_user: Mutex<bool>,
-}
+pub struct FramebufferObject;
 
 impl Object for FramebufferObject {
     impl_cast_function!("configuratable", Configuratable);

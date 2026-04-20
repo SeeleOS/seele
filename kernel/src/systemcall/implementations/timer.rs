@@ -1,7 +1,7 @@
 use crate::{
     misc::timer::{ClockId, Sigevent, TimerNotifyMethod, TimerSpec, TimerState},
     process::misc::with_current_process,
-    systemcall::utils::{SyscallError, SyscallImpl, SyscallResult},
+    systemcall::utils::{SyscallError, SyscallImpl},
 };
 
 use crate::define_syscall;

@@ -3,14 +3,13 @@ use x86_64::{
     VirtAddr,
     structures::paging::{
         Page, PageTableFlags, PhysFrame, Size4KiB,
-        page::{PageRange, PageRangeInclusive},
+        page::PageRange,
     },
 };
 
 use crate::{
-    filesystem::{object::FileLikeObject, path::Path},
+    filesystem::object::FileLikeObject,
     memory::addrspace::KERNEL_MEM_START,
-    object::misc::ObjectRef,
 };
 
 #[derive(Clone, Debug)]

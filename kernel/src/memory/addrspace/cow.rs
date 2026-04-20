@@ -1,4 +1,4 @@
-use core::intrinsics::copy_nonoverlapping;
+use core::ptr::copy_nonoverlapping;
 
 use alloc::collections::btree_map::BTreeMap;
 use ext4plus::sync::Mutex;

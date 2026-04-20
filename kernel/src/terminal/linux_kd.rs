@@ -37,6 +37,7 @@ enum KeyboardType {
 
 #[derive(Debug, Clone, Copy)]
 #[repr(u16)]
+#[allow(dead_code)]
 enum KeyType {
     Latin = 0,
     Function = 1,
@@ -52,6 +53,7 @@ const fn k(ty: KeyType, value: u16) -> u16 {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 enum KeyValue {
     Enter,
     Break,

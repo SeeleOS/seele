@@ -1,14 +1,13 @@
+#![allow(unused_braces)]
+
 use alloc::{string::String, vec::Vec};
-use futures_util::future::OkInto;
 use x86_64::VirtAddr;
 
 use crate::{
-    define_syscall,
     filesystem::vfs_traits::Whence,
     memory::protection::Protection,
     misc::{
         c_types::{CString, CVec},
-        error::AsSyscallError,
         others::KernelFrom,
         timer::ClockId,
     },
@@ -17,7 +16,6 @@ use crate::{
     process::{
         ProcessRef,
         group::ProcessGroupID,
-        manager::MANAGER,
         misc::{ProcessID, get_process_with_pid},
     },
     signal::{Signal, Signals},

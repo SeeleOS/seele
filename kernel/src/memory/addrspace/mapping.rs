@@ -1,23 +1,15 @@
-use alloc::{slice, sync::Arc, vec::Vec};
-use spleen_font::Size;
+use alloc::vec::Vec;
 use x86_64::{
     VirtAddr,
-    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
+    structures::paging::{Mapper, Page, Size4KiB},
 };
 
 use crate::{
-    filesystem::object::FileLikeObject,
     memory::{
         addrspace::{
-            cow::increase_ref,
             mem_area::{Data, MemoryArea},
         },
-        paging::FRAME_ALLOCATOR,
-        protection::Protection,
-        utils::apply_offset,
     },
-    misc::{others::protection_to_page_flags, stack_builder::StackBuilder},
-    object::misc::ObjectRef,
 };
 
 use super::{AddrSpace, AllocResult, LAZY_MAP};

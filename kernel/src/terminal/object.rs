@@ -10,7 +10,7 @@ use crate::{
         misc::ObjectResult,
         traits::{Configuratable, Writable},
     },
-    s_print, s_println,
+    s_print,
     terminal::term_trait::AbstractTerminal,
 };
 

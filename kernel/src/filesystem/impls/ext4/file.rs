@@ -76,7 +76,7 @@ impl File for Ext4File {
             Whence::End => self.inner.inode().size_in_bytes() as i64 + offset,
         };
 
-        self.inner.seek_to(pos as u64);
+        let _ = self.inner.seek_to(pos as u64);
 
         Ok(self.inner.position() as usize)
     }

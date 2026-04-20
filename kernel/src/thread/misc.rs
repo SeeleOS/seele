@@ -1,5 +1,3 @@
-use spin::MutexGuard;
-
 use crate::{
     define_with_accessor,
     process::misc::next_linux_task_id,

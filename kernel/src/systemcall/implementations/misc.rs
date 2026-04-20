@@ -3,7 +3,6 @@ use bitflags::bitflags;
 use core::sync::atomic::{AtomicI32, Ordering};
 use num_enum::TryFromPrimitive;
 use x86_64::VirtAddr;
-use x86_rtc::Rtc;
 
 use crate::memory::{
     addrspace::mem_area::{Data, MemoryArea},

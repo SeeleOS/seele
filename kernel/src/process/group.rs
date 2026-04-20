@@ -4,7 +4,6 @@ use crate::process::{
     ProcessRef,
     manager::{MANAGER, Manager},
 };
-use crate::signal::Signal;
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct ProcessGroupID(pub u64);

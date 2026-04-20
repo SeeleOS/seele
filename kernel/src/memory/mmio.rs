@@ -2,8 +2,8 @@ use alloc::collections::BTreeMap;
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
 use x86_64::{
-    PhysAddr, VirtAddr,
-    structures::paging::{Mapper, Page, PageSize, PageTableFlags, PhysFrame, Size4KiB},
+    PhysAddr,
+    structures::paging::{Mapper, PageSize, PageTableFlags, PhysFrame, Size4KiB},
 };
 
 use crate::memory::{

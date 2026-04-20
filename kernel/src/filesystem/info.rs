@@ -1,5 +1,4 @@
 use alloc::string::String;
-use bootloader_api::info;
 
 use crate::filesystem::vfs_traits::{DirectoryContentType, FileLikeType};
 

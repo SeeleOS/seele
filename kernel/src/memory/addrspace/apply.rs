@@ -1,4 +1,4 @@
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 use x86_64::structures::paging::{FrameAllocator, Mapper, Page, PhysFrame, Size4KiB, Translate};
 
 use crate::{

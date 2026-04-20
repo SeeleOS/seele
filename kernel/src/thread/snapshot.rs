@@ -80,7 +80,7 @@ impl ThreadSnapshot {
 
     pub fn new_with_fx_state(
         entry_point: u64,
-        addrspace: &mut AddrSpace,
+        _addrspace: &mut AddrSpace,
         virt_stack_addr: u64,
         snapshot_type: ThreadSnapshotType,
         fx_state: FxState,

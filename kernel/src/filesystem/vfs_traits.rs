@@ -1,7 +1,7 @@
 use core::any::Any;
 use core::fmt::Debug;
 
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{string::String, vec::Vec};
 use num_enum::TryFromPrimitive;
 
 use crate::filesystem::{

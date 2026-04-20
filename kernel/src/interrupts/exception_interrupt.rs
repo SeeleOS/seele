@@ -1,17 +1,15 @@
 use x86_64::{
-    PrivilegeLevel,
     instructions::interrupts,
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame},
 };
 
 use crate::{
-    interrupts::{pagefault::pagefault_handler, print_stackframe_m},
-    misc::{hlt_loop, others::is_user_mode},
+    interrupts::pagefault::pagefault_handler,
+    misc::others::is_user_mode,
     process::{
-        manager::{MANAGER, get_current_process, terminate_process},
+        manager::{get_current_process, terminate_process},
         misc::with_current_process,
     },
-    s_println,
     signal::Signal,
     thread::{misc::with_current_thread, scheduling::return_to_executor_no_save},
     tss::{DOUBLE_FAULT_IST_LOCATION, GP_IST_LOCATION, PAGE_FAULT_IST_LOCATION},
