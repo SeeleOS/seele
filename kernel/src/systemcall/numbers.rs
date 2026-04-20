@@ -156,6 +156,7 @@ pub enum SyscallNumber {
     Faccessat = 269,
     Pselect6 = 270,
     Ppoll = 271,
+    Unshare = 272,
     SetRobustList = 273,
     Utimensat = 280,
     EpollPwait = 281,

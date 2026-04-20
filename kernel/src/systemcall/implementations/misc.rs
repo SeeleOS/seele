@@ -59,6 +59,22 @@ bitflags! {
     }
 }
 
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct UnshareFlags: u64 {
+        const FS = CloneFlags::FS.bits();
+        const FILES = CloneFlags::FILES.bits();
+        const NEWNS = CloneFlags::NEWNS.bits();
+        const SYSVSEM = 0x0004_0000;
+        const NEWCGROUP = CloneFlags::NEWCGROUP.bits();
+        const NEWUTS = CloneFlags::NEWUTS.bits();
+        const NEWIPC = CloneFlags::NEWIPC.bits();
+        const NEWUSER = CloneFlags::NEWUSER.bits();
+        const NEWPID = CloneFlags::NEWPID.bits();
+        const NEWNET = CloneFlags::NEWNET.bits();
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct LinuxCloneArgs {
@@ -1015,6 +1031,24 @@ define_syscall!(
         Ok(0)
     }
 );
+
+define_syscall!(Unshare, |flags: u64| {
+    let unsupported = flags
+        & !UnshareFlags::all().bits()
+        & !(CloneFlags::THREAD | CloneFlags::SIGHAND | CloneFlags::VM | CloneFlags::CLEAR_SIGHAND)
+            .bits();
+    if unsupported != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let forbidden =
+        flags & (CloneFlags::THREAD | CloneFlags::SIGHAND | CloneFlags::VM | CloneFlags::CLEAR_SIGHAND).bits();
+    if forbidden != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    Ok(0)
+});
 
 define_syscall!(Clone, |flags: u64,
                         stack_pointer: u64,

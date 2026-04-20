@@ -20,6 +20,7 @@ fn should_trace_process(path: &str) -> bool {
             || p.ends_with("/systemd-tmpfiles")
             || p.ends_with("/systemd-sysusers")
             || p.ends_with("/systemd-journald")
+            || p.ends_with("/systemd-userdbd")
             || p.ends_with("/udevadm")
             || p.ends_with("/systemd-udevd")
     )
