@@ -1,5 +1,4 @@
 use alloc::{collections::BTreeMap, format, string::String, vec, vec::Vec};
-use core::sync::atomic::{AtomicBool, Ordering};
 use lazy_static::lazy_static;
 
 use crate::{
@@ -29,8 +28,6 @@ pub(super) const PROC_SYS_KERNEL_DOMAINNAME_INODE: u64 = 0x300c;
 lazy_static! {
     static ref PROC_BOOT_ID: String = generate_boot_id();
 }
-
-static LOGGED_EXECUTOR_MOUNTINFO: AtomicBool = AtomicBool::new(false);
 
 pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
     let mut entries = vec![
@@ -183,17 +180,5 @@ pub(super) fn proc_mountinfo_bytes() -> Vec<u8> {
             fs.mount_source()
         ));
     }
-
-    crate::process::misc::with_current_process(|process| {
-        if process
-            .command_line
-            .first()
-            .is_some_and(|path| path.ends_with("/systemd-executor"))
-            && !LOGGED_EXECUTOR_MOUNTINFO.swap(true, Ordering::Relaxed)
-        {
-            crate::s_println!("mountinfo dump begin\n{}mountinfo dump end", out);
-        }
-    });
-
     out.into_bytes()
 }

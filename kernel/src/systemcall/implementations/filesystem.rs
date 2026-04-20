@@ -301,18 +301,12 @@ fn is_api_mount_path(path: &Path) -> bool {
 }
 
 fn should_trace_namespace_path(path: &str) -> bool {
-    path.contains("hostname")
-        || path.contains("domainname")
-        || path.contains("/systemd/inaccessible/")
+    let _ = path;
+    false
 }
 
 fn current_process_is_executor() -> bool {
-    with_current_process(|process| {
-        process
-            .command_line
-            .first()
-            .is_some_and(|path| path.ends_with("/systemd-executor"))
-    })
+    false
 }
 
 fn remount_bind_flag_update(bits: u64) -> (MountFlags, MountFlags) {

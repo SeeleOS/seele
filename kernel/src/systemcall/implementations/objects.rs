@@ -25,38 +25,12 @@ use crate::{
         manager::get_current_process,
         misc::{ProcessID, with_current_process},
     },
-    s_println,
     systemcall::utils::{SyscallError, SyscallImpl, SyscallResult},
 };
 
 static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeMap::new());
 static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
 const COPY_CHUNK_SIZE: usize = 16 * 1024;
-
-fn current_process_is_executor() -> bool {
-    with_current_process(|process| {
-        process
-            .command_line
-            .first()
-            .is_some_and(|path| path.ends_with("/systemd-executor"))
-    })
-}
-
-fn trace_executor_mountinfo_object(object: &ObjectRef, action: &str) {
-    if !current_process_is_executor() {
-        return;
-    }
-
-    let Ok(file_like) = object.clone().as_file_like() else {
-        return;
-    };
-    let path = file_like.path().as_string();
-    if !path.ends_with("/mountinfo") {
-        return;
-    }
-
-    s_println!("mountinfo object trace action={} path={}", action, path);
-}
 
 #[repr(C)]
 struct LinuxIovec {
@@ -66,18 +40,7 @@ struct LinuxIovec {
 
 fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult {
     let obj = get_object_current_process(object_index)?.as_file_like()?;
-    let contents = match obj.directory_contents() {
-        Ok(contents) => contents,
-        Err(err) => {
-            s_println!(
-                "getdents64 failed fd={} path={} err={:?}",
-                object_index,
-                obj.path().as_string(),
-                err
-            );
-            return Err(err.into());
-        }
-    };
+    let contents = obj.directory_contents().map_err(SyscallError::from)?;
     let current_pid = get_current_process().lock().pid;
     let mut offsets = DIR_OFFSETS.lock();
     let offset_entry = offsets.entry((current_pid, object_index)).or_insert(0usize);
@@ -170,14 +133,11 @@ define_syscall!(Getdents64, |object_index: u64, buf: *mut u8, len: usize| {
 });
 
 define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
-    trace_executor_mountinfo_object(&object, "read-enter");
     unsafe {
-        let read = object
+        Ok(object
             .clone()
             .as_readable()?
-            .read(slice::from_raw_parts_mut(buf_ptr, len))?;
-        trace_executor_mountinfo_object(&object, "read-exit");
-        Ok(read)
+            .read(slice::from_raw_parts_mut(buf_ptr, len))?)
     }
 });
 
@@ -263,23 +223,6 @@ define_syscall!(Close, |object_num: usize| {
 define_syscall!(Ioctl, |object: ObjectRef,
                         request: u64,
                         request_ptr: u64| {
-    if request == 0x802c_542a {
-        if current_process_is_executor() {
-            if let Ok(file_like) = object.clone().as_file_like() {
-                crate::s_println!(
-                    "ioctl trace request={:#x} file_like_path={}",
-                    request,
-                    file_like.path().as_string()
-                );
-            } else {
-                crate::s_println!(
-                    "ioctl trace request={:#x} object={}",
-                    request,
-                    object.debug_name()
-                );
-            }
-        }
-    }
     let res = object
         .as_configuratable()?
         .configure(ConfigurateRequest::new(request, request_ptr)?);
@@ -452,13 +395,11 @@ define_syscall!(
 define_syscall!(Lseek, |object: ObjectRef,
                         offset: i64,
                         seek_type: Whence| {
-    trace_executor_mountinfo_object(&object, "lseek-enter");
     let result = object
         .clone()
         .as_seekable()?
         .seek(offset, seek_type)
         .map_err(SyscallError::from)?;
-    trace_executor_mountinfo_object(&object, "lseek-exit");
     Ok(result)
 });
 
@@ -469,10 +410,8 @@ define_syscall!(Pread64, |object: ObjectRef,
     if offset < 0 {
         return Err(SyscallError::InvalidArguments);
     }
-    trace_executor_mountinfo_object(&object, "pread-enter");
     let file = object.clone().as_file_like()?;
     let read = unsafe { file.read_at(slice::from_raw_parts_mut(buf_ptr, len), offset as u64)? };
-    trace_executor_mountinfo_object(&object, "pread-exit");
     Ok(read)
 });
 

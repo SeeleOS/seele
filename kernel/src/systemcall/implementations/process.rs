@@ -62,15 +62,6 @@ define_syscall!(Wait4, |target_process: i32,
     let wait_options = WaitOptions::from_bits_truncate(options);
     let preserve_child = wait_options.contains(WaitOptions::WNOWAIT);
     let current_process = get_current_process();
-    let current_pid = current_process.lock().pid.0;
-    if current_pid == 1 {
-        crate::s_println!(
-            "pid1 wait4 enter target={} options={:#x} preserve_child={}",
-            target_process,
-            options,
-            preserve_child
-        );
-    }
     loop {
         THREAD_MANAGER
             .get()
@@ -128,92 +119,26 @@ define_syscall!(Wait4, |target_process: i32,
                     user_safe::write(status_ptr, &status)?;
                 }
                 let pid = process.lock().pid.0;
-                if current_pid == 1 {
-                    crate::s_println!(
-                        "pid1 wait4 return target={} child_pid={} exit_code={} preserve_child={}",
-                        target_process,
-                        pid,
-                        exit_code,
-                        preserve_child
-                    );
-                }
-                if current_pid == 26 || pid == 32 {
-                    crate::s_println!(
-                        "wait4 return current_pid={} target={} child_pid={} exit_code={}",
-                        current_pid,
-                        target_process,
-                        pid,
-                        exit_code
-                    );
-                }
                 if !preserve_child {
                     MANAGER.lock().reap_process(process);
                 }
                 return Ok(pid as usize);
             }
             None if wait_options.contains(WaitOptions::NOHANG) => {
-                if current_pid == 1 {
-                    crate::s_println!(
-                        "pid1 wait4 nohang-empty target={} options={:#x}",
-                        target_process,
-                        options
-                    );
-                }
                 return Ok(0);
             }
             None => {
                 if has_wait_interrupt_signal(&current_process) {
-                    if current_pid == 1 {
-                        crate::s_println!(
-                            "pid1 wait4 interrupted-before-block target={}",
-                            target_process
-                        );
-                    }
                     return Err(SyscallError::Interrupted);
                 }
 
-                if current_pid == 1 {
-                    crate::s_println!(
-                        "pid1 wait4 block target={} options={:#x}",
-                        target_process,
-                        options
-                    );
-                }
-                if current_pid == 26 || target_process == 32 {
-                    crate::s_println!(
-                        "wait4 block current_pid={} target={}",
-                        current_pid,
-                        target_process
-                    );
-                }
                 prepare_block_current(BlockType::WakeRequired {
                     wake_type: WakeType::ProcsesExit,
                     deadline: None,
                 });
                 finish_block_current();
 
-                if current_pid == 26 || target_process == 32 {
-                    crate::s_println!(
-                        "wait4 wake current_pid={} target={}",
-                        current_pid,
-                        target_process
-                    );
-                }
-                if current_pid == 1 {
-                    crate::s_println!(
-                        "pid1 wait4 wake target={} options={:#x}",
-                        target_process,
-                        options
-                    );
-                }
-
                 if has_wait_interrupt_signal(&current_process) {
-                    if current_pid == 1 {
-                        crate::s_println!(
-                            "pid1 wait4 interrupted-after-wake target={}",
-                            target_process
-                        );
-                    }
                     return Err(SyscallError::Interrupted);
                 }
             }
@@ -225,14 +150,6 @@ define_syscall!(Waitid, |id_type: i32,
                          id: u32,
                          info_ptr: *mut SigInfo,
                          options: i32| {
-    if get_current_process().lock().pid.0 == 1 {
-        crate::s_println!(
-            "pid1 waitid enter id_type={} id={} options={:#x}",
-            id_type,
-            id,
-            options
-        );
-    }
     let target_process = match id_type {
         0 => -1,
         1 => id as i32,
@@ -267,15 +184,6 @@ define_syscall!(Waitid, |id_type: i32,
             )
         };
         user_safe::write(info_ptr, &info)?;
-    }
-
-    if get_current_process().lock().pid.0 == 1 {
-        crate::s_println!(
-            "pid1 waitid return id_type={} id={} pid={}",
-            id_type,
-            id,
-            pid
-        );
     }
 
     Ok(0)

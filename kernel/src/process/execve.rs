@@ -10,7 +10,6 @@ use crate::{
         action::{SignalAction, SignalHandlingType},
         misc::default_signal_action_vec,
     },
-    systemcall::handling::register_traced_process,
     thread::{
         THREAD_MANAGER, misc::SnapshotState, snapshot::ThreadSnapshot, stack::allocate_kernel_stack,
     },
@@ -30,22 +29,6 @@ fn execve_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalAction> {
         .collect()
 }
 
-fn should_trace_exec_path(path: &str) -> bool {
-    matches!(
-        path,
-        p if p.ends_with("/systemd-modules-load")
-            || p.ends_with("/modprobe")
-            || p.ends_with("/kmod")
-            || p.ends_with("/systemd-executor")
-            || p.ends_with("/systemd-tmpfiles")
-            || p.ends_with("/systemd-sysusers")
-            || p.ends_with("/systemd-journald")
-            || p.ends_with("/systemd-userdbd")
-            || p.ends_with("/udevadm")
-            || p.ends_with("/systemd-udevd")
-    )
-}
-
 impl Process {
     fn execve(
         &mut self,
@@ -59,9 +42,6 @@ impl Process {
         } else {
             args.clone()
         };
-        if should_trace_exec_path(&path_string) {
-            register_traced_process(self.pid.0, path_string.clone());
-        }
         // TODO: kill all the other threads when execveing
         log::trace!("execve: start {}", path.clone().as_string());
         with_profiling(
