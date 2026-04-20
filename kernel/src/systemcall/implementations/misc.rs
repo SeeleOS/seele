@@ -124,6 +124,16 @@ enum PrctlCapAmbientOp {
     ClearAll = 4,
 }
 
+#[derive(Clone, Copy, Debug, TryFromPrimitive)]
+#[repr(u64)]
+enum KeyctlCommand {
+    GetKeyringId = 0,
+    JoinSessionKeyring = 1,
+    Setperm = 5,
+    Link = 8,
+    SessionToParent = 18,
+}
+
 bitflags! {
     #[derive(Clone, Copy, Debug)]
     struct RseqFlags: u32 {
@@ -174,11 +184,6 @@ const LINUX_REBOOT_MAGIC2: u32 = 0x2812_1969;
 const LINUX_REBOOT_CMD_CAD_OFF: u32 = 0x0000_0000;
 const LINUX_REBOOT_CMD_CAD_ON: u32 = 0x89ab_cdef;
 const BPF_COMMAND_MAX: u32 = 36;
-const KEYCTL_GET_KEYRING_ID: u64 = 0;
-const KEYCTL_JOIN_SESSION_KEYRING: u64 = 1;
-const KEYCTL_SETPERM: u64 = 5;
-const KEYCTL_LINK: u64 = 8;
-const KEYCTL_SESSION_TO_PARENT: u64 = 18;
 const KEY_SPEC_SESSION_KEYRING: i32 = -3;
 const KEY_SPEC_USER_KEYRING: i32 = -4;
 
@@ -1565,23 +1570,23 @@ define_syscall!(Keyctl, |cmd: u64,
                          arg3: u64,
                          _arg4: u64,
                          _arg5: u64| {
-    match cmd {
-        KEYCTL_GET_KEYRING_ID => {
+    match KeyctlCommand::try_from(cmd) {
+        Ok(KeyctlCommand::GetKeyringId) => {
             let keyring = resolve_keyring(arg2 as i32, arg3 != 0)?;
             Ok(keyring as usize)
         }
-        KEYCTL_JOIN_SESSION_KEYRING => Ok(current_session_keyring(true)? as usize),
-        KEYCTL_SETPERM => {
+        Ok(KeyctlCommand::JoinSessionKeyring) => Ok(current_session_keyring(true)? as usize),
+        Ok(KeyctlCommand::Setperm) => {
             let _keyring = resolve_keyring(arg2 as i32, true)?;
             Ok(0)
         }
-        KEYCTL_LINK => {
+        Ok(KeyctlCommand::Link) => {
             let _source = resolve_keyring(arg2 as i32, false)?;
             let _target = resolve_keyring(arg3 as i32, true)?;
             Ok(0)
         }
-        KEYCTL_SESSION_TO_PARENT => Ok(0),
-        _ => {
+        Ok(KeyctlCommand::SessionToParent) => Ok(0),
+        Err(_) => {
             crate::s_println!(
                 "unsupported keyctl pid={} cmd={} arg2={:#x} arg3={:#x}",
                 get_current_process().lock().pid.0,
