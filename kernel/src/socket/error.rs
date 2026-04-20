@@ -4,6 +4,7 @@ use crate::{misc::error::AsSyscallError, systemcall::utils::SyscallError};
 pub enum SocketError {
     TryAgain,
     InvalidArguments,
+    OperationNotSupported,
     AddressFamilyNotSupported,
     ProtocolNotSupported,
     AddressInUse,
@@ -19,6 +20,7 @@ impl AsSyscallError for SocketError {
         match self {
             Self::TryAgain => SyscallError::TryAgain,
             Self::InvalidArguments => SyscallError::InvalidArguments,
+            Self::OperationNotSupported => SyscallError::OperationNotSupported,
             Self::AddressFamilyNotSupported => SyscallError::AddressFamilyNotSupported,
             Self::ProtocolNotSupported => SyscallError::ProtocolNotSupported,
             Self::AddressInUse => SyscallError::AddressInUse,

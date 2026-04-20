@@ -25,11 +25,12 @@ impl UnixSocketObject {
                     }
                 };
 
-                match &*self.state.lock() {
-                    UnixSocketState::Unbound => {}
+                let local_name = match &*self.state.lock() {
+                    UnixSocketState::Unbound => None,
+                    UnixSocketState::Bound { path } => Some(path.clone()),
                     UnixSocketState::Stream(_) => return Err(SocketError::IsConnected),
                     _ => return Err(SocketError::InvalidArguments),
-                }
+                };
 
                 let (client_stream, server_stream) = UnixStreamInner::pair();
                 let peer_pid = get_current_process().lock().pid.0;
@@ -47,7 +48,9 @@ impl UnixSocketObject {
                     uid: 0,
                     gid: 0,
                 };
+                *client_stream.local_name.lock() = local_name.clone();
                 *client_stream.peer_name.lock() = Some(path.clone());
+                *server_stream.peer_name.lock() = local_name;
                 *server_stream.local_name.lock() = Some(path.clone());
 
                 let mut pending = listener.pending.lock();

@@ -1,4 +1,6 @@
-use super::{UNIX_SOCKET_REGISTRY, UnixSocketObject, UnixSocketState, wake_io};
+use super::{
+    UNIX_SOCKET_REGISTRY, UnixSocketObject, UnixSocketRegistryEntry, UnixSocketState, wake_io,
+};
 use crate::filesystem::{path::Path, vfs::VirtualFS};
 
 impl Drop for UnixSocketObject {
@@ -26,7 +28,21 @@ impl Drop for UnixSocketObject {
                 }
                 datagram.close_local();
             }
-            UnixSocketState::Stream(stream) => stream.close_local(),
+            UnixSocketState::Stream(stream) => {
+                if let Some(path) = stream.local_name.lock().clone() {
+                    let should_remove = matches!(
+                        UNIX_SOCKET_REGISTRY.lock().get(&path),
+                        Some(UnixSocketRegistryEntry::StreamReserved)
+                    );
+                    if should_remove {
+                        UNIX_SOCKET_REGISTRY.lock().remove(&path);
+                        if path.as_bytes().first() != Some(&0) {
+                            let _ = VirtualFS.lock().delete_file(Path::new(&path));
+                        }
+                    }
+                }
+                stream.close_local();
+            }
             UnixSocketState::Unbound | UnixSocketState::Closed => {}
         }
     }

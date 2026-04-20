@@ -1,12 +1,14 @@
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 use core::{mem, slice};
 
 use super::{
     AF_UNIX, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PASSCRED, SO_PASSPIDFD, SO_PASSRIGHTS,
-    SO_PASSSEC, SO_PEERCRED, SO_PROTOCOL, SO_RCVBUF, SO_RCVBUFFORCE, SO_REUSEADDR, SO_SNDBUF,
-    SO_SNDBUFFORCE, SO_TIMESTAMP_NEW, SO_TIMESTAMP_OLD, SO_TIMESTAMPNS_NEW, SO_TIMESTAMPNS_OLD,
-    SO_TYPE, SOCK_DGRAM, SOCK_SEQPACKET, SOCK_STREAM, SOL_SOCKET, SocketError, SocketLike,
-    SocketResult, UnixSocketKind, UnixSocketObject, UnixSocketState,
+    SO_PASSSEC, SO_PEERCRED, SO_PEERGROUPS, SO_PEERPIDFD, SO_PEERSEC, SO_PROTOCOL, SO_RCVBUF,
+    SO_RCVBUFFORCE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_REUSEADDR, SO_SNDBUF, SO_SNDBUFFORCE,
+    SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD, SO_TIMESTAMP_NEW, SO_TIMESTAMP_OLD, SO_TIMESTAMPNS_NEW,
+    SO_TIMESTAMPNS_OLD, SO_TYPE, SOCK_DGRAM, SOCK_SEQPACKET, SOCK_STREAM, SOL_SOCKET, SocketError,
+    SocketLike, SocketResult, UnixSocketKind, UnixSocketObject, UnixSocketState,
+    socket_timeout_option_len,
 };
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
@@ -49,6 +51,14 @@ impl UnixSocketObject {
                 let _ = Self::decode_i32(option_value)?;
                 Ok(())
             }
+            SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD | SO_RCVTIMEO_NEW | SO_SNDTIMEO_NEW => {
+                let expected_len =
+                    socket_timeout_option_len(option_name).ok_or(SocketError::InvalidArguments)?;
+                if option_value.len() < expected_len {
+                    return Err(SocketError::InvalidArguments);
+                }
+                Ok(())
+            }
             SO_PASSCRED => {
                 *self.pass_cred.lock() = Self::decode_i32(option_value)? != 0;
                 Ok(())
@@ -60,6 +70,7 @@ impl UnixSocketObject {
             SO_ERROR | SO_TYPE | SO_ACCEPTCONN | SO_DOMAIN | SO_PROTOCOL | SO_PEERCRED => {
                 Err(SocketError::InvalidArguments)
             }
+            SO_PEERSEC | SO_PEERGROUPS | SO_PEERPIDFD => Err(SocketError::OperationNotSupported),
             _ => Err(SocketError::InvalidArguments),
         }
     }
@@ -96,6 +107,12 @@ impl UnixSocketObject {
             SO_REUSEADDR => Self::encode_i32(option_len, 0),
             SO_PASSCRED => Self::encode_i32(option_len, *self.pass_cred.lock() as i32),
             option_name if Self::is_boolean_sockopt(option_name) => Self::encode_i32(option_len, 0),
+            SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD | SO_RCVTIMEO_NEW | SO_SNDTIMEO_NEW => {
+                let expected_len =
+                    socket_timeout_option_len(option_name).ok_or(SocketError::InvalidArguments)?;
+                Self::encode_zeroed_bytes(option_len, expected_len)
+            }
+            SO_PEERSEC | SO_PEERGROUPS | SO_PEERPIDFD => Err(SocketError::OperationNotSupported),
             SO_PEERCRED => match &*self.state.lock() {
                 UnixSocketState::Datagram(datagram) => {
                     let cred = *datagram.peer_cred.lock();
@@ -157,6 +174,14 @@ impl UnixSocketObject {
             )
         }
         .to_vec())
+    }
+
+    fn encode_zeroed_bytes(option_len: usize, expected_len: usize) -> SocketResult<Vec<u8>> {
+        if option_len < expected_len {
+            return Err(SocketError::InvalidArguments);
+        }
+
+        Ok(vec![0; expected_len])
     }
 }
 
