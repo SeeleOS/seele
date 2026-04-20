@@ -7,7 +7,7 @@ use crate::{
         error::ObjectError,
         misc::{ObjectRef, get_object_current_process},
     },
-    process::{FdFlags, manager::get_current_process, misc::with_current_process},
+    process::{FdFlags, manager::get_current_process},
     socket::{
         AF_NETLINK, AF_UNIX, SOCK_CLOEXEC, SOCK_NONBLOCK, SOL_SOCKET, UnixSocketKind,
         UnixSocketObject, UnixSocketState,
@@ -96,23 +96,6 @@ const MSG_PEEK: u64 = 0x2;
 const MSG_CTRUNC: i32 = 0x8;
 const MSG_TRUNC: u64 = 0x20;
 const SCM_CREDENTIALS: i32 = 2;
-
-fn current_process_matches_suffix(suffix: &str) -> bool {
-    with_current_process(|process| {
-        process
-            .command_line
-            .first()
-            .is_some_and(|path| path.ends_with(suffix))
-    })
-}
-
-fn current_process_is_udevd() -> bool {
-    current_process_matches_suffix("/systemd-udevd")
-}
-
-fn current_process_is_pid1() -> bool {
-    with_current_process(|process| process.pid.0 == 1)
-}
 
 enum SocketAddress {
     Unix(String),
@@ -493,14 +476,6 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
                 unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
             buffer.extend_from_slice(chunk);
         }
-        if current_process_is_udevd() {
-            crate::s_println!(
-                "udevd sendmsg datagram: target={:?} bytes={} control_len={}",
-                target_path,
-                buffer.len(),
-                msg.msg_controllen
-            );
-        }
         let written = if let Some(path) = target_path.as_deref() {
             socket
                 .write_socket_to_path(&buffer, path)
@@ -508,13 +483,6 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
         } else {
             socket.write_socket(&buffer).map_err(ObjectError::from)?
         };
-        if current_process_is_udevd() {
-            crate::s_println!(
-                "udevd sendmsg datagram result: target={:?} wrote={}",
-                target_path,
-                written
-            );
-        }
         return Ok(written);
     }
 
@@ -793,16 +761,6 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         if copy_len < control.len() {
             msg.msg_flags |= MSG_CTRUNC;
         }
-    }
-
-    if current_process_is_pid1() && total_read > 0 {
-        crate::s_println!(
-            "pid1 recvmsg unix: bytes={} name_len={} control_len={} msg_flags={:#x}",
-            total_read,
-            msg.msg_namelen,
-            msg.msg_controllen,
-            msg.msg_flags
-        );
     }
 
     Ok(total_read)

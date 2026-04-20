@@ -300,24 +300,6 @@ fn is_api_mount_path(path: &Path) -> bool {
         .starts_with(&(String::from(API_MOUNT_ROOT) + "/"))
 }
 
-fn should_trace_namespace_path(path: &str) -> bool {
-    let _ = path;
-    false
-}
-
-fn current_process_is_executor() -> bool {
-    false
-}
-
-fn current_process_is_journald() -> bool {
-    with_current_process(|process| {
-        process
-            .command_line
-            .first()
-            .is_some_and(|path| path.ends_with("/systemd-journald"))
-    })
-}
-
 fn remount_bind_flag_update(bits: u64) -> (MountFlags, MountFlags) {
     let flags = MountFlags::from_bits_retain(bits & MountFlags::all().bits());
     let mut mask = MountFlags::MS_RDONLY
@@ -553,9 +535,6 @@ fn faccessat_impl(
     }
 
     let path = resolve_path_at(dirfd, path_str)?;
-    if should_trace_namespace_path(&path.clone().as_string()) {
-        crate::s_println!("faccessat resolved {}", path.clone().as_string());
-    }
     let open_result = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
         VirtualFS.lock().open_nofollow(path)
     } else {
@@ -591,18 +570,7 @@ fn stat_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<LinuxStat, Sysc
         return Ok(object.as_statable()?.stat());
     }
 
-    if should_trace_namespace_path(path_str) || current_process_is_executor() {
-        crate::s_println!(
-            "stat trace dirfd={} path={} flags={:#x}",
-            dirfd,
-            path_str,
-            flags.bits()
-        );
-    }
     let path = resolve_path_at(dirfd, path_str)?;
-    if should_trace_namespace_path(&path.clone().as_string()) {
-        crate::s_println!("stat resolved {}", path.clone().as_string());
-    }
     let open_result = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
         VirtualFS.lock().open_nofollow(path.clone())
     } else {
@@ -653,14 +621,6 @@ define_syscall!(OpenAt, |dirfd: i32,
                          _mode: u32| {
     let current_process = get_current_process();
     let path_str = path_from_raw(path)?;
-    if should_trace_namespace_path(&path_str) || current_process_is_executor() {
-        crate::s_println!(
-            "openat trace dirfd={} path={} flags={:#x}",
-            dirfd,
-            path_str,
-            flags.bits()
-        );
-    }
     if flags.contains(OpenFlags::TMPFILE) {
         return Err(SyscallError::OperationNotSupported);
     }
@@ -668,26 +628,8 @@ define_syscall!(OpenAt, |dirfd: i32,
     let nofollow = flags.contains(OpenFlags::NOFOLLOW);
     let directory_only = flags.contains(OpenFlags::DIRECTORY);
     let path_only = flags.contains(OpenFlags::PATH);
-    let trace_journald = current_process_is_journald();
 
-    let path = match resolve_path_at(dirfd, &path_str) {
-        Ok(path) => path,
-        Err(err) => {
-            if trace_journald {
-                crate::s_println!(
-                    "journald openat path error: dirfd={} path={} flags={:#x} err={:?}",
-                    dirfd,
-                    path_str,
-                    flags.bits(),
-                    err
-                );
-            }
-            return Err(err);
-        }
-    };
-    if should_trace_namespace_path(&path.clone().as_string()) {
-        crate::s_println!("openat resolved {}", path.clone().as_string());
-    }
+    let path = resolve_path_at(dirfd, &path_str)?;
     let open_result = if nofollow {
         VirtualFS.lock().open_nofollow(path.clone())
     } else {
@@ -700,41 +642,13 @@ define_syscall!(OpenAt, |dirfd: i32,
         }
         object = Arc::new(file);
     } else if create {
-        let create_result = VirtualFS.lock().create_file(path.clone());
-        if let Err(err) = create_result {
-            if trace_journald {
-                crate::s_println!(
-                    "journald openat create error: path={} flags={:#x} err={:?}",
-                    path.as_string(),
-                    flags.bits(),
-                    err
-                );
-            }
-            return Err(err.into());
-        }
+        VirtualFS.lock().create_file(path.clone())?;
         let reopen_result = VirtualFS.lock().open(path.clone());
         object = match reopen_result {
             Ok(file) => Arc::new(file),
-            Err(err) => {
-                if trace_journald {
-                    crate::s_println!(
-                        "journald openat reopen error: path={} flags={:#x} err={:?}",
-                        path.as_string(),
-                        flags.bits(),
-                        err
-                    );
-                }
-                return Err(err.into());
-            }
+            Err(err) => return Err(err.into()),
         };
     } else {
-        if trace_journald {
-            crate::s_println!(
-                "journald openat missing: path={} flags={:#x}",
-                path.as_string(),
-                flags.bits()
-            );
-        }
         return Err(SyscallError::FileNotFound);
     }
 
@@ -776,13 +690,7 @@ define_syscall!(Open, |path: CString, flags: OpenFlags, mode: u32| {
 define_syscall!(Access, |path: CString, mode: i32| {
     check_access_mode(mode)?;
     let path_str = path_from_raw(path)?;
-    if should_trace_namespace_path(&path_str) || current_process_is_executor() {
-        crate::s_println!("access trace path={} mode={:#x}", path_str, mode);
-    }
     let path = resolve_path_at(AT_FDCWD, &path_str)?;
-    if should_trace_namespace_path(&path.clone().as_string()) {
-        crate::s_println!("access resolved {}", path.clone().as_string());
-    }
     let open_result = VirtualFS.lock().open(path);
     let _ = open_result?;
     Ok(0)
@@ -800,7 +708,6 @@ define_syscall!(Fchdir, |fd: u64| {
     if !matches!(file_like.info()?.file_like_type, FileLikeType::Directory) {
         return Err(SyscallError::NotADirectory);
     }
-
     get_current_process()
         .lock()
         .change_directory(file_like.path().as_absolute())?;
@@ -881,14 +788,6 @@ define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
 
 define_syscall!(Fstat, |fd: u64, linux_stat_ptr: *mut LinuxStat| {
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
-    if current_process_is_executor()
-        && let Ok(file_like) = object.clone().as_file_like()
-    {
-        let path = file_like.path().as_string();
-        if path.ends_with("/mountinfo") {
-            crate::s_println!("mountinfo object trace action=fstat path={}", path);
-        }
-    }
     let stat = object.as_statable()?.stat();
     user_safe::write(linux_stat_ptr, &stat)?;
     Ok(0)
@@ -939,21 +838,7 @@ define_syscall!(Newfstatat, |dirfd: i32,
         path_from_raw(path)?
     };
 
-    let stat = match stat_at(dirfd, &path_str, flags) {
-        Ok(stat) => stat,
-        Err(err) => {
-            if current_process_is_journald() {
-                crate::s_println!(
-                    "journald fstatat error: dirfd={} path={} flags={:#x} err={:?}",
-                    dirfd,
-                    path_str,
-                    flags.bits(),
-                    err
-                );
-            }
-            return Err(err);
-        }
-    };
+    let stat = stat_at(dirfd, &path_str, flags)?;
 
     user_safe::write(linux_stat_ptr, &stat)?;
     Ok(0)
@@ -1032,15 +917,6 @@ define_syscall!(Faccessat, |dirfd: i32,
                             mode: i32,
                             flags: AtFlags| {
     let path_str = path_from_raw(path)?;
-    if should_trace_namespace_path(&path_str) || current_process_is_executor() {
-        crate::s_println!(
-            "faccessat trace dirfd={} path={} mode={:#x} flags={:#x}",
-            dirfd,
-            path_str,
-            mode,
-            flags.bits()
-        );
-    }
     faccessat_impl(dirfd, &path_str, mode, flags)
 });
 
@@ -1049,15 +925,6 @@ define_syscall!(Faccessat2, |dirfd: i32,
                              mode: i32,
                              flags: AtFlags| {
     let path_str = path_from_raw(path)?;
-    if should_trace_namespace_path(&path_str) || current_process_is_executor() {
-        crate::s_println!(
-            "faccessat2 trace dirfd={} path={} mode={:#x} flags={:#x}",
-            dirfd,
-            path_str,
-            mode,
-            flags.bits()
-        );
-    }
     faccessat_impl(dirfd, &path_str, mode, flags)
 });
 
@@ -1220,31 +1087,8 @@ define_syscall!(SymlinkAt, |target: CString,
 
 define_syscall!(MkdirAt, |dirfd: i32, path: CString, _mode: u32| {
     let path = path_from_raw(path)?;
-    let path = match resolve_path_at(dirfd, &path) {
-        Ok(path) => path,
-        Err(err) => {
-            if current_process_is_journald() {
-                crate::s_println!(
-                    "journald mkdirat resolve error: dirfd={} path={} err={:?}",
-                    dirfd,
-                    path,
-                    err
-                );
-            }
-            return Err(err);
-        }
-    };
-
-    if let Err(err) = VirtualFS.lock().create_dir(path.clone()) {
-        if current_process_is_journald() {
-            crate::s_println!(
-                "journald mkdirat error: path={} err={:?}",
-                path.as_string(),
-                err
-            );
-        }
-        return Err(err.into());
-    }
+    let path = resolve_path_at(dirfd, &path)?;
+    VirtualFS.lock().create_dir(path.clone())?;
 
     Ok(0)
 });
@@ -1303,17 +1147,6 @@ define_syscall!(Mount, |source: CString,
     let target = path_from_raw(target)?;
     let filesystemtype = string_from_raw_optional(filesystemtype)?;
     let _data = string_from_raw_optional(data)?;
-    if source.as_deref().is_some_and(should_trace_namespace_path)
-        || should_trace_namespace_path(&target)
-    {
-        crate::s_println!(
-            "mount trace source={:?} target={} fstype={:?} flags={:#x}",
-            source,
-            target,
-            filesystemtype,
-            mountflags
-        );
-    }
     let target_object = VirtualFS.lock().open(Path::new(&target))?;
     let target_path = target_object.path();
     let target_is_directory = matches!(
@@ -1552,21 +1385,10 @@ define_syscall!(OpenTree, |dirfd: i32,
         get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
     } else {
         let path = path_from_raw(path)?;
-        if should_trace_namespace_path(&path) || current_process_is_executor() {
-            crate::s_println!(
-                "open_tree trace dirfd={} path={} flags={:#x}",
-                dirfd,
-                path,
-                flags.bits()
-            );
-        }
         if path.is_empty() && flags.contains(OpenTreeFlags::AT_EMPTY_PATH) {
             get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
         } else {
             let path = resolve_path_at(dirfd, &path)?;
-            if should_trace_namespace_path(&path.clone().as_string()) {
-                crate::s_println!("open_tree resolved {}", path.clone().as_string());
-            }
             let file = if flags.contains(OpenTreeFlags::AT_SYMLINK_NOFOLLOW) {
                 VirtualFS.lock().open_nofollow(path)?
             } else {
@@ -1612,14 +1434,6 @@ define_syscall!(MountSetattr, |dirfd: i32,
         get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
     } else {
         let path = path_from_raw(path)?;
-        if should_trace_namespace_path(&path) || current_process_is_executor() {
-            crate::s_println!(
-                "mount_setattr trace dirfd={} path={} flags={:#x}",
-                dirfd,
-                path,
-                flags.bits()
-            );
-        }
         if path.is_empty() {
             if !flags.contains(AtFlags::EMPTY_PATH) {
                 return Err(SyscallError::BadAddress);
@@ -1627,9 +1441,6 @@ define_syscall!(MountSetattr, |dirfd: i32,
             get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
         } else {
             let path = resolve_path_at(dirfd, &path)?;
-            if should_trace_namespace_path(&path.clone().as_string()) {
-                crate::s_println!("mount_setattr resolved {}", path.clone().as_string());
-            }
             let file = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
                 VirtualFS.lock().open_nofollow(path)?
             } else {
@@ -1684,9 +1495,6 @@ define_syscall!(Readlink, |path: CString,
                            out_buf: *mut u8,
                            out_len: usize| {
     let path_str = path_from_raw(path)?;
-    if current_process_is_executor() {
-        crate::s_println!("readlink trace path={}", path_str);
-    }
     let path = resolve_path_at(AT_FDCWD, &path_str)?;
     readlink_impl(path, out_buf, out_len)
 });
@@ -1696,9 +1504,6 @@ define_syscall!(ReadlinkAt, |dirfd: i32,
                              out_buf: *mut u8,
                              out_len: usize| {
     let path_str = path_from_raw(path)?;
-    if current_process_is_executor() {
-        crate::s_println!("readlinkat trace dirfd={} path={}", dirfd, path_str);
-    }
     let path = resolve_path_at(dirfd, &path_str)?;
     readlink_impl(path, out_buf, out_len)
 });
@@ -1711,25 +1516,7 @@ define_syscall!(RenameAt, |old_dirfd: i32,
     let new_from_currentdir = path_is_relative_to_cwd(new_dirfd)?;
     let old_path = path_from_raw(old_path)?;
     let new_path = path_from_raw(new_path)?;
-    match rename_impl(
-        old_from_currentdir,
-        old_path.clone(),
-        new_from_currentdir,
-        new_path.clone(),
-    ) {
-        Ok(value) => Ok(value),
-        Err(err) => {
-            if current_process_is_journald() {
-                crate::s_println!(
-                    "journald renameat error: old_path={} new_path={} err={:?}",
-                    old_path,
-                    new_path,
-                    err
-                );
-            }
-            Err(err)
-        }
-    }
+    rename_impl(old_from_currentdir, old_path, new_from_currentdir, new_path)
 });
 
 define_syscall!(RenameAt2, |old_dirfd: i32,

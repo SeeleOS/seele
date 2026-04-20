@@ -297,15 +297,6 @@ define_syscall!(Kill, |pid: i32, signal: i32| {
 
     if let Some(signal) = signal {
         for process in targets {
-            if matches!(signal, Signal::Kill) {
-                crate::s_println!(
-                    "kill trace sender_pid={} target_pid={} raw_pid={} signal={:?}",
-                    get_current_process().lock().pid.0,
-                    process.lock().pid.0,
-                    pid,
-                    signal
-                );
-            }
             process.lock().send_signal(signal);
         }
     }
@@ -332,15 +323,6 @@ define_syscall!(Tgkill, |tgid: i32, tid: i32, signal: i32| {
         return Err(SyscallError::NoProcess);
     }
 
-    if matches!(signal, Signal::Kill) {
-        crate::s_println!(
-            "tgkill trace sender_pid={} target_pid={} target_tid={} signal={:?}",
-            get_current_process().lock().pid.0,
-            tgid.0,
-            tid.0,
-            signal
-        );
-    }
     process.lock().send_signal(signal);
     Ok(0)
 });

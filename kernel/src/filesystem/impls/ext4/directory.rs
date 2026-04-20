@@ -25,7 +25,6 @@ use crate::filesystem::{
     vfs::FSResult,
     vfs_traits::{Directory, DirectoryContentType, FileLike, FileLikeType},
 };
-use crate::s_println;
 
 fn map_ext4_error(err: Ext4Error) -> FSError {
     FSError::from(err)
@@ -98,23 +97,13 @@ impl Directory for Ext4Directory {
 
         let iter = match self.fs.read_dir(self.path.as_str()) {
             Ok(iter) => iter,
-            Err(err) => {
-                s_println!("ext4 read_dir failed path={} err={:?}", self.path, err);
-                return Err(map_ext4_error(err));
-            }
+            Err(err) => return Err(map_ext4_error(err)),
         };
 
         for entry_res in iter {
             let entry = match entry_res {
                 Ok(entry) => entry,
-                Err(err) => {
-                    s_println!(
-                        "ext4 read_dir entry failed path={} err={:?}",
-                        self.path,
-                        err
-                    );
-                    return Err(map_ext4_error(err));
-                }
+                Err(err) => return Err(map_ext4_error(err)),
             };
             let name = entry
                 .file_name()
@@ -124,15 +113,7 @@ impl Directory for Ext4Directory {
 
             let file_type = match entry.file_type() {
                 Ok(file_type) => file_type,
-                Err(err) => {
-                    s_println!(
-                        "ext4 dir entry file_type failed path={} name={} err={:?}",
-                        self.path,
-                        name,
-                        err
-                    );
-                    return Err(map_ext4_error(err));
-                }
+                Err(err) => return Err(map_ext4_error(err)),
             };
             let content_type = if file_type.is_dir() {
                 DirectoryContentType::Directory
@@ -226,15 +207,7 @@ impl Directory for Ext4Directory {
             .symlink(&mut parent, name, target, 0, 0, Duration::from_millis(0))
         {
             Ok(_) => {}
-            Err(err) => {
-                s_println!(
-                    "ext4 symlink failed parent={} name={} err={:?}",
-                    self.path,
-                    name.as_str().unwrap_or("<non-utf8>"),
-                    err
-                );
-                return Err(map_ext4_error(err));
-            }
+            Err(err) => return Err(map_ext4_error(err)),
         }
         Ok(())
     }
