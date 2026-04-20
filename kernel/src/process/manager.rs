@@ -3,6 +3,7 @@ use lazy_static::lazy_static;
 use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
+    filesystem::cgroupfs::remove_pid_cgroup_path,
     object::linux_anon::wake_pidfd_for_process_with_manager,
     process::{Process, ProcessRef, misc::ProcessID},
     thread::{THREAD_MANAGER, ThreadRef, manager::ThreadManager},
@@ -45,7 +46,9 @@ impl Manager {
     }
 
     pub fn reap_process(&mut self, process: ProcessRef) {
-        self.processes.remove(&process.lock().pid);
+        let pid = process.lock().pid;
+        self.processes.remove(&pid);
+        remove_pid_cgroup_path(pid);
         let mut process = process.lock();
         process.objects.clear();
         process.object_flags.clear();
@@ -83,6 +86,7 @@ impl Process {
     pub fn terminate_inner(&mut self, exit_code: u64) -> Vec<ThreadRef> {
         if self.exit_code.is_none() {
             self.exit_code = Some(exit_code);
+            remove_pid_cgroup_path(self.pid);
         }
 
         self.threads

@@ -111,18 +111,19 @@ impl CgroupState {
     fn remove_directory(&mut self, parent: &str, name: &str) -> FSResult<()> {
         let parent = Self::normalize_dir_path(parent);
         let child_path = Self::child_path(&parent, name);
+        self.prune_dead_pid_paths();
         let Some(directory) = self.directories.get(&child_path) else {
             return Err(FSError::NotFound);
         };
         if !directory.children.is_empty() {
-            return Err(FSError::Other);
+            return Err(FSError::DirectoryNotEmpty);
         }
         if self
             .pid_paths
             .values()
             .any(|path| Self::normalize_dir_path(path) == child_path)
         {
-            return Err(FSError::Other);
+            return Err(FSError::Busy);
         }
 
         self.directories.remove(&child_path);
@@ -142,6 +143,15 @@ impl CgroupState {
         self.directory(&path)?;
         self.pid_paths.insert(pid.0, path);
         Ok(())
+    }
+
+    fn remove_pid_path(&mut self, pid: ProcessID) {
+        self.pid_paths.remove(&pid.0);
+    }
+
+    fn prune_dead_pid_paths(&mut self) {
+        self.pid_paths
+            .retain(|pid, _| MANAGER.lock().processes.contains_key(&ProcessID(*pid)));
     }
 
     fn pids_in_path(&self, path: &str) -> Vec<ProcessID> {
@@ -564,4 +574,8 @@ pub fn set_pid_cgroup_path_from_fs_path(pid: ProcessID, path: &Path) -> FSResult
     };
 
     CGROUP_STATE.lock().set_pid_path(pid, &cgroup_path)
+}
+
+pub fn remove_pid_cgroup_path(pid: ProcessID) {
+    CGROUP_STATE.lock().remove_pid_path(pid);
 }
