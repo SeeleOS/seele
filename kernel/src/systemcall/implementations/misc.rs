@@ -704,10 +704,12 @@ define_syscall!(TimerfdCreate, |clock_id: i32, flags: TimerFdFlags| {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let object = Arc::new(TimerFdObject::default());
-    if flags.contains(TimerFdFlags::TFD_NONBLOCK) {
-        let _ = object.clone().set_flags(FileFlags::NONBLOCK);
-    }
+    let file_flags = if flags.contains(TimerFdFlags::TFD_NONBLOCK) {
+        FileFlags::NONBLOCK
+    } else {
+        FileFlags::empty()
+    };
+    let object = TimerFdObject::new(file_flags);
     let fd_flags = if flags.contains(TimerFdFlags::TFD_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
@@ -755,6 +757,9 @@ define_syscall!(
         };
         timerfd.set_timer(deadline, interval_ns);
         wake_linux_io_waiters();
+        if timerfd.is_read_ready() {
+            timerfd.wake_waiters();
+        }
 
         Ok(0)
     }

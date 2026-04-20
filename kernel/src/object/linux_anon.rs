@@ -59,9 +59,15 @@ struct PidFdRegistry {
     watchers: BTreeMap<u64, Vec<Weak<PidFdObject>>>,
 }
 
+#[derive(Default)]
+struct TimerFdRegistry {
+    watchers: Vec<Weak<TimerFdObject>>,
+}
+
 lazy_static::lazy_static! {
     static ref SIGNALFD_REGISTRY: Mutex<SignalfdRegistry> = Mutex::new(SignalfdRegistry::default());
     static ref PIDFD_REGISTRY: Mutex<PidFdRegistry> = Mutex::new(PidFdRegistry::default());
+    static ref TIMERFD_REGISTRY: Mutex<TimerFdRegistry> = Mutex::new(TimerFdRegistry::default());
 }
 
 #[repr(C)]
@@ -671,9 +677,21 @@ struct TimerFdState {
 pub struct TimerFdObject {
     flags: Mutex<FileFlags>,
     state: Mutex<TimerFdState>,
+    self_ref: Mutex<Option<Weak<TimerFdObject>>>,
 }
 
 impl TimerFdObject {
+    pub fn new(flags: FileFlags) -> Arc<Self> {
+        let timerfd = Arc::new(Self {
+            flags: Mutex::new(flags),
+            state: Mutex::new(TimerFdState::default()),
+            self_ref: Mutex::new(None),
+        });
+        *timerfd.self_ref.lock() = Some(Arc::downgrade(&timerfd));
+        register_timerfd(&timerfd);
+        timerfd
+    }
+
     pub fn set_timer(&self, deadline: Option<Time>, interval_ns: u64) {
         let mut state = self.state.lock();
         state.deadline = deadline;
@@ -710,10 +728,59 @@ impl TimerFdObject {
         state.deadline = Some(deadline);
     }
 
-    fn is_read_ready(&self) -> bool {
+    pub fn is_read_ready(&self) -> bool {
         let mut state = self.state.lock();
         Self::refresh(&mut state);
         state.expirations > 0
+    }
+
+    fn self_object(&self) -> Option<ObjectRef> {
+        self.self_ref
+            .lock()
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .map(|object| object as ObjectRef)
+    }
+
+    pub fn wake_waiters(&self) {
+        let mut manager = THREAD_MANAGER.get().unwrap().lock();
+        self.wake_waiters_with_manager(&mut manager);
+    }
+
+    fn wake_waiters_with_manager(&self, manager: &mut ThreadManager) {
+        if let Some(object) = self.self_object() {
+            manager.wake_poller(object, PollableEvent::CanBeRead);
+        }
+    }
+}
+
+fn register_timerfd(timerfd: &Arc<TimerFdObject>) {
+    let mut registry = TIMERFD_REGISTRY.lock();
+    registry
+        .watchers
+        .retain(|watcher| watcher.strong_count() > 0);
+    registry.watchers.push(Arc::downgrade(timerfd));
+}
+
+fn timerfds() -> Vec<Arc<TimerFdObject>> {
+    let mut registry = TIMERFD_REGISTRY.lock();
+    let mut strong = Vec::new();
+    registry.watchers.retain(|watcher| {
+        if let Some(timerfd) = watcher.upgrade() {
+            strong.push(timerfd);
+            true
+        } else {
+            false
+        }
+    });
+    strong
+}
+
+pub fn wake_expired_timerfds_with_manager(manager: &mut ThreadManager) {
+    for timerfd in timerfds() {
+        if timerfd.is_read_ready() {
+            timerfd.wake_waiters_with_manager(manager);
+        }
     }
 }
 
