@@ -1,5 +1,6 @@
 use crate::object::FileFlags;
 use crate::{
+    memory::user_safe,
     object::{
         error::ObjectError,
         memfd::{memfd_add_seals, memfd_get_seals},
@@ -18,6 +19,12 @@ enum FcntlCmd {
     SetFd = 2,
     GetFl = 3,
     SetFl = 4,
+    GetLk = 5,
+    SetLk = 6,
+    SetLkw = 7,
+    OfdGetLk = 36,
+    OfdSetLk = 37,
+    OfdSetLkw = 38,
     DupFdCloexec = 1030,
     AddSeals = 1033,
     GetSeals = 1034,
@@ -27,6 +34,18 @@ const O_WRONLY: usize = 0o1;
 const O_RDWR: usize = 0o2;
 const O_NONBLOCK: usize = 0o4_000;
 const FD_CLOEXEC: u32 = 1;
+const F_UNLCK: i16 = 2;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct LinuxFlock {
+    lock_type: i16,
+    whence: i16,
+    start: i64,
+    len: i64,
+    pid: i32,
+    __reserved: i32,
+}
 
 fn access_mode_bits(object: &ObjectRef) -> usize {
     let readable = object.clone().as_readable().is_ok();
@@ -89,6 +108,27 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
             process.set_fd_flags(fd as usize, flags)?;
             Ok(0)
         }),
+        FcntlCmd::GetLk | FcntlCmd::OfdGetLk => {
+            let file_like = object.as_file_like()?;
+            let flock_ptr = arg as *mut LinuxFlock;
+            if flock_ptr.is_null() {
+                return Err(SyscallError::BadAddress);
+            }
+
+            let mut flock = user_safe::read(flock_ptr)?;
+            let _ = file_like;
+            flock.lock_type = F_UNLCK;
+            flock.pid = 0;
+            user_safe::write(flock_ptr, &flock)?;
+            Ok(0)
+        }
+        FcntlCmd::SetLk | FcntlCmd::SetLkw | FcntlCmd::OfdSetLk | FcntlCmd::OfdSetLkw => {
+            let _ = object.as_file_like()?;
+            if arg == 0 {
+                return Err(SyscallError::BadAddress);
+            }
+            Ok(0)
+        }
         FcntlCmd::AddSeals => {
             let file_like = object.as_file_like()?;
             memfd_add_seals(&file_like.path(), arg as u32)
