@@ -1,8 +1,11 @@
 use alloc::{collections::btree_map::BTreeMap, sync::Arc, vec::Vec};
+use core::mem;
 use spin::Mutex;
 
 use crate::{
-    process::manager::MANAGER,
+    object::linux_anon::wake_signalfd_for_process_with_manager,
+    process::{ProcessRef, manager::MANAGER},
+    signal::{Signal, Signals},
     systemcall::implementations::wake_futex_for_process,
     task::{TASK_SPAWNER, task::Task},
     thread::{
@@ -10,9 +13,15 @@ use crate::{
         future::ThreadFuture,
         misc::{State, ThreadID},
         thread::Thread,
-        yielding::BlockedQueues,
+        yielding::{BlockType, BlockedQueues},
     },
 };
+
+#[derive(Debug)]
+struct PendingThreadExit {
+    process: ProcessRef,
+    clear_child_tid: u64,
+}
 
 #[derive(Default, Debug)]
 pub struct ThreadManager {
@@ -20,6 +29,7 @@ pub struct ThreadManager {
     pub current: Option<ThreadRef>,
     pub idle_thread: Option<ThreadRef>,
     pub zombies: Vec<ThreadRef>,
+    pending_thread_exits: Vec<PendingThreadExit>,
     pub blocked_queues: BlockedQueues,
 }
 
@@ -71,11 +81,10 @@ impl ThreadManager {
 
     pub fn mark_thread_exited(&mut self, thread: ThreadRef) {
         log::debug!("mark_thread_exited");
-        let (process, clear_child_tid, pid) = {
+        let (process, clear_child_tid) = {
             let mut thread = thread.lock();
             log::debug!("mark_thread_exited tid={:?}", thread.id);
             let process = thread.parent.clone();
-            let pid = process.lock().pid.0;
             let clear_child_tid = thread.clear_child_tid;
 
             if clear_child_tid != 0 {
@@ -83,15 +92,14 @@ impl ThreadManager {
             }
 
             thread.state = State::Zombie;
-            (process, clear_child_tid, pid)
+            (process, clear_child_tid)
         };
 
         if clear_child_tid != 0 {
-            let _ = process
-                .lock()
-                .addrspace
-                .write(clear_child_tid as *mut u8, &0i32);
-            wake_futex_for_process(pid, clear_child_tid, 1);
+            self.pending_thread_exits.push(PendingThreadExit {
+                process,
+                clear_child_tid,
+            });
         }
 
         self.zombies.push(thread);
@@ -99,6 +107,8 @@ impl ThreadManager {
 
     pub fn cleanup_exited_threads(&mut self) {
         let mut to_remove = Vec::new();
+
+        self.flush_pending_thread_exits();
 
         log::debug!("zombies size {}", self.zombies.len());
 
@@ -128,10 +138,60 @@ impl ThreadManager {
         }
 
         for dead_process in to_remove {
+            let dead_pid = dead_process.lock().pid.0;
+            if let Some(parent) = dead_process.lock().parent.clone() {
+                let (parent_pid, threads) = {
+                    let mut parent = parent.lock();
+                    parent
+                        .pending_signals
+                        .insert(Signals::from(Signal::ChildChanged));
+                    (parent.pid.0, parent.threads.clone())
+                };
+
+                crate::s_println!(
+                    "cleanup_exited_threads dead_pid={} parent_pid={}",
+                    dead_pid,
+                    parent_pid
+                );
+
+                wake_signalfd_for_process_with_manager(parent_pid, self);
+
+                for thread in threads {
+                    let Some(thread) = thread.upgrade() else {
+                        continue;
+                    };
+
+                    let should_wake = {
+                        let thread = thread.lock();
+                        matches!(
+                            &thread.state,
+                            State::Blocked(block_type) if !matches!(block_type, BlockType::Stopped)
+                        )
+                    };
+
+                    if should_wake {
+                        self.wake(thread.clone());
+                    }
+                }
+            }
             MANAGER
                 .lock()
                 .notify_process_exit_waiters(dead_process, self);
         }
         log::debug!("cleanup_exited_threads done");
+    }
+
+    fn flush_pending_thread_exits(&mut self) {
+        for pending in mem::take(&mut self.pending_thread_exits) {
+            let pid = {
+                let mut process = pending.process.lock();
+                let pid = process.pid.0;
+                let _ = process
+                    .addrspace
+                    .write(pending.clear_child_tid as *mut u8, &0i32);
+                pid
+            };
+            wake_futex_for_process(pid, pending.clear_child_tid, 1);
+        }
     }
 }

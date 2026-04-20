@@ -75,6 +75,7 @@ pub fn terminate_process(process: ProcessRef, exit_code: u64) {
     for thread in threads {
         thread_manager.mark_thread_exited(thread);
     }
+    thread_manager.cleanup_exited_threads();
 }
 
 impl Process {

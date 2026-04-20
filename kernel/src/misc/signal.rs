@@ -13,7 +13,7 @@ use crate::{
 };
 use alloc::vec::Vec;
 use bitflags::bitflags;
-use core::ffi::c_void;
+use core::{ffi::c_void, mem};
 use num_enum::TryFromPrimitive;
 use strum::{EnumIter, IntoEnumIterator};
 
@@ -56,16 +56,47 @@ pub type SignalHandlerFn = extern "C" fn(i32);
 pub type SigHandlerFn2 = extern "C" fn(i32, *const SigInfo, *const UContext);
 
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct SigInfo {
     pub si_signo: i32,
     pub si_errno: i32,
     pub si_code: i32,
-    pub si_pid: i32,
-    pub si_uid: u32,
-    pub si_addr: *mut c_void,
-    pub si_status: i32,
-    pub si_value: SigValue,
+    _pad0: i32,
+    fields: SigInfoFields,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union SigInfoFields {
+    pad: [u8; 112],
+    child: SigInfoChild,
+    fault: SigInfoFault,
+    value: SigInfoValue,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct SigInfoChild {
+    si_pid: i32,
+    si_uid: u32,
+    si_status: i32,
+    _pad1: i32,
+    si_utime: i64,
+    si_stime: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct SigInfoFault {
+    si_addr: *mut c_void,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct SigInfoValue {
+    si_pid: i32,
+    si_uid: u32,
+    si_value: SigValue,
 }
 
 #[repr(C)]
@@ -80,6 +111,50 @@ impl Default for SigValue {
         Self { sival_int: 0 }
     }
 }
+
+impl Default for SigInfoFields {
+    fn default() -> Self {
+        Self { pad: [0; 112] }
+    }
+}
+
+impl Default for SigInfo {
+    fn default() -> Self {
+        Self {
+            si_signo: 0,
+            si_errno: 0,
+            si_code: 0,
+            _pad0: 0,
+            fields: SigInfoFields::default(),
+        }
+    }
+}
+
+impl SigInfo {
+    pub fn for_signal(signal: Signal) -> Self {
+        Self {
+            si_signo: signal as i32,
+            ..Default::default()
+        }
+    }
+
+    pub fn for_waitid(signal: Signal, code: i32, pid: i32, status: i32) -> Self {
+        Self {
+            si_signo: signal as i32,
+            si_code: code,
+            fields: SigInfoFields {
+                child: SigInfoChild {
+                    si_pid: pid,
+                    si_status: status,
+                    ..Default::default()
+                },
+            },
+            ..Default::default()
+        }
+    }
+}
+
+const _: [(); 128] = [(); mem::size_of::<SigInfo>()];
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -292,10 +367,7 @@ impl Process {
                         let (_, mut stack_builder) = self.addrspace.allocate_user(16);
                         let (_, mut frame_builder) = self.addrspace.allocate_user(1);
 
-                        let siginfo = SigInfo {
-                            si_signo: signal as i32,
-                            ..Default::default()
-                        };
+                        let siginfo = SigInfo::for_signal(signal);
                         let ucontext = build_signal_ucontext(current_thread);
 
                         let ucontext_ptr = frame_builder.push_struct(&ucontext);

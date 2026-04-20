@@ -11,7 +11,7 @@ use crate::{
         misc::with_current_process,
     },
     signal::Signal,
-    thread::{misc::with_current_thread, scheduling::return_to_executor_no_save},
+    thread::{THREAD_MANAGER, misc::with_current_thread, scheduling::return_to_executor_no_save},
     tss::{DOUBLE_FAULT_IST_LOCATION, GP_IST_LOCATION, PAGE_FAULT_IST_LOCATION},
 };
 
@@ -77,6 +77,18 @@ pub fn handle_usermode_exception(stackframe: &InterruptStackFrame, sig: Signal) 
     });
 
     if should_switch {
+        let current_pid = with_current_process(|process| process.pid.0);
+        if current_pid == 32 {
+            crate::s_println!("signal cleanup path=exception pid={}", current_pid);
+        }
+        THREAD_MANAGER
+            .get()
+            .unwrap()
+            .lock()
+            .cleanup_exited_threads();
+        if current_pid == 32 {
+            crate::s_println!("signal cleanup done path=exception pid={}", current_pid);
+        }
         return_to_executor_no_save();
     }
 

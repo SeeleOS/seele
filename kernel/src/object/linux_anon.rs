@@ -303,6 +303,35 @@ pub fn wake_signalfd_for_process(pid: u64) {
     }
 }
 
+pub fn wake_signalfd_for_process_with_manager(pid: u64, manager: &mut ThreadManager) {
+    let watchers = {
+        let mut registry = SIGNALFD_REGISTRY.lock();
+        let Some(watchers) = registry.watchers.get_mut(&pid) else {
+            return;
+        };
+
+        let mut strong = Vec::new();
+        watchers.retain(|watcher| {
+            if let Some(signalfd) = watcher.upgrade() {
+                strong.push(signalfd);
+                true
+            } else {
+                false
+            }
+        });
+        strong
+    };
+
+    for signalfd in watchers {
+        if signalfd.next_ready_signal().is_some() {
+            manager.wake_io();
+            if let Some(object) = signalfd.self_object() {
+                manager.wake_poller(object, PollableEvent::CanBeRead);
+            }
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct InotifyObject {
     flags: Mutex<FileFlags>,
