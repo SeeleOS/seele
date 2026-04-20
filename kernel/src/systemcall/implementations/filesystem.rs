@@ -688,6 +688,26 @@ fn chmod_at(dirfd: i32, path_str: &str, mode: u32, flags: AtFlags) -> Result<usi
     Ok(0)
 }
 
+fn chown_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<usize, SyscallError> {
+    let allowed_flags = AtFlags::EMPTY_PATH | AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT;
+    if flags.bits() != (flags & allowed_flags).bits() {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    if path_str.is_empty() {
+        if !flags.contains(AtFlags::EMPTY_PATH) {
+            return Err(SyscallError::InvalidArguments);
+        }
+        let _ = get_object_current_process(dirfd as u64)
+            .map_err(SyscallError::from)?
+            .as_file_like()?;
+        return Ok(0);
+    }
+
+    ensure_path_exists_at(dirfd, path_str, flags.contains(AtFlags::SYMLINK_NOFOLLOW))?;
+    Ok(0)
+}
+
 define_syscall!(OpenAt, |dirfd: i32,
                          path: CString,
                          flags: OpenFlags,
@@ -832,9 +852,7 @@ define_syscall!(Chmod, |path: CString, mode: u32| {
 
 define_syscall!(Chown, |path: CString, _owner: u32, _group: u32| {
     let path_str = path_from_raw(path)?;
-    let path = resolve_path_at(AT_FDCWD, &path_str)?;
-    let _ = VirtualFS.lock().open(path)?;
-    Ok(0)
+    chown_at(AT_FDCWD, &path_str, AtFlags::empty())
 });
 
 define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
@@ -888,6 +906,25 @@ define_syscall!(Fchmodat2, |dirfd: i32,
     };
 
     chmod_at(dirfd, &path_str, mode, flags)
+});
+
+define_syscall!(Fchownat, |dirfd: i32,
+                           path: u64,
+                           _owner: u32,
+                           _group: u32,
+                           flags: AtFlags| {
+    let path = path as CString;
+    let path_str = if path.is_null() {
+        if flags.contains(AtFlags::EMPTY_PATH) {
+            String::new()
+        } else {
+            return Err(SyscallError::BadAddress);
+        }
+    } else {
+        path_from_raw(path)?
+    };
+
+    chown_at(dirfd, &path_str, flags)
 });
 
 define_syscall!(Newfstatat, |dirfd: i32,

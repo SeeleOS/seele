@@ -130,6 +130,7 @@ pub enum SyscallNumber {
     Tgkill = 234,
     Gettid = 186,
     Mknodat = 259,
+    Fchownat = 260,
     Setxattr = 188,
     Lsetxattr = 189,
     Fsetxattr = 190,
