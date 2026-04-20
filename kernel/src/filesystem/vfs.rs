@@ -74,16 +74,15 @@ impl VFS {
     }
 
     pub fn mount(&mut self, path: Path, fs: impl FileSystem + 'static) -> FSResult<()> {
+        let fs: FileSystemRef = Arc::new(Mutex::new(fs));
+        self.mount_ref(path, fs)
+    }
+
+    pub fn mount_ref(&mut self, path: Path, fs: FileSystemRef) -> FSResult<()> {
         let normalized_path = self.normalize_path(path);
         let normalized_path_string = normalized_path.clone().as_string();
-        if self
-            .mounts
-            .iter()
-            .any(|mount| mount.path.clone().as_string() == normalized_path_string)
-        {
-            return Ok(());
-        }
-        let fs: FileSystemRef = Arc::new(Mutex::new(fs));
+        self.mounts
+            .retain(|mount| mount.path.clone().as_string() != normalized_path_string);
         fs.lock().init()?;
         self.mounts.push(Mount {
             path: normalized_path,
@@ -91,6 +90,18 @@ impl VFS {
         });
         self.mounts
             .sort_by_key(|mount| Reverse(mount.path.clone().as_string().len()));
+        Ok(())
+    }
+
+    pub fn unmount(&mut self, path: Path) -> FSResult<()> {
+        let normalized_path = self.normalize_path(path);
+        let normalized_path_string = normalized_path.clone().as_string();
+        let old_len = self.mounts.len();
+        self.mounts
+            .retain(|mount| mount.path.clone().as_string() != normalized_path_string);
+        if self.mounts.len() == old_len {
+            return Err(FSError::NotFound);
+        }
         Ok(())
     }
 

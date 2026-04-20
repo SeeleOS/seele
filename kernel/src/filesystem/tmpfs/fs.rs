@@ -8,7 +8,7 @@ use crate::filesystem::{
 };
 
 use super::{
-    TmpNodeKind, TmpfsDirectoryHandle, TmpfsFileHandle, TmpfsState, TmpfsStateRef,
+    TmpFsVariant, TmpNodeKind, TmpfsDirectoryHandle, TmpfsFileHandle, TmpfsState, TmpfsStateRef,
     TmpfsSymlinkHandle,
 };
 
@@ -64,12 +64,22 @@ pub(crate) fn tmpfs_lookup_path(state: &TmpfsStateRef, path: &str) -> FSResult<F
 
 pub struct TmpFs {
     state: TmpfsStateRef,
+    variant: TmpFsVariant,
 }
 
 impl TmpFs {
     pub fn new() -> Self {
+        Self::with_variant(TmpFsVariant::TmpFs)
+    }
+
+    pub fn ramfs() -> Self {
+        Self::with_variant(TmpFsVariant::RamFs)
+    }
+
+    fn with_variant(variant: TmpFsVariant) -> Self {
         Self {
             state: Arc::new(Mutex::new(TmpfsState::new())),
+            variant,
         }
     }
 }
@@ -96,18 +106,18 @@ impl FileSystem for TmpFs {
     }
 
     fn name(&self) -> &'static str {
-        "tmpfs"
+        self.variant.name()
     }
 
     fn magic(&self) -> i64 {
-        0x0102_1994
+        self.variant.magic()
     }
 
     fn mount_source(&self) -> &'static str {
-        "tmpfs"
+        self.variant.mount_source()
     }
 
     fn mount_options(&self, _path: &Path) -> &'static str {
-        "rw,nosuid,nodev,relatime"
+        self.variant.mount_options()
     }
 }

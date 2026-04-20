@@ -197,6 +197,8 @@ pub enum SyscallNumber {
     Fsopen = 430,
     Fsconfig = 431,
     OpenTree = 428,
+    MoveMount = 429,
+    Fsmount = 432,
     PidfdOpen = 434,
     Clone3 = 435,
     CloseRange = 436,

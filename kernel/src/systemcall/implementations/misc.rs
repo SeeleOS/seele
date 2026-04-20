@@ -43,7 +43,13 @@ bitflags! {
         const SIGHAND = 0x0000_0800;
         const PIDFD = 0x0000_1000;
         const VFORK = 0x0000_4000;
+        const NEWPID = 0x2000_0000;
         const NEWNS = 0x0002_0000;
+        const NEWCGROUP = 0x0200_0000;
+        const NEWUTS = 0x0400_0000;
+        const NEWIPC = 0x0800_0000;
+        const NEWUSER = 0x1000_0000;
+        const NEWNET = 0x4000_0000;
         const THREAD = 0x0001_0000;
         const SETTLS = 0x0008_0000;
         const PARENT_SETTID = 0x0010_0000;
@@ -81,12 +87,17 @@ enum PrctlOption {
     SetKeepCaps = 8,
     SetName = 15,
     GetName = 16,
+    GetSeccomp = 21,
+    SetSeccomp = 22,
     CapbsetRead = 23,
+    CapbsetDrop = 24,
     GetSecureBits = 27,
     SetSecureBits = 28,
     SetNoNewPrivs = 38,
     GetNoNewPrivs = 39,
     CapAmbient = 47,
+    SetMdwe = 65,
+    GetMdwe = 66,
 }
 
 #[derive(Clone, Copy, Debug, TryFromPrimitive)]
@@ -252,6 +263,12 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
             | CloneFlags::VM.bits()
             | CloneFlags::VFORK.bits()
             | CloneFlags::NEWNS.bits()
+            | CloneFlags::NEWCGROUP.bits()
+            | CloneFlags::NEWUTS.bits()
+            | CloneFlags::NEWIPC.bits()
+            | CloneFlags::NEWUSER.bits()
+            | CloneFlags::NEWPID.bits()
+            | CloneFlags::NEWNET.bits()
             | CloneFlags::CLEAR_SIGHAND.bits()
             | CloneFlags::PARENT_SETTID.bits()
             | CloneFlags::CHILD_SETTID.bits()
@@ -1388,7 +1405,10 @@ define_syscall!(Prctl, |option: i32,
         PrctlOption::SetPdeathsig
         | PrctlOption::SetDumpable
         | PrctlOption::SetName
-        | PrctlOption::SetNoNewPrivs => Ok(0),
+        | PrctlOption::SetNoNewPrivs
+        | PrctlOption::SetSeccomp
+        | PrctlOption::CapbsetDrop
+        | PrctlOption::SetMdwe => Ok(0),
         PrctlOption::SetKeepCaps => {
             if arg2 > 1 {
                 return Err(SyscallError::InvalidArguments);
@@ -1404,7 +1424,10 @@ define_syscall!(Prctl, |option: i32,
             user_safe::write(arg2 as *mut u8, &0i32)?;
             Ok(0)
         }
-        PrctlOption::GetDumpable | PrctlOption::GetNoNewPrivs => Ok(0),
+        PrctlOption::GetDumpable
+        | PrctlOption::GetNoNewPrivs
+        | PrctlOption::GetSeccomp
+        | PrctlOption::GetMdwe => Ok(0),
         PrctlOption::GetKeepCaps => Ok(get_current_process().lock().keep_capabilities as usize),
         PrctlOption::GetSecureBits => Ok(get_current_process().lock().secure_bits as usize),
         PrctlOption::GetName => {
