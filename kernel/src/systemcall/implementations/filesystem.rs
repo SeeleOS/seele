@@ -309,6 +309,15 @@ fn current_process_is_executor() -> bool {
     false
 }
 
+fn current_process_is_journald() -> bool {
+    with_current_process(|process| {
+        process
+            .command_line
+            .first()
+            .is_some_and(|path| path.ends_with("/systemd-journald"))
+    })
+}
+
 fn remount_bind_flag_update(bits: u64) -> (MountFlags, MountFlags) {
     let flags = MountFlags::from_bits_retain(bits & MountFlags::all().bits());
     let mut mask = MountFlags::MS_RDONLY
@@ -659,8 +668,23 @@ define_syscall!(OpenAt, |dirfd: i32,
     let nofollow = flags.contains(OpenFlags::NOFOLLOW);
     let directory_only = flags.contains(OpenFlags::DIRECTORY);
     let path_only = flags.contains(OpenFlags::PATH);
+    let trace_journald = current_process_is_journald();
 
-    let path = resolve_path_at(dirfd, &path_str)?;
+    let path = match resolve_path_at(dirfd, &path_str) {
+        Ok(path) => path,
+        Err(err) => {
+            if trace_journald {
+                crate::s_println!(
+                    "journald openat path error: dirfd={} path={} flags={:#x} err={:?}",
+                    dirfd,
+                    path_str,
+                    flags.bits(),
+                    err
+                );
+            }
+            return Err(err);
+        }
+    };
     if should_trace_namespace_path(&path.clone().as_string()) {
         crate::s_println!("openat resolved {}", path.clone().as_string());
     }
@@ -677,10 +701,40 @@ define_syscall!(OpenAt, |dirfd: i32,
         object = Arc::new(file);
     } else if create {
         let create_result = VirtualFS.lock().create_file(path.clone());
-        create_result?;
+        if let Err(err) = create_result {
+            if trace_journald {
+                crate::s_println!(
+                    "journald openat create error: path={} flags={:#x} err={:?}",
+                    path.as_string(),
+                    flags.bits(),
+                    err
+                );
+            }
+            return Err(err.into());
+        }
         let reopen_result = VirtualFS.lock().open(path.clone());
-        object = Arc::new(reopen_result?);
+        object = match reopen_result {
+            Ok(file) => Arc::new(file),
+            Err(err) => {
+                if trace_journald {
+                    crate::s_println!(
+                        "journald openat reopen error: path={} flags={:#x} err={:?}",
+                        path.as_string(),
+                        flags.bits(),
+                        err
+                    );
+                }
+                return Err(err.into());
+            }
+        };
     } else {
+        if trace_journald {
+            crate::s_println!(
+                "journald openat missing: path={} flags={:#x}",
+                path.as_string(),
+                flags.bits()
+            );
+        }
         return Err(SyscallError::FileNotFound);
     }
 
@@ -885,7 +939,21 @@ define_syscall!(Newfstatat, |dirfd: i32,
         path_from_raw(path)?
     };
 
-    let stat = stat_at(dirfd, &path_str, flags)?;
+    let stat = match stat_at(dirfd, &path_str, flags) {
+        Ok(stat) => stat,
+        Err(err) => {
+            if current_process_is_journald() {
+                crate::s_println!(
+                    "journald fstatat error: dirfd={} path={} flags={:#x} err={:?}",
+                    dirfd,
+                    path_str,
+                    flags.bits(),
+                    err
+                );
+            }
+            return Err(err);
+        }
+    };
 
     user_safe::write(linux_stat_ptr, &stat)?;
     Ok(0)
@@ -1152,9 +1220,31 @@ define_syscall!(SymlinkAt, |target: CString,
 
 define_syscall!(MkdirAt, |dirfd: i32, path: CString, _mode: u32| {
     let path = path_from_raw(path)?;
-    let path = resolve_path_at(dirfd, &path)?;
+    let path = match resolve_path_at(dirfd, &path) {
+        Ok(path) => path,
+        Err(err) => {
+            if current_process_is_journald() {
+                crate::s_println!(
+                    "journald mkdirat resolve error: dirfd={} path={} err={:?}",
+                    dirfd,
+                    path,
+                    err
+                );
+            }
+            return Err(err);
+        }
+    };
 
-    VirtualFS.lock().create_dir(path)?;
+    if let Err(err) = VirtualFS.lock().create_dir(path.clone()) {
+        if current_process_is_journald() {
+            crate::s_println!(
+                "journald mkdirat error: path={} err={:?}",
+                path.as_string(),
+                err
+            );
+        }
+        return Err(err.into());
+    }
 
     Ok(0)
 });
@@ -1595,7 +1685,25 @@ define_syscall!(RenameAt, |old_dirfd: i32,
     let new_from_currentdir = path_is_relative_to_cwd(new_dirfd)?;
     let old_path = path_from_raw(old_path)?;
     let new_path = path_from_raw(new_path)?;
-    rename_impl(old_from_currentdir, old_path, new_from_currentdir, new_path)
+    match rename_impl(
+        old_from_currentdir,
+        old_path.clone(),
+        new_from_currentdir,
+        new_path.clone(),
+    ) {
+        Ok(value) => Ok(value),
+        Err(err) => {
+            if current_process_is_journald() {
+                crate::s_println!(
+                    "journald renameat error: old_path={} new_path={} err={:?}",
+                    old_path,
+                    new_path,
+                    err
+                );
+            }
+            Err(err)
+        }
+    }
 });
 
 define_syscall!(RenameAt2, |old_dirfd: i32,
