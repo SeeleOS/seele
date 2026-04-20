@@ -33,6 +33,7 @@ After finishing a change, run `nix develop -c cargo run -- --agent` to test the 
 - Use Rust 2024 style and keep formatting `rustfmt`-clean.
 - Indent with 4 spaces; do not use tabs for new code.
 - Prefer `enum` and `bitflags` over integer `const` groups when values are a closed set.
+- When a Linux flag set is already modeled as a `bitflags` type, do not duplicate the same bits as separate local `const`s. Reuse the `bitflags` type directly and prefer Linux ABI names such as `MS_*`, `O_*`, or `MAP_*` on the flags themselves.
 - Use `snake_case` for functions/modules, `CamelCase` for types, and short descriptive names for syscalls and kernel objects.
 - Match Linux naming where the kernel exposes Linux ABI behavior.
 - Do not write fully qualified type paths inline such as `alloc::string::String`. If a common type is used, import it at the top of the file and use the short name in code.
