@@ -79,11 +79,7 @@ impl File for MemFdFile {
         .with_inode(self.inode))
     }
 
-    fn read_at(
-        &mut self,
-        buffer: &mut [u8],
-        offset: u64,
-    ) -> FSResult<usize> {
+    fn read_at(&mut self, buffer: &mut [u8], offset: u64) -> FSResult<usize> {
         let offset = usize::try_from(offset).map_err(|_| FSError::Other)?;
         if offset >= self.data.len() {
             return Ok(0);

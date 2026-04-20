@@ -40,10 +40,7 @@ pub(super) fn chmod_path(fs: &Ext4, path: &str, mode: u32) -> FSResult<()> {
 pub struct EXT4(pub Ext4);
 
 impl EXT4 {
-    fn follow_intermediate_symlinks(
-        &self,
-        mut current: FileLike,
-    ) -> FSResult<FileLike> {
+    fn follow_intermediate_symlinks(&self, mut current: FileLike) -> FSResult<FileLike> {
         const MAX_SYMLINKS: usize = 40;
 
         for _ in 0..MAX_SYMLINKS {
@@ -174,7 +171,8 @@ impl FileSystem for EXT4 {
                 FollowSymlinks::All,
             )
             .map_err(FSError::from)?;
-        let mut new_parent_dir = Dir::open_inode(&self.0, new_parent_inode).map_err(FSError::from)?;
+        let mut new_parent_dir =
+            Dir::open_inode(&self.0, new_parent_inode).map_err(FSError::from)?;
         let mut source_inode = source_inode;
         new_parent_dir
             .link(
@@ -190,7 +188,8 @@ impl FileSystem for EXT4 {
                 FollowSymlinks::All,
             )
             .map_err(FSError::from)?;
-        let mut old_parent_dir = Dir::open_inode(&self.0, old_parent_inode).map_err(FSError::from)?;
+        let mut old_parent_dir =
+            Dir::open_inode(&self.0, old_parent_inode).map_err(FSError::from)?;
         let old_inode = self
             .0
             .path_to_inode(

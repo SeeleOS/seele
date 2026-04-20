@@ -8,10 +8,10 @@ use crate::{
     filesystem::{
         errors::FSError,
         info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
+        path::Path,
         staticfs::{
             device::StaticDeviceHandle, directory::StaticDirectoryHandle, file::StaticFileHandle,
         },
-        path::Path,
         vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
         vfs_traits::{FileLike, Whence},
     },
@@ -244,7 +244,12 @@ impl Readable for FileLikeObject {
 }
 
 impl MemoryMappable for FileLikeObject {
-    fn map(self: Arc<Self>, offset: u64, pages: u64, protection: Protection) -> ObjectResult<VirtAddr> {
+    fn map(
+        self: Arc<Self>,
+        offset: u64,
+        pages: u64,
+        protection: Protection,
+    ) -> ObjectResult<VirtAddr> {
         if let Some(device) = self.resolve_device_object()? {
             let mappable = device
                 .as_mappable()

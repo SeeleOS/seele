@@ -131,7 +131,10 @@ impl FsContextObject {
 
     fn string_supported(&self, key: &str) -> bool {
         match self.fs_type.as_str() {
-            "tmpfs" => matches!(key, "mode" | "size" | "nr_inodes" | "uid" | "gid" | "nr_blocks"),
+            "tmpfs" => matches!(
+                key,
+                "mode" | "size" | "nr_inodes" | "uid" | "gid" | "nr_blocks"
+            ),
             "ramfs" => matches!(key, "mode"),
             "proc" => matches!(key, "hidepid" | "subset"),
             _ => false,

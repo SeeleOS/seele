@@ -145,8 +145,7 @@ pub(super) fn proc_mountinfo_bytes() -> Vec<u8> {
         let parent_id = if path == "/" {
             0
         } else {
-            ids
-                .keys()
+            ids.keys()
                 .filter(|candidate| {
                     candidate.as_str() != path
                         && (path == format!("{}/", candidate.trim_end_matches('/'))

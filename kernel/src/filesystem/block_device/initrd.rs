@@ -30,11 +30,7 @@ impl BlockDevice for RamDisk {
         1024
     }
 
-    fn read_single_block(
-        &self,
-        id: usize,
-        buffer: &mut [u8],
-    ) -> BlockDeviceResult {
+    fn read_single_block(&self, id: usize, buffer: &mut [u8]) -> BlockDeviceResult {
         let start = id * self.block_size();
         let end = start + self.block_size();
 
@@ -52,11 +48,7 @@ impl BlockDevice for RamDisk {
         Ok(end - start)
     }
 
-    fn write_single_block(
-        &self,
-        id: usize,
-        buffer: &[u8],
-    ) -> BlockDeviceResult {
+    fn write_single_block(&self, id: usize, buffer: &[u8]) -> BlockDeviceResult {
         let start = id * self.block_size();
         let end = start + self.block_size();
 
@@ -87,19 +79,11 @@ impl BlockDevice for RamDiskHandle {
         RAMDISK.get().unwrap().block_size()
     }
 
-    fn read_single_block(
-        &self,
-        id: usize,
-        buffer: &mut [u8],
-    ) -> BlockDeviceResult {
+    fn read_single_block(&self, id: usize, buffer: &mut [u8]) -> BlockDeviceResult {
         RAMDISK.get().unwrap().read_single_block(id, buffer)
     }
 
-    fn write_single_block(
-        &self,
-        id: usize,
-        buffer: &[u8],
-    ) -> BlockDeviceResult {
+    fn write_single_block(&self, id: usize, buffer: &[u8]) -> BlockDeviceResult {
         RAMDISK.get().unwrap().write_single_block(id, buffer)
     }
 

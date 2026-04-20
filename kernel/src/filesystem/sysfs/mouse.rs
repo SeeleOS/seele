@@ -55,7 +55,12 @@ fn mouse_caps_prop() -> Vec<u8> {
 }
 
 fn mouse_input_uevent_write(buffer: &[u8]) -> FSResult<usize> {
-    emit_uevent(buffer, "/devices/platform/i8042/serio1/input/input1", "input", None)
+    emit_uevent(
+        buffer,
+        "/devices/platform/i8042/serio1/input/input1",
+        "input",
+        None,
+    )
 }
 
 fn mouse_event_uevent_write(buffer: &[u8]) -> FSResult<usize> {
@@ -68,7 +73,12 @@ fn mouse_event_uevent_write(buffer: &[u8]) -> FSResult<usize> {
 }
 
 fn mouse_input_dir_uevent_write(buffer: &[u8]) -> FSResult<usize> {
-    emit_uevent(buffer, "/devices/platform/i8042/serio1/input", "input", None)
+    emit_uevent(
+        buffer,
+        "/devices/platform/i8042/serio1/input",
+        "input",
+        None,
+    )
 }
 
 fn mouse_serio_uevent_write(buffer: &[u8]) -> FSResult<usize> {

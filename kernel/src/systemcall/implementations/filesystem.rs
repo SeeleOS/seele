@@ -1020,8 +1020,7 @@ define_syscall!(MkdirAt, |dirfd: i32, path: CString, _mode: u32| {
     let path = path_from_raw(path)?;
     let path = resolve_path_at(dirfd, &path)?;
 
-    let result = VirtualFS.lock().create_dir(path);
-    result?;
+    VirtualFS.lock().create_dir(path)?;
 
     Ok(0)
 });
@@ -1082,7 +1081,10 @@ define_syscall!(Mount, |source: CString,
     let _data = string_from_raw_optional(data)?;
     let target_path = {
         let target_object = VirtualFS.lock().open(Path::new(&target))?;
-        if !matches!(target_object.info()?.file_like_type, FileLikeType::Directory) {
+        if !matches!(
+            target_object.info()?.file_like_type,
+            FileLikeType::Directory
+        ) {
             return Err(SyscallError::NotADirectory);
         }
         target_object.path()
@@ -1125,7 +1127,11 @@ define_syscall!(Fsopen, |fs_name: CString, _flags: u32| {
     Ok(fd)
 });
 
-define_syscall!(Fsconfig, |fd: i32, cmd: u32, key: CString, value: CString, _aux: i32| {
+define_syscall!(Fsconfig, |fd: i32,
+                           cmd: u32,
+                           key: CString,
+                           value: CString,
+                           _aux: i32| {
     let object = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
     let fs_context = object.as_fs_context()?;
     let command = FsConfigCommand::try_from(cmd).map_err(|_| SyscallError::InvalidArguments)?;
@@ -1163,79 +1169,79 @@ define_syscall!(Fsmount, |fd: i32, flags: u32, _mount_attrs: u32| {
         .push_object_with_flags(mount_root, fd_flags))
 });
 
-define_syscall!(
-    MoveMount,
-    |from_dirfd: i32, from_path: CString, to_dirfd: i32, to_path: CString, flags: u32| {
-        if flags & !MOVE_MOUNT_ALLOWED_FLAGS != 0 {
-            return Err(SyscallError::InvalidArguments);
-        }
+define_syscall!(MoveMount, |from_dirfd: i32,
+                            from_path: CString,
+                            to_dirfd: i32,
+                            to_path: CString,
+                            flags: u32| {
+    if flags & !MOVE_MOUNT_ALLOWED_FLAGS != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
 
-        let source_path = if from_path.is_null() {
+    let source_path = if from_path.is_null() {
+        if (flags & MOVE_MOUNT_F_EMPTY_PATH) == 0 {
+            return Err(SyscallError::BadAddress);
+        }
+        let object = get_object_current_process(from_dirfd as u64).map_err(SyscallError::from)?;
+        object.as_file_like()?.path().normalize()
+    } else {
+        let from_path = path_from_raw(from_path)?;
+        if from_path.is_empty() {
             if (flags & MOVE_MOUNT_F_EMPTY_PATH) == 0 {
-                return Err(SyscallError::BadAddress);
+                return Err(SyscallError::InvalidArguments);
             }
-            let object = get_object_current_process(from_dirfd as u64).map_err(SyscallError::from)?;
+            let object =
+                get_object_current_process(from_dirfd as u64).map_err(SyscallError::from)?;
             object.as_file_like()?.path().normalize()
         } else {
-            let from_path = path_from_raw(from_path)?;
-            if from_path.is_empty() {
-                if (flags & MOVE_MOUNT_F_EMPTY_PATH) == 0 {
-                    return Err(SyscallError::InvalidArguments);
-                }
-                let object =
-                    get_object_current_process(from_dirfd as u64).map_err(SyscallError::from)?;
-                object.as_file_like()?.path().normalize()
-            } else {
-                resolve_path_at(from_dirfd, &from_path)?.normalize()
-            }
-        };
-
-        let (mount_path, mount_fs) = VirtualFS.lock().mount_metadata(source_path.clone())?;
-        if mount_path != source_path {
-            return Err(SyscallError::InvalidArguments);
+            resolve_path_at(from_dirfd, &from_path)?.normalize()
         }
+    };
 
-        let target_path = if to_path.is_null() {
+    let (mount_path, mount_fs) = VirtualFS.lock().mount_metadata(source_path.clone())?;
+    if mount_path != source_path {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let target_path = if to_path.is_null() {
+        if (flags & MOVE_MOUNT_T_EMPTY_PATH) == 0 {
+            return Err(SyscallError::BadAddress);
+        }
+        let object = get_object_current_process(to_dirfd as u64).map_err(SyscallError::from)?;
+        object.as_file_like()?.path().normalize()
+    } else {
+        let to_path = path_from_raw(to_path)?;
+        if to_path.is_empty() {
             if (flags & MOVE_MOUNT_T_EMPTY_PATH) == 0 {
-                return Err(SyscallError::BadAddress);
+                return Err(SyscallError::InvalidArguments);
             }
             let object = get_object_current_process(to_dirfd as u64).map_err(SyscallError::from)?;
             object.as_file_like()?.path().normalize()
         } else {
-            let to_path = path_from_raw(to_path)?;
-            if to_path.is_empty() {
-                if (flags & MOVE_MOUNT_T_EMPTY_PATH) == 0 {
-                    return Err(SyscallError::InvalidArguments);
-                }
-                let object =
-                    get_object_current_process(to_dirfd as u64).map_err(SyscallError::from)?;
-                object.as_file_like()?.path().normalize()
-            } else {
-                resolve_path_at(to_dirfd, &to_path)?.normalize()
-            }
-        };
-
-        let target = VirtualFS.lock().open(target_path.clone())?;
-        if !matches!(target.info()?.file_like_type, FileLikeType::Directory) {
-            return Err(SyscallError::NotADirectory);
+            resolve_path_at(to_dirfd, &to_path)?.normalize()
         }
+    };
 
-        VirtualFS
-            .lock()
-            .mount_ref(target_path, mount_fs)
-            .map_err(SyscallError::from)?;
-        VirtualFS
-            .lock()
-            .unmount(source_path.clone())
-            .map_err(SyscallError::from)?;
-        if is_api_mount_path(&source_path) {
-            let _ = VirtualFS.lock().delete_file(source_path);
-        }
-
-        let _ = flags & MOVE_MOUNT_BENEATH;
-        Ok(0)
+    let target = VirtualFS.lock().open(target_path.clone())?;
+    if !matches!(target.info()?.file_like_type, FileLikeType::Directory) {
+        return Err(SyscallError::NotADirectory);
     }
-);
+
+    VirtualFS
+        .lock()
+        .mount_ref(target_path, mount_fs)
+        .map_err(SyscallError::from)?;
+    VirtualFS
+        .lock()
+        .unmount(source_path.clone())
+        .map_err(SyscallError::from)?;
+    if is_api_mount_path(&source_path) {
+        let _ = VirtualFS.lock().delete_file(source_path);
+    }
+
+    let _ = flags & MOVE_MOUNT_BENEATH;
+    Ok(0)
+});
 
 define_syscall!(OpenTree, |dirfd: i32, path: CString, flags: u32| {
     let allowed_flags = OPEN_TREE_CLONE
@@ -1284,61 +1290,60 @@ define_syscall!(OpenTree, |dirfd: i32, path: CString, flags: u32| {
     Ok(fd)
 });
 
-define_syscall!(
-    MountSetattr,
-    |dirfd: i32, path: CString, flags: u32, attr: *const LinuxMountAttr, size: usize| {
-        let allowed_flags = AtFlags::SYMLINK_NOFOLLOW.bits() as u32
-            | AtFlags::EMPTY_PATH.bits() as u32
-            | AT_RECURSIVE;
-        if flags & !allowed_flags != 0 {
-            return Err(SyscallError::InvalidArguments);
-        }
-        if size < core::mem::size_of::<LinuxMountAttr>() {
-            return Err(SyscallError::InvalidArguments);
-        }
-        if attr.is_null() {
+define_syscall!(MountSetattr, |dirfd: i32,
+                               path: CString,
+                               flags: u32,
+                               attr: *const LinuxMountAttr,
+                               size: usize| {
+    let allowed_flags =
+        AtFlags::SYMLINK_NOFOLLOW.bits() as u32 | AtFlags::EMPTY_PATH.bits() as u32 | AT_RECURSIVE;
+    if flags & !allowed_flags != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if size < core::mem::size_of::<LinuxMountAttr>() {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if attr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let object = if path.is_null() {
+        if (flags & AtFlags::EMPTY_PATH.bits() as u32) == 0 {
             return Err(SyscallError::BadAddress);
         }
-
-        let object = if path.is_null() {
+        get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
+    } else {
+        let path = path_from_raw(path)?;
+        if path.is_empty() {
             if (flags & AtFlags::EMPTY_PATH.bits() as u32) == 0 {
                 return Err(SyscallError::BadAddress);
             }
             get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
         } else {
-            let path = path_from_raw(path)?;
-            if path.is_empty() {
-                if (flags & AtFlags::EMPTY_PATH.bits() as u32) == 0 {
-                    return Err(SyscallError::BadAddress);
-                }
-                get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
+            let path = resolve_path_at(dirfd, &path)?;
+            let file = if (flags & AtFlags::SYMLINK_NOFOLLOW.bits() as u32) != 0 {
+                VirtualFS.lock().open_nofollow(path)?
             } else {
-                let path = resolve_path_at(dirfd, &path)?;
-                let file = if (flags & AtFlags::SYMLINK_NOFOLLOW.bits() as u32) != 0 {
-                    VirtualFS.lock().open_nofollow(path)?
-                } else {
-                    VirtualFS.lock().open(path)?
-                };
-                Arc::new(file)
-            }
-        };
-
-        if !matches!(
-            object.clone().as_file_like()?.info()?.file_like_type,
-            FileLikeType::Directory
-        ) {
-            return Err(SyscallError::NotADirectory);
+                VirtualFS.lock().open(path)?
+            };
+            Arc::new(file)
         }
+    };
 
-        let attr = unsafe { &*attr };
-        if attr.attr_set != 0 || attr.attr_clr != 0 || attr.propagation != 0 || attr.userns_fd != 0
-        {
-            return Err(SyscallError::OperationNotSupported);
-        }
-
-        Ok(0)
+    if !matches!(
+        object.clone().as_file_like()?.info()?.file_like_type,
+        FileLikeType::Directory
+    ) {
+        return Err(SyscallError::NotADirectory);
     }
-);
+
+    let attr = unsafe { &*attr };
+    if attr.attr_set != 0 || attr.attr_clr != 0 || attr.propagation != 0 || attr.userns_fd != 0 {
+        return Err(SyscallError::OperationNotSupported);
+    }
+
+    Ok(0)
+});
 
 define_syscall!(
     NameToHandleAt,

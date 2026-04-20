@@ -50,7 +50,12 @@ fn keyboard_caps_prop() -> Vec<u8> {
 }
 
 fn keyboard_input_uevent_write(buffer: &[u8]) -> FSResult<usize> {
-    emit_uevent(buffer, "/devices/platform/i8042/serio0/input/input0", "input", None)
+    emit_uevent(
+        buffer,
+        "/devices/platform/i8042/serio0/input/input0",
+        "input",
+        None,
+    )
 }
 
 fn keyboard_event_uevent_write(buffer: &[u8]) -> FSResult<usize> {
@@ -63,7 +68,12 @@ fn keyboard_event_uevent_write(buffer: &[u8]) -> FSResult<usize> {
 }
 
 fn keyboard_input_dir_uevent_write(buffer: &[u8]) -> FSResult<usize> {
-    emit_uevent(buffer, "/devices/platform/i8042/serio0/input", "input", None)
+    emit_uevent(
+        buffer,
+        "/devices/platform/i8042/serio0/input",
+        "input",
+        None,
+    )
 }
 
 fn keyboard_serio_uevent_write(buffer: &[u8]) -> FSResult<usize> {

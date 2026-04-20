@@ -51,11 +51,7 @@ impl File for Ext4File {
         self.inner.write_bytes(buffer).map_err(Into::into)
     }
 
-    fn read_at(
-        &mut self,
-        buffer: &mut [u8],
-        offset: u64,
-    ) -> FSResult<usize> {
+    fn read_at(&mut self, buffer: &mut [u8], offset: u64) -> FSResult<usize> {
         self.inner.read_bytes_at(buffer, offset).map_err(Into::into)
     }
 

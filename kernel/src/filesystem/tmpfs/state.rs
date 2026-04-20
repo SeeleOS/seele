@@ -221,7 +221,8 @@ impl TmpfsState {
         self.directory_children_mut(&new_parent)?.insert(new_name);
 
         for (suffix, node) in moved_nodes {
-            self.nodes.insert(alloc::format!("{new_path}{suffix}"), node);
+            self.nodes
+                .insert(alloc::format!("{new_path}{suffix}"), node);
         }
 
         Ok(())
