@@ -1,6 +1,7 @@
 use alloc::{string::String, sync::Arc, vec::Vec};
 use bitflags::bitflags;
 use core::sync::atomic::{AtomicI32, Ordering};
+use num_enum::TryFromPrimitive;
 use x86_64::VirtAddr;
 use x86_rtc::Rtc;
 
@@ -68,7 +69,7 @@ struct LinuxCloneArgs {
     cgroup: u64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
 #[repr(i32)]
 enum PrctlOption {
     SetPdeathsig = 1,
@@ -87,51 +88,13 @@ enum PrctlOption {
     CapAmbient = 47,
 }
 
-impl TryFrom<i32> for PrctlOption {
-    type Error = ();
-
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        Ok(match value {
-            1 => Self::SetPdeathsig,
-            2 => Self::GetPdeathsig,
-            3 => Self::GetDumpable,
-            4 => Self::SetDumpable,
-            7 => Self::GetKeepCaps,
-            8 => Self::SetKeepCaps,
-            15 => Self::SetName,
-            16 => Self::GetName,
-            23 => Self::CapbsetRead,
-            27 => Self::GetSecureBits,
-            28 => Self::SetSecureBits,
-            38 => Self::SetNoNewPrivs,
-            39 => Self::GetNoNewPrivs,
-            47 => Self::CapAmbient,
-            _ => return Err(()),
-        })
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, TryFromPrimitive)]
 #[repr(u64)]
 enum PrctlCapAmbientOp {
     IsSet = 1,
     Raise = 2,
     Lower = 3,
     ClearAll = 4,
-}
-
-impl TryFrom<u64> for PrctlCapAmbientOp {
-    type Error = ();
-
-    fn try_from(value: u64) -> Result<Self, Self::Error> {
-        Ok(match value {
-            1 => Self::IsSet,
-            2 => Self::Raise,
-            3 => Self::Lower,
-            4 => Self::ClearAll,
-            _ => return Err(()),
-        })
-    }
 }
 
 bitflags! {
@@ -357,21 +320,10 @@ fn clone_process(
     Ok(pid.0 as usize)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
 #[repr(u32)]
 enum RlimitResource {
     NoFile = 7,
-}
-
-impl TryFrom<u32> for RlimitResource {
-    type Error = ();
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        Ok(match value {
-            7 => Self::NoFile,
-            _ => return Err(()),
-        })
-    }
 }
 
 bitflags! {
