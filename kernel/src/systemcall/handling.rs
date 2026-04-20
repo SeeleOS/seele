@@ -7,8 +7,6 @@ use crate::{
 };
 use x86_64::registers::model_specific::FsBase;
 
-pub fn register_traced_process(_pid: u64, _path: alloc::string::String) {}
-
 #[unsafe(no_mangle)]
 extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     let snapshot = unsafe { &mut *snapshot_ptr };

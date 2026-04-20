@@ -41,6 +41,16 @@ const S_IFCHR: u32 = 0o020000;
 const S_IFBLK: u32 = 0o060000;
 const S_IFSOCK: u32 = 0o140000;
 const API_MOUNT_ROOT: &str = "/run/.api-mounts";
+const MOUNT_ATTR_RDONLY: u64 = MountFlags::MS_RDONLY.bits();
+const MOUNT_ATTR_NOSUID: u64 = MountFlags::MS_NOSUID.bits();
+const MOUNT_ATTR_NODEV: u64 = MountFlags::MS_NODEV.bits();
+const MOUNT_ATTR_NOEXEC: u64 = MountFlags::MS_NOEXEC.bits();
+const MOUNT_ATTR__ATIME: u64 = 0x0000_0070;
+const MOUNT_ATTR_NOATIME: u64 = 0x0000_0010;
+const MOUNT_ATTR_STRICTATIME: u64 = 0x0000_0020;
+const MOUNT_ATTR_NODIRATIME: u64 = 0x0000_0080;
+const MOUNT_ATTR_IDMAP: u64 = 0x0010_0000;
+const MOUNT_ATTR_NOSYMFOLLOW: u64 = 0x0020_0000;
 
 static NEXT_API_MOUNT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -310,6 +320,69 @@ fn remount_bind_flag_update(bits: u64) -> (MountFlags, MountFlags) {
         mask |= MountFlags::MS_RELATIME;
     }
     (flags, mask)
+}
+
+fn mount_attr_flag_update(attr: &LinuxMountAttr) -> Result<(MountFlags, MountFlags), SyscallError> {
+    let supported_basic =
+        MOUNT_ATTR_RDONLY | MOUNT_ATTR_NOSUID | MOUNT_ATTR_NODEV | MOUNT_ATTR_NOEXEC;
+    let supported_set = supported_basic | MOUNT_ATTR_NOATIME | MOUNT_ATTR_STRICTATIME;
+    let supported_clr = supported_basic | MOUNT_ATTR__ATIME;
+
+    if attr.propagation != 0 {
+        return Err(SyscallError::OperationNotSupported);
+    }
+    if attr.attr_set & !supported_set != 0 {
+        return Err(SyscallError::OperationNotSupported);
+    }
+    if attr.attr_clr & !supported_clr != 0 {
+        return Err(SyscallError::OperationNotSupported);
+    }
+    if attr.attr_set & (MOUNT_ATTR_NODIRATIME | MOUNT_ATTR_IDMAP | MOUNT_ATTR_NOSYMFOLLOW) != 0 {
+        return Err(SyscallError::OperationNotSupported);
+    }
+    if (attr.attr_set & MOUNT_ATTR__ATIME) != 0 {
+        return Err(SyscallError::OperationNotSupported);
+    }
+
+    let basic_mask = MountFlags::MS_RDONLY
+        | MountFlags::MS_NOSUID
+        | MountFlags::MS_NODEV
+        | MountFlags::MS_NOEXEC;
+    let mut flags = MountFlags::from_bits_retain(attr.attr_set & basic_mask.bits());
+    let mut mask =
+        MountFlags::from_bits_retain((attr.attr_set | attr.attr_clr) & basic_mask.bits());
+
+    if attr.attr_clr & MOUNT_ATTR__ATIME != 0 {
+        flags.insert(MountFlags::MS_RELATIME);
+        mask.insert(MountFlags::MS_RELATIME);
+    }
+
+    Ok((flags, mask))
+}
+
+fn mount_setattr_target_path(
+    dirfd: i32,
+    path: CString,
+    flags: AtFlags,
+) -> Result<Path, SyscallError> {
+    if path.is_null() {
+        if !flags.contains(AtFlags::EMPTY_PATH) {
+            return Err(SyscallError::BadAddress);
+        }
+        let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
+        return Ok(object.as_file_like()?.path().normalize());
+    }
+
+    let path = path_from_raw(path)?;
+    if path.is_empty() {
+        if !flags.contains(AtFlags::EMPTY_PATH) {
+            return Err(SyscallError::InvalidArguments);
+        }
+        let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
+        return Ok(object.as_file_like()?.path().normalize());
+    }
+
+    resolve_path_at(dirfd, &path).map(|path| path.normalize())
 }
 
 fn symlink_target_matches(path: &Path, expected_target: &str) -> bool {
@@ -1160,7 +1233,12 @@ define_syscall!(Mount, |source: CString,
             let (remount_flags, remount_mask) = remount_bind_flag_update(mountflags);
             VirtualFS
                 .lock()
-                .remount_bind(target_path, remount_flags, remount_mask)
+                .remount_bind(
+                    target_path,
+                    remount_flags,
+                    remount_mask,
+                    operation_flags.contains(MountOperationFlags::MS_REC),
+                )
                 .map_err(SyscallError::from)?;
         } else {
             let source = source.ok_or(SyscallError::BadAddress)?;
@@ -1427,35 +1505,19 @@ define_syscall!(MountSetattr, |dirfd: i32,
         return Err(SyscallError::BadAddress);
     }
 
-    let object = if path.is_null() {
-        if !flags.contains(AtFlags::EMPTY_PATH) {
-            return Err(SyscallError::BadAddress);
-        }
-        get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
-    } else {
-        let path = path_from_raw(path)?;
-        if path.is_empty() {
-            if !flags.contains(AtFlags::EMPTY_PATH) {
-                return Err(SyscallError::BadAddress);
-            }
-            get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
-        } else {
-            let path = resolve_path_at(dirfd, &path)?;
-            let file = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
-                VirtualFS.lock().open_nofollow(path)?
-            } else {
-                VirtualFS.lock().open(path)?
-            };
-            Arc::new(file)
-        }
-    };
-
-    let _ = object.clone().as_file_like()?;
-
     let attr = unsafe { &*attr };
-    if attr.attr_set != 0 || attr.attr_clr != 0 || attr.propagation != 0 || attr.userns_fd != 0 {
-        return Err(SyscallError::OperationNotSupported);
-    }
+    let target_path = mount_setattr_target_path(dirfd, path, flags)?;
+    let (remount_flags, remount_mask) = mount_attr_flag_update(attr)?;
+
+    VirtualFS
+        .lock()
+        .remount_bind(
+            target_path,
+            remount_flags,
+            remount_mask,
+            flags.contains(AtFlags::RECURSIVE),
+        )
+        .map_err(SyscallError::from)?;
 
     Ok(0)
 });

@@ -183,16 +183,27 @@ impl VFS {
         path: Path,
         flags: MountFlags,
         mask: MountFlags,
+        recursive: bool,
     ) -> FSResult<()> {
         let mount_path = self.mount_path(path)?;
-        let mount_path_string = mount_path.as_string();
-        let mount = self
-            .mounts
-            .iter_mut()
-            .find(|mount| mount.path.clone().as_string() == mount_path_string)
-            .ok_or(FSError::NotFound)?;
-        mount.flags.remove(mask);
-        mount.flags.insert(flags & mask);
+        let mount_path_string = mount_path.clone().as_string();
+        let mut updated = false;
+
+        for mount in &mut self.mounts {
+            let is_target = mount.path.clone().as_string() == mount_path_string;
+            if !(is_target || recursive && mount.path.starts_with(&mount_path)) {
+                continue;
+            }
+
+            mount.flags.remove(mask);
+            mount.flags.insert(flags & mask);
+            updated = true;
+        }
+
+        if !updated {
+            return Err(FSError::NotFound);
+        }
+
         Ok(())
     }
 

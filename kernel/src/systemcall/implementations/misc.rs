@@ -1081,6 +1081,18 @@ define_syscall!(Unshare, |flags: u64| {
         return Err(SyscallError::InvalidArguments);
     }
 
+    let namespace_flags = (UnshareFlags::NEWNS
+        | UnshareFlags::NEWCGROUP
+        | UnshareFlags::NEWUTS
+        | UnshareFlags::NEWIPC
+        | UnshareFlags::NEWUSER
+        | UnshareFlags::NEWPID
+        | UnshareFlags::NEWNET)
+        .bits();
+    if flags & namespace_flags != 0 {
+        return Err(SyscallError::NoSyscall);
+    }
+
     Ok(0)
 });
 
