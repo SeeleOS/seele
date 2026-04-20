@@ -146,8 +146,6 @@ add_syscall_arg_flags_type!(
     i32,
     PipeFlags,
     i32,
-    AtFlags,
-    i32,
     OpenFlags,
     i32,
     XattrFlags,
@@ -173,3 +171,5 @@ add_syscall_arg_flags_type!(
 add_syscall_arg_type!(MmapFlags, val, {
     Ok(MmapFlags::from_bits_retain(val as i32))
 });
+
+add_syscall_arg_type!(AtFlags, val, { Ok(AtFlags::from_bits_retain(val as i32)) });
