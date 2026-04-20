@@ -37,6 +37,8 @@ fn should_trace_exec_path(path: &str) -> bool {
             || p.ends_with("/modprobe")
             || p.ends_with("/kmod")
             || p.ends_with("/systemd-tmpfiles")
+            || p.ends_with("/systemd-sysusers")
+            || p.ends_with("/systemd-journald")
             || p.ends_with("/udevadm")
             || p.ends_with("/systemd-udevd")
     )
@@ -56,7 +58,6 @@ impl Process {
             args.clone()
         };
         if should_trace_exec_path(&path_string) {
-            crate::s_println!("trace exec pid={} path={}", self.pid.0, path_string);
             register_traced_process(self.pid.0, path_string.clone());
         }
         // TODO: kill all the other threads when execveing

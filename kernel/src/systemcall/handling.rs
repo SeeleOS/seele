@@ -18,6 +18,8 @@ fn should_trace_process(path: &str) -> bool {
             || p.ends_with("/modprobe")
             || p.ends_with("/kmod")
             || p.ends_with("/systemd-tmpfiles")
+            || p.ends_with("/systemd-sysusers")
+            || p.ends_with("/systemd-journald")
             || p.ends_with("/udevadm")
             || p.ends_with("/systemd-udevd")
     )
@@ -38,17 +40,7 @@ fn traced_process_path(pid: u64) -> Option<String> {
 }
 
 fn should_trace_pid1_syscall(syscall: Option<SyscallNumber>) -> bool {
-    matches!(
-        syscall,
-        Some(
-            SyscallNumber::Wait4
-                | SyscallNumber::Waitid
-                | SyscallNumber::EpollWait
-                | SyscallNumber::EpollPwait
-                | SyscallNumber::EpollPwait2
-                | SyscallNumber::Read
-        )
-    )
+    matches!(syscall, Some(SyscallNumber::Wait4 | SyscallNumber::Waitid))
 }
 
 #[unsafe(no_mangle)]
@@ -70,15 +62,7 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
 
     let current_pid = with_current_process(|proc| proc.pid.0);
     let syscall = SyscallNumber::try_from(syscall_no as usize).ok();
-    let traced_name = traced_process_path(current_pid);
-    if let Some(path) = traced_name.as_deref() {
-        crate::s_println!(
-            "trace enter pid={} path={} syscall={:?}",
-            current_pid,
-            path,
-            syscall
-        );
-    } else if current_pid == 1 && should_trace_pid1_syscall(syscall) {
+    if current_pid == 1 && should_trace_pid1_syscall(syscall) {
         crate::s_println!("pid1 trace enter syscall={:?}", syscall);
     }
 
@@ -138,21 +122,25 @@ fn syscall_handler_unwrapped(
         };
 
         if let Some(path) = current_name.as_deref() {
-            crate::s_println!(
-                "trace exit pid={} path={} syscall={:?} result={}",
-                current_pid,
-                path,
-                syscall,
-                result
-            );
+            let should_log = result < 0 || matches!(syscall, Some(SyscallNumber::ExitGroup));
+            if should_log {
+                crate::s_println!(
+                    "trace exit pid={} path={} syscall={:?} result={}",
+                    current_pid,
+                    path,
+                    syscall,
+                    result
+                );
+            }
         } else if current_pid == 1 && should_trace_pid1_syscall(syscall) {
             crate::s_println!("pid1 trace exit syscall={:?} result={}", syscall, result);
         }
 
-        if current_pid == 32 && result < 0 {
+        if result < 0 && current_name.is_some() {
             crate::s_println!(
-                "pid32 syscall error: no={:?} args=({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x}) -> {}",
-                SyscallNumber::try_from(syscall_no as usize).ok(),
+                "syscall error: pid={} no={:?} args=({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x}) -> {}",
+                current_pid,
+                syscall,
                 arg1,
                 arg2,
                 arg3,
