@@ -161,6 +161,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         Faccessat,
         Pselect6,
         Ppoll,
+        Unshare,
         SetRobustList,
         Utimensat,
         EpollPwait,
