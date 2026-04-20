@@ -19,9 +19,10 @@ use crate::{
         AF_NETLINK, NETLINK_ADD_MEMBERSHIP, NETLINK_DROP_MEMBERSHIP, NETLINK_EXT_ACK,
         NETLINK_GET_STRICT_CHK, NETLINK_KOBJECT_UEVENT, NETLINK_LIST_MEMBERSHIPS, NETLINK_PKTINFO,
         NETLINK_ROUTE, SO_ATTACH_FILTER, SO_DETACH_FILTER, SO_DOMAIN, SO_ERROR, SO_PASSCRED,
-        SO_PROTOCOL, SO_RCVBUF, SO_RCVBUFFORCE, SO_REUSEADDR, SO_SNDBUF, SO_SNDBUFFORCE, SO_TYPE,
-        SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_RAW, SOL_NETLINK, SOL_SOCKET, SocketError,
-        SocketLike, SocketResult,
+        SO_PASSRIGHTS, SO_PASSSEC, SO_PASSPIDFD, SO_PROTOCOL, SO_RCVBUF, SO_RCVBUFFORCE,
+        SO_REUSEADDR, SO_SNDBUF, SO_SNDBUFFORCE, SO_TIMESTAMPNS_NEW, SO_TIMESTAMPNS_OLD,
+        SO_TIMESTAMP_NEW, SO_TIMESTAMP_OLD, SO_TYPE, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK,
+        SOCK_RAW, SOL_NETLINK, SOL_SOCKET, SocketError, SocketLike, SocketResult,
     },
 };
 
@@ -145,7 +146,9 @@ impl NetlinkSocketObject {
         if level == SOL_SOCKET {
             return match option_name {
                 SO_REUSEADDR | SO_PASSCRED | SO_SNDBUF | SO_RCVBUF | SO_SNDBUFFORCE
-                | SO_RCVBUFFORCE | SO_ATTACH_FILTER | SO_DETACH_FILTER => Ok(()),
+                | SO_RCVBUFFORCE | SO_ATTACH_FILTER | SO_DETACH_FILTER | SO_PASSSEC
+                | SO_PASSRIGHTS | SO_PASSPIDFD | SO_TIMESTAMP_OLD | SO_TIMESTAMP_NEW
+                | SO_TIMESTAMPNS_OLD | SO_TIMESTAMPNS_NEW => Ok(()),
                 _ => Err(SocketError::InvalidArguments),
             };
         }
@@ -187,7 +190,15 @@ impl NetlinkSocketObject {
                 SO_SNDBUF | SO_RCVBUF | SO_SNDBUFFORCE | SO_RCVBUFFORCE => {
                     Self::encode_i32(option_len, DEFAULT_SOCKET_BUFFER_SIZE)
                 }
-                SO_REUSEADDR | SO_PASSCRED => Self::encode_i32(option_len, 0),
+                SO_REUSEADDR
+                | SO_PASSCRED
+                | SO_PASSSEC
+                | SO_PASSRIGHTS
+                | SO_PASSPIDFD
+                | SO_TIMESTAMP_OLD
+                | SO_TIMESTAMP_NEW
+                | SO_TIMESTAMPNS_OLD
+                | SO_TIMESTAMPNS_NEW => Self::encode_i32(option_len, 0),
                 _ => Err(SocketError::InvalidArguments),
             };
         }
