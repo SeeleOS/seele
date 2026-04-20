@@ -17,6 +17,7 @@ fn should_trace_process(path: &str) -> bool {
         p if p.ends_with("/systemd-modules-load")
             || p.ends_with("/modprobe")
             || p.ends_with("/kmod")
+            || p.ends_with("/systemd-executor")
             || p.ends_with("/systemd-tmpfiles")
             || p.ends_with("/systemd-sysusers")
             || p.ends_with("/systemd-journald")
@@ -123,7 +124,7 @@ fn syscall_handler_unwrapped(
         };
 
         if let Some(path) = current_name.as_deref() {
-            let should_log = result < 0 || matches!(syscall, Some(SyscallNumber::ExitGroup));
+            let should_log = false; //result < 0 || matches!(syscall, Some(SyscallNumber::ExitGroup));
             if should_log {
                 crate::s_println!(
                     "trace exit pid={} path={} syscall={:?} result={}",

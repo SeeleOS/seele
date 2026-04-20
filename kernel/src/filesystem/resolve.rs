@@ -127,13 +127,26 @@ impl VFS {
         Ok(mount.path.clone())
     }
 
-    fn find_mount(&self, path: &Path) -> FSResult<(&Mount, Path)> {
+    pub(super) fn find_mount(&self, path: &Path) -> FSResult<(&Mount, Path)> {
         for mount in &self.mounts {
             if let Some(stripped) = path.strip_prefix(&mount.path) {
-                return Ok((mount, stripped));
+                return Ok((mount, join_mount_source(&mount.source_path, &stripped)));
             }
         }
 
         Err(FSError::NotFound)
     }
+}
+
+fn join_mount_source(source: &Path, suffix: &Path) -> Path {
+    let mut path = source.normalize().as_string();
+    for part in suffix.normalize().parts {
+        if let PathPart::Normal(component) = part {
+            if !path.ends_with('/') {
+                path.push('/');
+            }
+            path.push_str(&component);
+        }
+    }
+    Path::new(&path).normalize()
 }

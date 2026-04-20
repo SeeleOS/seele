@@ -33,6 +33,31 @@ static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeM
 static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
 const COPY_CHUNK_SIZE: usize = 16 * 1024;
 
+fn current_process_is_executor() -> bool {
+    with_current_process(|process| {
+        process
+            .command_line
+            .first()
+            .is_some_and(|path| path.ends_with("/systemd-executor"))
+    })
+}
+
+fn trace_executor_mountinfo_object(object: &ObjectRef, action: &str) {
+    if !current_process_is_executor() {
+        return;
+    }
+
+    let Ok(file_like) = object.clone().as_file_like() else {
+        return;
+    };
+    let path = file_like.path().as_string();
+    if !path.ends_with("/mountinfo") {
+        return;
+    }
+
+    s_println!("mountinfo object trace action={} path={}", action, path);
+}
+
 #[repr(C)]
 struct LinuxIovec {
     iov_base: *const u8,
@@ -145,10 +170,14 @@ define_syscall!(Getdents64, |object_index: u64, buf: *mut u8, len: usize| {
 });
 
 define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
+    trace_executor_mountinfo_object(&object, "read-enter");
     unsafe {
-        Ok(object
+        let read = object
+            .clone()
             .as_readable()?
-            .read(slice::from_raw_parts_mut(buf_ptr, len))?)
+            .read(slice::from_raw_parts_mut(buf_ptr, len))?;
+        trace_executor_mountinfo_object(&object, "read-exit");
+        Ok(read)
     }
 });
 
@@ -234,6 +263,23 @@ define_syscall!(Close, |object_num: usize| {
 define_syscall!(Ioctl, |object: ObjectRef,
                         request: u64,
                         request_ptr: u64| {
+    if request == 0x802c_542a {
+        if current_process_is_executor() {
+            if let Ok(file_like) = object.clone().as_file_like() {
+                crate::s_println!(
+                    "ioctl trace request={:#x} file_like_path={}",
+                    request,
+                    file_like.path().as_string()
+                );
+            } else {
+                crate::s_println!(
+                    "ioctl trace request={:#x} object={}",
+                    request,
+                    object.debug_name()
+                );
+            }
+        }
+    }
     let res = object
         .as_configuratable()?
         .configure(ConfigurateRequest::new(request, request_ptr)?);
@@ -406,10 +452,14 @@ define_syscall!(
 define_syscall!(Lseek, |object: ObjectRef,
                         offset: i64,
                         seek_type: Whence| {
-    object
+    trace_executor_mountinfo_object(&object, "lseek-enter");
+    let result = object
+        .clone()
         .as_seekable()?
         .seek(offset, seek_type)
-        .map_err(Into::into)
+        .map_err(SyscallError::from)?;
+    trace_executor_mountinfo_object(&object, "lseek-exit");
+    Ok(result)
 });
 
 define_syscall!(Pread64, |object: ObjectRef,
@@ -419,8 +469,11 @@ define_syscall!(Pread64, |object: ObjectRef,
     if offset < 0 {
         return Err(SyscallError::InvalidArguments);
     }
-    let file = object.as_file_like()?;
-    unsafe { Ok(file.read_at(slice::from_raw_parts_mut(buf_ptr, len), offset as u64)?) }
+    trace_executor_mountinfo_object(&object, "pread-enter");
+    let file = object.clone().as_file_like()?;
+    let read = unsafe { file.read_at(slice::from_raw_parts_mut(buf_ptr, len), offset as u64)? };
+    trace_executor_mountinfo_object(&object, "pread-exit");
+    Ok(read)
 });
 
 define_syscall!(Pwrite64, |object: ObjectRef,

@@ -164,13 +164,20 @@ define_syscall!(Wait4, |target_process: i32,
             None => {
                 if has_wait_interrupt_signal(&current_process) {
                     if current_pid == 1 {
-                        crate::s_println!("pid1 wait4 interrupted-before-block target={}", target_process);
+                        crate::s_println!(
+                            "pid1 wait4 interrupted-before-block target={}",
+                            target_process
+                        );
                     }
                     return Err(SyscallError::Interrupted);
                 }
 
                 if current_pid == 1 {
-                    crate::s_println!("pid1 wait4 block target={} options={:#x}", target_process, options);
+                    crate::s_println!(
+                        "pid1 wait4 block target={} options={:#x}",
+                        target_process,
+                        options
+                    );
                 }
                 if current_pid == 26 || target_process == 32 {
                     crate::s_println!(
@@ -193,12 +200,19 @@ define_syscall!(Wait4, |target_process: i32,
                     );
                 }
                 if current_pid == 1 {
-                    crate::s_println!("pid1 wait4 wake target={} options={:#x}", target_process, options);
+                    crate::s_println!(
+                        "pid1 wait4 wake target={} options={:#x}",
+                        target_process,
+                        options
+                    );
                 }
 
                 if has_wait_interrupt_signal(&current_process) {
                     if current_pid == 1 {
-                        crate::s_println!("pid1 wait4 interrupted-after-wake target={}", target_process);
+                        crate::s_println!(
+                            "pid1 wait4 interrupted-after-wake target={}",
+                            target_process
+                        );
                     }
                     return Err(SyscallError::Interrupted);
                 }
@@ -256,7 +270,12 @@ define_syscall!(Waitid, |id_type: i32,
     }
 
     if get_current_process().lock().pid.0 == 1 {
-        crate::s_println!("pid1 waitid return id_type={} id={} pid={}", id_type, id, pid);
+        crate::s_println!(
+            "pid1 waitid return id_type={} id={} pid={}",
+            id_type,
+            id,
+            pid
+        );
     }
 
     Ok(0)

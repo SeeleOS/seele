@@ -36,6 +36,7 @@ fn should_trace_exec_path(path: &str) -> bool {
         p if p.ends_with("/systemd-modules-load")
             || p.ends_with("/modprobe")
             || p.ends_with("/kmod")
+            || p.ends_with("/systemd-executor")
             || p.ends_with("/systemd-tmpfiles")
             || p.ends_with("/systemd-sysusers")
             || p.ends_with("/systemd-journald")
