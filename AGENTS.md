@@ -42,6 +42,7 @@ After finishing a change, run `nix develop -c cargo run -- --agent` to test the 
 - When an existing library or crate feature can cleanly replace handwritten repetitive decoding or boilerplate, prefer using it over custom open-coded conversion logic.
 - Do not take shortcuts just to get something running quickly. In particular, avoid adding stubs, temporary shortcuts, or ad-hoc special cases merely to make a feature appear to work.
 - For syscall handlers, do not take a user pointer as `u64` and then immediately cast it to `*const T` or `*mut T` in the body. Make the syscall argument itself a properly typed pointer and add or reuse the `SyscallArg` conversion in `kernel/src/systemcall/arg_types.rs`.
+- For syscall flag arguments and similar closed ABI bitfields, do not manually call `from_bits*()` inside syscall bodies or pass raw integers through internal helpers when a typed flag would do. Convert at the syscall boundary with `SyscallArg`, make syscall parameters strongly typed, and have helper functions take the typed flag directly unless there is a clear special-case reason not to.
 
 ## Testing Guidelines
 
