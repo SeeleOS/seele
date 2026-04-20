@@ -4,6 +4,7 @@ use core::{
 };
 
 use alloc::{collections::btree_map::BTreeMap, format, string::String};
+use bitflags::bitflags;
 use spin::Mutex;
 
 use crate::{
@@ -31,8 +32,6 @@ use crate::{
 static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeMap::new());
 static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
 const COPY_CHUNK_SIZE: usize = 16 * 1024;
-const O_CLOEXEC: i32 = 0o2_000_000;
-const CLOSE_RANGE_CLOEXEC: u32 = 0x4;
 
 #[repr(C)]
 struct LinuxIovec {
@@ -288,16 +287,21 @@ define_syscall!(Dup2, |source_fd: usize, dest: usize| {
         .map_err(Into::into)
 });
 
-define_syscall!(Dup3, |source_fd: usize, dest: usize, flags: i32| {
-    if (flags & !O_CLOEXEC) != 0 {
-        return Err(SyscallError::InvalidArguments);
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct DupFlags: i32 {
+        const O_CLOEXEC = 0o2_000_000;
     }
+}
+
+define_syscall!(Dup3, |source_fd: usize, dest: usize, flags: i32| {
+    let flags = DupFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
     if source_fd == dest {
         return Err(SyscallError::InvalidArguments);
     }
 
     let source = get_object_current_process(source_fd as u64).map_err(SyscallError::from)?;
-    let fd_flags = if (flags & O_CLOEXEC) != 0 {
+    let fd_flags = if flags.contains(DupFlags::O_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
         FdFlags::empty()
@@ -308,10 +312,15 @@ define_syscall!(Dup3, |source_fd: usize, dest: usize, flags: i32| {
         .map_err(Into::into)
 });
 
-define_syscall!(CloseRange, |first: usize, last: usize, flags: u32| {
-    if flags & !CLOSE_RANGE_CLOEXEC != 0 {
-        return Err(SyscallError::InvalidArguments);
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct CloseRangeFlags: u32 {
+        const CLOSE_RANGE_CLOEXEC = 0x4;
     }
+}
+
+define_syscall!(CloseRange, |first: usize, last: usize, flags: u32| {
+    let flags = CloseRangeFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
 
     let process_ref = get_current_process();
     let mut process = process_ref.lock();
@@ -324,7 +333,7 @@ define_syscall!(CloseRange, |first: usize, last: usize, flags: u32| {
         if process.objects[fd].is_none() {
             continue;
         }
-        if (flags & CLOSE_RANGE_CLOEXEC) != 0 {
+        if flags.contains(CloseRangeFlags::CLOSE_RANGE_CLOEXEC) {
             process.set_fd_flags(fd, FdFlags::CLOEXEC)?;
         } else {
             process.clear_object_slot(fd)?;
@@ -343,16 +352,19 @@ define_syscall!(OpenDevice, |name: String| {
     })
 });
 
-define_syscall!(MemfdCreate, |name: String, flags: u32| {
-    const MFD_CLOEXEC: u32 = 0x0001;
-    const MFD_ALLOW_SEALING: u32 = 0x0002;
-    const MFD_NOEXEC_SEAL: u32 = 0x0008;
-    const MFD_EXEC: u32 = 0x0010;
-
-    if (flags & !(MFD_CLOEXEC | MFD_ALLOW_SEALING | MFD_NOEXEC_SEAL | MFD_EXEC)) != 0 {
-        return Err(SyscallError::InvalidArguments);
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct MemfdFlags: u32 {
+        const MFD_CLOEXEC = 0x0001;
+        const MFD_ALLOW_SEALING = 0x0002;
+        const MFD_NOEXEC_SEAL = 0x0008;
+        const MFD_EXEC = 0x0010;
     }
-    if (flags & MFD_NOEXEC_SEAL) != 0 && (flags & MFD_EXEC) != 0 {
+}
+
+define_syscall!(MemfdCreate, |name: String, flags: u32| {
+    let flags = MemfdFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
+    if flags.contains(MemfdFlags::MFD_NOEXEC_SEAL) && flags.contains(MemfdFlags::MFD_EXEC) {
         return Err(SyscallError::InvalidArguments);
     }
 
@@ -367,9 +379,9 @@ define_syscall!(MemfdCreate, |name: String, flags: u32| {
     let object = create_memfd_object(
         path,
         sanitized_name,
-        (flags & (MFD_ALLOW_SEALING | MFD_NOEXEC_SEAL)) != 0,
+        flags.intersects(MemfdFlags::MFD_ALLOW_SEALING | MemfdFlags::MFD_NOEXEC_SEAL),
     );
-    let fd_flags = if (flags & MFD_CLOEXEC) != 0 {
+    let fd_flags = if flags.contains(MemfdFlags::MFD_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
         FdFlags::empty()
