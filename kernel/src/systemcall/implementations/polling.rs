@@ -7,6 +7,7 @@ use crate::thread::yielding::{
     BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
 };
 use alloc::sync::Arc;
+use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
 
 use crate::systemcall::utils::SyscallError;
@@ -16,7 +17,12 @@ use crate::{
     process::{FdFlags, manager::get_current_process},
 };
 
-const EPOLL_CLOEXEC: i32 = 0o2_000_000;
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct EpollCreateFlags: i32 {
+        const EPOLL_CLOEXEC = 0o2_000_000;
+    }
+}
 
 #[derive(Clone, Copy, Debug, TryFromPrimitive)]
 #[repr(u64)]
@@ -26,7 +32,7 @@ enum EpollCtlOp {
     Mod = 3,
 }
 
-bitflags::bitflags! {
+bitflags! {
     #[derive(Clone, Copy, Debug)]
     struct EpollEvents: u32 {
         const IN = 0x001;
@@ -101,11 +107,9 @@ fn linux_bits_to_events(bits: u32) -> [Option<PollableEvent>; 4] {
 }
 
 define_syscall!(EpollCreate1, |flags: i32| {
-    if flags & !EPOLL_CLOEXEC != 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
+    let flags = EpollCreateFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
 
-    let fd_flags = if (flags & EPOLL_CLOEXEC) != 0 {
+    let fd_flags = if flags.contains(EpollCreateFlags::EPOLL_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
         FdFlags::empty()

@@ -1,4 +1,5 @@
 use alloc::{collections::BTreeMap, sync::Arc};
+use bitflags::bitflags;
 
 use crate::{
     define_syscall,
@@ -13,19 +14,21 @@ use crate::{
     },
 };
 
-const POLLIN: i16 = 0x001;
-const POLLPRI: i16 = 0x002;
-const POLLOUT: i16 = 0x004;
-const POLLERR: i16 = 0x008;
-const POLLHUP: i16 = 0x010;
-const POLLNVAL: i16 = 0x020;
-const POLLRDNORM: i16 = 0x040;
-const POLLRDBAND: i16 = 0x080;
-const POLLWRNORM: i16 = 0x100;
-const POLLWRBAND: i16 = 0x200;
-
-const READABLE_BITS: i16 = POLLIN | POLLPRI | POLLRDNORM | POLLRDBAND;
-const WRITABLE_BITS: i16 = POLLOUT | POLLWRNORM | POLLWRBAND;
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct PollEvents: i16 {
+        const POLLIN = 0x001;
+        const POLLPRI = 0x002;
+        const POLLOUT = 0x004;
+        const POLLERR = 0x008;
+        const POLLHUP = 0x010;
+        const POLLNVAL = 0x020;
+        const POLLRDNORM = 0x040;
+        const POLLRDBAND = 0x080;
+        const POLLWRNORM = 0x100;
+        const POLLWRBAND = 0x200;
+    }
+}
 
 #[repr(C)]
 struct LinuxPollFd {
@@ -41,35 +44,45 @@ struct Timespec {
 }
 
 fn kernel_events_for(bits: i16) -> [Option<PollableEvent>; 4] {
-    let watch_read = bits & READABLE_BITS != 0;
-    let watch_write = bits & WRITABLE_BITS != 0;
+    let bits = PollEvents::from_bits_retain(bits);
+    let watch_read = bits.intersects(
+        PollEvents::POLLIN | PollEvents::POLLPRI | PollEvents::POLLRDNORM | PollEvents::POLLRDBAND,
+    );
+    let watch_write =
+        bits.intersects(PollEvents::POLLOUT | PollEvents::POLLWRNORM | PollEvents::POLLWRBAND);
     let watch_any = watch_read || watch_write;
 
     [
         watch_read.then_some(PollableEvent::CanBeRead),
         watch_write.then_some(PollableEvent::CanBeWritten),
-        (watch_any || bits & POLLERR != 0).then_some(PollableEvent::Error),
-        (watch_any || bits & POLLHUP != 0).then_some(PollableEvent::Closed),
+        (watch_any || bits.contains(PollEvents::POLLERR)).then_some(PollableEvent::Error),
+        (watch_any || bits.contains(PollEvents::POLLHUP)).then_some(PollableEvent::Closed),
     ]
 }
 
 fn translate_ready_events(requested_events: i16, kernel_events: u32) -> i16 {
-    let mut translated = 0;
+    let requested_events = PollEvents::from_bits_retain(requested_events);
+    let mut translated = PollEvents::empty();
 
-    if kernel_events & (POLLIN as u32) != 0 {
-        translated |= requested_events & READABLE_BITS;
+    if kernel_events & (PollEvents::POLLIN.bits() as u32) != 0 {
+        translated |= requested_events
+            & (PollEvents::POLLIN
+                | PollEvents::POLLPRI
+                | PollEvents::POLLRDNORM
+                | PollEvents::POLLRDBAND);
     }
-    if kernel_events & (POLLOUT as u32) != 0 {
-        translated |= requested_events & WRITABLE_BITS;
+    if kernel_events & (PollEvents::POLLOUT.bits() as u32) != 0 {
+        translated |= requested_events
+            & (PollEvents::POLLOUT | PollEvents::POLLWRNORM | PollEvents::POLLWRBAND);
     }
-    if kernel_events & (POLLERR as u32) != 0 {
-        translated |= POLLERR;
+    if kernel_events & (PollEvents::POLLERR.bits() as u32) != 0 {
+        translated |= PollEvents::POLLERR;
     }
-    if kernel_events & (POLLHUP as u32) != 0 {
-        translated |= POLLHUP;
+    if kernel_events & (PollEvents::POLLHUP.bits() as u32) != 0 {
+        translated |= PollEvents::POLLHUP;
     }
 
-    translated
+    translated.bits()
 }
 
 fn count_ready(fds: &[LinuxPollFd]) -> usize {
@@ -167,7 +180,7 @@ fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallE
             Ok(object) => object,
             Err(err) => {
                 if matches!(err, ObjectError::DoesNotExist) {
-                    pfd.revents |= POLLNVAL;
+                    pfd.revents |= PollEvents::POLLNVAL.bits();
                     invalid += 1;
                     continue;
                 }
@@ -178,7 +191,15 @@ fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallE
         let poll_object = poll_identity_object(object.clone());
 
         if poll_object.clone().as_pollable().is_err() {
-            pfd.revents |= pfd.events & (READABLE_BITS | WRITABLE_BITS);
+            pfd.revents |= (PollEvents::from_bits_retain(pfd.events)
+                & (PollEvents::POLLIN
+                    | PollEvents::POLLPRI
+                    | PollEvents::POLLRDNORM
+                    | PollEvents::POLLRDBAND
+                    | PollEvents::POLLOUT
+                    | PollEvents::POLLWRNORM
+                    | PollEvents::POLLWRBAND))
+                .bits();
             continue;
         }
 
@@ -201,18 +222,18 @@ fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallE
             .entry(ready.data as usize)
             .and_modify(|events| {
                 *events |= match ready.event {
-                    PollableEvent::CanBeRead => POLLIN as u32,
-                    PollableEvent::CanBeWritten => POLLOUT as u32,
-                    PollableEvent::Error => POLLERR as u32,
-                    PollableEvent::Closed => POLLHUP as u32,
+                    PollableEvent::CanBeRead => PollEvents::POLLIN.bits() as u32,
+                    PollableEvent::CanBeWritten => PollEvents::POLLOUT.bits() as u32,
+                    PollableEvent::Error => PollEvents::POLLERR.bits() as u32,
+                    PollableEvent::Closed => PollEvents::POLLHUP.bits() as u32,
                     PollableEvent::Other(bits) => bits as u32,
                 }
             })
             .or_insert_with(|| match ready.event {
-                PollableEvent::CanBeRead => POLLIN as u32,
-                PollableEvent::CanBeWritten => POLLOUT as u32,
-                PollableEvent::Error => POLLERR as u32,
-                PollableEvent::Closed => POLLHUP as u32,
+                PollableEvent::CanBeRead => PollEvents::POLLIN.bits() as u32,
+                PollableEvent::CanBeWritten => PollEvents::POLLOUT.bits() as u32,
+                PollableEvent::Error => PollEvents::POLLERR.bits() as u32,
+                PollableEvent::Closed => PollEvents::POLLHUP.bits() as u32,
                 PollableEvent::Other(bits) => bits as u32,
             });
     }
