@@ -1348,7 +1348,7 @@ define_syscall!(Mount, |source: CString,
         return Err(SyscallError::OperationNotSupported);
     }
 
-    if operation_flags.contains(MountOperationFlags::MS_REMOUNT)
+    if (operation_flags.contains(MountOperationFlags::MS_REMOUNT)
         || operation_flags.intersects(
             MountOperationFlags::MS_PRIVATE
                 | MountOperationFlags::MS_SLAVE
@@ -1356,11 +1356,10 @@ define_syscall!(Mount, |source: CString,
                 | MountOperationFlags::MS_UNBINDABLE,
         )
         || mountflags == 0
-        || (mountflags & MountFlags::all().bits()) != 0
+        || (mountflags & MountFlags::all().bits()) != 0)
+        && filesystemtype.is_none()
     {
-        if filesystemtype.is_none() {
-            return Ok(0);
-        }
+        return Ok(0);
     }
 
     if filesystemtype

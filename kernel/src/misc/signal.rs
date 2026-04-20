@@ -56,7 +56,7 @@ pub type SignalHandlerFn = extern "C" fn(i32);
 pub type SigHandlerFn2 = extern "C" fn(i32, *const SigInfo, *const UContext);
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct SigInfo {
     pub si_signo: i32,
     pub si_errno: i32,
@@ -115,18 +115,6 @@ impl Default for SigValue {
 impl Default for SigInfoFields {
     fn default() -> Self {
         Self { pad: [0; 112] }
-    }
-}
-
-impl Default for SigInfo {
-    fn default() -> Self {
-        Self {
-            si_signo: 0,
-            si_errno: 0,
-            si_code: 0,
-            _pad0: 0,
-            fields: SigInfoFields::default(),
-        }
     }
 }
 
