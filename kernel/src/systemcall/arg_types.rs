@@ -11,7 +11,10 @@ use crate::{
         others::KernelFrom,
         timer::ClockId,
     },
-    object::misc::{ObjectRef, get_object_current_process},
+    object::{
+        linux_anon::{EventFdFlags, SignalfdFlags},
+        misc::{ObjectRef, get_object_current_process},
+    },
     polling::event::PollableEvent,
     process::{
         ProcessRef,
@@ -19,7 +22,10 @@ use crate::{
         misc::{ProcessID, get_process_with_pid},
     },
     signal::{Signal, Signals},
-    systemcall::implementations::{EpollCreateFlags, PollEvents},
+    systemcall::implementations::{
+        ClockNanosleepFlags, EpollCreateFlags, InotifyInitFlags, PipeFlags, PollEvents,
+        TimerFdFlags, TimerSetTimeFlags,
+    },
     systemcall::utils::{SyscallError, SyscallResult},
 };
 
@@ -120,4 +126,32 @@ add_syscall_arg_type!(PollEvents, val, {
 
 add_syscall_arg_type!(EpollCreateFlags, val, {
     EpollCreateFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(InotifyInitFlags, val, {
+    InotifyInitFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(EventFdFlags, val, {
+    EventFdFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(TimerFdFlags, val, {
+    TimerFdFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(TimerSetTimeFlags, val, {
+    TimerSetTimeFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(ClockNanosleepFlags, val, {
+    ClockNanosleepFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(SignalfdFlags, val, {
+    SignalfdFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(PipeFlags, val, {
+    PipeFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
 });

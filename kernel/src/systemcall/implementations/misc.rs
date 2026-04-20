@@ -143,7 +143,7 @@ bitflags! {
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct InotifyInitFlags: i32 {
+    pub(crate) struct InotifyInitFlags: i32 {
         const IN_NONBLOCK = 0o4_000;
         const IN_CLOEXEC = 0o2_000_000;
     }
@@ -151,7 +151,7 @@ bitflags! {
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct TimerFdFlags: i32 {
+    pub(crate) struct TimerFdFlags: i32 {
         const TFD_NONBLOCK = 0o4_000;
         const TFD_CLOEXEC = 0o2_000_000;
     }
@@ -159,14 +159,14 @@ bitflags! {
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct TimerSetTimeFlags: i32 {
+    pub(crate) struct TimerSetTimeFlags: i32 {
         const TFD_TIMER_ABSTIME = 1;
     }
 }
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct ClockNanosleepFlags: i32 {
+    pub(crate) struct ClockNanosleepFlags: i32 {
         const TIMER_ABSTIME = 1;
     }
 }
@@ -650,8 +650,7 @@ define_syscall!(InotifyInit, {
     Ok(fd)
 });
 
-define_syscall!(InotifyInit1, |flags: i32| {
-    let flags = InotifyInitFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
+define_syscall!(InotifyInit1, |flags: InotifyInitFlags| {
     let object = Arc::new(InotifyObject::default());
     if flags.contains(InotifyInitFlags::IN_NONBLOCK) {
         let _ = object.clone().set_flags(FileFlags::NONBLOCK);
@@ -667,9 +666,7 @@ define_syscall!(InotifyInit1, |flags: i32| {
     Ok(fd)
 });
 
-fn create_eventfd(initval: u32, flags: i32) -> Result<usize, SyscallError> {
-    let flags = EventFdFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
-
+fn create_eventfd(initval: u32, flags: EventFdFlags) -> Result<usize, SyscallError> {
     let fd = get_current_process().lock().push_object_with_flags(
         EventFdObject::new(initval as u64, flags),
         if flags.contains(EventFdFlags::EFD_CLOEXEC) {
@@ -681,9 +678,11 @@ fn create_eventfd(initval: u32, flags: i32) -> Result<usize, SyscallError> {
     Ok(fd)
 }
 
-define_syscall!(Eventfd, |initval: u32| { create_eventfd(initval, 0) });
+define_syscall!(Eventfd, |initval: u32| {
+    create_eventfd(initval, EventFdFlags::empty())
+});
 
-define_syscall!(Eventfd2, |initval: u32, flags: i32| {
+define_syscall!(Eventfd2, |initval: u32, flags: EventFdFlags| {
     create_eventfd(initval, flags)
 });
 
@@ -699,11 +698,10 @@ define_syscall!(InotifyRmWatch, |object: ObjectRef, _wd: i32| {
     Ok(0)
 });
 
-define_syscall!(TimerfdCreate, |clock_id: i32, flags: i32| {
+define_syscall!(TimerfdCreate, |clock_id: i32, flags: TimerFdFlags| {
     if !matches!(clock_id, 0 | 1) {
         return Err(SyscallError::InvalidArguments);
     }
-    let flags = TimerFdFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
 
     let object = Arc::new(TimerFdObject::default());
     if flags.contains(TimerFdFlags::TFD_NONBLOCK) {
@@ -723,13 +721,12 @@ define_syscall!(TimerfdCreate, |clock_id: i32, flags: i32| {
 define_syscall!(
     TimerfdSettime,
     |object: ObjectRef,
-     flags: i32,
+     flags: TimerSetTimeFlags,
      new_value: *const LinuxItimerspec,
      old_value: *mut LinuxItimerspec| {
         if new_value.is_null() {
             return Err(SyscallError::BadAddress);
         }
-        let flags = TimerSetTimeFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
 
         let timerfd = object.as_timerfd()?;
         let now = KernelTime::since_boot();
@@ -1018,11 +1015,13 @@ define_syscall!(RtSigsuspend, |mask: *const u64, sigset_size: usize| {
 
 define_syscall!(
     ClockNanosleep,
-    |clock_id: i32, flags: i32, req: *const LinuxTimespec, rem: *mut LinuxTimespec| {
+    |clock_id: i32,
+     flags: ClockNanosleepFlags,
+     req: *const LinuxTimespec,
+     rem: *mut LinuxTimespec| {
         if req.is_null() {
             return Err(SyscallError::BadAddress);
         }
-        let flags = ClockNanosleepFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
 
         let requested = unsafe { &*req };
         if requested.tv_sec < 0 || requested.tv_nsec < 0 || requested.tv_nsec >= 1_000_000_000 {

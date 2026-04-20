@@ -10,15 +10,13 @@ use bitflags::bitflags;
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct PipeFlags: i32 {
+    pub(crate) struct PipeFlags: i32 {
         const O_NONBLOCK = 0o4_000;
         const O_CLOEXEC = 0o2_000_000;
     }
 }
 
-fn create_pipe(fds: *mut i32, flags: i32) -> Result<usize, SyscallError> {
-    let flags = PipeFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
-
+fn create_pipe(fds: *mut i32, flags: PipeFlags) -> Result<usize, SyscallError> {
     let kind = SOCK_STREAM
         | if flags.contains(PipeFlags::O_NONBLOCK) {
             SOCK_NONBLOCK
@@ -53,8 +51,10 @@ fn create_pipe(fds: *mut i32, flags: i32) -> Result<usize, SyscallError> {
     Ok(0)
 }
 
-define_syscall!(Pipe, |fds: *mut i32| { create_pipe(fds, 0) });
+define_syscall!(Pipe, |fds: *mut i32| {
+    create_pipe(fds, PipeFlags::empty())
+});
 
-define_syscall!(Pipe2, |fds: *mut i32, flags: i32| {
+define_syscall!(Pipe2, |fds: *mut i32, flags: PipeFlags| {
     create_pipe(fds, flags)
 });

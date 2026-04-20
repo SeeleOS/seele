@@ -51,7 +51,7 @@ bitflags! {
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct StackFlags: i32 {
+    pub(crate) struct StackFlags: i32 {
         const SS_ONSTACK = 1;
         const SS_DISABLE = 2;
     }
@@ -118,53 +118,52 @@ fn decode_sigaction(action: LinuxSigAction) -> SignalAction {
     }
 }
 
-define_syscall!(Signalfd4, |fd: i32,
-                            mask: *const u64,
-                            sigsetsize: usize,
-                            flags: i32| {
-    if sigsetsize != size_of::<u64>() {
-        return Err(SyscallError::InvalidArguments);
-    }
-    let flags = SignalfdFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
+define_syscall!(
+    Signalfd4,
+    |fd: i32, mask: *const u64, sigsetsize: usize, flags: SignalfdFlags| {
+        if sigsetsize != size_of::<u64>() {
+            return Err(SyscallError::InvalidArguments);
+        }
 
-    let mask = user_safe::read(mask)?;
+        let mask = user_safe::read(mask)?;
 
-    if fd == -1 {
-        let signalfd = SignalfdObject::new(get_current_process().lock().pid.0, mask, flags);
-        let signalfd_ref: ObjectRef = signalfd;
+        if fd == -1 {
+            let signalfd = SignalfdObject::new(get_current_process().lock().pid.0, mask, flags);
+            let signalfd_ref: ObjectRef = signalfd;
+            let fd_flags = if flags.contains(SignalfdFlags::SFD_CLOEXEC) {
+                FdFlags::CLOEXEC
+            } else {
+                FdFlags::empty()
+            };
+            return Ok(with_current_process(|process| {
+                process.push_object_with_flags(signalfd_ref, fd_flags)
+            }));
+        }
+
+        let signalfd = get_object_current_process(fd as u64)
+            .map_err(SyscallError::from)?
+            .as_signalfd()?;
+        signalfd.set_mask(mask);
+
+        let file_flags = if flags.contains(SignalfdFlags::SFD_NONBLOCK) {
+            FileFlags::NONBLOCK
+        } else {
+            FileFlags::empty()
+        };
+        signalfd
+            .clone()
+            .set_flags(file_flags)
+            .map_err(SyscallError::from)?;
         let fd_flags = if flags.contains(SignalfdFlags::SFD_CLOEXEC) {
             FdFlags::CLOEXEC
         } else {
             FdFlags::empty()
         };
-        return Ok(with_current_process(|process| {
-            process.push_object_with_flags(signalfd_ref, fd_flags)
-        }));
+        with_current_process(|process| process.set_fd_flags(fd as usize, fd_flags))?;
+
+        Ok(fd as usize)
     }
-
-    let signalfd = get_object_current_process(fd as u64)
-        .map_err(SyscallError::from)?
-        .as_signalfd()?;
-    signalfd.set_mask(mask);
-
-    let file_flags = if flags.contains(SignalfdFlags::SFD_NONBLOCK) {
-        FileFlags::NONBLOCK
-    } else {
-        FileFlags::empty()
-    };
-    signalfd
-        .clone()
-        .set_flags(file_flags)
-        .map_err(SyscallError::from)?;
-    let fd_flags = if flags.contains(SignalfdFlags::SFD_CLOEXEC) {
-        FdFlags::CLOEXEC
-    } else {
-        FdFlags::empty()
-    };
-    with_current_process(|process| process.set_fd_flags(fd as usize, fd_flags))?;
-
-    Ok(fd as usize)
-});
+);
 
 define_syscall!(
     RtSigaction,
