@@ -53,6 +53,16 @@ macro_rules! add_syscall_arg_type {
     }
 }
 
+macro_rules! add_syscall_arg_flags_type {
+    ($($type:ty, $raw:ty),* $(,)?) => {
+        $(
+            add_syscall_arg_type!($type, val, {
+                <$type>::from_bits(val as $raw).ok_or(SyscallError::InvalidArguments)
+            });
+        )*
+    };
+}
+
 pub trait SyscallArg {
     fn from_u64(val: u64) -> SyscallResult<Self>
     where
@@ -72,10 +82,6 @@ impl<T> SyscallArg for *mut T {
 }
 
 add_syscall_arg_type!(u32, usize, u64, i32, i64);
-
-add_syscall_arg_type!(Signals, val, {
-    Signals::from_bits(val).ok_or(SyscallError::InvalidArguments)
-});
 
 add_syscall_arg_type!(Vec<String>, val, {
     Vec::k_from(val as CVec<CString>).map_err(|err| err.as_syscall_error())
@@ -107,10 +113,6 @@ add_syscall_arg_type!(ProcessRef, val, { get_process_with_pid(ProcessID(val)) })
 
 add_syscall_arg_type!(VirtAddr, val, { Ok(VirtAddr::new(val)) });
 
-add_syscall_arg_type!(Protection, val, {
-    Protection::from_bits(val).ok_or(SyscallError::InvalidArguments)
-});
-
 add_syscall_arg_type!(Whence, val, {
     Whence::try_from(val).map_err(|_| SyscallError::InvalidArguments)
 });
@@ -121,86 +123,51 @@ add_syscall_arg_type!(ClockId, val, {
     ClockId::try_from(val).map_err(|_| SyscallError::InvalidArguments)
 });
 
-add_syscall_arg_type!(PollEvents, val, {
-    PollEvents::from_bits(val as i16).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(EpollCreateFlags, val, {
-    EpollCreateFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(InotifyInitFlags, val, {
-    InotifyInitFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(EventFdFlags, val, {
-    EventFdFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(TimerFdFlags, val, {
-    TimerFdFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(TimerSetTimeFlags, val, {
-    TimerSetTimeFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(ClockNanosleepFlags, val, {
-    ClockNanosleepFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(SignalfdFlags, val, {
-    SignalfdFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(PipeFlags, val, {
-    PipeFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(AtFlags, val, {
-    AtFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(OpenFlags, val, {
-    OpenFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(XattrFlags, val, {
-    XattrFlags::from_bits(val as u32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(UmountFlags, val, {
-    UmountFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(FsOpenFlags, val, {
-    FsOpenFlags::from_bits(val as u32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(FsMountFlags, val, {
-    FsMountFlags::from_bits(val as u32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(MoveMountFlags, val, {
-    MoveMountFlags::from_bits(val as u32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(OpenTreeFlags, val, {
-    OpenTreeFlags::from_bits(val as u32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(MmapFlags, val, {
-    MmapFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(MremapFlags, val, {
-    MremapFlags::from_bits(val).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(RseqFlags, val, {
-    RseqFlags::from_bits(val as u32).ok_or(SyscallError::InvalidArguments)
-});
-
-add_syscall_arg_type!(GetRandomFlags, val, {
-    GetRandomFlags::from_bits(val as u32).ok_or(SyscallError::InvalidArguments)
-});
+add_syscall_arg_flags_type!(
+    Signals,
+    u64,
+    Protection,
+    u64,
+    PollEvents,
+    i16,
+    EpollCreateFlags,
+    i32,
+    InotifyInitFlags,
+    i32,
+    EventFdFlags,
+    i32,
+    TimerFdFlags,
+    i32,
+    TimerSetTimeFlags,
+    i32,
+    ClockNanosleepFlags,
+    i32,
+    SignalfdFlags,
+    i32,
+    PipeFlags,
+    i32,
+    AtFlags,
+    i32,
+    OpenFlags,
+    i32,
+    XattrFlags,
+    u32,
+    UmountFlags,
+    i32,
+    FsOpenFlags,
+    u32,
+    FsMountFlags,
+    u32,
+    MoveMountFlags,
+    u32,
+    OpenTreeFlags,
+    u32,
+    MmapFlags,
+    i32,
+    MremapFlags,
+    u64,
+    RseqFlags,
+    u32,
+    GetRandomFlags,
+    u32,
+);
