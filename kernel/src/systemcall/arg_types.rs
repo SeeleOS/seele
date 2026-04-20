@@ -23,9 +23,9 @@ use crate::{
     },
     signal::{Signal, Signals},
     systemcall::implementations::{
-        AtFlags, ClockNanosleepFlags, EpollCreateFlags, FsMountFlags, FsOpenFlags,
-        InotifyInitFlags, MoveMountFlags, OpenFlags, OpenTreeFlags, PipeFlags, PollEvents,
-        TimerFdFlags, TimerSetTimeFlags, UmountFlags, XattrFlags,
+        AtFlags, ClockNanosleepFlags, EpollCreateFlags, FsMountFlags, FsOpenFlags, GetRandomFlags,
+        InotifyInitFlags, MmapFlags, MoveMountFlags, MremapFlags, OpenFlags, OpenTreeFlags,
+        PipeFlags, PollEvents, RseqFlags, TimerFdFlags, TimerSetTimeFlags, UmountFlags, XattrFlags,
     },
     systemcall::utils::{SyscallError, SyscallResult},
 };
@@ -187,4 +187,20 @@ add_syscall_arg_type!(MoveMountFlags, val, {
 
 add_syscall_arg_type!(OpenTreeFlags, val, {
     OpenTreeFlags::from_bits(val as u32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(MmapFlags, val, {
+    MmapFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(MremapFlags, val, {
+    MremapFlags::from_bits(val).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(RseqFlags, val, {
+    RseqFlags::from_bits(val as u32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(GetRandomFlags, val, {
+    GetRandomFlags::from_bits(val as u32).ok_or(SyscallError::InvalidArguments)
 });

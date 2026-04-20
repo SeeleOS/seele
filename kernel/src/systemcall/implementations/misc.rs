@@ -136,7 +136,7 @@ enum KeyctlCommand {
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct RseqFlags: u32 {
+    pub(crate) struct RseqFlags: u32 {
         const UNREGISTER = 1;
     }
 }
@@ -402,7 +402,7 @@ enum RlimitResource {
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct GetRandomFlags: u32 {
+    pub(crate) struct GetRandomFlags: u32 {
         const NONBLOCK = 0x0001;
         const RANDOM = 0x0002;
     }
@@ -1620,9 +1620,8 @@ define_syscall!(SetRobustList, |head: u64, len: usize| {
 
 define_syscall!(Rseq, |rseq_ptr: *mut LinuxRseq,
                        rseq_len: u32,
-                       flags: u32,
+                       flags: RseqFlags,
                        sig: u32| {
-    let flags = RseqFlags::from_bits_truncate(flags);
     if flags.bits() != flags.bits() & RseqFlags::UNREGISTER.bits() || rseq_len != RSEQ_LEN_X86_64 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -1664,35 +1663,38 @@ define_syscall!(Rseq, |rseq_ptr: *mut LinuxRseq,
     Ok(0)
 });
 
-define_syscall!(Getrandom, |buf: *mut u8, len: usize, flags: u32| {
-    let flags = GetRandomFlags::from_bits_truncate(flags);
-    if flags.bits() != flags.bits() & (GetRandomFlags::NONBLOCK | GetRandomFlags::RANDOM).bits() {
-        return Err(SyscallError::InvalidArguments);
-    }
-    if len == 0 {
-        return Ok(0);
-    }
-    if buf.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
+define_syscall!(
+    Getrandom,
+    |buf: *mut u8, len: usize, flags: GetRandomFlags| {
+        if flags.bits() != flags.bits() & (GetRandomFlags::NONBLOCK | GetRandomFlags::RANDOM).bits()
+        {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if len == 0 {
+            return Ok(0);
+        }
+        if buf.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
 
-    let mut state = KernelTime::since_boot().as_nanoseconds()
-        ^ KernelTime::current().as_nanoseconds()
-        ^ (buf as u64).rotate_left(17)
-        ^ (len as u64).rotate_left(33);
-    let mut out = vec![0; len];
+        let mut state = KernelTime::since_boot().as_nanoseconds()
+            ^ KernelTime::current().as_nanoseconds()
+            ^ (buf as u64).rotate_left(17)
+            ^ (len as u64).rotate_left(33);
+        let mut out = vec![0; len];
 
-    for byte in &mut out {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        *byte = state as u8;
+        for byte in &mut out {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            *byte = state as u8;
+        }
+
+        user_safe::write(buf, &out[..])?;
+
+        Ok(len)
     }
-
-    user_safe::write(buf, &out[..])?;
-
-    Ok(len)
-});
+);
 
 define_syscall!(CreatePty, |master_ptr: *mut i32, slave_ptr: *mut i32| {
     if master_ptr.is_null() || slave_ptr.is_null() {

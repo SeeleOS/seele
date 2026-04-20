@@ -37,7 +37,7 @@ enum ArchPrctlCode {
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct MmapFlags: i32 {
+    pub(crate) struct MmapFlags: i32 {
         const FIXED = 0x10;
         const ANONYMOUS = 0x20;
         const FIXED_NOREPLACE = 0x100000;
@@ -46,7 +46,7 @@ bitflags! {
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct MremapFlags: u64 {
+    pub(crate) struct MremapFlags: u64 {
         const MAYMOVE = 0x1;
     }
 }
@@ -175,14 +175,13 @@ fn mapping_overlaps(areas: &[MemoryArea], start: VirtAddr, end: VirtAddr) -> boo
 define_syscall!(Mmap, |addr: u64,
                        len: u64,
                        prot: i32,
-                       flags: i32,
+                       flags: MmapFlags,
                        fd: i32,
                        offset: u64| {
     if len == 0 {
         return Err(SyscallError::InvalidArguments);
     }
     let protection = prot_to_protection(prot)?;
-    let flags = MmapFlags::from_bits_truncate(flags);
     let pages = len.div_ceil(4096);
     let fixed = flags.intersects(MmapFlags::FIXED | MmapFlags::FIXED_NOREPLACE);
     let start = VirtAddr::new(addr);
@@ -269,13 +268,12 @@ define_syscall!(Munmap, |addr: VirtAddr, len: u64| {
 define_syscall!(Mremap, |old_addr: VirtAddr,
                          old_len: u64,
                          new_len: u64,
-                         flags: u64,
+                         flags: MremapFlags,
                          _new_addr: u64| {
     if old_len == 0 || new_len == 0 {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let flags = MremapFlags::from_bits_truncate(flags);
     let old_pages = old_len.div_ceil(4096);
     let new_pages = new_len.div_ceil(4096);
 
