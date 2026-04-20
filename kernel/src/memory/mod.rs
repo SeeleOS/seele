@@ -1,5 +1,5 @@
 use alloc::sync::Arc;
-use bootloader_api::info::MemoryRegions;
+use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
 
@@ -19,6 +19,7 @@ pub mod user_safe;
 pub mod utils;
 
 pub static PHYSICAL_MEMORY_OFFSET: OnceCell<u64> = OnceCell::uninit();
+pub static USABLE_MEMORY_BYTES: OnceCell<u64> = OnceCell::uninit();
 
 pub fn init(physical_memory_offset: u64, memory_regions: &'static MemoryRegions) {
     log::debug!("memory: init offset {:#x}", physical_memory_offset);
@@ -35,5 +36,16 @@ pub fn init(physical_memory_offset: u64, memory_regions: &'static MemoryRegions)
     MAPPER.get_or_init(|| mapper.clone());
     FRAME_ALLOCATOR.get_or_init(|| frame_allocator.clone());
     PHYSICAL_MEMORY_OFFSET.get_or_init(|| physical_memory_offset);
+    USABLE_MEMORY_BYTES.get_or_init(|| {
+        memory_regions
+            .iter()
+            .filter(|region| region.kind == MemoryRegionKind::Usable)
+            .map(|region| region.end.saturating_sub(region.start))
+            .sum()
+    });
     log::debug!("memory: mapper/frame allocator ready");
+}
+
+pub fn usable_memory_bytes() -> u64 {
+    USABLE_MEMORY_BYTES.get().copied().unwrap_or(0)
 }

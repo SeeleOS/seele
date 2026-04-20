@@ -885,7 +885,12 @@ define_syscall!(Uname, |info: *mut UtsName| {
     if info.is_null() {
         return Err(SyscallError::BadAddress);
     }
-    let mut uts = UtsName::new("Seele", "6.12.0-seele", "#1 Seele", "x86_64");
+    let mut uts = UtsName::new(
+        crate::misc::utsname::DEFAULT_SYSNAME,
+        crate::misc::utsname::DEFAULT_RELEASE,
+        crate::misc::utsname::DEFAULT_VERSION,
+        crate::misc::utsname::DEFAULT_MACHINE,
+    );
     uts.nodename = crate::misc::utsname::current_hostname(NAME);
     uts.domainname = crate::misc::utsname::current_domainname("(none)");
     user_safe::write(info, &uts)?;

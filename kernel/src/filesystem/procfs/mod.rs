@@ -18,22 +18,25 @@ mod root;
 use nodes::{proc_dir, proc_file, proc_rw_file, proc_symlink};
 use pid::{
     current_pid, ensure_pid_exists, fd_target, parse_fd, parse_pid, pid_cgroup_inode,
-    pid_cmdline_inode, pid_dir_entries, pid_dir_inode, pid_fd_dir_inode, pid_fd_entries,
-    pid_fd_inode, pid_fdinfo_dir_inode, pid_fdinfo_entries, pid_fdinfo_inode, pid_gid_map_inode,
-    pid_mountinfo_inode, pid_ns_dir_inode, pid_ns_entries, pid_ns_inode, pid_oom_score_adj_inode,
-    pid_root_inode, pid_setgroups_inode, pid_stat_inode, pid_status_inode, pid_string,
-    pid_uid_map_inode, proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_fdinfo_bytes,
-    proc_pid_gid_map_bytes, proc_pid_oom_score_adj_bytes, proc_pid_setgroups_bytes,
-    proc_pid_stat_bytes, proc_pid_status_bytes, proc_pid_uid_map_bytes, proc_pid_write_gid_map,
+    pid_cmdline_inode, pid_comm_inode, pid_dir_entries, pid_dir_inode, pid_environ_inode,
+    pid_fd_dir_inode, pid_fd_entries, pid_fd_inode, pid_fdinfo_dir_inode, pid_fdinfo_entries,
+    pid_fdinfo_inode, pid_gid_map_inode, pid_mountinfo_inode, pid_ns_dir_inode, pid_ns_entries,
+    pid_ns_inode, pid_oom_score_adj_inode, pid_root_inode, pid_setgroups_inode, pid_stat_inode,
+    pid_status_inode, pid_string, pid_uid_map_inode, proc_pid_cgroup_bytes, proc_pid_cmdline_bytes,
+    proc_pid_comm_bytes, proc_pid_environ_bytes, proc_pid_fdinfo_bytes, proc_pid_gid_map_bytes,
+    proc_pid_oom_score_adj_bytes, proc_pid_setgroups_bytes, proc_pid_stat_bytes,
+    proc_pid_status_bytes, proc_pid_uid_map_bytes, proc_pid_write_gid_map,
     proc_pid_write_oom_score_adj, proc_pid_write_setgroups, proc_pid_write_uid_map,
 };
 use root::{
-    PROC_CMDLINE_INODE, PROC_MOUNTS_INODE, PROC_ROOT_INODE, PROC_SELF_INODE,
-    PROC_SYS_FS_FILE_MAX_INODE, PROC_SYS_FS_INODE, PROC_SYS_FS_NR_OPEN_INODE, PROC_SYS_INODE,
-    PROC_SYS_KERNEL_DOMAINNAME_INODE, PROC_SYS_KERNEL_HOSTNAME_INODE, PROC_SYS_KERNEL_INODE,
-    PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE, PROC_SYS_KERNEL_RANDOM_INODE, proc_boot_id_bytes,
-    proc_kernel_cmdline_bytes, proc_kernel_entries, proc_kernel_random_entries,
-    proc_mountinfo_bytes, proc_mounts_bytes, proc_root_entries,
+    PROC_CMDLINE_INODE, PROC_MEMINFO_INODE, PROC_MOUNTS_INODE, PROC_PRESSURE_CPU_INODE,
+    PROC_PRESSURE_INODE, PROC_PRESSURE_IO_INODE, PROC_PRESSURE_MEMORY_INODE, PROC_ROOT_INODE,
+    PROC_SELF_INODE, PROC_SYS_FS_FILE_MAX_INODE, PROC_SYS_FS_INODE, PROC_SYS_FS_NR_OPEN_INODE,
+    PROC_SYS_INODE, PROC_SYS_KERNEL_DOMAINNAME_INODE, PROC_SYS_KERNEL_HOSTNAME_INODE,
+    PROC_SYS_KERNEL_INODE, PROC_SYS_KERNEL_OSRELEASE_INODE, PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE,
+    PROC_SYS_KERNEL_RANDOM_INODE, proc_boot_id_bytes, proc_kernel_cmdline_bytes,
+    proc_kernel_entries, proc_kernel_random_entries, proc_mountinfo_bytes, proc_mounts_bytes,
+    proc_pressure_entries, proc_root_entries,
 };
 
 const DEFAULT_FILE_MAX: u64 = 1_048_576;
@@ -48,6 +51,41 @@ fn proc_hostname_bytes() -> Vec<u8> {
 
 fn proc_domainname_bytes() -> Vec<u8> {
     proc_c_string_bytes(crate::misc::utsname::current_domainname("(none)"))
+}
+
+fn proc_osrelease_bytes() -> Vec<u8> {
+    format!("{}\n", crate::misc::utsname::DEFAULT_RELEASE).into_bytes()
+}
+
+fn proc_meminfo_bytes() -> Vec<u8> {
+    let total_kib = crate::memory::usable_memory_bytes() / 1024;
+    format!(
+        concat!(
+            "MemTotal:       {:>8} kB\n",
+            "MemFree:        {:>8} kB\n",
+            "MemAvailable:   {:>8} kB\n",
+            "Buffers:        {:>8} kB\n",
+            "Cached:         {:>8} kB\n",
+            "SwapCached:     {:>8} kB\n",
+            "Active:         {:>8} kB\n",
+            "Inactive:       {:>8} kB\n",
+            "Active(anon):   {:>8} kB\n",
+            "Inactive(anon): {:>8} kB\n",
+            "Active(file):   {:>8} kB\n",
+            "Inactive(file): {:>8} kB\n",
+            "Unevictable:    {:>8} kB\n",
+            "Mlocked:        {:>8} kB\n",
+            "SwapTotal:      {:>8} kB\n",
+            "SwapFree:       {:>8} kB\n"
+        ),
+        total_kib, total_kib, total_kib, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    )
+    .into_bytes()
+}
+
+fn proc_pressure_bytes() -> Vec<u8> {
+    b"some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n"
+        .to_vec()
 }
 
 fn proc_write_hostname(buffer: &[u8]) -> FSResult<usize> {
@@ -143,7 +181,24 @@ impl FileSystem for ProcFs {
                 PROC_CMDLINE_INODE,
                 proc_kernel_cmdline_bytes,
             )),
+            ["meminfo"] => Ok(proc_file("meminfo", PROC_MEMINFO_INODE, proc_meminfo_bytes)),
             ["mounts"] => Ok(proc_file("mounts", PROC_MOUNTS_INODE, proc_mounts_bytes)),
+            ["pressure"] => Ok(proc_dir(
+                "pressure",
+                PROC_PRESSURE_INODE,
+                proc_pressure_entries(),
+            )),
+            ["pressure", "cpu"] => Ok(proc_file(
+                "cpu",
+                PROC_PRESSURE_CPU_INODE,
+                proc_pressure_bytes,
+            )),
+            ["pressure", "io"] => Ok(proc_file("io", PROC_PRESSURE_IO_INODE, proc_pressure_bytes)),
+            ["pressure", "memory"] => Ok(proc_file(
+                "memory",
+                PROC_PRESSURE_MEMORY_INODE,
+                proc_pressure_bytes,
+            )),
             ["sys"] => Ok(proc_dir("sys", PROC_SYS_INODE, proc_sys_entries())),
             ["sys", "fs"] => Ok(proc_dir("fs", PROC_SYS_FS_INODE, proc_fs_entries())),
             ["sys", "kernel"] => Ok(proc_dir(
@@ -162,6 +217,11 @@ impl FileSystem for ProcFs {
                 PROC_SYS_KERNEL_DOMAINNAME_INODE,
                 proc_domainname_bytes,
                 proc_write_domainname,
+            )),
+            ["sys", "kernel", "osrelease"] => Ok(proc_file(
+                "osrelease",
+                PROC_SYS_KERNEL_OSRELEASE_INODE,
+                proc_osrelease_bytes,
             )),
             ["sys", "kernel", "random"] => Ok(proc_dir(
                 "random",
@@ -193,6 +253,18 @@ impl FileSystem for ProcFs {
                 let pid = current_pid()?;
                 Ok(proc_file("cmdline", pid_cmdline_inode(pid), move || {
                     proc_pid_cmdline_bytes(pid)
+                }))
+            }
+            ["self", "comm"] => {
+                let pid = current_pid()?;
+                Ok(proc_file("comm", pid_comm_inode(pid), move || {
+                    proc_pid_comm_bytes(pid).unwrap_or_default()
+                }))
+            }
+            ["self", "environ"] => {
+                let pid = current_pid()?;
+                Ok(proc_file("environ", pid_environ_inode(pid), move || {
+                    proc_pid_environ_bytes(pid).unwrap_or_default()
                 }))
             }
             ["self", "stat"] => {
@@ -312,6 +384,20 @@ impl FileSystem for ProcFs {
                 ensure_pid_exists(pid)?;
                 Ok(proc_file("cmdline", pid_cmdline_inode(pid), move || {
                     proc_pid_cmdline_bytes(pid)
+                }))
+            }
+            [pid, "comm"] => {
+                let pid = parse_pid(pid)?;
+                ensure_pid_exists(pid)?;
+                Ok(proc_file("comm", pid_comm_inode(pid), move || {
+                    proc_pid_comm_bytes(pid).unwrap_or_default()
+                }))
+            }
+            [pid, "environ"] => {
+                let pid = parse_pid(pid)?;
+                ensure_pid_exists(pid)?;
+                Ok(proc_file("environ", pid_environ_inode(pid), move || {
+                    proc_pid_environ_bytes(pid).unwrap_or_default()
                 }))
             }
             [pid, "stat"] => {

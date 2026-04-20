@@ -118,6 +118,13 @@ static DEV_LOG_NODE: StaticNode = StaticNode::Symlink(StaticSymlinkNode {
     target: "/run/systemd/journal/dev-log",
 });
 
+static DEV_KMSG_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
+    name: "kmsg",
+    inode: 0x100f,
+    mode: 0o020600,
+    device_name: "kmsg",
+});
+
 static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "null",
@@ -166,6 +173,10 @@ static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "log",
         node: &DEV_LOG_NODE,
+    },
+    StaticDirEntry {
+        name: "kmsg",
+        node: &DEV_KMSG_NODE,
     },
 ];
 

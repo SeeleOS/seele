@@ -3,6 +3,11 @@ use spin::Mutex;
 static HOSTNAME: Mutex<Option<[u8; 65]>> = Mutex::new(None);
 static DOMAINNAME: Mutex<Option<[u8; 65]>> = Mutex::new(None);
 
+pub const DEFAULT_SYSNAME: &str = "Seele";
+pub const DEFAULT_RELEASE: &str = "6.12.0-seele";
+pub const DEFAULT_VERSION: &str = "#1 Seele";
+pub const DEFAULT_MACHINE: &str = "x86_64";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SetHostnameError {
     Invalid,

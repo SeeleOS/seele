@@ -16,14 +16,20 @@ pub(super) const PROC_CMDLINE_INODE: u64 = 0x3001;
 pub(super) const PROC_SELF_INODE: u64 = 0x3002;
 pub(super) const PROC_MOUNTS_INODE: u64 = 0x3003;
 pub(super) const PROC_SYS_INODE: u64 = 0x3004;
-pub(super) const PROC_SYS_FS_INODE: u64 = 0x3005;
-pub(super) const PROC_SYS_FS_FILE_MAX_INODE: u64 = 0x3006;
-pub(super) const PROC_SYS_FS_NR_OPEN_INODE: u64 = 0x3007;
-pub(super) const PROC_SYS_KERNEL_INODE: u64 = 0x3008;
-pub(super) const PROC_SYS_KERNEL_RANDOM_INODE: u64 = 0x3009;
-pub(super) const PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE: u64 = 0x300a;
-pub(super) const PROC_SYS_KERNEL_HOSTNAME_INODE: u64 = 0x300b;
-pub(super) const PROC_SYS_KERNEL_DOMAINNAME_INODE: u64 = 0x300c;
+pub(super) const PROC_MEMINFO_INODE: u64 = 0x3005;
+pub(super) const PROC_PRESSURE_INODE: u64 = 0x3006;
+pub(super) const PROC_PRESSURE_CPU_INODE: u64 = 0x3007;
+pub(super) const PROC_PRESSURE_IO_INODE: u64 = 0x3008;
+pub(super) const PROC_PRESSURE_MEMORY_INODE: u64 = 0x3009;
+pub(super) const PROC_SYS_FS_INODE: u64 = 0x300a;
+pub(super) const PROC_SYS_FS_FILE_MAX_INODE: u64 = 0x300b;
+pub(super) const PROC_SYS_FS_NR_OPEN_INODE: u64 = 0x300c;
+pub(super) const PROC_SYS_KERNEL_INODE: u64 = 0x300d;
+pub(super) const PROC_SYS_KERNEL_RANDOM_INODE: u64 = 0x300e;
+pub(super) const PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE: u64 = 0x300f;
+pub(super) const PROC_SYS_KERNEL_HOSTNAME_INODE: u64 = 0x3010;
+pub(super) const PROC_SYS_KERNEL_DOMAINNAME_INODE: u64 = 0x3011;
+pub(super) const PROC_SYS_KERNEL_OSRELEASE_INODE: u64 = 0x3012;
 
 lazy_static! {
     static ref PROC_BOOT_ID: String = generate_boot_id();
@@ -32,7 +38,9 @@ lazy_static! {
 pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
     let mut entries = vec![
         DirectoryContentInfo::new("cmdline".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("meminfo".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("mounts".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("pressure".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("self".into(), DirectoryContentType::Symlink),
         DirectoryContentInfo::new("sys".into(), DirectoryContentType::Directory),
     ];
@@ -55,6 +63,7 @@ pub(super) fn proc_kernel_entries() -> Vec<DirectoryContentInfo> {
     vec![
         DirectoryContentInfo::new("hostname".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("domainname".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("osrelease".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("random".into(), DirectoryContentType::Directory),
     ]
 }
@@ -68,6 +77,14 @@ pub(super) fn proc_kernel_random_entries() -> Vec<DirectoryContentInfo> {
 
 pub(super) fn proc_boot_id_bytes() -> Vec<u8> {
     format!("{}\n", PROC_BOOT_ID.as_str()).into_bytes()
+}
+
+pub(super) fn proc_pressure_entries() -> Vec<DirectoryContentInfo> {
+    vec![
+        DirectoryContentInfo::new("cpu".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("io".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("memory".into(), DirectoryContentType::File),
+    ]
 }
 
 fn generate_boot_id() -> String {

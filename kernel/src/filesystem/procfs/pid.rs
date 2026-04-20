@@ -13,9 +13,11 @@ use crate::{
 
 pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
     vec![
+        DirectoryContentInfo::new("comm".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("stat".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("status".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("cmdline".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("environ".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("cgroup".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("oom_score_adj".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("mountinfo".into(), DirectoryContentType::File),
@@ -106,6 +108,24 @@ pub(super) fn proc_pid_cmdline_bytes(pid: ProcessID) -> Vec<u8> {
         bytes.push(0);
     }
     bytes
+}
+
+pub(super) fn proc_pid_comm_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    let process = process.lock();
+    let name = process
+        .command_line
+        .first()
+        .and_then(|path| path.rsplit('/').next())
+        .filter(|name| !name.is_empty())
+        .map(String::from)
+        .unwrap_or_else(|| pid_string(pid));
+    Ok(format!("{name}\n").into_bytes())
+}
+
+pub(super) fn proc_pid_environ_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
+    let _ = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    Ok(Vec::new())
 }
 
 fn format_capability_set(low: u32, high: u32) -> String {
@@ -337,40 +357,48 @@ pub(super) fn pid_cmdline_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 1
 }
 
-pub(super) fn pid_mountinfo_inode(pid: ProcessID) -> u64 {
+pub(super) fn pid_comm_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 2
 }
 
-pub(super) fn pid_cgroup_inode(pid: ProcessID) -> u64 {
+pub(super) fn pid_mountinfo_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 3
 }
 
-pub(super) fn pid_oom_score_adj_inode(pid: ProcessID) -> u64 {
+pub(super) fn pid_cgroup_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 4
 }
 
-pub(super) fn pid_stat_inode(pid: ProcessID) -> u64 {
+pub(super) fn pid_oom_score_adj_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 5
 }
 
-pub(super) fn pid_status_inode(pid: ProcessID) -> u64 {
+pub(super) fn pid_stat_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 6
 }
 
-pub(super) fn pid_uid_map_inode(pid: ProcessID) -> u64 {
+pub(super) fn pid_status_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 7
 }
 
-pub(super) fn pid_gid_map_inode(pid: ProcessID) -> u64 {
+pub(super) fn pid_uid_map_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 8
 }
 
-pub(super) fn pid_setgroups_inode(pid: ProcessID) -> u64 {
+pub(super) fn pid_gid_map_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 9
 }
 
-pub(super) fn pid_root_inode(pid: ProcessID) -> u64 {
+pub(super) fn pid_setgroups_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 10
+}
+
+pub(super) fn pid_root_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 11
+}
+
+pub(super) fn pid_environ_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 12
 }
 
 pub(super) fn pid_fd_dir_inode(pid: ProcessID) -> u64 {
