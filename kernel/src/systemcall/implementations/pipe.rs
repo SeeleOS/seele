@@ -6,17 +6,21 @@ use crate::{
     socket::{AF_UNIX, SOCK_NONBLOCK, SOCK_STREAM, UnixSocketObject},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
+use bitflags::bitflags;
 
-const O_NONBLOCK: i32 = 0o4_000;
-const O_CLOEXEC: i32 = 0o2_000_000;
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct PipeFlags: i32 {
+        const O_NONBLOCK = 0o4_000;
+        const O_CLOEXEC = 0o2_000_000;
+    }
+}
 
 fn create_pipe(fds: *mut i32, flags: i32) -> Result<usize, SyscallError> {
-    if (flags & !(O_NONBLOCK | O_CLOEXEC)) != 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
+    let flags = PipeFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
 
     let kind = SOCK_STREAM
-        | if (flags & O_NONBLOCK) != 0 {
+        | if flags.contains(PipeFlags::O_NONBLOCK) {
             SOCK_NONBLOCK
         } else {
             0
@@ -30,7 +34,7 @@ fn create_pipe(fds: *mut i32, flags: i32) -> Result<usize, SyscallError> {
     let process = get_current_process();
     let (read_fd, write_fd) = {
         let mut process = process.lock();
-        let fd_flags = if (flags & O_CLOEXEC) != 0 {
+        let fd_flags = if flags.contains(PipeFlags::O_CLOEXEC) {
             FdFlags::CLOEXEC
         } else {
             FdFlags::empty()

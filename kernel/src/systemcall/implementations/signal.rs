@@ -11,7 +11,7 @@ use crate::{
     memory::user_safe,
     object::{
         FileFlags, Object,
-        linux_anon::SignalfdObject,
+        linux_anon::{SignalfdFlags, SignalfdObject},
         misc::{ObjectRef, get_object_current_process},
     },
     process::misc::with_current_process,
@@ -19,16 +19,13 @@ use crate::{
     signal::{SigInfo, Signal, UContext, action::SignalAction},
 };
 use alloc::vec::Vec;
+use bitflags::bitflags;
 use core::mem::size_of;
 use num_enum::TryFromPrimitive;
 use spin::Mutex;
 
 const SIG_DFL: usize = 0;
 const SIG_IGN: usize = 1;
-const SFD_NONBLOCK: i32 = 0o4_000;
-const SFD_CLOEXEC: i32 = 0o2_000_000;
-const SS_ONSTACK: i32 = 1;
-const SS_DISABLE: i32 = 2;
 const MINSIGSTKSZ: usize = 2048;
 
 #[repr(C)]
@@ -41,14 +38,22 @@ struct LinuxStack {
 
 static SIGALTSTACK_STATE: Mutex<LinuxStack> = Mutex::new(LinuxStack {
     ss_sp: 0,
-    ss_flags: SS_DISABLE,
+    ss_flags: StackFlags::SS_DISABLE.bits(),
     ss_size: 0,
 });
 
-bitflags::bitflags! {
+bitflags! {
     #[derive(Clone, Copy, Debug)]
     struct SigActionFlags: u64 {
         const SIGINFO = 0x0000_0004;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct StackFlags: i32 {
+        const SS_ONSTACK = 1;
+        const SS_DISABLE = 2;
     }
 }
 
@@ -120,16 +125,14 @@ define_syscall!(Signalfd4, |fd: i32,
     if sigsetsize != size_of::<u64>() {
         return Err(SyscallError::InvalidArguments);
     }
-    if (flags & !(SFD_NONBLOCK | SFD_CLOEXEC)) != 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
+    let flags = SignalfdFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
 
     let mask = user_safe::read(mask)?;
 
     if fd == -1 {
         let signalfd = SignalfdObject::new(get_current_process().lock().pid.0, mask, flags);
         let signalfd_ref: ObjectRef = signalfd;
-        let fd_flags = if (flags & SFD_CLOEXEC) != 0 {
+        let fd_flags = if flags.contains(SignalfdFlags::SFD_CLOEXEC) {
             FdFlags::CLOEXEC
         } else {
             FdFlags::empty()
@@ -144,7 +147,7 @@ define_syscall!(Signalfd4, |fd: i32,
         .as_signalfd()?;
     signalfd.set_mask(mask);
 
-    let file_flags = if (flags & SFD_NONBLOCK) != 0 {
+    let file_flags = if flags.contains(SignalfdFlags::SFD_NONBLOCK) {
         FileFlags::NONBLOCK
     } else {
         FileFlags::empty()
@@ -153,7 +156,7 @@ define_syscall!(Signalfd4, |fd: i32,
         .clone()
         .set_flags(file_flags)
         .map_err(SyscallError::from)?;
-    let fd_flags = if (flags & SFD_CLOEXEC) != 0 {
+    let fd_flags = if flags.contains(SignalfdFlags::SFD_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
         FdFlags::empty()
@@ -212,14 +215,16 @@ define_syscall!(
             }
 
             let new_stack = &*new_stack;
-            if (new_stack.ss_flags & !(SS_DISABLE)) != 0 {
+            let new_flags =
+                StackFlags::from_bits(new_stack.ss_flags).ok_or(SyscallError::InvalidArguments)?;
+            if new_flags.intersects(StackFlags::SS_ONSTACK) {
                 return Err(SyscallError::InvalidArguments);
             }
 
-            if (new_stack.ss_flags & SS_DISABLE) != 0 {
+            if new_flags.contains(StackFlags::SS_DISABLE) {
                 *state = LinuxStack {
                     ss_sp: 0,
-                    ss_flags: SS_DISABLE,
+                    ss_flags: StackFlags::SS_DISABLE.bits(),
                     ss_size: 0,
                 };
                 return Ok(0);
@@ -234,7 +239,7 @@ define_syscall!(
 
             *state = LinuxStack {
                 ss_sp: new_stack.ss_sp,
-                ss_flags: new_stack.ss_flags & !SS_ONSTACK,
+                ss_flags: new_flags.bits(),
                 ss_size: new_stack.ss_size,
             };
         }

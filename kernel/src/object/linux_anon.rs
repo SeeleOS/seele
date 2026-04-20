@@ -41,6 +41,14 @@ bitflags! {
     }
 }
 
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    pub struct SignalfdFlags: i32 {
+        const SFD_NONBLOCK = 0o4_000;
+        const SFD_CLOEXEC = 0o2_000_000;
+    }
+}
+
 #[derive(Default)]
 struct SignalfdRegistry {
     watchers: BTreeMap<u64, Vec<Weak<SignalfdObject>>>,
@@ -211,7 +219,7 @@ pub struct SignalfdObject {
 }
 
 impl SignalfdObject {
-    pub fn new(owner_pid: u64, mask: u64, flags: i32) -> Arc<Self> {
+    pub fn new(owner_pid: u64, mask: u64, flags: SignalfdFlags) -> Arc<Self> {
         let signalfd = Arc::new(Self {
             flags: Mutex::new(FileFlags::empty()),
             mask: Mutex::new(mask),
@@ -219,7 +227,7 @@ impl SignalfdObject {
             self_ref: Mutex::new(None),
         });
         *signalfd.self_ref.lock() = Some(Arc::downgrade(&signalfd));
-        if (flags & 0o4_000) != 0 {
+        if flags.contains(SignalfdFlags::SFD_NONBLOCK) {
             let _ = signalfd.clone().set_flags(FileFlags::NONBLOCK);
         }
         register_signalfd(owner_pid, &signalfd);
