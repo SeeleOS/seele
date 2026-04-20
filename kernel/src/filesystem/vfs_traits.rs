@@ -63,6 +63,12 @@ pub trait File: Send + Sync {
     fn read(&mut self, buffer: &mut [u8]) -> FSResult<usize>;
     fn write(&mut self, buffer: &[u8]) -> FSResult<usize>;
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize>;
+    fn truncate(&mut self, _length: u64) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+    fn allocate(&mut self, _mode: u32, _offset: u64, _len: u64) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
     fn chmod(&self, _mode: u32) -> FSResult<()> {
         Err(FSError::Readonly)
     }

@@ -32,6 +32,18 @@ static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeM
 static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
 const COPY_CHUNK_SIZE: usize = 16 * 1024;
 
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    pub struct FallocateFlags: i32 {
+        const FALLOC_FL_KEEP_SIZE = 0x01;
+        const FALLOC_FL_PUNCH_HOLE = 0x02;
+        const FALLOC_FL_COLLAPSE_RANGE = 0x08;
+        const FALLOC_FL_ZERO_RANGE = 0x10;
+        const FALLOC_FL_INSERT_RANGE = 0x20;
+        const FALLOC_FL_UNSHARE_RANGE = 0x40;
+    }
+}
+
 #[repr(C)]
 struct LinuxIovec {
     iov_base: *const u8,
@@ -250,12 +262,35 @@ define_syscall!(Fadvise64, |_object: ObjectRef,
     Ok(0)
 });
 
-define_syscall!(Ftruncate, |_object: ObjectRef, _length: i64| { Ok(0) });
+define_syscall!(Ftruncate, |object: ObjectRef, length: i64| {
+    if length < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
 
-define_syscall!(Fallocate, |_object: ObjectRef,
-                            _mode: i32,
-                            _offset: i64,
-                            _len: i64| { Ok(0) });
+    object
+        .as_file_like()?
+        .truncate(length as u64)
+        .map_err(SyscallError::from)?;
+    Ok(0)
+});
+
+define_syscall!(Fallocate, |object: ObjectRef,
+                            mode: FallocateFlags,
+                            offset: i64,
+                            len: i64| {
+    if offset < 0 || len < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if !mode.is_empty() {
+        return Err(SyscallError::OperationNotSupported);
+    }
+
+    object
+        .as_file_like()?
+        .allocate(mode.bits() as u32, offset as u64, len as u64)
+        .map_err(SyscallError::from)?;
+    Ok(0)
+});
 
 define_syscall!(Dup, |object: ObjectRef| {
     get_current_process()

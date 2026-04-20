@@ -142,6 +142,42 @@ impl File for MemFdFile {
         self.offset = next.max(0) as usize;
         Ok(self.offset)
     }
+
+    fn truncate(&mut self, length: u64) -> FSResult<()> {
+        let length = usize::try_from(length).map_err(|_| FSError::Other)?;
+        let seals = self.current_seals();
+        if length < self.data.len() && seals.contains(MemFdSealFlags::F_SEAL_SHRINK) {
+            return Err(FSError::AccessDenied);
+        }
+        if length > self.data.len() && seals.contains(MemFdSealFlags::F_SEAL_GROW) {
+            return Err(FSError::AccessDenied);
+        }
+
+        self.data.resize(length, 0);
+        Ok(())
+    }
+
+    fn allocate(&mut self, mode: u32, offset: u64, len: u64) -> FSResult<()> {
+        if mode != 0 {
+            return Err(FSError::Other);
+        }
+
+        let offset = usize::try_from(offset).map_err(|_| FSError::Other)?;
+        let len = usize::try_from(len).map_err(|_| FSError::Other)?;
+        let end = offset.checked_add(len).ok_or(FSError::Other)?;
+        let seals = self.current_seals();
+        if end > self.data.len()
+            && (seals.contains(MemFdSealFlags::F_SEAL_GROW)
+                || seals.contains(MemFdSealFlags::F_SEAL_WRITE))
+        {
+            return Err(FSError::AccessDenied);
+        }
+
+        if end > self.data.len() {
+            self.data.resize(end, 0);
+        }
+        Ok(())
+    }
 }
 
 fn memfd_key(path: &Path) -> String {

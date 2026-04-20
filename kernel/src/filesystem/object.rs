@@ -129,6 +129,14 @@ impl FileLikeObject {
         }
     }
 
+    pub fn truncate(&self, length: u64) -> FSResult<()> {
+        self.resolve_file()?.lock().truncate(length)
+    }
+
+    pub fn allocate(&self, mode: u32, offset: u64, len: u64) -> FSResult<()> {
+        self.resolve_file()?.lock().allocate(mode, offset, len)
+    }
+
     fn resolve_file(&self) -> FSResult<WrappedFile> {
         match &self.file {
             FileLike::File(file) => Ok(file.clone()),

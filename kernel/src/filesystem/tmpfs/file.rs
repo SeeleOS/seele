@@ -113,6 +113,42 @@ impl File for TmpfsFileHandle {
         Ok(self.offset)
     }
 
+    fn truncate(&mut self, length: u64) -> FSResult<()> {
+        let length = usize::try_from(length).map_err(|_| FSError::Other)?;
+        let mut state = self.state.lock();
+        let node = state.node_mut(&self.path)?;
+        let data = match &mut node.kind {
+            TmpNodeKind::File { data, .. } => data,
+            TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => {
+                return Err(FSError::NotAFile);
+            }
+        };
+        data.resize(length, 0);
+        Ok(())
+    }
+
+    fn allocate(&mut self, mode: u32, offset: u64, len: u64) -> FSResult<()> {
+        if mode != 0 {
+            return Err(FSError::Other);
+        }
+
+        let offset = usize::try_from(offset).map_err(|_| FSError::Other)?;
+        let len = usize::try_from(len).map_err(|_| FSError::Other)?;
+        let end = offset.checked_add(len).ok_or(FSError::Other)?;
+        let mut state = self.state.lock();
+        let node = state.node_mut(&self.path)?;
+        let data = match &mut node.kind {
+            TmpNodeKind::File { data, .. } => data,
+            TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => {
+                return Err(FSError::NotAFile);
+            }
+        };
+        if end > data.len() {
+            data.resize(end, 0);
+        }
+        Ok(())
+    }
+
     fn chmod(&self, mode: u32) -> FSResult<()> {
         let mut state = self.state.lock();
         if (mode & S_IFMT) != 0 {
