@@ -2,6 +2,7 @@ use alloc::{
     collections::VecDeque,
     format,
     sync::{Arc, Weak},
+    vec,
     vec::Vec,
 };
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -21,13 +22,14 @@ use crate::{
     },
     polling::{event::PollableEvent, object::Pollable},
     socket::{
-        AF_NETLINK, NETLINK_ADD_MEMBERSHIP, NETLINK_DROP_MEMBERSHIP, NETLINK_EXT_ACK,
-        NETLINK_GET_STRICT_CHK, NETLINK_KOBJECT_UEVENT, NETLINK_LIST_MEMBERSHIPS, NETLINK_PKTINFO,
-        NETLINK_ROUTE, SO_ATTACH_FILTER, SO_DETACH_FILTER, SO_DOMAIN, SO_ERROR, SO_PASSCRED,
-        SO_PASSPIDFD, SO_PASSRIGHTS, SO_PASSSEC, SO_PROTOCOL, SO_RCVBUF, SO_RCVBUFFORCE,
-        SO_REUSEADDR, SO_SNDBUF, SO_SNDBUFFORCE, SO_TIMESTAMP_NEW, SO_TIMESTAMP_OLD,
-        SO_TIMESTAMPNS_NEW, SO_TIMESTAMPNS_OLD, SO_TYPE, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK,
-        SOCK_RAW, SOL_NETLINK, SOL_SOCKET, SocketError, SocketLike, SocketResult,
+        AF_NETLINK, NETLINK_ADD_MEMBERSHIP, NETLINK_AUDIT, NETLINK_DROP_MEMBERSHIP,
+        NETLINK_EXT_ACK, NETLINK_GET_STRICT_CHK, NETLINK_KOBJECT_UEVENT, NETLINK_LIST_MEMBERSHIPS,
+        NETLINK_PKTINFO, NETLINK_ROUTE, SO_ATTACH_FILTER, SO_DETACH_FILTER, SO_DOMAIN, SO_ERROR,
+        SO_PASSCRED, SO_PASSPIDFD, SO_PASSRIGHTS, SO_PASSSEC, SO_PROTOCOL, SO_RCVBUF,
+        SO_RCVBUFFORCE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_REUSEADDR, SO_SNDBUF, SO_SNDBUFFORCE,
+        SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD, SO_TIMESTAMP_NEW, SO_TIMESTAMP_OLD, SO_TIMESTAMPNS_NEW,
+        SO_TIMESTAMPNS_OLD, SO_TYPE, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_RAW,
+        SOL_NETLINK, SOL_SOCKET, SocketError, SocketLike, SocketResult, socket_timeout_option_len,
     },
 };
 
@@ -78,7 +80,10 @@ pub struct NetlinkSocketObject {
 impl NetlinkSocketObject {
     pub fn create(kind: u64, protocol: u64) -> SocketResult<Arc<Self>> {
         let socket_type = kind & !(SOCK_NONBLOCK | SOCK_CLOEXEC);
-        if !matches!(protocol, NETLINK_ROUTE | NETLINK_KOBJECT_UEVENT) {
+        if !matches!(
+            protocol,
+            NETLINK_ROUTE | NETLINK_AUDIT | NETLINK_KOBJECT_UEVENT
+        ) {
             return Err(SocketError::ProtocolNotSupported);
         }
         if !matches!(socket_type, SOCK_RAW | SOCK_DGRAM) {
@@ -154,6 +159,14 @@ impl NetlinkSocketObject {
                 | SO_RCVBUFFORCE | SO_ATTACH_FILTER | SO_DETACH_FILTER | SO_PASSSEC
                 | SO_PASSRIGHTS | SO_PASSPIDFD | SO_TIMESTAMP_OLD | SO_TIMESTAMP_NEW
                 | SO_TIMESTAMPNS_OLD | SO_TIMESTAMPNS_NEW => Ok(()),
+                SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD | SO_RCVTIMEO_NEW | SO_SNDTIMEO_NEW => {
+                    let expected_len = socket_timeout_option_len(option_name)
+                        .ok_or(SocketError::InvalidArguments)?;
+                    if option_value.len() < expected_len {
+                        return Err(SocketError::InvalidArguments);
+                    }
+                    Ok(())
+                }
                 _ => Err(SocketError::InvalidArguments),
             };
         }
@@ -198,6 +211,11 @@ impl NetlinkSocketObject {
                 SO_REUSEADDR | SO_PASSCRED | SO_PASSSEC | SO_PASSRIGHTS | SO_PASSPIDFD
                 | SO_TIMESTAMP_OLD | SO_TIMESTAMP_NEW | SO_TIMESTAMPNS_OLD | SO_TIMESTAMPNS_NEW => {
                     Self::encode_i32(option_len, 0)
+                }
+                SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD | SO_RCVTIMEO_NEW | SO_SNDTIMEO_NEW => {
+                    let expected_len = socket_timeout_option_len(option_name)
+                        .ok_or(SocketError::InvalidArguments)?;
+                    Self::encode_zeroed_bytes(option_len, expected_len)
                 }
                 _ => Err(SocketError::InvalidArguments),
             };
@@ -244,6 +262,14 @@ impl NetlinkSocketObject {
             out.extend_from_slice(&group.to_ne_bytes());
         }
         out
+    }
+
+    fn encode_zeroed_bytes(option_len: usize, expected_len: usize) -> SocketResult<Vec<u8>> {
+        if option_len < expected_len {
+            return Err(SocketError::InvalidArguments);
+        }
+
+        Ok(vec![0; expected_len])
     }
 
     fn enqueue_ack(&self, message: &[u8]) {
