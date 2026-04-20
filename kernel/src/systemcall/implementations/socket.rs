@@ -1,8 +1,12 @@
 use crate::{
     define_syscall,
     memory::user_safe,
-    object::{FileFlags, error::ObjectError, misc::{ObjectRef, get_object_current_process}},
     object::netlink::{NetlinkSocketAddress, NetlinkSocketObject},
+    object::{
+        FileFlags,
+        error::ObjectError,
+        misc::{ObjectRef, get_object_current_process},
+    },
     process::{FdFlags, manager::get_current_process},
     socket::{
         AF_NETLINK, AF_UNIX, SOCK_CLOEXEC, SOCK_NONBLOCK, SOL_SOCKET, UnixSocketKind,
@@ -152,8 +156,7 @@ fn socket_address_from_raw(
 
 define_syscall!(Socket, |domain: u64, kind: u64, protocol: u64| {
     let socket: ObjectRef = if domain == AF_NETLINK {
-        NetlinkSocketObject::create(kind, protocol)
-            .map_err(ObjectError::from)?
+        NetlinkSocketObject::create(kind, protocol).map_err(ObjectError::from)?
     } else {
         UnixSocketObject::create(domain, kind, protocol).map_err(ObjectError::from)?
     };
@@ -175,7 +178,8 @@ define_syscall!(Socketpair, |domain: u64,
                              kind: u64,
                              protocol: u64,
                              fds: *mut i32| {
-    let (left, right) = UnixSocketObject::pair(domain, kind, protocol).map_err(ObjectError::from)?;
+    let (left, right) =
+        UnixSocketObject::pair(domain, kind, protocol).map_err(ObjectError::from)?;
     let (left_fd, right_fd) = {
         let process = get_current_process();
         let mut process = process.lock();
@@ -248,8 +252,7 @@ define_syscall!(Accept, |socket: ObjectRef,
         .accept()
         .map_err(ObjectError::from)?;
     if !address_len_ptr.is_null() {
-        let accepted = get_object_current_process(fd as u64)
-            .map_err(SyscallError::from)?;
+        let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
         let name = accepted
             .as_unix_socket()?
             .getpeername_bytes()
@@ -273,8 +276,7 @@ define_syscall!(Accept4, |socket: ObjectRef,
         .accept()
         .map_err(ObjectError::from)?;
     if !address_len_ptr.is_null() {
-        let accepted = get_object_current_process(fd as u64)
-            .map_err(SyscallError::from)?;
+        let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
         let name = accepted
             .as_unix_socket()?
             .getpeername_bytes()
@@ -322,9 +324,7 @@ define_syscall!(Sendto, |socket: ObjectRef,
                 return Err(SyscallError::InvalidArguments);
             };
         }
-        let written = socket
-            .send(buffer)
-            .map_err(ObjectError::from)?;
+        let written = socket.send(buffer).map_err(ObjectError::from)?;
         return Ok(written);
     }
 
@@ -339,15 +339,11 @@ define_syscall!(Sendto, |socket: ObjectRef,
                 .map_err(ObjectError::from)?);
         }
         if matches!(&*socket.state.lock(), UnixSocketState::Unbound) {
-            socket
-                .connect(path)
-                .map_err(ObjectError::from)?;
+            socket.connect(path).map_err(ObjectError::from)?;
         }
     }
 
-    let written = socket
-        .write_socket(buffer)
-        .map_err(ObjectError::from)?;
+    let written = socket.write_socket(buffer).map_err(ObjectError::from)?;
 
     Ok(written)
 });
@@ -410,9 +406,7 @@ define_syscall!(
 
         let socket = socket.as_unix_socket()?;
         let mut data = vec![0; len];
-        let read = socket
-            .read_socket(&mut data)
-            .map_err(ObjectError::from)?;
+        let read = socket.read_socket(&mut data).map_err(ObjectError::from)?;
 
         if read > 0 {
             user_safe::write(buffer, &data[..read])?;
@@ -422,9 +416,7 @@ define_syscall!(
             if address_len_ptr.is_null() {
                 return Err(SyscallError::BadAddress);
             }
-            let name = socket
-                .getpeername_bytes()
-                .map_err(ObjectError::from)?;
+            let name = socket.getpeername_bytes().map_err(ObjectError::from)?;
             let requested_len = unsafe { *address_len_ptr as usize };
             let copy_len = requested_len.min(name.len());
             if copy_len > 0 {
@@ -489,9 +481,7 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
                 .write_socket_to_path(&buffer, path)
                 .map_err(ObjectError::from)?
         } else {
-            socket
-                .write_socket(&buffer)
-                .map_err(ObjectError::from)?
+            socket.write_socket(&buffer).map_err(ObjectError::from)?
         };
         return Ok(written);
     }
@@ -499,9 +489,7 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
     if let Some(path) = target_path
         && matches!(&*socket.state.lock(), UnixSocketState::Unbound)
     {
-        socket
-            .connect(path)
-            .map_err(ObjectError::from)?;
+        socket.connect(path).map_err(ObjectError::from)?;
     }
 
     let mut total_written = 0usize;
@@ -515,9 +503,7 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
         }
 
         let buffer = unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
-        let written = socket
-            .write_socket(buffer)
-            .map_err(ObjectError::from)?;
+        let written = socket.write_socket(buffer).map_err(ObjectError::from)?;
         total_written += written;
         if written < buffer.len() {
             break;
@@ -740,9 +726,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         }
 
         let buffer = unsafe { core::slice::from_raw_parts_mut(iov.iov_base, iov.iov_len) };
-        let read = socket
-            .read_socket(buffer)
-            .map_err(ObjectError::from)?;
+        let read = socket.read_socket(buffer).map_err(ObjectError::from)?;
         total_read += read;
         if read < buffer.len() {
             break;
@@ -751,9 +735,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
 
     msg.msg_flags = 0;
     if !msg.msg_name.is_null() {
-        let name = socket
-            .getpeername_bytes()
-            .map_err(ObjectError::from)?;
+        let name = socket.getpeername_bytes().map_err(ObjectError::from)?;
         let copy_len = (msg.msg_namelen as usize).min(name.len());
         if copy_len > 0 {
             user_safe::write(msg.msg_name.cast::<u8>(), &name[..copy_len])?;

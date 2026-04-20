@@ -1,9 +1,9 @@
 use alloc::sync::Weak;
 
 use super::{
-    DATAGRAM_RECV_CAPACITY, STREAM_RECV_CAPACITY, SocketError, SocketResult, UNIX_SOCKET_REGISTRY,
-    SocketPeerCred, UnixDatagramMessage, UnixSocketKind, UnixSocketObject, UnixSocketRegistryEntry,
-    UnixSocketState, wake_io, wake_pollers,
+    DATAGRAM_RECV_CAPACITY, STREAM_RECV_CAPACITY, SocketError, SocketPeerCred, SocketResult,
+    UNIX_SOCKET_REGISTRY, UnixDatagramMessage, UnixSocketKind, UnixSocketObject,
+    UnixSocketRegistryEntry, UnixSocketState, wake_io, wake_pollers,
 };
 use crate::{
     object::{error::ObjectError, traits::Writable},
@@ -21,7 +21,11 @@ impl Writable for UnixSocketObject {
 }
 
 impl UnixSocketObject {
-    fn write_datagram_socket(&self, buffer: &[u8], target_path: Option<&str>) -> SocketResult<usize> {
+    fn write_datagram_socket(
+        &self,
+        buffer: &[u8],
+        target_path: Option<&str>,
+    ) -> SocketResult<usize> {
         let datagram = match &*self.state.lock() {
             UnixSocketState::Datagram(datagram) => datagram.clone(),
             _ => return Err(SocketError::InvalidArguments),

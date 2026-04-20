@@ -1,4 +1,9 @@
-use alloc::{collections::VecDeque, format, sync::{Arc, Weak}, vec::Vec};
+use alloc::{
+    collections::VecDeque,
+    format,
+    sync::{Arc, Weak},
+    vec::Vec,
+};
 use core::sync::atomic::{AtomicU64, Ordering};
 use lazy_static::lazy_static;
 use spin::Mutex;
@@ -19,9 +24,9 @@ use crate::{
         AF_NETLINK, NETLINK_ADD_MEMBERSHIP, NETLINK_DROP_MEMBERSHIP, NETLINK_EXT_ACK,
         NETLINK_GET_STRICT_CHK, NETLINK_KOBJECT_UEVENT, NETLINK_LIST_MEMBERSHIPS, NETLINK_PKTINFO,
         NETLINK_ROUTE, SO_ATTACH_FILTER, SO_DETACH_FILTER, SO_DOMAIN, SO_ERROR, SO_PASSCRED,
-        SO_PASSRIGHTS, SO_PASSSEC, SO_PASSPIDFD, SO_PROTOCOL, SO_RCVBUF, SO_RCVBUFFORCE,
-        SO_REUSEADDR, SO_SNDBUF, SO_SNDBUFFORCE, SO_TIMESTAMPNS_NEW, SO_TIMESTAMPNS_OLD,
-        SO_TIMESTAMP_NEW, SO_TIMESTAMP_OLD, SO_TYPE, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK,
+        SO_PASSPIDFD, SO_PASSRIGHTS, SO_PASSSEC, SO_PROTOCOL, SO_RCVBUF, SO_RCVBUFFORCE,
+        SO_REUSEADDR, SO_SNDBUF, SO_SNDBUFFORCE, SO_TIMESTAMP_NEW, SO_TIMESTAMP_OLD,
+        SO_TIMESTAMPNS_NEW, SO_TIMESTAMPNS_OLD, SO_TYPE, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK,
         SOCK_RAW, SOL_NETLINK, SOL_SOCKET, SocketError, SocketLike, SocketResult,
     },
 };
@@ -190,15 +195,10 @@ impl NetlinkSocketObject {
                 SO_SNDBUF | SO_RCVBUF | SO_SNDBUFFORCE | SO_RCVBUFFORCE => {
                     Self::encode_i32(option_len, DEFAULT_SOCKET_BUFFER_SIZE)
                 }
-                SO_REUSEADDR
-                | SO_PASSCRED
-                | SO_PASSSEC
-                | SO_PASSRIGHTS
-                | SO_PASSPIDFD
-                | SO_TIMESTAMP_OLD
-                | SO_TIMESTAMP_NEW
-                | SO_TIMESTAMPNS_OLD
-                | SO_TIMESTAMPNS_NEW => Self::encode_i32(option_len, 0),
+                SO_REUSEADDR | SO_PASSCRED | SO_PASSSEC | SO_PASSRIGHTS | SO_PASSPIDFD
+                | SO_TIMESTAMP_OLD | SO_TIMESTAMP_NEW | SO_TIMESTAMPNS_OLD | SO_TIMESTAMPNS_NEW => {
+                    Self::encode_i32(option_len, 0)
+                }
                 _ => Err(SocketError::InvalidArguments),
             };
         }
@@ -293,7 +293,9 @@ pub fn broadcast_kobject_uevent(
     devname: Option<&str>,
 ) {
     let seqnum = NEXT_UEVENT_SEQNUM.fetch_add(1, Ordering::Relaxed);
-    let mut message = format!("{action}@{devpath}\0ACTION={action}\0DEVPATH={devpath}\0SUBSYSTEM={subsystem}\0").into_bytes();
+    let mut message =
+        format!("{action}@{devpath}\0ACTION={action}\0DEVPATH={devpath}\0SUBSYSTEM={subsystem}\0")
+            .into_bytes();
     if let Some(devname) = devname {
         message.extend_from_slice(format!("DEVNAME={devname}\0").as_bytes());
     }
@@ -374,12 +376,7 @@ impl SocketLike for NetlinkSocketObject {
         NetlinkSocketObject::setsockopt(self, level, option_name, option_value)
     }
 
-    fn getsockopt(
-        &self,
-        level: u64,
-        option_name: u64,
-        option_len: usize,
-    ) -> SocketResult<Vec<u8>> {
+    fn getsockopt(&self, level: u64, option_name: u64, option_len: usize) -> SocketResult<Vec<u8>> {
         NetlinkSocketObject::getsockopt(self, level, option_name, option_len)
     }
 }

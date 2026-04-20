@@ -2,9 +2,9 @@ use alloc::vec::Vec;
 use core::{mem, slice};
 
 use super::{
-    AF_UNIX, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PASSCRED, SO_PASSRIGHTS, SO_PASSSEC,
-    SO_PASSPIDFD, SO_PEERCRED, SO_PROTOCOL, SO_RCVBUF, SO_RCVBUFFORCE, SO_REUSEADDR, SO_SNDBUF,
-    SO_SNDBUFFORCE, SO_TIMESTAMPNS_NEW, SO_TIMESTAMPNS_OLD, SO_TIMESTAMP_NEW, SO_TIMESTAMP_OLD,
+    AF_UNIX, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PASSCRED, SO_PASSPIDFD, SO_PASSRIGHTS,
+    SO_PASSSEC, SO_PEERCRED, SO_PROTOCOL, SO_RCVBUF, SO_RCVBUFFORCE, SO_REUSEADDR, SO_SNDBUF,
+    SO_SNDBUFFORCE, SO_TIMESTAMP_NEW, SO_TIMESTAMP_OLD, SO_TIMESTAMPNS_NEW, SO_TIMESTAMPNS_OLD,
     SO_TYPE, SOCK_DGRAM, SOCK_SEQPACKET, SOCK_STREAM, SOL_SOCKET, SocketError, SocketLike,
     SocketResult, UnixSocketKind, UnixSocketObject, UnixSocketState,
 };
@@ -169,12 +169,7 @@ impl SocketLike for UnixSocketObject {
         UnixSocketObject::setsockopt(self, level, option_name, option_value)
     }
 
-    fn getsockopt(
-        &self,
-        level: u64,
-        option_name: u64,
-        option_len: usize,
-    ) -> SocketResult<Vec<u8>> {
+    fn getsockopt(&self, level: u64, option_name: u64, option_len: usize) -> SocketResult<Vec<u8>> {
         UnixSocketObject::getsockopt(self, level, option_name, option_len)
     }
 }

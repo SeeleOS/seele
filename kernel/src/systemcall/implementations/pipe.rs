@@ -21,15 +21,11 @@ fn create_pipe(fds: *mut i32, flags: i32) -> Result<usize, SyscallError> {
         } else {
             0
         };
-    let (read_end, write_end) = UnixSocketObject::pair(AF_UNIX, kind, 0)
-        .map_err(ObjectError::from)?;
+    let (read_end, write_end) =
+        UnixSocketObject::pair(AF_UNIX, kind, 0).map_err(ObjectError::from)?;
 
-    read_end
-        .shutdown(1)
-        .map_err(ObjectError::from)?;
-    write_end
-        .shutdown(0)
-        .map_err(ObjectError::from)?;
+    read_end.shutdown(1).map_err(ObjectError::from)?;
+    write_end.shutdown(0).map_err(ObjectError::from)?;
 
     let process = get_current_process();
     let (read_fd, write_fd) = {
