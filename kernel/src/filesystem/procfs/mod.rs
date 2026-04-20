@@ -19,11 +19,13 @@ use nodes::{proc_dir, proc_file, proc_rw_file, proc_symlink};
 use pid::{
     current_pid, ensure_pid_exists, fd_target, parse_fd, parse_pid, pid_cgroup_inode,
     pid_cmdline_inode, pid_dir_entries, pid_dir_inode, pid_fd_dir_inode, pid_fd_entries,
-    pid_fd_inode, pid_fdinfo_dir_inode, pid_fdinfo_entries, pid_fdinfo_inode, pid_mountinfo_inode,
-    pid_oom_score_adj_inode, pid_stat_inode, pid_status_inode, pid_string,
-    proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_fdinfo_bytes,
-    proc_pid_oom_score_adj_bytes, proc_pid_stat_bytes, proc_pid_status_bytes,
-    proc_pid_write_oom_score_adj,
+    pid_fd_inode, pid_fdinfo_dir_inode, pid_fdinfo_entries, pid_fdinfo_inode, pid_gid_map_inode,
+    pid_mountinfo_inode, pid_ns_dir_inode, pid_ns_entries, pid_ns_inode, pid_oom_score_adj_inode,
+    pid_root_inode, pid_setgroups_inode, pid_stat_inode, pid_status_inode, pid_string,
+    pid_uid_map_inode, proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_fdinfo_bytes,
+    proc_pid_gid_map_bytes, proc_pid_oom_score_adj_bytes, proc_pid_setgroups_bytes,
+    proc_pid_stat_bytes, proc_pid_status_bytes, proc_pid_uid_map_bytes, proc_pid_write_gid_map,
+    proc_pid_write_oom_score_adj, proc_pid_write_setgroups, proc_pid_write_uid_map,
 };
 use root::{
     PROC_CMDLINE_INODE, PROC_MOUNTS_INODE, PROC_ROOT_INODE, PROC_SELF_INODE,
@@ -179,6 +181,49 @@ impl FileSystem for ProcFs {
                     proc_mountinfo_bytes,
                 ))
             }
+            ["self", "uid_map"] => {
+                let pid = current_pid()?;
+                Ok(proc_rw_file(
+                    "uid_map",
+                    pid_uid_map_inode(pid),
+                    move || proc_pid_uid_map_bytes(pid).unwrap_or_default(),
+                    move |buffer| proc_pid_write_uid_map(pid, buffer),
+                ))
+            }
+            ["self", "gid_map"] => {
+                let pid = current_pid()?;
+                Ok(proc_rw_file(
+                    "gid_map",
+                    pid_gid_map_inode(pid),
+                    move || proc_pid_gid_map_bytes(pid).unwrap_or_default(),
+                    move |buffer| proc_pid_write_gid_map(pid, buffer),
+                ))
+            }
+            ["self", "setgroups"] => {
+                let pid = current_pid()?;
+                Ok(proc_rw_file(
+                    "setgroups",
+                    pid_setgroups_inode(pid),
+                    move || proc_pid_setgroups_bytes(pid).unwrap_or_default(),
+                    move |buffer| proc_pid_write_setgroups(pid, buffer),
+                ))
+            }
+            ["self", "root"] => {
+                let pid = current_pid()?;
+                Ok(proc_symlink("root", pid_root_inode(pid), "/".into()))
+            }
+            ["self", "ns"] => {
+                let pid = current_pid()?;
+                Ok(proc_dir("ns", pid_ns_dir_inode(pid), pid_ns_entries()))
+            }
+            ["self", "ns", namespace] => {
+                let pid = current_pid()?;
+                Ok(proc_file(
+                    namespace,
+                    pid_ns_inode(pid, namespace)?,
+                    Vec::new,
+                ))
+            }
             ["self", "fd"] => {
                 let pid = current_pid()?;
                 Ok(proc_dir("fd", pid_fd_dir_inode(pid), pid_fd_entries(pid)?))
@@ -258,6 +303,55 @@ impl FileSystem for ProcFs {
                     "mountinfo",
                     pid_mountinfo_inode(pid),
                     proc_mountinfo_bytes,
+                ))
+            }
+            [pid, "uid_map"] => {
+                let pid = parse_pid(pid)?;
+                ensure_pid_exists(pid)?;
+                Ok(proc_rw_file(
+                    "uid_map",
+                    pid_uid_map_inode(pid),
+                    move || proc_pid_uid_map_bytes(pid).unwrap_or_default(),
+                    move |buffer| proc_pid_write_uid_map(pid, buffer),
+                ))
+            }
+            [pid, "gid_map"] => {
+                let pid = parse_pid(pid)?;
+                ensure_pid_exists(pid)?;
+                Ok(proc_rw_file(
+                    "gid_map",
+                    pid_gid_map_inode(pid),
+                    move || proc_pid_gid_map_bytes(pid).unwrap_or_default(),
+                    move |buffer| proc_pid_write_gid_map(pid, buffer),
+                ))
+            }
+            [pid, "setgroups"] => {
+                let pid = parse_pid(pid)?;
+                ensure_pid_exists(pid)?;
+                Ok(proc_rw_file(
+                    "setgroups",
+                    pid_setgroups_inode(pid),
+                    move || proc_pid_setgroups_bytes(pid).unwrap_or_default(),
+                    move |buffer| proc_pid_write_setgroups(pid, buffer),
+                ))
+            }
+            [pid, "root"] => {
+                let pid = parse_pid(pid)?;
+                ensure_pid_exists(pid)?;
+                Ok(proc_symlink("root", pid_root_inode(pid), "/".into()))
+            }
+            [pid, "ns"] => {
+                let pid = parse_pid(pid)?;
+                ensure_pid_exists(pid)?;
+                Ok(proc_dir("ns", pid_ns_dir_inode(pid), pid_ns_entries()))
+            }
+            [pid, "ns", namespace] => {
+                let pid = parse_pid(pid)?;
+                ensure_pid_exists(pid)?;
+                Ok(proc_file(
+                    namespace,
+                    pid_ns_inode(pid, namespace)?,
+                    Vec::new,
                 ))
             }
             [pid, "fd"] => {

@@ -1,5 +1,8 @@
-use alloc::sync::{Arc, Weak};
-use alloc::vec::Vec;
+use alloc::{
+    string::String,
+    sync::{Arc, Weak},
+    vec::Vec,
+};
 use bitflags::bitflags;
 use spin::Mutex;
 use x86_64::VirtAddr;
@@ -42,6 +45,7 @@ pub struct Process {
     pub objects: Vec<Option<Arc<dyn Object>>>,
     pub object_flags: Vec<FdFlags>,
     pub current_directory: AbsolutePath,
+    pub command_line: Vec<String>,
     pub exit_code: Option<u64>,
     pub parent: Option<ProcessRef>,
     pub signal_actions: Vec<SignalAction>,
@@ -59,6 +63,9 @@ pub struct Process {
     pub saved_gid: u32,
     pub fs_gid: u32,
     pub supplementary_groups: Vec<u32>,
+    pub user_namespace_uid_map: Option<String>,
+    pub user_namespace_gid_map: Option<String>,
+    pub user_namespace_setgroups: Option<String>,
     pub keep_capabilities: bool,
     pub oom_score_adj: i32,
     pub secure_bits: u32,
@@ -84,6 +91,7 @@ impl Default for Process {
             threads: Vec::new(),
             objects: Vec::new(),
             object_flags: Vec::new(),
+            command_line: Vec::new(),
             exit_code: None,
             parent: None,
             timers: Vec::new(),
@@ -97,6 +105,9 @@ impl Default for Process {
             saved_gid: 0,
             fs_gid: 0,
             supplementary_groups: Vec::new(),
+            user_namespace_uid_map: None,
+            user_namespace_gid_map: None,
+            user_namespace_setgroups: None,
             keep_capabilities: false,
             oom_score_adj: 0,
             secure_bits: 0,

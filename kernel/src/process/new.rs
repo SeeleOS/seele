@@ -8,9 +8,7 @@ use spin::Mutex;
 
 use crate::{
     elfloader::{load_elf_lazy, read_elf_header},
-    filesystem::{
-        errors::FSError, object::FileLikeObject, path::Path, vfs::VirtualFS,
-    },
+    filesystem::{errors::FSError, object::FileLikeObject, path::Path, vfs::VirtualFS},
     memory::addrspace::AddrSpace,
     misc::time::with_profiling,
     object::{Object, tty_device::get_default_tty},
@@ -88,6 +86,7 @@ impl Process {
         }));
 
         let process = &mut *process_arc.lock();
+        process.command_line = vec![String::from(INIT_PATH)];
 
         log::debug!("process {}: setup start", pid.0);
         let context = with_profiling(

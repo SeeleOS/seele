@@ -1,4 +1,4 @@
-use alloc::{string::String, vec::Vec};
+use alloc::{string::String, vec, vec::Vec};
 use x86_64::VirtAddr;
 
 use crate::{
@@ -10,6 +10,7 @@ use crate::{
         action::{SignalAction, SignalHandlingType},
         misc::default_signal_action_vec,
     },
+    systemcall::handling::register_traced_process,
     thread::{
         THREAD_MANAGER, misc::SnapshotState, snapshot::ThreadSnapshot, stack::allocate_kernel_stack,
     },
@@ -29,6 +30,18 @@ fn execve_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalAction> {
         .collect()
 }
 
+fn should_trace_exec_path(path: &str) -> bool {
+    matches!(
+        path,
+        p if p.ends_with("/systemd-modules-load")
+            || p.ends_with("/modprobe")
+            || p.ends_with("/kmod")
+            || p.ends_with("/systemd-tmpfiles")
+            || p.ends_with("/udevadm")
+            || p.ends_with("/systemd-udevd")
+    )
+}
+
 impl Process {
     fn execve(
         &mut self,
@@ -37,6 +50,15 @@ impl Process {
         env: Vec<String>,
     ) -> Result<*mut ThreadSnapshot, FSError> {
         let path_string = path.clone().as_string();
+        let command_line = if args.is_empty() {
+            vec![path_string.clone()]
+        } else {
+            args.clone()
+        };
+        if should_trace_exec_path(&path_string) {
+            crate::s_println!("trace exec pid={} path={}", self.pid.0, path_string);
+            register_traced_process(self.pid.0, path_string.clone());
+        }
         // TODO: kill all the other threads when execveing
         log::trace!("execve: start {}", path.clone().as_string());
         with_profiling(
@@ -101,6 +123,7 @@ impl Process {
         self.pending_signals = Signals::default();
         self.signal_actions = execve_signal_actions(&self.signal_actions);
         self.program_break = 0;
+        self.command_line = command_line;
 
         with_profiling(
             || self.addrspace.load(),
@@ -122,9 +145,7 @@ impl Process {
 pub fn execve(path: Path, args: Vec<String>, env: Vec<String>) -> Result<(), FSError> {
     let (_, resolved_path) = VirtualFS.lock().resolve_with_path(path)?;
     let snapshot = {
-        log::debug!("execve: locking process manager");
         let manager = MANAGER.lock();
-        log::debug!("execve: process manager locked");
         let current = manager.current.clone().unwrap();
         with_profiling(
             || current.lock().execve(resolved_path, args, env),

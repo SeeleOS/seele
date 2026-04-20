@@ -19,9 +19,37 @@ pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("cgroup".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("oom_score_adj".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("mountinfo".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("uid_map".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("gid_map".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("setgroups".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("root".into(), DirectoryContentType::Symlink),
+        DirectoryContentInfo::new("ns".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("fd".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("fdinfo".into(), DirectoryContentType::Directory),
     ]
+}
+
+const PROC_NAMESPACE_NAMES: [&str; 8] =
+    ["cgroup", "ipc", "mnt", "net", "pid", "time", "user", "uts"];
+
+fn default_user_namespace_map(id: u32) -> String {
+    format!("0 {id} 1\n")
+}
+
+fn normalize_proc_control_write(buffer: &[u8]) -> FSResult<String> {
+    let content = core::str::from_utf8(buffer).map_err(|_| FSError::Other)?;
+    Ok(if content.ends_with('\n') {
+        String::from(content)
+    } else {
+        format!("{content}\n")
+    })
+}
+
+pub(super) fn pid_ns_entries() -> Vec<DirectoryContentInfo> {
+    PROC_NAMESPACE_NAMES
+        .iter()
+        .map(|name| DirectoryContentInfo::new((*name).into(), DirectoryContentType::File))
+        .collect()
 }
 
 pub(super) fn pid_fd_entries(pid: ProcessID) -> FSResult<Vec<DirectoryContentInfo>> {
@@ -44,7 +72,11 @@ pub(super) fn pid_fd_entries(pid: ProcessID) -> FSResult<Vec<DirectoryContentInf
 pub(super) fn proc_pid_stat_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
     let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
     let process = process.lock();
-    let parent_pid = process.parent.as_ref().map(|parent| parent.lock().pid.0).unwrap_or(0);
+    let parent_pid = process
+        .parent
+        .as_ref()
+        .map(|parent| parent.lock().pid.0)
+        .unwrap_or(0);
     let state = if process.have_exited() || process.threads.is_empty() {
         'Z'
     } else {
@@ -58,19 +90,22 @@ pub(super) fn proc_pid_stat_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
             "{} ({}) {} {} {} {} 0 0 0 0 0 0 0 0 0 0 0 0 20 0 {} 0 ",
             "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
         ),
-        pid.0,
-        comm,
-        state,
-        parent_pid,
-        process.group_id.0,
-        session,
-        num_threads,
+        pid.0, comm, state, parent_pid, process.group_id.0, session, num_threads,
     );
     Ok(content.into_bytes())
 }
 
-pub(super) fn proc_pid_cmdline_bytes(_pid: ProcessID) -> Vec<u8> {
-    Vec::new()
+pub(super) fn proc_pid_cmdline_bytes(pid: ProcessID) -> Vec<u8> {
+    let Ok(process) = get_process_with_pid(pid) else {
+        return Vec::new();
+    };
+    let process = process.lock();
+    let mut bytes = Vec::new();
+    for arg in &process.command_line {
+        bytes.extend_from_slice(arg.as_bytes());
+        bytes.push(0);
+    }
+    bytes
 }
 
 fn format_capability_set(low: u32, high: u32) -> String {
@@ -80,7 +115,11 @@ fn format_capability_set(low: u32, high: u32) -> String {
 pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
     let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
     let process = process.lock();
-    let parent_pid = process.parent.as_ref().map(|parent| parent.lock().pid.0).unwrap_or(0);
+    let parent_pid = process
+        .parent
+        .as_ref()
+        .map(|parent| parent.lock().pid.0)
+        .unwrap_or(0);
     let state = if process.have_exited() || process.threads.is_empty() {
         "Z (zombie)"
     } else {
@@ -137,12 +176,72 @@ pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
             process.capability_inheritable[0],
             process.capability_inheritable[1],
         ),
-        format_capability_set(process.capability_permitted[0], process.capability_permitted[1]),
-        format_capability_set(process.capability_effective[0], process.capability_effective[1]),
-        format_capability_set(process.capability_permitted[0], process.capability_permitted[1]),
+        format_capability_set(
+            process.capability_permitted[0],
+            process.capability_permitted[1]
+        ),
+        format_capability_set(
+            process.capability_effective[0],
+            process.capability_effective[1]
+        ),
+        format_capability_set(
+            process.capability_permitted[0],
+            process.capability_permitted[1]
+        ),
         format_capability_set(process.capability_ambient[0], process.capability_ambient[1]),
     );
     Ok(content.into_bytes())
+}
+
+pub(super) fn proc_pid_uid_map_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    let process = process.lock();
+    Ok(process
+        .user_namespace_uid_map
+        .clone()
+        .unwrap_or_else(|| default_user_namespace_map(process.real_uid))
+        .into_bytes())
+}
+
+pub(super) fn proc_pid_gid_map_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    let process = process.lock();
+    Ok(process
+        .user_namespace_gid_map
+        .clone()
+        .unwrap_or_else(|| default_user_namespace_map(process.real_gid))
+        .into_bytes())
+}
+
+pub(super) fn proc_pid_setgroups_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    let process = process.lock();
+    Ok(process
+        .user_namespace_setgroups
+        .clone()
+        .unwrap_or_else(|| String::from("allow\n"))
+        .into_bytes())
+}
+
+pub(super) fn proc_pid_write_uid_map(pid: ProcessID, buffer: &[u8]) -> FSResult<usize> {
+    let value = normalize_proc_control_write(buffer)?;
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    process.lock().user_namespace_uid_map = Some(value);
+    Ok(buffer.len())
+}
+
+pub(super) fn proc_pid_write_gid_map(pid: ProcessID, buffer: &[u8]) -> FSResult<usize> {
+    let value = normalize_proc_control_write(buffer)?;
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    process.lock().user_namespace_gid_map = Some(value);
+    Ok(buffer.len())
+}
+
+pub(super) fn proc_pid_write_setgroups(pid: ProcessID, buffer: &[u8]) -> FSResult<usize> {
+    let value = normalize_proc_control_write(buffer)?;
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    process.lock().user_namespace_setgroups = Some(value);
+    Ok(buffer.len())
 }
 
 pub(super) fn proc_pid_cgroup_bytes(pid: ProcessID) -> Vec<u8> {
@@ -258,6 +357,22 @@ pub(super) fn pid_status_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 6
 }
 
+pub(super) fn pid_uid_map_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 7
+}
+
+pub(super) fn pid_gid_map_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 8
+}
+
+pub(super) fn pid_setgroups_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 9
+}
+
+pub(super) fn pid_root_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 10
+}
+
 pub(super) fn pid_fd_dir_inode(pid: ProcessID) -> u64 {
     0x5000_0000 + pid.0 * 0x100
 }
@@ -266,12 +381,24 @@ pub(super) fn pid_fdinfo_dir_inode(pid: ProcessID) -> u64 {
     0x5100_0000 + pid.0 * 0x100
 }
 
+pub(super) fn pid_ns_dir_inode(pid: ProcessID) -> u64 {
+    0x5200_0000 + pid.0 * 0x100
+}
+
 pub(super) fn pid_fd_inode(pid: ProcessID, fd: &str) -> u64 {
     pid_fd_dir_inode(pid) + 1 + fd.parse::<u64>().unwrap_or(0)
 }
 
 pub(super) fn pid_fdinfo_inode(pid: ProcessID, fd: &str) -> u64 {
     pid_fdinfo_dir_inode(pid) + 1 + fd.parse::<u64>().unwrap_or(0)
+}
+
+pub(super) fn pid_ns_inode(pid: ProcessID, name: &str) -> FSResult<u64> {
+    let index = PROC_NAMESPACE_NAMES
+        .iter()
+        .position(|namespace| *namespace == name)
+        .ok_or(FSError::NotFound)?;
+    Ok(pid_ns_dir_inode(pid) + 1 + index as u64)
 }
 
 pub(super) fn fd_target(pid: ProcessID, fd: &str) -> FSResult<String> {
