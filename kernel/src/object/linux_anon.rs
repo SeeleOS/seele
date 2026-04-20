@@ -3,6 +3,7 @@ use alloc::{
     sync::{Arc, Weak},
     vec::Vec,
 };
+use bitflags::bitflags;
 use spin::Mutex;
 
 use crate::{
@@ -29,8 +30,16 @@ use crate::{
 };
 use strum::IntoEnumIterator;
 
-const EVENTFD_SEMAPHORE: i32 = 0x1;
 const EVENTFD_COUNTER_MAX: u64 = u64::MAX - 1;
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    pub struct EventFdFlags: i32 {
+        const EFD_SEMAPHORE = 0x1;
+        const EFD_NONBLOCK = 0o4_000;
+        const EFD_CLOEXEC = 0o2_000_000;
+    }
+}
 
 #[derive(Default)]
 struct SignalfdRegistry {
@@ -410,15 +419,15 @@ pub struct EventFdObject {
 }
 
 impl EventFdObject {
-    pub fn new(initial: u64, flags: i32) -> Arc<Self> {
+    pub fn new(initial: u64, flags: EventFdFlags) -> Arc<Self> {
         let eventfd = Arc::new(Self {
             flags: Mutex::new(FileFlags::empty()),
             state: Mutex::new(EventFdState { counter: initial }),
-            semaphore: (flags & EVENTFD_SEMAPHORE) != 0,
+            semaphore: flags.contains(EventFdFlags::EFD_SEMAPHORE),
             self_ref: Mutex::new(None),
         });
         *eventfd.self_ref.lock() = Some(Arc::downgrade(&eventfd));
-        if (flags & 0o4_000) != 0 {
+        if flags.contains(EventFdFlags::EFD_NONBLOCK) {
             let _ = eventfd.clone().set_flags(FileFlags::NONBLOCK);
         }
         eventfd

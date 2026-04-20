@@ -14,7 +14,7 @@ use crate::misc::time::{self, Time as KernelTime};
 use crate::misc::timer::ClockId;
 use crate::misc::{others::protection_to_page_flags, reboot as reboot_state, utsname::UtsName};
 use crate::object::linux_anon::{
-    EventFdObject, InotifyObject, PidFdObject, TimerFdObject, wake_linux_io_waiters,
+    EventFdFlags, EventFdObject, InotifyObject, PidFdObject, TimerFdObject, wake_linux_io_waiters,
 };
 use crate::object::misc::get_object_current_process;
 use crate::object::{FileFlags, Object, misc::ObjectRef};
@@ -131,21 +131,44 @@ bitflags! {
     }
 }
 
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct InotifyInitFlags: i32 {
+        const IN_NONBLOCK = 0o4_000;
+        const IN_CLOEXEC = 0o2_000_000;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct TimerFdFlags: i32 {
+        const TFD_NONBLOCK = 0o4_000;
+        const TFD_CLOEXEC = 0o2_000_000;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct TimerSetTimeFlags: i32 {
+        const TFD_TIMER_ABSTIME = 1;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct ClockNanosleepFlags: i32 {
+        const TIMER_ABSTIME = 1;
+    }
+}
+
 const RSEQ_LEN_X86_64: u32 = 32;
 const RSEQ_CPU_ID_UNINITIALIZED: u32 = u32::MAX;
 const RSEQ_CPU_ID_SINGLE_CORE: u32 = 0;
 const RLIM64_INFINITY: u64 = u64::MAX;
 const RLIMIT_NOFILE_DEFAULT: u64 = 1024;
 const INITIAL_BRK_RESERVE: u64 = 0x4000_0000;
-const TIMER_ABSTIME: i32 = 1;
 const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
 const LINUX_CAPABILITY_U32S_3: usize = 2;
-const TFD_TIMER_ABSTIME: i32 = 1;
-const TFD_NONBLOCK: i32 = 0o4_000;
-const TFD_CLOEXEC: i32 = 0o2_000_000;
-const EFD_SEMAPHORE: i32 = 0x1;
-const EFD_NONBLOCK: i32 = 0o4_000;
-const EFD_ALLOWED_FLAGS: i32 = EFD_SEMAPHORE | EFD_NONBLOCK | 0o2_000_000;
 const LINUX_REBOOT_MAGIC1: u32 = 0xfee1_dead;
 const LINUX_REBOOT_MAGIC2: u32 = 0x2812_1969;
 const LINUX_REBOOT_CMD_CAD_OFF: u32 = 0x0000_0000;
@@ -623,11 +646,12 @@ define_syscall!(InotifyInit, {
 });
 
 define_syscall!(InotifyInit1, |flags: i32| {
+    let flags = InotifyInitFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
     let object = Arc::new(InotifyObject::default());
-    if (flags & TFD_NONBLOCK) != 0 {
+    if flags.contains(InotifyInitFlags::IN_NONBLOCK) {
         let _ = object.clone().set_flags(FileFlags::NONBLOCK);
     }
-    let fd_flags = if (flags & TFD_CLOEXEC) != 0 {
+    let fd_flags = if flags.contains(InotifyInitFlags::IN_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
         FdFlags::empty()
@@ -639,13 +663,11 @@ define_syscall!(InotifyInit1, |flags: i32| {
 });
 
 fn create_eventfd(initval: u32, flags: i32) -> Result<usize, SyscallError> {
-    if (flags & !EFD_ALLOWED_FLAGS) != 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
+    let flags = EventFdFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
 
     let fd = get_current_process().lock().push_object_with_flags(
         EventFdObject::new(initval as u64, flags),
-        if (flags & TFD_CLOEXEC) != 0 {
+        if flags.contains(EventFdFlags::EFD_CLOEXEC) {
             FdFlags::CLOEXEC
         } else {
             FdFlags::empty()
@@ -676,12 +698,13 @@ define_syscall!(TimerfdCreate, |clock_id: i32, flags: i32| {
     if !matches!(clock_id, 0 | 1) {
         return Err(SyscallError::InvalidArguments);
     }
+    let flags = TimerFdFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
 
     let object = Arc::new(TimerFdObject::default());
-    if (flags & TFD_NONBLOCK) != 0 {
+    if flags.contains(TimerFdFlags::TFD_NONBLOCK) {
         let _ = object.clone().set_flags(FileFlags::NONBLOCK);
     }
-    let fd_flags = if (flags & TFD_CLOEXEC) != 0 {
+    let fd_flags = if flags.contains(TimerFdFlags::TFD_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
         FdFlags::empty()
@@ -701,6 +724,7 @@ define_syscall!(
         if new_value.is_null() {
             return Err(SyscallError::BadAddress);
         }
+        let flags = TimerSetTimeFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
 
         let timerfd = object.as_timerfd()?;
         let now = KernelTime::since_boot();
@@ -721,7 +745,7 @@ define_syscall!(
         let interval_ns = linux_timespec_to_ns(new_spec.it_interval)?;
         let deadline = if value_ns == 0 {
             None
-        } else if (flags & TFD_TIMER_ABSTIME) != 0 {
+        } else if flags.contains(TimerSetTimeFlags::TFD_TIMER_ABSTIME) {
             Some(KernelTime::from_nanoseconds(value_ns))
         } else {
             Some(now.add_ns(value_ns))
@@ -993,9 +1017,7 @@ define_syscall!(
         if req.is_null() {
             return Err(SyscallError::BadAddress);
         }
-        if (flags & !TIMER_ABSTIME) != 0 {
-            return Err(SyscallError::InvalidArguments);
-        }
+        let flags = ClockNanosleepFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
 
         let requested = unsafe { &*req };
         if requested.tv_sec < 0 || requested.tv_nsec < 0 || requested.tv_nsec >= 1_000_000_000 {
@@ -1011,7 +1033,7 @@ define_syscall!(
             ClockId::Realtime => KernelTime::current(),
             ClockId::SinceBoot => KernelTime::since_boot(),
         };
-        let deadline = if (flags & TIMER_ABSTIME) != 0 {
+        let deadline = if flags.contains(ClockNanosleepFlags::TIMER_ABSTIME) {
             KernelTime::from_nanoseconds(requested_ns)
         } else {
             now.add_ns(requested_ns)
@@ -1042,8 +1064,9 @@ define_syscall!(Unshare, |flags: u64| {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let forbidden =
-        flags & (CloneFlags::THREAD | CloneFlags::SIGHAND | CloneFlags::VM | CloneFlags::CLEAR_SIGHAND).bits();
+    let forbidden = flags
+        & (CloneFlags::THREAD | CloneFlags::SIGHAND | CloneFlags::VM | CloneFlags::CLEAR_SIGHAND)
+            .bits();
     if forbidden != 0 {
         return Err(SyscallError::InvalidArguments);
     }
