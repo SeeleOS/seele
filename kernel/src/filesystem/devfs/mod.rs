@@ -107,6 +107,15 @@ static DEV_SHM_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     entries: &[],
 });
 
+static DEV_LOG_NODE: StaticNode = StaticNode::Symlink(
+    crate::filesystem::staticfs::StaticSymlinkNode {
+        name: "log",
+        inode: 0x100e,
+        mode: 0o120777,
+        target: "/run/systemd/journal/dev-log",
+    },
+);
+
 static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "null",
@@ -151,6 +160,10 @@ static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "shm",
         node: &DEV_SHM_NODE,
+    },
+    StaticDirEntry {
+        name: "log",
+        node: &DEV_LOG_NODE,
     },
 ];
 

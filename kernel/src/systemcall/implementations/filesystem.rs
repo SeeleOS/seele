@@ -12,7 +12,6 @@ use crate::{
         misc::{ObjectRef, get_object_current_process},
     },
     process::{FdFlags, manager::get_current_process, misc::with_current_process},
-    s_println,
     systemcall::utils::{SyscallError, SyscallImpl},
 };
 use alloc::{string::String, sync::Arc, vec::Vec};
@@ -203,6 +202,16 @@ fn resolve_path_at(dirfd: i32, path_str: &str) -> Result<Path, SyscallError> {
     let mut base = file_like.path().as_absolute();
     base.push_path_str(path_str);
     Ok(base.as_normal())
+}
+
+fn symlink_target_matches(path: &Path, expected_target: &str) -> bool {
+    let Ok(link) = VirtualFS.lock().open_nofollow(path.clone()) else {
+        return false;
+    };
+    let Ok(target) = link.read_link() else {
+        return false;
+    };
+    target == expected_target
 }
 
 fn check_access_mode(mode: i32) -> Result<(), SyscallError> {
@@ -961,13 +970,8 @@ define_syscall!(SymlinkAt, |target: CString,
     let link_path = resolve_path_at(new_dirfd, &link_path)?;
 
     let result = VirtualFS.lock().create_symlink(link_path.clone(), &target);
-    if let Err(err) = &result {
-        s_println!(
-            "symlinkat failed link={} target={} err={:?}",
-            link_path.as_string(),
-            target,
-            err
-        );
+    if result.is_err() && symlink_target_matches(&link_path, &target) {
+        return Ok(0);
     }
     result?;
 
