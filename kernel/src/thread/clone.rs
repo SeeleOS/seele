@@ -1,10 +1,7 @@
 use crate::{
     process::ProcessRef,
     thread::{
-        THREAD_MANAGER, ThreadRef,
-        misc::ThreadID,
-        stack::allocate_kernel_stack,
-        thread::Thread,
+        THREAD_MANAGER, ThreadRef, misc::ThreadID, stack::allocate_kernel_stack, thread::Thread,
     },
 };
 

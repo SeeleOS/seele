@@ -1,9 +1,9 @@
 use alloc::vec::Vec;
 
 use crate::process::{
-    misc::ProcessID,
     ProcessRef,
     manager::{MANAGER, Manager},
+    misc::ProcessID,
 };
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]

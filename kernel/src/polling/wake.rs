@@ -16,9 +16,7 @@ impl PollerObject {
         data: u64,
     ) -> bool {
         let already_queued = woken_events.iter().any(|ready| {
-            ready.event == event
-                && ready.data == data
-                && Arc::ptr_eq(&ready.object, object)
+            ready.event == event && ready.data == data && Arc::ptr_eq(&ready.object, object)
         });
 
         if !already_queued {
@@ -35,9 +33,7 @@ impl PollerObject {
             .entries
             .lock()
             .iter()
-            .filter(|entry| {
-                entry.event == event && Arc::ptr_eq(&entry.object, &object)
-            })
+            .filter(|entry| entry.event == event && Arc::ptr_eq(&entry.object, &object))
             .map(|entry| entry.data)
             .collect();
 

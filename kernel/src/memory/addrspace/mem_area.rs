@@ -1,16 +1,10 @@
 use alloc::sync::Arc;
 use x86_64::{
     VirtAddr,
-    structures::paging::{
-        Page, PageTableFlags, PhysFrame, Size4KiB,
-        page::PageRange,
-    },
+    structures::paging::{Page, PageTableFlags, PhysFrame, Size4KiB, page::PageRange},
 };
 
-use crate::{
-    filesystem::object::FileLikeObject,
-    memory::addrspace::KERNEL_MEM_START,
-};
+use crate::{filesystem::object::FileLikeObject, memory::addrspace::KERNEL_MEM_START};
 
 #[derive(Clone, Debug)]
 pub struct MemoryArea {

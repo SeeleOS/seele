@@ -40,11 +40,7 @@ struct LinuxIovec {
     iov_len: usize,
 }
 
-fn write_dirents64(
-    object_index: u64,
-    buf: *mut u8,
-    len: usize,
-) -> SyscallResult {
+fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult {
     let obj = get_object_current_process(object_index)?.as_file_like()?;
     let contents = match obj.directory_contents() {
         Ok(contents) => contents,

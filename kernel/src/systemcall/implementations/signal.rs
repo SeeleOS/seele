@@ -1,4 +1,3 @@
-use alloc::vec::Vec;
 use crate::process::group::ProcessGroupID;
 use crate::process::manager::MANAGER;
 use crate::process::misc::ProcessID;
@@ -17,8 +16,9 @@ use crate::{
     },
     process::misc::with_current_process,
     process::{FdFlags, manager::get_current_process},
-    signal::{Signal, SigInfo, UContext, action::SignalAction},
+    signal::{SigInfo, Signal, UContext, action::SignalAction},
 };
+use alloc::vec::Vec;
 use core::mem::size_of;
 use num_enum::TryFromPrimitive;
 use spin::Mutex;

@@ -4,10 +4,10 @@ use core::{
     task::{Context, Poll},
 };
 
+use alloc::sync::Arc;
 use futures_util::{Stream, StreamExt, task::AtomicWaker};
 use heapless::Deque;
 use ps2_mouse::Mouse;
-use alloc::sync::Arc;
 use spin::Mutex;
 use x86_64::{
     instructions::interrupts::without_interrupts, instructions::port::Port,

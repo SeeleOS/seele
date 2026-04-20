@@ -78,7 +78,10 @@ pub fn init_stack_layout(
 
     let execfn_ptr = builder.push_str(exec_path);
     let platform_ptr = builder.push_str("x86_64");
-    let random_bytes = [Time::current().as_nanoseconds(), Time::since_boot().as_nanoseconds()];
+    let random_bytes = [
+        Time::current().as_nanoseconds(),
+        Time::since_boot().as_nanoseconds(),
+    ];
     let random_ptr = builder.push_struct(&random_bytes);
 
     let aux_entries = if interpreter_base.is_some() { 20 } else { 19 };

@@ -10,17 +10,16 @@ use crate::memory::{
     user_safe,
 };
 use crate::misc::error::AsSyscallError;
-use crate::misc::timer::ClockId;
 use crate::misc::time::{self, Time as KernelTime};
+use crate::misc::timer::ClockId;
 use crate::misc::{others::protection_to_page_flags, reboot as reboot_state, utsname::UtsName};
-use crate::object::{FileFlags, Object, misc::ObjectRef};
 use crate::object::linux_anon::{
     EventFdObject, InotifyObject, PidFdObject, TimerFdObject, wake_linux_io_waiters,
 };
 use crate::object::misc::get_object_current_process;
+use crate::object::{FileFlags, Object, misc::ObjectRef};
 use crate::process::{
-    FdFlags,
-    Process,
+    FdFlags, Process,
     manager::{MANAGER, get_current_process},
     misc::{ProcessID, get_process_with_pid},
 };
@@ -645,9 +644,12 @@ define_syscall!(Eventfd2, |initval: u32, flags: i32| {
     create_eventfd(initval, flags)
 });
 
-define_syscall!(InotifyAddWatch, |object: ObjectRef, _path: String, _mask: u32| {
-    Ok(object.as_inotify()?.add_watch() as usize)
-});
+define_syscall!(
+    InotifyAddWatch,
+    |object: ObjectRef, _path: String, _mask: u32| {
+        Ok(object.as_inotify()?.add_watch() as usize)
+    }
+);
 
 define_syscall!(InotifyRmWatch, |object: ObjectRef, _wd: i32| {
     let _ = object.as_inotify()?;
@@ -839,12 +841,7 @@ define_syscall!(Uname, |info: *mut UtsName| {
     if info.is_null() {
         return Err(SyscallError::BadAddress);
     }
-    let mut uts = UtsName::new(
-        "Seele",
-        "6.12.0-seele",
-        "#1 Seele",
-        "x86_64",
-    );
+    let mut uts = UtsName::new("Seele", "6.12.0-seele", "#1 Seele", "x86_64");
     uts.nodename = crate::misc::utsname::current_hostname(NAME);
     user_safe::write(info, &uts)?;
     Ok(0)
@@ -988,8 +985,8 @@ define_syscall!(
             return Err(SyscallError::InvalidArguments);
         }
 
-        let clock = ClockId::try_from(clock_id as u64)
-            .map_err(|_| SyscallError::InvalidArguments)?;
+        let clock =
+            ClockId::try_from(clock_id as u64).map_err(|_| SyscallError::InvalidArguments)?;
         let requested_ns =
             (requested.tv_sec as u64).saturating_mul(1_000_000_000) + (requested.tv_nsec as u64);
 

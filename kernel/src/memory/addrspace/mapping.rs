@@ -4,13 +4,7 @@ use x86_64::{
     structures::paging::{Mapper, Page, Size4KiB},
 };
 
-use crate::{
-    memory::{
-        addrspace::{
-            mem_area::{Data, MemoryArea},
-        },
-    },
-};
+use crate::memory::addrspace::mem_area::{Data, MemoryArea};
 
 use super::{AddrSpace, AllocResult, LAZY_MAP};
 
