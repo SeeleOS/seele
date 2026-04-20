@@ -30,9 +30,10 @@ use pid::{
 use root::{
     PROC_CMDLINE_INODE, PROC_MOUNTS_INODE, PROC_ROOT_INODE, PROC_SELF_INODE,
     PROC_SYS_FS_FILE_MAX_INODE, PROC_SYS_FS_INODE, PROC_SYS_FS_NR_OPEN_INODE, PROC_SYS_INODE,
-    PROC_SYS_KERNEL_INODE, PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE, PROC_SYS_KERNEL_RANDOM_INODE,
-    proc_boot_id_bytes, proc_kernel_cmdline_bytes, proc_kernel_entries, proc_kernel_random_entries,
-    proc_mountinfo_bytes, proc_mounts_bytes, proc_root_entries,
+    PROC_SYS_KERNEL_DOMAINNAME_INODE, PROC_SYS_KERNEL_HOSTNAME_INODE, PROC_SYS_KERNEL_INODE,
+    PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE, PROC_SYS_KERNEL_RANDOM_INODE, proc_boot_id_bytes,
+    proc_kernel_cmdline_bytes, proc_kernel_entries, proc_kernel_random_entries, proc_mountinfo_bytes,
+    proc_mounts_bytes, proc_root_entries,
 };
 
 const DEFAULT_FILE_MAX: u64 = 1_048_576;
@@ -40,6 +41,39 @@ const DEFAULT_NR_OPEN: u64 = 1_048_576;
 
 static PROC_FILE_MAX: AtomicU64 = AtomicU64::new(DEFAULT_FILE_MAX);
 static PROC_NR_OPEN: AtomicU64 = AtomicU64::new(DEFAULT_NR_OPEN);
+
+fn proc_hostname_bytes() -> Vec<u8> {
+    proc_c_string_bytes(crate::misc::utsname::current_hostname(crate::NAME))
+}
+
+fn proc_domainname_bytes() -> Vec<u8> {
+    proc_c_string_bytes(crate::misc::utsname::current_domainname("(none)"))
+}
+
+fn proc_write_hostname(buffer: &[u8]) -> FSResult<usize> {
+    let value = proc_trim_sysctl_string(buffer)?;
+    crate::misc::utsname::set_hostname(value.as_bytes()).map_err(|_| FSError::Other)?;
+    Ok(buffer.len())
+}
+
+fn proc_write_domainname(buffer: &[u8]) -> FSResult<usize> {
+    let value = proc_trim_sysctl_string(buffer)?;
+    crate::misc::utsname::set_domainname(value.as_bytes()).map_err(|_| FSError::Other)?;
+    Ok(buffer.len())
+}
+
+fn proc_c_string_bytes(value: [u8; 65]) -> Vec<u8> {
+    let len = value.iter().position(|&byte| byte == 0).unwrap_or(value.len());
+    let mut bytes = value[..len].to_vec();
+    bytes.push(b'\n');
+    bytes
+}
+
+fn proc_trim_sysctl_string(buffer: &[u8]) -> FSResult<&str> {
+    core::str::from_utf8(buffer)
+        .map(|value| value.trim_matches(|c: char| c.is_ascii_whitespace() || c == '\0'))
+        .map_err(|_| FSError::Other)
+}
 
 fn proc_fs_entries() -> Vec<DirectoryContentInfo> {
     vec![
@@ -113,6 +147,18 @@ impl FileSystem for ProcFs {
                 "kernel",
                 PROC_SYS_KERNEL_INODE,
                 proc_kernel_entries(),
+            )),
+            ["sys", "kernel", "hostname"] => Ok(proc_rw_file(
+                "hostname",
+                PROC_SYS_KERNEL_HOSTNAME_INODE,
+                proc_hostname_bytes,
+                proc_write_hostname,
+            )),
+            ["sys", "kernel", "domainname"] => Ok(proc_rw_file(
+                "domainname",
+                PROC_SYS_KERNEL_DOMAINNAME_INODE,
+                proc_domainname_bytes,
+                proc_write_domainname,
             )),
             ["sys", "kernel", "random"] => Ok(proc_dir(
                 "random",

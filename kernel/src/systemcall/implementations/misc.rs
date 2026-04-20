@@ -859,6 +859,7 @@ define_syscall!(Uname, |info: *mut UtsName| {
     }
     let mut uts = UtsName::new("Seele", "6.12.0-seele", "#1 Seele", "x86_64");
     uts.nodename = crate::misc::utsname::current_hostname(NAME);
+    uts.domainname = crate::misc::utsname::current_domainname("(none)");
     user_safe::write(info, &uts)?;
     Ok(0)
 });

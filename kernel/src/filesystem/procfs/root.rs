@@ -23,6 +23,8 @@ pub(super) const PROC_SYS_FS_NR_OPEN_INODE: u64 = 0x3007;
 pub(super) const PROC_SYS_KERNEL_INODE: u64 = 0x3008;
 pub(super) const PROC_SYS_KERNEL_RANDOM_INODE: u64 = 0x3009;
 pub(super) const PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE: u64 = 0x300a;
+pub(super) const PROC_SYS_KERNEL_HOSTNAME_INODE: u64 = 0x300b;
+pub(super) const PROC_SYS_KERNEL_DOMAINNAME_INODE: u64 = 0x300c;
 
 lazy_static! {
     static ref PROC_BOOT_ID: String = generate_boot_id();
@@ -51,10 +53,11 @@ pub(super) fn proc_kernel_cmdline_bytes() -> Vec<u8> {
 }
 
 pub(super) fn proc_kernel_entries() -> Vec<DirectoryContentInfo> {
-    vec![DirectoryContentInfo::new(
-        "random".into(),
-        DirectoryContentType::Directory,
-    )]
+    vec![
+        DirectoryContentInfo::new("hostname".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("domainname".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("random".into(), DirectoryContentType::Directory),
+    ]
 }
 
 pub(super) fn proc_kernel_random_entries() -> Vec<DirectoryContentInfo> {

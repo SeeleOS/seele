@@ -1,6 +1,7 @@
 use spin::Mutex;
 
 static HOSTNAME: Mutex<Option<[u8; 65]>> = Mutex::new(None);
+static DOMAINNAME: Mutex<Option<[u8; 65]>> = Mutex::new(None);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SetHostnameError {
@@ -61,6 +62,28 @@ pub fn set_hostname(hostname: &[u8]) -> Result<(), SetHostnameError> {
     let mut field = [0; 65];
     write_c_field(&mut field, hostname);
     *HOSTNAME.lock() = Some(field);
+    Ok(())
+}
+
+pub fn current_domainname(default: &str) -> [u8; 65] {
+    let domainname = DOMAINNAME.lock();
+    if let Some(domainname) = *domainname {
+        domainname
+    } else {
+        let mut field = [0; 65];
+        write_c_field(&mut field, default.as_bytes());
+        field
+    }
+}
+
+pub fn set_domainname(domainname: &[u8]) -> Result<(), SetHostnameError> {
+    if domainname.len() > 64 || domainname.contains(&0) {
+        return Err(SetHostnameError::Invalid);
+    }
+
+    let mut field = [0; 65];
+    write_c_field(&mut field, domainname);
+    *DOMAINNAME.lock() = Some(field);
     Ok(())
 }
 
