@@ -162,8 +162,6 @@ add_syscall_arg_flags_type!(
     u32,
     OpenTreeFlags,
     u32,
-    MmapFlags,
-    i32,
     MremapFlags,
     u64,
     RseqFlags,
@@ -171,3 +169,7 @@ add_syscall_arg_flags_type!(
     GetRandomFlags,
     u32,
 );
+
+add_syscall_arg_type!(MmapFlags, val, {
+    Ok(MmapFlags::from_bits_retain(val as i32))
+});
