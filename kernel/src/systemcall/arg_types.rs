@@ -63,6 +63,16 @@ macro_rules! add_syscall_arg_flags_type {
     };
 }
 
+macro_rules! add_syscall_arg_flags_retain_type {
+    ($($type:ty, $raw:ty),* $(,)?) => {
+        $(
+            add_syscall_arg_type!($type, val, {
+                Ok(<$type>::from_bits_retain(val as $raw))
+            });
+        )*
+    };
+}
+
 pub trait SyscallArg {
     fn from_u64(val: u64) -> SyscallResult<Self>
     where
@@ -168,8 +178,4 @@ add_syscall_arg_flags_type!(
     u32,
 );
 
-add_syscall_arg_type!(MmapFlags, val, {
-    Ok(MmapFlags::from_bits_retain(val as i32))
-});
-
-add_syscall_arg_type!(AtFlags, val, { Ok(AtFlags::from_bits_retain(val as i32)) });
+add_syscall_arg_flags_retain_type!(MmapFlags, i32, AtFlags, i32);
