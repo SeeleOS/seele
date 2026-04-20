@@ -144,7 +144,7 @@ pub(super) fn proc_mountinfo_bytes() -> Vec<u8> {
         let parent_id = if path == "/" {
             0
         } else {
-            let parent = ids
+            ids
                 .keys()
                 .filter(|candidate| {
                     candidate.as_str() != path
@@ -154,8 +154,7 @@ pub(super) fn proc_mountinfo_bytes() -> Vec<u8> {
                 .max_by_key(|candidate| candidate.len())
                 .and_then(|candidate| ids.get(candidate))
                 .copied()
-                .unwrap_or(1);
-            parent
+                .unwrap_or(1)
         };
         let fs = fs.lock();
         let options = fs.mount_options(&crate::filesystem::path::Path::new(&path));

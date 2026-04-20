@@ -52,7 +52,7 @@ pub trait BlockDevice: Send + Sync {
 
     fn read_blocks(&self, start: usize, buffer: &mut [u8]) -> BlockDeviceResult {
         // 向上取整：(len + size - 1) / size
-        let read_len = (buffer.len() + self.block_size() - 1) / self.block_size();
+        let read_len = buffer.len().div_ceil(self.block_size());
 
         for i in 0..read_len {
             let block = start + i;

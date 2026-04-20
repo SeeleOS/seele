@@ -74,6 +74,12 @@ impl TmpFs {
     }
 }
 
+impl Default for TmpFs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileSystem for TmpFs {
     fn init(&mut self) -> FSResult<()> {
         Ok(())

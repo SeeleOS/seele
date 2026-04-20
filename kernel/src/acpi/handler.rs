@@ -21,7 +21,7 @@ impl Handler for ACPIHandler {
         PhysicalMapping {
             physical_start: physical_address,
             mapped_length: size,
-            handler: self.clone(),
+            handler: *self,
             region_length: size,
             virtual_start: NonNull::new(apply_offset(physical_address as u64) as *mut T).unwrap(),
         }

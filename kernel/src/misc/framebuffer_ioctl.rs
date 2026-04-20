@@ -7,7 +7,7 @@ pub struct FbBitfield {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct FbFixScreeninfo {
     pub id: [i8; 16],
     pub smem_start: u64,
@@ -24,28 +24,6 @@ pub struct FbFixScreeninfo {
     pub accel: u32,
     pub capabilities: u16,
     pub reserved: [u16; 2],
-}
-
-impl Default for FbFixScreeninfo {
-    fn default() -> Self {
-        Self {
-            id: [0; 16],
-            smem_start: 0,
-            smem_len: 0,
-            type_: 0,
-            type_aux: 0,
-            visual: 0,
-            xpanstep: 0,
-            ypanstep: 0,
-            ywrapstep: 0,
-            line_length: 0,
-            mmio_start: 0,
-            mmio_len: 0,
-            accel: 0,
-            capabilities: 0,
-            reserved: [0; 2],
-        }
-    }
 }
 
 #[repr(C)]

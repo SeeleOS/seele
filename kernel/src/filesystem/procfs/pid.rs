@@ -195,7 +195,7 @@ pub(super) fn proc_pid_fdinfo_bytes(pid: ProcessID, fd: usize) -> FSResult<Vec<u
         .and_then(|entry| entry.clone())
         .ok_or(FSError::NotFound)?;
 
-    let mut content = format!("pos:\t0\nflags:\t0\nmnt_id:\t0\nino:\t0\n");
+    let mut content = alloc::string::String::from("pos:\t0\nflags:\t0\nmnt_id:\t0\nino:\t0\n");
     if let Ok(pidfd) = object.as_pidfd() {
         content.push_str(&format!("Pid:\t{}\n", pidfd.pid()));
     }

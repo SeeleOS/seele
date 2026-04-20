@@ -186,6 +186,12 @@ impl DevFs {
     }
 }
 
+impl Default for DevFs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileSystem for DevFs {
     fn init(&mut self) -> FSResult<()> {
         self.inner.init()

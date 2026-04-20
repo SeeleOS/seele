@@ -46,3 +46,9 @@ impl UnixDatagramInner {
         wake_io();
     }
 }
+
+impl Default for UnixDatagramInner {
+    fn default() -> Self {
+        Self::new()
+    }
+}

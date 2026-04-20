@@ -20,15 +20,17 @@ struct SharedAllocation {
 // SAFETY: The raw pointer points to uniquely-owned DMA memory.
 unsafe impl Send for SharedAllocation {}
 
-static SHARED_ALLOCATIONS: OnceCell<Mutex<BTreeMap<PhysAddr, SharedAllocation>>> =
-    OnceCell::uninit();
-static DMA_PAGE_POOL: OnceCell<Mutex<BTreeMap<usize, Vec<(PhysAddr, usize)>>>> = OnceCell::uninit();
+type SharedAllocationMap = BTreeMap<PhysAddr, SharedAllocation>;
+type DmaPagePool = BTreeMap<usize, Vec<(PhysAddr, usize)>>;
 
-fn shared_allocations() -> &'static Mutex<BTreeMap<PhysAddr, SharedAllocation>> {
+static SHARED_ALLOCATIONS: OnceCell<Mutex<SharedAllocationMap>> = OnceCell::uninit();
+static DMA_PAGE_POOL: OnceCell<Mutex<DmaPagePool>> = OnceCell::uninit();
+
+fn shared_allocations() -> &'static Mutex<SharedAllocationMap> {
     SHARED_ALLOCATIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-fn dma_page_pool() -> &'static Mutex<BTreeMap<usize, Vec<(PhysAddr, usize)>>> {
+fn dma_page_pool() -> &'static Mutex<DmaPagePool> {
     DMA_PAGE_POOL.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 

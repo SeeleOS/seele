@@ -67,3 +67,9 @@ impl UnixStreamInner {
         wake_io();
     }
 }
+
+impl Default for UnixStreamInner {
+    fn default() -> Self {
+        Self::new()
+    }
+}

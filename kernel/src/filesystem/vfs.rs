@@ -119,3 +119,9 @@ impl VFS {
         }
     }
 }
+
+impl Default for VFS {
+    fn default() -> Self {
+        Self::new()
+    }
+}

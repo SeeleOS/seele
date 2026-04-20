@@ -447,6 +447,12 @@ impl SysFs {
     }
 }
 
+impl Default for SysFs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileSystem for SysFs {
     fn init(&mut self) -> FSResult<()> {
         self.inner.init()

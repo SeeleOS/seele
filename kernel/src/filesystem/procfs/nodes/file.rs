@@ -9,12 +9,15 @@ use crate::filesystem::{
     vfs_traits::{File, FileLikeType, Whence},
 };
 
+type ProcReadCallback = dyn Fn() -> Vec<u8> + Send + Sync;
+type ProcWriteCallback = dyn Fn(&[u8]) -> FSResult<usize> + Send + Sync;
+
 pub(super) struct ProcFile {
     name: String,
     inode: u64,
     mode: u32,
-    read: Arc<dyn Fn() -> Vec<u8> + Send + Sync>,
-    write: Option<Arc<dyn Fn(&[u8]) -> FSResult<usize> + Send + Sync>>,
+    read: Arc<ProcReadCallback>,
+    write: Option<Arc<ProcWriteCallback>>,
     offset: usize,
 }
 
@@ -23,8 +26,8 @@ impl ProcFile {
         name: String,
         inode: u64,
         mode: u32,
-        read: Arc<dyn Fn() -> Vec<u8> + Send + Sync>,
-        write: Option<Arc<dyn Fn(&[u8]) -> FSResult<usize> + Send + Sync>>,
+        read: Arc<ProcReadCallback>,
+        write: Option<Arc<ProcWriteCallback>>,
     ) -> Self {
         Self {
             name,

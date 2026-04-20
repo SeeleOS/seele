@@ -484,6 +484,12 @@ impl CgroupFs {
     }
 }
 
+impl Default for CgroupFs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileSystem for CgroupFs {
     fn init(&mut self) -> FSResult<()> {
         Ok(())

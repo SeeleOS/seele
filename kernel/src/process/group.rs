@@ -24,7 +24,7 @@ impl Manager {
     pub fn get_processes_in_group(&mut self, group_id: ProcessGroupID) -> Vec<ProcessRef> {
         let mut processes = Vec::new();
 
-        for (_, process) in &mut self.processes {
+        for process in self.processes.values_mut() {
             if process.lock().group_id == group_id {
                 processes.push(process.clone());
             }

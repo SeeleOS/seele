@@ -252,7 +252,7 @@ pub fn setup_process(
     objects: &mut Vec<Option<Arc<dyn Object>>>,
     object_flags: &mut Vec<FdFlags>,
 ) -> Result<ThreadSnapshot, FSError> {
-    if args.first().is_none() {
+    if args.is_empty() {
         args.insert(0, path.clone().as_string());
     }
 

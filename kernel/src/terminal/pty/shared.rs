@@ -6,7 +6,7 @@ use crate::{
     terminal::object::TerminalSettings,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct PtyShared {
     pub from_master: VecDeque<u8>,
     pub from_slave: VecDeque<u8>,
@@ -15,20 +15,6 @@ pub struct PtyShared {
     pub active_group: Option<ProcessGroupID>,
     pub master: Option<Weak<dyn Object>>,
     pub slave: Option<Weak<dyn Object>>,
-}
-
-impl Default for PtyShared {
-    fn default() -> Self {
-        Self {
-            from_master: VecDeque::new(),
-            from_slave: VecDeque::new(),
-            line_buffer: VecDeque::new(),
-            info: TerminalSettings::default(),
-            active_group: None,
-            master: None,
-            slave: None,
-        }
-    }
 }
 
 impl PtyShared {

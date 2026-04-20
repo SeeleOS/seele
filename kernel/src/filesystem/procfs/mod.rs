@@ -75,6 +75,12 @@ impl ProcFs {
     }
 }
 
+impl Default for ProcFs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileSystem for ProcFs {
     fn init(&mut self) -> FSResult<()> {
         Ok(())

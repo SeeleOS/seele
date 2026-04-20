@@ -250,8 +250,8 @@ impl Directory for Ext4Directory {
 
         if inode.metadata().is_dir() {
             let path = self.join_child(name);
-            let mut iter = self.fs.read_dir(path.as_str()).map_err(map_ext4_error)?;
-            while let Some(entry) = iter.next() {
+            let iter = self.fs.read_dir(path.as_str()).map_err(map_ext4_error)?;
+            for entry in iter {
                 let entry = entry.map_err(map_ext4_error)?;
                 let entry_name = entry
                     .file_name()

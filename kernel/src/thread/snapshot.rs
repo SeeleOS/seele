@@ -40,7 +40,7 @@ impl Default for FxState {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct ThreadSnapshot {
     pub inner: Snapshot,
     // RSP used on context switching in kernel space to not messup the userstack
@@ -117,17 +117,5 @@ impl ThreadSnapshot {
 
     pub fn as_ptr(&mut self) -> *mut Self {
         self as *mut Self
-    }
-}
-
-impl Default for ThreadSnapshot {
-    fn default() -> Self {
-        Self {
-            inner: Snapshot::default(),
-            kernel_rsp: 0,
-            fx_state: FxState::default(),
-            fs_base: 0,
-            snapshot_type: ThreadSnapshotType::default(),
-        }
     }
 }

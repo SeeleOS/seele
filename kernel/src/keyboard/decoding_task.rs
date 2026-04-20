@@ -23,7 +23,7 @@ pub static RAW_QUEUE: OnceCell<Mutex<VecDeque<u8>>> = OnceCell::uninit();
 pub static MEDIUM_RAW_QUEUE: OnceCell<Mutex<VecDeque<u8>>> = OnceCell::uninit();
 
 pub async fn process_keypresses() {
-    let mut scancodes = ScancodeStream::default();
+    let mut scancodes = ScancodeStream;
 
     // loop through scancodes infinitely
     while let Some(scancode) = scancodes.next().await {
