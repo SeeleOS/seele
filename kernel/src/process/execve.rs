@@ -29,6 +29,10 @@ fn execve_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalAction> {
         .collect()
 }
 
+fn should_trace_exec_path(path: &str) -> bool {
+    path.ends_with("/systemd-journald") || path.ends_with("/systemd-udevd")
+}
+
 impl Process {
     fn execve(
         &mut self,
@@ -42,6 +46,9 @@ impl Process {
         } else {
             args.clone()
         };
+        if should_trace_exec_path(&path_string) {
+            crate::s_println!("exec trace pid={} path={}", self.pid.0, path_string);
+        }
         // TODO: kill all the other threads when execveing
         log::trace!("execve: start {}", path.clone().as_string());
         with_profiling(

@@ -293,6 +293,13 @@ impl Process {
     }
 
     pub fn send_signal(&mut self, signal: Signal) {
+        if matches!(signal, Signal::Kill) {
+            s_println!(
+                "send_signal trace target_pid={} signal={:?}",
+                self.pid.0,
+                signal
+            );
+        }
         match signal {
             Signal::Continue => {
                 let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
