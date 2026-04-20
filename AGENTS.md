@@ -46,6 +46,8 @@ After finishing a change, run `nix develop -c cargo run -- --agent` to test the 
 There is no large standalone test suite yet; verification is primarily compile checks plus QEMU boot tests.
 
 - Run `cargo check --manifest-path kernel/Cargo.toml` for all kernel changes.
+- Treat compiler warnings as failures. Do not leave any `cargo check` warnings in the tree.
+- After finishing code changes, run `cargo clippy` and address its findings before considering the work complete.
 - Run `nix develop -c cargo run -- --agent` for syscall, process, terminal, or userspace changes.
 - Add focused unit tests only when the target module already uses them.
 
