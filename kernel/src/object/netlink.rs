@@ -21,7 +21,7 @@ use crate::{
         NETLINK_ROUTE, SO_ATTACH_FILTER, SO_DETACH_FILTER, SO_DOMAIN, SO_ERROR, SO_PASSCRED,
         SO_PROTOCOL, SO_RCVBUF, SO_RCVBUFFORCE, SO_REUSEADDR, SO_SNDBUF, SO_SNDBUFFORCE, SO_TYPE,
         SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_RAW, SOL_NETLINK, SOL_SOCKET, SocketError,
-        SocketResult,
+        SocketLike, SocketResult,
     },
 };
 
@@ -319,6 +319,7 @@ impl Object for NetlinkSocketObject {
     impl_cast_function!("readable", Readable);
     impl_cast_function!("pollable", Pollable);
     impl_cast_function!("statable", Statable);
+    impl_cast_function!("socket_like", SocketLike);
     impl_cast_function_non_trait!("netlink_socket", NetlinkSocketObject);
 }
 
@@ -350,6 +351,25 @@ impl Readable for NetlinkSocketObject {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
         let (copied, _) = self.recv_message(buffer, false)?;
         Ok(copied)
+    }
+}
+
+impl SocketLike for NetlinkSocketObject {
+    fn getsockname_bytes(&self) -> SocketResult<Vec<u8>> {
+        Ok(NetlinkSocketObject::getsockname_bytes(self))
+    }
+
+    fn setsockopt(&self, level: u64, option_name: u64, option_value: &[u8]) -> SocketResult<()> {
+        NetlinkSocketObject::setsockopt(self, level, option_name, option_value)
+    }
+
+    fn getsockopt(
+        &self,
+        level: u64,
+        option_name: u64,
+        option_len: usize,
+    ) -> SocketResult<Vec<u8>> {
+        NetlinkSocketObject::getsockopt(self, level, option_name, option_len)
     }
 }
 

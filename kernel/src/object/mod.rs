@@ -19,7 +19,7 @@ use crate::{
         traits::{Configuratable, MemoryMappable, Readable, Seekable, Statable, Writable},
     },
     polling::{object::Pollable, poller::PollerObject},
-    socket::UnixSocketObject,
+    socket::{SocketLike, UnixSocketObject},
     systemcall::utils::{SyscallError, SyscallResult},
 };
 
@@ -75,6 +75,7 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function!("mappable", MemoryMappable, InvalidArguments);
     define_cast_function!("seekable", Seekable, InvalidArguments);
     define_cast_function!("statable", Statable, BadFileDescriptor);
+    define_cast_function!("socket_like", SocketLike, BadFileDescriptor);
 
     define_cast_function_non_trait!("file_like", FileLikeObject, BadFileDescriptor);
     define_cast_function_non_trait!("eventfd", EventFdObject, BadFileDescriptor);

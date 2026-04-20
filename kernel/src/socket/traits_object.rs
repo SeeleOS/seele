@@ -9,7 +9,7 @@ use crate::{
     polling::object::Pollable,
 };
 
-use super::UnixSocketObject;
+use super::{SocketLike, UnixSocketObject};
 
 const FIONBIO: u64 = 0x5421;
 const FIOCLEX: u64 = 0x5451;
@@ -32,6 +32,7 @@ impl Object for UnixSocketObject {
     impl_cast_function!("writable", Writable);
     impl_cast_function!("pollable", Pollable);
     impl_cast_function!("statable", Statable);
+    impl_cast_function!("socket_like", SocketLike);
     impl_cast_function_non_trait!("unix_socket", UnixSocketObject);
 }
 

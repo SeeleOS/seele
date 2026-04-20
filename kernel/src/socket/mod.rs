@@ -9,6 +9,7 @@ mod name;
 mod object;
 mod pair;
 mod registry;
+mod socket_like;
 mod sockopt;
 mod state;
 mod stream;
@@ -56,6 +57,7 @@ pub use datagram::{DATAGRAM_RECV_CAPACITY, UnixDatagramInner, UnixDatagramMessag
 pub use error::{SocketError, SocketResult};
 pub use object::{UnixSocketKind, UnixSocketObject};
 pub(crate) use registry::{UNIX_SOCKET_REGISTRY, UnixSocketRegistryEntry};
+pub use socket_like::SocketLike;
 pub use state::{UnixListenerInner, UnixSocketState};
 pub use stream::{STREAM_RECV_CAPACITY, SocketPeerCred, UnixStreamInner};
 pub(crate) use wake::{wake_io, wake_pollers};

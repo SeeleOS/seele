@@ -4,7 +4,7 @@ use core::{mem, slice};
 use super::{
     AF_UNIX, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PASSCRED, SO_PEERCRED, SO_PROTOCOL, SO_RCVBUF,
     SO_REUSEADDR, SO_SNDBUF, SO_TYPE, SOCK_DGRAM, SOCK_SEQPACKET, SOCK_STREAM, SOL_SOCKET,
-    SocketError, SocketResult, UnixSocketKind, UnixSocketObject, UnixSocketState,
+    SocketError, SocketLike, SocketResult, UnixSocketKind, UnixSocketObject, UnixSocketState,
 };
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
@@ -134,5 +134,24 @@ impl UnixSocketObject {
             )
         }
         .to_vec())
+    }
+}
+
+impl SocketLike for UnixSocketObject {
+    fn getsockname_bytes(&self) -> SocketResult<Vec<u8>> {
+        UnixSocketObject::getsockname_bytes(self)
+    }
+
+    fn setsockopt(&self, level: u64, option_name: u64, option_value: &[u8]) -> SocketResult<()> {
+        UnixSocketObject::setsockopt(self, level, option_name, option_value)
+    }
+
+    fn getsockopt(
+        &self,
+        level: u64,
+        option_name: u64,
+        option_len: usize,
+    ) -> SocketResult<Vec<u8>> {
+        UnixSocketObject::getsockopt(self, level, option_name, option_len)
     }
 }

@@ -1,7 +1,6 @@
 use crate::{
     define_syscall,
     memory::user_safe,
-    object::Object,
     object::misc::ObjectRef,
     object::netlink::{NetlinkSocketAddress, NetlinkSocketObject},
     process::{FdFlags, manager::get_current_process},
@@ -358,11 +357,56 @@ define_syscall!(
     |socket: ObjectRef,
      buffer: *mut u8,
      len: usize,
-     _flags: u64,
+     flags: u64,
      address: *mut u8,
      address_len_ptr: *mut u32| {
         if len > 0 && buffer.is_null() {
             return Err(SyscallError::BadAddress);
+        }
+
+        if let Ok(socket) = socket.clone().as_netlink_socket() {
+            let peek = (flags & MSG_PEEK) != 0;
+            let report_trunc = (flags & MSG_TRUNC) != 0;
+            let message_len = socket.peek_message_len().ok_or(SyscallError::TryAgain)?;
+            let mut data = Vec::new();
+            data.resize(len, 0);
+            let (copied, full_len) = socket
+                .recv_message(&mut data, peek)
+                .map_err(crate::object::error::ObjectError::from)?;
+
+            if copied > 0 {
+                user_safe::write(buffer, &data[..copied])?;
+            }
+
+            if !address.is_null() {
+                if address_len_ptr.is_null() {
+                    return Err(SyscallError::BadAddress);
+                }
+                let name = LinuxSockAddrNl {
+                    nl_family: AF_NETLINK as u16,
+                    nl_pad: 0,
+                    nl_pid: 0,
+                    nl_groups: 0,
+                };
+                let requested_len = unsafe { *address_len_ptr as usize };
+                let name_bytes = unsafe {
+                    core::slice::from_raw_parts(
+                        (&name as *const LinuxSockAddrNl).cast::<u8>(),
+                        core::mem::size_of::<LinuxSockAddrNl>(),
+                    )
+                };
+                let copy_len = requested_len.min(name_bytes.len());
+                if copy_len > 0 {
+                    user_safe::write(address, &name_bytes[..copy_len])?;
+                }
+                user_safe::write(address_len_ptr, &(name_bytes.len() as u32))?;
+            }
+
+            return Ok(if report_trunc || len == 0 {
+                full_len.max(message_len)
+            } else {
+                copied
+            });
         }
 
         let socket = socket.as_unix_socket()?;
@@ -471,16 +515,10 @@ define_syscall!(Setsockopt, |socket: ObjectRef,
     } else {
         unsafe { slice::from_raw_parts(option_value, option_len as usize) }
     };
-    if let Ok(socket) = socket.clone().as_unix_socket() {
-        socket
-            .setsockopt(level as u64, option_name as u64, option_value)
-            .map_err(crate::object::error::ObjectError::from)?;
-    } else {
-        socket
-            .as_netlink_socket()?
-            .setsockopt(level as u64, option_name as u64, option_value)
-            .map_err(crate::object::error::ObjectError::from)?;
-    }
+    socket
+        .as_socket_like()?
+        .setsockopt(level as u64, option_name as u64, option_value)
+        .map_err(crate::object::error::ObjectError::from)?;
 
     Ok(0)
 });
@@ -497,16 +535,10 @@ define_syscall!(
         }
 
         let option_len = unsafe { *option_len_ptr as usize };
-        let value = if let Ok(socket) = socket.clone().as_unix_socket() {
-            socket
-                .getsockopt(level as u64, option_name as u64, option_len)
-                .map_err(crate::object::error::ObjectError::from)?
-        } else {
-            socket
-                .as_netlink_socket()?
-                .getsockopt(level as u64, option_name as u64, option_len)
-                .map_err(crate::object::error::ObjectError::from)?
-        };
+        let value = socket
+            .as_socket_like()?
+            .getsockopt(level as u64, option_name as u64, option_len)
+            .map_err(crate::object::error::ObjectError::from)?;
 
         if option_value.is_null() {
             if option_len != 0 && !value.is_empty() {
@@ -543,13 +575,10 @@ define_syscall!(
             return Err(SyscallError::BadAddress);
         }
 
-        let name = if let Ok(socket) = socket.clone().as_unix_socket() {
-            socket
-                .getsockname_bytes()
-                .map_err(crate::object::error::ObjectError::from)?
-        } else {
-            socket.as_netlink_socket()?.getsockname_bytes()
-        };
+        let name = socket
+            .as_socket_like()?
+            .getsockname_bytes()
+            .map_err(crate::object::error::ObjectError::from)?;
         let requested_len = unsafe { *address_len_ptr as usize };
         let copy_len = requested_len.min(name.len());
 
