@@ -46,7 +46,7 @@ static NEXT_API_MOUNT_ID: AtomicU64 = AtomicU64::new(1);
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct AtFlags: i32 {
+    pub(crate) struct AtFlags: i32 {
         const REMOVEDIR = 0x200;
         const SYMLINK_NOFOLLOW = 0x100;
         const NO_AUTOMOUNT = 0x800;
@@ -121,7 +121,7 @@ struct LinuxMountAttr {
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct OpenFlags: i32 {
+    pub(crate) struct OpenFlags: i32 {
         const CREAT = 0x40;
         const EXCL = 0x80;
         const NONBLOCK = 0o4_000;
@@ -135,7 +135,7 @@ bitflags! {
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct XattrFlags: u32 {
+    pub(crate) struct XattrFlags: u32 {
         const CREATE = 0x1;
         const REPLACE = 0x2;
     }
@@ -143,7 +143,7 @@ bitflags! {
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct UmountFlags: i32 {
+    pub(crate) struct UmountFlags: i32 {
         const FORCE = 0x1;
         const DETACH = 0x2;
         const EXPIRE = 0x4;
@@ -153,21 +153,21 @@ bitflags! {
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct FsOpenFlags: u32 {
+    pub(crate) struct FsOpenFlags: u32 {
         const FSCONTEXT_CLOEXEC = 0x1;
     }
 }
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct FsMountFlags: u32 {
+    pub(crate) struct FsMountFlags: u32 {
         const FSMOUNT_CLOEXEC = 0x1;
     }
 }
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct MoveMountFlags: u32 {
+    pub(crate) struct MoveMountFlags: u32 {
         const MOVE_MOUNT_F_SYMLINKS = 0x0000_0001;
         const MOVE_MOUNT_F_AUTOMOUNTS = 0x0000_0002;
         const MOVE_MOUNT_F_EMPTY_PATH = 0x0000_0004;
@@ -181,7 +181,7 @@ bitflags! {
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct OpenTreeFlags: u32 {
+    pub(crate) struct OpenTreeFlags: u32 {
         const OPEN_TREE_CLONE = 0x0000_0001;
         const AT_SYMLINK_NOFOLLOW = AtFlags::SYMLINK_NOFOLLOW.bits() as u32;
         const AT_NO_AUTOMOUNT = AtFlags::NO_AUTOMOUNT.bits() as u32;
@@ -491,8 +491,7 @@ fn ensure_object_supports_xattrs(object: &ObjectRef) -> Result<(), SyscallError>
     Ok(())
 }
 
-fn validate_xattr_flags(flags: u32) -> Result<(), SyscallError> {
-    let flags = XattrFlags::from_bits_truncate(flags);
+fn validate_xattr_flags(flags: XattrFlags) -> Result<(), SyscallError> {
     if flags.bits() != flags.bits() & (XattrFlags::CREATE | XattrFlags::REPLACE).bits() {
         return Err(SyscallError::InvalidArguments);
     }
@@ -502,8 +501,7 @@ fn validate_xattr_flags(flags: u32) -> Result<(), SyscallError> {
     Ok(())
 }
 
-fn validate_umount_flags(flags: i32) -> Result<UmountFlags, SyscallError> {
-    let flags = UmountFlags::from_bits_truncate(flags);
+fn validate_umount_flags(flags: UmountFlags) -> Result<UmountFlags, SyscallError> {
     if flags.bits()
         != flags.bits()
             & (UmountFlags::FORCE
@@ -521,9 +519,8 @@ fn faccessat_impl(
     dirfd: i32,
     path_str: &str,
     mode: i32,
-    flags: i32,
+    flags: AtFlags,
 ) -> Result<usize, SyscallError> {
-    let flags = AtFlags::from_bits_truncate(flags);
     let allowed = (AtFlags::EMPTY_PATH | AtFlags::SYMLINK_NOFOLLOW | AtFlags::EACCESS).bits();
     if flags.bits() != flags.bits() & allowed {
         return Err(SyscallError::NoSyscall);
@@ -638,7 +635,7 @@ fn chmod_at(dirfd: i32, path_str: &str, mode: u32, flags: AtFlags) -> Result<usi
 
 define_syscall!(OpenAt, |dirfd: i32,
                          path: CString,
-                         flags: i32,
+                         flags: OpenFlags,
                          _mode: u32| {
     let current_process = get_current_process();
     let path_str = path_from_raw(path)?;
@@ -647,10 +644,9 @@ define_syscall!(OpenAt, |dirfd: i32,
             "openat trace dirfd={} path={} flags={:#x}",
             dirfd,
             path_str,
-            flags
+            flags.bits()
         );
     }
-    let flags = OpenFlags::from_bits_truncate(flags);
     if flags.contains(OpenFlags::TMPFILE) {
         return Err(SyscallError::OperationNotSupported);
     }
@@ -707,11 +703,11 @@ define_syscall!(OpenAt, |dirfd: i32,
         .push_object_with_flags(object, fd_flags))
 });
 
-define_syscall!(Open, |path: CString, flags: i32, mode: u32| {
+define_syscall!(Open, |path: CString, flags: OpenFlags, mode: u32| {
     OpenAt::handle_call(
         (-100i32) as u64,
         path as u64,
-        flags as u64,
+        flags.bits() as u64,
         mode as u64,
         0,
         0,
@@ -845,8 +841,10 @@ define_syscall!(Fchmod, |fd: u64, mode: u32| {
     Ok(0)
 });
 
-define_syscall!(Fchmodat2, |dirfd: i32, path: u64, mode: u32, flags: i32| {
-    let flags = AtFlags::from_bits_truncate(flags);
+define_syscall!(Fchmodat2, |dirfd: i32,
+                            path: u64,
+                            mode: u32,
+                            flags: AtFlags| {
     let path = path as CString;
     let path_str = if path.is_null() {
         if flags.contains(AtFlags::EMPTY_PATH) {
@@ -864,9 +862,8 @@ define_syscall!(Fchmodat2, |dirfd: i32, path: u64, mode: u32, flags: i32| {
 define_syscall!(Newfstatat, |dirfd: i32,
                              path: u64,
                              linux_stat_ptr: *mut LinuxStat,
-                             flags: i32| {
+                             flags: AtFlags| {
     let path = path as CString;
-    let flags = AtFlags::from_bits_truncate(flags);
     if flags.bits()
         != flags.bits()
             & (AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT | AtFlags::EMPTY_PATH).bits()
@@ -891,10 +888,9 @@ define_syscall!(Newfstatat, |dirfd: i32,
 
 define_syscall!(Statx, |dirfd: i32,
                         path: CString,
-                        flags: i32,
+                        flags: AtFlags,
                         _mask: u32,
                         statx_ptr: *mut LinuxStatx| {
-    let flags = AtFlags::from_bits_truncate(flags);
     let allowed_flags = (AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT | AtFlags::EMPTY_PATH)
         .bits()
         | AT_STATX_FORCE_SYNC
@@ -961,7 +957,7 @@ define_syscall!(Statx, |dirfd: i32,
 define_syscall!(Faccessat, |dirfd: i32,
                             path: CString,
                             mode: i32,
-                            flags: i32| {
+                            flags: AtFlags| {
     let path_str = path_from_raw(path)?;
     if should_trace_namespace_path(&path_str) || current_process_is_executor() {
         crate::s_println!(
@@ -969,7 +965,7 @@ define_syscall!(Faccessat, |dirfd: i32,
             dirfd,
             path_str,
             mode,
-            flags
+            flags.bits()
         );
     }
     faccessat_impl(dirfd, &path_str, mode, flags)
@@ -978,7 +974,7 @@ define_syscall!(Faccessat, |dirfd: i32,
 define_syscall!(Faccessat2, |dirfd: i32,
                              path: CString,
                              mode: i32,
-                             flags: i32| {
+                             flags: AtFlags| {
     let path_str = path_from_raw(path)?;
     if should_trace_namespace_path(&path_str) || current_process_is_executor() {
         crate::s_println!(
@@ -986,7 +982,7 @@ define_syscall!(Faccessat2, |dirfd: i32,
             dirfd,
             path_str,
             mode,
-            flags
+            flags.bits()
         );
     }
     faccessat_impl(dirfd, &path_str, mode, flags)
@@ -1025,7 +1021,7 @@ define_syscall!(Setxattr, |path: CString,
                            name: CString,
                            _value: *const u8,
                            _size: usize,
-                           flags: u32| {
+                           flags: XattrFlags| {
     let path_str = path_from_raw(path)?;
     let _name = xattr_name_from_raw(name)?;
     validate_xattr_flags(flags)?;
@@ -1037,7 +1033,7 @@ define_syscall!(Lsetxattr, |path: CString,
                             name: CString,
                             _value: *const u8,
                             _size: usize,
-                            flags: u32| {
+                            flags: XattrFlags| {
     let path_str = path_from_raw(path)?;
     let _name = xattr_name_from_raw(name)?;
     validate_xattr_flags(flags)?;
@@ -1049,7 +1045,7 @@ define_syscall!(Fsetxattr, |object: ObjectRef,
                             name: CString,
                             _value: *const u8,
                             _size: usize,
-                            flags: u32| {
+                            flags: XattrFlags| {
     let _name = xattr_name_from_raw(name)?;
     validate_xattr_flags(flags)?;
     ensure_object_supports_xattrs(&object)?;
@@ -1095,9 +1091,8 @@ define_syscall!(Fremovexattr, |object: ObjectRef, name: CString| {
     Err(SyscallError::NoData)
 });
 
-define_syscall!(UnlinkAt, |dirfd: i32, path: CString, flags: i32| {
+define_syscall!(UnlinkAt, |dirfd: i32, path: CString, flags: AtFlags| {
     let path = path_from_raw(path)?;
-    let flags = AtFlags::from_bits_truncate(flags);
     if flags.bits() & !AtFlags::REMOVEDIR.bits() != 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -1293,16 +1288,15 @@ define_syscall!(Mount, |source: CString,
     Ok(0)
 });
 
-define_syscall!(Umount2, |target: CString, flags: i32| {
+define_syscall!(Umount2, |target: CString, flags: UmountFlags| {
     let target = path_from_raw(target)?;
     let _flags = validate_umount_flags(flags)?;
     let _ = resolve_path_at(AT_FDCWD, &target)?;
     Ok(0)
 });
 
-define_syscall!(Fsopen, |fs_name: CString, _flags: u32| {
+define_syscall!(Fsopen, |fs_name: CString, flags: FsOpenFlags| {
     let fs_name = path_from_raw(fs_name)?;
-    let flags = FsOpenFlags::from_bits_retain(_flags);
     let fd_flags = if flags.contains(FsOpenFlags::FSCONTEXT_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
@@ -1328,9 +1322,9 @@ define_syscall!(Fsconfig, |fd: i32,
     Ok(0)
 });
 
-define_syscall!(Fsmount, |fd: i32, flags: u32, _mount_attrs: u32| {
-    let flags = FsMountFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
-
+define_syscall!(Fsmount, |fd: i32,
+                          flags: FsMountFlags,
+                          _mount_attrs: u32| {
     let object = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
     let fs_context = object.as_fs_context()?;
     let mount_path = next_api_mount_path()?;
@@ -1354,79 +1348,82 @@ define_syscall!(Fsmount, |fd: i32, flags: u32, _mount_attrs: u32| {
         .push_object_with_flags(mount_root, fd_flags))
 });
 
-define_syscall!(MoveMount, |from_dirfd: i32,
-                            from_path: CString,
-                            to_dirfd: i32,
-                            to_path: CString,
-                            flags: u32| {
-    let flags = MoveMountFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
-
-    let source_path = if from_path.is_null() {
-        if !flags.contains(MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH) {
-            return Err(SyscallError::BadAddress);
-        }
-        let object = get_object_current_process(from_dirfd as u64).map_err(SyscallError::from)?;
-        object.as_file_like()?.path().normalize()
-    } else {
-        let from_path = path_from_raw(from_path)?;
-        if from_path.is_empty() {
+define_syscall!(
+    MoveMount,
+    |from_dirfd: i32,
+     from_path: CString,
+     to_dirfd: i32,
+     to_path: CString,
+     flags: MoveMountFlags| {
+        let source_path = if from_path.is_null() {
             if !flags.contains(MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH) {
-                return Err(SyscallError::InvalidArguments);
+                return Err(SyscallError::BadAddress);
             }
             let object =
                 get_object_current_process(from_dirfd as u64).map_err(SyscallError::from)?;
             object.as_file_like()?.path().normalize()
         } else {
-            resolve_path_at(from_dirfd, &from_path)?.normalize()
-        }
-    };
+            let from_path = path_from_raw(from_path)?;
+            if from_path.is_empty() {
+                if !flags.contains(MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH) {
+                    return Err(SyscallError::InvalidArguments);
+                }
+                let object =
+                    get_object_current_process(from_dirfd as u64).map_err(SyscallError::from)?;
+                object.as_file_like()?.path().normalize()
+            } else {
+                resolve_path_at(from_dirfd, &from_path)?.normalize()
+            }
+        };
 
-    let (mount_path, mount_fs, mount_source_path, mount_flags) =
-        VirtualFS.lock().mount_metadata(source_path.clone())?;
-    if mount_path != source_path {
-        return Err(SyscallError::InvalidArguments);
-    }
-
-    let target_path = if to_path.is_null() {
-        if !flags.contains(MoveMountFlags::MOVE_MOUNT_T_EMPTY_PATH) {
-            return Err(SyscallError::BadAddress);
+        let (mount_path, mount_fs, mount_source_path, mount_flags) =
+            VirtualFS.lock().mount_metadata(source_path.clone())?;
+        if mount_path != source_path {
+            return Err(SyscallError::InvalidArguments);
         }
-        let object = get_object_current_process(to_dirfd as u64).map_err(SyscallError::from)?;
-        object.as_file_like()?.path().normalize()
-    } else {
-        let to_path = path_from_raw(to_path)?;
-        if to_path.is_empty() {
+
+        let target_path = if to_path.is_null() {
             if !flags.contains(MoveMountFlags::MOVE_MOUNT_T_EMPTY_PATH) {
-                return Err(SyscallError::InvalidArguments);
+                return Err(SyscallError::BadAddress);
             }
             let object = get_object_current_process(to_dirfd as u64).map_err(SyscallError::from)?;
             object.as_file_like()?.path().normalize()
         } else {
-            resolve_path_at(to_dirfd, &to_path)?.normalize()
+            let to_path = path_from_raw(to_path)?;
+            if to_path.is_empty() {
+                if !flags.contains(MoveMountFlags::MOVE_MOUNT_T_EMPTY_PATH) {
+                    return Err(SyscallError::InvalidArguments);
+                }
+                let object =
+                    get_object_current_process(to_dirfd as u64).map_err(SyscallError::from)?;
+                object.as_file_like()?.path().normalize()
+            } else {
+                resolve_path_at(to_dirfd, &to_path)?.normalize()
+            }
+        };
+
+        let _ = VirtualFS.lock().open(target_path.clone())?;
+
+        VirtualFS
+            .lock()
+            .attach_mount(target_path, mount_fs, mount_source_path, mount_flags)
+            .map_err(SyscallError::from)?;
+        VirtualFS
+            .lock()
+            .unmount(source_path.clone())
+            .map_err(SyscallError::from)?;
+        if is_api_mount_path(&source_path) {
+            let _ = VirtualFS.lock().delete_file(source_path);
         }
-    };
 
-    let _ = VirtualFS.lock().open(target_path.clone())?;
-
-    VirtualFS
-        .lock()
-        .attach_mount(target_path, mount_fs, mount_source_path, mount_flags)
-        .map_err(SyscallError::from)?;
-    VirtualFS
-        .lock()
-        .unmount(source_path.clone())
-        .map_err(SyscallError::from)?;
-    if is_api_mount_path(&source_path) {
-        let _ = VirtualFS.lock().delete_file(source_path);
+        let _ = flags.contains(MoveMountFlags::MOVE_MOUNT_BENEATH);
+        Ok(0)
     }
+);
 
-    let _ = flags.contains(MoveMountFlags::MOVE_MOUNT_BENEATH);
-    Ok(0)
-});
-
-define_syscall!(OpenTree, |dirfd: i32, path: CString, flags: u32| {
-    let flags = OpenTreeFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
-
+define_syscall!(OpenTree, |dirfd: i32,
+                           path: CString,
+                           flags: OpenTreeFlags| {
     let object = if path.is_null() {
         if !flags.contains(OpenTreeFlags::AT_EMPTY_PATH) {
             return Err(SyscallError::BadAddress);
@@ -1472,12 +1469,12 @@ define_syscall!(OpenTree, |dirfd: i32, path: CString, flags: u32| {
 
 define_syscall!(MountSetattr, |dirfd: i32,
                                path: CString,
-                               flags: u32,
+                               flags: AtFlags,
                                attr: *const LinuxMountAttr,
                                size: usize| {
     let allowed_flags =
-        (AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH | AtFlags::RECURSIVE).bits() as u32;
-    if flags & !allowed_flags != 0 {
+        (AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH | AtFlags::RECURSIVE).bits();
+    if flags.bits() & !allowed_flags != 0 {
         return Err(SyscallError::InvalidArguments);
     }
     if size < core::mem::size_of::<LinuxMountAttr>() {
@@ -1488,7 +1485,7 @@ define_syscall!(MountSetattr, |dirfd: i32,
     }
 
     let object = if path.is_null() {
-        if (flags & AtFlags::EMPTY_PATH.bits() as u32) == 0 {
+        if !flags.contains(AtFlags::EMPTY_PATH) {
             return Err(SyscallError::BadAddress);
         }
         get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
@@ -1499,11 +1496,11 @@ define_syscall!(MountSetattr, |dirfd: i32,
                 "mount_setattr trace dirfd={} path={} flags={:#x}",
                 dirfd,
                 path,
-                flags
+                flags.bits()
             );
         }
         if path.is_empty() {
-            if (flags & AtFlags::EMPTY_PATH.bits() as u32) == 0 {
+            if !flags.contains(AtFlags::EMPTY_PATH) {
                 return Err(SyscallError::BadAddress);
             }
             get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
@@ -1512,7 +1509,7 @@ define_syscall!(MountSetattr, |dirfd: i32,
             if should_trace_namespace_path(&path.clone().as_string()) {
                 crate::s_println!("mount_setattr resolved {}", path.clone().as_string());
             }
-            let file = if (flags & AtFlags::SYMLINK_NOFOLLOW.bits() as u32) != 0 {
+            let file = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
                 VirtualFS.lock().open_nofollow(path)?
             } else {
                 VirtualFS.lock().open(path)?

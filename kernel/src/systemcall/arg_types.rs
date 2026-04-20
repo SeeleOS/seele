@@ -23,8 +23,9 @@ use crate::{
     },
     signal::{Signal, Signals},
     systemcall::implementations::{
-        ClockNanosleepFlags, EpollCreateFlags, InotifyInitFlags, PipeFlags, PollEvents,
-        TimerFdFlags, TimerSetTimeFlags,
+        AtFlags, ClockNanosleepFlags, EpollCreateFlags, FsMountFlags, FsOpenFlags,
+        InotifyInitFlags, MoveMountFlags, OpenFlags, OpenTreeFlags, PipeFlags, PollEvents,
+        TimerFdFlags, TimerSetTimeFlags, UmountFlags, XattrFlags,
     },
     systemcall::utils::{SyscallError, SyscallResult},
 };
@@ -154,4 +155,36 @@ add_syscall_arg_type!(SignalfdFlags, val, {
 
 add_syscall_arg_type!(PipeFlags, val, {
     PipeFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(AtFlags, val, {
+    AtFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(OpenFlags, val, {
+    OpenFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(XattrFlags, val, {
+    XattrFlags::from_bits(val as u32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(UmountFlags, val, {
+    UmountFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(FsOpenFlags, val, {
+    FsOpenFlags::from_bits(val as u32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(FsMountFlags, val, {
+    FsMountFlags::from_bits(val as u32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(MoveMountFlags, val, {
+    MoveMountFlags::from_bits(val as u32).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(OpenTreeFlags, val, {
+    OpenTreeFlags::from_bits(val as u32).ok_or(SyscallError::InvalidArguments)
 });
