@@ -39,18 +39,56 @@ pub enum Signal {
     BrokenPipe = 13,
     Alarm = 14,
     Terminate = 15,
+    StackFault = 16,
     ChildChanged = 17,
     Continue = 18,
     Stop = 19,
     TerminalStop = 20,
     TerminalInput = 21,
     TerminalOutput = 22,
+    UrgentCondition = 23,
     CpuTimeLimitExceeded = 24,
     FileSizeLimitExceeded = 25,
+    VirtualAlarm = 26,
+    ProfilingTimer = 27,
+    WindowChanged = 28,
+    IoPossible = 29,
+    PowerFailure = 30,
     BadSystemCall = 31,
+    Realtime0 = 34,
+    Realtime1 = 35,
+    Realtime2 = 36,
+    Realtime3 = 37,
+    Realtime4 = 38,
+    Realtime5 = 39,
+    Realtime6 = 40,
+    Realtime7 = 41,
+    Realtime8 = 42,
+    Realtime9 = 43,
+    Realtime10 = 44,
+    Realtime11 = 45,
+    Realtime12 = 46,
+    Realtime13 = 47,
+    Realtime14 = 48,
+    Realtime15 = 49,
+    Realtime16 = 50,
+    Realtime17 = 51,
+    Realtime18 = 52,
+    Realtime19 = 53,
+    Realtime20 = 54,
+    Realtime21 = 55,
+    Realtime22 = 56,
+    Realtime23 = 57,
+    Realtime24 = 58,
+    Realtime25 = 59,
+    Realtime26 = 60,
+    Realtime27 = 61,
+    Realtime28 = 62,
+    Realtime29 = 63,
+    Realtime30 = 64,
 }
 
-pub const SIGNAL_AMOUNT: usize = 24;
+pub const SIGNAL_AMOUNT: usize = 64;
 
 pub type SignalHandlerFn = extern "C" fn(i32);
 pub type SigHandlerFn2 = extern "C" fn(i32, *const SigInfo, *const UContext);
@@ -172,36 +210,15 @@ pub enum SignalHandlingType {
 
 impl Signal {
     pub const fn index(self) -> usize {
-        match self {
-            Self::Hangup => 0,
-            Self::Interrupt => 1,
-            Self::Quit => 2,
-            Self::IllegalInstruction => 3,
-            Self::Trap => 4,
-            Self::Abort => 5,
-            Self::BusError => 6,
-            Self::FloatingPointError => 7,
-            Self::Kill => 8,
-            Self::User1 => 9,
-            Self::InvalidMemoryAccess => 10,
-            Self::User2 => 11,
-            Self::BrokenPipe => 12,
-            Self::Alarm => 13,
-            Self::Terminate => 14,
-            Self::ChildChanged => 15,
-            Self::Continue => 16,
-            Self::Stop => 17,
-            Self::TerminalStop => 18,
-            Self::TerminalInput => 19,
-            Self::TerminalOutput => 20,
-            Self::CpuTimeLimitExceeded => 21,
-            Self::FileSizeLimitExceeded => 22,
-            Self::BadSystemCall => 23,
-        }
+        self as usize - 1
     }
 
     pub const fn mask(self) -> u64 {
         1 << (self as u64 - 1)
+    }
+
+    pub const fn is_realtime(self) -> bool {
+        (self as u64) >= Self::Realtime0 as u64
     }
 }
 
@@ -224,46 +241,28 @@ bitflags! {
         const BROKEN_PIPE = Signal::BrokenPipe.mask();
         const ALARM = Signal::Alarm.mask();
         const TERMINATE = Signal::Terminate.mask();
+        const STACK_FAULT = Signal::StackFault.mask();
         const CHILD_CHANGED = Signal::ChildChanged.mask();
         const CONTINUE = Signal::Continue.mask();
         const STOP = Signal::Stop.mask();
         const TERMINAL_STOP = Signal::TerminalStop.mask();
         const TERMINAL_INPUT = Signal::TerminalInput.mask();
         const TERMINAL_OUTPUT = Signal::TerminalOutput.mask();
+        const URGENT_CONDITION = Signal::UrgentCondition.mask();
         const CPU_TIME_LIMIT_EXCEEDED = Signal::CpuTimeLimitExceeded.mask();
         const FILE_SIZE_LIMIT_EXCEEDED = Signal::FileSizeLimitExceeded.mask();
+        const VIRTUAL_ALARM = Signal::VirtualAlarm.mask();
+        const PROFILING_TIMER = Signal::ProfilingTimer.mask();
+        const WINDOW_CHANGED = Signal::WindowChanged.mask();
+        const IO_POSSIBLE = Signal::IoPossible.mask();
+        const POWER_FAILURE = Signal::PowerFailure.mask();
         const BAD_SYSTEM_CALL = Signal::BadSystemCall.mask();
     }
 }
 
 impl From<Signal> for Signals {
     fn from(value: Signal) -> Self {
-        match value {
-            Signal::Hangup => Self::HANGUP,
-            Signal::Interrupt => Self::INTERRUPT,
-            Signal::Quit => Self::QUIT,
-            Signal::IllegalInstruction => Self::ILLEGAL_INSTRUCTION,
-            Signal::Trap => Self::TRAP,
-            Signal::Abort => Self::ABORT,
-            Signal::BusError => Self::BUS_ERROR,
-            Signal::FloatingPointError => Self::FLOATING_POINT_ERROR,
-            Signal::Kill => Self::KILL,
-            Signal::User1 => Self::USER1,
-            Signal::InvalidMemoryAccess => Self::INVALID_MEMORY_ACCESS,
-            Signal::User2 => Self::USER2,
-            Signal::BrokenPipe => Self::BROKEN_PIPE,
-            Signal::Alarm => Self::ALARM,
-            Signal::Terminate => Self::TERMINATE,
-            Signal::ChildChanged => Self::CHILD_CHANGED,
-            Signal::Continue => Self::CONTINUE,
-            Signal::Stop => Self::STOP,
-            Signal::TerminalStop => Self::TERMINAL_STOP,
-            Signal::TerminalInput => Self::TERMINAL_INPUT,
-            Signal::TerminalOutput => Self::TERMINAL_OUTPUT,
-            Signal::CpuTimeLimitExceeded => Self::CPU_TIME_LIMIT_EXCEEDED,
-            Signal::FileSizeLimitExceeded => Self::FILE_SIZE_LIMIT_EXCEEDED,
-            Signal::BadSystemCall => Self::BAD_SYSTEM_CALL,
-        }
+        Self::from_bits_retain(value.mask())
     }
 }
 
@@ -392,34 +391,45 @@ impl Process {
     }
 
     fn default_signal_action(&mut self, signal: Signal) -> bool {
-        match signal {
-            Signal::Terminate
-            | Signal::Kill
-            | Signal::Interrupt
-            | Signal::Quit
-            | Signal::Abort
-            | Signal::BusError
-            | Signal::InvalidMemoryAccess
-            | Signal::BrokenPipe
-            | Signal::Hangup
-            | Signal::FloatingPointError
-            | Signal::IllegalInstruction
-            | Signal::Trap
-            | Signal::User1
-            | Signal::User2
-            | Signal::CpuTimeLimitExceeded
-            | Signal::FileSizeLimitExceeded
-            | Signal::BadSystemCall => {
-                s_println!("fatal signal: pid={} signal={:?}", self.pid.0, signal);
-                let threads = self.terminate_inner(signal as u64);
-                let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-                for thread in threads {
-                    thread_manager.mark_thread_exited(thread);
-                }
-
-                true
+        if signal.is_realtime()
+            || matches!(
+                signal,
+                Signal::Terminate
+                    | Signal::Kill
+                    | Signal::Interrupt
+                    | Signal::Quit
+                    | Signal::Abort
+                    | Signal::BusError
+                    | Signal::InvalidMemoryAccess
+                    | Signal::BrokenPipe
+                    | Signal::Hangup
+                    | Signal::FloatingPointError
+                    | Signal::IllegalInstruction
+                    | Signal::StackFault
+                    | Signal::Trap
+                    | Signal::User1
+                    | Signal::User2
+                    | Signal::CpuTimeLimitExceeded
+                    | Signal::FileSizeLimitExceeded
+                    | Signal::VirtualAlarm
+                    | Signal::ProfilingTimer
+                    | Signal::IoPossible
+                    | Signal::PowerFailure
+                    | Signal::BadSystemCall
+            )
+        {
+            s_println!("fatal signal: pid={} signal={:?}", self.pid.0, signal);
+            let threads = self.terminate_inner(signal as u64);
+            let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+            for thread in threads {
+                thread_manager.mark_thread_exited(thread);
             }
-            Signal::ChildChanged => false,
+
+            return true;
+        }
+
+        match signal {
+            Signal::ChildChanged | Signal::UrgentCondition | Signal::WindowChanged => false,
             Signal::Stop
             | Signal::TerminalStop
             | Signal::TerminalInput
@@ -436,6 +446,7 @@ impl Process {
             }
             Signal::Continue => unreachable!(),
             Signal::Alarm => false,
+            _ => false,
         }
     }
 }
