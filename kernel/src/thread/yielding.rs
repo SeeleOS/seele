@@ -164,7 +164,6 @@ impl ThreadManager {
 
     pub fn wake_process_exit_waiters(&mut self, pid: ProcessID) {
         log::debug!("thread wake_process_exit_waiters: {}", pid.0);
-        crate::s_println!("wake_process_exit_waiters pid={}", pid.0);
         let mut to_wake = Vec::new();
 
         self.blocked_queues.process_exit.retain(|f| {

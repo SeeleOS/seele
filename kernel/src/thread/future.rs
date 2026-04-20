@@ -93,18 +93,11 @@ impl Future for ThreadFuture {
                 .unwrap()
                 .lock()
                 .cleanup_exited_threads();
-            if process_pid == 32 {
-                crate::s_println!("signal cleanup done path=thread-poll pid={}", process_pid);
-            }
         }
 
         let state = self.0.lock().state.clone();
         match state {
             State::Zombie => {
-                let pid = self.0.lock().parent.lock().pid.0;
-                if pid >= 32 {
-                    crate::s_println!("thread poll zombie cleanup pid={}", pid);
-                }
                 log::debug!("thread poll: zombie");
                 self.0.lock().task_id = None;
                 THREAD_MANAGER

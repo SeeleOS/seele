@@ -138,7 +138,6 @@ impl ThreadManager {
         }
 
         for dead_process in to_remove {
-            let dead_pid = dead_process.lock().pid.0;
             if let Some(parent) = dead_process.lock().parent.clone() {
                 let (parent_pid, threads) = {
                     let mut parent = parent.lock();
@@ -147,12 +146,6 @@ impl ThreadManager {
                         .insert(Signals::from(Signal::ChildChanged));
                     (parent.pid.0, parent.threads.clone())
                 };
-
-                crate::s_println!(
-                    "cleanup_exited_threads dead_pid={} parent_pid={}",
-                    dead_pid,
-                    parent_pid
-                );
 
                 wake_signalfd_for_process_with_manager(parent_pid, self);
 

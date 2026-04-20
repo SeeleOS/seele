@@ -50,13 +50,6 @@ impl VFS {
 
     pub fn open(&mut self, path: Path) -> FSResult<FileLikeObject> {
         let normalized = self.normalize_path(path);
-        let normalized_string = normalized.clone().as_string();
-        if normalized_string.contains("hostname")
-            || normalized_string.contains("domainname")
-            || normalized_string.contains("/systemd/inaccessible/")
-        {
-            crate::s_println!("vfs open {}", normalized_string);
-        }
         log::trace!("vfs: open {}", normalized.clone().as_string());
         let (file, resolved_path) = self.resolve_with_path(normalized)?;
         Ok(FileLikeObject::new(file, resolved_path))
@@ -64,13 +57,6 @@ impl VFS {
 
     pub fn open_nofollow(&mut self, path: Path) -> FSResult<FileLikeObject> {
         let normalized = self.normalize_path(path);
-        let normalized_string = normalized.clone().as_string();
-        if normalized_string.contains("hostname")
-            || normalized_string.contains("domainname")
-            || normalized_string.contains("/systemd/inaccessible/")
-        {
-            crate::s_println!("vfs open_nofollow {}", normalized_string);
-        }
         log::trace!("vfs: open_nofollow {}", normalized.clone().as_string());
         let (file, resolved_path) = self.resolve_nofollow_with_path(normalized)?;
         Ok(FileLikeObject::new(file, resolved_path))
@@ -78,13 +64,6 @@ impl VFS {
 
     pub fn file_info(&mut self, path: Path) -> FSResult<FileLikeInfo> {
         let normalized = self.normalize_path(path);
-        let normalized_string = normalized.clone().as_string();
-        if normalized_string.contains("hostname")
-            || normalized_string.contains("domainname")
-            || normalized_string.contains("/systemd/inaccessible/")
-        {
-            crate::s_println!("vfs file_info {}", normalized_string);
-        }
         log::trace!("vfs: file_info {}", normalized.clone().as_string());
         self.resolve(normalized)?.info()
     }
