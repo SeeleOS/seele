@@ -1079,16 +1079,12 @@ define_syscall!(Mount, |source: CString,
     let target = path_from_raw(target)?;
     let filesystemtype = string_from_raw_optional(filesystemtype)?;
     let _data = string_from_raw_optional(data)?;
-    let target_path = {
-        let target_object = VirtualFS.lock().open(Path::new(&target))?;
-        if !matches!(
-            target_object.info()?.file_like_type,
-            FileLikeType::Directory
-        ) {
-            return Err(SyscallError::NotADirectory);
-        }
-        target_object.path()
-    };
+    let target_object = VirtualFS.lock().open(Path::new(&target))?;
+    let target_path = target_object.path();
+    let target_is_directory = matches!(
+        target_object.info()?.file_like_type,
+        FileLikeType::Directory
+    );
 
     if filesystemtype
         .as_deref()
@@ -1097,8 +1093,11 @@ define_syscall!(Mount, |source: CString,
         return Err(SyscallError::NoSyscall);
     }
 
-    VirtualFS.lock().resolve_dir(target_path.clone())?;
     if filesystemtype.as_deref() == Some("tmpfs") {
+        if !target_is_directory {
+            return Err(SyscallError::NotADirectory);
+        }
+        VirtualFS.lock().resolve_dir(target_path.clone())?;
         VirtualFS
             .lock()
             .mount(target_path.clone(), TmpFs::new())
