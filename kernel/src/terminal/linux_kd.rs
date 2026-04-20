@@ -178,6 +178,7 @@ impl KeyValue {
 pub struct LinuxConsoleState {
     pub keyboard_mode: KeyboardMode,
     pub display_mode: DisplayMode,
+    pub kbrequest_signal: u32,
     pub vt_mode: LinuxVtMode,
     pub active_vt: u32,
 }
@@ -187,6 +188,7 @@ impl Default for LinuxConsoleState {
         Self {
             keyboard_mode: KeyboardMode::Unicode,
             display_mode: DisplayMode::Text,
+            kbrequest_signal: 0,
             vt_mode: LinuxVtMode::default(),
             active_vt: 1,
         }
@@ -567,6 +569,10 @@ pub fn handle_kd_request(
         ConfigurateRequest::LinuxKdSetDisplayMode(mode) => {
             let mode = DisplayMode::try_from(*mode).map_err(|_| ObjectError::InvalidArguments)?;
             state.lock().display_mode = mode;
+            Ok(Some(0))
+        }
+        ConfigurateRequest::LinuxKdSignalAccept(signal) => {
+            state.lock().kbrequest_signal = *signal;
             Ok(Some(0))
         }
         _ => Ok(None),
