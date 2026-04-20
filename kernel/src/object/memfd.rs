@@ -4,6 +4,7 @@ use core::{
 };
 
 use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use bitflags::bitflags;
 use spin::Mutex;
 
 use crate::{
@@ -19,9 +20,25 @@ use crate::{
     systemcall::utils::{SyscallError, SyscallResult},
 };
 
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct MemFdSealFlags: u32 {
+        const F_SEAL_SEAL = 0x0001;
+        const F_SEAL_SHRINK = 0x0002;
+        const F_SEAL_GROW = 0x0004;
+        const F_SEAL_WRITE = 0x0008;
+        const F_SEAL_FUTURE_WRITE = 0x0010;
+        const SUPPORTED = Self::F_SEAL_SEAL.bits()
+            | Self::F_SEAL_SHRINK.bits()
+            | Self::F_SEAL_GROW.bits()
+            | Self::F_SEAL_WRITE.bits()
+            | Self::F_SEAL_FUTURE_WRITE.bits();
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct MemFdState {
-    seals: u32,
+    seals: MemFdSealFlags,
     allow_sealing: bool,
 }
 
@@ -37,10 +54,6 @@ struct MemFdFile {
     path: Path,
     data: Vec<u8>,
 }
-
-const F_SEAL_SEAL: u32 = 0x0001;
-const F_SEAL_WRITE: u32 = 0x0008;
-const SUPPORTED_MEMFD_SEALS: u32 = 0x001f;
 
 static NEXT_MEMFD_INODE: AtomicU64 = AtomicU64::new(1);
 
@@ -59,8 +72,10 @@ impl MemFdFile {
         }
     }
 
-    fn current_seals(&self) -> u32 {
-        memfd_get_seals(&self.path).unwrap_or(0)
+    fn current_seals(&self) -> MemFdSealFlags {
+        memfd_get_seals(&self.path)
+            .map(MemFdSealFlags::from_bits_retain)
+            .unwrap_or_else(MemFdSealFlags::empty)
     }
 }
 
@@ -97,7 +112,7 @@ impl File for MemFdFile {
     }
 
     fn write(&mut self, buffer: &[u8]) -> FSResult<usize> {
-        if (self.current_seals() & F_SEAL_WRITE) != 0 {
+        if self.current_seals().contains(MemFdSealFlags::F_SEAL_WRITE) {
             return Err(FSError::AccessDenied);
         }
 
@@ -137,7 +152,11 @@ pub fn register_memfd(path: &Path, allow_sealing: bool) {
     MEMFD_REGISTRY.lock().states.insert(
         memfd_key(path),
         MemFdState {
-            seals: if allow_sealing { 0 } else { F_SEAL_SEAL },
+            seals: if allow_sealing {
+                MemFdSealFlags::empty()
+            } else {
+                MemFdSealFlags::F_SEAL_SEAL
+            },
             allow_sealing,
         },
     );
@@ -148,11 +167,12 @@ pub fn memfd_get_seals(path: &Path) -> Option<u32> {
         .lock()
         .states
         .get(&memfd_key(path))
-        .map(|state| state.seals)
+        .map(|state| state.seals.bits())
 }
 
 pub fn memfd_add_seals(path: &Path, seals: u32) -> SyscallResult {
-    if (seals & !SUPPORTED_MEMFD_SEALS) != 0 {
+    let seals = MemFdSealFlags::from_bits(seals).ok_or(SyscallError::InvalidArguments)?;
+    if seals.bits() & !MemFdSealFlags::SUPPORTED.bits() != 0 {
         return Err(SyscallError::InvalidArguments);
     }
 
@@ -162,7 +182,7 @@ pub fn memfd_add_seals(path: &Path, seals: u32) -> SyscallResult {
         .get_mut(&memfd_key(path))
         .ok_or(SyscallError::InvalidArguments)?;
 
-    if !state.allow_sealing || (state.seals & F_SEAL_SEAL) != 0 {
+    if !state.allow_sealing || state.seals.contains(MemFdSealFlags::F_SEAL_SEAL) {
         return Err(SyscallError::PermissionDenied);
     }
 
