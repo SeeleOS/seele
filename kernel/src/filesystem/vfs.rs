@@ -1,4 +1,5 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use core::cmp::Reverse;
 use spin::Mutex;
 
 use crate::filesystem::{
@@ -89,7 +90,7 @@ impl VFS {
             fs,
         });
         self.mounts
-            .sort_by_key(|mount| core::cmp::Reverse(mount.path.clone().as_string().len()));
+            .sort_by_key(|mount| Reverse(mount.path.clone().as_string().len()));
         Ok(())
     }
 

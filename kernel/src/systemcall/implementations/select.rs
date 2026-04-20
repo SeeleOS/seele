@@ -3,6 +3,7 @@ use alloc::{sync::Arc, vec};
 use crate::define_syscall;
 use crate::filesystem::object::poll_identity_object;
 use crate::misc::time::Time;
+use crate::object::Object;
 use crate::object::misc::get_object_current_process;
 use crate::polling::event::PollableEvent;
 use crate::polling::poller::PollerObject;
@@ -28,7 +29,7 @@ fn block_on_poller(poller: Arc<PollerObject>, timeout: Option<Time>) {
         return;
     }
 
-    let poller_ref: Arc<dyn crate::object::Object> = poller;
+    let poller_ref: Arc<dyn Object> = poller;
     let current = prepare_block_current(BlockType::WakeRequired {
         wake_type: WakeType::Poller(poller_ref),
         deadline: timeout,

@@ -3,14 +3,17 @@ use bitflags::bitflags;
 
 use crate::{
     define_syscall,
+    filesystem::path::Path,
     memory::user_safe,
     misc::signal::SigInfo,
-    object::misc::get_object_current_process,
+    object::{error::ObjectError, misc::get_object_current_process},
     process::{
         execve::execve,
         manager::{MANAGER, get_current_process, terminate_process},
-        misc::ProcessID,
+        misc::{ProcessID, get_process_with_pid},
+        Process,
     },
+    signal::Signal,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
         THREAD_MANAGER, get_current_thread,
@@ -124,7 +127,7 @@ define_syscall!(Wait4, |target_process: i32,
                     deadline: None,
                 })
                 .map_err(|err| match err {
-                    crate::object::error::ObjectError::Interrupted => SyscallError::Interrupted,
+                    ObjectError::Interrupted => SyscallError::Interrupted,
                     _ => SyscallError::TryAgain,
                 })?;
             }
@@ -163,7 +166,7 @@ define_syscall!(Waitid, |id_type: i32,
             SigInfo::default()
         } else {
             SigInfo {
-                si_signo: crate::signal::Signal::ChildChanged as i32,
+                si_signo: Signal::ChildChanged as i32,
                 si_code: CLD_EXITED,
                 si_pid: pid as i32,
                 si_status: (status >> 8) & 0xff,
@@ -179,7 +182,7 @@ define_syscall!(Waitid, |id_type: i32,
 define_syscall!(Execve, |path_str: String,
                          args: Vec<String>,
                          env: Vec<String>| {
-    let path = crate::filesystem::path::Path::new(path_str.as_str());
+    let path = Path::new(path_str.as_str());
     execve(path, args, env)?;
     log::info!("execve done");
     Ok(0)
@@ -197,7 +200,7 @@ define_syscall!(ExitGroup, |exit_code: u64| {
 
 define_syscall!(Fork, {
     let current = get_current_process();
-    let (child_process, _child_thread) = crate::process::Process::fork(current);
+    let (child_process, _child_thread) = Process::fork(current);
     let pid = child_process.lock().pid.0;
     MANAGER
         .lock()
@@ -226,7 +229,7 @@ define_syscall!(Getpgid, |pid: i32| {
     } else {
         pid as u64
     };
-    let process = crate::process::misc::get_process_with_pid(ProcessID(pid))?;
+    let process = get_process_with_pid(ProcessID(pid))?;
     Ok(process.lock().group_id.0 as usize)
 });
 
@@ -236,7 +239,7 @@ define_syscall!(Setpgid, |pid: i32, group_id: i32| {
     } else {
         pid as u64
     };
-    let process = crate::process::misc::get_process_with_pid(ProcessID(pid))?;
+    let process = get_process_with_pid(ProcessID(pid))?;
     let new_group_id = if group_id == 0 { pid } else { group_id as u64 };
     process.lock().group_id.0 = new_group_id;
     Ok(0)

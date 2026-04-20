@@ -1,6 +1,7 @@
 use crate::{
     define_syscall,
     memory::user_safe,
+    object::error::ObjectError,
     process::{FdFlags, manager::get_current_process},
     socket::{AF_UNIX, SOCK_NONBLOCK, SOCK_STREAM, UnixSocketObject},
     systemcall::utils::{SyscallError, SyscallImpl},
@@ -21,14 +22,14 @@ fn create_pipe(fds: *mut i32, flags: i32) -> Result<usize, SyscallError> {
             0
         };
     let (read_end, write_end) = UnixSocketObject::pair(AF_UNIX, kind, 0)
-        .map_err(crate::object::error::ObjectError::from)?;
+        .map_err(ObjectError::from)?;
 
     read_end
         .shutdown(1)
-        .map_err(crate::object::error::ObjectError::from)?;
+        .map_err(ObjectError::from)?;
     write_end
         .shutdown(0)
-        .map_err(crate::object::error::ObjectError::from)?;
+        .map_err(ObjectError::from)?;
 
     let process = get_current_process();
     let (read_fd, write_fd) = {

@@ -95,7 +95,7 @@ impl FileSystem for ProcFs {
                 PathPart::Normal(name) => Some(name.as_str()),
                 _ => None,
             })
-            .collect::<alloc::vec::Vec<_>>();
+            .collect::<Vec<_>>();
 
         match parts.as_slice() {
             [] => Ok(proc_dir("/", PROC_ROOT_INODE, proc_root_entries())),

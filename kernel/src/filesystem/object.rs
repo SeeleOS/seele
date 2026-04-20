@@ -1,6 +1,7 @@
-use core::fmt::Debug;
+use core::fmt::{Debug, Formatter, Result as FmtResult};
 
 use alloc::{string::String, sync::Arc, vec::Vec};
+use x86_64::VirtAddr;
 
 use crate::object::misc::ObjectRef;
 use crate::{
@@ -10,13 +11,14 @@ use crate::{
         staticfs::{
             device::StaticDeviceHandle, directory::StaticDirectoryHandle, file::StaticFileHandle,
         },
+        path::Path,
         vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
         vfs_traits::{FileLike, Whence},
     },
     impl_cast_function, impl_cast_function_non_trait,
     memory::{addrspace::mem_area::Data, protection::Protection},
     object::{
-        Object,
+        FileFlags, Object,
         config::ConfigurateRequest,
         error::ObjectError,
         misc::ObjectResult,
@@ -28,10 +30,10 @@ use crate::{
 
 pub struct FileLikeObject {
     file: FileLike,
-    path: crate::filesystem::path::Path,
+    path: Path,
 }
 
-fn mount_device_id_for_path(path: &crate::filesystem::path::Path) -> u64 {
+fn mount_device_id_for_path(path: &Path) -> u64 {
     let Ok(mount_path) = VirtualFS.lock().mount_path(path.clone()) else {
         return 1;
     };
@@ -47,20 +49,17 @@ fn mount_device_id_for_path(path: &crate::filesystem::path::Path) -> u64 {
     }
 }
 
-fn stat_with_mount_device_id(
-    mut stat: LinuxStat,
-    path: &crate::filesystem::path::Path,
-) -> LinuxStat {
+fn stat_with_mount_device_id(mut stat: LinuxStat, path: &Path) -> LinuxStat {
     stat.st_dev = mount_device_id_for_path(path);
     stat
 }
 
 impl FileLikeObject {
-    pub fn new(file: FileLike, path: crate::filesystem::path::Path) -> Self {
+    pub fn new(file: FileLike, path: Path) -> Self {
         Self { file, path }
     }
 
-    pub fn path(&self) -> crate::filesystem::path::Path {
+    pub fn path(&self) -> Path {
         self.path.clone()
     }
 
@@ -182,13 +181,13 @@ pub fn poll_identity_object(object: ObjectRef) -> ObjectRef {
 }
 
 impl Debug for FileLikeObject {
-    fn fmt(&self, _f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, _f: &mut Formatter<'_>) -> FmtResult {
         Ok(())
     }
 }
 
 impl Object for FileLikeObject {
-    fn get_flags(self: Arc<Self>) -> ObjectResult<crate::object::FileFlags> {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
         let Some(device) = self.resolve_device_object()? else {
             return Err(ObjectError::Unimplemented);
         };
@@ -196,7 +195,7 @@ impl Object for FileLikeObject {
         device.clone().get_flags()
     }
 
-    fn set_flags(self: Arc<Self>, flags: crate::object::FileFlags) -> ObjectResult<()> {
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
         let Some(device) = self.resolve_device_object()? else {
             return Err(ObjectError::Unimplemented);
         };
@@ -245,12 +244,7 @@ impl Readable for FileLikeObject {
 }
 
 impl MemoryMappable for FileLikeObject {
-    fn map(
-        self: alloc::sync::Arc<Self>,
-        offset: u64,
-        pages: u64,
-        protection: Protection,
-    ) -> ObjectResult<x86_64::VirtAddr> {
+    fn map(self: Arc<Self>, offset: u64, pages: u64, protection: Protection) -> ObjectResult<VirtAddr> {
         if let Some(device) = self.resolve_device_object()? {
             let mappable = device
                 .as_mappable()
@@ -301,7 +295,7 @@ impl Pollable for FileLikeObject {
 }
 
 impl Seekable for FileLikeObject {
-    fn seek(self: alloc::sync::Arc<Self>, offset: i64, seek_type: Whence) -> ObjectResult<usize> {
+    fn seek(self: Arc<Self>, offset: i64, seek_type: Whence) -> ObjectResult<usize> {
         if let Ok(Some(device)) = self.resolve_device_object() {
             let seekable = device
                 .as_seekable()

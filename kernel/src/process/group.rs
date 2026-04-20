@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 
 use crate::process::{
+    misc::ProcessID,
     ProcessRef,
     manager::{MANAGER, Manager},
 };
@@ -9,7 +10,7 @@ use crate::process::{
 pub struct ProcessGroupID(pub u64);
 
 impl ProcessGroupID {
-    pub fn from_leader(pid: crate::process::misc::ProcessID) -> Self {
+    pub fn from_leader(pid: ProcessID) -> Self {
         Self(pid.0)
     }
 }

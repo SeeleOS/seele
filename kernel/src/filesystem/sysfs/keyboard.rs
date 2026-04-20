@@ -1,7 +1,10 @@
 use alloc::vec::Vec;
 
-use crate::filesystem::staticfs::{
-    StaticDirEntry, StaticDirectoryNode, StaticFileNode, StaticNode, StaticSymlinkNode,
+use crate::filesystem::{
+    staticfs::{
+        StaticDirEntry, StaticDirectoryNode, StaticFileNode, StaticNode, StaticSymlinkNode,
+    },
+    vfs::FSResult,
 };
 
 use super::emit_uevent;
@@ -46,11 +49,11 @@ fn keyboard_caps_prop() -> Vec<u8> {
     b"0\n".to_vec()
 }
 
-fn keyboard_input_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+fn keyboard_input_uevent_write(buffer: &[u8]) -> FSResult<usize> {
     emit_uevent(buffer, "/devices/platform/i8042/serio0/input/input0", "input", None)
 }
 
-fn keyboard_event_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+fn keyboard_event_uevent_write(buffer: &[u8]) -> FSResult<usize> {
     emit_uevent(
         buffer,
         "/devices/platform/i8042/serio0/input/input0/event0",
@@ -59,11 +62,11 @@ fn keyboard_event_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResul
     )
 }
 
-fn keyboard_input_dir_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+fn keyboard_input_dir_uevent_write(buffer: &[u8]) -> FSResult<usize> {
     emit_uevent(buffer, "/devices/platform/i8042/serio0/input", "input", None)
 }
 
-fn keyboard_serio_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+fn keyboard_serio_uevent_write(buffer: &[u8]) -> FSResult<usize> {
     emit_uevent(buffer, "/devices/platform/i8042/serio0", "serio", None)
 }
 

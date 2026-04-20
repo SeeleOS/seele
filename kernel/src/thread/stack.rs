@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use x86_64::{
@@ -22,7 +23,7 @@ pub fn allocate_kernel_stack(pages: u64) -> StackBuilder {
     let start = guard_page + 1;
     let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
 
-    let mut page_write_bases = alloc::vec::Vec::with_capacity(pages as usize);
+    let mut page_write_bases = Vec::with_capacity(pages as usize);
     let mut frame_allocator = FRAME_ALLOCATOR.try_get().unwrap().lock();
 
     for i in 0..pages {

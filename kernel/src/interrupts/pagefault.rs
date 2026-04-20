@@ -8,7 +8,7 @@ use x86_64::{
 
 use crate::{
     interrupts::exception_interrupt::handle_usermode_exception,
-    memory::addrspace::{cow::COW_FLAG, mem_area::Data},
+    memory::addrspace::{AddrSpace, cow::COW_FLAG, mem_area::Data},
     misc::others::is_user_mode,
     process::manager::get_current_process,
     s_println,
@@ -43,7 +43,7 @@ pub extern "x86-interrupt" fn pagefault_handler(
                         addrspace.apply_page_cluster(
                             Page::containing_address(address),
                             area.clone(),
-                            crate::memory::addrspace::AddrSpace::file_lazy_cluster_pages(),
+                            AddrSpace::file_lazy_cluster_pages(),
                         );
                     } else {
                         addrspace.apply_page(Page::containing_address(address), area.clone());

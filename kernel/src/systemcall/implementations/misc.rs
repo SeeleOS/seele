@@ -10,20 +10,22 @@ use crate::memory::{
     user_safe,
 };
 use crate::misc::error::AsSyscallError;
+use crate::misc::timer::ClockId;
 use crate::misc::time::{self, Time as KernelTime};
 use crate::misc::{others::protection_to_page_flags, reboot as reboot_state, utsname::UtsName};
-use crate::object::Object;
+use crate::object::{FileFlags, Object, misc::ObjectRef};
 use crate::object::linux_anon::{
     EventFdObject, InotifyObject, PidFdObject, TimerFdObject, wake_linux_io_waiters,
 };
 use crate::object::misc::get_object_current_process;
 use crate::process::{
     FdFlags,
+    Process,
     manager::{MANAGER, get_current_process},
     misc::{ProcessID, get_process_with_pid},
 };
 use crate::signal::{
-    action::{SignalAction, SignalHandlingType},
+    action::{SignalAction, SignalHandlingType, Signals},
     misc::default_signal_action_vec,
 };
 use crate::systemcall::utils::{SyscallError, SyscallImpl};
@@ -274,7 +276,7 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
     }
 
     let current = get_current_process();
-    let (child_process, child_thread) = crate::process::Process::fork(current.clone());
+    let (child_process, child_thread) = Process::fork(current.clone());
     let pid = child_process.lock().pid;
     MANAGER.lock().processes.insert(pid, child_process.clone());
 
@@ -591,7 +593,7 @@ define_syscall!(InotifyInit, {
 define_syscall!(InotifyInit1, |flags: i32| {
     let object = Arc::new(InotifyObject::default());
     if (flags & TFD_NONBLOCK) != 0 {
-        let _ = object.clone().set_flags(crate::object::FileFlags::NONBLOCK);
+        let _ = object.clone().set_flags(FileFlags::NONBLOCK);
     }
     let fd_flags = if (flags & TFD_CLOEXEC) != 0 {
         FdFlags::CLOEXEC
@@ -626,15 +628,11 @@ define_syscall!(Eventfd2, |initval: u32, flags: i32| {
     create_eventfd(initval, flags)
 });
 
-define_syscall!(
-    InotifyAddWatch,
-    |object: crate::object::misc::ObjectRef, _path: alloc::string::String, _mask: u32| {
-        Ok(object.as_inotify()?.add_watch() as usize)
-    }
-);
+define_syscall!(InotifyAddWatch, |object: ObjectRef, _path: String, _mask: u32| {
+    Ok(object.as_inotify()?.add_watch() as usize)
+});
 
-define_syscall!(InotifyRmWatch, |object: crate::object::misc::ObjectRef,
-                                 _wd: i32| {
+define_syscall!(InotifyRmWatch, |object: ObjectRef, _wd: i32| {
     let _ = object.as_inotify()?;
     Ok(0)
 });
@@ -646,7 +644,7 @@ define_syscall!(TimerfdCreate, |clock_id: i32, flags: i32| {
 
     let object = Arc::new(TimerFdObject::default());
     if (flags & TFD_NONBLOCK) != 0 {
-        let _ = object.clone().set_flags(crate::object::FileFlags::NONBLOCK);
+        let _ = object.clone().set_flags(FileFlags::NONBLOCK);
     }
     let fd_flags = if (flags & TFD_CLOEXEC) != 0 {
         FdFlags::CLOEXEC
@@ -661,7 +659,7 @@ define_syscall!(TimerfdCreate, |clock_id: i32, flags: i32| {
 
 define_syscall!(
     TimerfdSettime,
-    |object: crate::object::misc::ObjectRef,
+    |object: ObjectRef,
      flags: i32,
      new_value: *const LinuxItimerspec,
      old_value: *mut LinuxItimerspec| {
@@ -702,7 +700,7 @@ define_syscall!(
 
 define_syscall!(
     TimerfdGettime,
-    |object: crate::object::misc::ObjectRef, curr_value: *mut LinuxItimerspec| {
+    |object: ObjectRef, curr_value: *mut LinuxItimerspec| {
         if curr_value.is_null() {
             return Err(SyscallError::BadAddress);
         }
@@ -936,7 +934,7 @@ define_syscall!(RtSigsuspend, |mask: *const u64, sigset_size: usize| {
         return Err(SyscallError::BadAddress);
     }
 
-    let new_mask = crate::signal::Signals::from_bits_truncate(unsafe { *mask });
+    let new_mask = Signals::from_bits_truncate(unsafe { *mask });
     let old_mask = {
         let current = crate::thread::get_current_thread();
         let mut current = current.lock();
@@ -947,7 +945,7 @@ define_syscall!(RtSigsuspend, |mask: *const u64, sigset_size: usize| {
 
     loop {
         let result = block_current_with_sig_check(BlockType::WakeRequired {
-            wake_type: crate::thread::yielding::WakeType::IO,
+            wake_type: WakeType::IO,
             deadline: None,
         });
 
@@ -973,14 +971,14 @@ define_syscall!(
             return Err(SyscallError::InvalidArguments);
         }
 
-        let clock = crate::misc::timer::ClockId::try_from(clock_id as u64)
+        let clock = ClockId::try_from(clock_id as u64)
             .map_err(|_| SyscallError::InvalidArguments)?;
         let requested_ns =
             (requested.tv_sec as u64).saturating_mul(1_000_000_000) + (requested.tv_nsec as u64);
 
         let now = match clock {
-            crate::misc::timer::ClockId::Realtime => KernelTime::current(),
-            crate::misc::timer::ClockId::SinceBoot => KernelTime::since_boot(),
+            ClockId::Realtime => KernelTime::current(),
+            ClockId::SinceBoot => KernelTime::since_boot(),
         };
         let deadline = if (flags & TIMER_ABSTIME) != 0 {
             KernelTime::from_nanoseconds(requested_ns)

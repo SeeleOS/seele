@@ -1,6 +1,7 @@
 use core::any::Any;
 
 use crate::filesystem::{
+    errors::FSError,
     info::{FileLikeInfo, UnixPermission},
     staticfs::StaticFileNode,
     vfs::FSResult,
@@ -52,7 +53,10 @@ impl File for StaticFileHandle {
     }
 
     fn write(&mut self, _buffer: &[u8]) -> FSResult<usize> {
-        self.node.write.map(|write| write(_buffer)).unwrap_or(Err(crate::filesystem::errors::FSError::Readonly))
+        self.node
+            .write
+            .map(|write| write(_buffer))
+            .unwrap_or(Err(FSError::Readonly))
     }
 
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {

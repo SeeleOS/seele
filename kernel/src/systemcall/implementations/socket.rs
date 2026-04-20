@@ -1,10 +1,13 @@
 use crate::{
     define_syscall,
     memory::user_safe,
-    object::misc::ObjectRef,
+    object::{FileFlags, error::ObjectError, misc::{ObjectRef, get_object_current_process}},
     object::netlink::{NetlinkSocketAddress, NetlinkSocketObject},
     process::{FdFlags, manager::get_current_process},
-    socket::{AF_NETLINK, AF_UNIX, SOCK_CLOEXEC, SOCK_NONBLOCK},
+    socket::{
+        AF_NETLINK, AF_UNIX, SOCK_CLOEXEC, SOCK_NONBLOCK, SOL_SOCKET, UnixSocketKind,
+        UnixSocketObject, UnixSocketState,
+    },
     systemcall::utils::{SyscallError, SyscallImpl},
 };
 use alloc::{string::String, vec, vec::Vec};
@@ -45,16 +48,14 @@ fn cmsg_align(len: usize) -> usize {
     (len + align - 1) & !(align - 1)
 }
 
-fn unix_socket_control_bytes(
-    socket: &crate::socket::UnixSocketObject,
-) -> Result<Vec<u8>, SyscallError> {
+fn unix_socket_control_bytes(socket: &UnixSocketObject) -> Result<Vec<u8>, SyscallError> {
     if !*socket.pass_cred.lock() {
         return Ok(Vec::new());
     }
 
     let peer_cred = match &*socket.state.lock() {
-        crate::socket::UnixSocketState::Datagram(datagram) => *datagram.peer_cred.lock(),
-        crate::socket::UnixSocketState::Stream(stream) => *stream.peer_cred.lock(),
+        UnixSocketState::Datagram(datagram) => *datagram.peer_cred.lock(),
+        UnixSocketState::Stream(stream) => *stream.peer_cred.lock(),
         _ => return Ok(Vec::new()),
     };
     let credential = LinuxUcred {
@@ -66,7 +67,7 @@ fn unix_socket_control_bytes(
     let control_len = header_space + cmsg_align(mem::size_of::<LinuxUcred>());
     let header = LinuxCmsgHdr {
         cmsg_len: header_space + mem::size_of::<LinuxUcred>(),
-        cmsg_level: crate::socket::SOL_SOCKET as i32,
+        cmsg_level: SOL_SOCKET as i32,
         cmsg_type: SCM_CREDENTIALS,
     };
     let mut control = vec![0u8; control_len];
@@ -152,13 +153,12 @@ fn socket_address_from_raw(
 define_syscall!(Socket, |domain: u64, kind: u64, protocol: u64| {
     let socket: ObjectRef = if domain == AF_NETLINK {
         NetlinkSocketObject::create(kind, protocol)
-            .map_err(crate::object::error::ObjectError::from)?
+            .map_err(ObjectError::from)?
     } else {
-        crate::socket::UnixSocketObject::create(domain, kind, protocol)
-            .map_err(crate::object::error::ObjectError::from)?
+        UnixSocketObject::create(domain, kind, protocol).map_err(ObjectError::from)?
     };
     if (kind & SOCK_NONBLOCK) != 0 {
-        let _ = socket.clone().set_flags(crate::object::FileFlags::NONBLOCK);
+        let _ = socket.clone().set_flags(FileFlags::NONBLOCK);
     }
     let fd_flags = if (kind & SOCK_CLOEXEC) != 0 {
         FdFlags::CLOEXEC
@@ -175,8 +175,7 @@ define_syscall!(Socketpair, |domain: u64,
                              kind: u64,
                              protocol: u64,
                              fds: *mut i32| {
-    let (left, right) = crate::socket::UnixSocketObject::pair(domain, kind, protocol)
-        .map_err(crate::object::error::ObjectError::from)?;
+    let (left, right) = UnixSocketObject::pair(domain, kind, protocol).map_err(ObjectError::from)?;
     let (left_fd, right_fd) = {
         let process = get_current_process();
         let mut process = process.lock();
@@ -207,13 +206,13 @@ define_syscall!(Bind, |socket: ObjectRef,
             socket
                 .as_unix_socket()?
                 .bind(path)
-                .map_err(crate::object::error::ObjectError::from)?;
+                .map_err(ObjectError::from)?;
         }
         SocketAddress::Netlink(address) => {
             socket
                 .as_netlink_socket()?
                 .bind(address)
-                .map_err(crate::object::error::ObjectError::from)?;
+                .map_err(ObjectError::from)?;
         }
     }
     Ok(0)
@@ -223,7 +222,7 @@ define_syscall!(Listen, |socket: ObjectRef, backlog: usize| {
     socket
         .as_unix_socket()?
         .listen(backlog)
-        .map_err(crate::object::error::ObjectError::from)?;
+        .map_err(ObjectError::from)?;
     Ok(0)
 });
 
@@ -236,7 +235,7 @@ define_syscall!(Connect, |socket: ObjectRef,
     let result = socket
         .as_unix_socket()?
         .connect(path.clone())
-        .map_err(crate::object::error::ObjectError::from);
+        .map_err(ObjectError::from);
     result?;
     Ok(0)
 });
@@ -247,14 +246,14 @@ define_syscall!(Accept, |socket: ObjectRef,
     let fd = socket
         .as_unix_socket()?
         .accept()
-        .map_err(crate::object::error::ObjectError::from)?;
+        .map_err(ObjectError::from)?;
     if !address_len_ptr.is_null() {
-        let accepted = crate::object::misc::get_object_current_process(fd as u64)
+        let accepted = get_object_current_process(fd as u64)
             .map_err(SyscallError::from)?;
         let name = accepted
             .as_unix_socket()?
             .getpeername_bytes()
-            .map_err(crate::object::error::ObjectError::from)?;
+            .map_err(ObjectError::from)?;
         let requested_len = unsafe { *address_len_ptr as usize };
         let copy_len = requested_len.min(name.len());
         if copy_len > 0 {
@@ -272,14 +271,14 @@ define_syscall!(Accept4, |socket: ObjectRef,
     let fd = socket
         .as_unix_socket()?
         .accept()
-        .map_err(crate::object::error::ObjectError::from)?;
+        .map_err(ObjectError::from)?;
     if !address_len_ptr.is_null() {
-        let accepted = crate::object::misc::get_object_current_process(fd as u64)
+        let accepted = get_object_current_process(fd as u64)
             .map_err(SyscallError::from)?;
         let name = accepted
             .as_unix_socket()?
             .getpeername_bytes()
-            .map_err(crate::object::error::ObjectError::from)?;
+            .map_err(ObjectError::from)?;
         let requested_len = unsafe { *address_len_ptr as usize };
         let copy_len = requested_len.min(name.len());
         if copy_len > 0 {
@@ -287,11 +286,10 @@ define_syscall!(Accept4, |socket: ObjectRef,
         }
         user_safe::write(address_len_ptr, &(name.len() as u32))?;
     }
-    let accepted =
-        crate::object::misc::get_object_current_process(fd as u64).map_err(SyscallError::from)?;
-    let mut file_flags = crate::object::FileFlags::empty();
+    let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+    let mut file_flags = FileFlags::empty();
     if (flags & SOCK_NONBLOCK as u32) != 0 {
-        file_flags.insert(crate::object::FileFlags::NONBLOCK);
+        file_flags.insert(FileFlags::NONBLOCK);
     }
     let _ = accepted.set_flags(file_flags);
     if (flags & SOCK_CLOEXEC as u32) != 0 {
@@ -326,7 +324,7 @@ define_syscall!(Sendto, |socket: ObjectRef,
         }
         let written = socket
             .send(buffer)
-            .map_err(crate::object::error::ObjectError::from)?;
+            .map_err(ObjectError::from)?;
         return Ok(written);
     }
 
@@ -335,21 +333,21 @@ define_syscall!(Sendto, |socket: ObjectRef,
         let SocketAddress::Unix(path) = socket_address_from_raw(address, address_len)? else {
             return Err(SyscallError::InvalidArguments);
         };
-        if socket.kind == crate::socket::UnixSocketKind::Datagram {
+        if socket.kind == UnixSocketKind::Datagram {
             return Ok(socket
                 .write_socket_to_path(buffer, &path)
-                .map_err(crate::object::error::ObjectError::from)?);
+                .map_err(ObjectError::from)?);
         }
-        if matches!(&*socket.state.lock(), crate::socket::UnixSocketState::Unbound) {
+        if matches!(&*socket.state.lock(), UnixSocketState::Unbound) {
             socket
                 .connect(path)
-                .map_err(crate::object::error::ObjectError::from)?;
+                .map_err(ObjectError::from)?;
         }
     }
 
     let written = socket
         .write_socket(buffer)
-        .map_err(crate::object::error::ObjectError::from)?;
+        .map_err(ObjectError::from)?;
 
     Ok(written)
 });
@@ -414,7 +412,7 @@ define_syscall!(
         let mut data = vec![0; len];
         let read = socket
             .read_socket(&mut data)
-            .map_err(crate::object::error::ObjectError::from)?;
+            .map_err(ObjectError::from)?;
 
         if read > 0 {
             user_safe::write(buffer, &data[..read])?;
@@ -426,7 +424,7 @@ define_syscall!(
             }
             let name = socket
                 .getpeername_bytes()
-                .map_err(crate::object::error::ObjectError::from)?;
+                .map_err(ObjectError::from)?;
             let requested_len = unsafe { *address_len_ptr as usize };
             let copy_len = requested_len.min(name.len());
             if copy_len > 0 {
@@ -472,7 +470,7 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
     };
 
     let socket = socket.as_unix_socket()?;
-    if socket.kind == crate::socket::UnixSocketKind::Datagram {
+    if socket.kind == UnixSocketKind::Datagram {
         let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
         let mut buffer = Vec::with_capacity(total_len);
         for iov in iovs {
@@ -489,21 +487,21 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
         let written = if let Some(path) = target_path.as_deref() {
             socket
                 .write_socket_to_path(&buffer, path)
-                .map_err(crate::object::error::ObjectError::from)?
+                .map_err(ObjectError::from)?
         } else {
             socket
                 .write_socket(&buffer)
-                .map_err(crate::object::error::ObjectError::from)?
+                .map_err(ObjectError::from)?
         };
         return Ok(written);
     }
 
     if let Some(path) = target_path
-        && matches!(&*socket.state.lock(), crate::socket::UnixSocketState::Unbound)
+        && matches!(&*socket.state.lock(), UnixSocketState::Unbound)
     {
         socket
             .connect(path)
-            .map_err(crate::object::error::ObjectError::from)?;
+            .map_err(ObjectError::from)?;
     }
 
     let mut total_written = 0usize;
@@ -519,7 +517,7 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
         let buffer = unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
         let written = socket
             .write_socket(buffer)
-            .map_err(crate::object::error::ObjectError::from)?;
+            .map_err(ObjectError::from)?;
         total_written += written;
         if written < buffer.len() {
             break;
@@ -546,7 +544,7 @@ define_syscall!(Setsockopt, |socket: ObjectRef,
     socket
         .as_socket_like()?
         .setsockopt(level as u64, option_name as u64, option_value)
-        .map_err(crate::object::error::ObjectError::from)?;
+        .map_err(ObjectError::from)?;
 
     Ok(0)
 });
@@ -566,7 +564,7 @@ define_syscall!(
         let value = socket
             .as_socket_like()?
             .getsockopt(level as u64, option_name as u64, option_len)
-            .map_err(crate::object::error::ObjectError::from)?;
+            .map_err(ObjectError::from)?;
 
         if option_value.is_null() {
             if option_len != 0 && !value.is_empty() {
@@ -606,7 +604,7 @@ define_syscall!(
         let name = socket
             .as_socket_like()?
             .getsockname_bytes()
-            .map_err(crate::object::error::ObjectError::from)?;
+            .map_err(ObjectError::from)?;
         let requested_len = unsafe { *address_len_ptr as usize };
         let copy_len = requested_len.min(name.len());
 
@@ -633,7 +631,7 @@ define_syscall!(
         let name = socket
             .as_unix_socket()?
             .getpeername_bytes()
-            .map_err(crate::object::error::ObjectError::from)?;
+            .map_err(ObjectError::from)?;
         let requested_len = unsafe { *address_len_ptr as usize };
         let copy_len = requested_len.min(name.len());
 
@@ -744,7 +742,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         let buffer = unsafe { core::slice::from_raw_parts_mut(iov.iov_base, iov.iov_len) };
         let read = socket
             .read_socket(buffer)
-            .map_err(crate::object::error::ObjectError::from)?;
+            .map_err(ObjectError::from)?;
         total_read += read;
         if read < buffer.len() {
             break;
@@ -755,7 +753,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
     if !msg.msg_name.is_null() {
         let name = socket
             .getpeername_bytes()
-            .map_err(crate::object::error::ObjectError::from)?;
+            .map_err(ObjectError::from)?;
         let copy_len = (msg.msg_namelen as usize).min(name.len());
         if copy_len > 0 {
             user_safe::write(msg.msg_name.cast::<u8>(), &name[..copy_len])?;
@@ -790,7 +788,7 @@ define_syscall!(Shutdown, |socket: ObjectRef, how: u64| {
     socket
         .as_unix_socket()?
         .shutdown(how)
-        .map_err(crate::object::error::ObjectError::from)?;
+        .map_err(ObjectError::from)?;
     Ok(0)
 });
 

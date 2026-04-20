@@ -6,7 +6,7 @@ use crate::{
     define_with_accessor,
     elfloader::ElfInfo,
     filesystem::{absolute_path::AbsolutePath, errors::FSError, vfs::VirtualFS},
-    misc::stack_builder::StackBuilder,
+    misc::{stack_builder::StackBuilder, time::Time},
     process::{
         Process, ProcessRef,
         manager::{MANAGER, get_current_process},
@@ -78,10 +78,7 @@ pub fn init_stack_layout(
 
     let execfn_ptr = builder.push_str(exec_path);
     let platform_ptr = builder.push_str("x86_64");
-    let random_bytes = [
-        crate::misc::time::Time::current().as_nanoseconds(),
-        crate::misc::time::Time::since_boot().as_nanoseconds(),
-    ];
+    let random_bytes = [Time::current().as_nanoseconds(), Time::since_boot().as_nanoseconds()];
     let random_ptr = builder.push_struct(&random_bytes);
 
     let aux_entries = if interpreter_base.is_some() { 20 } else { 19 };

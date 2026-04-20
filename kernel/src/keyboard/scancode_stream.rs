@@ -1,4 +1,7 @@
-use core::task::Poll;
+use core::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use conquer_once::spin::OnceCell;
 use crossbeam_queue::ArrayQueue;
@@ -20,10 +23,7 @@ impl Default for ScancodeStream {
 impl Stream for ScancodeStream {
     type Item = u8;
 
-    fn poll_next(
-        self: core::pin::Pin<&mut Self>,
-        cx: &mut core::task::Context<'_>,
-    ) -> core::task::Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let queue = SCANCODE_QUEUE.try_get().expect("Uninitialized");
 
         if let Some(scancode) = queue.pop() {

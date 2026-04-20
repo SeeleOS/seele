@@ -4,7 +4,7 @@ use crate::{
     define_syscall,
     filesystem::object::poll_identity_object,
     misc::{error::AsSyscallError, time::Time},
-    object::misc::get_object_current_process,
+    object::{Object, error::ObjectError, misc::get_object_current_process},
     polling::{event::PollableEvent, poller::PollerObject},
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::yielding::{
@@ -103,7 +103,7 @@ fn wait_on_poller(poller: Arc<PollerObject>, timeout_ms: i32) -> Result<(), Sysc
         Some(Time::since_boot().add_ms(timeout_ms as u64))
     };
 
-    let poller_ref: Arc<dyn crate::object::Object> = poller.clone();
+    let poller_ref: Arc<dyn Object> = poller.clone();
     let current = prepare_block_current(BlockType::WakeRequired {
         wake_type: WakeType::Poller(poller_ref),
         deadline,
@@ -166,7 +166,7 @@ fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallE
         let object = match get_object_current_process(pfd.fd as u64) {
             Ok(object) => object,
             Err(err) => {
-                if matches!(err, crate::object::error::ObjectError::DoesNotExist) {
+                if matches!(err, ObjectError::DoesNotExist) {
                     pfd.revents |= POLLNVAL;
                     invalid += 1;
                     continue;

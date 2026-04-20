@@ -25,7 +25,7 @@ use crate::{
         misc::{ProcessID, with_current_process},
     },
     s_println,
-    systemcall::utils::{SyscallError, SyscallImpl},
+    systemcall::utils::{SyscallError, SyscallImpl, SyscallResult},
 };
 
 static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeMap::new());
@@ -44,7 +44,7 @@ fn write_dirents64(
     object_index: u64,
     buf: *mut u8,
     len: usize,
-) -> crate::systemcall::utils::SyscallResult {
+) -> SyscallResult {
     let obj = get_object_current_process(object_index)?.as_file_like()?;
     let contents = match obj.directory_contents() {
         Ok(contents) => contents,
@@ -109,7 +109,7 @@ fn copy_between_objects(
     input: ObjectRef,
     output: ObjectRef,
     mut remaining: usize,
-) -> crate::systemcall::utils::SyscallResult {
+) -> SyscallResult {
     let readable = input.as_readable()?;
     let writable = output.as_writable()?;
     let mut buffer = [0u8; COPY_CHUNK_SIZE];

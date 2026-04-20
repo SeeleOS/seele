@@ -5,6 +5,7 @@ use crate::filesystem::{
     errors::FSError,
     info::{FileLikeInfo, UnixPermission},
     path::Path,
+    vfs::FSResult,
     vfs_traits::{FileLikeType, Symlink},
 };
 
@@ -16,7 +17,7 @@ pub struct Ext4Symlink {
 }
 
 impl Symlink for Ext4Symlink {
-    fn info(&self) -> crate::filesystem::vfs::FSResult<crate::filesystem::info::FileLikeInfo> {
+    fn info(&self) -> FSResult<FileLikeInfo> {
         Ok(FileLikeInfo {
             name: self.name.clone(),
             file_like_type: FileLikeType::Symlink,
@@ -26,7 +27,7 @@ impl Symlink for Ext4Symlink {
         })
     }
 
-    fn target(&self) -> crate::filesystem::vfs::FSResult<Path> {
+    fn target(&self) -> FSResult<Path> {
         let fs = &self.fs;
         let target = self.inode.symlink_target(fs).map_err(FSError::from)?;
         let target = target.to_str().map_err(|_| FSError::Other)?;
@@ -42,7 +43,7 @@ impl Symlink for Ext4Symlink {
         Ok(Path::new(&combined).as_absolute().as_normal())
     }
 
-    fn read_link_target(&self) -> crate::filesystem::vfs::FSResult<String> {
+    fn read_link_target(&self) -> FSResult<String> {
         let target = self.inode.symlink_target(&self.fs).map_err(FSError::from)?;
         target
             .to_str()

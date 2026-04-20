@@ -2,7 +2,7 @@ use alloc::slice;
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
 
-use crate::filesystem::block_device::{BlockDevice, BlockDeviceError};
+use crate::filesystem::block_device::{BlockDevice, BlockDeviceError, BlockDeviceResult};
 
 #[derive(Debug)]
 pub struct RamDisk(Mutex<&'static mut [u8]>);
@@ -34,7 +34,7 @@ impl BlockDevice for RamDisk {
         &self,
         id: usize,
         buffer: &mut [u8],
-    ) -> crate::filesystem::block_device::BlockDeviceResult {
+    ) -> BlockDeviceResult {
         let start = id * self.block_size();
         let end = start + self.block_size();
 
@@ -56,7 +56,7 @@ impl BlockDevice for RamDisk {
         &self,
         id: usize,
         buffer: &[u8],
-    ) -> crate::filesystem::block_device::BlockDeviceResult {
+    ) -> BlockDeviceResult {
         let start = id * self.block_size();
         let end = start + self.block_size();
 
@@ -91,7 +91,7 @@ impl BlockDevice for RamDiskHandle {
         &self,
         id: usize,
         buffer: &mut [u8],
-    ) -> crate::filesystem::block_device::BlockDeviceResult {
+    ) -> BlockDeviceResult {
         RAMDISK.get().unwrap().read_single_block(id, buffer)
     }
 
@@ -99,7 +99,7 @@ impl BlockDevice for RamDiskHandle {
         &self,
         id: usize,
         buffer: &[u8],
-    ) -> crate::filesystem::block_device::BlockDeviceResult {
+    ) -> BlockDeviceResult {
         RAMDISK.get().unwrap().write_single_block(id, buffer)
     }
 

@@ -14,7 +14,7 @@ impl TaskID {
     fn new() -> Self {
         static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
-        TaskID(NEXT_ID.fetch_add(1, core::sync::atomic::Ordering::Relaxed))
+        TaskID(NEXT_ID.fetch_add(1, Ordering::Relaxed))
     }
 }
 

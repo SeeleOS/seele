@@ -1,4 +1,5 @@
-use bootloader_api::info::PixelFormat;
+use alloc::{vec, vec::Vec};
+use bootloader_api::info::{FrameBuffer, FrameBufferInfo, PixelFormat};
 use conquer_once::spin::OnceCell;
 use core::sync::atomic::{AtomicBool, Ordering};
 use spin::Mutex;
@@ -26,7 +27,7 @@ pub struct FramebufferInfo {
     pub pixel_format: FramebufferPixelFormat,
 }
 
-pub fn init(boot_info: &'static mut bootloader_api::info::FrameBuffer) {
+pub fn init(boot_info: &'static mut FrameBuffer) {
     log::info!("graphics: init start");
     FRAME_BUFFER.init_once(|| Mutex::new(Canvas::new(boot_info)));
     log::debug!("graphics: terminal configured");
@@ -37,15 +38,15 @@ pub static FRAMEBUFFER_USER_CONTROLLED: AtomicBool = AtomicBool::new(false);
 
 pub struct Canvas {
     pub fb: &'static mut [u8],
-    buffer: alloc::vec::Vec<u8>,
-    pub info: bootloader_api::info::FrameBufferInfo,
+    buffer: Vec<u8>,
+    pub info: FrameBufferInfo,
 
     pub width: u32,
     pub height: u32,
 }
 
 impl Canvas {
-    pub fn new(frame_buffer: &'static mut bootloader_api::info::FrameBuffer) -> Self {
+    pub fn new(frame_buffer: &'static mut FrameBuffer) -> Self {
         let info = frame_buffer.info();
         let fb = frame_buffer.buffer_mut();
 
@@ -55,7 +56,7 @@ impl Canvas {
         Self {
             info,
             fb,
-            buffer: alloc::vec![0u8; info.byte_len],
+            buffer: vec![0u8; info.byte_len],
 
             width: info.width as u32,
             height: info.height as u32,

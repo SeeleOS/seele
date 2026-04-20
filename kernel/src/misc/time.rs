@@ -198,6 +198,7 @@ fn detect_tsc_frequency_from_leaf_0x16() -> Option<u64> {
 }
 
 #[cfg(target_arch = "x86_64")]
-fn cpuid(leaf: u32) -> core::arch::x86_64::CpuidResult {
+fn cpuid(leaf: u32) -> CpuidResult {
     core::arch::x86_64::__cpuid(leaf)
 }
+use core::arch::x86_64::CpuidResult;

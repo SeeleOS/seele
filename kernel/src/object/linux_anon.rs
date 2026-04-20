@@ -1,6 +1,7 @@
 use alloc::{
     collections::BTreeMap,
     sync::{Arc, Weak},
+    vec::Vec,
 };
 use spin::Mutex;
 
@@ -16,6 +17,7 @@ use crate::{
     },
     polling::{event::PollableEvent, object::Pollable},
     process::manager::MANAGER,
+    process::misc::ProcessID,
     signal::{Signal, Signals},
     thread::{
         THREAD_MANAGER,
@@ -32,12 +34,12 @@ const EVENTFD_COUNTER_MAX: u64 = u64::MAX - 1;
 
 #[derive(Default)]
 struct SignalfdRegistry {
-    watchers: BTreeMap<u64, alloc::vec::Vec<Weak<SignalfdObject>>>,
+    watchers: BTreeMap<u64, Vec<Weak<SignalfdObject>>>,
 }
 
 #[derive(Default)]
 struct PidFdRegistry {
-    watchers: BTreeMap<u64, alloc::vec::Vec<Weak<PidFdObject>>>,
+    watchers: BTreeMap<u64, Vec<Weak<PidFdObject>>>,
 }
 
 lazy_static::lazy_static! {
@@ -107,7 +109,7 @@ impl PidFdObject {
         MANAGER
             .lock()
             .processes
-            .get(&crate::process::misc::ProcessID(self.pid))
+            .get(&ProcessID(self.pid))
             .is_some_and(|process| !process.lock().have_exited())
     }
 
@@ -126,14 +128,14 @@ fn register_pidfd(pid: u64, pidfd: &Arc<PidFdObject>) {
     watchers.push(Arc::downgrade(pidfd));
 }
 
-fn pidfds_for_process(pid: u64) -> alloc::vec::Vec<Arc<PidFdObject>> {
+fn pidfds_for_process(pid: u64) -> Vec<Arc<PidFdObject>> {
     {
         let mut registry = PIDFD_REGISTRY.lock();
         let Some(watchers) = registry.watchers.get_mut(&pid) else {
-            return alloc::vec::Vec::new();
+            return Vec::new();
         };
 
-        let mut strong = alloc::vec::Vec::new();
+        let mut strong = Vec::new();
         watchers.retain(|watcher| {
             if let Some(pidfd) = watcher.upgrade() {
                 strong.push(pidfd);
@@ -282,7 +284,7 @@ pub fn wake_signalfd_for_process(pid: u64) {
             return;
         };
 
-        let mut strong = alloc::vec::Vec::new();
+        let mut strong = Vec::new();
         watchers.retain(|watcher| {
             if let Some(signalfd) = watcher.upgrade() {
                 strong.push(signalfd);

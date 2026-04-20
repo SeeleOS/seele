@@ -2,7 +2,7 @@ use alloc::sync::Weak;
 
 use super::{
     DATAGRAM_RECV_CAPACITY, STREAM_RECV_CAPACITY, SocketError, SocketResult, UNIX_SOCKET_REGISTRY,
-    UnixDatagramMessage, UnixSocketKind, UnixSocketObject, UnixSocketRegistryEntry,
+    SocketPeerCred, UnixDatagramMessage, UnixSocketKind, UnixSocketObject, UnixSocketRegistryEntry,
     UnixSocketState, wake_io, wake_pollers,
 };
 use crate::{
@@ -88,7 +88,7 @@ impl UnixSocketObject {
         recv_queue.push_back(UnixDatagramMessage {
             data: buffer.to_vec(),
             sender_name: datagram.local_name.lock().clone(),
-            sender_cred: crate::socket::SocketPeerCred {
+            sender_cred: SocketPeerCred {
                 pid: get_current_process().lock().pid.0,
                 uid: 0,
                 gid: 0,

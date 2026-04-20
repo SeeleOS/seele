@@ -1,8 +1,11 @@
+use alloc::sync::Arc;
+
 use crate::{
     impl_cast_function, impl_cast_function_non_trait,
     object::{
         FileFlags, Object,
         config::ConfigurateRequest,
+        error::ObjectError,
         misc::ObjectResult,
         traits::{Configuratable, Readable, Statable, Writable},
     },
@@ -15,14 +18,11 @@ const FIONBIO: u64 = 0x5421;
 const FIOCLEX: u64 = 0x5451;
 
 impl Object for UnixSocketObject {
-    fn get_flags(self: alloc::sync::Arc<Self>) -> crate::object::misc::ObjectResult<FileFlags> {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
         Ok(*self.flags.lock())
     }
 
-    fn set_flags(
-        self: alloc::sync::Arc<Self>,
-        flags: FileFlags,
-    ) -> crate::object::misc::ObjectResult<()> {
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
         *self.flags.lock() = flags;
         Ok(())
     }
@@ -55,7 +55,7 @@ impl Configuratable for UnixSocketObject {
                 }
                 Ok(0)
             }
-            _ => Err(crate::object::error::ObjectError::InvalidRequest),
+            _ => Err(ObjectError::InvalidRequest),
         }
     }
 }

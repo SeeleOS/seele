@@ -4,6 +4,7 @@ mod mouse;
 use alloc::vec::Vec;
 
 use crate::filesystem::{
+    errors::FSError,
     path::Path,
     staticfs::{
         StaticDirEntry, StaticDirectoryNode, StaticFileNode, StaticFs, StaticNode,
@@ -463,7 +464,7 @@ impl FileSystem for SysFs {
     }
 
     fn rename(&self, _old_path: &Path, _new_path: &Path) -> FSResult<()> {
-        Err(crate::filesystem::errors::FSError::Readonly)
+        Err(FSError::Readonly)
     }
 
     fn name(&self) -> &'static str {

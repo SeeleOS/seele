@@ -1,5 +1,8 @@
 use alloc::{boxed::Box, sync::Arc};
-use core::error::Error;
+use core::{
+    error::Error,
+    fmt::{Display, Formatter, Result as FmtResult},
+};
 
 use ext4plus::{Ext4Read, Ext4Write};
 use spin::mutex::Mutex;
@@ -24,8 +27,8 @@ pub type Ext4RamDiskOperator = Ext4BlockOperator;
 #[derive(Debug)]
 struct Ext4BlockIoError(BlockDeviceError);
 
-impl core::fmt::Display for Ext4BlockIoError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl Display for Ext4BlockIoError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "ext4 block IO error: {:?}", self.0)
     }
 }

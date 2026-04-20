@@ -93,7 +93,7 @@ fn info_to_linux_termios2(info: &TerminalSettings) -> LinuxTermios2 {
 }
 
 impl Configuratable for TerminalObject {
-    fn configure(&self, request: crate::object::config::ConfigurateRequest) -> ObjectResult<isize> {
+    fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
         if let Some(result) = handle_kd_request(&self.linux_console, &request)? {
             return Ok(result);
         }

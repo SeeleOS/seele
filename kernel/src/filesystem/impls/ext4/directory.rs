@@ -21,8 +21,9 @@ use ext4plus::{
 use crate::filesystem::{
     errors::FSError,
     impls::ext4::{chmod_path, file::Ext4File, symlink::Ext4Symlink},
-    info::DirectoryContentInfo,
-    vfs_traits::{Directory, DirectoryContentType, FileLike},
+    info::{DirectoryContentInfo, FileLikeInfo, UnixPermission},
+    vfs::FSResult,
+    vfs_traits::{Directory, DirectoryContentType, FileLike, FileLikeType},
 };
 use crate::s_println;
 
@@ -59,7 +60,7 @@ impl Ext4Directory {
         &self.fs
     }
 
-    fn open_parent_dir(&self) -> crate::filesystem::vfs::FSResult<(ext4plus::inode::Inode, Dir)> {
+    fn open_parent_dir(&self) -> FSResult<(ext4plus::inode::Inode, Dir)> {
         let parent_inode = self
             .fs
             .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
@@ -74,25 +75,25 @@ impl Directory for Ext4Directory {
         self
     }
 
-    fn info(&self) -> crate::filesystem::vfs::FSResult<crate::filesystem::info::FileLikeInfo> {
+    fn info(&self) -> FSResult<FileLikeInfo> {
         let inode = self
             .fs
             .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
             .map_err(map_ext4_error)?;
-        Ok(crate::filesystem::info::FileLikeInfo::new(
+        Ok(FileLikeInfo::new(
             self.name.clone(),
             0,
-            crate::filesystem::info::UnixPermission(inode.mode().bits().into()),
-            crate::filesystem::vfs_traits::FileLikeType::Directory,
+            UnixPermission(inode.mode().bits().into()),
+            FileLikeType::Directory,
         )
         .with_inode(inode.index.get().into()))
     }
 
-    fn name(&self) -> crate::filesystem::vfs::FSResult<String> {
+    fn name(&self) -> FSResult<String> {
         Ok(self.name.clone())
     }
 
-    fn contents(&self) -> crate::filesystem::vfs::FSResult<Vec<DirectoryContentInfo>> {
+    fn contents(&self) -> FSResult<Vec<DirectoryContentInfo>> {
         let mut result = Vec::new();
 
         let iter = match self.fs.read_dir(self.path.as_str()) {
@@ -147,7 +148,7 @@ impl Directory for Ext4Directory {
         Ok(result)
     }
 
-    fn create(&self, info: DirectoryContentInfo) -> crate::filesystem::vfs::FSResult<()> {
+    fn create(&self, info: DirectoryContentInfo) -> FSResult<()> {
         let (file_type, mode) = match info.content_type {
             DirectoryContentType::File => (
                 FileType::Regular,
@@ -215,7 +216,7 @@ impl Directory for Ext4Directory {
         Ok(())
     }
 
-    fn create_symlink(&self, name: &str, target: &str) -> crate::filesystem::vfs::FSResult<()> {
+    fn create_symlink(&self, name: &str, target: &str) -> FSResult<()> {
         let (_, mut parent) = self.open_parent_dir()?;
         let name = DirEntryName::try_from(name).map_err(|_| FSError::PathTooLong)?;
         let target = Ext4PathBuf::try_from(target.to_string()).map_err(|_| FSError::PathTooLong)?;
@@ -238,7 +239,7 @@ impl Directory for Ext4Directory {
         Ok(())
     }
 
-    fn delete(&self, name: &str) -> crate::filesystem::vfs::FSResult<()> {
+    fn delete(&self, name: &str) -> FSResult<()> {
         let mut parent_inode = self
             .fs
             .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
@@ -276,7 +277,7 @@ impl Directory for Ext4Directory {
         Ok(())
     }
 
-    fn get(&self, name: &str) -> crate::filesystem::vfs::FSResult<FileLike> {
+    fn get(&self, name: &str) -> FSResult<FileLike> {
         let path = self.join_child(name);
 
         // Use `path_to_inode` so we can decide whether this is a file or directory.
@@ -312,7 +313,7 @@ impl Directory for Ext4Directory {
         }
     }
 
-    fn chmod(&self, mode: u32) -> crate::filesystem::vfs::FSResult<()> {
+    fn chmod(&self, mode: u32) -> FSResult<()> {
         chmod_path(&self.fs, &self.path, mode)
     }
 }

@@ -7,6 +7,7 @@ use crate::filesystem::{
     errors::FSError,
     impls::ext4::chmod_path,
     info::{FileLikeInfo, UnixPermission},
+    vfs::FSResult,
     vfs_traits::{File, FileLikeType, Whence},
 };
 
@@ -42,11 +43,11 @@ impl File for Ext4File {
         self
     }
 
-    fn read(&mut self, buffer: &mut [u8]) -> crate::filesystem::vfs::FSResult<usize> {
+    fn read(&mut self, buffer: &mut [u8]) -> FSResult<usize> {
         self.inner.read_bytes(buffer).map_err(Into::into)
     }
 
-    fn write(&mut self, buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+    fn write(&mut self, buffer: &[u8]) -> FSResult<usize> {
         self.inner.write_bytes(buffer).map_err(Into::into)
     }
 
@@ -54,11 +55,11 @@ impl File for Ext4File {
         &mut self,
         buffer: &mut [u8],
         offset: u64,
-    ) -> crate::filesystem::vfs::FSResult<usize> {
+    ) -> FSResult<usize> {
         self.inner.read_bytes_at(buffer, offset).map_err(Into::into)
     }
 
-    fn info(&mut self) -> crate::filesystem::vfs::FSResult<FileLikeInfo> {
+    fn info(&mut self) -> FSResult<FileLikeInfo> {
         let size = self.size()?;
         Ok(FileLikeInfo::new(
             self.name.clone(),
@@ -69,7 +70,7 @@ impl File for Ext4File {
         .with_inode(self.inner.inode().index.get().into()))
     }
 
-    fn seek(&mut self, offset: i64, seek_type: Whence) -> crate::filesystem::vfs::FSResult<usize> {
+    fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {
         let pos = match seek_type {
             Whence::Start => offset,
             Whence::Current => self.inner.position() as i64 + offset,
@@ -81,7 +82,7 @@ impl File for Ext4File {
         Ok(self.inner.position() as usize)
     }
 
-    fn chmod(&self, mode: u32) -> crate::filesystem::vfs::FSResult<()> {
+    fn chmod(&self, mode: u32) -> FSResult<()> {
         chmod_path(&self.fs, &self.path, mode)
     }
 }

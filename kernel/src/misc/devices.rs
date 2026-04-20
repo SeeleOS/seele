@@ -3,6 +3,7 @@ use crate::{
     impl_cast_function,
     object::{
         Object,
+        misc::ObjectResult,
         traits::{Readable, Statable, Writable},
     },
 };
@@ -17,13 +18,13 @@ impl Object for DevNull {
 }
 
 impl Writable for DevNull {
-    fn write(&self, buffer: &[u8]) -> crate::object::misc::ObjectResult<usize> {
+    fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
         Ok(buffer.len())
     }
 }
 
 impl Readable for DevNull {
-    fn read(&self, buffer: &mut [u8]) -> crate::object::misc::ObjectResult<usize> {
+    fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
         buffer.fill(0);
         Ok(buffer.len())
     }

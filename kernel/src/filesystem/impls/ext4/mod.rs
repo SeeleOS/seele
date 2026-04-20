@@ -9,7 +9,7 @@ use crate::filesystem::{
     errors::FSError,
     impls::ext4::{directory::Ext4Directory, file::Ext4File},
     path::{Path, PathPart},
-    vfs::WrappedDirectory,
+    vfs::{FSResult, WrappedDirectory},
     vfs_traits::{FileLike, FileSystem},
 };
 
@@ -22,7 +22,7 @@ pub mod symlink;
 const CHMOD_PERMISSION_BITS: u16 = 0o7777;
 const FILE_TYPE_BITS: u16 = 0o170000;
 
-pub(super) fn chmod_path(fs: &Ext4, path: &str, mode: u32) -> crate::filesystem::vfs::FSResult<()> {
+pub(super) fn chmod_path(fs: &Ext4, path: &str, mode: u32) -> FSResult<()> {
     let requested_bits = (mode as u16) & CHMOD_PERMISSION_BITS;
     let requested_mode = InodeMode::from_bits(requested_bits).ok_or(FSError::Other)?;
     let mut inode = fs
@@ -43,7 +43,7 @@ impl EXT4 {
     fn follow_intermediate_symlinks(
         &self,
         mut current: FileLike,
-    ) -> crate::filesystem::vfs::FSResult<FileLike> {
+    ) -> FSResult<FileLike> {
         const MAX_SYMLINKS: usize = 40;
 
         for _ in 0..MAX_SYMLINKS {
@@ -67,11 +67,11 @@ impl EXT4 {
 }
 
 impl FileSystem for EXT4 {
-    fn init(&mut self) -> crate::filesystem::vfs::FSResult<()> {
+    fn init(&mut self) -> FSResult<()> {
         Ok(())
     }
 
-    fn lookup(&self, path: &Path) -> crate::filesystem::vfs::FSResult<FileLike> {
+    fn lookup(&self, path: &Path) -> FSResult<FileLike> {
         let normalized = path.normalize();
         let path_string = normalized.clone().as_string();
         let mut current = FileLike::Directory(self.root_dir());
@@ -115,7 +115,7 @@ impl FileSystem for EXT4 {
         Ok(current)
     }
 
-    fn rename(&self, old_path: &Path, new_path: &Path) -> crate::filesystem::vfs::FSResult<()> {
+    fn rename(&self, old_path: &Path, new_path: &Path) -> FSResult<()> {
         let old_path = old_path.normalize();
         let new_path = new_path.normalize();
         if old_path == new_path {

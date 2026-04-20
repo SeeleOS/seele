@@ -1,7 +1,10 @@
 use alloc::vec::Vec;
 
-use crate::filesystem::staticfs::{
-    StaticDirEntry, StaticDirectoryNode, StaticFileNode, StaticNode, StaticSymlinkNode,
+use crate::filesystem::{
+    staticfs::{
+        StaticDirEntry, StaticDirectoryNode, StaticFileNode, StaticNode, StaticSymlinkNode,
+    },
+    vfs::FSResult,
 };
 
 use super::emit_uevent;
@@ -51,11 +54,11 @@ fn mouse_caps_prop() -> Vec<u8> {
     b"1\n".to_vec()
 }
 
-fn mouse_input_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+fn mouse_input_uevent_write(buffer: &[u8]) -> FSResult<usize> {
     emit_uevent(buffer, "/devices/platform/i8042/serio1/input/input1", "input", None)
 }
 
-fn mouse_event_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+fn mouse_event_uevent_write(buffer: &[u8]) -> FSResult<usize> {
     emit_uevent(
         buffer,
         "/devices/platform/i8042/serio1/input/input1/event1",
@@ -64,11 +67,11 @@ fn mouse_event_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<u
     )
 }
 
-fn mouse_input_dir_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+fn mouse_input_dir_uevent_write(buffer: &[u8]) -> FSResult<usize> {
     emit_uevent(buffer, "/devices/platform/i8042/serio1/input", "input", None)
 }
 
-fn mouse_serio_uevent_write(buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+fn mouse_serio_uevent_write(buffer: &[u8]) -> FSResult<usize> {
     emit_uevent(buffer, "/devices/platform/i8042/serio1", "serio", None)
 }
 

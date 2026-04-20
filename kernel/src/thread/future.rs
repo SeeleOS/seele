@@ -1,4 +1,7 @@
-use core::task::Poll;
+use core::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use alloc::sync::Arc;
 use x86_64::{VirtAddr, instructions::interrupts::without_interrupts};
@@ -30,10 +33,7 @@ back to poll() -> poll returns
 impl Future for ThreadFuture {
     type Output = ();
 
-    fn poll(
-        self: core::pin::Pin<&mut Self>,
-        cx: &mut core::task::Context<'_>,
-    ) -> core::task::Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let (thread_snapshot, executor_snapshot) = {
             without_interrupts(|| {
                 let mut manager = THREAD_MANAGER.get().unwrap().lock();

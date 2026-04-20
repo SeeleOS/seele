@@ -38,7 +38,7 @@ impl MemoryMappable for FramebufferObject {
         offset: u64,
         pages: u64,
         protection: Protection,
-    ) -> crate::object::misc::ObjectResult<VirtAddr> {
+    ) -> ObjectResult<VirtAddr> {
         use alloc::vec::Vec;
         use x86_64::structures::paging::PhysFrame;
         use x86_64::structures::paging::{PageTableFlags, mapper::TranslateResult};

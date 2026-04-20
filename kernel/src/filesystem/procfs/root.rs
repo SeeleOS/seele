@@ -4,6 +4,7 @@ use lazy_static::lazy_static;
 use crate::{
     filesystem::{
         info::DirectoryContentInfo,
+        path::Path,
         vfs::{FileSystemRef, VirtualFS},
         vfs_traits::DirectoryContentType,
     },
@@ -125,7 +126,7 @@ pub(super) fn proc_mounts_bytes() -> Vec<u8> {
         out.push(' ');
         out.push_str(fs.name());
         out.push(' ');
-        out.push_str(fs.mount_options(&crate::filesystem::path::Path::new(&path)));
+        out.push_str(fs.mount_options(&Path::new(&path)));
         out.push_str(" 0 0\n");
     }
     out.into_bytes()
@@ -157,7 +158,7 @@ pub(super) fn proc_mountinfo_bytes() -> Vec<u8> {
                 .unwrap_or(1)
         };
         let fs = fs.lock();
-        let options = fs.mount_options(&crate::filesystem::path::Path::new(&path));
+        let options = fs.mount_options(&Path::new(&path));
         out.push_str(&format!(
             "{id} {parent_id} 0:{id} / {path} {options} - {} {} rw\n",
             fs.name(),

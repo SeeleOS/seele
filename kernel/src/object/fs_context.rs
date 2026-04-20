@@ -2,6 +2,7 @@ use alloc::{string::String, sync::Arc};
 use num_enum::TryFromPrimitive;
 
 use crate::{
+    filesystem::info::LinuxStat,
     impl_cast_function, impl_cast_function_non_trait,
     object::{FileFlags, Object, misc::ObjectResult, traits::Statable},
     systemcall::utils::SyscallError,
@@ -70,7 +71,7 @@ impl Object for FsContextObject {
 }
 
 impl Statable for FsContextObject {
-    fn stat(&self) -> crate::filesystem::info::LinuxStat {
-        crate::filesystem::info::LinuxStat::char_device(0o600)
+    fn stat(&self) -> LinuxStat {
+        LinuxStat::char_device(0o600)
     }
 }

@@ -1,6 +1,6 @@
 use crate::filesystem::object::poll_identity_object;
 use crate::misc::time::Time;
-use crate::object::misc::ObjectRef;
+use crate::object::{Object, misc::ObjectRef};
 use crate::polling::event::PollableEvent;
 use crate::systemcall::utils::SyscallImpl;
 use crate::thread::yielding::{
@@ -212,7 +212,7 @@ fn epoll_wait_impl(
             Some(Time::since_boot().add_ms(timeout as u64))
         };
 
-        let poller_ref: Arc<dyn crate::object::Object> = poller.clone();
+        let poller_ref: Arc<dyn Object> = poller.clone();
         let current = prepare_block_current(BlockType::WakeRequired {
             wake_type: WakeType::Poller(poller_ref),
             deadline,

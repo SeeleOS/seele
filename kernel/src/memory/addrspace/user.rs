@@ -6,7 +6,7 @@ use x86_64::{
 };
 
 use crate::{
-    memory::addrspace::{AddrSpace, mem_area::Data},
+    memory::addrspace::{AddrSpace, cow::COW_FLAG, mem_area::Data},
     systemcall::utils::{SyscallError, SyscallResult},
 };
 
@@ -33,7 +33,7 @@ impl AddrSpace {
     fn ensure_user_page_writable(&mut self, addr: VirtAddr) -> bool {
         match self.page_table.inner.translate(addr) {
             TranslateResult::Mapped { flags, .. } => {
-                if flags.contains(crate::memory::addrspace::cow::COW_FLAG) {
+                if flags.contains(COW_FLAG) {
                     self.replace_cow_page(addr);
                     true
                 } else {
@@ -119,7 +119,7 @@ impl AddrSpace {
     }
 
     pub fn read<T: Copy>(&mut self, ptr: *const T) -> SyscallResult<T> {
-        let mut value = core::mem::MaybeUninit::<T>::uninit();
+        let mut value = MaybeUninit::<T>::uninit();
         let bytes = unsafe {
             core::slice::from_raw_parts_mut(
                 value.as_mut_ptr().cast::<u8>(),
@@ -130,3 +130,4 @@ impl AddrSpace {
         Ok(unsafe { value.assume_init() })
     }
 }
+use core::mem::MaybeUninit;

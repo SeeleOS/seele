@@ -1,9 +1,10 @@
+use alloc::vec::Vec;
 use crate::process::group::ProcessGroupID;
 use crate::process::manager::MANAGER;
 use crate::process::misc::ProcessID;
 use crate::signal::action::{SignalHandlingType, Signals};
 use crate::systemcall::utils::*;
-use crate::thread::misc::SnapshotState;
+use crate::thread::misc::{SnapshotState, ThreadID};
 use crate::thread::scheduling::return_to_executor_no_save;
 use crate::thread::{THREAD_MANAGER, get_current_thread};
 use crate::{
@@ -250,7 +251,7 @@ define_syscall!(Kill, |pid: i32, signal: i32| {
     };
 
     let current_group = get_current_process().lock().group_id;
-    let mut targets = alloc::vec::Vec::new();
+    let mut targets = Vec::new();
     {
         let manager = MANAGER.lock();
 
@@ -302,7 +303,7 @@ define_syscall!(Kill, |pid: i32, signal: i32| {
 define_syscall!(Tgkill, |tgid: i32, tid: i32, signal: i32| {
     let signal = Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?;
     let tgid = ProcessID(tgid as u64);
-    let tid = crate::thread::misc::ThreadID(tid as u64);
+    let tid = ThreadID(tid as u64);
 
     let thread = THREAD_MANAGER
         .get()

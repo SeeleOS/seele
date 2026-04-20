@@ -1,6 +1,10 @@
 use crate::filesystem::{
+    errors::FSError,
     path::Path,
-    staticfs::{StaticDeviceNode, StaticDirEntry, StaticDirectoryNode, StaticFs, StaticNode},
+    staticfs::{
+        StaticDeviceNode, StaticDirEntry, StaticDirectoryNode, StaticFs, StaticNode,
+        StaticSymlinkNode,
+    },
     vfs::FSResult,
     vfs_traits::{FileLike, FileSystem},
 };
@@ -107,14 +111,12 @@ static DEV_SHM_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     entries: &[],
 });
 
-static DEV_LOG_NODE: StaticNode = StaticNode::Symlink(
-    crate::filesystem::staticfs::StaticSymlinkNode {
-        name: "log",
-        inode: 0x100e,
-        mode: 0o120777,
-        target: "/run/systemd/journal/dev-log",
-    },
-);
+static DEV_LOG_NODE: StaticNode = StaticNode::Symlink(StaticSymlinkNode {
+    name: "log",
+    inode: 0x100e,
+    mode: 0o120777,
+    target: "/run/systemd/journal/dev-log",
+});
 
 static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
@@ -202,7 +204,7 @@ impl FileSystem for DevFs {
     }
 
     fn rename(&self, _old_path: &Path, _new_path: &Path) -> FSResult<()> {
-        Err(crate::filesystem::errors::FSError::Readonly)
+        Err(FSError::Readonly)
     }
 
     fn name(&self) -> &'static str {

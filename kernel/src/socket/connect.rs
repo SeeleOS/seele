@@ -1,4 +1,7 @@
-use alloc::{string::String, sync::Arc};
+use alloc::{
+    string::String,
+    sync::{Arc, Weak},
+};
 use spin::Mutex;
 
 use super::{
@@ -57,7 +60,7 @@ impl UnixSocketObject {
                     .owner
                     .lock()
                     .as_ref()
-                    .and_then(alloc::sync::Weak::upgrade)
+                    .and_then(Weak::upgrade)
                 {
                     wake_pollers(&owner, PollableEvent::CanBeRead);
                 }

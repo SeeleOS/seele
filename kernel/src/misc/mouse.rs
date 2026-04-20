@@ -7,6 +7,7 @@ use core::{
 use futures_util::{Stream, StreamExt, task::AtomicWaker};
 use heapless::Deque;
 use ps2_mouse::Mouse;
+use alloc::sync::Arc;
 use spin::Mutex;
 use x86_64::{
     instructions::interrupts::without_interrupts, instructions::port::Port,
@@ -108,11 +109,11 @@ pub struct PS2MouseObject {
 }
 
 impl Object for PS2MouseObject {
-    fn get_flags(self: alloc::sync::Arc<Self>) -> ObjectResult<FileFlags> {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
         Ok(*self.flags.lock())
     }
 
-    fn set_flags(self: alloc::sync::Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
         *self.flags.lock() = flags;
 
         Ok(())

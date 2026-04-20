@@ -12,7 +12,7 @@ use crate::{
         info::{FileLikeInfo, UnixPermission},
         object::FileLikeObject,
         path::Path,
-        vfs::WrappedFile,
+        vfs::{FSResult, WrappedFile},
         vfs_traits::{File, FileLike, FileLikeType, Whence},
     },
     object::misc::ObjectRef,
@@ -69,7 +69,7 @@ impl File for MemFdFile {
         self
     }
 
-    fn info(&mut self) -> crate::filesystem::vfs::FSResult<FileLikeInfo> {
+    fn info(&mut self) -> FSResult<FileLikeInfo> {
         Ok(FileLikeInfo::new(
             self.name.clone(),
             self.data.len(),
@@ -83,7 +83,7 @@ impl File for MemFdFile {
         &mut self,
         buffer: &mut [u8],
         offset: u64,
-    ) -> crate::filesystem::vfs::FSResult<usize> {
+    ) -> FSResult<usize> {
         let offset = usize::try_from(offset).map_err(|_| FSError::Other)?;
         if offset >= self.data.len() {
             return Ok(0);
@@ -94,13 +94,13 @@ impl File for MemFdFile {
         Ok(len)
     }
 
-    fn read(&mut self, buffer: &mut [u8]) -> crate::filesystem::vfs::FSResult<usize> {
+    fn read(&mut self, buffer: &mut [u8]) -> FSResult<usize> {
         let read = self.read_at(buffer, self.offset as u64)?;
         self.offset = self.offset.saturating_add(read);
         Ok(read)
     }
 
-    fn write(&mut self, buffer: &[u8]) -> crate::filesystem::vfs::FSResult<usize> {
+    fn write(&mut self, buffer: &[u8]) -> FSResult<usize> {
         if (self.current_seals() & F_SEAL_WRITE) != 0 {
             return Err(FSError::AccessDenied);
         }
@@ -121,7 +121,7 @@ impl File for MemFdFile {
         Ok(buffer.len())
     }
 
-    fn seek(&mut self, offset: i64, seek_type: Whence) -> crate::filesystem::vfs::FSResult<usize> {
+    fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {
         let base = match seek_type {
             Whence::Start => 0i64,
             Whence::Current => self.offset as i64,

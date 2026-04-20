@@ -1,3 +1,5 @@
+use alloc::{sync::Arc, vec::Vec};
+
 use crate::{
     object::misc::ObjectRef,
     polling::{
@@ -8,7 +10,7 @@ use crate::{
 
 impl PollerObject {
     fn queue_ready_event(
-        woken_events: &mut alloc::vec::Vec<PollerReadyEvent>,
+        woken_events: &mut Vec<PollerReadyEvent>,
         object: &ObjectRef,
         event: PollableEvent,
         data: u64,
@@ -16,7 +18,7 @@ impl PollerObject {
         let already_queued = woken_events.iter().any(|ready| {
             ready.event == event
                 && ready.data == data
-                && alloc::sync::Arc::ptr_eq(&ready.object, object)
+                && Arc::ptr_eq(&ready.object, object)
         });
 
         if !already_queued {
@@ -29,12 +31,12 @@ impl PollerObject {
 
     // Checks for all matching entries that should be woken, and pushes them to woken_events.
     pub fn push_woken_event(&self, object: ObjectRef, event: PollableEvent) -> PollWakeResult {
-        let matching_entries: alloc::vec::Vec<u64> = self
+        let matching_entries: Vec<u64> = self
             .entries
             .lock()
             .iter()
             .filter(|entry| {
-                entry.event == event && alloc::sync::Arc::ptr_eq(&entry.object, &object)
+                entry.event == event && Arc::ptr_eq(&entry.object, &object)
             })
             .map(|entry| entry.data)
             .collect();
@@ -67,7 +69,7 @@ impl PollerObject {
 
     // Pushes the events that are already ready and do not need waiting.
     pub fn push_already_ready_events(&self) -> bool {
-        let ready_entries: alloc::vec::Vec<_> = self
+        let ready_entries: Vec<_> = self
             .entries
             .lock()
             .iter()
@@ -91,7 +93,7 @@ impl PollerObject {
         !self.woken_events.lock().is_empty()
     }
 
-    pub fn take_woken_events(&self, maxevents: usize) -> alloc::vec::Vec<PollerReadyEvent> {
+    pub fn take_woken_events(&self, maxevents: usize) -> Vec<PollerReadyEvent> {
         let mut woken_events = self.woken_events.lock();
         let count = woken_events.len().min(maxevents);
         woken_events.drain(..count).collect()

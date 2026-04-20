@@ -1,7 +1,7 @@
 use alloc::{string::String, sync::Arc, vec::Vec};
 use spin::Mutex;
 
-use crate::filesystem::{info::DirectoryContentInfo, vfs_traits::FileLike};
+use crate::filesystem::{info::DirectoryContentInfo, vfs::FSResult, vfs_traits::FileLike};
 
 mod directory;
 mod file;
@@ -38,7 +38,7 @@ where
 pub(super) fn proc_rw_file<F, W>(name: &str, inode: u64, read: F, write: W) -> FileLike
 where
     F: Fn() -> Vec<u8> + Send + Sync + 'static,
-    W: Fn(&[u8]) -> crate::filesystem::vfs::FSResult<usize> + Send + Sync + 'static,
+    W: Fn(&[u8]) -> FSResult<usize> + Send + Sync + 'static,
 {
     FileLike::File(Arc::new(Mutex::new(ProcFile::new(
         name.into(),

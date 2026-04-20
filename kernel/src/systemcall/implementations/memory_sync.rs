@@ -166,11 +166,7 @@ fn prot_to_protection(prot: i32) -> Result<Protection, SyscallError> {
     Ok(protection)
 }
 
-fn mapping_overlaps(
-    areas: &[crate::memory::addrspace::mem_area::MemoryArea],
-    start: VirtAddr,
-    end: VirtAddr,
-) -> bool {
+fn mapping_overlaps(areas: &[MemoryArea], start: VirtAddr, end: VirtAddr) -> bool {
     areas
         .iter()
         .any(|area| area.start < end && area.end > start)

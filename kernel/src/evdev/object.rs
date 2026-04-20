@@ -1,4 +1,7 @@
-use alloc::sync::Arc;
+use alloc::{
+    sync::{Arc, Weak},
+    vec::Vec,
+};
 use core::fmt;
 use spin::Mutex;
 
@@ -26,7 +29,7 @@ use super::{
 pub struct EventDeviceHub {
     pub(super) kind: EventDeviceKind,
     pub(super) state: Mutex<EventDeviceHubState>,
-    pub(super) clients: Mutex<alloc::vec::Vec<alloc::sync::Weak<EventDeviceClientObject>>>,
+    pub(super) clients: Mutex<Vec<Weak<EventDeviceClientObject>>>,
 }
 
 pub struct EventDeviceClientObject {

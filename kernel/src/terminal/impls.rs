@@ -1,4 +1,4 @@
-use core::fmt::{Debug, Write};
+use core::fmt::{Debug, Formatter, Result as FmtResult, Write};
 
 use crate::{
     misc::framebuffer::{FRAME_BUFFER, framebuffer_user_controlled},
@@ -30,7 +30,7 @@ unsafe impl Send for KernelTerminal {}
 unsafe impl Sync for KernelTerminal {}
 
 impl Debug for KernelTerminal {
-    fn fmt(&self, _f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, _f: &mut Formatter<'_>) -> FmtResult {
         Ok(())
     }
 }
