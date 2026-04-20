@@ -141,7 +141,7 @@ impl NetlinkSocketObject {
     }
 
     pub fn send(&self, message: &[u8]) -> SocketResult<usize> {
-        if self.protocol == NETLINK_ROUTE {
+        if matches!(self.protocol, NETLINK_ROUTE | NETLINK_AUDIT) {
             self.enqueue_ack(message);
         }
         Ok(message.len())
