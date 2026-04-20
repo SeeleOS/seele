@@ -1,3 +1,5 @@
+use crate::filesystem::vfs_traits::MountFlags;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TmpFsVariant {
     TmpFs,
@@ -23,10 +25,10 @@ impl TmpFsVariant {
         self.name()
     }
 
-    pub fn mount_options(self) -> &'static str {
+    pub fn default_mount_flags(self) -> MountFlags {
         match self {
-            Self::TmpFs => "rw,nosuid,nodev,relatime",
-            Self::RamFs => "rw,relatime",
+            Self::TmpFs => MountFlags::MS_NOSUID | MountFlags::MS_NODEV | MountFlags::MS_RELATIME,
+            Self::RamFs => MountFlags::MS_RELATIME,
         }
     }
 }

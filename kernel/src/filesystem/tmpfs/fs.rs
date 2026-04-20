@@ -117,7 +117,7 @@ impl FileSystem for TmpFs {
         self.variant.mount_source()
     }
 
-    fn mount_options(&self, _path: &Path) -> &'static str {
-        self.variant.mount_options()
+    fn default_mount_flags(&self, _path: &Path) -> crate::filesystem::vfs_traits::MountFlags {
+        self.variant.default_mount_flags()
     }
 }

@@ -479,7 +479,10 @@ impl FileSystem for SysFs {
         "sysfs"
     }
 
-    fn mount_options(&self, _path: &Path) -> &'static str {
-        "rw,nosuid,nodev,noexec,relatime"
+    fn default_mount_flags(&self, _path: &Path) -> crate::filesystem::vfs_traits::MountFlags {
+        crate::filesystem::vfs_traits::MountFlags::MS_NOSUID
+            | crate::filesystem::vfs_traits::MountFlags::MS_NODEV
+            | crate::filesystem::vfs_traits::MountFlags::MS_NOEXEC
+            | crate::filesystem::vfs_traits::MountFlags::MS_RELATIME
     }
 }

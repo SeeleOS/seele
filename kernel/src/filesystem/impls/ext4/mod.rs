@@ -219,8 +219,8 @@ impl FileSystem for EXT4 {
         "rootfs"
     }
 
-    fn mount_options(&self, _path: &Path) -> &'static str {
-        "rw,relatime"
+    fn default_mount_flags(&self, _path: &Path) -> crate::filesystem::vfs_traits::MountFlags {
+        crate::filesystem::vfs_traits::MountFlags::MS_RELATIME
     }
 }
 

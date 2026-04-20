@@ -13,7 +13,7 @@ use crate::filesystem::{
     procfs::ProcFs,
     sysfs::SysFs,
     tmpfs::TmpFs,
-    vfs_traits::{Directory, File, FileSystem, Symlink},
+    vfs_traits::{Directory, File, FileSystem, MountFlags, Symlink},
 };
 use ext4plus::Ext4 as Ext4Inner;
 use lazy_static::lazy_static;
@@ -33,6 +33,8 @@ pub type FileSystemRef = Arc<Mutex<dyn FileSystem>>;
 pub struct Mount {
     pub path: Path,
     pub fs: FileSystemRef,
+    pub source_path: Path,
+    pub flags: MountFlags,
 }
 
 pub struct VFS {
@@ -80,16 +82,94 @@ impl VFS {
 
     pub fn mount_ref(&mut self, path: Path, fs: FileSystemRef) -> FSResult<()> {
         let normalized_path = self.normalize_path(path);
+        fs.lock().init()?;
+        let flags = fs.lock().default_mount_flags(&normalized_path);
+        self.attach_mount(normalized_path, fs, Path::new("/"), flags)
+    }
+
+    pub fn attach_mount(
+        &mut self,
+        path: Path,
+        fs: FileSystemRef,
+        source_path: Path,
+        flags: MountFlags,
+    ) -> FSResult<()> {
+        let normalized_path = self.normalize_path(path);
         let normalized_path_string = normalized_path.clone().as_string();
         self.mounts
             .retain(|mount| mount.path.clone().as_string() != normalized_path_string);
-        fs.lock().init()?;
         self.mounts.push(Mount {
             path: normalized_path,
             fs,
+            source_path: source_path.normalize(),
+            flags,
         });
         self.mounts
             .sort_by_key(|mount| Reverse(mount.path.clone().as_string().len()));
+        Ok(())
+    }
+
+    pub fn bind_mount(&mut self, source: Path, target: Path, recursive: bool) -> FSResult<()> {
+        let source = self.normalize_path(source);
+        let target = self.normalize_path(target);
+        let source_mounts = self
+            .mounts
+            .iter()
+            .map(|mount| Mount {
+                path: mount.path.clone(),
+                fs: mount.fs.clone(),
+                source_path: mount.source_path.clone(),
+                flags: mount.flags,
+            })
+            .collect::<Vec<_>>();
+
+        let (source_mount, source_relative) = self.find_mount(&source)?;
+        self.attach_mount(
+            target.clone(),
+            source_mount.fs.clone(),
+            source_relative,
+            source_mount.flags,
+        )?;
+
+        if !recursive {
+            return Ok(());
+        }
+
+        for mount in source_mounts {
+            if mount.path == source || !mount.path.starts_with(&source) {
+                continue;
+            }
+
+            let Some(suffix) = mount.path.strip_prefix(&source) else {
+                continue;
+            };
+            let target_path = join_paths(&target, &suffix);
+            self.attach_mount(
+                target_path,
+                mount.fs.clone(),
+                mount.source_path.clone(),
+                mount.flags,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    pub fn remount_bind(
+        &mut self,
+        path: Path,
+        flags: MountFlags,
+        mask: MountFlags,
+    ) -> FSResult<()> {
+        let mount_path = self.mount_path(path)?;
+        let mount_path_string = mount_path.as_string();
+        let mount = self
+            .mounts
+            .iter_mut()
+            .find(|mount| mount.path.clone().as_string() == mount_path_string)
+            .ok_or(FSError::NotFound)?;
+        mount.flags.remove(mask);
+        mount.flags.insert(flags & mask);
         Ok(())
     }
 
@@ -105,7 +185,7 @@ impl VFS {
         Ok(())
     }
 
-    pub fn mount_metadata(&self, path: Path) -> FSResult<(Path, FileSystemRef)> {
+    pub fn mount_metadata(&self, path: Path) -> FSResult<(Path, FileSystemRef, Path, MountFlags)> {
         let mount_path = self.mount_path(path)?;
         let mount_path_string = mount_path.clone().as_string();
         let mount = self
@@ -113,13 +193,25 @@ impl VFS {
             .iter()
             .find(|mount| mount.path.clone().as_string() == mount_path_string)
             .ok_or(FSError::NotFound)?;
-        Ok((mount.path.clone(), mount.fs.clone()))
+        Ok((
+            mount.path.clone(),
+            mount.fs.clone(),
+            mount.source_path.clone(),
+            mount.flags,
+        ))
     }
 
-    pub fn mount_snapshots(&self) -> Vec<(Path, FileSystemRef)> {
+    pub fn mount_snapshots(&self) -> Vec<(Path, FileSystemRef, Path, MountFlags)> {
         self.mounts
             .iter()
-            .map(|mount| (mount.path.clone(), mount.fs.clone()))
+            .map(|mount| {
+                (
+                    mount.path.clone(),
+                    mount.fs.clone(),
+                    mount.source_path.clone(),
+                    mount.flags,
+                )
+            })
             .collect()
     }
 
@@ -130,6 +222,19 @@ impl VFS {
             path.as_absolute().as_normal().normalize()
         }
     }
+}
+
+fn join_paths(base: &Path, suffix: &Path) -> Path {
+    let mut path = base.normalize().as_string();
+    for part in suffix.normalize().parts {
+        if let crate::filesystem::path::PathPart::Normal(component) = part {
+            if !path.ends_with('/') {
+                path.push('/');
+            }
+            path.push_str(&component);
+        }
+    }
+    Path::new(&path).normalize()
 }
 
 impl Default for VFS {

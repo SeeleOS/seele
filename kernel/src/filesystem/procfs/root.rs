@@ -4,9 +4,8 @@ use lazy_static::lazy_static;
 use crate::{
     filesystem::{
         info::DirectoryContentInfo,
-        path::Path,
         vfs::{FileSystemRef, VirtualFS},
-        vfs_traits::DirectoryContentType,
+        vfs_traits::{DirectoryContentType, MountFlags},
     },
     misc::time::Time,
     process::manager::MANAGER,
@@ -108,20 +107,22 @@ fn generate_boot_id() -> String {
     )
 }
 
-fn sorted_mounts() -> Vec<(String, FileSystemRef)> {
+fn sorted_mounts() -> Vec<(String, FileSystemRef, String, MountFlags)> {
     let mut mounts = VirtualFS
         .lock()
         .mount_snapshots()
         .into_iter()
-        .map(|(path, fs)| (path.as_string(), fs))
+        .map(|(path, fs, source_path, flags)| {
+            (path.as_string(), fs, source_path.as_string(), flags)
+        })
         .collect::<Vec<_>>();
-    mounts.sort_by_key(|(path, _)| (path.matches('/').count(), path.len()));
+    mounts.sort_by_key(|(path, _, _, _)| (path.matches('/').count(), path.len()));
     mounts
 }
 
 pub(super) fn proc_mounts_bytes() -> Vec<u8> {
     let mut out = String::new();
-    for (path, fs) in sorted_mounts() {
+    for (path, fs, _, flags) in sorted_mounts() {
         let fs = fs.lock();
         out.push_str(fs.mount_source());
         out.push(' ');
@@ -129,7 +130,7 @@ pub(super) fn proc_mounts_bytes() -> Vec<u8> {
         out.push(' ');
         out.push_str(fs.name());
         out.push(' ');
-        out.push_str(fs.mount_options(&Path::new(&path)));
+        out.push_str(&flags.proc_options());
         out.push_str(" 0 0\n");
     }
     out.into_bytes()
@@ -138,12 +139,22 @@ pub(super) fn proc_mounts_bytes() -> Vec<u8> {
 pub(super) fn proc_mountinfo_bytes() -> Vec<u8> {
     let mounts = sorted_mounts();
     let mut ids = BTreeMap::new();
-    for (index, (path, _)) in mounts.iter().enumerate() {
+    let mut dev_ids = BTreeMap::new();
+    let mut next_dev_id = 1u64;
+
+    for (index, (path, fs, _, _)) in mounts.iter().enumerate() {
         ids.insert(path.clone(), index as u64 + 1);
+
+        let fs_key = format!("{:p}", alloc::sync::Arc::as_ptr(fs));
+        dev_ids.entry(fs_key).or_insert_with(|| {
+            let dev_id = next_dev_id;
+            next_dev_id += 1;
+            dev_id
+        });
     }
 
     let mut out = String::new();
-    for (path, fs) in mounts {
+    for (path, fs, source_path, flags) in mounts {
         let id = *ids.get(&path).unwrap_or(&1);
         let parent_id = if path == "/" {
             0
@@ -159,10 +170,12 @@ pub(super) fn proc_mountinfo_bytes() -> Vec<u8> {
                 .copied()
                 .unwrap_or(1)
         };
+        let fs_key = format!("{:p}", alloc::sync::Arc::as_ptr(&fs));
         let fs = fs.lock();
-        let options = fs.mount_options(&Path::new(&path));
+        let dev_id = *dev_ids.get(&fs_key).unwrap_or(&1);
+        let options = flags.proc_options();
         out.push_str(&format!(
-            "{id} {parent_id} 0:{id} / {path} {options} - {} {} rw\n",
+            "{id} {parent_id} 0:{dev_id} {source_path} {path} {options} - {} {} {options}\n",
             fs.name(),
             fs.mount_source()
         ));

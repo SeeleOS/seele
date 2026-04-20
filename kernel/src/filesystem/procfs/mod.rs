@@ -32,8 +32,8 @@ use root::{
     PROC_SYS_FS_FILE_MAX_INODE, PROC_SYS_FS_INODE, PROC_SYS_FS_NR_OPEN_INODE, PROC_SYS_INODE,
     PROC_SYS_KERNEL_DOMAINNAME_INODE, PROC_SYS_KERNEL_HOSTNAME_INODE, PROC_SYS_KERNEL_INODE,
     PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE, PROC_SYS_KERNEL_RANDOM_INODE, proc_boot_id_bytes,
-    proc_kernel_cmdline_bytes, proc_kernel_entries, proc_kernel_random_entries, proc_mountinfo_bytes,
-    proc_mounts_bytes, proc_root_entries,
+    proc_kernel_cmdline_bytes, proc_kernel_entries, proc_kernel_random_entries,
+    proc_mountinfo_bytes, proc_mounts_bytes, proc_root_entries,
 };
 
 const DEFAULT_FILE_MAX: u64 = 1_048_576;
@@ -63,7 +63,10 @@ fn proc_write_domainname(buffer: &[u8]) -> FSResult<usize> {
 }
 
 fn proc_c_string_bytes(value: [u8; 65]) -> Vec<u8> {
-    let len = value.iter().position(|&byte| byte == 0).unwrap_or(value.len());
+    let len = value
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(value.len());
     let mut bytes = value[..len].to_vec();
     bytes.push(b'\n');
     bytes
@@ -449,7 +452,10 @@ impl FileSystem for ProcFs {
         "proc"
     }
 
-    fn mount_options(&self, _path: &Path) -> &'static str {
-        "rw,nosuid,nodev,noexec,relatime"
+    fn default_mount_flags(&self, _path: &Path) -> crate::filesystem::vfs_traits::MountFlags {
+        crate::filesystem::vfs_traits::MountFlags::MS_NOSUID
+            | crate::filesystem::vfs_traits::MountFlags::MS_NODEV
+            | crate::filesystem::vfs_traits::MountFlags::MS_NOEXEC
+            | crate::filesystem::vfs_traits::MountFlags::MS_RELATIME
     }
 }

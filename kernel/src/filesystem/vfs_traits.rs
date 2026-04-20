@@ -2,6 +2,7 @@ use core::any::Any;
 use core::fmt::Debug;
 
 use alloc::{string::String, vec::Vec};
+use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
 
 use crate::filesystem::{
@@ -10,6 +11,41 @@ use crate::filesystem::{
     path::Path,
     vfs::{FSResult, WrappedDirectory, WrappedFile, WrappedSymlink},
 };
+
+bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct MountFlags: u64 {
+        const MS_RDONLY = 1;
+        const MS_NOSUID = 2;
+        const MS_NODEV = 4;
+        const MS_NOEXEC = 8;
+        const MS_RELATIME = 1 << 21;
+    }
+}
+
+impl MountFlags {
+    pub fn proc_options(self) -> String {
+        let mut options = Vec::new();
+        options.push(if self.contains(Self::MS_RDONLY) {
+            "ro"
+        } else {
+            "rw"
+        });
+        if self.contains(Self::MS_NOSUID) {
+            options.push("nosuid");
+        }
+        if self.contains(Self::MS_NODEV) {
+            options.push("nodev");
+        }
+        if self.contains(Self::MS_NOEXEC) {
+            options.push("noexec");
+        }
+        if self.contains(Self::MS_RELATIME) {
+            options.push("relatime");
+        }
+        options.join(",")
+    }
+}
 
 #[repr(u64)]
 #[derive(Clone, Copy, TryFromPrimitive, Debug)]
@@ -80,7 +116,7 @@ pub trait FileSystem: Send + Sync {
     fn name(&self) -> &'static str;
     fn magic(&self) -> i64;
     fn mount_source(&self) -> &'static str;
-    fn mount_options(&self, path: &Path) -> &'static str;
+    fn default_mount_flags(&self, path: &Path) -> MountFlags;
 }
 
 #[derive(Debug)]

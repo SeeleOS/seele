@@ -219,7 +219,8 @@ impl FileSystem for DevFs {
         "devtmpfs"
     }
 
-    fn mount_options(&self, _path: &Path) -> &'static str {
-        "rw,nosuid,relatime"
+    fn default_mount_flags(&self, _path: &Path) -> crate::filesystem::vfs_traits::MountFlags {
+        crate::filesystem::vfs_traits::MountFlags::MS_NOSUID
+            | crate::filesystem::vfs_traits::MountFlags::MS_RELATIME
     }
 }
