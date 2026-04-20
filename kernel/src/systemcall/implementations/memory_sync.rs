@@ -38,8 +38,23 @@ enum ArchPrctlCode {
 bitflags! {
     #[derive(Clone, Copy, Debug)]
     pub(crate) struct MmapFlags: i32 {
+        const SHARED = 0x01;
+        const PRIVATE = 0x02;
+        const SHARED_VALIDATE = 0x03;
+        const DROPPABLE = 0x08;
         const FIXED = 0x10;
         const ANONYMOUS = 0x20;
+        const MAP_32BIT = 0x40;
+        const GROWSDOWN = 0x0100;
+        const DENYWRITE = 0x0800;
+        const EXECUTABLE = 0x1000;
+        const LOCKED = 0x2000;
+        const NORESERVE = 0x4000;
+        const POPULATE = 0x008000;
+        const NONBLOCK = 0x010000;
+        const STACK = 0x020000;
+        const HUGETLB = 0x040000;
+        const SYNC = 0x080000;
         const FIXED_NOREPLACE = 0x100000;
     }
 }
@@ -48,6 +63,8 @@ bitflags! {
     #[derive(Clone, Copy, Debug)]
     pub(crate) struct MremapFlags: u64 {
         const MAYMOVE = 0x1;
+        const FIXED = 0x2;
+        const DONTUNMAP = 0x4;
     }
 }
 

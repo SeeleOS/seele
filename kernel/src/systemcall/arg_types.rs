@@ -148,8 +148,6 @@ add_syscall_arg_flags_type!(
     i32,
     TimerFdFlags,
     i32,
-    TimerSetTimeFlags,
-    i32,
     ClockNanosleepFlags,
     i32,
     SignalfdFlags,
@@ -176,4 +174,13 @@ add_syscall_arg_flags_type!(
     u32,
 );
 
-add_syscall_arg_flags_retain_type!(MmapFlags, i32, AtFlags, i32, OpenFlags, i32);
+add_syscall_arg_flags_retain_type!(
+    MmapFlags,
+    i32,
+    AtFlags,
+    i32,
+    OpenFlags,
+    i32,
+    TimerSetTimeFlags,
+    i32
+);

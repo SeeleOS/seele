@@ -49,8 +49,11 @@ bitflags! {
     pub(crate) struct AtFlags: i32 {
         const REMOVEDIR = 0x200;
         const SYMLINK_NOFOLLOW = 0x100;
+        const SYMLINK_FOLLOW = 0x400;
         const NO_AUTOMOUNT = 0x800;
         const EMPTY_PATH = 0x1000;
+        const STATX_FORCE_SYNC = 0x2000;
+        const STATX_DONT_SYNC = 0x4000;
         const EACCESS = 0x200;
         const RECURSIVE = 0x8000;
     }
@@ -124,10 +127,18 @@ bitflags! {
     pub(crate) struct OpenFlags: i32 {
         const CREAT = 0x40;
         const EXCL = 0x80;
+        const NOCTTY = 0x100;
+        const TRUNC = 0x200;
+        const APPEND = 0o2_000;
         const NONBLOCK = 0o4_000;
+        const DSYNC = 0o10_000;
+        const DIRECT = 0o40_000;
+        const LARGEFILE = 0o100_000;
         const DIRECTORY = 0o200000;
         const NOFOLLOW = 0o400000;
+        const NOATIME = 0o1000000;
         const CLOEXEC = 0o2000000;
+        const SYNC = 0x101000;
         const PATH = 0o10000000;
         const TMPFILE = 0o20200000;
     }

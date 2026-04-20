@@ -161,6 +161,7 @@ bitflags! {
     #[derive(Clone, Copy, Debug)]
     pub(crate) struct TimerSetTimeFlags: i32 {
         const TFD_TIMER_ABSTIME = 1;
+        const TFD_TIMER_CANCEL_ON_SET = 2;
     }
 }
 
@@ -405,6 +406,7 @@ bitflags! {
     pub(crate) struct GetRandomFlags: u32 {
         const NONBLOCK = 0x0001;
         const RANDOM = 0x0002;
+        const INSECURE = 0x0004;
     }
 }
 
