@@ -88,6 +88,13 @@ fn proc_pressure_bytes() -> Vec<u8> {
         .to_vec()
 }
 
+fn proc_write_pressure(buffer: &[u8]) -> FSResult<usize> {
+    // systemd programs PSI triggers via writes to /proc/pressure/*.
+    // We do not implement real PSI accounting yet, but accepting the
+    // trigger string matches the expected userspace setup flow.
+    Ok(buffer.len())
+}
+
 fn proc_write_hostname(buffer: &[u8]) -> FSResult<usize> {
     let value = proc_trim_sysctl_string(buffer)?;
     crate::misc::utsname::set_hostname(value.as_bytes()).map_err(|_| FSError::Other)?;
@@ -189,16 +196,23 @@ impl FileSystem for ProcFs {
                 PROC_PRESSURE_INODE,
                 proc_pressure_entries(),
             )),
-            ["pressure", "cpu"] => Ok(proc_file(
+            ["pressure", "cpu"] => Ok(proc_rw_file(
                 "cpu",
                 PROC_PRESSURE_CPU_INODE,
                 proc_pressure_bytes,
+                proc_write_pressure,
             )),
-            ["pressure", "io"] => Ok(proc_file("io", PROC_PRESSURE_IO_INODE, proc_pressure_bytes)),
-            ["pressure", "memory"] => Ok(proc_file(
+            ["pressure", "io"] => Ok(proc_rw_file(
+                "io",
+                PROC_PRESSURE_IO_INODE,
+                proc_pressure_bytes,
+                proc_write_pressure,
+            )),
+            ["pressure", "memory"] => Ok(proc_rw_file(
                 "memory",
                 PROC_PRESSURE_MEMORY_INODE,
                 proc_pressure_bytes,
+                proc_write_pressure,
             )),
             ["sys"] => Ok(proc_dir("sys", PROC_SYS_INODE, proc_sys_entries())),
             ["sys", "fs"] => Ok(proc_dir("fs", PROC_SYS_FS_INODE, proc_fs_entries())),
