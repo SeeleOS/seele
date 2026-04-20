@@ -1668,7 +1668,10 @@ define_syscall!(Rseq, |rseq_ptr: *mut LinuxRseq,
 define_syscall!(
     Getrandom,
     |buf: *mut u8, len: usize, flags: GetRandomFlags| {
-        if flags.bits() != flags.bits() & (GetRandomFlags::NONBLOCK | GetRandomFlags::RANDOM).bits()
+        if flags.bits()
+            != flags.bits()
+                & (GetRandomFlags::NONBLOCK | GetRandomFlags::RANDOM | GetRandomFlags::INSECURE)
+                    .bits()
         {
             return Err(SyscallError::InvalidArguments);
         }
