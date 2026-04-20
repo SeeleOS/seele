@@ -35,6 +35,7 @@ After finishing a change, run `nix develop -c cargo run -- --agent` to test the 
 - Prefer `enum` and `bitflags` over integer `const` groups when values are a closed set.
 - Use `snake_case` for functions/modules, `CamelCase` for types, and short descriptive names for syscalls and kernel objects.
 - Match Linux naming where the kernel exposes Linux ABI behavior.
+- Do not write fully qualified type paths inline such as `alloc::string::String`. If a common type is used, import it at the top of the file and use the short name in code.
 - Do not accumulate large amounts of unrelated code in one file. Split code by subsystem or feature when a file starts carrying multiple responsibilities, for example moving select-like syscalls into their own `select.rs`.
 - When there is a clearly better structural solution, prefer it over local patching. In particular, favor changes that remove repetitive boilerplate, unify error handling, and let call sites use direct propagation such as `?` instead of open-coded checks.
 - When an existing library or crate feature can cleanly replace handwritten repetitive decoding or boilerplate, prefer using it over custom open-coded conversion logic.
