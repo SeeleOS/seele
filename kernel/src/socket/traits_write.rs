@@ -21,83 +21,104 @@ impl Writable for UnixSocketObject {
 }
 
 impl UnixSocketObject {
+    fn write_datagram_socket(&self, buffer: &[u8], target_path: Option<&str>) -> SocketResult<usize> {
+        let datagram = match &*self.state.lock() {
+            UnixSocketState::Datagram(datagram) => datagram.clone(),
+            _ => return Err(SocketError::InvalidArguments),
+        };
+
+        if *datagram.write_shutdown.lock() {
+            return Err(SocketError::BrokenPipe);
+        }
+
+        let peer = if let Some(target_path) = target_path {
+            let registry = UNIX_SOCKET_REGISTRY.lock();
+            match registry.get(target_path) {
+                Some(UnixSocketRegistryEntry::Datagram(endpoint)) => {
+                    endpoint.upgrade().ok_or(SocketError::ConnectionRefused)?
+                }
+                _ => return Err(SocketError::ConnectionRefused),
+            }
+        } else if let Some(peer) = datagram.peer.lock().as_ref().and_then(Weak::upgrade) {
+            peer
+        } else {
+            let peer_name = datagram
+                .peer_name
+                .lock()
+                .clone()
+                .ok_or(SocketError::ConnectionRefused)?;
+            let registry = UNIX_SOCKET_REGISTRY.lock();
+            match registry.get(&peer_name) {
+                Some(UnixSocketRegistryEntry::Datagram(endpoint)) => {
+                    endpoint.upgrade().ok_or(SocketError::ConnectionRefused)?
+                }
+                _ => return Err(SocketError::ConnectionRefused),
+            }
+        };
+        let peer_datagram = match &*peer.state.lock() {
+            UnixSocketState::Datagram(datagram) => datagram.clone(),
+            _ => return Err(SocketError::ConnectionRefused),
+        };
+
+        if *peer_datagram.read_shutdown.lock() {
+            return Err(SocketError::BrokenPipe);
+        }
+
+        let mut recv_queue = peer_datagram.recv_queue.lock();
+        if recv_queue.len() >= DATAGRAM_RECV_CAPACITY {
+            drop(recv_queue);
+            if self.is_nonblocking() {
+                return Err(SocketError::TryAgain);
+            }
+
+            let current = prepare_block_current(BlockType::WakeRequired {
+                wake_type: WakeType::IO,
+                deadline: None,
+            });
+            if peer_datagram.recv_queue.lock().len() < DATAGRAM_RECV_CAPACITY
+                || *peer_datagram.read_shutdown.lock()
+            {
+                cancel_block(&current);
+            } else {
+                finish_block_current();
+            }
+            return Ok(0);
+        }
+
+        recv_queue.push_back(UnixDatagramMessage {
+            data: buffer.to_vec(),
+            sender_name: datagram.local_name.lock().clone(),
+            sender_cred: crate::socket::SocketPeerCred {
+                pid: get_current_process().lock().pid.0,
+                uid: 0,
+                gid: 0,
+            },
+        });
+        drop(recv_queue);
+
+        if let Some(owner) = peer_datagram.owner.lock().as_ref().and_then(Weak::upgrade) {
+            wake_pollers(&owner, PollableEvent::CanBeRead);
+        }
+        wake_io();
+        Ok(buffer.len())
+    }
+
+    pub fn write_socket_to_path(&self, buffer: &[u8], path: &str) -> SocketResult<usize> {
+        match self.kind {
+            UnixSocketKind::Datagram => self.write_datagram_socket(buffer, Some(path)),
+            UnixSocketKind::Stream | UnixSocketKind::SeqPacket => self.write_socket(buffer),
+        }
+    }
+
     pub fn write_socket(&self, buffer: &[u8]) -> SocketResult<usize> {
         loop {
             match self.kind {
                 UnixSocketKind::Datagram => {
-                    let datagram = match &*self.state.lock() {
-                        UnixSocketState::Datagram(datagram) => datagram.clone(),
-                        _ => return Err(SocketError::InvalidArguments),
-                    };
-
-                    if *datagram.write_shutdown.lock() {
-                        return Err(SocketError::BrokenPipe);
-                    }
-
-                    let peer =
-                        if let Some(peer) = datagram.peer.lock().as_ref().and_then(Weak::upgrade) {
-                            peer
-                        } else {
-                            let peer_name = datagram
-                                .peer_name
-                                .lock()
-                                .clone()
-                                .ok_or(SocketError::ConnectionRefused)?;
-                            let registry = UNIX_SOCKET_REGISTRY.lock();
-                            match registry.get(&peer_name) {
-                                Some(UnixSocketRegistryEntry::Datagram(endpoint)) => {
-                                    endpoint.upgrade().ok_or(SocketError::ConnectionRefused)?
-                                }
-                                _ => return Err(SocketError::ConnectionRefused),
-                            }
-                        };
-                    let peer_datagram = match &*peer.state.lock() {
-                        UnixSocketState::Datagram(datagram) => datagram.clone(),
-                        _ => return Err(SocketError::ConnectionRefused),
-                    };
-
-                    if *peer_datagram.read_shutdown.lock() {
-                        return Err(SocketError::BrokenPipe);
-                    }
-
-                    let mut recv_queue = peer_datagram.recv_queue.lock();
-                    if recv_queue.len() >= DATAGRAM_RECV_CAPACITY {
-                        drop(recv_queue);
-                        if self.is_nonblocking() {
-                            return Err(SocketError::TryAgain);
-                        }
-
-                        let current = prepare_block_current(BlockType::WakeRequired {
-                            wake_type: WakeType::IO,
-                            deadline: None,
-                        });
-                        if peer_datagram.recv_queue.lock().len() < DATAGRAM_RECV_CAPACITY
-                            || *peer_datagram.read_shutdown.lock()
-                        {
-                            cancel_block(&current);
-                        } else {
-                            finish_block_current();
-                        }
+                    let written = self.write_datagram_socket(buffer, None)?;
+                    if written == 0 {
                         continue;
                     }
-
-                    recv_queue.push_back(UnixDatagramMessage {
-                        data: buffer.to_vec(),
-                        sender_name: datagram.local_name.lock().clone(),
-                        sender_cred: crate::socket::SocketPeerCred {
-                            pid: get_current_process().lock().pid.0,
-                            uid: 0,
-                            gid: 0,
-                        },
-                    });
-                    drop(recv_queue);
-
-                    if let Some(owner) = peer_datagram.owner.lock().as_ref().and_then(Weak::upgrade)
-                    {
-                        wake_pollers(&owner, PollableEvent::CanBeRead);
-                    }
-                    wake_io();
-                    return Ok(buffer.len());
+                    return Ok(written);
                 }
                 UnixSocketKind::Stream | UnixSocketKind::SeqPacket => {
                     let stream = match &*self.state.lock() {

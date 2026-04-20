@@ -335,10 +335,12 @@ define_syscall!(Sendto, |socket: ObjectRef,
         let SocketAddress::Unix(path) = socket_address_from_raw(address, address_len)? else {
             return Err(SyscallError::InvalidArguments);
         };
-        if matches!(
-            &*socket.state.lock(),
-            crate::socket::UnixSocketState::Unbound
-        ) {
+        if socket.kind == crate::socket::UnixSocketKind::Datagram {
+            return Ok(socket
+                .write_socket_to_path(buffer, &path)
+                .map_err(crate::object::error::ObjectError::from)?);
+        }
+        if matches!(&*socket.state.lock(), crate::socket::UnixSocketState::Unbound) {
             socket
                 .connect(path)
                 .map_err(crate::object::error::ObjectError::from)?;
@@ -460,24 +462,52 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
         unsafe { core::slice::from_raw_parts(msg.msg_iov, msg.msg_iovlen) }
     };
 
-    if !msg.msg_name.is_null() {
+    let target_path = if !msg.msg_name.is_null() {
         let address_len = msg.msg_namelen;
         let SocketAddress::Unix(path) = socket_address_from_raw(msg.msg_name.cast(), address_len)?
         else {
             return Err(SyscallError::InvalidArguments);
         };
-        let socket_ref = socket.clone().as_unix_socket()?;
-        if matches!(
-            &*socket_ref.state.lock(),
-            crate::socket::UnixSocketState::Unbound
-        ) {
-            socket_ref
+        Some(path)
+    } else {
+        None
+    };
+
+    let socket = socket.as_unix_socket()?;
+    if socket.kind == crate::socket::UnixSocketKind::Datagram {
+        let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
+        let mut buffer = Vec::with_capacity(total_len);
+        for iov in iovs {
+            if iov.iov_len == 0 {
+                continue;
+            }
+            if iov.iov_base.is_null() {
+                return Err(SyscallError::BadAddress);
+            }
+            let chunk =
+                unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
+            buffer.extend_from_slice(chunk);
+        }
+        let written = if let Some(path) = target_path.as_deref() {
+            socket
+                .write_socket_to_path(&buffer, path)
+                .map_err(crate::object::error::ObjectError::from)?
+        } else {
+            socket
+                .write_socket(&buffer)
+                .map_err(crate::object::error::ObjectError::from)?
+        };
+        return Ok(written);
+    }
+
+    if let Some(path) = target_path {
+        if matches!(&*socket.state.lock(), crate::socket::UnixSocketState::Unbound) {
+            socket
                 .connect(path)
                 .map_err(crate::object::error::ObjectError::from)?;
         }
     }
 
-    let socket = socket.as_unix_socket()?;
     let mut total_written = 0usize;
 
     for iov in iovs {
