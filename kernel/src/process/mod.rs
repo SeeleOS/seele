@@ -22,6 +22,10 @@ pub mod object;
 
 pub type ProcessRef = Arc<Mutex<Process>>;
 
+const CAP_LAST_CAP: u32 = 40;
+const DEFAULT_CAPABILITY_LOW: u32 = u32::MAX;
+const DEFAULT_CAPABILITY_HIGH: u32 = (1u32 << (CAP_LAST_CAP - 31)) - 1;
+
 bitflags! {
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct FdFlags: u32 {
@@ -98,8 +102,8 @@ impl Default for Process {
             secure_bits: 0,
             session_keyring: 0,
             user_keyring: 0,
-            capability_effective: [u32::MAX; 2],
-            capability_permitted: [u32::MAX; 2],
+            capability_effective: [DEFAULT_CAPABILITY_LOW, DEFAULT_CAPABILITY_HIGH],
+            capability_permitted: [DEFAULT_CAPABILITY_LOW, DEFAULT_CAPABILITY_HIGH],
             capability_inheritable: [0; 2],
             capability_ambient: [0; 2],
         }
