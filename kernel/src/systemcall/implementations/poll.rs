@@ -16,7 +16,7 @@ use crate::{
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct PollEvents: i16 {
+    pub(crate) struct PollEvents: i16 {
         const POLLIN = 0x001;
         const POLLPRI = 0x002;
         const POLLOUT = 0x004;
@@ -43,8 +43,7 @@ struct Timespec {
     tv_nsec: i64,
 }
 
-fn kernel_events_for(bits: i16) -> [Option<PollableEvent>; 4] {
-    let bits = PollEvents::from_bits_retain(bits);
+fn kernel_events_for(bits: PollEvents) -> [Option<PollableEvent>; 4] {
     let watch_read = bits.intersects(
         PollEvents::POLLIN | PollEvents::POLLPRI | PollEvents::POLLRDNORM | PollEvents::POLLRDBAND,
     );
@@ -60,8 +59,7 @@ fn kernel_events_for(bits: i16) -> [Option<PollableEvent>; 4] {
     ]
 }
 
-fn translate_ready_events(requested_events: i16, kernel_events: u32) -> i16 {
-    let requested_events = PollEvents::from_bits_retain(requested_events);
+fn translate_ready_events(requested_events: PollEvents, kernel_events: u32) -> i16 {
     let mut translated = PollEvents::empty();
 
     if kernel_events & (PollEvents::POLLIN.bits() as u32) != 0 {
@@ -191,7 +189,7 @@ fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallE
         let poll_object = poll_identity_object(object.clone());
 
         if poll_object.clone().as_pollable().is_err() {
-            pfd.revents |= (PollEvents::from_bits_retain(pfd.events)
+            pfd.revents |= ((PollEvents::from_bits_retain(pfd.events))
                 & (PollEvents::POLLIN
                     | PollEvents::POLLPRI
                     | PollEvents::POLLRDNORM
@@ -203,7 +201,8 @@ fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallE
             continue;
         }
 
-        for event in kernel_events_for(pfd.events).into_iter().flatten() {
+        let requested_events = PollEvents::from_bits_retain(pfd.events);
+        for event in kernel_events_for(requested_events).into_iter().flatten() {
             poller.register_obj(poll_object.clone(), event, index as u64);
         }
     }
@@ -240,7 +239,8 @@ fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallE
 
     for (index, kernel_ready) in ready_by_index {
         if let Some(pfd) = fds.get_mut(index) {
-            pfd.revents |= translate_ready_events(pfd.events, kernel_ready);
+            pfd.revents |=
+                translate_ready_events(PollEvents::from_bits_retain(pfd.events), kernel_ready);
         }
     }
 

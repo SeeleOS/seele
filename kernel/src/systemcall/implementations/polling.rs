@@ -19,7 +19,7 @@ use crate::{
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct EpollCreateFlags: i32 {
+    pub(crate) struct EpollCreateFlags: i32 {
         const EPOLL_CLOEXEC = 0o2_000_000;
     }
 }
@@ -34,7 +34,7 @@ enum EpollCtlOp {
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct EpollEvents: u32 {
+    pub(crate) struct EpollEvents: u32 {
         const IN = 0x001;
         const OUT = 0x004;
         const ERR = 0x008;
@@ -82,18 +82,17 @@ fn write_epoll_event(event_ptr: *mut LinuxEpollEvent, events: u32, data: u64) {
     }
 }
 
-fn pollable_event_to_linux_bits(event: PollableEvent) -> u32 {
+fn pollable_event_to_linux_bits(event: PollableEvent) -> EpollEvents {
     match event {
-        PollableEvent::CanBeRead => EpollEvents::IN.bits(),
-        PollableEvent::CanBeWritten => EpollEvents::OUT.bits(),
-        PollableEvent::Error => EpollEvents::ERR.bits(),
-        PollableEvent::Closed => EpollEvents::HUP.bits(),
-        PollableEvent::Other(bits) => bits as u32,
+        PollableEvent::CanBeRead => EpollEvents::IN,
+        PollableEvent::CanBeWritten => EpollEvents::OUT,
+        PollableEvent::Error => EpollEvents::ERR,
+        PollableEvent::Closed => EpollEvents::HUP,
+        PollableEvent::Other(bits) => EpollEvents::from_bits_retain(bits as u32),
     }
 }
 
-fn linux_bits_to_events(bits: u32) -> [Option<PollableEvent>; 4] {
-    let bits = EpollEvents::from_bits_truncate(bits);
+fn linux_bits_to_events(bits: EpollEvents) -> [Option<PollableEvent>; 4] {
     [
         bits.contains(EpollEvents::IN)
             .then_some(PollableEvent::CanBeRead),
@@ -106,9 +105,7 @@ fn linux_bits_to_events(bits: u32) -> [Option<PollableEvent>; 4] {
     ]
 }
 
-define_syscall!(EpollCreate1, |flags: i32| {
-    let flags = EpollCreateFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
-
+define_syscall!(EpollCreate1, |flags: EpollCreateFlags| {
     let fd_flags = if flags.contains(EpollCreateFlags::EPOLL_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
@@ -123,7 +120,7 @@ define_syscall!(EpollCreate1, |flags: i32| {
 fn epoll_update_impl(
     poller: ObjectRef,
     target_object: ObjectRef,
-    bits: u32,
+    bits: EpollEvents,
     data: u64,
 ) -> Result<usize, SyscallError> {
     let target_object = poll_identity_object(target_object);
@@ -167,7 +164,7 @@ define_syscall!(
                 epoll_update_impl(
                     poller,
                     target_object,
-                    event.events,
+                    EpollEvents::from_bits_retain(event.events),
                     epoll_event_data_u64(&event),
                 )
             }
@@ -239,7 +236,7 @@ fn epoll_wait_impl(
         for (index, woken) in woken_events.iter().enumerate() {
             write_epoll_event(
                 unsafe { events_ptr.add(index) },
-                pollable_event_to_linux_bits(woken.event),
+                pollable_event_to_linux_bits(woken.event).bits(),
                 woken.data,
             );
         }

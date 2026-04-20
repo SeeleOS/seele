@@ -19,6 +19,7 @@ use crate::{
         misc::{ProcessID, get_process_with_pid},
     },
     signal::{Signal, Signals},
+    systemcall::implementations::{EpollCreateFlags, PollEvents},
     systemcall::utils::{SyscallError, SyscallResult},
 };
 
@@ -111,4 +112,12 @@ add_syscall_arg_type!(ProcessGroupID, val, { Ok(ProcessGroupID(val)) });
 
 add_syscall_arg_type!(ClockId, val, {
     ClockId::try_from(val).map_err(|_| SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(PollEvents, val, {
+    PollEvents::from_bits(val as i16).ok_or(SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(EpollCreateFlags, val, {
+    EpollCreateFlags::from_bits(val as i32).ok_or(SyscallError::InvalidArguments)
 });
