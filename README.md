@@ -33,6 +33,16 @@ experimental-features = nix-command flakes
 EOF
 ```
 
+## Run directly
+
+From the repository root, you can build and boot the OS directly with:
+
+```sh
+nix run
+```
+
+This uses the Rust toolchain pinned in [rust-toolchain.toml](/home/elysia/coding-project/seele-os-linux/rust-toolchain.toml) through the flake, builds the runner and kernel, and launches QEMU.
+
 ## Enter the dev shell
 
 From the repository root:
@@ -65,7 +75,7 @@ cd ..
 
 This writes into the mounted `sysroot` directory backed by `disk.img`.
 
-## Build and run
+## Build and run with Cargo
 
 From the repository root:
 

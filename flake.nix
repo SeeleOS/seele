@@ -1,104 +1,69 @@
 {
   inputs = {
-    naersk.url = "github:nix-community/naersk/master";
+    flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    utils.url = "github:numtide/flake-utils";
+    rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
   outputs =
     {
       self,
+      flake-utils,
       nixpkgs,
-      utils,
-      naersk,
+      rust-overlay,
     }:
-    utils.lib.eachDefaultSystem (
+    flake-utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = import nixpkgs { inherit system; };
-        naersk-lib = pkgs.callPackage naersk { };
+        overlays = [ (import rust-overlay) ];
+        pkgs = import nixpkgs {
+          inherit system overlays;
+        };
+        toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+
+        runPackages = with pkgs; [
+          git
+          qemu
+          util-linux
+          toolchain
+        ];
+
+        devPackages = with pkgs; [
+          git
+          pacman
+          procps
+          qemu
+          util-linux
+          toolchain
+        ];
+
+        runApp = pkgs.writeShellApplication {
+          name = "seele-run";
+          runtimeInputs = runPackages;
+          text = ''
+            set -eu
+
+            repo_root="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || ${pkgs.coreutils}/bin/pwd -P)"
+            cd "$repo_root"
+
+            exec cargo run -- "$@"
+          '';
+        };
+
+        defaultDevShell = pkgs.mkShell {
+          packages = devPackages;
+        };
       in
       {
-        defaultPackage = naersk-lib.buildPackage ./.;
-        devShell =
-          with pkgs;
-          mkShell {
-            nativeBuildInputs = [ rustup ];
-            buildInputs = [
-              arch-install-scripts
-              cargo
-              cargo-c
-              autoconf
-              automake
-              bison
-              cmake
-              file
-              findutils
-              flex
-              gawk
-              desktop-file-utils
-              gettext
-              glib
-              gdk-pixbuf
-              gtk4
-              libgee
-              libadwaita
-              librsvg
-              libgnome-games-support
-              shared-mime-info
-              gnugrep
-              gnutar
-              gperf
-              gzip
-              libarchive
-              libtool
-              lld
-              libmpc
-              meson
-              mpfr
-              ninja
-              openssl
-              perl
-              pacman
-              pkg-config
-              pkgsCross.x86_64-embedded.buildPackages.gcc
-              pre-commit
-              procps
-              python3
-              qemu
-              rust-script
-              rustPackages.clippy
-              rustc
-              rustfmt
-              sassc
-              lzip
-              stdenv.cc.cc.lib
-              appstream
-              texinfo
-              itstool
-              util-linux
-              vala
-              wget
-              which
-              xz
-              yelp-tools
-              zlib
-              zstd
-              codex
-            ];
-            RUST_SRC_PATH = rustPlatform.rustLibSrc;
-            shellHook = ''
-              export REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-              export SYSROOT_DIR="$REPO_ROOT/sysroot"
-              export TOOLCHAIN_DIR="$REPO_ROOT/toolchain"
-              export LLVM_BUILD_BIN="$TOOLCHAIN_DIR/llvm-project/build-seele/bin"
-              export LD_LIBRARY_PATH=${pkgs.zstd.out}/lib:${pkgs.zlib}/lib:${pkgs.stdenv.cc.cc.lib}/lib:$LD_LIBRARY_PATH
-              export PATH="$REPO_ROOT/.llvm/bin:$HOME/.cargo/bin:$PATH"
-              echo "[devshell] Ensuring Rust toolchain 'seele'..."
-              #(cd "$TOOLCHAIN_DIR" && ./install.rs) || echo "[devshell] install.rs failed"
-              sudo mount disk.img sysroot
-            '';
-          };
+        packages.default = runApp;
+        apps.default = {
+          type = "app";
+          program = "${runApp}/bin/seele-run";
+        };
+        devShells.default = defaultDevShell;
+
+        defaultPackage = runApp;
+        devShell = defaultDevShell;
       }
     );
 }
