@@ -195,6 +195,7 @@ pub enum SyscallNumber {
     Rseq = 334,
     PidfdSendSignal = 424,
     Fsopen = 430,
+    Fsconfig = 431,
     OpenTree = 428,
     PidfdOpen = 434,
     Clone3 = 435,

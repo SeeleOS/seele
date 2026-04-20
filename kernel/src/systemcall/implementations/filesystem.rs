@@ -9,6 +9,7 @@ use crate::{
     object::{
         FileFlags, Object,
         error::ObjectError,
+        fs_context::{FsConfigCommand, FsContextObject},
         misc::{ObjectRef, get_object_current_process},
     },
     process::{FdFlags, manager::get_current_process, misc::with_current_process},
@@ -31,6 +32,7 @@ const AT_EACCESS: i32 = 0x200;
 const AT_RECURSIVE: u32 = 0x8000;
 const OPEN_TREE_CLONE: u32 = 0x1;
 const OPEN_TREE_CLOEXEC: u32 = 0x0008_0000;
+const FSOPEN_CLOEXEC: u32 = 0x1;
 const O_TMPFILE: i32 = 0o20200000;
 const S_IFMT: u32 = 0o170000;
 const S_IFREG: u32 = 0o100000;
@@ -1079,8 +1081,26 @@ define_syscall!(Umount2, |target: CString, flags: i32| {
 });
 
 define_syscall!(Fsopen, |fs_name: CString, _flags: u32| {
-    let _ = path_from_raw(fs_name)?;
-    Err(SyscallError::PermissionDenied)
+    let fs_name = path_from_raw(fs_name)?;
+    let fd_flags = if (_flags & FSOPEN_CLOEXEC) != 0 {
+        FdFlags::CLOEXEC
+    } else {
+        FdFlags::empty()
+    };
+    let fd = get_current_process()
+        .lock()
+        .push_object_with_flags(FsContextObject::new(fs_name), fd_flags);
+    Ok(fd)
+});
+
+define_syscall!(Fsconfig, |fd: i32, cmd: u32, key: CString, value: CString, _aux: i32| {
+    let object = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+    let fs_context = object.as_fs_context()?;
+    let command = FsConfigCommand::try_from(cmd)?;
+    let key = string_from_raw_optional(key)?;
+    let value = string_from_raw_optional(value)?;
+    fs_context.configure(command, key.as_deref(), value.as_deref())?;
+    Ok(0)
 });
 
 define_syscall!(OpenTree, |dirfd: i32, path: CString, flags: u32| {

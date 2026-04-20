@@ -13,6 +13,7 @@ use crate::{
     filesystem::object::FileLikeObject,
     object::{
         error::ObjectError,
+        fs_context::FsContextObject,
         linux_anon::{EventFdObject, InotifyObject, PidFdObject, SignalfdObject, TimerFdObject},
         misc::ObjectResult,
         netlink::NetlinkSocketObject,
@@ -27,6 +28,7 @@ pub mod config;
 pub mod control;
 pub mod device;
 pub mod error;
+pub mod fs_context;
 pub mod linux_anon;
 pub mod memfd;
 pub mod misc;
@@ -79,6 +81,7 @@ pub trait Object: Send + Sync + Debug {
 
     define_cast_function_non_trait!("file_like", FileLikeObject, BadFileDescriptor);
     define_cast_function_non_trait!("eventfd", EventFdObject, BadFileDescriptor);
+    define_cast_function_non_trait!("fs_context", FsContextObject, BadFileDescriptor);
     define_cast_function_non_trait!("inotify", InotifyObject, BadFileDescriptor);
     define_cast_function_non_trait!("poller", PollerObject, BadFileDescriptor);
     define_cast_function_non_trait!("pidfd", PidFdObject, BadFileDescriptor);
