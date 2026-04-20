@@ -9,6 +9,7 @@ use crate::{
     process::{FdFlags, misc::with_current_process},
     systemcall::utils::{SyscallError, SyscallResult},
 };
+use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
 
 #[derive(Clone, Copy, Debug, TryFromPrimitive)]
@@ -32,9 +33,21 @@ enum FcntlCmd {
 
 const O_WRONLY: usize = 0o1;
 const O_RDWR: usize = 0o2;
-const O_NONBLOCK: usize = 0o4_000;
-const FD_CLOEXEC: u32 = 1;
 const F_UNLCK: i16 = 2;
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct FileStatusFlags: u64 {
+        const O_NONBLOCK = 0o4_000;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    struct DescriptorFlags: u32 {
+        const FD_CLOEXEC = 1;
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -63,7 +76,8 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
     match FcntlCmd::try_from(command).map_err(|_| SyscallError::InvalidArguments)? {
         FcntlCmd::SetFl => {
             let mut flags = FileFlags::empty();
-            if (arg & O_NONBLOCK as u64) != 0 {
+            let status_flags = FileStatusFlags::from_bits_truncate(arg);
+            if status_flags.contains(FileStatusFlags::O_NONBLOCK) {
                 flags.insert(FileFlags::NONBLOCK);
             }
             match object.set_flags(flags) {
@@ -76,7 +90,7 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
                 Ok(flags) => {
                     let mut linux_flags = 0;
                     if flags.contains(FileFlags::NONBLOCK) {
-                        linux_flags |= O_NONBLOCK;
+                        linux_flags |= FileStatusFlags::O_NONBLOCK.bits() as usize;
                     }
                     linux_flags
                 }
@@ -100,7 +114,8 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
             with_current_process(|process| Ok(process.get_fd_flags(fd as usize)?.bits() as usize))
         }
         FcntlCmd::SetFd => with_current_process(|process| {
-            let flags = if (arg as u32 & FD_CLOEXEC) != 0 {
+            let descriptor_flags = DescriptorFlags::from_bits_truncate(arg as u32);
+            let flags = if descriptor_flags.contains(DescriptorFlags::FD_CLOEXEC) {
                 FdFlags::CLOEXEC
             } else {
                 FdFlags::empty()
