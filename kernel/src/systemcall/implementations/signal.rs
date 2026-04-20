@@ -16,7 +16,7 @@ use crate::{
     },
     process::misc::with_current_process,
     process::{FdFlags, manager::get_current_process},
-    signal::{Signal, action::SignalAction},
+    signal::{Signal, SigInfo, UContext, action::SignalAction},
 };
 use core::mem::size_of;
 use num_enum::TryFromPrimitive;
@@ -91,8 +91,17 @@ fn decode_sigaction(action: LinuxSigAction) -> SignalAction {
         handler
             if SigActionFlags::from_bits_truncate(action.flags)
                 .contains(SigActionFlags::SIGINFO) =>
-        unsafe { SignalHandlingType::Function2(core::mem::transmute(handler)) },
-        handler => unsafe { SignalHandlingType::Function1(core::mem::transmute(handler)) },
+        unsafe {
+            SignalHandlingType::Function2(core::mem::transmute::<
+                usize,
+                extern "C" fn(i32, *const SigInfo, *const UContext),
+            >(handler))
+        },
+        handler => unsafe {
+            SignalHandlingType::Function1(core::mem::transmute::<usize, extern "C" fn(i32)>(
+                handler,
+            ))
+        },
     };
 
     SignalAction {

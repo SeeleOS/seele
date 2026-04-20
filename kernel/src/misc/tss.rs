@@ -57,5 +57,5 @@ pub fn init() {
 }
 
 pub fn get_ref() -> &'static TaskStateSegment {
-    unsafe { &*(&raw const TSS) }
+    unsafe { core::ptr::addr_of!(TSS).as_ref().unwrap() }
 }

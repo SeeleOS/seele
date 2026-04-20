@@ -273,7 +273,7 @@ impl Process {
 
                         let current_fx_state = current_thread.get_appropriate_snapshot().fx_state;
                         let mut thread_snapshot = ThreadSnapshot::new_with_fx_state(
-                            func as u64,
+                            (func as usize) as u64,
                             &mut self.addrspace,
                             stack_builder.finish().as_u64(),
                             ThreadSnapshotType::Thread,
@@ -296,7 +296,7 @@ impl Process {
                             si_signo: signal as i32,
                             ..Default::default()
                         };
-                        let ucontext = build_signal_ucontext(&current_thread);
+                        let ucontext = build_signal_ucontext(current_thread);
 
                         let ucontext_ptr = frame_builder.push_struct(&ucontext);
                         let siginfo_ptr = frame_builder.push_struct(&siginfo);
@@ -307,7 +307,7 @@ impl Process {
 
                         let current_fx_state = current_thread.get_appropriate_snapshot().fx_state;
                         let mut thread_snapshot = ThreadSnapshot::new_with_fx_state(
-                            func as u64,
+                            (func as usize) as u64,
                             &mut self.addrspace,
                             stack_builder.finish().as_u64(),
                             ThreadSnapshotType::Thread,

@@ -1,3 +1,5 @@
+#![allow(clippy::module_inception)]
+
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
 

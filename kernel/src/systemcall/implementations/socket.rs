@@ -370,11 +370,10 @@ define_syscall!(
             let peek = (flags & MSG_PEEK) != 0;
             let report_trunc = (flags & MSG_TRUNC) != 0;
             let message_len = socket.peek_message_len().ok_or(SyscallError::TryAgain)?;
-            let mut data = Vec::new();
-            data.resize(len, 0);
+            let mut data = vec![0; len];
             let (copied, full_len) = socket
                 .recv_message(&mut data, peek)
-                .map_err(crate::object::error::ObjectError::from)?;
+                .map_err(SyscallError::from)?;
 
             if copied > 0 {
                 user_safe::write(buffer, &data[..copied])?;
@@ -412,8 +411,7 @@ define_syscall!(
         }
 
         let socket = socket.as_unix_socket()?;
-        let mut data = Vec::new();
-        data.resize(len, 0);
+        let mut data = vec![0; len];
         let read = socket
             .read_socket(&mut data)
             .map_err(crate::object::error::ObjectError::from)?;
@@ -500,12 +498,12 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
         return Ok(written);
     }
 
-    if let Some(path) = target_path {
-        if matches!(&*socket.state.lock(), crate::socket::UnixSocketState::Unbound) {
-            socket
-                .connect(path)
-                .map_err(crate::object::error::ObjectError::from)?;
-        }
+    if let Some(path) = target_path
+        && matches!(&*socket.state.lock(), crate::socket::UnixSocketState::Unbound)
+    {
+        socket
+            .connect(path)
+            .map_err(crate::object::error::ObjectError::from)?;
     }
 
     let mut total_written = 0usize;

@@ -56,7 +56,7 @@ pub struct TaskWaker {
 }
 
 impl TaskWaker {
-    pub fn new(
+    pub fn into_waker(
         taskid: TaskID,
         task_queue: Arc<ArrayQueue<TaskID>>,
         queued: Arc<AtomicBool>,

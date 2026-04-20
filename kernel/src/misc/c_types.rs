@@ -8,6 +8,7 @@ use crate::{
 pub type CString = *const u8;
 pub type CVec<T> = *const T;
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 impl KernelFrom<CString> for String {
     fn k_from(val: CString) -> super::error::KernelResult<Self> {
         const MAX_LENGTH: usize = 4096;
@@ -33,6 +34,7 @@ impl KernelFrom<CString> for String {
     }
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 impl KernelFrom<CVec<CString>> for Vec<String> {
     fn k_from(val: CVec<CString>) -> super::error::KernelResult<Self> {
         const MAX_LENGTH: usize = 4096;

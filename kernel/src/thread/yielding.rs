@@ -269,7 +269,6 @@ pub fn block_current(block_type: BlockType) {
 
 // Avoid sleeping forever in interruptible waits by re-checking for pending
 // signals before and after blocking
-#[must_use]
 pub fn block_current_with_sig_check(block_type: BlockType) -> ObjectResult<()> {
     if !get_current_process().lock().pending_signals.is_empty() {
         return Err(ObjectError::Interrupted);

@@ -1,4 +1,4 @@
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{string::String, sync::Arc, vec, vec::Vec};
 use bitflags::bitflags;
 use core::sync::atomic::{AtomicI32, Ordering};
 use num_enum::TryFromPrimitive;
@@ -200,8 +200,8 @@ fn current_user_keyring(create: bool) -> Result<i32, SyscallError> {
 
 fn resolve_keyring(spec: i32, create: bool) -> Result<i32, SyscallError> {
     match spec {
-        KEY_SPEC_SESSION_KEYRING => current_session_keyring(true || create),
-        KEY_SPEC_USER_KEYRING => current_user_keyring(true || create),
+        KEY_SPEC_SESSION_KEYRING => current_session_keyring(create),
+        KEY_SPEC_USER_KEYRING => current_user_keyring(create),
         serial if serial > 0 => Ok(serial),
         _ => Err(SyscallError::InvalidArguments),
     }
@@ -221,9 +221,9 @@ fn clone_cleared_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalActio
         .collect()
 }
 
-fn clone_process(
+struct CloneProcessArgs {
     clone_flags: CloneFlags,
-    flags: u64,
+    raw_flags: u64,
     exit_signal: u8,
     stack_pointer: u64,
     parent_tid: *mut i32,
@@ -231,8 +231,21 @@ fn clone_process(
     tls: u64,
     pidfd_ptr: *mut i32,
     cgroup_fd: u64,
-) -> Result<usize, SyscallError> {
-    let unsupported = flags
+}
+
+fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
+    let CloneProcessArgs {
+        clone_flags,
+        raw_flags,
+        exit_signal,
+        stack_pointer,
+        parent_tid,
+        child_tid,
+        tls,
+        pidfd_ptr,
+        cgroup_fd,
+    } = args;
+    let unsupported = raw_flags
         & !(0xff
             | CloneFlags::VM.bits()
             | CloneFlags::VFORK.bits()
@@ -1009,17 +1022,17 @@ define_syscall!(Clone, |flags: u64,
         } else {
             core::ptr::null_mut()
         };
-        return clone_process(
+        return clone_process(CloneProcessArgs {
             clone_flags,
-            flags,
+            raw_flags: flags,
             exit_signal,
             stack_pointer,
             parent_tid,
             child_tid,
             tls,
             pidfd_ptr,
-            0,
-        );
+            cgroup_fd: 0,
+        });
     }
 
     let flags = clone_flags;
@@ -1100,17 +1113,17 @@ define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
         return Err(SyscallError::InvalidArguments);
     }
 
-    clone_process(
+    clone_process(CloneProcessArgs {
         clone_flags,
-        flags,
-        (args.exit_signal & 0xff) as u8,
+        raw_flags: flags,
+        exit_signal: (args.exit_signal & 0xff) as u8,
         stack_pointer,
-        args.parent_tid as *mut i32,
-        args.child_tid as *mut i32,
-        args.tls,
-        args.pidfd as *mut i32,
-        args.cgroup,
-    )
+        parent_tid: args.parent_tid as *mut i32,
+        child_tid: args.child_tid as *mut i32,
+        tls: args.tls,
+        pidfd_ptr: args.pidfd as *mut i32,
+        cgroup_fd: args.cgroup,
+    })
 });
 
 define_syscall!(PidfdOpen, |pid: i32, flags: u32| {
@@ -1342,8 +1355,7 @@ define_syscall!(
             return Err(SyscallError::InvalidArguments);
         }
 
-        let mut mask = Vec::with_capacity(cpusetsize);
-        mask.resize(cpusetsize, 0);
+        let mut mask = vec![0; cpusetsize];
         mask[0] = 1;
         user_safe::write(mask_ptr, &mask)?;
 
@@ -1439,15 +1451,9 @@ define_syscall!(Prctl, |option: i32,
 
 define_syscall!(
     Prlimit64,
-    |pid: i32, resource: u32, new_limit: *const LinuxRlimit64, old_limit: *mut LinuxRlimit64| {
+    |pid: i32, resource: u32, _new_limit: *const LinuxRlimit64, old_limit: *mut LinuxRlimit64| {
         if pid != 0 {
             return Err(SyscallError::InvalidArguments);
-        }
-
-        if !new_limit.is_null() {
-            if new_limit.is_null() {
-                return Err(SyscallError::BadAddress);
-            }
         }
 
         if !old_limit.is_null() {
@@ -1594,8 +1600,7 @@ define_syscall!(Getrandom, |buf: *mut u8, len: usize, flags: u32| {
         ^ KernelTime::current().as_nanoseconds()
         ^ (buf as u64).rotate_left(17)
         ^ (len as u64).rotate_left(33);
-    let mut out = Vec::with_capacity(len);
-    out.resize(len, 0);
+    let mut out = vec![0; len];
 
     for byte in &mut out {
         state ^= state << 13;

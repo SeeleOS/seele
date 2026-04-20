@@ -55,7 +55,9 @@ impl Executor {
             let waker = wakers
                 .entry(taskid)
                 // inserts a new waker if there is no waker assigned to the task
-                .or_insert_with(|| TaskWaker::new(taskid, task_queue.clone(), task.wake_handle()));
+                .or_insert_with(|| {
+                    TaskWaker::into_waker(taskid, task_queue.clone(), task.wake_handle())
+                });
             let mut context = Context::from_waker(waker);
 
             match task.poll(&mut context) {

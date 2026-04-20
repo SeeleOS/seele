@@ -100,11 +100,7 @@ fn futex_wait_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
             return Err(SyscallError::TryAgain);
         }
 
-        if !queue.contains_key(&key) {
-            queue.insert(key, VecDeque::new());
-        }
-
-        queue.get_mut(&key).unwrap().push_back(current);
+        queue.entry(key).or_default().push_back(current);
 
         // Mark the thread blocked before releasing the futex bucket so a
         // concurrent wake cannot slip between queue insertion and scheduling.
@@ -197,7 +193,7 @@ define_syscall!(Mmap, |addr: u64,
     let end = start + pages * 4096;
 
     if fixed {
-        if addr == 0 || offset % 4096 != 0 {
+        if addr == 0 || !offset.is_multiple_of(4096) {
             return Err(SyscallError::InvalidArguments);
         }
 
@@ -259,7 +255,7 @@ define_syscall!(Mmap, |addr: u64,
             .as_u64() as usize);
     }
 
-    if offset % 4096 != 0 || fd < 0 {
+    if !offset.is_multiple_of(4096) || fd < 0 {
         return Err(SyscallError::InvalidArguments);
     }
     let object =

@@ -25,6 +25,10 @@ impl FixedBlockSizeAllocator {
         }
     }
 
+    /// # Safety
+    ///
+    /// The caller must provide a valid, unused heap range that is exclusively
+    /// owned by this allocator for the duration of its lifetime.
     pub unsafe fn init(&mut self, heap_start: usize, heap_size: usize) {
         unsafe {
             self.fallback.init(heap_start, heap_size);
@@ -36,6 +40,12 @@ impl FixedBlockSizeAllocator {
             Ok(ptr) => ptr.as_ptr(),
             Err(_) => ptr::null_mut(),
         }
+    }
+}
+
+impl Default for FixedBlockSizeAllocator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

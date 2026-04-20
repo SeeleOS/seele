@@ -48,7 +48,7 @@ impl MemoryMappable for FramebufferObject {
         let fb_ptr = framebuffer.fb.as_mut_ptr();
         let fb_len = framebuffer.info.byte_len as u64;
 
-        if pages == 0 || offset % 4096 != 0 {
+        if pages == 0 || !offset.is_multiple_of(4096) {
             return Err(ObjectError::InvalidArguments);
         }
 

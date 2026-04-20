@@ -2,6 +2,11 @@ use spin::Mutex;
 
 static HOSTNAME: Mutex<Option<[u8; 65]>> = Mutex::new(None);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SetHostnameError {
+    Invalid,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct UtsName {
@@ -48,9 +53,9 @@ pub fn current_hostname(default: &str) -> [u8; 65] {
     }
 }
 
-pub fn set_hostname(hostname: &[u8]) -> Result<(), ()> {
+pub fn set_hostname(hostname: &[u8]) -> Result<(), SetHostnameError> {
     if hostname.len() > 64 || hostname.contains(&0) {
-        return Err(());
+        return Err(SetHostnameError::Invalid);
     }
 
     let mut field = [0; 65];

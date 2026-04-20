@@ -41,6 +41,10 @@ pub struct BootinfoFrameAllocator {
 }
 
 impl BootinfoFrameAllocator {
+    /// # Safety
+    ///
+    /// `memory_map` must remain valid for the allocator's lifetime and must
+    /// describe physical memory that is not concurrently mutated elsewhere.
     pub unsafe fn new(memory_map: &'static MemoryRegions) -> Self {
         Self {
             memory_map,
@@ -174,6 +178,10 @@ impl BootinfoFrameAllocator {
             .or_else(|| self.next_contiguous_usable_frames(pages))
     }
 
+    /// # Safety
+    ///
+    /// The caller must ensure the range `[start, start + pages)` was
+    /// previously allocated from this allocator and is not still in use.
     pub unsafe fn deallocate_contiguous(&mut self, start: PhysFrame<Size4KiB>, pages: usize) {
         for page in 0..pages {
             let frame = PhysFrame::containing_address(PhysAddr::new(
