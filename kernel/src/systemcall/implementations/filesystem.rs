@@ -31,6 +31,7 @@ const AT_EACCESS: i32 = 0x200;
 const AT_RECURSIVE: u32 = 0x8000;
 const OPEN_TREE_CLONE: u32 = 0x1;
 const OPEN_TREE_CLOEXEC: u32 = 0x0008_0000;
+const O_TMPFILE: i32 = 0o20200000;
 const S_IFMT: u32 = 0o170000;
 const S_IFREG: u32 = 0o100000;
 const S_IFIFO: u32 = 0o010000;
@@ -516,6 +517,9 @@ define_syscall!(OpenAt, |dirfd: i32,
                          _mode: u32| {
     let current_process = get_current_process();
     let path_str = path_from_raw(path)?;
+    if (flags & O_TMPFILE) == O_TMPFILE {
+        return Err(SyscallError::OperationNotSupported);
+    }
     let flags = OpenFlags::from_bits_truncate(flags);
     let create = flags.contains(OpenFlags::CREAT);
     let nofollow = flags.contains(OpenFlags::NOFOLLOW);
