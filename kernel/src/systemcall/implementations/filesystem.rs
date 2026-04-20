@@ -1384,8 +1384,35 @@ define_syscall!(Mount, |source: CString,
 
 define_syscall!(Umount2, |target: CString, flags: UmountFlags| {
     let target = path_from_raw(target)?;
-    let _flags = validate_umount_flags(flags)?;
-    let _ = resolve_path_at(AT_FDCWD, &target)?;
+    let flags = validate_umount_flags(flags)?;
+    let path = resolve_path_at(AT_FDCWD, &target)?.normalize();
+
+    if flags.contains(UmountFlags::NOFOLLOW) {
+        let _ = VirtualFS.lock().open_nofollow(path.clone())?;
+    } else {
+        let _ = VirtualFS.lock().open(path.clone())?;
+    }
+
+    if path == Path::new("/") {
+        return Err(SyscallError::DeviceOrResourceBusy);
+    }
+
+    let mount_path = VirtualFS
+        .lock()
+        .mount_path(path.clone())
+        .map_err(SyscallError::from)?;
+    if mount_path != path {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    if flags.contains(UmountFlags::DETACH) {
+        VirtualFS
+            .lock()
+            .detach_mount(path)
+            .map_err(SyscallError::from)?;
+    } else {
+        VirtualFS.lock().unmount(path).map_err(SyscallError::from)?;
+    }
     Ok(0)
 });
 

@@ -42,6 +42,29 @@ pub struct VFS {
 }
 
 impl VFS {
+    fn remove_mounts_at(&mut self, path: &Path, include_children: bool) -> FSResult<()> {
+        let normalized_path = self.normalize_path(path.clone());
+        let normalized_path_string = normalized_path.clone().as_string();
+        let has_exact_mount = self
+            .mounts
+            .iter()
+            .any(|mount| mount.path.clone().as_string() == normalized_path_string);
+        if !has_exact_mount {
+            return Err(FSError::NotFound);
+        }
+
+        self.mounts.retain(|mount| {
+            let mount_path = mount.path.clone();
+            let mount_path_string = mount_path.clone().as_string();
+            if mount_path_string == normalized_path_string {
+                return false;
+            }
+
+            !(include_children && mount_path.starts_with(&normalized_path))
+        });
+        Ok(())
+    }
+
     pub fn new() -> Self {
         Self { mounts: Vec::new() }
     }
@@ -175,14 +198,19 @@ impl VFS {
 
     pub fn unmount(&mut self, path: Path) -> FSResult<()> {
         let normalized_path = self.normalize_path(path);
-        let normalized_path_string = normalized_path.clone().as_string();
-        let old_len = self.mounts.len();
-        self.mounts
-            .retain(|mount| mount.path.clone().as_string() != normalized_path_string);
-        if self.mounts.len() == old_len {
-            return Err(FSError::NotFound);
+        if self
+            .mounts
+            .iter()
+            .any(|mount| mount.path != normalized_path && mount.path.starts_with(&normalized_path))
+        {
+            return Err(FSError::Busy);
         }
-        Ok(())
+        self.remove_mounts_at(&normalized_path, false)
+    }
+
+    pub fn detach_mount(&mut self, path: Path) -> FSResult<()> {
+        let normalized_path = self.normalize_path(path);
+        self.remove_mounts_at(&normalized_path, true)
     }
 
     pub fn mount_metadata(&self, path: Path) -> FSResult<(Path, FileSystemRef, Path, MountFlags)> {
