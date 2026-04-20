@@ -17,19 +17,20 @@ pub(super) const PROC_SELF_INODE: u64 = 0x3002;
 pub(super) const PROC_MOUNTS_INODE: u64 = 0x3003;
 pub(super) const PROC_SYS_INODE: u64 = 0x3004;
 pub(super) const PROC_MEMINFO_INODE: u64 = 0x3005;
-pub(super) const PROC_PRESSURE_INODE: u64 = 0x3006;
-pub(super) const PROC_PRESSURE_CPU_INODE: u64 = 0x3007;
-pub(super) const PROC_PRESSURE_IO_INODE: u64 = 0x3008;
-pub(super) const PROC_PRESSURE_MEMORY_INODE: u64 = 0x3009;
-pub(super) const PROC_SYS_FS_INODE: u64 = 0x300a;
-pub(super) const PROC_SYS_FS_FILE_MAX_INODE: u64 = 0x300b;
-pub(super) const PROC_SYS_FS_NR_OPEN_INODE: u64 = 0x300c;
-pub(super) const PROC_SYS_KERNEL_INODE: u64 = 0x300d;
-pub(super) const PROC_SYS_KERNEL_RANDOM_INODE: u64 = 0x300e;
-pub(super) const PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE: u64 = 0x300f;
-pub(super) const PROC_SYS_KERNEL_HOSTNAME_INODE: u64 = 0x3010;
-pub(super) const PROC_SYS_KERNEL_DOMAINNAME_INODE: u64 = 0x3011;
-pub(super) const PROC_SYS_KERNEL_OSRELEASE_INODE: u64 = 0x3012;
+pub(super) const PROC_DEVICES_INODE: u64 = 0x3006;
+pub(super) const PROC_PRESSURE_INODE: u64 = 0x3007;
+pub(super) const PROC_PRESSURE_CPU_INODE: u64 = 0x3008;
+pub(super) const PROC_PRESSURE_IO_INODE: u64 = 0x3009;
+pub(super) const PROC_PRESSURE_MEMORY_INODE: u64 = 0x300a;
+pub(super) const PROC_SYS_FS_INODE: u64 = 0x300b;
+pub(super) const PROC_SYS_FS_FILE_MAX_INODE: u64 = 0x300c;
+pub(super) const PROC_SYS_FS_NR_OPEN_INODE: u64 = 0x300d;
+pub(super) const PROC_SYS_KERNEL_INODE: u64 = 0x300e;
+pub(super) const PROC_SYS_KERNEL_RANDOM_INODE: u64 = 0x300f;
+pub(super) const PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE: u64 = 0x3010;
+pub(super) const PROC_SYS_KERNEL_HOSTNAME_INODE: u64 = 0x3011;
+pub(super) const PROC_SYS_KERNEL_DOMAINNAME_INODE: u64 = 0x3012;
+pub(super) const PROC_SYS_KERNEL_OSRELEASE_INODE: u64 = 0x3013;
 
 lazy_static! {
     static ref PROC_BOOT_ID: String = generate_boot_id();
@@ -38,6 +39,7 @@ lazy_static! {
 pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
     let mut entries = vec![
         DirectoryContentInfo::new("cmdline".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("devices".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("meminfo".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("mounts".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("pressure".into(), DirectoryContentType::Directory),
@@ -57,6 +59,25 @@ pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
 
 pub(super) fn proc_kernel_cmdline_bytes() -> Vec<u8> {
     Vec::new()
+}
+
+pub(super) fn proc_devices_bytes() -> Vec<u8> {
+    concat!(
+        "Character devices:\n",
+        "  1 mem\n",
+        "  4 tty\n",
+        "  5 /dev/tty\n",
+        " 10 misc\n",
+        " 13 input\n",
+        " 29 fb\n",
+        "136 pts\n",
+        "248 rtc\n",
+        "\n",
+        "Block devices:\n",
+        "  7 loop\n",
+    )
+    .as_bytes()
+    .to_vec()
 }
 
 pub(super) fn proc_kernel_entries() -> Vec<DirectoryContentInfo> {
