@@ -118,6 +118,11 @@ impl FileLikeObject {
     }
 
     pub fn chmod(&self, mode: u32) -> FSResult<()> {
+        if self.resolve_device_object()?.is_some() {
+            let _ = mode;
+            return Ok(());
+        }
+
         match &self.file {
             FileLike::File(file) => file.lock().chmod(mode),
             FileLike::Directory(dir) => dir.lock().chmod(mode),
@@ -326,10 +331,12 @@ impl Seekable for FileLikeObject {
 
 impl Statable for FileLikeObject {
     fn stat(&self) -> LinuxStat {
-        if let Ok(Some(device)) = self.resolve_device_object()
-            && let Ok(statable) = device.as_statable()
-        {
-            return stat_with_mount_device_id(statable.stat(), &self.path);
+        if let Ok(Some(device)) = self.resolve_device_object() {
+            let mut stat = self.info().map(FileLikeInfo::as_linux).unwrap_or_default();
+            if let Ok(statable) = device.as_statable() {
+                stat.st_rdev = statable.stat().st_rdev;
+            }
+            return stat_with_mount_device_id(stat, &self.path);
         }
 
         stat_with_mount_device_id(

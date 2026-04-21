@@ -671,10 +671,10 @@ fn chmod_at(dirfd: i32, path_str: &str, mode: u32, flags: AtFlags) -> Result<usi
         if !flags.contains(AtFlags::EMPTY_PATH) {
             return Err(SyscallError::InvalidArguments);
         }
-        get_object_current_process(dirfd as u64)
-            .map_err(SyscallError::from)?
-            .as_file_like()?
-            .chmod(mode)?;
+        chmod_fd_object(
+            get_object_current_process(dirfd as u64).map_err(SyscallError::from)?,
+            mode,
+        )?;
         return Ok(0);
     }
 
@@ -694,6 +694,16 @@ fn chmod_at(dirfd: i32, path_str: &str, mode: u32, flags: AtFlags) -> Result<usi
     Ok(0)
 }
 
+fn chmod_fd_object(object: ObjectRef, mode: u32) -> Result<(), SyscallError> {
+    if let Ok(file_like) = object.clone().as_file_like() {
+        file_like.chmod(mode)?;
+    } else {
+        let _ = object.as_statable()?;
+    }
+
+    Ok(())
+}
+
 fn chown_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<usize, SyscallError> {
     let allowed_flags = AtFlags::EMPTY_PATH | AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT;
     if flags.bits() != (flags & allowed_flags).bits() {
@@ -704,14 +714,20 @@ fn chown_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<usize, Syscall
         if !flags.contains(AtFlags::EMPTY_PATH) {
             return Err(SyscallError::InvalidArguments);
         }
-        let _ = get_object_current_process(dirfd as u64)
-            .map_err(SyscallError::from)?
-            .as_file_like()?;
+        chown_fd_object(get_object_current_process(dirfd as u64).map_err(SyscallError::from)?)?;
         return Ok(0);
     }
 
     ensure_path_exists_at(dirfd, path_str, flags.contains(AtFlags::SYMLINK_NOFOLLOW))?;
     Ok(0)
+}
+
+fn chown_fd_object(object: ObjectRef) -> Result<(), SyscallError> {
+    if object.clone().as_file_like().is_err() {
+        let _ = object.as_statable()?;
+    }
+
+    Ok(())
 }
 
 define_syscall!(OpenAt, |dirfd: i32,
@@ -894,7 +910,8 @@ define_syscall!(Fstat, |fd: u64, linux_stat_ptr: *mut LinuxStat| {
 
 define_syscall!(Fchmod, |fd: u64, mode: u32| {
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
-    object.as_file_like()?.chmod(mode)?;
+    let mode = mode & !S_IFMT;
+    chmod_fd_object(object, mode)?;
     Ok(0)
 });
 

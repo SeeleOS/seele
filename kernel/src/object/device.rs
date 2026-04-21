@@ -7,7 +7,10 @@ use crate::{
         fb_object::FramebufferObject,
         mouse::PS2MouseObject,
     },
-    object::{misc::ObjectRef, tty_device::get_default_tty},
+    object::{
+        misc::ObjectRef,
+        tty_device::{get_console_tty, get_default_tty},
+    },
     systemcall::utils::{SyscallError, SyscallResult},
 };
 
@@ -18,7 +21,10 @@ lazy_static::lazy_static! {
         devices.insert("framebuffer", Arc::new(FramebufferObject) as ObjectRef);
         devices.insert("devnull", Arc::new(DevNull) as ObjectRef);
         devices.insert("kmsg", Arc::new(DevKmsg::default()) as ObjectRef);
+        devices.insert("console", get_console_tty() as ObjectRef);
         devices.insert("tty", get_default_tty() as ObjectRef);
+        devices.insert("tty0", get_default_tty() as ObjectRef);
+        devices.insert("tty1", get_default_tty() as ObjectRef);
         devices.insert("ps2mouse", Arc::new(PS2MouseObject::default()) as ObjectRef);
 
         devices

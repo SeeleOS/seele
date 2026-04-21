@@ -1,16 +1,9 @@
-use core::char;
-
-use alloc::collections::vec_deque::VecDeque;
-use spin::mutex::Mutex;
-
 use crate::{
-    keyboard::decoding_task::KEYBOARD_QUEUE,
-    object::tty_device::{get_default_tty, wake_tty_poller_readable},
+    object::tty_device::{get_active_tty, wake_tty_poller_readable},
     print,
     signal::Signal,
     terminal::{
         line_discipline::{process_input_byte, process_output_bytes},
-        misc::{LINE_BUFFER, flush_line_buffer},
         object::TerminalSettings,
         state::DEFAULT_TERMINAL,
     },
@@ -18,10 +11,11 @@ use crate::{
 };
 
 fn handle_interrupt_char(info: &TerminalSettings) {
-    if let Some(group_id) = *get_default_tty().active_group.lock()
+    let active_tty = get_active_tty();
+    if let Some(group_id) = *active_tty.active_group.lock()
         && info.send_sig_on_special_chars
     {
-        LINE_BUFFER.lock().clear();
+        active_tty.clear_line_buffer();
         group_id
             .get_processes()
             .iter()
@@ -33,22 +27,20 @@ fn handle_interrupt_char(info: &TerminalSettings) {
 
 pub fn process_char(char: char) {
     let info = *DEFAULT_TERMINAL.get().unwrap().lock().info.lock();
+    let active_tty = get_active_tty();
     let Ok(byte) = u8::try_from(char as u32) else {
         return;
     };
+    let queue_tty = active_tty.clone();
+    let mut line_buffer = active_tty.line_buffer().lock();
 
     process_input_byte(
         &info,
-        &mut LINE_BUFFER.lock(),
+        &mut line_buffer,
         byte,
-        |byte| {
-            KEYBOARD_QUEUE
-                .get_or_init(|| Mutex::new(VecDeque::new()))
-                .lock()
-                .push_back(byte);
-        },
+        |byte| queue_tty.push_keyboard_byte(byte),
         |bytes| {
-            let mut echoed = VecDeque::new();
+            let mut echoed = alloc::collections::vec_deque::VecDeque::new();
             process_output_bytes(&info, bytes, |byte| {
                 echoed.push_back(byte);
             });
@@ -58,9 +50,10 @@ pub fn process_char(char: char) {
         },
         || handle_interrupt_char(&info),
     );
+    drop(line_buffer);
 
     if byte == b'\n' {
-        flush_line_buffer();
+        active_tty.flush_line_buffer();
     }
     THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
     wake_tty_poller_readable();

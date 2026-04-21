@@ -145,6 +145,16 @@ impl Configuratable for TerminalObject {
                     },
                 );
             },
+            ConfigurateRequest::LinuxTiocswinsz(winsize) => unsafe {
+                let winsize = read_volatile(winsize);
+                let mut info = self.info.lock();
+                if winsize.ws_row != 0 {
+                    info.rows = winsize.ws_row as u64;
+                }
+                if winsize.ws_col != 0 {
+                    info.cols = winsize.ws_col as u64;
+                }
+            },
             _ => return Err(ObjectError::InvalidArguments),
         }
         Ok(0)

@@ -4,7 +4,7 @@ use crate::{
     misc::framebuffer::{FRAME_BUFFER, framebuffer_user_controlled},
     terminal::{
         KernelTerminal,
-        term_trait::{AbstractTerminal, TerminalSize},
+        term_trait::{AbstractTerminal, PtyWriter, TerminalCursorPosition, TerminalSize},
     },
 };
 
@@ -19,6 +19,15 @@ impl AbstractTerminal for KernelTerminal {
 
     fn size(&self) -> TerminalSize {
         TerminalSize::new(self.0.rows(), self.0.columns())
+    }
+
+    fn cursor_position(&self) -> TerminalCursorPosition {
+        let position = self.0.cursor_position();
+        TerminalCursorPosition::from_zero_based(position.row, position.column)
+    }
+
+    fn set_pty_writer(&mut self, writer: PtyWriter) {
+        self.0.set_pty_writer(writer);
     }
 
     fn clear(&mut self) {

@@ -4,11 +4,7 @@ use num_enum::TryFromPrimitive;
 use pc_keyboard::KeyCode;
 use spin::Mutex;
 
-use crate::{
-    keyboard::decoding_task::{KEYBOARD_QUEUE, MEDIUM_RAW_QUEUE, RAW_QUEUE},
-    object::{config::ConfigurateRequest, error::ObjectError, misc::ObjectResult},
-    terminal::misc::LINE_BUFFER,
-};
+use crate::object::{config::ConfigurateRequest, error::ObjectError, misc::ObjectResult};
 
 #[derive(Debug, Clone, Copy, TryFromPrimitive, PartialEq, Eq)]
 #[repr(u32)]
@@ -526,19 +522,6 @@ pub fn handle_kd_request(
         ConfigurateRequest::LinuxKdSetKeyboardMode(mode) => {
             let mode = KeyboardMode::try_from(*mode).map_err(|_| ObjectError::InvalidArguments)?;
             state.lock().keyboard_mode = mode;
-            KEYBOARD_QUEUE
-                .get_or_init(|| Mutex::new(Default::default()))
-                .lock()
-                .clear();
-            RAW_QUEUE
-                .get_or_init(|| Mutex::new(Default::default()))
-                .lock()
-                .clear();
-            MEDIUM_RAW_QUEUE
-                .get_or_init(|| Mutex::new(Default::default()))
-                .lock()
-                .clear();
-            LINE_BUFFER.lock().clear();
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxKdGetKeyboardType(ptr) => {

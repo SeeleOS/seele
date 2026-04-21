@@ -1,11 +1,10 @@
-use alloc::{collections::vec_deque::VecDeque, format, sync::Arc, vec::Vec};
+use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
 
 use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function,
-    keyboard::decoding_task::{KEYBOARD_QUEUE, MEDIUM_RAW_QUEUE, RAW_QUEUE},
     object::{
         FileFlags, Object,
         config::ConfigurateRequest,
@@ -15,6 +14,7 @@ use crate::{
     },
     polling::{event::PollableEvent, object::Pollable},
     process::group::ProcessGroupID,
+    process::manager::get_current_process,
     terminal::{
         linux_kd::{KeyboardMode, LinuxConsoleState, handle_kd_request},
         linux_vt::handle_vt_request,
@@ -23,55 +23,23 @@ use crate::{
     thread::{THREAD_MANAGER, yielding::WakeType},
 };
 
+pub static CONSOLE_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();
 pub static DEFAULT_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();
+
+pub fn get_console_tty() -> Arc<TtyDevice> {
+    CONSOLE_TTY.get().unwrap().clone()
+}
 
 pub fn get_default_tty() -> Arc<TtyDevice> {
     DEFAULT_TTY.get().unwrap().clone()
 }
 
-fn get_appropriate_keyboard_queue(mode: KeyboardMode) -> &'static Mutex<VecDeque<u8>> {
-    // Linux raw/off expose scan codes, mediumraw exposes Linux keycodes,
-    // cooked modes expose decoded bytes.
-    match mode {
-        KeyboardMode::Raw | KeyboardMode::Off => {
-            RAW_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
-        }
-        KeyboardMode::MediumRaw => MEDIUM_RAW_QUEUE.get_or_init(|| Mutex::new(VecDeque::new())),
-        KeyboardMode::Xlate | KeyboardMode::Unicode => {
-            KEYBOARD_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
-        }
-    }
-}
-
-fn terminal_query_responses(buffer: &[u8], rows: u64, cols: u64) -> Vec<u8> {
-    let mut responses = Vec::new();
-
-    for index in 0..buffer.len() {
-        if buffer[index..].starts_with(b"\x1b[18t") {
-            responses.extend_from_slice(format!("\x1b[8;{};{}t", rows, cols).as_bytes());
-        } else if buffer[index..].starts_with(b"\x1b[6n") {
-            responses.extend_from_slice(format!("\x1b[{};{}R", rows, cols).as_bytes());
-        }
-    }
-
-    responses
-}
-
-impl Pollable for TtyDevice {
-    fn is_event_ready(&self, event: PollableEvent) -> bool {
-        match event {
-            PollableEvent::CanBeRead => {
-                let queue = get_appropriate_keyboard_queue(self.keyboard_mode());
-                !queue.lock().is_empty()
-            }
-            PollableEvent::CanBeWritten => true,
-            _ => false,
-        }
-    }
+pub fn get_active_tty() -> Arc<TtyDevice> {
+    get_default_tty()
 }
 
 pub fn wake_tty_poller_readable() {
-    let tty: ObjectRef = get_default_tty();
+    let tty: ObjectRef = get_active_tty();
     THREAD_MANAGER
         .get()
         .unwrap()
@@ -83,6 +51,11 @@ pub fn wake_tty_poller_readable() {
 pub struct TtyDevice {
     terminal: Arc<Mutex<TerminalObject>>,
     linux_console: Mutex<LinuxConsoleState>,
+    interactive: bool,
+    keyboard_queue: Mutex<VecDeque<u8>>,
+    raw_queue: Mutex<VecDeque<u8>>,
+    medium_raw_queue: Mutex<VecDeque<u8>>,
+    line_buffer: Mutex<VecDeque<u8>>,
     /// The foreground process group currently attached to this tty.
     /// Line-discipline generated signals such as Ctrl+C should be sent here.
     pub active_group: Mutex<Option<ProcessGroupID>>,
@@ -90,10 +63,15 @@ pub struct TtyDevice {
 }
 
 impl TtyDevice {
-    pub fn new(terminal: Arc<Mutex<TerminalObject>>) -> Self {
+    pub fn new(terminal: Arc<Mutex<TerminalObject>>, interactive: bool) -> Self {
         Self {
             terminal,
             linux_console: Mutex::new(LinuxConsoleState::default()),
+            interactive,
+            keyboard_queue: Mutex::new(VecDeque::new()),
+            raw_queue: Mutex::new(VecDeque::new()),
+            medium_raw_queue: Mutex::new(VecDeque::new()),
+            line_buffer: Mutex::new(VecDeque::new()),
             active_group: Mutex::new(None),
             flags: Mutex::new(FileFlags::empty()),
         }
@@ -101,6 +79,86 @@ impl TtyDevice {
 
     pub fn keyboard_mode(&self) -> KeyboardMode {
         self.linux_console.lock().keyboard_mode
+    }
+
+    pub fn push_raw_byte(&self, byte: u8) {
+        self.raw_queue.lock().push_back(byte);
+    }
+
+    pub fn push_medium_raw_bytes(&self, bytes: &[u8]) {
+        self.medium_raw_queue.lock().extend(bytes.iter().copied());
+    }
+
+    pub fn push_keyboard_byte(&self, byte: u8) {
+        self.keyboard_queue.lock().push_back(byte);
+    }
+
+    pub fn push_keyboard_bytes(&self, bytes: &[u8]) {
+        self.keyboard_queue.lock().extend(bytes.iter().copied());
+    }
+
+    pub fn line_buffer(&self) -> &Mutex<VecDeque<u8>> {
+        &self.line_buffer
+    }
+
+    pub fn clear_input_state(&self) {
+        self.keyboard_queue.lock().clear();
+        self.raw_queue.lock().clear();
+        self.medium_raw_queue.lock().clear();
+        self.line_buffer.lock().clear();
+    }
+
+    pub fn clear_line_buffer(&self) {
+        self.line_buffer.lock().clear();
+    }
+
+    pub fn flush_line_buffer(&self) {
+        let mut line_buffer = self.line_buffer.lock();
+        let mut keyboard_queue = self.keyboard_queue.lock();
+        keyboard_queue.extend(line_buffer.drain(..));
+    }
+
+    fn push_terminal_query_responses(&self, bytes: &[u8]) {
+        if !self.interactive || bytes.is_empty() {
+            return;
+        }
+
+        match self.keyboard_mode() {
+            KeyboardMode::Raw | KeyboardMode::Off => {
+                self.raw_queue.lock().extend(bytes.iter().copied());
+            }
+            KeyboardMode::MediumRaw => {
+                self.medium_raw_queue.lock().extend(bytes.iter().copied());
+            }
+            KeyboardMode::Xlate | KeyboardMode::Unicode => {
+                self.keyboard_queue.lock().extend(bytes.iter().copied());
+            }
+        }
+
+        THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+    }
+
+    pub fn push_terminal_response_bytes(&self, bytes: &[u8]) {
+        self.push_terminal_query_responses(bytes);
+        if !bytes.is_empty() {
+            wake_tty_poller_readable();
+        }
+    }
+}
+
+impl Pollable for TtyDevice {
+    fn is_event_ready(&self, event: PollableEvent) -> bool {
+        match event {
+            PollableEvent::CanBeRead => match self.keyboard_mode() {
+                KeyboardMode::Raw | KeyboardMode::Off => !self.raw_queue.lock().is_empty(),
+                KeyboardMode::MediumRaw => !self.medium_raw_queue.lock().is_empty(),
+                KeyboardMode::Xlate | KeyboardMode::Unicode => {
+                    !self.keyboard_queue.lock().is_empty()
+                }
+            },
+            PollableEvent::CanBeWritten => true,
+            _ => false,
+        }
     }
 }
 
@@ -114,19 +172,7 @@ impl Object for TtyDevice {
 
 impl Writable for TtyDevice {
     fn write(&self, buffer: &[u8]) -> super::ObjectResult<usize> {
-        let response = {
-            let terminal = self.terminal.lock();
-            let info = *terminal.info.lock();
-            terminal_query_responses(buffer, info.rows, info.cols)
-        };
-
         let written = self.terminal.lock().write(buffer)?;
-
-        if !response.is_empty() {
-            let queue = get_appropriate_keyboard_queue(self.keyboard_mode());
-            queue.lock().extend(response);
-            wake_tty_poller_readable();
-        }
 
         Ok(written)
     }
@@ -134,16 +180,25 @@ impl Writable for TtyDevice {
 
 impl Readable for TtyDevice {
     fn read(&self, buffer: &mut [u8]) -> super::ObjectResult<usize> {
-        read_or_block(buffer, &self.flags, WakeType::Keyboard, |buffer| {
-            let queue = get_appropriate_keyboard_queue(self.keyboard_mode());
-            let mut queue = queue.lock();
-
-            if queue.is_empty() {
-                None
-            } else {
-                Some(copy_from_queue(&mut queue, buffer))
-            }
-        })
+        read_or_block(
+            buffer,
+            &self.flags,
+            WakeType::Keyboard,
+            |buffer| match self.keyboard_mode() {
+                KeyboardMode::Raw | KeyboardMode::Off => {
+                    let mut queue = self.raw_queue.lock();
+                    (!queue.is_empty()).then(|| copy_from_queue(&mut queue, buffer))
+                }
+                KeyboardMode::MediumRaw => {
+                    let mut queue = self.medium_raw_queue.lock();
+                    (!queue.is_empty()).then(|| copy_from_queue(&mut queue, buffer))
+                }
+                KeyboardMode::Xlate | KeyboardMode::Unicode => {
+                    let mut queue = self.keyboard_queue.lock();
+                    (!queue.is_empty()).then(|| copy_from_queue(&mut queue, buffer))
+                }
+            },
+        )
     }
 }
 
@@ -152,6 +207,13 @@ impl Configuratable for TtyDevice {
         &self,
         request: super::config::ConfigurateRequest,
     ) -> super::misc::ObjectResult<isize> {
+        if matches!(request, ConfigurateRequest::LinuxKdSetKeyboardMode(_))
+            && let Some(result) = handle_kd_request(&self.linux_console, &request)?
+        {
+            self.clear_input_state();
+            return Ok(result);
+        }
+
         if let Some(result) = handle_kd_request(&self.linux_console, &request)? {
             return Ok(result);
         }
@@ -161,14 +223,33 @@ impl Configuratable for TtyDevice {
         }
 
         match request {
+            ConfigurateRequest::LinuxTcFlush(_) => {
+                self.clear_input_state();
+                Ok(0)
+            }
+            ConfigurateRequest::LinuxTiocnxcl => Ok(0),
+            ConfigurateRequest::LinuxTiocsctty(_) => {
+                let group_id = get_current_process().lock().group_id;
+                *self.active_group.lock() = Some(group_id);
+                Ok(0)
+            }
             ConfigurateRequest::LinuxTiocgPgrp(ptr) => unsafe {
-                *ptr = self.active_group.lock().unwrap().0 as i32;
+                *ptr = self
+                    .active_group
+                    .lock()
+                    .map(|group| group.0 as i32)
+                    .unwrap_or(0);
                 Ok(0)
             },
+            ConfigurateRequest::LinuxTiocnotty => Ok(0),
             ConfigurateRequest::LinuxTiocspgrp(ptr) => unsafe {
                 *self.active_group.lock() = Some(ProcessGroupID((*ptr) as u64));
                 Ok(0)
             },
+            ConfigurateRequest::LinuxTiocvhangup => {
+                self.clear_input_state();
+                Ok(0)
+            }
             _ => self.terminal.lock().configure(request),
         }
     }

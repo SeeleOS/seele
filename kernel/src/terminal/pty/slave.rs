@@ -1,3 +1,5 @@
+use core::ptr::{read_volatile, write_volatile};
+
 use alloc::sync::Arc;
 use spin::Mutex;
 
@@ -6,7 +8,7 @@ use crate::{
     impl_cast_function,
     object::{
         FileFlags, Object,
-        config::ConfigurateRequest,
+        config::{ConfigurateRequest, LinuxWinsize},
         misc::ObjectResult,
         queue_helpers::{copy_from_queue, read_or_block},
         traits::{Configuratable, Readable, Statable, Writable},
@@ -97,7 +99,33 @@ impl Configuratable for PtySlave {
             return Ok(result);
         }
 
-        Ok(0)
+        match request {
+            ConfigurateRequest::LinuxTiocgwinsz(winsize) => unsafe {
+                let info = self.shared.lock().info;
+                write_volatile(
+                    winsize,
+                    LinuxWinsize {
+                        ws_row: info.rows as u16,
+                        ws_col: info.cols as u16,
+                        ws_xpixel: 0,
+                        ws_ypixel: 0,
+                    },
+                );
+                Ok(0)
+            },
+            ConfigurateRequest::LinuxTiocswinsz(winsize) => unsafe {
+                let winsize = read_volatile(winsize);
+                let mut shared = self.shared.lock();
+                if winsize.ws_row != 0 {
+                    shared.info.rows = winsize.ws_row as u64;
+                }
+                if winsize.ws_col != 0 {
+                    shared.info.cols = winsize.ws_col as u64;
+                }
+                Ok(0)
+            },
+            _ => Ok(0),
+        }
     }
 }
 

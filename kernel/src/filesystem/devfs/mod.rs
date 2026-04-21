@@ -27,21 +27,21 @@ static DEV_CONSOLE_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     name: "console",
     inode: 0x1003,
     mode: 0o020600,
-    device_name: "tty",
+    device_name: "console",
 });
 
 static DEV_TTY0_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     name: "tty0",
     inode: 0x1004,
-    mode: 0o020666,
-    device_name: "tty",
+    mode: 0o020620,
+    device_name: "tty0",
 });
 
 static DEV_TTY1_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     name: "tty1",
     inode: 0x1005,
-    mode: 0o020666,
-    device_name: "tty",
+    mode: 0o020620,
+    device_name: "tty1",
 });
 
 static DEV_FB0_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {

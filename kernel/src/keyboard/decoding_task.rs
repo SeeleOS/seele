@@ -1,8 +1,5 @@
-use alloc::collections::vec_deque::VecDeque;
-use conquer_once::spin::OnceCell;
 use futures_util::StreamExt;
 use pc_keyboard::DecodedKey;
-use spin::Mutex;
 
 use crate::keyboard::{
     char_processing::process_char, encode_linux_raw_byte, ps2::_PS2_KEYBOARD,
@@ -10,27 +7,19 @@ use crate::keyboard::{
 };
 use crate::{
     evdev::push_keyboard_event,
-    object::tty_device::{get_default_tty, wake_tty_poller_readable},
+    object::tty_device::{get_active_tty, wake_tty_poller_readable},
     terminal::linux_kd::{KeyboardMode, linux_keycode_from_keycode},
     thread::THREAD_MANAGER,
 };
 use pc_keyboard::{KeyEvent, KeyState};
-
-pub static KEYBOARD_QUEUE: OnceCell<Mutex<VecDeque<u8>>> = OnceCell::uninit();
-/// Raw keyboard modes consume untranslated scancodes from this queue.
-pub static RAW_QUEUE: OnceCell<Mutex<VecDeque<u8>>> = OnceCell::uninit();
-/// Medium raw mode consumes Linux keycodes with press/release state.
-pub static MEDIUM_RAW_QUEUE: OnceCell<Mutex<VecDeque<u8>>> = OnceCell::uninit();
 
 pub async fn process_keypresses() {
     let mut scancodes = ScancodeStream;
 
     // loop through scancodes infinitely
     while let Some(scancode) = scancodes.next().await {
-        RAW_QUEUE
-            .get_or_init(|| Mutex::new(VecDeque::new()))
-            .lock()
-            .push_back(encode_linux_raw_byte(scancode));
+        let active_tty = get_active_tty();
+        active_tty.push_raw_byte(encode_linux_raw_byte(scancode));
         THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
         wake_tty_poller_readable();
 
@@ -39,10 +28,10 @@ pub async fn process_keypresses() {
 
             if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
                 push_keyboard_event(&key_event);
-                match get_default_tty().keyboard_mode() {
+                match active_tty.keyboard_mode() {
                     KeyboardMode::Raw | KeyboardMode::Off => continue,
                     KeyboardMode::MediumRaw => {
-                        push_medium_raw_event(&key_event);
+                        push_medium_raw_event(&active_tty, &key_event);
                         continue;
                     }
                     KeyboardMode::Xlate | KeyboardMode::Unicode => {}
@@ -63,24 +52,23 @@ pub async fn process_keypresses() {
     }
 }
 
-fn push_medium_raw_event(event: &KeyEvent) {
+fn push_medium_raw_event(active_tty: &crate::object::tty_device::TtyDevice, event: &KeyEvent) {
     let Some(keycode) = linux_keycode_from_keycode(event.code) else {
         return;
     };
 
-    let mut queue = MEDIUM_RAW_QUEUE
-        .get_or_init(|| Mutex::new(VecDeque::new()))
-        .lock();
-
     let released = matches!(event.state, KeyState::Up);
-    if keycode < 0x80 {
-        queue.push_back(keycode | if released { 0x80 } else { 0 });
+    let mut encoded = [0u8; 3];
+    let len = if keycode < 0x80 {
+        encoded[0] = keycode | if released { 0x80 } else { 0 };
+        1
     } else {
-        queue.push_back(if released { 0x80 } else { 0 });
-        queue.push_back((keycode >> 7) & 0x7f);
-        queue.push_back(keycode & 0x7f);
-    }
-    drop(queue);
+        encoded[0] = if released { 0x80 } else { 0 };
+        encoded[1] = (keycode >> 7) & 0x7f;
+        encoded[2] = keycode & 0x7f;
+        3
+    };
+    active_tty.push_medium_raw_bytes(&encoded[..len]);
 
     THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
     wake_tty_poller_readable();
