@@ -172,9 +172,7 @@ impl Object for TtyDevice {
 
 impl Writable for TtyDevice {
     fn write(&self, buffer: &[u8]) -> super::ObjectResult<usize> {
-        let written = self.terminal.lock().write(buffer)?;
-
-        Ok(written)
+        self.terminal.lock().write(buffer)
     }
 }
 
