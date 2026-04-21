@@ -77,6 +77,7 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 
 - IMPORTANT: split commits by feature/fix.
 - IMPORTANT: make small verified commits promptly while debugging.
+- IMPORTANT: once a discrete feature or fix is verified, commit it immediately instead of waiting for the rest of the work to finish.
 - IMPORTANT: before committing, review the current `git diff` against `AGENTS.md`, then split and commit by feature/fix.
 - Do not let multiple unrelated runtime experiments, partial fixes, or cleanup work accumulate in one uncommitted batch.
 
