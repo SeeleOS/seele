@@ -44,6 +44,7 @@ After finishing a change, run `nix develop -c cargo run -- --agent` to test the 
 - Do not take shortcuts just to get something running quickly. In particular, avoid adding stubs, temporary shortcuts, or ad-hoc special cases merely to make a feature appear to work.
 - For syscall handlers, do not take a user pointer as `u64` and then immediately cast it to `*const T` or `*mut T` in the body. Make the syscall argument itself a properly typed pointer and add or reuse the `SyscallArg` conversion in `kernel/src/systemcall/arg_types.rs`.
 - For syscall flag arguments and similar closed ABI bitfields, do not manually call `from_bits*()` inside syscall bodies or pass raw integers through internal helpers when a typed flag would do. Convert at the syscall boundary with `SyscallArg`, make syscall parameters strongly typed, and have helper functions take the typed flag directly unless there is a clear special-case reason not to.
+- For Linux ioctls, prefer adding explicit `ConfigurateRequest` variants and decoding them at the ioctl boundary instead of matching raw ioctl numbers inside device implementations. Treat `RawIoctl` as a last resort passthrough path, not the default way to add tty/ioctl support.
 
 ## Testing Guidelines
 
@@ -76,6 +77,7 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 
 - IMPORTANT: split commits by feature/fix.
 - IMPORTANT: make small verified commits promptly while debugging.
+- IMPORTANT: before committing, review the current `git diff` against `AGENTS.md`, then split and commit by feature/fix.
 - Do not let multiple unrelated runtime experiments, partial fixes, or cleanup work accumulate in one uncommitted batch.
 
 - Keep commit titles concise and action-oriented.
