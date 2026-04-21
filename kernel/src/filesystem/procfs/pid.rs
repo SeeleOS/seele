@@ -34,6 +34,15 @@ pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
 const PROC_NAMESPACE_NAMES: [&str; 8] =
     ["cgroup", "ipc", "mnt", "net", "pid", "time", "user", "uts"];
 
+const PROC_CGROUP_INIT_INO: u64 = 0xEFFF_FFFB;
+const PROC_IPC_INIT_INO: u64 = 0xEFFF_FFFF;
+const PROC_MNT_INIT_INO: u64 = 0xEFFF_FFF8;
+const PROC_NET_INIT_INO: u64 = 0xEFFF_FFF9;
+const PROC_PID_INIT_INO: u64 = 0xEFFF_FFFC;
+const PROC_TIME_INIT_INO: u64 = 0xEFFF_FFFA;
+const PROC_USER_INIT_INO: u64 = 0xEFFF_FFFD;
+const PROC_UTS_INIT_INO: u64 = 0xEFFF_FFFE;
+
 fn default_user_namespace_map(id: u32) -> String {
     format!("0 {id} 1\n")
 }
@@ -422,11 +431,18 @@ pub(super) fn pid_fdinfo_inode(pid: ProcessID, fd: &str) -> u64 {
 }
 
 pub(super) fn pid_ns_inode(pid: ProcessID, name: &str) -> FSResult<u64> {
-    let index = PROC_NAMESPACE_NAMES
-        .iter()
-        .position(|namespace| *namespace == name)
-        .ok_or(FSError::NotFound)?;
-    Ok(pid_ns_dir_inode(pid) + 1 + index as u64)
+    let _ = pid;
+    match name {
+        "cgroup" => Ok(PROC_CGROUP_INIT_INO),
+        "ipc" => Ok(PROC_IPC_INIT_INO),
+        "mnt" => Ok(PROC_MNT_INIT_INO),
+        "net" => Ok(PROC_NET_INIT_INO),
+        "pid" => Ok(PROC_PID_INIT_INO),
+        "time" => Ok(PROC_TIME_INIT_INO),
+        "user" => Ok(PROC_USER_INIT_INO),
+        "uts" => Ok(PROC_UTS_INIT_INO),
+        _ => Err(FSError::NotFound),
+    }
 }
 
 pub(super) fn fd_target(pid: ProcessID, fd: &str) -> FSResult<String> {
