@@ -80,19 +80,12 @@ impl VFS {
         let ext4 = Ext4Inner::load_with_writer(Box::new(reader), Some(Box::new(writer))).unwrap();
         log::info!("vfs: ext4 loaded");
         self.mount(Path::new("/"), EXT4::new(ext4))?;
+        self.mount(Path::new("/tmp"), TmpFs::new())?;
         self.mount(Path::new("/run"), TmpFs::new())?;
         self.mount(Path::new("/dev"), DevFs::new())?;
         self.mount(Path::new("/proc"), ProcFs::new())?;
         self.mount(Path::new("/sys"), SysFs::new())?;
         self.mount(Path::new("/sys/fs/cgroup"), CgroupFs::new())?;
-
-        for temp_dir in ["/tmp", "/var/tmp"] {
-            if let Err(err) = self.clear_directory(Path::new(temp_dir)) {
-                log::warn!("vfs: failed to clean {}: {:?}", temp_dir, err);
-            } else {
-                log::info!("vfs: cleaned {}", temp_dir);
-            }
-        }
 
         log::debug!("vfs: init done");
         Ok(())
