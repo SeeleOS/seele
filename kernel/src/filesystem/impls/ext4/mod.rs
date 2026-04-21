@@ -1,4 +1,4 @@
-use alloc::{string::ToString, sync::Arc};
+use alloc::{collections::btree_map::BTreeMap, string::String, string::ToString, sync::Arc};
 use spin::mutex::Mutex;
 
 use ext4plus::{
@@ -25,6 +25,50 @@ pub mod symlink;
 
 const CHMOD_PERMISSION_BITS: u16 = 0o7777;
 const FILE_TYPE_BITS: u16 = 0o170000;
+pub(super) type LookupCache = Arc<Mutex<BTreeMap<(u32, String), Inode>>>;
+
+pub(super) fn lookup_cache_get(
+    cache: &LookupCache,
+    parent_inode: &Inode,
+    name: &str,
+) -> Option<Inode> {
+    cache
+        .lock()
+        .get(&(parent_inode.index.get(), name.to_string()))
+        .cloned()
+}
+
+pub(super) fn lookup_cache_insert(
+    cache: &LookupCache,
+    parent_inode: &Inode,
+    name: &str,
+    inode: &Inode,
+) {
+    lookup_cache_insert_raw(cache, parent_inode.index.get(), name, inode);
+}
+
+pub(super) fn lookup_cache_insert_raw(
+    cache: &LookupCache,
+    parent_inode: u32,
+    name: &str,
+    inode: &Inode,
+) {
+    cache
+        .lock()
+        .insert((parent_inode, name.to_string()), inode.clone());
+}
+
+pub(super) fn lookup_cache_remove(cache: &LookupCache, parent_inode: &Inode, name: &str) {
+    lookup_cache_remove_raw(cache, parent_inode.index.get(), name);
+}
+
+pub(super) fn lookup_cache_remove_raw(cache: &LookupCache, parent_inode: u32, name: &str) {
+    cache.lock().remove(&(parent_inode, name.to_string()));
+}
+
+pub(super) fn lookup_cache_clear(cache: &LookupCache) {
+    cache.lock().clear();
+}
 
 pub(super) fn chmod_path(fs: &Ext4, path: &str, mode: u32) -> FSResult<()> {
     let requested_bits = (mode as u16) & CHMOD_PERMISSION_BITS;
@@ -44,6 +88,7 @@ pub(super) fn chmod_path(fs: &Ext4, path: &str, mode: u32) -> FSResult<()> {
 pub struct EXT4 {
     fs: Ext4,
     root_inode: Inode,
+    lookup_cache: LookupCache,
 }
 
 impl EXT4 {
@@ -51,7 +96,11 @@ impl EXT4 {
         let root_inode = fs
             .path_to_inode(Ext4Path::new("/"), FollowSymlinks::All)
             .expect("ext4 root inode must exist");
-        Self { fs, root_inode }
+        Self {
+            fs,
+            root_inode,
+            lookup_cache: Arc::new(Mutex::new(BTreeMap::new())),
+        }
     }
 
     fn follow_intermediate_symlinks(&self, mut current: FileLike) -> FSResult<FileLike> {
@@ -74,6 +123,8 @@ impl EXT4 {
             "/".to_string(),
             self.fs.clone(),
             self.root_inode.clone(),
+            None,
+            self.lookup_cache.clone(),
         )))
     }
 }
@@ -130,6 +181,7 @@ impl FileSystem for EXT4 {
     }
 
     fn rename(&self, old_path: &Path, new_path: &Path) -> FSResult<()> {
+        lookup_cache_clear(&self.lookup_cache);
         let old_path = old_path.normalize();
         let new_path = new_path.normalize();
         if old_path == new_path {

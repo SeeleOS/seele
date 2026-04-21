@@ -127,13 +127,7 @@ impl VFS {
             .downcast_ref::<Ext4Directory>()
             .ok_or(FSError::Other)?;
 
-        let parent_inode = ext4_parent
-            .fs()
-            .path_to_inode(
-                ext4plus::path::Path::new(ext4_parent.path()),
-                ext4plus::FollowSymlinks::All,
-            )
-            .map_err(FSError::from)?;
+        let parent_inode = ext4_parent.inode();
         let mut parent_dir = ext4plus::dir::Dir::open_inode(ext4_parent.fs(), parent_inode)
             .map_err(FSError::from)?;
 
@@ -144,6 +138,7 @@ impl VFS {
                 &mut source_inode,
             )
             .map_err(FSError::from)?;
+        ext4_parent.clear_lookup_cache();
 
         Ok(())
     }
