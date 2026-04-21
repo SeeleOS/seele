@@ -23,6 +23,7 @@ Keep new code close to the subsystem it belongs to. For example, terminal ioctls
 - `cargo fmt --all`: format Rust code before submitting changes.
 - When launching the VM during agent work, use a checked-in `.sh` wrapper script instead of invoking the VM command directly. Put any needed log redirection inside the wrapper rather than on the outer command line.
 - When using the checked-in VM wrapper, run it directly (for example `misc/run-agent-vm.sh`). Do not wrap it with `bash`, and do not override its default log file path unless explicitly requested.
+- Unless there is a clear debugging need, do not add or override VM timeouts on top of the checked-in wrapper defaults. Prefer running `misc/run-agent-vm.sh` as-is.
 - Do not assume `sysroot/` is mounted or synchronized with `disk.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the VM wrapper when in doubt.
 - If the sandbox, `no_new_privileges`, missing mounts, or network restrictions block a necessary command, ask the user for privilege escalation or the required access instead of silently giving up on that path.
 
@@ -72,6 +73,10 @@ If the current logs are already noisy enough to pollute the debugging signal and
 ## Commit & Pull Request Guidelines
 
 Recent commits are short, imperative, and lowercase, for example: `deleted seele-sys fully` or `linux stuff`.
+
+- IMPORTANT: split commits by feature/fix.
+- IMPORTANT: make small verified commits promptly while debugging.
+- Do not let multiple unrelated runtime experiments, partial fixes, or cleanup work accumulate in one uncommitted batch.
 
 - Keep commit titles concise and action-oriented.
 - One logical change per commit when practical.
