@@ -97,6 +97,7 @@ pub enum SyscallNumber {
     Chmod = 90,
     Fchmod = 91,
     Chown = 92,
+    Fchown = 93,
     Iopl = 172,
     Ioperm = 173,
     Getpid = 39,

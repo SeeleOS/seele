@@ -915,6 +915,12 @@ define_syscall!(Fchmod, |fd: u64, mode: u32| {
     Ok(0)
 });
 
+define_syscall!(Fchown, |fd: u64, _owner: u32, _group: u32| {
+    let object = get_object_current_process(fd).map_err(SyscallError::from)?;
+    chown_fd_object(object)?;
+    Ok(0)
+});
+
 define_syscall!(Fchmodat2, |dirfd: i32,
                             path: u64,
                             mode: u32,

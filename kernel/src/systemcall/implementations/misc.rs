@@ -1044,17 +1044,23 @@ define_syscall!(
         let requested_ns =
             (requested.tv_sec as u64).saturating_mul(1_000_000_000) + (requested.tv_nsec as u64);
 
-        let now = match clock {
-            ClockId::Realtime => KernelTime::current(),
-            ClockId::SinceBoot => KernelTime::since_boot(),
-        };
         let deadline = if flags.contains(ClockNanosleepFlags::TIMER_ABSTIME) {
-            KernelTime::from_nanoseconds(requested_ns)
+            match clock {
+                ClockId::Realtime => {
+                    let now_realtime = KernelTime::current();
+                    let now_boot = KernelTime::since_boot();
+                    now_boot.add_ns(requested_ns.saturating_sub(now_realtime.as_nanoseconds()))
+                }
+                ClockId::SinceBoot => KernelTime::from_nanoseconds(requested_ns),
+            }
         } else {
-            now.add_ns(requested_ns)
+            // Blocked-thread timeouts are evaluated against since_boot.
+            // Relative sleeps are duration-based, so normalize them onto
+            // that clock domain even for CLOCK_REALTIME.
+            KernelTime::since_boot().add_ns(requested_ns)
         };
 
-        if deadline > now {
+        if deadline > KernelTime::since_boot() {
             block_current_with_sig_check(BlockType::SetTime(deadline))?;
         }
 
