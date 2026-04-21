@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DISK_IMG="${ROOT_DIR}/disk.img"
 SYSROOT_DIR="${ROOT_DIR}/sysroot"
 PACMAN_CONF="${ROOT_DIR}/misc/pacman.conf"
+HOST_PATH="${PATH}"
 ARCH_MIRROR="${ARCH_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/archlinux/\$repo/os/\$arch}"
 ARCH_PACKAGES=(
     base
@@ -71,7 +72,7 @@ Server = ${ARCH_MIRROR}
 Server = ${ARCH_MIRROR}
 EOF
 
-sudo pacman \
+sudo env "PATH=${HOST_PATH}" pacman \
     --config "${PACMAN_CONF}" \
     --root "${SYSROOT_DIR}" \
     --dbpath "${SYSROOT_DIR}/var/lib/pacman" \

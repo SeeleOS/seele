@@ -33,13 +33,28 @@ fn umount_sysroot() {
     let project_root = discover_project_root();
     let sysroot = project_root.join("sysroot");
 
-    Command::new("sudo")
+    let is_mounted = Command::new("mountpoint")
+        .arg("-q")
+        .arg(&sysroot)
+        .status()
+        .expect("failed to check whether sysroot is mounted")
+        .success();
+
+    if !is_mounted {
+        return;
+    }
+
+    let status = Command::new("sudo")
         .arg("umount")
         .arg(&sysroot)
-        .spawn()
-        .unwrap()
-        .wait()
-        .unwrap();
+        .status()
+        .expect("failed to unmount sysroot");
+
+    assert!(
+        status.success(),
+        "failed to unmount mounted sysroot at {}",
+        sysroot.display()
+    );
 }
 
 fn discover_project_root() -> PathBuf {
