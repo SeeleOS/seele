@@ -79,7 +79,7 @@ impl VFS {
         let writer = Ext4BlockOperator::new(block_device);
         let ext4 = Ext4Inner::load_with_writer(Box::new(reader), Some(Box::new(writer))).unwrap();
         log::info!("vfs: ext4 loaded");
-        self.mount(Path::new("/"), EXT4(ext4))?;
+        self.mount(Path::new("/"), EXT4::new(ext4))?;
         self.mount(Path::new("/run"), TmpFs::new())?;
         self.mount(Path::new("/dev"), DevFs::new())?;
         self.mount(Path::new("/proc"), ProcFs::new())?;

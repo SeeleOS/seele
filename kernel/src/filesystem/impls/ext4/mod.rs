@@ -2,7 +2,10 @@ use alloc::{string::ToString, sync::Arc};
 use spin::mutex::Mutex;
 
 use ext4plus::{
-    DirEntryName, Ext4, FollowSymlinks, dir::Dir, inode::InodeMode, path::Path as Ext4Path,
+    DirEntryName, Ext4, FollowSymlinks,
+    dir::Dir,
+    inode::{Inode, InodeMode},
+    path::Path as Ext4Path,
 };
 
 use crate::filesystem::{
@@ -38,9 +41,19 @@ pub(super) fn chmod_path(fs: &Ext4, path: &str, mode: u32) -> FSResult<()> {
 
 /// Wrapper around the `ext4plus::Ext4` filesystem so it can be used
 /// through the kernel's generic `FileSystem` trait.
-pub struct EXT4(pub Ext4);
+pub struct EXT4 {
+    fs: Ext4,
+    root_inode: Inode,
+}
 
 impl EXT4 {
+    pub fn new(fs: Ext4) -> Self {
+        let root_inode = fs
+            .path_to_inode(Ext4Path::new("/"), FollowSymlinks::All)
+            .expect("ext4 root inode must exist");
+        Self { fs, root_inode }
+    }
+
     fn follow_intermediate_symlinks(&self, mut current: FileLike) -> FSResult<FileLike> {
         const MAX_SYMLINKS: usize = 40;
 
@@ -56,15 +69,11 @@ impl EXT4 {
     }
 
     fn root_dir(&self) -> WrappedDirectory {
-        let inode = self
-            .0
-            .path_to_inode(Ext4Path::new("/"), FollowSymlinks::All)
-            .expect("ext4 root inode must exist");
         Arc::new(Mutex::new(Ext4Directory::new(
             "".to_string(),
             "/".to_string(),
-            self.0.clone(),
-            inode,
+            self.fs.clone(),
+            self.root_inode.clone(),
         )))
     }
 }
@@ -132,7 +141,7 @@ impl FileSystem for EXT4 {
             return Err(FSError::Other);
         }
         let source_inode = self
-            .0
+            .fs
             .path_to_inode(
                 Ext4Path::new(&old_path.clone().as_string()),
                 FollowSymlinks::ExcludeFinalComponent,
@@ -149,16 +158,16 @@ impl FileSystem for EXT4 {
                 return Err(FSError::DirectoryNotEmpty);
             }
             let new_parent_inode = self
-                .0
+                .fs
                 .path_to_inode(
                     Ext4Path::new(&new_parent.clone().as_string()),
                     FollowSymlinks::All,
                 )
                 .map_err(FSError::from)?;
             let mut new_parent_dir =
-                Dir::open_inode(&self.0, new_parent_inode).map_err(FSError::from)?;
+                Dir::open_inode(&self.fs, new_parent_inode).map_err(FSError::from)?;
             let target_inode = self
-                .0
+                .fs
                 .path_to_inode(
                     Ext4Path::new(&new_path.clone().as_string()),
                     FollowSymlinks::ExcludeFinalComponent,
@@ -173,14 +182,14 @@ impl FileSystem for EXT4 {
         }
 
         let new_parent_inode = self
-            .0
+            .fs
             .path_to_inode(
                 Ext4Path::new(&new_parent.clone().as_string()),
                 FollowSymlinks::All,
             )
             .map_err(FSError::from)?;
         let mut new_parent_dir =
-            Dir::open_inode(&self.0, new_parent_inode).map_err(FSError::from)?;
+            Dir::open_inode(&self.fs, new_parent_inode).map_err(FSError::from)?;
         let mut source_inode = source_inode;
         new_parent_dir
             .link(
@@ -190,16 +199,16 @@ impl FileSystem for EXT4 {
             .map_err(FSError::from)?;
 
         let old_parent_inode = self
-            .0
+            .fs
             .path_to_inode(
                 Ext4Path::new(&old_parent.clone().as_string()),
                 FollowSymlinks::All,
             )
             .map_err(FSError::from)?;
         let mut old_parent_dir =
-            Dir::open_inode(&self.0, old_parent_inode).map_err(FSError::from)?;
+            Dir::open_inode(&self.fs, old_parent_inode).map_err(FSError::from)?;
         let old_inode = self
-            .0
+            .fs
             .path_to_inode(
                 Ext4Path::new(&old_path.clone().as_string()),
                 FollowSymlinks::ExcludeFinalComponent,
