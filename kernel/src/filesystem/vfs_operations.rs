@@ -1,7 +1,7 @@
 use crate::{
     filesystem::{
         info::{DirectoryContentInfo, FileLikeInfo},
-        object::FileLikeObject,
+        object::OpenedFileObject,
         vfs::{FSResult, VFS, VirtualFS, WrappedDirectory, WrappedFile},
     },
     object::traits::Readable,
@@ -48,18 +48,18 @@ impl VFS {
         parent_dir.lock().create_symlink(&name, target)
     }
 
-    pub fn open(&mut self, path: Path) -> FSResult<FileLikeObject> {
+    pub fn open(&mut self, path: Path) -> FSResult<OpenedFileObject> {
         let normalized = self.normalize_path(path);
         log::trace!("vfs: open {}", normalized.clone().as_string());
         let (file, resolved_path) = self.resolve_with_path(normalized)?;
-        Ok(FileLikeObject::new(file, resolved_path))
+        OpenedFileObject::new(file, resolved_path)
     }
 
-    pub fn open_nofollow(&mut self, path: Path) -> FSResult<FileLikeObject> {
+    pub fn open_nofollow(&mut self, path: Path) -> FSResult<OpenedFileObject> {
         let normalized = self.normalize_path(path);
         log::trace!("vfs: open_nofollow {}", normalized.clone().as_string());
         let (file, resolved_path) = self.resolve_nofollow_with_path(normalized)?;
-        Ok(FileLikeObject::new(file, resolved_path))
+        OpenedFileObject::new(file, resolved_path)
     }
 
     pub fn file_info(&mut self, path: Path) -> FSResult<FileLikeInfo> {

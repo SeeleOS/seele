@@ -8,7 +8,7 @@ pub struct DirectoryContentInfo {
     pub content_type: DirectoryContentType,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FileLikeInfo {
     pub name: String,
     pub size: usize,
@@ -17,7 +17,7 @@ pub struct FileLikeInfo {
     pub permission: UnixPermission,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct UnixPermission(pub u32);
 
 impl UnixPermission {

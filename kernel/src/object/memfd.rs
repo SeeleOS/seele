@@ -231,5 +231,5 @@ pub fn create_memfd_object(path: Path, name: String, allow_sealing: bool) -> Obj
 
     let inode = NEXT_MEMFD_INODE.fetch_add(1, Ordering::Relaxed);
     let file: WrappedFile = Arc::new(Mutex::new(MemFdFile::new(name, inode, path.clone())));
-    Arc::new(FileLikeObject::new(FileLike::File(file), path)) as ObjectRef
+    Arc::new(FileLikeObject::new(FileLike::File(file), path).expect("memfd must open")) as ObjectRef
 }

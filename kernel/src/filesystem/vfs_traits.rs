@@ -125,7 +125,7 @@ pub trait FileSystem: Send + Sync {
     fn default_mount_flags(&self, path: &Path) -> MountFlags;
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum FileLikeType {
     File,
     Directory,

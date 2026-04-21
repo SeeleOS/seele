@@ -28,9 +28,32 @@ use crate::{
     process::misc::with_current_process,
 };
 
-pub struct FileLikeObject {
-    file: FileLike,
+pub struct OpenedFileObject {
+    backend: OpenBackend,
     path: Path,
+}
+
+pub type FileLikeObject = OpenedFileObject;
+
+enum OpenBackend {
+    RegularFile(WrappedFile),
+    Device {
+        file: WrappedFile,
+        object: ObjectRef,
+    },
+    Directory(WrappedDirectory),
+    SymlinkPath {
+        target: Path,
+        info: FileLikeInfo,
+    },
+}
+
+fn device_object_for_file(file: &WrappedFile) -> FSResult<Option<ObjectRef>> {
+    let file = file.lock();
+    let Some(device) = file.as_any().downcast_ref::<StaticDeviceHandle>() else {
+        return Ok(None);
+    };
+    Ok(Some(device.object()?))
 }
 
 fn mount_device_id_for_path(path: &Path) -> u64 {
@@ -54,9 +77,42 @@ fn stat_with_mount_device_id(mut stat: LinuxStat, path: &Path) -> LinuxStat {
     stat
 }
 
-impl FileLikeObject {
-    pub fn new(file: FileLike, path: Path) -> Self {
-        Self { file, path }
+impl OpenBackend {
+    fn from_file_like(file: FileLike) -> FSResult<Self> {
+        match file {
+            FileLike::File(file) => {
+                if let Some(object) = device_object_for_file(&file)? {
+                    Ok(Self::Device { file, object })
+                } else {
+                    Ok(Self::RegularFile(file))
+                }
+            }
+            FileLike::Directory(dir) => Ok(Self::Directory(dir)),
+            FileLike::Symlink(symlink) => {
+                let symlink = symlink.lock();
+                Ok(Self::SymlinkPath {
+                    target: symlink.target()?,
+                    info: symlink.info()?,
+                })
+            }
+        }
+    }
+
+    fn info(&self) -> FSResult<FileLikeInfo> {
+        match self {
+            Self::RegularFile(file) | Self::Device { file, .. } => file.lock().info(),
+            Self::Directory(dir) => dir.lock().info(),
+            Self::SymlinkPath { info, .. } => Ok(info.clone()),
+        }
+    }
+}
+
+impl OpenedFileObject {
+    pub fn new(file: FileLike, path: Path) -> FSResult<Self> {
+        Ok(Self {
+            backend: OpenBackend::from_file_like(file)?,
+            path,
+        })
     }
 
     pub fn path(&self) -> Path {
@@ -64,11 +120,7 @@ impl FileLikeObject {
     }
 
     pub fn info(&self) -> FSResult<FileLikeInfo> {
-        match &self.file {
-            FileLike::File(file) => file.lock().info(),
-            FileLike::Directory(dir) => dir.lock().info(),
-            FileLike::Symlink(symlink) => symlink.lock().info(),
-        }
+        self.backend.info()
     }
 
     pub fn directory_contents(&self) -> ObjectResult<Vec<DirectoryContentInfo>> {
@@ -80,23 +132,23 @@ impl FileLikeObject {
     }
 
     pub fn read_link(&self) -> FSResult<String> {
-        if let FileLike::Symlink(symlink) = &self.file {
-            symlink.lock().read_link_target()
-        } else {
-            Err(FSError::NotASymlink)
+        match &self.backend {
+            OpenBackend::SymlinkPath { target, .. } => Ok(target.clone().as_string()),
+            _ => Err(FSError::NotASymlink),
         }
     }
 
     pub fn is_static_fs(&self) -> bool {
-        match &self.file {
-            FileLike::File(file) => {
+        match &self.backend {
+            OpenBackend::RegularFile(file) => {
                 let file = file.lock();
-                file.as_any().is::<StaticDeviceHandle>() || file.as_any().is::<StaticFileHandle>()
+                file.as_any().is::<StaticFileHandle>()
             }
-            FileLike::Directory(directory) => {
+            OpenBackend::Device { .. } => true,
+            OpenBackend::Directory(directory) => {
                 directory.lock().as_any().is::<StaticDirectoryHandle>()
             }
-            FileLike::Symlink(_) => true,
+            OpenBackend::SymlinkPath { .. } => true,
         }
     }
 
@@ -118,17 +170,17 @@ impl FileLikeObject {
     }
 
     pub fn chmod(&self, mode: u32) -> FSResult<()> {
-        if self.resolve_device_object()?.is_some() {
+        if self.device_object().is_some() {
             let _ = mode;
             return Ok(());
         }
 
-        match &self.file {
-            FileLike::File(file) => file.lock().chmod(mode),
-            FileLike::Directory(dir) => dir.lock().chmod(mode),
-            FileLike::Symlink(symlink) => {
-                let target = symlink.lock().target()?;
-                let nested = VirtualFS.lock().open(target)?;
+        match &self.backend {
+            OpenBackend::RegularFile(file) => file.lock().chmod(mode),
+            OpenBackend::Device { .. } => Ok(()),
+            OpenBackend::Directory(dir) => dir.lock().chmod(mode),
+            OpenBackend::SymlinkPath { target, .. } => {
+                let nested = VirtualFS.lock().open(target.clone())?;
                 nested.chmod(mode)
             }
         }
@@ -143,49 +195,36 @@ impl FileLikeObject {
     }
 
     fn resolve_file(&self) -> FSResult<WrappedFile> {
-        match &self.file {
-            FileLike::File(file) => Ok(file.clone()),
-            FileLike::Symlink(symlink) => {
-                let target = symlink.lock().target()?;
-                VirtualFS.lock().resolve_file(target)
+        match &self.backend {
+            OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => Ok(file.clone()),
+            OpenBackend::SymlinkPath { target, .. } => {
+                VirtualFS.lock().resolve_file(target.clone())
             }
-            FileLike::Directory(_) => Err(FSError::NotAFile),
+            OpenBackend::Directory(_) => Err(FSError::NotAFile),
         }
     }
 
     fn resolve_dir(&self) -> FSResult<WrappedDirectory> {
-        match &self.file {
-            FileLike::Directory(dir) => Ok(dir.clone()),
-            FileLike::Symlink(symlink) => {
-                let target = symlink.lock().target()?;
-                VirtualFS.lock().resolve_dir(target)
-            }
-            FileLike::File(_) => Err(FSError::NotADirectory),
+        match &self.backend {
+            OpenBackend::Directory(dir) => Ok(dir.clone()),
+            OpenBackend::SymlinkPath { target, .. } => VirtualFS.lock().resolve_dir(target.clone()),
+            OpenBackend::RegularFile(_) | OpenBackend::Device { .. } => Err(FSError::NotADirectory),
         }
     }
 
-    fn resolve_device_object(&self) -> FSResult<Option<ObjectRef>> {
-        match &self.file {
-            FileLike::File(file) => {
-                let file = file.lock();
-                let Some(device) = file.as_any().downcast_ref::<StaticDeviceHandle>() else {
-                    return Ok(None);
-                };
-                Ok(Some(device.object()?))
-            }
-            FileLike::Symlink(symlink) => {
-                let target = symlink.lock().target()?;
-                let nested = VirtualFS.lock().open(target)?;
-                nested.resolve_device_object()
-            }
-            FileLike::Directory(_) => Ok(None),
+    fn device_object(&self) -> Option<ObjectRef> {
+        match &self.backend {
+            OpenBackend::Device { object, .. } => Some(object.clone()),
+            OpenBackend::RegularFile(_)
+            | OpenBackend::Directory(_)
+            | OpenBackend::SymlinkPath { .. } => None,
         }
     }
 }
 
 pub fn poll_identity_object(object: ObjectRef) -> ObjectRef {
     if let Ok(file_like) = object.clone().as_file_like()
-        && let Ok(Some(device)) = file_like.resolve_device_object()
+        && let Some(device) = file_like.device_object()
     {
         return device;
     }
@@ -193,15 +232,15 @@ pub fn poll_identity_object(object: ObjectRef) -> ObjectRef {
     object
 }
 
-impl Debug for FileLikeObject {
+impl Debug for OpenedFileObject {
     fn fmt(&self, _f: &mut Formatter<'_>) -> FmtResult {
         Ok(())
     }
 }
 
-impl Object for FileLikeObject {
+impl Object for OpenedFileObject {
     fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
-        let Some(device) = self.resolve_device_object()? else {
+        let Some(device) = self.device_object() else {
             return Err(ObjectError::Unimplemented);
         };
 
@@ -209,7 +248,7 @@ impl Object for FileLikeObject {
     }
 
     fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
-        let Some(device) = self.resolve_device_object()? else {
+        let Some(device) = self.device_object() else {
             return Err(ObjectError::Unimplemented);
         };
 
@@ -227,9 +266,9 @@ impl Object for FileLikeObject {
     impl_cast_function_non_trait!("file_like", FileLikeObject);
 }
 
-impl Writable for FileLikeObject {
+impl Writable for OpenedFileObject {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
-        if let Some(device) = self.resolve_device_object()? {
+        if let Some(device) = self.device_object() {
             let writable = device
                 .as_writable()
                 .map_err(|_| ObjectError::InvalidArguments)?;
@@ -243,9 +282,9 @@ impl Writable for FileLikeObject {
     }
 }
 
-impl Readable for FileLikeObject {
+impl Readable for OpenedFileObject {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
-        if let Some(device) = self.resolve_device_object()? {
+        if let Some(device) = self.device_object() {
             let readable = device
                 .as_readable()
                 .map_err(|_| ObjectError::InvalidArguments)?;
@@ -256,14 +295,14 @@ impl Readable for FileLikeObject {
     }
 }
 
-impl MemoryMappable for FileLikeObject {
+impl MemoryMappable for OpenedFileObject {
     fn map(
         self: Arc<Self>,
         offset: u64,
         pages: u64,
         protection: Protection,
     ) -> ObjectResult<VirtAddr> {
-        if let Some(device) = self.resolve_device_object()? {
+        if let Some(device) = self.device_object() {
             let mappable = device
                 .as_mappable()
                 .map_err(|_| ObjectError::InvalidArguments)?;
@@ -289,9 +328,9 @@ impl MemoryMappable for FileLikeObject {
     }
 }
 
-impl Configuratable for FileLikeObject {
+impl Configuratable for OpenedFileObject {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
-        let Some(device) = self.resolve_device_object()? else {
+        let Some(device) = self.device_object() else {
             return Err(ObjectError::InvalidRequest);
         };
 
@@ -302,36 +341,37 @@ impl Configuratable for FileLikeObject {
     }
 }
 
-impl Pollable for FileLikeObject {
+impl Pollable for OpenedFileObject {
     fn is_event_ready(&self, event: PollableEvent) -> bool {
-        self.resolve_device_object()
-            .ok()
-            .flatten()
+        self.device_object()
             .and_then(|device| device.as_pollable().ok())
             .is_some_and(|pollable| pollable.is_event_ready(event))
     }
 }
 
-impl Seekable for FileLikeObject {
+impl Seekable for OpenedFileObject {
     fn seek(self: Arc<Self>, offset: i64, seek_type: Whence) -> ObjectResult<usize> {
-        if let Ok(Some(device)) = self.resolve_device_object() {
+        if let Some(device) = self.device_object() {
             let seekable = device
                 .as_seekable()
                 .map_err(|_| ObjectError::FSError(FSError::NotAFile))?;
             return seekable.seek(offset, seek_type);
         }
 
-        if let FileLike::File(file) = &self.file {
-            file.lock().seek(offset, seek_type).map_err(Into::into)
-        } else {
-            Err(ObjectError::FSError(FSError::NotAFile))
+        match &self.backend {
+            OpenBackend::RegularFile(file) => {
+                file.lock().seek(offset, seek_type).map_err(Into::into)
+            }
+            OpenBackend::Device { .. }
+            | OpenBackend::Directory(_)
+            | OpenBackend::SymlinkPath { .. } => Err(ObjectError::FSError(FSError::NotAFile)),
         }
     }
 }
 
-impl Statable for FileLikeObject {
+impl Statable for OpenedFileObject {
     fn stat(&self) -> LinuxStat {
-        if let Ok(Some(device)) = self.resolve_device_object() {
+        if let Some(device) = self.device_object() {
             let mut stat = self.info().map(FileLikeInfo::as_linux).unwrap_or_default();
             if let Ok(statable) = device.as_statable() {
                 stat.st_rdev = statable.stat().st_rdev;
