@@ -38,6 +38,7 @@ pub enum SyscallNumber {
     Connect = 42,
     Accept = 43,
     Sendmsg = 46,
+    Sendmmsg = 307,
     Sendto = 44,
     Recvfrom = 45,
     Recvmsg = 47,

@@ -2,11 +2,12 @@ use alloc::{
     collections::VecDeque,
     string::String,
     sync::{Arc, Weak},
+    vec::Vec,
 };
 use spin::Mutex;
 
 use super::{UnixSocketObject, wake_io, wake_pollers};
-use crate::polling::event::PollableEvent;
+use crate::{object::misc::ObjectRef, polling::event::PollableEvent};
 
 pub const STREAM_RECV_CAPACITY: usize = 64 * 1024;
 
@@ -20,6 +21,7 @@ pub struct SocketPeerCred {
 #[derive(Debug)]
 pub struct UnixStreamInner {
     pub recv_buf: Mutex<VecDeque<u8>>,
+    pub pending_rights: Mutex<VecDeque<Vec<ObjectRef>>>,
     pub peer: Mutex<Option<Weak<UnixStreamInner>>>,
     pub owner: Mutex<Option<Weak<UnixSocketObject>>>,
     pub peer_cred: Mutex<SocketPeerCred>,
@@ -34,6 +36,7 @@ impl UnixStreamInner {
     pub fn new() -> Self {
         Self {
             recv_buf: Mutex::new(VecDeque::new()),
+            pending_rights: Mutex::new(VecDeque::new()),
             peer: Mutex::new(None),
             owner: Mutex::new(None),
             peer_cred: Mutex::new(SocketPeerCred::default()),

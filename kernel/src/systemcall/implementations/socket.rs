@@ -52,27 +52,13 @@ fn cmsg_align(len: usize) -> usize {
     (len + align - 1) & !(align - 1)
 }
 
-fn unix_socket_control_bytes(socket: &UnixSocketObject) -> Result<Vec<u8>, SyscallError> {
-    if !*socket.pass_cred.lock() {
-        return Ok(Vec::new());
-    }
-
-    let peer_cred = match &*socket.state.lock() {
-        UnixSocketState::Datagram(datagram) => *datagram.peer_cred.lock(),
-        UnixSocketState::Stream(stream) => *stream.peer_cred.lock(),
-        _ => return Ok(Vec::new()),
-    };
-    let credential = LinuxUcred {
-        pid: i32::try_from(peer_cred.pid).map_err(|_| SyscallError::InvalidArguments)?,
-        uid: peer_cred.uid,
-        gid: peer_cred.gid,
-    };
+fn encode_control_message(cmsg_type: i32, payload: &[u8]) -> Vec<u8> {
     let header_space = cmsg_align(mem::size_of::<LinuxCmsgHdr>());
-    let control_len = header_space + cmsg_align(mem::size_of::<LinuxUcred>());
+    let control_len = header_space + cmsg_align(payload.len());
     let header = LinuxCmsgHdr {
-        cmsg_len: header_space + mem::size_of::<LinuxUcred>(),
+        cmsg_len: header_space + payload.len(),
         cmsg_level: SOL_SOCKET as i32,
-        cmsg_type: SCM_CREDENTIALS,
+        cmsg_type,
     };
     let mut control = vec![0u8; control_len];
     let header_bytes = unsafe {
@@ -82,19 +68,59 @@ fn unix_socket_control_bytes(socket: &UnixSocketObject) -> Result<Vec<u8>, Sysca
         )
     };
     control[..header_bytes.len()].copy_from_slice(header_bytes);
+    control[header_space..header_space + payload.len()].copy_from_slice(payload);
+    control
+}
+
+fn stream_rights_control_bytes(socket: &UnixSocketObject) -> Result<Vec<u8>, SyscallError> {
+    let UnixSocketState::Stream(stream) = &*socket.state.lock() else {
+        return Ok(Vec::new());
+    };
+    let Some(rights) = stream.pending_rights.lock().pop_front() else {
+        return Ok(Vec::new());
+    };
+
+    let mut payload = Vec::with_capacity(rights.len() * mem::size_of::<i32>());
+    let current_process = get_current_process();
+    let mut current = current_process.lock();
+    for right in rights {
+        let fd = i32::try_from(current.push_object(right))
+            .map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
+        payload.extend_from_slice(&fd.to_ne_bytes());
+    }
+    Ok(encode_control_message(SCM_RIGHTS, &payload))
+}
+
+fn unix_socket_control_bytes(socket: &UnixSocketObject) -> Result<Vec<u8>, SyscallError> {
+    let mut control = stream_rights_control_bytes(socket)?;
+    if !*socket.pass_cred.lock() {
+        return Ok(control);
+    }
+
+    let peer_cred = match &*socket.state.lock() {
+        UnixSocketState::Datagram(datagram) => *datagram.peer_cred.lock(),
+        UnixSocketState::Stream(stream) => *stream.peer_cred.lock(),
+        _ => return Ok(control),
+    };
+    let credential = LinuxUcred {
+        pid: i32::try_from(peer_cred.pid).map_err(|_| SyscallError::InvalidArguments)?,
+        uid: peer_cred.uid,
+        gid: peer_cred.gid,
+    };
     let cred_bytes = unsafe {
         slice::from_raw_parts(
             (&credential as *const LinuxUcred).cast::<u8>(),
             mem::size_of::<LinuxUcred>(),
         )
     };
-    control[header_space..header_space + cred_bytes.len()].copy_from_slice(cred_bytes);
+    control.extend_from_slice(&encode_control_message(SCM_CREDENTIALS, cred_bytes));
     Ok(control)
 }
 
 const MSG_PEEK: u64 = 0x2;
 const MSG_CTRUNC: i32 = 0x8;
 const MSG_TRUNC: u64 = 0x20;
+const SCM_RIGHTS: i32 = 1;
 const SCM_CREDENTIALS: i32 = 2;
 
 enum SocketAddress {
@@ -429,14 +455,43 @@ define_syscall!(
     }
 );
 
-define_syscall!(Sendmsg, |socket: ObjectRef,
-                          msg: *const relibc_msg_hdr,
-                          _flags: u64| {
-    if msg.is_null() {
+fn sendmsg_rights(msg: &relibc_msg_hdr) -> Result<Vec<ObjectRef>, SyscallError> {
+    if msg.msg_controllen == 0 {
+        return Ok(Vec::new());
+    }
+    if msg.msg_control.is_null() || msg.msg_controllen < mem::size_of::<LinuxCmsgHdr>() {
         return Err(SyscallError::BadAddress);
     }
 
-    let msg = unsafe { &*msg };
+    let header = unsafe { &*(msg.msg_control as *const LinuxCmsgHdr) };
+    if header.cmsg_level != SOL_SOCKET as i32 || header.cmsg_type != SCM_RIGHTS {
+        return Ok(Vec::new());
+    }
+
+    let header_space = cmsg_align(mem::size_of::<LinuxCmsgHdr>());
+    if header.cmsg_len < header_space || header.cmsg_len > msg.msg_controllen {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let payload_len = header.cmsg_len - header_space;
+    if !payload_len.is_multiple_of(mem::size_of::<i32>()) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let fd_count = payload_len / mem::size_of::<i32>();
+    let fds =
+        unsafe { slice::from_raw_parts(msg.msg_control.add(header_space) as *const i32, fd_count) };
+    let mut rights = Vec::with_capacity(fd_count);
+    for &fd in fds {
+        if fd < 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
+        rights.push(get_object_current_process(fd as u64).map_err(SyscallError::from)?);
+    }
+    Ok(rights)
+}
+
+fn sendmsg_impl(socket: ObjectRef, msg: &relibc_msg_hdr) -> Result<usize, SyscallError> {
     if msg.msg_iovlen > isize::MAX as usize {
         return Err(SyscallError::InvalidArguments);
     }
@@ -462,6 +517,7 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
     };
 
     let socket = socket.as_unix_socket()?;
+    let rights = sendmsg_rights(msg)?;
     if socket.kind == UnixSocketKind::Datagram {
         let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
         let mut buffer = Vec::with_capacity(total_len);
@@ -510,7 +566,61 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
         }
     }
 
+    if total_written > 0 && !rights.is_empty() {
+        let stream = match &*socket.state.lock() {
+            UnixSocketState::Stream(stream) => stream.clone(),
+            _ => return Err(SyscallError::InvalidArguments),
+        };
+        let peer = stream
+            .peer
+            .lock()
+            .as_ref()
+            .and_then(|peer| peer.upgrade())
+            .ok_or(SyscallError::BrokenPipe)?;
+        peer.pending_rights.lock().push_back(rights);
+    }
+
     Ok(total_written)
+}
+
+define_syscall!(Sendmsg, |socket: ObjectRef,
+                          msg: *const relibc_msg_hdr,
+                          _flags: u64| {
+    if msg.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    sendmsg_impl(socket, unsafe { &*msg })
+});
+
+define_syscall!(Sendmmsg, |socket: ObjectRef,
+                           msgvec: *mut relibc_mmsghdr,
+                           vlen: u32,
+                           _flags: u32| {
+    if vlen > 0 && msgvec.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let messages = if vlen == 0 {
+        &mut [][..]
+    } else {
+        unsafe { core::slice::from_raw_parts_mut(msgvec, vlen as usize) }
+    };
+    let mut sent = 0usize;
+
+    for message in messages {
+        match sendmsg_impl(socket.clone(), &message.msg_hdr) {
+            Ok(written) => {
+                message.msg_len =
+                    u32::try_from(written).map_err(|_| SyscallError::InvalidArguments)?;
+                sent += 1;
+            }
+            Err(_) if sent > 0 => break,
+            Err(err) => return Err(err),
+        }
+    }
+
+    Ok(sent)
 });
 
 define_syscall!(Setsockopt, |socket: ObjectRef,
@@ -789,4 +899,10 @@ struct relibc_msg_hdr {
     msg_control: *mut u8,
     msg_controllen: usize,
     msg_flags: i32,
+}
+
+#[repr(C)]
+struct relibc_mmsghdr {
+    msg_hdr: relibc_msg_hdr,
+    msg_len: u32,
 }

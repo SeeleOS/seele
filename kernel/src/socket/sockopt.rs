@@ -1,4 +1,4 @@
-use alloc::{vec, vec::Vec};
+use alloc::{sync::Arc, vec, vec::Vec};
 use core::{mem, slice};
 
 use super::{
@@ -7,11 +7,20 @@ use super::{
     SO_RCVBUFFORCE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_REUSEADDR, SO_SNDBUF, SO_SNDBUFFORCE,
     SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD, SO_TIMESTAMP_NEW, SO_TIMESTAMP_OLD, SO_TIMESTAMPNS_NEW,
     SO_TIMESTAMPNS_OLD, SO_TYPE, SOCK_DGRAM, SOCK_SEQPACKET, SOCK_STREAM, SOL_SOCKET, SocketError,
-    SocketLike, SocketResult, UnixSocketKind, UnixSocketObject, UnixSocketState,
+    SocketLike, SocketPeerCred, SocketResult, UnixSocketKind, UnixSocketObject, UnixSocketState,
     socket_timeout_option_len,
+};
+use crate::{
+    object::{Object, linux_anon::PidFdObject},
+    process::{
+        FdFlags,
+        manager::get_current_process,
+        misc::{ProcessID, get_process_with_pid},
+    },
 };
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
+const DEFAULT_PEER_SECURITY_LABEL: &[u8] = b"unconfined\0";
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -112,32 +121,28 @@ impl UnixSocketObject {
                     socket_timeout_option_len(option_name).ok_or(SocketError::InvalidArguments)?;
                 Self::encode_zeroed_bytes(option_len, expected_len)
             }
-            SO_PEERSEC | SO_PEERGROUPS | SO_PEERPIDFD => Err(SocketError::OperationNotSupported),
-            SO_PEERCRED => match &*self.state.lock() {
-                UnixSocketState::Datagram(datagram) => {
-                    let cred = *datagram.peer_cred.lock();
-                    Self::encode_ucred(
-                        option_len,
-                        SocketUcred {
-                            pid: i32::try_from(cred.pid).unwrap_or(i32::MAX),
-                            uid: cred.uid,
-                            gid: cred.gid,
-                        },
-                    )
-                }
-                UnixSocketState::Stream(stream) => {
-                    let cred = *stream.peer_cred.lock();
-                    Self::encode_ucred(
-                        option_len,
-                        SocketUcred {
-                            pid: i32::try_from(cred.pid).unwrap_or(i32::MAX),
-                            uid: cred.uid,
-                            gid: cred.gid,
-                        },
-                    )
-                }
-                _ => Err(SocketError::InvalidArguments),
-            },
+            SO_PEERGROUPS => self.encode_peer_groups(option_len),
+            SO_PEERPIDFD => self.encode_peer_pidfd(option_len),
+            SO_PEERCRED => {
+                let cred = self.peer_cred()?;
+                Self::encode_ucred(
+                    option_len,
+                    SocketUcred {
+                        pid: i32::try_from(cred.pid).unwrap_or(i32::MAX),
+                        uid: cred.uid,
+                        gid: cred.gid,
+                    },
+                )
+            }
+            SO_PEERSEC => Self::encode_bytes(option_len, DEFAULT_PEER_SECURITY_LABEL),
+            _ => Err(SocketError::InvalidArguments),
+        }
+    }
+
+    fn peer_cred(&self) -> SocketResult<SocketPeerCred> {
+        match &*self.state.lock() {
+            UnixSocketState::Datagram(datagram) => Ok(*datagram.peer_cred.lock()),
+            UnixSocketState::Stream(stream) => Ok(*stream.peer_cred.lock()),
             _ => Err(SocketError::InvalidArguments),
         }
     }
@@ -182,6 +187,54 @@ impl UnixSocketObject {
         }
 
         Ok(vec![0; expected_len])
+    }
+
+    fn encode_bytes(option_len: usize, value: &[u8]) -> SocketResult<Vec<u8>> {
+        if option_len < value.len() {
+            return Err(SocketError::InvalidArguments);
+        }
+
+        Ok(value.to_vec())
+    }
+
+    fn encode_u32_slice(option_len: usize, values: &[u32]) -> SocketResult<Vec<u8>> {
+        let expected_len = mem::size_of_val(values);
+        if option_len < expected_len {
+            return Err(SocketError::InvalidArguments);
+        }
+
+        let mut encoded = Vec::with_capacity(expected_len);
+        for value in values {
+            encoded.extend_from_slice(&value.to_ne_bytes());
+        }
+        Ok(encoded)
+    }
+
+    fn encode_peer_groups(&self, option_len: usize) -> SocketResult<Vec<u8>> {
+        let cred = self.peer_cred()?;
+        let mut groups = if let Ok(process) = get_process_with_pid(ProcessID(cred.pid)) {
+            let process = process.lock();
+            let mut groups = process.supplementary_groups.clone();
+            groups.push(process.effective_gid);
+            groups
+        } else {
+            vec![cred.gid]
+        };
+        groups.sort_unstable();
+        groups.dedup();
+        Self::encode_u32_slice(option_len, &groups)
+    }
+
+    fn encode_peer_pidfd(&self, option_len: usize) -> SocketResult<Vec<u8>> {
+        let cred = self.peer_cred()?;
+        let pidfd: Arc<dyn Object> = PidFdObject::new(cred.pid);
+        let fd = get_current_process()
+            .lock()
+            .push_object_with_flags(pidfd, FdFlags::CLOEXEC);
+        Self::encode_i32(
+            option_len,
+            i32::try_from(fd).map_err(|_| SocketError::InvalidArguments)?,
+        )
     }
 }
 
