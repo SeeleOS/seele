@@ -94,7 +94,6 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
     }
 
     if *offset_entry >= contents.len() && bytes_written == 0 {
-        offsets.remove(&(current_pid, object_index));
         return Ok(0);
     }
 
