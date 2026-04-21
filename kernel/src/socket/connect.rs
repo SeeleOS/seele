@@ -6,8 +6,8 @@ use spin::Mutex;
 
 use super::{
     SocketError, SocketPeerCred, SocketResult, UNIX_SOCKET_REGISTRY, UnixSocketKind,
-    UnixSocketObject, UnixSocketRegistryEntry, UnixSocketState, UnixStreamInner, wake_io,
-    wake_pollers,
+    UnixSocketObject, UnixSocketRegistryEntry, UnixSocketRegistryKey, UnixSocketState,
+    UnixStreamInner, wake_io, wake_pollers,
 };
 use crate::object::FileFlags;
 use crate::polling::event::PollableEvent;
@@ -17,17 +17,21 @@ impl UnixSocketObject {
     pub fn connect(self: &Arc<Self>, path: String) -> SocketResult<()> {
         match self.kind {
             UnixSocketKind::Stream | UnixSocketKind::SeqPacket => {
+                let registry_key = UnixSocketRegistryKey::from_socket_path(&path)
+                    .ok_or(SocketError::ConnectionRefused)?;
                 let listener = {
                     let registry = UNIX_SOCKET_REGISTRY.lock();
-                    match registry.get(&path) {
+                    match registry.get(&registry_key) {
                         Some(UnixSocketRegistryEntry::Listener(listener)) => listener.clone(),
                         _ => return Err(SocketError::ConnectionRefused),
                     }
                 };
 
-                let local_name = match &*self.state.lock() {
-                    UnixSocketState::Unbound => None,
-                    UnixSocketState::Bound { path } => Some(path.clone()),
+                let (local_name, local_key) = match &*self.state.lock() {
+                    UnixSocketState::Unbound => (None, None),
+                    UnixSocketState::Bound { path, registry_key } => {
+                        (Some(path.clone()), Some(registry_key.clone()))
+                    }
                     UnixSocketState::Stream(_) => return Err(SocketError::IsConnected),
                     _ => return Err(SocketError::InvalidArguments),
                 };
@@ -49,9 +53,11 @@ impl UnixSocketObject {
                     gid: 0,
                 };
                 *client_stream.local_name.lock() = local_name.clone();
-                *client_stream.peer_name.lock() = Some(path.clone());
+                *client_stream.local_key.lock() = local_key;
+                *client_stream.peer_name.lock() = Some(listener.path.clone());
                 *server_stream.peer_name.lock() = local_name;
-                *server_stream.local_name.lock() = Some(path.clone());
+                *server_stream.local_name.lock() = Some(listener.path.clone());
+                *server_stream.local_key.lock() = Some(listener.registry_key.clone());
 
                 let mut pending = listener.pending.lock();
                 if pending.len() >= listener.backlog {
@@ -66,23 +72,31 @@ impl UnixSocketObject {
                 Ok(())
             }
             UnixSocketKind::Datagram => {
-                let exists = {
+                let registry_key = UnixSocketRegistryKey::from_socket_path(&path)
+                    .ok_or(SocketError::ConnectionRefused)?;
+                let endpoint = {
                     let registry = UNIX_SOCKET_REGISTRY.lock();
-                    matches!(
-                        registry.get(&path),
-                        Some(UnixSocketRegistryEntry::Datagram(endpoint))
-                            if endpoint.upgrade().is_some()
-                    )
+                    match registry.get(&registry_key) {
+                        Some(UnixSocketRegistryEntry::Datagram(endpoint)) => endpoint
+                            .upgrade()
+                            .ok_or(SocketError::ConnectionRefused)?,
+                        _ => return Err(SocketError::ConnectionRefused),
+                    }
                 };
-                if !exists {
-                    return Err(SocketError::ConnectionRefused);
-                }
 
                 let datagram = match &*self.state.lock() {
                     UnixSocketState::Datagram(datagram) => datagram.clone(),
                     _ => return Err(SocketError::InvalidArguments),
                 };
-                *datagram.peer_name.lock() = Some(path);
+                let peer_name = match &*endpoint.state.lock() {
+                    UnixSocketState::Datagram(peer_datagram) => {
+                        peer_datagram.local_name.lock().clone()
+                    }
+                    _ => None,
+                };
+                *datagram.peer.lock() = Some(Arc::downgrade(&endpoint));
+                *datagram.peer_key.lock() = Some(registry_key);
+                *datagram.peer_name.lock() = peer_name.or(Some(path));
                 Ok(())
             }
         }

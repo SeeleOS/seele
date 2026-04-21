@@ -28,7 +28,7 @@ impl UnixSocketObject {
     pub fn getsockname_bytes(&self) -> SocketResult<Vec<u8>> {
         match &*self.state.lock() {
             UnixSocketState::Unbound => Ok(serialize_unix_addr(None)),
-            UnixSocketState::Bound { path } => Ok(serialize_unix_addr(Some(path))),
+            UnixSocketState::Bound { path, .. } => Ok(serialize_unix_addr(Some(path))),
             UnixSocketState::Listener(listener) => Ok(serialize_unix_addr(Some(&listener.path))),
             UnixSocketState::Datagram(datagram) => {
                 let local_name = datagram.local_name.lock();

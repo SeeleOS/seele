@@ -6,7 +6,7 @@ use alloc::{
 };
 use spin::Mutex;
 
-use super::{UnixSocketObject, wake_io, wake_pollers};
+use super::{registry::UnixSocketRegistryKey, UnixSocketObject, wake_io, wake_pollers};
 use crate::{object::misc::ObjectRef, polling::event::PollableEvent};
 
 pub const STREAM_RECV_CAPACITY: usize = 64 * 1024;
@@ -29,6 +29,7 @@ pub struct UnixStreamInner {
     pub read_shutdown: Mutex<bool>,
     pub write_shutdown: Mutex<bool>,
     pub local_name: Mutex<Option<String>>,
+    pub local_key: Mutex<Option<UnixSocketRegistryKey>>,
     pub peer_name: Mutex<Option<String>>,
 }
 
@@ -44,6 +45,7 @@ impl UnixStreamInner {
             read_shutdown: Mutex::new(false),
             write_shutdown: Mutex::new(false),
             local_name: Mutex::new(None),
+            local_key: Mutex::new(None),
             peer_name: Mutex::new(None),
         }
     }

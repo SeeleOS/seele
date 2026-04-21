@@ -3,7 +3,7 @@ use alloc::sync::Weak;
 use super::{
     DATAGRAM_RECV_CAPACITY, STREAM_RECV_CAPACITY, SocketError, SocketPeerCred, SocketResult,
     UNIX_SOCKET_REGISTRY, UnixDatagramMessage, UnixSocketKind, UnixSocketObject,
-    UnixSocketRegistryEntry, UnixSocketState, wake_io, wake_pollers,
+    UnixSocketRegistryEntry, UnixSocketRegistryKey, UnixSocketState, wake_io, wake_pollers,
 };
 use crate::{
     object::{error::ObjectError, traits::Writable},
@@ -36,28 +36,42 @@ impl UnixSocketObject {
         }
 
         let peer = if let Some(target_path) = target_path {
+            let target_key = UnixSocketRegistryKey::from_socket_path(target_path)
+                .ok_or(SocketError::ConnectionRefused)?;
+            let endpoint = {
+                let registry = UNIX_SOCKET_REGISTRY.lock();
+                match registry.get(&target_key) {
+                    Some(UnixSocketRegistryEntry::Datagram(endpoint)) => endpoint.upgrade(),
+                    _ => None,
+                }
+            };
+            endpoint.ok_or(SocketError::ConnectionRefused)?
+        } else if let Some(peer) = datagram.peer.lock().as_ref().and_then(Weak::upgrade) {
+            peer
+        } else if let Some(peer_key) = datagram.peer_key.lock().clone() {
             let registry = UNIX_SOCKET_REGISTRY.lock();
-            match registry.get(target_path) {
+            match registry.get(&peer_key) {
                 Some(UnixSocketRegistryEntry::Datagram(endpoint)) => {
                     endpoint.upgrade().ok_or(SocketError::ConnectionRefused)?
                 }
                 _ => return Err(SocketError::ConnectionRefused),
             }
-        } else if let Some(peer) = datagram.peer.lock().as_ref().and_then(Weak::upgrade) {
-            peer
         } else {
             let peer_name = datagram
                 .peer_name
                 .lock()
                 .clone()
                 .ok_or(SocketError::ConnectionRefused)?;
-            let registry = UNIX_SOCKET_REGISTRY.lock();
-            match registry.get(&peer_name) {
-                Some(UnixSocketRegistryEntry::Datagram(endpoint)) => {
-                    endpoint.upgrade().ok_or(SocketError::ConnectionRefused)?
+            let peer_key = UnixSocketRegistryKey::from_socket_path(&peer_name)
+                .ok_or(SocketError::ConnectionRefused)?;
+            let endpoint = {
+                let registry = UNIX_SOCKET_REGISTRY.lock();
+                match registry.get(&peer_key) {
+                    Some(UnixSocketRegistryEntry::Datagram(endpoint)) => endpoint.upgrade(),
+                    _ => None,
                 }
-                _ => return Err(SocketError::ConnectionRefused),
-            }
+            };
+            endpoint.ok_or(SocketError::ConnectionRefused)?
         };
         let peer_datagram = match &*peer.state.lock() {
             UnixSocketState::Datagram(datagram) => datagram.clone(),

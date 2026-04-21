@@ -71,7 +71,7 @@ pub const NETLINK_GET_STRICT_CHK: u64 = 12;
 pub use datagram::{DATAGRAM_RECV_CAPACITY, UnixDatagramInner, UnixDatagramMessage};
 pub use error::{SocketError, SocketResult};
 pub use object::{UnixSocketKind, UnixSocketObject};
-pub(crate) use registry::{UNIX_SOCKET_REGISTRY, UnixSocketRegistryEntry};
+pub(crate) use registry::{UNIX_SOCKET_REGISTRY, UnixSocketRegistryEntry, UnixSocketRegistryKey};
 pub use socket_like::SocketLike;
 pub use state::{UnixListenerInner, UnixSocketState};
 pub use stream::{STREAM_RECV_CAPACITY, SocketPeerCred, UnixStreamInner};
