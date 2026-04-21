@@ -22,13 +22,18 @@
         toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
         runPackages = with pkgs; [
+          bash
+          coreutils
+          e2fsprogs
           git
+          pacman
           qemu
           util-linux
           toolchain
         ];
 
         devPackages = with pkgs; [
+          e2fsprogs
           git
           pacman
           procps
@@ -45,6 +50,17 @@
 
             repo_root="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || ${pkgs.coreutils}/bin/pwd -P)"
             cd "$repo_root"
+
+            needs_rootfs_init=0
+            if [ ! -f disk.img ]; then
+              needs_rootfs_init=1
+            elif ! ${pkgs.util-linux}/bin/mountpoint -q sysroot 2>/dev/null && [ ! -e sysroot/bin/bash ]; then
+              needs_rootfs_init=1
+            fi
+
+            if [ "$needs_rootfs_init" -eq 1 ]; then
+              ./misc/make_disk.sh
+            fi
 
             exec cargo run -- "$@"
           '';
