@@ -6,6 +6,7 @@ use crate::{
     object::linux_anon::wake_signalfd_for_process_with_manager,
     process::{ProcessRef, manager::MANAGER},
     signal::{Signal, Signals},
+    smp::current_thread,
     systemcall::implementations::wake_futex_for_process,
     task::{TASK_SPAWNER, task::Task},
     thread::{
@@ -26,7 +27,6 @@ struct PendingThreadExit {
 #[derive(Default, Debug)]
 pub struct ThreadManager {
     pub threads: BTreeMap<ThreadID, ThreadRef>,
-    pub current: Option<ThreadRef>,
     pub idle_thread: Option<ThreadRef>,
     pub zombies: Vec<ThreadRef>,
     pending_thread_exits: Vec<PendingThreadExit>,
@@ -34,9 +34,7 @@ pub struct ThreadManager {
 }
 
 impl ThreadManager {
-    pub fn init(&mut self) {
-        self.current = Some(Thread::empty());
-    }
+    pub fn init(&mut self) {}
 
     pub fn spawn(&mut self, thread: Thread) -> ThreadRef {
         let id = thread.id;
@@ -56,9 +54,9 @@ impl ThreadManager {
 
     pub fn kill_all_except(&mut self, thread: ThreadRef) {
         let threads = self
-            .current
+            .idle_thread
             .clone()
-            .unwrap()
+            .unwrap_or_else(current_thread)
             .lock()
             .parent
             .lock()
@@ -76,7 +74,7 @@ impl ThreadManager {
 
     pub fn mark_current_thread_exited(&mut self) {
         log::debug!("mark_current_thread_exited");
-        self.mark_thread_exited(self.current.clone().unwrap());
+        self.mark_thread_exited(crate::thread::get_current_thread());
     }
 
     pub fn mark_thread_exited(&mut self, thread: ThreadRef) {

@@ -1,5 +1,7 @@
 use crate::{
-    gdt::GDT, memory::addrspace::AddrSpace, misc::snapshot::Snapshot,
+    memory::addrspace::AddrSpace,
+    misc::snapshot::Snapshot,
+    smp::{user_code_selector, user_data_selector},
     thread::stack::allocate_kernel_stack,
 };
 
@@ -93,10 +95,10 @@ impl ThreadSnapshot {
         Self {
             inner: Snapshot::default_regs(
                 entry_point,
-                GDT.1.user_code.0,
+                user_code_selector().0,
                 0x202,
                 virt_stack_addr,
-                GDT.1.user_data.0,
+                user_data_selector().0,
             ),
             kernel_rsp: allocate_kernel_stack(16).finish().as_u64(),
             fx_state,

@@ -3,7 +3,10 @@ use crate::{
     process::misc::with_current_process,
     systemcall::table::SYSCALL_TABLE,
     systemcall::utils::SyscallError,
-    thread::{THREAD_MANAGER, misc::with_current_thread, scheduling::return_to_executor_no_save},
+    thread::{
+        THREAD_MANAGER, get_current_thread, misc::with_current_thread,
+        scheduling::return_to_executor_no_save,
+    },
 };
 use x86_64::registers::model_specific::FsBase;
 
@@ -12,13 +15,7 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     let snapshot = unsafe { &mut *snapshot_ptr };
     let syscall_no = snapshot.rax;
 
-    let thread_ref = THREAD_MANAGER
-        .get()
-        .unwrap()
-        .lock()
-        .current
-        .clone()
-        .unwrap();
+    let thread_ref = get_current_thread();
     let mut thread = thread_ref.lock();
     thread.get_appropriate_snapshot().inner = *snapshot;
     thread.get_appropriate_snapshot().fs_base = FsBase::read().as_u64();

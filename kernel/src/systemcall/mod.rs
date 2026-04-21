@@ -4,13 +4,16 @@ use x86_64::{
     registers::segmentation::SegmentSelector,
     registers::{
         control::{Efer, EferFlags},
-        model_specific::{KernelGsBase, LStar, SFMask, Star},
+        model_specific::{LStar, SFMask, Star},
         rflags::RFlags,
     },
 };
 
 use crate::{
-    misc::{CPU_CORE_CONTEXT, gdt::GDT},
+    smp::{
+        kernel_code_selector, kernel_data_selector, load_current_kernel_gs_base,
+        user_code_selector, user_data_selector,
+    },
     systemcall::entry::syscall_entry,
 };
 
@@ -31,10 +34,10 @@ pub fn init() {
         SFMask::write(RFlags::INTERRUPT_FLAG);
 
         // set segment selectors for SYSCALL/SYSRET
-        let kernel_cs = SegmentSelector::new(GDT.1.kernel_code.index(), PrivilegeLevel::Ring0);
-        let kernel_ss = SegmentSelector::new(GDT.1.kernel_data.index(), PrivilegeLevel::Ring0);
-        let user_cs = SegmentSelector::new(GDT.1.user_code.index(), PrivilegeLevel::Ring3);
-        let user_ss = SegmentSelector::new(GDT.1.user_data.index(), PrivilegeLevel::Ring3);
+        let kernel_cs = SegmentSelector::new(kernel_code_selector().index(), PrivilegeLevel::Ring0);
+        let kernel_ss = SegmentSelector::new(kernel_data_selector().index(), PrivilegeLevel::Ring0);
+        let user_cs = SegmentSelector::new(user_code_selector().index(), PrivilegeLevel::Ring3);
+        let user_ss = SegmentSelector::new(user_data_selector().index(), PrivilegeLevel::Ring3);
         Star::write(user_cs, user_ss, kernel_cs, kernel_ss)
             .expect("invalid STAR segment selectors");
 
@@ -42,8 +45,6 @@ pub fn init() {
         let syscall_entry_addr = VirtAddr::new(syscall_entry as *const () as usize as u64);
         LStar::write(syscall_entry_addr);
 
-        unsafe {
-            KernelGsBase::write(VirtAddr::new(CPU_CORE_CONTEXT as u64));
-        }
+        load_current_kernel_gs_base();
     })
 }

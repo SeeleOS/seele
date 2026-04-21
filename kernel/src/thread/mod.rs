@@ -4,7 +4,10 @@ use alloc::sync::Arc;
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
 
-use crate::thread::{manager::ThreadManager, thread::Thread};
+use crate::{
+    smp::{current_thread, set_current_thread},
+    thread::{manager::ThreadManager, thread::Thread},
+};
 
 pub mod clone;
 pub mod future;
@@ -24,16 +27,11 @@ pub fn init() {
         .get_or_init(|| Mutex::new(ThreadManager::default()))
         .lock();
     thread_manager.init();
+    set_current_thread(Some(Thread::empty()));
 }
 
 pub type ThreadRef = Arc<Mutex<Thread>>;
 
 pub fn get_current_thread() -> ThreadRef {
-    THREAD_MANAGER
-        .get()
-        .unwrap()
-        .lock()
-        .current
-        .clone()
-        .unwrap()
+    current_thread()
 }

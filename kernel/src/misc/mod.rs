@@ -4,7 +4,6 @@ pub mod auxv;
 pub mod c_types;
 pub mod debug_exit;
 
-pub mod cpu_core_context;
 pub mod devices;
 pub mod error;
 pub mod fb_object;
@@ -26,8 +25,6 @@ pub mod time;
 pub mod timer;
 pub mod tss;
 pub mod utsname;
-
-pub use cpu_core_context::*;
 
 pub fn hlt_loop() -> ! {
     loop {

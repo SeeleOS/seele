@@ -4,13 +4,13 @@ use core::{
 };
 
 use alloc::sync::Arc;
-use x86_64::{VirtAddr, instructions::interrupts::without_interrupts};
+use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
     misc::snapshot::Snapshot,
     process::manager::MANAGER,
+    smp::{current_thread, set_current_kernel_stack, set_current_process, set_current_thread},
     thread::{THREAD_MANAGER, ThreadRef, misc::State, snapshot::ThreadSnapshot},
-    tss::TSS,
 };
 
 pub struct ThreadFuture(pub ThreadRef);
@@ -36,9 +36,9 @@ impl Future for ThreadFuture {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let (thread_snapshot, executor_snapshot) = {
             without_interrupts(|| {
-                let mut manager = THREAD_MANAGER.get().unwrap().lock();
+                let _manager = THREAD_MANAGER.get().unwrap().lock();
                 let mut thread = self.0.lock();
-                let previous_thread_ref = manager.current.clone().unwrap();
+                let previous_thread_ref = current_thread();
 
                 if Arc::ptr_eq(&self.0, &previous_thread_ref) {
                     thread.state = State::Running;
@@ -55,13 +55,13 @@ impl Future for ThreadFuture {
                     };
 
                     thread.state = State::Running;
-                    manager.current = Some(self.0.clone());
-                    unsafe {
-                        TSS.privilege_stack_table[0] = VirtAddr::new(thread.kernel_stack_top);
-                    }
+                    set_current_thread(Some(self.0.clone()));
+                    set_current_kernel_stack(thread.kernel_stack_top);
 
                     if previous_thread_pid != thread_pid {
                         MANAGER.lock().load_process(thread.parent.clone());
+                    } else {
+                        set_current_process(Some(thread.parent.clone()));
                     }
                 };
                 (

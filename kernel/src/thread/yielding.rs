@@ -228,13 +228,7 @@ pub fn block(thread_ref: ThreadRef, block_type: BlockType) {
 }
 
 fn current_thread_ref() -> ThreadRef {
-    THREAD_MANAGER
-        .get()
-        .unwrap()
-        .lock()
-        .current
-        .clone()
-        .unwrap()
+    crate::thread::get_current_thread()
 }
 
 pub fn prepare_block_current(block_type: BlockType) -> ThreadRef {

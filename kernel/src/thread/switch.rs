@@ -8,7 +8,8 @@ use x86_64::{
 };
 
 use crate::{
-    misc::{CPU_CORE_CONTEXT, snapshot::Snapshot},
+    misc::snapshot::Snapshot,
+    smp::with_current_cpu,
     thread::snapshot::{ThreadSnapshot, ThreadSnapshotType},
 };
 
@@ -49,10 +50,10 @@ impl ThreadSnapshot {
     }
 
     fn update_gs(&mut self) {
-        unsafe {
-            (*CPU_CORE_CONTEXT).gs_kernel_stack_top = self.kernel_rsp;
-            KernelGsBase::write(VirtAddr::new(CPU_CORE_CONTEXT as u64));
-        }
+        with_current_cpu(|cpu| {
+            cpu.gs_context.kernel_stack_top = self.kernel_rsp;
+            KernelGsBase::write(VirtAddr::from_ptr(&cpu.gs_context));
+        });
     }
 
     fn save_msr(&mut self) {

@@ -7,8 +7,8 @@ use crate::{
         hardware_interrupt::init_hardware_interrupts,
     },
     memory::utils::apply_offset,
-    misc::with_cpu_core_context,
     print,
+    smp::with_current_cpu,
 };
 pub mod exception_interrupt;
 pub mod hardware_interrupt;
@@ -33,8 +33,8 @@ pub fn init() {
     IDT.load();
 
     unsafe {
-        with_cpu_core_context(|f| {
-            f.local_apic.as_mut().unwrap().enable();
+        with_current_cpu(|cpu| {
+            cpu.local_apic.enable();
         });
     };
 

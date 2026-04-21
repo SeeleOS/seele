@@ -1,5 +1,6 @@
 use crate::{
     misc::snapshot::Snapshot,
+    smp::current_thread,
     thread::{
         THREAD_MANAGER,
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
@@ -9,8 +10,8 @@ use core::{arch::naked_asm, mem::offset_of, mem::size_of};
 
 pub fn return_to_executor(snapshot: &mut Snapshot, snapshot_type: ThreadSnapshotType) {
     let (thread_snapshot, executor_snapshot) = {
-        let manager = THREAD_MANAGER.get().unwrap().lock();
-        let current_ref = manager.current.clone().unwrap();
+        let _manager = THREAD_MANAGER.get().unwrap().lock();
+        let current_ref = current_thread();
         let mut current = current_ref.lock();
 
         (
@@ -117,8 +118,8 @@ extern "C" fn return_to_executor_from_current_inner(snapshot_ptr: *mut Snapshot)
 pub fn return_to_executor_no_save() -> ! {
     log::trace!("return_to_executor_no_save");
     let (thread_snapshot, executor_snapshot) = {
-        let manager = THREAD_MANAGER.get().unwrap().lock();
-        let current_ref = manager.current.clone().unwrap();
+        let _manager = THREAD_MANAGER.get().unwrap().lock();
+        let current_ref = current_thread();
         let mut current = current_ref.lock();
 
         (

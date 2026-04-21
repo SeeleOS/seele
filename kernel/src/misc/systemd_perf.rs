@@ -3,8 +3,9 @@ use lazy_static::lazy_static;
 
 use crate::{
     misc::time::Time,
-    process::{Process, manager::MANAGER, misc::ProcessID},
+    process::{Process, misc::ProcessID},
     s_println,
+    smp::try_current_process,
 };
 
 const TARGET_COMMANDS: [&str; 2] = ["systemd-tmpfiles", "ldconfig"];
@@ -90,7 +91,7 @@ fn should_profile_command(command: &str) -> bool {
 }
 
 fn current_target_process() -> Option<(ProcessID, String)> {
-    let process = MANAGER.try_lock()?.current.clone()?;
+    let process = try_current_process()?;
     let process = process.try_lock()?;
     let command = process.command_line.first()?.clone();
     should_profile_command(&command).then_some((process.pid, command))

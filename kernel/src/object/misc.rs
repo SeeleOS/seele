@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use crate::{
     object::{Object, error::ObjectError},
-    process::manager::MANAGER,
+    process::manager::get_current_process,
 };
 
 pub type ObjectRef = Arc<dyn Object>;
@@ -31,7 +31,7 @@ macro_rules! impl_cast_function {
 }
 
 pub fn get_object_current_process(id: u64) -> ObjectResult<Arc<dyn Object>> {
-    let current = MANAGER.lock().current.clone().unwrap();
+    let current = get_current_process();
     let current = current.lock();
 
     current

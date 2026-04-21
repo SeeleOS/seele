@@ -5,14 +5,13 @@ use x86_64::{
 
 use crate::{
     interrupts::pagefault::pagefault_handler,
-    misc::others::is_user_mode,
+    misc::{others::is_user_mode, tss::*},
     process::{
         manager::{get_current_process, terminate_process},
         misc::with_current_process,
     },
     signal::Signal,
     thread::{THREAD_MANAGER, misc::with_current_thread, scheduling::return_to_executor_no_save},
-    tss::{DOUBLE_FAULT_IST_LOCATION, GP_IST_LOCATION, PAGE_FAULT_IST_LOCATION},
 };
 
 pub fn init_exception_interrupts(idt: &mut InterruptDescriptorTable) {

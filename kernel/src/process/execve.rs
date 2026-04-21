@@ -1,6 +1,3 @@
-use alloc::{string::String, vec, vec::Vec};
-use x86_64::VirtAddr;
-
 use crate::{
     filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
     misc::time::with_profiling,
@@ -10,11 +7,10 @@ use crate::{
         action::{SignalAction, SignalHandlingType},
         misc::default_signal_action_vec,
     },
-    thread::{
-        THREAD_MANAGER, misc::SnapshotState, snapshot::ThreadSnapshot, stack::allocate_kernel_stack,
-    },
-    tss::TSS,
+    smp::{current_process, current_thread, set_current_kernel_stack},
+    thread::{misc::SnapshotState, snapshot::ThreadSnapshot, stack::allocate_kernel_stack},
 };
+use alloc::{string::String, vec, vec::Vec};
 
 fn execve_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalAction> {
     let defaults = default_signal_action_vec();
@@ -53,9 +49,7 @@ impl Process {
             .as_str(),
         );
 
-        let thread_manager = THREAD_MANAGER.get().unwrap().lock();
-
-        let thread = thread_manager.current.clone().unwrap();
+        let thread = current_thread();
 
         //thread_manager.kill_all_except(thread.clone());
 
@@ -110,9 +104,7 @@ impl Process {
             )
             .as_str(),
         );
-        unsafe {
-            TSS.privilege_stack_table[0] = VirtAddr::new(thread_locked.kernel_stack_top);
-        }
+        set_current_kernel_stack(thread_locked.kernel_stack_top);
 
         Ok(&mut thread_locked.snapshot as *mut ThreadSnapshot)
     }
@@ -121,8 +113,8 @@ impl Process {
 pub fn execve(path: Path, args: Vec<String>, env: Vec<String>) -> Result<(), FSError> {
     let (_, resolved_path) = VirtualFS.lock().resolve_with_path(path)?;
     let snapshot = {
-        let manager = MANAGER.lock();
-        let current = manager.current.clone().unwrap();
+        let _manager = MANAGER.lock();
+        let current = current_process();
         with_profiling(
             || current.lock().execve(resolved_path, args, env),
             "process::execve total",

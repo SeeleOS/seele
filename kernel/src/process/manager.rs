@@ -7,6 +7,7 @@ use crate::{
     misc::systemd_perf,
     object::linux_anon::wake_pidfd_for_process_with_manager,
     process::{Process, ProcessRef, misc::ProcessID},
+    smp::{current_process, set_current_process},
     thread::{THREAD_MANAGER, ThreadRef, manager::ThreadManager},
 };
 
@@ -17,7 +18,6 @@ lazy_static! {
 #[derive(Debug, Default)]
 pub struct Manager {
     pub processes: BTreeMap<ProcessID, ProcessRef>,
-    pub current: Option<ProcessRef>,
     pub zombies: Vec<ProcessRef>,
 }
 
@@ -25,10 +25,9 @@ impl Manager {
     pub fn init(&mut self) {
         without_interrupts(|| {
             let kernel_process = Process::empty();
-            // TODO: delete the idle proecss or let it fucking work with all that shit
-            self.current = Some(kernel_process.clone());
             self.processes
                 .insert(kernel_process.lock().pid, kernel_process.clone());
+            set_current_process(Some(kernel_process.clone()));
 
             let init = Process::init();
             self.processes.insert(init.lock().pid, init.clone());
@@ -61,12 +60,12 @@ impl Manager {
         let mut process_locked = process.lock();
 
         process_locked.addrspace.load();
-        self.current = Some(process.clone());
+        set_current_process(Some(process.clone()));
     }
 }
 
 pub fn get_current_process() -> ProcessRef {
-    MANAGER.lock().current.clone().unwrap()
+    current_process()
 }
 
 pub fn terminate_process(process: ProcessRef, exit_code: u64) {

@@ -3,19 +3,13 @@ use spin::mutex::Mutex;
 
 use crate::{
     process::{Process, ProcessRef, misc::ProcessID},
-    thread::{THREAD_MANAGER, ThreadRef, misc::ThreadID},
+    thread::{ThreadRef, get_current_thread, misc::ThreadID},
 };
 
 impl Process {
     pub fn fork(parent: ProcessRef) -> (ProcessRef, ThreadRef) {
         let (pid, new_process) = {
-            let current_thread = THREAD_MANAGER
-                .get()
-                .unwrap()
-                .lock()
-                .current
-                .clone()
-                .unwrap();
+            let current_thread = get_current_thread();
             let mut parent_locked = parent.lock();
             log::debug!(
                 "Forking. Parent Current RSP: {:x}",
@@ -64,13 +58,7 @@ impl Process {
             (pid, new_process)
         };
 
-        let current_thread = THREAD_MANAGER
-            .get()
-            .unwrap()
-            .lock()
-            .current
-            .clone()
-            .unwrap();
+        let current_thread = get_current_thread();
         let new_thread = current_thread
             .lock()
             .clone_and_spawn_with_id(new_process.clone(), ThreadID(pid.0));

@@ -20,6 +20,7 @@ pub mod misc;
 pub mod object;
 pub mod polling;
 pub mod process;
+pub mod smp;
 pub mod socket;
 pub mod systemcall;
 pub mod task;
@@ -38,8 +39,9 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
 
 use crate::filesystem::vfs::VirtualFS;
 use crate::misc::others::enable_sse;
-use crate::misc::{cpu_core_context, framebuffer, gdt, logging, mouse, time, tss};
+use crate::misc::{framebuffer, logging, mouse, time};
 use crate::process::manager::MANAGER;
+use crate::smp::init_bsp;
 use crate::terminal::misc::clear;
 use bootloader_api::BootInfo;
 use bootloader_api::{BootloaderConfig, config::Mapping};
@@ -65,24 +67,20 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
         bootinfo.physical_memory_offset.into_option().unwrap(),
         &bootinfo.memory_regions,
     );
-    cpu_core_context::init();
+    init_bsp();
     framebuffer::init(bootinfo.framebuffer.as_mut().unwrap());
     terminal::init();
     logging::init();
     time::init();
     enable_sse();
     log::info!("init: sse enabled");
-    tss::init();
-    log::info!("init: tss ready");
     drivers::init();
     log::info!("init: drivers ready");
 
     VirtualFS.lock().init().unwrap();
 
     log::info!("init: vfs ready");
-    gdt::init();
-    log::info!("init: gdt ready");
-    log::info!("init: misc ready");
+    log::info!("init: smp bsp ready");
     systemcall::init();
     log::info!("init: syscall ready");
     acpi::init(bootinfo.rsdp_addr.into_option().unwrap());

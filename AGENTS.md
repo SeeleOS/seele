@@ -6,12 +6,14 @@ This repository is a Rust workspace for a small x86_64 OS.
 
 - `kernel/`: the kernel crate. Most development happens in `kernel/src/`.
 - `kernel/src/systemcall/`: syscall numbers, dispatch, and implementations.
+- `kernel/src/smp/`: SMP bring-up, per-CPU state, and AP startup code.
 - `kernel/src/filesystem/`, `memory/`, `process/`, `thread/`, `terminal/`: core kernel subsystems.
 - `misc/runner.rs`: QEMU runner used by `cargo run`.
 - `scripts/`: helper scripts.
 - `disk.img` and `sysroot/`: guest root filesystem image and mounted contents.
 
 Keep new code close to the subsystem it belongs to. For example, terminal ioctls belong under `kernel/src/terminal/`, not in a generic ABI file.
+Keep SMP-specific code under `kernel/src/smp/` instead of scattering AP bootstrap and per-CPU helpers across unrelated modules.
 
 ## Build, Test, and Development Commands
 
