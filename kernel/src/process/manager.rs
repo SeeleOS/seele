@@ -4,6 +4,7 @@ use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
     filesystem::cgroupfs::remove_pid_cgroup_path,
+    misc::systemd_perf,
     object::linux_anon::wake_pidfd_for_process_with_manager,
     process::{Process, ProcessRef, misc::ProcessID},
     thread::{THREAD_MANAGER, ThreadRef, manager::ThreadManager},
@@ -71,6 +72,7 @@ pub fn get_current_process() -> ProcessRef {
 pub fn terminate_process(process: ProcessRef, exit_code: u64) {
     let threads = {
         let mut process = process.lock();
+        systemd_perf::log_and_clear_process_summary(&process, exit_code);
         process.terminate_inner(exit_code)
     };
 

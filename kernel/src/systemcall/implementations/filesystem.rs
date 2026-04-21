@@ -11,7 +11,11 @@ use crate::{
         vfs_traits::{FileLikeType, MountFlags},
     },
     memory::user_safe,
-    misc::{c_types::CString, others::KernelFrom},
+    misc::{
+        c_types::CString,
+        others::KernelFrom,
+        systemd_perf::{self, PerfBucket},
+    },
     object::{
         FileFlags, Object,
         error::ObjectError,
@@ -266,25 +270,27 @@ fn path_is_relative_to_cwd(dirfd: i32) -> Result<bool, SyscallError> {
 }
 
 fn resolve_path_at(dirfd: i32, path_str: &str) -> Result<Path, SyscallError> {
-    if path_str.starts_with('/') {
-        return Ok(Path::new(path_str));
-    }
+    systemd_perf::profile_current_process(PerfBucket::ResolvePathAt, || {
+        if path_str.starts_with('/') {
+            return Ok(Path::new(path_str));
+        }
 
-    if dirfd == AT_FDCWD {
-        let mut current_dir = with_current_process(|process| process.current_directory.clone());
-        current_dir.push_path_str(path_str);
-        return Ok(current_dir.as_normal());
-    }
+        if dirfd == AT_FDCWD {
+            let mut current_dir = with_current_process(|process| process.current_directory.clone());
+            current_dir.push_path_str(path_str);
+            return Ok(current_dir.as_normal());
+        }
 
-    let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
-    let file_like = object.as_file_like()?;
-    if !matches!(file_like.info()?.file_like_type, FileLikeType::Directory) {
-        return Err(SyscallError::NotADirectory);
-    }
+        let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
+        let file_like = object.as_file_like()?;
+        if !matches!(file_like.info()?.file_like_type, FileLikeType::Directory) {
+            return Err(SyscallError::NotADirectory);
+        }
 
-    let mut base = file_like.path().as_absolute();
-    base.push_path_str(path_str);
-    Ok(base.as_normal())
+        let mut base = file_like.path().as_absolute();
+        base.push_path_str(path_str);
+        Ok(base.as_normal())
+    })
 }
 
 fn ensure_directory_exists(path: &str) -> Result<(), SyscallError> {
@@ -712,61 +718,63 @@ define_syscall!(OpenAt, |dirfd: i32,
                          path: CString,
                          flags: OpenFlags,
                          _mode: u32| {
-    let current_process = get_current_process();
-    let path_str = path_from_raw(path)?;
-    if flags.contains(OpenFlags::TMPFILE) {
-        return Err(SyscallError::OperationNotSupported);
-    }
-    let create = flags.contains(OpenFlags::CREAT);
-    let nofollow = flags.contains(OpenFlags::NOFOLLOW);
-    let directory_only = flags.contains(OpenFlags::DIRECTORY);
-    let path_only = flags.contains(OpenFlags::PATH);
-
-    let path = resolve_path_at(dirfd, &path_str)?;
-    let open_result = if nofollow {
-        VirtualFS.lock().open_nofollow(path.clone())
-    } else {
-        VirtualFS.lock().open(path.clone())
-    };
-    let object;
-    if let Ok(file) = open_result {
-        if create && flags.contains(OpenFlags::EXCL) {
-            return Err(SyscallError::FileAlreadyExists);
+    systemd_perf::profile_current_process(PerfBucket::OpenAt, || {
+        let current_process = get_current_process();
+        let path_str = path_from_raw(path)?;
+        if flags.contains(OpenFlags::TMPFILE) {
+            return Err(SyscallError::OperationNotSupported);
         }
-        object = Arc::new(file);
-    } else if create {
-        VirtualFS.lock().create_file(path.clone())?;
-        let reopen_result = VirtualFS.lock().open(path.clone());
-        object = match reopen_result {
-            Ok(file) => Arc::new(file),
-            Err(err) => return Err(err.into()),
+        let create = flags.contains(OpenFlags::CREAT);
+        let nofollow = flags.contains(OpenFlags::NOFOLLOW);
+        let directory_only = flags.contains(OpenFlags::DIRECTORY);
+        let path_only = flags.contains(OpenFlags::PATH);
+
+        let path = resolve_path_at(dirfd, &path_str)?;
+        let open_result = if nofollow {
+            VirtualFS.lock().open_nofollow(path.clone())
+        } else {
+            VirtualFS.lock().open(path.clone())
         };
-    } else {
-        return Err(SyscallError::FileNotFound);
-    }
-
-    let info = object.info()?;
-    if nofollow && !path_only && matches!(info.file_like_type, FileLikeType::Symlink) {
-        return Err(SyscallError::TooManySymbolicLinks);
-    }
-    if directory_only && !matches!(info.file_like_type, FileLikeType::Directory) {
-        return Err(SyscallError::NotADirectory);
-    }
-    if flags.contains(OpenFlags::NONBLOCK) {
-        match object.clone().set_flags(FileFlags::NONBLOCK) {
-            Ok(()) | Err(ObjectError::Unimplemented) => {}
-            Err(err) => return Err(err.into()),
+        let object;
+        if let Ok(file) = open_result {
+            if create && flags.contains(OpenFlags::EXCL) {
+                return Err(SyscallError::FileAlreadyExists);
+            }
+            object = Arc::new(file);
+        } else if create {
+            VirtualFS.lock().create_file(path.clone())?;
+            let reopen_result = VirtualFS.lock().open(path.clone());
+            object = match reopen_result {
+                Ok(file) => Arc::new(file),
+                Err(err) => return Err(err.into()),
+            };
+        } else {
+            return Err(SyscallError::FileNotFound);
         }
-    }
 
-    let fd_flags = if flags.contains(OpenFlags::CLOEXEC) {
-        FdFlags::CLOEXEC
-    } else {
-        FdFlags::empty()
-    };
-    Ok(current_process
-        .lock()
-        .push_object_with_flags(object, fd_flags))
+        let info = object.info()?;
+        if nofollow && !path_only && matches!(info.file_like_type, FileLikeType::Symlink) {
+            return Err(SyscallError::TooManySymbolicLinks);
+        }
+        if directory_only && !matches!(info.file_like_type, FileLikeType::Directory) {
+            return Err(SyscallError::NotADirectory);
+        }
+        if flags.contains(OpenFlags::NONBLOCK) {
+            match object.clone().set_flags(FileFlags::NONBLOCK) {
+                Ok(()) | Err(ObjectError::Unimplemented) => {}
+                Err(err) => return Err(err.into()),
+            }
+        }
+
+        let fd_flags = if flags.contains(OpenFlags::CLOEXEC) {
+            FdFlags::CLOEXEC
+        } else {
+            FdFlags::empty()
+        };
+        Ok(current_process
+            .lock()
+            .push_object_with_flags(object, fd_flags))
+    })
 });
 
 define_syscall!(Open, |path: CString, flags: OpenFlags, mode: u32| {
@@ -931,27 +939,29 @@ define_syscall!(Newfstatat, |dirfd: i32,
                              path: u64,
                              linux_stat_ptr: *mut LinuxStat,
                              flags: AtFlags| {
-    let path = path as CString;
-    if flags.bits()
-        != flags.bits()
-            & (AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT | AtFlags::EMPTY_PATH).bits()
-    {
-        return Err(SyscallError::NoSyscall);
-    }
-    let path_str = if path.is_null() {
-        if flags.contains(AtFlags::EMPTY_PATH) {
-            String::new()
-        } else {
-            return Err(SyscallError::BadAddress);
+    systemd_perf::profile_current_process(PerfBucket::Newfstatat, || {
+        let path = path as CString;
+        if flags.bits()
+            != flags.bits()
+                & (AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT | AtFlags::EMPTY_PATH).bits()
+        {
+            return Err(SyscallError::NoSyscall);
         }
-    } else {
-        path_from_raw(path)?
-    };
+        let path_str = if path.is_null() {
+            if flags.contains(AtFlags::EMPTY_PATH) {
+                String::new()
+            } else {
+                return Err(SyscallError::BadAddress);
+            }
+        } else {
+            path_from_raw(path)?
+        };
 
-    let stat = stat_at(dirfd, &path_str, flags)?;
+        let stat = stat_at(dirfd, &path_str, flags)?;
 
-    user_safe::write(linux_stat_ptr, &stat)?;
-    Ok(0)
+        user_safe::write(linux_stat_ptr, &stat)?;
+        Ok(0)
+    })
 });
 
 define_syscall!(Statx, |dirfd: i32,
@@ -959,67 +969,69 @@ define_syscall!(Statx, |dirfd: i32,
                         flags: AtFlags,
                         _mask: u32,
                         statx_ptr: *mut LinuxStatx| {
-    let allowed_flags = (AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT | AtFlags::EMPTY_PATH)
-        .bits()
-        | AT_STATX_FORCE_SYNC
-        | AT_STATX_DONT_SYNC;
-    if flags.bits() != flags.bits() & allowed_flags {
-        return Err(SyscallError::NoSyscall);
-    }
-    let path_str = if path.is_null() {
-        if flags.contains(AtFlags::EMPTY_PATH) {
-            String::new()
+    systemd_perf::profile_current_process(PerfBucket::Statx, || {
+        let allowed_flags =
+            (AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT | AtFlags::EMPTY_PATH).bits()
+                | AT_STATX_FORCE_SYNC
+                | AT_STATX_DONT_SYNC;
+        if flags.bits() != flags.bits() & allowed_flags {
+            return Err(SyscallError::NoSyscall);
+        }
+        let path_str = if path.is_null() {
+            if flags.contains(AtFlags::EMPTY_PATH) {
+                String::new()
+            } else {
+                return Err(SyscallError::BadAddress);
+            }
         } else {
+            path_from_raw(path)?
+        };
+        if statx_ptr.is_null() {
             return Err(SyscallError::BadAddress);
         }
-    } else {
-        path_from_raw(path)?
-    };
-    if statx_ptr.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
 
-    let stat = stat_at(dirfd, &path_str, flags)?;
-    let mount_id = stat_mount_id_at(dirfd, &path_str, flags)?;
-    let mount_root = stat_mount_root_at(dirfd, &path_str, flags)?;
+        let stat = stat_at(dirfd, &path_str, flags)?;
+        let mount_id = stat_mount_id_at(dirfd, &path_str, flags)?;
+        let mount_root = stat_mount_root_at(dirfd, &path_str, flags)?;
 
-    let statx = LinuxStatx {
-        stx_mask: STATX_BASIC_STATS | STATX_MNT_ID,
-        stx_blksize: stat.st_blksize as u32,
-        stx_attributes: if mount_root { STATX_ATTR_MOUNT_ROOT } else { 0 },
-        stx_nlink: stat.st_nlink as u32,
-        stx_uid: stat.st_uid,
-        stx_gid: stat.st_gid,
-        stx_mode: stat.st_mode as u16,
-        stx_ino: stat.st_ino,
-        stx_size: stat.st_size as u64,
-        stx_blocks: stat.st_blocks as u64,
-        stx_atime: StatxTimestamp {
-            tv_sec: stat.st_atime,
-            tv_nsec: stat.st_atime_nsec as u32,
-            __reserved: 0,
-        },
-        stx_ctime: StatxTimestamp {
-            tv_sec: stat.st_ctime,
-            tv_nsec: stat.st_ctime_nsec as u32,
-            __reserved: 0,
-        },
-        stx_mtime: StatxTimestamp {
-            tv_sec: stat.st_mtime,
-            tv_nsec: stat.st_mtime_nsec as u32,
-            __reserved: 0,
-        },
-        stx_rdev_major: linux_major(stat.st_rdev),
-        stx_rdev_minor: linux_minor(stat.st_rdev),
-        stx_dev_major: linux_major(stat.st_dev),
-        stx_dev_minor: linux_minor(stat.st_dev),
-        stx_mnt_id: mount_id,
-        stx_attributes_mask: STATX_ATTR_MOUNT_ROOT,
-        ..Default::default()
-    };
-    user_safe::write(statx_ptr, &statx)?;
+        let statx = LinuxStatx {
+            stx_mask: STATX_BASIC_STATS | STATX_MNT_ID,
+            stx_blksize: stat.st_blksize as u32,
+            stx_attributes: if mount_root { STATX_ATTR_MOUNT_ROOT } else { 0 },
+            stx_nlink: stat.st_nlink as u32,
+            stx_uid: stat.st_uid,
+            stx_gid: stat.st_gid,
+            stx_mode: stat.st_mode as u16,
+            stx_ino: stat.st_ino,
+            stx_size: stat.st_size as u64,
+            stx_blocks: stat.st_blocks as u64,
+            stx_atime: StatxTimestamp {
+                tv_sec: stat.st_atime,
+                tv_nsec: stat.st_atime_nsec as u32,
+                __reserved: 0,
+            },
+            stx_ctime: StatxTimestamp {
+                tv_sec: stat.st_ctime,
+                tv_nsec: stat.st_ctime_nsec as u32,
+                __reserved: 0,
+            },
+            stx_mtime: StatxTimestamp {
+                tv_sec: stat.st_mtime,
+                tv_nsec: stat.st_mtime_nsec as u32,
+                __reserved: 0,
+            },
+            stx_rdev_major: linux_major(stat.st_rdev),
+            stx_rdev_minor: linux_minor(stat.st_rdev),
+            stx_dev_major: linux_major(stat.st_dev),
+            stx_dev_minor: linux_minor(stat.st_dev),
+            stx_mnt_id: mount_id,
+            stx_attributes_mask: STATX_ATTR_MOUNT_ROOT,
+            ..Default::default()
+        };
+        user_safe::write(statx_ptr, &statx)?;
 
-    Ok(0)
+        Ok(0)
+    })
 });
 
 define_syscall!(Faccessat, |dirfd: i32,
@@ -1584,10 +1596,12 @@ define_syscall!(Statfs, |path: CString, buf: *mut LinuxStatFs| {
 });
 
 define_syscall!(Fstatfs, |fd: u64, buf: *mut LinuxStatFs| {
-    let object = get_object_current_process(fd).map_err(SyscallError::from)?;
-    let statfs = linux_statfs(filesystem_magic_for_object(&object)?);
-    user_safe::write(buf, &statfs)?;
-    Ok(0)
+    systemd_perf::profile_current_process(PerfBucket::Fstatfs, || {
+        let object = get_object_current_process(fd).map_err(SyscallError::from)?;
+        let statfs = linux_statfs(filesystem_magic_for_object(&object)?);
+        user_safe::write(buf, &statfs)?;
+        Ok(0)
+    })
 });
 
 define_syscall!(Readlink, |path: CString,

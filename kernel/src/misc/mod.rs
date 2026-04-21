@@ -20,6 +20,7 @@ pub mod serial_print;
 pub mod signal;
 pub mod snapshot;
 pub mod stack_builder;
+pub mod systemd_perf;
 pub mod testing;
 pub mod time;
 pub mod timer;

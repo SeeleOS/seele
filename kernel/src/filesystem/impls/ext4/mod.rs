@@ -12,6 +12,7 @@ use crate::filesystem::{
     vfs::{FSResult, WrappedDirectory},
     vfs_traits::{FileLike, FileSystem},
 };
+use crate::misc::systemd_perf::{self, PerfBucket};
 
 pub mod directory;
 pub mod error;
@@ -55,10 +56,15 @@ impl EXT4 {
     }
 
     fn root_dir(&self) -> WrappedDirectory {
+        let inode = self
+            .0
+            .path_to_inode(Ext4Path::new("/"), FollowSymlinks::All)
+            .expect("ext4 root inode must exist");
         Arc::new(Mutex::new(Ext4Directory::new(
             "".to_string(),
             "/".to_string(),
             self.0.clone(),
+            inode,
         )))
     }
 }
@@ -69,47 +75,49 @@ impl FileSystem for EXT4 {
     }
 
     fn lookup(&self, path: &Path) -> FSResult<FileLike> {
-        let normalized = path.normalize();
-        let path_string = normalized.clone().as_string();
-        let mut current = FileLike::Directory(self.root_dir());
-        let components = normalized.parts.clone();
+        systemd_perf::profile_current_process(PerfBucket::Ext4Lookup, || {
+            let normalized = path.normalize();
+            let path_string = normalized.clone().as_string();
+            let mut current = FileLike::Directory(self.root_dir());
+            let components = normalized.parts.clone();
 
-        if components.len() == 1 && matches!(components.first(), Some(PathPart::Root)) {
-            return Ok(current);
-        }
+            if components.len() == 1 && matches!(components.first(), Some(PathPart::Root)) {
+                return Ok(current);
+            }
 
-        for (index, component) in components.iter().enumerate() {
-            let is_last = index + 1 == components.len();
+            for (index, component) in components.iter().enumerate() {
+                let is_last = index + 1 == components.len();
 
-            match component {
-                PathPart::Root | PathPart::CurrentDir => {}
-                PathPart::ParentDir => return Err(FSError::NotADirectory),
-                PathPart::Normal(name) => {
-                    current = self.follow_intermediate_symlinks(current)?;
-                    current = match current {
-                        FileLike::Directory(dir) => dir.lock().get(name)?,
-                        FileLike::File(_) => return Err(FSError::NotADirectory),
-                        FileLike::Symlink(_) => {
-                            unreachable!("intermediate symlink was not followed")
-                        }
-                    };
-
-                    if !is_last {
+                match component {
+                    PathPart::Root | PathPart::CurrentDir => {}
+                    PathPart::ParentDir => return Err(FSError::NotADirectory),
+                    PathPart::Normal(name) => {
                         current = self.follow_intermediate_symlinks(current)?;
+                        current = match current {
+                            FileLike::Directory(dir) => dir.lock().get(name)?,
+                            FileLike::File(_) => return Err(FSError::NotADirectory),
+                            FileLike::Symlink(_) => {
+                                unreachable!("intermediate symlink was not followed")
+                            }
+                        };
+
+                        if !is_last {
+                            current = self.follow_intermediate_symlinks(current)?;
+                        }
                     }
                 }
             }
-        }
 
-        if path_string.ends_with('/') {
-            current = self.follow_intermediate_symlinks(current)?;
-        }
+            if path_string.ends_with('/') {
+                current = self.follow_intermediate_symlinks(current)?;
+            }
 
-        if path_string.ends_with('/') && matches!(current, FileLike::File(_)) {
-            return Err(FSError::NotADirectory);
-        }
+            if path_string.ends_with('/') && matches!(current, FileLike::File(_)) {
+                return Err(FSError::NotADirectory);
+            }
 
-        Ok(current)
+            Ok(current)
+        })
     }
 
     fn rename(&self, old_path: &Path, new_path: &Path) -> FSResult<()> {

@@ -11,6 +11,7 @@ use crate::filesystem::{
     block_device::{BlockDevice, BlockDeviceError},
     storage_operator::{SeekFrom, StorageOperator, block::BlockDeviceOperator},
 };
+use crate::misc::systemd_perf::{self, PerfBucket};
 
 /// Simple adapter that lets ext4plus read from a generic block device.
 pub struct Ext4BlockOperator(pub Mutex<BlockDeviceOperator>);
@@ -41,25 +42,31 @@ impl From<BlockDeviceError> for Ext4BlockIoError {
     }
 }
 
+fn boxed_io_error(err: BlockDeviceError) -> Box<dyn Error + Send + Sync + 'static> {
+    Box::new(Ext4BlockIoError::from(err))
+}
+
 impl Ext4Read for Ext4BlockOperator {
     fn read(
         &self,
         start_byte: u64,
         dst: &mut [u8],
     ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-        let mut op = self.0.lock();
+        systemd_perf::profile_current_process(PerfBucket::Ext4BlockRead, || {
+            let mut op = self.0.lock();
 
-        op.seek(SeekFrom::Start(start_byte))
-            .map_err(Ext4BlockIoError::from)?;
+            op.seek(SeekFrom::Start(start_byte))
+                .map_err(boxed_io_error)?;
 
-        let n = op.read(dst).map_err(Ext4BlockIoError::from)?;
+            let n = op.read(dst).map_err(boxed_io_error)?;
 
-        if n != dst.len() {
-            // ext4plus expects the buffer to be fully filled.
-            return Err(Box::new(Ext4BlockIoError(BlockDeviceError::Other)));
-        }
+            if n != dst.len() {
+                // ext4plus expects the buffer to be fully filled.
+                return Err(boxed_io_error(BlockDeviceError::Other));
+            }
 
-        Ok(())
+            Ok(())
+        })
     }
 }
 

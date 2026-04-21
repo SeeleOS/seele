@@ -14,7 +14,7 @@ use ext4plus::{
     dir::Dir,
     error::Ext4Error,
     file::File as Ext4InnerFile,
-    inode::{InodeCreationOptions, InodeFlags, InodeMode},
+    inode::{Inode, InodeCreationOptions, InodeFlags, InodeMode},
     path::{Path, PathBuf as Ext4PathBuf},
 };
 
@@ -25,6 +25,7 @@ use crate::filesystem::{
     vfs::FSResult,
     vfs_traits::{Directory, DirectoryContentType, FileLike, FileLikeType},
 };
+use crate::misc::systemd_perf::{self, PerfBucket};
 
 fn map_ext4_error(err: Ext4Error) -> FSError {
     FSError::from(err)
@@ -36,11 +37,17 @@ pub struct Ext4Directory {
     /// Full absolute path within the ext4 filesystem, e.g. `/`, `/usr`.
     path: String,
     fs: Ext4,
+    inode: Mutex<Inode>,
 }
 
 impl Ext4Directory {
-    pub fn new(name: String, path: String, fs: Ext4) -> Self {
-        Self { name, path, fs }
+    pub fn new(name: String, path: String, fs: Ext4, inode: Inode) -> Self {
+        Self {
+            name,
+            path,
+            fs,
+            inode: Mutex::new(inode),
+        }
     }
 
     fn join_child(&self, child: &str) -> String {
@@ -59,11 +66,16 @@ impl Ext4Directory {
         &self.fs
     }
 
-    fn open_parent_dir(&self) -> FSResult<(ext4plus::inode::Inode, Dir)> {
-        let parent_inode = self
-            .fs
-            .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
-            .map_err(map_ext4_error)?;
+    fn current_inode(&self) -> Inode {
+        self.inode.lock().clone()
+    }
+
+    fn update_cached_inode(&self, inode: Inode) {
+        *self.inode.lock() = inode;
+    }
+
+    fn open_parent_dir(&self) -> FSResult<(Inode, Dir)> {
+        let parent_inode = self.current_inode();
         let parent = Dir::open_inode(&self.fs, parent_inode.clone()).map_err(map_ext4_error)?;
         Ok((parent_inode, parent))
     }
@@ -75,10 +87,7 @@ impl Directory for Ext4Directory {
     }
 
     fn info(&self) -> FSResult<FileLikeInfo> {
-        let inode = self
-            .fs
-            .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
-            .map_err(map_ext4_error)?;
+        let inode = self.current_inode();
         Ok(FileLikeInfo::new(
             self.name.clone(),
             0,
@@ -163,11 +172,7 @@ impl Directory for Ext4Directory {
         })?;
 
         // Parent inode of the new inode. In this case, the parent inode is [`self`]
-        let mut parent_inode = self
-            .fs
-            .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
-            .map_err(map_ext4_error)?;
-        let mut parent = Dir::open_inode(&self.fs, parent_inode.clone()).map_err(map_ext4_error)?;
+        let (mut parent_inode, mut parent) = self.open_parent_dir()?;
 
         if matches!(info.content_type, DirectoryContentType::Directory) {
             // A freshly-created ext4 directory needs an initialized first block
@@ -193,6 +198,7 @@ impl Directory for Ext4Directory {
                 .ok_or(FSError::Other)?;
             parent_inode.set_links_count(new_links);
             parent_inode.write(&self.fs).map_err(map_ext4_error)?;
+            self.update_cached_inode(parent_inode);
         }
         Ok(())
     }
@@ -213,11 +219,7 @@ impl Directory for Ext4Directory {
     }
 
     fn delete(&self, name: &str) -> FSResult<()> {
-        let mut parent_inode = self
-            .fs
-            .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
-            .map_err(map_ext4_error)?;
-        let mut parent = Dir::open_inode(&self.fs, parent_inode.clone()).map_err(map_ext4_error)?;
+        let (mut parent_inode, mut parent) = self.open_parent_dir()?;
 
         let entry_name = DirEntryName::try_from(name).map_err(|_| FSError::Other)?;
         let inode = parent.get_entry(entry_name).map_err(map_ext4_error)?;
@@ -244,6 +246,7 @@ impl Directory for Ext4Directory {
                 .ok_or(FSError::Other)?;
             parent_inode.set_links_count(new_links);
             parent_inode.write(&self.fs).map_err(map_ext4_error)?;
+            self.update_cached_inode(parent_inode);
         }
 
         parent.unlink(entry_name, inode).map_err(map_ext4_error)?;
@@ -251,42 +254,45 @@ impl Directory for Ext4Directory {
     }
 
     fn get(&self, name: &str) -> FSResult<FileLike> {
-        let path = self.join_child(name);
+        systemd_perf::profile_current_process(PerfBucket::Ext4DirGet, || {
+            let path = self.join_child(name);
+            let (_, parent) = self.open_parent_dir()?;
+            let entry_name = DirEntryName::try_from(name).map_err(|_| FSError::Other)?;
+            let inode = parent.get_entry(entry_name).map_err(map_ext4_error)?;
 
-        // Use `path_to_inode` so we can decide whether this is a file or directory.
-        let inode = self
-            .fs
-            .path_to_inode(
-                ext4plus::path::Path::new(&path),
-                FollowSymlinks::ExcludeFinalComponent,
-            )
-            .map_err(map_ext4_error)?;
+            let meta = inode.metadata();
 
-        let meta = inode.metadata();
-
-        if meta.is_dir() {
-            Ok(FileLike::Directory(Arc::new(Mutex::new(
-                Ext4Directory::new(name.to_string(), path, self.fs.clone()),
-            ))))
-        } else if meta.is_symlink() {
-            Ok(FileLike::Symlink(Arc::new(Mutex::new(Ext4Symlink {
-                fs: self.fs.clone(),
-                inode,
-                name: name.into(),
-                parent_path: self.path.clone(),
-            }))))
-        } else {
-            let inner_file = Ext4InnerFile::open_inode(&self.fs, inode).map_err(map_ext4_error)?;
-            Ok(FileLike::File(Arc::new(Mutex::new(Ext4File::new(
-                name.to_string(),
-                path,
-                self.fs.clone(),
-                inner_file,
-            )))))
-        }
+            if meta.is_dir() {
+                Ok(FileLike::Directory(Arc::new(Mutex::new(
+                    Ext4Directory::new(name.to_string(), path, self.fs.clone(), inode),
+                ))))
+            } else if meta.is_symlink() {
+                Ok(FileLike::Symlink(Arc::new(Mutex::new(Ext4Symlink {
+                    fs: self.fs.clone(),
+                    inode,
+                    name: name.into(),
+                    parent_path: self.path.clone(),
+                }))))
+            } else {
+                let inner_file =
+                    Ext4InnerFile::open_inode(&self.fs, inode).map_err(map_ext4_error)?;
+                Ok(FileLike::File(Arc::new(Mutex::new(Ext4File::new(
+                    name.to_string(),
+                    path,
+                    self.fs.clone(),
+                    inner_file,
+                )))))
+            }
+        })
     }
 
     fn chmod(&self, mode: u32) -> FSResult<()> {
-        chmod_path(&self.fs, &self.path, mode)
+        chmod_path(&self.fs, &self.path, mode)?;
+        let inode = self
+            .fs
+            .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
+            .map_err(map_ext4_error)?;
+        self.update_cached_inode(inode);
+        Ok(())
     }
 }
