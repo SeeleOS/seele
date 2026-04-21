@@ -35,10 +35,12 @@ pub struct Mount {
     pub fs: FileSystemRef,
     pub source_path: Path,
     pub flags: MountFlags,
+    pub device_id: u64,
 }
 
 pub struct VFS {
     pub(super) mounts: Vec<Mount>,
+    next_mount_device_id: u64,
 }
 
 impl VFS {
@@ -66,7 +68,10 @@ impl VFS {
     }
 
     pub fn new() -> Self {
-        Self { mounts: Vec::new() }
+        Self {
+            mounts: Vec::new(),
+            next_mount_device_id: 1,
+        }
     }
 
     pub fn init(&mut self) -> FSResult<()> {
@@ -112,6 +117,16 @@ impl VFS {
     ) -> FSResult<()> {
         let normalized_path = self.normalize_path(path);
         let normalized_path_string = normalized_path.clone().as_string();
+        let device_id = self
+            .mounts
+            .iter()
+            .find(|mount| Arc::ptr_eq(&mount.fs, &fs))
+            .map(|mount| mount.device_id)
+            .unwrap_or_else(|| {
+                let device_id = self.next_mount_device_id;
+                self.next_mount_device_id += 1;
+                device_id
+            });
         self.mounts
             .retain(|mount| mount.path.clone().as_string() != normalized_path_string);
         self.mounts.push(Mount {
@@ -119,6 +134,7 @@ impl VFS {
             fs,
             source_path: source_path.normalize(),
             flags,
+            device_id,
         });
         self.mounts
             .sort_by_key(|mount| Reverse(mount.path.clone().as_string().len()));
@@ -136,6 +152,7 @@ impl VFS {
                 fs: mount.fs.clone(),
                 source_path: mount.source_path.clone(),
                 flags: mount.flags,
+                device_id: mount.device_id,
             })
             .collect::<Vec<_>>();
 
@@ -231,6 +248,16 @@ impl VFS {
             mount.source_path.clone(),
             mount.flags,
         ))
+    }
+
+    pub fn mount_device_id(&self, path: Path) -> FSResult<u64> {
+        let mount_path = self.mount_path(path)?;
+        let mount_path_string = mount_path.clone().as_string();
+        self.mounts
+            .iter()
+            .find(|mount| mount.path.clone().as_string() == mount_path_string)
+            .map(|mount| mount.device_id)
+            .ok_or(FSError::NotFound)
     }
 
     pub fn mount_snapshots(&self) -> Vec<(Path, FileSystemRef, Path, MountFlags)> {

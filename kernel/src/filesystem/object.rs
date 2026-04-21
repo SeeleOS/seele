@@ -56,20 +56,11 @@ fn device_object_for_file(file: &WrappedFile) -> FSResult<Option<ObjectRef>> {
     Ok(Some(device.object()?))
 }
 
-fn mount_device_id_for_path(path: &Path) -> u64 {
-    let Ok(mount_path) = VirtualFS.lock().mount_path(path.clone()) else {
+pub(crate) fn mount_device_id_for_path(path: &Path) -> u64 {
+    let Ok(device_id) = VirtualFS.lock().mount_device_id(path.clone()) else {
         return 1;
     };
-
-    match mount_path.as_string().as_str() {
-        "/" => 1,
-        "/run" => 6,
-        "/proc" => 2,
-        "/sys" => 3,
-        "/sys/fs/cgroup" => 4,
-        "/dev" => 5,
-        _ => 1,
-    }
+    device_id
 }
 
 fn stat_with_mount_device_id(mut stat: LinuxStat, path: &Path) -> LinuxStat {
