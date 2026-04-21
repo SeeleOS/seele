@@ -82,6 +82,8 @@ sudo env "PATH=${HOST_PATH}" pacman \
     -Sy \
     "${ARCH_PACKAGES[@]}"
 
+sudo chroot "${SYSROOT_DIR}" /usr/bin/passwd -d root
+
 sudo chmod 0755 "${SYSROOT_DIR}/run"
 sudo install -d -m 0755 "${SYSROOT_DIR}/run/dbus"
 sudo install -d -m 0755 "${SYSROOT_DIR}/run/udev/data"
