@@ -153,7 +153,8 @@ pub fn set_current_kernel_stack(stack_top: u64) {
 }
 
 pub fn register_application_processor(index: usize, apic_id: u32) -> *mut CpuCoreContext {
-    let ctx = Box::leak(Box::new(CpuCoreContext::new(index, apic_id, false))) as *mut CpuCoreContext;
+    let ctx =
+        Box::leak(Box::new(CpuCoreContext::new(index, apic_id, false))) as *mut CpuCoreContext;
     register_cpu(ctx);
     ctx
 }

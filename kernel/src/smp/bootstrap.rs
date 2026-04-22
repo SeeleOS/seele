@@ -1,4 +1,4 @@
-use core::{arch::asm, hint::spin_loop, ptr};
+use core::{arch::asm, hint::spin_loop, mem::offset_of, ptr};
 
 use bootloader_api::info::MemoryRegionKind;
 use conquer_once::spin::OnceCell;
@@ -16,25 +16,40 @@ use crate::{
         paging::{FRAME_ALLOCATOR, MAPPER},
         utils::apply_offset,
     },
-    misc::{
-        time::Time,
+    misc::time::Time,
+    smp::{
+        cpu::{CpuCoreContext, register_application_processor},
+        gs::GsContext,
+        topology, wait_for_cpu_online, with_current_cpu,
     },
-    smp::{cpu::{CpuCoreContext, register_application_processor}, topology, wait_for_cpu_online, with_current_cpu},
+    thread,
 };
 
 const AP_STARTUP_MIN_ADDR: u64 = 0x8_000;
 const AP_STARTUP_MAX_ADDR: u64 = 0xA_0000;
 const AP_WAKE_SPINS: usize = 10_000_000;
 const INIT_IPI_DELAY_MS: u64 = 10;
-const SIPI_DELAY_MS: u64 = 1;
 const GDT_CODE32_TEMPLATE: u64 = 0x00cf9a000000ffff;
 const GDT_DATA32_TEMPLATE: u64 = 0x00cf92000000ffff;
 const GDT_CODE64: u64 = 0x00af9a000000ffff;
 const GDT_DATA64: u64 = 0x00cf92000000ffff;
+const GDT_USER_DATA64: u64 = 0x00cff3000000ffff;
+const GDT_USER_CODE64: u64 = 0x00affb000000ffff;
 const AP_DEBUG_HLT: bool = false;
 const AP_DEBUG_PROTECTED_HLT: bool = false;
 const AP_DEBUG_LONG_HLT: bool = false;
 const AP_DEBUG_AFTER_PG_HLT: bool = false;
+const IA32_GS_BASE: u32 = 0xc000_0101;
+const IA32_KERNEL_GS_BASE: u32 = 0xc000_0102;
+const IA32_EFER: u32 = 0xc000_0080;
+const IA32_STAR: u32 = 0xc000_0081;
+const IA32_LSTAR: u32 = 0xc000_0082;
+const IA32_FMASK: u32 = 0xc000_0084;
+const EFER_SCE: u64 = 1;
+const RFLAGS_INTERRUPT_FLAG: u64 = 1 << 9;
+const SYSCALL_KERNEL_CS: u16 = 0x08;
+const SYSCALL_SYSRET_BASE: u16 = 0x13;
+const TEMP_TSS_SELECTOR: u16 = 0x28;
 
 const PROTECTED_MODE_OFFSET: usize = 37;
 const PROTECTED_MODE_JUMP_IMM_OFFSET: usize = 31;
@@ -42,17 +57,21 @@ const LONG_MODE_OFFSET: usize = 109;
 const GDT_DESCRIPTOR_OFFSET: usize = 208;
 const LONG_MODE_JUMP_IMM_OFFSET: usize = 103;
 const GDT_OFFSET: usize = 216;
-const GDT_CODE32_OFFSET: usize = 224;
-const GDT_DATA32_OFFSET: usize = 232;
-const GDT_CODE64_OFFSET: usize = 240;
-const GDT_DATA64_OFFSET: usize = 248;
+const GDT_KERNEL_CODE_OFFSET: usize = 224;
+const GDT_KERNEL_DATA_OFFSET: usize = 232;
+const GDT_USER_DATA_OFFSET: usize = 240;
+const GDT_USER_CODE_OFFSET: usize = 248;
+const GDT_TSS_LOW_OFFSET: usize = 256;
+const GDT_TSS_HIGH_OFFSET: usize = 264;
+const GDT_CODE32_OFFSET: usize = 272;
+const GDT_DATA32_OFFSET: usize = 280;
 const CR3_MOFFS_OFFSET: usize = 57;
-const TEMP_CR3_OFFSET: usize = 256;
-const BSP_CR3_OFFSET: usize = 264;
-const STACK_OFFSET: usize = 272;
-const ENTRY_OFFSET: usize = 280;
-const CPU_CONTEXT_OFFSET: usize = 288;
-const TRAMPOLINE_SIZE: usize = 296;
+const TEMP_CR3_OFFSET: usize = 288;
+const BSP_CR3_OFFSET: usize = 296;
+const STACK_OFFSET: usize = 304;
+const ENTRY_OFFSET: usize = 312;
+const CPU_CONTEXT_OFFSET: usize = 320;
+const TRAMPOLINE_SIZE: usize = 328;
 
 static AP_STARTUP_PAGE: OnceCell<u64> = OnceCell::uninit();
 static AP_BOOTSTRAP_CR3: OnceCell<u64> = OnceCell::uninit();
@@ -97,13 +116,13 @@ const AP_TRAMPOLINE: [u8; TRAMPOLINE_SIZE] = {
     blob[32] = ((PROTECTED_MODE_OFFSET >> 8) & 0xff) as u8;
     blob[33] = ((PROTECTED_MODE_OFFSET >> 16) & 0xff) as u8;
     blob[34] = ((PROTECTED_MODE_OFFSET >> 24) & 0xff) as u8;
-    blob[35] = 0x08;
+    blob[35] = 0x38;
     blob[36] = 0x00; // code32 selector
 
     // 32-bit entry: load the kernel page tables, enable long mode, then jump
     // through a patched far pointer to the 64-bit entry below.
     blob[37] = 0xb8;
-    blob[38] = 0x10;
+    blob[38] = 0x40;
     blob[39] = 0x00;
     blob[40] = 0x00;
     blob[41] = 0x00; // mov eax, 0x10
@@ -168,7 +187,7 @@ const AP_TRAMPOLINE: [u8; TRAMPOLINE_SIZE] = {
     blob[100] = 0x22;
     blob[101] = 0xc0; // mov cr0, eax
     blob[102] = 0xea;
-    blob[107] = 0x18;
+    blob[107] = 0x08;
     blob[108] = 0x00; // jmp far ptr16:32 to the long-mode entry
 
     // 64-bit entry: continue on the BSP's page tables that were already loaded
@@ -189,7 +208,7 @@ const AP_TRAMPOLINE: [u8; TRAMPOLINE_SIZE] = {
     blob[122] = 0x90;
     blob[123] = 0x66;
     blob[124] = 0xb8;
-    blob[125] = 0x20;
+    blob[125] = 0x10;
     blob[126] = 0x00; // mov ax, 0x20
     blob[127] = 0x8e;
     blob[128] = 0xd8; // mov ds, ax
@@ -210,7 +229,7 @@ const AP_TRAMPOLINE: [u8; TRAMPOLINE_SIZE] = {
     blob[143] = 0x48;
     blob[144] = 0x8b;
     blob[145] = 0x25;
-    blob[146] = 0x7a;
+    blob[146] = 0x9a;
     blob[147] = 0x00;
     blob[148] = 0x00;
     blob[149] = 0x00; // mov rsp, [rip + stack]
@@ -248,7 +267,7 @@ const AP_TRAMPOLINE: [u8; TRAMPOLINE_SIZE] = {
     blob[181] = 0x48;
     blob[182] = 0x8b;
     blob[183] = 0x3d;
-    blob[184] = 0x64;
+    blob[184] = 0x84;
     blob[185] = 0x00;
     blob[186] = 0x00;
     blob[187] = 0x00; // mov rdi, [rip + cpu_context]
@@ -259,7 +278,7 @@ const AP_TRAMPOLINE: [u8; TRAMPOLINE_SIZE] = {
     blob[192] = 0x48;
     blob[193] = 0x8b;
     blob[194] = 0x05;
-    blob[195] = 0x51;
+    blob[195] = 0x71;
     blob[196] = 0x00;
     blob[197] = 0x00;
     blob[198] = 0x00; // mov rax, [rip + entry]
@@ -273,15 +292,12 @@ const AP_TRAMPOLINE: [u8; TRAMPOLINE_SIZE] = {
     blob[206] = 0x0b; // if Rust returns unexpectedly, fault hard
 
     // Padding to 8-byte alignment.
-    blob[GDT_DESCRIPTOR_OFFSET] = 0x27;
+    blob[GDT_DESCRIPTOR_OFFSET] = 0x47;
     blob[GDT_DESCRIPTOR_OFFSET + 1] = 0x00; // GDT limit
 
     // Long mode far pointer selector.
-    blob[GDT_DESCRIPTOR_OFFSET + 4] = 0x18;
+    blob[GDT_DESCRIPTOR_OFFSET + 4] = 0x08;
     blob[GDT_DESCRIPTOR_OFFSET + 5] = 0x00;
-
-    write_u64(&mut blob, GDT_CODE64_OFFSET, GDT_CODE64);
-    write_u64(&mut blob, GDT_DATA64_OFFSET, GDT_DATA64);
 
     blob
 };
@@ -294,7 +310,10 @@ pub fn start_application_processors() {
         return;
     }
 
-    log::info!("smp: discovered {} application processors", processors.len());
+    log::info!(
+        "smp: discovered {} application processors",
+        processors.len()
+    );
     let startup_phys = *AP_STARTUP_PAGE.get_or_init(init_ap_startup_page);
     let bootstrap_cr3 = *AP_BOOTSTRAP_CR3.get_or_init(init_ap_bootstrap_cr3);
     let startup_vector = (startup_phys >> 12) as u8;
@@ -312,16 +331,16 @@ pub fn start_application_processors() {
         prepare_ap_startup_page(startup_phys, cpu);
         log::info!("smp: waking AP {}", processor.apic_id);
         wake_application_processor(processor.apic_id, startup_vector);
-        log::info!("smp: waiting for AP {} online", processor.apic_id);
 
         assert!(
             wait_for_cpu_online(processor.apic_id, AP_WAKE_SPINS),
             "AP {} did not report online",
             processor.apic_id
         );
-        log::info!("smp: AP {} online", processor.apic_id);
     }
 }
+
+pub fn release_application_processors() {}
 
 fn init_ap_startup_page() -> u64 {
     let phys_addr = find_ap_startup_page();
@@ -358,9 +377,15 @@ fn init_ap_bootstrap_cr3() -> u64 {
     ) = {
         let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
         (
-            frame_allocator.allocate_frame().expect("no frame for AP bootstrap PML4"),
-            frame_allocator.allocate_frame().expect("no frame for AP bootstrap PDPT"),
-            frame_allocator.allocate_frame().expect("no frame for AP bootstrap PD"),
+            frame_allocator
+                .allocate_frame()
+                .expect("no frame for AP bootstrap PML4"),
+            frame_allocator
+                .allocate_frame()
+                .expect("no frame for AP bootstrap PDPT"),
+            frame_allocator
+                .allocate_frame()
+                .expect("no frame for AP bootstrap PD"),
         )
     };
 
@@ -384,7 +409,9 @@ fn init_ap_bootstrap_cr3() -> u64 {
 }
 
 fn find_ap_startup_page() -> u64 {
-    let regions = MEMORY_REGIONS.get().expect("memory regions not initialized");
+    let regions = MEMORY_REGIONS
+        .get()
+        .expect("memory regions not initialized");
 
     for region in regions.iter() {
         if region.kind != MemoryRegionKind::Usable {
@@ -427,11 +454,26 @@ fn prepare_ap_startup_page(phys_addr: u64, cpu: *mut CpuCoreContext) {
 
         ptr::copy_nonoverlapping(AP_TRAMPOLINE.as_ptr(), dst, AP_TRAMPOLINE.len());
         ptr::write_unaligned(dst.add(GDT_DESCRIPTOR_OFFSET + 2) as *mut u32, gdt_base);
+        ptr::write_unaligned(dst.add(GDT_KERNEL_CODE_OFFSET) as *mut u64, GDT_CODE64);
+        ptr::write_unaligned(dst.add(GDT_KERNEL_DATA_OFFSET) as *mut u64, GDT_DATA64);
+        ptr::write_unaligned(dst.add(GDT_USER_DATA_OFFSET) as *mut u64, GDT_USER_DATA64);
+        ptr::write_unaligned(dst.add(GDT_USER_CODE_OFFSET) as *mut u64, GDT_USER_CODE64);
+        let tss_base = (*cpu).segments.tss as u64;
+        let tss_limit =
+            (core::mem::size_of::<x86_64::structures::tss::TaskStateSegment>() - 1) as u32;
+        ptr::write_unaligned(
+            dst.add(GDT_TSS_LOW_OFFSET) as *mut u64,
+            encode_tss_descriptor_low(tss_base, tss_limit),
+        );
+        ptr::write_unaligned(
+            dst.add(GDT_TSS_HIGH_OFFSET) as *mut u64,
+            encode_tss_descriptor_high(tss_base),
+        );
         ptr::write_unaligned(dst.add(GDT_CODE32_OFFSET) as *mut u64, GDT_CODE32_TEMPLATE);
         ptr::write_unaligned(dst.add(GDT_DATA32_OFFSET) as *mut u64, GDT_DATA32_TEMPLATE);
         if AP_DEBUG_PROTECTED_HLT {
             ptr::write(dst.add(PROTECTED_MODE_OFFSET), 0xb8);
-            ptr::write(dst.add(PROTECTED_MODE_OFFSET + 1), 0x10);
+            ptr::write(dst.add(PROTECTED_MODE_OFFSET + 1), 0x40);
             ptr::write(dst.add(PROTECTED_MODE_OFFSET + 2), 0x00);
             ptr::write(dst.add(PROTECTED_MODE_OFFSET + 3), 0x00);
             ptr::write(dst.add(PROTECTED_MODE_OFFSET + 4), 0x00);
@@ -470,7 +512,10 @@ fn prepare_ap_startup_page(phys_addr: u64, cpu: *mut CpuCoreContext) {
             dst.add(CR3_MOFFS_OFFSET) as *mut u32,
             (phys_addr + TEMP_CR3_OFFSET as u64) as u32,
         );
-        ptr::write_unaligned(dst.add(LONG_MODE_JUMP_IMM_OFFSET) as *mut u32, long_mode_addr);
+        ptr::write_unaligned(
+            dst.add(LONG_MODE_JUMP_IMM_OFFSET) as *mut u32,
+            long_mode_addr,
+        );
         ptr::write_unaligned(dst.add(TEMP_CR3_OFFSET) as *mut u64, bsp_cr3);
         ptr::write_unaligned(dst.add(BSP_CR3_OFFSET) as *mut u64, bsp_cr3);
         ptr::write_unaligned(dst.add(STACK_OFFSET) as *mut u64, bootstrap_stack_top);
@@ -482,11 +527,7 @@ fn prepare_ap_startup_page(phys_addr: u64, cpu: *mut CpuCoreContext) {
 fn wake_application_processor(apic_id: u32, startup_vector: u8) {
     send_init_ipi(apic_id);
     spin_for_ms(INIT_IPI_DELAY_MS);
-
-    for _ in 0..2 {
-        send_startup_ipi(apic_id, startup_vector);
-        spin_for_ms(SIPI_DELAY_MS);
-    }
+    send_startup_ipi(apic_id, startup_vector);
 }
 
 fn send_init_ipi(apic_id: u32) {
@@ -522,39 +563,117 @@ const fn align_down_4k(addr: u64) -> u64 {
     addr & !(Size4KiB::SIZE - 1)
 }
 
-const fn write_u64(blob: &mut [u8; TRAMPOLINE_SIZE], offset: usize, value: u64) {
-    blob[offset] = (value & 0xff) as u8;
-    blob[offset + 1] = ((value >> 8) & 0xff) as u8;
-    blob[offset + 2] = ((value >> 16) & 0xff) as u8;
-    blob[offset + 3] = ((value >> 24) & 0xff) as u8;
-    blob[offset + 4] = ((value >> 32) & 0xff) as u8;
-    blob[offset + 5] = ((value >> 40) & 0xff) as u8;
-    blob[offset + 6] = ((value >> 48) & 0xff) as u8;
-    blob[offset + 7] = ((value >> 56) & 0xff) as u8;
+const fn encode_tss_descriptor_low(base: u64, limit: u32) -> u64 {
+    (limit as u64 & 0xffff)
+        | ((base & 0x00ff_ffff) << 16)
+        | (0x89_u64 << 40)
+        | (((limit as u64 >> 16) & 0xf) << 48)
+        | (((base >> 24) & 0xff) << 56)
+}
+
+const fn encode_tss_descriptor_high(base: u64) -> u64 {
+    (base >> 32) & 0xffff_ffff
 }
 
 extern "C" fn ap_entry_trampoline(cpu: *mut CpuCoreContext) -> ! {
-    unsafe { debugcon_write(b'R') };
+    ap_main(cpu)
+}
+
+fn ap_main(cpu: *mut CpuCoreContext) -> ! {
+    unsafe { bootstrap_load_gs_context(cpu) };
+    unsafe { bootstrap_load_tss() };
+    unsafe { bootstrap_init_systemcall() };
+
     unsafe {
-        let _ = (*cpu).apic_id;
-        debugcon_write(b'q');
         ptr::addr_of_mut!((*cpu).online).cast::<u8>().write(1);
-        debugcon_write(b'O');
     }
 
-    loop {
-        unsafe {
-            asm!("hlt", options(nomem, nostack, preserves_flags));
-        }
+    unsafe { bootstrap_jump_to_scheduler() };
+}
+
+unsafe fn bootstrap_load_gs_context(cpu: *const CpuCoreContext) {
+    let gs_context = unsafe {
+        cpu.cast::<u8>()
+            .add(offset_of!(CpuCoreContext, gs_context))
+            .cast::<GsContext>()
+    };
+    let gs_base = gs_context as u64;
+
+    unsafe {
+        bootstrap_write_msr(IA32_GS_BASE, gs_base);
+        bootstrap_write_msr(IA32_KERNEL_GS_BASE, gs_base);
     }
 }
 
-unsafe fn debugcon_write(byte: u8) {
+unsafe fn bootstrap_write_msr(msr: u32, value: u64) {
     unsafe {
         asm!(
-            "out 0xe9, al",
-            in("al") byte,
-            options(nomem, nostack, preserves_flags)
+            "wrmsr",
+            in("ecx") msr,
+            in("eax") value as u32,
+            in("edx") (value >> 32) as u32,
+            options(nostack, preserves_flags)
         );
+    }
+}
+
+unsafe fn bootstrap_load_tss() {
+    unsafe {
+        asm!(
+            "ltr ax",
+            in("ax") TEMP_TSS_SELECTOR,
+            options(nostack, preserves_flags)
+        );
+    }
+}
+
+unsafe fn bootstrap_init_systemcall() {
+    let efer = unsafe { bootstrap_read_msr(IA32_EFER) } | EFER_SCE;
+    let star = ((SYSCALL_SYSRET_BASE as u64) << 48) | ((SYSCALL_KERNEL_CS as u64) << 32);
+    let lstar = bootstrap_syscall_entry();
+
+    unsafe {
+        bootstrap_write_msr(IA32_EFER, efer);
+        bootstrap_write_msr(IA32_FMASK, RFLAGS_INTERRUPT_FLAG);
+        bootstrap_write_msr(IA32_STAR, star);
+        bootstrap_write_msr(IA32_LSTAR, lstar);
+    }
+}
+
+unsafe fn bootstrap_read_msr(msr: u32) -> u64 {
+    let low: u32;
+    let high: u32;
+
+    unsafe {
+        asm!(
+            "rdmsr",
+            in("ecx") msr,
+            out("eax") low,
+            out("edx") high,
+            options(nostack, preserves_flags)
+        );
+    }
+
+    ((high as u64) << 32) | (low as u64)
+}
+
+fn bootstrap_syscall_entry() -> u64 {
+    let entry: u64;
+
+    unsafe {
+        asm!(
+            "lea {entry}, [rip + {syscall_entry}]",
+            entry = out(reg) entry,
+            syscall_entry = sym crate::systemcall::entry::syscall_entry,
+            options(nostack, preserves_flags)
+        );
+    }
+
+    entry
+}
+
+unsafe fn bootstrap_jump_to_scheduler() -> ! {
+    unsafe {
+        asm!("jmp {}", sym thread::scheduling::run, options(noreturn));
     }
 }

@@ -40,7 +40,7 @@ use crate::filesystem::vfs::VirtualFS;
 use crate::misc::others::enable_sse;
 use crate::misc::{framebuffer, logging, mouse, time};
 use crate::process::manager::MANAGER;
-use crate::smp::{init_bsp, start_application_processors};
+use crate::smp::{init_bsp, release_application_processors, start_application_processors};
 use crate::terminal::misc::clear;
 use bootloader_api::BootInfo;
 use bootloader_api::{BootloaderConfig, config::Mapping};
@@ -96,11 +96,8 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     mouse::init();
     log::info!("init: mouse init done");
     start_application_processors();
-    log::info!("init: smp aps ready");
-
-    log::info!("init: clearing terminal");
     clear();
-    log::info!("init: entering scheduler");
+    release_application_processors();
     thread::scheduling::run();
 }
 
