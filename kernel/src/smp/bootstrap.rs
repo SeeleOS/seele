@@ -1,4 +1,9 @@
-use core::{arch::asm, hint::spin_loop, mem::offset_of, ptr};
+use core::{
+    arch::asm,
+    hint::spin_loop,
+    mem::offset_of,
+    ptr,
+};
 
 use bootloader_api::info::MemoryRegionKind;
 use conquer_once::spin::OnceCell;
@@ -435,12 +440,11 @@ fn prepare_ap_startup_page(phys_addr: u64, cpu: *mut CpuCoreContext) {
     let bsp_cr3 = Cr3::read().0.start_address().as_u64();
     let entry = ap_entry_trampoline as *const () as usize as u64;
     let stack_top = unsafe { (*cpu).gs_context.kernel_stack_top };
-    let bootstrap_stack_top = phys_addr + Size4KiB::SIZE;
     let gdt_base = (phys_addr + GDT_OFFSET as u64) as u32;
     let long_mode_addr = (phys_addr + LONG_MODE_OFFSET as u64) as u32;
 
     log::info!(
-        "smp: startup trampoline bsp_cr3={bsp_cr3:#x} bootstrap_stack_top={bootstrap_stack_top:#x} stack_top={stack_top:#x} entry={entry:#x}"
+        "smp: startup trampoline bsp_cr3={bsp_cr3:#x} stack_top={stack_top:#x} entry={entry:#x}"
     );
 
     unsafe {
@@ -518,7 +522,7 @@ fn prepare_ap_startup_page(phys_addr: u64, cpu: *mut CpuCoreContext) {
         );
         ptr::write_unaligned(dst.add(TEMP_CR3_OFFSET) as *mut u64, bsp_cr3);
         ptr::write_unaligned(dst.add(BSP_CR3_OFFSET) as *mut u64, bsp_cr3);
-        ptr::write_unaligned(dst.add(STACK_OFFSET) as *mut u64, bootstrap_stack_top);
+        ptr::write_unaligned(dst.add(STACK_OFFSET) as *mut u64, stack_top);
         ptr::write_unaligned(dst.add(ENTRY_OFFSET) as *mut u64, entry);
         ptr::write_unaligned(dst.add(CPU_CONTEXT_OFFSET) as *mut u64, cpu as u64);
     }
