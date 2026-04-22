@@ -35,6 +35,7 @@ const AP_STARTUP_MIN_ADDR: u64 = 0x8_000;
 const AP_STARTUP_MAX_ADDR: u64 = 0xA_0000;
 const AP_WAKE_SPINS: usize = 10_000_000;
 const INIT_IPI_DELAY_MS: u64 = 10;
+const STARTUP_IPI_DELAY_US: u64 = 200;
 const GDT_CODE32_TEMPLATE: u64 = 0x00cf9a000000ffff;
 const GDT_DATA32_TEMPLATE: u64 = 0x00cf92000000ffff;
 const GDT_CODE64: u64 = 0x00af9a000000ffff;
@@ -547,6 +548,8 @@ fn wake_application_processor(apic_id: u32, startup_vector: u8) {
     send_init_ipi(apic_id);
     spin_for_ms(INIT_IPI_DELAY_MS);
     send_startup_ipi(apic_id, startup_vector);
+    spin_for_us(STARTUP_IPI_DELAY_US);
+    send_startup_ipi(apic_id, startup_vector);
 }
 
 fn send_init_ipi(apic_id: u32) {
@@ -569,6 +572,13 @@ fn send_startup_ipi(apic_id: u32, startup_vector: u8) {
 
 fn spin_for_ms(milliseconds: u64) {
     let deadline = Time::since_boot().add_ms(milliseconds);
+    while Time::since_boot() < deadline {
+        spin_loop();
+    }
+}
+
+fn spin_for_us(microseconds: u64) {
+    let deadline = Time::since_boot().add_ns(microseconds.saturating_mul(1_000));
     while Time::since_boot() < deadline {
         spin_loop();
     }
