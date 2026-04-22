@@ -1,9 +1,8 @@
-use futures_util::StreamExt;
-use pc_keyboard::DecodedKey;
+use pc_keyboard::{DecodedKey, KeyEvent, KeyState};
 
 use crate::keyboard::{
-    char_processing::process_char, encode_linux_raw_byte, ps2::_PS2_KEYBOARD,
-    raw_key_processing::process_key, scancode_stream::ScancodeStream,
+    SCANCODE_QUEUE, char_processing::process_char, encode_linux_raw_byte, ps2::_PS2_KEYBOARD,
+    raw_key_processing::process_key,
 };
 use crate::{
     evdev::push_keyboard_event,
@@ -11,13 +10,11 @@ use crate::{
     terminal::linux_kd::{KeyboardMode, linux_keycode_from_keycode},
     thread::THREAD_MANAGER,
 };
-use pc_keyboard::{KeyEvent, KeyState};
 
-pub async fn process_keypresses() {
-    let mut scancodes = ScancodeStream;
+pub fn process_pending_scancodes() {
+    let queue = SCANCODE_QUEUE.get().unwrap();
 
-    // loop through scancodes infinitely
-    while let Some(scancode) = scancodes.next().await {
+    while let Some(scancode) = queue.pop() {
         let active_tty = get_active_tty();
         active_tty.push_raw_byte(encode_linux_raw_byte(scancode));
         THREAD_MANAGER.get().unwrap().lock().wake_keyboard();

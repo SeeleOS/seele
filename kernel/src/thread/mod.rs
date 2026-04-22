@@ -10,7 +10,6 @@ use crate::{
 };
 
 pub mod clone;
-pub mod future;
 pub mod manager;
 pub mod misc;
 pub mod scheduling;
@@ -26,12 +25,23 @@ pub fn init() {
     let mut thread_manager = THREAD_MANAGER
         .get_or_init(|| Mutex::new(ThreadManager::default()))
         .lock();
-    thread_manager.init();
-    set_current_thread(Some(Thread::empty()));
+    let idle_thread = Thread::empty();
+    thread_manager.init(idle_thread.clone());
+    set_current_thread(Some(idle_thread));
 }
 
 pub type ThreadRef = Arc<Mutex<Thread>>;
 
 pub fn get_current_thread() -> ThreadRef {
     current_thread()
+}
+
+pub fn scheduler_thread() -> ThreadRef {
+    THREAD_MANAGER
+        .get()
+        .unwrap()
+        .lock()
+        .idle_thread
+        .clone()
+        .expect("scheduler thread not initialized")
 }

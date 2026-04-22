@@ -54,7 +54,7 @@ impl Snapshot {
         let mut snp = Self::default();
         unsafe {
             core::arch::asm!(
-                // Executor snapshots only need precise callee-saved registers and
+                // Scheduler snapshots only need precise callee-saved registers and
                 // control state. Use rax as the output base so the live rdi value
                 // is captured instead of being overwritten by the snapshot pointer.
                 "mov [rax + {R15_OFF}], r15",

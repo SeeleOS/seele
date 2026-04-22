@@ -5,7 +5,7 @@ use crate::{
     misc::snapshot::Snapshot,
     object::linux_anon::wake_expired_timerfds_with_manager,
     process::manager::MANAGER,
-    thread::{THREAD_MANAGER, scheduling::return_to_executor, snapshot::ThreadSnapshotType},
+    thread::{THREAD_MANAGER, scheduling::return_to_scheduler, snapshot::ThreadSnapshotType},
 };
 
 #[unsafe(naked)]
@@ -71,7 +71,7 @@ pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
         return;
     }
 
-    return_to_executor(snapshot, ThreadSnapshotType::Thread);
+    return_to_scheduler(snapshot, ThreadSnapshotType::Thread);
 
     unreachable!();
 }

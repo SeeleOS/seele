@@ -20,12 +20,12 @@ impl ThreadSnapshot {
     ) {
         without_interrupts(|| {
             if let Some(source) = source {
-                if matches!(source.snapshot_type, ThreadSnapshotType::Executor) {
+                if matches!(source.snapshot_type, ThreadSnapshotType::Scheduler) {
                     // Saves the current RSP, which have the RIP saved
                     // on the stacktop when we called switch_from()
-                    // So when we use jump_to_executor(), it will load
+                    // So when we use jump_to_scheduler(), it will load
                     // the RSP, get the RIP, and when RET back
-                    source.save_executor_rsp();
+                    source.save_scheduler_rsp();
                 }
 
                 // Saves the current state of the system (snapshot)
@@ -43,7 +43,7 @@ impl ThreadSnapshot {
         match self.snapshot_type {
             ThreadSnapshotType::Thread => self.jump_user(),
             ThreadSnapshotType::Kernel => self.jump_kernel(),
-            ThreadSnapshotType::Executor => self.jump_to_executor(),
+            ThreadSnapshotType::Scheduler => self.jump_to_scheduler(),
         }
     }
 
@@ -81,7 +81,7 @@ impl ThreadSnapshot {
     }
 
     #[unsafe(naked)]
-    extern "C" fn save_executor_rsp(&mut self) {
+    extern "C" fn save_scheduler_rsp(&mut self) {
         naked_asm!(
             "mov [rdi + {K_RSP_OFF}], rsp",
             "ret",
@@ -90,7 +90,7 @@ impl ThreadSnapshot {
     }
 
     #[unsafe(naked)]
-    extern "C" fn jump_to_executor(&mut self) {
+    extern "C" fn jump_to_scheduler(&mut self) {
         naked_asm!(
             // Loads the kernel stack so it wont messup the user stack
             "mov rsp, [rdi + {K_RSP_OFF}]",

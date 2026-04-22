@@ -5,7 +5,7 @@ use crate::{
     systemcall::utils::SyscallError,
     thread::{
         THREAD_MANAGER, get_current_thread, misc::with_current_thread,
-        scheduling::return_to_executor_no_save,
+        scheduling::return_to_scheduler_no_save,
     },
 };
 use x86_64::registers::model_specific::FsBase;
@@ -47,7 +47,7 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
             .cleanup_exited_threads();
         // Its fine to no_save becuase we've already saved everything manually
         // And returned the value (snapshot.rax = result)
-        return_to_executor_no_save();
+        return_to_scheduler_no_save();
     }
 }
 

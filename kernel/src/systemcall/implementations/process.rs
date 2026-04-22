@@ -17,7 +17,7 @@ use crate::{
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
         THREAD_MANAGER, get_current_thread,
-        scheduling::return_to_executor_no_save,
+        scheduling::return_to_scheduler_no_save,
         yielding::{BlockType, WakeType, finish_block_current, prepare_block_current},
     },
 };
@@ -200,12 +200,12 @@ define_syscall!(Execve, |path_str: String,
 
 define_syscall!(Exit, |exit_code: u64| {
     terminate_process(get_current_process(), exit_code);
-    return_to_executor_no_save();
+    return_to_scheduler_no_save();
 });
 
 define_syscall!(ExitGroup, |exit_code: u64| {
     terminate_process(get_current_process(), exit_code);
-    return_to_executor_no_save();
+    return_to_scheduler_no_save();
 });
 
 define_syscall!(Fork, {

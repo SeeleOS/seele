@@ -4,7 +4,6 @@ use spin::Mutex;
 use crate::{
     process::{Process, ProcessRef},
     signal::Signals,
-    task::task::TaskID,
     thread::{
         ThreadRef,
         misc::{SnapshotState, State, ThreadID},
@@ -19,7 +18,7 @@ pub struct Thread {
     pub id: ThreadID,
     pub snapshot_state: SnapshotState,
     pub snapshot: ThreadSnapshot,
-    pub executor_snapshot: ThreadSnapshot,
+    pub scheduler_snapshot: ThreadSnapshot,
     pub state: State,
     // Kernel stack for the cpu to switch to a clean stack on interrupts
     // not to be confused with the kernel_rsp in ThreadSnapshot
@@ -28,7 +27,6 @@ pub struct Thread {
     pub saved_blocked_signals: Vec<Signals>,
     pub blocked_signals: Signals,
     pub clear_child_tid: u64,
-    pub task_id: Option<TaskID>,
     pub robust_list_head: u64,
     pub robust_list_len: usize,
     pub rseq_area: u64,
@@ -48,12 +46,11 @@ impl Default for Thread {
             parent: Process::empty(),
             id: ThreadID::default(),
             snapshot: ThreadSnapshot::default(),
-            executor_snapshot: ThreadSnapshot::new_executor(),
+            scheduler_snapshot: ThreadSnapshot::new_scheduler(),
             state: State::Ready,
             kernel_stack_top: 0,
             blocked_signals: Signals::default(),
             clear_child_tid: 0,
-            task_id: None,
             robust_list_head: 0,
             robust_list_len: 0,
             rseq_area: 0,

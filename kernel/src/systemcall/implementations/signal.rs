@@ -4,7 +4,7 @@ use crate::process::misc::ProcessID;
 use crate::signal::action::{SignalHandlingType, Signals};
 use crate::systemcall::utils::*;
 use crate::thread::misc::{SnapshotState, ThreadID};
-use crate::thread::scheduling::return_to_executor_no_save;
+use crate::thread::scheduling::return_to_scheduler_no_save;
 use crate::thread::{THREAD_MANAGER, get_current_thread};
 use crate::{
     define_syscall,
@@ -401,7 +401,7 @@ define_syscall!(RtSigreturn, {
     get_current_thread().lock().snapshot_state = SnapshotState::Normal;
     get_current_thread().lock().restore_blocked_signals();
 
-    return_to_executor_no_save();
+    return_to_scheduler_no_save();
 });
 
 define_syscall!(SendSignalToAll, |signal: Signal| {

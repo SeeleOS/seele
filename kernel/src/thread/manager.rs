@@ -1,4 +1,8 @@
-use alloc::{collections::btree_map::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{
+    collections::{btree_map::BTreeMap, vec_deque::VecDeque},
+    sync::Arc,
+    vec::Vec,
+};
 use core::mem;
 use spin::Mutex;
 
@@ -8,10 +12,8 @@ use crate::{
     signal::{Signal, Signals},
     smp::current_thread,
     systemcall::implementations::wake_futex_for_process,
-    task::{TASK_SPAWNER, task::Task},
     thread::{
         ThreadRef,
-        future::ThreadFuture,
         misc::{State, ThreadID},
         thread::Thread,
         yielding::{BlockType, BlockedQueues},
@@ -28,28 +30,53 @@ struct PendingThreadExit {
 pub struct ThreadManager {
     pub threads: BTreeMap<ThreadID, ThreadRef>,
     pub idle_thread: Option<ThreadRef>,
+    pub ready_queue: VecDeque<ThreadRef>,
     pub zombies: Vec<ThreadRef>,
     pending_thread_exits: Vec<PendingThreadExit>,
     pub blocked_queues: BlockedQueues,
 }
 
 impl ThreadManager {
-    pub fn init(&mut self) {}
+    pub fn init(&mut self, idle_thread: ThreadRef) {
+        self.idle_thread = Some(idle_thread);
+    }
 
     pub fn spawn(&mut self, thread: Thread) -> ThreadRef {
         let id = thread.id;
         let thread = Arc::new(Mutex::new(thread));
 
-        self.threads.insert(id, thread);
-
-        let thread = self.threads.get_mut(&id).unwrap();
-        let task = Task::new(ThreadFuture(thread.clone()));
-        thread.lock().task_id = Some(task.id);
+        self.threads.insert(id, thread.clone());
 
         log::debug!("thread spawn: {:?}", id);
-        TASK_SPAWNER.get().unwrap().lock().spawn(task);
+        self.push_ready(thread.clone());
 
-        thread.clone()
+        thread
+    }
+
+    pub fn push_ready(&mut self, thread: ThreadRef) {
+        if self
+            .ready_queue
+            .iter()
+            .any(|queued| Arc::ptr_eq(queued, &thread))
+        {
+            return;
+        }
+
+        self.ready_queue.push_back(thread);
+    }
+
+    pub fn pop_ready(&mut self) -> Option<ThreadRef> {
+        while let Some(thread) = self.ready_queue.pop_front() {
+            if matches!(thread.lock().state, State::Ready) {
+                return Some(thread);
+            }
+        }
+
+        None
+    }
+
+    pub fn has_ready_threads(&self) -> bool {
+        !self.ready_queue.is_empty()
     }
 
     pub fn kill_all_except(&mut self, thread: ThreadRef) {
@@ -92,6 +119,8 @@ impl ThreadManager {
             thread.state = State::Zombie;
             (process, clear_child_tid)
         };
+
+        self.remove_from_blocked_queues(&thread);
 
         if clear_child_tid != 0 {
             self.pending_thread_exits.push(PendingThreadExit {

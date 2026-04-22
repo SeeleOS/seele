@@ -11,7 +11,7 @@ use crate::{
         misc::with_current_process,
     },
     signal::Signal,
-    thread::{THREAD_MANAGER, misc::with_current_thread, scheduling::return_to_executor_no_save},
+    thread::{THREAD_MANAGER, misc::with_current_thread, scheduling::return_to_scheduler_no_save},
 };
 
 pub fn init_exception_interrupts(idt: &mut InterruptDescriptorTable) {
@@ -88,9 +88,9 @@ pub fn handle_usermode_exception(stackframe: &InterruptStackFrame, sig: Signal) 
         if current_pid == 32 {
             crate::s_println!("signal cleanup done path=exception pid={}", current_pid);
         }
-        return_to_executor_no_save();
+        return_to_scheduler_no_save();
     }
 
     terminate_process(get_current_process(), sig as u64);
-    return_to_executor_no_save();
+    return_to_scheduler_no_save();
 }

@@ -23,7 +23,6 @@ pub mod process;
 pub mod smp;
 pub mod socket;
 pub mod systemcall;
-pub mod task;
 pub mod terminal;
 pub mod thread;
 pub use misc::signal;
@@ -85,8 +84,6 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
     log::info!("init: syscall ready");
     acpi::init(bootinfo.rsdp_addr.into_option().unwrap());
     log::info!("init: acpi ready");
-    let mut executor = task::init();
-    log::info!("init: kernel task executor ready");
     thread::init();
     MANAGER.lock().init();
     log::info!("init: multitasking ready");
@@ -103,8 +100,8 @@ pub fn init(bootinfo: &'static mut BootInfo) -> ! {
 
     log::info!("init: clearing terminal");
     clear();
-    log::info!("init: entering executor");
-    executor.run();
+    log::info!("init: entering scheduler");
+    thread::scheduling::run();
 }
 
 #[cfg(test)]

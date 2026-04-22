@@ -1,11 +1,13 @@
-use crate::keyboard::scancode_stream::{SCANCODE_QUEUE, WAKER};
+use conquer_once::spin::OnceCell;
+use crossbeam_queue::ArrayQueue;
 
 pub mod char_processing;
-pub mod decoding_task;
+pub mod decoding;
 pub mod key_to_escape_sequence;
 pub mod ps2;
 pub mod raw_key_processing;
-pub mod scancode_stream;
+
+pub static SCANCODE_QUEUE: OnceCell<ArrayQueue<u8>> = OnceCell::uninit();
 
 pub(super) fn encode_linux_raw_byte(scancode: u8) -> u8 {
     match scancode {
@@ -25,7 +27,14 @@ pub fn init() {
 pub(crate) fn push_scancode(scancode: u8) {
     let queue = SCANCODE_QUEUE.get().unwrap();
     let _ = queue.push(scancode);
+}
 
-    // Defer queue consumers to task context instead of doing thread wakeups on the IRQ stack.
-    WAKER.wake();
+pub fn has_pending_scancodes() -> bool {
+    SCANCODE_QUEUE
+        .try_get()
+        .is_ok_and(|queue| !queue.is_empty())
+}
+
+pub fn process_pending_scancodes() {
+    decoding::process_pending_scancodes();
 }

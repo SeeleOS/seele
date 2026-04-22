@@ -59,9 +59,8 @@ pub enum ThreadSnapshotType {
     Thread,
     // Snapshot of a blocked kernel context (e.g. syscall blocking)
     Kernel,
-    // Snapshot for the poll()
-    // function of the thread
-    Executor,
+    // Snapshot for the scheduler context of the thread.
+    Scheduler,
 }
 
 impl ThreadSnapshot {
@@ -107,10 +106,10 @@ impl ThreadSnapshot {
         }
     }
 
-    pub fn new_executor() -> Self {
+    pub fn new_scheduler() -> Self {
         Self {
             inner: Snapshot::default(),
-            snapshot_type: ThreadSnapshotType::Executor,
+            snapshot_type: ThreadSnapshotType::Scheduler,
             kernel_rsp: allocate_kernel_stack(16).finish().as_u64(),
             fx_state: FxState::capture_current(),
             fs_base: 0,

@@ -8,10 +8,9 @@ use crate::{
     },
     polling::event::PollableEvent,
     process::{manager::get_current_process, misc::ProcessID},
-    task::TASK_SPAWNER,
     thread::{
         THREAD_MANAGER, ThreadRef, manager::ThreadManager, misc::State,
-        scheduling::return_to_executor_from_current,
+        scheduling::return_to_scheduler_from_current,
     },
 };
 
@@ -121,7 +120,7 @@ impl ThreadManager {
         }
     }
 
-    fn remove_from_blocked_queues(&mut self, thread: &ThreadRef) {
+    pub(crate) fn remove_from_blocked_queues(&mut self, thread: &ThreadRef) {
         self.blocked_queues
             .keyboard
             .retain(|t| !Arc::ptr_eq(t, thread));
@@ -154,11 +153,8 @@ impl ThreadManager {
         let mut locked_thread = thread.lock();
         if matches!(locked_thread.state, State::Blocked(_)) {
             locked_thread.state = State::Ready;
-            let task_id = locked_thread.task_id;
             drop(locked_thread);
-            if let Some(task_id) = task_id {
-                TASK_SPAWNER.get().unwrap().lock().wake_existing(task_id);
-            }
+            self.push_ready(thread);
         }
     }
 
@@ -224,7 +220,7 @@ pub fn block(thread_ref: ThreadRef, block_type: BlockType) {
         thread_manager.block(thread_ref, block_type);
     }
 
-    return_to_executor_from_current();
+    return_to_scheduler_from_current();
 }
 
 fn current_thread_ref() -> ThreadRef {
@@ -253,7 +249,7 @@ pub fn cancel_block(thread_ref: &ThreadRef) {
 }
 
 pub fn finish_block_current() {
-    return_to_executor_from_current();
+    return_to_scheduler_from_current();
 }
 
 pub fn block_current(block_type: BlockType) {

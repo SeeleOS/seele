@@ -1,11 +1,6 @@
-use core::{
-    pin::Pin,
-    sync::atomic::{AtomicBool, Ordering},
-    task::{Context, Poll},
-};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use alloc::sync::Arc;
-use futures_util::{Stream, StreamExt, task::AtomicWaker};
 use heapless::Deque;
 use ps2_mouse::Mouse;
 use spin::Mutex;
@@ -39,28 +34,6 @@ lazy_static::lazy_static! {
 
 static MOUSE_PENDING: AtomicBool = AtomicBool::new(false);
 static MOUSE_EVDEV_PENDING: AtomicBool = AtomicBool::new(false);
-static MOUSE_WAKER: AtomicWaker = AtomicWaker::new();
-
-struct MouseInterruptStream;
-
-impl Stream for MouseInterruptStream {
-    type Item = ();
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if MOUSE_PENDING.swap(false, Ordering::AcqRel) {
-            return Poll::Ready(Some(()));
-        }
-
-        MOUSE_WAKER.register(cx.waker());
-
-        if MOUSE_PENDING.swap(false, Ordering::AcqRel) {
-            MOUSE_WAKER.take();
-            Poll::Ready(Some(()))
-        } else {
-            Poll::Pending
-        }
-    }
-}
 
 pub fn init() {
     init_mouse_packet_decoder();
@@ -69,10 +42,12 @@ pub fn init() {
         .expect("ps2: failed to initialize mouse");
 }
 
-pub async fn process_mouse_events() {
-    let mut interrupts = MouseInterruptStream;
+pub fn has_pending_events() -> bool {
+    MOUSE_PENDING.load(Ordering::Acquire)
+}
 
-    while interrupts.next().await.is_some() {
+pub fn process_pending_mouse_events() {
+    while MOUSE_PENDING.swap(false, Ordering::AcqRel) {
         if MOUSE_EVDEV_PENDING.swap(false, Ordering::AcqRel) {
             MOUSE_EVENT_DEVICE.wake_readers();
         }
@@ -99,7 +74,6 @@ pub extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptSta
         MOUSE_EVDEV_PENDING.store(true, Ordering::Release);
     }
     MOUSE_PENDING.store(true, Ordering::Release);
-    MOUSE_WAKER.wake();
     send_eoi();
 }
 
