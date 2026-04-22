@@ -353,14 +353,13 @@ pub fn start_application_processors() {
 }
 
 pub fn release_application_processors() {
-    let entry = ap_scheduler_entry as *const () as usize as u64;
+    let entry = thread::scheduling::run as *const () as usize as u64;
 
     for processor in topology::application_processors() {
         crate::smp::with_cpu_by_apic_id(processor.apic_id, |cpu| {
             cpu.startup.release_entry.store(entry, Ordering::Release);
         });
     }
-    unsafe { bootstrap_debug_byte(b'Z') };
 }
 
 fn init_ap_startup_page() -> u64 {
@@ -600,16 +599,12 @@ extern "C" fn ap_entry_trampoline(cpu: *mut CpuCoreContext) -> ! {
 }
 
 fn ap_main(cpu: *mut CpuCoreContext) -> ! {
-    unsafe { bootstrap_debug_byte(b'q') };
     unsafe { bootstrap_load_gs_context(cpu) };
     unsafe { bootstrap_load_tss() };
-    unsafe { bootstrap_debug_byte(b't') };
     unsafe { bootstrap_init_systemcall() };
-    unsafe { bootstrap_debug_byte(b'y') };
 
     unsafe {
         ptr::addr_of_mut!((*cpu).online).cast::<u8>().write(1);
-        bootstrap_debug_byte(b'o');
     }
 
     unsafe {
@@ -624,8 +619,6 @@ fn ap_main(cpu: *mut CpuCoreContext) -> ! {
 #[unsafe(naked)]
 extern "C" fn bootstrap_park_until_released() -> ! {
     naked_asm!(
-        "mov al, {parked_marker}",
-        "out 0xe9, al",
         "2:",
         "mov rax, qword ptr gs:[{cpu_context_offset}]",
         "mov rax, qword ptr [rax + {release_entry_offset}]",
@@ -634,14 +627,9 @@ extern "C" fn bootstrap_park_until_released() -> ! {
         "pause",
         "jmp 2b",
         "3:",
-        "mov rcx, rax",
-        "mov al, {released_marker}",
-        "out 0xe9, al",
-        "jmp rcx",
+        "jmp rax",
         cpu_context_offset = const GS_CPU_CONTEXT_OFFSET,
         release_entry_offset = const CPU_RELEASE_ENTRY_OFFSET,
-        parked_marker = const b'u',
-        released_marker = const b'w',
     );
 }
 
@@ -724,25 +712,4 @@ fn bootstrap_syscall_entry() -> u64 {
     }
 
     entry
-}
-
-unsafe fn bootstrap_jump_to_scheduler() -> ! {
-    unsafe {
-        bootstrap_debug_byte(b's');
-        asm!("jmp {}", sym thread::scheduling::run, options(noreturn));
-    }
-}
-
-extern "C" fn ap_scheduler_entry() -> ! {
-    unsafe { bootstrap_jump_to_scheduler() }
-}
-
-unsafe fn bootstrap_debug_byte(byte: u8) {
-    unsafe {
-        asm!(
-            "out 0xe9, al",
-            in("al") byte,
-            options(nomem, nostack, preserves_flags)
-        );
-    }
 }
