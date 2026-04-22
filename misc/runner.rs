@@ -85,7 +85,7 @@ fn main() {
         "if=pflash,format=raw,unit=0,file={},readonly=on",
         code.display()
     ));
-    cmd.arg("-no-reboot").arg("-no-shutdown");
+    cmd.arg("-no-reboot").arg("-action").arg("reboot=shutdown");
     if let Some(path) = &debug_log {
         cmd.arg("-d").arg("int,cpu_reset,guest_errors");
         cmd.arg("-D").arg(path);
