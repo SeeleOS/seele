@@ -30,6 +30,17 @@ lazy_static! {
 
 pub fn init() {
     log::info!("interrupts: init start");
+    init_local();
+    io_apic::init();
+
+    log::info!("interrupts: init done");
+}
+
+pub fn init_ap() {
+    init_local();
+}
+
+fn init_local() {
     IDT.load();
 
     unsafe {
@@ -37,10 +48,6 @@ pub fn init() {
             cpu.local_apic.enable();
         });
     };
-
-    io_apic::init();
-
-    log::info!("interrupts: init done");
 }
 
 pub fn default_local_apic() -> LocalApic {

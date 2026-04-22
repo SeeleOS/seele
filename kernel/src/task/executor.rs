@@ -1,6 +1,7 @@
 use core::task::{Context, Poll, Waker};
 
 use alloc::{collections::btree_map::BTreeMap, sync::Arc};
+use conquer_once::spin::OnceCell;
 use crossbeam_queue::ArrayQueue;
 use spin::Mutex;
 use x86_64::instructions::interrupts::{self, enable_and_hlt};
@@ -10,6 +11,13 @@ use crate::task::{
     spawner::TaskSpawner,
     task::{Task, TaskID, TaskWaker},
 };
+
+struct ExecutorShared {
+    tasks: Arc<Mutex<BTreeMap<TaskID, Task>>>,
+    task_queue: Arc<ArrayQueue<TaskID>>,
+}
+
+static EXECUTOR_SHARED: OnceCell<ExecutorShared> = OnceCell::uninit();
 
 // When a task was awoken, the taskid will be pushed to the
 // task queue to be executed.
@@ -21,15 +29,19 @@ pub struct Executor {
 
 impl Default for Executor {
     fn default() -> Self {
-        let tasks = Arc::new(Mutex::new(BTreeMap::new()));
-        let task_queue = Arc::new(ArrayQueue::new(128));
+        let shared = EXECUTOR_SHARED.get_or_init(|| {
+            let tasks = Arc::new(Mutex::new(BTreeMap::new()));
+            let task_queue = Arc::new(ArrayQueue::new(128));
 
-        TASK_SPAWNER
-            .get_or_init(|| Mutex::new(TaskSpawner::new(tasks.clone(), task_queue.clone())));
+            TASK_SPAWNER
+                .get_or_init(|| Mutex::new(TaskSpawner::new(tasks.clone(), task_queue.clone())));
+
+            ExecutorShared { tasks, task_queue }
+        });
 
         Self {
-            tasks,
-            task_queue,
+            tasks: shared.tasks.clone(),
+            task_queue: shared.task_queue.clone(),
             wakers: BTreeMap::new(),
         }
     }

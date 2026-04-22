@@ -32,3 +32,7 @@ pub fn init() -> Executor {
 
     executor
 }
+
+pub fn secondary_executor() -> Executor {
+    Executor::default()
+}

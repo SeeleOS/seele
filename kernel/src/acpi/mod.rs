@@ -6,6 +6,7 @@ use crate::acpi::handler::ACPIHandler;
 pub mod handler;
 
 pub static ACPI_TABLE: OnceCell<AcpiTables<ACPIHandler>> = OnceCell::uninit();
+pub static RSDP_ADDR: OnceCell<u64> = OnceCell::uninit();
 
 pub fn init(rsdp_addr: u64) {
     log::debug!("acpi: init start");
@@ -16,5 +17,6 @@ pub fn init(rsdp_addr: u64) {
                 .expect("Failed to parse ACPI Table from RSDT")
         })
         .expect("Failed to initalize ACPI Table");
+    RSDP_ADDR.get_or_init(|| rsdp_addr);
     log::debug!("acpi: init done");
 }

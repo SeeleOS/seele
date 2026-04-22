@@ -20,6 +20,7 @@ pub mod utils;
 
 pub static PHYSICAL_MEMORY_OFFSET: OnceCell<u64> = OnceCell::uninit();
 pub static USABLE_MEMORY_BYTES: OnceCell<u64> = OnceCell::uninit();
+pub static MEMORY_REGIONS: OnceCell<&'static MemoryRegions> = OnceCell::uninit();
 
 pub fn init(physical_memory_offset: u64, memory_regions: &'static MemoryRegions) {
     log::debug!("memory: init offset {:#x}", physical_memory_offset);
@@ -36,6 +37,7 @@ pub fn init(physical_memory_offset: u64, memory_regions: &'static MemoryRegions)
     MAPPER.get_or_init(|| mapper.clone());
     FRAME_ALLOCATOR.get_or_init(|| frame_allocator.clone());
     PHYSICAL_MEMORY_OFFSET.get_or_init(|| physical_memory_offset);
+    MEMORY_REGIONS.get_or_init(|| memory_regions);
     USABLE_MEMORY_BYTES.get_or_init(|| {
         memory_regions
             .iter()

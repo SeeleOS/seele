@@ -1,13 +1,13 @@
 use alloc::boxed::Box;
 use core::arch::x86_64::__cpuid;
-use core::sync::atomic::{AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 use x2apic::lapic::LocalApic;
 use x86_64::{
     PrivilegeLevel, VirtAddr,
     instructions::tables::load_tss,
     registers::{
-        model_specific::KernelGsBase,
+        model_specific::{GsBase, KernelGsBase},
         segmentation::{CS, DS, ES, SS, Segment},
     },
     structures::{
@@ -41,16 +41,17 @@ pub struct CpuCoreContext {
     pub index: usize,
     pub apic_id: u32,
     pub is_bsp: bool,
+    pub online: AtomicBool,
     pub gs_context: GsContext,
     pub local_apic: LocalApic,
     pub current_thread: Option<ThreadRef>,
     pub current_process: Option<ProcessRef>,
-    segments: CpuSegments,
+    pub(crate) segments: CpuSegments,
 }
 
-struct CpuSegments {
-    gdt: GlobalDescriptorTable,
-    tss: *mut TaskStateSegment,
+pub(crate) struct CpuSegments {
+    pub(crate) gdt: GlobalDescriptorTable,
+    pub(crate) tss: *mut TaskStateSegment,
 }
 
 unsafe impl Send for CpuCoreContext {}
@@ -58,38 +59,48 @@ unsafe impl Sync for CpuCoreContext {}
 
 pub fn init_bsp() {
     let apic_id = current_apic_id_raw();
-    let ctx = Box::leak(Box::new(CpuCoreContext::new(0, apic_id, true)));
+    let ctx = Box::leak(Box::new(CpuCoreContext::new(0, apic_id, true))) as *mut CpuCoreContext;
 
     register_cpu(ctx);
-    load_current_segments();
+    load_segments_for_cpu(unsafe { &*ctx });
     topology::register_bsp(apic_id);
 }
 
 pub fn load_current_segments() {
-    let (gdt, gs_context) = with_current_cpu(|cpu| {
-        (
-            &cpu.segments.gdt as *const GlobalDescriptorTable,
-            &cpu.gs_context as *const GsContext,
-        )
-    });
-
-    unsafe {
-        (*gdt).load();
-        CS::set_reg(kernel_code_selector());
-        SS::set_reg(kernel_data_selector());
-        DS::set_reg(kernel_data_selector());
-        ES::set_reg(kernel_data_selector());
-        load_tss(tss_selector());
-        KernelGsBase::write(VirtAddr::from_ptr(&*gs_context));
-    }
+    let cpu = with_current_cpu(|cpu| cpu as *mut CpuCoreContext);
+    load_segments_for_cpu(unsafe { &*cpu });
 }
 
 pub fn load_current_kernel_gs_base() {
     let gs_context = with_current_cpu(|cpu| &cpu.gs_context as *const GsContext);
 
     unsafe {
-        KernelGsBase::write(VirtAddr::from_ptr(&*gs_context));
+        write_gs_bases(gs_context);
     }
+}
+
+pub fn load_segments_for_cpu(cpu: &'static CpuCoreContext) {
+    unsafe {
+        cpu.segments.gdt.load();
+        CS::set_reg(kernel_code_selector());
+        SS::set_reg(kernel_data_selector());
+        DS::set_reg(kernel_data_selector());
+        ES::set_reg(kernel_data_selector());
+        load_tss(tss_selector());
+        write_gs_bases(&cpu.gs_context);
+    }
+}
+
+fn current_gs_context() -> &'static GsContext {
+    let gs_ptr = GsBase::read().as_u64() as *const GsContext;
+    assert!(!gs_ptr.is_null(), "current GS context not initialized");
+    unsafe { &*gs_ptr }
+}
+
+unsafe fn write_gs_bases(gs_context: *const GsContext) {
+    let address = unsafe { VirtAddr::from_ptr(&*gs_context) };
+    GsBase::write(address);
+    KernelGsBase::write(address);
 }
 
 pub fn current_apic_id() -> u32 {
@@ -105,15 +116,9 @@ pub fn current_cpu_index() -> usize {
 }
 
 pub fn with_current_cpu<R>(f: impl FnOnce(&mut CpuCoreContext) -> R) -> R {
-    let apic_id = current_apic_id_raw();
-    let slot = CPU_BY_APIC_ID
-        .get(apic_id as usize)
-        .unwrap_or_else(|| panic!("unsupported APIC ID {apic_id:#x}"));
-    let ptr = slot.load(Ordering::Acquire);
-    assert!(
-        !ptr.is_null(),
-        "CPU core context for APIC ID {apic_id:#x} not initialized"
-    );
+    let gs_context = current_gs_context();
+    let ptr = gs_context.cpu_context.cast::<CpuCoreContext>();
+    assert!(!ptr.is_null(), "current CPU context not initialized");
     unsafe { f(&mut *ptr) }
 }
 
@@ -145,6 +150,41 @@ pub fn set_current_kernel_stack(stack_top: u64) {
     with_current_cpu(|cpu| unsafe {
         (*cpu.segments.tss).privilege_stack_table[0] = VirtAddr::new(stack_top);
     });
+}
+
+pub fn register_application_processor(index: usize, apic_id: u32) -> *mut CpuCoreContext {
+    let ctx = Box::leak(Box::new(CpuCoreContext::new(index, apic_id, false))) as *mut CpuCoreContext;
+    register_cpu(ctx);
+    ctx
+}
+
+pub fn with_cpu_by_apic_id<R>(apic_id: u32, f: impl FnOnce(&CpuCoreContext) -> R) -> R {
+    let slot = CPU_BY_APIC_ID
+        .get(apic_id as usize)
+        .unwrap_or_else(|| panic!("unsupported APIC ID {apic_id:#x}"));
+    let ptr = slot.load(Ordering::Acquire);
+    assert!(
+        !ptr.is_null(),
+        "CPU core context for APIC ID {apic_id:#x} not initialized"
+    );
+    unsafe { f(&*ptr) }
+}
+
+pub fn mark_current_cpu_online() {
+    with_current_cpu(|cpu| {
+        cpu.online.store(true, Ordering::Release);
+    });
+}
+
+pub fn wait_for_cpu_online(apic_id: u32, spins: usize) -> bool {
+    for _ in 0..spins {
+        if with_cpu_by_apic_id(apic_id, |cpu| cpu.online.load(Ordering::Acquire)) {
+            return true;
+        }
+        core::hint::spin_loop();
+    }
+
+    false
 }
 
 pub fn kernel_code_selector() -> SegmentSelector {
@@ -194,9 +234,11 @@ impl CpuCoreContext {
             index,
             apic_id,
             is_bsp,
+            online: AtomicBool::new(is_bsp),
             gs_context: GsContext {
                 kernel_stack_top: gs_stack_top,
                 user_stack_top: 0,
+                cpu_context: core::ptr::null_mut(),
             },
             local_apic: default_local_apic(),
             current_thread: None,
@@ -206,14 +248,17 @@ impl CpuCoreContext {
     }
 }
 
-fn register_cpu(ctx: &'static mut CpuCoreContext) {
+fn register_cpu(ctx: *mut CpuCoreContext) {
+    unsafe {
+        (*ctx).gs_context.cpu_context = ctx.cast();
+    }
     let slot = CPU_BY_APIC_ID
-        .get(ctx.apic_id as usize)
-        .unwrap_or_else(|| panic!("unsupported APIC ID {:#x}", ctx.apic_id));
-    let previous = slot.swap(ctx as *mut CpuCoreContext, Ordering::AcqRel);
+        .get(unsafe { (*ctx).apic_id as usize })
+        .unwrap_or_else(|| panic!("unsupported APIC ID {:#x}", unsafe { (*ctx).apic_id }));
+    let previous = slot.swap(ctx, Ordering::AcqRel);
     assert!(
         previous.is_null(),
         "CPU core context for APIC ID {:#x} already initialized",
-        ctx.apic_id
+        unsafe { (*ctx).apic_id }
     );
 }

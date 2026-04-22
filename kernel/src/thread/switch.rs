@@ -2,14 +2,12 @@ use core::arch::naked_asm;
 
 use core::mem::offset_of;
 use x86_64::{
-    VirtAddr,
-    instructions::interrupts::without_interrupts,
-    registers::model_specific::{FsBase, KernelGsBase},
+    VirtAddr, instructions::interrupts::without_interrupts, registers::model_specific::FsBase,
 };
 
 use crate::{
     misc::snapshot::Snapshot,
-    smp::with_current_cpu,
+    smp::{load_current_kernel_gs_base, with_current_cpu},
     thread::snapshot::{ThreadSnapshot, ThreadSnapshotType},
 };
 
@@ -50,10 +48,8 @@ impl ThreadSnapshot {
     }
 
     fn update_gs(&mut self) {
-        with_current_cpu(|cpu| {
-            cpu.gs_context.kernel_stack_top = self.kernel_rsp;
-            KernelGsBase::write(VirtAddr::from_ptr(&cpu.gs_context));
-        });
+        with_current_cpu(|cpu| cpu.gs_context.kernel_stack_top = self.kernel_rsp);
+        load_current_kernel_gs_base();
     }
 
     fn save_msr(&mut self) {

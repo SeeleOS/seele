@@ -12,6 +12,7 @@ use x86_64::{
 
 pub static MAPPER: OnceCell<Arc<Mutex<OffsetPageTable<'static>>>> = OnceCell::uninit();
 pub static FRAME_ALLOCATOR: OnceCell<Arc<Mutex<BootinfoFrameAllocator>>> = OnceCell::uninit();
+const LOWER_MEMORY_END: u64 = 0x10_0000;
 
 // initalize the mapper thats based on offset page table
 pub fn init_mapper(physcal_memory_offset: u64) -> OffsetPageTable<'static> {
@@ -50,7 +51,7 @@ impl BootinfoFrameAllocator {
             memory_map,
             free_frames: Vec::new(),
             next_region_index: 0,
-            next_frame_addr: 0,
+            next_frame_addr: LOWER_MEMORY_END,
         }
     }
 
@@ -66,7 +67,7 @@ impl BootinfoFrameAllocator {
                 continue;
             }
 
-            let start = align_up_4k(region.start);
+            let start = align_up_4k(region.start.max(LOWER_MEMORY_END));
             let end = align_down_4k(region.end);
 
             if start >= end {
@@ -137,7 +138,7 @@ impl BootinfoFrameAllocator {
                 continue;
             }
 
-            let start = align_up_4k(region.start);
+            let start = align_up_4k(region.start.max(LOWER_MEMORY_END));
             let end = align_down_4k(region.end);
 
             if start >= end {

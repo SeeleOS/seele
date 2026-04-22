@@ -8,6 +8,10 @@ use std::{
 fn main() {
     let agent_mode = env::args().any(|arg| arg == "--agent");
     let agent_timeout = env::var("SEELE_QEMU_TIMEOUT").unwrap_or_else(|_| "10s".to_string());
+    let machine = env::var("SEELE_QEMU_MACHINE").unwrap_or_else(|_| "q35".to_string());
+    let smp = env::var("SEELE_QEMU_SMP").unwrap_or_else(|_| "2".to_string());
+    let qemu_debug_log = env::var_os("SEELE_QEMU_DEBUG_LOG");
+    let qemu_debugcon = env::var_os("SEELE_QEMU_DEBUGCON");
 
     // read env variables that were set in build script
     let uefi_path = env!("UEFI_PATH");
@@ -23,6 +27,8 @@ fn main() {
     };
     // give the guest 8 GiB of RAM
     cmd.arg("-m").arg("4G");
+    cmd.arg("-machine").arg(&machine);
+    cmd.arg("-smp").arg(&smp);
     // print serial output to the shell
     if agent_mode {
         if let Some(serial_log) = &serial_log {
@@ -37,6 +43,10 @@ fn main() {
     // enable the guest to exit qemu
     cmd.arg("-device")
         .arg("isa-debug-exit,iobase=0xf4,iosize=0x04");
+    if let Some(path) = qemu_debugcon {
+        cmd.arg("-debugcon").arg(format!("file:{}", PathBuf::from(path).display()));
+        cmd.arg("-global").arg("isa-debugcon.iobase=0xe9");
+    }
     cmd.arg("-display")
         .arg(if agent_mode { "none" } else { "sdl" });
 
@@ -70,6 +80,10 @@ fn main() {
         code.display()
     ));
     cmd.arg("-no-reboot").arg("-no-shutdown");
+    if let Some(path) = qemu_debug_log {
+        cmd.arg("-d").arg("int,cpu_reset,guest_errors");
+        cmd.arg("-D").arg(path);
+    }
     // copy vars and enable rw instead of snapshot if you want to store data (e.g. enroll secure boot keys)
     cmd.arg("-drive").arg(format!(
         "if=pflash,format=raw,unit=1,file={},snapshot=on",
