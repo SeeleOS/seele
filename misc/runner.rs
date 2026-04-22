@@ -17,6 +17,11 @@ fn main() {
     let uefi_path = env!("UEFI_PATH");
     let root_disk = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("disk.img");
     let serial_log = agent_mode.then(|| env::temp_dir().join("seele-agent-serial.log"));
+    let keep_debug_log = qemu_debug_log.is_some();
+    let debug_log = qemu_debug_log
+        .as_ref()
+        .map(PathBuf::from)
+        .or_else(|| agent_mode.then(|| env::temp_dir().join("seele-agent-qemu.log")));
 
     let mut cmd = if agent_mode {
         let mut timeout = Command::new("timeout");
@@ -44,7 +49,8 @@ fn main() {
     cmd.arg("-device")
         .arg("isa-debug-exit,iobase=0xf4,iosize=0x04");
     if let Some(path) = qemu_debugcon {
-        cmd.arg("-debugcon").arg(format!("file:{}", PathBuf::from(path).display()));
+        cmd.arg("-debugcon")
+            .arg(format!("file:{}", PathBuf::from(path).display()));
         cmd.arg("-global").arg("isa-debugcon.iobase=0xe9");
     }
     cmd.arg("-display")
@@ -80,7 +86,7 @@ fn main() {
         code.display()
     ));
     cmd.arg("-no-reboot").arg("-no-shutdown");
-    if let Some(path) = qemu_debug_log {
+    if let Some(path) = &debug_log {
         cmd.arg("-d").arg("int,cpu_reset,guest_errors");
         cmd.arg("-D").arg(path);
     }
@@ -106,7 +112,25 @@ fn main() {
     let exit_code = match status.code().unwrap_or(1) {
         0x10 => 0, // success
         0x11 => 1, // failure
-        _ => 2,    // unknown fault
+        _ => {
+            if let Some(path) = &debug_log {
+                report_qemu_fault(path);
+            }
+            2
+        } // unknown fault
     };
+    if !keep_debug_log && let Some(path) = debug_log {
+        let _ = fs::remove_file(path);
+    }
     exit(exit_code);
+}
+
+fn report_qemu_fault(debug_log: &Path) {
+    let Ok(contents) = fs::read_to_string(debug_log) else {
+        return;
+    };
+
+    if contents.contains("Triple fault") {
+        eprintln!("qemu: detected triple fault");
+    }
 }
