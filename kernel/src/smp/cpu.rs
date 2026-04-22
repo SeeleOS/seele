@@ -1,6 +1,6 @@
 use alloc::boxed::Box;
 use core::arch::x86_64::__cpuid;
-use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 
 use x2apic::lapic::LocalApic;
 use x86_64::{
@@ -43,10 +43,15 @@ pub struct CpuCoreContext {
     pub is_bsp: bool,
     pub online: AtomicBool,
     pub gs_context: GsContext,
+    pub(crate) startup: ApStartupState,
     pub local_apic: LocalApic,
     pub current_thread: Option<ThreadRef>,
     pub current_process: Option<ProcessRef>,
     pub(crate) segments: CpuSegments,
+}
+
+pub(crate) struct ApStartupState {
+    pub(crate) release_entry: AtomicU64,
 }
 
 pub(crate) struct CpuSegments {
@@ -240,6 +245,9 @@ impl CpuCoreContext {
                 kernel_stack_top: gs_stack_top,
                 user_stack_top: 0,
                 cpu_context: core::ptr::null_mut(),
+            },
+            startup: ApStartupState {
+                release_entry: AtomicU64::new(0),
             },
             local_apic: default_local_apic(),
             current_thread: None,

@@ -1,8 +1,9 @@
 use core::{
-    arch::asm,
+    arch::{asm, naked_asm},
     hint::spin_loop,
     mem::offset_of,
     ptr,
+    sync::atomic::Ordering,
 };
 
 use bootloader_api::info::MemoryRegionKind;
@@ -23,7 +24,7 @@ use crate::{
     },
     misc::time::Time,
     smp::{
-        cpu::{CpuCoreContext, register_application_processor},
+        cpu::{ApStartupState, CpuCoreContext, register_application_processor},
         gs::GsContext,
         topology, wait_for_cpu_online, with_current_cpu,
     },
@@ -80,6 +81,9 @@ const TRAMPOLINE_SIZE: usize = 328;
 
 static AP_STARTUP_PAGE: OnceCell<u64> = OnceCell::uninit();
 static AP_BOOTSTRAP_CR3: OnceCell<u64> = OnceCell::uninit();
+const GS_CPU_CONTEXT_OFFSET: usize = offset_of!(GsContext, cpu_context);
+const CPU_RELEASE_ENTRY_OFFSET: usize =
+    offset_of!(CpuCoreContext, startup) + offset_of!(ApStartupState, release_entry);
 
 const AP_TRAMPOLINE: [u8; TRAMPOLINE_SIZE] = {
     let mut blob = [0u8; TRAMPOLINE_SIZE];
@@ -333,6 +337,9 @@ pub fn start_application_processors() {
             processor.index
         );
         let cpu = register_application_processor(processor.index, processor.apic_id);
+        unsafe {
+            (*cpu).startup.release_entry.store(0, Ordering::Release);
+        }
         prepare_ap_startup_page(startup_phys, cpu);
         log::info!("smp: waking AP {}", processor.apic_id);
         wake_application_processor(processor.apic_id, startup_vector);
@@ -345,7 +352,16 @@ pub fn start_application_processors() {
     }
 }
 
-pub fn release_application_processors() {}
+pub fn release_application_processors() {
+    let entry = ap_scheduler_entry as *const () as usize as u64;
+
+    for processor in topology::application_processors() {
+        crate::smp::with_cpu_by_apic_id(processor.apic_id, |cpu| {
+            cpu.startup.release_entry.store(entry, Ordering::Release);
+        });
+    }
+    unsafe { bootstrap_debug_byte(b'Z') };
+}
 
 fn init_ap_startup_page() -> u64 {
     let phys_addr = find_ap_startup_page();
@@ -584,15 +600,49 @@ extern "C" fn ap_entry_trampoline(cpu: *mut CpuCoreContext) -> ! {
 }
 
 fn ap_main(cpu: *mut CpuCoreContext) -> ! {
+    unsafe { bootstrap_debug_byte(b'q') };
     unsafe { bootstrap_load_gs_context(cpu) };
     unsafe { bootstrap_load_tss() };
+    unsafe { bootstrap_debug_byte(b't') };
     unsafe { bootstrap_init_systemcall() };
+    unsafe { bootstrap_debug_byte(b'y') };
 
     unsafe {
         ptr::addr_of_mut!((*cpu).online).cast::<u8>().write(1);
+        bootstrap_debug_byte(b'o');
     }
 
-    unsafe { bootstrap_jump_to_scheduler() };
+    unsafe {
+        asm!(
+            "jmp {}",
+            sym bootstrap_park_until_released,
+            options(noreturn)
+        );
+    }
+}
+
+#[unsafe(naked)]
+extern "C" fn bootstrap_park_until_released() -> ! {
+    naked_asm!(
+        "mov al, {parked_marker}",
+        "out 0xe9, al",
+        "2:",
+        "mov rax, qword ptr gs:[{cpu_context_offset}]",
+        "mov rax, qword ptr [rax + {release_entry_offset}]",
+        "test rax, rax",
+        "jnz 3f",
+        "pause",
+        "jmp 2b",
+        "3:",
+        "mov rcx, rax",
+        "mov al, {released_marker}",
+        "out 0xe9, al",
+        "jmp rcx",
+        cpu_context_offset = const GS_CPU_CONTEXT_OFFSET,
+        release_entry_offset = const CPU_RELEASE_ENTRY_OFFSET,
+        parked_marker = const b'u',
+        released_marker = const b'w',
+    );
 }
 
 unsafe fn bootstrap_load_gs_context(cpu: *const CpuCoreContext) {
@@ -678,6 +728,21 @@ fn bootstrap_syscall_entry() -> u64 {
 
 unsafe fn bootstrap_jump_to_scheduler() -> ! {
     unsafe {
+        bootstrap_debug_byte(b's');
         asm!("jmp {}", sym thread::scheduling::run, options(noreturn));
+    }
+}
+
+extern "C" fn ap_scheduler_entry() -> ! {
+    unsafe { bootstrap_jump_to_scheduler() }
+}
+
+unsafe fn bootstrap_debug_byte(byte: u8) {
+    unsafe {
+        asm!(
+            "out 0xe9, al",
+            in("al") byte,
+            options(nomem, nostack, preserves_flags)
+        );
     }
 }
