@@ -1,4 +1,7 @@
-use core::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
+use core::{
+    hint::spin_loop,
+    sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering},
+};
 
 use crate::misc::get_cycles;
 use x86_rtc::Rtc;
@@ -13,21 +16,31 @@ pub const NANOSECONDS_PER_MICROSECOND: u64 = 1_000;
 pub const NANOSECONDS_PER_MILLISECOND: u64 = 1_000_000;
 pub const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
 const DEFAULT_TSC_FREQ_HZ: u64 = 1_000_000_000;
+const MIN_TSC_FREQ_HZ: u64 = 1_000_000;
+const MAX_TSC_FREQ_HZ: u64 = 10_000_000_000;
 const PROFILING: bool = false;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Time(pub u64);
 
+struct TimeCalibration {
+    boot_tsc: u64,
+    tsc_freq_hz: u64,
+    realtime_base_ns: i64,
+}
+
 pub fn init() {
-    BOOT_TSC.store(get_cycles(), Ordering::SeqCst);
-    TSC_FREQ_HZ.store(
-        detect_tsc_frequency_hz().unwrap_or(DEFAULT_TSC_FREQ_HZ),
-        Ordering::SeqCst,
-    );
-    REALTIME_BASE_NS.store(
-        (Rtc::new().get_unix_timestamp() as i64).saturating_mul(NANOSECONDS_PER_SECOND as i64),
-        Ordering::SeqCst,
-    );
+    let rtc = Rtc::new();
+    let calibration = calibrate_timebase(&rtc).unwrap_or_else(|| TimeCalibration {
+        boot_tsc: get_cycles(),
+        tsc_freq_hz: detect_tsc_frequency_hz().unwrap_or(DEFAULT_TSC_FREQ_HZ),
+        realtime_base_ns: (rtc.get_unix_timestamp() as i64)
+            .saturating_mul(NANOSECONDS_PER_SECOND as i64),
+    });
+
+    BOOT_TSC.store(calibration.boot_tsc, Ordering::SeqCst);
+    TSC_FREQ_HZ.store(calibration.tsc_freq_hz, Ordering::SeqCst);
+    REALTIME_BASE_NS.store(calibration.realtime_base_ns, Ordering::SeqCst);
 }
 
 fn nanoseconds_since_boot() -> u64 {
@@ -167,6 +180,34 @@ where
 
 fn detect_tsc_frequency_hz() -> Option<u64> {
     detect_tsc_frequency_from_leaf_0x15().or_else(detect_tsc_frequency_from_leaf_0x16)
+}
+
+fn calibrate_timebase(rtc: &Rtc) -> Option<TimeCalibration> {
+    let (boot_second, boot_tsc) = wait_for_next_rtc_second(rtc, rtc.get_unix_timestamp())?;
+    let (next_second, next_tsc) = wait_for_next_rtc_second(rtc, boot_second)?;
+    let elapsed_seconds = next_second.checked_sub(boot_second)?;
+    let elapsed_cycles = next_tsc.checked_sub(boot_tsc)?;
+    let tsc_freq_hz = ((elapsed_cycles as u128) / (elapsed_seconds as u128)) as u64;
+
+    if !(MIN_TSC_FREQ_HZ..=MAX_TSC_FREQ_HZ).contains(&tsc_freq_hz) {
+        return None;
+    }
+
+    Some(TimeCalibration {
+        boot_tsc,
+        tsc_freq_hz,
+        realtime_base_ns: (boot_second as i64).saturating_mul(NANOSECONDS_PER_SECOND as i64),
+    })
+}
+
+fn wait_for_next_rtc_second(rtc: &Rtc, second: u64) -> Option<(u64, u64)> {
+    loop {
+        let current_second = rtc.get_unix_timestamp();
+        if current_second > second {
+            return Some((current_second, get_cycles()));
+        }
+        spin_loop();
+    }
 }
 
 fn detect_tsc_frequency_from_leaf_0x15() -> Option<u64> {
