@@ -17,7 +17,7 @@ use crate::{
         config::ConfigurateRequest,
         error::ObjectError,
         linux_anon::wake_linux_io_waiters,
-        misc::ObjectResult,
+        misc::{ObjectRef, ObjectResult},
         traits::{Configuratable, Readable, Statable},
     },
     polling::{event::PollableEvent, object::Pollable},
@@ -31,6 +31,7 @@ use crate::{
         SO_TIMESTAMPNS_OLD, SO_TYPE, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_RAW,
         SOL_NETLINK, SOL_SOCKET, SocketError, SocketLike, SocketResult, socket_timeout_option_len,
     },
+    thread::THREAD_MANAGER,
 };
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
@@ -75,6 +76,7 @@ pub struct NetlinkSocketObject {
     address: Mutex<NetlinkSocketAddress>,
     memberships: Mutex<Vec<u32>>,
     recv_queue: Mutex<VecDeque<Vec<u8>>>,
+    self_ref: Mutex<Option<Weak<NetlinkSocketObject>>>,
 }
 
 impl NetlinkSocketObject {
@@ -97,11 +99,38 @@ impl NetlinkSocketObject {
             address: Mutex::new(NetlinkSocketAddress::default()),
             memberships: Mutex::new(Vec::new()),
             recv_queue: Mutex::new(VecDeque::new()),
+            self_ref: Mutex::new(None),
         });
+        *socket.self_ref.lock() = Some(Arc::downgrade(&socket));
         if protocol == NETLINK_KOBJECT_UEVENT {
             NETLINK_SOCKETS.lock().push(Arc::downgrade(&socket));
         }
         Ok(socket)
+    }
+
+    fn self_object(&self) -> Option<ObjectRef> {
+        self.self_ref
+            .lock()
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .map(|socket| socket as ObjectRef)
+    }
+
+    fn wake_read_waiters(&self) {
+        wake_linux_io_waiters();
+        let Some(object) = self.self_object() else {
+            return;
+        };
+        THREAD_MANAGER
+            .get()
+            .unwrap()
+            .lock()
+            .wake_poller(object, PollableEvent::CanBeRead);
+    }
+
+    fn queue_message(&self, message: Vec<u8>) {
+        self.recv_queue.lock().push_back(message);
+        self.wake_read_waiters();
     }
 
     pub fn bind(&self, address: NetlinkSocketAddress) -> SocketResult<()> {
@@ -303,8 +332,7 @@ impl NetlinkSocketObject {
                 core::mem::size_of::<NetlinkErrorMessage>(),
             )
         });
-        self.recv_queue.lock().push_back(bytes);
-        wake_linux_io_waiters();
+        self.queue_message(bytes);
     }
 
     fn is_nonblocking(&self) -> bool {
@@ -328,19 +356,21 @@ pub fn broadcast_kobject_uevent(
     message.extend_from_slice(format!("SEQNUM={seqnum}\0").as_bytes());
 
     let mut sockets = NETLINK_SOCKETS.lock();
-    let mut delivered = false;
+    let mut delivered_sockets = Vec::new();
     sockets.retain(|socket| {
         let Some(socket) = socket.upgrade() else {
             return false;
         };
         if socket.protocol == NETLINK_KOBJECT_UEVENT {
             socket.recv_queue.lock().push_back(message.clone());
-            delivered = true;
+            delivered_sockets.push(socket);
         }
         true
     });
-    if delivered {
-        wake_linux_io_waiters();
+    drop(sockets);
+
+    for socket in delivered_sockets {
+        socket.wake_read_waiters();
     }
 }
 

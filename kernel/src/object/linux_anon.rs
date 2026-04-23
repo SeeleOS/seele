@@ -61,7 +61,7 @@ struct PidFdRegistry {
 
 #[derive(Default)]
 struct TimerFdRegistry {
-    watchers: Vec<Weak<TimerFdObject>>,
+    armed: BTreeMap<(Time, usize), Weak<TimerFdObject>>,
 }
 
 lazy_static::lazy_static! {
@@ -688,15 +688,17 @@ impl TimerFdObject {
             self_ref: Mutex::new(None),
         });
         *timerfd.self_ref.lock() = Some(Arc::downgrade(&timerfd));
-        register_timerfd(&timerfd);
         timerfd
     }
 
     pub fn set_timer(&self, deadline: Option<Time>, interval_ns: u64) {
         let mut state = self.state.lock();
+        let previous_deadline = state.deadline;
         state.deadline = deadline;
         state.interval_ns = interval_ns;
         state.expirations = 0;
+        drop(state);
+        self.update_registry(previous_deadline, deadline);
     }
 
     pub fn current_timer(&self) -> (Option<Time>, u64) {
@@ -728,10 +730,19 @@ impl TimerFdObject {
         state.deadline = Some(deadline);
     }
 
+    fn refresh_state(&self) -> TimerFdState {
+        let (previous_deadline, state) = {
+            let mut state = self.state.lock();
+            let previous_deadline = state.deadline;
+            Self::refresh(&mut state);
+            (previous_deadline, *state)
+        };
+        self.update_registry(previous_deadline, state.deadline);
+        state
+    }
+
     pub fn is_read_ready(&self) -> bool {
-        let mut state = self.state.lock();
-        Self::refresh(&mut state);
-        state.expirations > 0
+        self.refresh_state().expirations > 0
     }
 
     fn self_object(&self) -> Option<ObjectRef> {
@@ -740,6 +751,21 @@ impl TimerFdObject {
             .as_ref()
             .and_then(Weak::upgrade)
             .map(|object| object as ObjectRef)
+    }
+
+    fn self_timerfd(&self) -> Option<Arc<Self>> {
+        self.self_ref.lock().as_ref().and_then(Weak::upgrade)
+    }
+
+    fn update_registry(&self, previous_deadline: Option<Time>, new_deadline: Option<Time>) {
+        if previous_deadline == new_deadline {
+            return;
+        }
+
+        let Some(timerfd) = self.self_timerfd() else {
+            return;
+        };
+        update_timerfd_deadline(&timerfd, previous_deadline, new_deadline);
     }
 
     pub fn wake_waiters(&self) {
@@ -754,30 +780,50 @@ impl TimerFdObject {
     }
 }
 
-fn register_timerfd(timerfd: &Arc<TimerFdObject>) {
-    let mut registry = TIMERFD_REGISTRY.lock();
-    registry
-        .watchers
-        .retain(|watcher| watcher.strong_count() > 0);
-    registry.watchers.push(Arc::downgrade(timerfd));
+fn timerfd_key(timerfd: &Arc<TimerFdObject>) -> usize {
+    Arc::as_ptr(timerfd) as usize
 }
 
-fn timerfds() -> Vec<Arc<TimerFdObject>> {
+fn update_timerfd_deadline(
+    timerfd: &Arc<TimerFdObject>,
+    previous_deadline: Option<Time>,
+    new_deadline: Option<Time>,
+) {
+    let mut registry = TIMERFD_REGISTRY.lock();
+    let key = timerfd_key(timerfd);
+
+    if let Some(previous_deadline) = previous_deadline {
+        registry.armed.remove(&(previous_deadline, key));
+    }
+
+    if let Some(new_deadline) = new_deadline {
+        registry
+            .armed
+            .insert((new_deadline, key), Arc::downgrade(timerfd));
+    }
+}
+
+fn expired_timerfds(now: Time) -> Vec<Arc<TimerFdObject>> {
     let mut registry = TIMERFD_REGISTRY.lock();
     let mut strong = Vec::new();
-    registry.watchers.retain(|watcher| {
+    while let Some((&(deadline, _), _)) = registry.armed.first_key_value() {
+        if deadline > now {
+            break;
+        }
+
+        let Some((_, watcher)) = registry.armed.pop_first() else {
+            break;
+        };
+
         if let Some(timerfd) = watcher.upgrade() {
             strong.push(timerfd);
-            true
-        } else {
-            false
         }
-    });
+    }
     strong
 }
 
 pub fn wake_expired_timerfds_with_manager(manager: &mut ThreadManager) {
-    for timerfd in timerfds() {
+    for timerfd in expired_timerfds(Time::since_boot()) {
         if timerfd.is_read_ready() {
             timerfd.wake_waiters_with_manager(manager);
         }
@@ -813,17 +859,20 @@ impl Readable for TimerFdObject {
         }
 
         loop {
-            let mut state = self.state.lock();
-            Self::refresh(&mut state);
-
+            let state = self.refresh_state();
             if state.expirations > 0 {
-                let expirations = state.expirations;
-                state.expirations = 0;
-                drop(state);
+                let expirations = {
+                    let mut state = self.state.lock();
+                    let expirations = state.expirations;
+                    state.expirations = 0;
+                    expirations
+                };
 
                 buffer[..8].copy_from_slice(&expirations.to_ne_bytes());
                 return Ok(8);
             }
+
+            let deadline = state.deadline;
 
             if self.flags.lock().contains(FileFlags::NONBLOCK) {
                 return Err(ObjectError::TryAgain);
@@ -831,9 +880,8 @@ impl Readable for TimerFdObject {
 
             let current = prepare_block_current(BlockType::WakeRequired {
                 wake_type: WakeType::IO,
-                deadline: state.deadline,
+                deadline,
             });
-            drop(state);
 
             if self.is_read_ready() {
                 cancel_block(&current);

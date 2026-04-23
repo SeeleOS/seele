@@ -497,13 +497,11 @@ impl Process {
             Signal::Stop
             | Signal::TerminalStop
             | Signal::TerminalInput
-            | Signal::TerminalOutput => {
-                ProcessSignalsResult {
-                    should_switch: true,
-                    exited_threads: Vec::new(),
-                    stopped_group: Some(self.group_id),
-                }
-            }
+            | Signal::TerminalOutput => ProcessSignalsResult {
+                should_switch: true,
+                exited_threads: Vec::new(),
+                stopped_group: Some(self.group_id),
+            },
             Signal::Continue => unreachable!(),
             Signal::Alarm => ProcessSignalsResult::default(),
             _ => ProcessSignalsResult::default(),

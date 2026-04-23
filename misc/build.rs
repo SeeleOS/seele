@@ -54,7 +54,11 @@ fn create_limine_uefi_image(
     file.set_len(64 * 1024 * 1024)
         .expect("failed to size limine uefi image");
 
-    run(Command::new("mformat").arg("-i").arg(image_path).arg("-F").arg("::"));
+    run(Command::new("mformat")
+        .arg("-i")
+        .arg(image_path)
+        .arg("-F")
+        .arg("::"));
     run(Command::new("mmd")
         .arg("-i")
         .arg(image_path)

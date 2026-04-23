@@ -6,12 +6,10 @@ use core::{
 use limine::mp::Cpu;
 
 use crate::{
-    boot,
-    interrupts,
+    boot, interrupts,
     smp::{
         cpu::{CpuCoreContext, register_application_processor},
-        set_current_thread,
-        topology, wait_for_cpu_online, with_cpu_by_apic_id,
+        set_current_thread, topology, wait_for_cpu_online, with_cpu_by_apic_id,
     },
     systemcall, thread,
 };
@@ -46,7 +44,9 @@ pub fn start_application_processors() {
             .find(|entry| entry.lapic_id == processor.apic_id)
             .expect("limine cpu entry missing for discovered AP");
 
-        limine_cpu.extra.store(cpu as usize as u64, Ordering::Release);
+        limine_cpu
+            .extra
+            .store(cpu as usize as u64, Ordering::Release);
     }
 }
 

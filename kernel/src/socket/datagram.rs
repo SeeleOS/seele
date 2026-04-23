@@ -1,7 +1,9 @@
 use alloc::{collections::VecDeque, string::String, sync::Weak, vec::Vec};
 use spin::Mutex;
 
-use super::{registry::UnixSocketRegistryKey, SocketPeerCred, UnixSocketObject, wake_io, wake_pollers};
+use super::{
+    SocketPeerCred, UnixSocketObject, registry::UnixSocketRegistryKey, wake_io, wake_pollers,
+};
 use crate::polling::event::PollableEvent;
 
 pub const DATAGRAM_RECV_CAPACITY: usize = 64 * 1024;

@@ -7,7 +7,8 @@ use crate::{
     systemcall::table::SYSCALL_TABLE,
     systemcall::utils::SyscallError,
     thread::{
-        THREAD_MANAGER, get_current_thread, misc::with_current_thread,
+        THREAD_MANAGER, get_current_thread,
+        misc::with_current_thread,
         scheduling::{enable_ap_task_scheduling, return_to_scheduler_no_save},
     },
 };
@@ -67,9 +68,7 @@ fn syscall_handler_unwrapped(
 ) -> isize {
     if !FIRST_USER_SYSCALL_LOGGED.load(Ordering::Acquire) {
         crate::process::misc::with_current_process(|process| {
-            if process.pid.0 > 1
-                && !FIRST_USER_SYSCALL_LOGGED.swap(true, Ordering::AcqRel)
-            {
+            if process.pid.0 > 1 && !FIRST_USER_SYSCALL_LOGGED.swap(true, Ordering::AcqRel) {
                 enable_ap_task_scheduling();
             }
         });

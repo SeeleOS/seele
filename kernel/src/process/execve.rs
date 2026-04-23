@@ -105,7 +105,6 @@ impl Process {
             .as_str(),
         );
         set_current_kernel_stack(thread_locked.kernel_stack_top);
-
         Ok(&mut thread_locked.snapshot as *mut ThreadSnapshot)
     }
 }

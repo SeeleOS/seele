@@ -16,9 +16,7 @@ use crate::{
     object::linux_anon::wake_expired_timerfds_with_manager,
     process::manager::MANAGER,
     signal::process_current_process_signals,
-    smp::{
-        set_current_kernel_stack, set_current_process, set_current_thread, try_current_process,
-    },
+    smp::{set_current_kernel_stack, set_current_process, set_current_thread, try_current_process},
     thread::{
         THREAD_MANAGER, ThreadRef,
         misc::State,

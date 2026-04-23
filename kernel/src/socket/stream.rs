@@ -6,7 +6,7 @@ use alloc::{
 };
 use spin::Mutex;
 
-use super::{registry::UnixSocketRegistryKey, UnixSocketObject, wake_io, wake_pollers};
+use super::{UnixSocketObject, registry::UnixSocketRegistryKey, wake_io, wake_pollers};
 use crate::{object::misc::ObjectRef, polling::event::PollableEvent};
 
 pub const STREAM_RECV_CAPACITY: usize = 64 * 1024;

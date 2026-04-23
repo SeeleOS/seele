@@ -255,6 +255,16 @@ define_syscall!(Setpgid, |pid: i32, group_id: i32| {
     Ok(0)
 });
 
+define_syscall!(Getsid, |pid: i32| {
+    let pid = if pid == 0 {
+        get_current_process().lock().pid.0
+    } else {
+        pid as u64
+    };
+    let process = get_process_with_pid(ProcessID(pid))?;
+    Ok(process.lock().group_id.0 as usize)
+});
+
 define_syscall!(Setsid, {
     let current = get_current_process();
     let pid = current.lock().pid.0;

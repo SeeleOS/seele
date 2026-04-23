@@ -5,7 +5,9 @@ use alloc::{
 };
 use spin::Mutex;
 
-use super::{registry::UnixSocketRegistryKey, UnixDatagramInner, UnixSocketObject, UnixStreamInner};
+use super::{
+    UnixDatagramInner, UnixSocketObject, UnixStreamInner, registry::UnixSocketRegistryKey,
+};
 
 #[derive(Debug)]
 pub enum UnixSocketState {

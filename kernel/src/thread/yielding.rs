@@ -1,15 +1,22 @@
-use alloc::{collections::vec_deque::VecDeque, sync::Arc, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, vec_deque::VecDeque},
+    format,
+    string::String,
+    sync::Arc,
+    vec::Vec,
+};
 
 use crate::{
-    misc::time::Time,
+    misc::{systemd_perf, time::Time},
     object::{
         error::ObjectError,
         misc::{ObjectRef, ObjectResult},
     },
     polling::event::PollableEvent,
     process::{manager::get_current_process, misc::ProcessID},
+    systemcall::implementations::remove_futex_waiter,
     thread::{
-        THREAD_MANAGER, ThreadRef, manager::ThreadManager, misc::State,
+        THREAD_MANAGER, ThreadRef, manager::ThreadManager, misc::State, misc::ThreadID,
         scheduling::return_to_scheduler_from_current,
     },
 };
@@ -18,6 +25,64 @@ use paste::paste;
 // [TODO] make the blocked process wont be pushed onto the queue.
 // they should only be pushed onto the queue with the wake function
 
+fn pollable_object_kind(object: &ObjectRef) -> &'static str {
+    if object.clone().as_netlink_socket().is_ok() {
+        "netlink"
+    } else if object.clone().as_signalfd().is_ok() {
+        "signalfd"
+    } else if object.clone().as_timerfd().is_ok() {
+        "timerfd"
+    } else if object.clone().as_eventfd().is_ok() {
+        "eventfd"
+    } else if object.clone().as_inotify().is_ok() {
+        "inotify"
+    } else if object.clone().as_unix_socket().is_ok() {
+        "unix"
+    } else if object.clone().as_pidfd().is_ok() {
+        "pidfd"
+    } else if object.clone().as_poller().is_ok() {
+        "poller"
+    } else {
+        "other"
+    }
+}
+
+fn poll_event_name(event: PollableEvent) -> &'static str {
+    match event {
+        PollableEvent::CanBeRead => "read",
+        PollableEvent::CanBeWritten => "write",
+        PollableEvent::Error => "error",
+        PollableEvent::Closed => "closed",
+        PollableEvent::Other(_) => "other",
+    }
+}
+
+fn log_current_poller_details(poller: &ObjectRef) {
+    let Ok(poller) = poller.clone().as_poller() else {
+        return;
+    };
+
+    let mut counts = BTreeMap::<String, usize>::new();
+    for entry in poller.entries.lock().iter() {
+        let key = format!(
+            "{}:{}",
+            pollable_object_kind(&entry.object),
+            poll_event_name(entry.event)
+        );
+        *counts.entry(key).or_default() += 1;
+    }
+
+    let mut parts = Vec::new();
+    for (key, count) in counts {
+        parts.push(format!("{key}={count}"));
+    }
+
+    if !parts.is_empty() {
+        let detail = format!("poller[{}]", parts.join(","));
+        systemd_perf::log_current_block(&detail);
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum BlockType {
     SetTime(Time),
@@ -25,7 +90,9 @@ pub enum BlockType {
         wake_type: WakeType,
         deadline: Option<Time>,
     },
-    Futex,
+    Futex {
+        deadline: Option<Time>,
+    },
     Stopped,
 }
 
@@ -36,6 +103,9 @@ impl BlockType {
             BlockType::WakeRequired {
                 deadline: Some(deadline),
                 ..
+            } => *deadline <= Time::since_boot(),
+            BlockType::Futex {
+                deadline: Some(deadline),
             } => *deadline <= Time::since_boot(),
             _ => false,
         }
@@ -64,8 +134,7 @@ pub struct BlockedQueues {
     pub process_exit: VecDeque<ThreadRef>,
     pub mouse: VecDeque<ThreadRef>,
     pub poller: VecDeque<ThreadRef>,
-
-    pub any: VecDeque<ThreadRef>,
+    pub timed: BTreeMap<(Time, ThreadID), ThreadRef>,
 }
 
 impl BlockedQueues {
@@ -80,12 +149,32 @@ impl BlockedQueues {
         }
     }
 
-    pub fn push(&mut self, thread_ref: ThreadRef, block_type: BlockType) {
-        self.any.push_back(thread_ref.clone());
+    pub fn push(&mut self, thread_ref: ThreadRef, thread_id: ThreadID, block_type: BlockType) {
+        let deadline = block_deadline(&block_type);
+
+        if let Some(deadline) = deadline {
+            self.timed.insert((deadline, thread_id), thread_ref.clone());
+        }
 
         if let BlockType::WakeRequired { wake_type, .. } = block_type {
             self.get_appropriate_queue(wake_type).push_back(thread_ref)
         }
+    }
+}
+
+fn block_deadline(block_type: &BlockType) -> Option<Time> {
+    match block_type {
+        BlockType::SetTime(time) => Some(*time),
+        BlockType::WakeRequired {
+            deadline: Some(deadline),
+            ..
+        } => Some(*deadline),
+        BlockType::Futex {
+            deadline: Some(deadline),
+        } => Some(*deadline),
+        BlockType::WakeRequired { deadline: None, .. }
+        | BlockType::Futex { deadline: None }
+        | BlockType::Stopped => None,
     }
 }
 
@@ -106,8 +195,17 @@ impl ThreadManager {
     // Process all the blocked thread for timed out ones and wake them
     pub fn process_timed_out_threads(&mut self) {
         let mut to_wake = Vec::new();
+        let now = Time::since_boot();
 
-        for thread in &self.blocked_queues.any {
+        while let Some((&(deadline, _), _)) = self.blocked_queues.timed.first_key_value() {
+            if deadline > now {
+                break;
+            }
+
+            let Some((_, thread)) = self.blocked_queues.timed.pop_first() else {
+                break;
+            };
+
             if let State::Blocked(block_type) = &thread.lock().state
                 && block_type.is_timed_out()
             {
@@ -121,6 +219,19 @@ impl ThreadManager {
     }
 
     pub(crate) fn remove_from_blocked_queues(&mut self, thread: &ThreadRef) {
+        remove_futex_waiter(thread);
+        let timed_key = {
+            let thread = thread.lock();
+            match &thread.state {
+                State::Blocked(block_type) => {
+                    block_deadline(block_type).map(|deadline| (deadline, thread.id))
+                }
+                State::Ready | State::Running | State::Zombie => None,
+            }
+        };
+        if let Some(key) = timed_key {
+            self.blocked_queues.timed.remove(&key);
+        }
         self.blocked_queues
             .keyboard
             .retain(|t| !Arc::ptr_eq(t, thread));
@@ -135,16 +246,17 @@ impl ThreadManager {
         self.blocked_queues
             .poller
             .retain(|t| !Arc::ptr_eq(t, thread));
-        self.blocked_queues.any.retain(|t| !Arc::ptr_eq(t, thread));
     }
 
     fn block(&mut self, thread_ref: ThreadRef, block_type: BlockType) {
         log::debug!("thread block: {:?}", block_type);
         let mut thread = thread_ref.lock();
+        let thread_id = thread.id;
 
         thread.state = State::Blocked(block_type.clone());
 
-        self.blocked_queues.push(thread_ref.clone(), block_type);
+        self.blocked_queues
+            .push(thread_ref.clone(), thread_id, block_type);
     }
 
     pub fn wake(&mut self, thread: ThreadRef) {
@@ -207,6 +319,34 @@ impl ThreadManager {
         to_wake.iter().for_each(|f| self.wake(f.clone()));
     }
 
+    pub fn wake_ready_pollers(&mut self) {
+        let mut to_wake = Vec::new();
+
+        for thread in &self.blocked_queues.poller {
+            let should_wake = if let State::Blocked(BlockType::WakeRequired {
+                wake_type: WakeType::Poller(poller),
+                ..
+            }) = &thread.lock().state
+            {
+                if let Ok(poller) = poller.clone().as_poller() {
+                    poller.has_woken_events() || poller.push_already_ready_events()
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if should_wake {
+                to_wake.push(thread.clone());
+            }
+        }
+
+        for thread in to_wake {
+            self.wake(thread);
+        }
+    }
+
     register_wake_func!(pty);
     register_wake_func!(keyboard);
     register_wake_func!(mouse);
@@ -228,6 +368,44 @@ fn current_thread_ref() -> ThreadRef {
 }
 
 pub fn prepare_block_current(block_type: BlockType) -> ThreadRef {
+    let block_kind = match &block_type {
+        BlockType::SetTime(_) => "set_time",
+        BlockType::WakeRequired {
+            wake_type: WakeType::IO,
+            ..
+        } => "io",
+        BlockType::WakeRequired {
+            wake_type: WakeType::Poller(_),
+            ..
+        } => "poller",
+        BlockType::WakeRequired {
+            wake_type: WakeType::Pty,
+            ..
+        } => "pty",
+        BlockType::WakeRequired {
+            wake_type: WakeType::Mouse,
+            ..
+        } => "mouse",
+        BlockType::WakeRequired {
+            wake_type: WakeType::Keyboard,
+            ..
+        } => "keyboard",
+        BlockType::WakeRequired {
+            wake_type: WakeType::ProcsesExit,
+            ..
+        } => "process_exit",
+        BlockType::Futex { .. } => "futex_wait",
+        BlockType::Stopped => "stopped",
+    };
+    systemd_perf::log_current_block(block_kind);
+    if let BlockType::WakeRequired {
+        wake_type: WakeType::Poller(poller),
+        ..
+    } = &block_type
+    {
+        log_current_poller_details(poller);
+    }
+
     let current = current_thread_ref();
 
     {
@@ -249,6 +427,23 @@ pub fn cancel_block(thread_ref: &ThreadRef) {
 }
 
 pub fn finish_block_current() {
+    let current = current_thread_ref();
+    {
+        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+        let mut thread = current.lock();
+        match thread.state {
+            State::Blocked(_) => {}
+            State::Ready => {
+                thread_manager
+                    .ready_queue
+                    .retain(|queued| !Arc::ptr_eq(queued, &current));
+                thread.state = State::Running;
+                return;
+            }
+            _ => return,
+        }
+    }
+
     return_to_scheduler_from_current();
 }
 
@@ -270,20 +465,3 @@ pub fn block_current_with_sig_check(block_type: BlockType) -> ObjectResult<()> {
     }
     Ok(())
 }
-    let current = current_thread_ref();
-    {
-        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-        let mut thread = current.lock();
-        match thread.state {
-            State::Blocked(_) => {}
-            State::Ready => {
-                thread_manager
-                    .ready_queue
-                    .retain(|queued| !Arc::ptr_eq(queued, &current));
-                thread.state = State::Running;
-                return;
-            }
-            _ => return,
-        }
-    }
-

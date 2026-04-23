@@ -10,6 +10,7 @@ use crate::memory::{
     user_safe,
 };
 use crate::misc::error::AsSyscallError;
+use crate::misc::systemd_perf::{self, PerfBucket};
 use crate::misc::time::{self, Time as KernelTime};
 use crate::misc::timer::ClockId;
 use crate::misc::{others::protection_to_page_flags, reboot as reboot_state, utsname::UtsName};
@@ -556,16 +557,18 @@ fn linux_clock_now_ns(clock_id: i32) -> Result<i64, SyscallError> {
 }
 
 define_syscall!(ClockGettime, |clock_id: i32, tp: *mut LinuxTimespec| {
-    if tp.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-    let ns = linux_clock_now_ns(clock_id)?;
-    let timespec = LinuxTimespec {
-        tv_sec: ns / 1_000_000_000,
-        tv_nsec: ns % 1_000_000_000,
-    };
-    user_safe::write(tp, &timespec)?;
-    Ok(0)
+    systemd_perf::profile_current_process(PerfBucket::ClockGettime, || {
+        if tp.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+        let ns = linux_clock_now_ns(clock_id)?;
+        let timespec = LinuxTimespec {
+            tv_sec: ns / 1_000_000_000,
+            tv_nsec: ns % 1_000_000_000,
+        };
+        user_safe::write(tp, &timespec)?;
+        Ok(0)
+    })
 });
 
 define_syscall!(ClockSettime, |clock_id: i32, tp: *const LinuxTimespec| {
@@ -1375,9 +1378,6 @@ define_syscall!(Setuid, |uid: u32| {
     Ok(0)
 });
 
-define_syscall!(Setgid, |gid: u32| {
-    let process = get_current_process();
-    let mut process = process.lock();
 define_syscall!(Setreuid, |ruid: i32, euid: i32| {
     let process = get_current_process();
     let mut process = process.lock();
@@ -1392,6 +1392,9 @@ define_syscall!(Setreuid, |ruid: i32, euid: i32| {
     Ok(0)
 });
 
+define_syscall!(Setgid, |gid: u32| {
+    let process = get_current_process();
+    let mut process = process.lock();
     process.real_gid = gid;
     process.effective_gid = gid;
     process.saved_gid = gid;
@@ -1399,9 +1402,6 @@ define_syscall!(Setreuid, |ruid: i32, euid: i32| {
     Ok(0)
 });
 
-define_syscall!(Geteuid, {
-    Ok(get_current_process().lock().effective_uid as usize)
-});
 define_syscall!(Setregid, |rgid: i32, egid: i32| {
     let process = get_current_process();
     let mut process = process.lock();
@@ -1416,14 +1416,14 @@ define_syscall!(Setregid, |rgid: i32, egid: i32| {
     Ok(0)
 });
 
+define_syscall!(Geteuid, {
+    Ok(get_current_process().lock().effective_uid as usize)
+});
 
 define_syscall!(Getegid, {
     Ok(get_current_process().lock().effective_gid as usize)
 });
 
-define_syscall!(Setfsuid, |uid: u32| {
-    let process = get_current_process();
-    let mut process = process.lock();
 define_syscall!(Getgroups, |size: i32, list: *mut u32| {
     if size < 0 {
         return Err(SyscallError::InvalidArguments);
@@ -1447,6 +1447,9 @@ define_syscall!(Getgroups, |size: i32, list: *mut u32| {
     Ok(groups.len())
 });
 
+define_syscall!(Setfsuid, |uid: u32| {
+    let process = get_current_process();
+    let mut process = process.lock();
     let old_uid = process.fs_uid;
     process.fs_uid = uid;
     Ok(old_uid as usize)
@@ -1460,11 +1463,11 @@ define_syscall!(Setfsgid, |gid: u32| {
     Ok(old_gid as usize)
 });
 
+define_syscall!(Vhangup, { Ok(0) });
+
 define_syscall!(Time, |time_ptr: *mut i64| {
     let seconds = (KernelTime::current().as_nanoseconds() / 1_000_000_000) as i64;
     if !time_ptr.is_null() {
-define_syscall!(Vhangup, { Ok(0) });
-
         user_safe::write(time_ptr, &seconds)?;
     }
     Ok(seconds as usize)

@@ -1,6 +1,7 @@
 use crate::{
     define_syscall,
     memory::user_safe,
+    misc::systemd_perf::{self, PerfBucket},
     object::netlink::{NetlinkSocketAddress, NetlinkSocketObject},
     object::{
         FileFlags,
@@ -382,76 +383,78 @@ define_syscall!(
      flags: u64,
      address: *mut u8,
      address_len_ptr: *mut u32| {
-        if len > 0 && buffer.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
+        systemd_perf::profile_current_process(PerfBucket::Recvfrom, || {
+            if len > 0 && buffer.is_null() {
+                return Err(SyscallError::BadAddress);
+            }
 
-        if let Ok(socket) = socket.clone().as_netlink_socket() {
-            let peek = (flags & MSG_PEEK) != 0;
-            let report_trunc = (flags & MSG_TRUNC) != 0;
-            let message_len = socket.peek_message_len().ok_or(SyscallError::TryAgain)?;
+            if let Ok(socket) = socket.clone().as_netlink_socket() {
+                let peek = (flags & MSG_PEEK) != 0;
+                let report_trunc = (flags & MSG_TRUNC) != 0;
+                let message_len = socket.peek_message_len().ok_or(SyscallError::TryAgain)?;
+                let mut data = vec![0; len];
+                let (copied, full_len) = socket
+                    .recv_message(&mut data, peek)
+                    .map_err(SyscallError::from)?;
+
+                if copied > 0 {
+                    user_safe::write(buffer, &data[..copied])?;
+                }
+
+                if !address.is_null() {
+                    if address_len_ptr.is_null() {
+                        return Err(SyscallError::BadAddress);
+                    }
+                    let name = LinuxSockAddrNl {
+                        nl_family: AF_NETLINK as u16,
+                        nl_pad: 0,
+                        nl_pid: 0,
+                        nl_groups: 0,
+                    };
+                    let requested_len = unsafe { *address_len_ptr as usize };
+                    let name_bytes = unsafe {
+                        core::slice::from_raw_parts(
+                            (&name as *const LinuxSockAddrNl).cast::<u8>(),
+                            core::mem::size_of::<LinuxSockAddrNl>(),
+                        )
+                    };
+                    let copy_len = requested_len.min(name_bytes.len());
+                    if copy_len > 0 {
+                        user_safe::write(address, &name_bytes[..copy_len])?;
+                    }
+                    user_safe::write(address_len_ptr, &(name_bytes.len() as u32))?;
+                }
+
+                return Ok(if report_trunc || len == 0 {
+                    full_len.max(message_len)
+                } else {
+                    copied
+                });
+            }
+
+            let socket = socket.as_unix_socket()?;
             let mut data = vec![0; len];
-            let (copied, full_len) = socket
-                .recv_message(&mut data, peek)
-                .map_err(SyscallError::from)?;
+            let read = socket.read_socket(&mut data).map_err(ObjectError::from)?;
 
-            if copied > 0 {
-                user_safe::write(buffer, &data[..copied])?;
+            if read > 0 {
+                user_safe::write(buffer, &data[..read])?;
             }
 
             if !address.is_null() {
                 if address_len_ptr.is_null() {
                     return Err(SyscallError::BadAddress);
                 }
-                let name = LinuxSockAddrNl {
-                    nl_family: AF_NETLINK as u16,
-                    nl_pad: 0,
-                    nl_pid: 0,
-                    nl_groups: 0,
-                };
+                let name = socket.getpeername_bytes().map_err(ObjectError::from)?;
                 let requested_len = unsafe { *address_len_ptr as usize };
-                let name_bytes = unsafe {
-                    core::slice::from_raw_parts(
-                        (&name as *const LinuxSockAddrNl).cast::<u8>(),
-                        core::mem::size_of::<LinuxSockAddrNl>(),
-                    )
-                };
-                let copy_len = requested_len.min(name_bytes.len());
+                let copy_len = requested_len.min(name.len());
                 if copy_len > 0 {
-                    user_safe::write(address, &name_bytes[..copy_len])?;
+                    user_safe::write(address, &name[..copy_len])?;
                 }
-                user_safe::write(address_len_ptr, &(name_bytes.len() as u32))?;
+                user_safe::write(address_len_ptr, &(name.len() as u32))?;
             }
 
-            return Ok(if report_trunc || len == 0 {
-                full_len.max(message_len)
-            } else {
-                copied
-            });
-        }
-
-        let socket = socket.as_unix_socket()?;
-        let mut data = vec![0; len];
-        let read = socket.read_socket(&mut data).map_err(ObjectError::from)?;
-
-        if read > 0 {
-            user_safe::write(buffer, &data[..read])?;
-        }
-
-        if !address.is_null() {
-            if address_len_ptr.is_null() {
-                return Err(SyscallError::BadAddress);
-            }
-            let name = socket.getpeername_bytes().map_err(ObjectError::from)?;
-            let requested_len = unsafe { *address_len_ptr as usize };
-            let copy_len = requested_len.min(name.len());
-            if copy_len > 0 {
-                user_safe::write(address, &name[..copy_len])?;
-            }
-            user_safe::write(address_len_ptr, &(name.len() as u32))?;
-        }
-
-        Ok(read)
+            Ok(read)
+        })
     }
 );
 

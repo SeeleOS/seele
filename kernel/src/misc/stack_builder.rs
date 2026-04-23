@@ -108,6 +108,10 @@ impl StackBuilder {
         }
     }
 
+    pub fn reserve_headroom(&mut self, bytes: u64) {
+        self.sp -= bytes;
+    }
+
     pub fn finish(self) -> VirtAddr {
         if !self.sp.is_aligned(16u64) {
             log::warn!("Stack pointer is not 16 byte aligned");

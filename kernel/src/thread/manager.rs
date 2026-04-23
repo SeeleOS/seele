@@ -116,11 +116,11 @@ impl ThreadManager {
                 thread.clear_child_tid = 0;
             }
 
-            thread.state = State::Zombie;
             (process, clear_child_tid)
         };
 
         self.remove_from_blocked_queues(&thread);
+        thread.lock().state = State::Zombie;
 
         if clear_child_tid != 0 {
             self.pending_thread_exits.push(PendingThreadExit {

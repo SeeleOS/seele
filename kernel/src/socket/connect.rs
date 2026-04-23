@@ -77,9 +77,9 @@ impl UnixSocketObject {
                 let endpoint = {
                     let registry = UNIX_SOCKET_REGISTRY.lock();
                     match registry.get(&registry_key) {
-                        Some(UnixSocketRegistryEntry::Datagram(endpoint)) => endpoint
-                            .upgrade()
-                            .ok_or(SocketError::ConnectionRefused)?,
+                        Some(UnixSocketRegistryEntry::Datagram(endpoint)) => {
+                            endpoint.upgrade().ok_or(SocketError::ConnectionRefused)?
+                        }
                         _ => return Err(SocketError::ConnectionRefused),
                     }
                 };

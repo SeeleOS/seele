@@ -3,9 +3,7 @@ use core::arch::naked_asm;
 use crate::{
     interrupts::hardware_interrupt::send_eoi,
     misc::snapshot::Snapshot,
-    object::linux_anon::wake_expired_timerfds_with_manager,
-    process::manager::MANAGER,
-    thread::{THREAD_MANAGER, scheduling::return_to_scheduler, snapshot::ThreadSnapshotType},
+    thread::{scheduling::return_to_scheduler, snapshot::ThreadSnapshotType},
 };
 
 #[unsafe(naked)]
@@ -52,19 +50,6 @@ pub extern "C" fn timer_interrupt_handler_wrapper() {
 
 pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
     send_eoi();
-
-    {
-        let manager = MANAGER.lock();
-        for process in manager.processes.values() {
-            process.lock().process_timers();
-        }
-    }
-
-    {
-        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-        thread_manager.process_timed_out_threads();
-        wake_expired_timerfds_with_manager(&mut thread_manager);
-    }
 
     // Don't preempt kernel mode; it can corrupt in-flight kernel snapshots.
     if (snapshot.cs & 0x3) == 0 {

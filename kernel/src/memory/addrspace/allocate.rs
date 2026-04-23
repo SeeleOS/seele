@@ -18,13 +18,16 @@ impl AddrSpace {
         let mem = self.user_mem;
         self.user_mem += (pages + 1) * 4096;
 
-        self.map(MemoryArea::new(
+        let (start, mut stack_builder) = self.map(MemoryArea::new_with_guard(
             mem,
             pages,
             PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE,
             Data::Normal,
             false,
-        ))
+        ));
+        // Leave one page free above the initial userspace stack contents.
+        stack_builder.reserve_headroom(4096);
+        (start, stack_builder)
     }
 
     pub fn allocate_user_lazy(

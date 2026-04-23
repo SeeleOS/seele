@@ -3,9 +3,7 @@ use core::ptr::NonNull;
 use acpi::{Handler, PhysicalMapping};
 use x86_64::instructions::port::Port;
 
-use crate::{
-    memory::mmio::map_mmio, misc::time::Time, read_port, write_port,
-};
+use crate::{memory::mmio::map_mmio, misc::time::Time, read_port, write_port};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ACPIHandler;

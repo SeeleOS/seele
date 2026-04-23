@@ -8,9 +8,9 @@ use crate::{
     filesystem::object::mount_device_id_for_path,
     memory::{
         addrspace::{
+            AddrSpace, AllocResult,
             cow::increase_ref,
             mem_area::{Data, MemoryArea},
-            AddrSpace, AllocResult,
         },
         paging::FRAME_ALLOCATOR,
         utils::apply_offset,

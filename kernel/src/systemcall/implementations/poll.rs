@@ -4,7 +4,11 @@ use bitflags::bitflags;
 use crate::{
     define_syscall,
     filesystem::object::poll_identity_object,
-    misc::{error::AsSyscallError, time::Time},
+    misc::{
+        error::AsSyscallError,
+        systemd_perf::{self, PerfBucket},
+        time::Time,
+    },
     object::{Object, error::ObjectError, misc::get_object_current_process},
     polling::{event::PollableEvent, poller::PollerObject},
     systemcall::utils::{SyscallError, SyscallImpl},
@@ -155,96 +159,98 @@ fn sleep_without_fds(timeout_ms: i32) -> Result<(), SyscallError> {
 }
 
 fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallError> {
-    for pfd in fds.iter_mut() {
-        pfd.revents = 0;
-    }
-
-    if fds.is_empty() {
-        sleep_without_fds(timeout_ms)?;
-        return Ok(0);
-    }
-
-    let poller = PollerObject::new();
-    let mut active = 0usize;
-    let mut invalid = 0usize;
-
-    for (index, pfd) in fds.iter_mut().enumerate() {
-        if pfd.fd < 0 {
-            continue;
+    systemd_perf::profile_current_process(PerfBucket::Poll, || {
+        for pfd in fds.iter_mut() {
+            pfd.revents = 0;
         }
-        active += 1;
 
-        let object = match get_object_current_process(pfd.fd as u64) {
-            Ok(object) => object,
-            Err(err) => {
-                if matches!(err, ObjectError::DoesNotExist) {
-                    pfd.revents |= PollEvents::POLLNVAL.bits();
-                    invalid += 1;
-                    continue;
-                }
-                return Err(err.as_syscall_error());
+        if fds.is_empty() {
+            sleep_without_fds(timeout_ms)?;
+            return Ok(0);
+        }
+
+        let poller = PollerObject::new();
+        let mut active = 0usize;
+        let mut invalid = 0usize;
+
+        for (index, pfd) in fds.iter_mut().enumerate() {
+            if pfd.fd < 0 {
+                continue;
             }
-        };
+            active += 1;
 
-        let poll_object = poll_identity_object(object.clone());
+            let object = match get_object_current_process(pfd.fd as u64) {
+                Ok(object) => object,
+                Err(err) => {
+                    if matches!(err, ObjectError::DoesNotExist) {
+                        pfd.revents |= PollEvents::POLLNVAL.bits();
+                        invalid += 1;
+                        continue;
+                    }
+                    return Err(err.as_syscall_error());
+                }
+            };
 
-        if poll_object.clone().as_pollable().is_err() {
-            pfd.revents |= ((PollEvents::from_bits_retain(pfd.events))
-                & (PollEvents::POLLIN
-                    | PollEvents::POLLPRI
-                    | PollEvents::POLLRDNORM
-                    | PollEvents::POLLRDBAND
-                    | PollEvents::POLLOUT
-                    | PollEvents::POLLWRNORM
-                    | PollEvents::POLLWRBAND))
-                .bits();
-            continue;
+            let poll_object = poll_identity_object(object.clone());
+
+            if poll_object.clone().as_pollable().is_err() {
+                pfd.revents |= ((PollEvents::from_bits_retain(pfd.events))
+                    & (PollEvents::POLLIN
+                        | PollEvents::POLLPRI
+                        | PollEvents::POLLRDNORM
+                        | PollEvents::POLLRDBAND
+                        | PollEvents::POLLOUT
+                        | PollEvents::POLLWRNORM
+                        | PollEvents::POLLWRBAND))
+                    .bits();
+                continue;
+            }
+
+            let requested_events = PollEvents::from_bits_retain(pfd.events);
+            for event in kernel_events_for(requested_events).into_iter().flatten() {
+                poller.register_obj(poll_object.clone(), event, index as u64);
+            }
         }
 
-        let requested_events = PollEvents::from_bits_retain(pfd.events);
-        for event in kernel_events_for(requested_events).into_iter().flatten() {
-            poller.register_obj(poll_object.clone(), event, index as u64);
+        if invalid > 0 && invalid == active {
+            return Ok(count_ready(fds));
         }
-    }
 
-    if invalid > 0 && invalid == active {
-        return Ok(count_ready(fds));
-    }
+        if count_ready(fds) == 0 {
+            wait_on_poller(poller.clone(), timeout_ms)?;
+        }
 
-    if count_ready(fds) == 0 {
-        wait_on_poller(poller.clone(), timeout_ms)?;
-    }
-
-    let mut ready_by_index = BTreeMap::<usize, u32>::new();
-    for ready in poller.take_woken_events(fds.len()) {
-        ready_by_index
-            .entry(ready.data as usize)
-            .and_modify(|events| {
-                *events |= match ready.event {
+        let mut ready_by_index = BTreeMap::<usize, u32>::new();
+        for ready in poller.take_woken_events(fds.len()) {
+            ready_by_index
+                .entry(ready.data as usize)
+                .and_modify(|events| {
+                    *events |= match ready.event {
+                        PollableEvent::CanBeRead => PollEvents::POLLIN.bits() as u32,
+                        PollableEvent::CanBeWritten => PollEvents::POLLOUT.bits() as u32,
+                        PollableEvent::Error => PollEvents::POLLERR.bits() as u32,
+                        PollableEvent::Closed => PollEvents::POLLHUP.bits() as u32,
+                        PollableEvent::Other(bits) => bits as u32,
+                    }
+                })
+                .or_insert_with(|| match ready.event {
                     PollableEvent::CanBeRead => PollEvents::POLLIN.bits() as u32,
                     PollableEvent::CanBeWritten => PollEvents::POLLOUT.bits() as u32,
                     PollableEvent::Error => PollEvents::POLLERR.bits() as u32,
                     PollableEvent::Closed => PollEvents::POLLHUP.bits() as u32,
                     PollableEvent::Other(bits) => bits as u32,
-                }
-            })
-            .or_insert_with(|| match ready.event {
-                PollableEvent::CanBeRead => PollEvents::POLLIN.bits() as u32,
-                PollableEvent::CanBeWritten => PollEvents::POLLOUT.bits() as u32,
-                PollableEvent::Error => PollEvents::POLLERR.bits() as u32,
-                PollableEvent::Closed => PollEvents::POLLHUP.bits() as u32,
-                PollableEvent::Other(bits) => bits as u32,
-            });
-    }
-
-    for (index, kernel_ready) in ready_by_index {
-        if let Some(pfd) = fds.get_mut(index) {
-            pfd.revents |=
-                translate_ready_events(PollEvents::from_bits_retain(pfd.events), kernel_ready);
+                });
         }
-    }
 
-    Ok(count_ready(fds))
+        for (index, kernel_ready) in ready_by_index {
+            if let Some(pfd) = fds.get_mut(index) {
+                pfd.revents |=
+                    translate_ready_events(PollEvents::from_bits_retain(pfd.events), kernel_ready);
+            }
+        }
+
+        Ok(count_ready(fds))
+    })
 }
 
 define_syscall!(Poll, |fds: *mut LinuxPollFd, nfds: usize, timeout: i32| {

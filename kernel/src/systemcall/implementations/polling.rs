@@ -1,4 +1,5 @@
 use crate::filesystem::object::poll_identity_object;
+use crate::misc::systemd_perf::{self, PerfBucket};
 use crate::misc::time::Time;
 use crate::object::{Object, misc::ObjectRef};
 use crate::polling::event::PollableEvent;
@@ -192,57 +193,59 @@ fn epoll_wait_impl(
     maxevents: usize,
     timeout: i32,
 ) -> Result<usize, SyscallError> {
-    if maxevents == 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
-
-    let poller = poller.as_poller()?;
-
-    if !poller.has_woken_events() {
-        poller.push_already_ready_events();
-    }
-
-    if !poller.has_woken_events() {
-        if timeout == 0 {
-            return Ok(0);
+    systemd_perf::profile_current_process(PerfBucket::EpollPwait2, || {
+        if maxevents == 0 {
+            return Err(SyscallError::InvalidArguments);
         }
 
-        let deadline = if timeout < 0 {
-            None
-        } else {
-            Some(Time::since_boot().add_ms(timeout as u64))
-        };
-
-        let poller_ref: Arc<dyn Object> = poller.clone();
-        let current = prepare_block_current(BlockType::WakeRequired {
-            wake_type: WakeType::Poller(poller_ref),
-            deadline,
-        });
+        let poller = poller.as_poller()?;
 
         if !poller.has_woken_events() {
             poller.push_already_ready_events();
         }
 
-        if poller.has_woken_events() {
-            cancel_block(&current);
-        } else {
-            finish_block_current();
+        if !poller.has_woken_events() {
+            if timeout == 0 {
+                return Ok(0);
+            }
+
+            let deadline = if timeout < 0 {
+                None
+            } else {
+                Some(Time::since_boot().add_ms(timeout as u64))
+            };
+
+            let poller_ref: Arc<dyn Object> = poller.clone();
+            let current = prepare_block_current(BlockType::WakeRequired {
+                wake_type: WakeType::Poller(poller_ref),
+                deadline,
+            });
+
+            if !poller.has_woken_events() {
+                poller.push_already_ready_events();
+            }
+
+            if poller.has_woken_events() {
+                cancel_block(&current);
+            } else {
+                finish_block_current();
+            }
         }
-    }
 
-    let woken_events = poller.take_woken_events(maxevents);
+        let woken_events = poller.take_woken_events(maxevents);
 
-    if !events_ptr.is_null() {
-        for (index, woken) in woken_events.iter().enumerate() {
-            write_epoll_event(
-                unsafe { events_ptr.add(index) },
-                pollable_event_to_linux_bits(woken.event).bits(),
-                woken.data,
-            );
+        if !events_ptr.is_null() {
+            for (index, woken) in woken_events.iter().enumerate() {
+                write_epoll_event(
+                    unsafe { events_ptr.add(index) },
+                    pollable_event_to_linux_bits(woken.event).bits(),
+                    woken.data,
+                );
+            }
         }
-    }
 
-    Ok(woken_events.len())
+        Ok(woken_events.len())
+    })
 }
 
 fn epoll_pwait2_timeout_ms(timeout: *const LinuxTimespec) -> Result<i32, SyscallError> {
