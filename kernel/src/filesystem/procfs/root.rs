@@ -1,4 +1,5 @@
 use alloc::{collections::BTreeMap, format, string::String, vec, vec::Vec};
+use core::sync::atomic::{AtomicU64, Ordering};
 use lazy_static::lazy_static;
 
 use crate::{
@@ -31,6 +32,9 @@ pub(super) const PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE: u64 = 0x3010;
 pub(super) const PROC_SYS_KERNEL_HOSTNAME_INODE: u64 = 0x3011;
 pub(super) const PROC_SYS_KERNEL_DOMAINNAME_INODE: u64 = 0x3012;
 pub(super) const PROC_SYS_KERNEL_OSRELEASE_INODE: u64 = 0x3013;
+pub(super) const PROC_SYS_KERNEL_RANDOM_UUID_INODE: u64 = 0x3014;
+
+static PROC_UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 lazy_static! {
     static ref PROC_BOOT_ID: String = generate_boot_id();
@@ -90,14 +94,23 @@ pub(super) fn proc_kernel_entries() -> Vec<DirectoryContentInfo> {
 }
 
 pub(super) fn proc_kernel_random_entries() -> Vec<DirectoryContentInfo> {
-    vec![DirectoryContentInfo::new(
-        "boot_id".into(),
-        DirectoryContentType::File,
-    )]
+    vec![
+        DirectoryContentInfo::new("boot_id".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("uuid".into(), DirectoryContentType::File),
+    ]
 }
 
 pub(super) fn proc_boot_id_bytes() -> Vec<u8> {
     format!("{}\n", PROC_BOOT_ID.as_str()).into_bytes()
+}
+
+pub(super) fn proc_random_uuid_bytes() -> Vec<u8> {
+    let counter = PROC_UUID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let seed = Time::current().as_nanoseconds()
+        ^ Time::since_boot().as_nanoseconds().rotate_left(19)
+        ^ counter.rotate_left(7)
+        ^ 0xbb67_ae85_84ca_a73b;
+    format!("{}\n", generate_uuid(seed)).into_bytes()
 }
 
 pub(super) fn proc_pressure_entries() -> Vec<DirectoryContentInfo> {
@@ -109,9 +122,14 @@ pub(super) fn proc_pressure_entries() -> Vec<DirectoryContentInfo> {
 }
 
 fn generate_boot_id() -> String {
-    let mut state = Time::current().as_nanoseconds()
-        ^ Time::since_boot().as_nanoseconds().rotate_left(19)
-        ^ 0x6a09_e667_f3bc_c908;
+    generate_uuid(
+        Time::current().as_nanoseconds()
+            ^ Time::since_boot().as_nanoseconds().rotate_left(19)
+            ^ 0x6a09_e667_f3bc_c908,
+    )
+}
+
+fn generate_uuid(mut state: u64) -> String {
     let mut bytes = [0u8; 16];
 
     for byte in &mut bytes {
