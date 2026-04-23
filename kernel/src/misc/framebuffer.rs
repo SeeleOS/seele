@@ -1,7 +1,7 @@
 use alloc::{vec, vec::Vec};
-use bootloader_api::info::{FrameBuffer, FrameBufferInfo, PixelFormat};
 use conquer_once::spin::OnceCell;
 use core::sync::atomic::{AtomicBool, Ordering};
+use limine::framebuffer::{Framebuffer, MemoryModel};
 use spin::Mutex;
 use x86_64::{VirtAddr, structures::paging::Translate};
 
@@ -27,9 +27,9 @@ pub struct FramebufferInfo {
     pub pixel_format: FramebufferPixelFormat,
 }
 
-pub fn init(boot_info: &'static mut FrameBuffer) {
+pub fn init(framebuffer: Framebuffer<'static>) {
     log::info!("graphics: init start");
-    FRAME_BUFFER.init_once(|| Mutex::new(Canvas::new(boot_info)));
+    FRAME_BUFFER.init_once(|| Mutex::new(Canvas::new(framebuffer)));
     log::debug!("graphics: terminal configured");
 }
 
@@ -39,25 +39,43 @@ pub static FRAMEBUFFER_USER_CONTROLLED: AtomicBool = AtomicBool::new(false);
 pub struct Canvas {
     pub fb: &'static mut [u8],
     buffer: Vec<u8>,
-    pub info: FrameBufferInfo,
+    pub info: FramebufferInfo,
 
     pub width: u32,
     pub height: u32,
 }
 
 impl Canvas {
-    pub fn new(frame_buffer: &'static mut FrameBuffer) -> Self {
-        let info = frame_buffer.info();
-        let fb = frame_buffer.buffer_mut();
+    pub fn new(frame_buffer: Framebuffer<'static>) -> Self {
+        assert!(
+            frame_buffer.memory_model() == MemoryModel::RGB,
+            "unsupported limine framebuffer memory model"
+        );
+        let info = FramebufferInfo {
+            phys_addr: 0,
+            width: frame_buffer.width() as usize,
+            height: frame_buffer.height() as usize,
+            stride: (frame_buffer.pitch() / (frame_buffer.bpp() as u64 / 8)) as usize,
+            bytes_per_pixel: frame_buffer.bpp() as usize / 8,
+            byte_len: (frame_buffer.pitch() * frame_buffer.height()) as usize,
+            pixel_format: match (
+                frame_buffer.red_mask_shift(),
+                frame_buffer.green_mask_shift(),
+                frame_buffer.blue_mask_shift(),
+            ) {
+                (0, 8, 16) => FramebufferPixelFormat::Rgb,
+                (16, 8, 0) => FramebufferPixelFormat::Bgr,
+                layout => panic!("unsupported limine framebuffer channel layout: {layout:?}"),
+            },
+        };
+        let fb = unsafe { core::slice::from_raw_parts_mut(frame_buffer.addr(), info.byte_len) };
 
-        // Clear screen
         fb.fill(0);
 
         Self {
             info,
             fb,
             buffer: vec![0u8; info.byte_len],
-
             width: info.width as u32,
             height: info.height as u32,
         }
@@ -69,32 +87,25 @@ impl Canvas {
             return;
         }
 
-        // Offset of the pixel from the start
-        // of the framebuffer (in pixels)
         let pixels_offset = (y * self.info.stride) + x;
-        // Offset in bytes
         let bytes_offset = pixels_offset * self.info.bytes_per_pixel;
 
         let (r, g, b) = color;
 
         match self.info.pixel_format {
-            PixelFormat::Rgb => {
+            FramebufferPixelFormat::Rgb => {
                 self.buffer[bytes_offset] = r;
                 self.buffer[bytes_offset + 1] = g;
                 self.buffer[bytes_offset + 2] = b;
             }
-            PixelFormat::Bgr => {
+            FramebufferPixelFormat::Bgr => {
                 self.buffer[bytes_offset] = b;
                 self.buffer[bytes_offset + 1] = g;
                 self.buffer[bytes_offset + 2] = r;
             }
-            _ => {
-                panic!("Unsupported pixel format. Possible old hardware");
-            }
         }
     }
 
-    // Flushes the contents of the buffer into the real fb
     pub fn flush(&mut self) {
         if framebuffer_user_controlled() {
             return;
@@ -123,11 +134,7 @@ impl Canvas {
             stride: self.info.stride,
             bytes_per_pixel: self.info.bytes_per_pixel,
             byte_len: self.info.byte_len,
-            pixel_format: match self.info.pixel_format {
-                PixelFormat::Rgb => FramebufferPixelFormat::Rgb,
-                PixelFormat::Bgr => FramebufferPixelFormat::Bgr,
-                _ => panic!("Unsupported pixel format"),
-            },
+            pixel_format: self.info.pixel_format,
         }
     }
 }

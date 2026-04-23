@@ -1,32 +1,97 @@
-use std::{env, path::PathBuf, process::Command};
+use std::{
+    env,
+    fs::{self, File},
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 fn main() {
     println!("cargo:rerun-if-changed=misc/build.rs");
+    println!("cargo:rerun-if-changed=limine.conf");
+    println!("cargo:rerun-if-changed=third_party/limine");
+    println!("cargo:rerun-if-changed=third_party/limine-binary");
     println!("cargo:rerun-if-changed=disk.img");
 
     umount_sysroot();
 
-    // set by cargo, build scripts should use this directory for output files
-    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    // set by cargo's artifact dependency feature, see
-    // https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#artifact-dependencies
-    let kernel = PathBuf::from(std::env::var_os("CARGO_BIN_FILE_KERNEL_kernel").unwrap());
-
-    // create an UEFI disk image (optional)
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    let kernel = PathBuf::from(env::var_os("CARGO_BIN_FILE_KERNEL_kernel").unwrap());
+    let project_root = discover_project_root();
+    let limine_dir = find_limine_dir(&project_root);
     let uefi_path = out_dir.join("uefi.img");
-    bootloader::UefiBoot::new(&kernel)
-        .create_disk_image(&uefi_path)
-        .unwrap();
 
-    // create a BIOS disk image
-    let bios_path = out_dir.join("bios.img");
-    bootloader::BiosBoot::new(&kernel)
-        .create_disk_image(&bios_path)
-        .unwrap();
+    create_limine_uefi_image(&uefi_path, &kernel, &project_root, &limine_dir);
 
-    // pass the disk image paths as env variables to the
     println!("cargo:rustc-env=UEFI_PATH={}", uefi_path.display());
-    println!("cargo:rustc-env=BIOS_PATH={}", bios_path.display());
+}
+
+fn find_limine_dir(project_root: &Path) -> PathBuf {
+    let binary_dir = project_root.join("third_party/limine-binary");
+    if binary_dir.join("BOOTX64.EFI").is_file() {
+        return binary_dir;
+    }
+
+    let source_dir = project_root.join("third_party/limine");
+    if source_dir.join("BOOTX64.EFI").is_file() {
+        return source_dir;
+    }
+
+    panic!(
+        "no usable limine binary tree found; expected BOOTX64.EFI under {} or {}",
+        binary_dir.display(),
+        source_dir.display()
+    );
+}
+
+fn create_limine_uefi_image(
+    image_path: &Path,
+    kernel: &Path,
+    project_root: &Path,
+    limine_dir: &Path,
+) {
+    let _ = fs::remove_file(image_path);
+    let file = File::create(image_path).expect("failed to create limine uefi image");
+    file.set_len(64 * 1024 * 1024)
+        .expect("failed to size limine uefi image");
+
+    run(Command::new("mformat").arg("-i").arg(image_path).arg("-F").arg("::"));
+    run(Command::new("mmd")
+        .arg("-i")
+        .arg(image_path)
+        .arg("::/EFI")
+        .arg("::/EFI/BOOT")
+        .arg("::/boot")
+        .arg("::/boot/limine"));
+    run(Command::new("mcopy")
+        .arg("-i")
+        .arg(image_path)
+        .arg(kernel)
+        .arg("::/boot/kernel"));
+    run(Command::new("mcopy")
+        .arg("-i")
+        .arg(image_path)
+        .arg(project_root.join("limine.conf"))
+        .arg("::/boot/limine/limine.conf"));
+    run(Command::new("mcopy")
+        .arg("-i")
+        .arg(image_path)
+        .arg(project_root.join("limine.conf"))
+        .arg("::/EFI/BOOT/limine.conf"));
+    run(Command::new("mcopy")
+        .arg("-i")
+        .arg(image_path)
+        .arg(project_root.join("limine.conf"))
+        .arg("::/limine.conf"));
+    run(Command::new("mcopy")
+        .arg("-i")
+        .arg(image_path)
+        .arg(limine_dir.join("BOOTX64.EFI"))
+        .arg("::/EFI/BOOT/BOOTX64.EFI"));
+}
+
+fn run(command: &mut Command) {
+    let status = command.status().expect("failed to execute build helper");
+    assert!(status.success(), "build helper failed: {command:?}");
 }
 
 fn umount_sysroot() {

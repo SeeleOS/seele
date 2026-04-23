@@ -32,7 +32,7 @@ pub mod user;
 pub const LAZY_MAP: bool = true;
 
 const USER_MEM_START: u64 = 0x0000_0000_c000_0000;
-pub const KERNEL_MEM_START: u64 = 0xFFFF_8000_1000_0000;
+pub const KERNEL_MEM_START: u64 = 0xFFFF_9000_1000_0000;
 
 static KERNEL_MEM: AtomicU64 = AtomicU64::new(KERNEL_MEM_START);
 

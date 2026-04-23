@@ -3,7 +3,7 @@ use x2apic::ioapic::{IoApic, IrqFlags, IrqMode, RedirectionTableEntry};
 
 use crate::{
     acpi::ACPI_TABLE, interrupts::hardware_interrupt::HardwareInterrupt,
-    memory::utils::apply_offset,
+    memory::mmio::map_mmio,
 };
 
 pub fn init() {
@@ -37,7 +37,7 @@ pub fn init() {
     }
 
     unsafe {
-        let mut io_apic = IoApic::new(apply_offset(io_apic_entry.unwrap().io_apic_address as u64));
+        let mut io_apic = IoApic::new(map_mmio(io_apic_entry.unwrap().io_apic_address as u64, 4096));
 
         let keyboard_entry = new_io_apic_entry(HardwareInterrupt::Keyboard.as_u8());
         let mouse_entry = new_io_apic_entry(HardwareInterrupt::Mouse.as_u8());

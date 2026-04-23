@@ -1,3 +1,5 @@
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use crate::{
     misc::snapshot::Snapshot,
     process::misc::with_current_process,
@@ -5,10 +7,12 @@ use crate::{
     systemcall::utils::SyscallError,
     thread::{
         THREAD_MANAGER, get_current_thread, misc::with_current_thread,
-        scheduling::return_to_scheduler_no_save,
+        scheduling::{enable_ap_task_scheduling, return_to_scheduler_no_save},
     },
 };
 use x86_64::registers::model_specific::FsBase;
+
+static FIRST_USER_SYSCALL_LOGGED: AtomicBool = AtomicBool::new(false);
 
 #[unsafe(no_mangle)]
 extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
@@ -60,6 +64,16 @@ fn syscall_handler_unwrapped(
     arg5: u64,
     arg6: u64,
 ) -> isize {
+    if !FIRST_USER_SYSCALL_LOGGED.load(Ordering::Acquire) {
+        with_current_process(|process| {
+            if process.pid.0 > 1
+                && !FIRST_USER_SYSCALL_LOGGED.swap(true, Ordering::AcqRel)
+            {
+                enable_ap_task_scheduling();
+            }
+        });
+    }
+
     if let Some(Some(handler)) = SYSCALL_TABLE.get(syscall_no as usize) {
         match handler(arg1, arg2, arg3, arg4, arg5, arg6) {
             Ok(value) => value as isize,

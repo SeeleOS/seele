@@ -6,7 +6,7 @@ use crate::{
         exception_interrupt::init_exception_interrupts,
         hardware_interrupt::init_hardware_interrupts,
     },
-    memory::utils::apply_offset,
+    memory::mmio::map_mmio,
     print,
     smp::with_current_cpu,
 };
@@ -58,7 +58,7 @@ pub fn default_local_apic() -> LocalApic {
         .timer_mode(TimerMode::Periodic)
         .timer_divide(TimerDivide::Div1)
         .timer_initial(1_000_000)
-        .set_xapic_base(unsafe { apply_offset(xapic_base()) })
+        .set_xapic_base(map_mmio(unsafe { xapic_base() }, 4096))
         .build()
         .unwrap()
 }

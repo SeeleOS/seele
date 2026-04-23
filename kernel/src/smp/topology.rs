@@ -1,8 +1,6 @@
-use acpi::platform::InterruptModel;
 use alloc::vec::Vec;
 use lazy_static::lazy_static;
-
-use crate::{acpi::ACPI_TABLE, smp::current_apic_id_raw};
+use limine::response::MpResponse;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Processor {
@@ -39,38 +37,16 @@ pub fn application_processors() -> Vec<Processor> {
         .collect()
 }
 
-pub fn discover_from_acpi() {
-    let Ok((_, processor_info)) = InterruptModel::new(ACPI_TABLE.get().unwrap()) else {
-        return;
-    };
-    let Some(processor_info) = processor_info else {
-        return;
-    };
-
-    let bsp_apic_id = current_apic_id_raw();
+pub fn discover_from_limine(response: &MpResponse) {
+    let bsp_apic_id = response.bsp_lapic_id();
     let mut processors = PROCESSORS.lock();
     processors.clear();
-    processors.push(Processor {
-        index: 0,
-        apic_id: bsp_apic_id,
-        is_bsp: true,
-    });
 
-    let mut next_index = 1usize;
-    for processor in core::iter::once(processor_info.boot_processor)
-        .chain(processor_info.application_processors.iter().copied())
-    {
-        if processor.local_apic_id == bsp_apic_id
-            || processor.state == acpi::platform::ProcessorState::Disabled
-        {
-            continue;
-        }
-
+    for (index, cpu) in response.cpus().iter().enumerate() {
         processors.push(Processor {
-            index: next_index,
-            apic_id: processor.local_apic_id,
-            is_bsp: false,
+            index,
+            apic_id: cpu.lapic_id,
+            is_bsp: cpu.lapic_id == bsp_apic_id,
         });
-        next_index += 1;
     }
 }

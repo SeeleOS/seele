@@ -67,7 +67,12 @@ impl AddrSpace {
                     }
                 }
 
-                first_frame.expect("file-backed cluster fault mapped no pages")
+                first_frame.unwrap_or_else(|| {
+                    self.page_table
+                        .inner
+                        .translate_page(page)
+                        .expect("file-backed cluster fault target page still unmapped")
+                })
             },
             Data::Shared {
                 ref frames,

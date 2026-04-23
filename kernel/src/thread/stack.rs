@@ -14,7 +14,7 @@ use crate::{
     misc::stack_builder::StackBuilder,
 };
 
-static KERNEL_MEM: AtomicU64 = AtomicU64::new(0xFFFF_8000_3000_0000);
+static KERNEL_MEM: AtomicU64 = AtomicU64::new(0xFFFF_9000_3000_0000);
 
 pub fn allocate_kernel_stack(pages: u64) -> StackBuilder {
     let guard_page = Page::containing_address(VirtAddr::new(

@@ -4,7 +4,7 @@ use acpi::{Handler, PhysicalMapping};
 use x86_64::instructions::port::Port;
 
 use crate::{
-    memory::utils::apply_offset, misc::time::Time, read_addr, read_port, write_addr, write_port,
+    memory::mmio::map_mmio, misc::time::Time, read_port, write_port,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -16,33 +16,32 @@ impl Handler for ACPIHandler {
         physical_address: usize,
         size: usize,
     ) -> acpi::PhysicalMapping<Self, T> {
-        // I doesnt need to manually map stuff because bootlaoder already
-        // mapped the memory :skull:
+        let virtual_start = map_mmio(physical_address as u64, size) as *mut T;
         PhysicalMapping {
             physical_start: physical_address,
             mapped_length: size,
             handler: *self,
             region_length: size,
-            virtual_start: NonNull::new(apply_offset(physical_address as u64) as *mut T).unwrap(),
+            virtual_start: NonNull::new(virtual_start).unwrap(),
         }
     }
 
     fn unmap_physical_region<T>(_region: &PhysicalMapping<Self, T>) {}
 
     fn read_u8(&self, address: usize) -> u8 {
-        unsafe { read_addr!(address, u8) }
+        unsafe { core::ptr::read_volatile(map_mmio(address as u64, 1) as *const u8) }
     }
 
     fn read_u16(&self, address: usize) -> u16 {
-        unsafe { read_addr!(address, u16) }
+        unsafe { core::ptr::read_volatile(map_mmio(address as u64, 2) as *const u16) }
     }
 
     fn read_u32(&self, address: usize) -> u32 {
-        unsafe { read_addr!(address, u32) }
+        unsafe { core::ptr::read_volatile(map_mmio(address as u64, 4) as *const u32) }
     }
 
     fn read_u64(&self, address: usize) -> u64 {
-        unsafe { read_addr!(address, u64) }
+        unsafe { core::ptr::read_volatile(map_mmio(address as u64, 8) as *const u64) }
     }
 
     fn read_io_u8(&self, port: u16) -> u8 {
@@ -58,19 +57,19 @@ impl Handler for ACPIHandler {
     }
 
     fn write_u8(&self, address: usize, value: u8) {
-        unsafe { write_addr!(address, u8, value) }
+        unsafe { core::ptr::write_volatile(map_mmio(address as u64, 1) as *mut u8, value) }
     }
 
     fn write_u16(&self, address: usize, value: u16) {
-        unsafe { write_addr!(address, u16, value) }
+        unsafe { core::ptr::write_volatile(map_mmio(address as u64, 2) as *mut u16, value) }
     }
 
     fn write_u32(&self, address: usize, value: u32) {
-        unsafe { write_addr!(address, u32, value) }
+        unsafe { core::ptr::write_volatile(map_mmio(address as u64, 4) as *mut u32, value) }
     }
 
     fn write_u64(&self, address: usize, value: u64) {
-        unsafe { write_addr!(address, u64, value) }
+        unsafe { core::ptr::write_volatile(map_mmio(address as u64, 8) as *mut u64, value) }
     }
 
     fn write_io_u8(&self, port: u16, value: u8) {

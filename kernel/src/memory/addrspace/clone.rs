@@ -14,7 +14,7 @@ use crate::memory::{
 
 use super::AddrSpace;
 
-const KERNEL_MEM_START: u64 = 0xffff_8000_0000_0000;
+const KERNEL_MEM_START: u64 = 0xffff_9000_0000_0000;
 
 impl AddrSpace {
     pub fn clone_all(&mut self) -> Self {

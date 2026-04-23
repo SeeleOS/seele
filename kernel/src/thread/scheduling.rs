@@ -1,5 +1,10 @@
 use alloc::sync::Arc;
-use core::{arch::naked_asm, mem::offset_of, mem::size_of};
+use core::{
+    arch::naked_asm,
+    mem::offset_of,
+    mem::size_of,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use x86_64::instructions::interrupts::{self, enable_and_hlt, without_interrupts};
 
@@ -8,7 +13,9 @@ use crate::{
     misc::mouse,
     misc::snapshot::Snapshot,
     process::manager::MANAGER,
-    smp::{set_current_kernel_stack, set_current_process, set_current_thread, try_current_process},
+    smp::{
+        set_current_kernel_stack, set_current_process, set_current_thread, try_current_process,
+    },
     thread::{
         THREAD_MANAGER, ThreadRef,
         misc::State,
@@ -16,6 +23,17 @@ use crate::{
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
     },
 };
+
+static AP_TASK_SCHEDULING_ENABLED: AtomicBool = AtomicBool::new(false);
+
+pub fn enable_ap_task_scheduling() {
+    AP_TASK_SCHEDULING_ENABLED.store(true, Ordering::Release);
+}
+
+fn can_run_ready_threads_on_current_cpu() -> bool {
+    crate::smp::with_current_cpu(|cpu| cpu.is_bsp)
+        || AP_TASK_SCHEDULING_ENABLED.load(Ordering::Acquire)
+}
 
 pub fn return_to_scheduler(snapshot: &mut Snapshot, snapshot_type: ThreadSnapshotType) {
     let (thread_snapshot, scheduler_snapshot) = {
@@ -132,10 +150,12 @@ pub fn run() -> ! {
         keyboard::process_pending_scancodes();
         mouse::process_pending_mouse_events();
 
-        let next_thread = {
+        let next_thread = if can_run_ready_threads_on_current_cpu() {
             let mut manager = THREAD_MANAGER.get().unwrap().lock();
             manager.process_timed_out_threads();
             manager.pop_ready()
+        } else {
+            None
         };
 
         if let Some(thread) = next_thread {
@@ -152,7 +172,6 @@ fn run_ready_thread(thread_ref: ThreadRef) {
         let _manager = THREAD_MANAGER.get().unwrap().lock();
         let mut thread = thread_ref.lock();
         let process = thread.parent.clone();
-
         thread.state = State::Running;
         set_current_thread(Some(thread_ref.clone()));
         set_current_kernel_stack(thread.kernel_stack_top);

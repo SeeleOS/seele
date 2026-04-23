@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
-use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
 use conquer_once::spin::OnceCell;
+use limine::memory_map::{Entry, EntryType};
 use spin::Mutex;
 
 use crate::memory::{
@@ -20,20 +20,18 @@ pub mod utils;
 
 pub static PHYSICAL_MEMORY_OFFSET: OnceCell<u64> = OnceCell::uninit();
 pub static USABLE_MEMORY_BYTES: OnceCell<u64> = OnceCell::uninit();
-pub static MEMORY_REGIONS: OnceCell<&'static MemoryRegions> = OnceCell::uninit();
+pub static MEMORY_REGIONS: OnceCell<&'static [&'static Entry]> = OnceCell::uninit();
 
-pub fn init(physical_memory_offset: u64, memory_regions: &'static MemoryRegions) {
+pub fn init(physical_memory_offset: u64, memory_regions: &'static [&'static Entry]) {
     log::debug!("memory: init offset {:#x}", physical_memory_offset);
     let mut mapper = init_mapper(physical_memory_offset);
     let mut frame_allocator = unsafe { BootinfoFrameAllocator::new(memory_regions) };
     init_heap(&mut mapper, &mut frame_allocator).expect("Failed heap initilization");
     log::debug!("memory: heap ready");
 
-    // [TODO] maybe i should move some stuff out of the os struct? tho if it works, dont touch it
     let mapper = Arc::new(Mutex::new(mapper));
     let frame_allocator = Arc::new(Mutex::new(frame_allocator));
 
-    // inits mapper and frame allocator
     MAPPER.get_or_init(|| mapper.clone());
     FRAME_ALLOCATOR.get_or_init(|| frame_allocator.clone());
     PHYSICAL_MEMORY_OFFSET.get_or_init(|| physical_memory_offset);
@@ -41,8 +39,8 @@ pub fn init(physical_memory_offset: u64, memory_regions: &'static MemoryRegions)
     USABLE_MEMORY_BYTES.get_or_init(|| {
         memory_regions
             .iter()
-            .filter(|region| region.kind == MemoryRegionKind::Usable)
-            .map(|region| region.end.saturating_sub(region.start))
+            .filter(|region| region.entry_type == EntryType::USABLE)
+            .map(|region| region.length)
             .sum()
     });
     log::debug!("memory: mapper/frame allocator ready");

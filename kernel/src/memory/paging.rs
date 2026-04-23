@@ -1,6 +1,6 @@
 use alloc::{sync::Arc, vec::Vec};
-use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
 use conquer_once::spin::OnceCell;
+use limine::memory_map::{Entry, EntryType};
 use spin::Mutex;
 use x86_64::{
     PhysAddr, VirtAddr,
@@ -14,7 +14,6 @@ pub static MAPPER: OnceCell<Arc<Mutex<OffsetPageTable<'static>>>> = OnceCell::un
 pub static FRAME_ALLOCATOR: OnceCell<Arc<Mutex<BootinfoFrameAllocator>>> = OnceCell::uninit();
 const LOWER_MEMORY_END: u64 = 0x10_0000;
 
-// initalize the mapper thats based on offset page table
 pub fn init_mapper(physcal_memory_offset: u64) -> OffsetPageTable<'static> {
     unsafe {
         OffsetPageTable::new(
@@ -32,10 +31,9 @@ pub fn get_l4_table(phys_mem_offset: VirtAddr) -> &'static mut PageTable {
     unsafe { &mut *page_table_ptr }
 }
 
-// allocates avalible frames based on bootinfos memory map
 #[derive(Clone)]
 pub struct BootinfoFrameAllocator {
-    memory_map: &'static MemoryRegions,
+    memory_map: &'static [&'static Entry],
     free_frames: Vec<PhysFrame<Size4KiB>>,
     next_region_index: usize,
     next_frame_addr: u64,
@@ -46,7 +44,7 @@ impl BootinfoFrameAllocator {
     ///
     /// `memory_map` must remain valid for the allocator's lifetime and must
     /// describe physical memory that is not concurrently mutated elsewhere.
-    pub unsafe fn new(memory_map: &'static MemoryRegions) -> Self {
+    pub unsafe fn new(memory_map: &'static [&'static Entry]) -> Self {
         Self {
             memory_map,
             free_frames: Vec::new(),
@@ -61,14 +59,14 @@ impl BootinfoFrameAllocator {
         }
 
         while let Some(region) = self.memory_map.get(self.next_region_index) {
-            if region.kind != MemoryRegionKind::Usable {
+            if region.entry_type != EntryType::USABLE {
                 self.next_region_index += 1;
                 self.next_frame_addr = 0;
                 continue;
             }
 
-            let start = align_up_4k(region.start.max(LOWER_MEMORY_END));
-            let end = align_down_4k(region.end);
+            let start = align_up_4k(region.base.max(LOWER_MEMORY_END));
+            let end = align_down_4k(region.base.saturating_add(region.length));
 
             if start >= end {
                 self.next_region_index += 1;
@@ -132,14 +130,14 @@ impl BootinfoFrameAllocator {
         let span = (pages as u64).checked_mul(Size4KiB::SIZE)?;
 
         while let Some(region) = self.memory_map.get(self.next_region_index) {
-            if region.kind != MemoryRegionKind::Usable {
+            if region.entry_type != EntryType::USABLE {
                 self.next_region_index += 1;
                 self.next_frame_addr = 0;
                 continue;
             }
 
-            let start = align_up_4k(region.start.max(LOWER_MEMORY_END));
-            let end = align_down_4k(region.end);
+            let start = align_up_4k(region.base.max(LOWER_MEMORY_END));
+            let end = align_down_4k(region.base.saturating_add(region.length));
 
             if start >= end {
                 self.next_region_index += 1;
