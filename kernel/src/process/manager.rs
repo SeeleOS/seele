@@ -90,6 +90,9 @@ impl Process {
             remove_pid_cgroup_path(self.pid);
         }
 
+        self.objects.clear();
+        self.object_flags.clear();
+
         self.threads
             .iter()
             .filter_map(|thread| thread.upgrade())

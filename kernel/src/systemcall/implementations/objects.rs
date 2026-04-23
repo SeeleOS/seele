@@ -341,12 +341,16 @@ define_syscall!(Dup3, |source_fd: usize, dest: usize, flags: i32| {
 bitflags! {
     #[derive(Clone, Copy, Debug)]
     struct CloseRangeFlags: u32 {
+        const CLOSE_RANGE_UNSHARE = 0x2;
         const CLOSE_RANGE_CLOEXEC = 0x4;
     }
 }
 
 define_syscall!(CloseRange, |first: usize, last: usize, flags: u32| {
     let flags = CloseRangeFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
+    if first > last {
+        return Err(SyscallError::InvalidArguments);
+    }
 
     let process_ref = get_current_process();
     let mut process = process_ref.lock();
