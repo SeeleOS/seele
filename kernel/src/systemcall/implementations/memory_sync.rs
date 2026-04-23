@@ -1,4 +1,8 @@
-use alloc::collections::{btree_map::BTreeMap, vec_deque::VecDeque};
+use alloc::{
+    collections::{btree_map::BTreeMap, vec_deque::VecDeque},
+    sync::Arc,
+    vec::Vec,
+};
 use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
 use spin::Mutex;
@@ -12,10 +16,13 @@ use crate::{
         user_safe,
     },
     misc::others::protection_to_page_flags,
+    misc::systemd_perf::{self, PerfBucket},
+    misc::time::Time,
     process::manager::get_current_process,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
         THREAD_MANAGER, ThreadRef, get_current_thread,
+        manager::ThreadManager,
         yielding::{BlockType, finish_block_current, prepare_block_current},
     },
 };
@@ -75,6 +82,12 @@ struct FutexKey {
 }
 
 static FUTEX_QUEUE: Mutex<BTreeMap<FutexKey, VecDeque<ThreadRef>>> = Mutex::new(BTreeMap::new());
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct LinuxTimespec {
+    tv_sec: i64,
+    tv_nsec: i64,
+}
 
 fn current_futex_key(addr: u64) -> FutexKey {
     let pid = get_current_process().lock().pid.0;
@@ -82,16 +95,43 @@ fn current_futex_key(addr: u64) -> FutexKey {
 }
 
 pub fn wake_futex_for_process(pid: u64, addr: u64, count: usize) -> usize {
+    let threads = take_futex_waiters(pid, addr, count);
+    let woken = threads.len();
+
+    let mut manager = THREAD_MANAGER.get().unwrap().lock();
+    for thread in threads {
+        manager.wake(thread);
+    }
+
+    woken
+}
+
+pub fn wake_futex_for_process_with_manager(
+    pid: u64,
+    addr: u64,
+    count: usize,
+    manager: &mut ThreadManager,
+) -> usize {
+    let threads = take_futex_waiters(pid, addr, count);
+    let woken = threads.len();
+
+    for thread in threads {
+        manager.wake(thread);
+    }
+
+    woken
+}
+
+fn take_futex_waiters(pid: u64, addr: u64, count: usize) -> Vec<ThreadRef> {
     let key = FutexKey { pid, addr };
     let mut queue = FUTEX_QUEUE.lock();
-    let mut woken = 0;
+    let mut woken = Vec::new();
     let mut remove_key = false;
 
     if let Some(queue) = queue.get_mut(&key) {
         for _ in 0..count {
             if let Some(thread) = queue.pop_front() {
-                THREAD_MANAGER.get().unwrap().lock().wake(thread);
-                woken += 1;
+                woken.push(thread);
             } else {
                 break;
             }
@@ -107,9 +147,43 @@ pub fn wake_futex_for_process(pid: u64, addr: u64, count: usize) -> usize {
     woken
 }
 
-fn futex_wait_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
+pub fn remove_futex_waiter(thread_ref: &ThreadRef) {
+    let mut queue = FUTEX_QUEUE.lock();
+    let mut empty_keys = Vec::new();
+
+    for (key, waiters) in queue.iter_mut() {
+        waiters.retain(|thread| !Arc::ptr_eq(thread, thread_ref));
+        if waiters.is_empty() {
+            empty_keys.push(*key);
+        }
+    }
+
+    for key in empty_keys {
+        queue.remove(&key);
+    }
+}
+
+fn futex_timeout_deadline(timeout: u64) -> Result<Option<Time>, SyscallError> {
+    if timeout == 0 {
+        return Ok(None);
+    }
+
+    let timeout = unsafe { *(timeout as *const LinuxTimespec) };
+    if timeout.tv_sec < 0 || !(0..1_000_000_000).contains(&timeout.tv_nsec) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let timeout_ns = (timeout.tv_sec as u128)
+        .saturating_mul(1_000_000_000)
+        .saturating_add(timeout.tv_nsec as u128);
+    let timeout_ns = timeout_ns.min(u64::MAX as u128) as u64;
+    Ok(Some(Time::since_boot().add_ns(timeout_ns)))
+}
+
+fn futex_wait_impl(arg1: u64, arg2: u64, timeout: u64) -> Result<usize, SyscallError> {
     let key = current_futex_key(arg1);
     let current = get_current_thread();
+    let deadline = futex_timeout_deadline(timeout)?;
     {
         let mut queue = FUTEX_QUEUE.lock();
         let cur_value = unsafe { *(arg1 as *const u32) } as u64;
@@ -117,16 +191,24 @@ fn futex_wait_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
             return Err(SyscallError::TryAgain);
         }
 
-        queue.entry(key).or_default().push_back(current);
+        queue.entry(key).or_default().push_back(current.clone());
 
         // Mark the thread blocked before releasing the futex bucket so a
         // concurrent wake cannot slip between queue insertion and scheduling.
-        prepare_block_current(BlockType::Futex);
+        prepare_block_current(BlockType::Futex { deadline });
     }
 
     // Do not keep FUTEX_QUEUE locked across scheduling, or FutexWake will
     // deadlock trying to take the same lock from another thread.
     finish_block_current();
+
+    remove_futex_waiter(&current);
+
+    if let Some(deadline) = deadline
+        && Time::since_boot() >= deadline
+    {
+        return Err(SyscallError::TryAgain);
+    }
 
     Ok(0)
 }
@@ -141,19 +223,21 @@ fn futex_wake_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
 define_syscall!(Futex, |arg1: u64,
                         op: u64,
                         arg2: u64,
-                        _timeout: u64,
+                        timeout: u64,
                         _uaddr2: u64,
                         val3: u64| {
-    match FutexOp::try_from(op & 0x7f).map_err(|_| SyscallError::InvalidArguments)? {
-        FutexOp::Wait => futex_wait_impl(arg1, arg2),
-        FutexOp::Wake => futex_wake_impl(arg1, arg2),
-        FutexOp::WaitBitset => {
-            if val3 == 0 {
-                return Err(SyscallError::InvalidArguments);
+    systemd_perf::profile_current_process(PerfBucket::Futex, || {
+        match FutexOp::try_from(op & 0x7f).map_err(|_| SyscallError::InvalidArguments)? {
+            FutexOp::Wait => futex_wait_impl(arg1, arg2, timeout),
+            FutexOp::Wake => futex_wake_impl(arg1, arg2),
+            FutexOp::WaitBitset => {
+                if val3 == 0 {
+                    return Err(SyscallError::InvalidArguments);
+                }
+                futex_wait_impl(arg1, arg2, timeout)
             }
-            futex_wait_impl(arg1, arg2)
         }
-    }
+    })
 });
 
 define_syscall!(ArchPrctl, |code: u64, addr: u64| {

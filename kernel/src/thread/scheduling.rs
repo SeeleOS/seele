@@ -12,7 +12,10 @@ use crate::{
     keyboard,
     misc::mouse,
     misc::snapshot::Snapshot,
+    misc::timer::process_expired_process_timers,
+    object::linux_anon::wake_expired_timerfds_with_manager,
     process::manager::MANAGER,
+    signal::process_current_process_signals,
     smp::{
         set_current_kernel_stack, set_current_process, set_current_thread, try_current_process,
     },
@@ -33,6 +36,15 @@ pub fn enable_ap_task_scheduling() {
 fn can_run_ready_threads_on_current_cpu() -> bool {
     crate::smp::with_current_cpu(|cpu| cpu.is_bsp)
         || AP_TASK_SCHEDULING_ENABLED.load(Ordering::Acquire)
+}
+
+fn process_deferred_timer_work() {
+    process_expired_process_timers();
+
+    let mut manager = THREAD_MANAGER.get().unwrap().lock();
+    manager.process_timed_out_threads();
+    wake_expired_timerfds_with_manager(&mut manager);
+    manager.wake_ready_pollers();
 }
 
 pub fn return_to_scheduler(snapshot: &mut Snapshot, snapshot_type: ThreadSnapshotType) {
@@ -147,12 +159,12 @@ pub fn return_to_scheduler_no_save() -> ! {
 
 pub fn run() -> ! {
     loop {
+        process_deferred_timer_work();
         keyboard::process_pending_scancodes();
         mouse::process_pending_mouse_events();
 
         let next_thread = if can_run_ready_threads_on_current_cpu() {
             let mut manager = THREAD_MANAGER.get().unwrap().lock();
-            manager.process_timed_out_threads();
             manager.pop_ready()
         } else {
             None
@@ -206,7 +218,7 @@ fn after_thread_yield(thread_ref: ThreadRef) {
         let thread = thread_ref.lock();
         thread.parent.clone()
     };
-    let should_cleanup = process.lock().process_signals();
+    let should_cleanup = process_current_process_signals(&process);
     if should_cleanup {
         THREAD_MANAGER
             .get()
@@ -249,10 +261,10 @@ fn after_thread_yield(thread_ref: ThreadRef) {
 fn sleep_if_idle() {
     interrupts::disable();
 
+    process_deferred_timer_work();
+
     let has_pending_work = keyboard::has_pending_scancodes() || mouse::has_pending_events() || {
-        let mut manager = THREAD_MANAGER.get().unwrap().lock();
-        manager.process_timed_out_threads();
-        manager.has_ready_threads()
+        THREAD_MANAGER.get().unwrap().lock().has_ready_threads()
     };
 
     if has_pending_work {

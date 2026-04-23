@@ -13,7 +13,7 @@ use crate::{
         traits::{Configuratable, Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
-    signal::Signal,
+    signal::{Signal, send_signal_to_process},
     terminal::line_discipline::{process_input_byte, process_output_bytes},
     terminal::pty::shared::PtyShared,
     thread::{THREAD_MANAGER, yielding::WakeType},
@@ -107,7 +107,7 @@ impl Writable for PtyMaster {
             group_id
                 .get_processes()
                 .iter()
-                .for_each(|process| process.lock().send_signal(Signal::Interrupt));
+                .for_each(|process| send_signal_to_process(process, Signal::Interrupt));
         }
 
         let mut manager = THREAD_MANAGER.get().unwrap().lock();

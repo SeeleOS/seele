@@ -1,10 +1,10 @@
 use crate::{
     misc::snapshot::Snapshot,
     object::linux_anon::wake_signalfd_for_process,
-    process::Process,
+    process::{Process, ProcessRef, group::ProcessGroupID},
     s_println,
     thread::{
-        THREAD_MANAGER, get_current_thread,
+        THREAD_MANAGER, ThreadRef, get_current_thread,
         misc::{SnapshotState, State, with_current_thread},
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
         thread::Thread,
@@ -274,38 +274,96 @@ pub mod misc {
     pub use super::default_signal_action_vec;
 }
 
+#[derive(Default)]
+pub struct ProcessSignalsResult {
+    pub should_switch: bool,
+    exited_threads: Vec<ThreadRef>,
+    stopped_group: Option<ProcessGroupID>,
+}
+
+fn wake_process_threads(process: &ProcessRef, wake_stopped_only: bool) {
+    let threads = {
+        let process = process.lock();
+        process.threads.clone()
+    };
+
+    let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+    for weak in threads {
+        let Some(thread) = weak.upgrade() else {
+            continue;
+        };
+
+        let should_wake = {
+            let thread = thread.lock();
+            match &thread.state {
+                State::Blocked(BlockType::Stopped) => wake_stopped_only,
+                State::Blocked(_) => !wake_stopped_only,
+                _ => false,
+            }
+        };
+
+        if should_wake {
+            thread_manager.wake(thread);
+        }
+    }
+}
+
+pub fn send_signal_to_process(process: &ProcessRef, signal: Signal) {
+    match signal {
+        Signal::Continue => wake_process_threads(process, true),
+        _ => {
+            let pid = {
+                let mut process = process.lock();
+                process.pending_signals.insert(Signals::from(signal));
+                process.pid.0
+            };
+            wake_signalfd_for_process(pid);
+            wake_process_threads(process, false);
+        }
+    }
+}
+
+pub fn process_current_process_signals(process: &ProcessRef) -> bool {
+    let result = {
+        let mut process = process.lock();
+        process.process_signals()
+    };
+
+    if let Some(group) = result.stopped_group {
+        for process in group.get_processes() {
+            let threads = {
+                let process = process.lock();
+                process.threads.clone()
+            };
+
+            for weak in threads {
+                if let Some(thread) = weak.upgrade() {
+                    thread.lock().state = State::Blocked(BlockType::Stopped);
+                }
+            }
+        }
+    }
+
+    if !result.exited_threads.is_empty() {
+        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+        for thread in result.exited_threads {
+            thread_manager.mark_thread_exited(thread);
+        }
+    }
+
+    result.should_switch
+}
+
 impl Process {
     pub fn get_signal_action(&mut self, signal: Signal) -> &mut action::SignalAction {
         &mut self.signal_actions[signal.index()]
     }
 
-    pub fn send_signal(&mut self, signal: Signal) {
-        match signal {
-            Signal::Continue => {
-                let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-                for weak in &self.threads {
-                    let Some(thread) = weak.upgrade() else {
-                        continue;
-                    };
-
-                    if matches!(thread.lock().state, State::Blocked(BlockType::Stopped)) {
-                        thread_manager.wake(thread.clone());
-                    }
-                }
-            }
-            _ => {
-                self.pending_signals.insert(Signals::from(signal));
-                wake_signalfd_for_process(self.pid.0);
-                self.wake_blocked_threads();
-            }
-        }
-    }
-
     /// Returns `true` if a user-space signal handler was installed and the
     /// caller should stop the current return path so the handler can run next.
     #[must_use]
-    pub fn process_signals(&mut self) -> bool {
-        let mut ret = false;
+    pub fn process_signals(&mut self) -> ProcessSignalsResult {
+        let mut result = ProcessSignalsResult::default();
 
         for signal in Signal::iter() {
             let signal_bits = Signals::from(signal);
@@ -320,8 +378,13 @@ impl Process {
 
                 match action.handling_type {
                     SignalHandlingType::Default => {
-                        if self.default_signal_action(signal) {
-                            ret = true;
+                        let default_result = self.default_signal_action(signal);
+                        result.should_switch |= default_result.should_switch;
+                        if !default_result.exited_threads.is_empty() {
+                            result.exited_threads = default_result.exited_threads;
+                        }
+                        if default_result.stopped_group.is_some() {
+                            result.stopped_group = default_result.stopped_group;
                         }
                     }
                     SignalHandlingType::Ignore => {}
@@ -348,7 +411,7 @@ impl Process {
                             .block_signals_for_handler(action.sig_handler_ignored_sigs, signal);
                         current_thread.enter_signal_handler(thread_snapshot);
 
-                        ret = true;
+                        result.should_switch = true;
                     }),
                     SignalHandlingType::Function2(func) => with_current_thread(|current_thread| {
                         let (_, mut stack_builder) = self.addrspace.allocate_user(16);
@@ -381,16 +444,16 @@ impl Process {
                             .block_signals_for_handler(action.sig_handler_ignored_sigs, signal);
                         current_thread.enter_signal_handler(thread_snapshot);
 
-                        ret = true;
+                        result.should_switch = true;
                     }),
                 }
             }
         }
 
-        ret
+        result
     }
 
-    fn default_signal_action(&mut self, signal: Signal) -> bool {
+    fn default_signal_action(&mut self, signal: Signal) -> ProcessSignalsResult {
         if signal.is_realtime()
             || matches!(
                 signal,
@@ -420,33 +483,30 @@ impl Process {
         {
             s_println!("fatal signal: pid={} signal={:?}", self.pid.0, signal);
             let threads = self.terminate_inner(signal as u64);
-            let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-            for thread in threads {
-                thread_manager.mark_thread_exited(thread);
-            }
-
-            return true;
+            return ProcessSignalsResult {
+                should_switch: true,
+                exited_threads: threads,
+                stopped_group: None,
+            };
         }
 
         match signal {
-            Signal::ChildChanged | Signal::UrgentCondition | Signal::WindowChanged => false,
+            Signal::ChildChanged | Signal::UrgentCondition | Signal::WindowChanged => {
+                ProcessSignalsResult::default()
+            }
             Signal::Stop
             | Signal::TerminalStop
             | Signal::TerminalInput
             | Signal::TerminalOutput => {
-                for process in self.group_id.get_processes() {
-                    let threads = process.lock().threads.clone();
-                    for weak in threads {
-                        if let Some(thread) = weak.upgrade() {
-                            thread.lock().state = State::Blocked(BlockType::Stopped);
-                        }
-                    }
+                ProcessSignalsResult {
+                    should_switch: true,
+                    exited_threads: Vec::new(),
+                    stopped_group: Some(self.group_id),
                 }
-                true
             }
             Signal::Continue => unreachable!(),
-            Signal::Alarm => false,
-            _ => false,
+            Signal::Alarm => ProcessSignalsResult::default(),
+            _ => ProcessSignalsResult::default(),
         }
     }
 }

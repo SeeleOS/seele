@@ -1,7 +1,7 @@
 use crate::{
     object::tty_device::{get_active_tty, wake_tty_poller_readable},
     print,
-    signal::Signal,
+    signal::{Signal, send_signal_to_process},
     terminal::{
         line_discipline::{process_input_byte, process_output_bytes},
         object::TerminalSettings,
@@ -19,7 +19,7 @@ fn handle_interrupt_char(info: &TerminalSettings) {
         group_id
             .get_processes()
             .iter()
-            .for_each(|process| process.lock().send_signal(Signal::Interrupt));
+            .for_each(|process| send_signal_to_process(process, Signal::Interrupt));
         THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
         wake_tty_poller_readable();
     }

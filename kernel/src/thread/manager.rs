@@ -11,7 +11,7 @@ use crate::{
     process::{ProcessRef, manager::MANAGER},
     signal::{Signal, Signals},
     smp::current_thread,
-    systemcall::implementations::wake_futex_for_process,
+    systemcall::implementations::wake_futex_for_process_with_manager,
     thread::{
         ThreadRef,
         misc::{State, ThreadID},
@@ -211,7 +211,7 @@ impl ThreadManager {
                     .write(pending.clear_child_tid as *mut u8, &0i32);
                 pid
             };
-            wake_futex_for_process(pid, pending.clear_child_tid, 1);
+            wake_futex_for_process_with_manager(pid, pending.clear_child_tid, 1, self);
         }
     }
 }

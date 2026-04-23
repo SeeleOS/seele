@@ -8,9 +8,8 @@ use crate::{
     misc::{others::is_user_mode, tss::*},
     process::{
         manager::{get_current_process, terminate_process},
-        misc::with_current_process,
     },
-    signal::Signal,
+    signal::{Signal, process_current_process_signals, send_signal_to_process},
     thread::{THREAD_MANAGER, misc::with_current_thread, scheduling::return_to_scheduler_no_save},
 };
 
@@ -70,24 +69,16 @@ pub fn handle_usermode_exception(stackframe: &InterruptStackFrame, sig: Signal) 
             .update_with_stackframe(stackframe);
     });
 
-    let should_switch = with_current_process(|process| {
-        process.send_signal(sig);
-        process.process_signals()
-    });
+    let process = get_current_process();
+    send_signal_to_process(&process, sig);
+    let should_switch = process_current_process_signals(&process);
 
     if should_switch {
-        let current_pid = with_current_process(|process| process.pid.0);
-        if current_pid == 32 {
-            crate::s_println!("signal cleanup path=exception pid={}", current_pid);
-        }
         THREAD_MANAGER
             .get()
             .unwrap()
             .lock()
             .cleanup_exited_threads();
-        if current_pid == 32 {
-            crate::s_println!("signal cleanup done path=exception pid={}", current_pid);
-        }
         return_to_scheduler_no_save();
     }
 

@@ -3,8 +3,8 @@ use num_enum::TryFromPrimitive;
 
 use crate::{
     misc::{others::push_and_return_index, time::Time},
-    process::Process,
-    signal::Signal,
+    process::{Process, manager::MANAGER},
+    signal::{Signal, send_signal_to_process},
     systemcall::utils::{SyscallError, SyscallResult},
 };
 
@@ -210,18 +210,35 @@ impl Process {
             .min(i32::MAX as u64) as usize)
     }
 
-    pub fn process_timers(&mut self) {
+    pub fn process_timers(&mut self) -> Vec<Signal> {
         let mut actions: Vec<TimerAction> = Vec::new();
 
         for timer in self.timers.iter_mut().flatten() {
             actions.push(timer.process());
         }
 
+        let mut signals = Vec::new();
         for action in actions {
             match action {
                 TimerAction::None => {}
-                TimerAction::Signal(signal) => self.send_signal(signal),
+                TimerAction::Signal(signal) => signals.push(signal),
             }
+        }
+
+        signals
+    }
+}
+
+pub fn process_expired_process_timers() {
+    let processes = {
+        let manager = MANAGER.lock();
+        manager.processes.values().cloned().collect::<Vec<_>>()
+    };
+
+    for process in processes {
+        let signals = process.lock().process_timers();
+        for signal in signals {
+            send_signal_to_process(&process, signal);
         }
     }
 }

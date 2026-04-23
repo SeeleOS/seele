@@ -2,7 +2,8 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{
     misc::snapshot::Snapshot,
-    process::misc::with_current_process,
+    process::manager::get_current_process,
+    signal::process_current_process_signals,
     systemcall::table::SYSCALL_TABLE,
     systemcall::utils::SyscallError,
     thread::{
@@ -42,7 +43,7 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
         thread.get_appropriate_snapshot().fs_base = FsBase::read().as_u64();
     });
 
-    let should_switch = with_current_process(|proc| proc.process_signals());
+    let should_switch = process_current_process_signals(&get_current_process());
     if should_switch {
         THREAD_MANAGER
             .get()
@@ -65,7 +66,7 @@ fn syscall_handler_unwrapped(
     arg6: u64,
 ) -> isize {
     if !FIRST_USER_SYSCALL_LOGGED.load(Ordering::Acquire) {
-        with_current_process(|process| {
+        crate::process::misc::with_current_process(|process| {
             if process.pid.0 > 1
                 && !FIRST_USER_SYSCALL_LOGGED.swap(true, Ordering::AcqRel)
             {

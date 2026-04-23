@@ -16,7 +16,7 @@ use crate::{
     },
     process::misc::with_current_process,
     process::{FdFlags, manager::get_current_process},
-    signal::{SigInfo, Signal, UContext, action::SignalAction},
+    signal::{SigInfo, Signal, UContext, action::SignalAction, send_signal_to_process},
 };
 use alloc::vec::Vec;
 use bitflags::bitflags;
@@ -297,7 +297,7 @@ define_syscall!(Kill, |pid: i32, signal: i32| {
 
     if let Some(signal) = signal {
         for process in targets {
-            process.lock().send_signal(signal);
+            send_signal_to_process(&process, signal);
         }
     }
 
@@ -323,7 +323,7 @@ define_syscall!(Tgkill, |tgid: i32, tid: i32, signal: i32| {
         return Err(SyscallError::NoProcess);
     }
 
-    process.lock().send_signal(signal);
+    send_signal_to_process(&process, signal);
     Ok(0)
 });
 
@@ -341,7 +341,7 @@ define_syscall!(
 
 define_syscall!(SendSignalGroup, |group: ProcessGroupID, signal: Signal| {
     for ele in group.get_processes() {
-        ele.lock().send_signal(signal);
+        send_signal_to_process(&ele, signal);
     }
 
     Ok(0)
@@ -406,7 +406,7 @@ define_syscall!(RtSigreturn, {
 
 define_syscall!(SendSignalToAll, |signal: Signal| {
     for process in MANAGER.lock().processes.values() {
-        process.lock().send_signal(signal);
+        send_signal_to_process(process, signal);
     }
 
     Ok(0)
