@@ -3,13 +3,18 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::{Command, exit},
+    thread,
 };
 
 fn main() {
     let agent_mode = env::args().any(|arg| arg == "--agent");
     let agent_timeout = env::var("SEELE_QEMU_TIMEOUT").unwrap_or_else(|_| "10s".to_string());
     let machine = env::var("SEELE_QEMU_MACHINE").unwrap_or_else(|_| "q35".to_string());
-    let smp = env::var("SEELE_QEMU_SMP").unwrap_or_else(|_| "2".to_string());
+    let smp = env::var("SEELE_QEMU_SMP").unwrap_or_else(|_| {
+        thread::available_parallelism()
+            .map(|count| count.get().to_string())
+            .unwrap_or_else(|_| "1".to_string())
+    });
     let qemu_debug_log = env::var_os("SEELE_QEMU_DEBUG_LOG");
     let qemu_debugcon = env::var_os("SEELE_QEMU_DEBUGCON");
 
