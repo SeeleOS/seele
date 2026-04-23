@@ -14,9 +14,15 @@ use symlink::ProcSymlink;
 const PROC_FILE_MODE_READONLY: u32 = 0o100444;
 const PROC_FILE_MODE_READWRITE: u32 = 0o100644;
 
-pub(super) fn proc_dir(name: &str, inode: u64, entries: Vec<DirectoryContentInfo>) -> FileLike {
+pub(super) fn proc_dir(
+    path: &str,
+    name: &str,
+    inode: u64,
+    entries: Vec<DirectoryContentInfo>,
+) -> FileLike {
     FileLike::Directory(Arc::new(Mutex::new(ProcDirectory::new(
         name.into(),
+        path.into(),
         inode,
         entries,
     ))))

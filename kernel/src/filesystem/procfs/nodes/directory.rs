@@ -11,14 +11,21 @@ use crate::filesystem::{
 
 pub(super) struct ProcDirectory {
     name: String,
+    path: String,
     inode: u64,
     entries: Vec<DirectoryContentInfo>,
 }
 
 impl ProcDirectory {
-    pub(super) fn new(name: String, inode: u64, entries: Vec<DirectoryContentInfo>) -> Self {
+    pub(super) fn new(
+        name: String,
+        path: String,
+        inode: u64,
+        entries: Vec<DirectoryContentInfo>,
+    ) -> Self {
         Self {
             name,
+            path,
             inode,
             entries,
         }
@@ -56,7 +63,12 @@ impl Directory for ProcDirectory {
         Err(FSError::Readonly)
     }
 
-    fn get(&self, _name: &str) -> FSResult<FileLike> {
-        Err(FSError::NotFound)
+    fn get(&self, name: &str) -> FSResult<FileLike> {
+        let child_path = if self.path == "/" {
+            alloc::format!("/{name}")
+        } else {
+            alloc::format!("{}/{}", self.path, name)
+        };
+        super::super::lookup_proc_path(&crate::filesystem::path::Path::new(&child_path))
     }
 }

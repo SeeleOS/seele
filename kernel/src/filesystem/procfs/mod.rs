@@ -166,381 +166,416 @@ impl Default for ProcFs {
     }
 }
 
+pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
+    let normalized = path.normalize();
+    let parts = normalized
+        .parts
+        .iter()
+        .filter_map(|part| match part {
+            PathPart::Normal(name) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    match parts.as_slice() {
+        [] => Ok(proc_dir("/", "/", PROC_ROOT_INODE, proc_root_entries())),
+        ["cmdline"] => Ok(proc_file(
+            "cmdline",
+            PROC_CMDLINE_INODE,
+            proc_kernel_cmdline_bytes,
+        )),
+        ["devices"] => Ok(proc_file("devices", PROC_DEVICES_INODE, proc_devices_bytes)),
+        ["meminfo"] => Ok(proc_file("meminfo", PROC_MEMINFO_INODE, proc_meminfo_bytes)),
+        ["mounts"] => Ok(proc_file("mounts", PROC_MOUNTS_INODE, proc_mounts_bytes)),
+        ["pressure"] => Ok(proc_dir(
+            "/pressure",
+            "pressure",
+            PROC_PRESSURE_INODE,
+            proc_pressure_entries(),
+        )),
+        ["pressure", "cpu"] => Ok(proc_rw_file(
+            "cpu",
+            PROC_PRESSURE_CPU_INODE,
+            proc_pressure_bytes,
+            proc_write_pressure,
+        )),
+        ["pressure", "io"] => Ok(proc_rw_file(
+            "io",
+            PROC_PRESSURE_IO_INODE,
+            proc_pressure_bytes,
+            proc_write_pressure,
+        )),
+        ["pressure", "memory"] => Ok(proc_rw_file(
+            "memory",
+            PROC_PRESSURE_MEMORY_INODE,
+            proc_pressure_bytes,
+            proc_write_pressure,
+        )),
+        ["sys"] => Ok(proc_dir("/sys", "sys", PROC_SYS_INODE, proc_sys_entries())),
+        ["sys", "fs"] => Ok(proc_dir(
+            "/sys/fs",
+            "fs",
+            PROC_SYS_FS_INODE,
+            proc_fs_entries(),
+        )),
+        ["sys", "kernel"] => Ok(proc_dir(
+            "/sys/kernel",
+            "kernel",
+            PROC_SYS_KERNEL_INODE,
+            proc_kernel_entries(),
+        )),
+        ["sys", "kernel", "hostname"] => Ok(proc_rw_file(
+            "hostname",
+            PROC_SYS_KERNEL_HOSTNAME_INODE,
+            proc_hostname_bytes,
+            proc_write_hostname,
+        )),
+        ["sys", "kernel", "domainname"] => Ok(proc_rw_file(
+            "domainname",
+            PROC_SYS_KERNEL_DOMAINNAME_INODE,
+            proc_domainname_bytes,
+            proc_write_domainname,
+        )),
+        ["sys", "kernel", "osrelease"] => Ok(proc_file(
+            "osrelease",
+            PROC_SYS_KERNEL_OSRELEASE_INODE,
+            proc_osrelease_bytes,
+        )),
+        ["sys", "kernel", "random"] => Ok(proc_dir(
+            "/sys/kernel/random",
+            "random",
+            PROC_SYS_KERNEL_RANDOM_INODE,
+            proc_kernel_random_entries(),
+        )),
+        ["sys", "kernel", "random", "boot_id"] => Ok(proc_file(
+            "boot_id",
+            PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE,
+            proc_boot_id_bytes,
+        )),
+        ["sys", "kernel", "random", "uuid"] => Ok(proc_file(
+            "uuid",
+            PROC_SYS_KERNEL_RANDOM_UUID_INODE,
+            proc_random_uuid_bytes,
+        )),
+        ["sys", "fs", "file-max"] => Ok(proc_rw_file(
+            "file-max",
+            PROC_SYS_FS_FILE_MAX_INODE,
+            || proc_sysctl_value_bytes(&PROC_FILE_MAX),
+            |buffer| proc_write_sysctl_u64(&PROC_FILE_MAX, buffer),
+        )),
+        ["sys", "fs", "nr_open"] => Ok(proc_rw_file(
+            "nr_open",
+            PROC_SYS_FS_NR_OPEN_INODE,
+            || proc_sysctl_value_bytes(&PROC_NR_OPEN),
+            |buffer| proc_write_sysctl_u64(&PROC_NR_OPEN, buffer),
+        )),
+        ["self"] => {
+            let pid = current_pid()?;
+            Ok(proc_symlink("self", PROC_SELF_INODE, format!("{}", pid.0)))
+        }
+        ["self", "cmdline"] => {
+            let pid = current_pid()?;
+            Ok(proc_file("cmdline", pid_cmdline_inode(pid), move || {
+                proc_pid_cmdline_bytes(pid)
+            }))
+        }
+        ["self", "comm"] => {
+            let pid = current_pid()?;
+            Ok(proc_file("comm", pid_comm_inode(pid), move || {
+                proc_pid_comm_bytes(pid).unwrap_or_default()
+            }))
+        }
+        ["self", "environ"] => {
+            let pid = current_pid()?;
+            Ok(proc_file("environ", pid_environ_inode(pid), move || {
+                proc_pid_environ_bytes(pid).unwrap_or_default()
+            }))
+        }
+        ["self", "stat"] => {
+            let pid = current_pid()?;
+            Ok(proc_file("stat", pid_stat_inode(pid), move || {
+                proc_pid_stat_bytes(pid).unwrap_or_default()
+            }))
+        }
+        ["self", "status"] => {
+            let pid = current_pid()?;
+            Ok(proc_file("status", pid_status_inode(pid), move || {
+                proc_pid_status_bytes(pid).unwrap_or_default()
+            }))
+        }
+        ["self", "cgroup"] => {
+            let pid = current_pid()?;
+            Ok(proc_file("cgroup", pid_cgroup_inode(pid), move || {
+                proc_pid_cgroup_bytes(pid)
+            }))
+        }
+        ["self", "oom_score_adj"] => {
+            let pid = current_pid()?;
+            Ok(proc_rw_file(
+                "oom_score_adj",
+                pid_oom_score_adj_inode(pid),
+                move || proc_pid_oom_score_adj_bytes(pid).unwrap_or_default(),
+                move |buffer| proc_pid_write_oom_score_adj(pid, buffer),
+            ))
+        }
+        ["self", "mountinfo"] => {
+            let pid = current_pid()?;
+            Ok(proc_file(
+                "mountinfo",
+                pid_mountinfo_inode(pid),
+                proc_mountinfo_bytes,
+            ))
+        }
+        ["self", "uid_map"] => {
+            let pid = current_pid()?;
+            Ok(proc_rw_file(
+                "uid_map",
+                pid_uid_map_inode(pid),
+                move || proc_pid_uid_map_bytes(pid).unwrap_or_default(),
+                move |buffer| proc_pid_write_uid_map(pid, buffer),
+            ))
+        }
+        ["self", "gid_map"] => {
+            let pid = current_pid()?;
+            Ok(proc_rw_file(
+                "gid_map",
+                pid_gid_map_inode(pid),
+                move || proc_pid_gid_map_bytes(pid).unwrap_or_default(),
+                move |buffer| proc_pid_write_gid_map(pid, buffer),
+            ))
+        }
+        ["self", "setgroups"] => {
+            let pid = current_pid()?;
+            Ok(proc_rw_file(
+                "setgroups",
+                pid_setgroups_inode(pid),
+                move || proc_pid_setgroups_bytes(pid).unwrap_or_default(),
+                move |buffer| proc_pid_write_setgroups(pid, buffer),
+            ))
+        }
+        ["self", "root"] => {
+            let pid = current_pid()?;
+            Ok(proc_symlink("root", pid_root_inode(pid), "/".into()))
+        }
+        ["self", "ns"] => {
+            let pid = current_pid()?;
+            Ok(proc_dir(
+                "/self/ns",
+                "ns",
+                pid_ns_dir_inode(pid),
+                pid_ns_entries(),
+            ))
+        }
+        ["self", "ns", namespace] => {
+            let pid = current_pid()?;
+            Ok(proc_file(
+                namespace,
+                pid_ns_inode(pid, namespace)?,
+                Vec::new,
+            ))
+        }
+        ["self", "fd"] => {
+            let pid = current_pid()?;
+            Ok(proc_dir(
+                "/self/fd",
+                "fd",
+                pid_fd_dir_inode(pid),
+                pid_fd_entries(pid)?,
+            ))
+        }
+        ["self", "fd", fd] => {
+            let pid = current_pid()?;
+            let fd = parse_fd(fd)?;
+            Ok(proc_symlink(fd, pid_fd_inode(pid, fd), fd_target(pid, fd)?))
+        }
+        ["self", "fdinfo"] => {
+            let pid = current_pid()?;
+            Ok(proc_dir(
+                "/self/fdinfo",
+                "fdinfo",
+                pid_fdinfo_dir_inode(pid),
+                pid_fdinfo_entries(pid)?,
+            ))
+        }
+        ["self", "fdinfo", fd] => {
+            let pid = current_pid()?;
+            let fd = parse_fd(fd)?;
+            let fd_num = fd.parse::<usize>().map_err(|_| FSError::NotFound)?;
+            Ok(proc_file("fdinfo", pid_fdinfo_inode(pid, fd), move || {
+                proc_pid_fdinfo_bytes(pid, fd_num).unwrap_or_default()
+            }))
+        }
+        [pid] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_dir(
+                &alloc::format!("/{}", pid.0),
+                pid_string(pid).as_str(),
+                pid_dir_inode(pid),
+                pid_dir_entries(),
+            ))
+        }
+        [pid, "cmdline"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_file("cmdline", pid_cmdline_inode(pid), move || {
+                proc_pid_cmdline_bytes(pid)
+            }))
+        }
+        [pid, "comm"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_file("comm", pid_comm_inode(pid), move || {
+                proc_pid_comm_bytes(pid).unwrap_or_default()
+            }))
+        }
+        [pid, "environ"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_file("environ", pid_environ_inode(pid), move || {
+                proc_pid_environ_bytes(pid).unwrap_or_default()
+            }))
+        }
+        [pid, "stat"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_file("stat", pid_stat_inode(pid), move || {
+                proc_pid_stat_bytes(pid).unwrap_or_default()
+            }))
+        }
+        [pid, "status"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_file("status", pid_status_inode(pid), move || {
+                proc_pid_status_bytes(pid).unwrap_or_default()
+            }))
+        }
+        [pid, "cgroup"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_file("cgroup", pid_cgroup_inode(pid), move || {
+                proc_pid_cgroup_bytes(pid)
+            }))
+        }
+        [pid, "oom_score_adj"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_rw_file(
+                "oom_score_adj",
+                pid_oom_score_adj_inode(pid),
+                move || proc_pid_oom_score_adj_bytes(pid).unwrap_or_default(),
+                move |buffer| proc_pid_write_oom_score_adj(pid, buffer),
+            ))
+        }
+        [pid, "mountinfo"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_file(
+                "mountinfo",
+                pid_mountinfo_inode(pid),
+                proc_mountinfo_bytes,
+            ))
+        }
+        [pid, "uid_map"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_rw_file(
+                "uid_map",
+                pid_uid_map_inode(pid),
+                move || proc_pid_uid_map_bytes(pid).unwrap_or_default(),
+                move |buffer| proc_pid_write_uid_map(pid, buffer),
+            ))
+        }
+        [pid, "gid_map"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_rw_file(
+                "gid_map",
+                pid_gid_map_inode(pid),
+                move || proc_pid_gid_map_bytes(pid).unwrap_or_default(),
+                move |buffer| proc_pid_write_gid_map(pid, buffer),
+            ))
+        }
+        [pid, "setgroups"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_rw_file(
+                "setgroups",
+                pid_setgroups_inode(pid),
+                move || proc_pid_setgroups_bytes(pid).unwrap_or_default(),
+                move |buffer| proc_pid_write_setgroups(pid, buffer),
+            ))
+        }
+        [pid, "root"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_symlink("root", pid_root_inode(pid), "/".into()))
+        }
+        [pid, "ns"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_dir(
+                &alloc::format!("/{}/ns", pid.0),
+                "ns",
+                pid_ns_dir_inode(pid),
+                pid_ns_entries(),
+            ))
+        }
+        [pid, "ns", namespace] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_file(
+                namespace,
+                pid_ns_inode(pid, namespace)?,
+                Vec::new,
+            ))
+        }
+        [pid, "fd"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_dir(
+                &alloc::format!("/{}/fd", pid.0),
+                "fd",
+                pid_fd_dir_inode(pid),
+                pid_fd_entries(pid)?,
+            ))
+        }
+        [pid, "fd", fd] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            let fd = parse_fd(fd)?;
+            Ok(proc_symlink(fd, pid_fd_inode(pid, fd), fd_target(pid, fd)?))
+        }
+        [pid, "fdinfo"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_dir(
+                &alloc::format!("/{}/fdinfo", pid.0),
+                "fdinfo",
+                pid_fdinfo_dir_inode(pid),
+                pid_fdinfo_entries(pid)?,
+            ))
+        }
+        [pid, "fdinfo", fd] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            let fd = parse_fd(fd)?;
+            let fd_num = fd.parse::<usize>().map_err(|_| FSError::NotFound)?;
+            Ok(proc_file("fdinfo", pid_fdinfo_inode(pid, fd), move || {
+                proc_pid_fdinfo_bytes(pid, fd_num).unwrap_or_default()
+            }))
+        }
+        _ => Err(FSError::NotFound),
+    }
+}
+
 impl FileSystem for ProcFs {
     fn init(&mut self) -> FSResult<()> {
         Ok(())
     }
 
     fn lookup(&self, path: &Path) -> FSResult<FileLike> {
-        let normalized = path.normalize();
-        let parts = normalized
-            .parts
-            .iter()
-            .filter_map(|part| match part {
-                PathPart::Normal(name) => Some(name.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-
-        match parts.as_slice() {
-            [] => Ok(proc_dir("/", PROC_ROOT_INODE, proc_root_entries())),
-            ["cmdline"] => Ok(proc_file(
-                "cmdline",
-                PROC_CMDLINE_INODE,
-                proc_kernel_cmdline_bytes,
-            )),
-            ["devices"] => Ok(proc_file("devices", PROC_DEVICES_INODE, proc_devices_bytes)),
-            ["meminfo"] => Ok(proc_file("meminfo", PROC_MEMINFO_INODE, proc_meminfo_bytes)),
-            ["mounts"] => Ok(proc_file("mounts", PROC_MOUNTS_INODE, proc_mounts_bytes)),
-            ["pressure"] => Ok(proc_dir(
-                "pressure",
-                PROC_PRESSURE_INODE,
-                proc_pressure_entries(),
-            )),
-            ["pressure", "cpu"] => Ok(proc_rw_file(
-                "cpu",
-                PROC_PRESSURE_CPU_INODE,
-                proc_pressure_bytes,
-                proc_write_pressure,
-            )),
-            ["pressure", "io"] => Ok(proc_rw_file(
-                "io",
-                PROC_PRESSURE_IO_INODE,
-                proc_pressure_bytes,
-                proc_write_pressure,
-            )),
-            ["pressure", "memory"] => Ok(proc_rw_file(
-                "memory",
-                PROC_PRESSURE_MEMORY_INODE,
-                proc_pressure_bytes,
-                proc_write_pressure,
-            )),
-            ["sys"] => Ok(proc_dir("sys", PROC_SYS_INODE, proc_sys_entries())),
-            ["sys", "fs"] => Ok(proc_dir("fs", PROC_SYS_FS_INODE, proc_fs_entries())),
-            ["sys", "kernel"] => Ok(proc_dir(
-                "kernel",
-                PROC_SYS_KERNEL_INODE,
-                proc_kernel_entries(),
-            )),
-            ["sys", "kernel", "hostname"] => Ok(proc_rw_file(
-                "hostname",
-                PROC_SYS_KERNEL_HOSTNAME_INODE,
-                proc_hostname_bytes,
-                proc_write_hostname,
-            )),
-            ["sys", "kernel", "domainname"] => Ok(proc_rw_file(
-                "domainname",
-                PROC_SYS_KERNEL_DOMAINNAME_INODE,
-                proc_domainname_bytes,
-                proc_write_domainname,
-            )),
-            ["sys", "kernel", "osrelease"] => Ok(proc_file(
-                "osrelease",
-                PROC_SYS_KERNEL_OSRELEASE_INODE,
-                proc_osrelease_bytes,
-            )),
-            ["sys", "kernel", "random"] => Ok(proc_dir(
-                "random",
-                PROC_SYS_KERNEL_RANDOM_INODE,
-                proc_kernel_random_entries(),
-            )),
-            ["sys", "kernel", "random", "boot_id"] => Ok(proc_file(
-                "boot_id",
-                PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE,
-                proc_boot_id_bytes,
-            )),
-            ["sys", "kernel", "random", "uuid"] => Ok(proc_file(
-                "uuid",
-                PROC_SYS_KERNEL_RANDOM_UUID_INODE,
-                proc_random_uuid_bytes,
-            )),
-            ["sys", "fs", "file-max"] => Ok(proc_rw_file(
-                "file-max",
-                PROC_SYS_FS_FILE_MAX_INODE,
-                || proc_sysctl_value_bytes(&PROC_FILE_MAX),
-                |buffer| proc_write_sysctl_u64(&PROC_FILE_MAX, buffer),
-            )),
-            ["sys", "fs", "nr_open"] => Ok(proc_rw_file(
-                "nr_open",
-                PROC_SYS_FS_NR_OPEN_INODE,
-                || proc_sysctl_value_bytes(&PROC_NR_OPEN),
-                |buffer| proc_write_sysctl_u64(&PROC_NR_OPEN, buffer),
-            )),
-            ["self"] => {
-                let pid = current_pid()?;
-                Ok(proc_symlink("self", PROC_SELF_INODE, format!("{}", pid.0)))
-            }
-            ["self", "cmdline"] => {
-                let pid = current_pid()?;
-                Ok(proc_file("cmdline", pid_cmdline_inode(pid), move || {
-                    proc_pid_cmdline_bytes(pid)
-                }))
-            }
-            ["self", "comm"] => {
-                let pid = current_pid()?;
-                Ok(proc_file("comm", pid_comm_inode(pid), move || {
-                    proc_pid_comm_bytes(pid).unwrap_or_default()
-                }))
-            }
-            ["self", "environ"] => {
-                let pid = current_pid()?;
-                Ok(proc_file("environ", pid_environ_inode(pid), move || {
-                    proc_pid_environ_bytes(pid).unwrap_or_default()
-                }))
-            }
-            ["self", "stat"] => {
-                let pid = current_pid()?;
-                Ok(proc_file("stat", pid_stat_inode(pid), move || {
-                    proc_pid_stat_bytes(pid).unwrap_or_default()
-                }))
-            }
-            ["self", "status"] => {
-                let pid = current_pid()?;
-                Ok(proc_file("status", pid_status_inode(pid), move || {
-                    proc_pid_status_bytes(pid).unwrap_or_default()
-                }))
-            }
-            ["self", "cgroup"] => {
-                let pid = current_pid()?;
-                Ok(proc_file("cgroup", pid_cgroup_inode(pid), move || {
-                    proc_pid_cgroup_bytes(pid)
-                }))
-            }
-            ["self", "oom_score_adj"] => {
-                let pid = current_pid()?;
-                Ok(proc_rw_file(
-                    "oom_score_adj",
-                    pid_oom_score_adj_inode(pid),
-                    move || proc_pid_oom_score_adj_bytes(pid).unwrap_or_default(),
-                    move |buffer| proc_pid_write_oom_score_adj(pid, buffer),
-                ))
-            }
-            ["self", "mountinfo"] => {
-                let pid = current_pid()?;
-                Ok(proc_file(
-                    "mountinfo",
-                    pid_mountinfo_inode(pid),
-                    proc_mountinfo_bytes,
-                ))
-            }
-            ["self", "uid_map"] => {
-                let pid = current_pid()?;
-                Ok(proc_rw_file(
-                    "uid_map",
-                    pid_uid_map_inode(pid),
-                    move || proc_pid_uid_map_bytes(pid).unwrap_or_default(),
-                    move |buffer| proc_pid_write_uid_map(pid, buffer),
-                ))
-            }
-            ["self", "gid_map"] => {
-                let pid = current_pid()?;
-                Ok(proc_rw_file(
-                    "gid_map",
-                    pid_gid_map_inode(pid),
-                    move || proc_pid_gid_map_bytes(pid).unwrap_or_default(),
-                    move |buffer| proc_pid_write_gid_map(pid, buffer),
-                ))
-            }
-            ["self", "setgroups"] => {
-                let pid = current_pid()?;
-                Ok(proc_rw_file(
-                    "setgroups",
-                    pid_setgroups_inode(pid),
-                    move || proc_pid_setgroups_bytes(pid).unwrap_or_default(),
-                    move |buffer| proc_pid_write_setgroups(pid, buffer),
-                ))
-            }
-            ["self", "root"] => {
-                let pid = current_pid()?;
-                Ok(proc_symlink("root", pid_root_inode(pid), "/".into()))
-            }
-            ["self", "ns"] => {
-                let pid = current_pid()?;
-                Ok(proc_dir("ns", pid_ns_dir_inode(pid), pid_ns_entries()))
-            }
-            ["self", "ns", namespace] => {
-                let pid = current_pid()?;
-                Ok(proc_file(
-                    namespace,
-                    pid_ns_inode(pid, namespace)?,
-                    Vec::new,
-                ))
-            }
-            ["self", "fd"] => {
-                let pid = current_pid()?;
-                Ok(proc_dir("fd", pid_fd_dir_inode(pid), pid_fd_entries(pid)?))
-            }
-            ["self", "fd", fd] => {
-                let pid = current_pid()?;
-                let fd = parse_fd(fd)?;
-                Ok(proc_symlink(fd, pid_fd_inode(pid, fd), fd_target(pid, fd)?))
-            }
-            ["self", "fdinfo"] => {
-                let pid = current_pid()?;
-                Ok(proc_dir(
-                    "fdinfo",
-                    pid_fdinfo_dir_inode(pid),
-                    pid_fdinfo_entries(pid)?,
-                ))
-            }
-            ["self", "fdinfo", fd] => {
-                let pid = current_pid()?;
-                let fd = parse_fd(fd)?;
-                let fd_num = fd.parse::<usize>().map_err(|_| FSError::NotFound)?;
-                Ok(proc_file("fdinfo", pid_fdinfo_inode(pid, fd), move || {
-                    proc_pid_fdinfo_bytes(pid, fd_num).unwrap_or_default()
-                }))
-            }
-            [pid] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_dir(
-                    pid_string(pid).as_str(),
-                    pid_dir_inode(pid),
-                    pid_dir_entries(),
-                ))
-            }
-            [pid, "cmdline"] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_file("cmdline", pid_cmdline_inode(pid), move || {
-                    proc_pid_cmdline_bytes(pid)
-                }))
-            }
-            [pid, "comm"] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_file("comm", pid_comm_inode(pid), move || {
-                    proc_pid_comm_bytes(pid).unwrap_or_default()
-                }))
-            }
-            [pid, "environ"] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_file("environ", pid_environ_inode(pid), move || {
-                    proc_pid_environ_bytes(pid).unwrap_or_default()
-                }))
-            }
-            [pid, "stat"] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_file("stat", pid_stat_inode(pid), move || {
-                    proc_pid_stat_bytes(pid).unwrap_or_default()
-                }))
-            }
-            [pid, "status"] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_file("status", pid_status_inode(pid), move || {
-                    proc_pid_status_bytes(pid).unwrap_or_default()
-                }))
-            }
-            [pid, "cgroup"] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_file("cgroup", pid_cgroup_inode(pid), move || {
-                    proc_pid_cgroup_bytes(pid)
-                }))
-            }
-            [pid, "oom_score_adj"] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_rw_file(
-                    "oom_score_adj",
-                    pid_oom_score_adj_inode(pid),
-                    move || proc_pid_oom_score_adj_bytes(pid).unwrap_or_default(),
-                    move |buffer| proc_pid_write_oom_score_adj(pid, buffer),
-                ))
-            }
-            [pid, "mountinfo"] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_file(
-                    "mountinfo",
-                    pid_mountinfo_inode(pid),
-                    proc_mountinfo_bytes,
-                ))
-            }
-            [pid, "uid_map"] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_rw_file(
-                    "uid_map",
-                    pid_uid_map_inode(pid),
-                    move || proc_pid_uid_map_bytes(pid).unwrap_or_default(),
-                    move |buffer| proc_pid_write_uid_map(pid, buffer),
-                ))
-            }
-            [pid, "gid_map"] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_rw_file(
-                    "gid_map",
-                    pid_gid_map_inode(pid),
-                    move || proc_pid_gid_map_bytes(pid).unwrap_or_default(),
-                    move |buffer| proc_pid_write_gid_map(pid, buffer),
-                ))
-            }
-            [pid, "setgroups"] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_rw_file(
-                    "setgroups",
-                    pid_setgroups_inode(pid),
-                    move || proc_pid_setgroups_bytes(pid).unwrap_or_default(),
-                    move |buffer| proc_pid_write_setgroups(pid, buffer),
-                ))
-            }
-            [pid, "root"] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_symlink("root", pid_root_inode(pid), "/".into()))
-            }
-            [pid, "ns"] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_dir("ns", pid_ns_dir_inode(pid), pid_ns_entries()))
-            }
-            [pid, "ns", namespace] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_file(
-                    namespace,
-                    pid_ns_inode(pid, namespace)?,
-                    Vec::new,
-                ))
-            }
-            [pid, "fd"] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_dir("fd", pid_fd_dir_inode(pid), pid_fd_entries(pid)?))
-            }
-            [pid, "fd", fd] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                let fd = parse_fd(fd)?;
-                Ok(proc_symlink(fd, pid_fd_inode(pid, fd), fd_target(pid, fd)?))
-            }
-            [pid, "fdinfo"] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                Ok(proc_dir(
-                    "fdinfo",
-                    pid_fdinfo_dir_inode(pid),
-                    pid_fdinfo_entries(pid)?,
-                ))
-            }
-            [pid, "fdinfo", fd] => {
-                let pid = parse_pid(pid)?;
-                ensure_pid_exists(pid)?;
-                let fd = parse_fd(fd)?;
-                let fd_num = fd.parse::<usize>().map_err(|_| FSError::NotFound)?;
-                Ok(proc_file("fdinfo", pid_fdinfo_inode(pid, fd), move || {
-                    proc_pid_fdinfo_bytes(pid, fd_num).unwrap_or_default()
-                }))
-            }
-            _ => Err(FSError::NotFound),
-        }
+        lookup_proc_path(path)
     }
 
     fn rename(&self, _old_path: &Path, _new_path: &Path) -> FSResult<()> {
