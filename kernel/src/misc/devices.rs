@@ -25,9 +25,8 @@ impl Writable for DevNull {
 }
 
 impl Readable for DevNull {
-    fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
-        buffer.fill(0);
-        Ok(buffer.len())
+    fn read(&self, _buffer: &mut [u8]) -> ObjectResult<usize> {
+        Ok(0)
     }
 }
 
