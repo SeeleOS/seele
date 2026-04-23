@@ -270,3 +270,20 @@ pub fn block_current_with_sig_check(block_type: BlockType) -> ObjectResult<()> {
     }
     Ok(())
 }
+    let current = current_thread_ref();
+    {
+        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+        let mut thread = current.lock();
+        match thread.state {
+            State::Blocked(_) => {}
+            State::Ready => {
+                thread_manager
+                    .ready_queue
+                    .retain(|queued| !Arc::ptr_eq(queued, &current));
+                thread.state = State::Running;
+                return;
+            }
+            _ => return,
+        }
+    }
+
