@@ -37,6 +37,14 @@ ARCH_PACKAGES=(
     xorg-fonts-misc
 )
 
+install_sysroot_file() {
+    local source="$1"
+    local target="$2"
+
+    sudo rm -rf "${target}"
+    sudo install -Dm644 "${source}" "${target}"
+}
+
 mkdir -p "${SYSROOT_DIR}"
 
 if mountpoint -q "${SYSROOT_DIR}"; then
@@ -83,6 +91,10 @@ sudo env "PATH=${HOST_PATH}" pacman \
     "${ARCH_PACKAGES[@]}"
 
 sudo chroot "${SYSROOT_DIR}" /usr/bin/passwd -d root
+
+install_sysroot_file "${ROOT_DIR}/misc/locale.conf" "${SYSROOT_DIR}/etc/locale.conf"
+install_sysroot_file "${ROOT_DIR}/misc/vconsole.conf" "${SYSROOT_DIR}/etc/vconsole.conf"
+install_sysroot_file "${ROOT_DIR}/misc/locale.sh" "${SYSROOT_DIR}/etc/profile.d/locale.sh"
 
 sudo chmod 0755 "${SYSROOT_DIR}/run"
 sudo install -d -m 0755 "${SYSROOT_DIR}/run/dbus"
