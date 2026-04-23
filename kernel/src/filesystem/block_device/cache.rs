@@ -8,8 +8,8 @@ use spin::Mutex;
 
 use crate::filesystem::block_device::{BlockDevice, BlockDeviceError, BlockDeviceResult};
 
-const DEFAULT_CACHE_ENTRIES: usize = 4_096;
-const DEFAULT_READAHEAD_BLOCKS: usize = 32;
+const DEFAULT_CACHE_ENTRIES: usize = 16_384;
+const DEFAULT_READAHEAD_BLOCKS: usize = 128;
 
 #[derive(Debug)]
 struct CacheEntry {
@@ -186,7 +186,9 @@ impl BlockDevice for CachedBlockDevice {
                 let hit_data = state.entries.get(&block_id).map(|entry| entry.data.clone());
                 let mut miss_end = index + 1;
                 if hit_data.is_none() {
-                    while miss_end < total_blocks && !state.entries.contains_key(&(start + miss_end)) {
+                    while miss_end < total_blocks
+                        && !state.entries.contains_key(&(start + miss_end))
+                    {
                         miss_end += 1;
                     }
                 }
