@@ -1202,12 +1202,10 @@ define_syscall!(LinkAt, |old_dirfd: i32,
                          new_dirfd: i32,
                          new_path: CString,
                          _flags: i32| {
-    let _ = path_is_relative_to_cwd(old_dirfd)?;
-    let _ = path_is_relative_to_cwd(new_dirfd)?;
     let old_path = path_from_raw(old_path)?;
     let new_path = path_from_raw(new_path)?;
-    let old_path = Path::new(&old_path);
-    let new_path = Path::new(&new_path);
+    let old_path = resolve_path_at(old_dirfd, &old_path)?;
+    let new_path = resolve_path_at(new_dirfd, &new_path)?;
 
     VirtualFS.lock().link_file(old_path, new_path)?;
 

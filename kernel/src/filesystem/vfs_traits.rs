@@ -119,6 +119,7 @@ pub trait FileSystem: Send + Sync {
     fn init(&mut self) -> FSResult<()>;
     fn lookup(&self, path: &Path) -> FSResult<FileLike>;
     fn rename(&self, old_path: &Path, new_path: &Path) -> FSResult<()>;
+    fn link(&self, old_path: &Path, new_path: &Path) -> FSResult<()>;
     fn name(&self) -> &'static str;
     fn magic(&self) -> i64;
     fn mount_source(&self) -> &'static str;

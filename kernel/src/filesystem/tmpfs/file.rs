@@ -14,14 +14,16 @@ use super::{S_IFMT, TmpNodeKind, TmpfsStateRef, node_name};
 pub(crate) struct TmpfsFileHandle {
     state: TmpfsStateRef,
     path: String,
+    inode: u64,
     offset: usize,
 }
 
 impl TmpfsFileHandle {
-    pub(crate) fn new(state: TmpfsStateRef, path: String) -> Self {
+    pub(crate) fn new(state: TmpfsStateRef, path: String, inode: u64) -> Self {
         Self {
             state,
             path,
+            inode,
             offset: 0,
         }
     }
@@ -34,7 +36,7 @@ impl File for TmpfsFileHandle {
 
     fn info(&mut self) -> FSResult<FileLikeInfo> {
         let state = self.state.lock();
-        let node = state.node(&self.path)?;
+        let node = state.node_by_inode(self.inode)?;
         match &node.kind {
             TmpNodeKind::File { data, mode } => Ok(FileLikeInfo::new(
                 node_name(&self.path),
@@ -49,7 +51,7 @@ impl File for TmpfsFileHandle {
 
     fn read_at(&mut self, buffer: &mut [u8], offset: u64) -> FSResult<usize> {
         let state = self.state.lock();
-        let node = state.node(&self.path)?;
+        let node = state.node_by_inode(self.inode)?;
         let data = match &node.kind {
             TmpNodeKind::File { data, .. } => data,
             TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => {
@@ -73,7 +75,7 @@ impl File for TmpfsFileHandle {
 
     fn write(&mut self, buffer: &[u8]) -> FSResult<usize> {
         let mut state = self.state.lock();
-        let node = state.node_mut(&self.path)?;
+        let node = state.node_by_inode_mut(self.inode)?;
         let data = match &mut node.kind {
             TmpNodeKind::File { data, .. } => data,
             TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => {
@@ -95,7 +97,7 @@ impl File for TmpfsFileHandle {
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {
         let len = {
             let state = self.state.lock();
-            let node = state.node(&self.path)?;
+            let node = state.node_by_inode(self.inode)?;
             match &node.kind {
                 TmpNodeKind::File { data, .. } => data.len() as i64,
                 TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => {
@@ -116,7 +118,7 @@ impl File for TmpfsFileHandle {
     fn truncate(&mut self, length: u64) -> FSResult<()> {
         let length = usize::try_from(length).map_err(|_| FSError::Other)?;
         let mut state = self.state.lock();
-        let node = state.node_mut(&self.path)?;
+        let node = state.node_by_inode_mut(self.inode)?;
         let data = match &mut node.kind {
             TmpNodeKind::File { data, .. } => data,
             TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => {
@@ -136,7 +138,7 @@ impl File for TmpfsFileHandle {
         let len = usize::try_from(len).map_err(|_| FSError::Other)?;
         let end = offset.checked_add(len).ok_or(FSError::Other)?;
         let mut state = self.state.lock();
-        let node = state.node_mut(&self.path)?;
+        let node = state.node_by_inode_mut(self.inode)?;
         let data = match &mut node.kind {
             TmpNodeKind::File { data, .. } => data,
             TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => {
@@ -152,9 +154,9 @@ impl File for TmpfsFileHandle {
     fn chmod(&self, mode: u32) -> FSResult<()> {
         let mut state = self.state.lock();
         if (mode & S_IFMT) != 0 {
-            state.update_file_mode(&self.path, mode)
+            state.update_file_mode_by_inode(self.inode, mode)
         } else {
-            state.update_file_mode(&self.path, mode & 0o7777)
+            state.update_file_mode_by_inode(self.inode, mode & 0o7777)
         }
     }
 }

@@ -12,7 +12,6 @@ use alloc::vec::Vec;
 
 use crate::filesystem::{
     errors::FSError,
-    impls::ext4::{directory::Ext4Directory, file::Ext4File},
     path::Path,
     vfs_traits::{DirectoryContentType, FileLike},
 };
@@ -94,9 +93,11 @@ impl VFS {
     }
 
     pub fn link_file(&mut self, old_path: Path, new_path: Path) -> FSResult<()> {
-        let old_mount = self.mount_path(old_path.clone())?;
-        let new_mount = self.mount_path(new_path.clone())?;
-        if old_mount != new_mount {
+        let old_path = self.normalize_path(old_path);
+        let new_path = self.normalize_path(new_path);
+        let (old_mount_path, old_fs, _, _) = self.mount_metadata(old_path.clone())?;
+        let (new_mount_path, _, _, _) = self.mount_metadata(new_path.clone())?;
+        if old_mount_path != new_mount_path {
             return Err(FSError::Other);
         }
 
@@ -106,41 +107,13 @@ impl VFS {
             new_path.clone().as_string()
         );
 
-        let source = self.resolve(old_path)?;
-        let source_inode = match source {
-            FileLike::File(file) => {
-                let file = file.lock();
-                let ext4_file = file
-                    .as_any()
-                    .downcast_ref::<Ext4File>()
-                    .ok_or(FSError::Other)?;
-                ext4_file.inode()
-            }
-            FileLike::Symlink(_) => todo!(),
-            FileLike::Directory(_) => return Err(FSError::Other),
-        };
-
-        let (parent_dir, name) = self.resolve_parent(new_path)?;
-        let parent = parent_dir.lock();
-        let ext4_parent = parent
-            .as_any()
-            .downcast_ref::<Ext4Directory>()
-            .ok_or(FSError::Other)?;
-
-        let parent_inode = ext4_parent.inode();
-        let mut parent_dir = ext4plus::dir::Dir::open_inode(ext4_parent.fs(), parent_inode)
-            .map_err(FSError::from)?;
-
-        let mut source_inode = source_inode;
-        parent_dir
-            .link(
-                ext4plus::DirEntryName::try_from(name.as_str()).map_err(|_| FSError::Other)?,
-                &mut source_inode,
-            )
-            .map_err(FSError::from)?;
-        ext4_parent.clear_lookup_cache();
-
-        Ok(())
+        let old_relative = old_path
+            .strip_prefix(&old_mount_path)
+            .ok_or(FSError::NotFound)?;
+        let new_relative = new_path
+            .strip_prefix(&old_mount_path)
+            .ok_or(FSError::NotFound)?;
+        old_fs.lock().link(&old_relative, &new_relative)
     }
 
     pub fn resolve_file(&self, path: Path) -> FSResult<WrappedFile> {

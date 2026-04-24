@@ -48,6 +48,7 @@ pub(crate) fn tmpfs_lookup_path(state: &TmpfsStateRef, path: &str) -> FSResult<F
     let path = TmpfsState::normalize(path);
     let state_guard = state.lock();
     let node = state_guard.node(&path)?;
+    let inode = node.inode;
     Ok(match &node.kind {
         TmpNodeKind::Directory { .. } => FileLike::Directory(Arc::new(Mutex::new(
             TmpfsDirectoryHandle::new(state.clone(), path),
@@ -55,6 +56,7 @@ pub(crate) fn tmpfs_lookup_path(state: &TmpfsStateRef, path: &str) -> FSResult<F
         TmpNodeKind::File { .. } => FileLike::File(Arc::new(Mutex::new(TmpfsFileHandle::new(
             state.clone(),
             path,
+            inode,
         )))),
         TmpNodeKind::Symlink { .. } => FileLike::Symlink(Arc::new(Mutex::new(
             TmpfsSymlinkHandle::new(state.clone(), path),
@@ -103,6 +105,12 @@ impl FileSystem for TmpFs {
         self.state
             .lock()
             .rename(&absolute_tmp_path(old_path), &absolute_tmp_path(new_path))
+    }
+
+    fn link(&self, old_path: &Path, new_path: &Path) -> FSResult<()> {
+        self.state
+            .lock()
+            .link(&absolute_tmp_path(old_path), &absolute_tmp_path(new_path))
     }
 
     fn name(&self) -> &'static str {

@@ -276,6 +276,47 @@ impl FileSystem for EXT4 {
         Ok(())
     }
 
+    fn link(&self, old_path: &Path, new_path: &Path) -> FSResult<()> {
+        let source = self.lookup(old_path)?;
+        let source_inode = match source {
+            FileLike::File(file) => {
+                let file = file.lock();
+                let ext4_file = file
+                    .as_any()
+                    .downcast_ref::<Ext4File>()
+                    .ok_or(FSError::Other)?;
+                ext4_file.inode()
+            }
+            FileLike::Symlink(_) | FileLike::Directory(_) => return Err(FSError::Other),
+        };
+
+        let new_parent = new_path.parent().ok_or(FSError::NotFound)?;
+        let new_name = new_path.file_name().ok_or(FSError::NotFound)?;
+        let parent = self.lookup(&new_parent)?;
+        let parent = match parent {
+            FileLike::Directory(parent) => parent,
+            FileLike::File(_) | FileLike::Symlink(_) => return Err(FSError::NotADirectory),
+        };
+        let parent = parent.lock();
+        let ext4_parent = parent
+            .as_any()
+            .downcast_ref::<Ext4Directory>()
+            .ok_or(FSError::Other)?;
+
+        let parent_inode = ext4_parent.inode();
+        let mut parent_dir =
+            Dir::open_inode(ext4_parent.fs(), parent_inode).map_err(FSError::from)?;
+        let mut source_inode = source_inode;
+        parent_dir
+            .link(
+                DirEntryName::try_from(new_name.as_str()).map_err(|_| FSError::Other)?,
+                &mut source_inode,
+            )
+            .map_err(FSError::from)?;
+        ext4_parent.clear_lookup_cache();
+        Ok(())
+    }
+
     fn name(&self) -> &'static str {
         "ext4"
     }

@@ -583,6 +583,10 @@ impl FileSystem for ProcFs {
         Err(FSError::Readonly)
     }
 
+    fn link(&self, _old_path: &Path, _new_path: &Path) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+
     fn name(&self) -> &'static str {
         "proc"
     }
