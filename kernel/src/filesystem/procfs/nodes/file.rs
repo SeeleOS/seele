@@ -48,7 +48,10 @@ impl File for ProcFile {
     fn info(&mut self) -> FSResult<FileLikeInfo> {
         Ok(FileLikeInfo::new(
             self.name.clone(),
-            (self.read)().len(),
+            // procfs files are generated on demand; reporting a dynamic size here
+            // would force content generation during metadata queries and can
+            // recurse back into procfs/VFS internals such as /proc/*/mountinfo.
+            0,
             UnixPermission(self.mode),
             FileLikeType::File,
         )
