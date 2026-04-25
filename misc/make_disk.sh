@@ -29,6 +29,7 @@ ARCH_PACKAGES=(
     mesa
     xf86-video-fbdev
     xf86-video-vesa
+    icewm
     plasma-meta
     plasma-x11-session
     konsole

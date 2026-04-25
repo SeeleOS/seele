@@ -35,6 +35,11 @@ if [ -f "$usermodmap" ]; then
 fi
 
 echo "xinitrc: starting session"
+if [ -x /usr/bin/icewm-session ]; then
+    echo "xinitrc: exec icewm-session"
+    exec /usr/bin/icewm-session
+fi
+
 if [ -x /usr/bin/startplasma-manual.sh ]; then
     echo "xinitrc: exec startplasma-manual.sh"
     exec /usr/bin/startplasma-manual.sh
