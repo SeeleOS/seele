@@ -18,13 +18,18 @@ impl AddrSpace {
         let mem = self.user_mem;
         self.user_mem += (pages + 1) * 4096;
 
-        let (start, mut stack_builder) = self.map(MemoryArea::new_with_guard(
+        self.map(MemoryArea::new_with_guard(
             mem,
             pages,
             PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE,
             Data::Normal,
             false,
-        ));
+        ))
+    }
+
+    pub fn allocate_user_stack(&mut self, pages: u64) -> AllocResult {
+        log::trace!("addrspace: allocate_user pages {}", pages);
+        let (start, mut stack_builder) = self.allocate_user(pages);
         // Leave one page free above the initial userspace stack contents.
         stack_builder.reserve_headroom(4096);
         (start, stack_builder)

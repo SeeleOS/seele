@@ -74,7 +74,7 @@ impl Thread {
 
     pub fn new_with_id(entry_point: u64, parent: ProcessRef, id: ThreadID) -> Self {
         let mut parent_lock = parent.lock();
-        let (_, stack) = parent_lock.addrspace.allocate_user(64);
+        let (_, stack) = parent_lock.addrspace.allocate_user_stack(64);
         let kernel_stack_top = allocate_kernel_stack(16).finish().as_u64();
         Self {
             id,

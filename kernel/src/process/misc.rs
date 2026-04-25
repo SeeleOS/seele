@@ -60,6 +60,44 @@ impl ProcessID {
     }
 }
 
+const PLATFORM: &str = "x86_64";
+const USER_STACK_HEADROOM_BYTES: u64 = 4096;
+const DEFAULT_USER_STACK_PAGES: u64 = 256;
+
+pub fn user_stack_pages_for_exec(
+    exec_path: &str,
+    args: &[String],
+    env_vars: &[String],
+    has_interpreter: bool,
+) -> u64 {
+    let required_bytes = required_initial_stack_bytes(exec_path, args, env_vars, has_interpreter);
+    let required_pages = (required_bytes + USER_STACK_HEADROOM_BYTES).div_ceil(4096);
+
+    DEFAULT_USER_STACK_PAGES.max(required_pages)
+}
+
+fn required_initial_stack_bytes(
+    exec_path: &str,
+    args: &[String],
+    env_vars: &[String],
+    has_interpreter: bool,
+) -> u64 {
+    let strings_bytes = args.iter().map(|arg| (arg.len() + 1) as u64).sum::<u64>()
+        + env_vars
+            .iter()
+            .map(|env| (env.len() + 1) as u64)
+            .sum::<u64>()
+        + (exec_path.len() + 1) as u64
+        + (PLATFORM.len() + 1) as u64;
+    let random_bytes = core::mem::size_of::<[u64; 2]>() as u64;
+    let aux_entries = if has_interpreter { 20 } else { 19 };
+    let aux_bytes = aux_entries * 2 * 8;
+    let argv_env_bytes = (args.len() + env_vars.len() + 3) as u64 * 8;
+    let alignment_slack = 15;
+
+    strings_bytes + random_bytes + aux_bytes + argv_env_bytes + alignment_slack
+}
+
 pub fn init_stack_layout(
     builder: &mut StackBuilder,
     file: &ElfInfo,

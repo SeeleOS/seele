@@ -15,7 +15,7 @@ use crate::{
     process::{
         FdEntry, Process, ProcessRef,
         group::ProcessGroupID,
-        misc::{ProcessID, init_stack_layout},
+        misc::{ProcessID, init_stack_layout, user_stack_pages_for_exec},
         object::init_objects,
     },
     thread::{
@@ -174,10 +174,6 @@ fn setup_process_inner(
         );
     }
 
-    let mut stack_builder = with_profiling(
-        || addrspace.allocate_user(32).1,
-        alloc::format!("allocate user stack {}", path_string).as_str(),
-    );
     let program_headers = with_profiling(
         || read_elf_header(&program_file),
         alloc::format!("read_elf_header {}", path_string).as_str(),
@@ -207,6 +203,13 @@ fn setup_process_inner(
         }
         None => (program.entry_point, None),
     };
+
+    let stack_pages =
+        user_stack_pages_for_exec(&path_string, &args, &env, interpreter_base.is_some());
+    let mut stack_builder = with_profiling(
+        || addrspace.allocate_user_stack(stack_pages).1,
+        alloc::format!("allocate user stack {}", path_string).as_str(),
+    );
 
     with_profiling(
         || {
