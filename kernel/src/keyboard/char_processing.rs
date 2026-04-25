@@ -1,10 +1,10 @@
 use crate::{
+    object::config::LinuxTermios2,
     object::tty_device::{get_active_tty, wake_tty_poller_readable},
     print,
     signal::{Signal, send_signal_to_process},
     terminal::{
         line_discipline::{process_input_byte, process_output_bytes},
-        object::TerminalSettings,
         state::DEFAULT_TERMINAL,
     },
     thread::THREAD_MANAGER,
@@ -12,9 +12,9 @@ use crate::{
 
 fn handle_interrupt_char(
     active_tty: &crate::object::tty_device::TtyDevice,
-    info: &TerminalSettings,
+    termios: &LinuxTermios2,
 ) {
-    if !info.send_sig_on_special_chars {
+    if !termios.should_signal_on_special_chars() {
         return;
     }
 
@@ -32,7 +32,7 @@ fn handle_interrupt_char(
 }
 
 pub fn process_char(char: char) {
-    let info = *DEFAULT_TERMINAL.get().unwrap().lock().info.lock();
+    let termios = *DEFAULT_TERMINAL.get().unwrap().lock().termios.lock();
     let active_tty = get_active_tty();
     let Ok(byte) = u8::try_from(char as u32) else {
         return;
@@ -42,13 +42,13 @@ pub fn process_char(char: char) {
     let mut wants_interrupt = false;
 
     process_input_byte(
-        &info,
+        &termios,
         &mut line_buffer,
         byte,
         |byte| queue_tty.push_keyboard_byte(byte),
         |bytes| {
             let mut echoed = alloc::collections::vec_deque::VecDeque::new();
-            process_output_bytes(&info, bytes, |byte| {
+            process_output_bytes(&termios, bytes, |byte| {
                 echoed.push_back(byte);
             });
             if let Ok(string) = core::str::from_utf8(echoed.make_contiguous()) {
@@ -62,7 +62,7 @@ pub fn process_char(char: char) {
     drop(line_buffer);
 
     if wants_interrupt {
-        handle_interrupt_char(&active_tty, &info);
+        handle_interrupt_char(&active_tty, &termios);
         return;
     }
 

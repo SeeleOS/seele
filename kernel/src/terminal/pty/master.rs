@@ -72,7 +72,7 @@ impl Writable for PtyMaster {
             let mut shared = self.shared.lock();
             let master = shared.get_master();
             let slave = shared.get_slave();
-            let info = shared.info;
+            let termios = shared.termios;
             let mut wrote_input = false;
             let mut wrote_echo = false;
             let mut interrupt_group = None;
@@ -82,14 +82,14 @@ impl Writable for PtyMaster {
                 let mut queued_echo = VecDeque::new();
                 let mut wants_interrupt = false;
                 process_input_byte(
-                    &info,
+                    &termios,
                     &mut shared.line_buffer,
                     byte,
                     |byte| {
                         queued_input.push_back(byte);
                     },
                     |bytes| {
-                        process_output_bytes(&info, bytes, |byte| {
+                        process_output_bytes(&termios, bytes, |byte| {
                             queued_echo.push_back(byte);
                         });
                     },

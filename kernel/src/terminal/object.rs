@@ -7,6 +7,7 @@ use crate::{
     impl_cast_function,
     object::{
         Object,
+        config::{LinuxTermios2, LinuxWinsize},
         misc::ObjectResult,
         traits::{Configuratable, Writable},
     },
@@ -16,43 +17,11 @@ use crate::{
 
 use super::linux_kd::LinuxConsoleState;
 
-#[derive(Debug, Clone, Copy)]
-pub struct TerminalSettings {
-    pub rows: u64,
-    pub cols: u64,
-    pub echo: bool,
-    pub canonical: bool,
-    pub send_sig_on_special_chars: bool,
-    pub echo_newline: bool,
-    pub echo_delete: bool,
-    pub map_output_newline_to_crlf: bool,
-}
-
-impl TerminalSettings {
-    pub const fn new(rows: u64, cols: u64) -> Self {
-        Self {
-            rows,
-            cols,
-            echo: true,
-            canonical: true,
-            send_sig_on_special_chars: true,
-            echo_newline: true,
-            echo_delete: true,
-            map_output_newline_to_crlf: true,
-        }
-    }
-}
-
-impl Default for TerminalSettings {
-    fn default() -> Self {
-        Self::new(0, 0)
-    }
-}
-
 #[derive(Debug)]
 pub struct TerminalObject {
     pub inner: Arc<Mutex<dyn AbstractTerminal>>,
-    pub info: Mutex<TerminalSettings>,
+    pub termios: Mutex<LinuxTermios2>,
+    pub winsize: Mutex<LinuxWinsize>,
     pub linux_console: Mutex<LinuxConsoleState>,
 }
 
@@ -60,7 +29,11 @@ impl TerminalObject {
     pub fn new(term: Arc<Mutex<dyn AbstractTerminal>>) -> Self {
         let window_size = term.lock().size();
         Self {
-            info: Mutex::new(TerminalSettings::new(window_size.rows, window_size.cols)),
+            termios: Mutex::new(LinuxTermios2::new_default()),
+            winsize: Mutex::new(LinuxWinsize::from_rows_cols(
+                window_size.rows,
+                window_size.cols,
+            )),
             inner: term,
             linux_console: Mutex::new(LinuxConsoleState::default()),
         }

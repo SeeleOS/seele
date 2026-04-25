@@ -8,7 +8,7 @@ use crate::{
     impl_cast_function,
     object::{
         FileFlags, Object,
-        config::{ConfigurateRequest, LinuxWinsize},
+        config::ConfigurateRequest,
         misc::ObjectResult,
         queue_helpers::{copy_from_queue, read_or_block_with_flags},
         traits::{Configuratable, Readable, Statable, Writable},
@@ -76,8 +76,8 @@ impl Writable for PtySlave {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
         let master = {
             let mut shared = self.shared.lock();
-            let info = shared.info;
-            process_output_bytes(&info, buffer, |byte| {
+            let termios = shared.termios;
+            process_output_bytes(&termios, buffer, |byte| {
                 shared.from_slave.push_back(byte);
             });
             shared.get_master()
@@ -139,36 +139,39 @@ impl Configuratable for PtySlave {
                 self.shared.lock().active_group = Some(ProcessGroupID(requested_group));
                 Ok(0)
             },
-            ConfigurateRequest::LinuxTcGets(_) | ConfigurateRequest::LinuxTcGets2(_) => Ok(0),
+            ConfigurateRequest::LinuxTcGets(termios) => unsafe {
+                let termios_state = self.shared.lock().termios;
+                write_volatile(termios, termios_state.as_linux_termios());
+                Ok(0)
+            },
             ConfigurateRequest::LinuxTcSets(termios) => unsafe {
-                let _ = read_volatile(termios);
+                let termios = read_volatile(termios);
+                let mut shared = self.shared.lock();
+                shared.termios.apply_linux_termios(&termios);
+                Ok(0)
+            },
+            ConfigurateRequest::LinuxTcGets2(termios) => unsafe {
+                write_volatile(termios, self.shared.lock().termios);
                 Ok(0)
             },
             ConfigurateRequest::LinuxTcSets2(termios) => unsafe {
-                let _ = read_volatile(termios);
+                let termios = read_volatile(termios);
+                let mut shared = self.shared.lock();
+                shared.termios.apply_linux_termios2(&termios);
                 Ok(0)
             },
             ConfigurateRequest::LinuxTiocgwinsz(winsize) => unsafe {
-                let info = self.shared.lock().info;
-                write_volatile(
-                    winsize,
-                    LinuxWinsize {
-                        ws_row: info.rows as u16,
-                        ws_col: info.cols as u16,
-                        ws_xpixel: 0,
-                        ws_ypixel: 0,
-                    },
-                );
+                write_volatile(winsize, self.shared.lock().winsize);
                 Ok(0)
             },
             ConfigurateRequest::LinuxTiocswinsz(winsize) => unsafe {
                 let winsize = read_volatile(winsize);
                 let mut shared = self.shared.lock();
                 if winsize.ws_row != 0 {
-                    shared.info.rows = winsize.ws_row as u64;
+                    shared.winsize.ws_row = winsize.ws_row;
                 }
                 if winsize.ws_col != 0 {
-                    shared.info.cols = winsize.ws_col as u64;
+                    shared.winsize.ws_col = winsize.ws_col;
                 }
                 Ok(0)
             },

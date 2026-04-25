@@ -11,12 +11,12 @@ use crate::{
 };
 
 pub fn process_key(key: KeyCode) {
-    let info = *DEFAULT_TERMINAL.get().unwrap().lock().info.lock();
+    let termios = *DEFAULT_TERMINAL.get().unwrap().lock().termios.lock();
     let active_tty = get_active_tty();
     let sequence = to_escape_sequence(key);
 
-    if !info.canonical {
-        if info.echo
+    if !termios.is_canonical() {
+        if termios.should_echo()
             && let Ok(str) = from_utf8(sequence)
         {
             print!("{str}");
@@ -30,7 +30,7 @@ pub fn process_key(key: KeyCode) {
         return;
     }
 
-    if info.echo
+    if termios.should_echo()
         && let Ok(str) = from_utf8(sequence)
     {
         print!("{str}");

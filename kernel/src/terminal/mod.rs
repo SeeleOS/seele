@@ -9,6 +9,7 @@ pub mod pty;
 pub mod renderer;
 pub mod state;
 pub mod term_trait;
+pub mod termios;
 
 use alloc::{boxed::Box, sync::Arc};
 pub use color::{COLOR_SCHEME, Color};

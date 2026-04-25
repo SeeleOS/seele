@@ -1,6 +1,6 @@
 use alloc::collections::vec_deque::VecDeque;
 
-use super::object::TerminalSettings;
+use crate::object::config::LinuxTermios2;
 
 /// Apply the terminal input line discipline to one incoming byte.
 ///
@@ -12,7 +12,7 @@ use super::object::TerminalSettings;
 /// `Interrupt` runs when the input byte should trigger a line-discipline
 /// generated signal such as Ctrl-C.
 pub fn process_input_byte<QueueByte, EchoBytes, Interrupt>(
-    info: &TerminalSettings,
+    termios: &LinuxTermios2,
     line_buffer: &mut VecDeque<u8>,
     byte: u8,
     mut queue_byte: QueueByte,
@@ -23,19 +23,19 @@ pub fn process_input_byte<QueueByte, EchoBytes, Interrupt>(
     EchoBytes: FnMut(&[u8]),
     Interrupt: FnMut(),
 {
-    // We currently model Linux's default ICRNL behavior unconditionally:
-    // terminal Enter keys often arrive as '\r', but userspace expects '\n'.
-    let byte = if byte == b'\r' { b'\n' } else { byte };
+    let byte = if byte == b'\r' && termios.map_input_cr_to_nl() {
+        b'\n'
+    } else {
+        byte
+    };
 
-    if byte == 0x03 {
+    if termios.should_signal_on_special_chars() && byte == termios.interrupt_char() {
         interrupt();
         return;
     }
 
-    if !info.canonical {
-        // In noncanonical mode, userspace consumes bytes immediately and
-        // handles its own line editing.
-        if info.echo {
+    if !termios.is_canonical() {
+        if termios.should_echo() {
             echo_bytes(&[byte]);
         }
         queue_byte(byte);
@@ -43,23 +43,27 @@ pub fn process_input_byte<QueueByte, EchoBytes, Interrupt>(
     }
 
     match byte {
+        byte if byte == termios.eof_char() => {
+            while let Some(byte) = line_buffer.pop_front() {
+                queue_byte(byte);
+            }
+        }
         b'\n' => {
-            if info.echo_newline {
+            if termios.should_echo_newline() {
                 echo_bytes(b"\n");
             }
-            // Canonical mode only exposes completed lines to readers.
             line_buffer.push_back(b'\n');
             while let Some(byte) = line_buffer.pop_front() {
                 queue_byte(byte);
             }
         }
-        0x08 | 0x7f => {
-            if line_buffer.pop_back().is_some() && info.echo_delete {
+        byte if byte == termios.erase_char() || byte == 0x08 => {
+            if line_buffer.pop_back().is_some() && termios.should_echo_erase() {
                 echo_bytes(b"\x08 \x08");
             }
         }
         byte => {
-            if info.echo {
+            if termios.should_echo() {
                 echo_bytes(&[byte]);
             }
             line_buffer.push_back(byte);
@@ -72,7 +76,7 @@ pub fn process_input_byte<QueueByte, EchoBytes, Interrupt>(
 /// At the moment this only models ONLCR, while preserving existing CRLF
 /// sequences instead of expanding them into CRCRLF.
 pub fn process_output_bytes<EmitByte>(
-    info: &TerminalSettings,
+    termios: &LinuxTermios2,
     buffer: &[u8],
     mut emit_byte: EmitByte,
 ) where
@@ -80,7 +84,7 @@ pub fn process_output_bytes<EmitByte>(
 {
     let mut prev_was_cr = false;
     for byte in buffer.iter().copied() {
-        if byte == b'\n' && !prev_was_cr && info.map_output_newline_to_crlf {
+        if byte == b'\n' && !prev_was_cr && termios.map_output_newline_to_crlf() {
             emit_byte(b'\r');
         }
         emit_byte(byte);
