@@ -3,7 +3,12 @@ use core::ptr::{read_volatile, write_volatile};
 use spin::Mutex;
 
 use crate::{
-    object::{config::ConfigurateRequest, error::ObjectError, misc::ObjectResult},
+    object::{
+        config::ConfigurateRequest,
+        error::ObjectError,
+        misc::ObjectResult,
+        tty_device::{get_active_vt, set_active_vt},
+    },
     terminal::linux_kd::{LinuxConsoleState, LinuxVtMode, LinuxVtStat},
 };
 
@@ -17,7 +22,7 @@ pub fn handle_vt_request(
                 return Err(ObjectError::InvalidArguments);
             }
 
-            let vt = state.lock().active_vt as u16;
+            let vt = get_active_vt() as u16;
             unsafe { write_volatile(*ptr, u32::from(vt)) };
             Ok(Some(0))
         }
@@ -35,7 +40,7 @@ pub fn handle_vt_request(
                 return Err(ObjectError::InvalidArguments);
             }
 
-            let active = state.lock().active_vt as u16;
+            let active = get_active_vt() as u16;
             let vt_state = LinuxVtStat {
                 v_active: active,
                 v_signal: 0,
@@ -54,23 +59,19 @@ pub fn handle_vt_request(
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxVtActivate(vt) | ConfigurateRequest::LinuxVtWaitActive(vt) => {
-            if *vt == 0 {
+            if *vt == 0 || !set_active_vt(*vt) {
                 return Err(ObjectError::InvalidArguments);
             }
-
-            state.lock().active_vt = *vt;
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxVtRelDisp(ack) => {
-            let mut state = state.lock();
-
             if *ack == 0 {
                 return Err(ObjectError::InvalidArguments);
             }
 
             // Minimal VT emulation: record that the current VT remains active.
-            if *ack == 2 {
-                state.active_vt = 1;
+            if *ack == 2 && !set_active_vt(1) {
+                return Err(ObjectError::InvalidArguments);
             }
 
             Ok(Some(0))

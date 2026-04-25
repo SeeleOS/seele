@@ -19,7 +19,10 @@ use spin::mutex::Mutex;
 
 use crate::{
     misc::framebuffer::FRAME_BUFFER,
-    object::tty_device::{CONSOLE_TTY, DEFAULT_TTY, TtyDevice, get_active_tty},
+    object::tty_device::{
+        CONSOLE_TTY, DEFAULT_TTY, TtyDevice, get_active_tty, init_virtual_ttys,
+        register_virtual_tty,
+    },
     terminal::object::TerminalObject,
     terminal::state::DEFAULT_TERMINAL,
 };
@@ -52,8 +55,13 @@ pub fn init() {
         )))))
     });
 
+    init_virtual_ttys();
+
     CONSOLE_TTY.get_or_init(|| Arc::new(TtyDevice::new(default_terminal.clone(), false)));
-    DEFAULT_TTY.get_or_init(|| Arc::new(TtyDevice::new(default_terminal.clone(), true)));
+    let default_tty = DEFAULT_TTY
+        .get_or_init(|| Arc::new(TtyDevice::new(default_terminal.clone(), true)))
+        .clone();
+    register_virtual_tty(1, default_tty);
 
     default_terminal
         .lock()

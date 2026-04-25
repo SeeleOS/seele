@@ -9,7 +9,7 @@ use crate::{
     },
     object::{
         misc::ObjectRef,
-        tty_device::{get_console_tty, get_default_tty},
+        tty_device::{get_active_tty, get_console_tty, get_default_tty, get_virtual_tty},
     },
     process::manager::get_current_process,
     systemcall::utils::{SyscallError, SyscallResult},
@@ -42,8 +42,20 @@ pub fn get_device_ref(name: &str) -> SyscallResult<ObjectRef> {
         return Ok(open_ptmx());
     }
 
+    if name == "tty0" {
+        return Ok(get_active_tty());
+    }
+
     if name == "tty"
         && let Some(tty) = current_process_tty()
+    {
+        return Ok(tty);
+    }
+
+    if let Some(vt) = name
+        .strip_prefix("tty")
+        .and_then(|suffix| suffix.parse::<u32>().ok())
+        && let Some(tty) = get_virtual_tty(vt)
     {
         return Ok(tty);
     }

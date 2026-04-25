@@ -1,4 +1,7 @@
-use alloc::{collections::vec_deque::VecDeque, sync::Arc};
+use alloc::{
+    collections::{btree_map::BTreeMap, vec_deque::VecDeque},
+    sync::Arc,
+};
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
 
@@ -25,6 +28,13 @@ use crate::{
 
 pub static CONSOLE_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();
 pub static DEFAULT_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();
+pub static ACTIVE_VT: OnceCell<Mutex<u32>> = OnceCell::uninit();
+pub static VIRTUAL_TTYS: OnceCell<Mutex<BTreeMap<u32, Arc<TtyDevice>>>> = OnceCell::uninit();
+
+pub fn init_virtual_ttys() {
+    ACTIVE_VT.get_or_init(|| Mutex::new(1));
+    VIRTUAL_TTYS.get_or_init(|| Mutex::new(BTreeMap::new()));
+}
 
 pub fn get_console_tty() -> Arc<TtyDevice> {
     CONSOLE_TTY.get().unwrap().clone()
@@ -34,8 +44,29 @@ pub fn get_default_tty() -> Arc<TtyDevice> {
     DEFAULT_TTY.get().unwrap().clone()
 }
 
+pub fn register_virtual_tty(vt: u32, tty: Arc<TtyDevice>) {
+    VIRTUAL_TTYS.get().unwrap().lock().insert(vt, tty);
+}
+
+pub fn get_virtual_tty(vt: u32) -> Option<Arc<TtyDevice>> {
+    VIRTUAL_TTYS.get().unwrap().lock().get(&vt).cloned()
+}
+
+pub fn get_active_vt() -> u32 {
+    *ACTIVE_VT.get().unwrap().lock()
+}
+
+pub fn set_active_vt(vt: u32) -> bool {
+    if get_virtual_tty(vt).is_none() {
+        return false;
+    }
+
+    *ACTIVE_VT.get().unwrap().lock() = vt;
+    true
+}
+
 pub fn get_active_tty() -> Arc<TtyDevice> {
-    get_default_tty()
+    get_virtual_tty(get_active_vt()).expect("active tty is not registered")
 }
 
 pub fn wake_tty_poller_readable() {

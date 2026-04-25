@@ -178,7 +178,6 @@ pub struct LinuxConsoleState {
     pub display_mode: DisplayMode,
     pub kbrequest_signal: u32,
     pub vt_mode: LinuxVtMode,
-    pub active_vt: u32,
 }
 
 impl Default for LinuxConsoleState {
@@ -188,7 +187,6 @@ impl Default for LinuxConsoleState {
             display_mode: DisplayMode::Text,
             kbrequest_signal: 0,
             vt_mode: LinuxVtMode::default(),
-            active_vt: 1,
         }
     }
 }
