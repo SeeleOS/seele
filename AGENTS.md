@@ -27,6 +27,7 @@ Keep SMP-specific code under `kernel/src/smp/` instead of scattering AP bootstra
 - When using the checked-in VM wrapper, run it directly (for example `misc/run-agent-vm.sh`). Do not wrap it with `bash`, and do not override its default log file path unless explicitly requested.
 - Unless there is a clear debugging need, do not add or override VM timeouts on top of the checked-in wrapper defaults. Prefer running `misc/run-agent-vm.sh` as-is.
 - When polling a background VM terminal, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
+- After finishing VM-based testing, shut the VM down and verify there is no leftover background runner or QEMU process before moving on.
 - Do not assume `sysroot/` is mounted or synchronized with `disk.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the VM wrapper when in doubt.
 - If the sandbox, `no_new_privileges`, missing mounts, or network restrictions block a necessary command, ask the user for privilege escalation or the required access instead of silently giving up on that path.
 
