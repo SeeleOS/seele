@@ -409,7 +409,7 @@ define_syscall!(
                         nl_family: AF_NETLINK as u16,
                         nl_pad: 0,
                         nl_pid: 0,
-                        nl_groups: 0,
+                        nl_groups: socket.source_groups(),
                     };
                     let requested_len = unsafe { *address_len_ptr as usize };
                     let name_bytes = unsafe {
@@ -804,7 +804,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
                 nl_family: AF_NETLINK as u16,
                 nl_pad: 0,
                 nl_pid: 0,
-                nl_groups: 0,
+                nl_groups: socket.source_groups(),
             };
             let requested_len = msg.msg_namelen as usize;
             let name_bytes = unsafe {

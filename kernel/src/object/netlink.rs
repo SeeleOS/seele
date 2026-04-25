@@ -148,6 +148,14 @@ impl NetlinkSocketObject {
         out
     }
 
+    pub fn source_groups(&self) -> u32 {
+        if self.protocol == NETLINK_KOBJECT_UEVENT {
+            1
+        } else {
+            0
+        }
+    }
+
     pub fn peek_message_len(&self) -> Option<usize> {
         self.recv_queue.lock().front().map(Vec::len)
     }
