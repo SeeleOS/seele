@@ -22,6 +22,7 @@ ARCH_PACKAGES=(
     xorg-xinit
     xorg-xkbcomp
     xkeyboard-config
+    xf86-input-evdev
     xf86-input-libinput
     fish
     yazi
