@@ -5,9 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DISK_IMG="${ROOT_DIR}/disk.img"
 SYSROOT_DIR="${ROOT_DIR}/sysroot"
 ROOTFS_MAKING_DIR="${ROOT_DIR}/rootfs_making"
-PACMAN_CONF="${ROOTFS_MAKING_DIR}/pacman.conf"
+PACMAN_CONF_TEMPLATE="${ROOTFS_MAKING_DIR}/pacman.conf"
+PACMAN_CONF_IN_SYSROOT="${SYSROOT_DIR}/etc/pacman.conf"
 OVERRIDE_DISK=0
-HOST_PATH="${PATH}"
 ARCH_MIRROR="${ARCH_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/archlinux/\$repo/os/\$arch}"
 AUR_BUILD_USER="aurbuilder"
 AUR_BUILD_DIR="/tmp/aur-build"
@@ -77,11 +77,8 @@ install_sysroot_file() {
 }
 
 pacman_root() {
-    sudo env "PATH=${HOST_PATH}" pacman \
-        --config "${PACMAN_CONF}" \
-        --root "${SYSROOT_DIR}" \
-        --dbpath "${SYSROOT_DIR}/var/lib/pacman" \
-        --cachedir "${SYSROOT_DIR}/var/cache/pacman/pkg" \
+    sudo pacman \
+        --sysroot "${SYSROOT_DIR}" \
         --noconfirm \
         "$@"
 }
@@ -223,10 +220,11 @@ sudo mkdir -p "${SYSROOT_DIR}/var/log"
 sudo mkdir -p "${SYSROOT_DIR}/var/tmp"
 sudo chmod 1777 "${SYSROOT_DIR}/var/tmp"
 sudo mkdir -p "${SYSROOT_DIR}/etc/X11"
+sudo mkdir -p "${SYSROOT_DIR}/etc"
 sudo mkdir -p "${SYSROOT_DIR}/var/lib/pacman"
 sudo mkdir -p "${SYSROOT_DIR}/var/cache/pacman/pkg"
 sudo rm -f "${SYSROOT_DIR}/var/lib/pacman/db.lck"
-cat <<EOF > "${PACMAN_CONF}"
+cat <<EOF | sudo tee "${PACMAN_CONF_TEMPLATE}" >/dev/null
 [options]
 Architecture = auto
 CheckSpace
@@ -239,6 +237,7 @@ Server = ${ARCH_MIRROR}
 [extra]
 Server = ${ARCH_MIRROR}
 EOF
+sudo install -Dm644 "${PACMAN_CONF_TEMPLATE}" "${PACMAN_CONF_IN_SYSROOT}"
 
 pacman_root --needed -Sy "${ARCH_PACKAGES[@]}"
 
