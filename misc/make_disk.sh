@@ -39,7 +39,12 @@ ARCH_PACKAGES=(
     plasma-meta
     plasma-x11-session
     konsole
+    kalk
     dolphin
+    nautilus
+    gnome-calculator
+    gnome-2048
+    gnome-mines
     ttf-dejavu
     xorg-fonts-misc
 )
