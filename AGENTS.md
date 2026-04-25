@@ -95,4 +95,5 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 
 - If the user provides a workflow or debugging suggestion that is broadly useful for future work in this repository, add it to `AGENTS.md` when appropriate instead of treating it as a one-off remark.
 - When debugging interactive login issues where the user needs to type a username or password manually, run `nix develop -c cargo run` in the foreground instead of the `--agent` path and let the user provide the login input.
+- In `--agent` mode, prefer sending guest tty input through `misc/send-agent-input.sh` and the dedicated agent tty socket instead of trying to type into the background VM process directly.
 - If `sysroot/` already appears to be mounted, reuse it directly instead of asking for privilege escalation to mount again. Only ask to mount when it is clearly not mounted.

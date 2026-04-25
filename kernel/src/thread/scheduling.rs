@@ -10,6 +10,7 @@ use x86_64::instructions::interrupts::{self, enable_and_hlt, without_interrupts}
 
 use crate::{
     keyboard,
+    misc::agent_tty_input,
     misc::mouse,
     misc::snapshot::Snapshot,
     misc::timer::process_expired_process_timers,
@@ -159,6 +160,7 @@ pub fn run() -> ! {
     loop {
         process_deferred_timer_work();
         keyboard::process_pending_scancodes();
+        agent_tty_input::process_pending_input();
         mouse::process_pending_mouse_events();
 
         let next_thread = if can_run_ready_threads_on_current_cpu() {
@@ -261,9 +263,10 @@ fn sleep_if_idle() {
 
     process_deferred_timer_work();
 
-    let has_pending_work = keyboard::has_pending_scancodes() || mouse::has_pending_events() || {
-        THREAD_MANAGER.get().unwrap().lock().has_ready_threads()
-    };
+    let has_pending_work = keyboard::has_pending_scancodes()
+        || agent_tty_input::has_pending_input()
+        || mouse::has_pending_events()
+        || { THREAD_MANAGER.get().unwrap().lock().has_ready_threads() };
 
     if has_pending_work {
         interrupts::enable();

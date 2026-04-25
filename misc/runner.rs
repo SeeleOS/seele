@@ -22,6 +22,11 @@ fn main() {
     let uefi_path = env!("UEFI_PATH");
     let root_disk = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("disk.img");
     let serial_log = agent_mode.then(|| env::temp_dir().join("seele-agent-serial.log"));
+    let agent_tty_socket = agent_mode.then(|| {
+        env::var_os("SEELE_AGENT_TTY_SOCKET")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/tmp/seele-agent-tty.sock"))
+    });
     let keep_debug_log = qemu_debug_log.is_some();
     let debug_log = qemu_debug_log
         .as_ref()
@@ -45,6 +50,17 @@ fn main() {
             let _ = fs::remove_file(serial_log);
             cmd.arg("-serial")
                 .arg(format!("file:{}", serial_log.display()));
+        }
+        if let Some(agent_tty_socket) = &agent_tty_socket {
+            if let Some(parent) = agent_tty_socket.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            cleanup_socket(agent_tty_socket);
+            eprintln!("agent tty input socket: {}", agent_tty_socket.display());
+            cmd.arg("-serial").arg(format!(
+                "unix:{},server=on,wait=off",
+                agent_tty_socket.display()
+            ));
         }
         cmd.arg("-monitor").arg("none");
     } else {
@@ -114,6 +130,9 @@ fn main() {
         }
         let _ = fs::remove_file(serial_log);
     }
+    if let Some(agent_tty_socket) = agent_tty_socket {
+        cleanup_socket(&agent_tty_socket);
+    }
     let exit_code = match status.code().unwrap_or(1) {
         0x10 => 0, // success
         0x11 => 1, // failure
@@ -128,6 +147,10 @@ fn main() {
         let _ = fs::remove_file(path);
     }
     exit(exit_code);
+}
+
+fn cleanup_socket(path: &Path) {
+    let _ = fs::remove_file(path);
 }
 
 fn report_qemu_fault(debug_log: &Path) {

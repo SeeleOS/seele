@@ -2,7 +2,7 @@ use core::fmt::{self, Write};
 
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
-use uart_16550::SerialPort;
+use uart_16550::{Config, Uart16550Tty, backend::PioBackend};
 use x86_64::instructions::interrupts::without_interrupts;
 
 #[macro_export]
@@ -16,15 +16,17 @@ macro_rules! s_println {
     ($($arg:tt)*) => ($crate::s_print!("{}\n", format_args!($($arg)*)));
 }
 
-pub static SERIAL_PORT: OnceCell<Mutex<SerialPort>> = OnceCell::uninit();
+pub static SERIAL_PORT: OnceCell<Mutex<Uart16550Tty<PioBackend>>> = OnceCell::uninit();
 
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
     without_interrupts(|| {
         SERIAL_PORT
             .get_or_init(|| {
-                let mut serial_port = unsafe { SerialPort::new(0x3F8) };
-                serial_port.init();
+                let serial_port = unsafe {
+                    Uart16550Tty::new_port(0x3F8, Config::default())
+                        .expect("failed to initialize serial port")
+                };
                 Mutex::new(serial_port)
             })
             .lock()

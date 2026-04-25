@@ -30,7 +30,7 @@ pub use misc::signal;
 
 use crate::filesystem::vfs::VirtualFS;
 use crate::misc::others::enable_sse;
-use crate::misc::{framebuffer, logging, mouse, time};
+use crate::misc::{agent_tty_input, framebuffer, logging, mouse, time};
 use crate::process::manager::MANAGER;
 use crate::smp::{init_bsp, release_application_processors, start_application_processors};
 use crate::terminal::misc::clear;
@@ -63,6 +63,8 @@ pub fn init() -> ! {
     log::info!("init: multitasking ready");
     keyboard::init();
     log::info!("init: keyboard ready");
+    agent_tty_input::init();
+    log::info!("init: agent tty input ready");
     interrupts::init();
     log::info!("init: interrupts ready");
 
