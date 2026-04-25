@@ -26,6 +26,7 @@ Keep SMP-specific code under `kernel/src/smp/` instead of scattering AP bootstra
 - When launching the VM during agent work, use a checked-in `.sh` wrapper script instead of invoking the VM command directly. Put any needed log redirection inside the wrapper rather than on the outer command line.
 - When using the checked-in VM wrapper, run it directly (for example `misc/run-agent-vm.sh`). Do not wrap it with `bash`, and do not override its default log file path unless explicitly requested.
 - Unless there is a clear debugging need, do not add or override VM timeouts on top of the checked-in wrapper defaults. Prefer running `misc/run-agent-vm.sh` as-is.
+- When polling a background VM terminal, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
 - Do not assume `sysroot/` is mounted or synchronized with `disk.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the VM wrapper when in doubt.
 - If the sandbox, `no_new_privileges`, missing mounts, or network restrictions block a necessary command, ask the user for privilege escalation or the required access instead of silently giving up on that path.
 
@@ -95,5 +96,5 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 
 - If the user provides a workflow or debugging suggestion that is broadly useful for future work in this repository, add it to `AGENTS.md` when appropriate instead of treating it as a one-off remark.
 - When debugging interactive login issues where the user needs to type a username or password manually, run `nix develop -c cargo run` in the foreground instead of the `--agent` path and let the user provide the login input.
-- In `--agent` mode, prefer sending guest tty input through `misc/send-agent-input.sh` and the dedicated agent tty socket instead of trying to type into the background VM process directly.
+- When a background VM terminal is available, prefer interacting with it directly to send guest tty input, including login credentials and shell commands, instead of routing that input through helper scripts or separate tty socket tooling.
 - If `sysroot/` already appears to be mounted, reuse it directly instead of asking for privilege escalation to mount again. Only ask to mount when it is clearly not mounted.

@@ -7,10 +7,12 @@ SYSROOT_DIR="${ROOT_DIR}/sysroot"
 PACMAN_CONF="${ROOT_DIR}/misc/pacman.conf"
 HOST_PATH="${PATH}"
 ARCH_MIRROR="${ARCH_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/archlinux/\$repo/os/\$arch}"
+AUR_BUILD_USER="aurbuilder"
+AUR_BUILD_DIR="/tmp/aur-build"
 ARCH_PACKAGES=(
     base
-    rustc
-    cargo
+    base-devel
+    rust
     bash
     alacritty
     evtest
@@ -20,6 +22,7 @@ ARCH_PACKAGES=(
     busybox
     fastfetch
     iptables
+    sudo
     xorg-server
     xorg-xinit
     xorg-xkbcomp
@@ -40,6 +43,9 @@ ARCH_PACKAGES=(
     ttf-dejavu
     xorg-fonts-misc
 )
+AUR_PACKAGES=(
+    st
+)
 
 install_sysroot_file() {
     local source="$1"
@@ -49,10 +55,130 @@ install_sysroot_file() {
     sudo install -Dm644 "${source}" "${target}"
 }
 
+pacman_root() {
+    sudo env "PATH=${HOST_PATH}" pacman \
+        --config "${PACMAN_CONF}" \
+        --root "${SYSROOT_DIR}" \
+        --dbpath "${SYSROOT_DIR}/var/lib/pacman" \
+        --cachedir "${SYSROOT_DIR}/var/cache/pacman/pkg" \
+        --noconfirm \
+        "$@"
+}
+
+mount_chroot_api_fs() {
+    sudo install -d -m 0755 "${SYSROOT_DIR}/dev" "${SYSROOT_DIR}/dev/pts" "${SYSROOT_DIR}/proc" "${SYSROOT_DIR}/sys"
+
+    if ! mountpoint -q "${SYSROOT_DIR}/dev"; then
+        sudo mount --bind /dev "${SYSROOT_DIR}/dev"
+    fi
+
+    if ! mountpoint -q "${SYSROOT_DIR}/dev/pts"; then
+        sudo mount --bind /dev/pts "${SYSROOT_DIR}/dev/pts"
+    fi
+
+    if ! mountpoint -q "${SYSROOT_DIR}/proc"; then
+        sudo mount -t proc proc "${SYSROOT_DIR}/proc"
+    fi
+
+    if ! mountpoint -q "${SYSROOT_DIR}/sys"; then
+        sudo mount --rbind /sys "${SYSROOT_DIR}/sys"
+    fi
+}
+
+umount_chroot_api_fs() {
+    if mountpoint -q "${SYSROOT_DIR}/dev/pts"; then
+        sudo umount -l "${SYSROOT_DIR}/dev/pts" || true
+    fi
+
+    if mountpoint -q "${SYSROOT_DIR}/dev"; then
+        sudo umount -l "${SYSROOT_DIR}/dev" || true
+    fi
+
+    if mountpoint -q "${SYSROOT_DIR}/proc"; then
+        sudo umount -l "${SYSROOT_DIR}/proc" || true
+    fi
+
+    if mountpoint -q "${SYSROOT_DIR}/sys"; then
+        sudo umount -R -l "${SYSROOT_DIR}/sys" || true
+    fi
+}
+
+trap umount_chroot_api_fs EXIT
+
+ensure_aur_builder() {
+    sudo chroot "${SYSROOT_DIR}" /bin/sh -lc "
+        set -eu
+        if ! id -u '${AUR_BUILD_USER}' >/dev/null 2>&1; then
+            useradd -m -U '${AUR_BUILD_USER}'
+        fi
+        install -d -m 0755 /etc/sudoers.d
+        cat >/etc/sudoers.d/${AUR_BUILD_USER}-pacman <<'EOF'
+${AUR_BUILD_USER} ALL=(ALL) NOPASSWD: /usr/bin/pacman
+EOF
+        chmod 0440 /etc/sudoers.d/${AUR_BUILD_USER}-pacman
+        install -d -m 0777 '${AUR_BUILD_DIR}'
+    "
+}
+
+install_aur_package() {
+    local package="$1"
+    local host_build_dir host_snapshot pkg_file host_pkg_file
+
+    host_build_dir="$(mktemp -d)"
+    host_snapshot="${host_build_dir}/${package}.tar.gz"
+    trap 'rm -rf "${host_build_dir}"' RETURN
+
+    curl \
+        --fail \
+        --location \
+        --http1.1 \
+        --retry 5 \
+        --retry-all-errors \
+        "https://aur.archlinux.org/cgit/aur.git/snapshot/${package}.tar.gz" \
+        -o "${host_snapshot}"
+    tar -C "${host_build_dir}" -xf "${host_snapshot}"
+
+    if [ ! -d "${host_build_dir}/${package}" ]; then
+        echo "AUR snapshot for ${package} did not contain ${package}/" >&2
+        return 1
+    fi
+
+    ensure_aur_builder
+
+    sudo rm -rf "${SYSROOT_DIR}${AUR_BUILD_DIR}/${package}"
+    sudo cp -a "${host_build_dir}/${package}" "${SYSROOT_DIR}${AUR_BUILD_DIR}/"
+    mount_chroot_api_fs
+    sudo chroot "${SYSROOT_DIR}" /usr/bin/chown -R "${AUR_BUILD_USER}:${AUR_BUILD_USER}" "${AUR_BUILD_DIR}/${package}"
+
+    sudo chroot "${SYSROOT_DIR}" /usr/bin/runuser -u "${AUR_BUILD_USER}" -- \
+        /bin/bash -lc "cd '${AUR_BUILD_DIR}/${package}' && /usr/bin/makepkg --noconfirm --syncdeps --clean --cleanbuild --force"
+
+    pkg_file="$(
+        sudo chroot "${SYSROOT_DIR}" /bin/sh -lc \
+            "cd '${AUR_BUILD_DIR}/${package}' && /usr/bin/realpath ./*.pkg.tar.* | /usr/bin/head -n 1"
+    )"
+
+    umount_chroot_api_fs
+
+    if [ -z "${pkg_file}" ]; then
+        echo "failed to locate built package for ${package}" >&2
+        return 1
+    fi
+
+    host_pkg_file="${SYSROOT_DIR}${pkg_file}"
+    if [ ! -f "${host_pkg_file}" ]; then
+        echo "built package path does not exist on host: ${host_pkg_file}" >&2
+        return 1
+    fi
+
+    pacman_root --needed -U "${host_pkg_file}"
+}
+
 mkdir -p "${SYSROOT_DIR}"
 
 if mountpoint -q "${SYSROOT_DIR}"; then
-    sudo umount "${SYSROOT_DIR}"
+    umount_chroot_api_fs
+    sudo umount -l "${SYSROOT_DIR}"
 fi
 
 if [ ! -f "${DISK_IMG}" ]; then
@@ -70,6 +196,7 @@ sudo chmod 1777 "${SYSROOT_DIR}/var/tmp"
 sudo mkdir -p "${SYSROOT_DIR}/etc/X11"
 sudo mkdir -p "${SYSROOT_DIR}/var/lib/pacman"
 sudo mkdir -p "${SYSROOT_DIR}/var/cache/pacman/pkg"
+sudo rm -f "${SYSROOT_DIR}/var/lib/pacman/db.lck"
 cat <<EOF > "${PACMAN_CONF}"
 [options]
 Architecture = auto
@@ -84,15 +211,11 @@ Server = ${ARCH_MIRROR}
 Server = ${ARCH_MIRROR}
 EOF
 
-sudo env "PATH=${HOST_PATH}" pacman \
-    --config "${PACMAN_CONF}" \
-    --root "${SYSROOT_DIR}" \
-    --dbpath "${SYSROOT_DIR}/var/lib/pacman" \
-    --cachedir "${SYSROOT_DIR}/var/cache/pacman/pkg" \
-    --noconfirm \
-    --needed \
-    -Sy \
-    "${ARCH_PACKAGES[@]}"
+pacman_root --needed -Sy "${ARCH_PACKAGES[@]}"
+
+for package in "${AUR_PACKAGES[@]}"; do
+    install_aur_package "${package}"
+done
 
 sudo chroot "${SYSROOT_DIR}" /usr/bin/passwd -d root
 

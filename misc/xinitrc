@@ -35,6 +35,11 @@ if [ -f "$usermodmap" ]; then
 fi
 
 echo "xinitrc: starting session"
+if [ -x /usr/bin/st ]; then
+    echo "xinitrc: start st"
+    /usr/bin/st &
+fi
+
 if [ -x /usr/bin/icewm-session ]; then
     echo "xinitrc: exec icewm-session"
     exec /usr/bin/icewm-session
