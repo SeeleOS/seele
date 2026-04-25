@@ -53,6 +53,7 @@ pub struct TtyDevice {
     linux_console: Mutex<LinuxConsoleState>,
     interactive: bool,
     keyboard_queue: Mutex<VecDeque<u8>>,
+    terminal_response_queue: Mutex<VecDeque<u8>>,
     raw_queue: Mutex<VecDeque<u8>>,
     medium_raw_queue: Mutex<VecDeque<u8>>,
     line_buffer: Mutex<VecDeque<u8>>,
@@ -69,6 +70,7 @@ impl TtyDevice {
             linux_console: Mutex::new(LinuxConsoleState::default()),
             interactive,
             keyboard_queue: Mutex::new(VecDeque::new()),
+            terminal_response_queue: Mutex::new(VecDeque::new()),
             raw_queue: Mutex::new(VecDeque::new()),
             medium_raw_queue: Mutex::new(VecDeque::new()),
             line_buffer: Mutex::new(VecDeque::new()),
@@ -103,6 +105,7 @@ impl TtyDevice {
 
     pub fn clear_input_state(&self) {
         self.keyboard_queue.lock().clear();
+        self.terminal_response_queue.lock().clear();
         self.raw_queue.lock().clear();
         self.medium_raw_queue.lock().clear();
         self.line_buffer.lock().clear();
@@ -118,22 +121,26 @@ impl TtyDevice {
         keyboard_queue.extend(line_buffer.drain(..));
     }
 
+    fn terminal_info(&self) -> crate::terminal::object::TerminalSettings {
+        *self.terminal.lock().info.lock()
+    }
+
+    fn expose_terminal_responses(&self) -> bool {
+        !self.terminal_info().canonical
+    }
+
+    fn clear_terminal_response_queue(&self) {
+        self.terminal_response_queue.lock().clear();
+    }
+
     fn push_terminal_query_responses(&self, bytes: &[u8]) {
         if !self.interactive || bytes.is_empty() {
             return;
         }
 
-        match self.keyboard_mode() {
-            KeyboardMode::Raw | KeyboardMode::Off => {
-                self.raw_queue.lock().extend(bytes.iter().copied());
-            }
-            KeyboardMode::MediumRaw => {
-                self.medium_raw_queue.lock().extend(bytes.iter().copied());
-            }
-            KeyboardMode::Xlate | KeyboardMode::Unicode => {
-                self.keyboard_queue.lock().extend(bytes.iter().copied());
-            }
-        }
+        self.terminal_response_queue
+            .lock()
+            .extend(bytes.iter().copied());
 
         THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
     }
@@ -149,13 +156,21 @@ impl TtyDevice {
 impl Pollable for TtyDevice {
     fn is_event_ready(&self, event: PollableEvent) -> bool {
         match event {
-            PollableEvent::CanBeRead => match self.keyboard_mode() {
-                KeyboardMode::Raw | KeyboardMode::Off => !self.raw_queue.lock().is_empty(),
-                KeyboardMode::MediumRaw => !self.medium_raw_queue.lock().is_empty(),
-                KeyboardMode::Xlate | KeyboardMode::Unicode => {
-                    !self.keyboard_queue.lock().is_empty()
+            PollableEvent::CanBeRead => {
+                if self.expose_terminal_responses()
+                    && !self.terminal_response_queue.lock().is_empty()
+                {
+                    return true;
                 }
-            },
+
+                match self.keyboard_mode() {
+                    KeyboardMode::Raw | KeyboardMode::Off => !self.raw_queue.lock().is_empty(),
+                    KeyboardMode::MediumRaw => !self.medium_raw_queue.lock().is_empty(),
+                    KeyboardMode::Xlate | KeyboardMode::Unicode => {
+                        !self.keyboard_queue.lock().is_empty()
+                    }
+                }
+            }
             PollableEvent::CanBeWritten => true,
             _ => false,
         }
@@ -184,6 +199,13 @@ impl Readable for TtyDevice {
 
     fn read_with_flags(&self, buffer: &mut [u8], flags: FileFlags) -> super::ObjectResult<usize> {
         read_or_block_with_flags(buffer, flags, WakeType::Keyboard, |buffer| {
+            if self.expose_terminal_responses() {
+                let mut response_queue = self.terminal_response_queue.lock();
+                if !response_queue.is_empty() {
+                    return Some(copy_from_queue(&mut response_queue, buffer));
+                }
+            }
+
             match self.keyboard_mode() {
                 KeyboardMode::Raw | KeyboardMode::Off => {
                     let mut queue = self.raw_queue.lock();
@@ -249,6 +271,13 @@ impl Configuratable for TtyDevice {
             ConfigurateRequest::LinuxTiocvhangup => {
                 self.clear_input_state();
                 Ok(0)
+            }
+            ConfigurateRequest::LinuxTcSets(_) | ConfigurateRequest::LinuxTcSets2(_) => {
+                let result = self.terminal.lock().configure(request)?;
+                if self.terminal_info().canonical {
+                    self.clear_terminal_response_queue();
+                }
+                Ok(result)
             }
             _ => self.terminal.lock().configure(request),
         }
