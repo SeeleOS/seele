@@ -35,9 +35,9 @@ pub fn get_object_current_process(id: u64) -> ObjectResult<Arc<dyn Object>> {
     let current = current.lock();
 
     current
-        .objects
+        .fd_table
         .get(id as usize)
-        .cloned()
-        .ok_or(ObjectError::DoesNotExist)?
+        .and_then(|entry| entry.as_ref())
+        .map(|entry| entry.object.clone())
         .ok_or(ObjectError::DoesNotExist)
 }

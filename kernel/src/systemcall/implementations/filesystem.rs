@@ -775,8 +775,15 @@ define_syscall!(OpenAt, |dirfd: i32,
         if directory_only && !matches!(info.file_like_type, FileLikeType::Directory) {
             return Err(SyscallError::NotADirectory);
         }
+        let mut file_flags = FileFlags::empty();
+        if flags.contains(OpenFlags::APPEND) {
+            file_flags.insert(FileFlags::APPEND);
+        }
         if flags.contains(OpenFlags::NONBLOCK) {
-            match object.clone().set_flags(FileFlags::NONBLOCK) {
+            file_flags.insert(FileFlags::NONBLOCK);
+        }
+        if !file_flags.is_empty() {
+            match object.clone().set_flags(file_flags) {
                 Ok(()) | Err(ObjectError::Unimplemented) => {}
                 Err(err) => return Err(err.into()),
             }

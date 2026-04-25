@@ -68,8 +68,8 @@ pub(super) fn pid_fd_entries(pid: ProcessID) -> FSResult<Vec<DirectoryContentInf
     let process = process.lock();
     let mut entries = Vec::new();
 
-    for (fd, object) in process.objects.iter().enumerate() {
-        if object.is_some() {
+    for (fd, entry) in process.fd_table.iter().enumerate() {
+        if entry.is_some() {
             entries.push(DirectoryContentInfo::new(
                 format!("{fd}"),
                 DirectoryContentType::Symlink,
@@ -199,7 +199,7 @@ pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
         process.effective_gid,
         process.saved_gid,
         process.fs_gid,
-        process.objects.len().max(64),
+        process.fd_table.len().max(64),
         groups,
         format_capability_set(
             process.capability_inheritable[0],
@@ -302,8 +302,8 @@ pub(super) fn pid_fdinfo_entries(pid: ProcessID) -> FSResult<Vec<DirectoryConten
     let process = process.lock();
     let mut entries = Vec::new();
 
-    for (fd, object) in process.objects.iter().enumerate() {
-        if object.is_some() {
+    for (fd, entry) in process.fd_table.iter().enumerate() {
+        if entry.is_some() {
             entries.push(DirectoryContentInfo::new(
                 format!("{fd}"),
                 DirectoryContentType::File,
@@ -318,9 +318,10 @@ pub(super) fn proc_pid_fdinfo_bytes(pid: ProcessID, fd: usize) -> FSResult<Vec<u
     let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
     let process = process.lock();
     let object = process
-        .objects
+        .fd_table
         .get(fd)
-        .and_then(|entry| entry.clone())
+        .and_then(|entry| entry.as_ref())
+        .map(|entry| entry.object.clone())
         .ok_or(FSError::NotFound)?;
 
     let mut content = String::from("pos:\t0\nflags:\t0\nmnt_id:\t0\nino:\t0\n");
@@ -450,9 +451,10 @@ pub(super) fn fd_target(pid: ProcessID, fd: &str) -> FSResult<String> {
     let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
     let process = process.lock();
     let object = process
-        .objects
+        .fd_table
         .get(fd_index)
-        .and_then(|entry| entry.clone())
+        .and_then(|entry| entry.as_ref())
+        .map(|entry| entry.object.clone())
         .ok_or(FSError::NotFound)?;
 
     if let Ok(file_like) = object.clone().as_file_like() {

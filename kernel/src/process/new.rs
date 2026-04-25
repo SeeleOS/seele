@@ -11,9 +11,9 @@ use crate::{
     filesystem::{errors::FSError, object::FileLikeObject, path::Path, vfs::VirtualFS},
     memory::addrspace::AddrSpace,
     misc::time::with_profiling,
-    object::{Object, tty_device::get_default_tty},
+    object::tty_device::get_default_tty,
     process::{
-        FdFlags, Process, ProcessRef,
+        FdEntry, Process, ProcessRef,
         group::ProcessGroupID,
         misc::{ProcessID, init_stack_layout},
         object::init_objects,
@@ -100,8 +100,7 @@ impl Process {
                         DEFAULT_HOME.into(),
                     ],
                     &mut process.addrspace,
-                    &mut process.objects,
-                    &mut process.object_flags,
+                    &mut process.fd_table,
                 )
             },
             "process init setup_process",
@@ -132,8 +131,7 @@ fn setup_process_inner(
     args: Vec<String>,
     env: Vec<String>,
     addrspace: &mut AddrSpace,
-    objects: &mut Vec<Option<Arc<dyn Object>>>,
-    object_flags: &mut Vec<FdFlags>,
+    fd_table: &mut Vec<Option<FdEntry>>,
     shebang_depth: usize,
 ) -> Result<ThreadSnapshot, FSError> {
     if shebang_depth > MAX_SHEBANG_DEPTH {
@@ -171,8 +169,7 @@ fn setup_process_inner(
             interpreter_args,
             env,
             addrspace,
-            objects,
-            object_flags,
+            fd_table,
             shebang_depth + 1,
         );
     }
@@ -226,7 +223,7 @@ fn setup_process_inner(
     );
 
     with_profiling(
-        || init_objects(objects, object_flags),
+        || init_objects(fd_table),
         alloc::format!("init_objects {}", path_string).as_str(),
     );
 
@@ -248,12 +245,11 @@ pub fn setup_process(
     mut args: Vec<String>,
     env: Vec<String>,
     addrspace: &mut AddrSpace,
-    objects: &mut Vec<Option<Arc<dyn Object>>>,
-    object_flags: &mut Vec<FdFlags>,
+    fd_table: &mut Vec<Option<FdEntry>>,
 ) -> Result<ThreadSnapshot, FSError> {
     if args.is_empty() {
         args.insert(0, path.clone().as_string());
     }
 
-    setup_process_inner(path, args, env, addrspace, objects, object_flags, 0)
+    setup_process_inner(path, args, env, addrspace, fd_table, 0)
 }

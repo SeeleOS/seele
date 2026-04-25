@@ -10,10 +10,11 @@ use x86_64::VirtAddr;
 use crate::filesystem::absolute_path::AbsolutePath;
 use crate::memory::addrspace::AddrSpace;
 use crate::misc::timer::Timer;
+use crate::object::misc::ObjectRef;
 use crate::process::group::ProcessGroupID;
 use crate::signal::misc::default_signal_action_vec;
 use crate::signal::{Signals, action::SignalAction};
-use crate::{object::Object, process::misc::ProcessID, thread::thread::Thread};
+use crate::{process::misc::ProcessID, thread::thread::Thread};
 
 pub mod execve;
 pub mod fork;
@@ -36,14 +37,25 @@ bitflags! {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct FdEntry {
+    pub object: ObjectRef,
+    pub fd_flags: FdFlags,
+}
+
+impl FdEntry {
+    pub fn new(object: ObjectRef, fd_flags: FdFlags) -> Self {
+        Self { object, fd_flags }
+    }
+}
+
 #[derive(Debug)]
 pub struct Process {
     pub pid: ProcessID,
     pub addrspace: AddrSpace,
     pub kernel_stack_top: VirtAddr,
     pub threads: Vec<Weak<Mutex<Thread>>>,
-    pub objects: Vec<Option<Arc<dyn Object>>>,
-    pub object_flags: Vec<FdFlags>,
+    pub fd_table: Vec<Option<FdEntry>>,
     pub current_directory: AbsolutePath,
     pub command_line: Vec<String>,
     pub exit_code: Option<u64>,
@@ -89,8 +101,7 @@ impl Default for Process {
             addrspace: AddrSpace::default(),
             kernel_stack_top: VirtAddr::zero(),
             threads: Vec::new(),
-            objects: Vec::new(),
-            object_flags: Vec::new(),
+            fd_table: Vec::new(),
             command_line: Vec::new(),
             exit_code: None,
             parent: None,

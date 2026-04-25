@@ -1,142 +1,114 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::vec::Vec;
 
 use crate::{
     object::{
-        Object,
         error::ObjectError,
         misc::{ObjectRef, ObjectResult},
         tty_device::get_default_tty,
     },
-    process::{FdFlags, Process},
+    process::{FdEntry, FdFlags, Process},
 };
 
-pub fn init_objects(objects: &mut Vec<Option<Arc<dyn Object>>>, object_flags: &mut Vec<FdFlags>) {
-    if objects.len() < 3 {
-        objects.resize(3, None);
-    }
-    if object_flags.len() < objects.len() {
-        object_flags.resize(objects.len(), FdFlags::empty());
+pub fn init_objects(fd_table: &mut Vec<Option<FdEntry>>) {
+    if fd_table.len() < 3 {
+        fd_table.resize(3, None);
     }
 
-    for slot in 0..3 {
-        if objects[slot].is_none() {
-            objects[slot] = Some(get_default_tty());
-            object_flags[slot] = FdFlags::empty();
+    for entry in fd_table.iter_mut().take(3) {
+        if entry.is_none() {
+            *entry = Some(FdEntry::new(get_default_tty(), FdFlags::empty()));
         }
     }
 }
 
 impl Process {
-    fn ensure_object_flags_len(&mut self) {
-        if self.object_flags.len() < self.objects.len() {
-            self.object_flags
-                .resize(self.objects.len(), FdFlags::empty());
-        }
-    }
-
-    pub fn find_empty_object_slot(&self, starts_from: usize) -> Option<usize> {
-        self.objects
+    pub fn find_empty_fd_slot(&self, starts_from: usize) -> Option<usize> {
+        self.fd_table
             .iter()
             .enumerate()
             .skip(starts_from)
-            .find(|(_, p)| p.is_none())
-            .map(|(i, _)| i)
+            .find(|(_, entry)| entry.is_none())
+            .map(|(index, _)| index)
     }
 
-    // Allocates a slot on the objects vec
-    pub fn alloc_object_slot(&mut self) -> usize {
-        if let Some(i) = self.find_empty_object_slot(0) {
-            i
+    pub fn alloc_fd_slot(&mut self) -> usize {
+        if let Some(index) = self.find_empty_fd_slot(0) {
+            index
         } else {
-            self.objects.push(None);
-            self.object_flags.push(FdFlags::empty());
-            self.objects.len() - 1
+            self.fd_table.push(None);
+            self.fd_table.len() - 1
         }
     }
 
-    /// Same as alloc_object_slot, but with a minimum index requirement
-    pub fn alloc_object_slot_with_min(&mut self, min: usize) -> usize {
-        if let Some(i) = self.find_empty_object_slot(min) {
-            return i;
+    pub fn alloc_fd_slot_with_min(&mut self, min: usize) -> usize {
+        if let Some(index) = self.find_empty_fd_slot(min) {
+            return index;
         }
 
-        if self.objects.len() <= min {
-            self.objects.resize(min + 1, None);
-            self.object_flags.resize(min + 1, FdFlags::empty());
+        if self.fd_table.len() <= min {
+            self.fd_table.resize(min + 1, None);
             min
         } else {
-            self.objects.push(None);
-            self.object_flags.push(FdFlags::empty());
-            self.objects.len() - 1
+            self.fd_table.push(None);
+            self.fd_table.len() - 1
         }
     }
 
-    pub fn get_object(&mut self, index: u64) -> ObjectResult<ObjectRef> {
-        self.objects
+    pub fn get_object(&self, index: u64) -> ObjectResult<ObjectRef> {
+        self.fd_table
             .get(index as usize)
             .ok_or(ObjectError::DoesNotExist)?
-            .clone()
+            .as_ref()
+            .map(|entry| entry.object.clone())
             .ok_or(ObjectError::DoesNotExist)
     }
 
-    pub fn set_object_slot_with_flags(
+    pub fn set_fd_entry(
         &mut self,
         slot: usize,
         object: ObjectRef,
-        flags: FdFlags,
+        fd_flags: FdFlags,
     ) -> ObjectResult<usize> {
-        if self.objects.len() <= slot {
-            self.objects.resize(slot + 1, None);
+        if self.fd_table.len() <= slot {
+            self.fd_table.resize(slot + 1, None);
         }
-        self.ensure_object_flags_len();
-        if self.object_flags.len() <= slot {
-            self.object_flags.resize(slot + 1, FdFlags::empty());
-        }
-        self.objects[slot] = Some(object);
-        self.object_flags[slot] = flags;
+        self.fd_table[slot] = Some(FdEntry::new(object, fd_flags));
         Ok(slot)
     }
 
-    pub fn clear_object_slot(&mut self, slot: usize) -> ObjectResult<()> {
+    pub fn clear_fd_slot(&mut self, slot: usize) -> ObjectResult<()> {
         let entry = self
-            .objects
+            .fd_table
             .get_mut(slot)
             .ok_or(ObjectError::DoesNotExist)?;
         if entry.is_none() {
             return Err(ObjectError::DoesNotExist);
         }
         *entry = None;
-        if let Some(flags) = self.object_flags.get_mut(slot) {
-            *flags = FdFlags::empty();
-        }
         Ok(())
     }
 
     pub fn get_fd_flags(&self, index: usize) -> ObjectResult<FdFlags> {
-        let object = self.objects.get(index).ok_or(ObjectError::DoesNotExist)?;
-        if object.is_none() {
-            return Err(ObjectError::DoesNotExist);
-        }
-        Ok(self
-            .object_flags
+        self.fd_table
             .get(index)
-            .copied()
-            .unwrap_or_else(FdFlags::empty))
+            .and_then(|entry| entry.as_ref())
+            .map(|entry| entry.fd_flags)
+            .ok_or(ObjectError::DoesNotExist)
     }
 
-    pub fn set_fd_flags(&mut self, index: usize, flags: FdFlags) -> ObjectResult<()> {
-        let object = self.objects.get(index).ok_or(ObjectError::DoesNotExist)?;
-        if object.is_none() {
-            return Err(ObjectError::DoesNotExist);
-        }
-        self.ensure_object_flags_len();
-        self.object_flags[index] = flags;
+    pub fn set_fd_flags(&mut self, index: usize, fd_flags: FdFlags) -> ObjectResult<()> {
+        let entry = self
+            .fd_table
+            .get_mut(index)
+            .and_then(|entry| entry.as_mut())
+            .ok_or(ObjectError::DoesNotExist)?;
+        entry.fd_flags = fd_flags;
         Ok(())
     }
 
     pub fn clone_object(&mut self, object: ObjectRef) -> ObjectResult<usize> {
-        let slot = self.alloc_object_slot();
-        self.set_object_slot_with_flags(slot, object.clone(), FdFlags::empty())
+        let slot = self.alloc_fd_slot();
+        self.set_fd_entry(slot, object, FdFlags::empty())
     }
 
     pub fn clone_object_with_min(&mut self, object: ObjectRef, min: usize) -> ObjectResult<usize> {
@@ -147,10 +119,10 @@ impl Process {
         &mut self,
         object: ObjectRef,
         min: usize,
-        flags: FdFlags,
+        fd_flags: FdFlags,
     ) -> ObjectResult<usize> {
-        let slot = self.alloc_object_slot_with_min(min);
-        self.set_object_slot_with_flags(slot, object.clone(), flags)
+        let slot = self.alloc_fd_slot_with_min(min);
+        self.set_fd_entry(slot, object, fd_flags)
     }
 
     pub fn clone_object_to(&mut self, object: ObjectRef, dest: usize) -> ObjectResult<usize> {
@@ -161,27 +133,28 @@ impl Process {
         &mut self,
         object: ObjectRef,
         dest: usize,
-        flags: FdFlags,
+        fd_flags: FdFlags,
     ) -> ObjectResult<usize> {
-        self.set_object_slot_with_flags(dest, object.clone(), flags)
+        self.set_fd_entry(dest, object, fd_flags)
     }
 
     pub fn push_object(&mut self, object: ObjectRef) -> usize {
         self.push_object_with_flags(object, FdFlags::empty())
     }
 
-    pub fn push_object_with_flags(&mut self, object: ObjectRef, flags: FdFlags) -> usize {
-        let slot = self.alloc_object_slot();
-        let _ = self.set_object_slot_with_flags(slot, object, flags);
+    pub fn push_object_with_flags(&mut self, object: ObjectRef, fd_flags: FdFlags) -> usize {
+        let slot = self.alloc_fd_slot();
+        let _ = self.set_fd_entry(slot, object, fd_flags);
         slot
     }
 
     pub fn close_cloexec_objects(&mut self) {
-        self.ensure_object_flags_len();
-        for (slot, object) in self.objects.iter_mut().enumerate() {
-            if object.is_some() && self.object_flags[slot].contains(FdFlags::CLOEXEC) {
-                *object = None;
-                self.object_flags[slot] = FdFlags::empty();
+        for entry in &mut self.fd_table {
+            if entry
+                .as_ref()
+                .is_some_and(|entry| entry.fd_flags.contains(FdFlags::CLOEXEC))
+            {
+                *entry = None;
             }
         }
     }

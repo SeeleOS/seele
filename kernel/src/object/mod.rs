@@ -6,6 +6,7 @@ bitflags::bitflags! {
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct FileFlags: u64 {
         const NONBLOCK = 1 << 0;
+        const APPEND = 1 << 1;
     }
 }
 
@@ -37,6 +38,7 @@ pub mod linux_anon;
 pub mod memfd;
 pub mod misc;
 pub mod netlink;
+pub mod open_state;
 pub mod queue_helpers;
 pub mod traits;
 pub mod tty_device;

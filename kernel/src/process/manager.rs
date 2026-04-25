@@ -50,8 +50,7 @@ impl Manager {
         self.processes.remove(&pid);
         remove_pid_cgroup_path(pid);
         let mut process = process.lock();
-        process.objects.clear();
-        process.object_flags.clear();
+        process.fd_table.clear();
         process.timers.clear();
         process.addrspace.clean();
     }
@@ -90,8 +89,7 @@ impl Process {
             remove_pid_cgroup_path(self.pid);
         }
 
-        self.objects.clear();
-        self.object_flags.clear();
+        self.fd_table.clear();
 
         self.threads
             .iter()

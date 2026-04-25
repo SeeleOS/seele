@@ -62,7 +62,7 @@ fn current_process_tty() -> Option<ObjectRef> {
     let stdin = {
         let process = get_current_process();
         let process = process.lock();
-        process.objects.first()?.clone()?
+        process.fd_table.first()?.as_ref()?.object.clone()
     };
 
     if stdin.clone().as_tty_device().is_ok() || stdin.clone().as_pty_slave().is_ok() {

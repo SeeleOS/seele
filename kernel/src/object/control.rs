@@ -38,6 +38,7 @@ const F_UNLCK: i16 = 2;
 bitflags! {
     #[derive(Clone, Copy, Debug)]
     struct FileStatusFlags: u64 {
+        const O_APPEND = 0o2_000;
         const O_NONBLOCK = 0o4_000;
     }
 }
@@ -77,6 +78,9 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
         FcntlCmd::SetFl => {
             let mut flags = FileFlags::empty();
             let status_flags = FileStatusFlags::from_bits_truncate(arg);
+            if status_flags.contains(FileStatusFlags::O_APPEND) {
+                flags.insert(FileFlags::APPEND);
+            }
             if status_flags.contains(FileStatusFlags::O_NONBLOCK) {
                 flags.insert(FileFlags::NONBLOCK);
             }
@@ -89,6 +93,9 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
             let flags = match object.clone().get_flags() {
                 Ok(flags) => {
                     let mut linux_flags = 0;
+                    if flags.contains(FileFlags::APPEND) {
+                        linux_flags |= FileStatusFlags::O_APPEND.bits() as usize;
+                    }
                     if flags.contains(FileFlags::NONBLOCK) {
                         linux_flags |= FileStatusFlags::O_NONBLOCK.bits() as usize;
                     }

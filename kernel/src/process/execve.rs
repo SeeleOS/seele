@@ -68,16 +68,7 @@ impl Process {
 
         self.close_cloexec_objects();
         thread_locked.snapshot = with_profiling(
-            || {
-                setup_process(
-                    path,
-                    args,
-                    env,
-                    &mut self.addrspace,
-                    &mut self.objects,
-                    &mut self.object_flags,
-                )
-            },
+            || setup_process(path, args, env, &mut self.addrspace, &mut self.fd_table),
             alloc::format!(
                 "execve setup_process pid={} path={}",
                 self.pid.0,

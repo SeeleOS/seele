@@ -226,7 +226,7 @@ define_syscall!(Close, |object_num: usize| {
     let process_ref = get_current_process();
     let mut process = process_ref.lock();
     let current_pid = process.pid;
-    if process.clear_object_slot(object_num).is_ok() {
+    if process.clear_fd_slot(object_num).is_ok() {
         DIR_OFFSETS.lock().remove(&(current_pid, object_num as u64));
         Ok(0)
     } else {
@@ -354,19 +354,19 @@ define_syscall!(CloseRange, |first: usize, last: usize, flags: u32| {
 
     let process_ref = get_current_process();
     let mut process = process_ref.lock();
-    if first >= process.objects.len() {
+    if first >= process.fd_table.len() {
         return Ok(0);
     }
 
-    let end = last.min(process.objects.len().saturating_sub(1));
+    let end = last.min(process.fd_table.len().saturating_sub(1));
     for fd in first..=end {
-        if process.objects[fd].is_none() {
+        if process.fd_table[fd].is_none() {
             continue;
         }
         if flags.contains(CloseRangeFlags::CLOSE_RANGE_CLOEXEC) {
             process.set_fd_flags(fd, FdFlags::CLOEXEC)?;
         } else {
-            process.clear_object_slot(fd)?;
+            process.clear_fd_slot(fd)?;
         }
     }
 

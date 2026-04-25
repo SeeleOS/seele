@@ -22,6 +22,7 @@ use crate::{
         config::ConfigurateRequest,
         error::ObjectError,
         misc::ObjectResult,
+        open_state::OpenState,
         traits::{Configuratable, MemoryMappable, Readable, Seekable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
@@ -30,6 +31,7 @@ use crate::{
 
 pub struct OpenedFileObject {
     backend: OpenBackend,
+    open_state: OpenState,
     path: Path,
 }
 
@@ -102,6 +104,7 @@ impl OpenedFileObject {
     pub fn new(file: FileLike, path: Path) -> FSResult<Self> {
         Ok(Self {
             backend: OpenBackend::from_file_like(file)?,
+            open_state: OpenState::default(),
             path,
         })
     }
@@ -231,19 +234,12 @@ impl Debug for OpenedFileObject {
 
 impl Object for OpenedFileObject {
     fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
-        let Some(device) = self.device_object() else {
-            return Err(ObjectError::Unimplemented);
-        };
-
-        device.clone().get_flags()
+        Ok(self.open_state.get_flags())
     }
 
     fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
-        let Some(device) = self.device_object() else {
-            return Err(ObjectError::Unimplemented);
-        };
-
-        device.clone().set_flags(flags)
+        self.open_state.set_flags(flags);
+        Ok(())
     }
 
     impl_cast_function!("writable", Writable);
@@ -266,10 +262,14 @@ impl Writable for OpenedFileObject {
             return writable.write(buffer);
         }
 
-        self.resolve_file()?
-            .lock()
-            .write(buffer)
-            .map_err(Into::into)
+        let file = self.resolve_file()?;
+        let mut file = file.lock();
+
+        if self.open_state.contains(FileFlags::APPEND) {
+            file.seek(0, Whence::End)?;
+        }
+
+        file.write(buffer).map_err(Into::into)
     }
 }
 
