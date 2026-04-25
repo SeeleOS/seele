@@ -1,26 +1,7 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-
-This repository is a Rust workspace for a small x86_64 OS.
-
-- `kernel/`: the kernel crate. Most development happens in `kernel/src/`.
-- `kernel/src/systemcall/`: syscall numbers, dispatch, and implementations.
-- `kernel/src/smp/`: SMP bring-up, per-CPU state, and AP startup code.
-- `kernel/src/filesystem/`, `memory/`, `process/`, `thread/`, `terminal/`: core kernel subsystems.
-- `misc/runner.rs`: QEMU runner used by `cargo run`.
-- `scripts/`: helper scripts.
-- `disk.img` and `sysroot/`: guest root filesystem image and mounted contents.
-
-Keep new code close to the subsystem it belongs to. For example, terminal ioctls belong under `kernel/src/terminal/`, not in a generic ABI file.
-Keep SMP-specific code under `kernel/src/smp/` instead of scattering AP bootstrap and per-CPU helpers across unrelated modules.
-
 ## Build, Test, and Development Commands
 
-- `cargo check --manifest-path kernel/Cargo.toml`: fast kernel-only compile check.
-- `cargo check`: compile the workspace, including the runner.
-- `cargo run`: build and boot the OS in QEMU.
-- `nix develop`: enter the project dev shell.
 - `nix develop -c cargo run -- --agent`: headless VM run with timeout and serial output; use this for runtime verification.
 - `cargo fmt --all`: format Rust code before submitting changes.
 - When launching the VM during agent work, use a checked-in `.sh` wrapper script instead of invoking the VM command directly. Put any needed log redirection inside the wrapper rather than on the outer command line.
@@ -35,11 +16,8 @@ After finishing a change, run `nix develop -c cargo run -- --agent` to test the 
 
 ## Coding Style & Naming Conventions
 
-- Use Rust 2024 style and keep formatting `rustfmt`-clean.
-- Indent with 4 spaces; do not use tabs for new code.
 - Prefer `enum` and `bitflags` over integer `const` groups when values are a closed set.
 - When a Linux flag set is already modeled as a `bitflags` type, do not duplicate the same bits as separate local `const`s. Reuse the `bitflags` type directly and prefer Linux ABI names such as `MS_*`, `O_*`, or `MAP_*` on the flags themselves.
-- Use `snake_case` for functions/modules, `CamelCase` for types, and short descriptive names for syscalls and kernel objects.
 - Match Linux naming where the kernel exposes Linux ABI behavior.
 - Do not write fully qualified type paths inline such as `alloc::string::String`. If a common type is used, import it at the top of the file and use the short name in code.
 - Do not accumulate large amounts of unrelated code in one file. Split code by subsystem or feature when a file starts carrying multiple responsibilities, for example moving select-like syscalls into their own `select.rs`.
@@ -62,8 +40,6 @@ There is no large standalone test suite yet; verification is primarily compile c
 
 ## Debugging Guidance
 
-If you hit an unimplemented syscall or similar runtime gap, check `../elysia-os` and `../elysia-os/relibc` first before designing a new solution. In many cases there is already a working implementation or a compatible approach there that should be reused or mirrored here.
-Treat `../elysia-os` and `../elysia-os/relibc` as reference code only. Do not assume this repository is currently using `relibc` or the exact same userspace stack; verify against the actual packages and binaries present in the current image.
 When debugging third-party userspace components such as Xorg, libudev, or libinput, do not rely on staring at binaries or disassembly unless there is no better option. Prefer reading the corresponding source code first.
 If the relevant source tree is not already present locally, do not have the agent clone it directly. The agent's network access is unreliable for this repository workflow. Instead, tell the user exactly which upstream or packaged source tree to clone into a clearly named local directory such as `third_party/`, then use that local checkout as the primary reference during debugging.
 When debugging third-party source code in this repository workflow, do not use web search as the primary way to inspect source. Clone the upstream repository into a local `third_party/` directory and use that local checkout instead.
