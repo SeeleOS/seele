@@ -16,15 +16,21 @@ pub fn process_pending_scancodes() {
 
     while let Some(scancode) = queue.pop() {
         let active_tty = get_active_tty();
-        active_tty.push_raw_byte(encode_linux_raw_byte(scancode));
-        THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
-        wake_tty_poller_readable();
+        let receives_hardware_keyboard_input = active_tty.receives_hardware_keyboard_input();
 
         let decoded_key = {
             let mut keyboard = _PS2_KEYBOARD.lock();
 
             if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
                 push_keyboard_event(&key_event);
+                if !receives_hardware_keyboard_input {
+                    continue;
+                }
+
+                active_tty.push_raw_byte(encode_linux_raw_byte(scancode));
+                THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+                wake_tty_poller_readable();
+
                 match active_tty.keyboard_mode() {
                     KeyboardMode::Raw | KeyboardMode::Off => continue,
                     KeyboardMode::MediumRaw => {
@@ -36,6 +42,12 @@ pub fn process_pending_scancodes() {
 
                 keyboard.process_keyevent(key_event)
             } else {
+                if receives_hardware_keyboard_input {
+                    active_tty.push_raw_byte(encode_linux_raw_byte(scancode));
+                    THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+                    wake_tty_poller_readable();
+                }
+
                 None
             }
         };

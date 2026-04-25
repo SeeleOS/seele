@@ -114,6 +114,10 @@ impl TtyDevice {
         self.linux_console.lock().keyboard_mode
     }
 
+    pub fn receives_hardware_keyboard_input(&self) -> bool {
+        self.linux_console.lock().display_mode != DisplayMode::Graphics
+    }
+
     pub fn push_raw_byte(&self, byte: u8) {
         self.raw_queue.lock().push_back(byte);
     }
