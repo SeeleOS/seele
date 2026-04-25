@@ -6,6 +6,7 @@ DISK_IMG="${ROOT_DIR}/disk.img"
 SYSROOT_DIR="${ROOT_DIR}/sysroot"
 ROOTFS_MAKING_DIR="${ROOT_DIR}/rootfs_making"
 PACMAN_CONF="${ROOTFS_MAKING_DIR}/pacman.conf"
+OVERRIDE_DISK=0
 HOST_PATH="${PATH}"
 ARCH_MIRROR="${ARCH_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/archlinux/\$repo/os/\$arch}"
 AUR_BUILD_USER="aurbuilder"
@@ -52,6 +53,20 @@ ARCH_PACKAGES=(
 AUR_PACKAGES=(
     st
 )
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --override)
+            OVERRIDE_DISK=1
+            ;;
+        *)
+            echo "unknown argument: $1" >&2
+            echo "usage: $0 [--override]" >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 install_sysroot_file() {
     local source="$1"
@@ -188,6 +203,12 @@ if mountpoint -q "${SYSROOT_DIR}"; then
 fi
 
 if [ -f "${DISK_IMG}" ]; then
+    if [ "${OVERRIDE_DISK}" -ne 1 ]; then
+        echo "disk image already exists: ${DISK_IMG}" >&2
+        echo "rerun with --override to recreate it" >&2
+        exit 1
+    fi
+
     rm -f "${DISK_IMG}"
 fi
 
