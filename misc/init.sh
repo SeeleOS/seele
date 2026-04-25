@@ -1,7 +1,7 @@
 #!/bin/sh
 
 export PATH=/bin:/usr/bin
-export TERM=xterm-256color
+export TERM=linux
 export HOME=/root
 export USER=root
 export LOGNAME=root

@@ -28,7 +28,7 @@ use crate::{
 };
 
 const DEFAULT_PATH: &str = "PATH=/bin:/usr/bin";
-const DEFAULT_TERM: &str = "TERM=xterm-256color";
+const DEFAULT_TERM: &str = "TERM=linux";
 const DEFAULT_HOME: &str = "HOME=/home";
 const INIT_PATH: &str = "/sbin/init";
 const MAX_SHEBANG_DEPTH: usize = 4;
