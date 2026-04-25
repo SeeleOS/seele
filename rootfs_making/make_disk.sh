@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DISK_IMG="${ROOT_DIR}/disk.img"
 SYSROOT_DIR="${ROOT_DIR}/sysroot"
-PACMAN_CONF="${ROOT_DIR}/misc/pacman.conf"
+ROOTFS_MAKING_DIR="${ROOT_DIR}/rootfs_making"
+PACMAN_CONF="${ROOTFS_MAKING_DIR}/pacman.conf"
 HOST_PATH="${PATH}"
 ARCH_MIRROR="${ARCH_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/archlinux/\$repo/os/\$arch}"
 AUR_BUILD_USER="aurbuilder"
@@ -224,9 +225,9 @@ done
 
 sudo chroot "${SYSROOT_DIR}" /usr/bin/passwd -d root
 
-install_sysroot_file "${ROOT_DIR}/misc/locale.conf" "${SYSROOT_DIR}/etc/locale.conf"
-install_sysroot_file "${ROOT_DIR}/misc/vconsole.conf" "${SYSROOT_DIR}/etc/vconsole.conf"
-install_sysroot_file "${ROOT_DIR}/misc/locale.sh" "${SYSROOT_DIR}/etc/profile.d/locale.sh"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/locale.conf" "${SYSROOT_DIR}/etc/locale.conf"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/vconsole.conf" "${SYSROOT_DIR}/etc/vconsole.conf"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/locale.sh" "${SYSROOT_DIR}/etc/profile.d/locale.sh"
 
 sudo chmod 0755 "${SYSROOT_DIR}/run"
 sudo install -d -m 0755 "${SYSROOT_DIR}/run/dbus"
@@ -240,9 +241,9 @@ sudo install -d -m 1777 "${SYSROOT_DIR}/tmp/.X11-unix"
 sudo install -d -m 0755 "${SYSROOT_DIR}/var/lib/dbus"
 
 sudo install -Dm644 "${ROOT_DIR}/misc/maplemono.ttf" "${SYSROOT_DIR}/usr/share/fonts/TTF/maplemono.ttf"
-sudo cp "${ROOT_DIR}/misc/xorg.conf" "${SYSROOT_DIR}/etc/X11/xorg.conf"
-sudo install -Dm755 "${ROOT_DIR}/misc/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
-sudo install -Dm755 "${ROOT_DIR}/misc/root.xinitrc" "${SYSROOT_DIR}/root/.xinitrc"
-sudo install -Dm755 "${ROOT_DIR}/misc/root.bash_profile" "${SYSROOT_DIR}/root/.bash_profile"
-sudo install -Dm755 "${ROOT_DIR}/misc/startplasma-manual.sh" "${SYSROOT_DIR}/usr/bin/startplasma-manual.sh"
-sudo install -Dm644 "${ROOT_DIR}/misc/getty-autologin.conf" "${SYSROOT_DIR}/etc/systemd/system/getty@tty1.service.d/autologin.conf"
+sudo cp "${ROOTFS_MAKING_DIR}/xorg.conf" "${SYSROOT_DIR}/etc/X11/xorg.conf"
+sudo install -Dm755 "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
+sudo install -Dm755 "${ROOTFS_MAKING_DIR}/root.xinitrc" "${SYSROOT_DIR}/root/.xinitrc"
+sudo install -Dm755 "${ROOTFS_MAKING_DIR}/root.bash_profile" "${SYSROOT_DIR}/root/.bash_profile"
+sudo install -Dm755 "${ROOTFS_MAKING_DIR}/startplasma-manual.sh" "${SYSROOT_DIR}/usr/bin/startplasma-manual.sh"
+sudo install -Dm644 "${ROOTFS_MAKING_DIR}/getty-autologin.conf" "${SYSROOT_DIR}/etc/systemd/system/getty@tty1.service.d/autologin.conf"

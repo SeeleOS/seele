@@ -4,6 +4,7 @@
 
 - `nix develop -c cargo run -- --agent`: headless VM run with timeout and serial output; use this for runtime verification.
 - `cargo fmt --all`: format Rust code before submitting changes.
+- `rootfs_making/make_disk.sh`: build or refresh `disk.img` and the guest root filesystem contents.
 - When launching the VM during agent work, use a checked-in `.sh` wrapper script instead of invoking the VM command directly. Put any needed log redirection inside the wrapper rather than on the outer command line.
 - When using the checked-in VM wrapper, run it directly (for example `misc/run-agent-vm.sh`). Do not wrap it with `bash`, and do not override its default log file path unless explicitly requested.
 - Unless there is a clear debugging need, do not add or override VM timeouts on top of the checked-in wrapper defaults. Prefer running `misc/run-agent-vm.sh` as-is.
@@ -51,6 +52,10 @@ If temporary debug output is needed in kernel code, use `s_println!` for those a
 After debugging is done, remove any temporary debug logs, extra serial prints, or ad-hoc instrumentation you added during investigation.
 If temporary runtime logging grows noisy enough to hide the actual signal, narrow or remove the unhelpful logs instead of letting large traces accumulate.
 If the current logs are already noisy enough to pollute the debugging signal and a given log is no longer necessary, clean it up promptly instead of keeping it around.
+
+## Repository Layout Notes
+
+- `rootfs_making/` contains the disk image construction script and the flat set of guest rootfs overlay/config files that `make_disk.sh` installs into `sysroot/`.
 
 ## Commit & Pull Request Guidelines
 
