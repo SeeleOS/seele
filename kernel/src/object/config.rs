@@ -1,4 +1,9 @@
-use crate::object::ObjectResult;
+use bitflags::bitflags;
+
+use crate::{
+    object::{FileFlags, ObjectResult, error::ObjectError},
+    process::FdFlags,
+};
 
 use crate::misc::framebuffer_ioctl::{FbCmap, FbFixScreeninfo, FbVarScreeninfo};
 use crate::terminal::linux_kd::{LinuxKbEntry, LinuxVtMode, LinuxVtStat};
@@ -25,6 +30,7 @@ pub enum ConfigurateRequest {
     LinuxTiocswinsz(*const LinuxWinsize),
     LinuxTiocgptn(*mut i32),
     LinuxTiocsptlck(*const i32),
+    LinuxTiocgptpeer(PtyPeerOpenRequest),
     LinuxTiocvhangup,
     LinuxKdGetKeyboardMode(*mut u32),
     LinuxKdSetKeyboardMode(u32),
@@ -41,6 +47,63 @@ pub enum ConfigurateRequest {
     LinuxVtWaitActive(u32),
     LinuxVtRelDisp(u32),
     RawIoctl { request: u64, arg: u64 },
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    pub struct PtyPeerOpenFlags: u32 {
+        const O_NOCTTY = 0x100;
+        const O_NONBLOCK = 0o4_000;
+        const O_CLOEXEC = 0o2_000_000;
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum PtyPeerAccessMode {
+    ReadOnly,
+    WriteOnly,
+    ReadWrite,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PtyPeerOpenRequest {
+    pub access_mode: PtyPeerAccessMode,
+    pub flags: PtyPeerOpenFlags,
+}
+
+impl PtyPeerOpenRequest {
+    const ACCESS_MODE_MASK: u64 = 0o3;
+
+    fn new(raw: u64) -> ObjectResult<Self> {
+        let access_mode = match raw & Self::ACCESS_MODE_MASK {
+            0 => PtyPeerAccessMode::ReadOnly,
+            1 => PtyPeerAccessMode::WriteOnly,
+            2 => PtyPeerAccessMode::ReadWrite,
+            _ => return Err(ObjectError::InvalidArguments),
+        };
+
+        let flag_bits = u32::try_from(raw & !Self::ACCESS_MODE_MASK)
+            .map_err(|_| ObjectError::InvalidArguments)?;
+        let flags = PtyPeerOpenFlags::from_bits(flag_bits).ok_or(ObjectError::InvalidArguments)?;
+
+        Ok(Self { access_mode, flags })
+    }
+
+    pub fn fd_flags(self) -> FdFlags {
+        if self.flags.contains(PtyPeerOpenFlags::O_CLOEXEC) {
+            FdFlags::CLOEXEC
+        } else {
+            FdFlags::empty()
+        }
+    }
+
+    pub fn file_flags(self) -> FileFlags {
+        let mut file_flags = FileFlags::empty();
+        if self.flags.contains(PtyPeerOpenFlags::O_NONBLOCK) {
+            file_flags.insert(FileFlags::NONBLOCK);
+        }
+        file_flags
+    }
 }
 
 #[repr(C)]
@@ -100,6 +163,7 @@ impl ConfigurateRequest {
             0x5414 => Self::LinuxTiocswinsz(ptr as *const LinuxWinsize),
             0x80045430 => Self::LinuxTiocgptn(ptr as *mut i32),
             0x40045431 => Self::LinuxTiocsptlck(ptr as *const i32),
+            0x5441 => Self::LinuxTiocgptpeer(PtyPeerOpenRequest::new(ptr)?),
             0x5437 => Self::LinuxTiocvhangup,
             0x4B44 => Self::LinuxKdGetKeyboardMode(ptr as *mut u32),
             0x4B45 => Self::LinuxKdSetKeyboardMode(ptr as u32),

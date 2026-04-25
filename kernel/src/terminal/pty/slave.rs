@@ -14,6 +14,8 @@ use crate::{
         traits::{Configuratable, Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
+    process::group::ProcessGroupID,
+    process::manager::get_current_process,
     terminal::{
         line_discipline::process_output_bytes,
         linux_kd::{LinuxConsoleState, handle_kd_request},
@@ -53,6 +55,15 @@ impl PtySlave {
 }
 
 impl Object for PtySlave {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(*self.flags.lock())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        *self.flags.lock() = flags;
+        Ok(())
+    }
+
     impl_cast_function!("writable", Writable);
     impl_cast_function!("readable", Readable);
     impl_cast_function!("configuratable", Configuratable);
@@ -102,6 +113,36 @@ impl Configuratable for PtySlave {
         }
 
         match request {
+            ConfigurateRequest::LinuxTiocsctty(_) => {
+                let group_id = get_current_process().lock().group_id;
+                self.shared.lock().active_group = Some(group_id);
+                Ok(0)
+            }
+            ConfigurateRequest::LinuxTiocgPgrp(ptr) => unsafe {
+                let tty_group = self
+                    .shared
+                    .lock()
+                    .active_group
+                    .map(|group| group.0 as i32)
+                    .unwrap_or(0);
+                *ptr = tty_group;
+                Ok(0)
+            },
+            ConfigurateRequest::LinuxTiocnotty => Ok(0),
+            ConfigurateRequest::LinuxTiocspgrp(ptr) => unsafe {
+                let requested_group = *ptr as u64;
+                self.shared.lock().active_group = Some(ProcessGroupID(requested_group));
+                Ok(0)
+            },
+            ConfigurateRequest::LinuxTcGets(_) | ConfigurateRequest::LinuxTcGets2(_) => Ok(0),
+            ConfigurateRequest::LinuxTcSets(termios) => unsafe {
+                let _ = read_volatile(termios);
+                Ok(0)
+            },
+            ConfigurateRequest::LinuxTcSets2(termios) => unsafe {
+                let _ = read_volatile(termios);
+                Ok(0)
+            },
             ConfigurateRequest::LinuxTiocgwinsz(winsize) => unsafe {
                 let info = self.shared.lock().info;
                 write_volatile(
@@ -126,6 +167,12 @@ impl Configuratable for PtySlave {
                 }
                 Ok(0)
             },
+            ConfigurateRequest::LinuxTiocvhangup => {
+                let mut shared = self.shared.lock();
+                shared.line_buffer.clear();
+                shared.from_master.clear();
+                Ok(0)
+            }
             _ => Ok(0),
         }
     }

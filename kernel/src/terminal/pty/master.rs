@@ -15,6 +15,7 @@ use crate::{
         traits::{Configuratable, Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
+    process::manager::get_current_process,
     signal::{Signal, send_signal_to_process},
     terminal::line_discipline::{process_input_byte, process_output_bytes},
     terminal::pty::{set_pty_lock, shared::PtyShared},
@@ -49,6 +50,15 @@ impl PtyMaster {
 }
 
 impl Object for PtyMaster {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(*self.flags.lock())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        *self.flags.lock() = flags;
+        Ok(())
+    }
+
     impl_cast_function!("writable", Writable);
     impl_cast_function!("readable", Readable);
     impl_cast_function!("configuratable", Configuratable);
@@ -151,6 +161,17 @@ impl Configuratable for PtyMaster {
                 set_pty_lock(self.number, locked);
                 return Ok(0);
             },
+            ConfigurateRequest::LinuxTiocgptpeer(open_request) => {
+                let slave = {
+                    let shared = self.shared.lock();
+                    shared.get_slave()
+                };
+                slave.clone().set_flags(open_request.file_flags())?;
+                let fd = get_current_process()
+                    .lock()
+                    .push_object_with_flags(slave, open_request.fd_flags());
+                return isize::try_from(fd).map_err(|_| ObjectError::Other);
+            }
             _ => {}
         }
 

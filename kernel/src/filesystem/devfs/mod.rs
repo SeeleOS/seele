@@ -11,8 +11,8 @@ use crate::{
         info::{DirectoryContentInfo, FileLikeInfo, UnixPermission},
         path::{Path, PathPart},
         staticfs::{
-            device::StaticDeviceHandle, directory::StaticDirectoryHandle, StaticDeviceNode,
-            StaticDirEntry, StaticDirectoryNode, StaticNode, StaticSymlinkNode,
+            StaticDeviceNode, StaticDirEntry, StaticDirectoryNode, StaticNode, StaticSymlinkNode,
+            device::StaticDeviceHandle, directory::StaticDirectoryHandle,
         },
         vfs::FSResult,
         vfs_traits::{Directory, DirectoryContentType, FileLike, FileLikeType, FileSystem},
@@ -236,12 +236,7 @@ fn pts_inode(number: u32) -> u64 {
 fn pts_file_like(number: u32) -> FSResult<FileLike> {
     let object = get_pty_slave(number).ok_or(FSError::NotFound)?;
     Ok(FileLike::File(Arc::new(Mutex::new(
-        StaticDeviceHandle::from_object(
-            number.to_string(),
-            pts_inode(number),
-            0o020620,
-            object,
-        ),
+        StaticDeviceHandle::from_object(number.to_string(), pts_inode(number), 0o020620, object),
     ))))
 }
 
@@ -301,9 +296,7 @@ impl Directory for DevPtsDirectoryHandle {
     fn contents(&self) -> FSResult<Vec<DirectoryContentInfo>> {
         Ok(list_ptys()
             .into_iter()
-            .map(|number| {
-                DirectoryContentInfo::new(number.to_string(), DirectoryContentType::File)
-            })
+            .map(|number| DirectoryContentInfo::new(number.to_string(), DirectoryContentType::File))
             .collect())
     }
 
