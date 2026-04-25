@@ -187,10 +187,12 @@ if mountpoint -q "${SYSROOT_DIR}"; then
     sudo umount -l "${SYSROOT_DIR}"
 fi
 
-if [ ! -f "${DISK_IMG}" ]; then
-    truncate -s 10G "${DISK_IMG}"
-    mkfs.ext4 -F "${DISK_IMG}"
+if [ -f "${DISK_IMG}" ]; then
+    rm -f "${DISK_IMG}"
 fi
+
+truncate -s 10G "${DISK_IMG}"
+mkfs.ext4 -F "${DISK_IMG}"
 
 sudo mount -o loop "${DISK_IMG}" "${SYSROOT_DIR}"
 
