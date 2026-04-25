@@ -108,11 +108,15 @@ impl Pollable for PS2MouseObject {
 
 impl Readable for PS2MouseObject {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
+        self.read_with_flags(buffer, *self.flags.lock())
+    }
+
+    fn read_with_flags(&self, buffer: &mut [u8], flags: FileFlags) -> ObjectResult<usize> {
         loop {
             let mut queue = without_interrupts(|| MOUSE_PACKETS.lock());
 
             if queue.is_empty() {
-                if self.flags.lock().contains(FileFlags::NONBLOCK) {
+                if flags.contains(FileFlags::NONBLOCK) {
                     return Err(ObjectError::TryAgain);
                 }
 

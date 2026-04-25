@@ -13,7 +13,7 @@ use crate::{
         config::ConfigurateRequest,
         error::ObjectError,
         misc::{ObjectRef, ObjectResult},
-        queue_helpers::{copy_from_queue, read_or_block},
+        queue_helpers::{copy_from_queue, read_or_block_with_flags},
         traits::{Configuratable, Readable, Statable},
     },
     polling::{event::PollableEvent, object::Pollable},
@@ -104,26 +104,25 @@ impl Object for EventDeviceClientObject {
 
 impl Readable for EventDeviceClientObject {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
+        self.read_with_flags(buffer, *self.flags.lock())
+    }
+
+    fn read_with_flags(&self, buffer: &mut [u8], flags: FileFlags) -> ObjectResult<usize> {
         if buffer.len() < INPUT_EVENT_SIZE {
             return Err(ObjectError::InvalidArguments);
         }
 
         let max_len = buffer.len() - (buffer.len() % INPUT_EVENT_SIZE);
-        read_or_block(
-            &mut buffer[..max_len],
-            &self.flags,
-            self.wake_type(),
-            |buffer| {
-                let mut state = self.state.lock();
-                let readable = state.queue.len() - (state.queue.len() % INPUT_EVENT_SIZE);
-                if readable == 0 {
-                    None
-                } else {
-                    let copy_len = buffer.len().min(readable);
-                    Some(copy_from_queue(&mut state.queue, &mut buffer[..copy_len]))
-                }
-            },
-        )
+        read_or_block_with_flags(&mut buffer[..max_len], flags, self.wake_type(), |buffer| {
+            let mut state = self.state.lock();
+            let readable = state.queue.len() - (state.queue.len() % INPUT_EVENT_SIZE);
+            if readable == 0 {
+                None
+            } else {
+                let copy_len = buffer.len().min(readable);
+                Some(copy_from_queue(&mut state.queue, &mut buffer[..copy_len]))
+            }
+        })
     }
 }
 

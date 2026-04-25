@@ -31,6 +31,18 @@ pub fn read_or_block<F>(
     buffer: &mut [u8],
     flags: &Mutex<FileFlags>,
     wake_type: WakeType,
+    try_read: F,
+) -> ObjectResult<usize>
+where
+    F: FnMut(&mut [u8]) -> Option<usize>,
+{
+    read_or_block_with_flags(buffer, *flags.lock(), wake_type, try_read)
+}
+
+pub fn read_or_block_with_flags<F>(
+    buffer: &mut [u8],
+    flags: FileFlags,
+    wake_type: WakeType,
     mut try_read: F,
 ) -> ObjectResult<usize>
 where
@@ -41,7 +53,7 @@ where
             return Ok(read_chars);
         }
 
-        if flags.lock().contains(FileFlags::NONBLOCK) {
+        if flags.contains(FileFlags::NONBLOCK) {
             return Err(ObjectError::TryAgain);
         }
 

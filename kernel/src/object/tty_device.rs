@@ -9,7 +9,7 @@ use crate::{
         FileFlags, Object,
         config::ConfigurateRequest,
         misc::ObjectRef,
-        queue_helpers::{copy_from_queue, read_or_block},
+        queue_helpers::{copy_from_queue, read_or_block_with_flags},
         traits::{Configuratable, Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
@@ -179,11 +179,12 @@ impl Writable for TtyDevice {
 
 impl Readable for TtyDevice {
     fn read(&self, buffer: &mut [u8]) -> super::ObjectResult<usize> {
-        read_or_block(
-            buffer,
-            &self.flags,
-            WakeType::Keyboard,
-            |buffer| match self.keyboard_mode() {
+        self.read_with_flags(buffer, *self.flags.lock())
+    }
+
+    fn read_with_flags(&self, buffer: &mut [u8], flags: FileFlags) -> super::ObjectResult<usize> {
+        read_or_block_with_flags(buffer, flags, WakeType::Keyboard, |buffer| {
+            match self.keyboard_mode() {
                 KeyboardMode::Raw | KeyboardMode::Off => {
                     let mut queue = self.raw_queue.lock();
                     (!queue.is_empty()).then(|| copy_from_queue(&mut queue, buffer))
@@ -196,8 +197,8 @@ impl Readable for TtyDevice {
                     let mut queue = self.keyboard_queue.lock();
                     (!queue.is_empty()).then(|| copy_from_queue(&mut queue, buffer))
                 }
-            },
-        )
+            }
+        })
     }
 }
 

@@ -19,7 +19,7 @@ use spin::mutex::Mutex;
 
 use crate::{
     misc::framebuffer::FRAME_BUFFER,
-    object::tty_device::{CONSOLE_TTY, DEFAULT_TTY, TtyDevice},
+    object::tty_device::{CONSOLE_TTY, DEFAULT_TTY, TtyDevice, get_active_tty},
     terminal::object::TerminalObject,
     terminal::state::DEFAULT_TERMINAL,
 };
@@ -54,6 +54,14 @@ pub fn init() {
 
     CONSOLE_TTY.get_or_init(|| Arc::new(TtyDevice::new(default_terminal.clone(), false)));
     DEFAULT_TTY.get_or_init(|| Arc::new(TtyDevice::new(default_terminal.clone(), true)));
+
+    default_terminal
+        .lock()
+        .inner
+        .lock()
+        .set_pty_writer(Box::new(|data| {
+            get_active_tty().push_terminal_response_bytes(data.as_bytes());
+        }));
 
     log::debug!("graphics: terminal configured");
 }

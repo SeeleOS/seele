@@ -4,7 +4,7 @@ use x86_64::VirtAddr;
 use crate::{
     filesystem::{info::LinuxStat, vfs_traits::Whence},
     memory::protection::Protection,
-    object::{Object, config::ConfigurateRequest, misc::ObjectResult},
+    object::{FileFlags, Object, config::ConfigurateRequest, misc::ObjectResult},
 };
 
 pub trait Writable: Object {
@@ -15,6 +15,10 @@ pub trait Writable: Object {
 pub trait Readable: Object {
     /// Reads the content of [`self`] and write them to [`buffer`]
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize>;
+
+    fn read_with_flags(&self, buffer: &mut [u8], _flags: FileFlags) -> ObjectResult<usize> {
+        self.read(buffer)
+    }
 }
 
 pub trait Configuratable: Object {

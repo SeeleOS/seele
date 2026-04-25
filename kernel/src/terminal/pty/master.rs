@@ -11,7 +11,7 @@ use crate::{
         config::ConfigurateRequest,
         error::ObjectError,
         misc::ObjectResult,
-        queue_helpers::{copy_from_queue, read_or_block},
+        queue_helpers::{copy_from_queue, read_or_block_with_flags},
         traits::{Configuratable, Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
@@ -138,7 +138,11 @@ impl Writable for PtyMaster {
 
 impl Readable for PtyMaster {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
-        read_or_block(buffer, &self.flags, WakeType::Pty, |buffer| {
+        self.read_with_flags(buffer, *self.flags.lock())
+    }
+
+    fn read_with_flags(&self, buffer: &mut [u8], flags: FileFlags) -> ObjectResult<usize> {
+        read_or_block_with_flags(buffer, flags, WakeType::Pty, |buffer| {
             let mut shared = self.shared.lock();
             if shared.from_slave.is_empty() {
                 None

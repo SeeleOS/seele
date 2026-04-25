@@ -279,7 +279,7 @@ impl Readable for OpenedFileObject {
             let readable = device
                 .as_readable()
                 .map_err(|_| ObjectError::InvalidArguments)?;
-            return readable.read(buffer);
+            return readable.read_with_flags(buffer, self.open_state.get_flags());
         }
 
         self.resolve_file()?.lock().read(buffer).map_err(Into::into)
