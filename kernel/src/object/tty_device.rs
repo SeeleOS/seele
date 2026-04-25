@@ -81,7 +81,7 @@ pub fn wake_tty_poller_readable() {
 #[derive(Debug)]
 pub struct TtyDevice {
     terminal: Arc<Mutex<TerminalObject>>,
-    linux_console: Mutex<LinuxConsoleState>,
+    linux_console: Arc<Mutex<LinuxConsoleState>>,
     interactive: bool,
     keyboard_queue: Mutex<VecDeque<u8>>,
     terminal_response_queue: Mutex<VecDeque<u8>>,
@@ -96,9 +96,10 @@ pub struct TtyDevice {
 
 impl TtyDevice {
     pub fn new(terminal: Arc<Mutex<TerminalObject>>, interactive: bool) -> Self {
+        let linux_console = terminal.lock().linux_console.clone();
         Self {
             terminal,
-            linux_console: Mutex::new(LinuxConsoleState::default()),
+            linux_console,
             interactive,
             keyboard_queue: Mutex::new(VecDeque::new()),
             terminal_response_queue: Mutex::new(VecDeque::new()),
@@ -157,11 +158,11 @@ impl TtyDevice {
     }
 
     fn should_route_terminal_responses(&self) -> bool {
-        let console = self.linux_console.lock();
+        let keyboard_mode = self.linux_console.lock().keyboard_mode;
         matches!(
-            console.keyboard_mode,
+            keyboard_mode,
             KeyboardMode::Raw | KeyboardMode::MediumRaw | KeyboardMode::Off
-        ) || console.display_mode == DisplayMode::Graphics
+        ) || self.linux_console.lock().display_mode == DisplayMode::Graphics
     }
 
     fn clear_terminal_response_queue(&self) {
@@ -286,17 +287,17 @@ impl Configuratable for TtyDevice {
             request,
             ConfigurateRequest::LinuxKdSetKeyboardMode(_)
                 | ConfigurateRequest::LinuxKdSetDisplayMode(_)
-        ) && let Some(result) = handle_kd_request(&self.linux_console, &request)?
+        ) && let Some(result) = handle_kd_request(self.linux_console.as_ref(), &request)?
         {
             self.clear_input_state();
             return Ok(result);
         }
 
-        if let Some(result) = handle_kd_request(&self.linux_console, &request)? {
+        if let Some(result) = handle_kd_request(self.linux_console.as_ref(), &request)? {
             return Ok(result);
         }
 
-        if let Some(result) = handle_vt_request(&self.linux_console, &request)? {
+        if let Some(result) = handle_vt_request(self.linux_console.as_ref(), &request)? {
             return Ok(result);
         }
 

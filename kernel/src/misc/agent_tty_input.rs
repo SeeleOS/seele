@@ -4,7 +4,7 @@ use core::mem;
 use spin::Mutex;
 use x86_64::instructions::port::Port;
 
-use crate::keyboard::char_processing::process_char;
+use crate::{keyboard::char_processing::process_char, object::tty_device::get_active_tty};
 
 const AGENT_TTY_COM_PORT: u16 = 0x2F8;
 const DATA_OFFSET: u16 = 0;
@@ -39,6 +39,9 @@ pub fn process_pending_input() {
     };
 
     for byte in pending_bytes {
+        if !get_active_tty().receives_hardware_keyboard_input() {
+            continue;
+        }
         process_char(char::from(byte));
     }
 }

@@ -11,8 +11,12 @@ use crate::{
 };
 
 pub fn process_key(key: KeyCode) {
-    let termios = *DEFAULT_TERMINAL.get().unwrap().lock().termios.lock();
     let active_tty = get_active_tty();
+    if !active_tty.receives_hardware_keyboard_input() {
+        return;
+    }
+
+    let termios = *DEFAULT_TERMINAL.get().unwrap().lock().termios.lock();
     let sequence = to_escape_sequence(key);
 
     if !termios.is_canonical() {

@@ -9,11 +9,11 @@ use crate::{
 
 impl Configuratable for TerminalObject {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
-        if let Some(result) = handle_kd_request(&self.linux_console, &request)? {
+        if let Some(result) = handle_kd_request(self.linux_console.as_ref(), &request)? {
             return Ok(result);
         }
 
-        if let Some(result) = handle_vt_request(&self.linux_console, &request)? {
+        if let Some(result) = handle_vt_request(self.linux_console.as_ref(), &request)? {
             return Ok(result);
         }
 

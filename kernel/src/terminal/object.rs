@@ -22,7 +22,7 @@ pub struct TerminalObject {
     pub inner: Arc<Mutex<dyn AbstractTerminal>>,
     pub termios: Mutex<LinuxTermios2>,
     pub winsize: Mutex<LinuxWinsize>,
-    pub linux_console: Mutex<LinuxConsoleState>,
+    pub linux_console: Arc<Mutex<LinuxConsoleState>>,
 }
 
 impl TerminalObject {
@@ -35,7 +35,7 @@ impl TerminalObject {
                 window_size.cols,
             )),
             inner: term,
-            linux_console: Mutex::new(LinuxConsoleState::default()),
+            linux_console: Arc::new(Mutex::new(LinuxConsoleState::default())),
         }
     }
 }

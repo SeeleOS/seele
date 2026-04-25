@@ -58,6 +58,12 @@ fn device_object_for_file(file: &WrappedFile) -> FSResult<Option<ObjectRef>> {
     Ok(Some(device.object()?))
 }
 
+fn device_rdev_for_file(file: &WrappedFile) -> Option<u64> {
+    let file = file.lock();
+    let device = file.as_any().downcast_ref::<StaticDeviceHandle>()?;
+    device.rdev()
+}
+
 pub(crate) fn mount_device_id_for_path(path: &Path) -> u64 {
     let Ok(device_id) = VirtualFS.lock().mount_device_id(path.clone()) else {
         return 1;
@@ -364,7 +370,12 @@ impl Statable for OpenedFileObject {
     fn stat(&self) -> LinuxStat {
         if let Some(device) = self.device_object() {
             let mut stat = self.info().map(FileLikeInfo::as_linux).unwrap_or_default();
-            if let Ok(statable) = device.as_statable() {
+            if let Some(rdev) = match &self.backend {
+                OpenBackend::Device { file, .. } => device_rdev_for_file(file),
+                _ => None,
+            } {
+                stat.st_rdev = rdev;
+            } else if let Ok(statable) = device.as_statable() {
                 stat.st_rdev = statable.stat().st_rdev;
             }
             return stat_with_mount_device_id(stat, &self.path);

@@ -36,6 +36,7 @@ pub struct StaticDeviceNode {
     pub inode: u64,
     pub mode: u32,
     pub device_name: &'static str,
+    pub rdev: Option<u64>,
 }
 
 pub enum StaticNode {

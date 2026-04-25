@@ -16,26 +16,38 @@ pub struct StaticDeviceHandle {
     name: String,
     inode: u64,
     mode: u32,
+    rdev: Option<u64>,
     object: ObjectRef,
 }
 
 impl StaticDeviceHandle {
     pub fn new(node: &'static StaticDeviceNode) -> Self {
         let object = get_device_ref(node.device_name).expect("static device must resolve");
-        Self::from_object(node.name.into(), node.inode, node.mode, object)
+        Self::from_object(node.name.into(), node.inode, node.mode, node.rdev, object)
     }
 
-    pub fn from_object(name: String, inode: u64, mode: u32, object: ObjectRef) -> Self {
+    pub fn from_object(
+        name: String,
+        inode: u64,
+        mode: u32,
+        rdev: Option<u64>,
+        object: ObjectRef,
+    ) -> Self {
         Self {
             name,
             inode,
             mode,
+            rdev,
             object,
         }
     }
 
     pub fn object(&self) -> Result<ObjectRef, FSError> {
         Ok(self.object.clone())
+    }
+
+    pub fn rdev(&self) -> Option<u64> {
+        self.rdev
     }
 }
 

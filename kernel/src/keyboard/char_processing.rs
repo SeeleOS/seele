@@ -32,8 +32,12 @@ fn handle_interrupt_char(
 }
 
 pub fn process_char(char: char) {
-    let termios = *DEFAULT_TERMINAL.get().unwrap().lock().termios.lock();
     let active_tty = get_active_tty();
+    if !active_tty.receives_hardware_keyboard_input() {
+        return;
+    }
+
+    let termios = *DEFAULT_TERMINAL.get().unwrap().lock().termios.lock();
     let Ok(byte) = u8::try_from(char as u32) else {
         return;
     };

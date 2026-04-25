@@ -25,6 +25,7 @@ static DEV_NULL_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     inode: 0x1001,
     mode: 0o020666,
     device_name: "devnull",
+    rdev: Some((1u64 << 8) | 3),
 });
 
 static DEV_TTY_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
@@ -32,6 +33,7 @@ static DEV_TTY_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     inode: 0x1002,
     mode: 0o020666,
     device_name: "tty",
+    rdev: Some(5u64 << 8),
 });
 
 static DEV_CONSOLE_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
@@ -39,6 +41,7 @@ static DEV_CONSOLE_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     inode: 0x1003,
     mode: 0o020600,
     device_name: "console",
+    rdev: Some((5u64 << 8) | 1),
 });
 
 static DEV_TTY0_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
@@ -46,6 +49,7 @@ static DEV_TTY0_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     inode: 0x1004,
     mode: 0o020620,
     device_name: "tty0",
+    rdev: Some(4u64 << 8),
 });
 
 static DEV_TTY1_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
@@ -53,6 +57,7 @@ static DEV_TTY1_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     inode: 0x1005,
     mode: 0o020620,
     device_name: "tty1",
+    rdev: Some((4u64 << 8) | 1),
 });
 
 static DEV_FB0_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
@@ -60,6 +65,7 @@ static DEV_FB0_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     inode: 0x1006,
     mode: 0o020666,
     device_name: "framebuffer",
+    rdev: Some(29u64 << 8),
 });
 
 static DEV_PSAUX_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
@@ -67,6 +73,7 @@ static DEV_PSAUX_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     inode: 0x1007,
     mode: 0o020666,
     device_name: "ps2mouse",
+    rdev: Some((10u64 << 8) | 1),
 });
 
 static DEV_MOUSE_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
@@ -74,6 +81,7 @@ static DEV_MOUSE_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     inode: 0x1008,
     mode: 0o020666,
     device_name: "ps2mouse",
+    rdev: Some((13u64 << 8) | 32),
 });
 
 static DEV_INPUT_EVENT0_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
@@ -81,6 +89,7 @@ static DEV_INPUT_EVENT0_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     inode: 0x100A,
     mode: 0o020660,
     device_name: "event-kbd",
+    rdev: Some((13u64 << 8) | 64),
 });
 
 static DEV_INPUT_EVENT1_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
@@ -88,6 +97,7 @@ static DEV_INPUT_EVENT1_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     inode: 0x100B,
     mode: 0o020660,
     device_name: "event-mouse",
+    rdev: Some((13u64 << 8) | 65),
 });
 
 static DEV_INPUT_ENTRIES: &[StaticDirEntry] = &[
@@ -113,6 +123,7 @@ static DEV_PTMX_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     inode: 0x1010,
     mode: 0o020666,
     device_name: "ptmx",
+    rdev: Some((5u64 << 8) | 2),
 });
 
 static DEV_PTS_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
@@ -141,6 +152,7 @@ static DEV_KMSG_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     inode: 0x100f,
     mode: 0o020600,
     device_name: "kmsg",
+    rdev: None,
 });
 
 static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
@@ -236,7 +248,13 @@ fn pts_inode(number: u32) -> u64 {
 fn pts_file_like(number: u32) -> FSResult<FileLike> {
     let object = get_pty_slave(number).ok_or(FSError::NotFound)?;
     Ok(FileLike::File(Arc::new(Mutex::new(
-        StaticDeviceHandle::from_object(number.to_string(), pts_inode(number), 0o020620, object),
+        StaticDeviceHandle::from_object(
+            number.to_string(),
+            pts_inode(number),
+            0o020620,
+            Some((136u64 << 8) | number as u64),
+            object,
+        ),
     ))))
 }
 

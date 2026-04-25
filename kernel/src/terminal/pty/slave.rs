@@ -119,7 +119,9 @@ impl Configuratable for PtySlave {
 
         match request {
             ConfigurateRequest::LinuxTiocsctty(_) => {
-                let group_id = get_current_process().lock().group_id;
+                let process = get_current_process();
+                let process = process.lock();
+                let group_id = process.group_id;
                 self.shared.lock().active_group = Some(group_id);
                 Ok(0)
             }
