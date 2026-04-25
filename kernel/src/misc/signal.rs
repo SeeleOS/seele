@@ -396,7 +396,10 @@ impl Process {
                         stack_builder.push(0);
                         stack_builder.push(action.restorer as u64);
 
-                        let current_fx_state = current_thread.get_appropriate_snapshot().fx_state;
+                        let (current_fx_state, current_fs_base) = {
+                            let snapshot = current_thread.get_appropriate_snapshot();
+                            (snapshot.fx_state, snapshot.fs_base)
+                        };
                         let mut thread_snapshot = ThreadSnapshot::new_with_fx_state(
                             (func as usize) as u64,
                             &mut self.addrspace,
@@ -404,6 +407,7 @@ impl Process {
                             ThreadSnapshotType::Thread,
                             current_fx_state,
                         );
+                        thread_snapshot.fs_base = current_fs_base;
 
                         thread_snapshot.inner.rdi = signal as u64;
 
@@ -427,7 +431,10 @@ impl Process {
                         stack_builder.push(0);
                         stack_builder.push(action.restorer as u64);
 
-                        let current_fx_state = current_thread.get_appropriate_snapshot().fx_state;
+                        let (current_fx_state, current_fs_base) = {
+                            let snapshot = current_thread.get_appropriate_snapshot();
+                            (snapshot.fx_state, snapshot.fs_base)
+                        };
                         let mut thread_snapshot = ThreadSnapshot::new_with_fx_state(
                             (func as usize) as u64,
                             &mut self.addrspace,
@@ -435,6 +442,7 @@ impl Process {
                             ThreadSnapshotType::Thread,
                             current_fx_state,
                         );
+                        thread_snapshot.fs_base = current_fs_base;
 
                         thread_snapshot.inner.rdi = signal as u64;
                         thread_snapshot.inner.rsi = siginfo_ptr;

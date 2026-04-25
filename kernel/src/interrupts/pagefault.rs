@@ -11,7 +11,6 @@ use crate::{
     memory::addrspace::{AddrSpace, cow::COW_FLAG, mem_area::Data},
     misc::others::is_user_mode,
     process::manager::get_current_process,
-    s_println,
     signal::Signal,
 };
 
@@ -63,14 +62,6 @@ pub extern "x86-interrupt" fn pagefault_handler(
 }
 
 fn actual_pagefault_handler(stack_frame: InterruptStackFrame, error_code: PageFaultErrorCode) -> ! {
-    let address = Cr2::read().unwrap();
-    s_println!(
-        "pagefault: addr={:#x} rip={:#x} err={:?}",
-        address.as_u64(),
-        stack_frame.instruction_pointer.as_u64(),
-        error_code
-    );
-
     if is_user_mode(&stack_frame) {
         handle_usermode_exception(&stack_frame, Signal::InvalidMemoryAccess);
     }
