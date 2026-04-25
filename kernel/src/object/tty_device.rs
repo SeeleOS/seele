@@ -1,9 +1,5 @@
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 use conquer_once::spin::OnceCell;
-use core::{
-    ptr::read_volatile,
-    sync::atomic::{AtomicBool, Ordering},
-};
 use spin::Mutex;
 
 use crate::{
@@ -61,7 +57,6 @@ pub struct TtyDevice {
     raw_queue: Mutex<VecDeque<u8>>,
     medium_raw_queue: Mutex<VecDeque<u8>>,
     line_buffer: Mutex<VecDeque<u8>>,
-    canonical_mode: AtomicBool,
     /// The foreground process group currently attached to this tty.
     /// Line-discipline generated signals such as Ctrl+C should be sent here.
     pub active_group: Mutex<Option<ProcessGroupID>>,
@@ -79,7 +74,6 @@ impl TtyDevice {
             raw_queue: Mutex::new(VecDeque::new()),
             medium_raw_queue: Mutex::new(VecDeque::new()),
             line_buffer: Mutex::new(VecDeque::new()),
-            canonical_mode: AtomicBool::new(true),
             active_group: Mutex::new(None),
             flags: Mutex::new(FileFlags::empty()),
         }
@@ -127,11 +121,7 @@ impl TtyDevice {
         keyboard_queue.extend(line_buffer.drain(..));
     }
 
-    fn expose_terminal_responses(&self) -> bool {
-        if self.canonical_mode.load(Ordering::Relaxed) {
-            return false;
-        }
-
+    fn should_route_terminal_responses(&self) -> bool {
         let console = self.linux_console.lock();
         matches!(
             console.keyboard_mode,
@@ -162,9 +152,10 @@ impl TtyDevice {
         }
 
         // Canonical tty readers expect human text input, not terminal query
-        // responses. Drop them here so login/shell sessions do not later see
-        // stale escape replies as fake keyboard input.
-        if !self.expose_terminal_responses() {
+        // responses. In text-console mode we emulate Linux console behavior
+        // and drop xterm-style replies entirely instead of feeding them back
+        // into tty input.
+        if !self.should_route_terminal_responses() {
             return;
         }
 
@@ -187,9 +178,7 @@ impl Pollable for TtyDevice {
     fn is_event_ready(&self, event: PollableEvent) -> bool {
         match event {
             PollableEvent::CanBeRead => {
-                if self.expose_terminal_responses()
-                    && !self.terminal_response_queue.lock().is_empty()
-                {
+                if !self.terminal_response_queue.lock().is_empty() {
                     return true;
                 }
 
@@ -229,12 +218,11 @@ impl Readable for TtyDevice {
 
     fn read_with_flags(&self, buffer: &mut [u8], flags: FileFlags) -> super::ObjectResult<usize> {
         read_or_block_with_flags(buffer, flags, WakeType::Keyboard, |buffer| {
-            if self.expose_terminal_responses() {
-                let mut response_queue = self.terminal_response_queue.lock();
-                if !response_queue.is_empty() {
-                    return Some(copy_from_queue(&mut response_queue, buffer));
-                }
+            let mut response_queue = self.terminal_response_queue.lock();
+            if !response_queue.is_empty() {
+                return Some(copy_from_queue(&mut response_queue, buffer));
             }
+            drop(response_queue);
 
             match self.keyboard_mode() {
                 KeyboardMode::Raw | KeyboardMode::Off => {
@@ -305,24 +293,9 @@ impl Configuratable for TtyDevice {
                 self.clear_input_state();
                 Ok(0)
             }
-            ConfigurateRequest::LinuxTcSets(termios) => unsafe {
-                let canonical = read_volatile(termios).c_lflag & 0x0000_0002 != 0;
-                self.canonical_mode.store(canonical, Ordering::Relaxed);
-                let result = self.terminal.lock().configure(request)?;
-                if canonical {
-                    self.clear_terminal_response_queue();
-                }
-                Ok(result)
-            },
-            ConfigurateRequest::LinuxTcSets2(termios) => unsafe {
-                let canonical = read_volatile(termios).c_lflag & 0x0000_0002 != 0;
-                self.canonical_mode.store(canonical, Ordering::Relaxed);
-                let result = self.terminal.lock().configure(request)?;
-                if canonical {
-                    self.clear_terminal_response_queue();
-                }
-                Ok(result)
-            },
+            ConfigurateRequest::LinuxTcSets(_) | ConfigurateRequest::LinuxTcSets2(_) => {
+                self.terminal.lock().configure(request)
+            }
             _ => self.terminal.lock().configure(request),
         }
     }
