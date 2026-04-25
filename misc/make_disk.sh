@@ -9,6 +9,8 @@ HOST_PATH="${PATH}"
 ARCH_MIRROR="${ARCH_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/archlinux/\$repo/os/\$arch}"
 ARCH_PACKAGES=(
     base
+    rustc
+    cargo
     bash
     alacritty
     evtest
