@@ -70,6 +70,7 @@ If you need syscall-level debugging, temporarily enable `should_log` in `kernel/
 When syscall logging is needed to chase userspace failures, prefer filtering the log to syscalls that return a specific errno of interest such as `BadAddress` instead of logging every syscall entry/exit. This keeps `mmap`, `read`, `write`, `poll`, and `futex` noise from hiding the actual signal.
 If the system appears to stop responding, consider early that a syscall may have entered the kernel and never returned. Use enter/exit syscall logs to verify this explicitly instead of assuming the last logged successful syscall was the true point of failure.
 If the system appears to stop making progress without an obvious crash, treat deadlock or lock re-entry as a primary suspect early instead of assuming the problem is only scheduler starvation or missing syscalls.
+If temporary debug output is needed in kernel code, use `s_println!` for those ad-hoc debug messages instead of `log::info!` or plain `print`-style output.
 After debugging is done, remove any temporary debug logs, extra serial prints, or ad-hoc instrumentation you added during investigation.
 If temporary runtime logging grows noisy enough to hide the actual signal, narrow or remove the unhelpful logs instead of letting large traces accumulate.
 If the current logs are already noisy enough to pollute the debugging signal and a given log is no longer necessary, clean it up promptly instead of keeping it around.
