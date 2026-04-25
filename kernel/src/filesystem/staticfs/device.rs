@@ -10,16 +10,28 @@ use crate::{
     },
     object::{device::get_device_ref, misc::ObjectRef},
 };
+use alloc::string::String;
 
 pub struct StaticDeviceHandle {
-    node: &'static StaticDeviceNode,
+    name: String,
+    inode: u64,
+    mode: u32,
     object: ObjectRef,
 }
 
 impl StaticDeviceHandle {
     pub fn new(node: &'static StaticDeviceNode) -> Self {
         let object = get_device_ref(node.device_name).expect("static device must resolve");
-        Self { node, object }
+        Self::from_object(node.name.into(), node.inode, node.mode, object)
+    }
+
+    pub fn from_object(name: String, inode: u64, mode: u32, object: ObjectRef) -> Self {
+        Self {
+            name,
+            inode,
+            mode,
+            object,
+        }
     }
 
     pub fn object(&self) -> Result<ObjectRef, FSError> {
@@ -34,12 +46,12 @@ impl File for StaticDeviceHandle {
 
     fn info(&mut self) -> FSResult<FileLikeInfo> {
         Ok(FileLikeInfo::new(
-            self.node.name.into(),
+            self.name.clone(),
             0,
-            UnixPermission(self.node.mode),
+            UnixPermission(self.mode),
             FileLikeType::File,
         )
-        .with_inode(self.node.inode))
+        .with_inode(self.inode))
     }
 
     fn read_at(&mut self, buffer: &mut [u8], _offset: u64) -> FSResult<usize> {

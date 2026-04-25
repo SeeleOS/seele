@@ -35,14 +35,16 @@ impl Pollable for PtySlave {
 
 #[derive(Debug)]
 pub struct PtySlave {
+    number: u32,
     shared: Arc<Mutex<PtyShared>>,
     linux_console: Mutex<LinuxConsoleState>,
     pub flags: Mutex<FileFlags>,
 }
 
 impl PtySlave {
-    pub fn new(shared: Arc<Mutex<PtyShared>>) -> Self {
+    pub fn new(number: u32, shared: Arc<Mutex<PtyShared>>) -> Self {
         Self {
+            number,
             shared,
             linux_console: Mutex::new(LinuxConsoleState::default()),
             flags: Mutex::new(FileFlags::default()),
@@ -131,6 +133,6 @@ impl Configuratable for PtySlave {
 
 impl Statable for PtySlave {
     fn stat(&self) -> LinuxStat {
-        LinuxStat::char_device(0o666)
+        LinuxStat::char_device_with_rdev(0o620, (136u64 << 8) | self.number as u64)
     }
 }

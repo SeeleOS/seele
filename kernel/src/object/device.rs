@@ -12,6 +12,7 @@ use crate::{
         tty_device::{get_console_tty, get_default_tty},
     },
     systemcall::utils::{SyscallError, SyscallResult},
+    terminal::pty::open_ptmx,
 };
 
 lazy_static::lazy_static! {
@@ -36,6 +37,10 @@ pub fn get_device(name: String) -> SyscallResult<ObjectRef> {
 }
 
 pub fn get_device_ref(name: &str) -> SyscallResult<ObjectRef> {
+    if name == "ptmx" {
+        return Ok(open_ptmx());
+    }
+
     if let Some(device) = open_event_device(name) {
         return Ok(device);
     }

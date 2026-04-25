@@ -1,12 +1,23 @@
-use crate::filesystem::{
-    errors::FSError,
-    path::Path,
-    staticfs::{
-        StaticDeviceNode, StaticDirEntry, StaticDirectoryNode, StaticFs, StaticNode,
-        StaticSymlinkNode,
+use alloc::{
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
+use spin::Mutex;
+
+use crate::{
+    filesystem::{
+        errors::FSError,
+        info::{DirectoryContentInfo, FileLikeInfo, UnixPermission},
+        path::{Path, PathPart},
+        staticfs::{
+            device::StaticDeviceHandle, directory::StaticDirectoryHandle, StaticDeviceNode,
+            StaticDirEntry, StaticDirectoryNode, StaticNode, StaticSymlinkNode,
+        },
+        vfs::FSResult,
+        vfs_traits::{Directory, DirectoryContentType, FileLike, FileLikeType, FileSystem},
     },
-    vfs::FSResult,
-    vfs_traits::{FileLike, FileSystem},
+    terminal::pty::{get_pty_slave, list_ptys},
 };
 
 static DEV_NULL_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
@@ -97,6 +108,13 @@ static DEV_INPUT_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     entries: DEV_INPUT_ENTRIES,
 });
 
+static DEV_PTMX_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
+    name: "ptmx",
+    inode: 0x1010,
+    mode: 0o020666,
+    device_name: "ptmx",
+});
+
 static DEV_PTS_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     name: "pts",
     inode: 0x100c,
@@ -163,6 +181,10 @@ static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
         node: &DEV_INPUT_NODE,
     },
     StaticDirEntry {
+        name: "ptmx",
+        node: &DEV_PTMX_NODE,
+    },
+    StaticDirEntry {
         name: "pts",
         node: &DEV_PTS_NODE,
     },
@@ -187,15 +209,121 @@ static DEV_ROOT_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     entries: DEV_ROOT_ENTRIES,
 });
 
-pub struct DevFs {
-    inner: StaticFs,
+pub struct DevFs;
+
+struct DevRootDirectoryHandle;
+struct DevPtsDirectoryHandle;
+
+fn root_directory_node() -> &'static StaticDirectoryNode {
+    let StaticNode::Directory(node) = &DEV_ROOT_NODE else {
+        unreachable!()
+    };
+    node
+}
+
+fn root_directory_file_like() -> FileLike {
+    FileLike::Directory(Arc::new(Mutex::new(DevRootDirectoryHandle)))
+}
+
+fn pts_directory_file_like() -> FileLike {
+    FileLike::Directory(Arc::new(Mutex::new(DevPtsDirectoryHandle)))
+}
+
+fn pts_inode(number: u32) -> u64 {
+    0x2000 + u64::from(number)
+}
+
+fn pts_file_like(number: u32) -> FSResult<FileLike> {
+    let object = get_pty_slave(number).ok_or(FSError::NotFound)?;
+    Ok(FileLike::File(Arc::new(Mutex::new(
+        StaticDeviceHandle::from_object(
+            number.to_string(),
+            pts_inode(number),
+            0o020620,
+            object,
+        ),
+    ))))
+}
+
+impl Directory for DevRootDirectoryHandle {
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
+    fn info(&self) -> FSResult<FileLikeInfo> {
+        StaticDirectoryHandle::new(root_directory_node()).info()
+    }
+
+    fn name(&self) -> FSResult<String> {
+        Ok("dev".into())
+    }
+
+    fn contents(&self) -> FSResult<Vec<DirectoryContentInfo>> {
+        StaticDirectoryHandle::new(root_directory_node()).contents()
+    }
+
+    fn create(&self, _info: DirectoryContentInfo) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+
+    fn delete(&self, _name: &str) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+
+    fn get(&self, name: &str) -> FSResult<FileLike> {
+        if name == "pts" {
+            return Ok(pts_directory_file_like());
+        }
+
+        StaticDirectoryHandle::new(root_directory_node()).get(name)
+    }
+}
+
+impl Directory for DevPtsDirectoryHandle {
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
+    fn info(&self) -> FSResult<FileLikeInfo> {
+        Ok(FileLikeInfo::new(
+            "pts".into(),
+            0,
+            UnixPermission(0o040755),
+            FileLikeType::Directory,
+        )
+        .with_inode(0x100c))
+    }
+
+    fn name(&self) -> FSResult<String> {
+        Ok("pts".into())
+    }
+
+    fn contents(&self) -> FSResult<Vec<DirectoryContentInfo>> {
+        Ok(list_ptys()
+            .into_iter()
+            .map(|number| {
+                DirectoryContentInfo::new(number.to_string(), DirectoryContentType::File)
+            })
+            .collect())
+    }
+
+    fn create(&self, _info: DirectoryContentInfo) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+
+    fn delete(&self, _name: &str) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+
+    fn get(&self, name: &str) -> FSResult<FileLike> {
+        let number = name.parse::<u32>().map_err(|_| FSError::NotFound)?;
+        pts_file_like(number)
+    }
 }
 
 impl DevFs {
     pub fn new() -> Self {
-        Self {
-            inner: StaticFs::new(&DEV_ROOT_NODE),
-        }
+        Self
     }
 }
 
@@ -207,11 +335,27 @@ impl Default for DevFs {
 
 impl FileSystem for DevFs {
     fn init(&mut self) -> FSResult<()> {
-        self.inner.init()
+        Ok(())
     }
 
     fn lookup(&self, path: &Path) -> FSResult<FileLike> {
-        self.inner.lookup(path)
+        let normalized = path.normalize();
+        let mut current = root_directory_file_like();
+
+        for component in normalized.parts.iter() {
+            match component {
+                PathPart::Root | PathPart::CurrentDir => {}
+                PathPart::ParentDir => return Err(FSError::NotADirectory),
+                PathPart::Normal(name) => {
+                    let FileLike::Directory(directory) = current else {
+                        return Err(FSError::NotADirectory);
+                    };
+                    current = directory.lock().get(name)?;
+                }
+            }
+        }
+
+        Ok(current)
     }
 
     fn rename(&self, _old_path: &Path, _new_path: &Path) -> FSResult<()> {

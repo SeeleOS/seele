@@ -1,3 +1,5 @@
+use core::ptr::{read_volatile, write_volatile};
+
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 use spin::Mutex;
 
@@ -15,7 +17,7 @@ use crate::{
     polling::{event::PollableEvent, object::Pollable},
     signal::{Signal, send_signal_to_process},
     terminal::line_discipline::{process_input_byte, process_output_bytes},
-    terminal::pty::shared::PtyShared,
+    terminal::pty::{set_pty_lock, shared::PtyShared},
     thread::{THREAD_MANAGER, yielding::WakeType},
 };
 
@@ -31,13 +33,15 @@ impl Pollable for PtyMaster {
 
 #[derive(Debug)]
 pub struct PtyMaster {
+    number: u32,
     shared: Arc<Mutex<PtyShared>>,
     pub flags: Mutex<FileFlags>,
 }
 
 impl PtyMaster {
-    pub fn new(shared: Arc<Mutex<PtyShared>>) -> Self {
+    pub fn new(number: u32, shared: Arc<Mutex<PtyShared>>) -> Self {
         Self {
+            number,
             shared,
             flags: Mutex::new(FileFlags::default()),
         }
@@ -137,6 +141,19 @@ impl Readable for PtyMaster {
 
 impl Configuratable for PtyMaster {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
+        match request {
+            ConfigurateRequest::LinuxTiocgptn(number_ptr) => unsafe {
+                write_volatile(number_ptr, self.number as i32);
+                return Ok(0);
+            },
+            ConfigurateRequest::LinuxTiocsptlck(lock_ptr) => unsafe {
+                let locked = read_volatile(lock_ptr) != 0;
+                set_pty_lock(self.number, locked);
+                return Ok(0);
+            },
+            _ => {}
+        }
+
         let slave = {
             let shared = self.shared.lock();
             shared.get_slave()
@@ -151,6 +168,6 @@ impl Configuratable for PtyMaster {
 
 impl Statable for PtyMaster {
     fn stat(&self) -> LinuxStat {
-        LinuxStat::char_device(0o666)
+        LinuxStat::char_device_with_rdev(0o666, (5u64 << 8) | 2)
     }
 }
