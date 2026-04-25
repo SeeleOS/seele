@@ -19,10 +19,12 @@ use crate::{
         misc::ObjectResult,
         netlink::NetlinkSocketObject,
         traits::{Configuratable, MemoryMappable, Readable, Seekable, Statable, Writable},
+        tty_device::TtyDevice,
     },
     polling::{object::Pollable, poller::PollerObject},
     socket::{SocketLike, UnixSocketObject},
     systemcall::utils::{SyscallError, SyscallResult},
+    terminal::pty::slave::PtySlave,
 };
 
 pub mod bpf;
@@ -92,4 +94,6 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function_non_trait!("netlink_socket", NetlinkSocketObject, BadFileDescriptor);
     define_cast_function_non_trait!("timerfd", TimerFdObject, BadFileDescriptor);
     define_cast_function_non_trait!("unix_socket", UnixSocketObject, BadFileDescriptor);
+    define_cast_function_non_trait!("tty_device", TtyDevice, BadFileDescriptor);
+    define_cast_function_non_trait!("pty_slave", PtySlave, BadFileDescriptor);
 }

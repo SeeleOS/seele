@@ -11,6 +11,7 @@ use crate::{
         misc::ObjectRef,
         tty_device::{get_console_tty, get_default_tty},
     },
+    process::manager::get_current_process,
     systemcall::utils::{SyscallError, SyscallResult},
     terminal::pty::open_ptmx,
 };
@@ -41,6 +42,12 @@ pub fn get_device_ref(name: &str) -> SyscallResult<ObjectRef> {
         return Ok(open_ptmx());
     }
 
+    if name == "tty"
+        && let Some(tty) = current_process_tty()
+    {
+        return Ok(tty);
+    }
+
     if let Some(device) = open_event_device(name) {
         return Ok(device);
     }
@@ -49,4 +56,18 @@ pub fn get_device_ref(name: &str) -> SyscallResult<ObjectRef> {
         .get(name)
         .ok_or(SyscallError::InvalidArguments)
         .cloned()
+}
+
+fn current_process_tty() -> Option<ObjectRef> {
+    let stdin = {
+        let process = get_current_process();
+        let process = process.lock();
+        process.objects.first()?.clone()?
+    };
+
+    if stdin.clone().as_tty_device().is_ok() || stdin.clone().as_pty_slave().is_ok() {
+        Some(stdin)
+    } else {
+        None
+    }
 }

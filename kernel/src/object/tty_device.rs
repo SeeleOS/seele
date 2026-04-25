@@ -168,6 +168,7 @@ impl Object for TtyDevice {
     impl_cast_function!("configuratable", Configuratable);
     impl_cast_function!("pollable", Pollable);
     impl_cast_function!("statable", Statable);
+    crate::impl_cast_function_non_trait!("tty_device", TtyDevice);
 }
 
 impl Writable for TtyDevice {

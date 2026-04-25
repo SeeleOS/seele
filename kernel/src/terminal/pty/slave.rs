@@ -69,6 +69,7 @@ impl Object for PtySlave {
     impl_cast_function!("configuratable", Configuratable);
     impl_cast_function!("pollable", Pollable);
     impl_cast_function!("statable", Statable);
+    crate::impl_cast_function_non_trait!("pty_slave", PtySlave);
 }
 
 impl Writable for PtySlave {

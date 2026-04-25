@@ -10,19 +10,25 @@ use crate::{
     thread::THREAD_MANAGER,
 };
 
-fn handle_interrupt_char(info: &TerminalSettings) {
-    let active_tty = get_active_tty();
-    if let Some(group_id) = *active_tty.active_group.lock()
-        && info.send_sig_on_special_chars
-    {
-        active_tty.clear_line_buffer();
-        group_id
-            .get_processes()
-            .iter()
-            .for_each(|process| send_signal_to_process(process, Signal::Interrupt));
-        THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
-        wake_tty_poller_readable();
+fn handle_interrupt_char(
+    active_tty: &crate::object::tty_device::TtyDevice,
+    info: &TerminalSettings,
+) {
+    if !info.send_sig_on_special_chars {
+        return;
     }
+
+    let active_group = *active_tty.active_group.lock();
+    active_tty.clear_line_buffer();
+
+    if let Some(group_id) = active_group {
+        for process in group_id.get_processes() {
+            send_signal_to_process(&process, Signal::Interrupt);
+        }
+    }
+
+    THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+    wake_tty_poller_readable();
 }
 
 pub fn process_char(char: char) {
@@ -33,6 +39,7 @@ pub fn process_char(char: char) {
     };
     let queue_tty = active_tty.clone();
     let mut line_buffer = active_tty.line_buffer().lock();
+    let mut wants_interrupt = false;
 
     process_input_byte(
         &info,
@@ -48,9 +55,16 @@ pub fn process_char(char: char) {
                 print!("{string}");
             }
         },
-        || handle_interrupt_char(&info),
+        || {
+            wants_interrupt = true;
+        },
     );
     drop(line_buffer);
+
+    if wants_interrupt {
+        handle_interrupt_char(&active_tty, &info);
+        return;
+    }
 
     if byte == b'\n' {
         active_tty.flush_line_buffer();
