@@ -1,5 +1,9 @@
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 use conquer_once::spin::OnceCell;
+use core::{
+    ptr::read_volatile,
+    sync::atomic::{AtomicBool, Ordering},
+};
 use spin::Mutex;
 
 use crate::{
@@ -16,7 +20,7 @@ use crate::{
     process::group::ProcessGroupID,
     process::manager::get_current_process,
     terminal::{
-        linux_kd::{KeyboardMode, LinuxConsoleState, handle_kd_request},
+        linux_kd::{DisplayMode, KeyboardMode, LinuxConsoleState, handle_kd_request},
         linux_vt::handle_vt_request,
         object::TerminalObject,
     },
@@ -57,6 +61,7 @@ pub struct TtyDevice {
     raw_queue: Mutex<VecDeque<u8>>,
     medium_raw_queue: Mutex<VecDeque<u8>>,
     line_buffer: Mutex<VecDeque<u8>>,
+    canonical_mode: AtomicBool,
     /// The foreground process group currently attached to this tty.
     /// Line-discipline generated signals such as Ctrl+C should be sent here.
     pub active_group: Mutex<Option<ProcessGroupID>>,
@@ -74,6 +79,7 @@ impl TtyDevice {
             raw_queue: Mutex::new(VecDeque::new()),
             medium_raw_queue: Mutex::new(VecDeque::new()),
             line_buffer: Mutex::new(VecDeque::new()),
+            canonical_mode: AtomicBool::new(true),
             active_group: Mutex::new(None),
             flags: Mutex::new(FileFlags::empty()),
         }
@@ -121,20 +127,44 @@ impl TtyDevice {
         keyboard_queue.extend(line_buffer.drain(..));
     }
 
-    fn terminal_info(&self) -> crate::terminal::object::TerminalSettings {
-        *self.terminal.lock().info.lock()
-    }
-
     fn expose_terminal_responses(&self) -> bool {
-        !self.terminal_info().canonical
+        if self.canonical_mode.load(Ordering::Relaxed) {
+            return false;
+        }
+
+        let console = self.linux_console.lock();
+        matches!(
+            console.keyboard_mode,
+            KeyboardMode::Raw | KeyboardMode::MediumRaw | KeyboardMode::Off
+        ) || console.display_mode == DisplayMode::Graphics
     }
 
     fn clear_terminal_response_queue(&self) {
         self.terminal_response_queue.lock().clear();
     }
 
+    fn set_active_group(&self, group: Option<ProcessGroupID>) {
+        let changed = {
+            let mut active_group = self.active_group.lock();
+            let changed = *active_group != group;
+            *active_group = group;
+            changed
+        };
+
+        if changed {
+            self.clear_terminal_response_queue();
+        }
+    }
+
     fn push_terminal_query_responses(&self, bytes: &[u8]) {
         if !self.interactive || bytes.is_empty() {
+            return;
+        }
+
+        // Canonical tty readers expect human text input, not terminal query
+        // responses. Drop them here so login/shell sessions do not later see
+        // stale escape replies as fake keyboard input.
+        if !self.expose_terminal_responses() {
             return;
         }
 
@@ -229,8 +259,11 @@ impl Configuratable for TtyDevice {
         &self,
         request: super::config::ConfigurateRequest,
     ) -> super::misc::ObjectResult<isize> {
-        if matches!(request, ConfigurateRequest::LinuxKdSetKeyboardMode(_))
-            && let Some(result) = handle_kd_request(&self.linux_console, &request)?
+        if matches!(
+            request,
+            ConfigurateRequest::LinuxKdSetKeyboardMode(_)
+                | ConfigurateRequest::LinuxKdSetDisplayMode(_)
+        ) && let Some(result) = handle_kd_request(&self.linux_console, &request)?
         {
             self.clear_input_state();
             return Ok(result);
@@ -252,7 +285,7 @@ impl Configuratable for TtyDevice {
             ConfigurateRequest::LinuxTiocnxcl => Ok(0),
             ConfigurateRequest::LinuxTiocsctty(_) => {
                 let group_id = get_current_process().lock().group_id;
-                *self.active_group.lock() = Some(group_id);
+                self.set_active_group(Some(group_id));
                 Ok(0)
             }
             ConfigurateRequest::LinuxTiocgPgrp(ptr) => unsafe {
@@ -265,20 +298,31 @@ impl Configuratable for TtyDevice {
             },
             ConfigurateRequest::LinuxTiocnotty => Ok(0),
             ConfigurateRequest::LinuxTiocspgrp(ptr) => unsafe {
-                *self.active_group.lock() = Some(ProcessGroupID((*ptr) as u64));
+                self.set_active_group(Some(ProcessGroupID((*ptr) as u64)));
                 Ok(0)
             },
             ConfigurateRequest::LinuxTiocvhangup => {
                 self.clear_input_state();
                 Ok(0)
             }
-            ConfigurateRequest::LinuxTcSets(_) | ConfigurateRequest::LinuxTcSets2(_) => {
+            ConfigurateRequest::LinuxTcSets(termios) => unsafe {
+                let canonical = read_volatile(termios).c_lflag & 0x0000_0002 != 0;
+                self.canonical_mode.store(canonical, Ordering::Relaxed);
                 let result = self.terminal.lock().configure(request)?;
-                if self.terminal_info().canonical {
+                if canonical {
                     self.clear_terminal_response_queue();
                 }
                 Ok(result)
-            }
+            },
+            ConfigurateRequest::LinuxTcSets2(termios) => unsafe {
+                let canonical = read_volatile(termios).c_lflag & 0x0000_0002 != 0;
+                self.canonical_mode.store(canonical, Ordering::Relaxed);
+                let result = self.terminal.lock().configure(request)?;
+                if canonical {
+                    self.clear_terminal_response_queue();
+                }
+                Ok(result)
+            },
             _ => self.terminal.lock().configure(request),
         }
     }
