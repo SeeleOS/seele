@@ -1,54 +1,39 @@
 use alloc::collections::vec_deque::VecDeque;
 use core::mem;
 
-use conquer_once::spin::OnceCell;
 use spin::Mutex;
-use uart_16550::{Config, Uart16550, backend::PioBackend, spec::registers::IER};
+use x86_64::instructions::port::Port;
 
 use crate::keyboard::char_processing::process_char;
 
 const AGENT_TTY_COM_PORT: u16 = 0x2F8;
+const DATA_OFFSET: u16 = 0;
+const LSR_OFFSET: u16 = 5;
+const LSR_DATA_READY: u8 = 1 << 0;
 
 struct AgentTtyInput {
-    uart: Uart16550<PioBackend>,
     pending_bytes: VecDeque<u8>,
 }
 
 impl AgentTtyInput {
     fn fill_pending_bytes(&mut self) {
-        while let Ok(byte) = self.uart.try_receive_byte() {
-            self.pending_bytes.push_back(byte);
+        while uart_has_pending_byte() {
+            self.pending_bytes.push_back(read_uart_byte());
         }
     }
 }
 
-static AGENT_TTY_INPUT: OnceCell<Mutex<AgentTtyInput>> = OnceCell::uninit();
+static AGENT_TTY_INPUT: Mutex<AgentTtyInput> = Mutex::new(AgentTtyInput {
+    pending_bytes: VecDeque::new(),
+});
 
-pub fn init() {
-    AGENT_TTY_INPUT.get_or_init(|| {
-        let config = Config {
-            interrupts: IER::empty(),
-            ..Config::default()
-        };
-        let mut uart = unsafe {
-            Uart16550::new_port(AGENT_TTY_COM_PORT).expect("invalid agent tty input port")
-        };
-        uart.init(config)
-            .expect("failed to initialize agent tty input");
-        Mutex::new(AgentTtyInput {
-            uart,
-            pending_bytes: VecDeque::new(),
-        })
-    });
+pub fn init() -> bool {
+    true
 }
 
 pub fn process_pending_input() {
-    let Some(input) = AGENT_TTY_INPUT.get() else {
-        return;
-    };
-
     let pending_bytes = {
-        let mut input = input.lock();
+        let mut input = AGENT_TTY_INPUT.lock();
         input.fill_pending_bytes();
         mem::take(&mut input.pending_bytes)
     };
@@ -59,11 +44,19 @@ pub fn process_pending_input() {
 }
 
 pub fn has_pending_input() -> bool {
-    let Some(input) = AGENT_TTY_INPUT.get() else {
-        return false;
-    };
-
-    let mut input = input.lock();
+    let mut input = AGENT_TTY_INPUT.lock();
     input.fill_pending_bytes();
     !input.pending_bytes.is_empty()
+}
+
+fn uart_has_pending_byte() -> bool {
+    read_lsr() & LSR_DATA_READY != 0
+}
+
+fn read_lsr() -> u8 {
+    unsafe { Port::new(AGENT_TTY_COM_PORT + LSR_OFFSET).read() }
+}
+
+fn read_uart_byte() -> u8 {
+    unsafe { Port::new(AGENT_TTY_COM_PORT + DATA_OFFSET).read() }
 }

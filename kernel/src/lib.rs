@@ -63,8 +63,12 @@ pub fn init() -> ! {
     log::info!("init: multitasking ready");
     keyboard::init();
     log::info!("init: keyboard ready");
-    agent_tty_input::init();
-    log::info!("init: agent tty input ready");
+    let agent_tty_ready = agent_tty_input::init();
+    if agent_tty_ready {
+        log::info!("init: agent tty input ready");
+    } else {
+        log::info!("init: agent tty input unavailable");
+    }
     interrupts::init();
     log::info!("init: interrupts ready");
 
