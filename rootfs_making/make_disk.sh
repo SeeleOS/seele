@@ -12,7 +12,7 @@ ARCH_MIRROR="${ARCH_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/archlinux/\$rep
 PACSTRAP_BIN="$(command -v pacstrap)"
 ARCH_CHROOT_BIN="$(command -v arch-chroot)"
 AUR_BUILD_USER="aurbuilder"
-AUR_BUILD_DIR="/tmp/aur-build"
+AUR_BUILD_DIR="/var/tmp/aur-build"
 ARCH_PACKAGES=(
     base
     base-devel
@@ -91,6 +91,7 @@ pacstrap_root() {
     sudo "${PACSTRAP_BIN}" \
         -C "${PACMAN_CONF_TEMPLATE}" \
         -c \
+        -M \
         "${SYSROOT_DIR}" \
         "$@"
 }
@@ -105,13 +106,22 @@ arch_chroot_user() {
     sudo "${ARCH_CHROOT_BIN}" -u "${user}" "${SYSROOT_DIR}" "$@"
 }
 
+install_repo_packages() {
+    if [ ! -x "${SYSROOT_DIR}/usr/bin/pacman" ]; then
+        pacstrap_root "${ARCH_PACKAGES[@]}"
+        return
+    fi
+
+    arch_chroot /usr/bin/pacman --noconfirm -Sy --needed "${ARCH_PACKAGES[@]}"
+}
+
 ensure_aur_builder() {
     arch_chroot /bin/sh -lc "
         set -eu
         if ! id -u '${AUR_BUILD_USER}' >/dev/null 2>&1; then
             useradd -m -U '${AUR_BUILD_USER}'
         fi
-        install -d -m 0755 /etc/sudoers.d
+        install -d -m 0750 /etc/sudoers.d
         cat >/etc/sudoers.d/${AUR_BUILD_USER}-pacman <<'EOF'
 ${AUR_BUILD_USER} ALL=(ALL) NOPASSWD: /usr/bin/pacman
 EOF
@@ -213,7 +223,7 @@ Server = ${ARCH_MIRROR}
 EOF
 sudo install -Dm644 "${PACMAN_CONF_TEMPLATE}" "${PACMAN_CONF_IN_SYSROOT}"
 
-pacstrap_root "${ARCH_PACKAGES[@]}"
+install_repo_packages
 arch_chroot /bin/sh -lc "update-ca-trust || true"
 
 arch_chroot /usr/sbin/usermod -p '' root
