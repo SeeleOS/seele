@@ -3,7 +3,7 @@ use crate::{
     memory::user_safe,
     misc::systemd_perf::{self, PerfBucket},
     net::InetAddress,
-    object::netlink::NetlinkSocketObject,
+    object::netlink::{NetlinkSocketAddress, NetlinkSocketObject},
     object::{
         FileFlags,
         error::ObjectError,
@@ -127,15 +127,20 @@ fn unix_socket_control_bytes(socket: &UnixSocketObject) -> Result<Vec<u8>, Sysca
     Ok(control)
 }
 
-fn netlink_socket_control_bytes(socket: &NetlinkSocketObject) -> Vec<u8> {
+fn netlink_socket_control_bytes(
+    socket: &NetlinkSocketObject,
+    source_pid: u32,
+    uid: u32,
+    gid: u32,
+) -> Result<Vec<u8>, SyscallError> {
     if !socket.pass_cred_enabled() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     let credential = LinuxUcred {
-        pid: 0,
-        uid: 0,
-        gid: 0,
+        pid: i32::try_from(source_pid).map_err(|_| SyscallError::InvalidArguments)?,
+        uid,
+        gid,
     };
     let cred_bytes = unsafe {
         slice::from_raw_parts(
@@ -143,7 +148,7 @@ fn netlink_socket_control_bytes(socket: &NetlinkSocketObject) -> Vec<u8> {
             mem::size_of::<LinuxUcred>(),
         )
     };
-    encode_control_message(SCM_CREDENTIALS, cred_bytes)
+    Ok(encode_control_message(SCM_CREDENTIALS, cred_bytes))
 }
 
 const MSG_PEEK: u64 = 0x2;
@@ -155,7 +160,7 @@ const SCM_CREDENTIALS: i32 = 2;
 enum SocketAddress {
     Inet(InetAddress),
     Unix(String),
-    Netlink,
+    Netlink(NetlinkSocketAddress),
 }
 
 fn socket_address_from_raw(
@@ -212,8 +217,10 @@ fn socket_address_from_raw(
             return Err(SyscallError::InvalidArguments);
         }
         let addr = unsafe { &*(address as *const LinuxSockAddrNl) };
-        let _ = addr;
-        return Ok(SocketAddress::Netlink);
+        return Ok(SocketAddress::Netlink(NetlinkSocketAddress {
+            pid: addr.nl_pid,
+            groups: addr.nl_groups,
+        }));
     }
 
     Err(SyscallError::AddressFamilyNotSupported)
@@ -449,7 +456,7 @@ define_syscall!(
                 let report_trunc = (flags & MSG_TRUNC) != 0;
                 let message_len = socket.peek_message_len().ok_or(SyscallError::TryAgain)?;
                 let mut data = vec![0; len];
-                let (copied, full_len) = socket
+                let (copied, full_len, source, _, _) = socket
                     .recv_message(&mut data, peek)
                     .map_err(SyscallError::from)?;
 
@@ -464,8 +471,8 @@ define_syscall!(
                     let name = LinuxSockAddrNl {
                         nl_family: AF_NETLINK as u16,
                         nl_pad: 0,
-                        nl_pid: 0,
-                        nl_groups: socket.source_groups(),
+                        nl_pid: source.pid,
+                        nl_groups: source.groups,
                     };
                     let requested_len = unsafe { *address_len_ptr as usize };
                     let name_bytes = unsafe {
@@ -556,6 +563,38 @@ fn sendmsg_impl(socket: ObjectRef, msg: &relibc_msg_hdr) -> Result<usize, Syscal
         }
         unsafe { core::slice::from_raw_parts(msg.msg_iov, msg.msg_iovlen) }
     };
+
+    if let Ok(socket) = socket.clone().as_netlink_socket() {
+        let destination = if !msg.msg_name.is_null() {
+            let SocketAddress::Netlink(address) =
+                socket_address_from_raw(msg.msg_name.cast(), msg.msg_namelen)?
+            else {
+                return Err(SyscallError::InvalidArguments);
+            };
+            Some(address)
+        } else {
+            None
+        };
+
+        let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
+        let mut buffer = Vec::with_capacity(total_len);
+        for iov in iovs {
+            if iov.iov_len == 0 {
+                continue;
+            }
+            if iov.iov_base.is_null() {
+                return Err(SyscallError::BadAddress);
+            }
+            let chunk =
+                unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
+            buffer.extend_from_slice(chunk);
+        }
+
+        let written = socket
+            .send(buffer.as_slice(), destination)
+            .map_err(ObjectError::from)?;
+        return Ok(written);
+    }
 
     if let Ok(socket) = socket.clone().as_inet_socket() {
         let target_addr = if !msg.msg_name.is_null() {
@@ -832,7 +871,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         let total_capacity = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
         let message_len = socket.peek_message_len().ok_or(SyscallError::TryAgain)?;
         let mut scratch = alloc::vec![0u8; total_capacity];
-        let (copied, full_len) = socket
+        let (copied, full_len, source, uid, gid) = socket
             .recv_message(&mut scratch, peek)
             .map_err(SyscallError::from)?;
         let mut copied_total = 0usize;
@@ -861,8 +900,8 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
             let name = LinuxSockAddrNl {
                 nl_family: AF_NETLINK as u16,
                 nl_pad: 0,
-                nl_pid: 0,
-                nl_groups: socket.source_groups(),
+                nl_pid: source.pid,
+                nl_groups: source.groups,
             };
             let requested_len = msg.msg_namelen as usize;
             let name_bytes = unsafe {
@@ -877,7 +916,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
             }
             msg.msg_namelen = name_bytes.len() as u32;
         }
-        let control = netlink_socket_control_bytes(&socket);
+        let control = netlink_socket_control_bytes(&socket, source.pid, uid, gid)?;
         if control.is_empty() {
             msg.msg_controllen = 0;
         } else if msg.msg_control.is_null() || msg.msg_controllen == 0 {
@@ -1018,7 +1057,7 @@ fn socket_address_to_bytes(address: SocketAddress) -> Result<Vec<u8>, SyscallErr
             }
             .to_vec())
         }
-        SocketAddress::Unix(_) | SocketAddress::Netlink => Err(SyscallError::InvalidArguments),
+        SocketAddress::Unix(_) | SocketAddress::Netlink(_) => Err(SyscallError::InvalidArguments),
     }
 }
 

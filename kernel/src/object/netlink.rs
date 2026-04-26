@@ -21,6 +21,7 @@ use crate::{
         traits::{Configuratable, Readable, Statable},
     },
     polling::{event::PollableEvent, object::Pollable},
+    process::manager::get_current_process,
     socket::{
         AF_NETLINK, NETLINK_ADD_MEMBERSHIP, NETLINK_AUDIT, NETLINK_DROP_MEMBERSHIP,
         NETLINK_EXT_ACK, NETLINK_GET_STRICT_CHK, NETLINK_KOBJECT_UEVENT, NETLINK_LIST_MEMBERSHIPS,
@@ -40,6 +41,7 @@ const FIOCLEX: u64 = 0x5451;
 const S_IFSOCK: u32 = 0o140000;
 const NLMSG_ERROR: u16 = 0x2;
 static NEXT_UEVENT_SEQNUM: AtomicU64 = AtomicU64::new(1);
+static NEXT_NETLINK_PORT_ID: AtomicU64 = AtomicU64::new(1);
 
 lazy_static! {
     static ref NETLINK_SOCKETS: Mutex<Vec<Weak<NetlinkSocketObject>>> = Mutex::new(Vec::new());
@@ -68,6 +70,14 @@ pub struct NetlinkSocketAddress {
     pub groups: u32,
 }
 
+#[derive(Clone, Debug)]
+struct QueuedNetlinkMessage {
+    bytes: Vec<u8>,
+    source: NetlinkSocketAddress,
+    uid: u32,
+    gid: u32,
+}
+
 #[derive(Debug)]
 pub struct NetlinkSocketObject {
     flags: Mutex<FileFlags>,
@@ -76,7 +86,7 @@ pub struct NetlinkSocketObject {
     protocol: u64,
     address: Mutex<NetlinkSocketAddress>,
     memberships: Mutex<Vec<u32>>,
-    recv_queue: Mutex<VecDeque<Vec<u8>>>,
+    recv_queue: Mutex<VecDeque<QueuedNetlinkMessage>>,
     self_ref: Mutex<Option<Weak<NetlinkSocketObject>>>,
 }
 
@@ -108,12 +118,12 @@ impl NetlinkSocketObject {
         })
     }
 
-    fn source_address_bytes(&self) -> Vec<u8> {
+    pub fn sockaddr_bytes(address: NetlinkSocketAddress) -> Vec<u8> {
         let mut out = Vec::with_capacity(12);
         out.extend_from_slice(&(AF_NETLINK as u16).to_ne_bytes());
         out.extend_from_slice(&0u16.to_ne_bytes());
-        out.extend_from_slice(&0u32.to_ne_bytes());
-        out.extend_from_slice(&self.source_groups().to_ne_bytes());
+        out.extend_from_slice(&address.pid.to_ne_bytes());
+        out.extend_from_slice(&address.groups.to_ne_bytes());
         out
     }
 
@@ -167,11 +177,35 @@ impl NetlinkSocketObject {
     }
 
     fn queue_message(&self, message: Vec<u8>) {
-        self.recv_queue.lock().push_back(message);
+        self.queue_message_with_source(
+            message,
+            NetlinkSocketAddress::default(),
+            0,
+            0,
+        );
+    }
+
+    fn queue_message_with_source(
+        &self,
+        message: Vec<u8>,
+        source: NetlinkSocketAddress,
+        uid: u32,
+        gid: u32,
+    ) {
+        self.recv_queue.lock().push_back(QueuedNetlinkMessage {
+            bytes: message,
+            source,
+            uid,
+            gid,
+        });
         self.wake_read_waiters();
     }
 
     pub fn bind(&self, address: NetlinkSocketAddress) -> SocketResult<()> {
+        let mut address = address;
+        if address.pid == 0 {
+            address.pid = NEXT_NETLINK_PORT_ID.fetch_add(1, Ordering::Relaxed) as u32;
+        }
         *self.address.lock() = address;
         Ok(())
     }
@@ -186,23 +220,19 @@ impl NetlinkSocketObject {
         out
     }
 
-    pub fn source_groups(&self) -> u32 {
-        if self.protocol == NETLINK_KOBJECT_UEVENT {
-            1
-        } else {
-            0
-        }
-    }
-
     pub fn pass_cred_enabled(&self) -> bool {
         *self.pass_cred.lock()
     }
 
     pub fn peek_message_len(&self) -> Option<usize> {
-        self.recv_queue.lock().front().map(Vec::len)
+        self.recv_queue.lock().front().map(|message| message.bytes.len())
     }
 
-    pub fn recv_message(&self, buffer: &mut [u8], peek: bool) -> ObjectResult<(usize, usize)> {
+    pub fn recv_message(
+        &self,
+        buffer: &mut [u8],
+        peek: bool,
+    ) -> ObjectResult<(usize, usize, NetlinkSocketAddress, u32, u32)> {
         let mut queue = self.recv_queue.lock();
         let message = if peek {
             queue.front().cloned()
@@ -214,14 +244,99 @@ impl NetlinkSocketObject {
             return Err(ObjectError::TryAgain);
         };
 
-        let copy_len = buffer.len().min(message.len());
-        buffer[..copy_len].copy_from_slice(&message[..copy_len]);
-        Ok((copy_len, message.len()))
+        let copy_len = buffer.len().min(message.bytes.len());
+        buffer[..copy_len].copy_from_slice(&message.bytes[..copy_len]);
+        Ok((
+            copy_len,
+            message.bytes.len(),
+            message.source,
+            message.uid,
+            message.gid,
+        ))
     }
 
-    pub fn send(&self, message: &[u8]) -> SocketResult<usize> {
+    fn receives_group(&self, group: u32) -> bool {
+        let address_groups = self.address.lock().groups;
+        if (address_groups & group) != 0 {
+            return true;
+        }
+
+        self.memberships
+            .lock()
+            .iter()
+            .any(|membership| *membership == group)
+    }
+
+    fn local_address(&self) -> NetlinkSocketAddress {
+        let mut address = self.address.lock();
+        if address.pid == 0 {
+            address.pid = NEXT_NETLINK_PORT_ID.fetch_add(1, Ordering::Relaxed) as u32;
+        }
+        *address
+    }
+
+    pub fn send(
+        &self,
+        message: &[u8],
+        destination: Option<NetlinkSocketAddress>,
+    ) -> SocketResult<usize> {
         if matches!(self.protocol, NETLINK_ROUTE | NETLINK_AUDIT) {
             self.enqueue_ack(message);
+            return Ok(message.len());
+        }
+
+        if self.protocol != NETLINK_KOBJECT_UEVENT {
+            return Ok(message.len());
+        }
+
+        let Some(destination) = destination else {
+            return Err(SocketError::InvalidArguments);
+        };
+        if destination.pid == 0 && destination.groups == 0 {
+            return Err(SocketError::InvalidArguments);
+        }
+
+        let sender = self.local_address();
+        let process = get_current_process();
+        let process = process.lock();
+        let uid = process.effective_uid;
+        let gid = process.effective_gid;
+        drop(process);
+
+        let source = NetlinkSocketAddress {
+            pid: sender.pid,
+            groups: if destination.groups != 0 {
+                destination.groups
+            } else {
+                0
+            },
+        };
+
+        let mut delivered = 0usize;
+        let mut sockets = NETLINK_SOCKETS.lock();
+        sockets.retain(|socket| {
+            let Some(socket) = socket.upgrade() else {
+                return false;
+            };
+            if socket.protocol != NETLINK_KOBJECT_UEVENT {
+                return true;
+            }
+
+            let should_deliver = if destination.groups != 0 {
+                socket.receives_group(destination.groups)
+            } else {
+                socket.local_address().pid == destination.pid
+            };
+
+            if should_deliver {
+                socket.queue_message_with_source(message.to_vec(), source, uid, gid);
+                delivered += 1;
+            }
+            true
+        });
+
+        if delivered == 0 {
+            return Err(SocketError::ConnectionRefused);
         }
         Ok(message.len())
     }
@@ -417,8 +532,13 @@ pub fn broadcast_kobject_uevent(
         let Some(socket) = socket.upgrade() else {
             return false;
         };
-        if socket.protocol == NETLINK_KOBJECT_UEVENT {
-            socket.recv_queue.lock().push_back(message.clone());
+        if socket.protocol == NETLINK_KOBJECT_UEVENT && socket.receives_group(1) {
+            socket.queue_message_with_source(
+                message.clone(),
+                NetlinkSocketAddress { pid: 0, groups: 1 },
+                0,
+                0,
+            );
             delivered_sockets.push(socket);
         }
         true
@@ -474,7 +594,7 @@ impl Configuratable for NetlinkSocketObject {
 
 impl Readable for NetlinkSocketObject {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
-        let (copied, _) = self.recv_message(buffer, false)?;
+        let (copied, _, _, _, _) = self.recv_message(buffer, false)?;
         Ok(copied)
     }
 }
@@ -485,18 +605,19 @@ impl SocketLike for NetlinkSocketObject {
     }
 
     fn sendto(self: Arc<Self>, buffer: &[u8], address: Option<&[u8]>) -> SocketResult<usize> {
-        if let Some(address) = address {
-            let _ = Self::parse_sockaddr(address)?;
-        }
-        self.send(buffer)
+        let destination = address
+            .map(Self::parse_sockaddr)
+            .transpose()?;
+        self.send(buffer, destination)
     }
 
     fn recvfrom(&self, buffer: &mut [u8]) -> SocketResult<(usize, Option<Vec<u8>>)> {
-        let (copied, _) = self.recv_message(buffer, false).map_err(|err| match err {
+        let (copied, _, source, _, _) =
+            self.recv_message(buffer, false).map_err(|err| match err {
             ObjectError::TryAgain => SocketError::TryAgain,
             _ => SocketError::InvalidArguments,
         })?;
-        Ok((copied, Some(self.source_address_bytes())))
+        Ok((copied, Some(Self::sockaddr_bytes(source))))
     }
 
     fn getsockname_bytes(&self) -> SocketResult<Vec<u8>> {
