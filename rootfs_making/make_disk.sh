@@ -85,7 +85,7 @@ install_sysroot_file() {
 pacman_root() {
     mount_chroot_api_fs
     sudo env PATH="${TARGET_PATH}" "${PACMAN_BIN}" \
-        --config "${PACMAN_CONF_TEMPLATE}" \
+        --config /etc/pacman.conf \
         --sysroot "${SYSROOT_DIR}" \
         --noconfirm \
         "$@"
