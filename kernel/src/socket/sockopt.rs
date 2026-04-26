@@ -1,4 +1,4 @@
-use alloc::{sync::Arc, vec, vec::Vec};
+use alloc::{string::ToString, sync::Arc, vec, vec::Vec};
 use core::{mem, slice};
 
 use super::{
@@ -8,10 +8,10 @@ use super::{
     SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD, SO_TIMESTAMP_NEW, SO_TIMESTAMP_OLD, SO_TIMESTAMPNS_NEW,
     SO_TIMESTAMPNS_OLD, SO_TYPE, SOCK_DGRAM, SOCK_SEQPACKET, SOCK_STREAM, SOL_SOCKET, SocketError,
     SocketLike, SocketPeerCred, SocketResult, UnixSocketKind, UnixSocketObject, UnixSocketState,
-    socket_timeout_option_len,
+    parse_unix_socket_path, socket_timeout_option_len,
 };
 use crate::{
-    object::{Object, linux_anon::PidFdObject},
+    object::{Object, linux_anon::PidFdObject, misc::{ObjectRef, get_object_current_process}},
     process::{
         FdFlags,
         manager::get_current_process,
@@ -239,8 +239,52 @@ impl UnixSocketObject {
 }
 
 impl SocketLike for UnixSocketObject {
+    fn bind_bytes(self: Arc<Self>, address: &[u8]) -> SocketResult<()> {
+        self.bind(parse_unix_socket_path(address)?)
+    }
+
+    fn listen(self: Arc<Self>, backlog: usize) -> SocketResult<()> {
+        UnixSocketObject::listen(&self, backlog)
+    }
+
+    fn connect_bytes(self: Arc<Self>, address: &[u8]) -> SocketResult<()> {
+        self.connect(parse_unix_socket_path(address)?)
+    }
+
+    fn accept(self: Arc<Self>) -> SocketResult<ObjectRef> {
+        let fd = UnixSocketObject::accept(&self)?;
+        get_object_current_process(fd as u64).map_err(|_| SocketError::InvalidArguments)
+    }
+
+    fn sendto(self: Arc<Self>, buffer: &[u8], address: Option<&[u8]>) -> SocketResult<usize> {
+        let target_path = address.map(parse_unix_socket_path).transpose()?;
+        if let Some(path) = target_path.as_deref() {
+            if self.kind == UnixSocketKind::Datagram {
+                return self.write_socket_to_path(buffer, path);
+            }
+            if matches!(&*self.state.lock(), UnixSocketState::Unbound) {
+                self.connect(path.to_string())?;
+            }
+        }
+
+        self.write_socket(buffer)
+    }
+
+    fn recvfrom(&self, buffer: &mut [u8]) -> SocketResult<(usize, Option<Vec<u8>>)> {
+        let read = self.read_socket(buffer)?;
+        Ok((read, Some(UnixSocketObject::getpeername_bytes(self)?)))
+    }
+
     fn getsockname_bytes(&self) -> SocketResult<Vec<u8>> {
         UnixSocketObject::getsockname_bytes(self)
+    }
+
+    fn getpeername_bytes(&self) -> SocketResult<Vec<u8>> {
+        UnixSocketObject::getpeername_bytes(self)
+    }
+
+    fn shutdown(&self, how: u64) -> SocketResult<()> {
+        UnixSocketObject::shutdown(self, how)
     }
 
     fn setsockopt(&self, level: u64, option_name: u64, option_value: &[u8]) -> SocketResult<()> {

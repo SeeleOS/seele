@@ -1,4 +1,4 @@
-use alloc::{vec, vec::Vec};
+use alloc::{string::String, vec, vec::Vec};
 use core::cmp::min;
 
 use super::{AF_UNIX, SocketError, SocketResult, UnixSocketObject, UnixSocketState};
@@ -22,6 +22,34 @@ fn serialize_unix_addr(path: Option<&str>) -> Vec<u8> {
     }
 
     out
+}
+
+pub(crate) fn parse_unix_socket_path(address: &[u8]) -> SocketResult<String> {
+    if address.len() < SA_FAMILY_LEN {
+        return Err(SocketError::InvalidArguments);
+    }
+
+    let path_len = address
+        .len()
+        .saturating_sub(SA_FAMILY_LEN)
+        .min(SOCKADDR_UN_PATH_LEN);
+    if path_len == 0 {
+        return Err(SocketError::InvalidArguments);
+    }
+
+    let path = &address[SA_FAMILY_LEN..SA_FAMILY_LEN + path_len];
+    if path[0] == 0 {
+        if path_len <= 1 {
+            return Err(SocketError::InvalidArguments);
+        }
+        return Ok(String::from_utf8_lossy(path).into_owned());
+    }
+
+    let len = path.iter().position(|&byte| byte == 0).unwrap_or(path_len);
+    if len == 0 {
+        return Err(SocketError::InvalidArguments);
+    }
+    Ok(String::from_utf8_lossy(&path[..len]).into_owned())
 }
 
 impl UnixSocketObject {

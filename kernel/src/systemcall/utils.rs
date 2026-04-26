@@ -35,7 +35,10 @@ pub enum SyscallError {
     ProtocolNotSupported = -93,
     AddressFamilyNotSupported = -97,
     AddressInUse = -98,
+    AddressNotAvailable = -99,
+    NetworkDown = -100,
     IsConnected = -106,
+    NotConnected = -107,
     ConnectionRefused = -111,
 }
 
@@ -80,7 +83,10 @@ impl From<isize> for SyscallError {
             -93 => Self::ProtocolNotSupported,
             -97 => Self::AddressFamilyNotSupported,
             -98 => Self::AddressInUse,
+            -99 => Self::AddressNotAvailable,
+            -100 => Self::NetworkDown,
             -106 => Self::IsConnected,
+            -107 => Self::NotConnected,
             -111 => Self::ConnectionRefused,
             _ => Self::IOError,
         }

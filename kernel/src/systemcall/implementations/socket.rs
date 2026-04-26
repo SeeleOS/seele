@@ -2,7 +2,8 @@ use crate::{
     define_syscall,
     memory::user_safe,
     misc::systemd_perf::{self, PerfBucket},
-    object::netlink::{NetlinkSocketAddress, NetlinkSocketObject},
+    net::InetAddress,
+    object::netlink::NetlinkSocketObject,
     object::{
         FileFlags,
         error::ObjectError,
@@ -10,8 +11,8 @@ use crate::{
     },
     process::{FdFlags, manager::get_current_process},
     socket::{
-        AF_NETLINK, AF_UNIX, SOCK_CLOEXEC, SOCK_NONBLOCK, SOL_SOCKET, UnixSocketKind,
-        UnixSocketObject, UnixSocketState,
+        AF_INET, AF_NETLINK, AF_UNIX, InetSocketObject, SOCK_CLOEXEC, SOCK_NONBLOCK, SOL_SOCKET,
+        UnixSocketKind, UnixSocketObject, UnixSocketState,
     },
     systemcall::utils::{SyscallError, SyscallImpl},
 };
@@ -30,6 +31,14 @@ struct LinuxSockAddrNl {
     nl_pad: u16,
     nl_pid: u32,
     nl_groups: u32,
+}
+
+#[repr(C)]
+struct LinuxSockAddrIn {
+    sin_family: u16,
+    sin_port: u16,
+    sin_addr: [u8; 4],
+    sin_zero: [u8; 8],
 }
 
 #[repr(C)]
@@ -125,8 +134,9 @@ const SCM_RIGHTS: i32 = 1;
 const SCM_CREDENTIALS: i32 = 2;
 
 enum SocketAddress {
+    Inet(InetAddress),
     Unix(String),
-    Netlink(NetlinkSocketAddress),
+    Netlink,
 }
 
 fn socket_address_from_raw(
@@ -167,23 +177,104 @@ fn socket_address_from_raw(
         ));
     }
 
+    if family == AF_INET as u16 {
+        if (address_len as usize) < mem::size_of::<LinuxSockAddrIn>() {
+            return Err(SyscallError::InvalidArguments);
+        }
+        let addr = unsafe { &*(address as *const LinuxSockAddrIn) };
+        return Ok(SocketAddress::Inet(InetAddress::new(
+            addr.sin_addr,
+            u16::from_be(addr.sin_port),
+        )));
+    }
+
     if family == AF_NETLINK as u16 {
         if (address_len as usize) < core::mem::size_of::<LinuxSockAddrNl>() {
             return Err(SyscallError::InvalidArguments);
         }
         let addr = unsafe { &*(address as *const LinuxSockAddrNl) };
-        return Ok(SocketAddress::Netlink(NetlinkSocketAddress {
-            pid: addr.nl_pid,
-            groups: addr.nl_groups,
-        }));
+        let _ = addr;
+        return Ok(SocketAddress::Netlink);
     }
 
     Err(SyscallError::AddressFamilyNotSupported)
 }
 
+fn write_socket_name(
+    address: *mut u8,
+    address_len_ptr: *mut u32,
+    name: &[u8],
+) -> Result<(), SyscallError> {
+    if address_len_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let requested_len = unsafe { *address_len_ptr as usize };
+    let copy_len = requested_len.min(name.len());
+    if copy_len > 0 && address.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    if copy_len > 0 {
+        user_safe::write(address, &name[..copy_len])?;
+    }
+    user_safe::write(address_len_ptr, &(name.len() as u32))?;
+    Ok(())
+}
+
+fn socket_address_bytes(address: *const u8, address_len: u32) -> Result<Vec<u8>, SyscallError> {
+    if address.is_null() || address_len < 2 {
+        return Err(SyscallError::BadAddress);
+    }
+    Ok(unsafe { slice::from_raw_parts(address, address_len as usize) }.to_vec())
+}
+
+fn accept_socket(socket: ObjectRef, flags: u32) -> Result<usize, SyscallError> {
+    if let Ok(socket) = socket.clone().as_unix_socket() {
+        let fd = socket.accept().map_err(ObjectError::from)?;
+        let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+        let mut file_flags = FileFlags::empty();
+        if (flags & SOCK_NONBLOCK as u32) != 0 {
+            file_flags.insert(FileFlags::NONBLOCK);
+        }
+        let _ = accepted.set_flags(file_flags);
+        if (flags & SOCK_CLOEXEC as u32) != 0 {
+            get_current_process()
+                .lock()
+                .set_fd_flags(fd, FdFlags::CLOEXEC)
+                .map_err(SyscallError::from)?;
+        }
+        return Ok(fd);
+    }
+
+    let accepted: ObjectRef = if let Ok(socket) = socket.as_inet_socket() {
+        socket.accept().map_err(ObjectError::from)?
+    } else {
+        return Err(SyscallError::BadFileDescriptor);
+    };
+
+    let mut file_flags = FileFlags::empty();
+    if (flags & SOCK_NONBLOCK as u32) != 0 {
+        file_flags.insert(FileFlags::NONBLOCK);
+    }
+    let _ = accepted.clone().set_flags(file_flags);
+
+    let fd_flags = if (flags & SOCK_CLOEXEC as u32) != 0 {
+        FdFlags::CLOEXEC
+    } else {
+        FdFlags::empty()
+    };
+    let fd = get_current_process()
+        .lock()
+        .push_object_with_flags(accepted, fd_flags);
+    Ok(fd)
+}
+
 define_syscall!(Socket, |domain: u64, kind: u64, protocol: u64| {
     let socket: ObjectRef = if domain == AF_NETLINK {
         NetlinkSocketObject::create(kind, protocol).map_err(ObjectError::from)?
+    } else if domain == AF_INET {
+        InetSocketObject::create(domain, kind, protocol).map_err(ObjectError::from)?
     } else {
         UnixSocketObject::create(domain, kind, protocol).map_err(ObjectError::from)?
     };
@@ -232,26 +323,17 @@ define_syscall!(Socketpair, |domain: u64,
 define_syscall!(Bind, |socket: ObjectRef,
                        address: *const u8,
                        address_len: u32| {
-    match socket_address_from_raw(address, address_len)? {
-        SocketAddress::Unix(path) => {
-            socket
-                .as_unix_socket()?
-                .bind(path)
-                .map_err(ObjectError::from)?;
-        }
-        SocketAddress::Netlink(address) => {
-            socket
-                .as_netlink_socket()?
-                .bind(address)
-                .map_err(ObjectError::from)?;
-        }
-    }
+    let address = socket_address_bytes(address, address_len)?;
+    socket
+        .as_socket_like()?
+        .bind_bytes(&address)
+        .map_err(ObjectError::from)?;
     Ok(0)
 });
 
 define_syscall!(Listen, |socket: ObjectRef, backlog: usize| {
     socket
-        .as_unix_socket()?
+        .as_socket_like()?
         .listen(backlog)
         .map_err(ObjectError::from)?;
     Ok(0)
@@ -260,36 +342,25 @@ define_syscall!(Listen, |socket: ObjectRef, backlog: usize| {
 define_syscall!(Connect, |socket: ObjectRef,
                           address: *const u8,
                           address_len: u32| {
-    let SocketAddress::Unix(path) = socket_address_from_raw(address, address_len)? else {
-        return Err(SyscallError::InvalidArguments);
-    };
-    let result = socket
-        .as_unix_socket()?
-        .connect(path.clone())
-        .map_err(ObjectError::from);
-    result?;
+    let address = socket_address_bytes(address, address_len)?;
+    socket
+        .as_socket_like()?
+        .connect_bytes(&address)
+        .map_err(ObjectError::from)?;
     Ok(0)
 });
 
 define_syscall!(Accept, |socket: ObjectRef,
                          address: *mut u8,
                          address_len_ptr: *mut u32| {
-    let fd = socket
-        .as_unix_socket()?
-        .accept()
-        .map_err(ObjectError::from)?;
+    let fd = accept_socket(socket, 0)?;
     if !address_len_ptr.is_null() {
         let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
         let name = accepted
-            .as_unix_socket()?
+            .as_socket_like()?
             .getpeername_bytes()
             .map_err(ObjectError::from)?;
-        let requested_len = unsafe { *address_len_ptr as usize };
-        let copy_len = requested_len.min(name.len());
-        if copy_len > 0 {
-            user_safe::write(address, &name[..copy_len])?;
-        }
-        user_safe::write(address_len_ptr, &(name.len() as u32))?;
+        write_socket_name(address, address_len_ptr, &name)?;
     }
     Ok(fd)
 });
@@ -298,34 +369,14 @@ define_syscall!(Accept4, |socket: ObjectRef,
                           address: *mut u8,
                           address_len_ptr: *mut u32,
                           flags: u32| {
-    let fd = socket
-        .as_unix_socket()?
-        .accept()
-        .map_err(ObjectError::from)?;
+    let fd = accept_socket(socket, flags)?;
     if !address_len_ptr.is_null() {
         let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
         let name = accepted
-            .as_unix_socket()?
+            .as_socket_like()?
             .getpeername_bytes()
             .map_err(ObjectError::from)?;
-        let requested_len = unsafe { *address_len_ptr as usize };
-        let copy_len = requested_len.min(name.len());
-        if copy_len > 0 {
-            user_safe::write(address, &name[..copy_len])?;
-        }
-        user_safe::write(address_len_ptr, &(name.len() as u32))?;
-    }
-    let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
-    let mut file_flags = FileFlags::empty();
-    if (flags & SOCK_NONBLOCK as u32) != 0 {
-        file_flags.insert(FileFlags::NONBLOCK);
-    }
-    let _ = accepted.set_flags(file_flags);
-    if (flags & SOCK_CLOEXEC as u32) != 0 {
-        get_current_process()
-            .lock()
-            .set_fd_flags(fd, FdFlags::CLOEXEC)
-            .map_err(SyscallError::from)?;
+        write_socket_name(address, address_len_ptr, &name)?;
     }
     Ok(fd)
 });
@@ -345,32 +396,13 @@ define_syscall!(Sendto, |socket: ObjectRef,
     } else {
         unsafe { slice::from_raw_parts(buffer, len) }
     };
-    if let Ok(socket) = socket.clone().as_netlink_socket() {
-        if !address.is_null() {
-            let SocketAddress::Netlink(_) = socket_address_from_raw(address, address_len)? else {
-                return Err(SyscallError::InvalidArguments);
-            };
-        }
-        let written = socket.send(buffer).map_err(ObjectError::from)?;
-        return Ok(written);
-    }
-
-    let socket = socket.as_unix_socket()?;
-    if !address.is_null() {
-        let SocketAddress::Unix(path) = socket_address_from_raw(address, address_len)? else {
-            return Err(SyscallError::InvalidArguments);
-        };
-        if socket.kind == UnixSocketKind::Datagram {
-            return Ok(socket
-                .write_socket_to_path(buffer, &path)
-                .map_err(ObjectError::from)?);
-        }
-        if matches!(&*socket.state.lock(), UnixSocketState::Unbound) {
-            socket.connect(path).map_err(ObjectError::from)?;
-        }
-    }
-
-    let written = socket.write_socket(buffer).map_err(ObjectError::from)?;
+    let address = (!address.is_null())
+        .then(|| socket_address_bytes(address, address_len))
+        .transpose()?;
+    let written = socket
+        .as_socket_like()?
+        .sendto(buffer, address.as_deref())
+        .map_err(ObjectError::from)?;
 
     Ok(written)
 });
@@ -388,7 +420,9 @@ define_syscall!(
                 return Err(SyscallError::BadAddress);
             }
 
-            if let Ok(socket) = socket.clone().as_netlink_socket() {
+            if let Ok(socket) = socket.clone().as_netlink_socket()
+                && (flags & (MSG_PEEK | MSG_TRUNC)) != 0
+            {
                 let peek = (flags & MSG_PEEK) != 0;
                 let report_trunc = (flags & MSG_TRUNC) != 0;
                 let message_len = socket.peek_message_len().ok_or(SyscallError::TryAgain)?;
@@ -432,25 +466,18 @@ define_syscall!(
                 });
             }
 
-            let socket = socket.as_unix_socket()?;
             let mut data = vec![0; len];
-            let read = socket.read_socket(&mut data).map_err(ObjectError::from)?;
+            let (read, source) = socket
+                .as_socket_like()?
+                .recvfrom(&mut data)
+                .map_err(ObjectError::from)?;
 
             if read > 0 {
                 user_safe::write(buffer, &data[..read])?;
             }
 
             if !address.is_null() {
-                if address_len_ptr.is_null() {
-                    return Err(SyscallError::BadAddress);
-                }
-                let name = socket.getpeername_bytes().map_err(ObjectError::from)?;
-                let requested_len = unsafe { *address_len_ptr as usize };
-                let copy_len = requested_len.min(name.len());
-                if copy_len > 0 {
-                    user_safe::write(address, &name[..copy_len])?;
-                }
-                user_safe::write(address_len_ptr, &(name.len() as u32))?;
+                write_socket_name(address, address_len_ptr, &source.unwrap_or_default())?;
             }
 
             Ok(read)
@@ -507,6 +534,43 @@ fn sendmsg_impl(socket: ObjectRef, msg: &relibc_msg_hdr) -> Result<usize, Syscal
         }
         unsafe { core::slice::from_raw_parts(msg.msg_iov, msg.msg_iovlen) }
     };
+
+    if let Ok(socket) = socket.clone().as_inet_socket() {
+        let target_addr = if !msg.msg_name.is_null() {
+            let SocketAddress::Inet(address) =
+                socket_address_from_raw(msg.msg_name.cast(), msg.msg_namelen)?
+            else {
+                return Err(SyscallError::InvalidArguments);
+            };
+            Some(address)
+        } else {
+            None
+        };
+
+        if msg.msg_controllen != 0 && !msg.msg_control.is_null() {
+            let _ = unsafe { slice::from_raw_parts(msg.msg_control, msg.msg_controllen) };
+        }
+
+        let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
+        let mut buffer = Vec::with_capacity(total_len);
+        for iov in iovs {
+            if iov.iov_len == 0 {
+                continue;
+            }
+            if iov.iov_base.is_null() {
+                return Err(SyscallError::BadAddress);
+            }
+            let chunk =
+                unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
+            buffer.extend_from_slice(chunk);
+        }
+
+        let written = match target_addr {
+            Some(address) => socket.send_to(&buffer, address).map_err(ObjectError::from)?,
+            None => socket.send(&buffer).map_err(ObjectError::from)?,
+        };
+        return Ok(written);
+    }
 
     let target_path = if !msg.msg_name.is_null() {
         let address_len = msg.msg_namelen;
@@ -696,26 +760,11 @@ define_syscall!(
 define_syscall!(
     Getsockname,
     |socket: ObjectRef, address: *mut u8, address_len_ptr: *mut u32| {
-        if address_len_ptr.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-
         let name = socket
             .as_socket_like()?
             .getsockname_bytes()
             .map_err(ObjectError::from)?;
-        let requested_len = unsafe { *address_len_ptr as usize };
-        let copy_len = requested_len.min(name.len());
-
-        if copy_len > 0 && address.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-
-        if copy_len > 0 {
-            user_safe::write(address, &name[..copy_len])?;
-        }
-        user_safe::write(address_len_ptr, &(name.len() as u32))?;
-
+        write_socket_name(address, address_len_ptr, &name)?;
         Ok(0)
     }
 );
@@ -723,26 +772,11 @@ define_syscall!(
 define_syscall!(
     Getpeername,
     |socket: ObjectRef, address: *mut u8, address_len_ptr: *mut u32| {
-        if address_len_ptr.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-
         let name = socket
-            .as_unix_socket()?
+            .as_socket_like()?
             .getpeername_bytes()
             .map_err(ObjectError::from)?;
-        let requested_len = unsafe { *address_len_ptr as usize };
-        let copy_len = requested_len.min(name.len());
-
-        if copy_len > 0 && address.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-
-        if copy_len > 0 {
-            user_safe::write(address, &name[..copy_len])?;
-        }
-        user_safe::write(address_len_ptr, &(name.len() as u32))?;
-
+        write_socket_name(address, address_len_ptr, &name)?;
         Ok(0)
     }
 );
@@ -827,6 +861,49 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         });
     }
 
+    if let Ok(socket) = socket.clone().as_inet_socket() {
+        let total_capacity = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
+        let mut scratch = alloc::vec![0u8; total_capacity];
+        let (read, source) = socket.recv_from(&mut scratch).map_err(ObjectError::from)?;
+        let mut copied_total = 0usize;
+
+        for iov in iovs {
+            if copied_total >= read {
+                break;
+            }
+            if iov.iov_len == 0 {
+                continue;
+            }
+            if iov.iov_base.is_null() {
+                return Err(SyscallError::BadAddress);
+            }
+
+            let chunk_len = (read - copied_total).min(iov.iov_len);
+            user_safe::write(
+                iov.iov_base,
+                &scratch[copied_total..copied_total + chunk_len],
+            )?;
+            copied_total += chunk_len;
+        }
+
+        msg.msg_flags = 0;
+        if !msg.msg_name.is_null() {
+            let name = source
+                .map(|address| socket_address_to_bytes(SocketAddress::Inet(address)))
+                .transpose()?
+                .unwrap_or_default();
+            let copy_len = (msg.msg_namelen as usize).min(name.len());
+            if copy_len > 0 {
+                user_safe::write(msg.msg_name.cast::<u8>(), &name[..copy_len])?;
+            }
+            msg.msg_namelen = name.len() as u32;
+        } else {
+            msg.msg_namelen = 0;
+        }
+        msg.msg_controllen = 0;
+        return Ok(copied_total);
+    }
+
     let socket = socket.as_unix_socket()?;
     let mut total_read = 0usize;
 
@@ -881,11 +958,32 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
 
 define_syscall!(Shutdown, |socket: ObjectRef, how: u64| {
     socket
-        .as_unix_socket()?
+        .as_socket_like()?
         .shutdown(how)
         .map_err(ObjectError::from)?;
     Ok(0)
 });
+
+fn socket_address_to_bytes(address: SocketAddress) -> Result<Vec<u8>, SyscallError> {
+    match address {
+        SocketAddress::Inet(address) => {
+            let sockaddr = LinuxSockAddrIn {
+                sin_family: AF_INET as u16,
+                sin_port: address.port.to_be(),
+                sin_addr: address.addr,
+                sin_zero: [0; 8],
+            };
+            Ok(unsafe {
+                slice::from_raw_parts(
+                    (&sockaddr as *const LinuxSockAddrIn).cast::<u8>(),
+                    mem::size_of::<LinuxSockAddrIn>(),
+                )
+            }
+            .to_vec())
+        }
+        SocketAddress::Unix(_) | SocketAddress::Netlink => Err(SyscallError::InvalidArguments),
+    }
+}
 
 #[repr(C)]
 struct relibc_iovec {

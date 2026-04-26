@@ -80,6 +80,42 @@ pub struct NetlinkSocketObject {
 }
 
 impl NetlinkSocketObject {
+    fn parse_sockaddr(address: &[u8]) -> SocketResult<NetlinkSocketAddress> {
+        if address.len() < 12 {
+            return Err(SocketError::InvalidArguments);
+        }
+        if u16::from_ne_bytes(
+            address[..2]
+                .try_into()
+                .map_err(|_| SocketError::InvalidArguments)?,
+        ) != AF_NETLINK as u16
+        {
+            return Err(SocketError::InvalidArguments);
+        }
+
+        Ok(NetlinkSocketAddress {
+            pid: u32::from_ne_bytes(
+                address[4..8]
+                    .try_into()
+                    .map_err(|_| SocketError::InvalidArguments)?,
+            ),
+            groups: u32::from_ne_bytes(
+                address[8..12]
+                    .try_into()
+                    .map_err(|_| SocketError::InvalidArguments)?,
+            ),
+        })
+    }
+
+    fn source_address_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(12);
+        out.extend_from_slice(&(AF_NETLINK as u16).to_ne_bytes());
+        out.extend_from_slice(&0u16.to_ne_bytes());
+        out.extend_from_slice(&0u32.to_ne_bytes());
+        out.extend_from_slice(&self.source_groups().to_ne_bytes());
+        out
+    }
+
     pub fn create(kind: u64, protocol: u64) -> SocketResult<Arc<Self>> {
         let socket_type = kind & !(SOCK_NONBLOCK | SOCK_CLOEXEC);
         if !matches!(
@@ -432,6 +468,25 @@ impl Readable for NetlinkSocketObject {
 }
 
 impl SocketLike for NetlinkSocketObject {
+    fn bind_bytes(self: Arc<Self>, address: &[u8]) -> SocketResult<()> {
+        self.bind(Self::parse_sockaddr(address)?)
+    }
+
+    fn sendto(self: Arc<Self>, buffer: &[u8], address: Option<&[u8]>) -> SocketResult<usize> {
+        if let Some(address) = address {
+            let _ = Self::parse_sockaddr(address)?;
+        }
+        self.send(buffer)
+    }
+
+    fn recvfrom(&self, buffer: &mut [u8]) -> SocketResult<(usize, Option<Vec<u8>>)> {
+        let (copied, _) = self.recv_message(buffer, false).map_err(|err| match err {
+            ObjectError::TryAgain => SocketError::TryAgain,
+            _ => SocketError::InvalidArguments,
+        })?;
+        Ok((copied, Some(self.source_address_bytes())))
+    }
+
     fn getsockname_bytes(&self) -> SocketResult<Vec<u8>> {
         Ok(NetlinkSocketObject::getsockname_bytes(self))
     }

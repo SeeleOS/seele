@@ -8,7 +8,10 @@ pub enum SocketError {
     AddressFamilyNotSupported,
     ProtocolNotSupported,
     AddressInUse,
+    AddressNotAvailable,
+    NetworkDown,
     IsConnected,
+    NotConnected,
     ConnectionRefused,
     BrokenPipe,
 }
@@ -24,7 +27,10 @@ impl AsSyscallError for SocketError {
             Self::AddressFamilyNotSupported => SyscallError::AddressFamilyNotSupported,
             Self::ProtocolNotSupported => SyscallError::ProtocolNotSupported,
             Self::AddressInUse => SyscallError::AddressInUse,
+            Self::AddressNotAvailable => SyscallError::AddressNotAvailable,
+            Self::NetworkDown => SyscallError::NetworkDown,
             Self::IsConnected => SyscallError::IsConnected,
+            Self::NotConnected => SyscallError::NotConnected,
             Self::ConnectionRefused => SyscallError::ConnectionRefused,
             Self::BrokenPipe => SyscallError::BrokenPipe,
         }
