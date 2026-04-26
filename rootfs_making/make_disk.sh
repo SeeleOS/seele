@@ -37,6 +37,8 @@ ARCH_PACKAGES=(
     yazi
     eza
     mesa
+    wayland
+    weston
     xf86-video-fbdev
     xf86-video-vesa
     icewm
