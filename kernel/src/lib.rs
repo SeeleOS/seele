@@ -77,8 +77,10 @@ pub fn init() -> ! {
     log::info!("init: late drivers ready");
 
     log::info!("init: mouse init start");
-    mouse::init();
-    log::info!("init: mouse init done");
+    match mouse::init() {
+        Ok(()) => log::info!("init: mouse ready"),
+        Err(err) => log::warn!("init: mouse unavailable ({err})"),
+    }
     start_application_processors();
     clear();
     release_application_processors();

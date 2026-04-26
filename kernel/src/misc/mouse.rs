@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use alloc::sync::Arc;
+use alloc::{format, string::String, sync::Arc};
 use heapless::Deque;
 use ps2_mouse::Mouse;
 use spin::Mutex;
@@ -32,14 +32,43 @@ lazy_static::lazy_static! {
     pub static ref MOUSE_PACKETS: Mutex<Deque<u8, 4096>> = Mutex::new(Deque::new());
 }
 
+const STATUS_OUTPUT_FULL: u8 = 1 << 0;
+
 static MOUSE_PENDING: AtomicBool = AtomicBool::new(false);
 static MOUSE_EVDEV_PENDING: AtomicBool = AtomicBool::new(false);
 
-pub fn init() {
+pub fn init() -> Result<(), String> {
     init_mouse_packet_decoder();
-    Mouse::new()
-        .init()
-        .expect("ps2: failed to initialize mouse");
+
+    let dropped = drain_output_buffer();
+    if dropped != 0 {
+        log::info!("ps2 mouse: dropped {dropped} stale byte(s) before init");
+    }
+
+    let mut mouse = Mouse::new();
+    match mouse.init() {
+        Ok(()) => Ok(()),
+        Err(first_err) => {
+            let dropped = drain_output_buffer();
+            if dropped != 0 {
+                log::warn!(
+                    "ps2 mouse: init failed ({first_err}); dropped {dropped} stale byte(s) and retrying"
+                );
+            } else {
+                log::warn!("ps2 mouse: init failed ({first_err}); retrying");
+            }
+
+            match mouse.init() {
+                Ok(()) => {
+                    log::info!("ps2 mouse: init succeeded on retry");
+                    Ok(())
+                }
+                Err(second_err) => Err(format!(
+                    "ps2 mouse initialization unavailable after retry: {second_err}"
+                )),
+            }
+        }
+    }
 }
 
 pub fn has_pending_events() -> bool {
@@ -75,6 +104,24 @@ pub extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptSta
     }
     MOUSE_PENDING.store(true, Ordering::Release);
     send_eoi();
+}
+
+fn drain_output_buffer() -> usize {
+    let mut status_port: Port<u8> = Port::new(0x64);
+    let mut data_port: Port<u8> = Port::new(0x60);
+    let mut drained = 0;
+
+    while drained < 256 {
+        let status = unsafe { status_port.read() };
+        if (status & STATUS_OUTPUT_FULL) == 0 {
+            break;
+        }
+
+        let _ = unsafe { data_port.read() };
+        drained += 1;
+    }
+
+    drained
 }
 
 #[derive(Debug, Default)]
