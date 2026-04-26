@@ -796,22 +796,23 @@ define_syscall!(OpenAt, |dirfd: i32,
         } else {
             VirtualFS.lock().open(path.clone())
         };
-        let object;
-        if let Ok(file) = open_result {
-            if create && flags.contains(OpenFlags::EXCL) {
-                return Err(SyscallError::FileAlreadyExists);
+        let object = match open_result {
+            Ok(file) => {
+                if create && flags.contains(OpenFlags::EXCL) {
+                    return Err(SyscallError::FileAlreadyExists);
+                }
+                Arc::new(file)
             }
-            object = Arc::new(file);
-        } else if create {
-            VirtualFS.lock().create_file(path.clone())?;
-            let reopen_result = VirtualFS.lock().open(path.clone());
-            object = match reopen_result {
-                Ok(file) => Arc::new(file),
-                Err(err) => return Err(err.into()),
-            };
-        } else {
-            return Err(SyscallError::FileNotFound);
-        }
+            Err(FSError::NotFound) if create => {
+                VirtualFS.lock().create_file(path.clone())?;
+                let reopen_result = VirtualFS.lock().open(path.clone());
+                match reopen_result {
+                    Ok(file) => Arc::new(file),
+                    Err(err) => return Err(err.into()),
+                }
+            }
+            Err(err) => return Err(err.into()),
+        };
 
         let info = object.info()?;
         if nofollow && !path_only && matches!(info.file_like_type, FileLikeType::Symlink) {

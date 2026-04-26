@@ -25,6 +25,11 @@ impl VFS {
     }
 
     pub fn create_file(&mut self, path: Path) -> FSResult<()> {
+        let normalized = self.normalize_path(path.clone());
+        if normalized.ends_with_slash() {
+            return Err(FSError::NotADirectory);
+        }
+
         let (parent_dir, name) = self.resolve_parent(path)?;
 
         parent_dir

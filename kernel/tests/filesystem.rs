@@ -31,6 +31,7 @@ use alloc::string::ToString;
 
 use kernel::{
     filesystem::{
+        errors::FSError,
         path::Path,
         vfs::{FileData, VirtualFS},
     },
@@ -57,6 +58,12 @@ test!("VFS Basic", || {
 test!("VFS Create Dir", || {
     let a_txt = Path::new("/test/vfs_dir");
     VirtualFS.lock().create_dir(a_txt.clone()).unwrap();
+});
+
+test!("VFS Reject File Create With Trailing Slash", || {
+    let path = Path::new("/test/vfs_file_slash/");
+    let err = VirtualFS.lock().create_file(path).unwrap_err();
+    assert_eq!(err, FSError::NotADirectory);
 });
 
 test!("VFS List Contents", || {

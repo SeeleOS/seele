@@ -58,6 +58,10 @@ impl Path {
         matches!(self.parts.first(), Some(PathPart::Root))
     }
 
+    pub fn ends_with_slash(&self) -> bool {
+        self.ends_with_slash
+    }
+
     pub fn normalize(&self) -> Self {
         let mut normalized = Vec::new();
         let is_absolute = self.is_absolute();
