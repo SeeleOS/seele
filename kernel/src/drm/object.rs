@@ -18,8 +18,9 @@ use super::abi::{
     DRM_CAP_TIMESTAMP_MONOTONIC, DRM_CLIENT_CAP_ASPECT_RATIO, DRM_CLIENT_CAP_ATOMIC,
     DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, DRM_CLIENT_CAP_STEREO_3D, DRM_CLIENT_CAP_UNIVERSAL_PLANES,
     DRM_CLIENT_CAP_WRITEBACK_CONNECTORS, DRM_MODE_CONNECTED, DRM_MODE_CONNECTOR_VIRTUAL,
-    DRM_MODE_ENCODER_VIRTUAL, DRM_MODE_SUBPIXEL_UNKNOWN, ENCODER0_ID, current_framebuffer_info,
-    current_mode_info,
+    DRM_MODE_ENCODER_VIRTUAL, DRM_MODE_OBJECT_CONNECTOR, DRM_MODE_OBJECT_CRTC,
+    DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_FB, DRM_MODE_SUBPIXEL_UNKNOWN, ENCODER0_ID,
+    current_framebuffer_info, current_mode_info,
 };
 
 #[derive(Default, Debug)]
@@ -153,6 +154,28 @@ impl Configuratable for DrmCardObject {
                 connector.subpixel = DRM_MODE_SUBPIXEL_UNKNOWN;
                 connector.pad = 0;
                 user_safe::write(ptr, &connector).map_err(|_| ObjectError::InvalidArguments)?;
+                Ok(0)
+            }
+            ConfigurateRequest::DrmModeGetProperty(ptr) => {
+                let mut property = read_user(ptr)?;
+                property.flags = 0;
+                property.name = [0; 32];
+                property.count_values = 0;
+                property.count_enum_blobs = 0;
+                user_safe::write(ptr, &property).map_err(|_| ObjectError::InvalidArguments)?;
+                Ok(0)
+            }
+            ConfigurateRequest::DrmModeObjGetProperties(ptr) => {
+                let mut properties = read_user(ptr)?;
+                match properties.obj_type {
+                    DRM_MODE_OBJECT_CRTC if properties.obj_id == CRTC0_ID => {}
+                    DRM_MODE_OBJECT_CONNECTOR if properties.obj_id == CONNECTOR0_ID => {}
+                    DRM_MODE_OBJECT_ENCODER if properties.obj_id == ENCODER0_ID => {}
+                    DRM_MODE_OBJECT_FB => {}
+                    _ => return Err(ObjectError::InvalidArguments),
+                }
+                properties.count_props = 0;
+                user_safe::write(ptr, &properties).map_err(|_| ObjectError::InvalidArguments)?;
                 Ok(0)
             }
             _ => Err(ObjectError::InvalidArguments),

@@ -7,9 +7,11 @@ use crate::{
 
 use crate::drm::abi::{
     DRM_IOCTL_DROP_MASTER, DRM_IOCTL_GET_CAP, DRM_IOCTL_MODE_GETCONNECTOR, DRM_IOCTL_MODE_GETCRTC,
-    DRM_IOCTL_MODE_GETENCODER, DRM_IOCTL_MODE_GETRESOURCES, DRM_IOCTL_MODE_SETCRTC,
-    DRM_IOCTL_SET_CLIENT_CAP, DRM_IOCTL_SET_MASTER, DRM_IOCTL_VERSION, DrmGetCap, DrmModeCardRes,
-    DrmModeCrtc, DrmModeGetConnector, DrmModeGetEncoder, DrmSetClientCap, DrmVersion,
+    DRM_IOCTL_MODE_GETENCODER, DRM_IOCTL_MODE_GETPROPERTY, DRM_IOCTL_MODE_GETRESOURCES,
+    DRM_IOCTL_MODE_OBJ_GETPROPERTIES, DRM_IOCTL_MODE_SETCRTC, DRM_IOCTL_SET_CLIENT_CAP,
+    DRM_IOCTL_SET_MASTER, DRM_IOCTL_VERSION, DrmGetCap, DrmModeCardRes, DrmModeCrtc,
+    DrmModeGetConnector, DrmModeGetEncoder, DrmModeGetProperty, DrmModeObjGetProperties,
+    DrmSetClientCap, DrmVersion,
 };
 use crate::misc::framebuffer_ioctl::{FbCmap, FbFixScreeninfo, FbVarScreeninfo};
 use crate::terminal::linux_kd::{LinuxKbEntry, LinuxVtMode, LinuxVtStat};
@@ -62,6 +64,8 @@ pub enum ConfigurateRequest {
     DrmModeSetCrtc(*mut DrmModeCrtc),
     DrmModeGetEncoder(*mut DrmModeGetEncoder),
     DrmModeGetConnector(*mut DrmModeGetConnector),
+    DrmModeGetProperty(*mut DrmModeGetProperty),
+    DrmModeObjGetProperties(*mut DrmModeObjGetProperties),
     RawIoctl { request: u64, arg: u64 },
 }
 
@@ -169,6 +173,10 @@ impl ConfigurateRequest {
             DRM_IOCTL_MODE_GETENCODER => Self::DrmModeGetEncoder(ptr as *mut DrmModeGetEncoder),
             DRM_IOCTL_MODE_GETCONNECTOR => {
                 Self::DrmModeGetConnector(ptr as *mut DrmModeGetConnector)
+            }
+            DRM_IOCTL_MODE_GETPROPERTY => Self::DrmModeGetProperty(ptr as *mut DrmModeGetProperty),
+            DRM_IOCTL_MODE_OBJ_GETPROPERTIES => {
+                Self::DrmModeObjGetProperties(ptr as *mut DrmModeObjGetProperties)
             }
             0x4600 => Self::FbGetVariableScreenInfo(ptr as *mut FbVarScreeninfo),
             0x4601 => Self::FbPutVariableScreenInfo(ptr as *mut FbVarScreeninfo),

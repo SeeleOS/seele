@@ -12,6 +12,8 @@ pub const DRM_IOCTL_MODE_GETCRTC: u64 = 0xc068_64a1;
 pub const DRM_IOCTL_MODE_SETCRTC: u64 = 0xc068_64a2;
 pub const DRM_IOCTL_MODE_GETENCODER: u64 = 0xc014_64a6;
 pub const DRM_IOCTL_MODE_GETCONNECTOR: u64 = 0xc050_64a7;
+pub const DRM_IOCTL_MODE_GETPROPERTY: u64 = 0xc040_64aa;
+pub const DRM_IOCTL_MODE_OBJ_GETPROPERTIES: u64 = 0xc020_64b9;
 
 pub const DRM_CAP_DUMB_BUFFER: u64 = 0x1;
 pub const DRM_CAP_DUMB_PREFERRED_DEPTH: u64 = 0x3;
@@ -32,6 +34,10 @@ pub const DRM_MODE_CONNECTED: u32 = 1;
 pub const DRM_MODE_SUBPIXEL_UNKNOWN: u32 = 0;
 pub const DRM_MODE_ENCODER_VIRTUAL: u32 = 5;
 pub const DRM_MODE_CONNECTOR_VIRTUAL: u32 = 15;
+pub const DRM_MODE_OBJECT_CRTC: u32 = 0xcccc_cccc;
+pub const DRM_MODE_OBJECT_CONNECTOR: u32 = 0xc0c0_c0c0;
+pub const DRM_MODE_OBJECT_ENCODER: u32 = 0xe0e0_e0e0;
+pub const DRM_MODE_OBJECT_FB: u32 = 0xfbfb_fbfb;
 
 pub const CARD0_ID: u32 = 0x1000;
 pub const CRTC0_ID: u32 = 0x1001;
@@ -155,6 +161,28 @@ pub struct DrmModeGetConnector {
     pub mm_height: u32,
     pub subpixel: u32,
     pub pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModeGetProperty {
+    pub values_ptr: u64,
+    pub enum_blob_ptr: u64,
+    pub prop_id: u32,
+    pub flags: u32,
+    pub name: [u8; 32],
+    pub count_values: u32,
+    pub count_enum_blobs: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModeObjGetProperties {
+    pub props_ptr: u64,
+    pub prop_values_ptr: u64,
+    pub count_props: u32,
+    pub obj_id: u32,
+    pub obj_type: u32,
 }
 
 pub fn current_mode_info() -> DrmModeModeInfo {
