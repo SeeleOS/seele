@@ -296,8 +296,11 @@ fn resolve_path_at(dirfd: i32, path_str: &str) -> Result<Path, SyscallError> {
 
 fn ensure_directory_exists(path: &str) -> Result<(), SyscallError> {
     let path = Path::new(path);
-    if VirtualFS.lock().file_info(path.clone()).is_ok() {
-        return Ok(());
+    if let Ok(info) = VirtualFS.lock().file_info(path.clone()) {
+        return match info.file_like_type {
+            FileLikeType::Directory => Ok(()),
+            _ => Err(SyscallError::NotADirectory),
+        };
     }
     VirtualFS.lock().create_dir(path)?;
     Ok(())
@@ -789,6 +792,10 @@ define_syscall!(OpenAt, |dirfd: i32,
         let nofollow = flags.contains(OpenFlags::NOFOLLOW);
         let directory_only = flags.contains(OpenFlags::DIRECTORY);
         let path_only = flags.contains(OpenFlags::PATH);
+
+        if create && directory_only {
+            return Err(SyscallError::InvalidArguments);
+        }
 
         let path = resolve_path_at(dirfd, &path_str)?;
         let open_result = if nofollow {
