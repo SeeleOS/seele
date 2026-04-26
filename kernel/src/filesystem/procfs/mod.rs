@@ -11,10 +11,15 @@ use crate::filesystem::{
     vfs_traits::{DirectoryContentType, FileLike, FileSystem},
 };
 
+mod net;
 mod nodes;
 mod pid;
 mod root;
 
+use net::{
+    PROC_NET_DEV_INODE, PROC_NET_IF_INET6_INODE, PROC_NET_INODE, PROC_NET_ROUTE_INODE,
+    proc_net_dev_bytes, proc_net_entries, proc_net_if_inet6_bytes, proc_net_route_bytes,
+};
 use nodes::{proc_dir, proc_file, proc_rw_file, proc_symlink};
 use pid::{
     current_pid, ensure_pid_exists, fd_target, parse_fd, parse_pid, pid_cgroup_inode,
@@ -188,6 +193,18 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         ["devices"] => Ok(proc_file("devices", PROC_DEVICES_INODE, proc_devices_bytes)),
         ["meminfo"] => Ok(proc_file("meminfo", PROC_MEMINFO_INODE, proc_meminfo_bytes)),
         ["mounts"] => Ok(proc_file("mounts", PROC_MOUNTS_INODE, proc_mounts_bytes)),
+        ["net"] => Ok(proc_dir("/net", "net", PROC_NET_INODE, proc_net_entries())),
+        ["net", "dev"] => Ok(proc_file("dev", PROC_NET_DEV_INODE, proc_net_dev_bytes)),
+        ["net", "route"] => Ok(proc_file(
+            "route",
+            PROC_NET_ROUTE_INODE,
+            proc_net_route_bytes,
+        )),
+        ["net", "if_inet6"] => Ok(proc_file(
+            "if_inet6",
+            PROC_NET_IF_INET6_INODE,
+            proc_net_if_inet6_bytes,
+        )),
         ["stat"] => Ok(proc_file("stat", PROC_STAT_INODE, proc_stat_bytes)),
         ["uptime"] => Ok(proc_file("uptime", PROC_UPTIME_INODE, proc_uptime_bytes)),
         ["pressure"] => Ok(proc_dir(
@@ -360,6 +377,23 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             let pid = current_pid()?;
             Ok(proc_symlink("root", pid_root_inode(pid), "/".into()))
         }
+        ["self", "net"] => Ok(proc_dir(
+            "/self/net",
+            "net",
+            PROC_NET_INODE,
+            proc_net_entries(),
+        )),
+        ["self", "net", "dev"] => Ok(proc_file("dev", PROC_NET_DEV_INODE, proc_net_dev_bytes)),
+        ["self", "net", "route"] => Ok(proc_file(
+            "route",
+            PROC_NET_ROUTE_INODE,
+            proc_net_route_bytes,
+        )),
+        ["self", "net", "if_inet6"] => Ok(proc_file(
+            "if_inet6",
+            PROC_NET_IF_INET6_INODE,
+            proc_net_if_inet6_bytes,
+        )),
         ["self", "ns"] => {
             let pid = current_pid()?;
             Ok(proc_dir(
@@ -513,6 +547,39 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             let pid = parse_pid(pid)?;
             ensure_pid_exists(pid)?;
             Ok(proc_symlink("root", pid_root_inode(pid), "/".into()))
+        }
+        [pid, "net"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_dir(
+                &format!("/{}/net", pid.0),
+                "net",
+                PROC_NET_INODE,
+                proc_net_entries(),
+            ))
+        }
+        [pid, "net", "dev"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_file("dev", PROC_NET_DEV_INODE, proc_net_dev_bytes))
+        }
+        [pid, "net", "route"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_file(
+                "route",
+                PROC_NET_ROUTE_INODE,
+                proc_net_route_bytes,
+            ))
+        }
+        [pid, "net", "if_inet6"] => {
+            let pid = parse_pid(pid)?;
+            ensure_pid_exists(pid)?;
+            Ok(proc_file(
+                "if_inet6",
+                PROC_NET_IF_INET6_INODE,
+                proc_net_if_inet6_bytes,
+            ))
         }
         [pid, "ns"] => {
             let pid = parse_pid(pid)?;

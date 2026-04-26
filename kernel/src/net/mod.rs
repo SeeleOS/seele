@@ -94,6 +94,7 @@ pub struct NetworkInterfaceInfo {
     pub mtu: u32,
     pub loopback: bool,
     pub ipv4: Option<([u8; 4], u8)>,
+    pub gateway: Option<[u8; 4]>,
 }
 
 impl From<IpEndpoint> for InetAddress {
@@ -371,6 +372,7 @@ pub fn interfaces() -> Vec<NetworkInterfaceInfo> {
         mtu: 65_536,
         loopback: true,
         ipv4: Some((LOOPBACK_IPV4, LOOPBACK_PREFIX_LEN)),
+        gateway: None,
     }];
 
     let manager = manager().lock();
@@ -382,6 +384,7 @@ pub fn interfaces() -> Vec<NetworkInterfaceInfo> {
             mtu: stack.device.device.mtu() as u32,
             loopback: false,
             ipv4: Some((STATIC_IPV4, STATIC_IPV4_PREFIX_LEN)),
+            gateway: Some(DEFAULT_GATEWAY_IPV4),
         });
     }
 

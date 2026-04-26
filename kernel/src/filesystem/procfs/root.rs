@@ -48,6 +48,7 @@ pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("devices".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("meminfo".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("mounts".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("net".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("pressure".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("stat".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("self".into(), DirectoryContentType::Symlink),
