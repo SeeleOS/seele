@@ -64,7 +64,12 @@ impl Process {
                     &mut next_fd_table,
                 )
             },
-            alloc::format!("execve setup_process pid={} path={}", self.pid.0, path_string).as_str(),
+            alloc::format!(
+                "execve setup_process pid={} path={}",
+                self.pid.0,
+                path_string
+            )
+            .as_str(),
         )?;
 
         // TODO: kill all the other threads when execveing
@@ -120,7 +125,10 @@ impl Process {
         );
         set_current_kernel_stack(thread_locked.kernel_stack_top);
         let vfork_blocker = self.vfork_blocker.take();
-        Ok((&mut thread_locked.snapshot as *mut ThreadSnapshot, vfork_blocker))
+        Ok((
+            &mut thread_locked.snapshot as *mut ThreadSnapshot,
+            vfork_blocker,
+        ))
     }
 }
 
