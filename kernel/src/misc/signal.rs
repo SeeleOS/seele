@@ -21,71 +21,72 @@ pub mod action {
     pub use super::{SignalAction, SignalHandlingType, Signals};
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, TryFromPrimitive, Debug, EnumIter)]
 #[repr(u64)]
 pub enum Signal {
-    Hangup = 1,
-    Interrupt = 2,
-    Quit = 3,
-    IllegalInstruction = 4,
-    Trap = 5,
-    Abort = 6,
-    BusError = 7,
-    FloatingPointError = 8,
-    Kill = 9,
-    User1 = 10,
-    InvalidMemoryAccess = 11,
-    User2 = 12,
-    BrokenPipe = 13,
-    Alarm = 14,
-    Terminate = 15,
-    StackFault = 16,
-    ChildChanged = 17,
-    Continue = 18,
-    Stop = 19,
-    TerminalStop = 20,
-    TerminalInput = 21,
-    TerminalOutput = 22,
-    UrgentCondition = 23,
-    CpuTimeLimitExceeded = 24,
-    FileSizeLimitExceeded = 25,
-    VirtualAlarm = 26,
-    ProfilingTimer = 27,
-    WindowChanged = 28,
-    IoPossible = 29,
-    PowerFailure = 30,
-    BadSystemCall = 31,
-    Realtime0 = 34,
-    Realtime1 = 35,
-    Realtime2 = 36,
-    Realtime3 = 37,
-    Realtime4 = 38,
-    Realtime5 = 39,
-    Realtime6 = 40,
-    Realtime7 = 41,
-    Realtime8 = 42,
-    Realtime9 = 43,
-    Realtime10 = 44,
-    Realtime11 = 45,
-    Realtime12 = 46,
-    Realtime13 = 47,
-    Realtime14 = 48,
-    Realtime15 = 49,
-    Realtime16 = 50,
-    Realtime17 = 51,
-    Realtime18 = 52,
-    Realtime19 = 53,
-    Realtime20 = 54,
-    Realtime21 = 55,
-    Realtime22 = 56,
-    Realtime23 = 57,
-    Realtime24 = 58,
-    Realtime25 = 59,
-    Realtime26 = 60,
-    Realtime27 = 61,
-    Realtime28 = 62,
-    Realtime29 = 63,
-    Realtime30 = 64,
+    SIGHUP = 1,
+    SIGINT = 2,
+    SIGQUIT = 3,
+    SIGILL = 4,
+    SIGTRAP = 5,
+    SIGABRT = 6,
+    SIGBUS = 7,
+    SIGFPE = 8,
+    SIGKILL = 9,
+    SIGUSR1 = 10,
+    SIGSEGV = 11,
+    SIGUSR2 = 12,
+    SIGPIPE = 13,
+    SIGALRM = 14,
+    SIGTERM = 15,
+    SIGSTKFLT = 16,
+    SIGCHLD = 17,
+    SIGCONT = 18,
+    SIGSTOP = 19,
+    SIGTSTP = 20,
+    SIGTTIN = 21,
+    SIGTTOU = 22,
+    SIGURG = 23,
+    SIGXCPU = 24,
+    SIGXFSZ = 25,
+    SIGVTALRM = 26,
+    SIGPROF = 27,
+    SIGWINCH = 28,
+    SIGIO = 29,
+    SIGPWR = 30,
+    SIGSYS = 31,
+    SIGRTMIN = 34,
+    SIGRTMIN_PLUS_1 = 35,
+    SIGRTMIN_PLUS_2 = 36,
+    SIGRTMIN_PLUS_3 = 37,
+    SIGRTMIN_PLUS_4 = 38,
+    SIGRTMIN_PLUS_5 = 39,
+    SIGRTMIN_PLUS_6 = 40,
+    SIGRTMIN_PLUS_7 = 41,
+    SIGRTMIN_PLUS_8 = 42,
+    SIGRTMIN_PLUS_9 = 43,
+    SIGRTMIN_PLUS_10 = 44,
+    SIGRTMIN_PLUS_11 = 45,
+    SIGRTMIN_PLUS_12 = 46,
+    SIGRTMIN_PLUS_13 = 47,
+    SIGRTMIN_PLUS_14 = 48,
+    SIGRTMIN_PLUS_15 = 49,
+    SIGRTMIN_PLUS_16 = 50,
+    SIGRTMIN_PLUS_17 = 51,
+    SIGRTMIN_PLUS_18 = 52,
+    SIGRTMIN_PLUS_19 = 53,
+    SIGRTMIN_PLUS_20 = 54,
+    SIGRTMIN_PLUS_21 = 55,
+    SIGRTMIN_PLUS_22 = 56,
+    SIGRTMIN_PLUS_23 = 57,
+    SIGRTMIN_PLUS_24 = 58,
+    SIGRTMIN_PLUS_25 = 59,
+    SIGRTMIN_PLUS_26 = 60,
+    SIGRTMIN_PLUS_27 = 61,
+    SIGRTMIN_PLUS_28 = 62,
+    SIGRTMIN_PLUS_29 = 63,
+    SIGRTMIN_PLUS_30 = 64,
 }
 
 pub const SIGNAL_AMOUNT: usize = 64;
@@ -218,7 +219,7 @@ impl Signal {
     }
 
     pub const fn is_realtime(self) -> bool {
-        (self as u64) >= Self::Realtime0 as u64
+        (self as u64) >= Self::SIGRTMIN as u64
     }
 }
 
@@ -226,37 +227,37 @@ bitflags! {
     #[derive(Default, Clone, Copy, Debug)]
     #[repr(transparent)]
     pub struct Signals: u64 {
-        const HANGUP = Signal::Hangup.mask();
-        const INTERRUPT = Signal::Interrupt.mask();
-        const QUIT = Signal::Quit.mask();
-        const ILLEGAL_INSTRUCTION = Signal::IllegalInstruction.mask();
-        const TRAP = Signal::Trap.mask();
-        const ABORT = Signal::Abort.mask();
-        const BUS_ERROR = Signal::BusError.mask();
-        const FLOATING_POINT_ERROR = Signal::FloatingPointError.mask();
-        const KILL = Signal::Kill.mask();
-        const USER1 = Signal::User1.mask();
-        const INVALID_MEMORY_ACCESS = Signal::InvalidMemoryAccess.mask();
-        const USER2 = Signal::User2.mask();
-        const BROKEN_PIPE = Signal::BrokenPipe.mask();
-        const ALARM = Signal::Alarm.mask();
-        const TERMINATE = Signal::Terminate.mask();
-        const STACK_FAULT = Signal::StackFault.mask();
-        const CHILD_CHANGED = Signal::ChildChanged.mask();
-        const CONTINUE = Signal::Continue.mask();
-        const STOP = Signal::Stop.mask();
-        const TERMINAL_STOP = Signal::TerminalStop.mask();
-        const TERMINAL_INPUT = Signal::TerminalInput.mask();
-        const TERMINAL_OUTPUT = Signal::TerminalOutput.mask();
-        const URGENT_CONDITION = Signal::UrgentCondition.mask();
-        const CPU_TIME_LIMIT_EXCEEDED = Signal::CpuTimeLimitExceeded.mask();
-        const FILE_SIZE_LIMIT_EXCEEDED = Signal::FileSizeLimitExceeded.mask();
-        const VIRTUAL_ALARM = Signal::VirtualAlarm.mask();
-        const PROFILING_TIMER = Signal::ProfilingTimer.mask();
-        const WINDOW_CHANGED = Signal::WindowChanged.mask();
-        const IO_POSSIBLE = Signal::IoPossible.mask();
-        const POWER_FAILURE = Signal::PowerFailure.mask();
-        const BAD_SYSTEM_CALL = Signal::BadSystemCall.mask();
+        const SIGHUP = Signal::SIGHUP.mask();
+        const SIGINT = Signal::SIGINT.mask();
+        const SIGQUIT = Signal::SIGQUIT.mask();
+        const SIGILL = Signal::SIGILL.mask();
+        const SIGTRAP = Signal::SIGTRAP.mask();
+        const SIGABRT = Signal::SIGABRT.mask();
+        const SIGBUS = Signal::SIGBUS.mask();
+        const SIGFPE = Signal::SIGFPE.mask();
+        const SIGKILL = Signal::SIGKILL.mask();
+        const SIGUSR1 = Signal::SIGUSR1.mask();
+        const SIGSEGV = Signal::SIGSEGV.mask();
+        const SIGUSR2 = Signal::SIGUSR2.mask();
+        const SIGPIPE = Signal::SIGPIPE.mask();
+        const SIGALRM = Signal::SIGALRM.mask();
+        const SIGTERM = Signal::SIGTERM.mask();
+        const SIGSTKFLT = Signal::SIGSTKFLT.mask();
+        const SIGCHLD = Signal::SIGCHLD.mask();
+        const SIGCONT = Signal::SIGCONT.mask();
+        const SIGSTOP = Signal::SIGSTOP.mask();
+        const SIGTSTP = Signal::SIGTSTP.mask();
+        const SIGTTIN = Signal::SIGTTIN.mask();
+        const SIGTTOU = Signal::SIGTTOU.mask();
+        const SIGURG = Signal::SIGURG.mask();
+        const SIGXCPU = Signal::SIGXCPU.mask();
+        const SIGXFSZ = Signal::SIGXFSZ.mask();
+        const SIGVTALRM = Signal::SIGVTALRM.mask();
+        const SIGPROF = Signal::SIGPROF.mask();
+        const SIGWINCH = Signal::SIGWINCH.mask();
+        const SIGIO = Signal::SIGIO.mask();
+        const SIGPWR = Signal::SIGPWR.mask();
+        const SIGSYS = Signal::SIGSYS.mask();
     }
 }
 
@@ -310,7 +311,7 @@ fn wake_process_threads(process: &ProcessRef, wake_stopped_only: bool) {
 
 pub fn send_signal_to_process(process: &ProcessRef, signal: Signal) {
     match signal {
-        Signal::Continue => wake_process_threads(process, true),
+        Signal::SIGCONT => wake_process_threads(process, true),
         _ => {
             let pid = {
                 let mut process = process.lock();
@@ -465,28 +466,28 @@ impl Process {
         if signal.is_realtime()
             || matches!(
                 signal,
-                Signal::Terminate
-                    | Signal::Kill
-                    | Signal::Interrupt
-                    | Signal::Quit
-                    | Signal::Abort
-                    | Signal::BusError
-                    | Signal::InvalidMemoryAccess
-                    | Signal::BrokenPipe
-                    | Signal::Hangup
-                    | Signal::FloatingPointError
-                    | Signal::IllegalInstruction
-                    | Signal::StackFault
-                    | Signal::Trap
-                    | Signal::User1
-                    | Signal::User2
-                    | Signal::CpuTimeLimitExceeded
-                    | Signal::FileSizeLimitExceeded
-                    | Signal::VirtualAlarm
-                    | Signal::ProfilingTimer
-                    | Signal::IoPossible
-                    | Signal::PowerFailure
-                    | Signal::BadSystemCall
+                Signal::SIGTERM
+                    | Signal::SIGKILL
+                    | Signal::SIGINT
+                    | Signal::SIGQUIT
+                    | Signal::SIGABRT
+                    | Signal::SIGBUS
+                    | Signal::SIGSEGV
+                    | Signal::SIGPIPE
+                    | Signal::SIGHUP
+                    | Signal::SIGFPE
+                    | Signal::SIGILL
+                    | Signal::SIGSTKFLT
+                    | Signal::SIGTRAP
+                    | Signal::SIGUSR1
+                    | Signal::SIGUSR2
+                    | Signal::SIGXCPU
+                    | Signal::SIGXFSZ
+                    | Signal::SIGVTALRM
+                    | Signal::SIGPROF
+                    | Signal::SIGIO
+                    | Signal::SIGPWR
+                    | Signal::SIGSYS
             )
         {
             s_println!("fatal signal: pid={} signal={:?}", self.pid.0, signal);
@@ -499,19 +500,18 @@ impl Process {
         }
 
         match signal {
-            Signal::ChildChanged | Signal::UrgentCondition | Signal::WindowChanged => {
+            Signal::SIGCHLD | Signal::SIGURG | Signal::SIGWINCH => {
                 ProcessSignalsResult::default()
             }
-            Signal::Stop
-            | Signal::TerminalStop
-            | Signal::TerminalInput
-            | Signal::TerminalOutput => ProcessSignalsResult {
+            Signal::SIGSTOP | Signal::SIGTSTP | Signal::SIGTTIN | Signal::SIGTTOU => {
+                ProcessSignalsResult {
                 should_switch: true,
                 exited_threads: Vec::new(),
                 stopped_group: Some(self.group_id),
-            },
-            Signal::Continue => unreachable!(),
-            Signal::Alarm => ProcessSignalsResult::default(),
+            }
+            }
+            Signal::SIGCONT => unreachable!(),
+            Signal::SIGALRM => ProcessSignalsResult::default(),
             _ => ProcessSignalsResult::default(),
         }
     }

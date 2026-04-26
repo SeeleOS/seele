@@ -35,7 +35,7 @@ impl Default for Sigevent {
     fn default() -> Self {
         Self {
             notify_type: TimerNotify::None,
-            signal: Signal::Alarm,
+            signal: Signal::SIGALRM,
         }
     }
 }

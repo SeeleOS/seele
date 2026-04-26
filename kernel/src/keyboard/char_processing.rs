@@ -23,7 +23,7 @@ fn handle_interrupt_char(
 
     if let Some(group_id) = active_group {
         for process in group_id.get_processes() {
-            send_signal_to_process(&process, Signal::Interrupt);
+            send_signal_to_process(&process, Signal::SIGINT);
         }
     }
 

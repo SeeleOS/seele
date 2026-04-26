@@ -31,7 +31,7 @@ extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) 
 
 extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
     if is_user_mode(&stack_frame) {
-        handle_usermode_exception(&stack_frame, Signal::IllegalInstruction);
+        handle_usermode_exception(&stack_frame, Signal::SIGILL);
     }
 
     panic!("invalid opcode.\n {:#?}", stack_frame);
@@ -39,7 +39,7 @@ extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFram
 
 extern "x86-interrupt" fn gp_handler(stack_frame: InterruptStackFrame, _err_code: u64) {
     if is_user_mode(&stack_frame) {
-        handle_usermode_exception(&stack_frame, Signal::InvalidMemoryAccess);
+        handle_usermode_exception(&stack_frame, Signal::SIGSEGV);
     }
 
     panic!("GP fault. \n {:#?}", stack_frame);

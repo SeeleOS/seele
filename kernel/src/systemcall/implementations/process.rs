@@ -39,7 +39,7 @@ fn exit_code_to_status(exit_code: u64) -> i32 {
 
 fn has_wait_interrupt_signal(process: &ProcessRef) -> bool {
     let mut pending = process.lock().pending_signals;
-    pending.remove(Signal::ChildChanged.into());
+    pending.remove(Signal::SIGCHLD.into());
     !pending.is_empty()
 }
 
@@ -177,7 +177,7 @@ define_syscall!(Waitid, |id_type: i32,
             SigInfo::default()
         } else {
             SigInfo::for_waitid(
-                Signal::ChildChanged,
+                Signal::SIGCHLD,
                 CLD_EXITED,
                 pid as i32,
                 (status >> 8) & 0xff,

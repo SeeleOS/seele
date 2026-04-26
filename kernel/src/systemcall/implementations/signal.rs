@@ -45,7 +45,7 @@ static SIGALTSTACK_STATE: Mutex<LinuxStack> = Mutex::new(LinuxStack {
 bitflags! {
     #[derive(Clone, Copy, Debug)]
     struct SigActionFlags: u64 {
-        const SIGINFO = 0x0000_0004;
+        const SA_SIGINFO = 0x0000_0004;
     }
 }
 
@@ -79,7 +79,9 @@ fn encode_sigaction(action: &SignalAction) -> LinuxSigAction {
         SignalHandlingType::Default => (SIG_DFL, 0),
         SignalHandlingType::Ignore => (SIG_IGN, 0),
         SignalHandlingType::Function1(func) => (func as usize, 0),
-        SignalHandlingType::Function2(func) => (func as usize, SigActionFlags::SIGINFO.bits()),
+        SignalHandlingType::Function2(func) => {
+            (func as usize, SigActionFlags::SA_SIGINFO.bits())
+        }
     };
 
     LinuxSigAction {
@@ -96,7 +98,7 @@ fn decode_sigaction(action: LinuxSigAction) -> SignalAction {
         SIG_IGN => SignalHandlingType::Ignore,
         handler
             if SigActionFlags::from_bits_truncate(action.flags)
-                .contains(SigActionFlags::SIGINFO) =>
+                .contains(SigActionFlags::SA_SIGINFO) =>
         unsafe {
             SignalHandlingType::Function2(core::mem::transmute::<
                 usize,

@@ -121,7 +121,7 @@ impl Writable for PtyMaster {
             group_id
                 .get_processes()
                 .iter()
-                .for_each(|process| send_signal_to_process(process, Signal::Interrupt));
+                .for_each(|process| send_signal_to_process(process, Signal::SIGINT));
         }
 
         let mut manager = THREAD_MANAGER.get().unwrap().lock();

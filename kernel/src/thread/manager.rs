@@ -170,7 +170,7 @@ impl ThreadManager {
                     let mut parent = parent.lock();
                     parent
                         .pending_signals
-                        .insert(Signals::from(Signal::ChildChanged));
+                        .insert(Signals::from(Signal::SIGCHLD));
                     (parent.pid.0, parent.threads.clone())
                 };
 
