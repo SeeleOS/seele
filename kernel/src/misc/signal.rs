@@ -56,6 +56,8 @@ pub enum Signal {
     SIGIO = 29,
     SIGPWR = 30,
     SIGSYS = 31,
+    SIGCANCEL = 32,
+    SIGSETXID = 33,
     SIGRTMIN = 34,
     SIGRTMIN_PLUS_1 = 35,
     SIGRTMIN_PLUS_2 = 36,
@@ -258,6 +260,8 @@ bitflags! {
         const SIGIO = Signal::SIGIO.mask();
         const SIGPWR = Signal::SIGPWR.mask();
         const SIGSYS = Signal::SIGSYS.mask();
+        const SIGCANCEL = Signal::SIGCANCEL.mask();
+        const SIGSETXID = Signal::SIGSETXID.mask();
     }
 }
 
