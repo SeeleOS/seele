@@ -1,14 +1,22 @@
 use crate::{
     filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
     misc::time::with_profiling,
-    process::{Process, manager::MANAGER, new::setup_process},
+    process::{
+        Process,
+        manager::{MANAGER, wake_vfork_blocker},
+        new::setup_process,
+    },
     signal::{
         Signals,
         action::{SignalAction, SignalHandlingType},
         misc::default_signal_action_vec,
     },
     smp::{current_process, current_thread, set_current_kernel_stack},
-    thread::{misc::SnapshotState, snapshot::ThreadSnapshot, stack::allocate_kernel_stack},
+    thread::{
+        misc::{SnapshotState, ThreadID},
+        snapshot::ThreadSnapshot,
+        stack::allocate_kernel_stack,
+    },
 };
 use alloc::{string::String, vec, vec::Vec};
 
@@ -31,7 +39,7 @@ impl Process {
         path: Path,
         args: Vec<String>,
         env: Vec<String>,
-    ) -> Result<*mut ThreadSnapshot, FSError> {
+    ) -> Result<(*mut ThreadSnapshot, Option<ThreadID>), FSError> {
         let path_string = path.clone().as_string();
         let command_line = if args.is_empty() {
             vec![path_string.clone()]
@@ -96,13 +104,14 @@ impl Process {
             .as_str(),
         );
         set_current_kernel_stack(thread_locked.kernel_stack_top);
-        Ok(&mut thread_locked.snapshot as *mut ThreadSnapshot)
+        let vfork_blocker = self.vfork_blocker.take();
+        Ok((&mut thread_locked.snapshot as *mut ThreadSnapshot, vfork_blocker))
     }
 }
 
 pub fn execve(path: Path, args: Vec<String>, env: Vec<String>) -> Result<(), FSError> {
     let (_, resolved_path) = VirtualFS.lock().resolve_with_path(path)?;
-    let snapshot = {
+    let (snapshot, vfork_blocker) = {
         let _manager = MANAGER.lock();
         let current = current_process();
         with_profiling(
@@ -110,6 +119,9 @@ pub fn execve(path: Path, args: Vec<String>, env: Vec<String>) -> Result<(), FSE
             "process::execve total",
         )?
     };
+    if let Some(thread_id) = vfork_blocker {
+        wake_vfork_blocker(thread_id);
+    }
 
     unsafe { (*snapshot).switch_from(None, None) };
 

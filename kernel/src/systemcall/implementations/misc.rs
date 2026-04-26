@@ -31,7 +31,10 @@ use crate::signal::{
 use crate::systemcall::utils::{SyscallError, SyscallImpl};
 use crate::terminal::pty::create_pty;
 use crate::thread::misc::with_current_thread;
-use crate::thread::yielding::{BlockType, WakeType, block_current_with_sig_check};
+use crate::thread::yielding::{
+    BlockType, WakeType, block_current_with_sig_check, cancel_block, finish_block_current,
+    prepare_block_current,
+};
 use crate::{NAME, define_syscall};
 
 bitflags! {
@@ -290,6 +293,26 @@ struct CloneProcessArgs {
     cgroup_fd: u64,
 }
 
+fn wait_for_vfork_completion(child_process: &crate::process::ProcessRef) {
+    loop {
+        if child_process.lock().vfork_blocker.is_none() {
+            return;
+        }
+
+        let current = prepare_block_current(BlockType::WakeRequired {
+            wake_type: WakeType::ProcsesExit,
+            deadline: None,
+        });
+
+        if child_process.lock().vfork_blocker.is_none() {
+            cancel_block(&current);
+            return;
+        }
+
+        finish_block_current();
+    }
+}
+
 fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
     let CloneProcessArgs {
         clone_flags,
@@ -341,6 +364,10 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
     let pid = child_process.lock().pid;
     MANAGER.lock().processes.insert(pid, child_process.clone());
 
+    if clone_flags.contains(CloneFlags::VFORK) {
+        child_process.lock().vfork_blocker = Some(crate::thread::get_current_thread().lock().id);
+    }
+
     if clone_flags.contains(CloneFlags::INTO_CGROUP) {
         let cgroup_path = get_object_current_process(cgroup_fd)
             .map_err(SyscallError::from)?
@@ -390,6 +417,10 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
         )
         .map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
         user_safe::write(pidfd_ptr, &pidfd_fd)?;
+    }
+
+    if clone_flags.contains(CloneFlags::VFORK) {
+        wait_for_vfork_completion(&child_process);
     }
 
     Ok(pid.0 as usize)
@@ -1150,7 +1181,10 @@ define_syscall!(Clone, |flags: u64,
         | CloneFlags::SIGHAND
         | CloneFlags::THREAD;
     if !clone_flags.contains(CloneFlags::THREAD) {
-        if clone_flags.intersects(CloneFlags::VM | CloneFlags::VFORK) {
+        if clone_flags.contains(CloneFlags::VFORK) && !clone_flags.contains(CloneFlags::VM) {
+            return Err(SyscallError::NoSyscall);
+        }
+        if clone_flags.contains(CloneFlags::VM) && !clone_flags.contains(CloneFlags::VFORK) {
             return Err(SyscallError::NoSyscall);
         }
         let pidfd_ptr = if clone_flags.contains(CloneFlags::PIDFD) {
@@ -1242,7 +1276,10 @@ define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
         );
     }
 
-    if clone_flags.intersects(CloneFlags::VM | CloneFlags::VFORK) {
+    if clone_flags.contains(CloneFlags::VFORK) && !clone_flags.contains(CloneFlags::VM) {
+        return Err(SyscallError::NoSyscall);
+    }
+    if clone_flags.contains(CloneFlags::VM) && !clone_flags.contains(CloneFlags::VFORK) {
         return Err(SyscallError::NoSyscall);
     }
 

@@ -79,6 +79,12 @@ impl ThreadManager {
         !self.ready_queue.is_empty()
     }
 
+    pub fn wake_thread_by_id(&mut self, thread_id: ThreadID) {
+        if let Some(thread) = self.threads.get(&thread_id).cloned() {
+            self.wake(thread);
+        }
+    }
+
     pub fn kill_all_except(&mut self, thread: ThreadRef) {
         let threads = self
             .idle_thread

@@ -14,6 +14,7 @@ use crate::object::misc::ObjectRef;
 use crate::process::group::ProcessGroupID;
 use crate::signal::misc::default_signal_action_vec;
 use crate::signal::{Signal, Signals, action::SignalAction};
+use crate::thread::misc::ThreadID;
 use crate::{process::misc::ProcessID, thread::thread::Thread};
 
 pub mod execve;
@@ -89,6 +90,7 @@ pub struct Process {
     pub capability_permitted: [u32; 2],
     pub capability_inheritable: [u32; 2],
     pub capability_ambient: [u32; 2],
+    pub vfork_blocker: Option<ThreadID>,
 }
 
 impl Default for Process {
@@ -130,6 +132,7 @@ impl Default for Process {
             capability_permitted: [DEFAULT_CAPABILITY_LOW, DEFAULT_CAPABILITY_HIGH],
             capability_inheritable: [0; 2],
             capability_ambient: [0; 2],
+            vfork_blocker: None,
         }
     }
 }

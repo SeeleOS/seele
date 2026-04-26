@@ -8,7 +8,7 @@ use crate::{
     object::linux_anon::wake_pidfd_for_process_with_manager,
     process::{Process, ProcessExitStatus, ProcessRef, misc::ProcessID},
     smp::{current_process, set_current_process},
-    thread::{THREAD_MANAGER, ThreadRef, manager::ThreadManager},
+    thread::{THREAD_MANAGER, ThreadRef, manager::ThreadManager, misc::ThreadID},
 };
 
 lazy_static! {
@@ -68,17 +68,29 @@ pub fn get_current_process() -> ProcessRef {
 }
 
 pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
-    let threads = {
+    let (threads, vfork_blocker) = {
         let mut process = process.lock();
         systemd_perf::log_and_clear_process_summary(&process, exit_status);
-        process.terminate_inner(exit_status)
+        let vfork_blocker = process.vfork_blocker.take();
+        (process.terminate_inner(exit_status), vfork_blocker)
     };
 
     let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+    if let Some(thread_id) = vfork_blocker {
+        thread_manager.wake_thread_by_id(thread_id);
+    }
     for thread in threads {
         thread_manager.mark_thread_exited(thread);
     }
     thread_manager.cleanup_exited_threads();
+}
+
+pub fn wake_vfork_blocker(thread_id: ThreadID) {
+    THREAD_MANAGER
+        .get()
+        .unwrap()
+        .lock()
+        .wake_thread_by_id(thread_id);
 }
 
 impl Process {
