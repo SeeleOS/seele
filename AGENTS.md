@@ -5,6 +5,7 @@
 - `nix develop -c cargo run -- --agent`: headless VM run with timeout and serial output; use this for runtime verification.
 - `cargo fmt --all`: format Rust code before submitting changes.
 - `rootfs_making/make_disk.sh`: build or refresh `disk.img` and the guest root filesystem contents.
+- If a required tool is missing for this repository workflow, add it to the `flake.nix` dev shell instead of treating it as a one-off host prerequisite.
 - When launching the VM during agent work, use a checked-in `.sh` wrapper script instead of invoking the VM command directly. Put any needed log redirection inside the wrapper rather than on the outer command line.
 - When using the checked-in VM wrapper, run it directly (for example `misc/run-agent-vm.sh`). Do not wrap it with `bash`, and do not override its default log file path unless explicitly requested.
 - `misc/run-agent-vm.sh` should not impose a default timeout. If a timeout is needed for a specific debugging pass, set it explicitly and shut the VM down yourself when finished.
