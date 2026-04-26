@@ -15,8 +15,8 @@ use crate::{
         traits::{Configuratable, Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
-    thread::{
-        yielding::{BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current},
+    thread::yielding::{
+        BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
     },
 };
 
@@ -226,10 +226,7 @@ impl InetSocketObject {
                 Ok(())
             }
             InetSocketKind::Datagram => {
-                state
-                    .handle
-                    .udp_bind(addr)
-                    .map_err(Self::map_net_error)?;
+                state.handle.udp_bind(addr).map_err(Self::map_net_error)?;
                 state.local = Some(addr);
                 Ok(())
             }
@@ -579,7 +576,9 @@ impl Pollable for InetSocketObject {
         match self.kind {
             InetSocketKind::Stream => match event {
                 PollableEvent::CanBeRead => {
-                    state.read_shutdown || state.handle.tcp_can_recv() || state.handle.tcp_is_closed()
+                    state.read_shutdown
+                        || state.handle.tcp_can_recv()
+                        || state.handle.tcp_is_closed()
                 }
                 PollableEvent::CanBeWritten => {
                     !state.write_shutdown && !state.listening && state.handle.tcp_can_send()

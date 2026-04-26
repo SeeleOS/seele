@@ -325,6 +325,7 @@ define_syscall!(Bind, |socket: ObjectRef,
                        address_len: u32| {
     let address = socket_address_bytes(address, address_len)?;
     socket
+        .clone()
         .as_socket_like()?
         .bind_bytes(&address)
         .map_err(ObjectError::from)?;
@@ -333,6 +334,7 @@ define_syscall!(Bind, |socket: ObjectRef,
 
 define_syscall!(Listen, |socket: ObjectRef, backlog: usize| {
     socket
+        .clone()
         .as_socket_like()?
         .listen(backlog)
         .map_err(ObjectError::from)?;
@@ -344,6 +346,7 @@ define_syscall!(Connect, |socket: ObjectRef,
                           address_len: u32| {
     let address = socket_address_bytes(address, address_len)?;
     socket
+        .clone()
         .as_socket_like()?
         .connect_bytes(&address)
         .map_err(ObjectError::from)?;
@@ -566,7 +569,9 @@ fn sendmsg_impl(socket: ObjectRef, msg: &relibc_msg_hdr) -> Result<usize, Syscal
         }
 
         let written = match target_addr {
-            Some(address) => socket.send_to(&buffer, address).map_err(ObjectError::from)?,
+            Some(address) => socket
+                .send_to(&buffer, address)
+                .map_err(ObjectError::from)?,
             None => socket.send(&buffer).map_err(ObjectError::from)?,
         };
         return Ok(written);

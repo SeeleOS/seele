@@ -11,7 +11,11 @@ use super::{
     parse_unix_socket_path, socket_timeout_option_len,
 };
 use crate::{
-    object::{Object, linux_anon::PidFdObject, misc::{ObjectRef, get_object_current_process}},
+    object::{
+        Object,
+        linux_anon::PidFdObject,
+        misc::{ObjectRef, get_object_current_process},
+    },
     process::{
         FdFlags,
         manager::get_current_process,

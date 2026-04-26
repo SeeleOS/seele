@@ -44,6 +44,13 @@ pub struct VFS {
 }
 
 impl VFS {
+    fn ensure_dir(&mut self, path: Path) -> FSResult<()> {
+        match self.create_dir(path) {
+            Ok(()) | Err(FSError::AlreadyExists) => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+
     fn remove_mounts_at(&mut self, path: &Path, include_children: bool) -> FSResult<()> {
         let normalized_path = self.normalize_path(path.clone());
         let normalized_path_string = normalized_path.clone().as_string();
@@ -91,6 +98,11 @@ impl VFS {
         self.mount(Path::new("/proc"), ProcFs::new())?;
         self.mount(Path::new("/sys"), SysFs::new())?;
         self.mount(Path::new("/sys/fs/cgroup"), CgroupFs::new())?;
+        self.ensure_dir(Path::new("/run/dbus"))?;
+        self.ensure_dir(Path::new("/run/systemd"))?;
+        self.ensure_dir(Path::new("/run/systemd/journal"))?;
+        self.ensure_dir(Path::new("/run/udev"))?;
+        self.ensure_dir(Path::new("/run/udev/data"))?;
 
         log::debug!("vfs: init done");
         Ok(())

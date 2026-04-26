@@ -136,14 +136,10 @@ impl E1000Device {
                 return None;
             }
         };
-        let Some((bar_addr, bar_size)) = bars
-            .into_iter()
-            .flatten()
-            .find_map(|bar| match bar {
-                BarInfo::Memory { .. } => bar.memory_address_size(),
-                BarInfo::IO { .. } => None,
-            })
-        else {
+        let Some((bar_addr, bar_size)) = bars.into_iter().flatten().find_map(|bar| match bar {
+            BarInfo::Memory { .. } => bar.memory_address_size(),
+            BarInfo::IO { .. } => None,
+        }) else {
             log::warn!("e1000: no MMIO BAR found");
             return None;
         };
@@ -213,7 +209,10 @@ impl E1000Device {
 
         self.write_reg(REG_RDBAL, self.rx_ring.phys_addr() as u32);
         self.write_reg(REG_RDBAH, (self.rx_ring.phys_addr() >> 32) as u32);
-        self.write_reg(REG_RDLEN, (RX_DESC_COUNT * size_of::<RxDescriptor>()) as u32);
+        self.write_reg(
+            REG_RDLEN,
+            (RX_DESC_COUNT * size_of::<RxDescriptor>()) as u32,
+        );
         self.write_reg(REG_RDH, 0);
         self.write_reg(REG_RDT, (RX_DESC_COUNT - 1) as u32);
         self.write_reg(REG_RCTL, RCTL_EN | RCTL_BAM | RCTL_SECRC);
@@ -232,7 +231,10 @@ impl E1000Device {
 
         self.write_reg(REG_TDBAL, self.tx_ring.phys_addr() as u32);
         self.write_reg(REG_TDBAH, (self.tx_ring.phys_addr() >> 32) as u32);
-        self.write_reg(REG_TDLEN, (TX_DESC_COUNT * size_of::<TxDescriptor>()) as u32);
+        self.write_reg(
+            REG_TDLEN,
+            (TX_DESC_COUNT * size_of::<TxDescriptor>()) as u32,
+        );
         self.write_reg(REG_TDH, 0);
         self.write_reg(REG_TDT, 0);
         self.write_reg(

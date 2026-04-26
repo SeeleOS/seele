@@ -202,12 +202,15 @@ impl NetStack {
         let mut iface = Interface::new(config, &mut adapter, smoltcp_now());
         iface.update_ip_addrs(|addrs| {
             addrs
-                .push(IpCidr::new(IpAddress::v4(
-                    STATIC_IPV4[0],
-                    STATIC_IPV4[1],
-                    STATIC_IPV4[2],
-                    STATIC_IPV4[3],
-                ), 24))
+                .push(IpCidr::new(
+                    IpAddress::v4(
+                        STATIC_IPV4[0],
+                        STATIC_IPV4[1],
+                        STATIC_IPV4[2],
+                        STATIC_IPV4[3],
+                    ),
+                    24,
+                ))
                 .unwrap();
         });
         let _ = iface.routes_mut().add_default_ipv4_route(Ipv4Address::new(
@@ -381,7 +384,11 @@ impl NetSocketHandle {
         manager().lock().with_stack_mut(|stack| {
             let socket = stack.sockets.get_mut::<tcp::Socket<'static>>(self.0);
             socket
-                .connect(stack.iface.context(), remote.endpoint(), local.listen_endpoint())
+                .connect(
+                    stack.iface.context(),
+                    remote.endpoint(),
+                    local.listen_endpoint(),
+                )
                 .map_err(map_tcp_connect_error)
         })
     }
@@ -413,11 +420,12 @@ impl NetSocketHandle {
     }
 
     pub fn tcp_is_active(self) -> bool {
-        manager()
-            .lock()
-            .stack
-            .as_mut()
-            .is_some_and(|stack| stack.sockets.get::<tcp::Socket<'static>>(self.0).is_active())
+        manager().lock().stack.as_mut().is_some_and(|stack| {
+            stack
+                .sockets
+                .get::<tcp::Socket<'static>>(self.0)
+                .is_active()
+        })
     }
 
     pub fn tcp_can_send(self) -> bool {
@@ -436,9 +444,11 @@ impl NetSocketHandle {
     }
 
     pub fn tcp_is_closed(self) -> bool {
-        manager().lock().stack.as_mut().is_none_or(|stack| {
-            !stack.sockets.get::<tcp::Socket<'static>>(self.0).is_open()
-        })
+        manager()
+            .lock()
+            .stack
+            .as_mut()
+            .is_none_or(|stack| !stack.sockets.get::<tcp::Socket<'static>>(self.0).is_open())
     }
 
     pub fn tcp_is_listening(self) -> bool {
@@ -473,14 +483,18 @@ impl NetSocketHandle {
 
     pub fn tcp_remote_addr(self) -> Option<InetAddress> {
         manager().lock().stack.as_mut().and_then(|stack| {
-            stack.sockets
+            stack
+                .sockets
                 .get::<tcp::Socket<'static>>(self.0)
                 .remote_endpoint()
                 .map(InetAddress::from)
         })
     }
 
-    pub fn tcp_accept(self, local: InetAddress) -> NetResult<(NetSocketHandle, InetAddress, InetAddress)> {
+    pub fn tcp_accept(
+        self,
+        local: InetAddress,
+    ) -> NetResult<(NetSocketHandle, InetAddress, InetAddress)> {
         manager().lock().with_stack_mut(|stack| {
             let active = {
                 let socket = stack.sockets.get::<tcp::Socket<'static>>(self.0);
@@ -515,7 +529,9 @@ impl NetSocketHandle {
     pub fn udp_bind(self, local: InetAddress) -> NetResult<()> {
         manager().lock().with_stack_mut(|stack| {
             let socket = stack.sockets.get_mut::<udp::Socket<'static>>(self.0);
-            socket.bind(local.listen_endpoint()).map_err(map_udp_bind_error)
+            socket
+                .bind(local.listen_endpoint())
+                .map_err(map_udp_bind_error)
         })
     }
 

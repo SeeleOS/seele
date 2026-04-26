@@ -1,5 +1,5 @@
-use pci_types::PciAddress;
 use alloc::vec::Vec;
+use pci_types::PciAddress;
 
 use virtio_drivers::transport::pci::bus::{DeviceFunction, DeviceFunctionInfo, PciRoot};
 
