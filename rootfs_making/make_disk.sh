@@ -100,12 +100,6 @@ arch_chroot() {
     sudo "${ARCH_CHROOT_BIN}" "${SYSROOT_DIR}" "$@"
 }
 
-arch_chroot_user() {
-    local user="$1"
-    shift
-    sudo "${ARCH_CHROOT_BIN}" -u "${user}" "${SYSROOT_DIR}" "$@"
-}
-
 install_repo_packages() {
     if [ ! -x "${SYSROOT_DIR}/usr/bin/pacman" ]; then
         pacstrap_root "${ARCH_PACKAGES[@]}"
@@ -158,8 +152,8 @@ install_aur_package() {
     sudo rm -rf "${SYSROOT_DIR}${AUR_BUILD_DIR}/${package}"
     sudo cp -a "${host_build_dir}/${package}" "${SYSROOT_DIR}${AUR_BUILD_DIR}/"
     arch_chroot /usr/bin/chown -R "${AUR_BUILD_USER}:${AUR_BUILD_USER}" "${AUR_BUILD_DIR}/${package}"
-    arch_chroot_user "${AUR_BUILD_USER}" /bin/bash -lc \
-        "cd '${AUR_BUILD_DIR}/${package}' && /usr/bin/makepkg --noconfirm --syncdeps --clean --cleanbuild --force"
+    arch_chroot /usr/bin/runuser -u "${AUR_BUILD_USER}" -- \
+        /bin/bash -lc "cd '${AUR_BUILD_DIR}/${package}' && /usr/bin/makepkg --noconfirm --syncdeps --clean --cleanbuild --force"
 
     pkg_file="$(
         arch_chroot /bin/sh -lc \
