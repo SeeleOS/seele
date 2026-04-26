@@ -19,6 +19,8 @@ ARCH_PACKAGES=(
     alacritty
     evtest
     libinput
+    curl
+    netsurf
     vim
     gcc
     busybox
