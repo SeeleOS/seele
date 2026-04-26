@@ -71,6 +71,7 @@ pub struct NetlinkSocketAddress {
 #[derive(Debug)]
 pub struct NetlinkSocketObject {
     flags: Mutex<FileFlags>,
+    pass_cred: Mutex<bool>,
     socket_type: u64,
     protocol: u64,
     address: Mutex<NetlinkSocketAddress>,
@@ -130,6 +131,7 @@ impl NetlinkSocketObject {
 
         let socket = Arc::new(Self {
             flags: Mutex::new(FileFlags::empty()),
+            pass_cred: Mutex::new(false),
             socket_type,
             protocol,
             address: Mutex::new(NetlinkSocketAddress::default()),
@@ -192,6 +194,10 @@ impl NetlinkSocketObject {
         }
     }
 
+    pub fn pass_cred_enabled(&self) -> bool {
+        *self.pass_cred.lock()
+    }
+
     pub fn peek_message_len(&self) -> Option<usize> {
         self.recv_queue.lock().front().map(Vec::len)
     }
@@ -228,10 +234,15 @@ impl NetlinkSocketObject {
     ) -> SocketResult<()> {
         if level == SOL_SOCKET {
             return match option_name {
-                SO_REUSEADDR | SO_PASSCRED | SO_SNDBUF | SO_RCVBUF | SO_SNDBUFFORCE
-                | SO_RCVBUFFORCE | SO_ATTACH_FILTER | SO_DETACH_FILTER | SO_PASSSEC
-                | SO_PASSRIGHTS | SO_PASSPIDFD | SO_TIMESTAMP_OLD | SO_TIMESTAMP_NEW
-                | SO_TIMESTAMPNS_OLD | SO_TIMESTAMPNS_NEW => Ok(()),
+                SO_PASSCRED => {
+                    let enabled = Self::decode_u32(option_value)? != 0;
+                    *self.pass_cred.lock() = enabled;
+                    Ok(())
+                }
+                SO_REUSEADDR | SO_SNDBUF | SO_RCVBUF | SO_SNDBUFFORCE | SO_RCVBUFFORCE
+                | SO_ATTACH_FILTER | SO_DETACH_FILTER | SO_PASSSEC | SO_PASSRIGHTS
+                | SO_PASSPIDFD | SO_TIMESTAMP_OLD | SO_TIMESTAMP_NEW | SO_TIMESTAMPNS_OLD
+                | SO_TIMESTAMPNS_NEW => Ok(()),
                 SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD | SO_RCVTIMEO_NEW | SO_SNDTIMEO_NEW => {
                     let expected_len = socket_timeout_option_len(option_name)
                         .ok_or(SocketError::InvalidArguments)?;
@@ -281,8 +292,9 @@ impl NetlinkSocketObject {
                 SO_SNDBUF | SO_RCVBUF | SO_SNDBUFFORCE | SO_RCVBUFFORCE => {
                     Self::encode_i32(option_len, DEFAULT_SOCKET_BUFFER_SIZE)
                 }
-                SO_REUSEADDR | SO_PASSCRED | SO_PASSSEC | SO_PASSRIGHTS | SO_PASSPIDFD
-                | SO_TIMESTAMP_OLD | SO_TIMESTAMP_NEW | SO_TIMESTAMPNS_OLD | SO_TIMESTAMPNS_NEW => {
+                SO_PASSCRED => Self::encode_i32(option_len, self.pass_cred_enabled() as i32),
+                SO_REUSEADDR | SO_PASSSEC | SO_PASSRIGHTS | SO_PASSPIDFD | SO_TIMESTAMP_OLD
+                | SO_TIMESTAMP_NEW | SO_TIMESTAMPNS_OLD | SO_TIMESTAMPNS_NEW => {
                     Self::encode_i32(option_len, 0)
                 }
                 SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD | SO_RCVTIMEO_NEW | SO_SNDTIMEO_NEW => {

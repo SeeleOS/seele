@@ -127,6 +127,25 @@ fn unix_socket_control_bytes(socket: &UnixSocketObject) -> Result<Vec<u8>, Sysca
     Ok(control)
 }
 
+fn netlink_socket_control_bytes(socket: &NetlinkSocketObject) -> Vec<u8> {
+    if !socket.pass_cred_enabled() {
+        return Vec::new();
+    }
+
+    let credential = LinuxUcred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let cred_bytes = unsafe {
+        slice::from_raw_parts(
+            (&credential as *const LinuxUcred).cast::<u8>(),
+            mem::size_of::<LinuxUcred>(),
+        )
+    };
+    encode_control_message(SCM_CREDENTIALS, cred_bytes)
+}
+
 const MSG_PEEK: u64 = 0x2;
 const MSG_CTRUNC: i32 = 0x8;
 const MSG_TRUNC: u64 = 0x20;
@@ -858,7 +877,20 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
             }
             msg.msg_namelen = name_bytes.len() as u32;
         }
-        msg.msg_controllen = 0;
+        let control = netlink_socket_control_bytes(&socket);
+        if control.is_empty() {
+            msg.msg_controllen = 0;
+        } else if msg.msg_control.is_null() || msg.msg_controllen == 0 {
+            msg.msg_flags |= MSG_CTRUNC;
+            msg.msg_controllen = 0;
+        } else {
+            let copy_len = msg.msg_controllen.min(control.len());
+            user_safe::write(msg.msg_control, &control[..copy_len])?;
+            msg.msg_controllen = copy_len;
+            if copy_len < control.len() {
+                msg.msg_flags |= MSG_CTRUNC;
+            }
+        }
         return Ok(if report_trunc || total_capacity == 0 {
             full_len.max(message_len)
         } else {
