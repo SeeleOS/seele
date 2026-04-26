@@ -323,9 +323,7 @@ impl NetlinkSocketObject {
             return true;
         }
 
-        self.memberships
-            .lock()
-            .contains(&group)
+        self.memberships.lock().contains(&group)
     }
 
     fn local_address(&self) -> NetlinkSocketAddress {
@@ -608,14 +606,18 @@ impl NetlinkSocketObject {
             || (request.ifi_index == 0 && request_name.is_none() && request_alt_name.is_none());
         if should_dump {
             for interface in matched {
-                self.queue_message(Self::encode_link_message(header, interface, true, reply_pid));
+                self.queue_message(Self::encode_link_message(
+                    header, interface, true, reply_pid,
+                ));
             }
             self.queue_message(Self::encode_done_message(header.nlmsg_seq, reply_pid));
             return;
         }
 
         if let Some(interface) = matched.into_iter().next() {
-            self.queue_message(Self::encode_link_message(header, interface, false, reply_pid));
+            self.queue_message(Self::encode_link_message(
+                header, interface, false, reply_pid,
+            ));
         } else {
             self.enqueue_error_response(header, -19);
         }
@@ -650,8 +652,7 @@ impl NetlinkSocketObject {
         if should_dump {
             for (interface, addr, prefix_len) in matched {
                 self.queue_message(Self::encode_addr_message(
-                    header, interface, addr, prefix_len, true,
-                    reply_pid,
+                    header, interface, addr, prefix_len, true, reply_pid,
                 ));
             }
             self.queue_message(Self::encode_done_message(header.nlmsg_seq, reply_pid));
@@ -660,8 +661,7 @@ impl NetlinkSocketObject {
 
         if let Some((interface, addr, prefix_len)) = matched.into_iter().next() {
             self.queue_message(Self::encode_addr_message(
-                header, interface, addr, prefix_len, false,
-                reply_pid,
+                header, interface, addr, prefix_len, false, reply_pid,
             ));
         } else {
             self.enqueue_error_response(header, 0);
