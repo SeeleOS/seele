@@ -133,12 +133,26 @@ impl File for MemFdFile {
     }
 
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {
-        let base = match seek_type {
-            Whence::Start => 0i64,
-            Whence::Current => self.offset as i64,
-            Whence::End => self.data.len() as i64,
+        let len = self.data.len() as i64;
+        let next = match seek_type {
+            Whence::Start => offset,
+            Whence::Current => (self.offset as i64)
+                .checked_add(offset)
+                .ok_or(FSError::Other)?,
+            Whence::End => len.checked_add(offset).ok_or(FSError::Other)?,
+            Whence::Data => {
+                if offset < 0 || offset >= len {
+                    return Err(FSError::Other);
+                }
+                offset
+            }
+            Whence::Hole => {
+                if offset < 0 || offset > len {
+                    return Err(FSError::Other);
+                }
+                len
+            }
         };
-        let next = base.checked_add(offset).ok_or(FSError::Other)?;
         self.offset = next.max(0) as usize;
         Ok(self.offset)
     }

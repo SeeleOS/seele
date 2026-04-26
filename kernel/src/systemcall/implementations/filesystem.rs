@@ -57,6 +57,7 @@ const MOUNT_ATTR_IDMAP: u64 = 0x0010_0000;
 const MOUNT_ATTR_NOSYMFOLLOW: u64 = 0x0020_0000;
 
 static NEXT_API_MOUNT_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_TMPFILE_ID: AtomicU64 = AtomicU64::new(1);
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -308,6 +309,41 @@ fn next_api_mount_path() -> Result<Path, SyscallError> {
     let path = Path::new(&format!("{API_MOUNT_ROOT}/{mount_id}"));
     ensure_directory_exists(&path.clone().as_string())?;
     Ok(path)
+}
+
+fn next_tmpfile_path(dir_path: &Path) -> Path {
+    let dir_path = dir_path.clone().normalize().as_string();
+    let tmp_id = NEXT_TMPFILE_ID.fetch_add(1, Ordering::Relaxed);
+    let tmp_name = format!(".tmpfile-{tmp_id}");
+    let path = if dir_path == "/" {
+        format!("/{tmp_name}")
+    } else {
+        format!("{dir_path}/{tmp_name}")
+    };
+    Path::new(&path)
+}
+
+fn open_tmpfile_at(dirfd: i32, path_str: &str) -> Result<ObjectRef, SyscallError> {
+    let dir_path = resolve_path_at(dirfd, path_str)?;
+    let dir = VirtualFS.lock().open(dir_path.clone())?;
+    if !matches!(dir.info()?.file_like_type, FileLikeType::Directory) {
+        return Err(SyscallError::NotADirectory);
+    }
+
+    for _ in 0..128 {
+        let tmp_path = next_tmpfile_path(&dir_path);
+        match VirtualFS.lock().create_file(tmp_path.clone()) {
+            Ok(()) => {
+                let object: ObjectRef = Arc::new(VirtualFS.lock().open(tmp_path.clone())?);
+                VirtualFS.lock().delete_file(tmp_path)?;
+                return Ok(object);
+            }
+            Err(FSError::AlreadyExists) => continue,
+            Err(err) => return Err(err.into()),
+        }
+    }
+
+    Err(SyscallError::FileAlreadyExists)
 }
 
 fn is_api_mount_path(path: &Path) -> bool {
@@ -738,7 +774,15 @@ define_syscall!(OpenAt, |dirfd: i32,
         let current_process = get_current_process();
         let path_str = path_from_raw(path)?;
         if flags.contains(OpenFlags::TMPFILE) {
-            return Err(SyscallError::OperationNotSupported);
+            let object = open_tmpfile_at(dirfd, &path_str)?;
+            let fd_flags = if flags.contains(OpenFlags::CLOEXEC) {
+                FdFlags::CLOEXEC
+            } else {
+                FdFlags::empty()
+            };
+            return Ok(current_process
+                .lock()
+                .push_object_with_flags(object, fd_flags));
         }
         let create = flags.contains(OpenFlags::CREAT);
         let nofollow = flags.contains(OpenFlags::NOFOLLOW);

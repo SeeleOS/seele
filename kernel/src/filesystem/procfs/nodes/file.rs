@@ -89,6 +89,18 @@ impl File for ProcFile {
             Whence::Start => offset,
             Whence::Current => self.offset as i64 + offset,
             Whence::End => len + offset,
+            Whence::Data => {
+                if offset < 0 || offset >= len {
+                    return Err(FSError::Other);
+                }
+                offset
+            }
+            Whence::Hole => {
+                if offset < 0 || offset > len {
+                    return Err(FSError::Other);
+                }
+                len
+            }
         }
         .max(0) as usize;
 

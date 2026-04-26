@@ -53,6 +53,8 @@ pub enum Whence {
     Start = 0,
     Current = 1,
     End = 2,
+    Data = 3,
+    Hole = 4,
 }
 
 pub trait File: Send + Sync {

@@ -283,6 +283,11 @@ define_syscall!(Fallocate, |object: ObjectRef,
     if offset < 0 || len < 0 {
         return Err(SyscallError::InvalidArguments);
     }
+    if mode.bits()
+        == (FallocateFlags::FALLOC_FL_KEEP_SIZE | FallocateFlags::FALLOC_FL_PUNCH_HOLE).bits()
+    {
+        return Ok(0);
+    }
     if !mode.is_empty() {
         return Err(SyscallError::OperationNotSupported);
     }

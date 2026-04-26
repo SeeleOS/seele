@@ -89,15 +89,47 @@ impl File for Ext4File {
     }
 
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {
+        let len = self.inner.inode().size_in_bytes() as i64;
         let pos = match seek_type {
             Whence::Start => offset,
             Whence::Current => self.inner.position() as i64 + offset,
-            Whence::End => self.inner.inode().size_in_bytes() as i64 + offset,
+            Whence::End => len + offset,
+            Whence::Data => {
+                if offset < 0 || offset >= len {
+                    return Err(FSError::Other);
+                }
+                offset
+            }
+            Whence::Hole => {
+                if offset < 0 || offset > len {
+                    return Err(FSError::Other);
+                }
+                len
+            }
         };
 
         let _ = self.inner.seek_to(pos as u64);
 
         Ok(self.inner.position() as usize)
+    }
+
+    fn truncate(&mut self, length: u64) -> FSResult<()> {
+        self.inner.truncate(length).map_err(FSError::from)?;
+        self.update_lookup_cache();
+        Ok(())
+    }
+
+    fn allocate(&mut self, mode: u32, offset: u64, len: u64) -> FSResult<()> {
+        if mode != 0 {
+            return Err(FSError::Other);
+        }
+
+        let end = offset.checked_add(len).ok_or(FSError::Other)?;
+        if end > self.inner.inode().size_in_bytes() {
+            self.inner.truncate(end).map_err(FSError::from)?;
+            self.update_lookup_cache();
+        }
+        Ok(())
     }
 
     fn chmod(&self, mode: u32) -> FSResult<()> {
