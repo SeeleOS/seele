@@ -18,6 +18,7 @@ pub mod interrupts;
 pub mod keyboard;
 pub mod memory;
 pub mod misc;
+pub mod net;
 pub mod object;
 pub mod polling;
 pub mod process;
@@ -47,8 +48,8 @@ pub fn init() -> ! {
     time::init();
     enable_sse();
     log::info!("init: sse enabled");
-    drivers::init();
-    log::info!("init: drivers ready");
+    drivers::init_early();
+    log::info!("init: early drivers ready");
 
     VirtualFS.lock().init().unwrap();
 
@@ -71,6 +72,9 @@ pub fn init() -> ! {
     }
     interrupts::init();
     log::info!("init: interrupts ready");
+    net::init();
+    drivers::init_late();
+    log::info!("init: late drivers ready");
 
     log::info!("init: mouse init start");
     mouse::init();

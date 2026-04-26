@@ -102,6 +102,9 @@ fn main() {
         cmd.arg("-device")
             .arg("virtio-blk-pci,drive=rootdisk,disable-legacy=on,disable-modern=off");
     }
+    cmd.arg("-netdev").arg("user,id=net0");
+    cmd.arg("-device")
+        .arg("e1000,netdev=net0,mac=52:54:00:12:34:56");
     cmd.arg("-drive").arg(format!(
         "if=pflash,format=raw,unit=0,file={},readonly=on",
         code.display()

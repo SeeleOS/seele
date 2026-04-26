@@ -1,3 +1,4 @@
+use pci_types::PciAddress;
 use alloc::vec::Vec;
 
 use virtio_drivers::transport::pci::bus::{DeviceFunction, DeviceFunctionInfo, PciRoot};
@@ -6,6 +7,7 @@ use crate::drivers::pci::access::PciConfigPorts;
 
 #[derive(Clone, Debug)]
 pub struct PciDeviceRecord {
+    pub address: PciAddress,
     pub function: DeviceFunction,
     pub info: DeviceFunctionInfo,
 }
@@ -26,7 +28,11 @@ pub fn enumerate_devices() -> Vec<PciDeviceRecord> {
                 info.class,
                 info.subclass,
             );
-            devices.push(PciDeviceRecord { function, info });
+            devices.push(PciDeviceRecord {
+                address: PciConfigPorts::pci_address(function),
+                function,
+                info,
+            });
         }
     }
 

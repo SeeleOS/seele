@@ -1,11 +1,14 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::collections::BTreeMap;
 use conquer_once::spin::OnceCell;
 use core::ptr::NonNull;
 use spin::Mutex;
 use virtio_drivers::{BufferDirection, Hal, PhysAddr};
 use x86_64::structures::paging::{PageSize, Size4KiB};
 
-use crate::memory::{mmio::map_mmio, paging::FRAME_ALLOCATOR, utils::apply_offset};
+use crate::{
+    drivers::dma::{allocate_dma_pages, deallocate_dma_pages},
+    memory::mmio::map_mmio,
+};
 
 const PAGE_SIZE: usize = Size4KiB::SIZE as usize;
 
@@ -21,46 +24,11 @@ struct SharedAllocation {
 unsafe impl Send for SharedAllocation {}
 
 type SharedAllocationMap = BTreeMap<PhysAddr, SharedAllocation>;
-type DmaPagePool = BTreeMap<usize, Vec<(PhysAddr, usize)>>;
 
 static SHARED_ALLOCATIONS: OnceCell<Mutex<SharedAllocationMap>> = OnceCell::uninit();
-static DMA_PAGE_POOL: OnceCell<Mutex<DmaPagePool>> = OnceCell::uninit();
 
 fn shared_allocations() -> &'static Mutex<SharedAllocationMap> {
     SHARED_ALLOCATIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
-}
-
-fn dma_page_pool() -> &'static Mutex<DmaPagePool> {
-    DMA_PAGE_POOL.get_or_init(|| Mutex::new(BTreeMap::new()))
-}
-
-fn allocate_dma_pages(pages: usize) -> Option<(PhysAddr, NonNull<u8>)> {
-    if let Some((paddr, vaddr)) = dma_page_pool().lock().get_mut(&pages).and_then(Vec::pop) {
-        unsafe {
-            core::ptr::write_bytes(vaddr as *mut u8, 0, pages * PAGE_SIZE);
-        }
-        return Some((paddr, NonNull::new(vaddr as *mut u8)?));
-    }
-
-    let mut allocator = FRAME_ALLOCATOR.get().unwrap().lock();
-    let start = allocator.allocate_contiguous(pages)?;
-    let paddr = start.start_address().as_u64();
-    let vaddr = apply_offset(paddr) as *mut u8;
-
-    unsafe {
-        core::ptr::write_bytes(vaddr, 0, pages * PAGE_SIZE);
-    }
-
-    Some((paddr, NonNull::new(vaddr)?))
-}
-
-fn deallocate_dma_pages(paddr: PhysAddr, pages: usize) {
-    let vaddr = apply_offset(paddr) as usize;
-    dma_page_pool()
-        .lock()
-        .entry(pages)
-        .or_default()
-        .push((paddr, vaddr));
 }
 
 pub struct KernelHal;

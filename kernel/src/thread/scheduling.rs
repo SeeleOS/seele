@@ -159,6 +159,7 @@ pub fn return_to_scheduler_no_save() -> ! {
 pub fn run() -> ! {
     loop {
         process_deferred_timer_work();
+        crate::net::poll();
         keyboard::process_pending_scancodes();
         agent_tty_input::process_pending_input();
         mouse::process_pending_mouse_events();
