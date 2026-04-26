@@ -3,6 +3,7 @@ mod mouse;
 
 use alloc::vec::Vec;
 
+use crate::drm::fs::{SYS_CLASS_DRM_NODE, SYS_DEV_CHAR_226_0_NODE, SYS_DEVICES_PLATFORM_DRM_NODE};
 use crate::filesystem::{
     errors::FSError,
     path::Path,
@@ -164,6 +165,10 @@ static SYS_CLASS_MISC_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNo
 
 static SYS_CLASS_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
+        name: "drm",
+        node: &SYS_CLASS_DRM_NODE,
+    },
+    StaticDirEntry {
         name: "graphics",
         node: &SYS_CLASS_GRAPHICS_NODE,
     },
@@ -280,6 +285,10 @@ static SYS_KERNEL_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
 
 static SYS_DEV_CHAR_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
+        name: "226:0",
+        node: &SYS_DEV_CHAR_226_0_NODE,
+    },
+    StaticDirEntry {
         name: "13:64",
         node: &SYS_DEV_CHAR_13_64_NODE,
     },
@@ -362,6 +371,10 @@ static SYS_DEVICES_PLATFORM_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "uevent",
         node: &SYS_DEVICES_PLATFORM_UEVENT_NODE,
+    },
+    StaticDirEntry {
+        name: "seele-drm",
+        node: &SYS_DEVICES_PLATFORM_DRM_NODE,
     },
     StaticDirEntry {
         name: "i8042",

@@ -6,6 +6,7 @@ use alloc::{
 use spin::Mutex;
 
 use crate::{
+    drm::fs::DEV_DRI_NODE,
     filesystem::{
         errors::FSError,
         info::{DirectoryContentInfo, FileLikeInfo, UnixPermission},
@@ -191,6 +192,10 @@ static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "input",
         node: &DEV_INPUT_NODE,
+    },
+    StaticDirEntry {
+        name: "dri",
+        node: &DEV_DRI_NODE,
     },
     StaticDirEntry {
         name: "ptmx",

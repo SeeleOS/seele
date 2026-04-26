@@ -1,6 +1,7 @@
 use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc};
 
 use crate::{
+    drm::object::DrmCardObject,
     evdev::open_event_device,
     misc::{
         devices::{DevKmsg, DevNull},
@@ -28,6 +29,7 @@ lazy_static::lazy_static! {
         devices.insert("tty0", get_default_tty() as ObjectRef);
         devices.insert("tty1", get_default_tty() as ObjectRef);
         devices.insert("ps2mouse", Arc::new(PS2MouseObject::default()) as ObjectRef);
+        devices.insert("drm-card0", Arc::new(DrmCardObject) as ObjectRef);
 
         devices
     };

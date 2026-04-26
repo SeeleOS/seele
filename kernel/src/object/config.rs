@@ -5,6 +5,12 @@ use crate::{
     process::FdFlags,
 };
 
+use crate::drm::abi::{
+    DRM_IOCTL_DROP_MASTER, DRM_IOCTL_GET_CAP, DRM_IOCTL_MODE_GETCONNECTOR, DRM_IOCTL_MODE_GETCRTC,
+    DRM_IOCTL_MODE_GETENCODER, DRM_IOCTL_MODE_GETRESOURCES, DRM_IOCTL_MODE_SETCRTC,
+    DRM_IOCTL_SET_CLIENT_CAP, DRM_IOCTL_SET_MASTER, DRM_IOCTL_VERSION, DrmGetCap, DrmModeCardRes,
+    DrmModeCrtc, DrmModeGetConnector, DrmModeGetEncoder, DrmSetClientCap, DrmVersion,
+};
 use crate::misc::framebuffer_ioctl::{FbCmap, FbFixScreeninfo, FbVarScreeninfo};
 use crate::terminal::linux_kd::{LinuxKbEntry, LinuxVtMode, LinuxVtStat};
 
@@ -46,6 +52,16 @@ pub enum ConfigurateRequest {
     LinuxVtActivate(u32),
     LinuxVtWaitActive(u32),
     LinuxVtRelDisp(u32),
+    DrmVersion(*mut DrmVersion),
+    DrmGetCap(*mut DrmGetCap),
+    DrmSetClientCap(*mut DrmSetClientCap),
+    DrmSetMaster,
+    DrmDropMaster,
+    DrmModeGetResources(*mut DrmModeCardRes),
+    DrmModeGetCrtc(*mut DrmModeCrtc),
+    DrmModeSetCrtc(*mut DrmModeCrtc),
+    DrmModeGetEncoder(*mut DrmModeGetEncoder),
+    DrmModeGetConnector(*mut DrmModeGetConnector),
     RawIoctl { request: u64, arg: u64 },
 }
 
@@ -142,6 +158,18 @@ pub struct LinuxWinsize {
 impl ConfigurateRequest {
     pub fn new(request: u64, ptr: u64) -> ObjectResult<Self> {
         Ok(match request {
+            DRM_IOCTL_VERSION => Self::DrmVersion(ptr as *mut DrmVersion),
+            DRM_IOCTL_GET_CAP => Self::DrmGetCap(ptr as *mut DrmGetCap),
+            DRM_IOCTL_SET_CLIENT_CAP => Self::DrmSetClientCap(ptr as *mut DrmSetClientCap),
+            DRM_IOCTL_SET_MASTER => Self::DrmSetMaster,
+            DRM_IOCTL_DROP_MASTER => Self::DrmDropMaster,
+            DRM_IOCTL_MODE_GETRESOURCES => Self::DrmModeGetResources(ptr as *mut DrmModeCardRes),
+            DRM_IOCTL_MODE_GETCRTC => Self::DrmModeGetCrtc(ptr as *mut DrmModeCrtc),
+            DRM_IOCTL_MODE_SETCRTC => Self::DrmModeSetCrtc(ptr as *mut DrmModeCrtc),
+            DRM_IOCTL_MODE_GETENCODER => Self::DrmModeGetEncoder(ptr as *mut DrmModeGetEncoder),
+            DRM_IOCTL_MODE_GETCONNECTOR => {
+                Self::DrmModeGetConnector(ptr as *mut DrmModeGetConnector)
+            }
             0x4600 => Self::FbGetVariableScreenInfo(ptr as *mut FbVarScreeninfo),
             0x4601 => Self::FbPutVariableScreenInfo(ptr as *mut FbVarScreeninfo),
             0x4602 => Self::FbGetFixedScreenInfo(ptr as *mut FbFixScreeninfo),
