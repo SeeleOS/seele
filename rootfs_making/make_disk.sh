@@ -222,6 +222,7 @@ sudo install -Dm644 "${PACMAN_CONF_TEMPLATE}" "${PACMAN_CONF_IN_SYSROOT}"
 install_repo_packages
 arch_chroot /bin/sh -lc "update-ca-trust || true"
 
+sudo install -Dm644 "${ROOTFS_MAKING_DIR}/seatd.service" "${SYSROOT_DIR}/etc/systemd/system/seatd.service"
 arch_chroot /usr/sbin/usermod -p '' root
 arch_chroot /usr/bin/systemctl enable seatd.service
 
