@@ -81,7 +81,7 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function!("configuratable", Configuratable, InappropriateIoctl);
     define_cast_function!("pollable", Pollable, InvalidArguments);
     define_cast_function!("mappable", MemoryMappable, InvalidArguments);
-    define_cast_function!("seekable", Seekable, InvalidArguments);
+    define_cast_function!("seekable", Seekable, IllegalSeek);
     define_cast_function!("statable", Statable, BadFileDescriptor);
     define_cast_function!("socket_like", SocketLike, BadFileDescriptor);
 

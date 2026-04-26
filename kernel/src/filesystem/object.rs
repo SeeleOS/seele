@@ -370,7 +370,7 @@ impl Seekable for OpenedFileObject {
         if let Some(device) = self.device_object() {
             let seekable = device
                 .as_seekable()
-                .map_err(|_| ObjectError::FSError(FSError::NotAFile))?;
+                .map_err(|_| ObjectError::FSError(FSError::IllegalSeek))?;
             return seekable.seek(offset, seek_type);
         }
 
@@ -380,7 +380,7 @@ impl Seekable for OpenedFileObject {
             }
             OpenBackend::Device { .. }
             | OpenBackend::Directory(_)
-            | OpenBackend::SymlinkPath { .. } => Err(ObjectError::FSError(FSError::NotAFile)),
+            | OpenBackend::SymlinkPath { .. } => Err(ObjectError::FSError(FSError::IllegalSeek)),
         }
     }
 }
