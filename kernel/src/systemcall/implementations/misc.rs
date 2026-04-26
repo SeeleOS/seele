@@ -437,6 +437,33 @@ struct LinuxSchedParam {
     sched_priority: i32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
+#[repr(i32)]
+pub enum LinuxSchedPolicy {
+    Other = 0,
+    Fifo = 1,
+    RoundRobin = 2,
+    Batch = 3,
+    Idle = 5,
+    Deadline = 6,
+}
+
+impl LinuxSchedPolicy {
+    fn min_priority(self) -> i32 {
+        match self {
+            Self::Fifo | Self::RoundRobin => 1,
+            Self::Other | Self::Batch | Self::Idle | Self::Deadline => 0,
+        }
+    }
+
+    fn max_priority(self) -> i32 {
+        match self {
+            Self::Fifo | Self::RoundRobin => 99,
+            Self::Other | Self::Batch | Self::Idle | Self::Deadline => 0,
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct LinuxSysinfo {
@@ -1255,9 +1282,37 @@ define_syscall!(Getpriority, |_which: i32, _who: i32| { Ok(0) });
 
 define_syscall!(Setpriority, |_which: i32, _who: i32, _prio: i32| { Ok(0) });
 
+define_syscall!(SchedSetparam, |pid: i32, param: *const LinuxSchedParam| {
+    if pid < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if param.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let param = unsafe { *param };
+    if param.sched_priority < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    Ok(0)
+});
+
+define_syscall!(SchedGetparam, |pid: i32, param: *mut LinuxSchedParam| {
+    if pid < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if param.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    user_safe::write(param, &LinuxSchedParam { sched_priority: 0 })?;
+    Ok(0)
+});
+
 define_syscall!(
     SchedSetscheduler,
-    |pid: i32, policy: i32, param: *const LinuxSchedParam| {
+    |pid: i32, policy: LinuxSchedPolicy, param: *const LinuxSchedParam| {
         if pid < 0 {
             return Err(SyscallError::InvalidArguments);
         }
@@ -1266,13 +1321,31 @@ define_syscall!(
         }
 
         let param = unsafe { *param };
-        if policy < 0 || param.sched_priority < 0 {
+        if param.sched_priority < policy.min_priority()
+            || param.sched_priority > policy.max_priority()
+        {
             return Err(SyscallError::InvalidArguments);
         }
 
         Ok(0)
     }
 );
+
+define_syscall!(SchedGetscheduler, |pid: i32| {
+    if pid < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    Ok(LinuxSchedPolicy::Other as usize)
+});
+
+define_syscall!(SchedGetPriorityMax, |policy: LinuxSchedPolicy| {
+    Ok(policy.max_priority() as usize)
+});
+
+define_syscall!(SchedGetPriorityMin, |policy: LinuxSchedPolicy| {
+    Ok(policy.min_priority() as usize)
+});
 
 define_syscall!(Iopl, |level: i32| {
     if !(0..=3).contains(&level) {
