@@ -14,6 +14,8 @@ pub const DRM_IOCTL_MODE_GETENCODER: u64 = 0xc014_64a6;
 pub const DRM_IOCTL_MODE_GETCONNECTOR: u64 = 0xc050_64a7;
 pub const DRM_IOCTL_MODE_GETPROPERTY: u64 = 0xc040_64aa;
 pub const DRM_IOCTL_MODE_OBJ_GETPROPERTIES: u64 = 0xc020_64b9;
+pub const DRM_IOCTL_MODE_GETPLANERESOURCES: u64 = 0xc010_64b5;
+pub const DRM_IOCTL_MODE_GETPLANE: u64 = 0xc020_64b6;
 
 pub const DRM_CAP_DUMB_BUFFER: u64 = 0x1;
 pub const DRM_CAP_DUMB_PREFERRED_DEPTH: u64 = 0x3;
@@ -183,6 +185,25 @@ pub struct DrmModeObjGetProperties {
     pub count_props: u32,
     pub obj_id: u32,
     pub obj_type: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModeGetPlaneRes {
+    pub plane_id_ptr: u64,
+    pub count_planes: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModeGetPlane {
+    pub plane_id: u32,
+    pub crtc_id: u32,
+    pub fb_id: u32,
+    pub possible_crtcs: u32,
+    pub gamma_size: u32,
+    pub count_format_types: u32,
+    pub format_type_ptr: u64,
 }
 
 pub fn current_mode_info() -> DrmModeModeInfo {

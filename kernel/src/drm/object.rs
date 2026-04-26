@@ -178,6 +178,22 @@ impl Configuratable for DrmCardObject {
                 user_safe::write(ptr, &properties).map_err(|_| ObjectError::InvalidArguments)?;
                 Ok(0)
             }
+            ConfigurateRequest::DrmModeGetPlaneResources(ptr) => {
+                let mut planes = read_user(ptr)?;
+                planes.count_planes = 0;
+                user_safe::write(ptr, &planes).map_err(|_| ObjectError::InvalidArguments)?;
+                Ok(0)
+            }
+            ConfigurateRequest::DrmModeGetPlane(ptr) => {
+                let mut plane = read_user(ptr)?;
+                plane.crtc_id = 0;
+                plane.fb_id = 0;
+                plane.possible_crtcs = 0;
+                plane.gamma_size = 0;
+                plane.count_format_types = 0;
+                user_safe::write(ptr, &plane).map_err(|_| ObjectError::InvalidArguments)?;
+                Ok(0)
+            }
             _ => Err(ObjectError::InvalidArguments),
         }
     }

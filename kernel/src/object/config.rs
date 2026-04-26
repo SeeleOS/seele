@@ -7,10 +7,11 @@ use crate::{
 
 use crate::drm::abi::{
     DRM_IOCTL_DROP_MASTER, DRM_IOCTL_GET_CAP, DRM_IOCTL_MODE_GETCONNECTOR, DRM_IOCTL_MODE_GETCRTC,
-    DRM_IOCTL_MODE_GETENCODER, DRM_IOCTL_MODE_GETPROPERTY, DRM_IOCTL_MODE_GETRESOURCES,
-    DRM_IOCTL_MODE_OBJ_GETPROPERTIES, DRM_IOCTL_MODE_SETCRTC, DRM_IOCTL_SET_CLIENT_CAP,
-    DRM_IOCTL_SET_MASTER, DRM_IOCTL_VERSION, DrmGetCap, DrmModeCardRes, DrmModeCrtc,
-    DrmModeGetConnector, DrmModeGetEncoder, DrmModeGetProperty, DrmModeObjGetProperties,
+    DRM_IOCTL_MODE_GETENCODER, DRM_IOCTL_MODE_GETPLANE, DRM_IOCTL_MODE_GETPLANERESOURCES,
+    DRM_IOCTL_MODE_GETPROPERTY, DRM_IOCTL_MODE_GETRESOURCES, DRM_IOCTL_MODE_OBJ_GETPROPERTIES,
+    DRM_IOCTL_MODE_SETCRTC, DRM_IOCTL_SET_CLIENT_CAP, DRM_IOCTL_SET_MASTER, DRM_IOCTL_VERSION,
+    DrmGetCap, DrmModeCardRes, DrmModeCrtc, DrmModeGetConnector, DrmModeGetEncoder,
+    DrmModeGetPlane, DrmModeGetPlaneRes, DrmModeGetProperty, DrmModeObjGetProperties,
     DrmSetClientCap, DrmVersion,
 };
 use crate::misc::framebuffer_ioctl::{FbCmap, FbFixScreeninfo, FbVarScreeninfo};
@@ -66,6 +67,8 @@ pub enum ConfigurateRequest {
     DrmModeGetConnector(*mut DrmModeGetConnector),
     DrmModeGetProperty(*mut DrmModeGetProperty),
     DrmModeObjGetProperties(*mut DrmModeObjGetProperties),
+    DrmModeGetPlaneResources(*mut DrmModeGetPlaneRes),
+    DrmModeGetPlane(*mut DrmModeGetPlane),
     RawIoctl { request: u64, arg: u64 },
 }
 
@@ -178,6 +181,10 @@ impl ConfigurateRequest {
             DRM_IOCTL_MODE_OBJ_GETPROPERTIES => {
                 Self::DrmModeObjGetProperties(ptr as *mut DrmModeObjGetProperties)
             }
+            DRM_IOCTL_MODE_GETPLANERESOURCES => {
+                Self::DrmModeGetPlaneResources(ptr as *mut DrmModeGetPlaneRes)
+            }
+            DRM_IOCTL_MODE_GETPLANE => Self::DrmModeGetPlane(ptr as *mut DrmModeGetPlane),
             0x4600 => Self::FbGetVariableScreenInfo(ptr as *mut FbVarScreeninfo),
             0x4601 => Self::FbPutVariableScreenInfo(ptr as *mut FbVarScreeninfo),
             0x4602 => Self::FbGetFixedScreenInfo(ptr as *mut FbFixScreeninfo),
