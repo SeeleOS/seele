@@ -241,11 +241,7 @@ sudo install -Dm644 "${PACMAN_CONF_TEMPLATE}" "${PACMAN_CONF_IN_SYSROOT}"
 
 pacman_root --needed -Sy "${ARCH_PACKAGES[@]}"
 
-for package in "${AUR_PACKAGES[@]}"; do
-    install_aur_package "${package}"
-done
-
-printf 'root:root\n' | sudo chroot "${SYSROOT_DIR}" /usr/sbin/chpasswd
+sudo chroot "${SYSROOT_DIR}" /usr/sbin/usermod -p '' root
 
 install_sysroot_file "${ROOTFS_MAKING_DIR}/locale.conf" "${SYSROOT_DIR}/etc/locale.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/vconsole.conf" "${SYSROOT_DIR}/etc/vconsole.conf"
@@ -267,3 +263,7 @@ sudo cp "${ROOTFS_MAKING_DIR}/xorg.conf" "${SYSROOT_DIR}/etc/X11/xorg.conf"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/root/.xinitrc"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/startplasma-manual.sh" "${SYSROOT_DIR}/usr/bin/startplasma-manual.sh"
+
+for package in "${AUR_PACKAGES[@]}"; do
+    install_aur_package "${package}"
+done
