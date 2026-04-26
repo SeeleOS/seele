@@ -9,10 +9,10 @@ PACMAN_CONF_TEMPLATE="${ROOTFS_MAKING_DIR}/pacman.conf"
 PACMAN_CONF_IN_SYSROOT="${SYSROOT_DIR}/etc/pacman.conf"
 OVERRIDE_DISK=0
 ARCH_MIRROR="${ARCH_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/archlinux/\$repo/os/\$arch}"
-PACMAN_BIN="$(command -v pacman)"
+PACSTRAP_BIN="$(command -v pacstrap)"
+ARCH_CHROOT_BIN="$(command -v arch-chroot)"
 AUR_BUILD_USER="aurbuilder"
 AUR_BUILD_DIR="/tmp/aur-build"
-TARGET_PATH="/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"
 ARCH_PACKAGES=(
     base
     base-devel
@@ -74,6 +74,11 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+if [ -z "${PACSTRAP_BIN}" ] || [ -z "${ARCH_CHROOT_BIN}" ]; then
+    echo "pacstrap and arch-chroot are required; run this script from the flake dev shell" >&2
+    exit 1
+fi
+
 install_sysroot_file() {
     local source="$1"
     local target="$2"
@@ -82,64 +87,26 @@ install_sysroot_file() {
     sudo install -Dm644 "${source}" "${target}"
 }
 
-pacman_root() {
-    mount_chroot_api_fs
-    sudo env PATH="${TARGET_PATH}" "${PACMAN_BIN}" \
-        --config /etc/pacman.conf \
-        --sysroot "${SYSROOT_DIR}" \
-        --noconfirm \
+pacstrap_root() {
+    sudo "${PACSTRAP_BIN}" \
+        -C "${PACMAN_CONF_TEMPLATE}" \
+        -c \
+        "${SYSROOT_DIR}" \
         "$@"
 }
 
-chroot_sh() {
-    sudo chroot "${SYSROOT_DIR}" /usr/bin/env -i \
-        HOME=/root \
-        PATH="${TARGET_PATH}" \
-        /bin/sh -lc "$1"
+arch_chroot() {
+    sudo "${ARCH_CHROOT_BIN}" "${SYSROOT_DIR}" "$@"
 }
 
-mount_chroot_api_fs() {
-    sudo install -d -m 0755 "${SYSROOT_DIR}/dev" "${SYSROOT_DIR}/dev/pts" "${SYSROOT_DIR}/proc" "${SYSROOT_DIR}/sys"
-
-    if ! mountpoint -q "${SYSROOT_DIR}/dev"; then
-        sudo mount --bind /dev "${SYSROOT_DIR}/dev"
-    fi
-
-    if ! mountpoint -q "${SYSROOT_DIR}/dev/pts"; then
-        sudo mount --bind /dev/pts "${SYSROOT_DIR}/dev/pts"
-    fi
-
-    if ! mountpoint -q "${SYSROOT_DIR}/proc"; then
-        sudo mount -t proc proc "${SYSROOT_DIR}/proc"
-    fi
-
-    if ! mountpoint -q "${SYSROOT_DIR}/sys"; then
-        sudo mount --rbind /sys "${SYSROOT_DIR}/sys"
-    fi
+arch_chroot_user() {
+    local user="$1"
+    shift
+    sudo "${ARCH_CHROOT_BIN}" -u "${user}" "${SYSROOT_DIR}" "$@"
 }
-
-umount_chroot_api_fs() {
-    if mountpoint -q "${SYSROOT_DIR}/dev/pts"; then
-        sudo umount -l "${SYSROOT_DIR}/dev/pts" || true
-    fi
-
-    if mountpoint -q "${SYSROOT_DIR}/dev"; then
-        sudo umount -l "${SYSROOT_DIR}/dev" || true
-    fi
-
-    if mountpoint -q "${SYSROOT_DIR}/proc"; then
-        sudo umount -l "${SYSROOT_DIR}/proc" || true
-    fi
-
-    if mountpoint -q "${SYSROOT_DIR}/sys"; then
-        sudo umount -R -l "${SYSROOT_DIR}/sys" || true
-    fi
-}
-
-trap umount_chroot_api_fs EXIT
 
 ensure_aur_builder() {
-    chroot_sh "
+    arch_chroot /bin/sh -lc "
         set -eu
         if ! id -u '${AUR_BUILD_USER}' >/dev/null 2>&1; then
             useradd -m -U '${AUR_BUILD_USER}'
@@ -180,24 +147,14 @@ install_aur_package() {
 
     sudo rm -rf "${SYSROOT_DIR}${AUR_BUILD_DIR}/${package}"
     sudo cp -a "${host_build_dir}/${package}" "${SYSROOT_DIR}${AUR_BUILD_DIR}/"
-    mount_chroot_api_fs
-    sudo chroot "${SYSROOT_DIR}" /usr/bin/env -i \
-        HOME=/root \
-        PATH="${TARGET_PATH}" \
-        /usr/bin/chown -R "${AUR_BUILD_USER}:${AUR_BUILD_USER}" "${AUR_BUILD_DIR}/${package}"
-
-    sudo chroot "${SYSROOT_DIR}" /usr/bin/env -i \
-        HOME="/home/${AUR_BUILD_USER}" \
-        PATH="${TARGET_PATH}" \
-        /usr/bin/runuser -u "${AUR_BUILD_USER}" -- \
-        /bin/bash -lc "export PATH='${TARGET_PATH}'; cd '${AUR_BUILD_DIR}/${package}' && /usr/bin/makepkg --noconfirm --syncdeps --clean --cleanbuild --force"
+    arch_chroot /usr/bin/chown -R "${AUR_BUILD_USER}:${AUR_BUILD_USER}" "${AUR_BUILD_DIR}/${package}"
+    arch_chroot_user "${AUR_BUILD_USER}" /bin/bash -lc \
+        "cd '${AUR_BUILD_DIR}/${package}' && /usr/bin/makepkg --noconfirm --syncdeps --clean --cleanbuild --force"
 
     pkg_file="$(
-        chroot_sh \
+        arch_chroot /bin/sh -lc \
             "cd '${AUR_BUILD_DIR}/${package}' && /usr/bin/realpath ./*.pkg.tar.* | /usr/bin/head -n 1"
     )"
-
-    umount_chroot_api_fs
 
     if [ -z "${pkg_file}" ]; then
         echo "failed to locate built package for ${package}" >&2
@@ -210,13 +167,12 @@ install_aur_package() {
         return 1
     fi
 
-    pacman_root --needed -U "${host_pkg_file}"
+    arch_chroot /usr/bin/pacman --noconfirm --needed -U "${pkg_file}"
 }
 
 mkdir -p "${SYSROOT_DIR}"
 
 if mountpoint -q "${SYSROOT_DIR}"; then
-    umount_chroot_api_fs
     sudo umount -l "${SYSROOT_DIR}"
 fi
 
@@ -242,9 +198,6 @@ sudo mkdir -p "${SYSROOT_DIR}/var/tmp"
 sudo chmod 1777 "${SYSROOT_DIR}/var/tmp"
 sudo mkdir -p "${SYSROOT_DIR}/etc/X11"
 sudo mkdir -p "${SYSROOT_DIR}/etc"
-sudo mkdir -p "${SYSROOT_DIR}/var/lib/pacman"
-sudo mkdir -p "${SYSROOT_DIR}/var/cache/pacman/pkg"
-sudo rm -f "${SYSROOT_DIR}/var/lib/pacman/db.lck"
 cat <<EOF | sudo tee "${PACMAN_CONF_TEMPLATE}" >/dev/null
 [options]
 Architecture = auto
@@ -260,13 +213,10 @@ Server = ${ARCH_MIRROR}
 EOF
 sudo install -Dm644 "${PACMAN_CONF_TEMPLATE}" "${PACMAN_CONF_IN_SYSROOT}"
 
-pacman_root --needed -Sy "${ARCH_PACKAGES[@]}"
-chroot_sh "update-ca-trust"
+pacstrap_root "${ARCH_PACKAGES[@]}"
+arch_chroot /bin/sh -lc "update-ca-trust || true"
 
-sudo chroot "${SYSROOT_DIR}" /usr/bin/env -i \
-    HOME=/root \
-    PATH="${TARGET_PATH}" \
-    /usr/sbin/usermod -p '' root
+arch_chroot /usr/sbin/usermod -p '' root
 
 install_sysroot_file "${ROOTFS_MAKING_DIR}/locale.conf" "${SYSROOT_DIR}/etc/locale.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/vconsole.conf" "${SYSROOT_DIR}/etc/vconsole.conf"
