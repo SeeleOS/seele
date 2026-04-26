@@ -15,7 +15,7 @@ use std::{
 
 fn main() {
     let agent_mode = env::args().any(|arg| arg == "--agent");
-    let agent_timeout = env::var("SEELE_QEMU_TIMEOUT").unwrap_or_else(|_| "10s".to_string());
+    let agent_timeout = env::var("SEELE_QEMU_TIMEOUT").ok();
     let machine = env::var("SEELE_QEMU_MACHINE").unwrap_or_else(|_| "q35".to_string());
     let smp = env::var("SEELE_QEMU_SMP").unwrap_or_else(|_| {
         thread::available_parallelism()
@@ -43,9 +43,13 @@ fn main() {
         .or_else(|| agent_mode.then(|| env::temp_dir().join("seele-agent-qemu.log")));
 
     let mut cmd = if agent_mode {
-        let mut timeout = Command::new("timeout");
-        timeout.arg(&agent_timeout).arg("qemu-system-x86_64");
-        timeout
+        if let Some(timeout) = &agent_timeout {
+            let mut timeout_cmd = Command::new("timeout");
+            timeout_cmd.arg(timeout).arg("qemu-system-x86_64");
+            timeout_cmd
+        } else {
+            Command::new("qemu-system-x86_64")
+        }
     } else {
         Command::new("qemu-system-x86_64")
     };

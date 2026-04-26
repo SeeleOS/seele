@@ -7,7 +7,7 @@
 - `rootfs_making/make_disk.sh`: build or refresh `disk.img` and the guest root filesystem contents.
 - When launching the VM during agent work, use a checked-in `.sh` wrapper script instead of invoking the VM command directly. Put any needed log redirection inside the wrapper rather than on the outer command line.
 - When using the checked-in VM wrapper, run it directly (for example `misc/run-agent-vm.sh`). Do not wrap it with `bash`, and do not override its default log file path unless explicitly requested.
-- Unless there is a clear debugging need, do not add or override VM timeouts on top of the checked-in wrapper defaults. Prefer running `misc/run-agent-vm.sh` as-is.
+- `misc/run-agent-vm.sh` should not impose a default timeout. If a timeout is needed for a specific debugging pass, set it explicitly and shut the VM down yourself when finished.
 - When polling a background VM terminal, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
 - After finishing VM-based testing, shut the VM down and verify there is no leftover background runner or QEMU process before moving on.
 - Do not assume `sysroot/` is mounted or synchronized with `disk.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the VM wrapper when in doubt.
@@ -81,4 +81,7 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 - If the user provides a workflow or debugging suggestion that is broadly useful for future work in this repository, add it to `AGENTS.md` when appropriate instead of treating it as a one-off remark.
 - When debugging interactive login issues where the user needs to type a username or password manually, run `nix develop -c cargo run` in the foreground instead of the `--agent` path and let the user provide the login input.
 - When a background VM terminal is available, prefer interacting with it directly to send guest tty input, including login credentials and shell commands, instead of routing that input through helper scripts or separate tty socket tooling.
+- If a background VM terminal is available, interact with that terminal session itself for guest input. Do not fall back to tty sockets, `nc`, or similar side channels when direct terminal interaction is possible.
+- `run agent vm` should be treated as directly interactive by default. Do not assume a separate tty socket or extra terminal wrapper is needed just to type into the guest.
+- After you finish using an interactive or background VM, terminate it yourself instead of relying on a default runner timeout to clean it up.
 - If `sysroot/` already appears to be mounted, reuse it directly instead of asking for privilege escalation to mount again. Only ask to mount when it is clearly not mounted.
