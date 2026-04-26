@@ -116,9 +116,8 @@ impl BootinfoFrameAllocator {
             }
 
             if run_len == pages {
-                let first = run_start + 1 - pages;
-                let start = self.free_frames[first];
-                self.free_frames.drain(first..=run_start);
+                let start = self.free_frames[run_start];
+                self.free_frames.drain(run_start..=i);
                 return Some(start);
             }
         }
