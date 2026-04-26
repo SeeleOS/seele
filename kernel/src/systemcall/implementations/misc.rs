@@ -1150,6 +1150,9 @@ define_syscall!(Clone, |flags: u64,
         | CloneFlags::SIGHAND
         | CloneFlags::THREAD;
     if !clone_flags.contains(CloneFlags::THREAD) {
+        if clone_flags.intersects(CloneFlags::VM | CloneFlags::VFORK) {
+            return Err(SyscallError::NoSyscall);
+        }
         let pidfd_ptr = if clone_flags.contains(CloneFlags::PIDFD) {
             parent_tid
         } else {
@@ -1237,6 +1240,10 @@ define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
             args.tls,
             0,
         );
+    }
+
+    if clone_flags.intersects(CloneFlags::VM | CloneFlags::VFORK) {
+        return Err(SyscallError::NoSyscall);
     }
 
     if clone_flags.contains(CloneFlags::PIDFD) != (args.pidfd != 0) {
