@@ -325,8 +325,7 @@ impl NetlinkSocketObject {
 
         self.memberships
             .lock()
-            .iter()
-            .any(|membership| *membership == group)
+            .contains(&group)
     }
 
     fn local_address(&self) -> NetlinkSocketAddress {

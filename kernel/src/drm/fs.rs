@@ -26,7 +26,7 @@ fn platform_drm_uevent() -> Vec<u8> {
 fn format_dev(major: u64, minor: u64) -> Vec<u8> {
     let mut out = String::new();
     use alloc::fmt::Write;
-    let _ = write!(&mut out, "{major}:{minor}\n");
+    let _ = writeln!(&mut out, "{major}:{minor}");
     out.into_bytes()
 }
 
