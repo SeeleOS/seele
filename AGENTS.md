@@ -63,6 +63,7 @@ If the current logs are already noisy enough to pollute the debugging signal and
 Recent commits are short, imperative, and lowercase, for example: `deleted seele-sys fully` or `linux stuff`.
 
 - IMPORTANT: split commits by feature/fix.
+- IMPORTANT: after finishing a discrete feature or fix, commit it immediately even before verification. If verification later finds a problem, fix that in a separate follow-up commit instead of delaying the original commit.
 - IMPORTANT: make small verified commits promptly while debugging.
 - IMPORTANT: once a discrete feature or fix is verified, commit it immediately instead of waiting for the rest of the work to finish.
 - IMPORTANT: before committing, review the current `git diff` against `AGENTS.md`, then split and commit by feature/fix.
