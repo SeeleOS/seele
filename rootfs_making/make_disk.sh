@@ -9,8 +9,10 @@ PACMAN_CONF_TEMPLATE="${ROOTFS_MAKING_DIR}/pacman.conf"
 PACMAN_CONF_IN_SYSROOT="${SYSROOT_DIR}/etc/pacman.conf"
 OVERRIDE_DISK=0
 ARCH_MIRROR="${ARCH_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/archlinux/\$repo/os/\$arch}"
+PACMAN_BIN="$(command -v pacman)"
 AUR_BUILD_USER="aurbuilder"
 AUR_BUILD_DIR="/tmp/aur-build"
+TARGET_PATH="/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"
 ARCH_PACKAGES=(
     base
     base-devel
@@ -81,10 +83,19 @@ install_sysroot_file() {
 }
 
 pacman_root() {
-    sudo pacman \
+    mount_chroot_api_fs
+    sudo env PATH="${TARGET_PATH}" "${PACMAN_BIN}" \
+        --config "${PACMAN_CONF_TEMPLATE}" \
         --sysroot "${SYSROOT_DIR}" \
         --noconfirm \
         "$@"
+}
+
+chroot_sh() {
+    sudo chroot "${SYSROOT_DIR}" /usr/bin/env -i \
+        HOME=/root \
+        PATH="${TARGET_PATH}" \
+        /bin/sh -lc "$1"
 }
 
 mount_chroot_api_fs() {
@@ -128,7 +139,7 @@ umount_chroot_api_fs() {
 trap umount_chroot_api_fs EXIT
 
 ensure_aur_builder() {
-    sudo chroot "${SYSROOT_DIR}" /bin/sh -lc "
+    chroot_sh "
         set -eu
         if ! id -u '${AUR_BUILD_USER}' >/dev/null 2>&1; then
             useradd -m -U '${AUR_BUILD_USER}'
@@ -170,13 +181,19 @@ install_aur_package() {
     sudo rm -rf "${SYSROOT_DIR}${AUR_BUILD_DIR}/${package}"
     sudo cp -a "${host_build_dir}/${package}" "${SYSROOT_DIR}${AUR_BUILD_DIR}/"
     mount_chroot_api_fs
-    sudo chroot "${SYSROOT_DIR}" /usr/bin/chown -R "${AUR_BUILD_USER}:${AUR_BUILD_USER}" "${AUR_BUILD_DIR}/${package}"
+    sudo chroot "${SYSROOT_DIR}" /usr/bin/env -i \
+        HOME=/root \
+        PATH="${TARGET_PATH}" \
+        /usr/bin/chown -R "${AUR_BUILD_USER}:${AUR_BUILD_USER}" "${AUR_BUILD_DIR}/${package}"
 
-    sudo chroot "${SYSROOT_DIR}" /usr/bin/runuser -u "${AUR_BUILD_USER}" -- \
-        /bin/bash -lc "cd '${AUR_BUILD_DIR}/${package}' && /usr/bin/makepkg --noconfirm --syncdeps --clean --cleanbuild --force"
+    sudo chroot "${SYSROOT_DIR}" /usr/bin/env -i \
+        HOME="/home/${AUR_BUILD_USER}" \
+        PATH="${TARGET_PATH}" \
+        /usr/bin/runuser -u "${AUR_BUILD_USER}" -- \
+        /bin/bash -lc "export PATH='${TARGET_PATH}'; cd '${AUR_BUILD_DIR}/${package}' && /usr/bin/makepkg --noconfirm --syncdeps --clean --cleanbuild --force"
 
     pkg_file="$(
-        sudo chroot "${SYSROOT_DIR}" /bin/sh -lc \
+        chroot_sh \
             "cd '${AUR_BUILD_DIR}/${package}' && /usr/bin/realpath ./*.pkg.tar.* | /usr/bin/head -n 1"
     )"
 
@@ -244,8 +261,12 @@ EOF
 sudo install -Dm644 "${PACMAN_CONF_TEMPLATE}" "${PACMAN_CONF_IN_SYSROOT}"
 
 pacman_root --needed -Sy "${ARCH_PACKAGES[@]}"
+chroot_sh "update-ca-trust"
 
-sudo chroot "${SYSROOT_DIR}" /usr/sbin/usermod -p '' root
+sudo chroot "${SYSROOT_DIR}" /usr/bin/env -i \
+    HOME=/root \
+    PATH="${TARGET_PATH}" \
+    /usr/sbin/usermod -p '' root
 
 install_sysroot_file "${ROOTFS_MAKING_DIR}/locale.conf" "${SYSROOT_DIR}/etc/locale.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/vconsole.conf" "${SYSROOT_DIR}/etc/vconsole.conf"

@@ -1,15 +1,4 @@
 #!/bin/sh
 
-if [ -x /usr/bin/icewm-session ]; then
-    exec /usr/bin/icewm-session
-fi
-
-if [ -x /usr/bin/startplasma-x11 ]; then
-    exec /usr/bin/startplasma-x11
-fi
-
-if [ -x /usr/bin/startplasma-manual.sh ]; then
-    exec /usr/bin/startplasma-manual.sh
-fi
-
-exec sh
+st &
+exec icewm-session
