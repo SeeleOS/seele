@@ -1,4 +1,5 @@
 use alloc::{
+    collections::BTreeSet,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
@@ -15,6 +16,7 @@ use crate::{
             StaticDeviceNode, StaticDirEntry, StaticDirectoryNode, StaticNode, StaticSymlinkNode,
             device::StaticDeviceHandle, directory::StaticDirectoryHandle,
         },
+        tmpfs::{TmpNodeKind, TmpfsState, TmpfsStateRef, tmpfs_lookup_path},
         vfs::FSResult,
         vfs_traits::{Directory, DirectoryContentType, FileLike, FileLikeType, FileSystem},
     },
@@ -226,9 +228,15 @@ static DEV_ROOT_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     entries: DEV_ROOT_ENTRIES,
 });
 
-pub struct DevFs;
+pub struct DevFs {
+    state: TmpfsStateRef,
+}
 
-struct DevRootDirectoryHandle;
+struct DevDirectoryHandle {
+    state: TmpfsStateRef,
+    path: String,
+    node: &'static StaticDirectoryNode,
+}
 struct DevPtsDirectoryHandle;
 
 fn root_directory_node() -> &'static StaticDirectoryNode {
@@ -238,8 +246,20 @@ fn root_directory_node() -> &'static StaticDirectoryNode {
     node
 }
 
-fn root_directory_file_like() -> FileLike {
-    FileLike::Directory(Arc::new(Mutex::new(DevRootDirectoryHandle)))
+fn root_directory_file_like(state: TmpfsStateRef) -> FileLike {
+    static_directory_file_like(state, "/".into(), root_directory_node())
+}
+
+fn static_directory_file_like(
+    state: TmpfsStateRef,
+    path: String,
+    node: &'static StaticDirectoryNode,
+) -> FileLike {
+    FileLike::Directory(Arc::new(Mutex::new(DevDirectoryHandle {
+        state,
+        path,
+        node,
+    })))
 }
 
 fn pts_directory_file_like() -> FileLike {
@@ -263,37 +283,250 @@ fn pts_file_like(number: u32) -> FSResult<FileLike> {
     ))))
 }
 
-impl Directory for DevRootDirectoryHandle {
+fn overlay_directory_path(path: &Path) -> String {
+    let normalized = path.normalize();
+    let components = normalized
+        .parts
+        .iter()
+        .filter_map(|part| match part {
+            PathPart::Normal(name) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if components.is_empty() {
+        "/".into()
+    } else {
+        alloc::format!("/{}", components.join("/"))
+    }
+}
+
+fn static_directory_child(
+    node: &'static StaticDirectoryNode,
+    name: &str,
+) -> Option<&'static StaticNode> {
+    node.entries
+        .iter()
+        .find(|entry| entry.name == name)
+        .map(|entry| entry.node)
+}
+
+fn static_node_file_like(
+    state: TmpfsStateRef,
+    path: String,
+    node: &'static StaticNode,
+) -> FileLike {
+    match node {
+        StaticNode::Directory(directory) => {
+            if path == "/pts" {
+                pts_directory_file_like()
+            } else {
+                static_directory_file_like(state, path, directory)
+            }
+        }
+        StaticNode::File(file) => FileLike::File(Arc::new(Mutex::new(
+            crate::filesystem::staticfs::file::StaticFileHandle::new(file),
+        ))),
+        StaticNode::Symlink(symlink) => FileLike::Symlink(Arc::new(Mutex::new(
+            crate::filesystem::staticfs::symlink::StaticSymlinkHandle::new(symlink),
+        ))),
+        StaticNode::Device(device) => {
+            FileLike::File(Arc::new(Mutex::new(StaticDeviceHandle::new(device))))
+        }
+    }
+}
+
+fn dynamic_children(state: &TmpfsStateRef, path: &str) -> FSResult<Vec<DirectoryContentInfo>> {
+    let state = state.lock();
+    let node = state.node(path)?;
+    let children = match &node.kind {
+        TmpNodeKind::Directory { children, .. } => children,
+        TmpNodeKind::File { .. } | TmpNodeKind::Symlink { .. } => {
+            return Err(FSError::NotADirectory);
+        }
+    };
+
+    let mut entries = Vec::with_capacity(children.len());
+    for child in children {
+        let child_path = TmpfsState::child_path(path, child);
+        let child_node = state.node(&child_path)?;
+        let content_type = match child_node.kind {
+            TmpNodeKind::Directory { .. } => DirectoryContentType::Directory,
+            TmpNodeKind::File { .. } => DirectoryContentType::File,
+            TmpNodeKind::Symlink { .. } => DirectoryContentType::Symlink,
+        };
+        entries.push(DirectoryContentInfo::new(child.clone(), content_type));
+    }
+    Ok(entries)
+}
+
+fn static_root_paths() -> &'static [&'static str] {
+    &["/input", "/dri", "/pts", "/shm"]
+}
+
+fn seeded_static_directory(path: &str) -> bool {
+    path == "/" || static_root_paths().contains(&path)
+}
+
+impl Directory for DevDirectoryHandle {
     fn as_any(&self) -> &dyn core::any::Any {
         self
     }
 
     fn info(&self) -> FSResult<FileLikeInfo> {
-        StaticDirectoryHandle::new(root_directory_node()).info()
+        StaticDirectoryHandle::new(self.node).info()
     }
 
     fn name(&self) -> FSResult<String> {
-        Ok("dev".into())
+        Ok(self.node.name.into())
     }
 
     fn contents(&self) -> FSResult<Vec<DirectoryContentInfo>> {
-        StaticDirectoryHandle::new(root_directory_node()).contents()
+        let mut seen = BTreeSet::new();
+        let mut entries = Vec::new();
+
+        for entry in self.node.entries {
+            seen.insert(entry.name.to_string());
+            entries.push(DirectoryContentInfo::new(
+                entry.name.into(),
+                entry.node.content_type(),
+            ));
+        }
+
+        for entry in dynamic_children(&self.state, &self.path)? {
+            if seen.insert(entry.name.clone()) {
+                entries.push(entry);
+            }
+        }
+
+        Ok(entries)
     }
 
-    fn create(&self, _info: DirectoryContentInfo) -> FSResult<()> {
-        Err(FSError::Readonly)
+    fn create(&self, info: DirectoryContentInfo) -> FSResult<()> {
+        if static_directory_child(self.node, &info.name).is_some() {
+            return Err(FSError::AlreadyExists);
+        }
+
+        let mut state = self.state.lock();
+        match info.content_type {
+            DirectoryContentType::File => state.create_file(&self.path, &info.name),
+            DirectoryContentType::Directory => state.create_directory(&self.path, &info.name),
+            DirectoryContentType::Symlink => Err(FSError::Readonly),
+        }
     }
 
-    fn delete(&self, _name: &str) -> FSResult<()> {
-        Err(FSError::Readonly)
+    fn create_symlink(&self, name: &str, target: &str) -> FSResult<()> {
+        if static_directory_child(self.node, name).is_some() {
+            return Err(FSError::AlreadyExists);
+        }
+
+        self.state.lock().create_symlink(&self.path, name, target)
+    }
+
+    fn delete(&self, name: &str) -> FSResult<()> {
+        if static_directory_child(self.node, name).is_some() {
+            return Err(FSError::Readonly);
+        }
+
+        self.state.lock().delete_node(&self.path, name)
     }
 
     fn get(&self, name: &str) -> FSResult<FileLike> {
-        if name == "pts" {
-            return Ok(pts_directory_file_like());
+        if let Some(node) = static_directory_child(self.node, name) {
+            let child_path = TmpfsState::child_path(&self.path, name);
+            return Ok(static_node_file_like(self.state.clone(), child_path, node));
         }
 
-        StaticDirectoryHandle::new(root_directory_node()).get(name)
+        let child_path = TmpfsState::child_path(&self.path, name);
+        tmpfs_lookup_path(&self.state, &child_path)
+    }
+}
+
+impl DevFs {
+    pub fn new() -> Self {
+        let state = Arc::new(Mutex::new(TmpfsState::new()));
+        {
+            let mut state_guard = state.lock();
+            for path in static_root_paths() {
+                let name = path.trim_start_matches('/');
+                state_guard
+                    .create_directory("/", name)
+                    .expect("devfs static directory seed should succeed");
+            }
+        }
+        Self { state }
+    }
+}
+
+impl Default for DevFs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FileSystem for DevFs {
+    fn init(&mut self) -> FSResult<()> {
+        Ok(())
+    }
+
+    fn lookup(&self, path: &Path) -> FSResult<FileLike> {
+        let normalized = path.normalize();
+        let mut current = root_directory_file_like(self.state.clone());
+
+        for component in normalized.parts.iter() {
+            match component {
+                PathPart::Root | PathPart::CurrentDir => {}
+                PathPart::ParentDir => return Err(FSError::NotADirectory),
+                PathPart::Normal(name) => {
+                    let FileLike::Directory(directory) = current else {
+                        return Err(FSError::NotADirectory);
+                    };
+                    current = directory.lock().get(name)?;
+                }
+            }
+        }
+
+        Ok(current)
+    }
+
+    fn rename(&self, old_path: &Path, new_path: &Path) -> FSResult<()> {
+        let old_path = overlay_directory_path(old_path);
+        let new_path = overlay_directory_path(new_path);
+        if seeded_static_directory(&old_path)
+            || seeded_static_directory(&new_path)
+            || static_path_exists(&old_path)
+        {
+            return Err(FSError::Readonly);
+        }
+        if static_path_exists(&new_path) {
+            return Err(FSError::Readonly);
+        }
+        self.state.lock().rename(&old_path, &new_path)
+    }
+
+    fn link(&self, old_path: &Path, new_path: &Path) -> FSResult<()> {
+        let old_path = overlay_directory_path(old_path);
+        let new_path = overlay_directory_path(new_path);
+        if static_path_exists(&old_path) || static_path_exists(&new_path) {
+            return Err(FSError::Readonly);
+        }
+        self.state.lock().link(&old_path, &new_path)
+    }
+
+    fn name(&self) -> &'static str {
+        "devtmpfs"
+    }
+
+    fn magic(&self) -> i64 {
+        0x0102_1994
+    }
+
+    fn mount_source(&self) -> &'static str {
+        "devtmpfs"
+    }
+
+    fn default_mount_flags(&self, _path: &Path) -> crate::filesystem::vfs_traits::MountFlags {
+        crate::filesystem::vfs_traits::MountFlags::MS_NOSUID
+            | crate::filesystem::vfs_traits::MountFlags::MS_RELATIME
     }
 }
 
@@ -337,65 +570,28 @@ impl Directory for DevPtsDirectoryHandle {
     }
 }
 
-impl DevFs {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for DevFs {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl FileSystem for DevFs {
-    fn init(&mut self) -> FSResult<()> {
-        Ok(())
+fn static_path_exists(path: &str) -> bool {
+    if path == "/" {
+        return true;
     }
 
-    fn lookup(&self, path: &Path) -> FSResult<FileLike> {
-        let normalized = path.normalize();
-        let mut current = root_directory_file_like();
-
-        for component in normalized.parts.iter() {
-            match component {
-                PathPart::Root | PathPart::CurrentDir => {}
-                PathPart::ParentDir => return Err(FSError::NotADirectory),
-                PathPart::Normal(name) => {
-                    let FileLike::Directory(directory) = current else {
-                        return Err(FSError::NotADirectory);
-                    };
-                    current = directory.lock().get(name)?;
+    let mut current = root_directory_node();
+    let mut parts = path.trim_start_matches('/').split('/').peekable();
+    while let Some(name) = parts.next() {
+        let Some(node) = static_directory_child(current, name) else {
+            return false;
+        };
+        match node {
+            StaticNode::Directory(directory) => {
+                if parts.peek().is_none() {
+                    return true;
                 }
+                current = directory;
+            }
+            StaticNode::File(_) | StaticNode::Device(_) | StaticNode::Symlink(_) => {
+                return parts.peek().is_none();
             }
         }
-
-        Ok(current)
     }
-
-    fn rename(&self, _old_path: &Path, _new_path: &Path) -> FSResult<()> {
-        Err(FSError::Readonly)
-    }
-
-    fn link(&self, _old_path: &Path, _new_path: &Path) -> FSResult<()> {
-        Err(FSError::Readonly)
-    }
-
-    fn name(&self) -> &'static str {
-        "devtmpfs"
-    }
-
-    fn magic(&self) -> i64 {
-        0x0102_1994
-    }
-
-    fn mount_source(&self) -> &'static str {
-        "devtmpfs"
-    }
-
-    fn default_mount_flags(&self, _path: &Path) -> crate::filesystem::vfs_traits::MountFlags {
-        crate::filesystem::vfs_traits::MountFlags::MS_NOSUID
-            | crate::filesystem::vfs_traits::MountFlags::MS_RELATIME
-    }
+    true
 }
