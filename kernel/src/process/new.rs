@@ -181,8 +181,7 @@ fn setup_process_inner(
     let program = with_profiling(
         || load_elf_lazy(addrspace, program_file, &program_headers),
         alloc::format!("load_elf_lazy {}", path_string).as_str(),
-    )
-    .unwrap();
+    )?;
 
     let (entry_point, interpreter_base) = match program.interpreter.as_deref() {
         Some(interpreter_path) => {
@@ -197,8 +196,7 @@ fn setup_process_inner(
             let interp = with_profiling(
                 || load_elf_lazy(addrspace, interp_file, &interp_headers),
                 alloc::format!("load interp {}", interpreter_path).as_str(),
-            )
-            .unwrap();
+            )?;
             (interp.entry_point, Some(interp.load_base))
         }
         None => (program.entry_point, None),

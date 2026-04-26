@@ -1,5 +1,4 @@
 use alloc::sync::Arc;
-use elfloader::ElfLoaderErr;
 use xmas_elf::{ElfFile, program::Type};
 
 use crate::{
@@ -7,6 +6,7 @@ use crate::{
         ElfInfo, headers::read_interp, load_base::choose_load_base_offset,
         segment::load_segment_to_area,
     },
+    filesystem::errors::FSError,
     filesystem::object::FileLikeObject,
     memory::addrspace::AddrSpace,
     misc::time::with_profiling,
@@ -39,15 +39,15 @@ pub fn load_elf_lazy(
     addrspace: &mut AddrSpace,
     file: Arc<FileLikeObject>,
     elf_bytes: &[u8],
-) -> Result<ElfInfo, ElfLoaderErr> {
-    let elf = ElfFile::new(elf_bytes)?;
+) -> Result<ElfInfo, FSError> {
+    let elf = ElfFile::new(elf_bytes).map_err(|_| FSError::Other)?;
     let load_base = choose_load_base_offset(addrspace, &elf);
     let mut interpreter = None;
 
     with_profiling(
         || {
             for header in elf.program_iter() {
-                match header.get_type()? {
+                match header.get_type().map_err(|_| FSError::Other)? {
                     Type::Load => {
                         if header.mem_size() == 0 {
                             continue;
@@ -60,12 +60,12 @@ pub fn load_elf_lazy(
                         ));
                     }
                     Type::Interp => {
-                        interpreter = Some(read_interp(&file, header).unwrap());
+                        interpreter = Some(read_interp(&file, header)?);
                     }
                     _ => {}
                 }
             }
-            Ok::<(), ElfLoaderErr>(())
+            Ok::<(), FSError>(())
         },
         "load_elf_lazy map segments",
     )?;

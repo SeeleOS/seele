@@ -1,10 +1,14 @@
+use core::mem;
+
 use crate::{
     filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
+    memory::addrspace::AddrSpace,
     misc::time::with_profiling,
     process::{
         Process,
         manager::{MANAGER, wake_vfork_blocker},
         new::setup_process,
+        object::close_cloexec_fd_entries,
     },
     signal::{
         Signals,
@@ -46,9 +50,29 @@ impl Process {
         } else {
             args.clone()
         };
+        let mut next_addrspace = AddrSpace::default();
+        let mut next_fd_table = self.fd_table.clone();
+        close_cloexec_fd_entries(&mut next_fd_table);
+
+        let next_snapshot = with_profiling(
+            || {
+                setup_process(
+                    path.clone(),
+                    args,
+                    env,
+                    &mut next_addrspace,
+                    &mut next_fd_table,
+                )
+            },
+            alloc::format!("execve setup_process pid={} path={}", self.pid.0, path_string).as_str(),
+        )?;
+
         // TODO: kill all the other threads when execveing
         with_profiling(
-            || self.addrspace.clean(),
+            || {
+                let mut old_addrspace = mem::replace(&mut self.addrspace, next_addrspace);
+                old_addrspace.clean();
+            },
             alloc::format!(
                 "execve clean addrspace pid={} path={}",
                 self.pid.0,
@@ -74,17 +98,8 @@ impl Process {
 
         let mut thread_locked = thread.lock();
 
-        self.close_cloexec_objects();
-        thread_locked.snapshot = with_profiling(
-            || setup_process(path, args, env, &mut self.addrspace, &mut self.fd_table),
-            alloc::format!(
-                "execve setup_process pid={} path={}",
-                self.pid.0,
-                path_string
-            )
-            .as_str(),
-        )
-        .unwrap();
+        self.fd_table = next_fd_table;
+        thread_locked.snapshot = next_snapshot;
         thread_locked.kernel_stack_top = self.kernel_stack_top.as_u64();
         thread_locked.snapshot_state = SnapshotState::Normal;
         thread_locked.sig_handler_snapshot = ThreadSnapshot::default();

@@ -9,6 +9,17 @@ use crate::{
     process::{FdEntry, FdFlags, Process},
 };
 
+pub fn close_cloexec_fd_entries(fd_table: &mut [Option<FdEntry>]) {
+    for entry in fd_table {
+        if entry
+            .as_ref()
+            .is_some_and(|entry| entry.fd_flags.contains(FdFlags::CLOEXEC))
+        {
+            *entry = None;
+        }
+    }
+}
+
 pub fn init_objects(fd_table: &mut Vec<Option<FdEntry>>) {
     if fd_table.len() < 3 {
         fd_table.resize(3, None);
@@ -149,13 +160,6 @@ impl Process {
     }
 
     pub fn close_cloexec_objects(&mut self) {
-        for entry in &mut self.fd_table {
-            if entry
-                .as_ref()
-                .is_some_and(|entry| entry.fd_flags.contains(FdFlags::CLOEXEC))
-            {
-                *entry = None;
-            }
-        }
+        close_cloexec_fd_entries(&mut self.fd_table);
     }
 }
