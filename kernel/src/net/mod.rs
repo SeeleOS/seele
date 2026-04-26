@@ -16,10 +16,15 @@ use crate::{misc::time::Time, thread::THREAD_MANAGER};
 
 const STATIC_IPV4: [u8; 4] = [10, 0, 2, 15];
 const DEFAULT_GATEWAY_IPV4: [u8; 4] = [10, 0, 2, 2];
+const LOOPBACK_IPV4: [u8; 4] = [127, 0, 0, 1];
 const TCP_BUFFER_SIZE: usize = 64 * 1024;
 const UDP_PACKET_CAPACITY: usize = 64;
 const UDP_BUFFER_SIZE: usize = 64 * 1024;
 const EPHEMERAL_PORT_START: u16 = 49152;
+const LOOPBACK_PREFIX_LEN: u8 = 8;
+const STATIC_IPV4_PREFIX_LEN: u8 = 24;
+const LOOPBACK_IFINDEX: i32 = 1;
+const PRIMARY_IFINDEX: i32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetError {
@@ -79,6 +84,16 @@ impl InetAddress {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NetworkInterfaceInfo {
+    pub index: i32,
+    pub name: &'static str,
+    pub mac: [u8; 6],
+    pub mtu: u32,
+    pub loopback: bool,
+    pub ipv4: Option<([u8; 4], u8)>,
 }
 
 impl From<IpEndpoint> for InetAddress {
@@ -346,6 +361,31 @@ pub fn poll() {
     if changed {
         wake_io();
     }
+}
+
+pub fn interfaces() -> Vec<NetworkInterfaceInfo> {
+    let mut interfaces = vec![NetworkInterfaceInfo {
+        index: LOOPBACK_IFINDEX,
+        name: "lo",
+        mac: [0; 6],
+        mtu: 65_536,
+        loopback: true,
+        ipv4: Some((LOOPBACK_IPV4, LOOPBACK_PREFIX_LEN)),
+    }];
+
+    let manager = manager().lock();
+    if let Some(stack) = manager.stack.as_ref() {
+        interfaces.push(NetworkInterfaceInfo {
+            index: PRIMARY_IFINDEX,
+            name: stack.device.device.name(),
+            mac: stack.device.device.mac_address(),
+            mtu: stack.device.device.mtu() as u32,
+            loopback: false,
+            ipv4: Some((STATIC_IPV4, STATIC_IPV4_PREFIX_LEN)),
+        });
+    }
+
+    interfaces
 }
 
 pub fn create_socket(kind: TransportKind) -> NetResult<NetSocketHandle> {
