@@ -1,4 +1,4 @@
-use alloc::{format, string::String};
+use alloc::string::String;
 
 use crate::filesystem::{
     errors::FSError,
@@ -40,21 +40,10 @@ impl Symlink for TmpfsSymlinkHandle {
     fn target(&self) -> FSResult<Path> {
         let state = self.state.lock();
         let node = state.node(&self.path)?;
-        let target = match &node.kind {
-            TmpNodeKind::Symlink { target } => target.clone(),
-            TmpNodeKind::Directory { .. } | TmpNodeKind::File { .. } => {
-                return Err(FSError::NotASymlink);
-            }
-        };
-        let parent = Path::new(&self.path).parent().unwrap_or_default();
-        let combined = if target.starts_with('/') {
-            target
-        } else if parent.clone().as_string() == "/" {
-            format!("/{}", target)
-        } else {
-            format!("{}/{}", parent.as_string(), target)
-        };
-        Ok(Path::new(&combined).normalize())
+        match &node.kind {
+            TmpNodeKind::Symlink { target } => Ok(Path::new(target)),
+            TmpNodeKind::Directory { .. } | TmpNodeKind::File { .. } => Err(FSError::NotASymlink),
+        }
     }
 
     fn read_link_target(&self) -> FSResult<String> {

@@ -45,6 +45,7 @@ enum OpenBackend {
     },
     Directory(WrappedDirectory),
     SymlinkPath {
+        read_link_target: String,
         target: Path,
         info: FileLikeInfo,
     },
@@ -77,7 +78,21 @@ fn stat_with_mount_device_id(mut stat: LinuxStat, path: &Path) -> LinuxStat {
 }
 
 impl OpenBackend {
-    fn from_file_like(file: FileLike) -> FSResult<Self> {
+    fn symlink_target_from_path(path: &Path, target: &str) -> Path {
+        let target_path = Path::new(target);
+        if target_path.is_absolute() {
+            return target_path;
+        }
+
+        let mut combined = path.parent().unwrap_or_default().as_string();
+        if !combined.ends_with('/') {
+            combined.push('/');
+        }
+        combined.push_str(target);
+        Path::new(&combined).normalize()
+    }
+
+    fn from_file_like(file: FileLike, path: &Path) -> FSResult<Self> {
         match file {
             FileLike::File(file) => {
                 if let Some(object) = device_object_for_file(&file)? {
@@ -89,8 +104,10 @@ impl OpenBackend {
             FileLike::Directory(dir) => Ok(Self::Directory(dir)),
             FileLike::Symlink(symlink) => {
                 let symlink = symlink.lock();
+                let read_link_target = symlink.read_link_target()?;
                 Ok(Self::SymlinkPath {
-                    target: symlink.target()?,
+                    target: Self::symlink_target_from_path(path, &read_link_target),
+                    read_link_target,
                     info: symlink.info()?,
                 })
             }
@@ -109,7 +126,7 @@ impl OpenBackend {
 impl OpenedFileObject {
     pub fn new(file: FileLike, path: Path) -> FSResult<Self> {
         Ok(Self {
-            backend: OpenBackend::from_file_like(file)?,
+            backend: OpenBackend::from_file_like(file, &path)?,
             open_state: OpenState::default(),
             path,
         })
@@ -133,7 +150,9 @@ impl OpenedFileObject {
 
     pub fn read_link(&self) -> FSResult<String> {
         match &self.backend {
-            OpenBackend::SymlinkPath { target, .. } => Ok(target.clone().as_string()),
+            OpenBackend::SymlinkPath {
+                read_link_target, ..
+            } => Ok(read_link_target.clone()),
             _ => Err(FSError::NotASymlink),
         }
     }
