@@ -22,6 +22,7 @@
         toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
         runPackages = with pkgs; [
+          arch-install-scripts
           bash
           coreutils
           e2fsprogs
@@ -33,6 +34,7 @@
         ];
 
         devPackages = with pkgs; [
+          arch-install-scripts
           e2fsprogs
           git
           pacman
