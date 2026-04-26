@@ -39,6 +39,7 @@ ARCH_PACKAGES=(
     yazi
     eza
     mesa
+    seatd
     wayland
     weston
     xf86-video-fbdev
@@ -221,6 +222,7 @@ install_repo_packages
 arch_chroot /bin/sh -lc "update-ca-trust || true"
 
 arch_chroot /usr/sbin/usermod -p '' root
+arch_chroot /usr/bin/systemctl enable seatd.service
 
 install_sysroot_file "${ROOTFS_MAKING_DIR}/locale.conf" "${SYSROOT_DIR}/etc/locale.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/vconsole.conf" "${SYSROOT_DIR}/etc/vconsole.conf"
