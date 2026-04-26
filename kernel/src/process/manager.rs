@@ -6,7 +6,7 @@ use crate::{
     filesystem::cgroupfs::remove_pid_cgroup_path,
     misc::systemd_perf,
     object::linux_anon::wake_pidfd_for_process_with_manager,
-    process::{Process, ProcessRef, misc::ProcessID},
+    process::{Process, ProcessExitStatus, ProcessRef, misc::ProcessID},
     smp::{current_process, set_current_process},
     thread::{THREAD_MANAGER, ThreadRef, manager::ThreadManager},
 };
@@ -67,11 +67,11 @@ pub fn get_current_process() -> ProcessRef {
     current_process()
 }
 
-pub fn terminate_process(process: ProcessRef, exit_code: u64) {
+pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
     let threads = {
         let mut process = process.lock();
-        systemd_perf::log_and_clear_process_summary(&process, exit_code);
-        process.terminate_inner(exit_code)
+        systemd_perf::log_and_clear_process_summary(&process, exit_status);
+        process.terminate_inner(exit_status)
     };
 
     let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
@@ -83,9 +83,9 @@ pub fn terminate_process(process: ProcessRef, exit_code: u64) {
 
 impl Process {
     #[must_use]
-    pub fn terminate_inner(&mut self, exit_code: u64) -> Vec<ThreadRef> {
-        if self.exit_code.is_none() {
-            self.exit_code = Some(exit_code);
+    pub fn terminate_inner(&mut self, exit_status: ProcessExitStatus) -> Vec<ThreadRef> {
+        if self.exit_status.is_none() {
+            self.exit_status = Some(exit_status);
             remove_pid_cgroup_path(self.pid);
         }
 

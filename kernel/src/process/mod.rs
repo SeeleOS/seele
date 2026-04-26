@@ -13,7 +13,7 @@ use crate::misc::timer::Timer;
 use crate::object::misc::ObjectRef;
 use crate::process::group::ProcessGroupID;
 use crate::signal::misc::default_signal_action_vec;
-use crate::signal::{Signals, action::SignalAction};
+use crate::signal::{Signal, Signals, action::SignalAction};
 use crate::{process::misc::ProcessID, thread::thread::Thread};
 
 pub mod execve;
@@ -29,6 +29,8 @@ pub type ProcessRef = Arc<Mutex<Process>>;
 const CAP_LAST_CAP: u32 = 40;
 const DEFAULT_CAPABILITY_LOW: u32 = u32::MAX;
 const DEFAULT_CAPABILITY_HIGH: u32 = (1u32 << (CAP_LAST_CAP - 31)) - 1;
+const CLD_EXITED: i32 = 1;
+const CLD_KILLED: i32 = 2;
 
 bitflags! {
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -58,7 +60,7 @@ pub struct Process {
     pub fd_table: Vec<Option<FdEntry>>,
     pub current_directory: AbsolutePath,
     pub command_line: Vec<String>,
-    pub exit_code: Option<u64>,
+    pub exit_status: Option<ProcessExitStatus>,
     pub parent: Option<ProcessRef>,
     pub signal_actions: Vec<SignalAction>,
     pub pending_signals: Signals,
@@ -103,7 +105,7 @@ impl Default for Process {
             threads: Vec::new(),
             fd_table: Vec::new(),
             command_line: Vec::new(),
-            exit_code: None,
+            exit_status: None,
             parent: None,
             timers: Vec::new(),
             file_mode_creation_mask: 0,
@@ -128,6 +130,39 @@ impl Default for Process {
             capability_permitted: [DEFAULT_CAPABILITY_LOW, DEFAULT_CAPABILITY_HIGH],
             capability_inheritable: [0; 2],
             capability_ambient: [0; 2],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessExitStatus {
+    Exited(u8),
+    Signaled(Signal),
+}
+
+impl ProcessExitStatus {
+    pub fn from_exit_code(code: u64) -> Self {
+        Self::Exited((code & 0xff) as u8)
+    }
+
+    pub fn wait_status(self) -> i32 {
+        match self {
+            Self::Exited(code) => i32::from(code) << 8,
+            Self::Signaled(signal) => signal as i32,
+        }
+    }
+
+    pub fn waitid_code(self) -> i32 {
+        match self {
+            Self::Exited(_) => CLD_EXITED,
+            Self::Signaled(_) => CLD_KILLED,
+        }
+    }
+
+    pub fn waitid_status(self) -> i32 {
+        match self {
+            Self::Exited(code) => i32::from(code),
+            Self::Signaled(signal) => signal as i32,
         }
     }
 }

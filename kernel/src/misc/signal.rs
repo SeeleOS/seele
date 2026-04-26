@@ -1,7 +1,7 @@
 use crate::{
     misc::snapshot::Snapshot,
     object::linux_anon::wake_signalfd_for_process,
-    process::{Process, ProcessRef, group::ProcessGroupID},
+    process::{Process, ProcessExitStatus, ProcessRef, group::ProcessGroupID},
     s_println,
     thread::{
         THREAD_MANAGER, ThreadRef, get_current_thread,
@@ -22,7 +22,7 @@ pub mod action {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Clone, Copy, TryFromPrimitive, Debug, EnumIter)]
+#[derive(Clone, Copy, TryFromPrimitive, Debug, EnumIter, PartialEq, Eq)]
 #[repr(u64)]
 pub enum Signal {
     SIGHUP = 1,
@@ -491,7 +491,7 @@ impl Process {
             )
         {
             s_println!("fatal signal: pid={} signal={:?}", self.pid.0, signal);
-            let threads = self.terminate_inner(signal as u64);
+            let threads = self.terminate_inner(ProcessExitStatus::Signaled(signal));
             return ProcessSignalsResult {
                 should_switch: true,
                 exited_threads: threads,
@@ -500,15 +500,13 @@ impl Process {
         }
 
         match signal {
-            Signal::SIGCHLD | Signal::SIGURG | Signal::SIGWINCH => {
-                ProcessSignalsResult::default()
-            }
+            Signal::SIGCHLD | Signal::SIGURG | Signal::SIGWINCH => ProcessSignalsResult::default(),
             Signal::SIGSTOP | Signal::SIGTSTP | Signal::SIGTTIN | Signal::SIGTTOU => {
                 ProcessSignalsResult {
-                should_switch: true,
-                exited_threads: Vec::new(),
-                stopped_group: Some(self.group_id),
-            }
+                    should_switch: true,
+                    exited_threads: Vec::new(),
+                    stopped_group: Some(self.group_id),
+                }
             }
             Signal::SIGCONT => unreachable!(),
             Signal::SIGALRM => ProcessSignalsResult::default(),

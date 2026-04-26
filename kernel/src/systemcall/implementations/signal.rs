@@ -79,9 +79,7 @@ fn encode_sigaction(action: &SignalAction) -> LinuxSigAction {
         SignalHandlingType::Default => (SIG_DFL, 0),
         SignalHandlingType::Ignore => (SIG_IGN, 0),
         SignalHandlingType::Function1(func) => (func as usize, 0),
-        SignalHandlingType::Function2(func) => {
-            (func as usize, SigActionFlags::SA_SIGINFO.bits())
-        }
+        SignalHandlingType::Function2(func) => (func as usize, SigActionFlags::SA_SIGINFO.bits()),
     };
 
     LinuxSigAction {

@@ -17,7 +17,7 @@ use crate::{
 
 impl Process {
     pub fn have_exited(&self) -> bool {
-        self.exit_code.is_some()
+        self.exit_status.is_some()
     }
 
     pub fn change_directory(&mut self, directory: AbsolutePath) -> Result<(), FSError> {

@@ -8,7 +8,7 @@ use crate::{
     misc::signal::SigInfo,
     object::misc::get_object_current_process,
     process::{
-        Process, ProcessRef,
+        Process, ProcessExitStatus, ProcessRef,
         execve::execve,
         manager::{MANAGER, get_current_process, terminate_process},
         misc::{ProcessID, get_process_with_pid},
@@ -31,37 +31,19 @@ bitflags! {
     }
 }
 
-const CLD_EXITED: i32 = 1;
-
-fn exit_code_to_status(exit_code: u64) -> i32 {
-    ((exit_code & 0xff) << 8) as i32
-}
-
 fn has_wait_interrupt_signal(process: &ProcessRef) -> bool {
     let mut pending = process.lock().pending_signals;
     pending.remove(Signal::SIGCHLD.into());
     !pending.is_empty()
 }
 
-define_syscall!(Getppid, {
-    if let Some(parent) = get_current_process().lock().parent.clone() {
-        Ok(parent.lock().pid.0 as usize)
-    } else {
-        Ok(0)
-    }
-});
-
-define_syscall!(Getpgrp, {
-    Ok(get_current_process().lock().group_id.0 as usize)
-});
-
-define_syscall!(Wait4, |target_process: i32,
-                        status_ptr: *mut i32,
-                        options: i32,
-                        _rusage: u64| {
-    let wait_options = WaitOptions::from_bits_truncate(options);
+fn wait_for_child_exit(
+    target_process: i32,
+    wait_options: WaitOptions,
+) -> Result<Option<(ProcessRef, u64, ProcessExitStatus)>, SyscallError> {
     let preserve_child = wait_options.contains(WaitOptions::WNOWAIT);
     let current_process = get_current_process();
+
     loop {
         THREAD_MANAGER
             .get()
@@ -98,7 +80,11 @@ define_syscall!(Wait4, |target_process: i32,
                 matched_child = true;
 
                 if p_lock.threads.is_empty() {
-                    exited_child = Some((process.clone(), p_lock.exit_code.unwrap_or(0)));
+                    exited_child = Some((
+                        process.clone(),
+                        pid.0,
+                        p_lock.exit_status.unwrap_or(ProcessExitStatus::Exited(0)),
+                    ));
                     break;
                 }
             }
@@ -113,20 +99,13 @@ define_syscall!(Wait4, |target_process: i32,
         };
 
         match check_result {
-            Some((process, exit_code)) => {
-                if !status_ptr.is_null() {
-                    let status = exit_code_to_status(exit_code);
-                    user_safe::write(status_ptr, &status)?;
-                }
-                let pid = process.lock().pid.0;
+            Some((process, pid, exit_status)) => {
                 if !preserve_child {
-                    MANAGER.lock().reap_process(process);
+                    MANAGER.lock().reap_process(process.clone());
                 }
-                return Ok(pid as usize);
+                return Ok(Some((process, pid, exit_status)));
             }
-            None if wait_options.contains(WaitOptions::NOHANG) => {
-                return Ok(0);
-            }
+            None if wait_options.contains(WaitOptions::NOHANG) => return Ok(None),
             None => {
                 if has_wait_interrupt_signal(&current_process) {
                     return Err(SyscallError::Interrupted);
@@ -144,6 +123,35 @@ define_syscall!(Wait4, |target_process: i32,
             }
         }
     }
+}
+
+define_syscall!(Getppid, {
+    if let Some(parent) = get_current_process().lock().parent.clone() {
+        Ok(parent.lock().pid.0 as usize)
+    } else {
+        Ok(0)
+    }
+});
+
+define_syscall!(Getpgrp, {
+    Ok(get_current_process().lock().group_id.0 as usize)
+});
+
+define_syscall!(Wait4, |target_process: i32,
+                        status_ptr: *mut i32,
+                        options: i32,
+                        _rusage: u64| {
+    let wait_options = WaitOptions::from_bits_truncate(options);
+    let Some((_, pid, exit_status)) = wait_for_child_exit(target_process, wait_options)? else {
+        return Ok(0);
+    };
+
+    if !status_ptr.is_null() {
+        let status = exit_status.wait_status();
+        user_safe::write(status_ptr, &status)?;
+    }
+
+    Ok(pid as usize)
 });
 
 define_syscall!(Waitid, |id_type: i32,
@@ -162,26 +170,19 @@ define_syscall!(Waitid, |id_type: i32,
         return Err(SyscallError::InvalidArguments);
     }
 
-    let mut status = 0;
-    let pid = Wait4::handle_call(
-        target_process as u64,
-        (&mut status as *mut i32) as u64,
-        options as u64,
-        0,
-        0,
-        0,
-    )?;
+    let wait_options = WaitOptions::from_bits_truncate(options);
+    let result = wait_for_child_exit(target_process, wait_options)?;
 
     if !info_ptr.is_null() {
-        let info = if pid == 0 {
-            SigInfo::default()
-        } else {
+        let info = if let Some((_, pid, exit_status)) = result {
             SigInfo::for_waitid(
                 Signal::SIGCHLD,
-                CLD_EXITED,
+                exit_status.waitid_code(),
                 pid as i32,
-                (status >> 8) & 0xff,
+                exit_status.waitid_status(),
             )
+        } else {
+            SigInfo::default()
         };
         user_safe::write(info_ptr, &info)?;
     }
@@ -199,12 +200,18 @@ define_syscall!(Execve, |path_str: String,
 });
 
 define_syscall!(Exit, |exit_code: u64| {
-    terminate_process(get_current_process(), exit_code);
+    terminate_process(
+        get_current_process(),
+        ProcessExitStatus::from_exit_code(exit_code),
+    );
     return_to_scheduler_no_save();
 });
 
 define_syscall!(ExitGroup, |exit_code: u64| {
-    terminate_process(get_current_process(), exit_code);
+    terminate_process(
+        get_current_process(),
+        ProcessExitStatus::from_exit_code(exit_code),
+    );
     return_to_scheduler_no_save();
 });
 

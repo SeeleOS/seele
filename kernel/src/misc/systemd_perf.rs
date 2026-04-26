@@ -1,4 +1,4 @@
-use crate::process::Process;
+use crate::process::{Process, ProcessExitStatus};
 
 #[derive(Clone, Copy)]
 pub enum PerfBucket {
@@ -28,4 +28,4 @@ pub fn profile_current_process<R>(_bucket: PerfBucket, func: impl FnOnce() -> R)
 pub fn log_current_block(_kind: &str) {}
 
 #[inline]
-pub fn log_and_clear_process_summary(_process: &Process, _exit_code: u64) {}
+pub fn log_and_clear_process_summary(_process: &Process, _exit_status: ProcessExitStatus) {}

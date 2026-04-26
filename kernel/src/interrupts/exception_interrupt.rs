@@ -6,7 +6,10 @@ use x86_64::{
 use crate::{
     interrupts::pagefault::pagefault_handler,
     misc::{others::is_user_mode, tss::*},
-    process::manager::{get_current_process, terminate_process},
+    process::{
+        ProcessExitStatus,
+        manager::{get_current_process, terminate_process},
+    },
     signal::{Signal, process_current_process_signals, send_signal_to_process},
     thread::{THREAD_MANAGER, misc::with_current_thread, scheduling::return_to_scheduler_no_save},
 };
@@ -80,6 +83,6 @@ pub fn handle_usermode_exception(stackframe: &InterruptStackFrame, sig: Signal) 
         return_to_scheduler_no_save();
     }
 
-    terminate_process(get_current_process(), sig as u64);
+    terminate_process(get_current_process(), ProcessExitStatus::Signaled(sig));
     return_to_scheduler_no_save();
 }
