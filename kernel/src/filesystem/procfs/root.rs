@@ -19,20 +19,22 @@ pub(super) const PROC_MOUNTS_INODE: u64 = 0x3003;
 pub(super) const PROC_SYS_INODE: u64 = 0x3004;
 pub(super) const PROC_MEMINFO_INODE: u64 = 0x3005;
 pub(super) const PROC_DEVICES_INODE: u64 = 0x3006;
-pub(super) const PROC_PRESSURE_INODE: u64 = 0x3007;
-pub(super) const PROC_PRESSURE_CPU_INODE: u64 = 0x3008;
-pub(super) const PROC_PRESSURE_IO_INODE: u64 = 0x3009;
-pub(super) const PROC_PRESSURE_MEMORY_INODE: u64 = 0x300a;
-pub(super) const PROC_SYS_FS_INODE: u64 = 0x300b;
-pub(super) const PROC_SYS_FS_FILE_MAX_INODE: u64 = 0x300c;
-pub(super) const PROC_SYS_FS_NR_OPEN_INODE: u64 = 0x300d;
-pub(super) const PROC_SYS_KERNEL_INODE: u64 = 0x300e;
-pub(super) const PROC_SYS_KERNEL_RANDOM_INODE: u64 = 0x300f;
-pub(super) const PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE: u64 = 0x3010;
-pub(super) const PROC_SYS_KERNEL_HOSTNAME_INODE: u64 = 0x3011;
-pub(super) const PROC_SYS_KERNEL_DOMAINNAME_INODE: u64 = 0x3012;
-pub(super) const PROC_SYS_KERNEL_OSRELEASE_INODE: u64 = 0x3013;
-pub(super) const PROC_SYS_KERNEL_RANDOM_UUID_INODE: u64 = 0x3014;
+pub(super) const PROC_STAT_INODE: u64 = 0x3007;
+pub(super) const PROC_UPTIME_INODE: u64 = 0x3008;
+pub(super) const PROC_PRESSURE_INODE: u64 = 0x3009;
+pub(super) const PROC_PRESSURE_CPU_INODE: u64 = 0x300a;
+pub(super) const PROC_PRESSURE_IO_INODE: u64 = 0x300b;
+pub(super) const PROC_PRESSURE_MEMORY_INODE: u64 = 0x300c;
+pub(super) const PROC_SYS_FS_INODE: u64 = 0x300d;
+pub(super) const PROC_SYS_FS_FILE_MAX_INODE: u64 = 0x300e;
+pub(super) const PROC_SYS_FS_NR_OPEN_INODE: u64 = 0x300f;
+pub(super) const PROC_SYS_KERNEL_INODE: u64 = 0x3010;
+pub(super) const PROC_SYS_KERNEL_RANDOM_INODE: u64 = 0x3011;
+pub(super) const PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE: u64 = 0x3012;
+pub(super) const PROC_SYS_KERNEL_HOSTNAME_INODE: u64 = 0x3013;
+pub(super) const PROC_SYS_KERNEL_DOMAINNAME_INODE: u64 = 0x3014;
+pub(super) const PROC_SYS_KERNEL_OSRELEASE_INODE: u64 = 0x3015;
+pub(super) const PROC_SYS_KERNEL_RANDOM_UUID_INODE: u64 = 0x3016;
 
 static PROC_UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -47,8 +49,10 @@ pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("meminfo".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("mounts".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("pressure".into(), DirectoryContentType::Directory),
+        DirectoryContentInfo::new("stat".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("self".into(), DirectoryContentType::Symlink),
         DirectoryContentInfo::new("sys".into(), DirectoryContentType::Directory),
+        DirectoryContentInfo::new("uptime".into(), DirectoryContentType::File),
     ];
 
     for pid in MANAGER.lock().processes.keys() {
@@ -82,6 +86,47 @@ pub(super) fn proc_devices_bytes() -> Vec<u8> {
     )
     .as_bytes()
     .to_vec()
+}
+
+pub(super) fn proc_stat_bytes() -> Vec<u8> {
+    let cpu_count = crate::smp::topology::processors().len().max(1) as u64;
+    let idle_ticks = Time::since_boot().as_nanoseconds() / 10_000_000;
+    let total_idle_ticks = idle_ticks.saturating_mul(cpu_count);
+    let boot_time =
+        crate::misc::time::unix_timestamp_seconds().saturating_sub(Time::since_boot().as_seconds());
+    let process_count = MANAGER.lock().processes.len();
+
+    let mut out = format!(
+        concat!(
+            "cpu  0 0 0 {} 0 0 0 0 0 0\n",
+            "intr 0\n",
+            "ctxt 0\n",
+            "btime {}\n",
+            "processes {}\n",
+            "procs_running 1\n",
+            "procs_blocked 0\n",
+            "softirq 0 0 0 0 0 0 0 0 0 0 0\n",
+        ),
+        total_idle_ticks, boot_time, process_count,
+    );
+
+    for cpu_index in 0..cpu_count {
+        out.push_str(&format!("cpu{cpu_index} 0 0 0 {idle_ticks} 0 0 0 0 0 0\n"));
+    }
+
+    out.into_bytes()
+}
+
+pub(super) fn proc_uptime_bytes() -> Vec<u8> {
+    let uptime = Time::since_boot();
+    format!(
+        "{}.{:02} {}.{:02}\n",
+        uptime.as_seconds(),
+        uptime.subsec_milliseconds() / 10,
+        uptime.as_seconds(),
+        uptime.subsec_milliseconds() / 10,
+    )
+    .into_bytes()
 }
 
 pub(super) fn proc_kernel_entries() -> Vec<DirectoryContentInfo> {
