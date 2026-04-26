@@ -1,7 +1,7 @@
 mod keyboard;
 mod mouse;
 
-use alloc::vec::Vec;
+use alloc::{format, vec::Vec};
 
 use crate::drm::fs::{SYS_CLASS_DRM_NODE, SYS_DEV_CHAR_226_0_NODE, SYS_DEVICES_PLATFORM_DRM_NODE};
 use crate::filesystem::{
@@ -38,39 +38,58 @@ fn i8042_uevent() -> Vec<u8> {
     b"DRIVER=i8042\nMODALIAS=platform:i8042\nSUBSYSTEM=platform\n".to_vec()
 }
 
-fn parse_uevent_action(buffer: &[u8]) -> &str {
-    core::str::from_utf8(buffer)
-        .ok()
-        .map(str::trim)
-        .filter(|action| !action.is_empty())
-        .unwrap_or("change")
+struct ParsedUevent<'a> {
+    action: &'a str,
+    synthetic_env: Vec<u8>,
 }
 
-pub(super) fn emit_uevent(
-    buffer: &[u8],
-    devpath: &str,
-    subsystem: &str,
-    devname: Option<&str>,
-) -> FSResult<usize> {
-    crate::object::netlink::broadcast_kobject_uevent(
-        parse_uevent_action(buffer),
-        devpath,
-        subsystem,
-        devname,
-    );
+fn parse_uevent_write(buffer: &[u8]) -> ParsedUevent<'_> {
+    let mut fields = core::str::from_utf8(buffer)
+        .ok()
+        .map(str::trim)
+        .unwrap_or("")
+        .split_ascii_whitespace();
+    let action = fields
+        .next()
+        .filter(|field| !field.is_empty())
+        .unwrap_or("change");
+
+    let mut synthetic_env = Vec::new();
+    let mut synth_uuid = "0";
+    for field in fields {
+        if field.contains('=') {
+            synthetic_env.extend_from_slice(format!("SYNTH_ARG_{field}\n").as_bytes());
+            continue;
+        }
+        synth_uuid = field;
+    }
+    synthetic_env.extend_from_slice(format!("SYNTH_UUID={synth_uuid}\n").as_bytes());
+
+    ParsedUevent {
+        action,
+        synthetic_env,
+    }
+}
+
+pub(super) fn emit_uevent(buffer: &[u8], devpath: &str, extra_env: &[u8]) -> FSResult<usize> {
+    let parsed = parse_uevent_write(buffer);
+    let mut env = Vec::with_capacity(extra_env.len() + parsed.synthetic_env.len());
+    env.extend_from_slice(extra_env);
+    env.extend_from_slice(&parsed.synthetic_env);
+    crate::object::netlink::broadcast_kobject_uevent(parsed.action, devpath, &env);
     Ok(buffer.len())
 }
 
 fn i8042_uevent_write(buffer: &[u8]) -> FSResult<usize> {
-    emit_uevent(buffer, "/devices/platform/i8042", "platform", None)
+    emit_uevent(buffer, "/devices/platform/i8042", &i8042_uevent())
 }
 
 fn platform_uevent_write(buffer: &[u8]) -> FSResult<usize> {
-    emit_uevent(buffer, "/devices/platform", "platform", None)
+    emit_uevent(buffer, "/devices/platform", &platform_uevent())
 }
 
 fn devices_uevent_write(buffer: &[u8]) -> FSResult<usize> {
-    emit_uevent(buffer, "/devices", "devices", None)
+    emit_uevent(buffer, "/devices", &devices_uevent())
 }
 
 static SYS_CLASS_GRAPHICS_FB0_DEVICE_SUBSYSTEM_NODE: StaticNode =

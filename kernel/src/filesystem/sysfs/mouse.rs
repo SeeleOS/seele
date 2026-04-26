@@ -58,8 +58,7 @@ fn mouse_input_uevent_write(buffer: &[u8]) -> FSResult<usize> {
     emit_uevent(
         buffer,
         "/devices/platform/i8042/serio1/input/input1",
-        "input",
-        None,
+        &mouse_input_uevent(),
     )
 }
 
@@ -67,8 +66,7 @@ fn mouse_event_uevent_write(buffer: &[u8]) -> FSResult<usize> {
     emit_uevent(
         buffer,
         "/devices/platform/i8042/serio1/input/input1/event1",
-        "input",
-        Some("input/event1"),
+        &mouse_event_uevent(),
     )
 }
 
@@ -76,13 +74,16 @@ fn mouse_input_dir_uevent_write(buffer: &[u8]) -> FSResult<usize> {
     emit_uevent(
         buffer,
         "/devices/platform/i8042/serio1/input",
-        "input",
-        None,
+        &mouse_input_dir_uevent(),
     )
 }
 
 fn mouse_serio_uevent_write(buffer: &[u8]) -> FSResult<usize> {
-    emit_uevent(buffer, "/devices/platform/i8042/serio1", "serio", None)
+    emit_uevent(
+        buffer,
+        "/devices/platform/i8042/serio1",
+        &mouse_serio_uevent(),
+    )
 }
 
 pub(super) static SYS_CLASS_INPUT_EVENT1_NODE: StaticNode =

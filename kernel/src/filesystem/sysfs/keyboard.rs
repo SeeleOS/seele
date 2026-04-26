@@ -53,8 +53,7 @@ fn keyboard_input_uevent_write(buffer: &[u8]) -> FSResult<usize> {
     emit_uevent(
         buffer,
         "/devices/platform/i8042/serio0/input/input0",
-        "input",
-        None,
+        &keyboard_input_uevent(),
     )
 }
 
@@ -62,8 +61,7 @@ fn keyboard_event_uevent_write(buffer: &[u8]) -> FSResult<usize> {
     emit_uevent(
         buffer,
         "/devices/platform/i8042/serio0/input/input0/event0",
-        "input",
-        Some("input/event0"),
+        &keyboard_event_uevent(),
     )
 }
 
@@ -71,13 +69,16 @@ fn keyboard_input_dir_uevent_write(buffer: &[u8]) -> FSResult<usize> {
     emit_uevent(
         buffer,
         "/devices/platform/i8042/serio0/input",
-        "input",
-        None,
+        &keyboard_input_dir_uevent(),
     )
 }
 
 fn keyboard_serio_uevent_write(buffer: &[u8]) -> FSResult<usize> {
-    emit_uevent(buffer, "/devices/platform/i8042/serio0", "serio", None)
+    emit_uevent(
+        buffer,
+        "/devices/platform/i8042/serio0",
+        &keyboard_serio_uevent(),
+    )
 }
 
 pub(super) static SYS_CLASS_INPUT_EVENT0_NODE: StaticNode =
