@@ -67,21 +67,18 @@ impl AbsolutePath {
 
 impl Path {
     pub fn as_absolute(&self) -> AbsolutePath {
-        let mut new_path = AbsolutePath(Vec::new());
+        let mut new_path = if self.is_absolute() {
+            AbsolutePath(Vec::new())
+        } else {
+            get_current_process().lock().current_directory.clone()
+        };
 
-        for (i, part) in self.parts.iter().enumerate() {
+        for part in self.parts.iter() {
             match part {
                 PathPart::Normal(str) => new_path.0.push(AbsolutePathPart::Normal(str.clone())),
                 PathPart::Root => new_path.0.push(AbsolutePathPart::Root),
-                PathPart::CurrentDir => {
-                    if i == 0 {
-                        new_path.push_path(get_current_process().lock().current_directory.clone());
-                    }
-                }
+                PathPart::CurrentDir => {}
                 PathPart::ParentDir => {
-                    if i == 0 {
-                        new_path.push_path(get_current_process().lock().current_directory.clone());
-                    }
                     let _ = new_path.0.pop();
                 }
             }
