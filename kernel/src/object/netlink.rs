@@ -543,10 +543,11 @@ impl NetlinkSocketObject {
         let Some((header, payload)) = self.request_header_and_payload(message) else {
             return;
         };
+        let reply_pid = self.local_address().pid;
 
         match header.nlmsg_type {
-            RTM_GETLINK => self.handle_get_link(header, payload),
-            RTM_GETADDR => self.handle_get_addr(header, payload),
+            RTM_GETLINK => self.handle_get_link(header, payload, reply_pid),
+            RTM_GETADDR => self.handle_get_addr(header, payload, reply_pid),
             _ => self.enqueue_error_response(header, 0),
         }
     }
@@ -574,7 +575,7 @@ impl NetlinkSocketObject {
         ))
     }
 
-    fn handle_get_link(&self, header: NetlinkMessageHeader, payload: &[u8]) {
+    fn handle_get_link(&self, header: NetlinkMessageHeader, payload: &[u8], reply_pid: u32) {
         let request = Self::read_struct_prefix::<IfInfoMessage>(payload).unwrap_or(IfInfoMessage {
             ifi_family: 0,
             ifi_pad: 0,
@@ -608,20 +609,20 @@ impl NetlinkSocketObject {
             || (request.ifi_index == 0 && request_name.is_none() && request_alt_name.is_none());
         if should_dump {
             for interface in matched {
-                self.queue_message(Self::encode_link_message(header, interface, true));
+                self.queue_message(Self::encode_link_message(header, interface, true, reply_pid));
             }
-            self.queue_message(Self::encode_done_message(header.nlmsg_seq));
+            self.queue_message(Self::encode_done_message(header.nlmsg_seq, reply_pid));
             return;
         }
 
         if let Some(interface) = matched.into_iter().next() {
-            self.queue_message(Self::encode_link_message(header, interface, false));
+            self.queue_message(Self::encode_link_message(header, interface, false, reply_pid));
         } else {
             self.enqueue_error_response(header, -19);
         }
     }
 
-    fn handle_get_addr(&self, header: NetlinkMessageHeader, payload: &[u8]) {
+    fn handle_get_addr(&self, header: NetlinkMessageHeader, payload: &[u8], reply_pid: u32) {
         let request = Self::read_struct_prefix::<IfAddrMessage>(payload).unwrap_or(IfAddrMessage {
             ifa_family: 0,
             ifa_prefixlen: 0,
@@ -651,15 +652,17 @@ impl NetlinkSocketObject {
             for (interface, addr, prefix_len) in matched {
                 self.queue_message(Self::encode_addr_message(
                     header, interface, addr, prefix_len, true,
+                    reply_pid,
                 ));
             }
-            self.queue_message(Self::encode_done_message(header.nlmsg_seq));
+            self.queue_message(Self::encode_done_message(header.nlmsg_seq, reply_pid));
             return;
         }
 
         if let Some((interface, addr, prefix_len)) = matched.into_iter().next() {
             self.queue_message(Self::encode_addr_message(
                 header, interface, addr, prefix_len, false,
+                reply_pid,
             ));
         } else {
             self.enqueue_error_response(header, 0);
@@ -670,6 +673,7 @@ impl NetlinkSocketObject {
         request: NetlinkMessageHeader,
         interface: net::NetworkInterfaceInfo,
         multipart: bool,
+        reply_pid: u32,
     ) -> Vec<u8> {
         let mut bytes = Vec::new();
         Self::append_struct(
@@ -679,7 +683,7 @@ impl NetlinkSocketObject {
                 nlmsg_type: RTM_NEWLINK,
                 nlmsg_flags: if multipart { NLM_F_MULTI } else { 0 },
                 nlmsg_seq: request.nlmsg_seq,
-                nlmsg_pid: 0,
+                nlmsg_pid: reply_pid,
             },
         );
         Self::append_struct(
@@ -732,6 +736,7 @@ impl NetlinkSocketObject {
         addr: [u8; 4],
         prefix_len: u8,
         multipart: bool,
+        reply_pid: u32,
     ) -> Vec<u8> {
         let mut bytes = Vec::new();
         Self::append_struct(
@@ -741,7 +746,7 @@ impl NetlinkSocketObject {
                 nlmsg_type: RTM_NEWADDR,
                 nlmsg_flags: if multipart { NLM_F_MULTI } else { 0 },
                 nlmsg_seq: request.nlmsg_seq,
-                nlmsg_pid: 0,
+                nlmsg_pid: reply_pid,
             },
         );
         Self::append_struct(
@@ -766,13 +771,13 @@ impl NetlinkSocketObject {
         bytes
     }
 
-    fn encode_done_message(seq: u32) -> Vec<u8> {
+    fn encode_done_message(seq: u32, reply_pid: u32) -> Vec<u8> {
         let header = NetlinkMessageHeader {
             nlmsg_len: core::mem::size_of::<NetlinkMessageHeader>() as u32,
             nlmsg_type: NLMSG_DONE,
             nlmsg_flags: NLM_F_MULTI,
             nlmsg_seq: seq,
-            nlmsg_pid: 0,
+            nlmsg_pid: reply_pid,
         };
         let mut bytes = Vec::new();
         Self::append_struct(&mut bytes, &header);
@@ -885,7 +890,7 @@ impl NetlinkSocketObject {
             nlmsg_type: NLMSG_ERROR,
             nlmsg_flags: 0,
             nlmsg_seq: header.nlmsg_seq,
-            nlmsg_pid: 0,
+            nlmsg_pid: self.local_address().pid,
         };
         let error = NetlinkErrorMessage { error, header };
 
