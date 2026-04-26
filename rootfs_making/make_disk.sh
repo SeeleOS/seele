@@ -200,17 +200,17 @@ if mountpoint -q "${SYSROOT_DIR}"; then
 fi
 
 if [ -f "${DISK_IMG}" ]; then
-    if [ "${OVERRIDE_DISK}" -ne 1 ]; then
-        echo "disk image already exists: ${DISK_IMG}" >&2
-        echo "rerun with --override to recreate it" >&2
-        exit 1
+    if [ "${OVERRIDE_DISK}" -eq 1 ]; then
+        rm -f "${DISK_IMG}"
+        truncate -s 10G "${DISK_IMG}"
+        mkfs.ext4 -F "${DISK_IMG}"
+    else
+        echo "reusing existing disk image: ${DISK_IMG}"
     fi
-
-    rm -f "${DISK_IMG}"
+else
+    truncate -s 10G "${DISK_IMG}"
+    mkfs.ext4 -F "${DISK_IMG}"
 fi
-
-truncate -s 10G "${DISK_IMG}"
-mkfs.ext4 -F "${DISK_IMG}"
 
 sudo mount -o loop "${DISK_IMG}" "${SYSROOT_DIR}"
 
@@ -245,7 +245,7 @@ for package in "${AUR_PACKAGES[@]}"; do
     install_aur_package "${package}"
 done
 
-sudo chroot "${SYSROOT_DIR}" /usr/bin/passwd -d root
+printf 'root:root\n' | sudo chroot "${SYSROOT_DIR}" /usr/sbin/chpasswd
 
 install_sysroot_file "${ROOTFS_MAKING_DIR}/locale.conf" "${SYSROOT_DIR}/etc/locale.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/vconsole.conf" "${SYSROOT_DIR}/etc/vconsole.conf"
