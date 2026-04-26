@@ -203,6 +203,7 @@ sudo mkdir -p "${SYSROOT_DIR}/var/tmp"
 sudo chmod 1777 "${SYSROOT_DIR}/var/tmp"
 sudo mkdir -p "${SYSROOT_DIR}/etc/X11"
 sudo mkdir -p "${SYSROOT_DIR}/etc"
+sudo rm -f "${SYSROOT_DIR}/var/lib/pacman/db.lck"
 cat <<EOF | sudo tee "${PACMAN_CONF_TEMPLATE}" >/dev/null
 [options]
 Architecture = auto
