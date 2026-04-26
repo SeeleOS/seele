@@ -24,7 +24,8 @@ impl UnixSocketObject {
         let registry_key = if is_abstract {
             UnixSocketRegistryKey::Abstract(path.clone())
         } else {
-            match VirtualFS.lock().create_file(Path::new(&path)) {
+            let create_result = VirtualFS.lock().create_file(Path::new(&path));
+            match create_result {
                 Ok(()) => {}
                 Err(FSError::AlreadyExists) => {
                     let Some(existing_key) = UnixSocketRegistryKey::from_socket_path(&path) else {

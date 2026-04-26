@@ -332,7 +332,8 @@ fn open_tmpfile_at(dirfd: i32, path_str: &str) -> Result<ObjectRef, SyscallError
 
     for _ in 0..128 {
         let tmp_path = next_tmpfile_path(&dir_path);
-        match VirtualFS.lock().create_file(tmp_path.clone()) {
+        let create_result = VirtualFS.lock().create_file(tmp_path.clone());
+        match create_result {
             Ok(()) => {
                 let object: ObjectRef = Arc::new(VirtualFS.lock().open(tmp_path.clone())?);
                 VirtualFS.lock().delete_file(tmp_path)?;
