@@ -40,11 +40,21 @@ pub const DRM_MODE_OBJECT_CRTC: u32 = 0xcccc_cccc;
 pub const DRM_MODE_OBJECT_CONNECTOR: u32 = 0xc0c0_c0c0;
 pub const DRM_MODE_OBJECT_ENCODER: u32 = 0xe0e0_e0e0;
 pub const DRM_MODE_OBJECT_FB: u32 = 0xfbfb_fbfb;
+pub const DRM_MODE_OBJECT_PLANE: u32 = 0xeeee_eeee;
+pub const DRM_MODE_PROP_IMMUTABLE: u32 = 1 << 2;
+pub const DRM_MODE_PROP_ENUM: u32 = 1 << 3;
 
 pub const CARD0_ID: u32 = 0x1000;
 pub const CRTC0_ID: u32 = 0x1001;
 pub const ENCODER0_ID: u32 = 0x1002;
 pub const CONNECTOR0_ID: u32 = 0x1003;
+pub const PRIMARY_PLANE0_ID: u32 = 0x1004;
+pub const PLANE_TYPE_PROP_ID: u32 = 0x1100;
+pub const DRM_PLANE_TYPE_OVERLAY: u64 = 0;
+pub const DRM_PLANE_TYPE_PRIMARY: u64 = 1;
+pub const DRM_PLANE_TYPE_CURSOR: u64 = 2;
+pub const DRM_FORMAT_XRGB8888: u32 = 0x3432_5258;
+pub const DRM_FORMAT_ARGB8888: u32 = 0x3432_5241;
 
 pub const CARD0_MAJOR: u64 = 226;
 pub const CARD0_MINOR: u64 = 0;
@@ -175,6 +185,13 @@ pub struct DrmModeGetProperty {
     pub name: [u8; 32],
     pub count_values: u32,
     pub count_enum_blobs: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModePropertyEnum {
+    pub value: u64,
+    pub name: [u8; 32],
 }
 
 #[repr(C)]

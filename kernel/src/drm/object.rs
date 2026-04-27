@@ -17,10 +17,13 @@ use super::abi::{
     DRM_CAP_DUMB_BUFFER, DRM_CAP_DUMB_PREFER_SHADOW, DRM_CAP_DUMB_PREFERRED_DEPTH,
     DRM_CAP_TIMESTAMP_MONOTONIC, DRM_CLIENT_CAP_ASPECT_RATIO, DRM_CLIENT_CAP_ATOMIC,
     DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, DRM_CLIENT_CAP_STEREO_3D, DRM_CLIENT_CAP_UNIVERSAL_PLANES,
-    DRM_CLIENT_CAP_WRITEBACK_CONNECTORS, DRM_MODE_CONNECTED, DRM_MODE_CONNECTOR_VIRTUAL,
-    DRM_MODE_ENCODER_VIRTUAL, DRM_MODE_OBJECT_CONNECTOR, DRM_MODE_OBJECT_CRTC,
-    DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_FB, DRM_MODE_SUBPIXEL_UNKNOWN, ENCODER0_ID,
-    current_framebuffer_info, current_mode_info,
+    DRM_CLIENT_CAP_WRITEBACK_CONNECTORS, DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888,
+    DRM_MODE_CONNECTED, DRM_MODE_CONNECTOR_VIRTUAL, DRM_MODE_ENCODER_VIRTUAL,
+    DRM_MODE_OBJECT_CONNECTOR, DRM_MODE_OBJECT_CRTC, DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_FB,
+    DRM_MODE_OBJECT_PLANE, DRM_MODE_PROP_ENUM, DRM_MODE_PROP_IMMUTABLE, DRM_MODE_SUBPIXEL_UNKNOWN,
+    DRM_PLANE_TYPE_CURSOR, DRM_PLANE_TYPE_OVERLAY, DRM_PLANE_TYPE_PRIMARY, DrmModePropertyEnum,
+    ENCODER0_ID, PLANE_TYPE_PROP_ID, PRIMARY_PLANE0_ID, current_framebuffer_info,
+    current_mode_info,
 };
 
 #[derive(Default, Debug)]
@@ -158,10 +161,26 @@ impl Configuratable for DrmCardObject {
             }
             ConfigurateRequest::DrmModeGetProperty(ptr) => {
                 let mut property = read_user(ptr)?;
-                property.flags = 0;
-                property.name = [0; 32];
-                property.count_values = 0;
-                property.count_enum_blobs = 0;
+                match property.prop_id {
+                    PLANE_TYPE_PROP_ID => {
+                        let enums = [
+                            make_property_enum(DRM_PLANE_TYPE_OVERLAY, "Overlay"),
+                            make_property_enum(DRM_PLANE_TYPE_PRIMARY, "Primary"),
+                            make_property_enum(DRM_PLANE_TYPE_CURSOR, "Cursor"),
+                        ];
+                        maybe_write_struct_slice(
+                            property.enum_blob_ptr,
+                            property.count_enum_blobs,
+                            &enums,
+                        )?;
+                        property.flags = DRM_MODE_PROP_ENUM | DRM_MODE_PROP_IMMUTABLE;
+                        property.name = [0; 32];
+                        copy_property_name(&mut property.name, "type");
+                        property.count_values = 0;
+                        property.count_enum_blobs = enums.len() as u32;
+                    }
+                    _ => return Err(ObjectError::InvalidArguments),
+                }
                 user_safe::write(ptr, &property).map_err(|_| ObjectError::InvalidArguments)?;
                 Ok(0)
             }
@@ -171,6 +190,22 @@ impl Configuratable for DrmCardObject {
                     DRM_MODE_OBJECT_CRTC if properties.obj_id == CRTC0_ID => {}
                     DRM_MODE_OBJECT_CONNECTOR if properties.obj_id == CONNECTOR0_ID => {}
                     DRM_MODE_OBJECT_ENCODER if properties.obj_id == ENCODER0_ID => {}
+                    DRM_MODE_OBJECT_PLANE if properties.obj_id == PRIMARY_PLANE0_ID => {
+                        maybe_write_u32_slice(
+                            properties.props_ptr,
+                            properties.count_props,
+                            &[PLANE_TYPE_PROP_ID],
+                        )?;
+                        maybe_write_u64_slice(
+                            properties.prop_values_ptr,
+                            properties.count_props,
+                            &[DRM_PLANE_TYPE_PRIMARY],
+                        )?;
+                        properties.count_props = 1;
+                        user_safe::write(ptr, &properties)
+                            .map_err(|_| ObjectError::InvalidArguments)?;
+                        return Ok(0);
+                    }
                     DRM_MODE_OBJECT_FB => {}
                     _ => return Err(ObjectError::InvalidArguments),
                 }
@@ -180,17 +215,28 @@ impl Configuratable for DrmCardObject {
             }
             ConfigurateRequest::DrmModeGetPlaneResources(ptr) => {
                 let mut planes = read_user(ptr)?;
-                planes.count_planes = 0;
+                maybe_write_u32_slice(
+                    planes.plane_id_ptr,
+                    planes.count_planes,
+                    &[PRIMARY_PLANE0_ID],
+                )?;
+                planes.count_planes = 1;
                 user_safe::write(ptr, &planes).map_err(|_| ObjectError::InvalidArguments)?;
                 Ok(0)
             }
             ConfigurateRequest::DrmModeGetPlane(ptr) => {
                 let mut plane = read_user(ptr)?;
-                plane.crtc_id = 0;
+                if plane.plane_id != 0 && plane.plane_id != PRIMARY_PLANE0_ID {
+                    return Err(ObjectError::InvalidArguments);
+                }
+                let formats = [DRM_FORMAT_XRGB8888, DRM_FORMAT_ARGB8888];
+                maybe_write_u32_slice(plane.format_type_ptr, plane.count_format_types, &formats)?;
+                plane.plane_id = PRIMARY_PLANE0_ID;
+                plane.crtc_id = CRTC0_ID;
                 plane.fb_id = 0;
-                plane.possible_crtcs = 0;
+                plane.possible_crtcs = 1;
                 plane.gamma_size = 0;
-                plane.count_format_types = 0;
+                plane.count_format_types = formats.len() as u32;
                 user_safe::write(ptr, &plane).map_err(|_| ObjectError::InvalidArguments)?;
                 Ok(0)
             }
@@ -210,6 +256,10 @@ fn read_user<T: Copy>(ptr: *mut T) -> ObjectResult<T> {
 }
 
 fn maybe_write_u32_slice(ptr: u64, capacity: u32, values: &[u32]) -> ObjectResult<()> {
+    maybe_write_struct_slice(ptr, capacity, values)
+}
+
+fn maybe_write_u64_slice(ptr: u64, capacity: u32, values: &[u64]) -> ObjectResult<()> {
     maybe_write_struct_slice(ptr, capacity, values)
 }
 
@@ -254,4 +304,19 @@ fn write_c_string(
             .map_err(|_| ObjectError::InvalidArguments)?;
     }
     Ok(())
+}
+
+fn copy_property_name(dst: &mut [u8; 32], value: &str) {
+    for (slot, byte) in dst.iter_mut().zip(value.bytes()) {
+        *slot = byte;
+    }
+}
+
+fn make_property_enum(value: u64, name: &str) -> DrmModePropertyEnum {
+    let mut item = DrmModePropertyEnum {
+        value,
+        name: [0; 32],
+    };
+    copy_property_name(&mut item.name, name);
+    item
 }
