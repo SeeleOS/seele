@@ -4,6 +4,7 @@ set -eu
 
 uid="$(id -u)"
 runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${uid}}"
+display_name="${WAYLAND_DISPLAY:-wayland-0}"
 
 mkdir -p "${runtime_dir}"
 chmod 0700 "${runtime_dir}" 2>/dev/null || true
@@ -13,4 +14,24 @@ if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
     exec /usr/bin/dbus-run-session -- /usr/bin/startplasma-wayland "$@"
 fi
 
-exec /usr/bin/startplasma-wayland "$@"
+/usr/bin/startplasma-wayland "$@" &
+session_pid=$!
+
+attempt=0
+while kill -0 "${session_pid}" 2>/dev/null; do
+    if pgrep -x plasmashell >/dev/null 2>&1; then
+        break
+    fi
+
+    if [ "${attempt}" -ge 50 ] \
+        && pgrep -x kwin_wayland >/dev/null 2>&1 \
+        && [ -S "${runtime_dir}/${display_name}" ]; then
+        /usr/bin/plasmashell --no-respawn >/var/log/plasmashell.log 2>&1 &
+        break
+    fi
+
+    attempt=$((attempt + 1))
+    sleep 0.2
+done
+
+wait "${session_pid}"
