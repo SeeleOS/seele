@@ -900,7 +900,11 @@ fn blit_dumb_buffer_to_scanout(
         return Err(ObjectError::InvalidArguments);
     }
 
-    canvas.fb.fill(0);
+    let clear_staging = width != canvas.info.width || height != canvas.info.height;
+    let dst = canvas.user_controlled_buffer_mut();
+    if clear_staging {
+        dst.fill(0);
+    }
 
     for y in 0..height {
         let src_row_start = y
@@ -919,12 +923,12 @@ fn blit_dumb_buffer_to_scanout(
         let dst_row_end = dst_row_start
             .checked_add(width * dst_bytes_per_pixel)
             .ok_or(ObjectError::InvalidArguments)?;
-        if dst_row_end > canvas.fb.len() {
+        if dst_row_end > dst.len() {
             return Err(ObjectError::InvalidArguments);
         }
 
         let src_row = &src[src_row_start..src_row_end];
-        let dst_row = &mut canvas.fb[dst_row_start..dst_row_end];
+        let dst_row = &mut dst[dst_row_start..dst_row_end];
 
         for x in 0..width {
             let src_px = &src_row[x * 4..x * 4 + 4];
@@ -957,6 +961,8 @@ fn blit_dumb_buffer_to_scanout(
             }
         }
     }
+
+    canvas.present_user_controlled();
 
     Ok(())
 }

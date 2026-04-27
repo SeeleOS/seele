@@ -118,6 +118,14 @@ impl Canvas {
         self.fb.fill(0);
     }
 
+    pub fn user_controlled_buffer_mut(&mut self) -> &mut [u8] {
+        &mut self.buffer
+    }
+
+    pub fn present_user_controlled(&mut self) {
+        self.fb.copy_from_slice(&self.buffer);
+    }
+
     pub fn fb_info(&self) -> FramebufferInfo {
         let phys_addr = MAPPER
             .get()
