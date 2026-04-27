@@ -4,7 +4,6 @@ set -eu
 
 uid="$(id -u)"
 runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${uid}}"
-display_name="${WAYLAND_DISPLAY:-wayland-0}"
 
 mkdir -p "${runtime_dir}"
 chmod 0700 "${runtime_dir}" 2>/dev/null || true
@@ -23,11 +22,14 @@ while kill -0 "${session_pid}" 2>/dev/null; do
         break
     fi
 
-    if [ "${attempt}" -ge 50 ] \
-        && pgrep -x kwin_wayland >/dev/null 2>&1 \
-        && [ -S "${runtime_dir}/${display_name}" ]; then
+    if [ "${attempt}" -ge 100 ]; then
         /usr/bin/plasmashell --no-respawn >/var/log/plasmashell.log 2>&1 &
-        break
+        sleep 2
+        if pgrep -x plasmashell >/dev/null 2>&1; then
+            break
+        fi
+        attempt=0
+        continue
     fi
 
     attempt=$((attempt + 1))
