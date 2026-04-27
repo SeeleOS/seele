@@ -23,6 +23,7 @@ use crate::{
         utils::apply_offset,
     },
     misc::framebuffer::{FRAME_BUFFER, FramebufferPixelFormat, framebuffer_set_user_controlled},
+    misc::time::Time,
     object::{
         FileFlags, Object,
         config::ConfigurateRequest,
@@ -68,6 +69,7 @@ struct DrmState {
     next_handle: u32,
     next_fb_id: u32,
     next_map_offset: u64,
+    next_flip_sequence: u32,
     dumb_buffers: BTreeMap<u32, DumbBuffer>,
     framebuffers: BTreeMap<u32, RegisteredFramebuffer>,
     current_fb_id: Option<u32>,
@@ -83,6 +85,8 @@ struct DumbBuffer {
     start_frame: PhysFrame<Size4KiB>,
     pages: usize,
     kernel_addr: u64,
+    user_handle_open: bool,
+    framebuffer_refs: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -102,6 +106,7 @@ impl DrmState {
             next_handle: 1,
             next_fb_id: 1,
             next_map_offset: DRM_BUFFER_OFFSET_BASE,
+            next_flip_sequence: 1,
             dumb_buffers: BTreeMap::new(),
             framebuffers: BTreeMap::new(),
             current_fb_id: None,
@@ -158,6 +163,8 @@ impl DrmState {
                 start_frame,
                 pages,
                 kernel_addr,
+                user_handle_open: true,
+                framebuffer_refs: 0,
             },
         );
 
@@ -168,6 +175,14 @@ impl DrmState {
     }
 
     fn register_framebuffer(&mut self, framebuffer: RegisteredFramebuffer) {
+        let buffer = self
+            .dumb_buffers
+            .get_mut(&framebuffer.handle)
+            .expect("framebuffer registration must reference an existing dumb buffer");
+        buffer.framebuffer_refs = buffer
+            .framebuffer_refs
+            .checked_add(1)
+            .expect("framebuffer refcount overflow");
         self.framebuffers.insert(framebuffer.fb_id, framebuffer);
     }
 
@@ -214,6 +229,48 @@ impl DrmState {
         }
 
         Err(ObjectError::InvalidArguments)
+    }
+
+    fn get_user_handle(&self, handle: u32) -> ObjectResult<&DumbBuffer> {
+        let buffer = self
+            .dumb_buffers
+            .get(&handle)
+            .ok_or(ObjectError::InvalidArguments)?;
+        if !buffer.user_handle_open {
+            return Err(ObjectError::InvalidArguments);
+        }
+        Ok(buffer)
+    }
+
+    fn close_dumb_handle(&mut self, handle: u32) -> ObjectResult<()> {
+        let buffer = self
+            .dumb_buffers
+            .get_mut(&handle)
+            .ok_or(ObjectError::InvalidArguments)?;
+        if !buffer.user_handle_open {
+            return Err(ObjectError::InvalidArguments);
+        }
+        buffer.user_handle_open = false;
+        Ok(())
+    }
+
+    fn remove_framebuffer(&mut self, fb_id: u32) -> ObjectResult<()> {
+        let framebuffer = self
+            .framebuffers
+            .remove(&fb_id)
+            .ok_or(ObjectError::InvalidArguments)?;
+        let buffer = self
+            .dumb_buffers
+            .get_mut(&framebuffer.handle)
+            .ok_or(ObjectError::InvalidArguments)?;
+        buffer.framebuffer_refs = buffer
+            .framebuffer_refs
+            .checked_sub(1)
+            .ok_or(ObjectError::InvalidArguments)?;
+        if self.current_fb_id == Some(fb_id) {
+            self.current_fb_id = None;
+        }
+        Ok(())
     }
 }
 
@@ -567,9 +624,8 @@ impl Configuratable for DrmCardObject {
             ConfigurateRequest::DrmModeRemoveFb(ptr) => {
                 let fb_id = read_user(ptr)?;
                 let mut state = DRM_STATE.lock();
-                state.framebuffers.remove(&fb_id);
-                if state.current_fb_id == Some(fb_id) {
-                    state.current_fb_id = None;
+                state.remove_framebuffer(fb_id)?;
+                if state.current_fb_id.is_none() {
                     framebuffer_set_user_controlled(false);
                 }
                 Ok(0)
@@ -603,26 +659,19 @@ impl Configuratable for DrmCardObject {
             ConfigurateRequest::DrmModeMapDumb(ptr) => {
                 let mut request = read_user(ptr)?;
                 let state = DRM_STATE.lock();
-                let buffer = state
-                    .dumb_buffers
-                    .get(&request.handle)
-                    .ok_or(ObjectError::InvalidArguments)?;
+                let buffer = state.get_user_handle(request.handle)?;
                 request.offset = buffer.map_offset;
                 user_safe::write(ptr, &request).map_err(|_| ObjectError::InvalidArguments)?;
                 Ok(0)
             }
             ConfigurateRequest::DrmModeDestroyDumb(ptr) => {
                 let request = read_user(ptr)?;
-                if !DRM_STATE.lock().dumb_buffers.contains_key(&request.handle) {
-                    return Err(ObjectError::InvalidArguments);
-                }
+                DRM_STATE.lock().close_dumb_handle(request.handle)?;
                 Ok(0)
             }
             ConfigurateRequest::DrmGemClose(ptr) => {
                 let request: DrmGemClose = read_user(ptr)?;
-                if !DRM_STATE.lock().dumb_buffers.contains_key(&request.handle) {
-                    return Err(ObjectError::InvalidArguments);
-                }
+                DRM_STATE.lock().close_dumb_handle(request.handle)?;
                 Ok(0)
             }
             _ => Err(ObjectError::InvalidArguments),
@@ -689,10 +738,7 @@ fn build_framebuffer(
     offset: u32,
     pixel_format: u32,
 ) -> ObjectResult<RegisteredFramebuffer> {
-    let buffer = state
-        .dumb_buffers
-        .get(&handle)
-        .ok_or(ObjectError::InvalidArguments)?;
+    let buffer = state.get_user_handle(handle)?;
     if !buffer.contains_scanout_range(offset, pitch, width, height) {
         return Err(ObjectError::InvalidArguments);
     }
@@ -728,6 +774,8 @@ fn scanout_framebuffer_id(fb_id: u32) -> ObjectResult<()> {
         (framebuffer, dumb_buffer)
     };
 
+    // TODO: This is still a legacy compatibility bridge over the Limine
+    // framebuffer, not a real KMS scanout implementation.
     blit_dumb_buffer_to_scanout(&dumb_buffer, &framebuffer)?;
     framebuffer_set_user_controlled(true);
     Ok(())
@@ -824,15 +872,23 @@ fn blit_dumb_buffer_to_scanout(
 }
 
 fn queue_page_flip_event(user_data: u64, crtc_id: u32) {
+    let now = Time::since_boot();
+    let sequence = {
+        let mut state = DRM_STATE.lock();
+        let sequence = state.next_flip_sequence;
+        state.next_flip_sequence = state.next_flip_sequence.wrapping_add(1);
+        sequence
+    };
+
     let event = DrmEventVblank {
         base: DrmEvent {
             type_: DRM_EVENT_FLIP_COMPLETE,
             length: size_of::<DrmEventVblank>() as u32,
         },
         user_data,
-        tv_sec: 0,
-        tv_usec: 0,
-        sequence: 0,
+        tv_sec: now.as_seconds().min(u64::from(u32::MAX)) as u32,
+        tv_usec: now.subsec_microseconds() as u32,
+        sequence,
         crtc_id,
     };
     let bytes = unsafe {
