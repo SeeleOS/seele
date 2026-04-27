@@ -256,6 +256,7 @@ sudo cp "${ROOTFS_MAKING_DIR}/xorg.conf" "${SYSROOT_DIR}/etc/X11/xorg.conf"
 sudo install -Dm644 "${ROOTFS_MAKING_DIR}/weston.ini" "${SYSROOT_DIR}/etc/xdg/weston/weston.ini"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/root/.xinitrc"
+sudo install -Dm644 "${ROOTFS_MAKING_DIR}/org.kde.KSplash.service" "${SYSROOT_DIR}/usr/share/dbus-1/services/org.kde.KSplash.service"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/startplasma-manual.sh" "${SYSROOT_DIR}/usr/bin/startplasma-manual.sh"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/startplasma-wayland" "${SYSROOT_DIR}/usr/local/bin/startplasma-wayland"
 
