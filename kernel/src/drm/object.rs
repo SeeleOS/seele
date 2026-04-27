@@ -1,15 +1,40 @@
+use alloc::{
+    collections::{BTreeMap, vec_deque::VecDeque},
+    sync::Arc,
+    vec::Vec,
+};
+use core::{cmp::min, mem::size_of, slice};
+
+use lazy_static::lazy_static;
+use spin::Mutex;
+use x86_64::{
+    PhysAddr, VirtAddr,
+    structures::paging::{PhysFrame, Size4KiB},
+};
+
 use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function,
-    memory::{addrspace::AddrSpace, user_safe},
+    memory::{
+        addrspace::{AddrSpace, mem_area::Data},
+        paging::FRAME_ALLOCATOR,
+        protection::Protection,
+        user_safe,
+        utils::apply_offset,
+    },
+    misc::framebuffer::{FRAME_BUFFER, FramebufferPixelFormat, framebuffer_set_user_controlled},
     object::{
-        Object,
+        FileFlags, Object,
         config::ConfigurateRequest,
+        device::DEVICES,
         error::ObjectError,
         misc::ObjectResult,
-        traits::{Configuratable, Statable},
+        queue_helpers::{copy_from_queue, read_or_block_with_flags},
+        traits::{Configuratable, MemoryMappable, Readable, Statable},
     },
+    polling::{event::PollableEvent, object::Pollable},
     process::misc::with_current_process,
+    thread::{THREAD_MANAGER, yielding::WakeType},
 };
 
 use super::abi::{
@@ -17,20 +42,208 @@ use super::abi::{
     DRM_CAP_DUMB_BUFFER, DRM_CAP_DUMB_PREFER_SHADOW, DRM_CAP_DUMB_PREFERRED_DEPTH,
     DRM_CAP_TIMESTAMP_MONOTONIC, DRM_CLIENT_CAP_ASPECT_RATIO, DRM_CLIENT_CAP_ATOMIC,
     DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, DRM_CLIENT_CAP_STEREO_3D, DRM_CLIENT_CAP_UNIVERSAL_PLANES,
-    DRM_CLIENT_CAP_WRITEBACK_CONNECTORS, DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888,
-    DRM_MODE_CONNECTED, DRM_MODE_CONNECTOR_VIRTUAL, DRM_MODE_ENCODER_VIRTUAL,
-    DRM_MODE_OBJECT_CONNECTOR, DRM_MODE_OBJECT_CRTC, DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_FB,
-    DRM_MODE_OBJECT_PLANE, DRM_MODE_PROP_ENUM, DRM_MODE_PROP_IMMUTABLE, DRM_MODE_SUBPIXEL_UNKNOWN,
-    DRM_PLANE_TYPE_CURSOR, DRM_PLANE_TYPE_OVERLAY, DRM_PLANE_TYPE_PRIMARY, DrmModePropertyEnum,
-    ENCODER0_ID, PLANE_TYPE_PROP_ID, PRIMARY_PLANE0_ID, current_framebuffer_info,
-    current_mode_info,
+    DRM_CLIENT_CAP_WRITEBACK_CONNECTORS, DRM_EVENT_FLIP_COMPLETE, DRM_FORMAT_ARGB8888,
+    DRM_FORMAT_XRGB8888, DRM_MODE_CONNECTED, DRM_MODE_CONNECTOR_VIRTUAL, DRM_MODE_ENCODER_VIRTUAL,
+    DRM_MODE_FB_MODIFIERS, DRM_MODE_OBJECT_CONNECTOR, DRM_MODE_OBJECT_CRTC,
+    DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_FB, DRM_MODE_OBJECT_PLANE, DRM_MODE_PAGE_FLIP_ASYNC,
+    DRM_MODE_PAGE_FLIP_EVENT, DRM_MODE_PAGE_FLIP_TARGET, DRM_MODE_PROP_ENUM,
+    DRM_MODE_PROP_IMMUTABLE, DRM_MODE_SUBPIXEL_UNKNOWN, DRM_PLANE_TYPE_CURSOR,
+    DRM_PLANE_TYPE_OVERLAY, DRM_PLANE_TYPE_PRIMARY, DrmEvent, DrmEventVblank, DrmGemClose,
+    DrmModeCreateDumb, DrmModePropertyEnum, ENCODER0_ID, PLANE_TYPE_PROP_ID, PRIMARY_PLANE0_ID,
+    current_framebuffer_info, current_mode_info,
 };
+
+lazy_static! {
+    static ref DRM_STATE: Mutex<DrmState> = Mutex::new(DrmState::new());
+    static ref DRM_EVENT_QUEUE: Mutex<VecDeque<u8>> = Mutex::new(VecDeque::new());
+}
+
+const DRM_BUFFER_OFFSET_BASE: u64 = 0x1000_0000;
 
 #[derive(Default, Debug)]
 pub struct DrmCardObject;
 
+#[derive(Debug)]
+struct DrmState {
+    next_handle: u32,
+    next_fb_id: u32,
+    next_map_offset: u64,
+    dumb_buffers: BTreeMap<u32, DumbBuffer>,
+    framebuffers: BTreeMap<u32, RegisteredFramebuffer>,
+    current_fb_id: Option<u32>,
+}
+
+#[derive(Clone, Debug)]
+struct DumbBuffer {
+    width: u32,
+    height: u32,
+    bpp: u32,
+    size: u64,
+    map_offset: u64,
+    start_frame: PhysFrame<Size4KiB>,
+    pages: usize,
+    kernel_addr: u64,
+}
+
+#[derive(Clone, Debug)]
+struct RegisteredFramebuffer {
+    fb_id: u32,
+    width: u32,
+    height: u32,
+    pitch: u32,
+    offset: u32,
+    pixel_format: u32,
+    handle: u32,
+}
+
+impl DrmState {
+    const fn new() -> Self {
+        Self {
+            next_handle: 1,
+            next_fb_id: 1,
+            next_map_offset: DRM_BUFFER_OFFSET_BASE,
+            dumb_buffers: BTreeMap::new(),
+            framebuffers: BTreeMap::new(),
+            current_fb_id: None,
+        }
+    }
+
+    fn create_dumb_buffer(&mut self, request: &mut DrmModeCreateDumb) -> ObjectResult<()> {
+        if request.width == 0 || request.height == 0 || request.bpp == 0 || request.flags != 0 {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        let bytes_per_pixel = request.bpp.div_ceil(8);
+        let pitch = request
+            .width
+            .checked_mul(bytes_per_pixel)
+            .ok_or(ObjectError::InvalidArguments)?;
+        let size = u64::from(pitch)
+            .checked_mul(u64::from(request.height))
+            .ok_or(ObjectError::InvalidArguments)?;
+        let pages =
+            usize::try_from(size.div_ceil(4096)).map_err(|_| ObjectError::InvalidArguments)?;
+        if pages == 0 {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        let start_frame = FRAME_ALLOCATOR
+            .get()
+            .unwrap()
+            .lock()
+            .allocate_contiguous(pages)
+            .ok_or(ObjectError::Other)?;
+        let kernel_addr = apply_offset(start_frame.start_address().as_u64());
+        unsafe {
+            core::ptr::write_bytes(kernel_addr as *mut u8, 0, pages * 4096);
+        }
+
+        let handle = self.next_handle;
+        self.next_handle = self.next_handle.checked_add(1).ok_or(ObjectError::Other)?;
+        let map_offset = self.next_map_offset;
+        self.next_map_offset = self
+            .next_map_offset
+            .checked_add((pages as u64) * 4096)
+            .and_then(|next| next.checked_add(4096))
+            .ok_or(ObjectError::Other)?;
+
+        self.dumb_buffers.insert(
+            handle,
+            DumbBuffer {
+                width: request.width,
+                height: request.height,
+                bpp: request.bpp,
+                size,
+                map_offset,
+                start_frame,
+                pages,
+                kernel_addr,
+            },
+        );
+
+        request.handle = handle;
+        request.pitch = pitch;
+        request.size = size;
+        Ok(())
+    }
+
+    fn register_framebuffer(&mut self, framebuffer: RegisteredFramebuffer) {
+        self.framebuffers.insert(framebuffer.fb_id, framebuffer);
+    }
+
+    fn next_fb_id(&mut self) -> ObjectResult<u32> {
+        let fb_id = self.next_fb_id;
+        self.next_fb_id = self.next_fb_id.checked_add(1).ok_or(ObjectError::Other)?;
+        Ok(fb_id)
+    }
+
+    fn dumb_buffer_for_mapping(
+        &self,
+        offset: u64,
+        pages: u64,
+    ) -> ObjectResult<(u64, usize, PhysFrame<Size4KiB>)> {
+        for buffer in self.dumb_buffers.values() {
+            let end_offset = buffer
+                .map_offset
+                .checked_add(buffer.aligned_size())
+                .ok_or(ObjectError::InvalidArguments)?;
+            if !(buffer.map_offset..end_offset).contains(&offset) {
+                continue;
+            }
+
+            let byte_delta = offset - buffer.map_offset;
+            if !byte_delta.is_multiple_of(4096) {
+                return Err(ObjectError::InvalidArguments);
+            }
+
+            let page_delta =
+                usize::try_from(byte_delta / 4096).map_err(|_| ObjectError::InvalidArguments)?;
+            let requested_pages =
+                usize::try_from(pages).map_err(|_| ObjectError::InvalidArguments)?;
+            if requested_pages == 0 || page_delta + requested_pages > buffer.pages {
+                return Err(ObjectError::InvalidArguments);
+            }
+
+            let start_addr =
+                buffer.start_frame.start_address().as_u64() + (page_delta as u64 * 4096);
+            return Ok((
+                buffer.kernel_addr + byte_delta,
+                requested_pages,
+                PhysFrame::containing_address(PhysAddr::new(start_addr)),
+            ));
+        }
+
+        Err(ObjectError::InvalidArguments)
+    }
+}
+
+impl DumbBuffer {
+    fn aligned_size(&self) -> u64 {
+        self.size.div_ceil(4096) * 4096
+    }
+
+    fn contains_scanout_range(&self, offset: u32, pitch: u32, width: u32, height: u32) -> bool {
+        if width > self.width || height > self.height || self.bpp < 32 {
+            return false;
+        }
+
+        let bytes_per_pixel = self.bpp.div_ceil(8);
+        if pitch < width.saturating_mul(bytes_per_pixel) {
+            return false;
+        }
+
+        let required = u64::from(offset)
+            .saturating_add(u64::from(pitch).saturating_mul(u64::from(height.saturating_sub(1))))
+            .saturating_add(u64::from(width) * u64::from(bytes_per_pixel));
+        required <= self.size
+    }
+}
+
 impl Object for DrmCardObject {
     impl_cast_function!("configuratable", Configuratable);
+    impl_cast_function!("mappable", MemoryMappable);
+    impl_cast_function!("pollable", Pollable);
+    impl_cast_function!("readable", Readable);
     impl_cast_function!("statable", Statable);
 }
 
@@ -78,10 +291,17 @@ impl Configuratable for DrmCardObject {
                     _ => Err(ObjectError::InvalidArguments),
                 }
             }
-            ConfigurateRequest::DrmSetMaster | ConfigurateRequest::DrmDropMaster => Ok(0),
+            ConfigurateRequest::DrmSetMaster => Ok(0),
+            ConfigurateRequest::DrmDropMaster => {
+                framebuffer_set_user_controlled(false);
+                DRM_STATE.lock().current_fb_id = None;
+                Ok(0)
+            }
             ConfigurateRequest::DrmModeGetResources(ptr) => {
                 let mut resources = read_user(ptr)?;
                 let fb = current_framebuffer_info();
+                let framebuffer_ids: Vec<u32> =
+                    DRM_STATE.lock().framebuffers.keys().copied().collect();
                 maybe_write_u32_slice(resources.crtc_id_ptr, resources.count_crtcs, &[CRTC0_ID])?;
                 maybe_write_u32_slice(
                     resources.connector_id_ptr,
@@ -93,8 +313,8 @@ impl Configuratable for DrmCardObject {
                     resources.count_encoders,
                     &[ENCODER0_ID],
                 )?;
-                maybe_write_u32_slice(resources.fb_id_ptr, resources.count_fbs, &[])?;
-                resources.count_fbs = 0;
+                maybe_write_u32_slice(resources.fb_id_ptr, resources.count_fbs, &framebuffer_ids)?;
+                resources.count_fbs = framebuffer_ids.len() as u32;
                 resources.count_crtcs = 1;
                 resources.count_connectors = 1;
                 resources.count_encoders = 1;
@@ -105,11 +325,49 @@ impl Configuratable for DrmCardObject {
                 user_safe::write(ptr, &resources).map_err(|_| ObjectError::InvalidArguments)?;
                 Ok(0)
             }
-            ConfigurateRequest::DrmModeGetCrtc(ptr) | ConfigurateRequest::DrmModeSetCrtc(ptr) => {
+            ConfigurateRequest::DrmModeGetCrtc(ptr) => {
                 let mut crtc = read_user(ptr)?;
                 if crtc.crtc_id != 0 && crtc.crtc_id != CRTC0_ID {
                     return Err(ObjectError::InvalidArguments);
                 }
+                crtc.crtc_id = CRTC0_ID;
+                crtc.fb_id = DRM_STATE.lock().current_fb_id.unwrap_or(0);
+                crtc.x = 0;
+                crtc.y = 0;
+                crtc.gamma_size = 0;
+                crtc.mode_valid = 1;
+                crtc.mode = current_mode_info();
+                user_safe::write(ptr, &crtc).map_err(|_| ObjectError::InvalidArguments)?;
+                Ok(0)
+            }
+            ConfigurateRequest::DrmModeSetCrtc(ptr) => {
+                let mut crtc = read_user(ptr)?;
+                if crtc.crtc_id != 0 && crtc.crtc_id != CRTC0_ID {
+                    return Err(ObjectError::InvalidArguments);
+                }
+
+                if crtc.count_connectors > 1 {
+                    return Err(ObjectError::InvalidArguments);
+                }
+                if crtc.count_connectors == 1 {
+                    let connector = with_current_process(|process| {
+                        process
+                            .addrspace
+                            .read(crtc.set_connectors_ptr as *const u32)
+                            .map_err(|_| ObjectError::InvalidArguments)
+                    })?;
+                    if connector != CONNECTOR0_ID {
+                        return Err(ObjectError::InvalidArguments);
+                    }
+                }
+
+                if crtc.fb_id == 0 {
+                    DRM_STATE.lock().current_fb_id = None;
+                    framebuffer_set_user_controlled(false);
+                } else {
+                    scanout_framebuffer_id(crtc.fb_id)?;
+                }
+
                 crtc.crtc_id = CRTC0_ID;
                 crtc.x = 0;
                 crtc.y = 0;
@@ -206,7 +464,11 @@ impl Configuratable for DrmCardObject {
                             .map_err(|_| ObjectError::InvalidArguments)?;
                         return Ok(0);
                     }
-                    DRM_MODE_OBJECT_FB => {}
+                    DRM_MODE_OBJECT_FB
+                        if DRM_STATE
+                            .lock()
+                            .framebuffers
+                            .contains_key(&properties.obj_id) => {}
                     _ => return Err(ObjectError::InvalidArguments),
                 }
                 properties.count_props = 0;
@@ -233,11 +495,134 @@ impl Configuratable for DrmCardObject {
                 maybe_write_u32_slice(plane.format_type_ptr, plane.count_format_types, &formats)?;
                 plane.plane_id = PRIMARY_PLANE0_ID;
                 plane.crtc_id = CRTC0_ID;
-                plane.fb_id = 0;
+                plane.fb_id = DRM_STATE.lock().current_fb_id.unwrap_or(0);
                 plane.possible_crtcs = 1;
                 plane.gamma_size = 0;
                 plane.count_format_types = formats.len() as u32;
                 user_safe::write(ptr, &plane).map_err(|_| ObjectError::InvalidArguments)?;
+                Ok(0)
+            }
+            ConfigurateRequest::DrmModeAddFb(ptr) => {
+                let mut fb = read_user(ptr)?;
+                let pixel_format = match (fb.bpp, fb.depth) {
+                    (32, 24) => DRM_FORMAT_XRGB8888,
+                    (32, 32) => DRM_FORMAT_ARGB8888,
+                    _ => return Err(ObjectError::InvalidArguments),
+                };
+                let registered = build_framebuffer(
+                    &DRM_STATE.lock(),
+                    fb.handle,
+                    fb.width,
+                    fb.height,
+                    fb.pitch,
+                    0,
+                    pixel_format,
+                )?;
+                let mut state = DRM_STATE.lock();
+                let fb_id = state.next_fb_id()?;
+                let mut registered = registered;
+                registered.fb_id = fb_id;
+                state.register_framebuffer(registered);
+                fb.fb_id = fb_id;
+                user_safe::write(ptr, &fb).map_err(|_| ObjectError::InvalidArguments)?;
+                Ok(0)
+            }
+            ConfigurateRequest::DrmModeAddFb2(ptr) => {
+                let mut fb = read_user(ptr)?;
+                if fb.flags & !DRM_MODE_FB_MODIFIERS != 0 {
+                    return Err(ObjectError::InvalidArguments);
+                }
+                if !matches!(fb.pixel_format, DRM_FORMAT_XRGB8888 | DRM_FORMAT_ARGB8888) {
+                    return Err(ObjectError::InvalidArguments);
+                }
+                if fb.handles[1..].iter().any(|&handle| handle != 0)
+                    || fb.pitches[1..].iter().any(|&pitch| pitch != 0)
+                    || fb.offsets[1..].iter().any(|&offset| offset != 0)
+                    || fb.modifier[1..].iter().any(|&modifier| modifier != 0)
+                {
+                    return Err(ObjectError::InvalidArguments);
+                }
+                if fb.flags & DRM_MODE_FB_MODIFIERS != 0 && fb.modifier[0] != 0 {
+                    return Err(ObjectError::InvalidArguments);
+                }
+
+                let registered = build_framebuffer(
+                    &DRM_STATE.lock(),
+                    fb.handles[0],
+                    fb.width,
+                    fb.height,
+                    fb.pitches[0],
+                    fb.offsets[0],
+                    fb.pixel_format,
+                )?;
+                let mut state = DRM_STATE.lock();
+                let fb_id = state.next_fb_id()?;
+                let mut registered = registered;
+                registered.fb_id = fb_id;
+                state.register_framebuffer(registered);
+                fb.fb_id = fb_id;
+                user_safe::write(ptr, &fb).map_err(|_| ObjectError::InvalidArguments)?;
+                Ok(0)
+            }
+            ConfigurateRequest::DrmModeRemoveFb(ptr) => {
+                let fb_id = read_user(ptr)?;
+                let mut state = DRM_STATE.lock();
+                state.framebuffers.remove(&fb_id);
+                if state.current_fb_id == Some(fb_id) {
+                    state.current_fb_id = None;
+                    framebuffer_set_user_controlled(false);
+                }
+                Ok(0)
+            }
+            ConfigurateRequest::DrmModePageFlip(ptr) => {
+                let flip = read_user(ptr)?;
+                if flip.crtc_id != CRTC0_ID || flip.reserved != 0 {
+                    return Err(ObjectError::InvalidArguments);
+                }
+                if flip.flags & DRM_MODE_PAGE_FLIP_ASYNC != 0
+                    || flip.flags & DRM_MODE_PAGE_FLIP_TARGET != 0
+                {
+                    return Err(ObjectError::Unimplemented);
+                }
+                if flip.flags & !DRM_MODE_PAGE_FLIP_EVENT != 0 {
+                    return Err(ObjectError::InvalidArguments);
+                }
+
+                scanout_framebuffer_id(flip.fb_id)?;
+                if flip.flags & DRM_MODE_PAGE_FLIP_EVENT != 0 {
+                    queue_page_flip_event(flip.user_data, flip.crtc_id);
+                }
+                Ok(0)
+            }
+            ConfigurateRequest::DrmModeCreateDumb(ptr) => {
+                let mut request = read_user(ptr)?;
+                DRM_STATE.lock().create_dumb_buffer(&mut request)?;
+                user_safe::write(ptr, &request).map_err(|_| ObjectError::InvalidArguments)?;
+                Ok(0)
+            }
+            ConfigurateRequest::DrmModeMapDumb(ptr) => {
+                let mut request = read_user(ptr)?;
+                let state = DRM_STATE.lock();
+                let buffer = state
+                    .dumb_buffers
+                    .get(&request.handle)
+                    .ok_or(ObjectError::InvalidArguments)?;
+                request.offset = buffer.map_offset;
+                user_safe::write(ptr, &request).map_err(|_| ObjectError::InvalidArguments)?;
+                Ok(0)
+            }
+            ConfigurateRequest::DrmModeDestroyDumb(ptr) => {
+                let request = read_user(ptr)?;
+                if !DRM_STATE.lock().dumb_buffers.contains_key(&request.handle) {
+                    return Err(ObjectError::InvalidArguments);
+                }
+                Ok(0)
+            }
+            ConfigurateRequest::DrmGemClose(ptr) => {
+                let request: DrmGemClose = read_user(ptr)?;
+                if !DRM_STATE.lock().dumb_buffers.contains_key(&request.handle) {
+                    return Err(ObjectError::InvalidArguments);
+                }
                 Ok(0)
             }
             _ => Err(ObjectError::InvalidArguments),
@@ -245,10 +630,242 @@ impl Configuratable for DrmCardObject {
     }
 }
 
+impl MemoryMappable for DrmCardObject {
+    fn map(
+        self: Arc<Self>,
+        offset: u64,
+        pages: u64,
+        protection: Protection,
+    ) -> ObjectResult<VirtAddr> {
+        let (_kernel_addr, page_count, start_frame) =
+            DRM_STATE.lock().dumb_buffer_for_mapping(offset, pages)?;
+        let mut frames = Vec::with_capacity(page_count);
+        for page_index in 0..page_count {
+            let frame_addr = start_frame.start_address().as_u64() + (page_index as u64 * 4096);
+            frames.push(PhysFrame::containing_address(PhysAddr::new(frame_addr)));
+        }
+
+        Ok(with_current_process(|process| {
+            process.addrspace.allocate_user_lazy(
+                pages,
+                protection,
+                Data::Shared {
+                    frames: Arc::<[PhysFrame]>::from(frames),
+                    flags: x86_64::structures::paging::PageTableFlags::empty(),
+                },
+            )
+        }))
+    }
+}
+
+impl Readable for DrmCardObject {
+    fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
+        self.read_with_flags(buffer, FileFlags::empty())
+    }
+
+    fn read_with_flags(&self, buffer: &mut [u8], flags: FileFlags) -> ObjectResult<usize> {
+        read_or_block_with_flags(buffer, flags, WakeType::IO, try_read_drm_events)
+    }
+}
+
+impl Pollable for DrmCardObject {
+    fn is_event_ready(&self, event: PollableEvent) -> bool {
+        matches!(event, PollableEvent::CanBeRead) && !DRM_EVENT_QUEUE.lock().is_empty()
+    }
+}
+
 impl Statable for DrmCardObject {
     fn stat(&self) -> LinuxStat {
         LinuxStat::char_device_with_rdev(0o660, CARD0_RDEV)
     }
+}
+
+fn build_framebuffer(
+    state: &DrmState,
+    handle: u32,
+    width: u32,
+    height: u32,
+    pitch: u32,
+    offset: u32,
+    pixel_format: u32,
+) -> ObjectResult<RegisteredFramebuffer> {
+    let buffer = state
+        .dumb_buffers
+        .get(&handle)
+        .ok_or(ObjectError::InvalidArguments)?;
+    if !buffer.contains_scanout_range(offset, pitch, width, height) {
+        return Err(ObjectError::InvalidArguments);
+    }
+    if !matches!(pixel_format, DRM_FORMAT_XRGB8888 | DRM_FORMAT_ARGB8888) {
+        return Err(ObjectError::InvalidArguments);
+    }
+
+    Ok(RegisteredFramebuffer {
+        fb_id: 0,
+        width,
+        height,
+        pitch,
+        offset,
+        pixel_format,
+        handle,
+    })
+}
+
+fn scanout_framebuffer_id(fb_id: u32) -> ObjectResult<()> {
+    let (framebuffer, dumb_buffer) = {
+        let mut state = DRM_STATE.lock();
+        let framebuffer = state
+            .framebuffers
+            .get(&fb_id)
+            .cloned()
+            .ok_or(ObjectError::InvalidArguments)?;
+        let dumb_buffer = state
+            .dumb_buffers
+            .get(&framebuffer.handle)
+            .cloned()
+            .ok_or(ObjectError::InvalidArguments)?;
+        state.current_fb_id = Some(fb_id);
+        (framebuffer, dumb_buffer)
+    };
+
+    blit_dumb_buffer_to_scanout(&dumb_buffer, &framebuffer)?;
+    framebuffer_set_user_controlled(true);
+    Ok(())
+}
+
+fn blit_dumb_buffer_to_scanout(
+    dumb_buffer: &DumbBuffer,
+    framebuffer: &RegisteredFramebuffer,
+) -> ObjectResult<()> {
+    let src_start = dumb_buffer
+        .kernel_addr
+        .checked_add(u64::from(framebuffer.offset))
+        .ok_or(ObjectError::InvalidArguments)?;
+    let src_bytes = usize::try_from(
+        dumb_buffer
+            .size
+            .checked_sub(u64::from(framebuffer.offset))
+            .ok_or(ObjectError::InvalidArguments)?,
+    )
+    .map_err(|_| ObjectError::InvalidArguments)?;
+    let src = unsafe { slice::from_raw_parts(src_start as *const u8, src_bytes) };
+
+    let mut canvas = FRAME_BUFFER.get().unwrap().lock();
+    let width = min(framebuffer.width as usize, canvas.info.width);
+    let height = min(framebuffer.height as usize, canvas.info.height);
+    let dst_bytes_per_pixel = canvas.info.bytes_per_pixel;
+    let dst_stride_bytes = canvas.info.stride * dst_bytes_per_pixel;
+    let dst_pixel_format = canvas.info.pixel_format;
+    let src_pitch = framebuffer.pitch as usize;
+
+    if dst_bytes_per_pixel < 3 || src_pitch < width * 4 {
+        return Err(ObjectError::InvalidArguments);
+    }
+
+    canvas.fb.fill(0);
+
+    for y in 0..height {
+        let src_row_start = y
+            .checked_mul(src_pitch)
+            .ok_or(ObjectError::InvalidArguments)?;
+        let src_row_end = src_row_start
+            .checked_add(width * 4)
+            .ok_or(ObjectError::InvalidArguments)?;
+        if src_row_end > src.len() {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        let dst_row_start = y
+            .checked_mul(dst_stride_bytes)
+            .ok_or(ObjectError::InvalidArguments)?;
+        let dst_row_end = dst_row_start
+            .checked_add(width * dst_bytes_per_pixel)
+            .ok_or(ObjectError::InvalidArguments)?;
+        if dst_row_end > canvas.fb.len() {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        let src_row = &src[src_row_start..src_row_end];
+        let dst_row = &mut canvas.fb[dst_row_start..dst_row_end];
+
+        for x in 0..width {
+            let src_px = &src_row[x * 4..x * 4 + 4];
+            let dst_px = &mut dst_row[x * dst_bytes_per_pixel..(x + 1) * dst_bytes_per_pixel];
+
+            let blue = src_px[0];
+            let green = src_px[1];
+            let red = src_px[2];
+            let alpha = if framebuffer.pixel_format == DRM_FORMAT_ARGB8888 {
+                src_px[3]
+            } else {
+                0xff
+            };
+
+            match dst_pixel_format {
+                FramebufferPixelFormat::Rgb => {
+                    dst_px[0] = red;
+                    dst_px[1] = green;
+                    dst_px[2] = blue;
+                }
+                FramebufferPixelFormat::Bgr => {
+                    dst_px[0] = blue;
+                    dst_px[1] = green;
+                    dst_px[2] = red;
+                }
+            }
+
+            if dst_bytes_per_pixel >= 4 {
+                dst_px[3] = alpha;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn queue_page_flip_event(user_data: u64, crtc_id: u32) {
+    let event = DrmEventVblank {
+        base: DrmEvent {
+            type_: DRM_EVENT_FLIP_COMPLETE,
+            length: size_of::<DrmEventVblank>() as u32,
+        },
+        user_data,
+        tv_sec: 0,
+        tv_usec: 0,
+        sequence: 0,
+        crtc_id,
+    };
+    let bytes = unsafe {
+        slice::from_raw_parts(
+            (&event as *const DrmEventVblank).cast::<u8>(),
+            size_of::<DrmEventVblank>(),
+        )
+    };
+    DRM_EVENT_QUEUE.lock().extend(bytes.iter().copied());
+    wake_drm_readable();
+}
+
+fn wake_drm_readable() {
+    let drm_object = DEVICES.get("drm-card0").cloned().unwrap();
+    let mut manager = THREAD_MANAGER.get().unwrap().lock();
+    manager.wake_io();
+    manager.wake_poller(drm_object, PollableEvent::CanBeRead);
+}
+
+fn try_read_drm_events(buffer: &mut [u8]) -> Option<usize> {
+    let event_size = size_of::<DrmEventVblank>();
+    if buffer.len() < event_size {
+        return Some(0);
+    }
+
+    let mut queue = DRM_EVENT_QUEUE.lock();
+    if queue.len() < event_size {
+        return None;
+    }
+
+    let events_to_copy = min(buffer.len() / event_size, queue.len() / event_size);
+    let bytes_to_copy = events_to_copy * event_size;
+    Some(copy_from_queue(&mut queue, &mut buffer[..bytes_to_copy]))
 }
 
 fn read_user<T: Copy>(ptr: *mut T) -> ObjectResult<T> {

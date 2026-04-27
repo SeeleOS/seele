@@ -6,12 +6,16 @@ use crate::{
 };
 
 use crate::drm::abi::{
-    DRM_IOCTL_DROP_MASTER, DRM_IOCTL_GET_CAP, DRM_IOCTL_MODE_GETCONNECTOR, DRM_IOCTL_MODE_GETCRTC,
-    DRM_IOCTL_MODE_GETENCODER, DRM_IOCTL_MODE_GETPLANE, DRM_IOCTL_MODE_GETPLANERESOURCES,
-    DRM_IOCTL_MODE_GETPROPERTY, DRM_IOCTL_MODE_GETRESOURCES, DRM_IOCTL_MODE_OBJ_GETPROPERTIES,
-    DRM_IOCTL_MODE_SETCRTC, DRM_IOCTL_SET_CLIENT_CAP, DRM_IOCTL_SET_MASTER, DRM_IOCTL_VERSION,
-    DrmGetCap, DrmModeCardRes, DrmModeCrtc, DrmModeGetConnector, DrmModeGetEncoder,
-    DrmModeGetPlane, DrmModeGetPlaneRes, DrmModeGetProperty, DrmModeObjGetProperties,
+    DRM_IOCTL_DROP_MASTER, DRM_IOCTL_GEM_CLOSE, DRM_IOCTL_GET_CAP, DRM_IOCTL_MODE_ADDFB,
+    DRM_IOCTL_MODE_ADDFB2, DRM_IOCTL_MODE_CREATE_DUMB, DRM_IOCTL_MODE_DESTROY_DUMB,
+    DRM_IOCTL_MODE_GETCONNECTOR, DRM_IOCTL_MODE_GETCRTC, DRM_IOCTL_MODE_GETENCODER,
+    DRM_IOCTL_MODE_GETPLANE, DRM_IOCTL_MODE_GETPLANERESOURCES, DRM_IOCTL_MODE_GETPROPERTY,
+    DRM_IOCTL_MODE_GETRESOURCES, DRM_IOCTL_MODE_MAP_DUMB, DRM_IOCTL_MODE_OBJ_GETPROPERTIES,
+    DRM_IOCTL_MODE_PAGE_FLIP, DRM_IOCTL_MODE_RMFB, DRM_IOCTL_MODE_SETCRTC,
+    DRM_IOCTL_SET_CLIENT_CAP, DRM_IOCTL_SET_MASTER, DRM_IOCTL_VERSION, DrmGemClose, DrmGetCap,
+    DrmModeCardRes, DrmModeCreateDumb, DrmModeCrtc, DrmModeCrtcPageFlip, DrmModeDestroyDumb,
+    DrmModeFbCmd, DrmModeFbCmd2, DrmModeGetConnector, DrmModeGetEncoder, DrmModeGetPlane,
+    DrmModeGetPlaneRes, DrmModeGetProperty, DrmModeMapDumb, DrmModeObjGetProperties,
     DrmSetClientCap, DrmVersion,
 };
 use crate::misc::framebuffer_ioctl::{FbCmap, FbFixScreeninfo, FbVarScreeninfo};
@@ -69,6 +73,14 @@ pub enum ConfigurateRequest {
     DrmModeObjGetProperties(*mut DrmModeObjGetProperties),
     DrmModeGetPlaneResources(*mut DrmModeGetPlaneRes),
     DrmModeGetPlane(*mut DrmModeGetPlane),
+    DrmModeAddFb(*mut DrmModeFbCmd),
+    DrmModeAddFb2(*mut DrmModeFbCmd2),
+    DrmModeRemoveFb(*mut u32),
+    DrmModePageFlip(*mut DrmModeCrtcPageFlip),
+    DrmModeCreateDumb(*mut DrmModeCreateDumb),
+    DrmModeMapDumb(*mut DrmModeMapDumb),
+    DrmModeDestroyDumb(*mut DrmModeDestroyDumb),
+    DrmGemClose(*mut DrmGemClose),
     RawIoctl { request: u64, arg: u64 },
 }
 
@@ -185,6 +197,14 @@ impl ConfigurateRequest {
                 Self::DrmModeGetPlaneResources(ptr as *mut DrmModeGetPlaneRes)
             }
             DRM_IOCTL_MODE_GETPLANE => Self::DrmModeGetPlane(ptr as *mut DrmModeGetPlane),
+            DRM_IOCTL_MODE_ADDFB => Self::DrmModeAddFb(ptr as *mut DrmModeFbCmd),
+            DRM_IOCTL_MODE_ADDFB2 => Self::DrmModeAddFb2(ptr as *mut DrmModeFbCmd2),
+            DRM_IOCTL_MODE_RMFB => Self::DrmModeRemoveFb(ptr as *mut u32),
+            DRM_IOCTL_MODE_PAGE_FLIP => Self::DrmModePageFlip(ptr as *mut DrmModeCrtcPageFlip),
+            DRM_IOCTL_MODE_CREATE_DUMB => Self::DrmModeCreateDumb(ptr as *mut DrmModeCreateDumb),
+            DRM_IOCTL_MODE_MAP_DUMB => Self::DrmModeMapDumb(ptr as *mut DrmModeMapDumb),
+            DRM_IOCTL_MODE_DESTROY_DUMB => Self::DrmModeDestroyDumb(ptr as *mut DrmModeDestroyDumb),
+            DRM_IOCTL_GEM_CLOSE => Self::DrmGemClose(ptr as *mut DrmGemClose),
             0x4600 => Self::FbGetVariableScreenInfo(ptr as *mut FbVarScreeninfo),
             0x4601 => Self::FbPutVariableScreenInfo(ptr as *mut FbVarScreeninfo),
             0x4602 => Self::FbGetFixedScreenInfo(ptr as *mut FbFixScreeninfo),

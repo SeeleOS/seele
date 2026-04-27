@@ -13,9 +13,17 @@ pub const DRM_IOCTL_MODE_SETCRTC: u64 = 0xc068_64a2;
 pub const DRM_IOCTL_MODE_GETENCODER: u64 = 0xc014_64a6;
 pub const DRM_IOCTL_MODE_GETCONNECTOR: u64 = 0xc050_64a7;
 pub const DRM_IOCTL_MODE_GETPROPERTY: u64 = 0xc040_64aa;
+pub const DRM_IOCTL_MODE_ADDFB: u64 = 0xc01c_64ae;
+pub const DRM_IOCTL_MODE_RMFB: u64 = 0xc004_64af;
+pub const DRM_IOCTL_MODE_PAGE_FLIP: u64 = 0xc018_64b0;
+pub const DRM_IOCTL_GEM_CLOSE: u64 = 0x4008_6409;
+pub const DRM_IOCTL_MODE_CREATE_DUMB: u64 = 0xc020_64b2;
+pub const DRM_IOCTL_MODE_MAP_DUMB: u64 = 0xc010_64b3;
+pub const DRM_IOCTL_MODE_DESTROY_DUMB: u64 = 0xc004_64b4;
 pub const DRM_IOCTL_MODE_OBJ_GETPROPERTIES: u64 = 0xc020_64b9;
 pub const DRM_IOCTL_MODE_GETPLANERESOURCES: u64 = 0xc010_64b5;
 pub const DRM_IOCTL_MODE_GETPLANE: u64 = 0xc020_64b6;
+pub const DRM_IOCTL_MODE_ADDFB2: u64 = 0xc068_64b8;
 
 pub const DRM_CAP_DUMB_BUFFER: u64 = 0x1;
 pub const DRM_CAP_DUMB_PREFERRED_DEPTH: u64 = 0x3;
@@ -43,6 +51,14 @@ pub const DRM_MODE_OBJECT_FB: u32 = 0xfbfb_fbfb;
 pub const DRM_MODE_OBJECT_PLANE: u32 = 0xeeee_eeee;
 pub const DRM_MODE_PROP_IMMUTABLE: u32 = 1 << 2;
 pub const DRM_MODE_PROP_ENUM: u32 = 1 << 3;
+pub const DRM_MODE_FB_MODIFIERS: u32 = 1 << 1;
+pub const DRM_MODE_PAGE_FLIP_EVENT: u32 = 0x01;
+pub const DRM_MODE_PAGE_FLIP_ASYNC: u32 = 0x02;
+pub const DRM_MODE_PAGE_FLIP_TARGET_ABSOLUTE: u32 = 0x04;
+pub const DRM_MODE_PAGE_FLIP_TARGET_RELATIVE: u32 = 0x08;
+pub const DRM_MODE_PAGE_FLIP_TARGET: u32 =
+    DRM_MODE_PAGE_FLIP_TARGET_ABSOLUTE | DRM_MODE_PAGE_FLIP_TARGET_RELATIVE;
+pub const DRM_EVENT_FLIP_COMPLETE: u32 = 0x02;
 
 pub const CARD0_ID: u32 = 0x1000;
 pub const CRTC0_ID: u32 = 0x1001;
@@ -189,6 +205,32 @@ pub struct DrmModeGetProperty {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModeFbCmd {
+    pub fb_id: u32,
+    pub width: u32,
+    pub height: u32,
+    pub pitch: u32,
+    pub bpp: u32,
+    pub depth: u32,
+    pub handle: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModeFbCmd2 {
+    pub fb_id: u32,
+    pub width: u32,
+    pub height: u32,
+    pub pixel_format: u32,
+    pub flags: u32,
+    pub handles: [u32; 4],
+    pub pitches: [u32; 4],
+    pub offsets: [u32; 4],
+    pub modifier: [u64; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct DrmModePropertyEnum {
     pub value: u64,
     pub name: [u8; 32],
@@ -221,6 +263,67 @@ pub struct DrmModeGetPlane {
     pub gamma_size: u32,
     pub count_format_types: u32,
     pub format_type_ptr: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModeCrtcPageFlip {
+    pub crtc_id: u32,
+    pub fb_id: u32,
+    pub flags: u32,
+    pub reserved: u32,
+    pub user_data: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModeCreateDumb {
+    pub height: u32,
+    pub width: u32,
+    pub bpp: u32,
+    pub flags: u32,
+    pub handle: u32,
+    pub pitch: u32,
+    pub size: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModeMapDumb {
+    pub handle: u32,
+    pub pad: u32,
+    pub offset: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModeDestroyDumb {
+    pub handle: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmGemClose {
+    pub handle: u32,
+    pub pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmEvent {
+    pub type_: u32,
+    pub length: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmEventVblank {
+    pub base: DrmEvent,
+    pub user_data: u64,
+    pub tv_sec: u32,
+    pub tv_usec: u32,
+    pub sequence: u32,
+    pub crtc_id: u32,
 }
 
 pub fn current_mode_info() -> DrmModeModeInfo {
