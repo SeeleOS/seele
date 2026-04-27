@@ -5,7 +5,7 @@ use crate::filesystem::staticfs::{
     StaticSymlinkNode,
 };
 
-use super::abi::{CARD0_MAJOR, CARD0_MINOR, CARD0_RDEV};
+use super::card::{CARD0_MAJOR, CARD0_MINOR, CARD0_RDEV};
 
 fn card0_dev() -> Vec<u8> {
     format_dev(CARD0_MAJOR, CARD0_MINOR)

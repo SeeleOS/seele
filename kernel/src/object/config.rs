@@ -5,18 +5,25 @@ use crate::{
     process::FdFlags,
 };
 
-use crate::drm::abi::{
-    DRM_IOCTL_DROP_MASTER, DRM_IOCTL_GEM_CLOSE, DRM_IOCTL_GET_CAP, DRM_IOCTL_MODE_ADDFB,
-    DRM_IOCTL_MODE_ADDFB2, DRM_IOCTL_MODE_CREATE_DUMB, DRM_IOCTL_MODE_DESTROY_DUMB,
-    DRM_IOCTL_MODE_GETCONNECTOR, DRM_IOCTL_MODE_GETCRTC, DRM_IOCTL_MODE_GETENCODER,
-    DRM_IOCTL_MODE_GETPLANE, DRM_IOCTL_MODE_GETPLANERESOURCES, DRM_IOCTL_MODE_GETPROPERTY,
-    DRM_IOCTL_MODE_GETRESOURCES, DRM_IOCTL_MODE_MAP_DUMB, DRM_IOCTL_MODE_OBJ_GETPROPERTIES,
-    DRM_IOCTL_MODE_PAGE_FLIP, DRM_IOCTL_MODE_RMFB, DRM_IOCTL_MODE_SETCRTC,
-    DRM_IOCTL_SET_CLIENT_CAP, DRM_IOCTL_SET_MASTER, DRM_IOCTL_VERSION, DRM_IOCTL_WAIT_VBLANK,
-    DrmGemClose, DrmGetCap, DrmModeCardRes, DrmModeCreateDumb, DrmModeCrtc, DrmModeCrtcPageFlip,
-    DrmModeDestroyDumb, DrmModeFbCmd, DrmModeFbCmd2, DrmModeGetConnector, DrmModeGetEncoder,
-    DrmModeGetPlane, DrmModeGetPlaneRes, DrmModeGetProperty, DrmModeMapDumb,
-    DrmModeObjGetProperties, DrmSetClientCap, DrmVersion, DrmWaitVblank,
+use crate::drm::{
+    client::{
+        DRM_IOCTL_DROP_MASTER, DRM_IOCTL_GEM_CLOSE, DRM_IOCTL_GET_CAP, DRM_IOCTL_SET_CLIENT_CAP,
+        DRM_IOCTL_SET_MASTER, DRM_IOCTL_VERSION, DRM_IOCTL_WAIT_VBLANK, DrmGemClose, DrmGetCap,
+        DrmSetClientCap, DrmVersion, DrmWaitVblank,
+    },
+    mode::{
+        DRM_IOCTL_MODE_ADDFB, DRM_IOCTL_MODE_ADDFB2, DRM_IOCTL_MODE_CREATE_DUMB,
+        DRM_IOCTL_MODE_DESTROY_DUMB, DRM_IOCTL_MODE_GETCONNECTOR, DRM_IOCTL_MODE_GETCRTC,
+        DRM_IOCTL_MODE_GETENCODER, DRM_IOCTL_MODE_GETPLANE, DRM_IOCTL_MODE_GETPLANERESOURCES,
+        DRM_IOCTL_MODE_GETPROPERTY, DRM_IOCTL_MODE_GETRESOURCES, DRM_IOCTL_MODE_MAP_DUMB,
+        DRM_IOCTL_MODE_OBJ_GETPROPERTIES, DRM_IOCTL_MODE_PAGE_FLIP, DRM_IOCTL_MODE_RMFB,
+        DRM_IOCTL_MODE_SETCRTC,
+    },
+    mode_types::{
+        DrmModeCardRes, DrmModeCreateDumb, DrmModeCrtc, DrmModeCrtcPageFlip, DrmModeDestroyDumb,
+        DrmModeFbCmd, DrmModeFbCmd2, DrmModeGetConnector, DrmModeGetEncoder, DrmModeGetPlane,
+        DrmModeGetPlaneRes, DrmModeGetProperty, DrmModeMapDumb, DrmModeObjGetProperties,
+    },
 };
 use crate::misc::framebuffer_ioctl::{FbCmap, FbFixScreeninfo, FbVarScreeninfo};
 use crate::terminal::linux_kd::{LinuxKbEntry, LinuxVtMode, LinuxVtStat};
