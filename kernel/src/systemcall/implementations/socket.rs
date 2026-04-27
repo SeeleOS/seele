@@ -12,7 +12,7 @@ use crate::{
     process::{FdFlags, manager::get_current_process},
     socket::{
         AF_INET, AF_NETLINK, AF_UNIX, InetSocketObject, SOCK_CLOEXEC, SOCK_NONBLOCK, SOL_SOCKET,
-        SocketError, UnixSocketKind, UnixSocketObject, UnixSocketState,
+        UnixSocketKind, UnixSocketObject, UnixSocketState,
     },
     systemcall::utils::{SyscallError, SyscallImpl},
 };
@@ -993,9 +993,17 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
     let socket = socket.as_unix_socket()?;
     let dontwait = (flags & MSG_DONTWAIT) != 0;
     let peek = (flags & MSG_PEEK) != 0;
-    let mut total_read = 0usize;
+    let total_capacity = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
+    let mut scratch = alloc::vec![0u8; total_capacity];
+    let total_read = socket
+        .read_socket_with_flags_and_mode(&mut scratch, dontwait, peek)
+        .map_err(ObjectError::from)?;
 
+    let mut copied_total = 0usize;
     for iov in iovs {
+        if copied_total >= total_read {
+            break;
+        }
         if iov.iov_len == 0 {
             continue;
         }
@@ -1003,16 +1011,12 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
             return Err(SyscallError::BadAddress);
         }
 
-        let buffer = unsafe { core::slice::from_raw_parts_mut(iov.iov_base, iov.iov_len) };
-        let read = match socket.read_socket_with_flags_and_mode(buffer, dontwait, peek) {
-            Ok(read) => read,
-            Err(SocketError::TryAgain) if total_read > 0 => break,
-            Err(err) => return Err(ObjectError::from(err).into()),
-        };
-        total_read += read;
-        if read < buffer.len() {
-            break;
-        }
+        let chunk_len = (total_read - copied_total).min(iov.iov_len);
+        user_safe::write(
+            iov.iov_base,
+            &scratch[copied_total..copied_total + chunk_len],
+        )?;
+        copied_total += chunk_len;
     }
 
     msg.msg_flags = 0;
