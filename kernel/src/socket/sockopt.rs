@@ -21,6 +21,9 @@ use crate::{
         manager::get_current_process,
         misc::{ProcessID, get_process_with_pid},
     },
+    thread::yielding::{
+        BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
+    },
 };
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
@@ -277,6 +280,70 @@ impl SocketLike for UnixSocketObject {
     fn recvfrom(&self, buffer: &mut [u8]) -> SocketResult<(usize, Option<Vec<u8>>)> {
         let read = self.read_socket(buffer)?;
         Ok((read, Some(UnixSocketObject::getpeername_bytes(self)?)))
+    }
+
+    fn recvfrom_with_flags(
+        &self,
+        buffer: &mut [u8],
+        flags: u64,
+    ) -> SocketResult<(usize, Option<Vec<u8>>)> {
+        const MSG_PEEK: u64 = 0x2;
+        const MSG_TRUNC: u64 = 0x20;
+
+        let peek = (flags & MSG_PEEK) != 0;
+        let report_trunc = (flags & MSG_TRUNC) != 0;
+
+        match &*self.state.lock() {
+            UnixSocketState::Datagram(datagram) => {
+                if *datagram.read_shutdown.lock() {
+                    return Ok((0, None));
+                }
+
+                loop {
+                    let message = if peek {
+                        datagram.recv_queue.lock().front().cloned()
+                    } else {
+                        datagram.recv_queue.lock().pop_front()
+                    };
+
+                    if let Some(message) = message {
+                        *datagram.peer_cred.lock() = message.sender_cred;
+                        *datagram.peer_name.lock() = message.sender_name;
+                        let copied = buffer.len().min(message.data.len());
+                        buffer[..copied].copy_from_slice(&message.data[..copied]);
+                        let source = Some(UnixSocketObject::getpeername_bytes(self)?);
+                        return Ok((
+                            if report_trunc || buffer.is_empty() {
+                                message.data.len()
+                            } else {
+                                copied
+                            },
+                            source,
+                        ));
+                    }
+
+                    if self.is_nonblocking() {
+                        return Err(SocketError::TryAgain);
+                    }
+
+                    let current = prepare_block_current(BlockType::WakeRequired {
+                        wake_type: WakeType::IO,
+                        deadline: None,
+                    });
+
+                    if !datagram.recv_queue.lock().is_empty() || *datagram.read_shutdown.lock() {
+                        cancel_block(&current);
+                    } else {
+                        finish_block_current();
+                    }
+                }
+            }
+            UnixSocketState::Stream(_) => {
+                let read = self.read_socket_with_flags_and_mode(buffer, false, peek)?;
+                Ok((read, Some(UnixSocketObject::getpeername_bytes(self)?)))
+            }
+            _ => Err(SocketError::InvalidArguments),
+        }
     }
 
     fn getsockname_bytes(&self) -> SocketResult<Vec<u8>> {
