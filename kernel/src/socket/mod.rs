@@ -83,7 +83,7 @@ pub use object::{UnixSocketKind, UnixSocketObject};
 pub(crate) use registry::{UNIX_SOCKET_REGISTRY, UnixSocketRegistryEntry, UnixSocketRegistryKey};
 pub use socket_like::SocketLike;
 pub use state::{UnixListenerInner, UnixSocketState};
-pub use stream::{STREAM_RECV_CAPACITY, SocketPeerCred, UnixStreamInner};
+pub use stream::{PendingRights, STREAM_RECV_CAPACITY, SocketPeerCred, UnixStreamInner};
 pub(crate) use wake::{wake_io, wake_pollers};
 
 pub(crate) fn socket_timeout_option_len(option_name: u64) -> Option<usize> {

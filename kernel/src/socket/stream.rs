@@ -19,9 +19,15 @@ pub struct SocketPeerCred {
 }
 
 #[derive(Debug)]
+pub struct PendingRights {
+    pub byte_offset: usize,
+    pub rights: Vec<ObjectRef>,
+}
+
+#[derive(Debug)]
 pub struct UnixStreamInner {
     pub recv_buf: Mutex<VecDeque<u8>>,
-    pub pending_rights: Mutex<VecDeque<Vec<ObjectRef>>>,
+    pub pending_rights: Mutex<VecDeque<PendingRights>>,
     pub peer: Mutex<Option<Weak<UnixStreamInner>>>,
     pub owner: Mutex<Option<Weak<UnixSocketObject>>>,
     pub peer_cred: Mutex<SocketPeerCred>,
@@ -70,6 +76,31 @@ impl UnixStreamInner {
             }
         }
         wake_io();
+    }
+
+    pub fn take_ready_rights(&self, bytes_read: usize) -> Vec<Vec<ObjectRef>> {
+        if bytes_read == 0 {
+            return Vec::new();
+        }
+
+        let mut pending = self.pending_rights.lock();
+        let mut ready = Vec::new();
+
+        while pending
+            .front()
+            .is_some_and(|entry| entry.byte_offset < bytes_read)
+        {
+            let entry = pending
+                .pop_front()
+                .expect("front element must exist while draining ready rights");
+            ready.push(entry.rights);
+        }
+
+        for entry in pending.iter_mut() {
+            entry.byte_offset = entry.byte_offset.saturating_sub(bytes_read);
+        }
+
+        ready
     }
 }
 

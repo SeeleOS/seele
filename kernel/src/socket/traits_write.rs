@@ -1,12 +1,12 @@
-use alloc::sync::Weak;
+use alloc::{sync::Weak, vec::Vec};
 
 use super::{
-    DATAGRAM_RECV_CAPACITY, STREAM_RECV_CAPACITY, SocketError, SocketPeerCred, SocketResult,
-    UNIX_SOCKET_REGISTRY, UnixDatagramMessage, UnixSocketKind, UnixSocketObject,
+    DATAGRAM_RECV_CAPACITY, PendingRights, STREAM_RECV_CAPACITY, SocketError, SocketPeerCred,
+    SocketResult, UNIX_SOCKET_REGISTRY, UnixDatagramMessage, UnixSocketKind, UnixSocketObject,
     UnixSocketRegistryEntry, UnixSocketRegistryKey, UnixSocketState, wake_io, wake_pollers,
 };
 use crate::{
-    object::{error::ObjectError, traits::Writable},
+    object::{error::ObjectError, misc::ObjectRef, traits::Writable},
     polling::event::PollableEvent,
     process::manager::get_current_process,
     thread::yielding::{
@@ -134,10 +134,11 @@ impl UnixSocketObject {
         self.write_socket_with_flags(buffer, false)
     }
 
-    pub fn write_socket_with_flags(
+    pub fn write_socket_with_rights(
         &self,
         buffer: &[u8],
         force_nonblocking: bool,
+        rights: Vec<ObjectRef>,
     ) -> SocketResult<usize> {
         let nonblocking = force_nonblocking || self.is_nonblocking();
         loop {
@@ -174,7 +175,14 @@ impl UnixSocketObject {
                     if recv_buf.len() < STREAM_RECV_CAPACITY {
                         let writable = STREAM_RECV_CAPACITY - recv_buf.len();
                         let write_len = buffer.len().min(writable);
+                        let byte_offset = recv_buf.len();
                         recv_buf.extend(buffer[..write_len].iter().copied());
+                        if write_len > 0 && !rights.is_empty() {
+                            peer.pending_rights.lock().push_back(PendingRights {
+                                byte_offset,
+                                rights,
+                            });
+                        }
                         drop(recv_buf);
 
                         if let Some(owner) = peer.owner.lock().as_ref().and_then(Weak::upgrade) {
@@ -211,5 +219,13 @@ impl UnixSocketObject {
                 }
             }
         }
+    }
+
+    pub fn write_socket_with_flags(
+        &self,
+        buffer: &[u8],
+        force_nonblocking: bool,
+    ) -> SocketResult<usize> {
+        self.write_socket_with_rights(buffer, force_nonblocking, Vec::new())
     }
 }

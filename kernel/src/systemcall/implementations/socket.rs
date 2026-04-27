@@ -82,27 +82,39 @@ fn encode_control_message(cmsg_type: i32, payload: &[u8]) -> Vec<u8> {
     control
 }
 
-fn stream_rights_control_bytes(socket: &UnixSocketObject) -> Result<Vec<u8>, SyscallError> {
+fn stream_rights_control_bytes_for_read(
+    socket: &UnixSocketObject,
+    bytes_read: usize,
+) -> Result<Vec<u8>, SyscallError> {
     let UnixSocketState::Stream(stream) = &*socket.state.lock() else {
         return Ok(Vec::new());
     };
-    let Some(rights) = stream.pending_rights.lock().pop_front() else {
-        return Ok(Vec::new());
-    };
 
-    let mut payload = Vec::with_capacity(rights.len() * mem::size_of::<i32>());
+    let ready_rights = stream.take_ready_rights(bytes_read);
+    if ready_rights.is_empty() {
+        return Ok(Vec::new());
+    }
+
     let current_process = get_current_process();
     let mut current = current_process.lock();
-    for right in rights {
-        let fd = i32::try_from(current.push_object(right))
-            .map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
-        payload.extend_from_slice(&fd.to_ne_bytes());
+    let mut control = Vec::new();
+    for rights in ready_rights {
+        let mut payload = Vec::with_capacity(rights.len() * mem::size_of::<i32>());
+        for right in rights {
+            let fd = i32::try_from(current.push_object(right))
+                .map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
+            payload.extend_from_slice(&fd.to_ne_bytes());
+        }
+        control.extend_from_slice(&encode_control_message(SCM_RIGHTS, &payload));
     }
-    Ok(encode_control_message(SCM_RIGHTS, &payload))
+    Ok(control)
 }
 
-fn unix_socket_control_bytes(socket: &UnixSocketObject) -> Result<Vec<u8>, SyscallError> {
-    let mut control = stream_rights_control_bytes(socket)?;
+fn unix_socket_control_bytes(
+    socket: &UnixSocketObject,
+    bytes_read: usize,
+) -> Result<Vec<u8>, SyscallError> {
+    let mut control = stream_rights_control_bytes_for_read(socket, bytes_read)?;
     if !*socket.pass_cred.lock() {
         return Ok(control);
     }
@@ -686,8 +698,8 @@ fn sendmsg_impl(
         socket.connect(path).map_err(ObjectError::from)?;
     }
 
-    let mut total_written = 0usize;
-
+    let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
+    let mut buffer = Vec::with_capacity(total_len);
     for iov in iovs {
         if iov.iov_len == 0 {
             continue;
@@ -695,34 +707,14 @@ fn sendmsg_impl(
         if iov.iov_base.is_null() {
             return Err(SyscallError::BadAddress);
         }
-
-        let buffer = unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
-        let written = match socket.write_socket_with_flags(buffer, dontwait) {
-            Ok(written) => written,
-            Err(SocketError::TryAgain) if total_written > 0 => break,
-            Err(err) => return Err(ObjectError::from(err).into()),
-        };
-        total_written += written;
-        if written < buffer.len() {
-            break;
-        }
+        let chunk = unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
+        buffer.extend_from_slice(chunk);
     }
 
-    if total_written > 0 && !rights.is_empty() {
-        let stream = match &*socket.state.lock() {
-            UnixSocketState::Stream(stream) => stream.clone(),
-            _ => return Err(SyscallError::InvalidArguments),
-        };
-        let peer = stream
-            .peer
-            .lock()
-            .as_ref()
-            .and_then(|peer| peer.upgrade())
-            .ok_or(SyscallError::BrokenPipe)?;
-        peer.pending_rights.lock().push_back(rights);
-    }
-
-    Ok(total_written)
+    socket
+        .write_socket_with_rights(&buffer, dontwait, rights)
+        .map_err(ObjectError::from)
+        .map_err(Into::into)
 }
 
 define_syscall!(Sendmsg, |socket: ObjectRef,
@@ -1028,7 +1020,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         msg.msg_namelen = 0;
     }
     let control = if total_read > 0 {
-        unix_socket_control_bytes(&socket)?
+        unix_socket_control_bytes(&socket, total_read)?
     } else {
         Vec::new()
     };
