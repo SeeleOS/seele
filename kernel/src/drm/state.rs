@@ -140,6 +140,24 @@ impl DrmState {
         Ok(())
     }
 
+    pub(super) fn import_prime_buffer(&mut self, buffer: &DumbBuffer) -> ObjectResult<u32> {
+        let handle = self.next_handle;
+        self.next_handle = self.next_handle.checked_add(1).ok_or(ObjectError::Other)?;
+        let map_offset = self.next_map_offset;
+        self.next_map_offset = self
+            .next_map_offset
+            .checked_add(buffer.aligned_size())
+            .and_then(|next| next.checked_add(4096u64))
+            .ok_or(ObjectError::Other)?;
+
+        let mut imported = buffer.clone();
+        imported.map_offset = map_offset;
+        imported.user_handle_open = true;
+        imported.framebuffer_refs = 0;
+        self.dumb_buffers.insert(handle, imported);
+        Ok(handle)
+    }
+
     pub(super) fn remove_framebuffer(&mut self, fb_id: u32) -> ObjectResult<()> {
         let framebuffer = self
             .framebuffers

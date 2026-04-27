@@ -11,6 +11,6 @@ pub mod fs;
 pub mod mode;
 pub mod mode_types;
 pub mod object;
-mod prime;
+pub(crate) mod prime;
 mod state;
 mod user;

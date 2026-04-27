@@ -13,11 +13,12 @@ use crate::{
         vfs_traits::FileLikeType,
     },
     impl_cast_function,
+    impl_cast_function_non_trait,
     memory::{addrspace::mem_area::Data, protection::Protection, user_safe},
     object::{
         Object,
         error::ObjectError,
-        misc::{ObjectRef, ObjectResult},
+        misc::{ObjectRef, ObjectResult, get_object_current_process},
         traits::{MemoryMappable, Statable},
     },
     process::{FdFlags, manager::get_current_process, misc::with_current_process},
@@ -36,7 +37,7 @@ bitflags! {
 }
 
 #[derive(Debug)]
-struct DrmPrimeBufferObject {
+pub(crate) struct DrmPrimeBufferObject {
     buffer: DumbBuffer,
     inode: u64,
 }
@@ -48,11 +49,16 @@ impl DrmPrimeBufferObject {
             inode: NEXT_PRIME_INODE.fetch_add(1, Ordering::Relaxed),
         }
     }
+
+    pub(crate) fn exported_buffer(&self) -> &DumbBuffer {
+        &self.buffer
+    }
 }
 
 impl Object for DrmPrimeBufferObject {
     impl_cast_function!("mappable", MemoryMappable);
     impl_cast_function!("statable", Statable);
+    impl_cast_function_non_trait!("drm_prime_buffer", DrmPrimeBufferObject);
 }
 
 impl MemoryMappable for DrmPrimeBufferObject {
@@ -130,6 +136,24 @@ pub(super) fn handle_prime_handle_to_fd(ptr: *mut DrmPrimeHandle) -> ObjectResul
         .lock()
         .push_object_with_flags(object, fd_flags);
     request.fd = i32::try_from(fd).map_err(|_| ObjectError::Other)?;
+    user_safe::write(ptr, &request).map_err(|_| ObjectError::InvalidArguments)?;
+    Ok(0)
+}
+
+pub(super) fn handle_prime_fd_to_handle(ptr: *mut DrmPrimeHandle) -> ObjectResult<isize> {
+    let mut request = read_user(ptr)?;
+    if request.flags != 0 {
+        return Err(ObjectError::InvalidArguments);
+    }
+
+    let object =
+        get_object_current_process(request.fd as u64).map_err(|_| ObjectError::InvalidArguments)?;
+    let prime = object
+        .as_drm_prime_buffer()
+        .map_err(|_| ObjectError::InvalidArguments)?;
+    request.handle = DRM_STATE
+        .lock()
+        .import_prime_buffer(prime.exported_buffer())?;
     user_safe::write(ptr, &request).map_err(|_| ObjectError::InvalidArguments)?;
     Ok(0)
 }

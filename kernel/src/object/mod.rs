@@ -11,6 +11,7 @@ bitflags::bitflags! {
 }
 
 use crate::{
+    drm::prime::DrmPrimeBufferObject,
     filesystem::object::FileLikeObject,
     object::{
         bpf::BpfObject,
@@ -97,6 +98,7 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function_non_trait!("inet_socket", InetSocketObject, BadFileDescriptor);
     define_cast_function_non_trait!("timerfd", TimerFdObject, BadFileDescriptor);
     define_cast_function_non_trait!("unix_socket", UnixSocketObject, BadFileDescriptor);
+    define_cast_function_non_trait!("drm_prime_buffer", DrmPrimeBufferObject, BadFileDescriptor);
     define_cast_function_non_trait!("tty_device", TtyDevice, BadFileDescriptor);
     define_cast_function_non_trait!("pty_slave", PtySlave, BadFileDescriptor);
 }
