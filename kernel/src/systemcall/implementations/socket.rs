@@ -517,7 +517,7 @@ define_syscall!(
             let mut data = vec![0; len];
             let (read, source) = socket
                 .as_socket_like()?
-                .recvfrom_with_flags(&mut data, flags)
+                .recvfrom(&mut data)
                 .map_err(ObjectError::from)?;
 
             if read > 0 {

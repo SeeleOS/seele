@@ -23,13 +23,6 @@ pub trait SocketLike: Object {
     fn recvfrom(&self, _buffer: &mut [u8]) -> SocketResult<(usize, Option<Vec<u8>>)> {
         Err(super::SocketError::OperationNotSupported)
     }
-    fn recvfrom_with_flags(
-        &self,
-        buffer: &mut [u8],
-        _flags: u64,
-    ) -> SocketResult<(usize, Option<Vec<u8>>)> {
-        self.recvfrom(buffer)
-    }
     fn getsockname_bytes(&self) -> SocketResult<Vec<u8>>;
     fn getpeername_bytes(&self) -> SocketResult<Vec<u8>> {
         Err(super::SocketError::NotConnected)
