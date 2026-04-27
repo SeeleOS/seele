@@ -291,3 +291,12 @@ pub(super) fn handle_mode_get_plane(
     user_safe::write(ptr, &plane).map_err(|_| ObjectError::InvalidArguments)?;
     Ok(0)
 }
+
+pub(super) fn handle_mode_list_lessees(
+    ptr: *mut crate::drm::mode_types::DrmModeListLessees,
+) -> ObjectResult<isize> {
+    let mut lessees = read_user(ptr)?;
+    lessees.count_lessees = 0;
+    user_safe::write(ptr, &lessees).map_err(|_| ObjectError::InvalidArguments)?;
+    Ok(0)
+}

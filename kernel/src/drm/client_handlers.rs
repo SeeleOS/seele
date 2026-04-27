@@ -2,9 +2,13 @@ use crate::{
     drm::{
         card::CRTC0_ID,
         client::{
-            DRIVER_DATE, DRIVER_DESC, DRIVER_NAME, DRM_CAP_DUMB_BUFFER, DRM_CAP_DUMB_PREFER_SHADOW,
-            DRM_CAP_DUMB_PREFERRED_DEPTH, DRM_CAP_TIMESTAMP_MONOTONIC, DRM_CLIENT_CAP_ASPECT_RATIO,
-            DRM_CLIENT_CAP_ATOMIC, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, DRM_CLIENT_CAP_STEREO_3D,
+            DRIVER_DATE, DRIVER_DESC, DRIVER_NAME, DRM_CAP_ADDFB2_MODIFIERS,
+            DRM_CAP_ASYNC_PAGE_FLIP, DRM_CAP_CRTC_IN_VBLANK_EVENT, DRM_CAP_CURSOR_HEIGHT,
+            DRM_CAP_CURSOR_WIDTH, DRM_CAP_DUMB_BUFFER, DRM_CAP_DUMB_PREFER_SHADOW,
+            DRM_CAP_DUMB_PREFERRED_DEPTH, DRM_CAP_PAGE_FLIP_TARGET, DRM_CAP_PRIME, DRM_CAP_SYNCOBJ,
+            DRM_CAP_SYNCOBJ_TIMELINE, DRM_CAP_TIMESTAMP_MONOTONIC, DRM_CAP_VBLANK_HIGH_CRTC,
+            DRM_CLIENT_CAP_ASPECT_RATIO, DRM_CLIENT_CAP_ATOMIC,
+            DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, DRM_CLIENT_CAP_STEREO_3D,
             DRM_CLIENT_CAP_UNIVERSAL_PLANES, DRM_CLIENT_CAP_WRITEBACK_CONNECTORS, DRM_EVENT_VBLANK,
             DRM_VBLANK_EVENT, DRM_VBLANK_FLAGS_MASK, DRM_VBLANK_FLIP, DRM_VBLANK_SIGNAL,
             DRM_VBLANK_TYPES_MASK,
@@ -36,13 +40,37 @@ pub(super) fn handle_version(ptr: *mut crate::drm::client::DrmVersion) -> Object
     Ok(0)
 }
 
+pub(super) fn handle_get_unique(ptr: *mut crate::drm::client::DrmUnique) -> ObjectResult<isize> {
+    let mut unique = read_user(ptr)?;
+    unique.unique_len = 0;
+    user_safe::write(ptr, &unique).map_err(|_| ObjectError::InvalidArguments)?;
+    Ok(0)
+}
+
+pub(super) fn handle_get_magic(ptr: *mut crate::drm::client::DrmAuth) -> ObjectResult<isize> {
+    let mut auth = read_user(ptr)?;
+    auth.magic = 1;
+    user_safe::write(ptr, &auth).map_err(|_| ObjectError::InvalidArguments)?;
+    Ok(0)
+}
+
 pub(super) fn handle_get_cap(ptr: *mut crate::drm::client::DrmGetCap) -> ObjectResult<isize> {
     let mut cap = read_user(ptr)?;
     cap.value = match cap.capability {
         DRM_CAP_DUMB_BUFFER => 1,
+        DRM_CAP_VBLANK_HIGH_CRTC => 1,
         DRM_CAP_DUMB_PREFERRED_DEPTH => 32,
         DRM_CAP_DUMB_PREFER_SHADOW => 0,
+        DRM_CAP_PRIME => 0,
         DRM_CAP_TIMESTAMP_MONOTONIC => 1,
+        DRM_CAP_ASYNC_PAGE_FLIP => 0,
+        DRM_CAP_CURSOR_WIDTH => 64,
+        DRM_CAP_CURSOR_HEIGHT => 64,
+        DRM_CAP_ADDFB2_MODIFIERS => 0,
+        DRM_CAP_PAGE_FLIP_TARGET => 0,
+        DRM_CAP_CRTC_IN_VBLANK_EVENT => 1,
+        DRM_CAP_SYNCOBJ => 0,
+        DRM_CAP_SYNCOBJ_TIMELINE => 0,
         _ => {
             crate::s_println!("drm get_cap unsupported capability={:#x}", cap.capability);
             return Err(ObjectError::InvalidArguments);
@@ -73,6 +101,16 @@ pub(super) fn handle_wait_vblank(
     Ok(0)
 }
 
+pub(super) fn handle_set_unique(ptr: *mut crate::drm::client::DrmUnique) -> ObjectResult<isize> {
+    let _ = read_user(ptr)?;
+    Ok(0)
+}
+
+pub(super) fn handle_auth_magic(ptr: *mut crate::drm::client::DrmAuth) -> ObjectResult<isize> {
+    let _ = read_user(ptr)?;
+    Ok(0)
+}
+
 pub(super) fn handle_set_client_cap(
     ptr: *mut crate::drm::client::DrmSetClientCap,
 ) -> ObjectResult<isize> {
@@ -93,6 +131,14 @@ pub(super) fn handle_set_client_cap(
                 cap.value
             );
             Err(ObjectError::Unimplemented)
+        }
+        (_, 0 | 1) => {
+            crate::s_println!(
+                "drm set_client_cap ignored capability={:#x} value={:#x}",
+                cap.capability,
+                cap.value
+            );
+            Ok(0)
         }
         _ => {
             crate::s_println!(

@@ -176,6 +176,14 @@ pub struct DrmModeGetPlane {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModeListLessees {
+    pub count_lessees: u32,
+    pub pad: u32,
+    pub lessees_ptr: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct DrmModeCrtcPageFlip {
     pub crtc_id: u32,
     pub fb_id: u32,

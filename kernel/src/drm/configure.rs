@@ -5,8 +5,12 @@ use super::{buffer_handlers, client_handlers, display_handlers};
 pub(super) fn handle_configure(request: ConfigurateRequest) -> ObjectResult<isize> {
     match request {
         ConfigurateRequest::DrmVersion(ptr) => client_handlers::handle_version(ptr),
+        ConfigurateRequest::DrmGetUnique(ptr) => client_handlers::handle_get_unique(ptr),
+        ConfigurateRequest::DrmGetMagic(ptr) => client_handlers::handle_get_magic(ptr),
         ConfigurateRequest::DrmGetCap(ptr) => client_handlers::handle_get_cap(ptr),
         ConfigurateRequest::DrmWaitVblank(ptr) => client_handlers::handle_wait_vblank(ptr),
+        ConfigurateRequest::DrmSetUnique(ptr) => client_handlers::handle_set_unique(ptr),
+        ConfigurateRequest::DrmAuthMagic(ptr) => client_handlers::handle_auth_magic(ptr),
         ConfigurateRequest::DrmSetClientCap(ptr) => client_handlers::handle_set_client_cap(ptr),
         ConfigurateRequest::DrmSetMaster => client_handlers::handle_set_master(),
         ConfigurateRequest::DrmDropMaster => client_handlers::handle_drop_master(),
@@ -33,6 +37,9 @@ pub(super) fn handle_configure(request: ConfigurateRequest) -> ObjectResult<isiz
             display_handlers::handle_mode_get_plane_resources(ptr)
         }
         ConfigurateRequest::DrmModeGetPlane(ptr) => display_handlers::handle_mode_get_plane(ptr),
+        ConfigurateRequest::DrmModeListLessees(ptr) => {
+            display_handlers::handle_mode_list_lessees(ptr)
+        }
         ConfigurateRequest::DrmModeAddFb(ptr) => buffer_handlers::handle_mode_add_fb(ptr),
         ConfigurateRequest::DrmModeAddFb2(ptr) => buffer_handlers::handle_mode_add_fb2(ptr),
         ConfigurateRequest::DrmModeRemoveFb(ptr) => buffer_handlers::handle_mode_remove_fb(ptr),

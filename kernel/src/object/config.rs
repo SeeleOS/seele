@@ -7,24 +7,25 @@ use crate::{
 
 use crate::drm::{
     client::{
-        DRM_IOCTL_DROP_MASTER, DRM_IOCTL_GEM_CLOSE, DRM_IOCTL_GET_CAP, DRM_IOCTL_SET_CLIENT_CAP,
-        DRM_IOCTL_SET_MASTER, DRM_IOCTL_VERSION, DRM_IOCTL_WAIT_VBLANK, DrmGemClose, DrmGetCap,
-        DrmSetClientCap, DrmVersion, DrmWaitVblank,
+        DRM_IOCTL_AUTH_MAGIC, DRM_IOCTL_DROP_MASTER, DRM_IOCTL_GEM_CLOSE, DRM_IOCTL_GET_CAP,
+        DRM_IOCTL_GET_MAGIC, DRM_IOCTL_GET_UNIQUE, DRM_IOCTL_SET_CLIENT_CAP, DRM_IOCTL_SET_MASTER,
+        DRM_IOCTL_SET_UNIQUE, DRM_IOCTL_VERSION, DRM_IOCTL_WAIT_VBLANK, DrmAuth, DrmGemClose,
+        DrmGetCap, DrmSetClientCap, DrmUnique, DrmVersion, DrmWaitVblank,
     },
     mode::{
         DRM_IOCTL_MODE_ADDFB, DRM_IOCTL_MODE_ADDFB2, DRM_IOCTL_MODE_CREATE_DUMB,
         DRM_IOCTL_MODE_DESTROY_DUMB, DRM_IOCTL_MODE_DIRTYFB, DRM_IOCTL_MODE_GETCONNECTOR,
         DRM_IOCTL_MODE_GETCRTC, DRM_IOCTL_MODE_GETENCODER, DRM_IOCTL_MODE_GETGAMMA,
         DRM_IOCTL_MODE_GETPLANE, DRM_IOCTL_MODE_GETPLANERESOURCES, DRM_IOCTL_MODE_GETPROPERTY,
-        DRM_IOCTL_MODE_GETRESOURCES, DRM_IOCTL_MODE_MAP_DUMB, DRM_IOCTL_MODE_OBJ_GETPROPERTIES,
-        DRM_IOCTL_MODE_PAGE_FLIP, DRM_IOCTL_MODE_RMFB, DRM_IOCTL_MODE_SETCRTC,
-        DRM_IOCTL_MODE_SETGAMMA,
+        DRM_IOCTL_MODE_GETRESOURCES, DRM_IOCTL_MODE_LIST_LESSEES, DRM_IOCTL_MODE_MAP_DUMB,
+        DRM_IOCTL_MODE_OBJ_GETPROPERTIES, DRM_IOCTL_MODE_PAGE_FLIP, DRM_IOCTL_MODE_RMFB,
+        DRM_IOCTL_MODE_SETCRTC, DRM_IOCTL_MODE_SETGAMMA,
     },
     mode_types::{
         DrmModeCardRes, DrmModeCreateDumb, DrmModeCrtc, DrmModeCrtcLut, DrmModeCrtcPageFlip,
         DrmModeDestroyDumb, DrmModeFbCmd, DrmModeFbCmd2, DrmModeFbDirtyCmd, DrmModeGetConnector,
-        DrmModeGetEncoder, DrmModeGetPlane, DrmModeGetPlaneRes, DrmModeGetProperty, DrmModeMapDumb,
-        DrmModeObjGetProperties,
+        DrmModeGetEncoder, DrmModeGetPlane, DrmModeGetPlaneRes, DrmModeGetProperty,
+        DrmModeListLessees, DrmModeMapDumb, DrmModeObjGetProperties,
     },
 };
 use crate::misc::framebuffer_ioctl::{FbCmap, FbFixScreeninfo, FbVarScreeninfo};
@@ -69,8 +70,12 @@ pub enum ConfigurateRequest {
     LinuxVtWaitActive(u32),
     LinuxVtRelDisp(u32),
     DrmVersion(*mut DrmVersion),
+    DrmGetUnique(*mut DrmUnique),
+    DrmGetMagic(*mut DrmAuth),
     DrmGetCap(*mut DrmGetCap),
     DrmWaitVblank(*mut DrmWaitVblank),
+    DrmSetUnique(*mut DrmUnique),
+    DrmAuthMagic(*mut DrmAuth),
     DrmSetClientCap(*mut DrmSetClientCap),
     DrmSetMaster,
     DrmDropMaster,
@@ -85,6 +90,7 @@ pub enum ConfigurateRequest {
     DrmModeObjGetProperties(*mut DrmModeObjGetProperties),
     DrmModeGetPlaneResources(*mut DrmModeGetPlaneRes),
     DrmModeGetPlane(*mut DrmModeGetPlane),
+    DrmModeListLessees(*mut DrmModeListLessees),
     DrmModeAddFb(*mut DrmModeFbCmd),
     DrmModeAddFb2(*mut DrmModeFbCmd2),
     DrmModeRemoveFb(*mut u32),
@@ -191,8 +197,12 @@ impl ConfigurateRequest {
     pub fn new(request: u64, ptr: u64) -> ObjectResult<Self> {
         Ok(match request {
             DRM_IOCTL_VERSION => Self::DrmVersion(ptr as *mut DrmVersion),
+            DRM_IOCTL_GET_UNIQUE => Self::DrmGetUnique(ptr as *mut DrmUnique),
+            DRM_IOCTL_GET_MAGIC => Self::DrmGetMagic(ptr as *mut DrmAuth),
             DRM_IOCTL_GET_CAP => Self::DrmGetCap(ptr as *mut DrmGetCap),
             DRM_IOCTL_WAIT_VBLANK => Self::DrmWaitVblank(ptr as *mut DrmWaitVblank),
+            DRM_IOCTL_SET_UNIQUE => Self::DrmSetUnique(ptr as *mut DrmUnique),
+            DRM_IOCTL_AUTH_MAGIC => Self::DrmAuthMagic(ptr as *mut DrmAuth),
             DRM_IOCTL_SET_CLIENT_CAP => Self::DrmSetClientCap(ptr as *mut DrmSetClientCap),
             DRM_IOCTL_SET_MASTER => Self::DrmSetMaster,
             DRM_IOCTL_DROP_MASTER => Self::DrmDropMaster,
@@ -213,6 +223,7 @@ impl ConfigurateRequest {
                 Self::DrmModeGetPlaneResources(ptr as *mut DrmModeGetPlaneRes)
             }
             DRM_IOCTL_MODE_GETPLANE => Self::DrmModeGetPlane(ptr as *mut DrmModeGetPlane),
+            DRM_IOCTL_MODE_LIST_LESSEES => Self::DrmModeListLessees(ptr as *mut DrmModeListLessees),
             DRM_IOCTL_MODE_ADDFB => Self::DrmModeAddFb(ptr as *mut DrmModeFbCmd),
             DRM_IOCTL_MODE_ADDFB2 => Self::DrmModeAddFb2(ptr as *mut DrmModeFbCmd2),
             DRM_IOCTL_MODE_RMFB => Self::DrmModeRemoveFb(ptr as *mut u32),

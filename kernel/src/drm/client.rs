@@ -1,15 +1,29 @@
 pub const DRM_IOCTL_VERSION: u64 = 0xc040_6400;
+pub const DRM_IOCTL_GET_UNIQUE: u64 = 0xc010_6401;
+pub const DRM_IOCTL_GET_MAGIC: u64 = 0x8004_6402;
 pub const DRM_IOCTL_GET_CAP: u64 = 0xc010_640c;
 pub const DRM_IOCTL_WAIT_VBLANK: u64 = 0xc018_643a;
+pub const DRM_IOCTL_SET_UNIQUE: u64 = 0x4010_6410;
+pub const DRM_IOCTL_AUTH_MAGIC: u64 = 0x4004_6411;
 pub const DRM_IOCTL_SET_CLIENT_CAP: u64 = 0x4010_640d;
 pub const DRM_IOCTL_SET_MASTER: u64 = 0x0000_641e;
 pub const DRM_IOCTL_DROP_MASTER: u64 = 0x0000_641f;
 pub const DRM_IOCTL_GEM_CLOSE: u64 = 0x4008_6409;
 
 pub const DRM_CAP_DUMB_BUFFER: u64 = 0x1;
+pub const DRM_CAP_VBLANK_HIGH_CRTC: u64 = 0x2;
 pub const DRM_CAP_DUMB_PREFERRED_DEPTH: u64 = 0x3;
 pub const DRM_CAP_DUMB_PREFER_SHADOW: u64 = 0x4;
+pub const DRM_CAP_PRIME: u64 = 0x5;
 pub const DRM_CAP_TIMESTAMP_MONOTONIC: u64 = 0x6;
+pub const DRM_CAP_ASYNC_PAGE_FLIP: u64 = 0x7;
+pub const DRM_CAP_CURSOR_WIDTH: u64 = 0x8;
+pub const DRM_CAP_CURSOR_HEIGHT: u64 = 0x9;
+pub const DRM_CAP_ADDFB2_MODIFIERS: u64 = 0x10;
+pub const DRM_CAP_PAGE_FLIP_TARGET: u64 = 0x11;
+pub const DRM_CAP_CRTC_IN_VBLANK_EVENT: u64 = 0x12;
+pub const DRM_CAP_SYNCOBJ: u64 = 0x13;
+pub const DRM_CAP_SYNCOBJ_TIMELINE: u64 = 0x14;
 
 pub const DRM_CLIENT_CAP_STEREO_3D: u64 = 1;
 pub const DRM_CLIENT_CAP_UNIVERSAL_PLANES: u64 = 2;
@@ -50,6 +64,19 @@ pub struct DrmVersion {
     pub date: *mut u8,
     pub desc_len: usize,
     pub desc: *mut u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmUnique {
+    pub unique_len: usize,
+    pub unique: *mut u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmAuth {
+    pub magic: u32,
 }
 
 #[repr(C)]
