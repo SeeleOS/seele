@@ -28,6 +28,15 @@ impl UnixSocketObject {
         buffer: &mut [u8],
         force_nonblocking: bool,
     ) -> SocketResult<usize> {
+        self.read_socket_with_flags_and_mode(buffer, force_nonblocking, false)
+    }
+
+    pub fn read_socket_with_flags_and_mode(
+        &self,
+        buffer: &mut [u8],
+        force_nonblocking: bool,
+        peek: bool,
+    ) -> SocketResult<usize> {
         let nonblocking = force_nonblocking || self.is_nonblocking();
         loop {
             match &*self.state.lock() {
@@ -36,7 +45,11 @@ impl UnixSocketObject {
                         return Ok(0);
                     }
 
-                    let message = datagram.recv_queue.lock().pop_front();
+                    let message = if peek {
+                        datagram.recv_queue.lock().front().cloned()
+                    } else {
+                        datagram.recv_queue.lock().pop_front()
+                    };
                     if let Some(message) = message {
                         *datagram.peer_cred.lock() = message.sender_cred;
                         *datagram.peer_name.lock() = message.sender_name;
@@ -67,6 +80,14 @@ impl UnixSocketObject {
 
                     let mut recv_buf = stream.recv_buf.lock();
                     if !recv_buf.is_empty() {
+                        if peek {
+                            let read = buffer.len().min(recv_buf.len());
+                            for (dst, src) in buffer.iter_mut().zip(recv_buf.iter().take(read)) {
+                                *dst = *src;
+                            }
+                            return Ok(read);
+                        }
+
                         let was_full = recv_buf.len() >= STREAM_RECV_CAPACITY;
                         let mut read = 0;
                         while read < buffer.len() {

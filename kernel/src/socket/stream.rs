@@ -18,7 +18,7 @@ pub struct SocketPeerCred {
     pub gid: u32,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PendingRights {
     pub byte_offset: usize,
     pub rights: Vec<ObjectRef>,
@@ -101,6 +101,19 @@ impl UnixStreamInner {
         }
 
         ready
+    }
+
+    pub fn peek_ready_rights(&self, bytes_read: usize) -> Vec<Vec<ObjectRef>> {
+        if bytes_read == 0 {
+            return Vec::new();
+        }
+
+        self.pending_rights
+            .lock()
+            .iter()
+            .take_while(|entry| entry.byte_offset < bytes_read)
+            .map(|entry| entry.rights.clone())
+            .collect()
     }
 }
 

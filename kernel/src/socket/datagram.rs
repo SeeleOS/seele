@@ -8,7 +8,7 @@ use crate::polling::event::PollableEvent;
 
 pub const DATAGRAM_RECV_CAPACITY: usize = 64 * 1024;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct UnixDatagramMessage {
     pub data: Vec<u8>,
     pub sender_name: Option<String>,

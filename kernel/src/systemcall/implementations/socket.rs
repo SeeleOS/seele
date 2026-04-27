@@ -85,12 +85,17 @@ fn encode_control_message(cmsg_type: i32, payload: &[u8]) -> Vec<u8> {
 fn stream_rights_control_bytes_for_read(
     socket: &UnixSocketObject,
     bytes_read: usize,
+    peek: bool,
 ) -> Result<Vec<u8>, SyscallError> {
     let UnixSocketState::Stream(stream) = &*socket.state.lock() else {
         return Ok(Vec::new());
     };
 
-    let ready_rights = stream.take_ready_rights(bytes_read);
+    let ready_rights = if peek {
+        stream.peek_ready_rights(bytes_read)
+    } else {
+        stream.take_ready_rights(bytes_read)
+    };
     if ready_rights.is_empty() {
         return Ok(Vec::new());
     }
@@ -113,8 +118,9 @@ fn stream_rights_control_bytes_for_read(
 fn unix_socket_control_bytes(
     socket: &UnixSocketObject,
     bytes_read: usize,
+    peek: bool,
 ) -> Result<Vec<u8>, SyscallError> {
-    let mut control = stream_rights_control_bytes_for_read(socket, bytes_read)?;
+    let mut control = stream_rights_control_bytes_for_read(socket, bytes_read, peek)?;
     if !*socket.pass_cred.lock() {
         return Ok(control);
     }
@@ -986,6 +992,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
 
     let socket = socket.as_unix_socket()?;
     let dontwait = (flags & MSG_DONTWAIT) != 0;
+    let peek = (flags & MSG_PEEK) != 0;
     let mut total_read = 0usize;
 
     for iov in iovs {
@@ -997,7 +1004,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         }
 
         let buffer = unsafe { core::slice::from_raw_parts_mut(iov.iov_base, iov.iov_len) };
-        let read = match socket.read_socket_with_flags(buffer, dontwait) {
+        let read = match socket.read_socket_with_flags_and_mode(buffer, dontwait, peek) {
             Ok(read) => read,
             Err(SocketError::TryAgain) if total_read > 0 => break,
             Err(err) => return Err(ObjectError::from(err).into()),
@@ -1020,7 +1027,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         msg.msg_namelen = 0;
     }
     let control = if total_read > 0 {
-        unix_socket_control_bytes(&socket, total_read)?
+        unix_socket_control_bytes(&socket, total_read, peek)?
     } else {
         Vec::new()
     };
