@@ -273,6 +273,24 @@ fn mapping_overlaps(areas: &[MemoryArea], start: VirtAddr, end: VirtAddr) -> boo
         .any(|area| area.start < end && area.end > start)
 }
 
+fn mmap_shared(flags: MmapFlags) -> Result<bool, SyscallError> {
+    match flags.bits() & MmapFlags::SHARED_VALIDATE.bits() {
+        bits if bits == MmapFlags::SHARED.bits() => Ok(true),
+        bits if bits == MmapFlags::PRIVATE.bits() => Ok(false),
+        bits if bits == MmapFlags::SHARED_VALIDATE.bits() => Ok(true),
+        _ => Err(SyscallError::InvalidArguments),
+    }
+}
+
+fn resized_file_mapping(
+    file: Arc<crate::filesystem::object::FileLikeObject>,
+    offset: u64,
+    pages: u64,
+    shared: bool,
+) -> Data {
+    file.mmap_data(offset, pages, shared)
+}
+
 define_syscall!(Mmap, |addr: u64,
                        len: u64,
                        prot: i32,
@@ -285,6 +303,7 @@ define_syscall!(Mmap, |addr: u64,
     let protection = prot_to_protection(prot)?;
     let pages = len.div_ceil(4096);
     let fixed = flags.intersects(MmapFlags::FIXED | MmapFlags::FIXED_NOREPLACE);
+    let shared = mmap_shared(flags)?;
     let start = VirtAddr::new(addr);
     let end = start + pages * 4096;
 
@@ -302,15 +321,10 @@ define_syscall!(Mmap, |addr: u64,
             let object = crate::object::misc::get_object_current_process(fd as u64)
                 .map_err(SyscallError::from)?;
             let file = object.as_file_like()?;
-            let file_bytes = file
-                .info()
-                .map(|info| (info.size as u64).saturating_sub(offset).min(pages * 4096))
-                .unwrap_or(0);
-            Some(Data::File {
-                offset,
-                file_bytes,
-                file,
-            })
+            if file.is_device_backed() {
+                return Err(SyscallError::InvalidArguments);
+            }
+            Some(file.mmap_data(offset, pages, shared))
         };
 
         let current = get_current_process();
@@ -356,6 +370,16 @@ define_syscall!(Mmap, |addr: u64,
     }
     let object =
         crate::object::misc::get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+    if let Ok(file) = object.clone().as_file_like()
+        && !file.is_device_backed()
+    {
+        let data = file.mmap_data(offset, pages, shared);
+        let address = get_current_process()
+            .lock()
+            .addrspace
+            .allocate_user_lazy(pages, protection, data);
+        return Ok(address.as_u64() as usize);
+    }
     let object = object.as_mappable()?;
     let address = object.map(offset, pages, protection)?;
     Ok(address.as_u64() as usize)
@@ -386,7 +410,7 @@ define_syscall!(Mremap, |old_addr: VirtAddr,
         .cloned()
         .ok_or(SyscallError::InvalidArguments)?;
 
-    if area.start != old_addr || !matches!(area.data, Data::Normal) {
+    if area.start != old_addr {
         return Err(SyscallError::InvalidArguments);
     }
 
@@ -404,20 +428,54 @@ define_syscall!(Mremap, |old_addr: VirtAddr,
     }
 
     let new_start = current.addrspace.fetch_add_user_mem(new_pages);
-    current.addrspace.map(MemoryArea::new(
-        new_start,
-        new_pages,
-        area.flags,
-        Data::Normal,
-        false,
-    ));
+    let new_data = match &area.data {
+        Data::Normal => Data::Normal,
+        Data::File {
+            offset,
+            file,
+            shared,
+            ..
+        } => resized_file_mapping(file.clone(), *offset, new_pages, *shared),
+        Data::Shared { .. } => return Err(SyscallError::InvalidArguments),
+    };
+    let new_area = MemoryArea::new(new_start, new_pages, area.flags, new_data, area.lazy);
+    current.addrspace.register_area(new_area.clone());
 
-    unsafe {
-        core::ptr::copy_nonoverlapping(
-            old_addr.as_u64() as *const u8,
-            new_start.as_u64() as *mut u8,
-            old_len as usize,
+    let copy_pages = match &area.data {
+        Data::Normal => old_pages,
+        Data::File { .. } => old_pages,
+        Data::Shared { .. } => 0,
+    };
+    for page_index in 0..copy_pages {
+        let src_addr = old_addr + page_index * 4096;
+        let Some(_) = current.addrspace.translate_addr(src_addr) else {
+            continue;
+        };
+
+        let dst_addr = new_start + page_index * 4096;
+        current.addrspace.apply_page(
+            x86_64::structures::paging::Page::containing_address(dst_addr),
+            new_area.clone(),
         );
+        let src_phys = current
+            .addrspace
+            .translate_addr(src_addr)
+            .ok_or(SyscallError::InvalidArguments)?;
+        let dst_phys = current
+            .addrspace
+            .translate_addr(dst_addr)
+            .ok_or(SyscallError::InvalidArguments)?;
+        if src_phys == dst_phys {
+            continue;
+        }
+        let copy_len = core::cmp::min(4096, (old_len - page_index * 4096) as usize);
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                src_addr.as_u64() as *const u8,
+                dst_addr.as_u64() as *mut u8,
+                copy_len,
+            );
+        }
     }
 
     current.addrspace.unmap(old_addr, old_len);

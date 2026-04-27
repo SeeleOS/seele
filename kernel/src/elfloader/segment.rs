@@ -39,6 +39,7 @@ pub fn load_segment_to_area(
             offset: file_offset,
             file_bytes,
             file,
+            shared: false,
         },
         lazy: true,
     }

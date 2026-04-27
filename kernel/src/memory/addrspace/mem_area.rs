@@ -25,6 +25,7 @@ pub enum Data {
         // Bytes from `offset` that belong to this mapping; the rest stays zeroed.
         file_bytes: u64,
         file: Arc<FileLikeObject>,
+        shared: bool,
     },
     Shared {
         frames: Arc<[PhysFrame]>,

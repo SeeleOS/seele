@@ -239,6 +239,23 @@ impl OpenedFileObject {
             | OpenBackend::SymlinkPath { .. } => None,
         }
     }
+
+    pub fn is_device_backed(&self) -> bool {
+        self.device_object().is_some()
+    }
+
+    pub fn mmap_data(self: Arc<Self>, offset: u64, pages: u64, shared: bool) -> Data {
+        let file_bytes = self
+            .info()
+            .map(|info| (info.size as u64).saturating_sub(offset).min(pages * 4096))
+            .unwrap_or(0);
+        Data::File {
+            offset,
+            file_bytes,
+            file: self,
+            shared,
+        }
+    }
 }
 
 pub fn poll_identity_object(object: ObjectRef) -> ObjectRef {
@@ -326,15 +343,7 @@ impl MemoryMappable for OpenedFileObject {
         }
 
         with_current_process(|process| {
-            let file_bytes = self
-                .info()
-                .map(|info| (info.size as u64).saturating_sub(offset).min(pages * 4096))
-                .unwrap_or(0);
-            let data = Data::File {
-                offset,
-                file_bytes,
-                file: self,
-            };
+            let data = self.mmap_data(offset, pages, false);
             let addr = process
                 .addrspace
                 .allocate_user_lazy(pages, protection, data);

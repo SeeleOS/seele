@@ -123,6 +123,7 @@ impl AddrSpace {
                 offset,
                 file_bytes,
                 file,
+                shared,
             } = &area.data
             {
                 let span = middle.end.as_u64() - middle.start.as_u64();
@@ -132,6 +133,7 @@ impl AddrSpace {
                         .saturating_sub(overlap_start.as_u64() - area.start.as_u64())
                         .min(span),
                     file: file.clone(),
+                    shared: *shared,
                 };
             }
 

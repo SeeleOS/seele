@@ -29,7 +29,7 @@ struct FilePageCacheKey {
 }
 
 lazy_static! {
-    static ref READONLY_FILE_PAGE_CACHE: Mutex<BTreeMap<FilePageCacheKey, PhysFrame>> =
+    static ref SHARED_FILE_PAGE_CACHE: Mutex<BTreeMap<FilePageCacheKey, PhysFrame>> =
         Mutex::new(BTreeMap::new());
 }
 
@@ -86,13 +86,13 @@ impl AddrSpace {
         })
     }
 
-    fn get_or_load_readonly_file_frame(
+    fn get_or_load_shared_file_frame(
         file: &Arc<crate::filesystem::object::FileLikeObject>,
         offset: u64,
         read_len: usize,
     ) -> Option<PhysFrame> {
         let key = Self::readonly_file_page_cache_key(file, offset)?;
-        let mut cache = READONLY_FILE_PAGE_CACHE.lock();
+        let mut cache = SHARED_FILE_PAGE_CACHE.lock();
         if let Some(frame) = cache.get(&key).copied() {
             return Some(frame);
         }
@@ -130,8 +130,9 @@ impl AddrSpace {
                 offset,
                 file_bytes,
                 ref file,
+                shared,
             } => unsafe {
-                let use_shared_cache = !area.flags.contains(PageTableFlags::WRITABLE);
+                let use_shared_cache = shared || !area.flags.contains(PageTableFlags::WRITABLE);
                 let page_index = (page.start_address().as_u64() - area.start.as_u64()) / 4096;
                 let max_pages =
                     core::cmp::min(cluster_pages, area.pages().saturating_sub(page_index));
@@ -154,7 +155,7 @@ impl AddrSpace {
 
                     if let (true, Some(frame)) = (
                         use_shared_cache,
-                        Self::get_or_load_readonly_file_frame(file, file_offset, read_len as usize),
+                        Self::get_or_load_shared_file_frame(file, file_offset, read_len as usize),
                     ) {
                         let frame = self.map_existing_frame(current_page, frame, area.flags, true);
                         if first_frame.is_none() {
