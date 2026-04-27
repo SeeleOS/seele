@@ -4,6 +4,7 @@ use crate::misc::framebuffer::{FRAME_BUFFER, FramebufferInfo};
 
 pub const DRM_IOCTL_VERSION: u64 = 0xc040_6400;
 pub const DRM_IOCTL_GET_CAP: u64 = 0xc010_640c;
+pub const DRM_IOCTL_WAIT_VBLANK: u64 = 0xc018_643a;
 pub const DRM_IOCTL_SET_CLIENT_CAP: u64 = 0x4010_640d;
 pub const DRM_IOCTL_SET_MASTER: u64 = 0x0000_641e;
 pub const DRM_IOCTL_DROP_MASTER: u64 = 0x0000_641f;
@@ -58,7 +59,21 @@ pub const DRM_MODE_PAGE_FLIP_TARGET_ABSOLUTE: u32 = 0x04;
 pub const DRM_MODE_PAGE_FLIP_TARGET_RELATIVE: u32 = 0x08;
 pub const DRM_MODE_PAGE_FLIP_TARGET: u32 =
     DRM_MODE_PAGE_FLIP_TARGET_ABSOLUTE | DRM_MODE_PAGE_FLIP_TARGET_RELATIVE;
+pub const DRM_EVENT_VBLANK: u32 = 0x01;
 pub const DRM_EVENT_FLIP_COMPLETE: u32 = 0x02;
+pub const DRM_VBLANK_ABSOLUTE: u32 = 0x0;
+pub const DRM_VBLANK_RELATIVE: u32 = 0x1;
+pub const DRM_VBLANK_EVENT: u32 = 0x0400_0000;
+pub const DRM_VBLANK_FLIP: u32 = 0x0800_0000;
+pub const DRM_VBLANK_NEXT_ON_MISS: u32 = 0x1000_0000;
+pub const DRM_VBLANK_SECONDARY: u32 = 0x2000_0000;
+pub const DRM_VBLANK_SIGNAL: u32 = 0x4000_0000;
+pub const DRM_VBLANK_TYPES_MASK: u32 = DRM_VBLANK_ABSOLUTE | DRM_VBLANK_RELATIVE;
+pub const DRM_VBLANK_FLAGS_MASK: u32 = DRM_VBLANK_EVENT
+    | DRM_VBLANK_SIGNAL
+    | DRM_VBLANK_SECONDARY
+    | DRM_VBLANK_NEXT_ON_MISS
+    | DRM_VBLANK_FLIP;
 
 pub const CARD0_ID: u32 = 0x1000;
 pub const CRTC0_ID: u32 = 0x1001;
@@ -107,6 +122,38 @@ pub struct DrmGetCap {
 pub struct DrmSetClientCap {
     pub capability: u64,
     pub value: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmWaitVblankRequest {
+    pub type_: u32,
+    pub sequence: u32,
+    pub signal: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmWaitVblankReply {
+    pub type_: u32,
+    pub sequence: u32,
+    pub tv_sec: i64,
+    pub tv_usec: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub union DrmWaitVblank {
+    pub request: DrmWaitVblankRequest,
+    pub reply: DrmWaitVblankReply,
+}
+
+impl Default for DrmWaitVblank {
+    fn default() -> Self {
+        Self {
+            request: DrmWaitVblankRequest::default(),
+        }
+    }
 }
 
 #[repr(C)]

@@ -9,7 +9,7 @@ use lazy_static::lazy_static;
 use spin::Mutex;
 use x86_64::{
     PhysAddr, VirtAddr,
-    structures::paging::{PhysFrame, Size4KiB},
+    structures::paging::{PageTableFlags, PhysFrame, Size4KiB, Translate, mapper::TranslateResult},
 };
 
 use crate::{
@@ -17,7 +17,7 @@ use crate::{
     impl_cast_function,
     memory::{
         addrspace::{AddrSpace, mem_area::Data},
-        paging::FRAME_ALLOCATOR,
+        paging::{FRAME_ALLOCATOR, MAPPER},
         protection::Protection,
         user_safe,
         utils::apply_offset,
@@ -43,15 +43,16 @@ use super::abi::{
     DRM_CAP_DUMB_BUFFER, DRM_CAP_DUMB_PREFER_SHADOW, DRM_CAP_DUMB_PREFERRED_DEPTH,
     DRM_CAP_TIMESTAMP_MONOTONIC, DRM_CLIENT_CAP_ASPECT_RATIO, DRM_CLIENT_CAP_ATOMIC,
     DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, DRM_CLIENT_CAP_STEREO_3D, DRM_CLIENT_CAP_UNIVERSAL_PLANES,
-    DRM_CLIENT_CAP_WRITEBACK_CONNECTORS, DRM_EVENT_FLIP_COMPLETE, DRM_FORMAT_ARGB8888,
-    DRM_FORMAT_XRGB8888, DRM_MODE_CONNECTED, DRM_MODE_CONNECTOR_VIRTUAL, DRM_MODE_ENCODER_VIRTUAL,
-    DRM_MODE_FB_MODIFIERS, DRM_MODE_OBJECT_CONNECTOR, DRM_MODE_OBJECT_CRTC,
-    DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_FB, DRM_MODE_OBJECT_PLANE, DRM_MODE_PAGE_FLIP_ASYNC,
-    DRM_MODE_PAGE_FLIP_EVENT, DRM_MODE_PAGE_FLIP_TARGET, DRM_MODE_PROP_ENUM,
-    DRM_MODE_PROP_IMMUTABLE, DRM_MODE_SUBPIXEL_UNKNOWN, DRM_PLANE_TYPE_CURSOR,
-    DRM_PLANE_TYPE_OVERLAY, DRM_PLANE_TYPE_PRIMARY, DrmEvent, DrmEventVblank, DrmGemClose,
-    DrmModeCreateDumb, DrmModePropertyEnum, ENCODER0_ID, PLANE_TYPE_PROP_ID, PRIMARY_PLANE0_ID,
-    current_framebuffer_info, current_mode_info,
+    DRM_CLIENT_CAP_WRITEBACK_CONNECTORS, DRM_EVENT_FLIP_COMPLETE, DRM_EVENT_VBLANK,
+    DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888, DRM_MODE_CONNECTED, DRM_MODE_CONNECTOR_VIRTUAL,
+    DRM_MODE_ENCODER_VIRTUAL, DRM_MODE_FB_MODIFIERS, DRM_MODE_OBJECT_CONNECTOR,
+    DRM_MODE_OBJECT_CRTC, DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_FB, DRM_MODE_OBJECT_PLANE,
+    DRM_MODE_PAGE_FLIP_ASYNC, DRM_MODE_PAGE_FLIP_EVENT, DRM_MODE_PAGE_FLIP_TARGET,
+    DRM_MODE_PROP_ENUM, DRM_MODE_PROP_IMMUTABLE, DRM_MODE_SUBPIXEL_UNKNOWN, DRM_PLANE_TYPE_CURSOR,
+    DRM_PLANE_TYPE_OVERLAY, DRM_PLANE_TYPE_PRIMARY, DRM_VBLANK_EVENT, DRM_VBLANK_FLAGS_MASK,
+    DRM_VBLANK_FLIP, DRM_VBLANK_SIGNAL, DRM_VBLANK_TYPES_MASK, DrmEvent, DrmEventVblank,
+    DrmGemClose, DrmModeCreateDumb, DrmModePropertyEnum, DrmWaitVblankReply, ENCODER0_ID,
+    PLANE_TYPE_PROP_ID, PRIMARY_PLANE0_ID, current_framebuffer_info, current_mode_info,
 };
 
 lazy_static! {
@@ -85,8 +86,10 @@ struct DumbBuffer {
     start_frame: PhysFrame<Size4KiB>,
     pages: usize,
     kernel_addr: u64,
+    shared_flags: PageTableFlags,
     user_handle_open: bool,
     framebuffer_refs: u32,
+    scanout_backed: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -132,16 +135,31 @@ impl DrmState {
             return Err(ObjectError::InvalidArguments);
         }
 
-        let start_frame = FRAME_ALLOCATOR
-            .get()
-            .unwrap()
-            .lock()
-            .allocate_contiguous(pages)
-            .ok_or(ObjectError::Other)?;
-        let kernel_addr = apply_offset(start_frame.start_address().as_u64());
-        unsafe {
-            core::ptr::write_bytes(kernel_addr as *mut u8, 0, pages * 4096);
-        }
+        let (start_frame, kernel_addr, shared_flags, scanout_backed) =
+            if let Some((start_frame, kernel_addr, shared_flags)) = self
+                .try_allocate_scanout_backing(
+                    request.width,
+                    request.height,
+                    request.bpp,
+                    pitch,
+                    size,
+                    pages,
+                )
+            {
+                (start_frame, kernel_addr, shared_flags, true)
+            } else {
+                let start_frame = FRAME_ALLOCATOR
+                    .get()
+                    .unwrap()
+                    .lock()
+                    .allocate_contiguous(pages)
+                    .ok_or(ObjectError::Other)?;
+                let kernel_addr = apply_offset(start_frame.start_address().as_u64());
+                unsafe {
+                    core::ptr::write_bytes(kernel_addr as *mut u8, 0, pages * 4096);
+                }
+                (start_frame, kernel_addr, PageTableFlags::empty(), false)
+            };
 
         let handle = self.next_handle;
         self.next_handle = self.next_handle.checked_add(1).ok_or(ObjectError::Other)?;
@@ -163,8 +181,10 @@ impl DrmState {
                 start_frame,
                 pages,
                 kernel_addr,
+                shared_flags,
                 user_handle_open: true,
                 framebuffer_refs: 0,
+                scanout_backed,
             },
         );
 
@@ -196,7 +216,7 @@ impl DrmState {
         &self,
         offset: u64,
         pages: u64,
-    ) -> ObjectResult<(u64, usize, PhysFrame<Size4KiB>)> {
+    ) -> ObjectResult<(usize, PhysFrame<Size4KiB>, PageTableFlags)> {
         for buffer in self.dumb_buffers.values() {
             let end_offset = buffer
                 .map_offset
@@ -222,13 +242,62 @@ impl DrmState {
             let start_addr =
                 buffer.start_frame.start_address().as_u64() + (page_delta as u64 * 4096);
             return Ok((
-                buffer.kernel_addr + byte_delta,
                 requested_pages,
                 PhysFrame::containing_address(PhysAddr::new(start_addr)),
+                buffer.shared_flags,
             ));
         }
 
         Err(ObjectError::InvalidArguments)
+    }
+
+    fn try_allocate_scanout_backing(
+        &self,
+        width: u32,
+        height: u32,
+        bpp: u32,
+        pitch: u32,
+        size: u64,
+        pages: usize,
+    ) -> Option<(PhysFrame<Size4KiB>, u64, PageTableFlags)> {
+        if self
+            .dumb_buffers
+            .values()
+            .any(|buffer| buffer.scanout_backed)
+        {
+            return None;
+        }
+
+        let fb_info = current_framebuffer_info();
+        if bpp != 32
+            || width != fb_info.width as u32
+            || height != fb_info.height as u32
+            || pitch != (fb_info.stride * fb_info.bytes_per_pixel) as u32
+            || size > fb_info.byte_len as u64
+        {
+            return None;
+        }
+
+        let framebuffer = FRAME_BUFFER.get().unwrap().lock();
+        let fb_addr = VirtAddr::new(framebuffer.fb.as_ptr() as u64);
+        let mut shared_flags = PageTableFlags::NO_CACHE;
+        let mapper = MAPPER.get().unwrap().lock();
+        let phys = mapper.translate_addr(fb_addr)?;
+        if phys.as_u64() & 0xfff != 0 {
+            return None;
+        }
+        if let TranslateResult::Mapped { flags, .. } = mapper.translate(fb_addr) {
+            shared_flags |= flags & (PageTableFlags::WRITE_THROUGH | PageTableFlags::NO_CACHE);
+        }
+        if (pages as u64) * 4096 > (fb_info.byte_len as u64).div_ceil(4096) * 4096 {
+            return None;
+        }
+
+        Some((
+            PhysFrame::containing_address(phys),
+            apply_offset(phys.as_u64()),
+            shared_flags,
+        ))
     }
 
     fn get_user_handle(&self, handle: u32) -> ObjectResult<&DumbBuffer> {
@@ -331,6 +400,24 @@ impl Configuratable for DrmCardObject {
                     _ => return Err(ObjectError::InvalidArguments),
                 };
                 user_safe::write(ptr, &cap).map_err(|_| ObjectError::InvalidArguments)?;
+                Ok(0)
+            }
+            ConfigurateRequest::DrmWaitVblank(ptr) => {
+                let mut wait = read_user(ptr)?;
+                let request = unsafe { wait.request };
+                let flags = request.type_ & DRM_VBLANK_FLAGS_MASK;
+                if request.type_ & !(DRM_VBLANK_TYPES_MASK | DRM_VBLANK_FLAGS_MASK) != 0
+                    || flags & (DRM_VBLANK_SIGNAL | DRM_VBLANK_FLIP) != 0
+                {
+                    return Err(ObjectError::InvalidArguments);
+                }
+
+                let reply = make_vblank_reply(request.type_, request.sequence);
+                if request.type_ & DRM_VBLANK_EVENT != 0 {
+                    queue_vblank_event(request.signal, CRTC0_ID, DRM_EVENT_VBLANK, reply.sequence);
+                }
+                wait.reply = reply;
+                user_safe::write(ptr, &wait).map_err(|_| ObjectError::InvalidArguments)?;
                 Ok(0)
             }
             ConfigurateRequest::DrmSetClientCap(ptr) => {
@@ -674,6 +761,7 @@ impl Configuratable for DrmCardObject {
                 DRM_STATE.lock().close_dumb_handle(request.handle)?;
                 Ok(0)
             }
+            ConfigurateRequest::RawIoctl { .. } => Err(ObjectError::InvalidArguments),
             _ => Err(ObjectError::InvalidArguments),
         }
     }
@@ -686,7 +774,7 @@ impl MemoryMappable for DrmCardObject {
         pages: u64,
         protection: Protection,
     ) -> ObjectResult<VirtAddr> {
-        let (_kernel_addr, page_count, start_frame) =
+        let (page_count, start_frame, shared_flags) =
             DRM_STATE.lock().dumb_buffer_for_mapping(offset, pages)?;
         let mut frames = Vec::with_capacity(page_count);
         for page_index in 0..page_count {
@@ -700,7 +788,7 @@ impl MemoryMappable for DrmCardObject {
                 protection,
                 Data::Shared {
                     frames: Arc::<[PhysFrame]>::from(frames),
-                    flags: x86_64::structures::paging::PageTableFlags::empty(),
+                    flags: shared_flags,
                 },
             )
         }))
@@ -774,9 +862,11 @@ fn scanout_framebuffer_id(fb_id: u32) -> ObjectResult<()> {
         (framebuffer, dumb_buffer)
     };
 
-    // TODO: This is still a legacy compatibility bridge over the Limine
-    // framebuffer, not a real KMS scanout implementation.
-    blit_dumb_buffer_to_scanout(&dumb_buffer, &framebuffer)?;
+    if !dumb_buffer.scanout_backed {
+        // TODO: This is still a legacy compatibility bridge over the Limine
+        // framebuffer, not a real KMS scanout implementation.
+        blit_dumb_buffer_to_scanout(&dumb_buffer, &framebuffer)?;
+    }
     framebuffer_set_user_controlled(true);
     Ok(())
 }
@@ -872,23 +962,38 @@ fn blit_dumb_buffer_to_scanout(
 }
 
 fn queue_page_flip_event(user_data: u64, crtc_id: u32) {
-    let now = Time::since_boot();
-    let sequence = {
-        let mut state = DRM_STATE.lock();
-        let sequence = state.next_flip_sequence;
-        state.next_flip_sequence = state.next_flip_sequence.wrapping_add(1);
-        sequence
-    };
+    let sequence = next_vblank_sequence();
+    queue_vblank_event(user_data, crtc_id, DRM_EVENT_FLIP_COMPLETE, sequence);
+}
 
+fn next_vblank_sequence() -> u32 {
+    let mut state = DRM_STATE.lock();
+    let sequence = state.next_flip_sequence;
+    state.next_flip_sequence = state.next_flip_sequence.wrapping_add(1);
+    sequence
+}
+
+fn make_vblank_reply(type_: u32, sequence: u32) -> DrmWaitVblankReply {
+    let now = Time::since_boot();
+    DrmWaitVblankReply {
+        type_,
+        sequence,
+        tv_sec: now.as_seconds().min(i64::MAX as u64) as i64,
+        tv_usec: now.subsec_microseconds() as i64,
+    }
+}
+
+fn queue_vblank_event(user_data: u64, crtc_id: u32, event_type: u32, sequence: u32) {
+    let reply = make_vblank_reply(0, sequence);
     let event = DrmEventVblank {
         base: DrmEvent {
-            type_: DRM_EVENT_FLIP_COMPLETE,
+            type_: event_type,
             length: size_of::<DrmEventVblank>() as u32,
         },
         user_data,
-        tv_sec: now.as_seconds().min(u64::from(u32::MAX)) as u32,
-        tv_usec: now.subsec_microseconds() as u32,
-        sequence,
+        tv_sec: reply.tv_sec.clamp(0, i64::from(u32::MAX)) as u32,
+        tv_usec: reply.tv_usec.clamp(0, i64::from(u32::MAX)) as u32,
+        sequence: reply.sequence,
         crtc_id,
     };
     let bytes = unsafe {
