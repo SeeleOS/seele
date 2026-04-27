@@ -975,6 +975,11 @@ define_syscall!(Fchmod, |fd: u64, mode: u32| {
     Ok(0)
 });
 
+define_syscall!(Fchmodat, |dirfd: i32, path: CString, mode: u32| {
+    let path_str = path_from_raw(path)?;
+    chmod_at(dirfd, &path_str, mode, AtFlags::empty())
+});
+
 define_syscall!(Fchown, |fd: u64, _owner: u32, _group: u32| {
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
     chown_fd_object(object)?;

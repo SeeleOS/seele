@@ -212,6 +212,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         Statx,
         Rseq,
         PidfdSendSignal,
+        Fchmodat,
         OpenTree,
         MoveMount,
         Fsopen,

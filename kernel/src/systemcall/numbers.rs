@@ -165,6 +165,7 @@ pub enum SyscallNumber {
     LinkAt = 265,
     SymlinkAt = 266,
     ReadlinkAt = 267,
+    Fchmodat = 268,
     Faccessat = 269,
     Pselect6 = 270,
     Ppoll = 271,
