@@ -36,7 +36,7 @@ bitflags! {
 }
 
 #[derive(Debug)]
-pub(crate) struct DrmPrimeBufferObject {
+pub struct DrmPrimeBufferObject {
     buffer: DumbBuffer,
     inode: u64,
 }
@@ -49,7 +49,7 @@ impl DrmPrimeBufferObject {
         }
     }
 
-    pub(crate) fn exported_buffer(&self) -> &DumbBuffer {
+    fn exported_buffer(&self) -> &DumbBuffer {
         &self.buffer
     }
 }
