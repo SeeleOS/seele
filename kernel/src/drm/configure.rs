@@ -1,6 +1,6 @@
 use crate::object::{config::ConfigurateRequest, error::ObjectError, misc::ObjectResult};
 
-use super::{buffer_handlers, client_handlers, display_handlers};
+use super::{buffer_handlers, client_handlers, display_handlers, prime};
 
 pub(super) fn handle_configure(request: ConfigurateRequest) -> ObjectResult<isize> {
     match request {
@@ -51,6 +51,7 @@ pub(super) fn handle_configure(request: ConfigurateRequest) -> ObjectResult<isiz
             buffer_handlers::handle_mode_destroy_dumb(ptr)
         }
         ConfigurateRequest::DrmGemClose(ptr) => buffer_handlers::handle_gem_close(ptr),
+        ConfigurateRequest::DrmPrimeHandleToFd(ptr) => prime::handle_prime_handle_to_fd(ptr),
         ConfigurateRequest::RawIoctl { request, arg } => {
             crate::s_println!("drm raw ioctl request={:#x} arg={:#x}", request, arg);
             Err(ObjectError::InvalidArguments)

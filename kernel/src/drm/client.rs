@@ -9,12 +9,14 @@ pub const DRM_IOCTL_SET_CLIENT_CAP: u64 = 0x4010_640d;
 pub const DRM_IOCTL_SET_MASTER: u64 = 0x0000_641e;
 pub const DRM_IOCTL_DROP_MASTER: u64 = 0x0000_641f;
 pub const DRM_IOCTL_GEM_CLOSE: u64 = 0x4008_6409;
+pub const DRM_IOCTL_PRIME_HANDLE_TO_FD: u64 = 0xc00c_642d;
 
 pub const DRM_CAP_DUMB_BUFFER: u64 = 0x1;
 pub const DRM_CAP_VBLANK_HIGH_CRTC: u64 = 0x2;
 pub const DRM_CAP_DUMB_PREFERRED_DEPTH: u64 = 0x3;
 pub const DRM_CAP_DUMB_PREFER_SHADOW: u64 = 0x4;
 pub const DRM_CAP_PRIME: u64 = 0x5;
+pub const DRM_PRIME_CAP_EXPORT: u64 = 0x1;
 pub const DRM_CAP_TIMESTAMP_MONOTONIC: u64 = 0x6;
 pub const DRM_CAP_ASYNC_PAGE_FLIP: u64 = 0x7;
 pub const DRM_CAP_CURSOR_WIDTH: u64 = 0x8;
@@ -130,6 +132,14 @@ impl Default for DrmWaitVblank {
 pub struct DrmGemClose {
     pub handle: u32,
     pub pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmPrimeHandle {
+    pub handle: u32,
+    pub flags: u32,
+    pub fd: i32,
 }
 
 #[repr(C)]

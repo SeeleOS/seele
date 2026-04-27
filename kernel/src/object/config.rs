@@ -8,9 +8,10 @@ use crate::{
 use crate::drm::{
     client::{
         DRM_IOCTL_AUTH_MAGIC, DRM_IOCTL_DROP_MASTER, DRM_IOCTL_GEM_CLOSE, DRM_IOCTL_GET_CAP,
-        DRM_IOCTL_GET_MAGIC, DRM_IOCTL_GET_UNIQUE, DRM_IOCTL_SET_CLIENT_CAP, DRM_IOCTL_SET_MASTER,
-        DRM_IOCTL_SET_UNIQUE, DRM_IOCTL_VERSION, DRM_IOCTL_WAIT_VBLANK, DrmAuth, DrmGemClose,
-        DrmGetCap, DrmSetClientCap, DrmUnique, DrmVersion, DrmWaitVblank,
+        DRM_IOCTL_GET_MAGIC, DRM_IOCTL_GET_UNIQUE, DRM_IOCTL_PRIME_HANDLE_TO_FD,
+        DRM_IOCTL_SET_CLIENT_CAP, DRM_IOCTL_SET_MASTER, DRM_IOCTL_SET_UNIQUE, DRM_IOCTL_VERSION,
+        DRM_IOCTL_WAIT_VBLANK, DrmAuth, DrmGemClose, DrmGetCap, DrmPrimeHandle, DrmSetClientCap,
+        DrmUnique, DrmVersion, DrmWaitVblank,
     },
     mode::{
         DRM_IOCTL_MODE_ADDFB, DRM_IOCTL_MODE_ADDFB2, DRM_IOCTL_MODE_CREATE_DUMB,
@@ -100,6 +101,7 @@ pub enum ConfigurateRequest {
     DrmModeMapDumb(*mut DrmModeMapDumb),
     DrmModeDestroyDumb(*mut DrmModeDestroyDumb),
     DrmGemClose(*mut DrmGemClose),
+    DrmPrimeHandleToFd(*mut DrmPrimeHandle),
     RawIoctl { request: u64, arg: u64 },
 }
 
@@ -233,6 +235,7 @@ impl ConfigurateRequest {
             DRM_IOCTL_MODE_MAP_DUMB => Self::DrmModeMapDumb(ptr as *mut DrmModeMapDumb),
             DRM_IOCTL_MODE_DESTROY_DUMB => Self::DrmModeDestroyDumb(ptr as *mut DrmModeDestroyDumb),
             DRM_IOCTL_GEM_CLOSE => Self::DrmGemClose(ptr as *mut DrmGemClose),
+            DRM_IOCTL_PRIME_HANDLE_TO_FD => Self::DrmPrimeHandleToFd(ptr as *mut DrmPrimeHandle),
             0x4600 => Self::FbGetVariableScreenInfo(ptr as *mut FbVarScreeninfo),
             0x4601 => Self::FbPutVariableScreenInfo(ptr as *mut FbVarScreeninfo),
             0x4602 => Self::FbGetFixedScreenInfo(ptr as *mut FbFixScreeninfo),
