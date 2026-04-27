@@ -12,8 +12,7 @@ use crate::{
         info::{FileLikeInfo, LinuxStat, UnixPermission},
         vfs_traits::FileLikeType,
     },
-    impl_cast_function,
-    impl_cast_function_non_trait,
+    impl_cast_function, impl_cast_function_non_trait,
     memory::{addrspace::mem_area::Data, protection::Protection, user_safe},
     object::{
         Object,
