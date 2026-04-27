@@ -229,7 +229,6 @@ sudo install -Dm644 "${ROOTFS_MAKING_DIR}/seele-udev-seed.service" "${SYSROOT_DI
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/seele-udev-seed.sh" "${SYSROOT_DIR}/usr/bin/seele-udev-seed.sh"
 sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/system/systemd-localed.service.d"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd-localed.service.d/override.conf" "${SYSROOT_DIR}/etc/systemd/system/systemd-localed.service.d/override.conf"
-sudo ln -sf qdbus6 "${SYSROOT_DIR}/usr/bin/qdbus"
 arch_chroot /usr/sbin/usermod -p '' root
 arch_chroot /usr/bin/systemctl enable seatd.service
 arch_chroot /usr/bin/systemctl enable seele-udev-seed.service
@@ -256,10 +255,7 @@ sudo cp "${ROOTFS_MAKING_DIR}/xorg.conf" "${SYSROOT_DIR}/etc/X11/xorg.conf"
 sudo install -Dm644 "${ROOTFS_MAKING_DIR}/weston.ini" "${SYSROOT_DIR}/etc/xdg/weston/weston.ini"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/root/.xinitrc"
-sudo install -Dm644 "${ROOTFS_MAKING_DIR}/org.kde.KSplash.service" "${SYSROOT_DIR}/usr/share/dbus-1/services/org.kde.KSplash.service"
-sudo install -Dm755 "${ROOTFS_MAKING_DIR}/ksplash-dbus-activate" "${SYSROOT_DIR}/usr/local/bin/ksplash-dbus-activate"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/startplasma-manual.sh" "${SYSROOT_DIR}/usr/bin/startplasma-manual.sh"
-sudo install -Dm755 "${ROOTFS_MAKING_DIR}/startplasma-wayland" "${SYSROOT_DIR}/usr/local/bin/startplasma-wayland"
 
 for package in "${AUR_PACKAGES[@]}"; do
     install_aur_package "${package}"

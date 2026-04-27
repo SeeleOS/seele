@@ -1,3 +1,0 @@
-[D-BUS Service]
-Name=org.kde.KSplash
-Exec=/usr/local/bin/ksplash-dbus-activate
