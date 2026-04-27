@@ -3,10 +3,11 @@ use crate::{
         card::CRTC0_ID,
         client::DrmGemClose,
         mode::{
-            DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888, DRM_MODE_FB_MODIFIERS,
-            DRM_MODE_PAGE_FLIP_ASYNC, DRM_MODE_PAGE_FLIP_EVENT, DRM_MODE_PAGE_FLIP_TARGET,
+            DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888, DRM_MODE_FB_DIRTY_FLAGS,
+            DRM_MODE_FB_MODIFIERS, DRM_MODE_PAGE_FLIP_ASYNC, DRM_MODE_PAGE_FLIP_EVENT,
+            DRM_MODE_PAGE_FLIP_TARGET,
         },
-        mode_types::{DrmModeCreateDumb, DrmModeFbCmd2},
+        mode_types::{DrmModeCreateDumb, DrmModeFbCmd2, DrmModeFbDirtyCmd},
     },
     memory::user_safe,
     object::{error::ObjectError, misc::ObjectResult},
@@ -112,6 +113,26 @@ pub(super) fn handle_mode_page_flip(
     scanout_framebuffer_id(flip.fb_id)?;
     if flip.flags & DRM_MODE_PAGE_FLIP_EVENT != 0 {
         queue_page_flip_event(flip.user_data, flip.crtc_id);
+    }
+    Ok(0)
+}
+
+pub(super) fn handle_mode_dirty_fb(ptr: *mut DrmModeFbDirtyCmd) -> ObjectResult<isize> {
+    let dirty = read_user(ptr)?;
+    if dirty.flags & !DRM_MODE_FB_DIRTY_FLAGS != 0 {
+        return Err(ObjectError::InvalidArguments);
+    }
+
+    let current_fb_id = {
+        let state = DRM_STATE.lock();
+        if !state.framebuffers.contains_key(&dirty.fb_id) {
+            return Err(ObjectError::InvalidArguments);
+        }
+        state.current_fb_id
+    };
+
+    if current_fb_id == Some(dirty.fb_id) {
+        scanout_framebuffer_id(dirty.fb_id)?;
     }
     Ok(0)
 }

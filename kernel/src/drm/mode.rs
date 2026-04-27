@@ -7,12 +7,15 @@ use super::mode_types::DrmModeModeInfo;
 pub const DRM_IOCTL_MODE_GETRESOURCES: u64 = 0xc040_64a0;
 pub const DRM_IOCTL_MODE_GETCRTC: u64 = 0xc068_64a1;
 pub const DRM_IOCTL_MODE_SETCRTC: u64 = 0xc068_64a2;
+pub const DRM_IOCTL_MODE_GETGAMMA: u64 = 0xc020_64a4;
+pub const DRM_IOCTL_MODE_SETGAMMA: u64 = 0xc020_64a5;
 pub const DRM_IOCTL_MODE_GETENCODER: u64 = 0xc014_64a6;
 pub const DRM_IOCTL_MODE_GETCONNECTOR: u64 = 0xc050_64a7;
 pub const DRM_IOCTL_MODE_GETPROPERTY: u64 = 0xc040_64aa;
 pub const DRM_IOCTL_MODE_ADDFB: u64 = 0xc01c_64ae;
 pub const DRM_IOCTL_MODE_RMFB: u64 = 0xc004_64af;
 pub const DRM_IOCTL_MODE_PAGE_FLIP: u64 = 0xc018_64b0;
+pub const DRM_IOCTL_MODE_DIRTYFB: u64 = 0xc018_64b1;
 pub const DRM_IOCTL_MODE_CREATE_DUMB: u64 = 0xc020_64b2;
 pub const DRM_IOCTL_MODE_MAP_DUMB: u64 = 0xc010_64b3;
 pub const DRM_IOCTL_MODE_DESTROY_DUMB: u64 = 0xc004_64b4;
@@ -35,6 +38,10 @@ pub const DRM_MODE_OBJECT_PLANE: u32 = 0xeeee_eeee;
 pub const DRM_MODE_PROP_IMMUTABLE: u32 = 1 << 2;
 pub const DRM_MODE_PROP_ENUM: u32 = 1 << 3;
 pub const DRM_MODE_FB_MODIFIERS: u32 = 1 << 1;
+pub const DRM_MODE_FB_DIRTY_ANNOTATE_COPY: u32 = 0x01;
+pub const DRM_MODE_FB_DIRTY_ANNOTATE_FILL: u32 = 0x02;
+pub const DRM_MODE_FB_DIRTY_FLAGS: u32 =
+    DRM_MODE_FB_DIRTY_ANNOTATE_COPY | DRM_MODE_FB_DIRTY_ANNOTATE_FILL;
 pub const DRM_MODE_PAGE_FLIP_EVENT: u32 = 0x01;
 pub const DRM_MODE_PAGE_FLIP_ASYNC: u32 = 0x02;
 pub const DRM_MODE_PAGE_FLIP_TARGET_ABSOLUTE: u32 = 0x04;
@@ -47,6 +54,7 @@ pub const DRM_PLANE_TYPE_CURSOR: u64 = 2;
 pub const DRM_FORMAT_XRGB8888: u32 = 0x3432_5258;
 pub const DRM_FORMAT_ARGB8888: u32 = 0x3432_5241;
 pub const MODE_REFRESH_HZ: u32 = 60;
+pub const MODE_GAMMA_LUT_SIZE: u32 = 256;
 
 pub fn current_mode_info() -> DrmModeModeInfo {
     let fb = current_framebuffer_info();

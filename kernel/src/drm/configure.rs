@@ -15,6 +15,8 @@ pub(super) fn handle_configure(request: ConfigurateRequest) -> ObjectResult<isiz
         }
         ConfigurateRequest::DrmModeGetCrtc(ptr) => display_handlers::handle_mode_get_crtc(ptr),
         ConfigurateRequest::DrmModeSetCrtc(ptr) => display_handlers::handle_mode_set_crtc(ptr),
+        ConfigurateRequest::DrmModeGetGamma(ptr) => display_handlers::handle_mode_get_gamma(ptr),
+        ConfigurateRequest::DrmModeSetGamma(ptr) => display_handlers::handle_mode_set_gamma(ptr),
         ConfigurateRequest::DrmModeGetEncoder(ptr) => {
             display_handlers::handle_mode_get_encoder(ptr)
         }
@@ -35,13 +37,17 @@ pub(super) fn handle_configure(request: ConfigurateRequest) -> ObjectResult<isiz
         ConfigurateRequest::DrmModeAddFb2(ptr) => buffer_handlers::handle_mode_add_fb2(ptr),
         ConfigurateRequest::DrmModeRemoveFb(ptr) => buffer_handlers::handle_mode_remove_fb(ptr),
         ConfigurateRequest::DrmModePageFlip(ptr) => buffer_handlers::handle_mode_page_flip(ptr),
+        ConfigurateRequest::DrmModeDirtyFb(ptr) => buffer_handlers::handle_mode_dirty_fb(ptr),
         ConfigurateRequest::DrmModeCreateDumb(ptr) => buffer_handlers::handle_mode_create_dumb(ptr),
         ConfigurateRequest::DrmModeMapDumb(ptr) => buffer_handlers::handle_mode_map_dumb(ptr),
         ConfigurateRequest::DrmModeDestroyDumb(ptr) => {
             buffer_handlers::handle_mode_destroy_dumb(ptr)
         }
         ConfigurateRequest::DrmGemClose(ptr) => buffer_handlers::handle_gem_close(ptr),
-        ConfigurateRequest::RawIoctl { .. } => Err(ObjectError::InvalidArguments),
+        ConfigurateRequest::RawIoctl { request, arg } => {
+            crate::s_println!("drm raw ioctl request={:#x} arg={:#x}", request, arg);
+            Err(ObjectError::InvalidArguments)
+        }
         _ => Err(ObjectError::InvalidArguments),
     }
 }

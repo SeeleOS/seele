@@ -94,6 +94,16 @@ pub struct DrmModeGetProperty {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModeCrtcLut {
+    pub crtc_id: u32,
+    pub gamma_size: u32,
+    pub red: u64,
+    pub green: u64,
+    pub blue: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct DrmModeFbCmd {
     pub fb_id: u32,
     pub width: u32,
@@ -116,6 +126,16 @@ pub struct DrmModeFbCmd2 {
     pub pitches: [u32; 4],
     pub offsets: [u32; 4],
     pub modifier: [u64; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModeFbDirtyCmd {
+    pub fb_id: u32,
+    pub flags: u32,
+    pub color: u32,
+    pub num_clips: u32,
+    pub clips_ptr: u64,
 }
 
 #[repr(C)]

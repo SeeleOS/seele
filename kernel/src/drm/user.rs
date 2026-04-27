@@ -13,6 +13,10 @@ pub(super) fn maybe_write_u32_slice(ptr: u64, capacity: u32, values: &[u32]) -> 
     maybe_write_struct_slice(ptr, capacity, values)
 }
 
+pub(super) fn maybe_write_u16_slice(ptr: u64, capacity: u32, values: &[u16]) -> ObjectResult<()> {
+    maybe_write_struct_slice(ptr, capacity, values)
+}
+
 pub(super) fn maybe_write_u64_slice(ptr: u64, capacity: u32, values: &[u64]) -> ObjectResult<()> {
     maybe_write_struct_slice(ptr, capacity, values)
 }

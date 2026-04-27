@@ -9,7 +9,8 @@ use crate::{
             DRM_MODE_OBJECT_CRTC, DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_FB,
             DRM_MODE_OBJECT_PLANE, DRM_MODE_PROP_ENUM, DRM_MODE_PROP_IMMUTABLE,
             DRM_MODE_SUBPIXEL_UNKNOWN, DRM_PLANE_TYPE_CURSOR, DRM_PLANE_TYPE_OVERLAY,
-            DRM_PLANE_TYPE_PRIMARY, current_framebuffer_info, current_mode_info,
+            DRM_PLANE_TYPE_PRIMARY, MODE_GAMMA_LUT_SIZE, current_framebuffer_info,
+            current_mode_info,
         },
     },
     memory::user_safe,
@@ -21,8 +22,8 @@ use super::{
     framebuffer,
     object::DRM_STATE,
     user::{
-        copy_property_name, make_property_enum, maybe_write_struct_slice, maybe_write_u32_slice,
-        maybe_write_u64_slice, read_user,
+        copy_property_name, make_property_enum, maybe_write_struct_slice, maybe_write_u16_slice,
+        maybe_write_u32_slice, maybe_write_u64_slice, read_user,
     },
 };
 
@@ -67,7 +68,7 @@ pub(super) fn handle_mode_get_crtc(
     crtc.fb_id = DRM_STATE.lock().current_fb_id.unwrap_or(0);
     crtc.x = 0;
     crtc.y = 0;
-    crtc.gamma_size = 0;
+    crtc.gamma_size = MODE_GAMMA_LUT_SIZE;
     crtc.mode_valid = 1;
     crtc.mode = current_mode_info();
     user_safe::write(ptr, &crtc).map_err(|_| ObjectError::InvalidArguments)?;
@@ -107,10 +108,49 @@ pub(super) fn handle_mode_set_crtc(
     crtc.crtc_id = CRTC0_ID;
     crtc.x = 0;
     crtc.y = 0;
-    crtc.gamma_size = 0;
+    crtc.gamma_size = MODE_GAMMA_LUT_SIZE;
     crtc.mode_valid = 1;
     crtc.mode = current_mode_info();
     user_safe::write(ptr, &crtc).map_err(|_| ObjectError::InvalidArguments)?;
+    Ok(0)
+}
+
+pub(super) fn handle_mode_get_gamma(
+    ptr: *mut crate::drm::mode_types::DrmModeCrtcLut,
+) -> ObjectResult<isize> {
+    let mut gamma = read_user(ptr)?;
+    if gamma.crtc_id != 0 && gamma.crtc_id != CRTC0_ID {
+        return Err(ObjectError::InvalidArguments);
+    }
+
+    let entry_count = usize::try_from(MODE_GAMMA_LUT_SIZE).unwrap_or(0);
+    let ramp: Vec<u16> = (0..entry_count)
+        .map(|index| ((index * u16::MAX as usize) / (entry_count.saturating_sub(1).max(1))) as u16)
+        .collect();
+    let count = gamma.gamma_size.min(MODE_GAMMA_LUT_SIZE);
+    let values = &ramp[..usize::try_from(count).unwrap_or(0)];
+    maybe_write_u16_slice(gamma.red, count, values)?;
+    maybe_write_u16_slice(gamma.green, count, values)?;
+    maybe_write_u16_slice(gamma.blue, count, values)?;
+    gamma.crtc_id = CRTC0_ID;
+    gamma.gamma_size = MODE_GAMMA_LUT_SIZE;
+    user_safe::write(ptr, &gamma).map_err(|_| ObjectError::InvalidArguments)?;
+    Ok(0)
+}
+
+pub(super) fn handle_mode_set_gamma(
+    ptr: *mut crate::drm::mode_types::DrmModeCrtcLut,
+) -> ObjectResult<isize> {
+    let mut gamma = read_user(ptr)?;
+    if gamma.crtc_id != 0 && gamma.crtc_id != CRTC0_ID {
+        return Err(ObjectError::InvalidArguments);
+    }
+    if gamma.gamma_size > MODE_GAMMA_LUT_SIZE {
+        return Err(ObjectError::InvalidArguments);
+    }
+    gamma.crtc_id = CRTC0_ID;
+    gamma.gamma_size = MODE_GAMMA_LUT_SIZE;
+    user_safe::write(ptr, &gamma).map_err(|_| ObjectError::InvalidArguments)?;
     Ok(0)
 }
 
