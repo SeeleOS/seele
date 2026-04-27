@@ -25,7 +25,9 @@ impl UnixSocketObject {
         &self,
         buffer: &[u8],
         target_path: Option<&str>,
+        force_nonblocking: bool,
     ) -> SocketResult<usize> {
+        let nonblocking = force_nonblocking || self.is_nonblocking();
         let datagram = match &*self.state.lock() {
             UnixSocketState::Datagram(datagram) => datagram.clone(),
             _ => return Err(SocketError::InvalidArguments),
@@ -85,7 +87,7 @@ impl UnixSocketObject {
         let mut recv_queue = peer_datagram.recv_queue.lock();
         if recv_queue.len() >= DATAGRAM_RECV_CAPACITY {
             drop(recv_queue);
-            if self.is_nonblocking() {
+            if nonblocking {
                 return Err(SocketError::TryAgain);
             }
 
@@ -123,16 +125,25 @@ impl UnixSocketObject {
 
     pub fn write_socket_to_path(&self, buffer: &[u8], path: &str) -> SocketResult<usize> {
         match self.kind {
-            UnixSocketKind::Datagram => self.write_datagram_socket(buffer, Some(path)),
+            UnixSocketKind::Datagram => self.write_datagram_socket(buffer, Some(path), false),
             UnixSocketKind::Stream | UnixSocketKind::SeqPacket => self.write_socket(buffer),
         }
     }
 
     pub fn write_socket(&self, buffer: &[u8]) -> SocketResult<usize> {
+        self.write_socket_with_flags(buffer, false)
+    }
+
+    pub fn write_socket_with_flags(
+        &self,
+        buffer: &[u8],
+        force_nonblocking: bool,
+    ) -> SocketResult<usize> {
+        let nonblocking = force_nonblocking || self.is_nonblocking();
         loop {
             match self.kind {
                 UnixSocketKind::Datagram => {
-                    let written = self.write_datagram_socket(buffer, None)?;
+                    let written = self.write_datagram_socket(buffer, None, force_nonblocking)?;
                     if written == 0 {
                         continue;
                     }
@@ -174,7 +185,7 @@ impl UnixSocketObject {
                     }
                     drop(recv_buf);
 
-                    if self.is_nonblocking() {
+                    if nonblocking {
                         return Err(SocketError::TryAgain);
                     }
 

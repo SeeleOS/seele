@@ -20,6 +20,15 @@ impl Readable for UnixSocketObject {
 
 impl UnixSocketObject {
     pub fn read_socket(&self, buffer: &mut [u8]) -> SocketResult<usize> {
+        self.read_socket_with_flags(buffer, false)
+    }
+
+    pub fn read_socket_with_flags(
+        &self,
+        buffer: &mut [u8],
+        force_nonblocking: bool,
+    ) -> SocketResult<usize> {
+        let nonblocking = force_nonblocking || self.is_nonblocking();
         loop {
             match &*self.state.lock() {
                 UnixSocketState::Datagram(datagram) => {
@@ -36,7 +45,7 @@ impl UnixSocketObject {
                         return Ok(read);
                     }
 
-                    if self.is_nonblocking() {
+                    if nonblocking {
                         return Err(SocketError::TryAgain);
                     }
 
@@ -91,7 +100,7 @@ impl UnixSocketObject {
                     if peer_gone || *stream.write_closed.lock() {
                         return Ok(0);
                     }
-                    if self.is_nonblocking() {
+                    if nonblocking {
                         return Err(SocketError::TryAgain);
                     }
 

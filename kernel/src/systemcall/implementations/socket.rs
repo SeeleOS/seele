@@ -12,7 +12,7 @@ use crate::{
     process::{FdFlags, manager::get_current_process},
     socket::{
         AF_INET, AF_NETLINK, AF_UNIX, InetSocketObject, SOCK_CLOEXEC, SOCK_NONBLOCK, SOL_SOCKET,
-        UnixSocketKind, UnixSocketObject, UnixSocketState,
+        SocketError, UnixSocketKind, UnixSocketObject, UnixSocketState,
     },
     systemcall::utils::{SyscallError, SyscallImpl},
 };
@@ -153,6 +153,7 @@ fn netlink_socket_control_bytes(
 
 const MSG_PEEK: u64 = 0x2;
 const MSG_CTRUNC: i32 = 0x8;
+const MSG_DONTWAIT: u64 = 0x40;
 const MSG_TRUNC: u64 = 0x20;
 const SCM_RIGHTS: i32 = 1;
 const SCM_CREDENTIALS: i32 = 2;
@@ -550,7 +551,11 @@ fn sendmsg_rights(msg: &relibc_msg_hdr) -> Result<Vec<ObjectRef>, SyscallError> 
     Ok(rights)
 }
 
-fn sendmsg_impl(socket: ObjectRef, msg: &relibc_msg_hdr) -> Result<usize, SyscallError> {
+fn sendmsg_impl(
+    socket: ObjectRef,
+    msg: &relibc_msg_hdr,
+    flags: u64,
+) -> Result<usize, SyscallError> {
     if msg.msg_iovlen > isize::MAX as usize {
         return Err(SyscallError::InvalidArguments);
     }
@@ -647,6 +652,7 @@ fn sendmsg_impl(socket: ObjectRef, msg: &relibc_msg_hdr) -> Result<usize, Syscal
     };
 
     let socket = socket.as_unix_socket()?;
+    let dontwait = (flags & MSG_DONTWAIT) != 0;
     let rights = sendmsg_rights(msg)?;
     if socket.kind == UnixSocketKind::Datagram {
         let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
@@ -667,7 +673,9 @@ fn sendmsg_impl(socket: ObjectRef, msg: &relibc_msg_hdr) -> Result<usize, Syscal
                 .write_socket_to_path(&buffer, path)
                 .map_err(ObjectError::from)?
         } else {
-            socket.write_socket(&buffer).map_err(ObjectError::from)?
+            socket
+                .write_socket_with_flags(&buffer, dontwait)
+                .map_err(ObjectError::from)?
         };
         return Ok(written);
     }
@@ -689,7 +697,11 @@ fn sendmsg_impl(socket: ObjectRef, msg: &relibc_msg_hdr) -> Result<usize, Syscal
         }
 
         let buffer = unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
-        let written = socket.write_socket(buffer).map_err(ObjectError::from)?;
+        let written = match socket.write_socket_with_flags(buffer, dontwait) {
+            Ok(written) => written,
+            Err(SocketError::TryAgain) if total_written > 0 => break,
+            Err(err) => return Err(ObjectError::from(err).into()),
+        };
         total_written += written;
         if written < buffer.len() {
             break;
@@ -715,18 +727,18 @@ fn sendmsg_impl(socket: ObjectRef, msg: &relibc_msg_hdr) -> Result<usize, Syscal
 
 define_syscall!(Sendmsg, |socket: ObjectRef,
                           msg: *const relibc_msg_hdr,
-                          _flags: u64| {
+                          flags: u64| {
     if msg.is_null() {
         return Err(SyscallError::BadAddress);
     }
 
-    sendmsg_impl(socket, unsafe { &*msg })
+    sendmsg_impl(socket, unsafe { &*msg }, flags)
 });
 
 define_syscall!(Sendmmsg, |socket: ObjectRef,
                            msgvec: *mut relibc_mmsghdr,
                            vlen: u32,
-                           _flags: u32| {
+                           flags: u32| {
     if vlen > 0 && msgvec.is_null() {
         return Err(SyscallError::BadAddress);
     }
@@ -739,7 +751,7 @@ define_syscall!(Sendmmsg, |socket: ObjectRef,
     let mut sent = 0usize;
 
     for message in messages {
-        match sendmsg_impl(socket.clone(), &message.msg_hdr) {
+        match sendmsg_impl(socket.clone(), &message.msg_hdr, flags as u64) {
             Ok(written) => {
                 message.msg_len =
                     u32::try_from(written).map_err(|_| SyscallError::InvalidArguments)?;
@@ -981,6 +993,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
     }
 
     let socket = socket.as_unix_socket()?;
+    let dontwait = (flags & MSG_DONTWAIT) != 0;
     let mut total_read = 0usize;
 
     for iov in iovs {
@@ -992,7 +1005,11 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         }
 
         let buffer = unsafe { core::slice::from_raw_parts_mut(iov.iov_base, iov.iov_len) };
-        let read = socket.read_socket(buffer).map_err(ObjectError::from)?;
+        let read = match socket.read_socket_with_flags(buffer, dontwait) {
+            Ok(read) => read,
+            Err(SocketError::TryAgain) if total_read > 0 => break,
+            Err(err) => return Err(ObjectError::from(err).into()),
+        };
         total_read += read;
         if read < buffer.len() {
             break;
