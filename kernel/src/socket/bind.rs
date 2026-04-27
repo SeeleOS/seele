@@ -6,6 +6,18 @@ use super::{
 };
 use crate::filesystem::{errors::FSError, path::Path, vfs::VirtualFS};
 
+const S_IFSOCK: u32 = 0o140000;
+const UNIX_SOCKET_PATH_MODE: u32 = S_IFSOCK | 0o777;
+
+fn create_socket_path(path: &str) -> Result<(), FSError> {
+    let mut vfs = VirtualFS.lock();
+    vfs.create_file(Path::new(path))?;
+    vfs.open(Path::new(path))?
+        .chmod(UNIX_SOCKET_PATH_MODE)
+        .map_err(|_| FSError::Other)?;
+    Ok(())
+}
+
 impl UnixSocketObject {
     pub fn bind(self: &Arc<Self>, path: String) -> SocketResult<()> {
         let mut state = self.state.lock();
@@ -24,7 +36,7 @@ impl UnixSocketObject {
         let registry_key = if is_abstract {
             UnixSocketRegistryKey::Abstract(path.clone())
         } else {
-            let create_result = VirtualFS.lock().create_file(Path::new(&path));
+            let create_result = create_socket_path(&path);
             match create_result {
                 Ok(()) => {}
                 Err(FSError::AlreadyExists) => {
@@ -42,10 +54,7 @@ impl UnixSocketObject {
                         .lock()
                         .delete_file(Path::new(&path))
                         .map_err(|_| SocketError::AddressInUse)?;
-                    VirtualFS
-                        .lock()
-                        .create_file(Path::new(&path))
-                        .map_err(|_| SocketError::AddressInUse)?;
+                    create_socket_path(&path).map_err(|_| SocketError::AddressInUse)?;
                 }
                 Err(_) => return Err(SocketError::InvalidArguments),
             }
