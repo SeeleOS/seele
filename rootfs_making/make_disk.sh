@@ -227,6 +227,8 @@ arch_chroot /bin/sh -lc "update-ca-trust || true"
 sudo install -Dm644 "${ROOTFS_MAKING_DIR}/seatd.service" "${SYSROOT_DIR}/etc/systemd/system/seatd.service"
 sudo install -Dm644 "${ROOTFS_MAKING_DIR}/seele-udev-seed.service" "${SYSROOT_DIR}/etc/systemd/system/seele-udev-seed.service"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/seele-udev-seed.sh" "${SYSROOT_DIR}/usr/bin/seele-udev-seed.sh"
+sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/system/systemd-localed.service.d"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd-localed.service.d/override.conf" "${SYSROOT_DIR}/etc/systemd/system/systemd-localed.service.d/override.conf"
 arch_chroot /usr/sbin/usermod -p '' root
 arch_chroot /usr/bin/systemctl enable seatd.service
 arch_chroot /usr/bin/systemctl enable seele-udev-seed.service
