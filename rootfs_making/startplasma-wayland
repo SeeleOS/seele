@@ -1,0 +1,16 @@
+#!/bin/sh
+
+set -eu
+
+uid="$(id -u)"
+runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${uid}}"
+
+mkdir -p "${runtime_dir}"
+chmod 0700 "${runtime_dir}" 2>/dev/null || true
+export XDG_RUNTIME_DIR="${runtime_dir}"
+
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+    exec /usr/bin/dbus-run-session -- /usr/bin/startplasma-wayland "$@"
+fi
+
+exec /usr/bin/startplasma-wayland "$@"
