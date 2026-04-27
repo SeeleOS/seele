@@ -4,7 +4,10 @@ use num_enum::TryFromPrimitive;
 use pc_keyboard::KeyCode;
 use spin::Mutex;
 
-use crate::object::{config::ConfigurateRequest, error::ObjectError, misc::ObjectResult};
+use crate::{
+    misc::framebuffer::{FRAME_BUFFER, framebuffer_set_user_controlled},
+    object::{config::ConfigurateRequest, error::ObjectError, misc::ObjectResult},
+};
 
 #[derive(Debug, Clone, Copy, TryFromPrimitive, PartialEq, Eq)]
 #[repr(u32)]
@@ -552,6 +555,16 @@ pub fn handle_kd_request(
         ConfigurateRequest::LinuxKdSetDisplayMode(mode) => {
             let mode = DisplayMode::try_from(*mode).map_err(|_| ObjectError::InvalidArguments)?;
             state.lock().display_mode = mode;
+            match mode {
+                DisplayMode::Graphics => {
+                    framebuffer_set_user_controlled(true);
+                    FRAME_BUFFER.get().unwrap().lock().clear();
+                }
+                DisplayMode::Text | DisplayMode::Text0 | DisplayMode::Text1 => {
+                    framebuffer_set_user_controlled(false);
+                    FRAME_BUFFER.get().unwrap().lock().flush();
+                }
+            }
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxKdSignalAccept(signal) => {
