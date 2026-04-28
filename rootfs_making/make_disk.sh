@@ -257,7 +257,6 @@ install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd/system/user@.service.d/runtim
 arch_chroot /usr/sbin/usermod -p '' root
 arch_chroot /usr/bin/systemctl enable seatd.service
 arch_chroot /usr/bin/systemctl enable sddm.service
-arch_chroot /usr/bin/systemctl enable sddm-diagnostics.service
 
 install_sysroot_file "${ROOTFS_MAKING_DIR}/xdg-runtime.sh" "${SYSROOT_DIR}/etc/profile.d/xdg-runtime.sh"
 
