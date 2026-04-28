@@ -921,11 +921,11 @@ fn sendmsg_impl(
         }
         let written = if let Some(path) = target_path.as_deref() {
             socket
-                .write_socket_to_path(&buffer, path)
+                .write_socket_to_path_with_rights(&buffer, path, rights)
                 .map_err(ObjectError::from)?
         } else {
             socket
-                .write_socket_with_flags(&buffer, dontwait)
+                .write_socket_with_rights(&buffer, dontwait, rights)
                 .map_err(ObjectError::from)?
         };
         return Ok(written);

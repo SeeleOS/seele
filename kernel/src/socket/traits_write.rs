@@ -121,13 +121,20 @@ impl UnixSocketObject {
         Ok(buffer.len())
     }
 
-    pub fn write_socket_to_path(&self, buffer: &[u8], path: &str) -> SocketResult<usize> {
+    pub fn write_socket_to_path_with_rights(
+        &self,
+        buffer: &[u8],
+        path: &str,
+        rights: Vec<ObjectRef>,
+    ) -> SocketResult<usize> {
         match self.kind {
-            UnixSocketKind::Datagram => {
-                self.write_datagram_socket(buffer, Some(path), false, Vec::new())
-            }
+            UnixSocketKind::Datagram => self.write_datagram_socket(buffer, Some(path), false, rights),
             UnixSocketKind::Stream | UnixSocketKind::SeqPacket => self.write_socket(buffer),
         }
+    }
+
+    pub fn write_socket_to_path(&self, buffer: &[u8], path: &str) -> SocketResult<usize> {
+        self.write_socket_to_path_with_rights(buffer, path, Vec::new())
     }
 
     pub fn write_socket(&self, buffer: &[u8]) -> SocketResult<usize> {
