@@ -799,8 +799,9 @@ fn faccessat_impl(
     let object: ObjectRef = Arc::new(match open_result {
         Ok(object) => object,
         Err(err) => {
-            debug_logind_path_op(debug_op, &path, &Err(err));
-            debug_init_path_op(debug_op, &path, &Err(err));
+            let syscall_err = SyscallError::from(err);
+            debug_logind_path_op(debug_op, &path, &Err(syscall_err));
+            debug_init_path_op(debug_op, &path, &Err(syscall_err));
             return Err(err.into());
         }
     });
