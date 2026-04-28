@@ -259,6 +259,8 @@ sudo install -d -m 0700 "${SYSROOT_DIR}/root/.config"
 sudo install -d -m 0700 "${SYSROOT_DIR}/root/.cache"
 sudo install -d -m 0700 "${SYSROOT_DIR}/root/.local/share"
 sudo install -d -m 0700 "${SYSROOT_DIR}/root/.local/state"
+arch_chroot /usr/bin/install -d -m 0750 -o sddm -g sddm /var/lib/sddm
+arch_chroot /usr/bin/install -d -m 0750 -o plasmalogin -g plasmalogin /var/lib/plasmalogin
 sudo install -d -m 1777 "${SYSROOT_DIR}/tmp/.X11-unix"
 sudo install -d -m 0755 "${SYSROOT_DIR}/var/lib/dbus"
 sudo rm -f "${SYSROOT_DIR}/init"
