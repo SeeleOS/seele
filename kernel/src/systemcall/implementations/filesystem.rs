@@ -792,9 +792,9 @@ fn faccessat_impl(
 
     let path = resolve_path_at(dirfd, path_str)?;
     let open_result = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
-        VirtualFS.lock().open_nofollow(path)
+        VirtualFS.lock().open_nofollow(path.clone())
     } else {
-        VirtualFS.lock().open(path)
+        VirtualFS.lock().open(path.clone())
     };
     let object: ObjectRef = Arc::new(match open_result {
         Ok(object) => object,
