@@ -21,6 +21,7 @@ impl Process {
             let new_process = Arc::new(Mutex::new(Self {
                 pid,
                 pending_signals: parent_locked.pending_signals,
+                pending_signal_info: parent_locked.pending_signal_info.clone(),
                 addrspace: parent_locked.addrspace.clone_all(),
                 kernel_stack_top: parent_locked.kernel_stack_top,
                 fd_table: parent_locked.fd_table.clone(),

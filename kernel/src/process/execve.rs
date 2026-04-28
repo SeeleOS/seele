@@ -110,6 +110,7 @@ impl Process {
         thread_locked.sig_handler_snapshot = ThreadSnapshot::default();
         thread_locked.saved_blocked_signals.clear();
         self.pending_signals = Signals::default();
+        self.pending_signal_info.fill(None);
         self.signal_actions = execve_signal_actions(&self.signal_actions);
         self.program_break = 0;
         self.command_line = command_line;

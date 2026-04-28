@@ -92,6 +92,8 @@ pub enum Signal {
 }
 
 pub const SIGNAL_AMOUNT: usize = 64;
+pub const SI_USER: i32 = 0;
+pub const SI_QUEUE: i32 = -1;
 
 pub type SignalHandlerFn = extern "C" fn(i32);
 pub type SigHandlerFn2 = extern "C" fn(i32, *const SigInfo, *const UContext);
@@ -167,6 +169,21 @@ impl SigInfo {
         }
     }
 
+    pub fn for_process_signal(signal: Signal, sender_pid: i32, sender_uid: u32) -> Self {
+        Self {
+            si_signo: signal as i32,
+            si_code: SI_USER,
+            fields: SigInfoFields {
+                value: SigInfoValue {
+                    si_pid: sender_pid,
+                    si_uid: sender_uid,
+                    ..Default::default()
+                },
+            },
+            ..Default::default()
+        }
+    }
+
     pub fn for_waitid(signal: Signal, code: i32, pid: i32, status: i32) -> Self {
         Self {
             si_signo: signal as i32,
@@ -180,6 +197,22 @@ impl SigInfo {
             },
             ..Default::default()
         }
+    }
+
+    pub fn sender_pid(&self) -> i32 {
+        unsafe { self.fields.value.si_pid }
+    }
+
+    pub fn sender_uid(&self) -> u32 {
+        unsafe { self.fields.value.si_uid }
+    }
+
+    pub fn signal_value_int(&self) -> i32 {
+        unsafe { self.fields.value.si_value.sival_int }
+    }
+
+    pub fn signal_value_ptr(&self) -> u64 {
+        unsafe { self.fields.value.si_value.sival_ptr as usize as u64 }
     }
 }
 
@@ -313,19 +346,34 @@ fn wake_process_threads(process: &ProcessRef, wake_stopped_only: bool) {
     }
 }
 
-pub fn send_signal_to_process(process: &ProcessRef, signal: Signal) {
+fn queue_signal(process: &ProcessRef, signal: Signal, siginfo: Option<SigInfo>) {
     match signal {
         Signal::SIGCONT => wake_process_threads(process, true),
         _ => {
             let pid = {
                 let mut process = process.lock();
-                process.pending_signals.insert(Signals::from(signal));
+                let signal_bits = Signals::from(signal);
+                let already_pending = process.pending_signals.contains(signal_bits);
+                process.pending_signals.insert(signal_bits);
+                if let Some(siginfo) = siginfo
+                    && (!already_pending || process.pending_signal_info[signal.index()].is_none())
+                {
+                    process.pending_signal_info[signal.index()] = Some(siginfo);
+                }
                 process.pid.0
             };
             wake_signalfd_for_process(pid);
             wake_process_threads(process, false);
         }
     }
+}
+
+pub fn send_signal_to_process(process: &ProcessRef, signal: Signal) {
+    queue_signal(process, signal, None);
+}
+
+pub fn send_signal_to_process_with_siginfo(process: &ProcessRef, signal: Signal, siginfo: SigInfo) {
+    queue_signal(process, signal, Some(siginfo));
 }
 
 pub fn process_current_process_signals(process: &ProcessRef) -> bool {
@@ -380,6 +428,9 @@ impl Process {
             {
                 let action = self.signal_actions[signal.index()].clone();
                 self.pending_signals.remove(signal_bits);
+                let siginfo = self.pending_signal_info[signal.index()]
+                    .take()
+                    .unwrap_or_else(|| SigInfo::for_signal(signal));
 
                 match action.handling_type {
                     SignalHandlingType::Default => {
@@ -426,7 +477,6 @@ impl Process {
                         let (_, mut stack_builder) = self.addrspace.allocate_user_stack(16);
                         let (_, mut frame_builder) = self.addrspace.allocate_user(1);
 
-                        let siginfo = SigInfo::for_signal(signal);
                         let ucontext = build_signal_ucontext(current_thread);
 
                         let ucontext_ptr = frame_builder.push_struct(&ucontext);

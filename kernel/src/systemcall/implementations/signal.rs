@@ -14,9 +14,12 @@ use crate::{
         linux_anon::{SignalfdFlags, SignalfdObject},
         misc::{ObjectRef, get_object_current_process},
     },
-    process::misc::with_current_process,
+    process::misc::{get_process_with_pid, with_current_process},
     process::{FdFlags, manager::get_current_process},
-    signal::{SigInfo, Signal, UContext, action::SignalAction, send_signal_to_process},
+    signal::{
+        SI_QUEUE, SigInfo, Signal, UContext, action::SignalAction, send_signal_to_process,
+        send_signal_to_process_with_siginfo,
+    },
 };
 use alloc::vec::Vec;
 use bitflags::bitflags;
@@ -329,13 +332,36 @@ define_syscall!(Tgkill, |tgid: i32, tid: i32, signal: i32| {
 
 define_syscall!(
     PidfdSendSignal,
-    |pidfd: ObjectRef, signal: i32, info: *const u8, flags: u32| {
-        if !info.is_null() || flags != 0 {
-            return Err(SyscallError::NoSyscall);
+    |pidfd: ObjectRef, signal: i32, info: *const SigInfo, flags: u32| {
+        let signal = Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?;
+        if flags != 0 {
+            return Err(SyscallError::InvalidArguments);
         }
 
         let pid = pidfd.as_pidfd()?.pid();
-        Kill::handle_call(pid, signal as u64, 0, 0, 0, 0)
+        let process = get_process_with_pid(ProcessID(pid))?;
+        let siginfo = if info.is_null() {
+            let current = get_current_process();
+            let current = current.lock();
+            SigInfo::for_process_signal(signal, current.pid.0 as i32, current.real_uid)
+        } else {
+            let mut siginfo = user_safe::read(info)?;
+            siginfo.si_signo = signal as i32;
+            if siginfo.si_code == 0 && siginfo.sender_pid() == 0 {
+                let current = get_current_process();
+                let current = current.lock();
+                siginfo.si_code = SI_QUEUE;
+                siginfo = SigInfo::for_process_signal(
+                    signal,
+                    current.pid.0 as i32,
+                    current.real_uid,
+                );
+                siginfo.si_code = SI_QUEUE;
+            }
+            siginfo
+        };
+        send_signal_to_process_with_siginfo(&process, signal, siginfo);
+        Ok(0)
     }
 );
 

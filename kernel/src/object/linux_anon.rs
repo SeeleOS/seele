@@ -19,7 +19,7 @@ use crate::{
     polling::{event::PollableEvent, object::Pollable},
     process::manager::MANAGER,
     process::misc::ProcessID,
-    signal::{Signal, Signals},
+    signal::{SigInfo, Signal, Signals},
     thread::{
         THREAD_MANAGER,
         manager::ThreadManager,
@@ -269,7 +269,7 @@ impl SignalfdObject {
         Signal::iter().find(|signal| (ready_mask & Signals::from(*signal).bits()) != 0)
     }
 
-    fn take_next_signal(&self) -> Option<Signal> {
+    fn take_next_signal(&self) -> Option<SigInfo> {
         let manager = MANAGER.lock();
         let process = manager
             .processes
@@ -281,7 +281,11 @@ impl SignalfdObject {
         let signal =
             Signal::iter().find(|signal| (ready_mask & Signals::from(*signal).bits()) != 0)?;
         process.pending_signals.remove(Signals::from(signal));
-        Some(signal)
+        Some(
+            process.pending_signal_info[signal.index()]
+                .take()
+                .unwrap_or_else(|| SigInfo::for_signal(signal)),
+        )
     }
 
     fn wake_waiters(&self) {
@@ -626,9 +630,15 @@ impl Readable for SignalfdObject {
         }
 
         loop {
-            if let Some(signal) = self.take_next_signal() {
+            if let Some(siginfo) = self.take_next_signal() {
                 let info = LinuxSignalfdSiginfo {
-                    ssi_signo: signal as u32,
+                    ssi_signo: siginfo.si_signo as u32,
+                    ssi_errno: siginfo.si_errno,
+                    ssi_code: siginfo.si_code,
+                    ssi_pid: siginfo.sender_pid() as u32,
+                    ssi_uid: siginfo.sender_uid(),
+                    ssi_int: siginfo.signal_value_int(),
+                    ssi_ptr: siginfo.signal_value_ptr(),
                     ..Default::default()
                 };
                 let raw = unsafe {
