@@ -350,7 +350,6 @@ define_syscall!(
             if siginfo.si_code == 0 && siginfo.sender_pid() == 0 {
                 let current = get_current_process();
                 let current = current.lock();
-                siginfo.si_code = SI_QUEUE;
                 siginfo = SigInfo::for_process_signal(
                     signal,
                     current.pid.0 as i32,

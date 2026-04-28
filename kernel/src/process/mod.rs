@@ -13,7 +13,7 @@ use crate::misc::timer::Timer;
 use crate::object::misc::ObjectRef;
 use crate::process::group::ProcessGroupID;
 use crate::signal::misc::default_signal_action_vec;
-use crate::signal::{SIGNAL_AMOUNT, SigInfo, Signal, Signals, action::SignalAction};
+use crate::signal::{PendingSignalInfo, SIGNAL_AMOUNT, Signal, Signals, action::SignalAction};
 use crate::thread::misc::ThreadID;
 use crate::{process::misc::ProcessID, thread::thread::Thread};
 
@@ -65,7 +65,7 @@ pub struct Process {
     pub parent: Option<ProcessRef>,
     pub signal_actions: Vec<SignalAction>,
     pub pending_signals: Signals,
-    pub pending_signal_info: Vec<Option<SigInfo>>,
+    pub pending_signal_info: Vec<Option<PendingSignalInfo>>,
     pub group_id: ProcessGroupID,
     pub timers: Vec<Option<Timer>>,
     pub program_break: u64,

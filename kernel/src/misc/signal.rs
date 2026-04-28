@@ -108,6 +108,16 @@ pub struct SigInfo {
     fields: SigInfoFields,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PendingSignalInfo {
+    pub si_signo: i32,
+    pub si_errno: i32,
+    pub si_code: i32,
+    pub si_pid: i32,
+    pub si_uid: u32,
+    pub si_value: u64,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 union SigInfoFields {
@@ -213,6 +223,44 @@ impl SigInfo {
 
     pub fn signal_value_ptr(&self) -> u64 {
         unsafe { self.fields.value.si_value.sival_ptr as usize as u64 }
+    }
+}
+
+impl PendingSignalInfo {
+    pub fn for_signal(signal: Signal) -> Self {
+        Self {
+            si_signo: signal as i32,
+            ..Default::default()
+        }
+    }
+
+    pub fn from_siginfo(siginfo: SigInfo) -> Self {
+        Self {
+            si_signo: siginfo.si_signo,
+            si_errno: siginfo.si_errno,
+            si_code: siginfo.si_code,
+            si_pid: siginfo.sender_pid(),
+            si_uid: siginfo.sender_uid(),
+            si_value: siginfo.signal_value_ptr(),
+        }
+    }
+
+    pub fn to_siginfo(self) -> SigInfo {
+        SigInfo {
+            si_signo: self.si_signo,
+            si_errno: self.si_errno,
+            si_code: self.si_code,
+            fields: SigInfoFields {
+                value: SigInfoValue {
+                    si_pid: self.si_pid,
+                    si_uid: self.si_uid,
+                    si_value: SigValue {
+                        sival_ptr: self.si_value as usize as *mut c_void,
+                    },
+                },
+            },
+            ..Default::default()
+        }
     }
 }
 
@@ -358,7 +406,8 @@ fn queue_signal(process: &ProcessRef, signal: Signal, siginfo: Option<SigInfo>) 
                 if let Some(siginfo) = siginfo
                     && (!already_pending || process.pending_signal_info[signal.index()].is_none())
                 {
-                    process.pending_signal_info[signal.index()] = Some(siginfo);
+                    process.pending_signal_info[signal.index()] =
+                        Some(PendingSignalInfo::from_siginfo(siginfo));
                 }
                 process.pid.0
             };
@@ -430,7 +479,8 @@ impl Process {
                 self.pending_signals.remove(signal_bits);
                 let siginfo = self.pending_signal_info[signal.index()]
                     .take()
-                    .unwrap_or_else(|| SigInfo::for_signal(signal));
+                    .unwrap_or_else(|| PendingSignalInfo::for_signal(signal))
+                    .to_siginfo();
 
                 match action.handling_type {
                     SignalHandlingType::Default => {

@@ -19,7 +19,7 @@ use crate::{
     polling::{event::PollableEvent, object::Pollable},
     process::manager::MANAGER,
     process::misc::ProcessID,
-    signal::{SigInfo, Signal, Signals},
+    signal::{PendingSignalInfo, Signal, Signals},
     thread::{
         THREAD_MANAGER,
         manager::ThreadManager,
@@ -269,7 +269,7 @@ impl SignalfdObject {
         Signal::iter().find(|signal| (ready_mask & Signals::from(*signal).bits()) != 0)
     }
 
-    fn take_next_signal(&self) -> Option<SigInfo> {
+    fn take_next_signal(&self) -> Option<PendingSignalInfo> {
         let manager = MANAGER.lock();
         let process = manager
             .processes
@@ -284,7 +284,7 @@ impl SignalfdObject {
         Some(
             process.pending_signal_info[signal.index()]
                 .take()
-                .unwrap_or_else(|| SigInfo::for_signal(signal)),
+                .unwrap_or_else(|| PendingSignalInfo::for_signal(signal)),
         )
     }
 
@@ -635,10 +635,10 @@ impl Readable for SignalfdObject {
                     ssi_signo: siginfo.si_signo as u32,
                     ssi_errno: siginfo.si_errno,
                     ssi_code: siginfo.si_code,
-                    ssi_pid: siginfo.sender_pid() as u32,
-                    ssi_uid: siginfo.sender_uid(),
-                    ssi_int: siginfo.signal_value_int(),
-                    ssi_ptr: siginfo.signal_value_ptr(),
+                    ssi_pid: siginfo.si_pid as u32,
+                    ssi_uid: siginfo.si_uid,
+                    ssi_int: siginfo.si_value as i32,
+                    ssi_ptr: siginfo.si_value,
                     ..Default::default()
                 };
                 let raw = unsafe {
