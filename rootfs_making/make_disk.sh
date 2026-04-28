@@ -253,6 +253,7 @@ install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd-localed.service.d/override.co
 install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd/system/systemd-user-runtime-dir@.service.d/bypass-userdb.conf" "${SYSROOT_DIR}/etc/systemd/system/systemd-user-runtime-dir@.service.d/bypass-userdb.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd/system/user@.service.d/bypass-userdb.conf" "${SYSROOT_DIR}/etc/systemd/system/user@.service.d/bypass-userdb.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd/system/user@.service.d/logging.conf" "${SYSROOT_DIR}/etc/systemd/system/user@.service.d/logging.conf"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd/system/user@.service.d/runtime-dir.conf" "${SYSROOT_DIR}/etc/systemd/system/user@.service.d/runtime-dir.conf"
 arch_chroot /usr/sbin/usermod -p '' root
 arch_chroot /usr/bin/systemctl enable seatd.service
 arch_chroot /usr/bin/systemctl enable sddm.service
