@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{
     misc::snapshot::Snapshot,
-    process::manager::get_current_process,
+    process::{manager::get_current_process, misc::with_current_process},
     process::ptrace::{maybe_stop_current_on_syscall_entry, maybe_stop_current_on_syscall_exit},
     signal::process_current_process_signals,
     systemcall::table::SYSCALL_TABLE,
@@ -16,6 +16,15 @@ use crate::{
 use x86_64::registers::model_specific::FsBase;
 
 static FIRST_USER_SYSCALL_LOGGED: AtomicBool = AtomicBool::new(false);
+
+fn should_log_logind_syscalls() -> bool {
+    with_current_process(|process| {
+        process
+            .command_line
+            .first()
+            .is_some_and(|command| command.contains("systemd-logind"))
+    })
+}
 
 #[unsafe(no_mangle)]
 extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
@@ -32,6 +41,10 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     thread.last_user_fs_base = fs_base;
     drop(thread);
 
+    if should_log_logind_syscalls() {
+        crate::s_println!("logind syscall enter {}", syscall_no);
+    }
+
     maybe_stop_current_on_syscall_entry();
 
     let result = syscall_handler_unwrapped(
@@ -43,6 +56,10 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
         snapshot.r8,
         snapshot.r9,
     );
+
+    if should_log_logind_syscalls() {
+        crate::s_println!("logind syscall exit {} -> {}", syscall_no, result);
+    }
 
     snapshot.rax = result;
 

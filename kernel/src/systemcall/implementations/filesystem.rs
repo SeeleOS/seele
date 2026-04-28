@@ -16,7 +16,7 @@ use crate::{
         systemd_perf::{self, PerfBucket},
     },
     object::{
-        FileFlags, Object,
+        FileFlags,
         error::ObjectError,
         fs_context::{FsConfigCommand, FsContextObject},
         misc::{ObjectRef, get_object_current_process},
@@ -329,7 +329,48 @@ fn is_logind_process() -> bool {
 
 fn is_logind_runtime_path(path: &Path) -> bool {
     let path = path.clone().as_string();
-    path.starts_with("/run/systemd/users") || path.starts_with("/run/systemd/seats")
+    path.starts_with("/run/systemd/") || path.starts_with("/proc/self/fd")
+}
+
+fn debug_logind_renameat2(
+    old_dirfd: i32,
+    old_path: &str,
+    new_dirfd: i32,
+    new_path: &str,
+    flags: u32,
+    result: &Result<(), SyscallError>,
+) {
+    if !is_logind_process() {
+        return;
+    }
+
+    let old_resolved = resolve_path_at(old_dirfd, old_path).ok();
+    let new_resolved = resolve_path_at(new_dirfd, new_path).ok();
+    let should_log = old_resolved.as_ref().is_some_and(is_logind_runtime_path)
+        || new_resolved.as_ref().is_some_and(is_logind_runtime_path);
+    if !should_log {
+        return;
+    }
+
+    let old_display = old_resolved
+        .map(|path| path.as_string())
+        .unwrap_or_else(|| format!("fd={old_dirfd}:{old_path}"));
+    let new_display = new_resolved
+        .map(|path| path.as_string())
+        .unwrap_or_else(|| format!("fd={new_dirfd}:{new_path}"));
+    match result {
+        Ok(()) => crate::s_println!(
+            "logind renameat2 {old_display} -> {new_display} flags=0x{flags:x} -> ok"
+        ),
+        Err(err) => crate::s_println!(
+            "logind renameat2 {old_display} -> {new_display} flags=0x{flags:x} -> {:?}",
+            err
+        ),
+    }
+}
+
+fn debug_logind_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) {
+    debug_logind_fs(op, path, result);
 }
 
 fn debug_logind_fs(op: &str, path: &Path, result: &Result<(), SyscallError>) {
@@ -370,6 +411,25 @@ fn open_tmpfile_at(dirfd: i32, path_str: &str) -> Result<ObjectRef, SyscallError
     }
 
     Err(SyscallError::FileAlreadyExists)
+}
+
+fn proc_self_fd_object(path: &Path) -> Result<Option<ObjectRef>, SyscallError> {
+    let path = path.clone().normalize().as_string();
+    let Some(fd_str) = path.strip_prefix("/proc/self/fd/") else {
+        return Ok(None);
+    };
+    if fd_str.is_empty() || fd_str.contains('/') {
+        return Ok(None);
+    }
+
+    let fd = fd_str
+        .parse::<u64>()
+        .map_err(|_| SyscallError::FileNotFound)?;
+    let object = match get_object_current_process(fd) {
+        Ok(object) => object,
+        Err(_) => return Err(SyscallError::FileNotFound),
+    };
+    Ok(Some(object))
 }
 
 fn is_api_mount_path(path: &Path) -> bool {
@@ -826,30 +886,83 @@ define_syscall!(OpenAt, |dirfd: i32,
         }
 
         let path = resolve_path_at(dirfd, &path_str)?;
-        let open_result = if nofollow {
-            VirtualFS.lock().open_nofollow(path.clone())
+        let object = if !nofollow {
+            match VirtualFS.lock().open(path.clone()) {
+                Ok(file) => {
+                    if create && flags.contains(OpenFlags::EXCL) {
+                        debug_logind_path_op(
+                            "openat",
+                            &path,
+                            &Err(SyscallError::FileAlreadyExists),
+                        );
+                        return Err(SyscallError::FileAlreadyExists);
+                    }
+                    Arc::new(file)
+                }
+                Err(FSError::NotFound) => match proc_self_fd_object(&path) {
+                    Ok(Some(object)) => object,
+                    Ok(None) if create => {
+                        VirtualFS.lock().create_file(path.clone())?;
+                        let reopen_result = VirtualFS.lock().open(path.clone());
+                        match reopen_result {
+                            Ok(file) => Arc::new(file),
+                            Err(err) => {
+                                let err = SyscallError::from(err);
+                                debug_logind_path_op("openat", &path, &Err(err));
+                                return Err(err);
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        debug_logind_path_op("openat", &path, &Err(SyscallError::FileNotFound));
+                        return Err(SyscallError::FileNotFound);
+                    }
+                    Err(err) => {
+                        debug_logind_path_op("openat", &path, &Err(err));
+                        return Err(err);
+                    }
+                },
+                Err(err) => {
+                    let err = SyscallError::from(err);
+                    debug_logind_path_op("openat", &path, &Err(err));
+                    return Err(err);
+                }
+            }
         } else {
-            VirtualFS.lock().open(path.clone())
-        };
-        let object = match open_result {
-            Ok(file) => {
-                if create && flags.contains(OpenFlags::EXCL) {
-                    return Err(SyscallError::FileAlreadyExists);
+            match VirtualFS.lock().open_nofollow(path.clone()) {
+                Ok(file) => {
+                    if create && flags.contains(OpenFlags::EXCL) {
+                        debug_logind_path_op(
+                            "openat",
+                            &path,
+                            &Err(SyscallError::FileAlreadyExists),
+                        );
+                        return Err(SyscallError::FileAlreadyExists);
+                    }
+                    Arc::new(file)
                 }
-                Arc::new(file)
-            }
-            Err(FSError::NotFound) if create => {
-                VirtualFS.lock().create_file(path.clone())?;
-                let reopen_result = VirtualFS.lock().open(path.clone());
-                match reopen_result {
-                    Ok(file) => Arc::new(file),
-                    Err(err) => return Err(err.into()),
+                Err(FSError::NotFound) if create => {
+                    VirtualFS.lock().create_file(path.clone())?;
+                    let reopen_result = VirtualFS.lock().open(path.clone());
+                    match reopen_result {
+                        Ok(file) => Arc::new(file),
+                        Err(err) => {
+                            let err = SyscallError::from(err);
+                            debug_logind_path_op("openat", &path, &Err(err));
+                            return Err(err);
+                        }
+                    }
+                }
+                Err(err) => {
+                    let err = SyscallError::from(err);
+                    debug_logind_path_op("openat", &path, &Err(err));
+                    return Err(err);
                 }
             }
-            Err(err) => return Err(err.into()),
         };
+        debug_logind_path_op("openat", &path, &Ok(()));
 
-        let info = object.info()?;
+        let info = object.clone().as_file_like()?.info()?;
         if nofollow && !path_only && matches!(info.file_like_type, FileLikeType::Symlink) {
             return Err(SyscallError::TooManySymbolicLinks);
         }
@@ -1073,7 +1186,25 @@ define_syscall!(Newfstatat, |dirfd: i32,
             path_from_raw(path)?
         };
 
-        let stat = stat_at(dirfd, &path_str, flags)?;
+        let resolved_path = if path_str.is_empty() && flags.contains(AtFlags::EMPTY_PATH) {
+            None
+        } else {
+            Some(resolve_path_at(dirfd, &path_str)?)
+        };
+        let stat = stat_at(dirfd, &path_str, flags).inspect(|_| {
+            if let Some(path) = resolved_path.as_ref() {
+                debug_logind_path_op("newfstatat", path, &Ok(()));
+            }
+        });
+        let stat = match stat {
+            Ok(stat) => stat,
+            Err(err) => {
+                if let Some(path) = resolved_path.as_ref() {
+                    debug_logind_path_op("newfstatat", path, &Err(err));
+                }
+                return Err(err);
+            }
+        };
 
         user_safe::write(linux_stat_ptr, &stat)?;
         Ok(0)
@@ -1286,7 +1417,10 @@ define_syscall!(UnlinkAt, |dirfd: i32, path: CString, flags: AtFlags| {
     } else if is_directory {
         return Err(SyscallError::IsADirectory);
     }
-    VirtualFS.lock().delete_file(path)?;
+    let result = VirtualFS.lock().delete_file(path.clone());
+    let result = result.map_err(SyscallError::from);
+    debug_logind_fs("unlink", &path, &result);
+    result?;
     Ok(0)
 });
 
@@ -1349,7 +1483,9 @@ define_syscall!(SymlinkAt, |target: CString,
 define_syscall!(MkdirAt, |dirfd: i32, path: CString, _mode: u32| {
     let path = path_from_raw(path)?;
     let path = resolve_path_at(dirfd, &path)?;
-    VirtualFS.lock().create_dir(path.clone())?;
+    let result = VirtualFS.lock().create_dir(path.clone()).map_err(SyscallError::from);
+    debug_logind_path_op("mkdirat", &path, &result);
+    result?;
 
     Ok(0)
 });
@@ -1774,11 +1910,13 @@ define_syscall!(RenameAt2, |old_dirfd: i32,
                             new_dirfd: i32,
                             new_path: CString,
                             flags: u32| {
-    if flags != 0 {
-        return Err(SyscallError::NoSyscall);
-    }
     let old_path = path_from_raw(old_path)?;
     let new_path = path_from_raw(new_path)?;
+    if flags != 0 {
+        let result = Err(SyscallError::NoSyscall);
+        debug_logind_renameat2(old_dirfd, &old_path, new_dirfd, &new_path, flags, &result);
+        return Err(SyscallError::NoSyscall);
+    }
     rename_impl(old_dirfd, old_path, new_dirfd, new_path)
 });
 
