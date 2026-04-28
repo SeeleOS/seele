@@ -84,31 +84,36 @@ pub(super) fn pid_fd_entries(pid: ProcessID) -> FSResult<Vec<DirectoryContentInf
 
 pub(super) fn proc_pid_stat_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
     let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
-    let process = process.lock();
-    let parent_pid = process
-        .parent
+    let (parent, state, session, tty_nr, tty_pgrp, group_id, num_threads) = {
+        let process = process.lock();
+        (
+            process.parent.clone(),
+            if process.have_exited() || process.threads.is_empty() {
+                'Z'
+            } else {
+                'S'
+            },
+            process.session_id.0,
+            process.controlling_terminal.map(|tty| tty.0).unwrap_or(0),
+            process
+                .stdin_foreground_process_group()
+                .map(|group| group.0)
+                .unwrap_or(0),
+            process.group_id.0,
+            process.threads.len().max(1),
+        )
+    };
+    let parent_pid = parent
         .as_ref()
         .map(|parent| parent.lock().pid.0)
         .unwrap_or(0);
-    let state = if process.have_exited() || process.threads.is_empty() {
-        'Z'
-    } else {
-        'S'
-    };
     let comm = pid_string(pid);
-    let session = process.session_id.0;
-    let tty_nr = process.controlling_terminal.map(|tty| tty.0).unwrap_or(0);
-    let tty_pgrp = process
-        .stdin_foreground_process_group()
-        .map(|group| group.0)
-        .unwrap_or(0);
-    let num_threads = process.threads.len().max(1);
     let content = format!(
         concat!(
             "{} ({}) {} {} {} {} {} {} 0 0 0 0 0 0 0 0 0 0 20 0 {} 0 ",
             "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
         ),
-        pid.0, comm, state, parent_pid, process.group_id.0, session, tty_nr, tty_pgrp, num_threads,
+        pid.0, comm, state, parent_pid, group_id, session, tty_nr, tty_pgrp, num_threads,
     );
     Ok(content.into_bytes())
 }
@@ -150,28 +155,63 @@ fn format_capability_set(low: u32, high: u32) -> String {
 
 pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
     let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
-    let process = process.lock();
-    let parent_pid = process
-        .parent
+    let (
+        parent,
+        tracer_pid,
+        state,
+        real_uid,
+        effective_uid,
+        saved_uid,
+        fs_uid,
+        real_gid,
+        effective_gid,
+        saved_gid,
+        fs_gid,
+        fd_size,
+        groups,
+        capability_inheritable,
+        capability_permitted,
+        capability_effective,
+        capability_ambient,
+    ) = {
+        let process = process.lock();
+        (
+            process.parent.clone(),
+            process.ptrace.tracer.map(|pid| pid.0).unwrap_or(0),
+            if process.have_exited() || process.threads.is_empty() {
+                "Z (zombie)"
+            } else {
+                "S (sleeping)"
+            },
+            process.real_uid,
+            process.effective_uid,
+            process.saved_uid,
+            process.fs_uid,
+            process.real_gid,
+            process.effective_gid,
+            process.saved_gid,
+            process.fs_gid,
+            process.fd_table.len().max(64),
+            if process.supplementary_groups.is_empty() {
+                String::new()
+            } else {
+                process
+                    .supplementary_groups
+                    .iter()
+                    .map(|group| format!("{group}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            },
+            process.capability_inheritable,
+            process.capability_permitted,
+            process.capability_effective,
+            process.capability_ambient,
+        )
+    };
+    let parent_pid = parent
         .as_ref()
         .map(|parent| parent.lock().pid.0)
         .unwrap_or(0);
-    let tracer_pid = process.ptrace.tracer.map(|pid| pid.0).unwrap_or(0);
-    let state = if process.have_exited() || process.threads.is_empty() {
-        "Z (zombie)"
-    } else {
-        "S (sleeping)"
-    };
-    let groups = if process.supplementary_groups.is_empty() {
-        String::new()
-    } else {
-        process
-            .supplementary_groups
-            .iter()
-            .map(|group| format!("{group}"))
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
     let content = format!(
         concat!(
             "Name:\t{}\n",
@@ -200,33 +240,21 @@ pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
         pid.0,
         parent_pid,
         tracer_pid,
-        process.real_uid,
-        process.effective_uid,
-        process.saved_uid,
-        process.fs_uid,
-        process.real_gid,
-        process.effective_gid,
-        process.saved_gid,
-        process.fs_gid,
-        process.fd_table.len().max(64),
+        real_uid,
+        effective_uid,
+        saved_uid,
+        fs_uid,
+        real_gid,
+        effective_gid,
+        saved_gid,
+        fs_gid,
+        fd_size,
         groups,
-        format_capability_set(
-            process.capability_inheritable[0],
-            process.capability_inheritable[1],
-        ),
-        format_capability_set(
-            process.capability_permitted[0],
-            process.capability_permitted[1]
-        ),
-        format_capability_set(
-            process.capability_effective[0],
-            process.capability_effective[1]
-        ),
-        format_capability_set(
-            process.capability_permitted[0],
-            process.capability_permitted[1]
-        ),
-        format_capability_set(process.capability_ambient[0], process.capability_ambient[1]),
+        format_capability_set(capability_inheritable[0], capability_inheritable[1]),
+        format_capability_set(capability_permitted[0], capability_permitted[1]),
+        format_capability_set(capability_effective[0], capability_effective[1]),
+        format_capability_set(capability_permitted[0], capability_permitted[1]),
+        format_capability_set(capability_ambient[0], capability_ambient[1]),
     );
     Ok(content.into_bytes())
 }
