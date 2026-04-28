@@ -329,7 +329,20 @@ fn debug_logind_renameat2(
 }
 
 fn debug_logind_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) {
-    let _ = (op, path, result);
+    if let Some((pid, command, parent_command)) = current_sddm_debug_process_info() {
+        let path_string = path.clone().normalize().as_string();
+        if should_log_sddm_path(&path_string) {
+            crate::s_println!(
+                "sddm-path-op pid={} cmd={} parent_cmd={} op={} path={} result={:?}",
+                pid,
+                command,
+                parent_command,
+                op,
+                path_string,
+                result
+            );
+        }
+    }
 }
 
 fn debug_init_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) {
@@ -337,12 +350,72 @@ fn debug_init_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) 
 }
 
 fn debug_init_openat_stage(stage: &str, dirfd: i32, path: &str) {
-    let _ = (stage, dirfd, path);
+    if let Some((pid, command, parent_command)) = current_sddm_debug_process_info() {
+        if should_log_sddm_path(path) {
+            crate::s_println!(
+                "sddm-openat-stage pid={} cmd={} parent_cmd={} stage={} dirfd={} path={}",
+                pid,
+                command,
+                parent_command,
+                stage,
+                dirfd,
+                path
+            );
+        }
+    }
 }
 
 fn debug_init_openat_note(_note: &str) {}
 
 fn debug_logind_fs(_op: &str, _path: &Path, _result: &Result<(), SyscallError>) {}
+
+fn current_sddm_debug_process_info() -> Option<(u64, String, String)> {
+    let current_process = get_current_process();
+    let process = current_process.lock();
+    let pid = process.pid.0;
+    let command = process
+        .command_line
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "<unknown>".into());
+    let parent_command = process
+        .parent
+        .as_ref()
+        .and_then(|parent| parent.lock().command_line.first().cloned())
+        .unwrap_or_else(|| "<none>".into());
+
+    if [command.as_str(), parent_command.as_str()]
+        .into_iter()
+        .any(is_sddm_debug_command)
+    {
+        Some((pid, command, parent_command))
+    } else {
+        None
+    }
+}
+
+fn is_sddm_debug_command(command: &str) -> bool {
+    command.contains("sddm")
+        || command.contains("kwin")
+        || command.contains("startplasma")
+        || command.contains("plasmashell")
+}
+
+fn should_log_sddm_path(path: &str) -> bool {
+    [
+        "plasma.desktop",
+        "startplasma-wayland",
+        "kwin_wayland",
+        "plasmashell",
+        "sddm-helper-start-wayland",
+        "/usr/share/wayland-sessions",
+        "/usr/share/xsessions",
+        "/usr/share/sddm/scripts/wayland-session",
+        "/usr/lib/sddm",
+    ]
+    .into_iter()
+    .any(|pattern| path.contains(pattern))
+}
 
 fn open_tmpfile_at(dirfd: i32, path_str: &str) -> Result<ObjectRef, SyscallError> {
     let dir_path = resolve_path_at(dirfd, path_str)?;
