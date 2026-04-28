@@ -39,6 +39,7 @@ ARCH_PACKAGES=(
     iptables
     sudo
     xorg-server
+    xorg-server-xephyr
     xorg-xinit
     xorg-xwayland
     xorg-xkbcomp
