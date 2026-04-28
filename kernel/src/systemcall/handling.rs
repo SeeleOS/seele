@@ -79,7 +79,8 @@ fn log_sddm_syscall(phase: &str, syscall_no: isize, result: Option<isize>) {
     let Some((pid, command)) = with_current_process(|process| {
         let pid = process.pid.0;
         let command = process.command_line.first().cloned().unwrap_or_default();
-        (command.contains("Xorg")
+        ((command == "systemd" && pid != 1)
+            || command.contains("Xorg")
             || command.contains("/usr/bin/X")
             || command == "sleep"
             || command.ends_with("/sleep")

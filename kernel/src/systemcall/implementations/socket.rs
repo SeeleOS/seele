@@ -66,7 +66,8 @@ fn current_display_socket_process_info() -> Option<(u64, String, String)> {
             .as_ref()
             .and_then(|parent| parent.lock().command_line.first().cloned())
             .unwrap_or_default();
-        (command.contains("sddm")
+        ((command == "systemd" && pid != 1)
+            || command.contains("sddm")
             || command.contains("Xorg")
             || command.contains("/usr/bin/X")
             || command.contains("startplasma")
