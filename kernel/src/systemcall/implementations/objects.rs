@@ -3,7 +3,7 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use alloc::{collections::btree_map::BTreeMap, format, string::String};
+use alloc::{collections::btree_map::BTreeMap, format, string::String, vec::Vec};
 use bitflags::bitflags;
 use spin::Mutex;
 
@@ -26,6 +26,7 @@ use crate::{
         manager::get_current_process,
         misc::{ProcessID, with_current_process},
     },
+    socket::{InetSocketKind, UnixSocketKind},
     systemcall::utils::{SyscallError, SyscallImpl, SyscallResult},
 };
 
@@ -49,6 +50,25 @@ bitflags! {
 struct LinuxIovec {
     iov_base: *const u8,
     iov_len: usize,
+}
+
+fn copy_iovecs(iovs: &[LinuxIovec]) -> Result<Vec<u8>, SyscallError> {
+    let total_len = iovs.iter().try_fold(0usize, |acc, iov| {
+        acc.checked_add(iov.iov_len)
+            .ok_or(SyscallError::InvalidArguments)
+    })?;
+    let mut buffer = Vec::with_capacity(total_len);
+    for iov in iovs {
+        if iov.iov_len == 0 {
+            continue;
+        }
+        if iov.iov_base.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+        let chunk = unsafe { slice::from_raw_parts(iov.iov_base, iov.iov_len) };
+        buffer.extend_from_slice(chunk);
+    }
+    Ok(buffer)
 }
 
 fn current_x_chain_process_info() -> Option<(u64, String, String)> {
@@ -317,6 +337,24 @@ define_syscall!(Writev, |object: ObjectRef,
     }
 
     let iovs = unsafe { slice::from_raw_parts(iov_ptr, iovcnt as usize) };
+    let preserve_datagram_boundary = object
+        .clone()
+        .as_unix_socket()
+        .map(|socket| socket.kind == UnixSocketKind::Datagram)
+        .or_else(|_| {
+            object
+                .clone()
+                .as_inet_socket()
+                .map(|socket| socket.kind == InetSocketKind::Datagram)
+        })
+        .unwrap_or(false);
+    if preserve_datagram_boundary {
+        let buffer = copy_iovecs(iovs)?;
+        log_x_chain_write_bytes(&buffer);
+        log_user_manager_socket_bytes("writev", &object, &buffer);
+        return Ok(writable.write(&buffer)?);
+    }
+
     for iov in iovs {
         if iov.iov_len == 0 {
             continue;
