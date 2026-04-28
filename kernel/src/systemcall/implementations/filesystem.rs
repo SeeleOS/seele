@@ -403,6 +403,8 @@ fn is_sddm_debug_command(command: &str) -> bool {
 
 fn should_log_sddm_path(path: &str) -> bool {
     [
+        "/etc/sddm.conf",
+        "/etc/sddm.conf.d",
         "plasma.desktop",
         "startplasma-wayland",
         "kwin_wayland",
