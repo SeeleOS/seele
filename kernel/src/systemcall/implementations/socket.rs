@@ -154,6 +154,26 @@ fn log_user_manager_socket_payload(op: &str, target: &str, bytes: &[u8]) {
     );
 }
 
+fn log_user_manager_socket_rights(op: &str, target: &str, rights_count: usize) {
+    if rights_count == 0 {
+        return;
+    }
+
+    let Some((pid, command, parent_command)) = current_user_manager_chain() else {
+        return;
+    };
+
+    crate::s_println!(
+        "usermgr-socket-{}-rights pid={} cmd={} parent_cmd={} target={} rights={}",
+        op,
+        pid,
+        command,
+        parent_command,
+        target,
+        rights_count
+    );
+}
+
 fn socket_target_from_bytes(address: &[u8]) -> Option<String> {
     match socket_address_from_raw(address.as_ptr(), address.len() as u32).ok()? {
         SocketAddress::Unix(path) => Some(format!("unix:{path}")),
@@ -190,6 +210,29 @@ fn preview_iovecs(iovs: &[relibc_iovec]) -> Result<Vec<u8>, SyscallError> {
         preview.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
     }
     Ok(preview)
+}
+
+fn count_scm_rights_in_control(control: &[u8]) -> usize {
+    let mut offset = 0usize;
+    let mut rights = 0usize;
+
+    while offset + mem::size_of::<LinuxCmsgHdr>() <= control.len() {
+        let header = unsafe { &*(control[offset..].as_ptr().cast::<LinuxCmsgHdr>()) };
+        if header.cmsg_len < mem::size_of::<LinuxCmsgHdr>() {
+            break;
+        }
+        let next = cmsg_align(offset + header.cmsg_len);
+        if next > control.len() {
+            break;
+        }
+        if header.cmsg_level == SOL_SOCKET as i32 && header.cmsg_type == SCM_RIGHTS {
+            let payload_len = header.cmsg_len - cmsg_align(mem::size_of::<LinuxCmsgHdr>());
+            rights += payload_len / mem::size_of::<i32>();
+        }
+        offset = next;
+    }
+
+    rights
 }
 
 fn cmsg_align(len: usize) -> usize {
@@ -906,6 +949,12 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
         socket_target_for_object(&socket).or_else(|| Some(String::from("connected")))
     };
     let preview = preview_iovecs(iovs)?;
+    let rights_count = if msg.msg_controllen == 0 || msg.msg_control.is_null() {
+        0
+    } else {
+        let control = unsafe { slice::from_raw_parts(msg.msg_control, msg.msg_controllen) };
+        count_scm_rights_in_control(control)
+    };
     let result = sendmsg_impl(socket, msg, flags);
     if let Some(target) = &log_target {
         log_user_manager_socket(
@@ -915,6 +964,7 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
         );
         if result.is_ok() {
             log_user_manager_socket_payload("sendmsg", target, &preview);
+            log_user_manager_socket_rights("sendmsg", target, rights_count);
         }
     }
     result
@@ -1252,6 +1302,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
             .and_then(|name| socket_target_from_bytes(&name))
             .unwrap_or_else(|| String::from("connected"));
         log_user_manager_socket_payload("recvmsg", &target, &scratch[..total_read]);
+        log_user_manager_socket_rights("recvmsg", &target, count_scm_rights_in_control(&control));
     }
 
     Ok(total_read)
