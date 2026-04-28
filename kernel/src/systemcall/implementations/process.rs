@@ -264,7 +264,7 @@ define_syscall!(Execve, |path_str: String,
             .as_ref()
             .and_then(|parent| parent.lock().command_line.first().cloned())
             .unwrap_or_default();
-        let should_log = [&*command, &*parent_command, path_str.as_str()]
+        let should_log = [command.as_str(), parent_command.as_str(), path_str.as_str()]
             .into_iter()
             .any(|value| {
                 value.contains("sddm")
@@ -274,8 +274,7 @@ define_syscall!(Execve, |path_str: String,
                     || value.contains("/usr/bin/X")
                     || value.contains("Xorg")
             });
-        if should_log
-        {
+        if should_log {
             crate::s_println!(
                 "sddm-execve pid={} old_cmd={} parent_cmd={} path={} args={:?}",
                 process.pid.0,

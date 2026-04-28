@@ -350,18 +350,18 @@ fn debug_init_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) 
 }
 
 fn debug_init_openat_stage(stage: &str, dirfd: i32, path: &str) {
-    if let Some((pid, command, parent_command)) = current_sddm_debug_process_info() {
-        if should_log_sddm_path(path) {
-            crate::s_println!(
-                "sddm-openat-stage pid={} cmd={} parent_cmd={} stage={} dirfd={} path={}",
-                pid,
-                command,
-                parent_command,
-                stage,
-                dirfd,
-                path
-            );
-        }
+    if let Some((pid, command, parent_command)) = current_sddm_debug_process_info()
+        && should_log_sddm_path(path)
+    {
+        crate::s_println!(
+            "sddm-openat-stage pid={} cmd={} parent_cmd={} stage={} dirfd={} path={}",
+            pid,
+            command,
+            parent_command,
+            stage,
+            dirfd,
+            path
+        );
     }
 }
 
@@ -806,7 +806,7 @@ fn faccessat_impl(
         }
     });
     let access_result = check_access_permissions(&object.as_statable()?.stat(), mode);
-    let log_result = access_result.map_err(SyscallError::from).map(|_| ());
+    let log_result = access_result.map(|_| ());
     debug_logind_path_op(debug_op, &path, &log_result);
     debug_init_path_op(debug_op, &path, &log_result);
     access_result?;
