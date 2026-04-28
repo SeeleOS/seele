@@ -18,8 +18,7 @@ rm -f "${log}"
 append date date
 sleep 10
 append display-manager-link ls -l /etc/systemd/system/display-manager.service
-append processes ps -ef
-append proc-sddm sh -c 'for proc in /proc/[0-9]*; do cmd=$(tr "\0" " " <"${proc}/cmdline" 2>/dev/null || true); case "${cmd}" in *sddm*|*kwin*|*plasma*|*Xorg*|*Xephyr*) echo "${proc}: ${cmd}";; esac; done'
+append proc-processes sh -c 'for proc in /proc/[0-9]*; do pid=${proc#/proc/}; comm=$(cat "${proc}/comm" 2>/dev/null || true); case "${comm}" in sddm|kwin*|plasmashell|startplasma*|Xorg|Xephyr|dbus*|systemd-logind|seatd) echo "${pid} ${comm}";; esac; done'
 append sddm-directories ls -la /run/sddm /var/lib/sddm /var/log/sddm
 append run-user-root ls -la /run/user/0
 append devices ls -la /dev/dri /dev/input /dev/tty0 /dev/tty1 /dev/fb0
