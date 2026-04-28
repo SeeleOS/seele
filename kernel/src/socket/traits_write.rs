@@ -165,6 +165,10 @@ impl UnixSocketObject {
                     return Ok(written);
                 }
                 UnixSocketKind::Stream | UnixSocketKind::SeqPacket => {
+                    if buffer.is_empty() && rights.is_empty() {
+                        return Ok(0);
+                    }
+
                     let stream = match &*self.state.lock() {
                         UnixSocketState::Stream(stream) => stream.clone(),
                         _ => return Err(SocketError::InvalidArguments),
