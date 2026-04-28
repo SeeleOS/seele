@@ -168,6 +168,27 @@ fn log_display_pipe_bytes(op: &str, object: &ObjectRef, bytes: &[u8]) {
     }
 }
 
+fn log_display_write_dispatch(op: &str, object: &ObjectRef, len: usize) {
+    let Some((pid, command, parent_command)) = current_display_pipe_process_info() else {
+        return;
+    };
+    let fds = current_process_object_fds(object);
+    let is_unix_socket = object.clone().as_unix_socket().is_ok();
+    let unnamed_unix_socket = is_unix_socket && is_unnamed_unix_socket(object);
+
+    crate::s_println!(
+        "display-{}-dispatch pid={} cmd={} parent_cmd={} fds={:?} len={} unix_socket={} unnamed_unix_socket={}",
+        op,
+        pid,
+        command,
+        parent_command,
+        fds,
+        len,
+        is_unix_socket,
+        unnamed_unix_socket
+    );
+}
+
 fn log_x_chain_write_bytes(_bytes: &[u8]) {}
 
 fn log_user_manager_socket_bytes(_op: &str, _object: &ObjectRef, _bytes: &[u8]) {}
@@ -280,6 +301,7 @@ define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
 
 define_syscall!(Write, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
     let bytes = user_safe::read_buffer(buf_ptr.cast_const(), len)?;
+    log_display_write_dispatch("write", &object, bytes.len());
     log_display_pipe_bytes("write", &object, &bytes);
     log_x_chain_write_bytes(&bytes);
     log_user_manager_socket_bytes("write", &object, &bytes);
@@ -318,6 +340,7 @@ define_syscall!(Writev, |object: ObjectRef,
         .unwrap_or(false);
     if preserve_datagram_boundary {
         let buffer = copy_iovecs(&iovs)?;
+        log_display_write_dispatch("writev", &object, buffer.len());
         log_display_pipe_bytes("writev", &object, &buffer);
         log_x_chain_write_bytes(&buffer);
         log_user_manager_socket_bytes("writev", &object, &buffer);
@@ -332,6 +355,7 @@ define_syscall!(Writev, |object: ObjectRef,
             return Err(SyscallError::BadAddress);
         }
         let buf = user_safe::read_buffer(iov.iov_base, iov.iov_len)?;
+        log_display_write_dispatch("writev", &object, buf.len());
         log_x_chain_write_bytes(&buf);
         log_user_manager_socket_bytes("writev", &object, &buf);
         let count = writable.write(&buf)?;
