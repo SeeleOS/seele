@@ -414,7 +414,9 @@ fn dynamic_children(state: &TmpfsStateRef, path: &str) -> FSResult<Vec<Directory
             TmpNodeKind::File { .. } => DirectoryContentType::File,
             TmpNodeKind::Symlink { .. } => DirectoryContentType::Symlink,
         };
-        entries.push(DirectoryContentInfo::new(child.clone(), content_type));
+        entries.push(
+            DirectoryContentInfo::new(child.clone(), content_type).with_inode(child_node.inode),
+        );
     }
     Ok(entries)
 }
@@ -446,10 +448,10 @@ impl Directory for DevDirectoryHandle {
 
         for entry in self.node.entries {
             seen.insert(entry.name.to_string());
-            entries.push(DirectoryContentInfo::new(
-                entry.name.into(),
-                entry.node.content_type(),
-            ));
+            entries.push(
+                DirectoryContentInfo::new(entry.name.into(), entry.node.content_type())
+                    .with_inode(entry.node.inode()),
+            );
         }
 
         for entry in dynamic_children(&self.state, &self.path)? {

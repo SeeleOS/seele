@@ -48,7 +48,10 @@ impl Directory for StaticDirectoryHandle {
             .node
             .entries
             .iter()
-            .map(|entry| DirectoryContentInfo::new(entry.name.into(), entry.node.content_type()))
+            .map(|entry| {
+                DirectoryContentInfo::new(entry.name.into(), entry.node.content_type())
+                    .with_inode(entry.node.inode())
+            })
             .collect())
     }
 

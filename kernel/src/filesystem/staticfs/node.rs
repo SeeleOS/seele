@@ -54,4 +54,13 @@ impl StaticNode {
             Self::Symlink(_) => DirectoryContentType::Symlink,
         }
     }
+
+    pub fn inode(&self) -> u64 {
+        match self {
+            Self::Directory(node) => node.inode,
+            Self::File(node) => node.inode,
+            Self::Symlink(node) => node.inode,
+            Self::Device(node) => node.inode,
+        }
+    }
 }

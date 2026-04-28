@@ -6,6 +6,7 @@ use crate::filesystem::vfs_traits::{DirectoryContentType, FileLikeType};
 pub struct DirectoryContentInfo {
     pub name: String,
     pub content_type: DirectoryContentType,
+    pub inode: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -143,6 +144,15 @@ impl FileLikeInfo {
 
 impl DirectoryContentInfo {
     pub fn new(name: String, content_type: DirectoryContentType) -> Self {
-        Self { name, content_type }
+        Self {
+            name,
+            content_type,
+            inode: 0,
+        }
+    }
+
+    pub fn with_inode(mut self, inode: u64) -> Self {
+        self.inode = inode;
+        self
     }
 }

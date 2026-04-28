@@ -68,7 +68,9 @@ impl Directory for TmpfsDirectoryHandle {
                 TmpNodeKind::File { .. } => DirectoryContentType::File,
                 TmpNodeKind::Symlink { .. } => DirectoryContentType::Symlink,
             };
-            entries.push(DirectoryContentInfo::new(child.clone(), content_type));
+            entries.push(
+                DirectoryContentInfo::new(child.clone(), content_type).with_inode(child_node.inode),
+            );
         }
         Ok(entries)
     }

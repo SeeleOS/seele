@@ -195,7 +195,9 @@ impl Directory for Ext4Directory {
                 DirectoryContentType::File
             };
 
-            result.push(DirectoryContentInfo { name, content_type });
+            result.push(
+                DirectoryContentInfo::new(name, content_type).with_inode(entry.inode.get().into()),
+            );
         }
 
         Ok(result)

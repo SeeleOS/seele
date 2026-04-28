@@ -6,9 +6,9 @@ use spin::Mutex;
 
 use crate::{
     define_syscall,
-    filesystem::{info::DirectoryContentInfo, object::FileLikeObject, path::Path},
     filesystem::vfs_traits::DirectoryContentType,
     filesystem::vfs_traits::Whence,
+    filesystem::{info::DirectoryContentInfo, object::FileLikeObject, path::Path},
     memory::protection::Protection,
     memory::user_safe,
     misc::systemd_perf::{self, PerfBucket},
@@ -127,6 +127,21 @@ fn should_log_sddm_dirent_directory(name: &str) -> bool {
     matches!(name, "sddm.conf.d" | "wayland-sessions" | "xsessions")
 }
 
+fn fallback_dirent_inode(info: &DirectoryContentInfo, offset: usize) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in info.name.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash ^= match info.content_type {
+        DirectoryContentType::Directory => 4,
+        DirectoryContentType::File => 8,
+        DirectoryContentType::Symlink => 10,
+    };
+    hash ^= offset as u64;
+    hash.max(1)
+}
+
 fn log_sddm_dirents(object_index: u64, obj: &FileLikeObject, contents: &[DirectoryContentInfo]) {
     let Some((pid, command, parent_command)) = current_sddm_dirent_process_info() else {
         return;
@@ -140,7 +155,12 @@ fn log_sddm_dirents(object_index: u64, obj: &FileLikeObject, contents: &[Directo
 
     let entries = contents
         .iter()
-        .map(|entry| format!("{}:{:?}", entry.name, entry.content_type))
+        .map(|entry| {
+            format!(
+                "{}:{:?}:ino={}",
+                entry.name, entry.content_type, entry.inode
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ");
     crate::s_println!(
@@ -261,7 +281,12 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
 
         unsafe {
             let entry_ptr = buf.add(bytes_written);
-            entry_ptr.cast::<u64>().write_unaligned(1);
+            let inode = if info.inode != 0 {
+                info.inode
+            } else {
+                fallback_dirent_inode(info, *offset_entry)
+            };
+            entry_ptr.cast::<u64>().write_unaligned(inode);
             entry_ptr
                 .add(8)
                 .cast::<i64>()
@@ -270,7 +295,7 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
             let linux_type = match info.content_type {
                 DirectoryContentType::Directory => 4,
                 DirectoryContentType::File => 8,
-                _ => 0,
+                DirectoryContentType::Symlink => 10,
             };
             entry_ptr.add(18).write(linux_type);
             core::ptr::copy_nonoverlapping(
