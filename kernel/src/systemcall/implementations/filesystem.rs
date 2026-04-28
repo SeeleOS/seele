@@ -396,6 +396,14 @@ fn debug_init_openat_stage(stage: &str, dirfd: i32, path: &str) {
     crate::s_println!("init openat {stage} dirfd={dirfd} path={path}");
 }
 
+fn debug_init_openat_note(note: &str) {
+    if !is_init_process() {
+        return;
+    }
+
+    crate::s_println!("init openat {note}");
+}
+
 fn debug_logind_fs(op: &str, path: &Path, result: &Result<(), SyscallError>) {
     if !is_logind_process() || !is_logind_runtime_path(path) {
         return;
@@ -928,10 +936,14 @@ define_syscall!(OpenAt, |dirfd: i32,
                 Err(FSError::NotFound) => match proc_self_fd_object(&path) {
                     Ok(Some(object)) => object,
                     Ok(None) if create => {
+                        debug_init_openat_note("open-notfound");
+                        debug_init_openat_note("create-start");
                         VirtualFS.lock().create_file(path.clone())?;
+                        debug_init_openat_note("create-done");
+                        debug_init_openat_note("reopen-start");
                         let reopen_result = VirtualFS.lock().open(path.clone());
-                            match reopen_result {
-                                Ok(file) => Arc::new(file),
+                        match reopen_result {
+                            Ok(file) => Arc::new(file),
                                 Err(err) => {
                                     let err = SyscallError::from(err);
                                     debug_logind_path_op("openat", &path, &Err(err));
