@@ -9,11 +9,7 @@ use crate::{
         error::ObjectError,
         misc::{ObjectRef, get_object_current_process},
     },
-    process::{
-        FdFlags,
-        manager::get_current_process,
-        misc::with_current_process,
-    },
+    process::{FdFlags, manager::get_current_process, misc::with_current_process},
     socket::{
         AF_INET, AF_NETLINK, AF_UNIX, InetSocketObject, SOCK_CLOEXEC, SOCK_NONBLOCK, SOL_SOCKET,
         UnixSocketKind, UnixSocketObject, UnixSocketState,
@@ -160,6 +156,24 @@ fn socket_target_for_object(socket: &ObjectRef) -> Option<String> {
     socket_target_for_socket_like(&*socket)
 }
 
+fn read_iovecs_from_user(
+    iov_ptr: *const relibc_iovec,
+    iov_len: usize,
+) -> Result<Vec<relibc_iovec>, SyscallError> {
+    if iov_len == 0 {
+        return Ok(Vec::new());
+    }
+    if iov_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let mut iovs = Vec::with_capacity(iov_len);
+    for index in 0..iov_len {
+        iovs.push(user_safe::read(unsafe { iov_ptr.add(index) })?);
+    }
+    Ok(iovs)
+}
+
 fn preview_iovecs(iovs: &[relibc_iovec]) -> Result<Vec<u8>, SyscallError> {
     let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>().min(256);
     let mut preview = Vec::with_capacity(total_len);
@@ -173,11 +187,26 @@ fn preview_iovecs(iovs: &[relibc_iovec]) -> Result<Vec<u8>, SyscallError> {
         if iov.iov_base.is_null() {
             return Err(SyscallError::BadAddress);
         }
-        let chunk = unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
+        let chunk = user_safe::read_buffer(iov.iov_base.cast_const(), iov.iov_len)?;
         let remaining = total_len - preview.len();
         preview.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
     }
     Ok(preview)
+}
+
+fn copy_iovecs_from_user(iovs: &[relibc_iovec]) -> Result<Vec<u8>, SyscallError> {
+    let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
+    let mut buffer = Vec::with_capacity(total_len);
+    for iov in iovs {
+        if iov.iov_len == 0 {
+            continue;
+        }
+        if iov.iov_base.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+        buffer.extend_from_slice(&user_safe::read_buffer(iov.iov_base.cast_const(), iov.iov_len)?);
+    }
+    Ok(buffer)
 }
 
 fn count_scm_rights_in_control(control: &[u8]) -> usize {
@@ -773,7 +802,7 @@ fn sendmsg_rights(msg: &relibc_msg_hdr) -> Result<Vec<ObjectRef>, SyscallError> 
         return Err(SyscallError::BadAddress);
     }
 
-    let control = unsafe { slice::from_raw_parts(msg.msg_control, msg.msg_controllen) };
+    let control = user_safe::read_buffer(msg.msg_control, msg.msg_controllen)?;
     let header_space = cmsg_align(mem::size_of::<LinuxCmsgHdr>());
     let mut offset = 0usize;
     let mut rights = Vec::new();
@@ -825,14 +854,7 @@ fn sendmsg_impl(
         return Err(SyscallError::InvalidArguments);
     }
 
-    let iovs = if msg.msg_iovlen == 0 {
-        &[][..]
-    } else {
-        if msg.msg_iov.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-        unsafe { core::slice::from_raw_parts(msg.msg_iov, msg.msg_iovlen) }
-    };
+    let iovs = read_iovecs_from_user(msg.msg_iov, msg.msg_iovlen)?;
 
     if let Ok(socket) = socket.clone().as_netlink_socket() {
         let destination = if !msg.msg_name.is_null() {
@@ -846,19 +868,7 @@ fn sendmsg_impl(
             None
         };
 
-        let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
-        let mut buffer = Vec::with_capacity(total_len);
-        for iov in iovs {
-            if iov.iov_len == 0 {
-                continue;
-            }
-            if iov.iov_base.is_null() {
-                return Err(SyscallError::BadAddress);
-            }
-            let chunk =
-                unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
-            buffer.extend_from_slice(chunk);
-        }
+        let buffer = copy_iovecs_from_user(&iovs)?;
 
         let written = socket
             .send(buffer.as_slice(), destination)
@@ -879,22 +889,10 @@ fn sendmsg_impl(
         };
 
         if msg.msg_controllen != 0 && !msg.msg_control.is_null() {
-            let _ = unsafe { slice::from_raw_parts(msg.msg_control, msg.msg_controllen) };
+            let _ = user_safe::read_buffer(msg.msg_control, msg.msg_controllen)?;
         }
 
-        let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
-        let mut buffer = Vec::with_capacity(total_len);
-        for iov in iovs {
-            if iov.iov_len == 0 {
-                continue;
-            }
-            if iov.iov_base.is_null() {
-                return Err(SyscallError::BadAddress);
-            }
-            let chunk =
-                unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
-            buffer.extend_from_slice(chunk);
-        }
+        let buffer = copy_iovecs_from_user(&iovs)?;
 
         let written = match target_addr {
             Some(address) => socket
@@ -920,19 +918,7 @@ fn sendmsg_impl(
     let dontwait = (flags & MSG_DONTWAIT) != 0;
     let rights = sendmsg_rights(msg)?;
     if socket.kind == UnixSocketKind::Datagram {
-        let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
-        let mut buffer = Vec::with_capacity(total_len);
-        for iov in iovs {
-            if iov.iov_len == 0 {
-                continue;
-            }
-            if iov.iov_base.is_null() {
-                return Err(SyscallError::BadAddress);
-            }
-            let chunk =
-                unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
-            buffer.extend_from_slice(chunk);
-        }
+        let buffer = copy_iovecs_from_user(&iovs)?;
         let written = if let Some(path) = target_path.as_deref() {
             socket
                 .write_socket_to_path_with_rights(&buffer, path, rights)
@@ -951,18 +937,7 @@ fn sendmsg_impl(
         socket.connect(path).map_err(ObjectError::from)?;
     }
 
-    let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
-    let mut buffer = Vec::with_capacity(total_len);
-    for iov in iovs {
-        if iov.iov_len == 0 {
-            continue;
-        }
-        if iov.iov_base.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-        let chunk = unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
-        buffer.extend_from_slice(chunk);
-    }
+    let buffer = copy_iovecs_from_user(&iovs)?;
 
     socket
         .write_socket_with_rights(&buffer, dontwait, rights)
@@ -977,15 +952,9 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
         return Err(SyscallError::BadAddress);
     }
 
-    let msg = unsafe { &*msg };
-    let iovs = if msg.msg_iovlen == 0 {
-        &[][..]
-    } else {
-        if msg.msg_iov.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-        unsafe { core::slice::from_raw_parts(msg.msg_iov, msg.msg_iovlen) }
-    };
+    let msg = user_safe::read(msg)?;
+    let iovs = read_iovecs_from_user(msg.msg_iov, msg.msg_iovlen)?;
+
     let log_target = if !msg.msg_name.is_null() {
         socket_address_bytes(msg.msg_name.cast(), msg.msg_namelen)
             .ok()
@@ -997,10 +966,10 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
     let rights_count = if msg.msg_controllen == 0 || msg.msg_control.is_null() {
         0
     } else {
-        let control = unsafe { slice::from_raw_parts(msg.msg_control, msg.msg_controllen) };
-        count_scm_rights_in_control(control)
+        let control = user_safe::read_buffer(msg.msg_control, msg.msg_controllen)?;
+        count_scm_rights_in_control(&control)
     };
-    let result = sendmsg_impl(socket, msg, flags);
+    let result = sendmsg_impl(socket, &msg, flags);
     if let Some(target) = &log_target {
         log_user_manager_socket(
             "sendmsg",
@@ -1143,20 +1112,15 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         return Err(SyscallError::BadAddress);
     }
 
-    let msg = unsafe { &mut *msg };
+    let msg_ptr = msg;
+    let mut msg = user_safe::read(msg_ptr)?;
     if msg.msg_iovlen > isize::MAX as usize {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let iovs = if msg.msg_iovlen == 0 {
-        &[][..]
-    } else {
-        if msg.msg_iov.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-        unsafe { core::slice::from_raw_parts_mut(msg.msg_iov, msg.msg_iovlen) }
-    };
+    let iovs = read_iovecs_from_user(msg.msg_iov.cast_const(), msg.msg_iovlen)?;
 
+    let result = (|| {
     if let Ok(socket) = socket.clone().as_netlink_socket() {
         let peek = (flags & MSG_PEEK) != 0;
         let report_trunc = (flags & MSG_TRUNC) != 0;
@@ -1199,7 +1163,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
             let name_bytes = unsafe {
                 core::slice::from_raw_parts(
                     (&name as *const LinuxSockAddrNl).cast::<u8>(),
-                    core::mem::size_of::<LinuxSockAddrNl>(),
+                core::mem::size_of::<LinuxSockAddrNl>(),
                 )
             };
             let copy_len = requested_len.min(name_bytes.len());
@@ -1359,6 +1323,12 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
     } else {
         copied_total
     })
+    })();
+
+    if result.is_ok() {
+        user_safe::write(msg_ptr, &msg)?;
+    }
+    result
 });
 
 define_syscall!(Shutdown, |socket: ObjectRef, how: u64| {
