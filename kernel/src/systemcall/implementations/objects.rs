@@ -203,34 +203,76 @@ fn is_unnamed_unix_socket(object: &ObjectRef) -> bool {
     .all(|name| name.len() >= 2 && name[2..].iter().all(|&byte| byte == 0))
 }
 
+fn display_socket_names(object: &ObjectRef) -> Vec<String> {
+    let Ok(socket) = object.clone().as_unix_socket() else {
+        return Vec::new();
+    };
+    [
+        socket.getsockname_bytes().ok(),
+        socket.getpeername_bytes().ok(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(|name| {
+        if name.len() < 2 {
+            return None;
+        }
+        let raw = &name[2..];
+        let end = raw.iter().position(|&byte| byte == 0).unwrap_or(raw.len());
+        if end == 0 {
+            return None;
+        }
+        Some(String::from_utf8_lossy(&raw[..end]).into_owned())
+    })
+    .collect()
+}
+
+fn is_named_sddm_unix_socket(object: &ObjectRef) -> bool {
+    display_socket_names(object)
+        .into_iter()
+        .any(|name| name.contains("sddm"))
+}
+
 fn log_display_pipe_bytes(op: &str, object: &ObjectRef, bytes: &[u8]) {
-    if bytes.is_empty() || bytes.len() > 16 || !is_unnamed_unix_socket(object) {
+    let unnamed_unix_socket = is_unnamed_unix_socket(object);
+    let named_sddm_unix_socket = is_named_sddm_unix_socket(object);
+    if bytes.is_empty()
+        || (!unnamed_unix_socket && !named_sddm_unix_socket)
+        || (bytes.len() > 16 && !named_sddm_unix_socket)
+    {
         return;
     }
     let Some((pid, command, parent_command)) = current_display_pipe_process_info() else {
         return;
     };
     let fds = current_process_object_fds(object);
+    let socket_names = if named_sddm_unix_socket {
+        display_socket_names(object)
+    } else {
+        Vec::new()
+    };
 
     if let Ok(text) = core::str::from_utf8(bytes) {
         crate::s_println!(
-            "display-pipe-{} pid={} cmd={} parent_cmd={} fds={:?} len={} text={:?}",
+            "display-pipe-{} pid={} cmd={} parent_cmd={} fds={:?} sockets={:?} len={} text={:?}",
             op,
             pid,
             command,
             parent_command,
             fds,
+            socket_names,
             bytes.len(),
             text
         );
     } else {
         crate::s_println!(
-            "display-pipe-{} pid={} cmd={} parent_cmd={} fds={:?} len={} bytes={:?}",
+            "display-pipe-{} pid={} cmd={} parent_cmd={} fds={:?} sockets={:?} len={} bytes={:?}",
             op,
             pid,
             command,
             parent_command,
             fds,
+            socket_names,
             bytes.len(),
             bytes
         );
@@ -431,6 +473,7 @@ define_syscall!(Writev, |object: ObjectRef,
         }
         let buf = user_safe::read_buffer(iov.iov_base, iov.iov_len)?;
         log_display_write_dispatch("writev", &object, buf.len());
+        log_display_pipe_bytes("writev", &object, &buf);
         log_x_chain_write_bytes(&buf);
         log_user_manager_socket_bytes("writev", &object, &buf);
         let count = writable.write(&buf)?;
