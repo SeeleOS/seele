@@ -14,10 +14,16 @@ section() {
     emit "=== $1 ==="
 }
 
+capture_command() {
+    "$@" 2>&1 | while IFS= read -r line; do
+        emit "${line}"
+    done
+}
+
 rm -f "${log}"
 
 section date
-date >>"${log}" 2>&1 || true
+capture_command date
 
 sleep 10
 
@@ -60,7 +66,7 @@ done
 section sddm-config
 for file in /etc/sddm.conf /etc/sddm.conf.d/seele-wayland.conf; do
     emit "--- ${file}"
-    cat "${file}" >>"${log}" 2>&1 || true
+    capture_command cat "${file}"
 done
 
 sleep 60
@@ -71,8 +77,8 @@ for path in /run/user/961 /run/user/961/*; do
 done
 
 section user-manager-status
-systemctl --no-pager --full status user-runtime-dir@961.service user@961.service >>"${log}" 2>&1 || true
-systemctl --no-pager --full show user-runtime-dir@961.service user@961.service >>"${log}" 2>&1 || true
-journalctl --no-pager -u user-runtime-dir@961.service -u user@961.service -n 200 >>"${log}" 2>&1 || true
+capture_command systemctl --no-pager --full status user-runtime-dir@961.service user@961.service
+capture_command systemctl --no-pager --full show user-runtime-dir@961.service user@961.service
+capture_command journalctl --no-pager -u user-runtime-dir@961.service -u user@961.service -n 200
 
 sync
