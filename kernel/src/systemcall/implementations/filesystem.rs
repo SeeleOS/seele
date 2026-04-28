@@ -331,18 +331,19 @@ fn debug_logind_renameat2(
 fn current_user_manager_chain() -> Option<(u64, String, String)> {
     with_current_process(|process| {
         let pid = process.pid.0;
-        if pid < 100 {
-            return None;
-        }
         let command = process.command_line.first().cloned().unwrap_or_default();
         let parent_command = process
             .parent
             .as_ref()
             .and_then(|parent| parent.lock().command_line.first().cloned())
             .unwrap_or_default();
-        let is_user_manager_chain = command.contains("systemd-executor")
-            || parent_command.contains("systemd-executor")
-            || (command == "/usr/lib/systemd/systemd" && parent_command.contains("systemd"));
+        let is_user_manager_chain = (pid >= 100
+            && (command.contains("systemd-executor")
+                || parent_command.contains("systemd-executor")
+                || (command == "/usr/lib/systemd/systemd"
+                    && parent_command.contains("systemd"))))
+            || command.contains("systemd-user-runtime-dir")
+            || command.contains("systemd-logind");
         is_user_manager_chain.then_some((pid, command, parent_command))
     })
 }
