@@ -771,6 +771,7 @@ fn faccessat_impl(
     path_str: &str,
     mode: i32,
     flags: AtFlags,
+    debug_op: &str,
 ) -> Result<usize, SyscallError> {
     let allowed = (AtFlags::EMPTY_PATH | AtFlags::SYMLINK_NOFOLLOW | AtFlags::EACCESS).bits();
     if flags.bits() != flags.bits() & allowed {
@@ -795,8 +796,19 @@ fn faccessat_impl(
     } else {
         VirtualFS.lock().open(path)
     };
-    let object: ObjectRef = Arc::new(open_result?);
-    check_access_permissions(&object.as_statable()?.stat(), mode)?;
+    let object: ObjectRef = Arc::new(match open_result {
+        Ok(object) => object,
+        Err(err) => {
+            debug_logind_path_op(debug_op, &path, &Err(err));
+            debug_init_path_op(debug_op, &path, &Err(err));
+            return Err(err.into());
+        }
+    });
+    let access_result = check_access_permissions(&object.as_statable()?.stat(), mode);
+    let log_result = access_result.map_err(SyscallError::from).map(|_| ());
+    debug_logind_path_op(debug_op, &path, &log_result);
+    debug_init_path_op(debug_op, &path, &log_result);
+    access_result?;
     Ok(0)
 }
 
@@ -1318,7 +1330,21 @@ define_syscall!(Statx, |dirfd: i32,
             return Err(SyscallError::BadAddress);
         }
 
-        let stat = stat_at(dirfd, &path_str, flags)?;
+        let resolved_path = if path_str.is_empty() && flags.contains(AtFlags::EMPTY_PATH) {
+            None
+        } else {
+            Some(resolve_path_at(dirfd, &path_str)?)
+        };
+        let stat = match stat_at(dirfd, &path_str, flags) {
+            Ok(stat) => stat,
+            Err(err) => {
+                if let Some(path) = resolved_path.as_ref() {
+                    debug_logind_path_op("statx", path, &Err(err));
+                    debug_init_path_op("statx", path, &Err(err));
+                }
+                return Err(err);
+            }
+        };
         let mount_id = stat_mount_id_at(dirfd, &path_str, flags)?;
         let mount_root = stat_mount_root_at(dirfd, &path_str, flags)?;
 
@@ -1357,6 +1383,10 @@ define_syscall!(Statx, |dirfd: i32,
             ..Default::default()
         };
         user_safe::write(statx_ptr, &statx)?;
+        if let Some(path) = resolved_path.as_ref() {
+            debug_logind_path_op("statx", path, &Ok(()));
+            debug_init_path_op("statx", path, &Ok(()));
+        }
 
         Ok(0)
     })
@@ -1367,7 +1397,7 @@ define_syscall!(Faccessat, |dirfd: i32,
                             mode: i32,
                             flags: AtFlags| {
     let path_str = path_from_raw(path)?;
-    faccessat_impl(dirfd, &path_str, mode, flags)
+    faccessat_impl(dirfd, &path_str, mode, flags, "faccessat")
 });
 
 define_syscall!(Faccessat2, |dirfd: i32,
@@ -1375,7 +1405,7 @@ define_syscall!(Faccessat2, |dirfd: i32,
                              mode: i32,
                              flags: AtFlags| {
     let path_str = path_from_raw(path)?;
-    faccessat_impl(dirfd, &path_str, mode, flags)
+    faccessat_impl(dirfd, &path_str, mode, flags, "faccessat2")
 });
 
 define_syscall!(Getxattr, |path: CString,
