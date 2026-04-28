@@ -6,7 +6,7 @@ use spin::Mutex;
 
 use crate::{
     define_syscall,
-    filesystem::path::Path,
+    filesystem::{info::DirectoryContentInfo, object::FileLikeObject, path::Path},
     filesystem::vfs_traits::DirectoryContentType,
     filesystem::vfs_traits::Whence,
     memory::protection::Protection,
@@ -105,6 +105,55 @@ fn current_display_pipe_process_info() -> Option<(u64, String, String)> {
     })
 }
 
+fn current_sddm_dirent_process_info() -> Option<(u64, String, String)> {
+    with_current_process(|process| {
+        let pid = process.pid.0;
+        let command = process.command_line.first().cloned().unwrap_or_default();
+        let parent_command = process
+            .parent
+            .as_ref()
+            .and_then(|parent| parent.lock().command_line.first().cloned())
+            .unwrap_or_default();
+        (command.contains("sddm")
+            || command.contains("kwin")
+            || command.contains("startplasma")
+            || command.contains("plasmashell")
+            || parent_command.contains("sddm"))
+        .then_some((pid, command, parent_command))
+    })
+}
+
+fn should_log_sddm_dirent_directory(name: &str) -> bool {
+    matches!(name, "sddm.conf.d" | "wayland-sessions" | "xsessions")
+}
+
+fn log_sddm_dirents(object_index: u64, obj: &FileLikeObject, contents: &[DirectoryContentInfo]) {
+    let Some((pid, command, parent_command)) = current_sddm_dirent_process_info() else {
+        return;
+    };
+    let Ok(info) = obj.info() else {
+        return;
+    };
+    if !should_log_sddm_dirent_directory(&info.name) {
+        return;
+    }
+
+    let entries = contents
+        .iter()
+        .map(|entry| format!("{}:{:?}", entry.name, entry.content_type))
+        .collect::<Vec<_>>()
+        .join(", ");
+    crate::s_println!(
+        "sddm-getdents64 pid={} cmd={} parent_cmd={} fd_object={} dir={} entries=[{}]",
+        pid,
+        command,
+        parent_command,
+        object_index,
+        info.name,
+        entries
+    );
+}
+
 fn current_process_object_fds(object: &ObjectRef) -> Vec<usize> {
     with_current_process(|process| {
         process
@@ -196,6 +245,7 @@ fn log_user_manager_socket_bytes(_op: &str, _object: &ObjectRef, _bytes: &[u8]) 
 fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult {
     let obj = get_object_current_process(object_index)?.as_file_like()?;
     let contents = obj.directory_contents().map_err(SyscallError::from)?;
+    log_sddm_dirents(object_index, &obj, &contents);
     let current_pid = get_current_process().lock().pid;
     let mut offsets = DIR_OFFSETS.lock();
     let offset_entry = offsets.entry((current_pid, object_index)).or_insert(0usize);
