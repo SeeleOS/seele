@@ -251,7 +251,6 @@ sudo install -d -m 0755 "${SYSROOT_DIR}/var/lib/dbus"
 sudo rm -f "${SYSROOT_DIR}/init"
 
 sudo install -Dm644 "${ROOT_DIR}/misc/maplemono.ttf" "${SYSROOT_DIR}/usr/share/fonts/TTF/maplemono.ttf"
-sudo cp "${ROOTFS_MAKING_DIR}/xorg.conf" "${SYSROOT_DIR}/etc/X11/xorg.conf"
 sudo install -Dm644 "${ROOTFS_MAKING_DIR}/weston.ini" "${SYSROOT_DIR}/etc/xdg/weston/weston.ini"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/root/.xinitrc"
