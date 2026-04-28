@@ -3,8 +3,10 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use crate::{
     misc::snapshot::Snapshot,
     process::manager::get_current_process,
+    process::misc::with_current_process,
     process::ptrace::{maybe_stop_current_on_syscall_entry, maybe_stop_current_on_syscall_exit},
     signal::process_current_process_signals,
+    systemcall::numbers::SyscallNumber,
     systemcall::table::SYSCALL_TABLE,
     systemcall::utils::SyscallError,
     thread::{
@@ -73,7 +75,55 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     }
 }
 
-fn log_sddm_syscall(_phase: &str, _syscall_no: isize, _result: Option<isize>) {}
+fn log_sddm_syscall(phase: &str, syscall_no: isize, result: Option<isize>) {
+    let Some((pid, command)) = with_current_process(|process| {
+        let pid = process.pid.0;
+        let command = process.command_line.first().cloned().unwrap_or_default();
+        (command.contains("Xorg")
+            || command.contains("/usr/bin/X")
+            || command == "sleep"
+            || command.ends_with("/sleep")
+            || command.contains("startplasma")
+            || command.contains("kwin")
+            || command.contains("plasmashell"))
+        .then_some((pid, command))
+    }) else {
+        return;
+    };
+
+    let syscall_name = SyscallNumber::from_number(syscall_no as usize);
+    match (phase, syscall_name, result) {
+        ("enter", Some(name), _) => crate::s_println!(
+            "display-syscall-enter pid={} cmd={} syscall={:?}({})",
+            pid,
+            command,
+            name,
+            syscall_no
+        ),
+        ("enter", None, _) => crate::s_println!(
+            "display-syscall-enter pid={} cmd={} syscall={}",
+            pid,
+            command,
+            syscall_no
+        ),
+        ("exit", Some(name), Some(value)) => crate::s_println!(
+            "display-syscall-exit pid={} cmd={} syscall={:?}({}) result={}",
+            pid,
+            command,
+            name,
+            syscall_no,
+            value
+        ),
+        ("exit", None, Some(value)) => crate::s_println!(
+            "display-syscall-exit pid={} cmd={} syscall={} result={}",
+            pid,
+            command,
+            syscall_no,
+            value
+        ),
+        _ => {}
+    }
+}
 
 fn syscall_handler_unwrapped(
     syscall_no: isize,
