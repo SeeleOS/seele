@@ -2,12 +2,12 @@ use crate::{
     define_syscall,
     filesystem::{
         errors::FSError,
-        info::LinuxStat,
+        info::{DirectoryContentInfo, LinuxStat},
         object::FileLikeObject,
         path::Path,
         tmpfs::TmpFs,
         vfs::VirtualFS,
-        vfs_traits::{DirectoryContentInfo, DirectoryContentType, FileLikeType, MountFlags},
+        vfs_traits::{DirectoryContentType, FileLikeType, MountFlags},
     },
     memory::user_safe,
     misc::{
