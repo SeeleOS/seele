@@ -194,8 +194,7 @@ impl UnixSocketObject {
                         UnixSocketKind::SeqPacket => buffer.len(),
                         UnixSocketKind::Datagram => unreachable!(),
                     };
-                    if self.kind == UnixSocketKind::SeqPacket && write_len > STREAM_RECV_CAPACITY
-                    {
+                    if self.kind == UnixSocketKind::SeqPacket && write_len > STREAM_RECV_CAPACITY {
                         return Err(SocketError::InvalidArguments);
                     }
                     if write_len > 0 {

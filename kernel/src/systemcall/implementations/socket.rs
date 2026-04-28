@@ -9,7 +9,7 @@ use crate::{
         error::ObjectError,
         misc::{ObjectRef, get_object_current_process},
     },
-    process::{FdFlags, manager::get_current_process, misc::with_current_process},
+    process::{FdFlags, manager::get_current_process},
     socket::{
         AF_INET, AF_NETLINK, AF_UNIX, InetSocketObject, SOCK_CLOEXEC, SOCK_NONBLOCK, SOL_SOCKET,
         UnixSocketKind, UnixSocketObject, UnixSocketState,
@@ -57,125 +57,11 @@ struct LinuxUcred {
     gid: u32,
 }
 
-fn current_user_manager_chain() -> Option<(u64, String, String)> {
-    with_current_process(|process| {
-        let pid = process.pid.0;
-        let command = process.command_line.first().cloned().unwrap_or_default();
-        let parent_command = process
-            .parent
-            .as_ref()
-            .and_then(|parent| parent.lock().command_line.first().cloned())
-            .unwrap_or_default();
-        let is_user_manager_chain = (pid >= 100
-            && (command.contains("systemd-executor")
-                || parent_command.contains("systemd-executor")
-                || (command == "/usr/lib/systemd/systemd" && parent_command.contains("systemd"))))
-            || command.contains("systemd-user-runtime-dir")
-            || command.contains("systemd-logind")
-            || command.contains("dbus-broker")
-            || command.contains("dbus-broker-launch")
-            || pid == 1;
-        is_user_manager_chain.then_some((pid, command, parent_command))
-    })
-}
+fn log_user_manager_socket(_op: &str, _target: &str, _result: &Result<(), SyscallError>) {}
 
-fn log_user_manager_socket(op: &str, target: &str, result: &Result<(), SyscallError>) {
-    let Some((pid, command, parent_command)) = current_user_manager_chain() else {
-        return;
-    };
-    match result {
-        Ok(()) => crate::s_println!(
-            "usermgr-socket pid={} cmd={} parent_cmd={} op={} target={} result=ok",
-            pid,
-            command,
-            parent_command,
-            op,
-            target
-        ),
-        Err(err) => crate::s_println!(
-            "usermgr-socket pid={} cmd={} parent_cmd={} op={} target={} err={:?}",
-            pid,
-            command,
-            parent_command,
-            op,
-            target,
-            err
-        ),
-    }
-}
+fn log_user_manager_socket_payload(_op: &str, _target: &str, _bytes: &[u8]) {}
 
-fn log_user_manager_socket_payload(op: &str, target: &str, bytes: &[u8]) {
-    if bytes.is_empty() {
-        return;
-    }
-
-    let Some((pid, command, parent_command)) = current_user_manager_chain() else {
-        return;
-    };
-
-    if bytes.len() > 4096 {
-        crate::s_println!(
-            "usermgr-socket-{}-skipped pid={} cmd={} parent_cmd={} target={} len={}",
-            op,
-            pid,
-            command,
-            parent_command,
-            target,
-            bytes.len()
-        );
-        return;
-    }
-
-    let preview = &bytes[..bytes.len().min(256)];
-    if let Ok(text) = core::str::from_utf8(preview)
-        && text.bytes().all(|byte| {
-            byte == b'\n' || byte == b'\r' || byte == b'\t' || (0x20..=0x7e).contains(&byte)
-        })
-    {
-        crate::s_println!(
-            "usermgr-socket-{} pid={} cmd={} parent_cmd={} target={} len={} text={:?}",
-            op,
-            pid,
-            command,
-            parent_command,
-            target,
-            bytes.len(),
-            text
-        );
-        return;
-    }
-
-    crate::s_println!(
-        "usermgr-socket-{}-bytes pid={} cmd={} parent_cmd={} target={} len={} bytes={:?}",
-        op,
-        pid,
-        command,
-        parent_command,
-        target,
-        bytes.len(),
-        &preview[..preview.len().min(64)]
-    );
-}
-
-fn log_user_manager_socket_rights(op: &str, target: &str, rights_count: usize) {
-    if rights_count == 0 {
-        return;
-    }
-
-    let Some((pid, command, parent_command)) = current_user_manager_chain() else {
-        return;
-    };
-
-    crate::s_println!(
-        "usermgr-socket-{}-rights pid={} cmd={} parent_cmd={} target={} rights={}",
-        op,
-        pid,
-        command,
-        parent_command,
-        target,
-        rights_count
-    );
-}
+fn log_user_manager_socket_rights(_op: &str, _target: &str, _rights_count: usize) {}
 
 fn socket_target_from_bytes(address: &[u8]) -> Option<String> {
     match socket_address_from_raw(address.as_ptr(), address.len() as u32).ok()? {
@@ -185,14 +71,32 @@ fn socket_target_from_bytes(address: &[u8]) -> Option<String> {
     }
 }
 
+fn is_effectively_unnamed_unix(address: &[u8]) -> bool {
+    address.len() >= 2 && address[2..].iter().all(|&byte| byte == 0)
+}
+
+fn socket_target_for_socket_like(socket: &dyn crate::socket::SocketLike) -> Option<String> {
+    for address in [
+        socket.getsockname_bytes().ok(),
+        socket.getpeername_bytes().ok(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if is_effectively_unnamed_unix(&address) {
+            continue;
+        }
+        if let Some(target) = socket_target_from_bytes(&address) {
+            return Some(target);
+        }
+    }
+
+    None
+}
+
 fn socket_target_for_object(socket: &ObjectRef) -> Option<String> {
-    let address = socket
-        .clone()
-        .as_socket_like()
-        .ok()?
-        .getsockname_bytes()
-        .ok()?;
-    socket_target_from_bytes(&address)
+    let socket = socket.clone().as_socket_like().ok()?;
+    socket_target_for_socket_like(&*socket)
 }
 
 fn preview_iovecs(iovs: &[relibc_iovec]) -> Result<Vec<u8>, SyscallError> {

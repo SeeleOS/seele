@@ -5,7 +5,6 @@ use crate::{
     process::manager::get_current_process,
     process::ptrace::{maybe_stop_current_on_syscall_entry, maybe_stop_current_on_syscall_exit},
     signal::process_current_process_signals,
-    systemcall::numbers::SyscallNumber,
     systemcall::table::SYSCALL_TABLE,
     systemcall::utils::SyscallError,
     thread::{
@@ -74,90 +73,7 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     }
 }
 
-fn log_sddm_syscall(phase: &str, syscall_no: isize, result: Option<isize>) {
-    crate::process::misc::with_current_process(|process| {
-        let command = process
-            .command_line
-            .first()
-            .map(|command| command.as_str())
-            .unwrap_or("");
-        let parent_command = process
-            .parent
-            .as_ref()
-            .and_then(|parent| {
-                parent
-                    .lock()
-                    .command_line
-                    .first()
-                    .cloned()
-            })
-            .unwrap_or_default();
-        if command.contains("sddm-diagnostics") {
-            return;
-        }
-        let is_user_manager_chain = process.pid.0 >= 100
-            && (command.contains("systemd-executor")
-                || parent_command.contains("systemd-executor")
-                || (command == "/usr/lib/systemd/systemd"
-                    && parent_command.contains("systemd")));
-        if !(command.contains("sddm")
-            || command.contains("/usr/bin/X")
-            || command.contains("Xorg")
-            || (command.contains("/bin/sh") && parent_command.contains("sddm"))
-            || parent_command.contains("sddm")
-            || command.contains("weston")
-            || command.contains("kwin")
-            || command.contains("plasma")
-            || is_user_manager_chain)
-        {
-            return;
-        }
-
-        let syscall = SyscallNumber::from_number(syscall_no as usize);
-        if is_user_manager_chain {
-            let Some(result) = result else {
-                return;
-            };
-            if result >= 0 && !matches!(syscall_no, 232 | 271 | 441) {
-                return;
-            }
-            crate::s_println!(
-                "sddm-syscall exit pid={} cmd={} parent_cmd={} no={} name={:?} result={}",
-                process.pid.0,
-                command,
-                parent_command,
-                syscall_no,
-                syscall,
-                result
-            );
-            return;
-        }
-
-        if !matches!(syscall_no, 56 | 59 | 61 | 62 | 172 | 173 | 247) {
-            return;
-        }
-
-        match (phase, result) {
-            ("enter", None) => crate::s_println!(
-                "sddm-syscall enter pid={} cmd={} no={} name={:?}",
-                process.pid.0,
-                command,
-                syscall_no,
-                syscall
-            ),
-            ("exit", Some(result)) => crate::s_println!(
-                "sddm-syscall exit pid={} cmd={} parent_cmd={} no={} name={:?} result={}",
-                process.pid.0,
-                command,
-                parent_command,
-                syscall_no,
-                syscall,
-                result
-            ),
-            _ => {}
-        }
-    });
-}
+fn log_sddm_syscall(_phase: &str, _syscall_no: isize, _result: Option<isize>) {}
 
 fn syscall_handler_unwrapped(
     syscall_no: isize,
