@@ -136,14 +136,22 @@ fn log_user_manager_socket_bytes(op: &str, object: &ObjectRef, bytes: &[u8]) {
     let Some((pid, command, parent_command)) = current_user_manager_chain_info() else {
         return;
     };
+    let target = object
+        .clone()
+        .as_socket_like()
+        .ok()
+        .and_then(|socket| socket.getsockname_bytes().ok())
+        .map(|name| format!("{:?}", name))
+        .unwrap_or_else(|| String::from("<unknown>"));
 
     if bytes.len() > 4096 {
         crate::s_println!(
-            "usermgr-socket-{}-skipped pid={} cmd={} parent_cmd={} len={}",
+            "usermgr-socket-{}-skipped pid={} cmd={} parent_cmd={} target={} len={}",
             op,
             pid,
             command,
             parent_command,
+            target,
             bytes.len()
         );
         return;
@@ -156,11 +164,12 @@ fn log_user_manager_socket_bytes(op: &str, object: &ObjectRef, bytes: &[u8]) {
         })
     {
         crate::s_println!(
-            "usermgr-socket-{} pid={} cmd={} parent_cmd={} len={} text={:?}",
+            "usermgr-socket-{} pid={} cmd={} parent_cmd={} target={} len={} text={:?}",
             op,
             pid,
             command,
             parent_command,
+            target,
             bytes.len(),
             text
         );
@@ -168,11 +177,12 @@ fn log_user_manager_socket_bytes(op: &str, object: &ObjectRef, bytes: &[u8]) {
     }
 
     crate::s_println!(
-        "usermgr-socket-{}-bytes pid={} cmd={} parent_cmd={} len={} bytes={:?}",
+        "usermgr-socket-{}-bytes pid={} cmd={} parent_cmd={} target={} len={} bytes={:?}",
         op,
         pid,
         command,
         parent_command,
+        target,
         bytes.len(),
         &preview[..preview.len().min(64)]
     );

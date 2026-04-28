@@ -71,7 +71,10 @@ fn current_user_manager_chain() -> Option<(u64, String, String)> {
                 || parent_command.contains("systemd-executor")
                 || (command == "/usr/lib/systemd/systemd" && parent_command.contains("systemd"))))
             || command.contains("systemd-user-runtime-dir")
-            || command.contains("systemd-logind");
+            || command.contains("systemd-logind")
+            || command.contains("dbus-broker")
+            || command.contains("dbus-broker-launch")
+            || pid == 1;
         is_user_manager_chain.then_some((pid, command, parent_command))
     })
 }
