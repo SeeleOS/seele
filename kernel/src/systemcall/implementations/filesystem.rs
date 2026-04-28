@@ -388,6 +388,14 @@ fn debug_init_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) 
     }
 }
 
+fn debug_init_openat_stage(stage: &str, dirfd: i32, path: &str) {
+    if !is_init_process() {
+        return;
+    }
+
+    crate::s_println!("init openat {stage} dirfd={dirfd} path={path}");
+}
+
 fn debug_logind_fs(op: &str, path: &Path, result: &Result<(), SyscallError>) {
     if !is_logind_process() || !is_logind_runtime_path(path) {
         return;
@@ -880,6 +888,7 @@ define_syscall!(OpenAt, |dirfd: i32,
     systemd_perf::profile_current_process(PerfBucket::OpenAt, || {
         let current_process = get_current_process();
         let path_str = path_from_raw(path)?;
+        debug_init_openat_stage("raw", dirfd, &path_str);
         if flags.contains(OpenFlags::TMPFILE) {
             let object = open_tmpfile_at(dirfd, &path_str)?;
             let fd_flags = if flags.contains(OpenFlags::CLOEXEC) {
@@ -901,6 +910,7 @@ define_syscall!(OpenAt, |dirfd: i32,
         }
 
         let path = resolve_path_at(dirfd, &path_str)?;
+        debug_init_openat_stage("resolved", dirfd, &path.clone().as_string());
         let object = if !nofollow {
             match VirtualFS.lock().open(path.clone()) {
                 Ok(file) => {
