@@ -14,6 +14,13 @@ section() {
     emit "=== $1 ==="
 }
 
+run_probe() {
+    emit "--- $*"
+    "$@" 2>&1 | while IFS= read -r line; do
+        emit "${line}"
+    done
+}
+
 rm -f "${log}"
 
 section date
@@ -44,6 +51,22 @@ section devices
 for path in /dev/dri /dev/dri/* /dev/input /dev/input/* /dev/tty0 /dev/tty1 /dev/fb0; do
     emit "${path}"
 done
+
+
+section logind-runtime
+for path in /run/systemd/seats /run/systemd/seats/* /run/systemd/sessions /run/systemd/sessions/* /run/udev/tags/seat /run/udev/tags/seat/* /run/udev/tags/master-of-seat /run/udev/tags/master-of-seat/*; do
+    emit "${path}"
+done
+for file in /run/systemd/seats/seat0 /run/udev/data/+drm:card0 /run/udev/data/c13:64 /run/udev/data/c13:65; do
+    emit "--- ${file}"
+    cat "${file}" 2>&1 | while IFS= read -r line; do
+        emit "${line}"
+    done
+done
+
+section logind-bus
+run_probe timeout 5s busctl --no-pager call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager ListSeats
+run_probe timeout 5s loginctl list-seats
 
 section sddm-config
 for file in /etc/sddm.conf /etc/sddm.conf.d/seele-wayland.conf; do
