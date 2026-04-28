@@ -405,6 +405,8 @@ fn should_log_sddm_path(path: &str) -> bool {
     [
         "/etc/sddm.conf",
         "/etc/sddm.conf.d",
+        "default.conf",
+        "seele-wayland.conf",
         "plasma.desktop",
         "startplasma-wayland",
         "kwin_wayland",
@@ -414,6 +416,7 @@ fn should_log_sddm_path(path: &str) -> bool {
         "/usr/share/xsessions",
         "/usr/share/sddm/scripts/wayland-session",
         "/usr/lib/sddm",
+        "/var/log/sddm/service.log",
     ]
     .into_iter()
     .any(|pattern| path.contains(pattern))
