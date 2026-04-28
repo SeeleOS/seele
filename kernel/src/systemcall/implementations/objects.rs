@@ -51,6 +51,66 @@ struct LinuxIovec {
     iov_len: usize,
 }
 
+fn current_x_chain_process_info() -> Option<(u64, String, String)> {
+    with_current_process(|process| {
+        let command = process
+            .command_line
+            .first()
+            .cloned()
+            .unwrap_or_default();
+        let parent_command = process
+            .parent
+            .as_ref()
+            .and_then(|parent| parent.lock().command_line.first().cloned())
+            .unwrap_or_default();
+        let is_x_chain = command.contains("Xorg")
+            || command.contains("/usr/bin/X")
+            || parent_command == "/usr/bin/sddm"
+            || command.contains("systemd-executor")
+            || parent_command.contains("systemd-executor")
+            || (command == "/usr/lib/systemd/systemd" && parent_command.contains("systemd"));
+        is_x_chain.then_some((process.pid.0, command, parent_command))
+    })
+}
+
+fn log_x_chain_write_bytes(bytes: &[u8]) {
+    if let Some((pid, command, parent_command)) = current_x_chain_process_info()
+    {
+        if bytes.len() > 4096 {
+            crate::s_println!(
+                "xchain-write-skipped pid={} cmd={} parent_cmd={} len={}",
+                pid,
+                command,
+                parent_command,
+                bytes.len()
+            );
+            return;
+        }
+        if let Ok(text) = core::str::from_utf8(bytes)
+            && text
+                .bytes()
+                .all(|byte| byte == b'\n' || byte == b'\r' || byte == b'\t' || (0x20..=0x7e).contains(&byte))
+        {
+            crate::s_println!(
+                "xchain-write pid={} cmd={} parent_cmd={} text={:?}",
+                pid,
+                command,
+                parent_command,
+                text
+            );
+            return;
+        }
+        crate::s_println!(
+            "xchain-write-bytes pid={} cmd={} parent_cmd={} len={} bytes={:?}",
+            pid,
+            command,
+            parent_command,
+            bytes.len(),
+            &bytes[..bytes.len().min(64)]
+        );
+    }
+}
+
 fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult {
     let obj = get_object_current_process(object_index)?.as_file_like()?;
     let contents = obj.directory_contents().map_err(SyscallError::from)?;
@@ -157,9 +217,11 @@ define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
 
 define_syscall!(Write, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
     unsafe {
+        let bytes = slice::from_raw_parts(buf_ptr, len);
+        log_x_chain_write_bytes(bytes);
         Ok(object
             .as_writable()?
-            .write(slice::from_raw_parts(buf_ptr, len))?)
+            .write(bytes)?)
     }
 });
 
@@ -185,6 +247,7 @@ define_syscall!(Writev, |object: ObjectRef,
             return Err(SyscallError::BadAddress);
         }
         let buf = unsafe { slice::from_raw_parts(iov.iov_base, iov.iov_len) };
+        log_x_chain_write_bytes(buf);
         let count = writable.write(buf)?;
         written += count;
         if count < iov.iov_len {
@@ -237,9 +300,42 @@ define_syscall!(Close, |object_num: usize| {
 define_syscall!(Ioctl, |object: ObjectRef,
                         request: u64,
                         request_ptr: u64| {
+    let x_chain_process = current_x_chain_process_info();
+    if let Some((pid, command, parent_command)) = &x_chain_process {
+        crate::s_println!(
+            "xchain-ioctl-enter pid={} cmd={} parent_cmd={} request={:#x} arg={:#x}",
+            pid,
+            command,
+            parent_command,
+            request,
+            request_ptr
+        );
+    }
     let res = object
         .as_configuratable()?
         .configure(ConfigurateRequest::new(request, request_ptr)?);
+
+    if let Some((pid, command, parent_command)) = x_chain_process {
+        match &res {
+            Ok(value) => crate::s_println!(
+                "xchain-ioctl-exit pid={} cmd={} parent_cmd={} request={:#x} result={}",
+                pid,
+                command,
+                parent_command,
+                request,
+                value
+            ),
+            Err(err) => crate::s_println!(
+                "xchain-ioctl-error pid={} cmd={} parent_cmd={} request={:#x} arg={:#x} err={:?}",
+                pid,
+                command,
+                parent_command,
+                request,
+                request_ptr,
+                err
+            ),
+        }
+    }
 
     res.map(|val| val as usize).map_err(Into::into)
 });

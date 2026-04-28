@@ -38,6 +38,15 @@ for proc in /proc/[0-9]*; do
             cat "${proc}/wchan" >>"${log}" 2>/dev/null || true
             emit ""
             ;;
+        systemd|systemd-executor)
+            emit "${pid} ${comm}"
+            cat "${proc}/cmdline" 2>/dev/null | tr '\000' ' ' | while IFS= read -r line; do
+                emit "${line}"
+            done
+            cat "${proc}/status" >>"${log}" 2>/dev/null || true
+            cat "${proc}/wchan" >>"${log}" 2>/dev/null || true
+            emit ""
+            ;;
     esac
 done
 

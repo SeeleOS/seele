@@ -5,6 +5,7 @@ use crate::{
     process::manager::get_current_process,
     process::ptrace::{maybe_stop_current_on_syscall_entry, maybe_stop_current_on_syscall_exit},
     signal::process_current_process_signals,
+    systemcall::numbers::SyscallNumber,
     systemcall::table::SYSCALL_TABLE,
     systemcall::utils::SyscallError,
     thread::{
@@ -34,6 +35,8 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
 
     maybe_stop_current_on_syscall_entry();
 
+    log_sddm_syscall("enter", syscall_no, None);
+
     let result = syscall_handler_unwrapped(
         syscall_no,
         snapshot.rdi,
@@ -45,6 +48,8 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     );
 
     snapshot.rax = result;
+
+    log_sddm_syscall("exit", syscall_no, Some(result));
 
     with_current_thread(|thread| {
         let fs_base = FsBase::read().as_u64();
@@ -67,6 +72,71 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
         // And returned the value (snapshot.rax = result)
         return_to_scheduler_no_save();
     }
+}
+
+fn log_sddm_syscall(phase: &str, syscall_no: isize, result: Option<isize>) {
+    crate::process::misc::with_current_process(|process| {
+        let command = process
+            .command_line
+            .first()
+            .map(|command| command.as_str())
+            .unwrap_or("");
+        let parent_command = process
+            .parent
+            .as_ref()
+            .and_then(|parent| {
+                parent
+                    .lock()
+                    .command_line
+                    .first()
+                    .cloned()
+            })
+            .unwrap_or_default();
+        if command.contains("sddm-diagnostics") {
+            return;
+        }
+        let is_user_manager_chain = command.contains("systemd-executor")
+            || parent_command.contains("systemd-executor")
+            || (command == "/usr/lib/systemd/systemd" && parent_command.contains("systemd"));
+        if !is_user_manager_chain
+            && !matches!(syscall_no, 56 | 59 | 61 | 62 | 172 | 173 | 247)
+        {
+            return;
+        }
+        if !(command.contains("sddm")
+            || command.contains("/usr/bin/X")
+            || command.contains("Xorg")
+            || (command.contains("/bin/sh") && parent_command.contains("sddm"))
+            || parent_command.contains("sddm")
+            || command.contains("weston")
+            || command.contains("kwin")
+            || command.contains("plasma")
+            || is_user_manager_chain)
+        {
+            return;
+        }
+
+        let syscall = SyscallNumber::from_number(syscall_no as usize);
+        match (phase, result) {
+            ("enter", None) => crate::s_println!(
+                "sddm-syscall enter pid={} cmd={} no={} name={:?}",
+                process.pid.0,
+                command,
+                syscall_no,
+                syscall
+            ),
+            ("exit", Some(result)) => crate::s_println!(
+                "sddm-syscall exit pid={} cmd={} parent_cmd={} no={} name={:?} result={}",
+                process.pid.0,
+                command,
+                parent_command,
+                syscall_no,
+                syscall,
+                result
+            ),
+            _ => {}
+        }
+    });
 }
 
 fn syscall_handler_unwrapped(
