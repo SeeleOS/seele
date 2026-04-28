@@ -56,6 +56,7 @@ ARCH_PACKAGES=(
     xf86-video-vesa
     icewm
     plasma-meta
+    plasma-wayland-session
     plasma-x11-session
     konsole
     kalk
