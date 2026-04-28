@@ -3,7 +3,6 @@ use crate::{
     filesystem::{
         errors::FSError,
         info::LinuxStat,
-        misc::smart_resolve_path,
         object::FileLikeObject,
         path::Path,
         tmpfs::TmpFs,
@@ -263,13 +262,6 @@ fn is_supported_api_mount(fstype: &str) -> bool {
     )
 }
 
-fn path_is_relative_to_cwd(dirfd: i32) -> Result<bool, SyscallError> {
-    match dirfd {
-        AT_FDCWD => Ok(true),
-        _ => Err(SyscallError::NoSyscall),
-    }
-}
-
 fn resolve_path_at(dirfd: i32, path_str: &str) -> Result<Path, SyscallError> {
     systemd_perf::profile_current_process(PerfBucket::ResolvePathAt, || {
         if path_str.starts_with('/') {
@@ -326,6 +318,31 @@ fn next_tmpfile_path(dir_path: &Path) -> Path {
     Path::new(&path)
 }
 
+fn is_logind_process() -> bool {
+    with_current_process(|process| {
+        process
+            .command_line
+            .first()
+            .is_some_and(|command| command.contains("systemd-logind"))
+    })
+}
+
+fn is_logind_runtime_path(path: &Path) -> bool {
+    let path = path.clone().as_string();
+    path.starts_with("/run/systemd/users") || path.starts_with("/run/systemd/seats")
+}
+
+fn debug_logind_fs(op: &str, path: &Path, result: &Result<(), SyscallError>) {
+    if !is_logind_process() || !is_logind_runtime_path(path) {
+        return;
+    }
+
+    match result {
+        Ok(()) => crate::s_println!("logind {op} {} -> ok", path.clone().as_string()),
+        Err(err) => crate::s_println!("logind {op} {} -> {:?}", path.clone().as_string(), err),
+    }
+}
+
 fn open_tmpfile_at(dirfd: i32, path_str: &str) -> Result<ObjectRef, SyscallError> {
     let dir_path = resolve_path_at(dirfd, path_str)?;
     let dir = VirtualFS.lock().open(dir_path.clone())?;
@@ -340,10 +357,15 @@ fn open_tmpfile_at(dirfd: i32, path_str: &str) -> Result<ObjectRef, SyscallError
             Ok(()) => {
                 let object: ObjectRef = Arc::new(VirtualFS.lock().open(tmp_path.clone())?);
                 VirtualFS.lock().delete_file(tmp_path)?;
+                debug_logind_fs("tmpfile", &dir_path, &Ok(()));
                 return Ok(object);
             }
             Err(FSError::AlreadyExists) => continue,
-            Err(err) => return Err(err.into()),
+            Err(err) => {
+                let err = SyscallError::from(err);
+                debug_logind_fs("tmpfile", &dir_path, &Err(err));
+                return Err(err);
+            }
         }
     }
 
@@ -665,21 +687,27 @@ fn faccessat_impl(
 }
 
 fn rename_impl(
-    old_from_currentdir: bool,
+    old_dirfd: i32,
     old_path: String,
-    new_from_currentdir: bool,
+    new_dirfd: i32,
     new_path: String,
 ) -> Result<usize, SyscallError> {
-    let old_path =
-        smart_resolve_path(old_path, old_from_currentdir).ok_or(SyscallError::InvalidArguments)?;
-    let new_path =
-        smart_resolve_path(new_path, new_from_currentdir).ok_or(SyscallError::InvalidArguments)?;
+    let old_path = resolve_path_at(old_dirfd, &old_path)?;
+    let new_path = resolve_path_at(new_dirfd, &new_path)?;
 
     if old_path.clone().as_string() == new_path.clone().as_string() {
         return Ok(0);
     }
 
-    VirtualFS.lock().rename_file(old_path, new_path)?;
+    let result = VirtualFS.lock().rename_file(old_path.clone(), new_path.clone());
+    let result = result.map_err(SyscallError::from);
+    let log_result = match result {
+        Ok(()) => Ok(()),
+        Err(err) => Err(err),
+    };
+    debug_logind_fs("rename-target", &new_path, &log_result);
+    let result = log_result;
+    result?;
     Ok(0)
 }
 
@@ -1284,7 +1312,15 @@ define_syscall!(LinkAt, |old_dirfd: i32,
             return Err(SyscallError::InvalidArguments);
         }
         let object = get_object_current_process(old_dirfd as u64).map_err(SyscallError::from)?;
-        object.as_file_like()?.link_to(new_path)?;
+        let result = object.as_file_like()?.link_to(new_path.clone());
+        let result = result.map_err(SyscallError::from);
+        let log_result = match result {
+            Ok(()) => Ok(()),
+            Err(err) => Err(err),
+        };
+        debug_logind_fs("linkat-empty-path", &new_path, &log_result);
+        let result = log_result;
+        result?;
         return Ok(0);
     }
 
@@ -1728,11 +1764,9 @@ define_syscall!(RenameAt, |old_dirfd: i32,
                            old_path: CString,
                            new_dirfd: i32,
                            new_path: CString| {
-    let old_from_currentdir = path_is_relative_to_cwd(old_dirfd)?;
-    let new_from_currentdir = path_is_relative_to_cwd(new_dirfd)?;
     let old_path = path_from_raw(old_path)?;
     let new_path = path_from_raw(new_path)?;
-    rename_impl(old_from_currentdir, old_path, new_from_currentdir, new_path)
+    rename_impl(old_dirfd, old_path, new_dirfd, new_path)
 });
 
 define_syscall!(RenameAt2, |old_dirfd: i32,
@@ -1743,11 +1777,9 @@ define_syscall!(RenameAt2, |old_dirfd: i32,
     if flags != 0 {
         return Err(SyscallError::NoSyscall);
     }
-    let old_from_currentdir = path_is_relative_to_cwd(old_dirfd)?;
-    let new_from_currentdir = path_is_relative_to_cwd(new_dirfd)?;
     let old_path = path_from_raw(old_path)?;
     let new_path = path_from_raw(new_path)?;
-    rename_impl(old_from_currentdir, old_path, new_from_currentdir, new_path)
+    rename_impl(old_dirfd, old_path, new_dirfd, new_path)
 });
 
 define_syscall!(Utimensat, |dirfd: i32,
