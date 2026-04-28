@@ -60,7 +60,6 @@ ARCH_PACKAGES=(
     xorg-fonts-misc
 )
 AUR_PACKAGES=(
-    st
 )
 
 while [ $# -gt 0 ]; do
