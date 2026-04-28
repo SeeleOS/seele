@@ -9,7 +9,11 @@ use crate::{
         error::ObjectError,
         misc::{ObjectRef, get_object_current_process},
     },
-    process::{FdFlags, manager::get_current_process},
+    process::{
+        FdFlags,
+        manager::get_current_process,
+        misc::with_current_process,
+    },
     socket::{
         AF_INET, AF_NETLINK, AF_UNIX, InetSocketObject, SOCK_CLOEXEC, SOCK_NONBLOCK, SOL_SOCKET,
         UnixSocketKind, UnixSocketObject, UnixSocketState,
@@ -57,7 +61,64 @@ struct LinuxUcred {
     gid: u32,
 }
 
-fn log_user_manager_socket(_op: &str, _target: &str, _result: &Result<(), SyscallError>) {}
+fn current_display_socket_process_info() -> Option<(u64, String, String)> {
+    with_current_process(|process| {
+        let pid = process.pid.0;
+        let command = process.command_line.first().cloned().unwrap_or_default();
+        let parent_command = process
+            .parent
+            .as_ref()
+            .and_then(|parent| parent.lock().command_line.first().cloned())
+            .unwrap_or_default();
+        (command.contains("sddm")
+            || command.contains("Xorg")
+            || command.contains("/usr/bin/X")
+            || command.contains("startplasma")
+            || command.contains("kwin")
+            || command.contains("plasmashell")
+            || parent_command.contains("sddm"))
+        .then_some((pid, command, parent_command))
+    })
+}
+
+fn should_log_display_socket_target(target: &str) -> bool {
+    target.contains(".X11-unix")
+        || target.contains("wayland")
+        || target.contains("sddm")
+        || target.contains("seat")
+}
+
+fn log_display_socket(op: &str, target: &str, result: &Result<(), SyscallError>) {
+    if !should_log_display_socket_target(target) {
+        return;
+    }
+    let Some((pid, command, parent_command)) = current_display_socket_process_info() else {
+        return;
+    };
+    match result {
+        Ok(()) => crate::s_println!(
+            "display-socket-{} pid={} cmd={} parent_cmd={} target={} result=ok",
+            op,
+            pid,
+            command,
+            parent_command,
+            target
+        ),
+        Err(err) => crate::s_println!(
+            "display-socket-{} pid={} cmd={} parent_cmd={} target={} result=err {:?}",
+            op,
+            pid,
+            command,
+            parent_command,
+            target,
+            err
+        ),
+    }
+}
+
+fn log_user_manager_socket(op: &str, target: &str, result: &Result<(), SyscallError>) {
+    log_display_socket(op, target, result);
+}
 
 fn log_user_manager_socket_payload(_op: &str, _target: &str, _bytes: &[u8]) {}
 
@@ -504,20 +565,32 @@ define_syscall!(Bind, |socket: ObjectRef,
                        address: *const u8,
                        address_len: u32| {
     let address = socket_address_bytes(address, address_len)?;
-    socket
+    let log_target = socket_target_from_bytes(&address);
+    let result = socket
         .clone()
         .as_socket_like()?
         .bind_bytes(&address)
-        .map_err(ObjectError::from)?;
+        .map_err(ObjectError::from)
+        .map_err(SyscallError::from);
+    if let Some(target) = &log_target {
+        log_display_socket("bind", target, &result);
+    }
+    result?;
     Ok(0)
 });
 
 define_syscall!(Listen, |socket: ObjectRef, backlog: usize| {
-    socket
+    let log_target = socket_target_for_object(&socket);
+    let result = socket
         .clone()
         .as_socket_like()?
         .listen(backlog)
-        .map_err(ObjectError::from)?;
+        .map_err(ObjectError::from)
+        .map_err(SyscallError::from);
+    if let Some(target) = &log_target {
+        log_display_socket("listen", target, &result);
+    }
+    result?;
     Ok(0)
 });
 
@@ -545,7 +618,7 @@ define_syscall!(Accept, |socket: ObjectRef,
     let listener_target = socket_target_for_object(&socket);
     let fd = accept_socket(socket, 0)?;
     if let Some(target) = &listener_target {
-        log_user_manager_socket("accept", target, &Ok(()));
+        log_display_socket("accept", target, &Ok(()));
     }
     if !address_len_ptr.is_null() {
         let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
@@ -565,7 +638,7 @@ define_syscall!(Accept4, |socket: ObjectRef,
     let listener_target = socket_target_for_object(&socket);
     let fd = accept_socket(socket, flags)?;
     if let Some(target) = &listener_target {
-        log_user_manager_socket("accept4", target, &Ok(()));
+        log_display_socket("accept4", target, &Ok(()));
     }
     if !address_len_ptr.is_null() {
         let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
