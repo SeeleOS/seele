@@ -204,7 +204,10 @@ fn copy_iovecs_from_user(iovs: &[relibc_iovec]) -> Result<Vec<u8>, SyscallError>
         if iov.iov_base.is_null() {
             return Err(SyscallError::BadAddress);
         }
-        buffer.extend_from_slice(&user_safe::read_buffer(iov.iov_base.cast_const(), iov.iov_len)?);
+        buffer.extend_from_slice(&user_safe::read_buffer(
+            iov.iov_base.cast_const(),
+            iov.iov_len,
+        )?);
     }
     Ok(buffer)
 }
@@ -1121,19 +1124,148 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
     let iovs = read_iovecs_from_user(msg.msg_iov.cast_const(), msg.msg_iovlen)?;
 
     let result = (|| {
-    if let Ok(socket) = socket.clone().as_netlink_socket() {
+        if let Ok(socket) = socket.clone().as_netlink_socket() {
+            let peek = (flags & MSG_PEEK) != 0;
+            let report_trunc = (flags & MSG_TRUNC) != 0;
+            let total_capacity = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
+            let message_len = socket.peek_message_len().ok_or(SyscallError::TryAgain)?;
+            let mut scratch = alloc::vec![0u8; total_capacity];
+            let (copied, full_len, source, uid, gid) = socket
+                .recv_message(&mut scratch, peek)
+                .map_err(SyscallError::from)?;
+            let mut copied_total = 0usize;
+
+            for iov in iovs {
+                if copied_total >= copied {
+                    break;
+                }
+                if iov.iov_len == 0 {
+                    continue;
+                }
+                if iov.iov_base.is_null() {
+                    return Err(SyscallError::BadAddress);
+                }
+
+                let chunk_len = (copied - copied_total).min(iov.iov_len);
+                user_safe::write(
+                    iov.iov_base,
+                    &scratch[copied_total..copied_total + chunk_len],
+                )?;
+                copied_total += chunk_len;
+            }
+
+            msg.msg_flags = 0;
+            if !msg.msg_name.is_null() {
+                let name = LinuxSockAddrNl {
+                    nl_family: AF_NETLINK as u16,
+                    nl_pad: 0,
+                    nl_pid: source.pid,
+                    nl_groups: source.groups,
+                };
+                let requested_len = msg.msg_namelen as usize;
+                let name_bytes = unsafe {
+                    core::slice::from_raw_parts(
+                        (&name as *const LinuxSockAddrNl).cast::<u8>(),
+                        core::mem::size_of::<LinuxSockAddrNl>(),
+                    )
+                };
+                let copy_len = requested_len.min(name_bytes.len());
+                if copy_len > 0 {
+                    user_safe::write(msg.msg_name.cast::<u8>(), &name_bytes[..copy_len])?;
+                }
+                msg.msg_namelen = name_bytes.len() as u32;
+            }
+            let control = netlink_socket_control_bytes(&socket, source.pid, uid, gid)?;
+            if control.is_empty() {
+                msg.msg_controllen = 0;
+            } else if msg.msg_control.is_null() || msg.msg_controllen == 0 {
+                msg.msg_flags |= MSG_CTRUNC;
+                msg.msg_controllen = 0;
+            } else {
+                let copy_len = msg.msg_controllen.min(control.len());
+                user_safe::write(msg.msg_control, &control[..copy_len])?;
+                msg.msg_controllen = copy_len;
+                if copy_len < control.len() {
+                    msg.msg_flags |= MSG_CTRUNC;
+                }
+            }
+            return Ok(if report_trunc || total_capacity == 0 {
+                full_len.max(message_len)
+            } else {
+                copied_total
+            });
+        }
+
+        if let Ok(socket) = socket.clone().as_inet_socket() {
+            let total_capacity = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
+            let mut scratch = alloc::vec![0u8; total_capacity];
+            let (read, source) = socket.recv_from(&mut scratch).map_err(ObjectError::from)?;
+            let mut copied_total = 0usize;
+
+            for iov in iovs {
+                if copied_total >= read {
+                    break;
+                }
+                if iov.iov_len == 0 {
+                    continue;
+                }
+                if iov.iov_base.is_null() {
+                    return Err(SyscallError::BadAddress);
+                }
+
+                let chunk_len = (read - copied_total).min(iov.iov_len);
+                user_safe::write(
+                    iov.iov_base,
+                    &scratch[copied_total..copied_total + chunk_len],
+                )?;
+                copied_total += chunk_len;
+            }
+
+            msg.msg_flags = 0;
+            if !msg.msg_name.is_null() {
+                let name = source
+                    .map(|address| socket_address_to_bytes(SocketAddress::Inet(address)))
+                    .transpose()?
+                    .unwrap_or_default();
+                let copy_len = (msg.msg_namelen as usize).min(name.len());
+                if copy_len > 0 {
+                    user_safe::write(msg.msg_name.cast::<u8>(), &name[..copy_len])?;
+                }
+                msg.msg_namelen = name.len() as u32;
+            } else {
+                msg.msg_namelen = 0;
+            }
+            msg.msg_controllen = 0;
+            if copied_total > 0 {
+                if let Some(target) =
+                    source.map(|address| format!("inet:{:?}:{}", address.addr, address.port))
+                {
+                    log_user_manager_socket_payload("recvmsg", &target, &scratch[..copied_total]);
+                } else {
+                    log_user_manager_socket_payload(
+                        "recvmsg",
+                        "connected",
+                        &scratch[..copied_total],
+                    );
+                }
+            }
+            return Ok(copied_total);
+        }
+
+        let socket = socket.as_unix_socket()?;
+        let dontwait = (flags & MSG_DONTWAIT) != 0;
         let peek = (flags & MSG_PEEK) != 0;
         let report_trunc = (flags & MSG_TRUNC) != 0;
         let total_capacity = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
-        let message_len = socket.peek_message_len().ok_or(SyscallError::TryAgain)?;
-        let mut scratch = alloc::vec![0u8; total_capacity];
-        let (copied, full_len, source, uid, gid) = socket
-            .recv_message(&mut scratch, peek)
-            .map_err(SyscallError::from)?;
-        let mut copied_total = 0usize;
+        let mut scratch =
+            alloc::vec![0u8; unix_seqpacket_next_len(&socket).unwrap_or(total_capacity)];
+        let total_read = socket
+            .read_socket_with_flags_and_mode(&mut scratch, dontwait, peek)
+            .map_err(ObjectError::from)?;
 
+        let mut copied_total = 0usize;
         for iov in iovs {
-            if copied_total >= copied {
+            if copied_total >= total_read {
                 break;
             }
             if iov.iov_len == 0 {
@@ -1143,7 +1275,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
                 return Err(SyscallError::BadAddress);
             }
 
-            let chunk_len = (copied - copied_total).min(iov.iov_len);
+            let chunk_len = (total_read - copied_total).min(iov.iov_len);
             user_safe::write(
                 iov.iov_base,
                 &scratch[copied_total..copied_total + chunk_len],
@@ -1152,27 +1284,24 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         }
 
         msg.msg_flags = 0;
-        if !msg.msg_name.is_null() {
-            let name = LinuxSockAddrNl {
-                nl_family: AF_NETLINK as u16,
-                nl_pad: 0,
-                nl_pid: source.pid,
-                nl_groups: source.groups,
-            };
-            let requested_len = msg.msg_namelen as usize;
-            let name_bytes = unsafe {
-                core::slice::from_raw_parts(
-                    (&name as *const LinuxSockAddrNl).cast::<u8>(),
-                core::mem::size_of::<LinuxSockAddrNl>(),
-                )
-            };
-            let copy_len = requested_len.min(name_bytes.len());
-            if copy_len > 0 {
-                user_safe::write(msg.msg_name.cast::<u8>(), &name_bytes[..copy_len])?;
-            }
-            msg.msg_namelen = name_bytes.len() as u32;
+        if copied_total < total_read {
+            msg.msg_flags |= MSG_TRUNC as i32;
         }
-        let control = netlink_socket_control_bytes(&socket, source.pid, uid, gid)?;
+        if !msg.msg_name.is_null() {
+            let name = socket.getpeername_bytes().map_err(ObjectError::from)?;
+            let copy_len = (msg.msg_namelen as usize).min(name.len());
+            if copy_len > 0 {
+                user_safe::write(msg.msg_name.cast::<u8>(), &name[..copy_len])?;
+            }
+            msg.msg_namelen = name.len() as u32;
+        } else {
+            msg.msg_namelen = 0;
+        }
+        let control = if total_read > 0 {
+            unix_socket_control_bytes(&socket, total_read, peek, flags)?
+        } else {
+            Vec::new()
+        };
         if control.is_empty() {
             msg.msg_controllen = 0;
         } else if msg.msg_control.is_null() || msg.msg_controllen == 0 {
@@ -1186,143 +1315,26 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
                 msg.msg_flags |= MSG_CTRUNC;
             }
         }
-        return Ok(if report_trunc || total_capacity == 0 {
-            full_len.max(message_len)
+
+        if total_read > 0 {
+            let target = socket
+                .getpeername_bytes()
+                .ok()
+                .and_then(|name| socket_target_from_bytes(&name))
+                .unwrap_or_else(|| String::from("connected"));
+            log_user_manager_socket_payload("recvmsg", &target, &scratch[..total_read]);
+            log_user_manager_socket_rights(
+                "recvmsg",
+                &target,
+                count_scm_rights_in_control(&control),
+            );
+        }
+
+        Ok(if report_trunc || total_capacity == 0 {
+            total_read
         } else {
             copied_total
-        });
-    }
-
-    if let Ok(socket) = socket.clone().as_inet_socket() {
-        let total_capacity = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
-        let mut scratch = alloc::vec![0u8; total_capacity];
-        let (read, source) = socket.recv_from(&mut scratch).map_err(ObjectError::from)?;
-        let mut copied_total = 0usize;
-
-        for iov in iovs {
-            if copied_total >= read {
-                break;
-            }
-            if iov.iov_len == 0 {
-                continue;
-            }
-            if iov.iov_base.is_null() {
-                return Err(SyscallError::BadAddress);
-            }
-
-            let chunk_len = (read - copied_total).min(iov.iov_len);
-            user_safe::write(
-                iov.iov_base,
-                &scratch[copied_total..copied_total + chunk_len],
-            )?;
-            copied_total += chunk_len;
-        }
-
-        msg.msg_flags = 0;
-        if !msg.msg_name.is_null() {
-            let name = source
-                .map(|address| socket_address_to_bytes(SocketAddress::Inet(address)))
-                .transpose()?
-                .unwrap_or_default();
-            let copy_len = (msg.msg_namelen as usize).min(name.len());
-            if copy_len > 0 {
-                user_safe::write(msg.msg_name.cast::<u8>(), &name[..copy_len])?;
-            }
-            msg.msg_namelen = name.len() as u32;
-        } else {
-            msg.msg_namelen = 0;
-        }
-        msg.msg_controllen = 0;
-        if copied_total > 0 {
-            if let Some(target) =
-                source.map(|address| format!("inet:{:?}:{}", address.addr, address.port))
-            {
-                log_user_manager_socket_payload("recvmsg", &target, &scratch[..copied_total]);
-            } else {
-                log_user_manager_socket_payload("recvmsg", "connected", &scratch[..copied_total]);
-            }
-        }
-        return Ok(copied_total);
-    }
-
-    let socket = socket.as_unix_socket()?;
-    let dontwait = (flags & MSG_DONTWAIT) != 0;
-    let peek = (flags & MSG_PEEK) != 0;
-    let report_trunc = (flags & MSG_TRUNC) != 0;
-    let total_capacity = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
-    let mut scratch = alloc::vec![0u8; unix_seqpacket_next_len(&socket).unwrap_or(total_capacity)];
-    let total_read = socket
-        .read_socket_with_flags_and_mode(&mut scratch, dontwait, peek)
-        .map_err(ObjectError::from)?;
-
-    let mut copied_total = 0usize;
-    for iov in iovs {
-        if copied_total >= total_read {
-            break;
-        }
-        if iov.iov_len == 0 {
-            continue;
-        }
-        if iov.iov_base.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-
-        let chunk_len = (total_read - copied_total).min(iov.iov_len);
-        user_safe::write(
-            iov.iov_base,
-            &scratch[copied_total..copied_total + chunk_len],
-        )?;
-        copied_total += chunk_len;
-    }
-
-    msg.msg_flags = 0;
-    if copied_total < total_read {
-        msg.msg_flags |= MSG_TRUNC as i32;
-    }
-    if !msg.msg_name.is_null() {
-        let name = socket.getpeername_bytes().map_err(ObjectError::from)?;
-        let copy_len = (msg.msg_namelen as usize).min(name.len());
-        if copy_len > 0 {
-            user_safe::write(msg.msg_name.cast::<u8>(), &name[..copy_len])?;
-        }
-        msg.msg_namelen = name.len() as u32;
-    } else {
-        msg.msg_namelen = 0;
-    }
-    let control = if total_read > 0 {
-        unix_socket_control_bytes(&socket, total_read, peek, flags)?
-    } else {
-        Vec::new()
-    };
-    if control.is_empty() {
-        msg.msg_controllen = 0;
-    } else if msg.msg_control.is_null() || msg.msg_controllen == 0 {
-        msg.msg_flags |= MSG_CTRUNC;
-        msg.msg_controllen = 0;
-    } else {
-        let copy_len = msg.msg_controllen.min(control.len());
-        user_safe::write(msg.msg_control, &control[..copy_len])?;
-        msg.msg_controllen = copy_len;
-        if copy_len < control.len() {
-            msg.msg_flags |= MSG_CTRUNC;
-        }
-    }
-
-    if total_read > 0 {
-        let target = socket
-            .getpeername_bytes()
-            .ok()
-            .and_then(|name| socket_target_from_bytes(&name))
-            .unwrap_or_else(|| String::from("connected"));
-        log_user_manager_socket_payload("recvmsg", &target, &scratch[..total_read]);
-        log_user_manager_socket_rights("recvmsg", &target, count_scm_rights_in_control(&control));
-    }
-
-    Ok(if report_trunc || total_capacity == 0 {
-        total_read
-    } else {
-        copied_total
-    })
+        })
     })();
 
     if result.is_ok() {
