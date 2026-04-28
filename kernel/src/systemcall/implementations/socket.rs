@@ -962,7 +962,7 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
     } else {
         socket_target_for_object(&socket).or_else(|| Some(String::from("connected")))
     };
-    let preview = preview_iovecs(iovs)?;
+    let preview = preview_iovecs(&iovs)?;
     let rights_count = if msg.msg_controllen == 0 || msg.msg_control.is_null() {
         0
     } else {
@@ -1361,12 +1361,14 @@ fn socket_address_to_bytes(address: SocketAddress) -> Result<Vec<u8>, SyscallErr
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct relibc_iovec {
     iov_base: *mut u8,
     iov_len: usize,
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct relibc_msg_hdr {
     msg_name: *mut u8,
     msg_namelen: u32,
