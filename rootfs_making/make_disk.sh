@@ -52,8 +52,6 @@ ARCH_PACKAGES=(
     seatd
     wayland
     weston
-    xf86-video-fbdev
-    xf86-video-vesa
     icewm
     plasma-meta
     plasma-x11-session
@@ -236,10 +234,12 @@ arch_chroot /bin/sh -lc "update-ca-trust || true"
 sudo install -Dm644 "${ROOTFS_MAKING_DIR}/seatd.service" "${SYSROOT_DIR}/etc/systemd/system/seatd.service"
 sudo install -Dm644 "${ROOTFS_MAKING_DIR}/systemd/system/sddm-diagnostics.service" "${SYSROOT_DIR}/etc/systemd/system/sddm-diagnostics.service"
 sudo install -d -m 0755 "${SYSROOT_DIR}/etc/sddm.conf.d"
+sudo install -d -m 0755 "${SYSROOT_DIR}/etc/X11/xorg.conf.d"
 sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/journald.conf.d"
 sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/system/sddm.service.d"
 sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/system/systemd-localed.service.d"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/sddm.conf.d/seele-wayland.conf" "${SYSROOT_DIR}/etc/sddm.conf.d/seele-wayland.conf"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/xorg.conf.d/10-seele-modesetting.conf" "${SYSROOT_DIR}/etc/X11/xorg.conf.d/10-seele-modesetting.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/sddm.service.d/logging.conf" "${SYSROOT_DIR}/etc/systemd/system/sddm.service.d/logging.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd/journald.conf.d/persistent.conf" "${SYSROOT_DIR}/etc/systemd/journald.conf.d/persistent.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd-localed.service.d/override.conf" "${SYSROOT_DIR}/etc/systemd/system/systemd-localed.service.d/override.conf"
