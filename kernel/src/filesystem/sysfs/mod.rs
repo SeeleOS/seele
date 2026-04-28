@@ -76,7 +76,7 @@ fn parse_uevent_write(buffer: &[u8]) -> ParsedUevent<'_> {
     }
 }
 
-pub(super) fn emit_uevent(buffer: &[u8], devpath: &str, extra_env: &[u8]) -> FSResult<usize> {
+pub(crate) fn emit_uevent(buffer: &[u8], devpath: &str, extra_env: &[u8]) -> FSResult<usize> {
     let parsed = parse_uevent_write(buffer);
     let mut env = Vec::with_capacity(extra_env.len() + parsed.synthetic_env.len());
     env.extend_from_slice(extra_env);

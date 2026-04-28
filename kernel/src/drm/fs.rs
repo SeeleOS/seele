@@ -1,8 +1,12 @@
 use alloc::{string::String, vec::Vec};
 
-use crate::filesystem::staticfs::{
-    StaticDeviceNode, StaticDirEntry, StaticDirectoryNode, StaticFileNode, StaticNode,
-    StaticSymlinkNode,
+use crate::filesystem::{
+    staticfs::{
+        StaticDeviceNode, StaticDirEntry, StaticDirectoryNode, StaticFileNode, StaticNode,
+        StaticSymlinkNode,
+    },
+    sysfs::emit_uevent,
+    vfs::FSResult,
 };
 
 use super::card::{CARD0_MAJOR, CARD0_MINOR, CARD0_RDEV};
@@ -21,6 +25,26 @@ fn drm_subsystem_uevent() -> Vec<u8> {
 
 fn platform_drm_uevent() -> Vec<u8> {
     b"DRIVER=seele-drm\nMODALIAS=platform:seele-drm\nSUBSYSTEM=platform\n".to_vec()
+}
+
+fn card0_uevent_write(buffer: &[u8]) -> FSResult<usize> {
+    emit_uevent(
+        buffer,
+        "/devices/platform/seele-drm/drm/card0",
+        &card0_uevent(),
+    )
+}
+
+fn drm_subsystem_uevent_write(buffer: &[u8]) -> FSResult<usize> {
+    emit_uevent(buffer, "/class/drm", &drm_subsystem_uevent())
+}
+
+fn platform_drm_uevent_write(buffer: &[u8]) -> FSResult<usize> {
+    emit_uevent(
+        buffer,
+        "/devices/platform/seele-drm",
+        &platform_drm_uevent(),
+    )
 }
 
 fn format_dev(major: u64, minor: u64) -> Vec<u8> {
@@ -89,7 +113,7 @@ static SYS_DRM_CARD0_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
     inode: 0x2076,
     mode: 0o100444,
     read: card0_uevent,
-    write: None,
+    write: Some(card0_uevent_write),
 });
 
 static SYS_DRM_CARD0_SUBSYSTEM_NODE: StaticNode = StaticNode::Symlink(StaticSymlinkNode {
@@ -137,7 +161,7 @@ static SYS_DRM_SUBSYSTEM_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNo
     inode: 0x207a,
     mode: 0o100444,
     read: drm_subsystem_uevent,
-    write: None,
+    write: Some(drm_subsystem_uevent_write),
 });
 
 static SYS_DRM_DEVICE_TREE_ENTRIES: &[StaticDirEntry] = &[
@@ -170,7 +194,7 @@ static SYS_PLATFORM_DRM_UEVENT_NODE: StaticNode = StaticNode::File(StaticFileNod
     inode: 0x207d,
     mode: 0o100444,
     read: platform_drm_uevent,
-    write: None,
+    write: Some(platform_drm_uevent_write),
 });
 
 static SYS_PLATFORM_DRM_ENTRIES: &[StaticDirEntry] = &[
