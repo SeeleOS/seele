@@ -359,15 +359,7 @@ fn debug_init_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) 
 }
 
 fn debug_init_openat_stage(stage: &str, dirfd: i32, path: &str) {
-    if !should_log_systemd_debug_path() {
-        return;
-    }
-    crate::s_println!(
-        "systemd-openat-stage stage={} dirfd={} path={}",
-        stage,
-        dirfd,
-        path
-    );
+    let _ = (stage, dirfd, path);
 }
 
 fn debug_init_openat_note(_note: &str) {}
