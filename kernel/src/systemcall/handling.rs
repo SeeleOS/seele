@@ -88,6 +88,7 @@ fn log_sddm_syscall(phase: &str, syscall_no: isize, result: Option<isize>) {
             || command.contains("kwin")
             || command.contains("plasmashell")
             || command.contains("dbus-broker")
+            || command.contains("systemd-logind")
             || command.contains("systemd-user-runtime-dir")
             || (command.ends_with("/systemd") && pid != 1))
         .then_some((pid, command))

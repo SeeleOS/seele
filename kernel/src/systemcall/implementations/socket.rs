@@ -74,6 +74,7 @@ fn current_display_socket_process_info() -> Option<(u64, String, String)> {
             || command.contains("kwin")
             || command.contains("plasmashell")
             || command.contains("dbus-broker")
+            || command.contains("systemd-logind")
             || command.contains("systemd-user-runtime-dir")
             || (command.ends_with("/systemd") && pid != 1)
             || parent_command.contains("sddm"))
