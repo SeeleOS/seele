@@ -30,6 +30,7 @@ ARCH_PACKAGES=(
     evtest
     libinput
     curl
+    strace
     netsurf
     vim
     gcc
