@@ -12,6 +12,8 @@
 - When polling a background VM terminal, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
 - After finishing VM-based testing, shut the VM down and verify there is no leftover background runner or QEMU process before moving on.
 - Do not assume `sysroot/` is mounted or synchronized with `disk.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the VM wrapper when in doubt.
+- If you need `sysroot/` mounted, run `misc/ensure-sysroot-mounted.sh` as a separate step first. Do not chain the mount step together with the real inspection command.
+- After `misc/ensure-sysroot-mounted.sh`, if you only need to read files from `sysroot/`, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
 - If the sandbox, `no_new_privileges`, missing mounts, or network restrictions block a necessary command, ask the user for privilege escalation or the required access instead of silently giving up on that path.
 
 After finishing a change, run `nix develop -c cargo run -- --agent` to test the VM. If the VM test fails, keep fixing the issue before considering the work done. If you are validating a shell or userspace fix, prefer the `--agent` path so serial logs are captured automatically.
@@ -90,3 +92,4 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 - `run agent vm` should be treated as directly interactive by default. Do not assume a separate tty socket or extra terminal wrapper is needed just to type into the guest.
 - After you finish using an interactive or background VM, terminate it yourself instead of relying on a default runner timeout to clean it up.
 - If `sysroot/` already appears to be mounted, reuse it directly instead of asking for privilege escalation to mount again. Only ask to mount when it is clearly not mounted.
+- When you need to mount `sysroot/`, use `misc/ensure-sysroot-mounted.sh` directly. Run it first, then run the real inspection command separately instead of chaining them together.
