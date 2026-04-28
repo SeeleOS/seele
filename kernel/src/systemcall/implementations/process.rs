@@ -264,7 +264,7 @@ define_syscall!(Execve, |path_str: String,
             .as_ref()
             .and_then(|parent| parent.lock().command_line.first().cloned())
             .unwrap_or_default();
-        let should_log = [command.as_ref(), parent_command.as_ref(), path_str.as_str()]
+        let should_log = [&command[..], &parent_command[..], path_str.as_str()]
             .into_iter()
             .any(|value| {
                 value.contains("sddm")
