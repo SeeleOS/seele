@@ -85,13 +85,40 @@ fn log_sddm_syscall(phase: &str, syscall_no: isize, result: Option<isize>) {
             || command.ends_with("/sleep")
             || command.contains("startplasma")
             || command.contains("kwin")
-            || command.contains("plasmashell"))
+            || command.contains("plasmashell")
+            || command.contains("dbus-broker")
+            || command.contains("systemd-user-runtime-dir")
+            || (command.ends_with("/systemd") && pid != 1))
         .then_some((pid, command))
     }) else {
         return;
     };
 
     let syscall_name = SyscallNumber::from_number(syscall_no as usize);
+    let should_log = matches!(
+        syscall_name,
+        Some(
+            SyscallNumber::Poll
+                | SyscallNumber::Read
+                | SyscallNumber::Write
+                | SyscallNumber::Writev
+                | SyscallNumber::Connect
+                | SyscallNumber::Sendto
+                | SyscallNumber::Recvfrom
+                | SyscallNumber::Sendmsg
+                | SyscallNumber::Recvmsg
+                | SyscallNumber::Setsockopt
+                | SyscallNumber::Getsockopt
+                | SyscallNumber::EpollWait
+                | SyscallNumber::Ppoll
+                | SyscallNumber::EpollPwait
+                | SyscallNumber::EpollPwait2
+        )
+    );
+    if !should_log {
+        return;
+    }
+
     match (phase, syscall_name, result) {
         ("enter", Some(name), _) => crate::s_println!(
             "display-syscall-enter pid={} cmd={} syscall={:?}({})",

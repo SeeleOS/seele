@@ -72,6 +72,9 @@ fn current_display_socket_process_info() -> Option<(u64, String, String)> {
             || command.contains("startplasma")
             || command.contains("kwin")
             || command.contains("plasmashell")
+            || command.contains("dbus-broker")
+            || command.contains("systemd-user-runtime-dir")
+            || (command.ends_with("/systemd") && pid != 1)
             || parent_command.contains("sddm"))
         .then_some((pid, command, parent_command))
     })
@@ -82,6 +85,9 @@ fn should_log_display_socket_target(target: &str) -> bool {
         || target.contains("wayland")
         || target.contains("sddm")
         || target.contains("seat")
+        || target.contains("dbus")
+        || target.contains("notify")
+        || target.contains("/bus")
 }
 
 fn log_display_socket(op: &str, target: &str, result: &Result<(), SyscallError>) {
@@ -116,9 +122,46 @@ fn log_user_manager_socket(op: &str, target: &str, result: &Result<(), SyscallEr
     log_display_socket(op, target, result);
 }
 
-fn log_user_manager_socket_payload(_op: &str, _target: &str, _bytes: &[u8]) {}
+fn log_user_manager_socket_payload(op: &str, target: &str, bytes: &[u8]) {
+    if !(target.contains("dbus") || target.contains("notify") || target.contains("/bus")) {
+        return;
+    }
+    let Some((pid, command, parent_command)) = current_display_socket_process_info() else {
+        return;
+    };
+    let preview_len = bytes.len().min(96);
+    let preview = &bytes[..preview_len];
+    crate::s_println!(
+        "display-socket-{}-payload pid={} cmd={} parent_cmd={} target={} len={} preview={:?}",
+        op,
+        pid,
+        command,
+        parent_command,
+        target,
+        bytes.len(),
+        preview
+    );
+}
 
-fn log_user_manager_socket_rights(_op: &str, _target: &str, _rights_count: usize) {}
+fn log_user_manager_socket_rights(op: &str, target: &str, rights_count: usize) {
+    if rights_count == 0
+        || !(target.contains("dbus") || target.contains("notify") || target.contains("/bus"))
+    {
+        return;
+    }
+    let Some((pid, command, parent_command)) = current_display_socket_process_info() else {
+        return;
+    };
+    crate::s_println!(
+        "display-socket-{}-rights pid={} cmd={} parent_cmd={} target={} count={}",
+        op,
+        pid,
+        command,
+        parent_command,
+        target,
+        rights_count
+    );
+}
 
 fn socket_target_from_bytes(address: &[u8]) -> Option<String> {
     match socket_address_from_raw(address.as_ptr(), address.len() as u32).ok()? {
