@@ -33,7 +33,14 @@ struct CgroupDirectory {
     inode: u64,
     children: BTreeSet<String>,
     subtree_control: String,
+    cpu_max: String,
     memory_oom_group: bool,
+    memory_min: String,
+    memory_low: String,
+    memory_high: String,
+    memory_max: String,
+    memory_swap_max: String,
+    pids_max: String,
 }
 
 struct CgroupState {
@@ -51,7 +58,14 @@ impl CgroupState {
                 inode: ROOT_INODE,
                 children: BTreeSet::new(),
                 subtree_control: String::new(),
+                cpu_max: String::from("max 100000"),
                 memory_oom_group: false,
+                memory_min: String::from("0"),
+                memory_low: String::from("0"),
+                memory_high: String::from("max"),
+                memory_max: String::from("max"),
+                memory_swap_max: String::from("max"),
+                pids_max: String::from("max"),
             },
         );
 
@@ -104,7 +118,14 @@ impl CgroupState {
                 inode,
                 children: BTreeSet::new(),
                 subtree_control: String::new(),
+                cpu_max: String::from("max 100000"),
                 memory_oom_group: false,
+                memory_min: String::from("0"),
+                memory_low: String::from("0"),
+                memory_high: String::from("max"),
+                memory_max: String::from("max"),
+                memory_swap_max: String::from("max"),
+                pids_max: String::from("max"),
             },
         );
         self.directory_mut(&parent)?.children.insert(name.into());
@@ -183,10 +204,17 @@ enum CgroupFileKind {
     Kill,
     Freeze,
     Type,
+    CpuMax,
     CpuStat,
     MemoryCurrent,
+    MemoryMin,
+    MemoryLow,
+    MemoryHigh,
+    MemoryMax,
+    MemorySwapMax,
     MemoryOomGroup,
     MemoryReclaim,
+    PidsMax,
 }
 
 impl CgroupFileKind {
@@ -200,10 +228,17 @@ impl CgroupFileKind {
             Self::Kill => "cgroup.kill",
             Self::Freeze => "cgroup.freeze",
             Self::Type => "cgroup.type",
+            Self::CpuMax => "cpu.max",
             Self::CpuStat => "cpu.stat",
             Self::MemoryCurrent => "memory.current",
+            Self::MemoryMin => "memory.min",
+            Self::MemoryLow => "memory.low",
+            Self::MemoryHigh => "memory.high",
+            Self::MemoryMax => "memory.max",
+            Self::MemorySwapMax => "memory.swap.max",
             Self::MemoryOomGroup => "memory.oom.group",
             Self::MemoryReclaim => "memory.reclaim",
+            Self::PidsMax => "pids.max",
         }
     }
 
@@ -217,10 +252,17 @@ impl CgroupFileKind {
             Self::Kill => 6,
             Self::Freeze => 7,
             Self::Type => 8,
-            Self::CpuStat => 9,
-            Self::MemoryCurrent => 10,
-            Self::MemoryOomGroup => 11,
-            Self::MemoryReclaim => 12,
+            Self::CpuMax => 9,
+            Self::CpuStat => 10,
+            Self::MemoryCurrent => 11,
+            Self::MemoryMin => 12,
+            Self::MemoryLow => 13,
+            Self::MemoryHigh => 14,
+            Self::MemoryMax => 15,
+            Self::MemorySwapMax => 16,
+            Self::MemoryOomGroup => 17,
+            Self::MemoryReclaim => 18,
+            Self::PidsMax => 19,
         }
     }
 
@@ -234,8 +276,15 @@ impl CgroupFileKind {
             | Self::SubtreeControl
             | Self::Kill
             | Self::Freeze
+            | Self::CpuMax
+            | Self::MemoryMin
+            | Self::MemoryLow
+            | Self::MemoryHigh
+            | Self::MemoryMax
+            | Self::MemorySwapMax
             | Self::MemoryOomGroup
-            | Self::MemoryReclaim => WRITABLE_FILE_MODE,
+            | Self::MemoryReclaim
+            | Self::PidsMax => WRITABLE_FILE_MODE,
         }
     }
 
@@ -249,10 +298,17 @@ impl CgroupFileKind {
             Self::Kill,
             Self::Freeze,
             Self::Type,
+            Self::CpuMax,
             Self::CpuStat,
             Self::MemoryCurrent,
+            Self::MemoryMin,
+            Self::MemoryLow,
+            Self::MemoryHigh,
+            Self::MemoryMax,
+            Self::MemorySwapMax,
             Self::MemoryOomGroup,
             Self::MemoryReclaim,
+            Self::PidsMax,
         ]
     }
 
@@ -291,7 +347,7 @@ fn file_info(path: &str, kind: CgroupFileKind) -> FSResult<FileLikeInfo> {
         UnixPermission(kind.mode()),
         FileLikeType::File,
     )
-    .with_inode(dir.inode * 16 + kind.inode_offset()))
+    .with_inode(dir.inode * 32 + kind.inode_offset()))
 }
 
 fn file_contents(state: &CgroupState, path: &str, kind: CgroupFileKind) -> FSResult<Vec<u8>> {
@@ -332,8 +388,14 @@ fn file_contents(state: &CgroupState, path: &str, kind: CgroupFileKind) -> FSRes
         CgroupFileKind::Kill => Vec::new(),
         CgroupFileKind::Freeze => b"0\n".to_vec(),
         CgroupFileKind::Type => b"domain\n".to_vec(),
+        CgroupFileKind::CpuMax => format!("{}\n", dir.cpu_max).into_bytes(),
         CgroupFileKind::CpuStat => b"usage_usec 0\nuser_usec 0\nsystem_usec 0\n".to_vec(),
         CgroupFileKind::MemoryCurrent => b"0\n".to_vec(),
+        CgroupFileKind::MemoryMin => format!("{}\n", dir.memory_min).into_bytes(),
+        CgroupFileKind::MemoryLow => format!("{}\n", dir.memory_low).into_bytes(),
+        CgroupFileKind::MemoryHigh => format!("{}\n", dir.memory_high).into_bytes(),
+        CgroupFileKind::MemoryMax => format!("{}\n", dir.memory_max).into_bytes(),
+        CgroupFileKind::MemorySwapMax => format!("{}\n", dir.memory_swap_max).into_bytes(),
         CgroupFileKind::MemoryOomGroup => {
             if dir.memory_oom_group {
                 b"1\n".to_vec()
@@ -342,8 +404,18 @@ fn file_contents(state: &CgroupState, path: &str, kind: CgroupFileKind) -> FSRes
             }
         }
         CgroupFileKind::MemoryReclaim => Vec::new(),
+        CgroupFileKind::PidsMax => format!("{}\n", dir.pids_max).into_bytes(),
     };
     Ok(bytes)
+}
+
+fn normalize_cgroup_limit_write(buffer: &[u8]) -> FSResult<String> {
+    let text = core::str::from_utf8(buffer).map_err(|_| FSError::Other)?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err(FSError::Other);
+    }
+    Ok(trimmed.to_string())
 }
 
 fn write_file(path: &str, kind: CgroupFileKind, buffer: &[u8]) -> FSResult<usize> {
@@ -396,6 +468,34 @@ fn write_file(path: &str, kind: CgroupFileKind, buffer: &[u8]) -> FSResult<usize
                 _ => return Err(FSError::Other),
             };
             state.directory_mut(path)?.memory_oom_group = value;
+        }
+        CgroupFileKind::CpuMax => {
+            let value = normalize_cgroup_limit_write(buffer)?;
+            state.directory_mut(path)?.cpu_max = value;
+        }
+        CgroupFileKind::MemoryMin => {
+            let value = normalize_cgroup_limit_write(buffer)?;
+            state.directory_mut(path)?.memory_min = value;
+        }
+        CgroupFileKind::MemoryLow => {
+            let value = normalize_cgroup_limit_write(buffer)?;
+            state.directory_mut(path)?.memory_low = value;
+        }
+        CgroupFileKind::MemoryHigh => {
+            let value = normalize_cgroup_limit_write(buffer)?;
+            state.directory_mut(path)?.memory_high = value;
+        }
+        CgroupFileKind::MemoryMax => {
+            let value = normalize_cgroup_limit_write(buffer)?;
+            state.directory_mut(path)?.memory_max = value;
+        }
+        CgroupFileKind::MemorySwapMax => {
+            let value = normalize_cgroup_limit_write(buffer)?;
+            state.directory_mut(path)?.memory_swap_max = value;
+        }
+        CgroupFileKind::PidsMax => {
+            let value = normalize_cgroup_limit_write(buffer)?;
+            state.directory_mut(path)?.pids_max = value;
         }
         CgroupFileKind::Kill | CgroupFileKind::Freeze | CgroupFileKind::MemoryReclaim => {}
         CgroupFileKind::Controllers
