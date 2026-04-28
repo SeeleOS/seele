@@ -26,6 +26,10 @@ fn should_log_logind_syscalls() -> bool {
     })
 }
 
+fn should_log_init_syscalls() -> bool {
+    with_current_process(|process| process.pid.0 == 1)
+}
+
 #[unsafe(no_mangle)]
 extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     let snapshot = unsafe { &mut *snapshot_ptr };
@@ -44,6 +48,9 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     if should_log_logind_syscalls() {
         crate::s_println!("logind syscall enter {}", syscall_no);
     }
+    if should_log_init_syscalls() {
+        crate::s_println!("init syscall enter {}", syscall_no);
+    }
 
     maybe_stop_current_on_syscall_entry();
 
@@ -59,6 +66,9 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
 
     if should_log_logind_syscalls() {
         crate::s_println!("logind syscall exit {} -> {}", syscall_no, result);
+    }
+    if should_log_init_syscalls() {
+        crate::s_println!("init syscall exit {} -> {}", syscall_no, result);
     }
 
     snapshot.rax = result;
