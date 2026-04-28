@@ -317,7 +317,7 @@ define_syscall!(Writev, |object: ObjectRef,
         })
         .unwrap_or(false);
     if preserve_datagram_boundary {
-        let buffer = copy_iovecs(iovs)?;
+        let buffer = copy_iovecs(&iovs)?;
         log_display_pipe_bytes("writev", &object, &buffer);
         log_x_chain_write_bytes(&buffer);
         log_user_manager_socket_bytes("writev", &object, &buffer);
