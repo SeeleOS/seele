@@ -464,19 +464,33 @@ fn proc_self_fd_object(path: &Path) -> Result<Option<ObjectRef>, SyscallError> {
 }
 
 fn create_file_unlocked(path: Path) -> Result<(), SyscallError> {
+    if is_init_process() {
+        crate::s_println!("init create_file_unlocked start {}", path.clone().as_string());
+    }
     let (parent_dir, name) = {
         let vfs = VirtualFS.lock();
         let normalized = vfs.normalize_path(path.clone());
         if normalized.ends_with_slash() {
             return Err(SyscallError::NotADirectory);
         }
-        vfs.resolve_parent(path).map_err(SyscallError::from)?
+        let resolved = vfs.resolve_parent(path).map_err(SyscallError::from)?;
+        if is_init_process() {
+            crate::s_println!("init create_file_unlocked resolved {name}", name = resolved.1);
+        }
+        resolved
     };
 
+    if is_init_process() {
+        crate::s_println!("init create_file_unlocked before-dir-lock");
+    }
     parent_dir
         .lock()
         .create(DirectoryContentInfo::new(name, DirectoryContentType::File))
-        .map_err(SyscallError::from)
+        .map_err(SyscallError::from)?;
+    if is_init_process() {
+        crate::s_println!("init create_file_unlocked done");
+    }
+    Ok(())
 }
 
 fn is_api_mount_path(path: &Path) -> bool {
