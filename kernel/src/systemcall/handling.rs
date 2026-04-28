@@ -98,11 +98,6 @@ fn log_sddm_syscall(phase: &str, syscall_no: isize, result: Option<isize>) {
         let is_user_manager_chain = command.contains("systemd-executor")
             || parent_command.contains("systemd-executor")
             || (command == "/usr/lib/systemd/systemd" && parent_command.contains("systemd"));
-        if !is_user_manager_chain
-            && !matches!(syscall_no, 56 | 59 | 61 | 62 | 172 | 173 | 247)
-        {
-            return;
-        }
         if !(command.contains("sddm")
             || command.contains("/usr/bin/X")
             || command.contains("Xorg")
@@ -117,6 +112,29 @@ fn log_sddm_syscall(phase: &str, syscall_no: isize, result: Option<isize>) {
         }
 
         let syscall = SyscallNumber::from_number(syscall_no as usize);
+        if is_user_manager_chain {
+            let Some(result) = result else {
+                return;
+            };
+            if result >= 0 && !matches!(syscall_no, 232 | 271 | 441) {
+                return;
+            }
+            crate::s_println!(
+                "sddm-syscall exit pid={} cmd={} parent_cmd={} no={} name={:?} result={}",
+                process.pid.0,
+                command,
+                parent_command,
+                syscall_no,
+                syscall,
+                result
+            );
+            return;
+        }
+
+        if !matches!(syscall_no, 56 | 59 | 61 | 62 | 172 | 173 | 247) {
+            return;
+        }
+
         match (phase, result) {
             ("enter", None) => crate::s_println!(
                 "sddm-syscall enter pid={} cmd={} no={} name={:?}",
