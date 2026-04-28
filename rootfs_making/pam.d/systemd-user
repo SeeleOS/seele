@@ -9,5 +9,6 @@ session    optional   pam_loginuid.so
 session    optional   pam_keyinit.so       force revoke
 session    include    system-auth
 session    optional   pam_umask.so
-session    optional   pam_systemd.so
+# Avoid logind manager-session registration here. In this guest it can block
+# user@.service startup before the user manager even execs.
 session    required   pam_env.so
