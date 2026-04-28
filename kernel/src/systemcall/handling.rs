@@ -87,6 +87,7 @@ fn log_sddm_syscall(phase: &str, syscall_no: isize, result: Option<isize>) {
             || command.contains("startplasma")
             || command.contains("kwin")
             || command.contains("plasmashell")
+            || command.contains("systemd-executor")
             || command.contains("systemd-logind")
             || command.contains("systemd-user-runtime-dir")
             || command.contains("systemd-userdbd")

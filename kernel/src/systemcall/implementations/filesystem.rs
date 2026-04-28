@@ -333,6 +333,7 @@ fn should_log_systemd_debug_path() -> bool {
         let pid = process.pid.0;
         let command = process.command_line.first().cloned().unwrap_or_default();
         (command == "systemd" && pid != 1)
+            || command.contains("systemd-executor")
             || command.contains("systemd-logind")
             || command.contains("systemd-userdbd")
             || command.contains("systemd-userwork")
