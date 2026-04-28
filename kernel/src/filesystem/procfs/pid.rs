@@ -94,14 +94,19 @@ pub(super) fn proc_pid_stat_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
         'S'
     };
     let comm = pid_string(pid);
-    let session = process.group_id.0;
+    let session = process.session_id.0;
+    let tty_nr = process.controlling_terminal.map(|tty| tty.0).unwrap_or(0);
+    let tty_pgrp = process
+        .stdin_foreground_process_group()
+        .map(|group| group.0)
+        .unwrap_or(0);
     let num_threads = process.threads.len().max(1);
     let content = format!(
         concat!(
-            "{} ({}) {} {} {} {} 0 0 0 0 0 0 0 0 0 0 0 0 20 0 {} 0 ",
+            "{} ({}) {} {} {} {} {} {} 0 0 0 0 0 0 0 0 0 0 20 0 {} 0 ",
             "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
         ),
-        pid.0, comm, state, parent_pid, process.group_id.0, session, num_threads,
+        pid.0, comm, state, parent_pid, process.group_id.0, session, tty_nr, tty_pgrp, num_threads,
     );
     Ok(content.into_bytes())
 }

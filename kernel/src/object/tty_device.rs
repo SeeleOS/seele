@@ -17,7 +17,7 @@ use crate::{
     },
     polling::{event::PollableEvent, object::Pollable},
     process::group::ProcessGroupID,
-    process::manager::get_current_process,
+    process::{ControllingTerminal, manager::get_current_process},
     terminal::{
         linux_kd::{DisplayMode, KeyboardMode, LinuxConsoleState, handle_kd_request},
         linux_vt::handle_vt_request,
@@ -137,6 +137,10 @@ impl TtyDevice {
 
     pub fn line_buffer(&self) -> &Mutex<VecDeque<u8>> {
         &self.line_buffer
+    }
+
+    pub fn foreground_process_group(&self) -> Option<ProcessGroupID> {
+        *self.active_group.lock()
     }
 
     pub fn clear_input_state(&self) {
@@ -308,8 +312,16 @@ impl Configuratable for TtyDevice {
             }
             ConfigurateRequest::LinuxTiocnxcl => Ok(0),
             ConfigurateRequest::LinuxTiocsctty(_) => {
-                let group_id = get_current_process().lock().group_id;
+                let process = get_current_process();
+                let (group_id, controlling_terminal) = {
+                    let process = process.lock();
+                    (
+                        process.group_id,
+                        process.stdin_terminal_rdev().map(ControllingTerminal),
+                    )
+                };
                 self.set_active_group(Some(group_id));
+                process.lock().controlling_terminal = controlling_terminal;
                 Ok(0)
             }
             ConfigurateRequest::LinuxTiocgPgrp(ptr) => unsafe {
@@ -320,7 +332,10 @@ impl Configuratable for TtyDevice {
                     .unwrap_or(0);
                 Ok(0)
             },
-            ConfigurateRequest::LinuxTiocnotty => Ok(0),
+            ConfigurateRequest::LinuxTiocnotty => {
+                get_current_process().lock().controlling_terminal = None;
+                Ok(0)
+            }
             ConfigurateRequest::LinuxTiocspgrp(ptr) => unsafe {
                 self.set_active_group(Some(ProcessGroupID((*ptr) as u64)));
                 Ok(0)

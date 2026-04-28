@@ -15,7 +15,7 @@ use crate::{
     },
     polling::{event::PollableEvent, object::Pollable},
     process::group::ProcessGroupID,
-    process::manager::get_current_process,
+    process::{ControllingTerminal, manager::get_current_process},
     terminal::{
         line_discipline::process_output_bytes,
         linux_kd::{LinuxConsoleState, handle_kd_request},
@@ -51,6 +51,10 @@ impl PtySlave {
             linux_console: Mutex::new(LinuxConsoleState::default()),
             flags: Mutex::new(FileFlags::default()),
         }
+    }
+
+    pub fn foreground_process_group(&self) -> Option<ProcessGroupID> {
+        self.shared.lock().active_group
     }
 }
 
@@ -120,9 +124,15 @@ impl Configuratable for PtySlave {
         match request {
             ConfigurateRequest::LinuxTiocsctty(_) => {
                 let process = get_current_process();
-                let process = process.lock();
-                let group_id = process.group_id;
+                let (group_id, controlling_terminal) = {
+                    let process = process.lock();
+                    (
+                        process.group_id,
+                        process.stdin_terminal_rdev().map(ControllingTerminal),
+                    )
+                };
                 self.shared.lock().active_group = Some(group_id);
+                process.lock().controlling_terminal = controlling_terminal;
                 Ok(0)
             }
             ConfigurateRequest::LinuxTiocgPgrp(ptr) => unsafe {
@@ -135,7 +145,10 @@ impl Configuratable for PtySlave {
                 *ptr = tty_group;
                 Ok(0)
             },
-            ConfigurateRequest::LinuxTiocnotty => Ok(0),
+            ConfigurateRequest::LinuxTiocnotty => {
+                get_current_process().lock().controlling_terminal = None;
+                Ok(0)
+            }
             ConfigurateRequest::LinuxTiocspgrp(ptr) => unsafe {
                 let requested_group = *ptr as u64;
                 self.shared.lock().active_group = Some(ProcessGroupID(requested_group));

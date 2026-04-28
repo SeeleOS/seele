@@ -14,6 +14,7 @@ use crate::filesystem::{
     vfs::FSResult,
     vfs_traits::{FileLike, FileSystem},
 };
+use crate::object::tty_device::get_active_vt;
 
 use self::{
     keyboard::{
@@ -32,6 +33,10 @@ fn devices_uevent() -> Vec<u8> {
 
 fn platform_uevent() -> Vec<u8> {
     b"SUBSYSTEM=platform\n".to_vec()
+}
+
+fn tty0_active() -> Vec<u8> {
+    format!("tty{}\n", get_active_vt()).into_bytes()
 }
 
 fn i8042_uevent() -> Vec<u8> {
@@ -182,6 +187,38 @@ static SYS_CLASS_MISC_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNo
     entries: SYS_CLASS_MISC_ENTRIES,
 });
 
+static SYS_CLASS_TTY_TTY0_ACTIVE_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "active",
+    inode: 0x2072,
+    mode: 0o100644,
+    read: tty0_active,
+    write: None,
+});
+
+static SYS_CLASS_TTY_TTY0_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
+    name: "active",
+    node: &SYS_CLASS_TTY_TTY0_ACTIVE_NODE,
+}];
+
+static SYS_CLASS_TTY_TTY0_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "tty0",
+    inode: 0x2073,
+    mode: 0o040755,
+    entries: SYS_CLASS_TTY_TTY0_ENTRIES,
+});
+
+static SYS_CLASS_TTY_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
+    name: "tty0",
+    node: &SYS_CLASS_TTY_TTY0_NODE,
+}];
+
+static SYS_CLASS_TTY_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "tty",
+    inode: 0x2074,
+    mode: 0o040755,
+    entries: SYS_CLASS_TTY_ENTRIES,
+});
+
 static SYS_CLASS_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "drm",
@@ -198,6 +235,10 @@ static SYS_CLASS_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "misc",
         node: &SYS_CLASS_MISC_NODE,
+    },
+    StaticDirEntry {
+        name: "tty",
+        node: &SYS_CLASS_TTY_NODE,
     },
 ];
 

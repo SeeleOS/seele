@@ -11,7 +11,7 @@ use crate::filesystem::absolute_path::AbsolutePath;
 use crate::memory::addrspace::AddrSpace;
 use crate::misc::timer::Timer;
 use crate::object::misc::ObjectRef;
-use crate::process::group::ProcessGroupID;
+use crate::process::group::{ProcessGroupID, SessionID};
 use crate::signal::misc::default_signal_action_vec;
 use crate::signal::{PendingSignalInfo, SIGNAL_AMOUNT, Signal, Signals, action::SignalAction};
 use crate::thread::misc::ThreadID;
@@ -28,6 +28,9 @@ pub mod ptrace;
 pub mod wait;
 
 pub type ProcessRef = Arc<Mutex<Process>>;
+
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ControllingTerminal(pub u64);
 
 const CAP_LAST_CAP: u32 = 40;
 const DEFAULT_CAPABILITY_LOW: u32 = u32::MAX;
@@ -69,6 +72,8 @@ pub struct Process {
     pub pending_signals: Signals,
     pub pending_signal_info: Vec<Option<PendingSignalInfo>>,
     pub group_id: ProcessGroupID,
+    pub session_id: SessionID,
+    pub controlling_terminal: Option<ControllingTerminal>,
     pub timers: Vec<Option<Timer>>,
     pub program_break: u64,
     pub file_mode_creation_mask: u32,
@@ -102,6 +107,8 @@ impl Default for Process {
     fn default() -> Self {
         Process {
             group_id: ProcessGroupID::default(),
+            session_id: SessionID::default(),
+            controlling_terminal: None,
             pending_signals: Signals::default(),
             pending_signal_info: alloc::vec![None; SIGNAL_AMOUNT],
             signal_actions: default_signal_action_vec(),
@@ -181,5 +188,46 @@ impl ProcessExitStatus {
 impl Process {
     pub fn empty() -> ProcessRef {
         Arc::new(Mutex::new(Self::default()))
+    }
+
+    pub fn stdin_terminal_rdev(&self) -> Option<u64> {
+        let object = self.fd_table.first()?.as_ref()?.object.clone();
+        let device = object
+            .clone()
+            .as_file_like()
+            .ok()
+            .and_then(|file| file.device_backing_object())
+            .unwrap_or(object);
+        let is_terminal =
+            device.clone().as_tty_device().is_ok() || device.clone().as_pty_slave().is_ok();
+        if !is_terminal {
+            return None;
+        }
+
+        self.fd_table
+            .first()?
+            .as_ref()?
+            .object
+            .clone()
+            .as_statable()
+            .ok()
+            .map(|statable| statable.stat().st_rdev)
+    }
+
+    pub fn stdin_foreground_process_group(&self) -> Option<ProcessGroupID> {
+        let object = self.fd_table.first()?.as_ref()?.object.clone();
+        let device = object
+            .clone()
+            .as_file_like()
+            .ok()
+            .and_then(|file| file.device_backing_object())
+            .unwrap_or(object);
+        if let Ok(tty) = device.clone().as_tty_device() {
+            return tty.foreground_process_group();
+        }
+        if let Ok(pty) = device.as_pty_slave() {
+            return pty.foreground_process_group();
+        }
+        None
     }
 }

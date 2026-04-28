@@ -329,12 +329,14 @@ define_syscall!(Getsid, |pid: i32| {
         pid as u64
     };
     let process = get_process_with_pid(ProcessID(pid))?;
-    Ok(process.lock().group_id.0 as usize)
+    Ok(process.lock().session_id.0 as usize)
 });
 
 define_syscall!(Setsid, {
     let current = get_current_process();
     let pid = current.lock().pid.0;
     current.lock().group_id.0 = pid;
+    current.lock().session_id.0 = pid;
+    current.lock().controlling_terminal = None;
     Ok(pid as usize)
 });

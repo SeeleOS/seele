@@ -79,6 +79,13 @@ fn current_process_tty() -> Option<ObjectRef> {
         process.fd_table.first()?.as_ref()?.object.clone()
     };
 
+    let stdin = stdin
+        .clone()
+        .as_file_like()
+        .ok()
+        .and_then(|file| file.device_backing_object())
+        .unwrap_or(stdin);
+
     if stdin.clone().as_tty_device().is_ok() || stdin.clone().as_pty_slave().is_ok() {
         Some(stdin)
     } else {

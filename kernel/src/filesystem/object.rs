@@ -253,6 +253,10 @@ impl OpenedFileObject {
         }
     }
 
+    pub fn device_backing_object(&self) -> Option<ObjectRef> {
+        self.device_object()
+    }
+
     pub fn is_device_backed(&self) -> bool {
         self.device_object().is_some()
     }

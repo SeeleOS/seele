@@ -15,6 +15,15 @@ impl ProcessGroupID {
     }
 }
 
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct SessionID(pub u64);
+
+impl SessionID {
+    pub fn from_leader(pid: ProcessID) -> Self {
+        Self(pid.0)
+    }
+}
+
 impl ProcessGroupID {
     pub fn get_processes(self) -> Vec<ProcessRef> {
         MANAGER.lock().get_processes_in_group(self)

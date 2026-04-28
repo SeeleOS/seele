@@ -14,7 +14,7 @@ use crate::{
     object::tty_device::get_default_tty,
     process::{
         FdEntry, Process, ProcessRef,
-        group::ProcessGroupID,
+        group::{ProcessGroupID, SessionID},
         misc::{ProcessID, init_stack_layout, user_stack_pages_for_exec},
         object::init_objects,
     },
@@ -82,6 +82,7 @@ impl Process {
             addrspace,
             kernel_stack_top,
             group_id: ProcessGroupID::from_leader(pid),
+            session_id: SessionID::from_leader(pid),
             ..Default::default()
         }));
 

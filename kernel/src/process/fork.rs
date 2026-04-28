@@ -30,6 +30,8 @@ impl Process {
                 parent: Some(parent.clone()),
                 signal_actions: parent_locked.signal_actions.clone(),
                 group_id: parent_locked.group_id,
+                session_id: parent_locked.session_id,
+                controlling_terminal: parent_locked.controlling_terminal,
                 program_break: parent_locked.program_break,
                 file_mode_creation_mask: parent_locked.file_mode_creation_mask,
                 real_uid: parent_locked.real_uid,
