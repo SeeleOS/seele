@@ -260,10 +260,38 @@ fn encode_control_message(cmsg_type: i32, payload: &[u8]) -> Vec<u8> {
     control
 }
 
+fn rights_control_bytes_for_read(
+    ready_rights: Vec<Vec<ObjectRef>>,
+    cloexec: bool,
+) -> Result<Vec<u8>, SyscallError> {
+    if ready_rights.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let current_process = get_current_process();
+    let mut current = current_process.lock();
+    let fd_flags = if cloexec {
+        FdFlags::CLOEXEC
+    } else {
+        FdFlags::empty()
+    };
+    let total_rights: usize = ready_rights.iter().map(Vec::len).sum();
+    let mut payload = Vec::with_capacity(total_rights * mem::size_of::<i32>());
+    for rights in ready_rights {
+        for right in rights {
+            let fd = i32::try_from(current.push_object_with_flags(right, fd_flags))
+                .map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
+            payload.extend_from_slice(&fd.to_ne_bytes());
+        }
+    }
+    Ok(encode_control_message(SCM_RIGHTS, &payload))
+}
+
 fn stream_rights_control_bytes_for_read(
     socket: &UnixSocketObject,
     bytes_read: usize,
     peek: bool,
+    cloexec: bool,
 ) -> Result<Vec<u8>, SyscallError> {
     let UnixSocketState::Stream(stream) = &*socket.state.lock() else {
         return Ok(Vec::new());
@@ -274,28 +302,14 @@ fn stream_rights_control_bytes_for_read(
     } else {
         stream.take_ready_rights(bytes_read)
     };
-    if ready_rights.is_empty() {
-        return Ok(Vec::new());
-    }
 
-    let current_process = get_current_process();
-    let mut current = current_process.lock();
-    let mut control = Vec::new();
-    for rights in ready_rights {
-        let mut payload = Vec::with_capacity(rights.len() * mem::size_of::<i32>());
-        for right in rights {
-            let fd = i32::try_from(current.push_object(right))
-                .map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
-            payload.extend_from_slice(&fd.to_ne_bytes());
-        }
-        control.extend_from_slice(&encode_control_message(SCM_RIGHTS, &payload));
-    }
-    Ok(control)
+    rights_control_bytes_for_read(ready_rights, cloexec)
 }
 
 fn datagram_rights_control_bytes_for_read(
     socket: &UnixSocketObject,
     peek: bool,
+    cloexec: bool,
 ) -> Result<Vec<u8>, SyscallError> {
     let UnixSocketState::Datagram(datagram) = &*socket.state.lock() else {
         return Ok(Vec::new());
@@ -306,29 +320,19 @@ fn datagram_rights_control_bytes_for_read(
     } else {
         core::mem::take(&mut *datagram.peer_rights.lock())
     };
-    if rights.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let current_process = get_current_process();
-    let mut current = current_process.lock();
-    let mut payload = Vec::with_capacity(rights.len() * mem::size_of::<i32>());
-    for right in rights {
-        let fd = i32::try_from(current.push_object(right))
-            .map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
-        payload.extend_from_slice(&fd.to_ne_bytes());
-    }
-    Ok(encode_control_message(SCM_RIGHTS, &payload))
+    rights_control_bytes_for_read(vec![rights], cloexec)
 }
 
 fn unix_socket_control_bytes(
     socket: &UnixSocketObject,
     bytes_read: usize,
     peek: bool,
+    recv_flags: u64,
 ) -> Result<Vec<u8>, SyscallError> {
-    let mut control = stream_rights_control_bytes_for_read(socket, bytes_read, peek)?;
+    let cloexec = (recv_flags & MSG_CMSG_CLOEXEC) != 0;
+    let mut control = stream_rights_control_bytes_for_read(socket, bytes_read, peek, cloexec)?;
     if control.is_empty() {
-        control = datagram_rights_control_bytes_for_read(socket, peek)?;
+        control = datagram_rights_control_bytes_for_read(socket, peek, cloexec)?;
     }
     if !*socket.pass_cred.lock() {
         return Ok(control);
@@ -380,6 +384,7 @@ fn netlink_socket_control_bytes(
 
 const MSG_PEEK: u64 = 0x2;
 const MSG_CTRUNC: i32 = 0x8;
+const MSG_CMSG_CLOEXEC: u64 = 0x40000000;
 const MSG_DONTWAIT: u64 = 0x40;
 const MSG_TRUNC: u64 = 0x20;
 const SCM_RIGHTS: i32 = 1;
@@ -774,31 +779,46 @@ fn sendmsg_rights(msg: &relibc_msg_hdr) -> Result<Vec<ObjectRef>, SyscallError> 
         return Err(SyscallError::BadAddress);
     }
 
-    let header = unsafe { &*(msg.msg_control as *const LinuxCmsgHdr) };
-    if header.cmsg_level != SOL_SOCKET as i32 || header.cmsg_type != SCM_RIGHTS {
-        return Ok(Vec::new());
-    }
-
+    let control = unsafe { slice::from_raw_parts(msg.msg_control, msg.msg_controllen) };
     let header_space = cmsg_align(mem::size_of::<LinuxCmsgHdr>());
-    if header.cmsg_len < header_space || header.cmsg_len > msg.msg_controllen {
-        return Err(SyscallError::InvalidArguments);
-    }
+    let mut offset = 0usize;
+    let mut rights = Vec::new();
 
-    let payload_len = header.cmsg_len - header_space;
-    if !payload_len.is_multiple_of(mem::size_of::<i32>()) {
-        return Err(SyscallError::InvalidArguments);
-    }
-
-    let fd_count = payload_len / mem::size_of::<i32>();
-    let fds =
-        unsafe { slice::from_raw_parts(msg.msg_control.add(header_space) as *const i32, fd_count) };
-    let mut rights = Vec::with_capacity(fd_count);
-    for &fd in fds {
-        if fd < 0 {
+    while offset + mem::size_of::<LinuxCmsgHdr>() <= control.len() {
+        let header = unsafe { &*(control[offset..].as_ptr().cast::<LinuxCmsgHdr>()) };
+        if header.cmsg_len < header_space {
             return Err(SyscallError::InvalidArguments);
         }
-        rights.push(get_object_current_process(fd as u64).map_err(SyscallError::from)?);
+
+        let next = cmsg_align(offset + header.cmsg_len);
+        if next > control.len() {
+            return Err(SyscallError::InvalidArguments);
+        }
+
+        if header.cmsg_level == SOL_SOCKET as i32 && header.cmsg_type == SCM_RIGHTS {
+            let payload_len = header.cmsg_len - header_space;
+            if !payload_len.is_multiple_of(mem::size_of::<i32>()) {
+                return Err(SyscallError::InvalidArguments);
+            }
+
+            let fd_count = payload_len / mem::size_of::<i32>();
+            let fds = unsafe {
+                slice::from_raw_parts(
+                    control[offset + header_space..].as_ptr().cast::<i32>(),
+                    fd_count,
+                )
+            };
+            for &fd in fds {
+                if fd < 0 {
+                    return Err(SyscallError::InvalidArguments);
+                }
+                rights.push(get_object_current_process(fd as u64).map_err(SyscallError::from)?);
+            }
+        }
+
+        offset = next;
     }
+
     Ok(rights)
 }
 
@@ -1308,7 +1328,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         msg.msg_namelen = 0;
     }
     let control = if total_read > 0 {
-        unix_socket_control_bytes(&socket, total_read, peek)?
+        unix_socket_control_bytes(&socket, total_read, peek, flags)?
     } else {
         Vec::new()
     };
