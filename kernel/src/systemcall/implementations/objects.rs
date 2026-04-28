@@ -3,13 +3,7 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use alloc::{
-    collections::btree_map::BTreeMap,
-    format,
-    string::String,
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{collections::btree_map::BTreeMap, format, string::String, sync::Arc, vec::Vec};
 use bitflags::bitflags;
 use spin::Mutex;
 
@@ -19,6 +13,7 @@ use crate::{
     filesystem::vfs_traits::DirectoryContentType,
     filesystem::vfs_traits::Whence,
     memory::protection::Protection,
+    memory::user_safe,
     misc::systemd_perf::{self, PerfBucket},
     object::{
         config::ConfigurateRequest,
@@ -52,6 +47,7 @@ bitflags! {
     }
 }
 
+#[derive(Clone, Copy)]
 #[repr(C)]
 struct LinuxIovec {
     iov_base: *const u8,
@@ -71,10 +67,24 @@ fn copy_iovecs(iovs: &[LinuxIovec]) -> Result<Vec<u8>, SyscallError> {
         if iov.iov_base.is_null() {
             return Err(SyscallError::BadAddress);
         }
-        let chunk = unsafe { slice::from_raw_parts(iov.iov_base, iov.iov_len) };
-        buffer.extend_from_slice(chunk);
+        buffer.extend_from_slice(&user_safe::read_buffer(iov.iov_base, iov.iov_len)?);
     }
     Ok(buffer)
+}
+
+fn read_iovecs(iov_ptr: *const LinuxIovec, iovcnt: i32) -> Result<Vec<LinuxIovec>, SyscallError> {
+    if iovcnt <= 0 {
+        return Ok(Vec::new());
+    }
+    if iov_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let mut iovs = Vec::with_capacity(iovcnt as usize);
+    for index in 0..iovcnt as usize {
+        iovs.push(user_safe::read(unsafe { iov_ptr.add(index) })?);
+    }
+    Ok(iovs)
 }
 
 fn current_x_chain_process_info() -> Option<(u64, String, String)> {
@@ -261,25 +271,22 @@ define_syscall!(Getdents64, |object_index: u64, buf: *mut u8, len: usize| {
 });
 
 define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
-    unsafe {
-        let buffer = slice::from_raw_parts_mut(buf_ptr, len);
-        let read = object.clone().as_readable()?.read(buffer)?;
-        if read > 0 {
-            log_display_pipe_bytes("read", &object, &buffer[..read]);
-            log_user_manager_socket_bytes("read", &object, &buffer[..read]);
-        }
-        Ok(read)
+    let mut buffer = vec![0; len];
+    let read = object.clone().as_readable()?.read(&mut buffer)?;
+    if read > 0 {
+        log_display_pipe_bytes("read", &object, &buffer[..read]);
+        log_user_manager_socket_bytes("read", &object, &buffer[..read]);
+        user_safe::write_buffer(buf_ptr, &buffer[..read])?;
     }
+    Ok(read)
 });
 
 define_syscall!(Write, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
-    unsafe {
-        let bytes = slice::from_raw_parts(buf_ptr, len);
-        log_display_pipe_bytes("write", &object, bytes);
-        log_x_chain_write_bytes(bytes);
-        log_user_manager_socket_bytes("write", &object, bytes);
-        Ok(object.as_writable()?.write(bytes)?)
-    }
+    let bytes = user_safe::read_buffer(buf_ptr.cast_const(), len)?;
+    log_display_pipe_bytes("write", &object, &bytes);
+    log_x_chain_write_bytes(&bytes);
+    log_user_manager_socket_bytes("write", &object, &bytes);
+    Ok(object.as_writable()?.write(&bytes)?)
 });
 
 define_syscall!(Writev, |object: ObjectRef,
@@ -295,7 +302,7 @@ define_syscall!(Writev, |object: ObjectRef,
         return Err(SyscallError::BadAddress);
     }
 
-    let iovs = unsafe { slice::from_raw_parts(iov_ptr, iovcnt as usize) };
+    let iovs = read_iovecs(iov_ptr, iovcnt)?;
     let preserve_datagram_boundary = object
         .clone()
         .as_unix_socket()
@@ -327,10 +334,10 @@ define_syscall!(Writev, |object: ObjectRef,
         if iov.iov_base.is_null() {
             return Err(SyscallError::BadAddress);
         }
-        let buf = unsafe { slice::from_raw_parts(iov.iov_base, iov.iov_len) };
-        log_x_chain_write_bytes(buf);
-        log_user_manager_socket_bytes("writev", &object, buf);
-        let count = writable.write(buf)?;
+        let buf = user_safe::read_buffer(iov.iov_base, iov.iov_len)?;
+        log_x_chain_write_bytes(&buf);
+        log_user_manager_socket_bytes("writev", &object, &buf);
+        let count = writable.write(&buf)?;
         written += count;
         if count < iov.iov_len {
             break;
@@ -635,7 +642,11 @@ define_syscall!(Pread64, |object: ObjectRef,
         return Err(SyscallError::InvalidArguments);
     }
     let file = object.clone().as_file_like()?;
-    let read = unsafe { file.read_at(slice::from_raw_parts_mut(buf_ptr, len), offset as u64)? };
+    let mut buffer = vec![0; len];
+    let read = file.read_at(&mut buffer, offset as u64)?;
+    if read > 0 {
+        user_safe::write_buffer(buf_ptr, &buffer[..read])?;
+    }
     Ok(read)
 });
 
@@ -651,7 +662,8 @@ define_syscall!(Pwrite64, |object: ObjectRef,
     let writable = object.as_writable()?;
     let current = seekable.clone().seek(0, Whence::Current)? as i64;
     seekable.clone().seek(offset, Whence::Start)?;
-    let written = unsafe { writable.write(slice::from_raw_parts(buf_ptr, len))? };
+    let buffer = user_safe::read_buffer(buf_ptr, len)?;
+    let written = writable.write(&buffer)?;
     let _ = seekable.seek(current, Whence::Start);
     Ok(written)
 });

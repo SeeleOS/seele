@@ -5,6 +5,8 @@ use x86_64::{
     structures::paging::{Page, PageTableFlags, Size4KiB, Translate, mapper::TranslateResult},
 };
 
+use alloc::vec::Vec;
+
 use crate::{
     memory::addrspace::{AddrSpace, cow::COW_FLAG, mem_area::Data},
     systemcall::utils::{SyscallError, SyscallResult},
@@ -128,6 +130,16 @@ impl AddrSpace {
         };
         self.read_bytes(ptr as u64, bytes)?;
         Ok(unsafe { value.assume_init() })
+    }
+
+    pub fn read_buffer(&mut self, ptr: *const u8, len: usize) -> SyscallResult<Vec<u8>> {
+        let mut buffer = vec![0; len];
+        self.read_bytes(ptr as u64, &mut buffer)?;
+        Ok(buffer)
+    }
+
+    pub fn write_buffer(&mut self, ptr: *mut u8, bytes: &[u8]) -> SyscallResult<()> {
+        self.write_bytes(ptr as u64, bytes)
     }
 }
 use core::mem::MaybeUninit;
