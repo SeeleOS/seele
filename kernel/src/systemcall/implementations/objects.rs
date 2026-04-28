@@ -75,6 +75,67 @@ fn current_x_chain_process_info() -> Option<(u64, String, String)> {
     None
 }
 
+fn current_display_pipe_process_info() -> Option<(u64, String, String)> {
+    with_current_process(|process| {
+        let pid = process.pid.0;
+        let command = process.command_line.first().cloned().unwrap_or_default();
+        let parent_command = process
+            .parent
+            .as_ref()
+            .and_then(|parent| parent.lock().command_line.first().cloned())
+            .unwrap_or_default();
+        (command.contains("sddm")
+            || command.contains("/usr/bin/X")
+            || command.contains("Xorg")
+            || parent_command.contains("sddm"))
+        .then_some((pid, command, parent_command))
+    })
+}
+
+fn is_unnamed_unix_socket(object: &ObjectRef) -> bool {
+    let Ok(socket) = object.clone().as_unix_socket() else {
+        return false;
+    };
+    [
+        socket.getsockname_bytes().ok(),
+        socket.getpeername_bytes().ok(),
+    ]
+    .into_iter()
+    .flatten()
+    .all(|name| name.len() >= 2 && name[2..].iter().all(|&byte| byte == 0))
+}
+
+fn log_display_pipe_bytes(op: &str, object: &ObjectRef, bytes: &[u8]) {
+    if bytes.is_empty() || bytes.len() > 16 || !is_unnamed_unix_socket(object) {
+        return;
+    }
+    let Some((pid, command, parent_command)) = current_display_pipe_process_info() else {
+        return;
+    };
+
+    if let Ok(text) = core::str::from_utf8(bytes) {
+        crate::s_println!(
+            "display-pipe-{} pid={} cmd={} parent_cmd={} len={} text={:?}",
+            op,
+            pid,
+            command,
+            parent_command,
+            bytes.len(),
+            text
+        );
+    } else {
+        crate::s_println!(
+            "display-pipe-{} pid={} cmd={} parent_cmd={} len={} bytes={:?}",
+            op,
+            pid,
+            command,
+            parent_command,
+            bytes.len(),
+            bytes
+        );
+    }
+}
+
 fn log_x_chain_write_bytes(_bytes: &[u8]) {}
 
 fn log_user_manager_socket_bytes(_op: &str, _object: &ObjectRef, _bytes: &[u8]) {}
@@ -179,6 +240,7 @@ define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
         let buffer = slice::from_raw_parts_mut(buf_ptr, len);
         let read = object.clone().as_readable()?.read(buffer)?;
         if read > 0 {
+            log_display_pipe_bytes("read", &object, &buffer[..read]);
             log_user_manager_socket_bytes("read", &object, &buffer[..read]);
         }
         Ok(read)
@@ -188,6 +250,7 @@ define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
 define_syscall!(Write, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
     unsafe {
         let bytes = slice::from_raw_parts(buf_ptr, len);
+        log_display_pipe_bytes("write", &object, bytes);
         log_x_chain_write_bytes(bytes);
         log_user_manager_socket_bytes("write", &object, bytes);
         Ok(object.as_writable()?.write(bytes)?)
@@ -226,6 +289,7 @@ define_syscall!(Writev, |object: ObjectRef,
         .unwrap_or(false);
     if preserve_datagram_boundary {
         let buffer = copy_iovecs(iovs)?;
+        log_display_pipe_bytes("writev", &object, &buffer);
         log_x_chain_write_bytes(&buffer);
         log_user_manager_socket_bytes("writev", &object, &buffer);
         return Ok(writable.write(&buffer)?);
