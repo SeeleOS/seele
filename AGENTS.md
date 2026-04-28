@@ -2,21 +2,21 @@
 
 ## Build, Test, and Development Commands
 
-- `nix develop -c cargo run -- --agent`: headless VM run with timeout and serial output; use this for runtime verification.
+- `agent-tools/run-agent-vm.sh`: headless VM run with serial output; use this for runtime verification.
 - `cargo fmt --all`: format Rust code before submitting changes.
 - `rootfs_making/make_disk.sh`: build or refresh `disk.img` and the guest root filesystem contents.
 - If a required tool is missing for this repository workflow, add it to the `flake.nix` dev shell instead of treating it as a one-off host prerequisite.
 - When launching the VM during agent work, use a checked-in `.sh` wrapper script instead of invoking the VM command directly. Put any needed log redirection inside the wrapper rather than on the outer command line.
-- When using the checked-in VM wrapper, run it directly (for example `misc/run-agent-vm.sh`). Do not wrap it with `bash`, and do not override its default log file path unless explicitly requested.
-- `misc/run-agent-vm.sh` should not impose a default timeout. If a timeout is needed for a specific debugging pass, set it explicitly and shut the VM down yourself when finished.
+- When using the checked-in VM wrapper, run it directly (for example `agent-tools/run-agent-vm.sh`). Do not wrap it with `bash`, and do not override its default log file path unless explicitly requested.
+- `agent-tools/run-agent-vm.sh` should not impose a default timeout. If a timeout is needed for a specific debugging pass, set it explicitly and shut the VM down yourself when finished.
 - When polling a background VM terminal, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
 - After finishing VM-based testing, shut the VM down and verify there is no leftover background runner or QEMU process before moving on.
 - Do not assume `sysroot/` is mounted or synchronized with `disk.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the VM wrapper when in doubt.
-- If you need `sysroot/` mounted, run `misc/ensure-sysroot-mounted.sh` as a separate step first. Do not chain the mount step together with the real inspection command.
-- After `misc/ensure-sysroot-mounted.sh`, if you only need to read files from `sysroot/`, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
+- If you need `sysroot/` mounted, run `agent-tools/ensure-sysroot-mounted.sh` as a separate step first. Do not chain the mount step together with the real inspection command.
+- After `agent-tools/ensure-sysroot-mounted.sh`, if you only need to read files from `sysroot/`, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
 - If the sandbox, `no_new_privileges`, missing mounts, or network restrictions block a necessary command, ask the user for privilege escalation or the required access instead of silently giving up on that path.
 
-After finishing a change, run `nix develop -c cargo run -- --agent` to test the VM. If the VM test fails, keep fixing the issue before considering the work done. If you are validating a shell or userspace fix, prefer the `--agent` path so serial logs are captured automatically.
+After finishing a change, run `agent-tools/run-agent-vm.sh` to test the VM. If the VM test fails, keep fixing the issue before considering the work done. If you are validating a shell or userspace fix, prefer the `--agent` path so serial logs are captured automatically.
 
 ## Coding Style & Naming Conventions
 
@@ -42,7 +42,7 @@ There is no large standalone test suite yet; verification is primarily compile c
 - Run `cargo check --manifest-path kernel/Cargo.toml` for all kernel changes.
 - Treat compiler warnings as failures. Do not leave any `cargo check` warnings in the tree.
 - After finishing code changes, run `cargo clippy` and address its findings before considering the work complete.
-- Run `nix develop -c cargo run -- --agent` for syscall, process, terminal, or userspace changes.
+- Run `agent-tools/run-agent-vm.sh` for syscall, process, terminal, or userspace changes.
 - Add focused unit tests only when the target module already uses them.
 
 ## Debugging Guidance
@@ -92,4 +92,4 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 - `run agent vm` should be treated as directly interactive by default. Do not assume a separate tty socket or extra terminal wrapper is needed just to type into the guest.
 - After you finish using an interactive or background VM, terminate it yourself instead of relying on a default runner timeout to clean it up.
 - If `sysroot/` already appears to be mounted, reuse it directly instead of asking for privilege escalation to mount again. Only ask to mount when it is clearly not mounted.
-- When you need to mount `sysroot/`, use `misc/ensure-sysroot-mounted.sh` directly. Run it first, then run the real inspection command separately instead of chaining them together.
+- When you need to mount `sysroot/`, use `agent-tools/ensure-sysroot-mounted.sh` directly. Run it first, then run the real inspection command separately instead of chaining them together.
