@@ -17,7 +17,7 @@ use crate::filesystem::{
 };
 
 impl VFS {
-    fn resolve_parent(&self, path: Path) -> FSResult<(WrappedDirectory, String)> {
+    pub(crate) fn resolve_parent(&self, path: Path) -> FSResult<(WrappedDirectory, String)> {
         let normalized = self.normalize_path(path);
         let name = normalized.file_name().ok_or(FSError::NotFound)?;
         let parent = normalized.parent().ok_or(FSError::NotFound)?;

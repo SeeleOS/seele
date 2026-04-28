@@ -7,7 +7,7 @@ use crate::{
         path::Path,
         tmpfs::TmpFs,
         vfs::VirtualFS,
-        vfs_traits::{FileLikeType, MountFlags},
+        vfs_traits::{DirectoryContentInfo, DirectoryContentType, FileLikeType, MountFlags},
     },
     memory::user_safe,
     misc::{
@@ -461,6 +461,22 @@ fn proc_self_fd_object(path: &Path) -> Result<Option<ObjectRef>, SyscallError> {
         Err(_) => return Err(SyscallError::FileNotFound),
     };
     Ok(Some(object))
+}
+
+fn create_file_unlocked(path: Path) -> Result<(), SyscallError> {
+    let (parent_dir, name) = {
+        let vfs = VirtualFS.lock();
+        let normalized = vfs.normalize_path(path.clone());
+        if normalized.ends_with_slash() {
+            return Err(SyscallError::NotADirectory);
+        }
+        vfs.resolve_parent(path).map_err(SyscallError::from)?
+    };
+
+    parent_dir
+        .lock()
+        .create(DirectoryContentInfo::new(name, DirectoryContentType::File))
+        .map_err(SyscallError::from)
 }
 
 fn is_api_mount_path(path: &Path) -> bool {
@@ -938,7 +954,7 @@ define_syscall!(OpenAt, |dirfd: i32,
                     Ok(None) if create => {
                         debug_init_openat_note("open-notfound");
                         debug_init_openat_note("create-start");
-                        VirtualFS.lock().create_file(path.clone())?;
+                        create_file_unlocked(path.clone())?;
                         debug_init_openat_note("create-done");
                         debug_init_openat_note("reopen-start");
                         let reopen_result = VirtualFS.lock().open(path.clone());
@@ -985,7 +1001,7 @@ define_syscall!(OpenAt, |dirfd: i32,
                     Arc::new(file)
                 }
                 Err(FSError::NotFound) if create => {
-                    VirtualFS.lock().create_file(path.clone())?;
+                    create_file_unlocked(path.clone())?;
                     let reopen_result = VirtualFS.lock().open(path.clone());
                     match reopen_result {
                         Ok(file) => Arc::new(file),
