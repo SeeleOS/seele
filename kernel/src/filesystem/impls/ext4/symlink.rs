@@ -23,6 +23,8 @@ impl Symlink for Ext4Symlink {
             file_like_type: FileLikeType::Symlink,
             size: 0,
             inode: self.inode.index.get().into(),
+            uid: self.inode.uid(),
+            gid: self.inode.gid(),
             permission: UnixPermission::symlink(),
         })
     }

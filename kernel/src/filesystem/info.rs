@@ -13,6 +13,8 @@ pub struct FileLikeInfo {
     pub name: String,
     pub size: usize,
     pub inode: u64,
+    pub uid: u32,
+    pub gid: u32,
     pub file_like_type: FileLikeType,
     pub permission: UnixPermission,
 }
@@ -78,6 +80,8 @@ impl LinuxStat {
             st_ino: info.inode,
             st_nlink: 1,
             st_mode,
+            st_uid: info.uid,
+            st_gid: info.gid,
             st_size: info.size as i64,
             st_blksize: 4096,
             st_blocks: (info.size as i64 + 511) / 512,
@@ -114,9 +118,17 @@ impl FileLikeInfo {
             name,
             size,
             inode: 0,
+            uid: 0,
+            gid: 0,
             file_like_type,
             permission,
         }
+    }
+
+    pub fn with_owner(mut self, uid: u32, gid: u32) -> Self {
+        self.uid = uid;
+        self.gid = gid;
+        self
     }
 
     pub fn with_inode(mut self, inode: u64) -> Self {

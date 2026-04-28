@@ -156,6 +156,7 @@ impl Directory for Ext4Directory {
             UnixPermission(inode.mode().bits().into()),
             FileLikeType::Directory,
         )
+        .with_owner(inode.uid(), inode.gid())
         .with_inode(inode.index.get().into()))
     }
 
