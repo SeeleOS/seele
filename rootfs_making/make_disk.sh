@@ -208,6 +208,7 @@ sudo mount -o loop "${DISK_IMG}" "${SYSROOT_DIR}"
 sudo mkdir -p "${SYSROOT_DIR}/tmp"
 sudo chmod 1777 "${SYSROOT_DIR}/tmp"
 sudo mkdir -p "${SYSROOT_DIR}/var/log"
+sudo mkdir -p "${SYSROOT_DIR}/var/log/sddm"
 sudo mkdir -p "${SYSROOT_DIR}/var/tmp"
 sudo chmod 1777 "${SYSROOT_DIR}/var/tmp"
 sudo mkdir -p "${SYSROOT_DIR}/etc/X11"
@@ -232,10 +233,13 @@ install_repo_packages
 arch_chroot /bin/sh -lc "update-ca-trust || true"
 
 sudo install -Dm644 "${ROOTFS_MAKING_DIR}/seatd.service" "${SYSROOT_DIR}/etc/systemd/system/seatd.service"
+sudo install -d -m 0755 "${SYSROOT_DIR}/etc/sddm.conf.d"
 sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/system/systemd-localed.service.d"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/sddm.conf.d/seele-wayland.conf" "${SYSROOT_DIR}/etc/sddm.conf.d/seele-wayland.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd-localed.service.d/override.conf" "${SYSROOT_DIR}/etc/systemd/system/systemd-localed.service.d/override.conf"
 arch_chroot /usr/sbin/usermod -p '' root
 arch_chroot /usr/bin/systemctl enable seatd.service
+arch_chroot /usr/bin/systemctl enable sddm.service
 
 install_sysroot_file "${ROOTFS_MAKING_DIR}/xdg-runtime.sh" "${SYSROOT_DIR}/etc/profile.d/xdg-runtime.sh"
 
