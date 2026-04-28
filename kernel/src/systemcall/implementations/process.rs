@@ -262,19 +262,17 @@ define_syscall!(Execve, |path_str: String,
         let parent_command = process
             .parent
             .as_ref()
-            .and_then(|parent| {
-                parent
-                    .lock()
-                    .command_line
-                    .first()
-                    .cloned()
-            })
+            .and_then(|parent| parent.lock().command_line.first().cloned())
             .unwrap_or_default();
         if (command.contains("sddm") && !command.contains("diagnostics"))
             || parent_command == "/usr/bin/sddm"
+            || parent_command.contains("sddm-diagnostics")
             || path_str.contains("/usr/bin/X")
             || path_str.contains("Xorg")
             || command.contains("systemd-executor")
+            || command.contains("systemd-userdbd")
+            || parent_command.contains("systemd-userdbd")
+            || parent_command == "systemd"
             || path_str.contains("/usr/lib/systemd/systemd")
         {
             crate::s_println!(

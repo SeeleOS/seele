@@ -87,9 +87,10 @@ fn log_sddm_syscall(phase: &str, syscall_no: isize, result: Option<isize>) {
             || command.contains("startplasma")
             || command.contains("kwin")
             || command.contains("plasmashell")
-            || command.contains("dbus-broker")
             || command.contains("systemd-logind")
             || command.contains("systemd-user-runtime-dir")
+            || command.contains("systemd-userdbd")
+            || command.contains("systemd-userwork")
             || (command.ends_with("/systemd") && pid != 1))
         .then_some((pid, command))
     }) else {
@@ -111,6 +112,20 @@ fn log_sddm_syscall(phase: &str, syscall_no: isize, result: Option<isize>) {
                 | SyscallNumber::Recvmsg
                 | SyscallNumber::Setsockopt
                 | SyscallNumber::Getsockopt
+                | SyscallNumber::Socket
+                | SyscallNumber::Bind
+                | SyscallNumber::Listen
+                | SyscallNumber::Accept
+                | SyscallNumber::Accept4
+                | SyscallNumber::Clone
+                | SyscallNumber::Clone3
+                | SyscallNumber::Wait4
+                | SyscallNumber::Waitid
+                | SyscallNumber::Futex
+                | SyscallNumber::OpenAt
+                | SyscallNumber::Statfs
+                | SyscallNumber::Nanosleep
+                | SyscallNumber::ClockNanosleep
                 | SyscallNumber::EpollWait
                 | SyscallNumber::Ppoll
                 | SyscallNumber::EpollPwait

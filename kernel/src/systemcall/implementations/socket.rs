@@ -76,6 +76,8 @@ fn current_display_socket_process_info() -> Option<(u64, String, String)> {
             || command.contains("dbus-broker")
             || command.contains("systemd-logind")
             || command.contains("systemd-user-runtime-dir")
+            || command.contains("systemd-userdbd")
+            || command.contains("systemd-userwork")
             || (command.ends_with("/systemd") && pid != 1)
             || parent_command.contains("sddm"))
         .then_some((pid, command, parent_command))
