@@ -7,7 +7,7 @@ use crate::{
         config::ConfigurateRequest,
         error::ObjectError,
         misc::ObjectResult,
-        tty_device::{get_active_vt, set_active_vt},
+        tty_device::{find_unused_virtual_tty, get_active_vt, set_active_vt},
     },
     terminal::linux_kd::{LinuxConsoleState, LinuxVtMode, LinuxVtStat},
 };
@@ -22,7 +22,7 @@ pub fn handle_vt_request(
                 return Err(ObjectError::InvalidArguments);
             }
 
-            let vt = get_active_vt() as u16;
+            let vt = find_unused_virtual_tty().ok_or(ObjectError::InvalidArguments)? as u16;
             unsafe { write_volatile(*ptr, u32::from(vt)) };
             Ok(Some(0))
         }

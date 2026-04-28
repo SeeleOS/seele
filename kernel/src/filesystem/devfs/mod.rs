@@ -63,6 +63,46 @@ static DEV_TTY1_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     rdev: Some((4u64 << 8) | 1),
 });
 
+static DEV_TTY2_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
+    name: "tty2",
+    inode: 0x1011,
+    mode: 0o020620,
+    device_name: "tty2",
+    rdev: Some((4u64 << 8) | 2),
+});
+
+static DEV_TTY3_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
+    name: "tty3",
+    inode: 0x1012,
+    mode: 0o020620,
+    device_name: "tty3",
+    rdev: Some((4u64 << 8) | 3),
+});
+
+static DEV_TTY4_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
+    name: "tty4",
+    inode: 0x1013,
+    mode: 0o020620,
+    device_name: "tty4",
+    rdev: Some((4u64 << 8) | 4),
+});
+
+static DEV_TTY5_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
+    name: "tty5",
+    inode: 0x1014,
+    mode: 0o020620,
+    device_name: "tty5",
+    rdev: Some((4u64 << 8) | 5),
+});
+
+static DEV_TTY6_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
+    name: "tty6",
+    inode: 0x1015,
+    mode: 0o020620,
+    device_name: "tty6",
+    rdev: Some((4u64 << 8) | 6),
+});
+
 static DEV_FB0_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     name: "fb0",
     inode: 0x1006,
@@ -178,6 +218,26 @@ static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "tty1",
         node: &DEV_TTY1_NODE,
+    },
+    StaticDirEntry {
+        name: "tty2",
+        node: &DEV_TTY2_NODE,
+    },
+    StaticDirEntry {
+        name: "tty3",
+        node: &DEV_TTY3_NODE,
+    },
+    StaticDirEntry {
+        name: "tty4",
+        node: &DEV_TTY4_NODE,
+    },
+    StaticDirEntry {
+        name: "tty5",
+        node: &DEV_TTY5_NODE,
+    },
+    StaticDirEntry {
+        name: "tty6",
+        node: &DEV_TTY6_NODE,
     },
     StaticDirEntry {
         name: "fb0",

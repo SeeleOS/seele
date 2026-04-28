@@ -30,6 +30,7 @@ pub static CONSOLE_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();
 pub static DEFAULT_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();
 pub static ACTIVE_VT: OnceCell<Mutex<u32>> = OnceCell::uninit();
 pub static VIRTUAL_TTYS: OnceCell<Mutex<BTreeMap<u32, Arc<TtyDevice>>>> = OnceCell::uninit();
+pub const MAX_VIRTUAL_TTYS: u32 = 6;
 
 pub fn init_virtual_ttys() {
     ACTIVE_VT.get_or_init(|| Mutex::new(1));
@@ -67,6 +68,16 @@ pub fn set_active_vt(vt: u32) -> bool {
 
 pub fn get_active_tty() -> Arc<TtyDevice> {
     get_virtual_tty(get_active_vt()).expect("active tty is not registered")
+}
+
+pub fn find_unused_virtual_tty() -> Option<u32> {
+    let active_vt = get_active_vt();
+    let ttys = VIRTUAL_TTYS.get().unwrap().lock().clone();
+
+    ttys.iter()
+        .find(|(vt, tty)| **vt != active_vt && tty.active_group.lock().is_none())
+        .map(|(vt, _)| *vt)
+        .or_else(|| ttys.keys().copied().find(|vt| *vt != active_vt))
 }
 
 pub fn wake_tty_poller_readable() {
