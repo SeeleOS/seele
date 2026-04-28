@@ -323,6 +323,9 @@ fn datagram_rights_control_bytes_for_read(
     } else {
         core::mem::take(&mut *datagram.peer_rights.lock())
     };
+    if rights.is_empty() {
+        return Ok(Vec::new());
+    }
     rights_control_bytes_for_read(vec![rights], cloexec)
 }
 
