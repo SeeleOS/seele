@@ -53,6 +53,7 @@ struct LinuxIovec {
 
 fn current_x_chain_process_info() -> Option<(u64, String, String)> {
     with_current_process(|process| {
+        let pid = process.pid.0;
         let command = process
             .command_line
             .first()
@@ -63,13 +64,16 @@ fn current_x_chain_process_info() -> Option<(u64, String, String)> {
             .as_ref()
             .and_then(|parent| parent.lock().command_line.first().cloned())
             .unwrap_or_default();
+        let is_late_systemd_chain = pid >= 100
+            && (command.contains("systemd-executor")
+                || parent_command.contains("systemd-executor")
+                || (command == "/usr/lib/systemd/systemd"
+                    && parent_command.contains("systemd")));
         let is_x_chain = command.contains("Xorg")
             || command.contains("/usr/bin/X")
             || parent_command == "/usr/bin/sddm"
-            || command.contains("systemd-executor")
-            || parent_command.contains("systemd-executor")
-            || (command == "/usr/lib/systemd/systemd" && parent_command.contains("systemd"));
-        is_x_chain.then_some((process.pid.0, command, parent_command))
+            || is_late_systemd_chain;
+        is_x_chain.then_some((pid, command, parent_command))
     })
 }
 

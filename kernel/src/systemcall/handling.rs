@@ -95,9 +95,11 @@ fn log_sddm_syscall(phase: &str, syscall_no: isize, result: Option<isize>) {
         if command.contains("sddm-diagnostics") {
             return;
         }
-        let is_user_manager_chain = command.contains("systemd-executor")
-            || parent_command.contains("systemd-executor")
-            || (command == "/usr/lib/systemd/systemd" && parent_command.contains("systemd"));
+        let is_user_manager_chain = process.pid.0 >= 100
+            && (command.contains("systemd-executor")
+                || parent_command.contains("systemd-executor")
+                || (command == "/usr/lib/systemd/systemd"
+                    && parent_command.contains("systemd")));
         if !(command.contains("sddm")
             || command.contains("/usr/bin/X")
             || command.contains("Xorg")
