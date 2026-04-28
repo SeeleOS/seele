@@ -53,6 +53,7 @@ impl UnixSocketObject {
                     if let Some(message) = message {
                         *datagram.peer_cred.lock() = message.sender_cred;
                         *datagram.peer_name.lock() = message.sender_name;
+                        *datagram.peer_rights.lock() = message.rights;
                         let read = buffer.len().min(message.data.len());
                         buffer[..read].copy_from_slice(&message.data[..read]);
                         return Ok(read);

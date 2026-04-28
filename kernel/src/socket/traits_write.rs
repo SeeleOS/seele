@@ -26,6 +26,7 @@ impl UnixSocketObject {
         buffer: &[u8],
         target_path: Option<&str>,
         force_nonblocking: bool,
+        rights: Vec<ObjectRef>,
     ) -> SocketResult<usize> {
         let nonblocking = force_nonblocking || self.is_nonblocking();
         let datagram = match &*self.state.lock() {
@@ -109,6 +110,7 @@ impl UnixSocketObject {
             data: buffer.to_vec(),
             sender_name: datagram.local_name.lock().clone(),
             sender_cred: current_socket_peer_cred(),
+            rights,
         });
         drop(recv_queue);
 
@@ -121,7 +123,9 @@ impl UnixSocketObject {
 
     pub fn write_socket_to_path(&self, buffer: &[u8], path: &str) -> SocketResult<usize> {
         match self.kind {
-            UnixSocketKind::Datagram => self.write_datagram_socket(buffer, Some(path), false),
+            UnixSocketKind::Datagram => {
+                self.write_datagram_socket(buffer, Some(path), false, Vec::new())
+            }
             UnixSocketKind::Stream | UnixSocketKind::SeqPacket => self.write_socket(buffer),
         }
     }
@@ -140,7 +144,12 @@ impl UnixSocketObject {
         loop {
             match self.kind {
                 UnixSocketKind::Datagram => {
-                    let written = self.write_datagram_socket(buffer, None, force_nonblocking)?;
+                    let written = self.write_datagram_socket(
+                        buffer,
+                        None,
+                        force_nonblocking,
+                        rights.clone(),
+                    )?;
                     if written == 0 {
                         continue;
                     }

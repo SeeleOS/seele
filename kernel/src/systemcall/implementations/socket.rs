@@ -293,12 +293,43 @@ fn stream_rights_control_bytes_for_read(
     Ok(control)
 }
 
+fn datagram_rights_control_bytes_for_read(
+    socket: &UnixSocketObject,
+    peek: bool,
+) -> Result<Vec<u8>, SyscallError> {
+    let UnixSocketState::Datagram(datagram) = &*socket.state.lock() else {
+        return Ok(Vec::new());
+    };
+
+    let rights = if peek {
+        datagram.peer_rights.lock().clone()
+    } else {
+        core::mem::take(&mut *datagram.peer_rights.lock())
+    };
+    if rights.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let current_process = get_current_process();
+    let mut current = current_process.lock();
+    let mut payload = Vec::with_capacity(rights.len() * mem::size_of::<i32>());
+    for right in rights {
+        let fd = i32::try_from(current.push_object(right))
+            .map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
+        payload.extend_from_slice(&fd.to_ne_bytes());
+    }
+    Ok(encode_control_message(SCM_RIGHTS, &payload))
+}
+
 fn unix_socket_control_bytes(
     socket: &UnixSocketObject,
     bytes_read: usize,
     peek: bool,
 ) -> Result<Vec<u8>, SyscallError> {
     let mut control = stream_rights_control_bytes_for_read(socket, bytes_read, peek)?;
+    if control.is_empty() {
+        control = datagram_rights_control_bytes_for_read(socket, peek)?;
+    }
     if !*socket.pass_cred.lock() {
         return Ok(control);
     }

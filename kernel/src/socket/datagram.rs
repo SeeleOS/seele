@@ -4,7 +4,7 @@ use spin::Mutex;
 use super::{
     SocketPeerCred, UnixSocketObject, registry::UnixSocketRegistryKey, wake_io, wake_pollers,
 };
-use crate::polling::event::PollableEvent;
+use crate::{object::misc::ObjectRef, polling::event::PollableEvent};
 
 pub const DATAGRAM_RECV_CAPACITY: usize = 64 * 1024;
 
@@ -13,6 +13,7 @@ pub struct UnixDatagramMessage {
     pub data: Vec<u8>,
     pub sender_name: Option<String>,
     pub sender_cred: SocketPeerCred,
+    pub rights: Vec<ObjectRef>,
 }
 
 #[derive(Debug)]
@@ -25,6 +26,7 @@ pub struct UnixDatagramInner {
     pub peer_name: Mutex<Option<String>>,
     pub peer_key: Mutex<Option<UnixSocketRegistryKey>>,
     pub peer_cred: Mutex<SocketPeerCred>,
+    pub peer_rights: Mutex<Vec<ObjectRef>>,
     pub read_shutdown: Mutex<bool>,
     pub write_shutdown: Mutex<bool>,
 }
@@ -40,6 +42,7 @@ impl UnixDatagramInner {
             peer_name: Mutex::new(None),
             peer_key: Mutex::new(None),
             peer_cred: Mutex::new(SocketPeerCred::default()),
+            peer_rights: Mutex::new(Vec::new()),
             read_shutdown: Mutex::new(false),
             write_shutdown: Mutex::new(false),
         }
