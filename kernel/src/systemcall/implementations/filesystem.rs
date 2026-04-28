@@ -1753,10 +1753,36 @@ define_syscall!(RenameAt2, |old_dirfd: i32,
 define_syscall!(Utimensat, |dirfd: i32,
                             path: CString,
                             times: *const [i64; 2],
-                            _flags: i32| {
-    if !path.is_null() {
+                            flags: AtFlags| {
+    let allowed_flags = AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH;
+    if flags.bits() != (flags & allowed_flags).bits() {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    if path.is_null() {
+        if flags.contains(AtFlags::EMPTY_PATH) {
+            let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
+            let _ = object.as_file_like()?;
+        } else {
+            return Err(SyscallError::BadAddress);
+        }
+    } else {
         let path_str = path_from_raw(path)?;
-        let _ = resolve_path_at(dirfd, &path_str)?;
+        if path_str.is_empty() {
+            if flags.contains(AtFlags::EMPTY_PATH) {
+                let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
+                let _ = object.as_file_like()?;
+            } else {
+                return Err(SyscallError::InvalidArguments);
+            }
+        } else {
+            let path = resolve_path_at(dirfd, &path_str)?;
+            let _ = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
+                VirtualFS.lock().open_nofollow(path)?
+            } else {
+                VirtualFS.lock().open(path)?
+            };
+        }
     }
 
     if !times.is_null() {
