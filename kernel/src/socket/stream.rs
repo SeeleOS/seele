@@ -28,6 +28,7 @@ pub struct PendingRights {
 pub struct UnixStreamInner {
     pub recv_buf: Mutex<VecDeque<u8>>,
     pub pending_rights: Mutex<VecDeque<PendingRights>>,
+    pub pending_packets: Mutex<VecDeque<usize>>,
     pub peer: Mutex<Option<Weak<UnixStreamInner>>>,
     pub owner: Mutex<Option<Weak<UnixSocketObject>>>,
     pub peer_cred: Mutex<SocketPeerCred>,
@@ -44,6 +45,7 @@ impl UnixStreamInner {
         Self {
             recv_buf: Mutex::new(VecDeque::new()),
             pending_rights: Mutex::new(VecDeque::new()),
+            pending_packets: Mutex::new(VecDeque::new()),
             peer: Mutex::new(None),
             owner: Mutex::new(None),
             peer_cred: Mutex::new(SocketPeerCred::default()),
@@ -114,6 +116,10 @@ impl UnixStreamInner {
             .take_while(|entry| entry.byte_offset < bytes_read)
             .map(|entry| entry.rights.clone())
             .collect()
+    }
+
+    pub fn next_packet_len(&self) -> Option<usize> {
+        self.pending_packets.lock().front().copied()
     }
 }
 

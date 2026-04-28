@@ -364,6 +364,17 @@ fn unix_socket_control_bytes(
     Ok(control)
 }
 
+fn unix_seqpacket_next_len(socket: &UnixSocketObject) -> Option<usize> {
+    if socket.kind != UnixSocketKind::SeqPacket {
+        return None;
+    }
+
+    let UnixSocketState::Stream(stream) = &*socket.state.lock() else {
+        return None;
+    };
+    stream.next_packet_len()
+}
+
 fn netlink_socket_control_bytes(
     socket: &NetlinkSocketObject,
     source_pid: u32,
@@ -1296,8 +1307,9 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
     let socket = socket.as_unix_socket()?;
     let dontwait = (flags & MSG_DONTWAIT) != 0;
     let peek = (flags & MSG_PEEK) != 0;
+    let report_trunc = (flags & MSG_TRUNC) != 0;
     let total_capacity = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
-    let mut scratch = alloc::vec![0u8; total_capacity];
+    let mut scratch = alloc::vec![0u8; unix_seqpacket_next_len(&socket).unwrap_or(total_capacity)];
     let total_read = socket
         .read_socket_with_flags_and_mode(&mut scratch, dontwait, peek)
         .map_err(ObjectError::from)?;
@@ -1323,6 +1335,9 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
     }
 
     msg.msg_flags = 0;
+    if copied_total < total_read {
+        msg.msg_flags |= MSG_TRUNC as i32;
+    }
     if !msg.msg_name.is_null() {
         let name = socket.getpeername_bytes().map_err(ObjectError::from)?;
         let copy_len = (msg.msg_namelen as usize).min(name.len());
@@ -1362,7 +1377,11 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         log_user_manager_socket_rights("recvmsg", &target, count_scm_rights_in_control(&control));
     }
 
-    Ok(total_read)
+    Ok(if report_trunc || total_capacity == 0 {
+        total_read
+    } else {
+        copied_total
+    })
 });
 
 define_syscall!(Shutdown, |socket: ObjectRef, how: u64| {

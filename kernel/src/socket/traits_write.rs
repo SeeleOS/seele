@@ -128,7 +128,9 @@ impl UnixSocketObject {
         rights: Vec<ObjectRef>,
     ) -> SocketResult<usize> {
         match self.kind {
-            UnixSocketKind::Datagram => self.write_datagram_socket(buffer, Some(path), false, rights),
+            UnixSocketKind::Datagram => {
+                self.write_datagram_socket(buffer, Some(path), false, rights)
+            }
             UnixSocketKind::Stream | UnixSocketKind::SeqPacket => self.write_socket(buffer),
         }
     }
@@ -184,11 +186,28 @@ impl UnixSocketObject {
                     }
 
                     let mut recv_buf = peer.recv_buf.lock();
-                    if recv_buf.len() < STREAM_RECV_CAPACITY {
-                        let writable = STREAM_RECV_CAPACITY - recv_buf.len();
-                        let write_len = buffer.len().min(writable);
+                    let required_len = match self.kind {
+                        UnixSocketKind::Stream => buffer.len().min(STREAM_RECV_CAPACITY),
+                        UnixSocketKind::SeqPacket => buffer.len(),
+                        UnixSocketKind::Datagram => unreachable!(),
+                    };
+                    if self.kind == UnixSocketKind::SeqPacket && required_len > STREAM_RECV_CAPACITY
+                    {
+                        return Err(SocketError::InvalidArguments);
+                    }
+                    if required_len <= STREAM_RECV_CAPACITY
+                        && recv_buf.len() + required_len <= STREAM_RECV_CAPACITY
+                    {
+                        let write_len = match self.kind {
+                            UnixSocketKind::Stream => required_len,
+                            UnixSocketKind::SeqPacket => buffer.len(),
+                            UnixSocketKind::Datagram => unreachable!(),
+                        };
                         let byte_offset = recv_buf.len();
                         recv_buf.extend(buffer[..write_len].iter().copied());
+                        if self.kind == UnixSocketKind::SeqPacket {
+                            peer.pending_packets.lock().push_back(write_len);
+                        }
                         if write_len > 0 && !rights.is_empty() {
                             peer.pending_rights.lock().push_back(PendingRights {
                                 byte_offset,

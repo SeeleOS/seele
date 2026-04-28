@@ -79,6 +79,44 @@ impl UnixSocketObject {
                         return Ok(0);
                     }
 
+                    if self.kind == super::UnixSocketKind::SeqPacket {
+                        let packet_len = stream.pending_packets.lock().front().copied();
+                        if let Some(packet_len) = packet_len {
+                            let mut recv_buf = stream.recv_buf.lock();
+                            if peek {
+                                let read = buffer.len().min(packet_len);
+                                for (dst, src) in buffer.iter_mut().zip(recv_buf.iter().take(read))
+                                {
+                                    *dst = *src;
+                                }
+                                return Ok(read);
+                            }
+
+                            let was_full = recv_buf.len() >= STREAM_RECV_CAPACITY;
+                            let read = buffer.len().min(packet_len);
+                            for (index, byte) in recv_buf.drain(..packet_len).enumerate() {
+                                if index < read {
+                                    buffer[index] = byte;
+                                }
+                            }
+                            drop(recv_buf);
+                            stream.pending_packets.lock().pop_front();
+                            let _ = stream.take_ready_rights(packet_len);
+
+                            if was_full {
+                                if let Some(peer) =
+                                    stream.peer.lock().as_ref().and_then(Weak::upgrade)
+                                    && let Some(owner) =
+                                        peer.owner.lock().as_ref().and_then(Weak::upgrade)
+                                {
+                                    wake_pollers(&owner, PollableEvent::CanBeWritten);
+                                }
+                                wake_io();
+                            }
+                            return Ok(read);
+                        }
+                    }
+
                     let mut recv_buf = stream.recv_buf.lock();
                     if !recv_buf.is_empty() {
                         if peek {

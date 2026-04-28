@@ -340,7 +340,12 @@ define_syscall!(Writev, |object: ObjectRef,
     let preserve_datagram_boundary = object
         .clone()
         .as_unix_socket()
-        .map(|socket| socket.kind == UnixSocketKind::Datagram)
+        .map(|socket| {
+            matches!(
+                socket.kind,
+                UnixSocketKind::Datagram | UnixSocketKind::SeqPacket
+            )
+        })
         .or_else(|_| {
             object
                 .clone()
