@@ -24,6 +24,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         Brk,
         RtSigaction,
         RtSigprocmask,
+        RtSigqueueinfo,
         RtSigreturn,
         Ioctl,
         Pread64,

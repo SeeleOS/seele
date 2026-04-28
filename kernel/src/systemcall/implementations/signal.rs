@@ -121,6 +121,27 @@ fn decode_sigaction(action: LinuxSigAction) -> SignalAction {
     }
 }
 
+fn read_or_build_signal_info(signal: Signal, info: *const SigInfo, default_code: i32) -> SyscallResult<SigInfo> {
+    if info.is_null() {
+        let current = get_current_process();
+        let current = current.lock();
+        let mut siginfo = SigInfo::for_process_signal(signal, current.pid.0 as i32, current.real_uid);
+        siginfo.si_code = default_code;
+        return Ok(siginfo);
+    }
+
+    let mut siginfo = user_safe::read(info)?;
+    siginfo.si_signo = signal as i32;
+    if siginfo.si_code == 0 && siginfo.sender_pid() == 0 {
+        let current = get_current_process();
+        let current = current.lock();
+        siginfo = SigInfo::for_process_signal(signal, current.pid.0 as i32, current.real_uid);
+        siginfo.si_code = default_code;
+    }
+
+    Ok(siginfo)
+}
+
 define_syscall!(
     Signalfd4,
     |fd: i32, mask: *const u64, sigsetsize: usize, flags: SignalfdFlags| {
@@ -330,6 +351,18 @@ define_syscall!(Tgkill, |tgid: i32, tid: i32, signal: i32| {
     Ok(0)
 });
 
+define_syscall!(RtSigqueueinfo, |pid: i32, signal: i32, info: *const SigInfo| {
+    if pid <= 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let signal = Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?;
+    let process = get_process_with_pid(ProcessID(pid as u64))?;
+    let siginfo = read_or_build_signal_info(signal, info, SI_QUEUE)?;
+    send_signal_to_process_with_siginfo(&process, signal, siginfo);
+    Ok(0)
+});
+
 define_syscall!(
     PidfdSendSignal,
     |pidfd: ObjectRef, signal: i32, info: *const SigInfo, flags: u32| {
@@ -340,25 +373,7 @@ define_syscall!(
 
         let pid = pidfd.as_pidfd()?.pid();
         let process = get_process_with_pid(ProcessID(pid))?;
-        let siginfo = if info.is_null() {
-            let current = get_current_process();
-            let current = current.lock();
-            SigInfo::for_process_signal(signal, current.pid.0 as i32, current.real_uid)
-        } else {
-            let mut siginfo = user_safe::read(info)?;
-            siginfo.si_signo = signal as i32;
-            if siginfo.si_code == 0 && siginfo.sender_pid() == 0 {
-                let current = get_current_process();
-                let current = current.lock();
-                siginfo = SigInfo::for_process_signal(
-                    signal,
-                    current.pid.0 as i32,
-                    current.real_uid,
-                );
-                siginfo.si_code = SI_QUEUE;
-            }
-            siginfo
-        };
+        let siginfo = read_or_build_signal_info(signal, info, SI_QUEUE)?;
         send_signal_to_process_with_siginfo(&process, signal, siginfo);
         Ok(0)
     }

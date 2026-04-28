@@ -111,6 +111,7 @@ pub enum SyscallNumber {
     Getsid = 124,
     Setfsuid = 122,
     Setfsgid = 123,
+    RtSigqueueinfo = 129,
     RtSigsuspend = 130,
     Sigaltstack = 131,
     Statfs = 137,
