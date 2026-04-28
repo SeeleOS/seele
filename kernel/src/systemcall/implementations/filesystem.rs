@@ -318,101 +318,25 @@ fn next_tmpfile_path(dir_path: &Path) -> Path {
     Path::new(&path)
 }
 
-fn is_logind_process() -> bool {
-    with_current_process(|process| {
-        process
-            .command_line
-            .first()
-            .is_some_and(|command| command.contains("systemd-logind"))
-    })
-}
-
-fn is_init_process() -> bool {
-    with_current_process(|process| process.pid.0 == 1)
-}
-
-fn is_logind_runtime_path(path: &Path) -> bool {
-    let path = path.clone().as_string();
-    path.starts_with("/run/systemd/") || path.starts_with("/proc/self/fd")
-}
-
 fn debug_logind_renameat2(
-    old_dirfd: i32,
-    old_path: &str,
-    new_dirfd: i32,
-    new_path: &str,
-    flags: u32,
-    result: &Result<(), SyscallError>,
+    _old_dirfd: i32,
+    _old_path: &str,
+    _new_dirfd: i32,
+    _new_path: &str,
+    _flags: u32,
+    _result: &Result<(), SyscallError>,
 ) {
-    if !is_logind_process() {
-        return;
-    }
-
-    let old_resolved = resolve_path_at(old_dirfd, old_path).ok();
-    let new_resolved = resolve_path_at(new_dirfd, new_path).ok();
-    let should_log = old_resolved.as_ref().is_some_and(is_logind_runtime_path)
-        || new_resolved.as_ref().is_some_and(is_logind_runtime_path);
-    if !should_log {
-        return;
-    }
-
-    let old_display = old_resolved
-        .map(|path| path.as_string())
-        .unwrap_or_else(|| format!("fd={old_dirfd}:{old_path}"));
-    let new_display = new_resolved
-        .map(|path| path.as_string())
-        .unwrap_or_else(|| format!("fd={new_dirfd}:{new_path}"));
-    match result {
-        Ok(()) => crate::s_println!(
-            "logind renameat2 {old_display} -> {new_display} flags=0x{flags:x} -> ok"
-        ),
-        Err(err) => crate::s_println!(
-            "logind renameat2 {old_display} -> {new_display} flags=0x{flags:x} -> {:?}",
-            err
-        ),
-    }
 }
 
-fn debug_logind_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) {
-    debug_logind_fs(op, path, result);
-}
+fn debug_logind_path_op(_op: &str, _path: &Path, _result: &Result<(), SyscallError>) {}
 
-fn debug_init_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) {
-    if !is_init_process() {
-        return;
-    }
+fn debug_init_path_op(_op: &str, _path: &Path, _result: &Result<(), SyscallError>) {}
 
-    match result {
-        Ok(()) => crate::s_println!("init {op} {} -> ok", path.clone().as_string()),
-        Err(err) => crate::s_println!("init {op} {} -> {:?}", path.clone().as_string(), err),
-    }
-}
+fn debug_init_openat_stage(_stage: &str, _dirfd: i32, _path: &str) {}
 
-fn debug_init_openat_stage(stage: &str, dirfd: i32, path: &str) {
-    if !is_init_process() {
-        return;
-    }
+fn debug_init_openat_note(_note: &str) {}
 
-    crate::s_println!("init openat {stage} dirfd={dirfd} path={path}");
-}
-
-fn debug_init_openat_note(note: &str) {
-    if !is_init_process() {
-        return;
-    }
-
-    crate::s_println!("init openat {note}");
-}
-
-fn debug_logind_fs(op: &str, path: &Path, result: &Result<(), SyscallError>) {
-    if !is_logind_process() || !is_logind_runtime_path(path) {
-        return;
-    }
-
-    match result {
-        Ok(()) => crate::s_println!("logind {op} {} -> ok", path.clone().as_string()),
-        Err(err) => crate::s_println!("logind {op} {} -> {:?}", path.clone().as_string(), err),
-    }
+fn debug_logind_fs(_op: &str, _path: &Path, _result: &Result<(), SyscallError>) {
 }
 
 fn open_tmpfile_at(dirfd: i32, path_str: &str) -> Result<ObjectRef, SyscallError> {
@@ -464,33 +388,19 @@ fn proc_self_fd_object(path: &Path) -> Result<Option<ObjectRef>, SyscallError> {
 }
 
 fn create_file_unlocked(path: Path) -> Result<(), SyscallError> {
-    if is_init_process() {
-        crate::s_println!("init create_file_unlocked start {}", path.clone().as_string());
-    }
     let (parent_dir, name) = {
         let vfs = VirtualFS.lock();
         let normalized = vfs.normalize_path(path.clone());
         if normalized.ends_with_slash() {
             return Err(SyscallError::NotADirectory);
         }
-        let resolved = vfs.resolve_parent(path).map_err(SyscallError::from)?;
-        if is_init_process() {
-            crate::s_println!("init create_file_unlocked resolved {name}", name = resolved.1);
-        }
-        resolved
+        vfs.resolve_parent(path).map_err(SyscallError::from)?
     };
 
-    if is_init_process() {
-        crate::s_println!("init create_file_unlocked before-dir-lock");
-    }
     parent_dir
         .lock()
         .create(DirectoryContentInfo::new(name, DirectoryContentType::File))
-        .map_err(SyscallError::from)?;
-    if is_init_process() {
-        crate::s_println!("init create_file_unlocked done");
-    }
-    Ok(())
+        .map_err(SyscallError::from)
 }
 
 fn is_api_mount_path(path: &Path) -> bool {

@@ -151,20 +151,10 @@ impl TmpfsState {
     fn create_node(&mut self, parent: &str, name: &str, kind: TmpNodeKind) -> FSResult<()> {
         let parent = Self::normalize(parent);
         let child = Self::child_path(&parent, name);
-        let trace_show_status = child == "/systemd/show-status";
-        if trace_show_status {
-            crate::s_println!("tmpfs create_node start parent={parent} child={child}");
-        }
         if self.paths.contains_key(&child) {
             return Err(FSError::AlreadyExists);
         }
-        if trace_show_status {
-            crate::s_println!("tmpfs create_node before-parent-check");
-        }
         let _ = self.directory_children_mut(&parent)?;
-        if trace_show_status {
-            crate::s_println!("tmpfs create_node before-insert");
-        }
         let inode = self.next_inode;
         self.next_inode += 1;
         self.paths.insert(child, inode);
@@ -177,13 +167,7 @@ impl TmpfsState {
                 kind,
             },
         );
-        if trace_show_status {
-            crate::s_println!("tmpfs create_node before-child-link");
-        }
         self.directory_children_mut(&parent)?.insert(name.into());
-        if trace_show_status {
-            crate::s_println!("tmpfs create_node done");
-        }
         Ok(())
     }
 
