@@ -9,7 +9,7 @@ use crate::{
         error::ObjectError,
         misc::{ObjectRef, get_object_current_process},
     },
-    process::{FdFlags, manager::get_current_process},
+    process::{FdFlags, manager::get_current_process, misc::with_current_process},
     socket::{
         AF_INET, AF_NETLINK, AF_UNIX, InetSocketObject, SOCK_CLOEXEC, SOCK_NONBLOCK, SOL_SOCKET,
         UnixSocketKind, UnixSocketObject, UnixSocketState,
@@ -55,6 +55,51 @@ struct LinuxUcred {
     pid: i32,
     uid: u32,
     gid: u32,
+}
+
+fn current_user_manager_chain() -> Option<(u64, String, String)> {
+    with_current_process(|process| {
+        let pid = process.pid.0;
+        if pid < 100 {
+            return None;
+        }
+        let command = process.command_line.first().cloned().unwrap_or_default();
+        let parent_command = process
+            .parent
+            .as_ref()
+            .and_then(|parent| parent.lock().command_line.first().cloned())
+            .unwrap_or_default();
+        let is_user_manager_chain = command.contains("systemd-executor")
+            || parent_command.contains("systemd-executor")
+            || (command == "/usr/lib/systemd/systemd" && parent_command.contains("systemd"));
+        is_user_manager_chain.then_some((pid, command, parent_command))
+    })
+}
+
+fn log_user_manager_socket(op: &str, target: &str, result: &Result<(), SyscallError>) {
+    let Some((pid, command, parent_command)) = current_user_manager_chain()
+    else {
+        return;
+    };
+    match result {
+        Ok(()) => crate::s_println!(
+            "usermgr-socket pid={} cmd={} parent_cmd={} op={} target={} result=ok",
+            pid,
+            command,
+            parent_command,
+            op,
+            target
+        ),
+        Err(err) => crate::s_println!(
+            "usermgr-socket pid={} cmd={} parent_cmd={} op={} target={} err={:?}",
+            pid,
+            command,
+            parent_command,
+            op,
+            target,
+            err
+        ),
+    }
 }
 
 fn cmsg_align(len: usize) -> usize {
@@ -390,11 +435,20 @@ define_syscall!(Connect, |socket: ObjectRef,
                           address: *const u8,
                           address_len: u32| {
     let address = socket_address_bytes(address, address_len)?;
-    socket
+    let log_target = match socket_address_from_raw(address.as_ptr(), address.len() as u32)? {
+        SocketAddress::Unix(path) => Some(format!("unix:{path}")),
+        SocketAddress::Netlink(addr) => Some(format!("netlink:{}:{}", addr.pid, addr.groups)),
+        SocketAddress::Inet(addr) => Some(format!("inet:{}:{}", addr.address, addr.port)),
+    };
+    let result = socket
         .clone()
         .as_socket_like()?
         .connect_bytes(&address)
-        .map_err(ObjectError::from)?;
+        .map_err(SyscallError::from);
+    if let Some(target) = &log_target {
+        log_user_manager_socket("connect", target, &result);
+    }
+    result?;
     Ok(0)
 });
 
@@ -447,10 +501,21 @@ define_syscall!(Sendto, |socket: ObjectRef,
     let address = (!address.is_null())
         .then(|| socket_address_bytes(address, address_len))
         .transpose()?;
+    let log_target = address
+        .as_deref()
+        .and_then(|address| match socket_address_from_raw(address.as_ptr(), address.len() as u32) {
+            Ok(SocketAddress::Unix(path)) => Some(format!("unix:{path}")),
+            Ok(SocketAddress::Netlink(addr)) => Some(format!("netlink:{}:{}", addr.pid, addr.groups)),
+            Ok(SocketAddress::Inet(addr)) => Some(format!("inet:{}:{}", addr.address, addr.port)),
+            Err(_) => None,
+        });
     let written = socket
         .as_socket_like()?
         .sendto(buffer, address.as_deref())
         .map_err(ObjectError::from)?;
+    if let Some(target) = &log_target {
+        log_user_manager_socket("sendto", target, &Ok(()));
+    }
 
     Ok(written)
 });
@@ -730,7 +795,22 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
         return Err(SyscallError::BadAddress);
     }
 
-    sendmsg_impl(socket, unsafe { &*msg }, flags)
+    let msg = unsafe { &*msg };
+    let log_target = if !msg.msg_name.is_null() {
+        match socket_address_from_raw(msg.msg_name.cast(), msg.msg_namelen) {
+            Ok(SocketAddress::Unix(path)) => Some(format!("unix:{path}")),
+            Ok(SocketAddress::Netlink(addr)) => Some(format!("netlink:{}:{}", addr.pid, addr.groups)),
+            Ok(SocketAddress::Inet(addr)) => Some(format!("inet:{}:{}", addr.address, addr.port)),
+            Err(_) => None,
+        }
+    } else {
+        Some(String::from("connected"))
+    };
+    let result = sendmsg_impl(socket, msg, flags);
+    if let Some(target) = &log_target {
+        log_user_manager_socket("sendmsg", target, &result.as_ref().map(|_| ()).map_err(|err| *err));
+    }
+    result
 });
 
 define_syscall!(Sendmmsg, |socket: ObjectRef,

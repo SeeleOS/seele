@@ -328,13 +328,98 @@ fn debug_logind_renameat2(
 ) {
 }
 
-fn debug_logind_path_op(_op: &str, _path: &Path, _result: &Result<(), SyscallError>) {}
+fn current_user_manager_chain() -> Option<(u64, String, String)> {
+    with_current_process(|process| {
+        let pid = process.pid.0;
+        if pid < 100 {
+            return None;
+        }
+        let command = process.command_line.first().cloned().unwrap_or_default();
+        let parent_command = process
+            .parent
+            .as_ref()
+            .and_then(|parent| parent.lock().command_line.first().cloned())
+            .unwrap_or_default();
+        let is_user_manager_chain = command.contains("systemd-executor")
+            || parent_command.contains("systemd-executor")
+            || (command == "/usr/lib/systemd/systemd" && parent_command.contains("systemd"));
+        is_user_manager_chain.then_some((pid, command, parent_command))
+    })
+}
+
+fn should_log_user_manager_path(path: &Path, result: &Result<(), SyscallError>) -> bool {
+    if result.is_err() {
+        return true;
+    }
+
+    let path = path.as_string();
+    path.starts_with("/run/dbus/")
+        || path.starts_with("/run/systemd/")
+        || path.starts_with("/run/user/")
+        || path.starts_with("/etc/systemd/")
+        || path.starts_with("/usr/lib/systemd/")
+}
+
+fn debug_logind_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) {
+    let Some((pid, command, parent_command)) = current_user_manager_chain()
+    else {
+        return;
+    };
+    if !should_log_user_manager_path(path, result) {
+        return;
+    }
+    match result {
+        Ok(()) => crate::s_println!(
+            "usermgr-path pid={} cmd={} parent_cmd={} op={} path={} result=ok",
+            pid,
+            command,
+            parent_command,
+            op,
+            path.as_string()
+        ),
+        Err(err) => crate::s_println!(
+            "usermgr-path pid={} cmd={} parent_cmd={} op={} path={} err={:?}",
+            pid,
+            command,
+            parent_command,
+            op,
+            path.as_string(),
+            err
+        ),
+    }
+}
 
 fn debug_init_path_op(_op: &str, _path: &Path, _result: &Result<(), SyscallError>) {}
 
-fn debug_init_openat_stage(_stage: &str, _dirfd: i32, _path: &str) {}
+fn debug_init_openat_stage(stage: &str, dirfd: i32, path: &str) {
+    let Some((pid, command, parent_command)) = current_user_manager_chain()
+    else {
+        return;
+    };
+    crate::s_println!(
+        "usermgr-openat-stage pid={} cmd={} parent_cmd={} stage={} dirfd={} path={}",
+        pid,
+        command,
+        parent_command,
+        stage,
+        dirfd,
+        path
+    );
+}
 
-fn debug_init_openat_note(_note: &str) {}
+fn debug_init_openat_note(note: &str) {
+    let Some((pid, command, parent_command)) = current_user_manager_chain()
+    else {
+        return;
+    };
+    crate::s_println!(
+        "usermgr-openat-note pid={} cmd={} parent_cmd={} note={}",
+        pid,
+        command,
+        parent_command,
+        note
+    );
+}
 
 fn debug_logind_fs(_op: &str, _path: &Path, _result: &Result<(), SyscallError>) {
 }
