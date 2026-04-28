@@ -224,22 +224,8 @@ fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallE
         for ready in poller.take_woken_events(fds.len()) {
             ready_by_index
                 .entry(ready.data as usize)
-                .and_modify(|events| {
-                    *events |= match ready.event {
-                        PollableEvent::CanBeRead => PollEvents::POLLIN.bits() as u32,
-                        PollableEvent::CanBeWritten => PollEvents::POLLOUT.bits() as u32,
-                        PollableEvent::Error => PollEvents::POLLERR.bits() as u32,
-                        PollableEvent::Closed => PollEvents::POLLHUP.bits() as u32,
-                        PollableEvent::Other(bits) => bits as u32,
-                    }
-                })
-                .or_insert_with(|| match ready.event {
-                    PollableEvent::CanBeRead => PollEvents::POLLIN.bits() as u32,
-                    PollableEvent::CanBeWritten => PollEvents::POLLOUT.bits() as u32,
-                    PollableEvent::Error => PollEvents::POLLERR.bits() as u32,
-                    PollableEvent::Closed => PollEvents::POLLHUP.bits() as u32,
-                    PollableEvent::Other(bits) => bits as u32,
-                });
+                .and_modify(|events| *events |= ready.ready_bits)
+                .or_insert(ready.ready_bits);
         }
 
         for (index, kernel_ready) in ready_by_index {

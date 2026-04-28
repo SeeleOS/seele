@@ -37,9 +37,13 @@ bitflags! {
     #[derive(Clone, Copy, Debug)]
     pub(crate) struct EpollEvents: u32 {
         const IN = 0x001;
+        const PRI = 0x002;
         const OUT = 0x004;
         const ERR = 0x008;
         const HUP = 0x010;
+        const RDHUP = 0x2000;
+        const ET = 0x8000_0000;
+        const ONESHOT = 0x4000_0000;
     }
 }
 
@@ -83,26 +87,46 @@ fn write_epoll_event(event_ptr: *mut LinuxEpollEvent, events: u32, data: u64) {
     }
 }
 
-fn pollable_event_to_linux_bits(event: PollableEvent) -> EpollEvents {
-    match event {
-        PollableEvent::CanBeRead => EpollEvents::IN,
-        PollableEvent::CanBeWritten => EpollEvents::OUT,
-        PollableEvent::Error => EpollEvents::ERR,
-        PollableEvent::Closed => EpollEvents::HUP,
-        PollableEvent::Other(bits) => EpollEvents::from_bits_retain(bits as u32),
-    }
-}
+fn epoll_interest_entries(bits: EpollEvents) -> [(bool, PollableEvent, u32); 6] {
+    let watch_any = bits.intersects(
+        EpollEvents::IN
+            | EpollEvents::PRI
+            | EpollEvents::OUT
+            | EpollEvents::HUP
+            | EpollEvents::RDHUP,
+    );
 
-fn linux_bits_to_events(bits: EpollEvents) -> [Option<PollableEvent>; 4] {
     [
-        bits.contains(EpollEvents::IN)
-            .then_some(PollableEvent::CanBeRead),
-        bits.contains(EpollEvents::OUT)
-            .then_some(PollableEvent::CanBeWritten),
-        bits.contains(EpollEvents::ERR)
-            .then_some(PollableEvent::Error),
-        bits.contains(EpollEvents::HUP)
-            .then_some(PollableEvent::Closed),
+        (
+            bits.contains(EpollEvents::IN),
+            PollableEvent::CanBeRead,
+            EpollEvents::IN.bits(),
+        ),
+        (
+            bits.contains(EpollEvents::PRI),
+            PollableEvent::CanBeRead,
+            EpollEvents::PRI.bits(),
+        ),
+        (
+            bits.contains(EpollEvents::OUT),
+            PollableEvent::CanBeWritten,
+            EpollEvents::OUT.bits(),
+        ),
+        (
+            watch_any || bits.contains(EpollEvents::ERR),
+            PollableEvent::Error,
+            EpollEvents::ERR.bits(),
+        ),
+        (
+            watch_any || bits.contains(EpollEvents::HUP),
+            PollableEvent::Closed,
+            EpollEvents::HUP.bits(),
+        ),
+        (
+            bits.contains(EpollEvents::RDHUP),
+            PollableEvent::Closed,
+            EpollEvents::RDHUP.bits(),
+        ),
     ]
 }
 
@@ -125,16 +149,23 @@ fn epoll_update_impl(
     data: u64,
 ) -> Result<usize, SyscallError> {
     let target_object = poll_identity_object(target_object);
+    let oneshot = bits.contains(EpollEvents::ONESHOT);
 
     if target_object.clone().as_pollable().is_err() {
         return Err(SyscallError::PermissionDenied);
     }
 
-    for event in linux_bits_to_events(bits).into_iter().flatten() {
-        poller
-            .clone()
-            .as_poller()?
-            .register_obj(target_object.clone(), event, data);
+    for (enabled, event, ready_bits) in epoll_interest_entries(bits) {
+        if !enabled {
+            continue;
+        }
+        poller.clone().as_poller()?.register_obj_with_ready_bits(
+            target_object.clone(),
+            event,
+            data,
+            ready_bits,
+            oneshot,
+        );
     }
 
     Ok(0)
@@ -238,7 +269,7 @@ fn epoll_wait_impl(
             for (index, woken) in woken_events.iter().enumerate() {
                 write_epoll_event(
                     unsafe { events_ptr.add(index) },
-                    pollable_event_to_linux_bits(woken.event).bits(),
+                    woken.ready_bits,
                     woken.data,
                 );
             }

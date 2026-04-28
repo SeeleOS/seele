@@ -136,15 +136,47 @@ pub fn notify_pollers(object: ObjectRef, event: PollableEvent) -> Vec<ObjectRef>
 
 impl PollerObject {
     pub fn register_obj(&self, object: ObjectRef, event: PollableEvent, data: u64) {
+        self.register_obj_with_ready_bits(
+            object,
+            event,
+            data,
+            match event {
+                PollableEvent::CanBeRead => 0x001,
+                PollableEvent::CanBeWritten => 0x004,
+                PollableEvent::Error => 0x008,
+                PollableEvent::Closed => 0x010,
+                PollableEvent::Other(bits) => bits as u32,
+            },
+            false,
+        );
+    }
+
+    pub fn register_obj_with_ready_bits(
+        &self,
+        object: ObjectRef,
+        event: PollableEvent,
+        data: u64,
+        ready_bits: u32,
+        oneshot: bool,
+    ) {
         let mut entries = self.entries.lock();
-        let is_new_entry = if let Some(existing) = entries
-            .iter_mut()
-            .find(|entry| entry.event == event && Arc::ptr_eq(&entry.object, &object))
-        {
+        let is_new_entry = if let Some(existing) = entries.iter_mut().find(|entry| {
+            entry.event == event
+                && entry.ready_bits == ready_bits
+                && Arc::ptr_eq(&entry.object, &object)
+        }) {
             existing.data = data;
+            existing.oneshot = oneshot;
+            existing.enabled = true;
             false
         } else {
-            entries.push(PollerEntry::new(object.clone(), event, data));
+            entries.push(PollerEntry::new(
+                object.clone(),
+                event,
+                data,
+                ready_bits,
+                oneshot,
+            ));
             true
         };
         drop(entries);
@@ -155,7 +187,7 @@ impl PollerObject {
 
         self.woken_events
             .lock()
-            .retain(|ready| !(ready.event == event && Arc::ptr_eq(&ready.object, &object)));
+            .retain(|ready| !Arc::ptr_eq(&ready.object, &object));
     }
 
     pub fn unregister_obj(&self, object: ObjectRef, event: PollableEvent) {
@@ -180,6 +212,14 @@ impl PollerObject {
 
         self.woken_events
             .lock()
-            .retain(|ready| !(ready.event == event && Arc::ptr_eq(&ready.object, &object)));
+            .retain(|ready| !Arc::ptr_eq(&ready.object, &object));
+    }
+
+    pub fn disable_oneshot_entries(&self, object: &ObjectRef) {
+        for entry in self.entries.lock().iter_mut() {
+            if Arc::ptr_eq(&entry.object, object) {
+                entry.enabled = false;
+            }
+        }
     }
 }
