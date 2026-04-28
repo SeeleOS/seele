@@ -352,7 +352,7 @@ fn should_log_user_manager_path(path: &Path, result: &Result<(), SyscallError>) 
         return true;
     }
 
-    let path = path.as_string();
+    let path = path.clone().as_string();
     path.starts_with("/run/dbus/")
         || path.starts_with("/run/systemd/")
         || path.starts_with("/run/user/")
@@ -361,13 +361,13 @@ fn should_log_user_manager_path(path: &Path, result: &Result<(), SyscallError>) 
 }
 
 fn debug_logind_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) {
-    let Some((pid, command, parent_command)) = current_user_manager_chain()
-    else {
+    let Some((pid, command, parent_command)) = current_user_manager_chain() else {
         return;
     };
     if !should_log_user_manager_path(path, result) {
         return;
     }
+    let path_string = path.clone().as_string();
     match result {
         Ok(()) => crate::s_println!(
             "usermgr-path pid={} cmd={} parent_cmd={} op={} path={} result=ok",
@@ -375,7 +375,7 @@ fn debug_logind_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>
             command,
             parent_command,
             op,
-            path.as_string()
+            path_string
         ),
         Err(err) => crate::s_println!(
             "usermgr-path pid={} cmd={} parent_cmd={} op={} path={} err={:?}",
@@ -383,7 +383,7 @@ fn debug_logind_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>
             command,
             parent_command,
             op,
-            path.as_string(),
+            path_string,
             err
         ),
     }
@@ -392,8 +392,7 @@ fn debug_logind_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>
 fn debug_init_path_op(_op: &str, _path: &Path, _result: &Result<(), SyscallError>) {}
 
 fn debug_init_openat_stage(stage: &str, dirfd: i32, path: &str) {
-    let Some((pid, command, parent_command)) = current_user_manager_chain()
-    else {
+    let Some((pid, command, parent_command)) = current_user_manager_chain() else {
         return;
     };
     crate::s_println!(
@@ -408,8 +407,7 @@ fn debug_init_openat_stage(stage: &str, dirfd: i32, path: &str) {
 }
 
 fn debug_init_openat_note(note: &str) {
-    let Some((pid, command, parent_command)) = current_user_manager_chain()
-    else {
+    let Some((pid, command, parent_command)) = current_user_manager_chain() else {
         return;
     };
     crate::s_println!(
@@ -421,8 +419,7 @@ fn debug_init_openat_note(note: &str) {
     );
 }
 
-fn debug_logind_fs(_op: &str, _path: &Path, _result: &Result<(), SyscallError>) {
-}
+fn debug_logind_fs(_op: &str, _path: &Path, _result: &Result<(), SyscallError>) {}
 
 fn open_tmpfile_at(dirfd: i32, path_str: &str) -> Result<ObjectRef, SyscallError> {
     let dir_path = resolve_path_at(dirfd, path_str)?;
@@ -815,7 +812,9 @@ fn rename_impl(
         return Ok(0);
     }
 
-    let result = VirtualFS.lock().rename_file(old_path.clone(), new_path.clone());
+    let result = VirtualFS
+        .lock()
+        .rename_file(old_path.clone(), new_path.clone());
     let result = result.map_err(SyscallError::from);
     let log_result = match result {
         Ok(()) => Ok(()),
@@ -973,14 +972,14 @@ define_syscall!(OpenAt, |dirfd: i32,
                         let reopen_result = VirtualFS.lock().open(path.clone());
                         match reopen_result {
                             Ok(file) => Arc::new(file),
-                                Err(err) => {
-                                    let err = SyscallError::from(err);
-                                    debug_logind_path_op("openat", &path, &Err(err));
-                                    debug_init_path_op("openat", &path, &Err(err));
-                                    return Err(err);
-                                }
+                            Err(err) => {
+                                let err = SyscallError::from(err);
+                                debug_logind_path_op("openat", &path, &Err(err));
+                                debug_init_path_op("openat", &path, &Err(err));
+                                return Err(err);
                             }
                         }
+                    }
                     Ok(None) => {
                         debug_logind_path_op("openat", &path, &Err(SyscallError::FileNotFound));
                         debug_init_path_op("openat", &path, &Err(SyscallError::FileNotFound));
@@ -1562,7 +1561,10 @@ define_syscall!(SymlinkAt, |target: CString,
 define_syscall!(MkdirAt, |dirfd: i32, path: CString, _mode: u32| {
     let path = path_from_raw(path)?;
     let path = resolve_path_at(dirfd, &path)?;
-    let result = VirtualFS.lock().create_dir(path.clone()).map_err(SyscallError::from);
+    let result = VirtualFS
+        .lock()
+        .create_dir(path.clone())
+        .map_err(SyscallError::from);
     debug_logind_path_op("mkdirat", &path, &result);
     result?;
 
@@ -2019,7 +2021,8 @@ define_syscall!(Utimensat, |dirfd: i32,
         let path_str = path_from_raw(path)?;
         if path_str.is_empty() {
             if flags.contains(AtFlags::EMPTY_PATH) {
-                let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
+                let object =
+                    get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
                 let _ = object.as_file_like()?;
             } else {
                 return Err(SyscallError::InvalidArguments);

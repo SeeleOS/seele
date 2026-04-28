@@ -11,7 +11,7 @@ use crate::{
         Process, ProcessExitStatus, ProcessRef,
         execve::execve,
         manager::{MANAGER, get_current_process, terminate_process},
-        misc::{get_process_with_pid, with_current_process, ProcessID},
+        misc::{ProcessID, get_process_with_pid, with_current_process},
         wait::{ProcessWaitEvent, take_wait_event},
     },
     signal::Signal,

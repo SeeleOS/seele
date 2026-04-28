@@ -437,12 +437,13 @@ define_syscall!(Connect, |socket: ObjectRef,
     let log_target = match socket_address_from_raw(address.as_ptr(), address.len() as u32)? {
         SocketAddress::Unix(path) => Some(format!("unix:{path}")),
         SocketAddress::Netlink(addr) => Some(format!("netlink:{}:{}", addr.pid, addr.groups)),
-        SocketAddress::Inet(addr) => Some(format!("inet:{}:{}", addr.address, addr.port)),
+        SocketAddress::Inet(addr) => Some(format!("inet:{:?}:{}", addr.addr, addr.port)),
     };
     let result = socket
         .clone()
         .as_socket_like()?
         .connect_bytes(&address)
+        .map_err(ObjectError::from)
         .map_err(SyscallError::from);
     if let Some(target) = &log_target {
         log_user_manager_socket("connect", target, &result);
@@ -506,7 +507,7 @@ define_syscall!(Sendto, |socket: ObjectRef,
             Ok(SocketAddress::Netlink(addr)) => {
                 Some(format!("netlink:{}:{}", addr.pid, addr.groups))
             }
-            Ok(SocketAddress::Inet(addr)) => Some(format!("inet:{}:{}", addr.address, addr.port)),
+            Ok(SocketAddress::Inet(addr)) => Some(format!("inet:{:?}:{}", addr.addr, addr.port)),
             Err(_) => None,
         }
     });
@@ -803,7 +804,7 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
             Ok(SocketAddress::Netlink(addr)) => {
                 Some(format!("netlink:{}:{}", addr.pid, addr.groups))
             }
-            Ok(SocketAddress::Inet(addr)) => Some(format!("inet:{}:{}", addr.address, addr.port)),
+            Ok(SocketAddress::Inet(addr)) => Some(format!("inet:{:?}:{}", addr.addr, addr.port)),
             Err(_) => None,
         }
     } else {
