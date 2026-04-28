@@ -56,7 +56,7 @@ If temporary debug output is needed in kernel code, use `s_println!` for those a
 After debugging is done, remove any temporary debug logs, extra serial prints, or ad-hoc instrumentation you added during investigation.
 If temporary runtime logging grows noisy enough to hide the actual signal, narrow or remove the unhelpful logs instead of letting large traces accumulate.
 If the current logs are already noisy enough to pollute the debugging signal and a given log is no longer necessary, clean it up promptly instead of keeping it around.
-When guest userspace needs syscall-level tracing, prefer running `strace` inside the VM before adding broad kernel syscall logging. If `strace` itself fails, treat missing or incorrect `ptrace` support as the first suspect and debug that path before instrumenting unrelated subsystems.
+Do not use `strace` inside the VM for guest userspace debugging in this repository. The current environment has known issues around `strace` behavior that make it a poor debugging tool here. Prefer targeted kernel syscall logging or other focused instrumentation instead.
 
 ## Repository Layout Notes
 
