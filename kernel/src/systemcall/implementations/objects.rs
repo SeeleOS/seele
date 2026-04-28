@@ -3,7 +3,13 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use alloc::{collections::btree_map::BTreeMap, format, string::String, vec::Vec};
+use alloc::{
+    collections::btree_map::BTreeMap,
+    format,
+    string::String,
+    sync::Arc,
+    vec::Vec,
+};
 use bitflags::bitflags;
 use spin::Mutex;
 
@@ -92,6 +98,22 @@ fn current_display_pipe_process_info() -> Option<(u64, String, String)> {
     })
 }
 
+fn current_process_object_fds(object: &ObjectRef) -> Vec<usize> {
+    with_current_process(|process| {
+        process
+            .fd_table
+            .iter()
+            .enumerate()
+            .filter_map(|(fd, entry)| {
+                entry
+                    .as_ref()
+                    .filter(|entry| Arc::ptr_eq(&entry.object, object))
+                    .map(|_| fd)
+            })
+            .collect()
+    })
+}
+
 fn is_unnamed_unix_socket(object: &ObjectRef) -> bool {
     let Ok(socket) = object.clone().as_unix_socket() else {
         return false;
@@ -112,24 +134,27 @@ fn log_display_pipe_bytes(op: &str, object: &ObjectRef, bytes: &[u8]) {
     let Some((pid, command, parent_command)) = current_display_pipe_process_info() else {
         return;
     };
+    let fds = current_process_object_fds(object);
 
     if let Ok(text) = core::str::from_utf8(bytes) {
         crate::s_println!(
-            "display-pipe-{} pid={} cmd={} parent_cmd={} len={} text={:?}",
+            "display-pipe-{} pid={} cmd={} parent_cmd={} fds={:?} len={} text={:?}",
             op,
             pid,
             command,
             parent_command,
+            fds,
             bytes.len(),
             text
         );
     } else {
         crate::s_println!(
-            "display-pipe-{} pid={} cmd={} parent_cmd={} len={} bytes={:?}",
+            "display-pipe-{} pid={} cmd={} parent_cmd={} fds={:?} len={} bytes={:?}",
             op,
             pid,
             command,
             parent_command,
+            fds,
             bytes.len(),
             bytes
         );
