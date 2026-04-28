@@ -54,11 +54,7 @@ struct LinuxIovec {
 fn current_x_chain_process_info() -> Option<(u64, String, String)> {
     with_current_process(|process| {
         let pid = process.pid.0;
-        let command = process
-            .command_line
-            .first()
-            .cloned()
-            .unwrap_or_default();
+        let command = process.command_line.first().cloned().unwrap_or_default();
         let parent_command = process
             .parent
             .as_ref()
@@ -67,8 +63,7 @@ fn current_x_chain_process_info() -> Option<(u64, String, String)> {
         let is_late_systemd_chain = pid >= 100
             && (command.contains("systemd-executor")
                 || parent_command.contains("systemd-executor")
-                || (command == "/usr/lib/systemd/systemd"
-                    && parent_command.contains("systemd")));
+                || (command == "/usr/lib/systemd/systemd" && parent_command.contains("systemd")));
         let is_x_chain = command.contains("Xorg")
             || command.contains("/usr/bin/X")
             || parent_command == "/usr/bin/sddm"
@@ -77,9 +72,27 @@ fn current_x_chain_process_info() -> Option<(u64, String, String)> {
     })
 }
 
+fn current_user_manager_chain_info() -> Option<(u64, String, String)> {
+    with_current_process(|process| {
+        let pid = process.pid.0;
+        let command = process.command_line.first().cloned().unwrap_or_default();
+        let parent_command = process
+            .parent
+            .as_ref()
+            .and_then(|parent| parent.lock().command_line.first().cloned())
+            .unwrap_or_default();
+        let is_user_manager_chain = (pid >= 100
+            && (command.contains("systemd-executor")
+                || parent_command.contains("systemd-executor")
+                || (command == "/usr/lib/systemd/systemd" && parent_command.contains("systemd"))))
+            || command.contains("systemd-user-runtime-dir")
+            || command.contains("systemd-logind");
+        is_user_manager_chain.then_some((pid, command, parent_command))
+    })
+}
+
 fn log_x_chain_write_bytes(bytes: &[u8]) {
-    if let Some((pid, command, parent_command)) = current_x_chain_process_info()
-    {
+    if let Some((pid, command, parent_command)) = current_x_chain_process_info() {
         if bytes.len() > 4096 {
             crate::s_println!(
                 "xchain-write-skipped pid={} cmd={} parent_cmd={} len={}",
@@ -91,9 +104,9 @@ fn log_x_chain_write_bytes(bytes: &[u8]) {
             return;
         }
         if let Ok(text) = core::str::from_utf8(bytes)
-            && text
-                .bytes()
-                .all(|byte| byte == b'\n' || byte == b'\r' || byte == b'\t' || (0x20..=0x7e).contains(&byte))
+            && text.bytes().all(|byte| {
+                byte == b'\n' || byte == b'\r' || byte == b'\t' || (0x20..=0x7e).contains(&byte)
+            })
         {
             crate::s_println!(
                 "xchain-write pid={} cmd={} parent_cmd={} text={:?}",
@@ -113,6 +126,56 @@ fn log_x_chain_write_bytes(bytes: &[u8]) {
             &bytes[..bytes.len().min(64)]
         );
     }
+}
+
+fn log_user_manager_socket_bytes(op: &str, object: &ObjectRef, bytes: &[u8]) {
+    if bytes.is_empty() || object.clone().as_socket_like().is_err() {
+        return;
+    }
+
+    let Some((pid, command, parent_command)) = current_user_manager_chain_info() else {
+        return;
+    };
+
+    if bytes.len() > 4096 {
+        crate::s_println!(
+            "usermgr-socket-{}-skipped pid={} cmd={} parent_cmd={} len={}",
+            op,
+            pid,
+            command,
+            parent_command,
+            bytes.len()
+        );
+        return;
+    }
+
+    let preview = &bytes[..bytes.len().min(256)];
+    if let Ok(text) = core::str::from_utf8(preview)
+        && text.bytes().all(|byte| {
+            byte == b'\n' || byte == b'\r' || byte == b'\t' || (0x20..=0x7e).contains(&byte)
+        })
+    {
+        crate::s_println!(
+            "usermgr-socket-{} pid={} cmd={} parent_cmd={} len={} text={:?}",
+            op,
+            pid,
+            command,
+            parent_command,
+            bytes.len(),
+            text
+        );
+        return;
+    }
+
+    crate::s_println!(
+        "usermgr-socket-{}-bytes pid={} cmd={} parent_cmd={} len={} bytes={:?}",
+        op,
+        pid,
+        command,
+        parent_command,
+        bytes.len(),
+        &preview[..preview.len().min(64)]
+    );
 }
 
 fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult {
@@ -212,10 +275,12 @@ define_syscall!(Getdents64, |object_index: u64, buf: *mut u8, len: usize| {
 
 define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
     unsafe {
-        Ok(object
-            .clone()
-            .as_readable()?
-            .read(slice::from_raw_parts_mut(buf_ptr, len))?)
+        let buffer = slice::from_raw_parts_mut(buf_ptr, len);
+        let read = object.clone().as_readable()?.read(buffer)?;
+        if read > 0 {
+            log_user_manager_socket_bytes("read", &object, &buffer[..read]);
+        }
+        Ok(read)
     }
 });
 
@@ -223,9 +288,8 @@ define_syscall!(Write, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
     unsafe {
         let bytes = slice::from_raw_parts(buf_ptr, len);
         log_x_chain_write_bytes(bytes);
-        Ok(object
-            .as_writable()?
-            .write(bytes)?)
+        log_user_manager_socket_bytes("write", &object, bytes);
+        Ok(object.as_writable()?.write(bytes)?)
     }
 });
 
@@ -236,7 +300,7 @@ define_syscall!(Writev, |object: ObjectRef,
         return Err(SyscallError::InvalidArguments);
     }
 
-    let writable = object.as_writable()?;
+    let writable = object.clone().as_writable()?;
     let mut written = 0usize;
     if iovcnt > 0 && iov_ptr.is_null() {
         return Err(SyscallError::BadAddress);
@@ -252,6 +316,7 @@ define_syscall!(Writev, |object: ObjectRef,
         }
         let buf = unsafe { slice::from_raw_parts(iov.iov_base, iov.iov_len) };
         log_x_chain_write_bytes(buf);
+        log_user_manager_socket_bytes("writev", &object, buf);
         let count = writable.write(buf)?;
         written += count;
         if count < iov.iov_len {

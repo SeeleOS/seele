@@ -69,8 +69,7 @@ fn current_user_manager_chain() -> Option<(u64, String, String)> {
         let is_user_manager_chain = (pid >= 100
             && (command.contains("systemd-executor")
                 || parent_command.contains("systemd-executor")
-                || (command == "/usr/lib/systemd/systemd"
-                    && parent_command.contains("systemd"))))
+                || (command == "/usr/lib/systemd/systemd" && parent_command.contains("systemd"))))
             || command.contains("systemd-user-runtime-dir")
             || command.contains("systemd-logind");
         is_user_manager_chain.then_some((pid, command, parent_command))
@@ -102,6 +101,59 @@ fn log_user_manager_socket(op: &str, target: &str, result: &Result<(), SyscallEr
     }
 }
 
+fn log_user_manager_socket_payload(op: &str, target: &str, bytes: &[u8]) {
+    if bytes.is_empty() {
+        return;
+    }
+
+    let Some((pid, command, parent_command)) = current_user_manager_chain() else {
+        return;
+    };
+
+    if bytes.len() > 4096 {
+        crate::s_println!(
+            "usermgr-socket-{}-skipped pid={} cmd={} parent_cmd={} target={} len={}",
+            op,
+            pid,
+            command,
+            parent_command,
+            target,
+            bytes.len()
+        );
+        return;
+    }
+
+    let preview = &bytes[..bytes.len().min(256)];
+    if let Ok(text) = core::str::from_utf8(preview)
+        && text.bytes().all(|byte| {
+            byte == b'\n' || byte == b'\r' || byte == b'\t' || (0x20..=0x7e).contains(&byte)
+        })
+    {
+        crate::s_println!(
+            "usermgr-socket-{} pid={} cmd={} parent_cmd={} target={} len={} text={:?}",
+            op,
+            pid,
+            command,
+            parent_command,
+            target,
+            bytes.len(),
+            text
+        );
+        return;
+    }
+
+    crate::s_println!(
+        "usermgr-socket-{}-bytes pid={} cmd={} parent_cmd={} target={} len={} bytes={:?}",
+        op,
+        pid,
+        command,
+        parent_command,
+        target,
+        bytes.len(),
+        &preview[..preview.len().min(64)]
+    );
+}
+
 fn socket_target_from_bytes(address: &[u8]) -> Option<String> {
     match socket_address_from_raw(address.as_ptr(), address.len() as u32).ok()? {
         SocketAddress::Unix(path) => Some(format!("unix:{path}")),
@@ -111,8 +163,33 @@ fn socket_target_from_bytes(address: &[u8]) -> Option<String> {
 }
 
 fn socket_target_for_object(socket: &ObjectRef) -> Option<String> {
-    let address = socket.clone().as_socket_like().ok()?.getsockname_bytes().ok()?;
+    let address = socket
+        .clone()
+        .as_socket_like()
+        .ok()?
+        .getsockname_bytes()
+        .ok()?;
     socket_target_from_bytes(&address)
+}
+
+fn preview_iovecs(iovs: &[relibc_iovec]) -> Result<Vec<u8>, SyscallError> {
+    let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>().min(256);
+    let mut preview = Vec::with_capacity(total_len);
+    for iov in iovs {
+        if preview.len() >= total_len {
+            break;
+        }
+        if iov.iov_len == 0 {
+            continue;
+        }
+        if iov.iov_base.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+        let chunk = unsafe { core::slice::from_raw_parts(iov.iov_base.cast_const(), iov.iov_len) };
+        let remaining = total_len - preview.len();
+        preview.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+    }
+    Ok(preview)
 }
 
 fn cmsg_align(len: usize) -> usize {
@@ -592,12 +669,18 @@ define_syscall!(
 
             let mut data = vec![0; len];
             let (read, source) = socket
+                .clone()
                 .as_socket_like()?
                 .recvfrom(&mut data)
                 .map_err(ObjectError::from)?;
 
             if read > 0 {
                 user_safe::write(buffer, &data[..read])?;
+                if let Some(target) = source.as_deref().and_then(socket_target_from_bytes) {
+                    log_user_manager_socket_payload("recvfrom", &target, &data[..read]);
+                } else if let Some(target) = socket_target_for_object(&socket) {
+                    log_user_manager_socket_payload("recvfrom", &target, &data[..read]);
+                }
             }
 
             if !address.is_null() {
@@ -807,6 +890,14 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
     }
 
     let msg = unsafe { &*msg };
+    let iovs = if msg.msg_iovlen == 0 {
+        &[][..]
+    } else {
+        if msg.msg_iov.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+        unsafe { core::slice::from_raw_parts(msg.msg_iov, msg.msg_iovlen) }
+    };
     let log_target = if !msg.msg_name.is_null() {
         socket_address_bytes(msg.msg_name.cast(), msg.msg_namelen)
             .ok()
@@ -814,6 +905,7 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
     } else {
         socket_target_for_object(&socket).or_else(|| Some(String::from("connected")))
     };
+    let preview = preview_iovecs(iovs)?;
     let result = sendmsg_impl(socket, msg, flags);
     if let Some(target) = &log_target {
         log_user_manager_socket(
@@ -821,6 +913,9 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
             target,
             &result.as_ref().map(|_| ()).map_err(|err| *err),
         );
+        if result.is_ok() {
+            log_user_manager_socket_payload("sendmsg", target, &preview);
+        }
     }
     result
 });
@@ -1079,6 +1174,15 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
             msg.msg_namelen = 0;
         }
         msg.msg_controllen = 0;
+        if copied_total > 0 {
+            if let Some(target) =
+                source.map(|address| format!("inet:{:?}:{}", address.addr, address.port))
+            {
+                log_user_manager_socket_payload("recvmsg", &target, &scratch[..copied_total]);
+            } else {
+                log_user_manager_socket_payload("recvmsg", "connected", &scratch[..copied_total]);
+            }
+        }
         return Ok(copied_total);
     }
 
@@ -1139,6 +1243,15 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         if copy_len < control.len() {
             msg.msg_flags |= MSG_CTRUNC;
         }
+    }
+
+    if total_read > 0 {
+        let target = socket
+            .getpeername_bytes()
+            .ok()
+            .and_then(|name| socket_target_from_bytes(&name))
+            .unwrap_or_else(|| String::from("connected"));
+        log_user_manager_socket_payload("recvmsg", &target, &scratch[..total_read]);
     }
 
     Ok(total_read)
