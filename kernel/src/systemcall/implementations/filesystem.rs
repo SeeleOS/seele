@@ -950,7 +950,11 @@ define_syscall!(OpenAt, |dirfd: i32,
         let path = resolve_path_at(dirfd, &path_str)?;
         debug_init_openat_stage("resolved", dirfd, &path.clone().as_string());
         let object = if !nofollow {
-            match VirtualFS.lock().open(path.clone()) {
+            let open_result = {
+                let mut vfs = VirtualFS.lock();
+                vfs.open(path.clone())
+            };
+            match open_result {
                 Ok(file) => {
                     if create && flags.contains(OpenFlags::EXCL) {
                         debug_logind_path_op(
@@ -1001,7 +1005,11 @@ define_syscall!(OpenAt, |dirfd: i32,
                 }
             }
         } else {
-            match VirtualFS.lock().open_nofollow(path.clone()) {
+            let open_result = {
+                let mut vfs = VirtualFS.lock();
+                vfs.open_nofollow(path.clone())
+            };
+            match open_result {
                 Ok(file) => {
                     if create && flags.contains(OpenFlags::EXCL) {
                         debug_logind_path_op(
