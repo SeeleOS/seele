@@ -186,23 +186,19 @@ impl UnixSocketObject {
                     }
 
                     let mut recv_buf = peer.recv_buf.lock();
-                    let required_len = match self.kind {
-                        UnixSocketKind::Stream => buffer.len().min(STREAM_RECV_CAPACITY),
+                    let write_len = match self.kind {
+                        UnixSocketKind::Stream => {
+                            let available = STREAM_RECV_CAPACITY.saturating_sub(recv_buf.len());
+                            buffer.len().min(available)
+                        }
                         UnixSocketKind::SeqPacket => buffer.len(),
                         UnixSocketKind::Datagram => unreachable!(),
                     };
-                    if self.kind == UnixSocketKind::SeqPacket && required_len > STREAM_RECV_CAPACITY
+                    if self.kind == UnixSocketKind::SeqPacket && write_len > STREAM_RECV_CAPACITY
                     {
                         return Err(SocketError::InvalidArguments);
                     }
-                    if required_len <= STREAM_RECV_CAPACITY
-                        && recv_buf.len() + required_len <= STREAM_RECV_CAPACITY
-                    {
-                        let write_len = match self.kind {
-                            UnixSocketKind::Stream => required_len,
-                            UnixSocketKind::SeqPacket => buffer.len(),
-                            UnixSocketKind::Datagram => unreachable!(),
-                        };
+                    if write_len > 0 {
                         let byte_offset = recv_buf.len();
                         recv_buf.extend(buffer[..write_len].iter().copied());
                         if self.kind == UnixSocketKind::SeqPacket {
