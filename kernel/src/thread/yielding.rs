@@ -83,6 +83,35 @@ fn log_current_poller_details(poller: &ObjectRef) {
     }
 }
 
+fn timed_wait_process_info(thread: &ThreadRef) -> Option<(u64, u64, String)> {
+    let thread = thread.lock();
+    let tid = thread.id.0;
+    let process = thread.parent.lock();
+    let pid = process.pid.0;
+    let command = process.command_line.first().cloned().unwrap_or_default();
+    (command.contains("sleep")
+        || command.contains("sddm")
+        || command.contains("Xorg")
+        || command.contains("/usr/bin/X"))
+    .then_some((tid, pid, command))
+}
+
+fn log_timed_wait_event(thread: &ThreadRef, event: &str, deadline: Time) {
+    let Some((tid, pid, command)) = timed_wait_process_info(thread) else {
+        return;
+    };
+    let now = Time::since_boot();
+    crate::s_println!(
+        "timed-wait-{} tid={} pid={} cmd={} now_ms={} deadline_ms={}",
+        event,
+        tid,
+        pid,
+        command,
+        now.as_milliseconds(),
+        deadline.as_milliseconds()
+    );
+}
+
 #[derive(Clone, Debug)]
 pub enum BlockType {
     SetTime(Time),
@@ -209,6 +238,9 @@ impl ThreadManager {
             if let State::Blocked(block_type) = &thread.lock().state
                 && block_type.is_timed_out()
             {
+                if let Some(deadline) = block_deadline(block_type) {
+                    log_timed_wait_event(&thread, "timeout", deadline);
+                }
                 to_wake.push(thread.clone());
             }
         }
@@ -254,6 +286,11 @@ impl ThreadManager {
         let thread_id = thread.id;
 
         thread.state = State::Blocked(block_type.clone());
+        if let Some(deadline) = block_deadline(&block_type) {
+            drop(thread);
+            log_timed_wait_event(&thread_ref, "block", deadline);
+            thread = thread_ref.lock();
+        }
 
         self.blocked_queues
             .push(thread_ref.clone(), thread_id, block_type);
@@ -261,11 +298,21 @@ impl ThreadManager {
 
     pub fn wake(&mut self, thread: ThreadRef) {
         log::debug!("thread wake");
+        let wake_deadline = {
+            let thread_locked = thread.lock();
+            match &thread_locked.state {
+                State::Blocked(block_type) => block_deadline(block_type),
+                State::Ready | State::Running | State::Zombie => None,
+            }
+        };
         self.remove_from_blocked_queues(&thread);
         let mut locked_thread = thread.lock();
         if matches!(locked_thread.state, State::Blocked(_)) {
             locked_thread.state = State::Ready;
             drop(locked_thread);
+            if let Some(deadline) = wake_deadline {
+                log_timed_wait_event(&thread, "wake", deadline);
+            }
             self.push_ready(thread);
         }
     }
