@@ -3,10 +3,8 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use crate::{
     misc::snapshot::Snapshot,
     process::manager::get_current_process,
-    process::misc::with_current_process,
     process::ptrace::{maybe_stop_current_on_syscall_entry, maybe_stop_current_on_syscall_exit},
     signal::process_current_process_signals,
-    systemcall::numbers::SyscallNumber,
     systemcall::table::SYSCALL_TABLE,
     systemcall::utils::SyscallError,
     thread::{
