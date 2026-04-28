@@ -110,6 +110,13 @@ impl Process {
         thread_locked.snapshot_state = SnapshotState::Normal;
         thread_locked.sig_handler_snapshot = ThreadSnapshot::default();
         thread_locked.saved_blocked_signals.clear();
+        thread_locked.clear_child_tid = 0;
+        thread_locked.robust_list_head = 0;
+        thread_locked.robust_list_len = 0;
+        thread_locked.rseq_area = 0;
+        thread_locked.rseq_len = 0;
+        thread_locked.rseq_flags = 0;
+        thread_locked.rseq_sig = 0;
         thread_locked.last_user_snapshot = thread_locked.snapshot.inner;
         thread_locked.last_user_fs_base = thread_locked.snapshot.fs_base;
         self.pending_signals = Signals::default();
