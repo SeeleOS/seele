@@ -341,17 +341,7 @@ fn should_log_systemd_debug_path() -> bool {
 }
 
 fn debug_logind_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) {
-    if !should_log_systemd_debug_path() {
-        return;
-    }
-    if let Err(err) = result {
-        crate::s_println!(
-            "systemd-path-op op={} path={} result={:?}",
-            op,
-            path.clone().as_string(),
-            err
-        );
-    }
+    let _ = (op, path, result);
 }
 
 fn debug_init_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) {
