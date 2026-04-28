@@ -3,25 +3,24 @@
 set -eu
 
 log=/var/log/sddm/diagnostics.log
-tmp="${log}.tmp"
 
-run_probe() {
-    echo "=== $* ==="
-    timeout 5s "$@" || echo "probe failed or timed out: $*"
+append() {
+    {
+        echo "=== $1 ==="
+        shift
+        "$@" || true
+        echo
+    } >>"${log}" 2>&1
+    sync
 }
 
-{
-    date
-    run_probe systemctl status --no-pager sddm.service
-    run_probe systemctl show --no-pager sddm.service
-    echo '=== display-manager link ==='
-    ls -l /etc/systemd/system/display-manager.service || true
-    run_probe ps -ef
-    echo '=== sddm directories ==='
-    ls -la /run/sddm /var/lib/sddm /var/log/sddm 2>&1 || true
-    run_probe loginctl seat-status seat0
-    run_probe loginctl list-sessions
-    run_probe journalctl --no-pager -n 120
-} >"${tmp}" 2>&1
-
-mv "${tmp}" "${log}"
+rm -f "${log}"
+append date date
+sleep 10
+append display-manager-link ls -l /etc/systemd/system/display-manager.service
+append processes ps -ef
+append proc-sddm sh -c 'for proc in /proc/[0-9]*; do cmd=$(tr "\0" " " <"${proc}/cmdline" 2>/dev/null || true); case "${cmd}" in *sddm*|*kwin*|*plasma*|*Xorg*|*Xephyr*) echo "${proc}: ${cmd}";; esac; done'
+append sddm-directories ls -la /run/sddm /var/lib/sddm /var/log/sddm
+append run-user-root ls -la /run/user/0
+append devices ls -la /dev/dri /dev/input /dev/tty0 /dev/tty1 /dev/fb0
+append sddm-config sh -c 'for file in /etc/sddm.conf /etc/sddm.conf.d/*.conf; do [ -e "${file}" ] && echo "--- ${file}" && sed -n "1,160p" "${file}"; done'
