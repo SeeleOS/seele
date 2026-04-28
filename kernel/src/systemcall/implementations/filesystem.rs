@@ -327,6 +327,10 @@ fn is_logind_process() -> bool {
     })
 }
 
+fn is_init_process() -> bool {
+    with_current_process(|process| process.pid.0 == 1)
+}
+
 fn is_logind_runtime_path(path: &Path) -> bool {
     let path = path.clone().as_string();
     path.starts_with("/run/systemd/") || path.starts_with("/proc/self/fd")
@@ -371,6 +375,17 @@ fn debug_logind_renameat2(
 
 fn debug_logind_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) {
     debug_logind_fs(op, path, result);
+}
+
+fn debug_init_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) {
+    if !is_init_process() {
+        return;
+    }
+
+    match result {
+        Ok(()) => crate::s_println!("init {op} {} -> ok", path.clone().as_string()),
+        Err(err) => crate::s_println!("init {op} {} -> {:?}", path.clone().as_string(), err),
+    }
 }
 
 fn debug_logind_fs(op: &str, path: &Path, result: &Result<(), SyscallError>) {
@@ -895,6 +910,7 @@ define_syscall!(OpenAt, |dirfd: i32,
                             &path,
                             &Err(SyscallError::FileAlreadyExists),
                         );
+                        debug_init_path_op("openat", &path, &Err(SyscallError::FileAlreadyExists));
                         return Err(SyscallError::FileAlreadyExists);
                     }
                     Arc::new(file)
@@ -904,27 +920,31 @@ define_syscall!(OpenAt, |dirfd: i32,
                     Ok(None) if create => {
                         VirtualFS.lock().create_file(path.clone())?;
                         let reopen_result = VirtualFS.lock().open(path.clone());
-                        match reopen_result {
-                            Ok(file) => Arc::new(file),
-                            Err(err) => {
-                                let err = SyscallError::from(err);
-                                debug_logind_path_op("openat", &path, &Err(err));
-                                return Err(err);
+                            match reopen_result {
+                                Ok(file) => Arc::new(file),
+                                Err(err) => {
+                                    let err = SyscallError::from(err);
+                                    debug_logind_path_op("openat", &path, &Err(err));
+                                    debug_init_path_op("openat", &path, &Err(err));
+                                    return Err(err);
+                                }
                             }
                         }
-                    }
                     Ok(None) => {
                         debug_logind_path_op("openat", &path, &Err(SyscallError::FileNotFound));
+                        debug_init_path_op("openat", &path, &Err(SyscallError::FileNotFound));
                         return Err(SyscallError::FileNotFound);
                     }
                     Err(err) => {
                         debug_logind_path_op("openat", &path, &Err(err));
+                        debug_init_path_op("openat", &path, &Err(err));
                         return Err(err);
                     }
                 },
                 Err(err) => {
                     let err = SyscallError::from(err);
                     debug_logind_path_op("openat", &path, &Err(err));
+                    debug_init_path_op("openat", &path, &Err(err));
                     return Err(err);
                 }
             }
@@ -937,6 +957,7 @@ define_syscall!(OpenAt, |dirfd: i32,
                             &path,
                             &Err(SyscallError::FileAlreadyExists),
                         );
+                        debug_init_path_op("openat", &path, &Err(SyscallError::FileAlreadyExists));
                         return Err(SyscallError::FileAlreadyExists);
                     }
                     Arc::new(file)
@@ -949,6 +970,7 @@ define_syscall!(OpenAt, |dirfd: i32,
                         Err(err) => {
                             let err = SyscallError::from(err);
                             debug_logind_path_op("openat", &path, &Err(err));
+                            debug_init_path_op("openat", &path, &Err(err));
                             return Err(err);
                         }
                     }
@@ -956,11 +978,13 @@ define_syscall!(OpenAt, |dirfd: i32,
                 Err(err) => {
                     let err = SyscallError::from(err);
                     debug_logind_path_op("openat", &path, &Err(err));
+                    debug_init_path_op("openat", &path, &Err(err));
                     return Err(err);
                 }
             }
         };
         debug_logind_path_op("openat", &path, &Ok(()));
+        debug_init_path_op("openat", &path, &Ok(()));
 
         let info = object.clone().as_file_like()?.info()?;
         if nofollow && !path_only && matches!(info.file_like_type, FileLikeType::Symlink) {
