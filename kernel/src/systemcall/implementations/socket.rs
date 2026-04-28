@@ -16,7 +16,7 @@ use crate::{
     },
     systemcall::utils::{SyscallError, SyscallImpl},
 };
-use alloc::{string::String, vec, vec::Vec};
+use alloc::{format, string::String, vec, vec::Vec};
 use core::{mem, slice};
 
 #[repr(C)]
@@ -77,8 +77,7 @@ fn current_user_manager_chain() -> Option<(u64, String, String)> {
 }
 
 fn log_user_manager_socket(op: &str, target: &str, result: &Result<(), SyscallError>) {
-    let Some((pid, command, parent_command)) = current_user_manager_chain()
-    else {
+    let Some((pid, command, parent_command)) = current_user_manager_chain() else {
         return;
     };
     match result {
@@ -501,14 +500,16 @@ define_syscall!(Sendto, |socket: ObjectRef,
     let address = (!address.is_null())
         .then(|| socket_address_bytes(address, address_len))
         .transpose()?;
-    let log_target = address
-        .as_deref()
-        .and_then(|address| match socket_address_from_raw(address.as_ptr(), address.len() as u32) {
+    let log_target = address.as_deref().and_then(|address| {
+        match socket_address_from_raw(address.as_ptr(), address.len() as u32) {
             Ok(SocketAddress::Unix(path)) => Some(format!("unix:{path}")),
-            Ok(SocketAddress::Netlink(addr)) => Some(format!("netlink:{}:{}", addr.pid, addr.groups)),
+            Ok(SocketAddress::Netlink(addr)) => {
+                Some(format!("netlink:{}:{}", addr.pid, addr.groups))
+            }
             Ok(SocketAddress::Inet(addr)) => Some(format!("inet:{}:{}", addr.address, addr.port)),
             Err(_) => None,
-        });
+        }
+    });
     let written = socket
         .as_socket_like()?
         .sendto(buffer, address.as_deref())
@@ -799,7 +800,9 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
     let log_target = if !msg.msg_name.is_null() {
         match socket_address_from_raw(msg.msg_name.cast(), msg.msg_namelen) {
             Ok(SocketAddress::Unix(path)) => Some(format!("unix:{path}")),
-            Ok(SocketAddress::Netlink(addr)) => Some(format!("netlink:{}:{}", addr.pid, addr.groups)),
+            Ok(SocketAddress::Netlink(addr)) => {
+                Some(format!("netlink:{}:{}", addr.pid, addr.groups))
+            }
             Ok(SocketAddress::Inet(addr)) => Some(format!("inet:{}:{}", addr.address, addr.port)),
             Err(_) => None,
         }
@@ -808,7 +811,11 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
     };
     let result = sendmsg_impl(socket, msg, flags);
     if let Some(target) = &log_target {
-        log_user_manager_socket("sendmsg", target, &result.as_ref().map(|_| ()).map_err(|err| *err));
+        log_user_manager_socket(
+            "sendmsg",
+            target,
+            &result.as_ref().map(|_| ()).map_err(|err| *err),
+        );
     }
     result
 });
