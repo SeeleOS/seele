@@ -1,9 +1,6 @@
-use core::{
-    slice,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use core::sync::atomic::{AtomicU64, Ordering};
 
-use alloc::{collections::btree_map::BTreeMap, format, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::btree_map::BTreeMap, format, string::String, sync::Arc, vec, vec::Vec};
 use bitflags::bitflags;
 use spin::Mutex;
 

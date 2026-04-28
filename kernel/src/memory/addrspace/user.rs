@@ -5,7 +5,7 @@ use x86_64::{
     structures::paging::{Page, PageTableFlags, Size4KiB, Translate, mapper::TranslateResult},
 };
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use crate::{
     memory::addrspace::{AddrSpace, cow::COW_FLAG, mem_area::Data},
