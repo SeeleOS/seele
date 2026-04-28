@@ -239,12 +239,14 @@ sudo install -d -m 0755 "${SYSROOT_DIR}/etc/X11/xorg.conf.d"
 sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/journald.conf.d"
 sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/system/sddm.service.d"
 sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/system/systemd-localed.service.d"
+sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/system/user@.service.d"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/sddm.conf.d/seele-wayland.conf" "${SYSROOT_DIR}/etc/sddm.conf.d/seele-wayland.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/xorg.conf.d/10-seele-modesetting.conf" "${SYSROOT_DIR}/etc/X11/xorg.conf.d/10-seele-modesetting.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/pam.d/systemd-user" "${SYSROOT_DIR}/etc/pam.d/systemd-user"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/sddm.service.d/logging.conf" "${SYSROOT_DIR}/etc/systemd/system/sddm.service.d/logging.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd/journald.conf.d/persistent.conf" "${SYSROOT_DIR}/etc/systemd/journald.conf.d/persistent.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd-localed.service.d/override.conf" "${SYSROOT_DIR}/etc/systemd/system/systemd-localed.service.d/override.conf"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd/system/user@.service.d/logging.conf" "${SYSROOT_DIR}/etc/systemd/system/user@.service.d/logging.conf"
 arch_chroot /usr/sbin/usermod -p '' root
 arch_chroot /usr/bin/systemctl enable seatd.service
 arch_chroot /usr/bin/systemctl enable sddm.service

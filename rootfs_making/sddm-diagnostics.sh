@@ -63,4 +63,16 @@ for file in /etc/sddm.conf /etc/sddm.conf.d/seele-wayland.conf; do
     cat "${file}" >>"${log}" 2>&1 || true
 done
 
+sleep 60
+
+section user-runtime-dir
+for path in /run/user/961 /run/user/961/*; do
+    emit "${path}"
+done
+
+section user-manager-status
+systemctl --no-pager --full status user-runtime-dir@961.service user@961.service >>"${log}" 2>&1 || true
+systemctl --no-pager --full show user-runtime-dir@961.service user@961.service >>"${log}" 2>&1 || true
+journalctl --no-pager -u user-runtime-dir@961.service -u user@961.service -n 200 >>"${log}" 2>&1 || true
+
 sync
