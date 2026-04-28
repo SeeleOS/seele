@@ -234,6 +234,7 @@ install_repo_packages
 arch_chroot /bin/sh -lc "update-ca-trust || true"
 
 sudo install -Dm644 "${ROOTFS_MAKING_DIR}/seatd.service" "${SYSROOT_DIR}/etc/systemd/system/seatd.service"
+sudo install -Dm644 "${ROOTFS_MAKING_DIR}/systemd/system/sddm-diagnostics.service" "${SYSROOT_DIR}/etc/systemd/system/sddm-diagnostics.service"
 sudo install -d -m 0755 "${SYSROOT_DIR}/etc/sddm.conf.d"
 sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/journald.conf.d"
 sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/system/sddm.service.d"
@@ -246,6 +247,7 @@ install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd-localed.service.d/override.co
 arch_chroot /usr/sbin/usermod -p '' root
 arch_chroot /usr/bin/systemctl enable seatd.service
 arch_chroot /usr/bin/systemctl enable sddm.service
+arch_chroot /usr/bin/systemctl enable sddm-diagnostics.service
 
 install_sysroot_file "${ROOTFS_MAKING_DIR}/xdg-runtime.sh" "${SYSROOT_DIR}/etc/profile.d/xdg-runtime.sh"
 
@@ -266,6 +268,7 @@ sudo install -Dm644 "${ROOTFS_MAKING_DIR}/weston.ini" "${SYSROOT_DIR}/etc/xdg/we
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/root/.xinitrc"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/startplasma-manual.sh" "${SYSROOT_DIR}/usr/bin/startplasma-manual.sh"
+sudo install -Dm755 "${ROOTFS_MAKING_DIR}/sddm-diagnostics.sh" "${SYSROOT_DIR}/usr/bin/sddm-diagnostics.sh"
 
 for package in "${AUR_PACKAGES[@]}"; do
     install_aur_package "${package}"

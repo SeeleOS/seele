@@ -1,0 +1,11 @@
+[Unit]
+Description=Capture SDDM diagnostic snapshot
+After=graphical.target sddm.service
+Wants=sddm.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/sddm-diagnostics.sh
+
+[Install]
+WantedBy=graphical.target
