@@ -26,7 +26,7 @@ fn mouse_properties() -> Vec<u8> {
 }
 
 fn mouse_input_uevent() -> Vec<u8> {
-    b"PRODUCT=11/1/2/100\nNAME=\"PS/2 Generic Mouse\"\nPHYS=\"isa0060/serio1/input1\"\nPROP=1\nSUBSYSTEM=input\n"
+    b"PRODUCT=11/1/2/100\nNAME=\"PS/2 Generic Mouse\"\nPHYS=\"isa0060/serio1/input1\"\nPROP=1\nSUBSYSTEM=input\nID_INPUT=1\nID_INPUT_MOUSE=1\nID_SEAT=seat0\nWL_SEAT=seat0\nLIBINPUT_DEVICE_GROUP=seele-mouse\n"
         .to_vec()
 }
 

@@ -26,7 +26,7 @@ fn keyboard_properties() -> Vec<u8> {
 }
 
 fn keyboard_input_uevent() -> Vec<u8> {
-    b"PRODUCT=11/1/1/100\nNAME=\"AT Translated Set 2 keyboard\"\nPHYS=\"isa0060/serio0/input0\"\nPROP=0\nSUBSYSTEM=input\n".to_vec()
+    b"PRODUCT=11/1/1/100\nNAME=\"AT Translated Set 2 keyboard\"\nPHYS=\"isa0060/serio0/input0\"\nPROP=0\nSUBSYSTEM=input\nID_INPUT=1\nID_INPUT_KEY=1\nID_INPUT_KEYBOARD=1\nID_SEAT=seat0\nWL_SEAT=seat0\nLIBINPUT_DEVICE_GROUP=seele-keyboard\n".to_vec()
 }
 
 fn keyboard_input_dir_uevent() -> Vec<u8> {
