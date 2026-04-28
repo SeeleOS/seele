@@ -46,7 +46,7 @@ for path in /dev/dri /dev/dri/* /dev/input /dev/input/* /dev/tty0 /dev/tty1 /dev
 done
 
 section sddm-config
-for file in /etc/sddm.conf /etc/sddm.conf.d/seele-wayland.conf /etc/sddm.conf.d/seele-greeter-debug.conf; do
+for file in /etc/sddm.conf /etc/sddm.conf.d/seele-wayland.conf; do
     emit "--- ${file}"
     cat "${file}" >>"${log}" 2>&1 || true
 done
