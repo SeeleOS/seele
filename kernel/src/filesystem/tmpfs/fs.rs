@@ -4,7 +4,7 @@ use spin::Mutex;
 use crate::filesystem::{
     path::{Path, PathPart},
     vfs::FSResult,
-    vfs_traits::{FileLike, FileSystem},
+    vfs_traits::{DirectoryContentType, FileLike, FileSystem},
 };
 
 use super::{
@@ -46,19 +46,30 @@ pub(crate) fn node_name(path: &str) -> String {
 
 pub(crate) fn tmpfs_lookup_path(state: &TmpfsStateRef, path: &str) -> FSResult<FileLike> {
     let path = TmpfsState::normalize(path);
-    let state_guard = state.lock();
-    let node = state_guard.node(&path)?;
-    let inode = node.inode;
-    Ok(match &node.kind {
-        TmpNodeKind::Directory { .. } => FileLike::Directory(Arc::new(Mutex::new(
+    let (inode, kind) = {
+        let state_guard = state.lock();
+        let node = state_guard.node(&path)?;
+        let kind = match &node.kind {
+            TmpNodeKind::Directory { .. } => DirectoryContentType::Directory,
+            TmpNodeKind::File { .. } => DirectoryContentType::File,
+            TmpNodeKind::Symlink { .. } => DirectoryContentType::Symlink,
+        };
+        (node.inode, kind)
+    };
+
+    Ok(match kind {
+        DirectoryContentType::Directory => FileLike::Directory(Arc::new(Mutex::new(
             TmpfsDirectoryHandle::new(state.clone(), path),
         ))),
-        TmpNodeKind::File { .. } => FileLike::File(Arc::new(Mutex::new(TmpfsFileHandle::new(
-            state.clone(),
-            path,
-            inode,
-        )))),
-        TmpNodeKind::Symlink { .. } => FileLike::Symlink(Arc::new(Mutex::new(
+        DirectoryContentType::File => {
+            state.lock().retain_inode(inode)?;
+            FileLike::File(Arc::new(Mutex::new(TmpfsFileHandle::new(
+                state.clone(),
+                path,
+                inode,
+            ))))
+        }
+        DirectoryContentType::Symlink => FileLike::Symlink(Arc::new(Mutex::new(
             TmpfsSymlinkHandle::new(state.clone(), path),
         ))),
     })

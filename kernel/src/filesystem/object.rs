@@ -213,6 +213,19 @@ impl OpenedFileObject {
         self.resolve_file()?.lock().allocate(mode, offset, len)
     }
 
+    pub fn link_to(&self, new_path: Path) -> FSResult<()> {
+        let old_mount_path = VirtualFS.lock().mount_path(self.path.clone())?;
+        let new_mount_path = VirtualFS.lock().mount_path(new_path.clone())?;
+        if old_mount_path != new_mount_path {
+            return Err(FSError::Other);
+        }
+
+        let new_relative = new_path
+            .strip_prefix(&old_mount_path)
+            .ok_or(FSError::NotFound)?;
+        self.resolve_file()?.lock().link_to(&new_relative)
+    }
+
     fn resolve_file(&self) -> FSResult<WrappedFile> {
         match &self.backend {
             OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => Ok(file.clone()),

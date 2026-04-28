@@ -31,6 +31,7 @@ pub(crate) enum TmpNodeKind {
 pub(crate) struct TmpNode {
     pub(crate) inode: u64,
     pub(crate) link_count: u64,
+    pub(crate) open_count: u64,
     pub(crate) kind: TmpNodeKind,
 }
 
@@ -50,6 +51,7 @@ impl TmpfsState {
             TmpNode {
                 inode: ROOT_INODE,
                 link_count: 1,
+                open_count: 0,
                 kind: TmpNodeKind::Directory {
                     children: BTreeSet::new(),
                     mode: DEFAULT_DIR_MODE,
@@ -161,6 +163,7 @@ impl TmpfsState {
             TmpNode {
                 inode,
                 link_count: 1,
+                open_count: 0,
                 kind,
             },
         );
@@ -186,6 +189,30 @@ impl TmpfsState {
         self.paths.remove(&child);
         self.directory_children_mut(&parent)?.remove(name);
         if remove_node {
+            let remove_inode = self.node_by_inode(inode)?.open_count == 0;
+            if !remove_inode {
+                let node = self.node_by_inode_mut(inode)?;
+                node.link_count = 0;
+            } else {
+                self.nodes.remove(&inode);
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn retain_inode(&mut self, inode: u64) -> FSResult<()> {
+        let node = self.node_by_inode_mut(inode)?;
+        node.open_count = node.open_count.checked_add(1).ok_or(FSError::Other)?;
+        Ok(())
+    }
+
+    pub(crate) fn release_inode(&mut self, inode: u64) -> FSResult<()> {
+        let remove_inode = {
+            let node = self.node_by_inode_mut(inode)?;
+            node.open_count = node.open_count.checked_sub(1).ok_or(FSError::Other)?;
+            node.open_count == 0 && node.link_count == 0
+        };
+        if remove_inode {
             self.nodes.remove(&inode);
         }
         Ok(())
@@ -210,15 +237,19 @@ impl TmpfsState {
 
     pub(crate) fn link(&mut self, old_path: &str, new_path: &str) -> FSResult<()> {
         let old_path = Self::normalize(old_path);
+        let inode = self.inode_for_path(&old_path)?;
+        self.link_inode(inode, new_path)
+    }
+
+    pub(crate) fn link_inode(&mut self, inode: u64, new_path: &str) -> FSResult<()> {
         let new_path = Self::normalize(new_path);
-        if old_path == "/" || new_path == "/" {
+        if new_path == "/" {
             return Err(FSError::AccessDenied);
         }
         if self.paths.contains_key(&new_path) {
             return Err(FSError::AlreadyExists);
         }
 
-        let inode = self.inode_for_path(&old_path)?;
         let node = self.node_by_inode(inode)?;
         if !matches!(node.kind, TmpNodeKind::File { .. }) {
             return Err(FSError::Other);

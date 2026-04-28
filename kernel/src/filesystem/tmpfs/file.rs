@@ -5,6 +5,7 @@ use alloc::string::String;
 use crate::filesystem::{
     errors::FSError,
     info::{FileLikeInfo, UnixPermission},
+    path::Path,
     vfs::FSResult,
     vfs_traits::{File, FileLikeType, Whence},
 };
@@ -26,6 +27,12 @@ impl TmpfsFileHandle {
             inode,
             offset: 0,
         }
+    }
+}
+
+impl Drop for TmpfsFileHandle {
+    fn drop(&mut self) {
+        let _ = self.state.lock().release_inode(self.inode);
     }
 }
 
@@ -161,6 +168,12 @@ impl File for TmpfsFileHandle {
             data.resize(end, 0);
         }
         Ok(())
+    }
+
+    fn link_to(&self, new_path: &Path) -> FSResult<()> {
+        self.state
+            .lock()
+            .link_inode(self.inode, &new_path.normalize().as_string())
     }
 
     fn chmod(&self, mode: u32) -> FSResult<()> {

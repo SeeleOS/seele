@@ -1266,12 +1266,29 @@ define_syscall!(LinkAt, |old_dirfd: i32,
                          old_path: CString,
                          new_dirfd: i32,
                          new_path: CString,
-                         _flags: i32| {
-    let old_path = path_from_raw(old_path)?;
+                         flags: AtFlags| {
+    let allowed_flags = AtFlags::EMPTY_PATH | AtFlags::SYMLINK_FOLLOW;
+    if flags.bits() != (flags & allowed_flags).bits() {
+        return Err(SyscallError::InvalidArguments);
+    }
     let new_path = path_from_raw(new_path)?;
-    let old_path = resolve_path_at(old_dirfd, &old_path)?;
     let new_path = resolve_path_at(new_dirfd, &new_path)?;
 
+    if old_path.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let old_path = path_from_raw(old_path)?;
+    if old_path.is_empty() {
+        if !flags.contains(AtFlags::EMPTY_PATH) {
+            return Err(SyscallError::InvalidArguments);
+        }
+        let object = get_object_current_process(old_dirfd as u64).map_err(SyscallError::from)?;
+        object.as_file_like()?.link_to(new_path)?;
+        return Ok(0);
+    }
+
+    let old_path = resolve_path_at(old_dirfd, &old_path)?;
     VirtualFS.lock().link_file(old_path, new_path)?;
 
     Ok(0)

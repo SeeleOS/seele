@@ -71,6 +71,9 @@ pub trait File: Send + Sync {
     fn allocate(&mut self, _mode: u32, _offset: u64, _len: u64) -> FSResult<()> {
         Err(FSError::Readonly)
     }
+    fn link_to(&self, _new_path: &Path) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
     fn chmod(&self, _mode: u32) -> FSResult<()> {
         Err(FSError::Readonly)
     }
