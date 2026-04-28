@@ -328,11 +328,46 @@ fn debug_logind_renameat2(
 ) {
 }
 
-fn debug_logind_path_op(_op: &str, _path: &Path, _result: &Result<(), SyscallError>) {}
+fn should_log_systemd_debug_path() -> bool {
+    with_current_process(|process| {
+        let pid = process.pid.0;
+        let command = process.command_line.first().cloned().unwrap_or_default();
+        (command == "systemd" && pid != 1)
+            || command.contains("systemd-logind")
+            || command.contains("systemd-userdbd")
+            || command.contains("systemd-userwork")
+    })
+}
 
-fn debug_init_path_op(_op: &str, _path: &Path, _result: &Result<(), SyscallError>) {}
+fn debug_logind_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) {
+    if !should_log_systemd_debug_path() {
+        return;
+    }
+    if let Err(err) = result {
+        crate::s_println!(
+            "systemd-path-op op={} path={} result={:?}",
+            op,
+            path.clone().as_string(),
+            err
+        );
+    }
+}
 
-fn debug_init_openat_stage(_stage: &str, _dirfd: i32, _path: &str) {}
+fn debug_init_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) {
+    debug_logind_path_op(op, path, result);
+}
+
+fn debug_init_openat_stage(stage: &str, dirfd: i32, path: &str) {
+    if !should_log_systemd_debug_path() {
+        return;
+    }
+    crate::s_println!(
+        "systemd-openat-stage stage={} dirfd={} path={}",
+        stage,
+        dirfd,
+        path
+    );
+}
 
 fn debug_init_openat_note(_note: &str) {}
 
