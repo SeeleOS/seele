@@ -6,7 +6,7 @@ use crate::object::FileFlags;
 use super::{
     AF_UNIX, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_SEQPACKET, SOCK_STREAM, SocketError,
     SocketResult, UnixDatagramInner, UnixSocketKind, UnixSocketObject, UnixSocketState,
-    UnixStreamInner,
+    UnixStreamInner, current_socket_peer_cred,
 };
 
 impl UnixSocketObject {
@@ -28,43 +28,53 @@ impl UnixSocketObject {
                     UnixSocketKind::Stream
                 };
                 let (left_stream, right_stream) = UnixStreamInner::pair();
+                let creator_cred = current_socket_peer_cred();
                 let left = Arc::new(Self {
                     kind,
                     state: Mutex::new(UnixSocketState::Stream(left_stream.clone())),
                     flags: Mutex::new(FileFlags::empty()),
                     pass_cred: Mutex::new(false),
+                    creator_cred,
                 });
                 let right = Arc::new(Self {
                     kind,
                     state: Mutex::new(UnixSocketState::Stream(right_stream.clone())),
                     flags: Mutex::new(FileFlags::empty()),
                     pass_cred: Mutex::new(false),
+                    creator_cred,
                 });
 
                 *left_stream.owner.lock() = Some(Arc::downgrade(&left));
                 *right_stream.owner.lock() = Some(Arc::downgrade(&right));
+                *left_stream.peer_cred.lock() = right.creator_cred;
+                *right_stream.peer_cred.lock() = left.creator_cred;
                 (left, right)
             }
             SOCK_DGRAM => {
                 let left_inner = Arc::new(UnixDatagramInner::new());
                 let right_inner = Arc::new(UnixDatagramInner::new());
+                let creator_cred = current_socket_peer_cred();
                 let left = Arc::new(Self {
                     kind: UnixSocketKind::Datagram,
                     state: Mutex::new(UnixSocketState::Datagram(left_inner.clone())),
                     flags: Mutex::new(FileFlags::empty()),
                     pass_cred: Mutex::new(false),
+                    creator_cred,
                 });
                 let right = Arc::new(Self {
                     kind: UnixSocketKind::Datagram,
                     state: Mutex::new(UnixSocketState::Datagram(right_inner.clone())),
                     flags: Mutex::new(FileFlags::empty()),
                     pass_cred: Mutex::new(false),
+                    creator_cred,
                 });
 
                 *left_inner.owner.lock() = Some(Arc::downgrade(&left));
                 *right_inner.owner.lock() = Some(Arc::downgrade(&right));
                 *left_inner.peer.lock() = Some(Arc::downgrade(&right));
                 *right_inner.peer.lock() = Some(Arc::downgrade(&left));
+                *left_inner.peer_cred.lock() = right.creator_cred;
+                *right_inner.peer_cred.lock() = left.creator_cred;
                 (left, right)
             }
             _ => return Err(SocketError::ProtocolNotSupported),

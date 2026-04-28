@@ -6,6 +6,7 @@ use crate::object::FileFlags;
 use super::{
     AF_UNIX, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_SEQPACKET, SOCK_STREAM, SocketError,
     SocketResult, UnixDatagramInner, UnixSocketKind, UnixSocketObject, UnixSocketState,
+    current_socket_peer_cred,
 };
 
 impl UnixSocketObject {
@@ -21,6 +22,7 @@ impl UnixSocketObject {
             state: Mutex::new(state),
             flags: Mutex::new(FileFlags::empty()),
             pass_cred: Mutex::new(false),
+            creator_cred: current_socket_peer_cred(),
         }
     }
 

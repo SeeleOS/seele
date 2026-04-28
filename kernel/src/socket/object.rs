@@ -2,7 +2,7 @@ use spin::Mutex;
 
 use crate::object::FileFlags;
 
-use super::UnixSocketState;
+use super::{SocketPeerCred, UnixSocketState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnixSocketKind {
@@ -23,4 +23,5 @@ pub struct UnixSocketObject {
     pub state: Mutex<UnixSocketState>,
     pub flags: Mutex<FileFlags>,
     pub pass_cred: Mutex<bool>,
+    pub creator_cred: SocketPeerCred,
 }

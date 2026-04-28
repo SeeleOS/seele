@@ -1,14 +1,14 @@
 use alloc::{sync::Weak, vec::Vec};
 
 use super::{
-    DATAGRAM_RECV_CAPACITY, PendingRights, STREAM_RECV_CAPACITY, SocketError, SocketPeerCred,
-    SocketResult, UNIX_SOCKET_REGISTRY, UnixDatagramMessage, UnixSocketKind, UnixSocketObject,
-    UnixSocketRegistryEntry, UnixSocketRegistryKey, UnixSocketState, wake_io, wake_pollers,
+    DATAGRAM_RECV_CAPACITY, PendingRights, STREAM_RECV_CAPACITY, SocketError, SocketResult,
+    UNIX_SOCKET_REGISTRY, UnixDatagramMessage, UnixSocketKind, UnixSocketObject,
+    UnixSocketRegistryEntry, UnixSocketRegistryKey, UnixSocketState, current_socket_peer_cred,
+    wake_io, wake_pollers,
 };
 use crate::{
     object::{error::ObjectError, misc::ObjectRef, traits::Writable},
     polling::event::PollableEvent,
-    process::manager::get_current_process,
     thread::yielding::{
         BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
     },
@@ -108,11 +108,7 @@ impl UnixSocketObject {
         recv_queue.push_back(UnixDatagramMessage {
             data: buffer.to_vec(),
             sender_name: datagram.local_name.lock().clone(),
-            sender_cred: SocketPeerCred {
-                pid: get_current_process().lock().pid.0,
-                uid: 0,
-                gid: 0,
-            },
+            sender_cred: current_socket_peer_cred(),
         });
         drop(recv_queue);
 

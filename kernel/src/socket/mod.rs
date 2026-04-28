@@ -21,6 +21,8 @@ mod traits_stat;
 mod traits_write;
 mod wake;
 
+use crate::process::manager::get_current_process;
+
 pub const AF_UNIX: u64 = 1;
 pub const AF_INET: u64 = 2;
 pub const AF_NETLINK: u64 = 16;
@@ -85,6 +87,16 @@ pub use socket_like::SocketLike;
 pub use state::{UnixListenerInner, UnixSocketState};
 pub use stream::{PendingRights, STREAM_RECV_CAPACITY, SocketPeerCred, UnixStreamInner};
 pub(crate) use wake::{wake_io, wake_pollers};
+
+pub(crate) fn current_socket_peer_cred() -> SocketPeerCred {
+    let process = get_current_process();
+    let process = process.lock();
+    SocketPeerCred {
+        pid: process.pid.0,
+        uid: process.effective_uid,
+        gid: process.effective_gid,
+    }
+}
 
 pub(crate) fn socket_timeout_option_len(option_name: u64) -> Option<usize> {
     match option_name {

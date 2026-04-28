@@ -5,13 +5,12 @@ use alloc::{
 use spin::Mutex;
 
 use super::{
-    SocketError, SocketPeerCred, SocketResult, UNIX_SOCKET_REGISTRY, UnixSocketKind,
-    UnixSocketObject, UnixSocketRegistryEntry, UnixSocketRegistryKey, UnixSocketState,
-    UnixStreamInner, wake_io, wake_pollers,
+    SocketError, SocketResult, UNIX_SOCKET_REGISTRY, UnixSocketKind, UnixSocketObject,
+    UnixSocketRegistryEntry, UnixSocketRegistryKey, UnixSocketState, UnixStreamInner,
+    current_socket_peer_cred, wake_io, wake_pollers,
 };
 use crate::object::FileFlags;
 use crate::polling::event::PollableEvent;
-use crate::process::manager::get_current_process;
 
 impl UnixSocketObject {
     pub fn connect(self: &Arc<Self>, path: String) -> SocketResult<()> {
@@ -37,7 +36,14 @@ impl UnixSocketObject {
                 };
 
                 let (client_stream, server_stream) = UnixStreamInner::pair();
-                let peer_pid = get_current_process().lock().pid.0;
+                let client_cred = current_socket_peer_cred();
+                let server_cred = listener
+                    .owner
+                    .lock()
+                    .as_ref()
+                    .and_then(Weak::upgrade)
+                    .map(|socket| socket.creator_cred)
+                    .unwrap_or_default();
                 *client_stream.owner.lock() = Some(Arc::downgrade(self));
                 let kind = self.kind;
                 let server_socket = Arc::new(Self {
@@ -45,13 +51,11 @@ impl UnixSocketObject {
                     state: Mutex::new(UnixSocketState::Stream(server_stream.clone())),
                     flags: Mutex::new(FileFlags::empty()),
                     pass_cred: Mutex::new(false),
+                    creator_cred: server_cred,
                 });
                 *server_stream.owner.lock() = Some(Arc::downgrade(&server_socket));
-                *server_stream.peer_cred.lock() = SocketPeerCred {
-                    pid: peer_pid,
-                    uid: 0,
-                    gid: 0,
-                };
+                *client_stream.peer_cred.lock() = server_cred;
+                *server_stream.peer_cred.lock() = client_cred;
                 *client_stream.local_name.lock() = local_name.clone();
                 *client_stream.local_key.lock() = local_key;
                 *client_stream.peer_name.lock() = Some(listener.path.clone());
