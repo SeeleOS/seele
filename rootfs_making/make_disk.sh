@@ -18,6 +18,13 @@ ARCH_PACKAGES=(
     base-devel
     rust
     bash
+    niri
+    hyprland
+    clang
+    nvim
+    chromium
+    firefox
+    vscode
     alacritty
     sddm
     evtest
