@@ -12,13 +12,16 @@ use crate::{
         execve::execve,
         manager::{MANAGER, get_current_process, terminate_process},
         misc::{ProcessID, get_process_with_pid},
+        wait::{ProcessWaitEvent, take_wait_event},
     },
     signal::Signal,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
         THREAD_MANAGER, get_current_thread,
         scheduling::return_to_scheduler_no_save,
-        yielding::{BlockType, WakeType, finish_block_current, prepare_block_current},
+        yielding::{
+            BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
+        },
     },
 };
 
@@ -37,10 +40,73 @@ fn has_wait_interrupt_signal(process: &ProcessRef) -> bool {
     !pending.is_empty()
 }
 
+const CLD_TRAPPED: i32 = 4;
+const CLD_STOPPED: i32 = 5;
+
+enum WaitOutcome {
+    Exited(ProcessRef, u64, ProcessExitStatus),
+    Stopped(ProcessRef, u64, ProcessWaitEvent),
+}
+
+fn check_wait_outcome(
+    target_process: i32,
+    wait_options: WaitOptions,
+    current_process: &ProcessRef,
+) -> Result<Option<WaitOutcome>, SyscallError> {
+    let preserve_child = wait_options.contains(WaitOptions::WNOWAIT);
+    let current_group = current_process.lock().group_id;
+    let manager = MANAGER.lock();
+    let mut matched_child = false;
+    let mut ready_child = None;
+
+    for (pid, process) in manager.processes.iter() {
+        let mut p_lock = process.lock();
+        let is_current_child = p_lock
+            .parent
+            .clone()
+            .is_some_and(|parent| Arc::ptr_eq(&parent, current_process));
+
+        let matches = match target_process {
+            -1 => is_current_child,
+            0 => is_current_child && p_lock.group_id == current_group,
+            1.. => pid.0 == target_process as u64 && is_current_child,
+            i32::MIN..=-2 => is_current_child && p_lock.group_id.0 == (-target_process) as u64,
+        };
+
+        if !matches {
+            continue;
+        }
+
+        matched_child = true;
+
+        if p_lock.threads.is_empty() {
+            ready_child = Some(WaitOutcome::Exited(
+                process.clone(),
+                pid.0,
+                p_lock.exit_status.unwrap_or(ProcessExitStatus::Exited(0)),
+            ));
+            break;
+        }
+
+        if let Some(wait_event) = take_wait_event(&mut p_lock, preserve_child) {
+            ready_child = Some(WaitOutcome::Stopped(process.clone(), pid.0, wait_event));
+            break;
+        }
+    }
+
+    if let Some(process) = ready_child {
+        Ok(Some(process))
+    } else if matched_child {
+        Ok(None)
+    } else {
+        Err(SyscallError::NoChildProcesses)
+    }
+}
+
 fn wait_for_child_exit(
     target_process: i32,
     wait_options: WaitOptions,
-) -> Result<Option<(ProcessRef, u64, ProcessExitStatus)>, SyscallError> {
+) -> Result<Option<WaitOutcome>, SyscallError> {
     let preserve_child = wait_options.contains(WaitOptions::WNOWAIT);
     let current_process = get_current_process();
 
@@ -51,59 +117,17 @@ fn wait_for_child_exit(
             .lock()
             .cleanup_exited_threads();
 
-        let current_group = current_process.lock().group_id;
-        let check_result = {
-            let manager = MANAGER.lock();
-            let mut matched_child = false;
-            let mut exited_child = None;
-
-            for (pid, process) in manager.processes.iter() {
-                let p_lock = process.lock();
-                let is_current_child = p_lock
-                    .parent
-                    .clone()
-                    .is_some_and(|parent| Arc::ptr_eq(&parent, &current_process));
-
-                let matches = match target_process {
-                    -1 => is_current_child,
-                    0 => is_current_child && p_lock.group_id == current_group,
-                    1.. => pid.0 == target_process as u64 && is_current_child,
-                    i32::MIN..=-2 => {
-                        is_current_child && p_lock.group_id.0 == (-target_process) as u64
-                    }
-                };
-
-                if !matches {
-                    continue;
-                }
-
-                matched_child = true;
-
-                if p_lock.threads.is_empty() {
-                    exited_child = Some((
-                        process.clone(),
-                        pid.0,
-                        p_lock.exit_status.unwrap_or(ProcessExitStatus::Exited(0)),
-                    ));
-                    break;
-                }
-            }
-
-            if let Some(process) = exited_child {
-                Some(process)
-            } else if matched_child {
-                None
-            } else {
-                return Err(SyscallError::NoChildProcesses);
-            }
-        };
+        let check_result = check_wait_outcome(target_process, wait_options, &current_process)?;
 
         match check_result {
-            Some((process, pid, exit_status)) => {
+            Some(WaitOutcome::Exited(process, pid, exit_status)) => {
                 if !preserve_child {
                     MANAGER.lock().reap_process(process.clone());
                 }
-                return Ok(Some((process, pid, exit_status)));
+                return Ok(Some(WaitOutcome::Exited(process, pid, exit_status)));
+            }
+            Some(WaitOutcome::Stopped(process, pid, wait_event)) => {
+                return Ok(Some(WaitOutcome::Stopped(process, pid, wait_event)));
             }
             None if wait_options.contains(WaitOptions::NOHANG) => return Ok(None),
             None => {
@@ -111,10 +135,28 @@ fn wait_for_child_exit(
                     return Err(SyscallError::Interrupted);
                 }
 
-                prepare_block_current(BlockType::WakeRequired {
+                let current = prepare_block_current(BlockType::WakeRequired {
                     wake_type: WakeType::ProcsesExit,
                     deadline: None,
                 });
+                match check_wait_outcome(target_process, wait_options, &current_process) {
+                    Ok(Some(outcome)) => {
+                        cancel_block(&current);
+                        finish_block_current();
+                        return Ok(Some(outcome));
+                    }
+                    Err(SyscallError::NoChildProcesses) => {
+                        cancel_block(&current);
+                        finish_block_current();
+                        return Err(SyscallError::NoChildProcesses);
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        cancel_block(&current);
+                        finish_block_current();
+                        return Err(err);
+                    }
+                }
                 finish_block_current();
 
                 if has_wait_interrupt_signal(&current_process) {
@@ -142,15 +184,21 @@ define_syscall!(Wait4, |target_process: i32,
                         options: i32,
                         _rusage: u64| {
     let wait_options = WaitOptions::from_bits_truncate(options);
-    let Some((_, pid, exit_status)) = wait_for_child_exit(target_process, wait_options)? else {
+    let Some(outcome) = wait_for_child_exit(target_process, wait_options)? else {
         return Ok(0);
     };
 
     if !status_ptr.is_null() {
-        let status = exit_status.wait_status();
+        let status = match outcome {
+            WaitOutcome::Exited(_, _, exit_status) => exit_status.wait_status(),
+            WaitOutcome::Stopped(_, _, wait_event) => wait_event.wait_status(),
+        };
         user_safe::write(status_ptr, &status)?;
     }
 
+    let pid = match outcome {
+        WaitOutcome::Exited(_, pid, _) | WaitOutcome::Stopped(_, pid, _) => pid,
+    };
     Ok(pid as usize)
 });
 
@@ -174,13 +222,25 @@ define_syscall!(Waitid, |id_type: i32,
     let result = wait_for_child_exit(target_process, wait_options)?;
 
     if !info_ptr.is_null() {
-        let info = if let Some((_, pid, exit_status)) = result {
-            SigInfo::for_waitid(
-                Signal::SIGCHLD,
-                exit_status.waitid_code(),
-                pid as i32,
-                exit_status.waitid_status(),
-            )
+        let info = if let Some(result) = result {
+            match result {
+                WaitOutcome::Exited(_, pid, exit_status) => SigInfo::for_waitid(
+                    Signal::SIGCHLD,
+                    exit_status.waitid_code(),
+                    pid as i32,
+                    exit_status.waitid_status(),
+                ),
+                WaitOutcome::Stopped(_, pid, wait_event) => SigInfo::for_waitid(
+                    Signal::SIGCHLD,
+                    if wait_event.is_ptrace() {
+                        CLD_TRAPPED
+                    } else {
+                        CLD_STOPPED
+                    },
+                    pid as i32,
+                    (wait_event.wait_status() >> 8) & 0xff,
+                ),
+            }
         } else {
             SigInfo::default()
         };

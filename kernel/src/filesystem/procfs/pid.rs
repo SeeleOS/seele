@@ -149,6 +149,7 @@ pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
         .as_ref()
         .map(|parent| parent.lock().pid.0)
         .unwrap_or(0);
+    let tracer_pid = process.ptrace.tracer.map(|pid| pid.0).unwrap_or(0);
     let state = if process.have_exited() || process.threads.is_empty() {
         "Z (zombie)"
     } else {
@@ -172,7 +173,7 @@ pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
             "Tgid:\t{}\n",
             "Pid:\t{}\n",
             "PPid:\t{}\n",
-            "TracerPid:\t0\n",
+            "TracerPid:\t{}\n",
             "Uid:\t{}\t{}\t{}\t{}\n",
             "Gid:\t{}\t{}\t{}\t{}\n",
             "FDSize:\t{}\n",
@@ -191,6 +192,7 @@ pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
         pid.0,
         pid.0,
         parent_pid,
+        tracer_pid,
         process.real_uid,
         process.effective_uid,
         process.saved_uid,

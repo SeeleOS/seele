@@ -72,6 +72,7 @@ pub enum SyscallNumber {
     Reboot = 169,
     Sethostname = 170,
     Sysinfo = 99,
+    Ptrace = 101,
     Setgroups = 116,
     Getresuid = 118,
     Setresuid = 117,

@@ -1,7 +1,7 @@
 use crate::{
     misc::snapshot::Snapshot,
     object::linux_anon::wake_signalfd_for_process,
-    process::{Process, ProcessExitStatus, ProcessRef, group::ProcessGroupID},
+    process::{Process, ProcessExitStatus, ProcessRef, ptrace::report_signal_stop},
     s_println,
     thread::{
         THREAD_MANAGER, ThreadRef, get_current_thread,
@@ -304,6 +304,10 @@ impl Signal {
     pub const fn is_realtime(self) -> bool {
         (self as u64) >= Self::SIGRTMIN as u64
     }
+
+    pub const fn is_unblockable(self) -> bool {
+        matches!(self, Self::SIGKILL | Self::SIGSTOP)
+    }
 }
 
 bitflags! {
@@ -364,7 +368,8 @@ pub mod misc {
 pub struct ProcessSignalsResult {
     pub should_switch: bool,
     exited_threads: Vec<ThreadRef>,
-    stopped_group: Option<ProcessGroupID>,
+    stop_current: bool,
+    stopped_signal: Option<Signal>,
 }
 
 fn wake_process_threads(process: &ProcessRef, wake_stopped_only: bool) {
@@ -431,17 +436,19 @@ pub fn process_current_process_signals(process: &ProcessRef) -> bool {
         process.process_signals()
     };
 
-    if let Some(group) = result.stopped_group {
-        for process in group.get_processes() {
-            let threads = {
-                let process = process.lock();
-                process.threads.clone()
-            };
+    if let Some(signal) = result.stopped_signal {
+        report_signal_stop(process, signal);
+    }
 
-            for weak in threads {
-                if let Some(thread) = weak.upgrade() {
-                    thread.lock().state = State::Blocked(BlockType::Stopped);
-                }
+    if result.stop_current {
+        let threads = {
+            let process = process.lock();
+            process.threads.clone()
+        };
+
+        for weak in threads {
+            if let Some(thread) = weak.upgrade() {
+                thread.lock().state = State::Blocked(BlockType::Stopped);
             }
         }
     }
@@ -470,10 +477,11 @@ impl Process {
         for signal in Signal::iter() {
             let signal_bits = Signals::from(signal);
             if self.pending_signals.contains(signal_bits)
-                && !get_current_thread()
-                    .lock()
-                    .blocked_signals
-                    .contains(signal_bits)
+                && (signal.is_unblockable()
+                    || !get_current_thread()
+                        .lock()
+                        .blocked_signals
+                        .contains(signal_bits))
             {
                 let action = self.signal_actions[signal.index()].clone();
                 self.pending_signals.remove(signal_bits);
@@ -489,8 +497,11 @@ impl Process {
                         if !default_result.exited_threads.is_empty() {
                             result.exited_threads = default_result.exited_threads;
                         }
-                        if default_result.stopped_group.is_some() {
-                            result.stopped_group = default_result.stopped_group;
+                        if default_result.stop_current {
+                            result.stop_current = true;
+                        }
+                        if default_result.stopped_signal.is_some() {
+                            result.stopped_signal = default_result.stopped_signal;
                         }
                     }
                     SignalHandlingType::Ignore => {}
@@ -599,7 +610,8 @@ impl Process {
             return ProcessSignalsResult {
                 should_switch: true,
                 exited_threads: threads,
-                stopped_group: None,
+                stop_current: false,
+                stopped_signal: None,
             };
         }
 
@@ -609,7 +621,8 @@ impl Process {
                 ProcessSignalsResult {
                     should_switch: true,
                     exited_threads: Vec::new(),
-                    stopped_group: Some(self.group_id),
+                    stop_current: true,
+                    stopped_signal: Some(signal),
                 }
             }
             Signal::SIGCONT => unreachable!(),

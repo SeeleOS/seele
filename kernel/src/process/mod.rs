@@ -24,6 +24,8 @@ pub mod manager;
 pub mod misc;
 pub mod new;
 pub mod object;
+pub mod ptrace;
+pub mod wait;
 
 pub type ProcessRef = Arc<Mutex<Process>>;
 
@@ -92,6 +94,8 @@ pub struct Process {
     pub capability_inheritable: [u32; 2],
     pub capability_ambient: [u32; 2],
     pub vfork_blocker: Option<ThreadID>,
+    pub ptrace: ptrace::PtraceState,
+    pub wait_event: Option<wait::ProcessWaitEvent>,
 }
 
 impl Default for Process {
@@ -135,6 +139,8 @@ impl Default for Process {
             capability_inheritable: [0; 2],
             capability_ambient: [0; 2],
             vfork_blocker: None,
+            ptrace: ptrace::PtraceState::default(),
+            wait_event: None,
         }
     }
 }

@@ -3,6 +3,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use crate::{
     misc::snapshot::Snapshot,
     process::manager::get_current_process,
+    process::ptrace::{maybe_stop_current_on_syscall_entry, maybe_stop_current_on_syscall_exit},
     signal::process_current_process_signals,
     systemcall::table::SYSCALL_TABLE,
     systemcall::utils::SyscallError,
@@ -23,9 +24,15 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
 
     let thread_ref = get_current_thread();
     let mut thread = thread_ref.lock();
+    let fs_base = FsBase::read().as_u64();
     thread.get_appropriate_snapshot().inner = *snapshot;
-    thread.get_appropriate_snapshot().fs_base = FsBase::read().as_u64();
+    thread.get_appropriate_snapshot().fs_base = fs_base;
+    thread.last_syscall_no = syscall_no as u64;
+    thread.last_user_snapshot = *snapshot;
+    thread.last_user_fs_base = fs_base;
     drop(thread);
+
+    maybe_stop_current_on_syscall_entry();
 
     let result = syscall_handler_unwrapped(
         syscall_no,
@@ -40,9 +47,14 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     snapshot.rax = result;
 
     with_current_thread(|thread| {
+        let fs_base = FsBase::read().as_u64();
         thread.get_appropriate_snapshot().inner = *snapshot;
-        thread.get_appropriate_snapshot().fs_base = FsBase::read().as_u64();
+        thread.get_appropriate_snapshot().fs_base = fs_base;
+        thread.last_user_snapshot = *snapshot;
+        thread.last_user_fs_base = fs_base;
     });
+
+    maybe_stop_current_on_syscall_exit();
 
     let should_switch = process_current_process_signals(&get_current_process());
     if should_switch {

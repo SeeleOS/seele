@@ -2,6 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 use spin::Mutex;
 
 use crate::{
+    misc::snapshot::Snapshot,
     process::{Process, ProcessRef},
     signal::Signals,
     thread::{
@@ -33,6 +34,9 @@ pub struct Thread {
     pub rseq_len: u32,
     pub rseq_flags: u32,
     pub rseq_sig: u32,
+    pub last_syscall_no: u64,
+    pub last_user_snapshot: Snapshot,
+    pub last_user_fs_base: u64,
 
     pub sig_handler_snapshot: ThreadSnapshot,
 }
@@ -57,6 +61,9 @@ impl Default for Thread {
             rseq_len: 0,
             rseq_flags: 0,
             rseq_sig: 0,
+            last_syscall_no: 0,
+            last_user_snapshot: Snapshot::default(),
+            last_user_fs_base: 0,
         }
     }
 }
@@ -75,14 +82,22 @@ impl Thread {
     pub fn new_with_id(entry_point: u64, parent: ProcessRef, id: ThreadID) -> Self {
         let mut parent_lock = parent.lock();
         let (_, stack) = parent_lock.addrspace.allocate_user_stack(64);
+        let user_stack = stack.finish().as_u64();
         let kernel_stack_top = allocate_kernel_stack(16).finish().as_u64();
         Self {
             id,
             snapshot: ThreadSnapshot::new(
                 entry_point,
                 &mut parent.clone().lock().addrspace,
-                stack.finish().as_u64(),
+                user_stack,
                 ThreadSnapshotType::Thread,
+            ),
+            last_user_snapshot: Snapshot::default_regs(
+                entry_point,
+                crate::smp::user_code_selector().0,
+                0x202,
+                user_stack,
+                crate::smp::user_data_selector().0,
             ),
             parent: parent.clone(),
             kernel_stack_top,
@@ -106,6 +121,8 @@ impl Thread {
     ) -> Self {
         Self {
             id,
+            last_user_snapshot: snapshot.inner,
+            last_user_fs_base: snapshot.fs_base,
             snapshot,
             parent,
             kernel_stack_top,

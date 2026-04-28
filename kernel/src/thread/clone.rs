@@ -23,6 +23,9 @@ impl Thread {
             kernel_stack_top: allocate_kernel_stack(16).finish().as_u64(),
             blocked_signals: self.blocked_signals,
             saved_blocked_signals: self.saved_blocked_signals.clone(),
+            last_syscall_no: self.last_syscall_no,
+            last_user_snapshot: self.last_user_snapshot,
+            last_user_fs_base: self.last_user_fs_base,
             ..Default::default()
         };
 

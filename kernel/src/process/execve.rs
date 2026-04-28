@@ -9,6 +9,7 @@ use crate::{
         manager::{MANAGER, wake_vfork_blocker},
         new::setup_process,
         object::close_cloexec_fd_entries,
+        ptrace::maybe_stop_current_after_exec,
     },
     signal::{
         Signals,
@@ -109,6 +110,8 @@ impl Process {
         thread_locked.snapshot_state = SnapshotState::Normal;
         thread_locked.sig_handler_snapshot = ThreadSnapshot::default();
         thread_locked.saved_blocked_signals.clear();
+        thread_locked.last_user_snapshot = thread_locked.snapshot.inner;
+        thread_locked.last_user_fs_base = thread_locked.snapshot.fs_base;
         self.pending_signals = Signals::default();
         self.pending_signal_info.fill(None);
         self.signal_actions = execve_signal_actions(&self.signal_actions);
@@ -146,6 +149,8 @@ pub fn execve(path: Path, args: Vec<String>, env: Vec<String>) -> Result<(), FSE
     if let Some(thread_id) = vfork_blocker {
         wake_vfork_blocker(thread_id);
     }
+
+    maybe_stop_current_after_exec();
 
     unsafe { (*snapshot).switch_from(None, None) };
 
