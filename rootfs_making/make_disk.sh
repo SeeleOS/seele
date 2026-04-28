@@ -278,8 +278,10 @@ sudo install -Dm644 "${ROOT_DIR}/misc/maplemono.ttf" "${SYSROOT_DIR}/usr/share/f
 sudo install -Dm644 "${ROOTFS_MAKING_DIR}/weston.ini" "${SYSROOT_DIR}/etc/xdg/weston/weston.ini"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/root/.xinitrc"
+sudo install -Dm755 "${ROOTFS_MAKING_DIR}/startplasma-sddm-wayland.sh" "${SYSROOT_DIR}/usr/bin/startplasma-sddm-wayland.sh"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/startplasma-manual.sh" "${SYSROOT_DIR}/usr/bin/startplasma-manual.sh"
 sudo install -Dm755 "${ROOTFS_MAKING_DIR}/sddm-diagnostics.sh" "${SYSROOT_DIR}/usr/bin/sddm-diagnostics.sh"
+sudo install -Dm644 "${ROOTFS_MAKING_DIR}/wayland-sessions/plasma-sddm.desktop" "${SYSROOT_DIR}/usr/share/wayland-sessions/plasma-sddm.desktop"
 
 for package in "${AUR_PACKAGES[@]}"; do
     install_aur_package "${package}"

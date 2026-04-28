@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Exec=/usr/bin/startplasma-sddm-wayland.sh
+TryExec=/usr/bin/startplasma-sddm-wayland.sh
+DesktopNames=KDE
+Name=Plasma (Wayland)
+Comment=Plasma by KDE
