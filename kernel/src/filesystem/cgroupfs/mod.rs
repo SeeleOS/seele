@@ -33,6 +33,7 @@ struct CgroupDirectory {
     inode: u64,
     children: BTreeSet<String>,
     subtree_control: String,
+    memory_oom_group: bool,
 }
 
 struct CgroupState {
@@ -50,6 +51,7 @@ impl CgroupState {
                 inode: ROOT_INODE,
                 children: BTreeSet::new(),
                 subtree_control: String::new(),
+                memory_oom_group: false,
             },
         );
 
@@ -102,6 +104,7 @@ impl CgroupState {
                 inode,
                 children: BTreeSet::new(),
                 subtree_control: String::new(),
+                memory_oom_group: false,
             },
         );
         self.directory_mut(&parent)?.children.insert(name.into());
@@ -173,55 +176,83 @@ lazy_static! {
 #[derive(Clone, Copy)]
 enum CgroupFileKind {
     Procs,
+    Threads,
     Controllers,
     SubtreeControl,
     Events,
     Kill,
     Freeze,
     Type,
+    CpuStat,
+    MemoryCurrent,
+    MemoryOomGroup,
+    MemoryReclaim,
 }
 
 impl CgroupFileKind {
     fn name(self) -> &'static str {
         match self {
             Self::Procs => "cgroup.procs",
+            Self::Threads => "cgroup.threads",
             Self::Controllers => "cgroup.controllers",
             Self::SubtreeControl => "cgroup.subtree_control",
             Self::Events => "cgroup.events",
             Self::Kill => "cgroup.kill",
             Self::Freeze => "cgroup.freeze",
             Self::Type => "cgroup.type",
+            Self::CpuStat => "cpu.stat",
+            Self::MemoryCurrent => "memory.current",
+            Self::MemoryOomGroup => "memory.oom.group",
+            Self::MemoryReclaim => "memory.reclaim",
         }
     }
 
     fn inode_offset(self) -> u64 {
         match self {
             Self::Procs => 1,
-            Self::Controllers => 2,
-            Self::SubtreeControl => 3,
-            Self::Events => 4,
-            Self::Kill => 5,
-            Self::Freeze => 6,
-            Self::Type => 7,
+            Self::Threads => 2,
+            Self::Controllers => 3,
+            Self::SubtreeControl => 4,
+            Self::Events => 5,
+            Self::Kill => 6,
+            Self::Freeze => 7,
+            Self::Type => 8,
+            Self::CpuStat => 9,
+            Self::MemoryCurrent => 10,
+            Self::MemoryOomGroup => 11,
+            Self::MemoryReclaim => 12,
         }
     }
 
     fn mode(self) -> u32 {
         match self {
-            Self::Controllers | Self::Events | Self::Type => READONLY_FILE_MODE,
-            Self::Procs | Self::SubtreeControl | Self::Kill | Self::Freeze => WRITABLE_FILE_MODE,
+            Self::Controllers | Self::Events | Self::Type | Self::CpuStat | Self::MemoryCurrent => {
+                READONLY_FILE_MODE
+            }
+            Self::Procs
+            | Self::Threads
+            | Self::SubtreeControl
+            | Self::Kill
+            | Self::Freeze
+            | Self::MemoryOomGroup
+            | Self::MemoryReclaim => WRITABLE_FILE_MODE,
         }
     }
 
     fn all() -> &'static [Self] {
         &[
             Self::Procs,
+            Self::Threads,
             Self::Controllers,
             Self::SubtreeControl,
             Self::Events,
             Self::Kill,
             Self::Freeze,
             Self::Type,
+            Self::CpuStat,
+            Self::MemoryCurrent,
+            Self::MemoryOomGroup,
+            Self::MemoryReclaim,
         ]
     }
 
@@ -274,7 +305,15 @@ fn file_contents(state: &CgroupState, path: &str, kind: CgroupFileKind) -> FSRes
             }
             content.into_bytes()
         }
-        CgroupFileKind::Controllers => b"\n".to_vec(),
+        CgroupFileKind::Threads => {
+            let pids = state.pids_in_path(path);
+            let mut content = String::new();
+            for pid in pids {
+                content.push_str(&format!("{}\n", pid.0));
+            }
+            content.into_bytes()
+        }
+        CgroupFileKind::Controllers => b"cpu memory pids\n".to_vec(),
         CgroupFileKind::SubtreeControl => {
             if dir.subtree_control.is_empty() {
                 b"\n".to_vec()
@@ -293,6 +332,16 @@ fn file_contents(state: &CgroupState, path: &str, kind: CgroupFileKind) -> FSRes
         CgroupFileKind::Kill => Vec::new(),
         CgroupFileKind::Freeze => b"0\n".to_vec(),
         CgroupFileKind::Type => b"domain\n".to_vec(),
+        CgroupFileKind::CpuStat => b"usage_usec 0\nuser_usec 0\nsystem_usec 0\n".to_vec(),
+        CgroupFileKind::MemoryCurrent => b"0\n".to_vec(),
+        CgroupFileKind::MemoryOomGroup => {
+            if dir.memory_oom_group {
+                b"1\n".to_vec()
+            } else {
+                b"0\n".to_vec()
+            }
+        }
+        CgroupFileKind::MemoryReclaim => Vec::new(),
     };
     Ok(bytes)
 }
@@ -311,12 +360,49 @@ fn write_file(path: &str, kind: CgroupFileKind, buffer: &[u8]) -> FSResult<usize
                 .map_err(|_| FSError::Other)?;
             state.set_pid_path(pid, path)?;
         }
+        CgroupFileKind::Threads => {
+            let text = core::str::from_utf8(buffer).map_err(|_| FSError::Other)?;
+            let pid = text
+                .trim()
+                .parse::<u64>()
+                .map(ProcessID)
+                .map_err(|_| FSError::Other)?;
+            state.set_pid_path(pid, path)?;
+        }
         CgroupFileKind::SubtreeControl => {
             let text = core::str::from_utf8(buffer).map_err(|_| FSError::Other)?;
-            state.directory_mut(path)?.subtree_control = text.trim().to_string();
+            let mut enabled = state
+                .directory(path)?
+                .subtree_control
+                .split_whitespace()
+                .map(ToString::to_string)
+                .collect::<BTreeSet<_>>();
+            for token in text.split_whitespace() {
+                if let Some(controller) = token.strip_prefix('+') {
+                    enabled.insert(controller.to_string());
+                } else if let Some(controller) = token.strip_prefix('-') {
+                    enabled.remove(controller);
+                } else if !token.is_empty() {
+                    enabled.insert(token.to_string());
+                }
+            }
+            state.directory_mut(path)?.subtree_control = enabled.into_iter().collect::<Vec<_>>().join(" ");
         }
-        CgroupFileKind::Kill | CgroupFileKind::Freeze => {}
-        CgroupFileKind::Controllers | CgroupFileKind::Events | CgroupFileKind::Type => {
+        CgroupFileKind::MemoryOomGroup => {
+            let text = core::str::from_utf8(buffer).map_err(|_| FSError::Other)?;
+            let value = match text.trim() {
+                "0" => false,
+                "1" => true,
+                _ => return Err(FSError::Other),
+            };
+            state.directory_mut(path)?.memory_oom_group = value;
+        }
+        CgroupFileKind::Kill | CgroupFileKind::Freeze | CgroupFileKind::MemoryReclaim => {}
+        CgroupFileKind::Controllers
+        | CgroupFileKind::Events
+        | CgroupFileKind::Type
+        | CgroupFileKind::CpuStat
+        | CgroupFileKind::MemoryCurrent => {
             return Err(FSError::Readonly);
         }
     }

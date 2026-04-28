@@ -16,6 +16,8 @@ pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("comm".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("stat".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("status".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("sessionid".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("loginuid".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("cmdline".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("environ".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("cgroup".into(), DirectoryContentType::File),
@@ -229,6 +231,16 @@ pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
     Ok(content.into_bytes())
 }
 
+pub(super) fn proc_pid_sessionid_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    Ok(format!("{}\n", process.lock().session_id.0).into_bytes())
+}
+
+pub(super) fn proc_pid_loginuid_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
+    let _ = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    Ok(b"4294967295\n".to_vec())
+}
+
 pub(super) fn proc_pid_uid_map_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
     let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
     let process = process.lock();
@@ -398,24 +410,32 @@ pub(super) fn pid_status_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 7
 }
 
-pub(super) fn pid_uid_map_inode(pid: ProcessID) -> u64 {
+pub(super) fn pid_sessionid_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 8
 }
 
-pub(super) fn pid_gid_map_inode(pid: ProcessID) -> u64 {
+pub(super) fn pid_loginuid_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 9
 }
 
-pub(super) fn pid_setgroups_inode(pid: ProcessID) -> u64 {
+pub(super) fn pid_uid_map_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 10
 }
 
-pub(super) fn pid_root_inode(pid: ProcessID) -> u64 {
+pub(super) fn pid_gid_map_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 11
 }
 
-pub(super) fn pid_environ_inode(pid: ProcessID) -> u64 {
+pub(super) fn pid_setgroups_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 12
+}
+
+pub(super) fn pid_root_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 13
+}
+
+pub(super) fn pid_environ_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 14
 }
 
 pub(super) fn pid_fd_dir_inode(pid: ProcessID) -> u64 {

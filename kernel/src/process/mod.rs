@@ -32,7 +32,7 @@ pub type ProcessRef = Arc<Mutex<Process>>;
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ControllingTerminal(pub u64);
 
-const CAP_LAST_CAP: u32 = 40;
+pub const CAP_LAST_CAP: u32 = 40;
 const DEFAULT_CAPABILITY_LOW: u32 = u32::MAX;
 const DEFAULT_CAPABILITY_HIGH: u32 = (1u32 << (CAP_LAST_CAP - 31)) - 1;
 const CLD_EXITED: i32 = 1;

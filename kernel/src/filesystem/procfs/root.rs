@@ -35,6 +35,8 @@ pub(super) const PROC_SYS_KERNEL_HOSTNAME_INODE: u64 = 0x3013;
 pub(super) const PROC_SYS_KERNEL_DOMAINNAME_INODE: u64 = 0x3014;
 pub(super) const PROC_SYS_KERNEL_OSRELEASE_INODE: u64 = 0x3015;
 pub(super) const PROC_SYS_KERNEL_RANDOM_UUID_INODE: u64 = 0x3016;
+pub(super) const PROC_SYS_KERNEL_NGROUPS_MAX_INODE: u64 = 0x3017;
+pub(super) const PROC_SYS_KERNEL_CAP_LAST_CAP_INODE: u64 = 0x3018;
 
 static PROC_UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -135,6 +137,8 @@ pub(super) fn proc_kernel_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("hostname".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("domainname".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("osrelease".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("ngroups_max".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("cap_last_cap".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("random".into(), DirectoryContentType::Directory),
     ]
 }
@@ -157,6 +161,14 @@ pub(super) fn proc_random_uuid_bytes() -> Vec<u8> {
         ^ counter.rotate_left(7)
         ^ 0xbb67_ae85_84ca_a73b;
     format!("{}\n", generate_uuid(seed)).into_bytes()
+}
+
+pub(super) fn proc_ngroups_max_bytes() -> Vec<u8> {
+    b"65536\n".to_vec()
+}
+
+pub(super) fn proc_cap_last_cap_bytes() -> Vec<u8> {
+    format!("{}\n", crate::process::CAP_LAST_CAP).into_bytes()
 }
 
 pub(super) fn proc_pressure_entries() -> Vec<DirectoryContentInfo> {
