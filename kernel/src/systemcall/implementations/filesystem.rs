@@ -331,7 +331,7 @@ fn debug_logind_renameat2(
 fn debug_logind_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) {
     if let Some((pid, command, parent_command)) = current_sddm_debug_process_info() {
         let path_string = path.clone().normalize().as_string();
-        if should_log_sddm_path(&path_string) {
+        if should_log_sddm_path_for_process(&command, &parent_command, &path_string) {
             crate::s_println!(
                 "sddm-path-op pid={} cmd={} parent_cmd={} op={} path={} result={:?}",
                 pid,
@@ -351,7 +351,7 @@ fn debug_init_path_op(op: &str, path: &Path, result: &Result<(), SyscallError>) 
 
 fn debug_init_openat_stage(stage: &str, dirfd: i32, path: &str) {
     if let Some((pid, command, parent_command)) = current_sddm_debug_process_info()
-        && should_log_sddm_path(path)
+        && should_log_sddm_path_for_process(&command, &parent_command, path)
     {
         crate::s_println!(
             "sddm-openat-stage pid={} cmd={} parent_cmd={} stage={} dirfd={} path={}",
@@ -420,6 +420,18 @@ fn should_log_sddm_path(path: &str) -> bool {
     ]
     .into_iter()
     .any(|pattern| path.contains(pattern))
+}
+
+fn should_log_sddm_path_for_process(command: &str, parent_command: &str, path: &str) -> bool {
+    if command.contains("sddm-greeter-qt6")
+        || command.contains("/usr/lib/sddm/sddm-helper")
+        || command == "/usr/bin/sddm"
+        || parent_command.contains("sddm")
+    {
+        return true;
+    }
+
+    should_log_sddm_path(path)
 }
 
 fn open_tmpfile_at(dirfd: i32, path_str: &str) -> Result<ObjectRef, SyscallError> {
