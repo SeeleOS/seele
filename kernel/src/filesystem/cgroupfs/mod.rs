@@ -421,6 +421,10 @@ impl Directory for CgroupDirectoryHandle {
 
         Err(FSError::NotFound)
     }
+
+    fn chmod(&self, _mode: u32) -> FSResult<()> {
+        Ok(())
+    }
 }
 
 struct CgroupFileHandle {
@@ -495,6 +499,10 @@ impl File for CgroupFileHandle {
         .max(0) as usize;
         self.offset = next;
         Ok(self.offset)
+    }
+
+    fn chmod(&self, _mode: u32) -> FSResult<()> {
+        Ok(())
     }
 }
 
