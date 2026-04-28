@@ -233,9 +233,7 @@ arch_chroot /usr/sbin/usermod -p '' root
 arch_chroot /usr/bin/systemctl enable seatd.service
 arch_chroot /usr/bin/systemctl enable seele-udev-seed.service
 
-install_sysroot_file "${ROOTFS_MAKING_DIR}/locale.conf" "${SYSROOT_DIR}/etc/locale.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/vconsole.conf" "${SYSROOT_DIR}/etc/vconsole.conf"
-install_sysroot_file "${ROOTFS_MAKING_DIR}/locale.sh" "${SYSROOT_DIR}/etc/profile.d/locale.sh"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/xdg-runtime.sh" "${SYSROOT_DIR}/etc/profile.d/xdg-runtime.sh"
 
 sudo chmod 0755 "${SYSROOT_DIR}/run"
