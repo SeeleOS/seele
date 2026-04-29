@@ -24,9 +24,9 @@ use crate::{
     signal::{Signal, Signals},
     systemcall::implementations::{
         AtFlags, ClockNanosleepFlags, EpollCreateFlags, FallocateFlags, FsMountFlags, FsOpenFlags,
-        GetRandomFlags, InotifyInitFlags, LinuxSchedPolicy, MmapFlags, MoveMountFlags,
-        MremapFlags, OpenFlags, OpenTreeFlags, PipeFlags, PollEvents, RseqFlags, SetnsFlags,
-        TimerFdFlags, TimerSetTimeFlags, UmountFlags, XattrFlags,
+        GetRandomFlags, InotifyInitFlags, LinuxSchedPolicy, MmapFlags, MoveMountFlags, MremapFlags,
+        OpenFlags, OpenTreeFlags, PipeFlags, PollEvents, RseqFlags, SetnsFlags, TimerFdFlags,
+        TimerSetTimeFlags, UmountFlags, XattrFlags,
     },
     systemcall::utils::{SyscallError, SyscallResult},
 };

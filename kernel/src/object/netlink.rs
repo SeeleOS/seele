@@ -645,13 +645,10 @@ impl NetlinkSocketObject {
         }
 
         let interfaces = net::interfaces();
-        let requested_interface = interfaces
-            .iter()
-            .copied()
-            .find(|interface| {
-                (request.ifi_index <= 0 || interface.index == request.ifi_index)
-                    && request_name.is_none_or(|name| interface.name == name)
-            });
+        let requested_interface = interfaces.iter().copied().find(|interface| {
+            (request.ifi_index <= 0 || interface.index == request.ifi_index)
+                && request_name.is_none_or(|name| interface.name == name)
+        });
 
         let Some(namespace_fd) = Self::find_attribute(payload, attrs_offset, IFLA_NET_NS_FD)
             .and_then(Self::parse_i32_attribute)

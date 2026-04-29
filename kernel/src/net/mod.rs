@@ -12,11 +12,7 @@ use smoltcp::{
 };
 use spin::Mutex;
 
-use crate::{
-    misc::time::Time,
-    process::manager::get_current_process,
-    thread::THREAD_MANAGER,
-};
+use crate::{misc::time::Time, process::manager::get_current_process, thread::THREAD_MANAGER};
 
 pub mod namespace;
 use namespace::NetNamespace;
@@ -416,7 +412,9 @@ pub fn register_device(device: Arc<dyn NetworkDevice>) {
         mac[5],
     );
     let init_namespace_inode = NetNamespace::init().inode();
-    manager.stacks.insert(init_namespace_inode, NetStack::new(device));
+    manager
+        .stacks
+        .insert(init_namespace_inode, NetStack::new(device));
     manager.primary_stack_owner = Some(init_namespace_inode);
 }
 
@@ -460,9 +458,11 @@ pub fn remove_socket(handle: NetSocketHandle) {
 }
 
 pub fn allocate_ephemeral_port() -> NetResult<u16> {
-    manager().lock().with_stack_mut(current_namespace_inode(), |stack| {
-        Ok(stack.next_ephemeral_port())
-    })
+    manager()
+        .lock()
+        .with_stack_mut(current_namespace_inode(), |stack| {
+            Ok(stack.next_ephemeral_port())
+        })
 }
 
 pub fn move_primary_device_to_namespace(namespace_inode: u64) -> NetResult<()> {
@@ -471,51 +471,61 @@ pub fn move_primary_device_to_namespace(namespace_inode: u64) -> NetResult<()> {
 
 impl NetSocketHandle {
     pub fn tcp_listen(self, local: InetAddress) -> NetResult<()> {
-        manager().lock().with_stack_mut(self.namespace_inode, |stack| {
-            let socket = stack.sockets.get_mut::<tcp::Socket<'static>>(self.socket);
-            socket
-                .listen(local.listen_endpoint())
-                .map_err(map_tcp_listen_error)
-        })
+        manager()
+            .lock()
+            .with_stack_mut(self.namespace_inode, |stack| {
+                let socket = stack.sockets.get_mut::<tcp::Socket<'static>>(self.socket);
+                socket
+                    .listen(local.listen_endpoint())
+                    .map_err(map_tcp_listen_error)
+            })
     }
 
     pub fn tcp_connect(self, remote: InetAddress, local: InetAddress) -> NetResult<()> {
-        manager().lock().with_stack_mut(self.namespace_inode, |stack| {
-            let socket = stack.sockets.get_mut::<tcp::Socket<'static>>(self.socket);
-            socket
-                .connect(
-                    stack.iface.context(),
-                    remote.endpoint(),
-                    local.listen_endpoint(),
-                )
-                .map_err(map_tcp_connect_error)
-        })
+        manager()
+            .lock()
+            .with_stack_mut(self.namespace_inode, |stack| {
+                let socket = stack.sockets.get_mut::<tcp::Socket<'static>>(self.socket);
+                socket
+                    .connect(
+                        stack.iface.context(),
+                        remote.endpoint(),
+                        local.listen_endpoint(),
+                    )
+                    .map_err(map_tcp_connect_error)
+            })
     }
 
     pub fn tcp_send(self, data: &[u8]) -> NetResult<usize> {
-        manager().lock().with_stack_mut(self.namespace_inode, |stack| {
-            let socket = stack.sockets.get_mut::<tcp::Socket<'static>>(self.socket);
-            socket.send_slice(data).map_err(map_tcp_send_error)
-        })
+        manager()
+            .lock()
+            .with_stack_mut(self.namespace_inode, |stack| {
+                let socket = stack.sockets.get_mut::<tcp::Socket<'static>>(self.socket);
+                socket.send_slice(data).map_err(map_tcp_send_error)
+            })
     }
 
     pub fn tcp_recv(self, data: &mut [u8]) -> NetResult<usize> {
-        manager().lock().with_stack_mut(self.namespace_inode, |stack| {
-            let socket = stack.sockets.get_mut::<tcp::Socket<'static>>(self.socket);
-            match socket.recv_slice(data) {
-                Ok(read) => Ok(read),
-                Err(tcp::RecvError::Finished) => Ok(0),
-                Err(tcp::RecvError::InvalidState) => Err(NetError::TryAgain),
-            }
-        })
+        manager()
+            .lock()
+            .with_stack_mut(self.namespace_inode, |stack| {
+                let socket = stack.sockets.get_mut::<tcp::Socket<'static>>(self.socket);
+                match socket.recv_slice(data) {
+                    Ok(read) => Ok(read),
+                    Err(tcp::RecvError::Finished) => Ok(0),
+                    Err(tcp::RecvError::InvalidState) => Err(NetError::TryAgain),
+                }
+            })
     }
 
     pub fn tcp_close(self) -> NetResult<()> {
-        manager().lock().with_stack_mut(self.namespace_inode, |stack| {
-            let socket = stack.sockets.get_mut::<tcp::Socket<'static>>(self.socket);
-            socket.close();
-            Ok(())
-        })
+        manager()
+            .lock()
+            .with_stack_mut(self.namespace_inode, |stack| {
+                let socket = stack.sockets.get_mut::<tcp::Socket<'static>>(self.socket);
+                socket.close();
+                Ok(())
+            })
     }
 
     pub fn tcp_is_active(self) -> bool {
@@ -524,11 +534,11 @@ impl NetSocketHandle {
             .stacks
             .get_mut(&self.namespace_inode)
             .is_some_and(|stack| {
-            stack
-                .sockets
-                .get::<tcp::Socket<'static>>(self.socket)
-                .is_active()
-        })
+                stack
+                    .sockets
+                    .get::<tcp::Socket<'static>>(self.socket)
+                    .is_active()
+            })
     }
 
     pub fn tcp_can_send(self) -> bool {
@@ -537,9 +547,9 @@ impl NetSocketHandle {
             .stacks
             .get_mut(&self.namespace_inode)
             .is_some_and(|stack| {
-            let socket = stack.sockets.get::<tcp::Socket<'static>>(self.socket);
-            socket.can_send() || socket.may_send()
-        })
+                let socket = stack.sockets.get::<tcp::Socket<'static>>(self.socket);
+                socket.can_send() || socket.may_send()
+            })
     }
 
     pub fn tcp_can_recv(self) -> bool {
@@ -547,7 +557,12 @@ impl NetSocketHandle {
             .lock()
             .stacks
             .get_mut(&self.namespace_inode)
-            .is_some_and(|stack| stack.sockets.get::<tcp::Socket<'static>>(self.socket).can_recv())
+            .is_some_and(|stack| {
+                stack
+                    .sockets
+                    .get::<tcp::Socket<'static>>(self.socket)
+                    .can_recv()
+            })
     }
 
     pub fn tcp_is_closed(self) -> bool {
@@ -555,7 +570,12 @@ impl NetSocketHandle {
             .lock()
             .stacks
             .get_mut(&self.namespace_inode)
-            .is_none_or(|stack| !stack.sockets.get::<tcp::Socket<'static>>(self.socket).is_open())
+            .is_none_or(|stack| {
+                !stack
+                    .sockets
+                    .get::<tcp::Socket<'static>>(self.socket)
+                    .is_open()
+            })
     }
 
     pub fn tcp_is_listening(self) -> bool {
@@ -564,114 +584,133 @@ impl NetSocketHandle {
             .stacks
             .get_mut(&self.namespace_inode)
             .is_some_and(|stack| {
-            matches!(
-                stack.sockets.get::<tcp::Socket<'static>>(self.socket).state(),
-                tcp::State::Listen
-            )
-        })
+                matches!(
+                    stack
+                        .sockets
+                        .get::<tcp::Socket<'static>>(self.socket)
+                        .state(),
+                    tcp::State::Listen
+                )
+            })
     }
 
     pub fn tcp_local_addr(self) -> Option<InetAddress> {
-        manager().lock().stacks.get_mut(&self.namespace_inode).and_then(|stack| {
-            let socket = stack.sockets.get::<tcp::Socket<'static>>(self.socket);
-            socket
-                .local_endpoint()
-                .or_else(|| {
-                    let endpoint = socket.listen_endpoint();
-                    (endpoint.port != 0).then(|| IpEndpoint {
-                        addr: endpoint.addr.unwrap_or(IpAddress::v4(
-                            STATIC_IPV4[0],
-                            STATIC_IPV4[1],
-                            STATIC_IPV4[2],
-                            STATIC_IPV4[3],
-                        )),
-                        port: endpoint.port,
+        manager()
+            .lock()
+            .stacks
+            .get_mut(&self.namespace_inode)
+            .and_then(|stack| {
+                let socket = stack.sockets.get::<tcp::Socket<'static>>(self.socket);
+                socket
+                    .local_endpoint()
+                    .or_else(|| {
+                        let endpoint = socket.listen_endpoint();
+                        (endpoint.port != 0).then(|| IpEndpoint {
+                            addr: endpoint.addr.unwrap_or(IpAddress::v4(
+                                STATIC_IPV4[0],
+                                STATIC_IPV4[1],
+                                STATIC_IPV4[2],
+                                STATIC_IPV4[3],
+                            )),
+                            port: endpoint.port,
+                        })
                     })
-                })
-                .map(InetAddress::from)
-        })
+                    .map(InetAddress::from)
+            })
     }
 
     pub fn tcp_remote_addr(self) -> Option<InetAddress> {
-        manager().lock().stacks.get_mut(&self.namespace_inode).and_then(|stack| {
-            stack
-                .sockets
-                .get::<tcp::Socket<'static>>(self.socket)
-                .remote_endpoint()
-                .map(InetAddress::from)
-        })
+        manager()
+            .lock()
+            .stacks
+            .get_mut(&self.namespace_inode)
+            .and_then(|stack| {
+                stack
+                    .sockets
+                    .get::<tcp::Socket<'static>>(self.socket)
+                    .remote_endpoint()
+                    .map(InetAddress::from)
+            })
     }
 
     pub fn tcp_accept(
         self,
         local: InetAddress,
     ) -> NetResult<(NetSocketHandle, InetAddress, InetAddress)> {
-        manager().lock().with_stack_mut(self.namespace_inode, |stack| {
-            let active = {
-                let socket = stack.sockets.get::<tcp::Socket<'static>>(self.socket);
-                socket.is_active()
-            };
-            if !active {
-                return Err(NetError::TryAgain);
-            }
+        manager()
+            .lock()
+            .with_stack_mut(self.namespace_inode, |stack| {
+                let active = {
+                    let socket = stack.sockets.get::<tcp::Socket<'static>>(self.socket);
+                    socket.is_active()
+                };
+                if !active {
+                    return Err(NetError::TryAgain);
+                }
 
-            let local_addr = stack
-                .sockets
-                .get::<tcp::Socket<'static>>(self.socket)
-                .local_endpoint()
-                .map(InetAddress::from)
-                .unwrap_or(local);
-            let peer_addr = stack
-                .sockets
-                .get::<tcp::Socket<'static>>(self.socket)
-                .remote_endpoint()
-                .map(InetAddress::from)
-                .ok_or(NetError::TryAgain)?;
+                let local_addr = stack
+                    .sockets
+                    .get::<tcp::Socket<'static>>(self.socket)
+                    .local_endpoint()
+                    .map(InetAddress::from)
+                    .unwrap_or(local);
+                let peer_addr = stack
+                    .sockets
+                    .get::<tcp::Socket<'static>>(self.socket)
+                    .remote_endpoint()
+                    .map(InetAddress::from)
+                    .ok_or(NetError::TryAgain)?;
 
-            let new_listener = stack.allocate_tcp_socket();
-            let listener = stack.sockets.get_mut::<tcp::Socket<'static>>(new_listener);
-            listener
-                .listen(local.listen_endpoint())
-                .map_err(map_tcp_listen_error)?;
-            Ok((
-                NetSocketHandle {
-                    namespace_inode: self.namespace_inode,
-                    socket: new_listener,
-                },
-                local_addr,
-                peer_addr,
-            ))
-        })
+                let new_listener = stack.allocate_tcp_socket();
+                let listener = stack.sockets.get_mut::<tcp::Socket<'static>>(new_listener);
+                listener
+                    .listen(local.listen_endpoint())
+                    .map_err(map_tcp_listen_error)?;
+                Ok((
+                    NetSocketHandle {
+                        namespace_inode: self.namespace_inode,
+                        socket: new_listener,
+                    },
+                    local_addr,
+                    peer_addr,
+                ))
+            })
     }
 
     pub fn udp_bind(self, local: InetAddress) -> NetResult<()> {
-        manager().lock().with_stack_mut(self.namespace_inode, |stack| {
-            let socket = stack.sockets.get_mut::<udp::Socket<'static>>(self.socket);
-            socket
-                .bind(local.listen_endpoint())
-                .map_err(map_udp_bind_error)
-        })
+        manager()
+            .lock()
+            .with_stack_mut(self.namespace_inode, |stack| {
+                let socket = stack.sockets.get_mut::<udp::Socket<'static>>(self.socket);
+                socket
+                    .bind(local.listen_endpoint())
+                    .map_err(map_udp_bind_error)
+            })
     }
 
     pub fn udp_send(self, data: &[u8], remote: InetAddress) -> NetResult<usize> {
-        manager().lock().with_stack_mut(self.namespace_inode, |stack| {
-            let socket = stack.sockets.get_mut::<udp::Socket<'static>>(self.socket);
-            socket
-                .send_slice(data, remote.endpoint())
-                .map(|_| data.len())
-                .map_err(map_udp_send_error)
-        })
+        manager()
+            .lock()
+            .with_stack_mut(self.namespace_inode, |stack| {
+                let socket = stack.sockets.get_mut::<udp::Socket<'static>>(self.socket);
+                socket
+                    .send_slice(data, remote.endpoint())
+                    .map(|_| data.len())
+                    .map_err(map_udp_send_error)
+            })
     }
 
     pub fn udp_recv(self, data: &mut [u8]) -> NetResult<(usize, InetAddress, bool)> {
-        manager().lock().with_stack_mut(self.namespace_inode, |stack| {
-            let socket = stack.sockets.get_mut::<udp::Socket<'static>>(self.socket);
-            match socket.recv_slice(data) {
-                Ok((read, meta)) => Ok((read, InetAddress::from(meta.endpoint), false)),
-                Err(udp::RecvError::Exhausted) => Err(NetError::TryAgain),
-                Err(udp::RecvError::Truncated) => Err(NetError::InvalidArguments),
-            }
-        })
+        manager()
+            .lock()
+            .with_stack_mut(self.namespace_inode, |stack| {
+                let socket = stack.sockets.get_mut::<udp::Socket<'static>>(self.socket);
+                match socket.recv_slice(data) {
+                    Ok((read, meta)) => Ok((read, InetAddress::from(meta.endpoint), false)),
+                    Err(udp::RecvError::Exhausted) => Err(NetError::TryAgain),
+                    Err(udp::RecvError::Truncated) => Err(NetError::InvalidArguments),
+                }
+            })
     }
 
     pub fn udp_can_send(self) -> bool {
@@ -679,7 +718,12 @@ impl NetSocketHandle {
             .lock()
             .stacks
             .get_mut(&self.namespace_inode)
-            .is_some_and(|stack| stack.sockets.get::<udp::Socket<'static>>(self.socket).can_send())
+            .is_some_and(|stack| {
+                stack
+                    .sockets
+                    .get::<udp::Socket<'static>>(self.socket)
+                    .can_send()
+            })
     }
 
     pub fn udp_can_recv(self) -> bool {
@@ -687,7 +731,12 @@ impl NetSocketHandle {
             .lock()
             .stacks
             .get_mut(&self.namespace_inode)
-            .is_some_and(|stack| stack.sockets.get::<udp::Socket<'static>>(self.socket).can_recv())
+            .is_some_and(|stack| {
+                stack
+                    .sockets
+                    .get::<udp::Socket<'static>>(self.socket)
+                    .can_recv()
+            })
     }
 
     pub fn udp_is_open(self) -> bool {
@@ -695,22 +744,31 @@ impl NetSocketHandle {
             .lock()
             .stacks
             .get_mut(&self.namespace_inode)
-            .is_some_and(|stack| stack.sockets.get::<udp::Socket<'static>>(self.socket).is_open())
+            .is_some_and(|stack| {
+                stack
+                    .sockets
+                    .get::<udp::Socket<'static>>(self.socket)
+                    .is_open()
+            })
     }
 
     pub fn udp_local_addr(self) -> Option<InetAddress> {
-        manager().lock().stacks.get_mut(&self.namespace_inode).and_then(|stack| {
-            let endpoint = stack
-                .sockets
-                .get::<udp::Socket<'static>>(self.socket)
-                .endpoint();
-            (endpoint.port != 0).then(|| InetAddress {
-                addr: endpoint.addr.map_or(STATIC_IPV4, |addr| {
-                    let IpAddress::Ipv4(ip) = addr;
-                    ip.octets()
-                }),
-                port: endpoint.port,
+        manager()
+            .lock()
+            .stacks
+            .get_mut(&self.namespace_inode)
+            .and_then(|stack| {
+                let endpoint = stack
+                    .sockets
+                    .get::<udp::Socket<'static>>(self.socket)
+                    .endpoint();
+                (endpoint.port != 0).then(|| InetAddress {
+                    addr: endpoint.addr.map_or(STATIC_IPV4, |addr| {
+                        let IpAddress::Ipv4(ip) = addr;
+                        ip.octets()
+                    }),
+                    port: endpoint.port,
+                })
             })
-        })
     }
 }
