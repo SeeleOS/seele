@@ -1104,11 +1104,6 @@ define_syscall!(Newfstatat, |dirfd: i32,
             path_from_raw(path)?
         };
 
-        let resolved_path = if path_str.is_empty() && flags.contains(AtFlags::EMPTY_PATH) {
-            None
-        } else {
-            Some(resolve_path_at(dirfd, &path_str)?)
-        };
         let stat = stat_at(dirfd, &path_str, flags)?;
 
         user_safe::write(linux_stat_ptr, &stat)?;
