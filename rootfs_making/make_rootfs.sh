@@ -210,6 +210,7 @@ install_repo_packages
 
 arch_chroot passwd -d root
 arch_chroot systemctl enable seatd.service
+arch_chroot systemctl enable sddm.service
 
 install_sysroot_file "${ROOTFS_MAKING_DIR}/weston.ini" "${SYSROOT_DIR}/etc/xdg/weston/weston.ini"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
