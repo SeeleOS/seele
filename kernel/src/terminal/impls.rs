@@ -1,7 +1,6 @@
 use core::fmt::{Debug, Formatter, Result as FmtResult, Write};
 
 use crate::{
-    misc::framebuffer::{FRAME_BUFFER, framebuffer_user_controlled},
     terminal::{
         KernelTerminal,
         term_trait::{AbstractTerminal, PtyWriter, TerminalCursorPosition, TerminalSize},
