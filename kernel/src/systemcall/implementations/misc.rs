@@ -415,7 +415,7 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
 
     let needs_child_tid_write =
         clone_flags.intersects(CloneFlags::CHILD_SETTID | CloneFlags::CHILD_CLEARTID);
-    if needs_child_tid_write && !is_vfork {
+    if needs_child_tid_write {
         child_process
             .lock()
             .addrspace
@@ -438,13 +438,8 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
     }
 
     if is_vfork {
-        Process::borrow_addrspace_from_parent_for_vfork(&current, &child_process);
-        if needs_child_tid_write {
-            child_process
-                .lock()
-                .addrspace
-                .write(child_tid, &(pid.0 as i32))?;
-        }
+        // Keep vfork safe for multi-threaded parents by using the existing
+        // fork/COW address-space clone and only adding the parent wait semantics.
         Process::wake_vfork_child(child_thread);
         wait_for_vfork_completion(&child_process);
     }

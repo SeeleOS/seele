@@ -94,17 +94,6 @@ impl Process {
         (new_process, new_thread)
     }
 
-    pub fn borrow_addrspace_from_parent_for_vfork(parent: &ProcessRef, child: &ProcessRef) {
-        let mut parent = parent.lock();
-        let mut child = child.lock();
-        let mut old_child_addrspace =
-            mem::replace(&mut child.addrspace, mem::take(&mut parent.addrspace));
-        child.borrowed_addrspace_from_parent = true;
-        drop(child);
-        drop(parent);
-        old_child_addrspace.clean();
-    }
-
     pub fn restore_borrowed_addrspace_to_parent(&mut self) {
         if !self.borrowed_addrspace_from_parent {
             return;
