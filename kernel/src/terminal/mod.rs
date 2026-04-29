@@ -37,9 +37,7 @@ pub fn init() {
     log::debug!("graphics: terminal ready");
 
     let default_terminal = DEFAULT_TERMINAL.get_or_init(|| {
-        Arc::new(Mutex::new(TerminalObject::new(Arc::new(Mutex::new(
-            KernelTerminal(terminal),
-        )))))
+        Arc::new(Mutex::new(TerminalObject::new(Arc::new(Mutex::new(terminal)))))
     });
 
     init_virtual_ttys();

@@ -1,9 +1,5 @@
-use alloc::{
-    alloc::{Layout, alloc_zeroed, dealloc},
-    format,
-};
-use conquer_once::spin::OnceCell;
-use core::{ffi::c_void, ptr::NonNull};
+use core::ptr::NonNull;
+
 use flanterm::sys;
 use spin::Mutex;
 
@@ -12,7 +8,10 @@ use crate::{
     terminal::term_trait::PtyWriter,
 };
 
-static PTY_WRITER: OnceCell<Mutex<Option<PtyWriter>>> = OnceCell::uninit();
+use super::{
+    alloc::{flanterm_alloc, flanterm_free},
+    callback::{flanterm_callback, init_pty_writer, set_pty_writer},
+};
 
 pub struct KernelTerminal(pub FlantermTerminal);
 
@@ -28,7 +27,7 @@ impl KernelTerminal {
 
 impl FlantermTerminal {
     pub fn new(canvas: &Mutex<Canvas>) -> Self {
-        PTY_WRITER.get_or_init(|| Mutex::new(None));
+        init_pty_writer();
 
         let (framebuffer, width, height, pitch, red_mask_shift, green_mask_shift, blue_mask_shift) = {
             let canvas = canvas.lock();
@@ -82,7 +81,7 @@ impl FlantermTerminal {
                 0,
             )
         };
-        let context =
+        let mut context =
             NonNull::new(context.cast::<sys::flanterm_fb_context>()).expect("flanterm init failed");
 
         unsafe {
@@ -126,7 +125,7 @@ impl FlantermTerminal {
     }
 
     pub fn set_pty_writer(&mut self, writer: PtyWriter) {
-        *PTY_WRITER.get().unwrap().lock() = Some(writer);
+        set_pty_writer(writer);
     }
 
     pub fn clear(&mut self) {
@@ -153,43 +152,3 @@ impl core::fmt::Debug for FlantermTerminal {
 
 unsafe impl Send for FlantermTerminal {}
 unsafe impl Sync for FlantermTerminal {}
-
-unsafe extern "C" fn flanterm_alloc(size: usize) -> *mut c_void {
-    let layout = Layout::from_size_align(size.max(1), 16).unwrap();
-    unsafe { alloc_zeroed(layout).cast() }
-}
-
-unsafe extern "C" fn flanterm_free(ptr: *mut c_void, size: usize) {
-    if ptr.is_null() {
-        return;
-    }
-
-    let layout = Layout::from_size_align(size.max(1), 16).unwrap();
-    unsafe { dealloc(ptr.cast(), layout) };
-}
-
-unsafe extern "C" fn flanterm_callback(
-    _context: *mut sys::flanterm_context,
-    callback: u64,
-    arg1: u64,
-    arg2: u64,
-    _arg3: u64,
-) {
-    match callback as u32 {
-        sys::FLANTERM_CB_PRIVATE_ID => write_pty_response("\x1b[?6c"),
-        sys::FLANTERM_CB_STATUS_REPORT => write_pty_response("\x1b[0n"),
-        sys::FLANTERM_CB_POS_REPORT => {
-            let response = format!("\x1b[{};{}R", arg2, arg1);
-            write_pty_response(&response);
-        }
-        _ => {}
-    }
-}
-
-fn write_pty_response(response: &str) {
-    if let Some(writer) = PTY_WRITER.get() {
-        if let Some(writer) = writer.lock().as_mut() {
-            writer(response);
-        }
-    }
-}
