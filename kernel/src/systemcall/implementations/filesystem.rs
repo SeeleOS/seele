@@ -518,7 +518,10 @@ fn filesystem_magic_for_object(object: &ObjectRef) -> Result<i64, SyscallError> 
         return Ok(ANON_INODE_FS_MAGIC);
     }
 
-    if object.clone().as_netlink_socket().is_ok() || object.clone().as_unix_socket().is_ok() {
+    if object.clone().as_inet_socket().is_ok()
+        || object.clone().as_netlink_socket().is_ok()
+        || object.clone().as_unix_socket().is_ok()
+    {
         return Ok(SOCKFS_MAGIC);
     }
 
@@ -550,11 +553,44 @@ fn mount_id_for_file_like(file_like: &FileLikeObject) -> Result<u64, SyscallErro
     mount_id_for_path(&file_like.path())
 }
 
+fn pseudo_mount_id(magic: i64) -> Option<u64> {
+    let offset = match magic {
+        SOCKFS_MAGIC => 0,
+        ANON_INODE_FS_MAGIC => 1,
+        _ => return None,
+    };
+
+    Some(VirtualFS.lock().mount_snapshots().len() as u64 + 1 + offset)
+}
+
+fn mount_id_for_object(object: &ObjectRef) -> Result<u64, SyscallError> {
+    if let Ok(file_like) = object.clone().as_file_like() {
+        return mount_id_for_file_like(&file_like);
+    }
+
+    let magic = filesystem_magic_for_object(object)?;
+    pseudo_mount_id(magic).ok_or(SyscallError::BadFileDescriptor)
+}
+
+fn mount_root_for_object(object: &ObjectRef) -> Result<bool, SyscallError> {
+    if let Ok(file_like) = object.clone().as_file_like() {
+        let path = file_like.path().normalize();
+        let mount_path = VirtualFS.lock().mount_path(path.clone())?;
+        return Ok(path.as_string() == mount_path.as_string());
+    }
+
+    let magic = filesystem_magic_for_object(object)?;
+    if pseudo_mount_id(magic).is_some() {
+        return Ok(false);
+    }
+
+    Err(SyscallError::BadFileDescriptor)
+}
+
 fn stat_mount_id_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<u64, SyscallError> {
     if path_str.is_empty() && flags.contains(AtFlags::EMPTY_PATH) {
         let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
-        let file_like = object.as_file_like()?;
-        return mount_id_for_file_like(&file_like);
+        return mount_id_for_object(&object);
     }
 
     let path = resolve_path_at(dirfd, path_str)?;
@@ -564,10 +600,7 @@ fn stat_mount_id_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<u64, S
 fn stat_mount_root_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<bool, SyscallError> {
     if path_str.is_empty() && flags.contains(AtFlags::EMPTY_PATH) {
         let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
-        let file_like = object.as_file_like()?;
-        let path = file_like.path().normalize();
-        let mount_path = VirtualFS.lock().mount_path(path.clone())?;
-        return Ok(path.as_string() == mount_path.as_string());
+        return mount_root_for_object(&object);
     }
 
     let path = resolve_path_at(dirfd, path_str)?.normalize();
