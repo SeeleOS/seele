@@ -9,25 +9,33 @@ use crate::{
 
 impl AbstractTerminal for KernelTerminal {
     fn push_str(&mut self, str: &str) {
-        self.0.write_str(str).unwrap();
-        self.0.flush();
+        self.terminal.write_str(str).unwrap();
+        self.pending_bytes = self.pending_bytes.saturating_add(str.len());
+
+        let should_flush =
+            self.pending_bytes >= 512 || (self.pending_bytes >= 128 && str.contains('\n'));
+        if should_flush {
+            self.terminal.flush();
+            self.pending_bytes = 0;
+        }
     }
 
     fn size(&self) -> TerminalSize {
-        TerminalSize::new(self.0.rows(), self.0.columns())
+        TerminalSize::new(self.terminal.rows(), self.terminal.columns())
     }
 
     fn cursor_position(&self) -> TerminalCursorPosition {
-        let position = self.0.cursor_position();
+        let position = self.terminal.cursor_position();
         TerminalCursorPosition::from_zero_based(position.row, position.column)
     }
 
     fn set_pty_writer(&mut self, writer: PtyWriter) {
-        self.0.set_pty_writer(writer);
+        self.terminal.set_pty_writer(writer);
     }
 
     fn clear(&mut self) {
-        self.0.clear();
+        self.terminal.clear();
+        self.pending_bytes = 0;
     }
 }
 

@@ -28,7 +28,10 @@ use crate::{
     terminal::state::DEFAULT_TERMINAL,
 };
 
-pub struct KernelTerminal(pub Terminal<TermRenderer<'static>>);
+pub struct KernelTerminal {
+    pub terminal: Terminal<TermRenderer<'static>>,
+    pending_bytes: usize,
+}
 
 pub mod object;
 pub mod object_config;
@@ -52,7 +55,10 @@ pub fn init() {
 
     let default_terminal = DEFAULT_TERMINAL.get_or_init(|| {
         Arc::new(Mutex::new(TerminalObject::new(Arc::new(Mutex::new(
-            KernelTerminal(terminal),
+            KernelTerminal {
+                terminal,
+                pending_bytes: 0,
+            },
         )))))
     });
 
