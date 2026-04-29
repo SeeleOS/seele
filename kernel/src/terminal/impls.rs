@@ -11,10 +11,6 @@ use crate::{
 impl AbstractTerminal for KernelTerminal {
     fn push_str(&mut self, str: &str) {
         self.0.write_str(str).unwrap();
-        self.0.flush();
-        if !framebuffer_user_controlled() {
-            FRAME_BUFFER.get().unwrap().lock().flush();
-        }
     }
 
     fn size(&self) -> TerminalSize {
