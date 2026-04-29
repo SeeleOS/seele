@@ -7,7 +7,7 @@ use x86_64::{
 
 use crate::object::{error::ObjectError, misc::ObjectResult};
 
-use super::object::DRM_BUFFER_OFFSET_BASE;
+use super::{mode::DRM_FORMAT_XRGB8888, object::DRM_BUFFER_OFFSET_BASE};
 
 #[derive(Debug)]
 pub(super) struct DrmState {
@@ -76,6 +76,34 @@ impl DrmState {
         let fb_id = self.next_fb_id;
         self.next_fb_id = self.next_fb_id.checked_add(1).ok_or(ObjectError::Other)?;
         Ok(fb_id)
+    }
+
+    pub(super) fn ensure_boot_framebuffer(&mut self) -> ObjectResult<()> {
+        if self.current_fb_id.is_some() || !self.framebuffers.is_empty() {
+            return Ok(());
+        }
+
+        let fb_info = super::mode::current_framebuffer_info();
+        let mut request = crate::drm::mode_types::DrmModeCreateDumb {
+            width: u32::try_from(fb_info.width).map_err(|_| ObjectError::Other)?,
+            height: u32::try_from(fb_info.height).map_err(|_| ObjectError::Other)?,
+            bpp: 32,
+            ..Default::default()
+        };
+        self.create_dumb_buffer(&mut request)?;
+
+        let fb_id = self.next_fb_id()?;
+        self.register_framebuffer(RegisteredFramebuffer {
+            fb_id,
+            width: request.width,
+            height: request.height,
+            pitch: request.pitch,
+            offset: 0,
+            pixel_format: DRM_FORMAT_XRGB8888,
+            handle: request.handle,
+        });
+        self.current_fb_id = Some(fb_id);
+        Ok(())
     }
 
     pub(super) fn dumb_buffer_for_mapping(

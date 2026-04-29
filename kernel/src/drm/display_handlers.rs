@@ -31,6 +31,7 @@ pub(super) fn handle_mode_get_resources(
     ptr: *mut crate::drm::mode_types::DrmModeCardRes,
 ) -> ObjectResult<isize> {
     let mut resources = read_user(ptr)?;
+    DRM_STATE.lock().ensure_boot_framebuffer()?;
     let fb = current_framebuffer_info();
     let framebuffer_ids: Vec<u32> = DRM_STATE.lock().framebuffers.keys().copied().collect();
     maybe_write_u32_slice(resources.crtc_id_ptr, resources.count_crtcs, &[CRTC0_ID])?;
@@ -61,6 +62,7 @@ pub(super) fn handle_mode_get_crtc(
     ptr: *mut crate::drm::mode_types::DrmModeCrtc,
 ) -> ObjectResult<isize> {
     let mut crtc = read_user(ptr)?;
+    DRM_STATE.lock().ensure_boot_framebuffer()?;
     if crtc.crtc_id != 0 && crtc.crtc_id != CRTC0_ID {
         return Err(ObjectError::InvalidArguments);
     }
