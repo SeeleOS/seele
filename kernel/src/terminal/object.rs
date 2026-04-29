@@ -2,6 +2,7 @@ use core::str::from_utf8;
 
 use alloc::{string::String, sync::Arc};
 use spin::Mutex;
+use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
     impl_cast_function,
@@ -42,8 +43,16 @@ impl TerminalObject {
     pub fn write_screen_text(&self, text: &str) {
         let filtered = strip_ansi_sequences(text);
         if !filtered.is_empty() {
-            self.inner.lock().push_str(&filtered);
+            without_interrupts(|| {
+                self.inner.lock().push_str(&filtered);
+            });
         }
+    }
+
+    pub fn clear_screen(&self) {
+        without_interrupts(|| {
+            self.inner.lock().clear();
+        });
     }
 }
 
