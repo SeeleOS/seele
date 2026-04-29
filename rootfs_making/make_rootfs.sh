@@ -213,6 +213,7 @@ arch_chroot systemctl enable seatd.service
 
 install_sysroot_file "${ROOTFS_MAKING_DIR}/weston.ini" "${SYSROOT_DIR}/etc/xdg/weston/weston.ini"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/20-modesetting.conf" "${SYSROOT_DIR}/etc/X11/xorg.conf.d/20-modesetting.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/root/.xinitrc"
 
 for package in "${AUR_PACKAGES[@]}"; do
