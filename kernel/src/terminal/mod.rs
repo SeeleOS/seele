@@ -43,13 +43,16 @@ pub fn init() {
 
     init_virtual_ttys();
 
-    CONSOLE_TTY.get_or_init(|| Arc::new(TtyDevice::new(default_terminal.clone(), false)));
+    CONSOLE_TTY.get_or_init(|| Arc::new(TtyDevice::new(default_terminal.clone(), false, None)));
     let default_tty = DEFAULT_TTY
-        .get_or_init(|| Arc::new(TtyDevice::new(default_terminal.clone(), true)))
+        .get_or_init(|| Arc::new(TtyDevice::new(default_terminal.clone(), true, Some(1))))
         .clone();
     register_virtual_tty(1, default_tty);
     for vt in 2..=MAX_VIRTUAL_TTYS {
-        register_virtual_tty(vt, Arc::new(TtyDevice::new(default_terminal.clone(), true)));
+        register_virtual_tty(
+            vt,
+            Arc::new(TtyDevice::new(default_terminal.clone(), true, Some(vt))),
+        );
     }
 
     default_terminal

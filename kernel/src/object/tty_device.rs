@@ -8,6 +8,7 @@ use spin::Mutex;
 use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function,
+    misc::framebuffer::{FRAME_BUFFER, framebuffer_set_user_controlled},
     object::{
         FileFlags, Object,
         config::ConfigurateRequest,
@@ -58,11 +59,12 @@ pub fn get_active_vt() -> u32 {
 }
 
 pub fn set_active_vt(vt: u32) -> bool {
-    if get_virtual_tty(vt).is_none() {
+    let Some(tty) = get_virtual_tty(vt) else {
         return false;
-    }
+    };
 
     *ACTIVE_VT.get().unwrap().lock() = vt;
+    tty.apply_display_mode_to_framebuffer();
     true
 }
 
@@ -93,6 +95,7 @@ pub fn wake_tty_poller_readable() {
 pub struct TtyDevice {
     terminal: Arc<Mutex<TerminalObject>>,
     linux_console: Arc<Mutex<LinuxConsoleState>>,
+    virtual_terminal: Option<u32>,
     interactive: bool,
     keyboard_queue: Mutex<VecDeque<u8>>,
     terminal_response_queue: Mutex<VecDeque<u8>>,
@@ -106,11 +109,15 @@ pub struct TtyDevice {
 }
 
 impl TtyDevice {
-    pub fn new(terminal: Arc<Mutex<TerminalObject>>, interactive: bool) -> Self {
-        let linux_console = terminal.lock().linux_console.clone();
+    pub fn new(
+        terminal: Arc<Mutex<TerminalObject>>,
+        interactive: bool,
+        virtual_terminal: Option<u32>,
+    ) -> Self {
         Self {
             terminal,
-            linux_console,
+            linux_console: Arc::new(Mutex::new(LinuxConsoleState::default())),
+            virtual_terminal,
             interactive,
             keyboard_queue: Mutex::new(VecDeque::new()),
             terminal_response_queue: Mutex::new(VecDeque::new()),
@@ -124,6 +131,20 @@ impl TtyDevice {
 
     pub fn keyboard_mode(&self) -> KeyboardMode {
         self.linux_console.lock().keyboard_mode
+    }
+
+    fn is_active_virtual_terminal(&self) -> bool {
+        self.virtual_terminal == Some(get_active_vt())
+    }
+
+    fn apply_display_mode_to_framebuffer(&self) {
+        match self.linux_console.lock().display_mode {
+            DisplayMode::Graphics => framebuffer_set_user_controlled(true),
+            DisplayMode::Text | DisplayMode::Text0 | DisplayMode::Text1 => {
+                framebuffer_set_user_controlled(false);
+                FRAME_BUFFER.get().unwrap().lock().flush();
+            }
+        }
     }
 
     pub fn receives_hardware_keyboard_input(&self) -> bool {
@@ -304,6 +325,11 @@ impl Configuratable for TtyDevice {
                 | ConfigurateRequest::LinuxKdSetDisplayMode(_)
         ) && let Some(result) = handle_kd_request(self.linux_console.as_ref(), &request)?
         {
+            if matches!(request, ConfigurateRequest::LinuxKdSetDisplayMode(_))
+                && self.is_active_virtual_terminal()
+            {
+                self.apply_display_mode_to_framebuffer();
+            }
             self.clear_input_state();
             return Ok(result);
         }
