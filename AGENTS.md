@@ -47,8 +47,8 @@ There is no large standalone test suite yet; verification is primarily compile c
 
 ## Debugging Guidance
 
-When debugging third-party userspace components such as Weston, Xorg, libudev, or libinput, do not rely on staring at binaries or disassembly unless there is no better option. Prefer reading the corresponding source code first.
-When debugging Weston specifically, inspect the local Weston source tree first and treat binary inspection or disassembly as a last resort only after the source path has been exhausted.
+IMPORTANT: When debugging third-party userspace components such as Weston, Xorg, libudev, or libinput, do not rely on staring at binaries or disassembly unless there is no better option. Prefer reading the corresponding source code first.
+IMPORTANT: When debugging Weston specifically, inspect the local Weston source tree first and treat binary inspection or disassembly as a last resort only after the source path has been exhausted.
 If the relevant source tree is not already present locally, do not have the agent clone it directly. The agent's network access is unreliable for this repository workflow. Instead, tell the user exactly which upstream or packaged source tree to clone into a clearly named local directory such as `third_party/`, then use that local checkout as the primary reference during debugging.
 When debugging third-party source code in this repository workflow, do not use web search as the primary way to inspect source. Clone the upstream repository into a local `third_party/` directory and use that local checkout instead.
 If you need syscall-level debugging, temporarily enable `should_log` in `kernel/src/systemcall/handling.rs` manually, and turn it back off before finishing the task.
