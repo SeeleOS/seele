@@ -1,4 +1,4 @@
 #!/bin/sh
 
-alacritty &
-exec icewm-session
+xsetroot -solid "#205d9c"
+exec icewm
