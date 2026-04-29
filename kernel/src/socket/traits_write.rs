@@ -85,40 +85,42 @@ impl UnixSocketObject {
             return Err(SocketError::BrokenPipe);
         }
 
-        let mut recv_queue = peer_datagram.recv_queue.lock();
-        if recv_queue.len() >= DATAGRAM_RECV_CAPACITY {
-            drop(recv_queue);
-            if nonblocking {
-                return Err(SocketError::TryAgain);
+        loop {
+            let mut recv_queue = peer_datagram.recv_queue.lock();
+            if recv_queue.len() >= DATAGRAM_RECV_CAPACITY {
+                drop(recv_queue);
+                if nonblocking {
+                    return Err(SocketError::TryAgain);
+                }
+
+                let current = prepare_block_current(BlockType::WakeRequired {
+                    wake_type: WakeType::IO,
+                    deadline: None,
+                });
+                if peer_datagram.recv_queue.lock().len() < DATAGRAM_RECV_CAPACITY
+                    || *peer_datagram.read_shutdown.lock()
+                {
+                    cancel_block(&current);
+                } else {
+                    finish_block_current();
+                }
+                continue;
             }
 
-            let current = prepare_block_current(BlockType::WakeRequired {
-                wake_type: WakeType::IO,
-                deadline: None,
+            recv_queue.push_back(UnixDatagramMessage {
+                data: buffer.to_vec(),
+                sender_name: datagram.local_name.lock().clone(),
+                sender_cred: current_socket_peer_cred(),
+                rights: rights.clone(),
             });
-            if peer_datagram.recv_queue.lock().len() < DATAGRAM_RECV_CAPACITY
-                || *peer_datagram.read_shutdown.lock()
-            {
-                cancel_block(&current);
-            } else {
-                finish_block_current();
+            drop(recv_queue);
+
+            if let Some(owner) = peer_datagram.owner.lock().as_ref().and_then(Weak::upgrade) {
+                wake_pollers(&owner, PollableEvent::CanBeRead);
             }
-            return Ok(0);
+            wake_io();
+            return Ok(buffer.len());
         }
-
-        recv_queue.push_back(UnixDatagramMessage {
-            data: buffer.to_vec(),
-            sender_name: datagram.local_name.lock().clone(),
-            sender_cred: current_socket_peer_cred(),
-            rights,
-        });
-        drop(recv_queue);
-
-        if let Some(owner) = peer_datagram.owner.lock().as_ref().and_then(Weak::upgrade) {
-            wake_pollers(&owner, PollableEvent::CanBeRead);
-        }
-        wake_io();
-        Ok(buffer.len())
     }
 
     pub fn write_socket_to_path_with_rights(
@@ -159,9 +161,6 @@ impl UnixSocketObject {
                         force_nonblocking,
                         rights.clone(),
                     )?;
-                    if written == 0 {
-                        continue;
-                    }
                     return Ok(written);
                 }
                 UnixSocketKind::Stream | UnixSocketKind::SeqPacket => {
