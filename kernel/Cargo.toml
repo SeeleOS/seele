@@ -18,7 +18,7 @@ x86_rtc = "0.1"
 x2apic = "0.5"
 ext4plus = { git = "https://github.com/SeeleOS/ext4plus", features = ["sync"] }
 owo-colors = { version = "4.3", default-features = false }
-os-terminal = { git = "https://github.com/SeeleOS/os-terminal", features = ["truetype", "wallpaper"] }
+os-terminal = { path = "../third_party/os-terminal", features = ["truetype", "wallpaper"] }
 vte = { version = "0.15", default-features = false}
 elfloader = { git = "https://github.com/SeeleOS/rust-elfloader" }
 spin = "0.10"
