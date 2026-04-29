@@ -208,6 +208,7 @@ install_sysroot_file "${PACMAN_CONF_TEMPLATE}" "${PACMAN_CONF_IN_SYSROOT}"
 
 install_repo_packages
 
+arch_chroot /usr/sbin/usermod -aG seat sddm
 arch_chroot passwd -d root
 arch_chroot systemctl enable seatd.service
 arch_chroot systemctl enable sddm.service
