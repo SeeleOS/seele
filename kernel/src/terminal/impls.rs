@@ -1,4 +1,4 @@
-use core::fmt::{Debug, Formatter, Result as FmtResult, Write};
+use core::fmt::{Debug, Formatter, Result as FmtResult};
 
 use crate::{
     terminal::{
@@ -9,8 +9,7 @@ use crate::{
 
 impl AbstractTerminal for KernelTerminal {
     fn push_str(&mut self, str: &str) {
-        self.0.write_str(str).unwrap();
-        self.0.flush();
+        self.0.write_str(str);
     }
 
     fn size(&self) -> TerminalSize {
@@ -18,8 +17,8 @@ impl AbstractTerminal for KernelTerminal {
     }
 
     fn cursor_position(&self) -> TerminalCursorPosition {
-        let position = self.0.cursor_position();
-        TerminalCursorPosition::from_zero_based(position.row, position.column)
+        let (row, column) = self.0.cursor_position();
+        TerminalCursorPosition::from_zero_based(row, column)
     }
 
     fn set_pty_writer(&mut self, writer: PtyWriter) {

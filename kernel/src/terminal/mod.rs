@@ -1,4 +1,5 @@
 pub mod color;
+pub mod flanterm;
 pub mod impls;
 pub mod line_discipline;
 pub mod linux_kd;
@@ -6,16 +7,14 @@ pub mod linux_vt;
 pub mod macros;
 pub mod misc;
 pub mod pty;
-pub mod renderer;
 pub mod state;
 pub mod term_trait;
 pub mod termios;
 
 use alloc::{boxed::Box, sync::Arc};
-pub use color::{COLOR_SCHEME, Color};
 pub use macros::term_print;
-use os_terminal::{Terminal, font::TrueTypeFont};
-pub use renderer::TermRenderer;
+pub use color::Color;
+pub use flanterm::KernelTerminal;
 use spin::mutex::Mutex;
 
 use crate::{
@@ -28,27 +27,14 @@ use crate::{
     terminal::state::DEFAULT_TERMINAL,
 };
 
-pub struct KernelTerminal(pub Terminal<TermRenderer<'static>>);
-
 pub mod object;
 pub mod object_config;
 
-pub static FONT: &[u8] = include_bytes!("../../../misc/maplemono.ttf");
-pub static WALLPAPER: &[u8] = include_bytes!("../../../misc/wallpaper-65.png");
-
 pub fn init() {
     log::info!("graphics: init start");
-    let mut terminal = Terminal::new(
-        TermRenderer::new(FRAME_BUFFER.get().unwrap()),
-        Box::new(TrueTypeFont::new(12.0, FONT)),
-    );
+    let terminal = KernelTerminal::new(FRAME_BUFFER.get().unwrap());
 
     log::debug!("graphics: terminal ready");
-
-    terminal.set_crnl_mapping(true);
-    terminal.set_custom_color_scheme(&COLOR_SCHEME);
-    terminal.set_auto_flush(false);
-    terminal.set_wallpaper(WALLPAPER).unwrap();
 
     let default_terminal = DEFAULT_TERMINAL.get_or_init(|| {
         Arc::new(Mutex::new(TerminalObject::new(Arc::new(Mutex::new(
