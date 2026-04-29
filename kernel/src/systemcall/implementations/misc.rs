@@ -1183,8 +1183,13 @@ define_syscall!(Unshare, |flags: u64| {
 });
 
 define_syscall!(Setns, |fd: ObjectRef, flags: SetnsFlags| {
-    let net_namespace = fd
+    let namespace_object = fd
         .clone()
+        .as_file_like()
+        .ok()
+        .and_then(|file| file.device_backing_object())
+        .unwrap_or(fd);
+    let net_namespace = namespace_object
         .as_net_namespace()
         .map_err(|_| SyscallError::InvalidArguments)?;
     if !flags.is_empty() && flags != SetnsFlags::NEWNET {
