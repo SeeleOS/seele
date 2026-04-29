@@ -2,7 +2,6 @@ use crate::{
     misc::snapshot::Snapshot,
     object::linux_anon::wake_signalfd_for_process,
     process::{Process, ProcessExitStatus, ProcessRef, ptrace::report_signal_stop},
-    s_println,
     thread::{
         THREAD_MANAGER, ThreadRef, get_current_thread,
         misc::{SnapshotState, State, with_current_thread},
@@ -605,7 +604,6 @@ impl Process {
                     | Signal::SIGSYS
             )
         {
-            s_println!("fatal signal: pid={} signal={:?}", self.pid.0, signal);
             let threads = self.terminate_inner(ProcessExitStatus::Signaled(signal));
             return ProcessSignalsResult {
                 should_switch: true,

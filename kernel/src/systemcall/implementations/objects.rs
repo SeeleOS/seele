@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use alloc::{collections::btree_map::BTreeMap, format, string::String, sync::Arc, vec, vec::Vec};
+use alloc::{collections::btree_map::BTreeMap, format, string::String, vec, vec::Vec};
 use bitflags::bitflags;
 use spin::Mutex;
 
@@ -84,49 +84,6 @@ fn read_iovecs(iov_ptr: *const LinuxIovec, iovcnt: i32) -> Result<Vec<LinuxIovec
     Ok(iovs)
 }
 
-fn current_x_chain_process_info() -> Option<(u64, String, String)> {
-    None
-}
-
-fn current_display_pipe_process_info() -> Option<(u64, String, String)> {
-    with_current_process(|process| {
-        let pid = process.pid.0;
-        let command = process.command_line.first().cloned().unwrap_or_default();
-        let parent_command = process
-            .parent
-            .as_ref()
-            .and_then(|parent| parent.lock().command_line.first().cloned())
-            .unwrap_or_default();
-        (command.contains("sddm")
-            || command.contains("/usr/bin/X")
-            || command.contains("Xorg")
-            || parent_command.contains("sddm"))
-        .then_some((pid, command, parent_command))
-    })
-}
-
-fn current_sddm_dirent_process_info() -> Option<(u64, String, String)> {
-    with_current_process(|process| {
-        let pid = process.pid.0;
-        let command = process.command_line.first().cloned().unwrap_or_default();
-        let parent_command = process
-            .parent
-            .as_ref()
-            .and_then(|parent| parent.lock().command_line.first().cloned())
-            .unwrap_or_default();
-        (command.contains("sddm")
-            || command.contains("kwin")
-            || command.contains("startplasma")
-            || command.contains("plasmashell")
-            || parent_command.contains("sddm"))
-        .then_some((pid, command, parent_command))
-    })
-}
-
-fn should_log_sddm_dirent_directory(name: &str) -> bool {
-    matches!(name, "sddm.conf.d" | "wayland-sessions" | "xsessions")
-}
-
 fn fallback_dirent_inode(info: &DirectoryContentInfo, offset: usize) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in info.name.as_bytes() {
@@ -142,163 +99,11 @@ fn fallback_dirent_inode(info: &DirectoryContentInfo, offset: usize) -> u64 {
     hash.max(1)
 }
 
-fn log_sddm_dirents(object_index: u64, obj: &FileLikeObject, contents: &[DirectoryContentInfo]) {
-    let Some((pid, command, parent_command)) = current_sddm_dirent_process_info() else {
-        return;
-    };
-    let Ok(info) = obj.info() else {
-        return;
-    };
-    if !should_log_sddm_dirent_directory(&info.name) {
-        return;
-    }
+fn log_sddm_dirents(_object_index: u64, _obj: &FileLikeObject, _contents: &[DirectoryContentInfo]) {}
 
-    let entries = contents
-        .iter()
-        .map(|entry| {
-            format!(
-                "{}:{:?}:ino={}",
-                entry.name, entry.content_type, entry.inode
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    crate::s_println!(
-        "sddm-getdents64 pid={} cmd={} parent_cmd={} fd_object={} dir={} entries=[{}]",
-        pid,
-        command,
-        parent_command,
-        object_index,
-        info.name,
-        entries
-    );
-}
+fn log_display_pipe_bytes(_op: &str, _object: &ObjectRef, _bytes: &[u8]) {}
 
-fn current_process_object_fds(object: &ObjectRef) -> Vec<usize> {
-    with_current_process(|process| {
-        process
-            .fd_table
-            .iter()
-            .enumerate()
-            .filter_map(|(fd, entry)| {
-                entry
-                    .as_ref()
-                    .filter(|entry| Arc::ptr_eq(&entry.object, object))
-                    .map(|_| fd)
-            })
-            .collect()
-    })
-}
-
-fn is_unnamed_unix_socket(object: &ObjectRef) -> bool {
-    let Ok(socket) = object.clone().as_unix_socket() else {
-        return false;
-    };
-    [
-        socket.getsockname_bytes().ok(),
-        socket.getpeername_bytes().ok(),
-    ]
-    .into_iter()
-    .flatten()
-    .all(|name| name.len() >= 2 && name[2..].iter().all(|&byte| byte == 0))
-}
-
-fn display_socket_names(object: &ObjectRef) -> Vec<String> {
-    let Ok(socket) = object.clone().as_unix_socket() else {
-        return Vec::new();
-    };
-    [
-        socket.getsockname_bytes().ok(),
-        socket.getpeername_bytes().ok(),
-    ]
-    .into_iter()
-    .flatten()
-    .filter_map(|name| {
-        if name.len() < 2 {
-            return None;
-        }
-        let raw = &name[2..];
-        let end = raw.iter().position(|&byte| byte == 0).unwrap_or(raw.len());
-        if end == 0 {
-            return None;
-        }
-        Some(String::from_utf8_lossy(&raw[..end]).into_owned())
-    })
-    .collect()
-}
-
-fn is_named_sddm_unix_socket(object: &ObjectRef) -> bool {
-    display_socket_names(object)
-        .into_iter()
-        .any(|name| name.contains("sddm"))
-}
-
-fn log_display_pipe_bytes(op: &str, object: &ObjectRef, bytes: &[u8]) {
-    let unnamed_unix_socket = is_unnamed_unix_socket(object);
-    let named_sddm_unix_socket = is_named_sddm_unix_socket(object);
-    if bytes.is_empty()
-        || (!unnamed_unix_socket && !named_sddm_unix_socket)
-        || (bytes.len() > 16 && !named_sddm_unix_socket)
-    {
-        return;
-    }
-    let Some((pid, command, parent_command)) = current_display_pipe_process_info() else {
-        return;
-    };
-    let fds = current_process_object_fds(object);
-    let socket_names = if named_sddm_unix_socket {
-        display_socket_names(object)
-    } else {
-        Vec::new()
-    };
-
-    if let Ok(text) = core::str::from_utf8(bytes) {
-        crate::s_println!(
-            "display-pipe-{} pid={} cmd={} parent_cmd={} fds={:?} sockets={:?} len={} text={:?}",
-            op,
-            pid,
-            command,
-            parent_command,
-            fds,
-            socket_names,
-            bytes.len(),
-            text
-        );
-    } else {
-        crate::s_println!(
-            "display-pipe-{} pid={} cmd={} parent_cmd={} fds={:?} sockets={:?} len={} bytes={:?}",
-            op,
-            pid,
-            command,
-            parent_command,
-            fds,
-            socket_names,
-            bytes.len(),
-            bytes
-        );
-    }
-}
-
-fn log_display_write_dispatch(op: &str, object: &ObjectRef, len: usize) {
-    let Some((pid, command, parent_command)) = current_display_pipe_process_info() else {
-        return;
-    };
-    let fds = current_process_object_fds(object);
-    let is_unix_socket = object.clone().as_unix_socket().is_ok();
-    let unnamed_unix_socket = is_unix_socket && is_unnamed_unix_socket(object);
-
-    crate::s_println!(
-        "display-{}-dispatch pid={} cmd={} parent_cmd={} fds={:?} len={} unix_socket={} unnamed_unix_socket={}",
-        op,
-        pid,
-        command,
-        parent_command,
-        fds,
-        len,
-        is_unix_socket,
-        unnamed_unix_socket
-    );
-}
+fn log_display_write_dispatch(_op: &str, _object: &ObjectRef, _len: usize) {}
 
 fn log_x_chain_write_bytes(_bytes: &[u8]) {}
 
@@ -528,42 +333,9 @@ define_syscall!(Close, |object_num: usize| {
 define_syscall!(Ioctl, |object: ObjectRef,
                         request: u64,
                         request_ptr: u64| {
-    let x_chain_process = current_x_chain_process_info();
-    if let Some((pid, command, parent_command)) = &x_chain_process {
-        crate::s_println!(
-            "xchain-ioctl-enter pid={} cmd={} parent_cmd={} request={:#x} arg={:#x}",
-            pid,
-            command,
-            parent_command,
-            request,
-            request_ptr
-        );
-    }
     let res = object
         .as_configuratable()?
         .configure(ConfigurateRequest::new(request, request_ptr)?);
-
-    if let Some((pid, command, parent_command)) = x_chain_process {
-        match &res {
-            Ok(value) => crate::s_println!(
-                "xchain-ioctl-exit pid={} cmd={} parent_cmd={} request={:#x} result={}",
-                pid,
-                command,
-                parent_command,
-                request,
-                value
-            ),
-            Err(err) => crate::s_println!(
-                "xchain-ioctl-error pid={} cmd={} parent_cmd={} request={:#x} arg={:#x} err={:?}",
-                pid,
-                command,
-                parent_command,
-                request,
-                request_ptr,
-                err
-            ),
-        }
-    }
 
     res.map(|val| val as usize).map_err(Into::into)
 });

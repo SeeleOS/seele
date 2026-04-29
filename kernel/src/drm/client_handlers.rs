@@ -71,10 +71,7 @@ pub(super) fn handle_get_cap(ptr: *mut crate::drm::client::DrmGetCap) -> ObjectR
         DRM_CAP_CRTC_IN_VBLANK_EVENT => 1,
         DRM_CAP_SYNCOBJ => 0,
         DRM_CAP_SYNCOBJ_TIMELINE => 0,
-        _ => {
-            crate::s_println!("drm get_cap unsupported capability={:#x}", cap.capability);
-            return Err(ObjectError::InvalidArguments);
-        }
+        _ => return Err(ObjectError::InvalidArguments),
     };
     user_safe::write(ptr, &cap).map_err(|_| ObjectError::InvalidArguments)?;
     Ok(0)
@@ -124,30 +121,9 @@ pub(super) fn handle_set_client_cap(
         | (DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, 0) => Ok(0),
         (DRM_CLIENT_CAP_ATOMIC, _)
         | (DRM_CLIENT_CAP_WRITEBACK_CONNECTORS, _)
-        | (DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, _) => {
-            crate::s_println!(
-                "drm set_client_cap unimplemented capability={:#x} value={:#x}",
-                cap.capability,
-                cap.value
-            );
-            Err(ObjectError::Unimplemented)
-        }
-        (_, 0 | 1) => {
-            crate::s_println!(
-                "drm set_client_cap ignored capability={:#x} value={:#x}",
-                cap.capability,
-                cap.value
-            );
-            Ok(0)
-        }
-        _ => {
-            crate::s_println!(
-                "drm set_client_cap invalid capability={:#x} value={:#x}",
-                cap.capability,
-                cap.value
-            );
-            Err(ObjectError::InvalidArguments)
-        }
+        | (DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, _) => Err(ObjectError::Unimplemented),
+        (_, 0 | 1) => Ok(0),
+        _ => Err(ObjectError::InvalidArguments),
     }
 }
 

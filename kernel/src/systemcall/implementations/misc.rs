@@ -1787,16 +1787,7 @@ define_syscall!(Keyctl, |cmd: u64,
             Ok(0)
         }
         Ok(KeyctlCommand::SessionToParent) => Ok(0),
-        Err(_) => {
-            crate::s_println!(
-                "unsupported keyctl pid={} cmd={} arg2={:#x} arg3={:#x}",
-                get_current_process().lock().pid.0,
-                cmd,
-                arg2,
-                arg3
-            );
-            Err(SyscallError::NoSyscall)
-        }
+        Err(_) => Err(SyscallError::NoSyscall),
     }
 });
 

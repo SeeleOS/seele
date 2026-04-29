@@ -11,7 +11,7 @@ use crate::{
         Process, ProcessExitStatus, ProcessRef,
         execve::execve,
         manager::{MANAGER, get_current_process, terminate_process},
-        misc::{ProcessID, get_process_with_pid, with_current_process},
+        misc::{ProcessID, get_process_with_pid},
         wait::{ProcessWaitEvent, take_wait_event},
     },
     signal::Signal,
@@ -253,38 +253,6 @@ define_syscall!(Waitid, |id_type: i32,
 define_syscall!(Execve, |path_str: String,
                          args: Vec<String>,
                          env: Vec<String>| {
-    with_current_process(|process| {
-        let command = process
-            .command_line
-            .first()
-            .map(|command| command.as_str())
-            .unwrap_or("");
-        let parent_command = process
-            .parent
-            .as_ref()
-            .and_then(|parent| parent.lock().command_line.first().cloned())
-            .unwrap_or_default();
-        let should_log = [command, parent_command.as_str(), path_str.as_str()]
-            .into_iter()
-            .any(|value| {
-                value.contains("sddm")
-                    || value.contains("startplasma")
-                    || value.contains("kwin")
-                    || value.contains("plasmashell")
-                    || value.contains("/usr/bin/X")
-                    || value.contains("Xorg")
-            });
-        if should_log {
-            crate::s_println!(
-                "sddm-execve pid={} old_cmd={} parent_cmd={} path={} args={:?}",
-                process.pid.0,
-                command,
-                parent_command,
-                path_str,
-                args
-            );
-        }
-    });
     let path = Path::new(path_str.as_str());
     execve(path, args, env)?;
     log::info!("execve done");

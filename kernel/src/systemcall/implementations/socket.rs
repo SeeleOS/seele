@@ -9,14 +9,14 @@ use crate::{
         error::ObjectError,
         misc::{ObjectRef, get_object_current_process},
     },
-    process::{FdFlags, manager::get_current_process, misc::with_current_process},
+    process::{FdFlags, manager::get_current_process},
     socket::{
         AF_INET, AF_NETLINK, AF_UNIX, InetSocketObject, SOCK_CLOEXEC, SOCK_NONBLOCK, SOL_SOCKET,
         UnixSocketKind, UnixSocketObject, UnixSocketState,
     },
     systemcall::utils::{SyscallError, SyscallImpl},
 };
-use alloc::{format, string::String, vec, vec::Vec};
+use alloc::{string::String, vec, vec::Vec};
 use core::{mem, slice};
 
 #[repr(C)]
@@ -57,153 +57,6 @@ struct LinuxUcred {
     gid: u32,
 }
 
-fn current_display_socket_process_info() -> Option<(u64, String, String)> {
-    with_current_process(|process| {
-        let pid = process.pid.0;
-        let command = process.command_line.first().cloned().unwrap_or_default();
-        let parent_command = process
-            .parent
-            .as_ref()
-            .and_then(|parent| parent.lock().command_line.first().cloned())
-            .unwrap_or_default();
-        ((command == "systemd" && pid != 1)
-            || command.contains("sddm")
-            || command.contains("Xorg")
-            || command.contains("/usr/bin/X")
-            || command.contains("startplasma")
-            || command.contains("kwin")
-            || command.contains("plasmashell")
-            || command.contains("dbus-broker")
-            || command.contains("systemd-executor")
-            || command.contains("systemd-logind")
-            || command.contains("systemd-user-runtime-dir")
-            || command.contains("systemd-userdbd")
-            || command.contains("systemd-userwork")
-            || (command.ends_with("/systemd") && pid != 1)
-            || parent_command.contains("sddm"))
-        .then_some((pid, command, parent_command))
-    })
-}
-
-fn should_log_display_socket_target(target: &str) -> bool {
-    target.contains(".X11-unix")
-        || target.contains("wayland")
-        || target.contains("sddm")
-        || target.contains("seat")
-        || target.contains("dbus")
-        || target.contains("notify")
-        || target.contains("/bus")
-}
-
-fn log_display_socket(op: &str, target: &str, result: &Result<(), SyscallError>) {
-    if !should_log_display_socket_target(target) {
-        return;
-    }
-    let Some((pid, command, parent_command)) = current_display_socket_process_info() else {
-        return;
-    };
-    match result {
-        Ok(()) => crate::s_println!(
-            "display-socket-{} pid={} cmd={} parent_cmd={} target={} result=ok",
-            op,
-            pid,
-            command,
-            parent_command,
-            target
-        ),
-        Err(err) => crate::s_println!(
-            "display-socket-{} pid={} cmd={} parent_cmd={} target={} result=err {:?}",
-            op,
-            pid,
-            command,
-            parent_command,
-            target,
-            err
-        ),
-    }
-}
-
-fn log_user_manager_socket(op: &str, target: &str, result: &Result<(), SyscallError>) {
-    log_display_socket(op, target, result);
-}
-
-fn log_user_manager_socket_payload(op: &str, target: &str, bytes: &[u8]) {
-    if !(target.contains("dbus") || target.contains("notify") || target.contains("/bus")) {
-        return;
-    }
-    let Some((pid, command, parent_command)) = current_display_socket_process_info() else {
-        return;
-    };
-    let preview_len = bytes.len().min(96);
-    let preview = &bytes[..preview_len];
-    crate::s_println!(
-        "display-socket-{}-payload pid={} cmd={} parent_cmd={} target={} len={} preview={:?}",
-        op,
-        pid,
-        command,
-        parent_command,
-        target,
-        bytes.len(),
-        preview
-    );
-}
-
-fn log_user_manager_socket_rights(op: &str, target: &str, rights_count: usize) {
-    if rights_count == 0
-        || !(target.contains("dbus") || target.contains("notify") || target.contains("/bus"))
-    {
-        return;
-    }
-    let Some((pid, command, parent_command)) = current_display_socket_process_info() else {
-        return;
-    };
-    crate::s_println!(
-        "display-socket-{}-rights pid={} cmd={} parent_cmd={} target={} count={}",
-        op,
-        pid,
-        command,
-        parent_command,
-        target,
-        rights_count
-    );
-}
-
-fn socket_target_from_bytes(address: &[u8]) -> Option<String> {
-    match socket_address_from_raw(address.as_ptr(), address.len() as u32).ok()? {
-        SocketAddress::Unix(path) => Some(format!("unix:{path}")),
-        SocketAddress::Netlink(addr) => Some(format!("netlink:{}:{}", addr.pid, addr.groups)),
-        SocketAddress::Inet(addr) => Some(format!("inet:{:?}:{}", addr.addr, addr.port)),
-    }
-}
-
-fn is_effectively_unnamed_unix(address: &[u8]) -> bool {
-    address.len() >= 2 && address[2..].iter().all(|&byte| byte == 0)
-}
-
-fn socket_target_for_socket_like(socket: &dyn crate::socket::SocketLike) -> Option<String> {
-    for address in [
-        socket.getsockname_bytes().ok(),
-        socket.getpeername_bytes().ok(),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        if is_effectively_unnamed_unix(&address) {
-            continue;
-        }
-        if let Some(target) = socket_target_from_bytes(&address) {
-            return Some(target);
-        }
-    }
-
-    None
-}
-
-fn socket_target_for_object(socket: &ObjectRef) -> Option<String> {
-    let socket = socket.clone().as_socket_like().ok()?;
-    socket_target_for_socket_like(&*socket)
-}
-
 fn read_iovecs_from_user(
     iov_ptr: *const relibc_iovec,
     iov_len: usize,
@@ -222,26 +75,6 @@ fn read_iovecs_from_user(
     Ok(iovs)
 }
 
-fn preview_iovecs(iovs: &[relibc_iovec]) -> Result<Vec<u8>, SyscallError> {
-    let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>().min(256);
-    let mut preview = Vec::with_capacity(total_len);
-    for iov in iovs {
-        if preview.len() >= total_len {
-            break;
-        }
-        if iov.iov_len == 0 {
-            continue;
-        }
-        if iov.iov_base.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-        let chunk = user_safe::read_buffer(iov.iov_base.cast_const(), iov.iov_len)?;
-        let remaining = total_len - preview.len();
-        preview.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
-    }
-    Ok(preview)
-}
-
 fn copy_iovecs_from_user(iovs: &[relibc_iovec]) -> Result<Vec<u8>, SyscallError> {
     let total_len = iovs.iter().map(|iov| iov.iov_len).sum::<usize>();
     let mut buffer = Vec::with_capacity(total_len);
@@ -258,29 +91,6 @@ fn copy_iovecs_from_user(iovs: &[relibc_iovec]) -> Result<Vec<u8>, SyscallError>
         )?);
     }
     Ok(buffer)
-}
-
-fn count_scm_rights_in_control(control: &[u8]) -> usize {
-    let mut offset = 0usize;
-    let mut rights = 0usize;
-
-    while offset + mem::size_of::<LinuxCmsgHdr>() <= control.len() {
-        let header = unsafe { &*(control[offset..].as_ptr().cast::<LinuxCmsgHdr>()) };
-        if header.cmsg_len < mem::size_of::<LinuxCmsgHdr>() {
-            break;
-        }
-        let next = cmsg_align(offset + header.cmsg_len);
-        if next > control.len() {
-            break;
-        }
-        if header.cmsg_level == SOL_SOCKET as i32 && header.cmsg_type == SCM_RIGHTS {
-            let payload_len = header.cmsg_len - cmsg_align(mem::size_of::<LinuxCmsgHdr>());
-            rights += payload_len / mem::size_of::<i32>();
-        }
-        offset = next;
-    }
-
-    rights
 }
 
 fn cmsg_align(len: usize) -> usize {
@@ -645,32 +455,22 @@ define_syscall!(Bind, |socket: ObjectRef,
                        address: *const u8,
                        address_len: u32| {
     let address = socket_address_bytes(address, address_len)?;
-    let log_target = socket_target_from_bytes(&address);
-    let result = socket
+    socket
         .clone()
         .as_socket_like()?
         .bind_bytes(&address)
         .map_err(ObjectError::from)
-        .map_err(SyscallError::from);
-    if let Some(target) = &log_target {
-        log_display_socket("bind", target, &result);
-    }
-    result?;
+        .map_err(SyscallError::from)?;
     Ok(0)
 });
 
 define_syscall!(Listen, |socket: ObjectRef, backlog: usize| {
-    let log_target = socket_target_for_object(&socket);
-    let result = socket
+    socket
         .clone()
         .as_socket_like()?
         .listen(backlog)
         .map_err(ObjectError::from)
-        .map_err(SyscallError::from);
-    if let Some(target) = &log_target {
-        log_display_socket("listen", target, &result);
-    }
-    result?;
+        .map_err(SyscallError::from)?;
     Ok(0)
 });
 
@@ -678,28 +478,19 @@ define_syscall!(Connect, |socket: ObjectRef,
                           address: *const u8,
                           address_len: u32| {
     let address = socket_address_bytes(address, address_len)?;
-    let log_target = socket_target_from_bytes(&address);
-    let result = socket
+    socket
         .clone()
         .as_socket_like()?
         .connect_bytes(&address)
         .map_err(ObjectError::from)
-        .map_err(SyscallError::from);
-    if let Some(target) = &log_target {
-        log_user_manager_socket("connect", target, &result);
-    }
-    result?;
+        .map_err(SyscallError::from)?;
     Ok(0)
 });
 
 define_syscall!(Accept, |socket: ObjectRef,
                          address: *mut u8,
                          address_len_ptr: *mut u32| {
-    let listener_target = socket_target_for_object(&socket);
     let fd = accept_socket(socket, 0)?;
-    if let Some(target) = &listener_target {
-        log_display_socket("accept", target, &Ok(()));
-    }
     if !address_len_ptr.is_null() {
         let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
         let name = accepted
@@ -715,11 +506,7 @@ define_syscall!(Accept4, |socket: ObjectRef,
                           address: *mut u8,
                           address_len_ptr: *mut u32,
                           flags: u32| {
-    let listener_target = socket_target_for_object(&socket);
     let fd = accept_socket(socket, flags)?;
-    if let Some(target) = &listener_target {
-        log_display_socket("accept4", target, &Ok(()));
-    }
     if !address_len_ptr.is_null() {
         let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
         let name = accepted
@@ -749,14 +536,10 @@ define_syscall!(Sendto, |socket: ObjectRef,
     let address = (!address.is_null())
         .then(|| socket_address_bytes(address, address_len))
         .transpose()?;
-    let log_target = address.as_deref().and_then(socket_target_from_bytes);
     let written = socket
         .as_socket_like()?
         .sendto(buffer, address.as_deref())
         .map_err(ObjectError::from)?;
-    if let Some(target) = &log_target {
-        log_user_manager_socket("sendto", target, &Ok(()));
-    }
 
     Ok(written)
 });
@@ -829,11 +612,6 @@ define_syscall!(
 
             if read > 0 {
                 user_safe::write(buffer, &data[..read])?;
-                if let Some(target) = source.as_deref().and_then(socket_target_from_bytes) {
-                    log_user_manager_socket_payload("recvfrom", &target, &data[..read]);
-                } else if let Some(target) = socket_target_for_object(&socket) {
-                    log_user_manager_socket_payload("recvfrom", &target, &data[..read]);
-                }
             }
 
             if !address.is_null() {
@@ -1004,35 +782,7 @@ define_syscall!(Sendmsg, |socket: ObjectRef,
     }
 
     let msg = user_safe::read(msg)?;
-    let iovs = read_iovecs_from_user(msg.msg_iov, msg.msg_iovlen)?;
-
-    let log_target = if !msg.msg_name.is_null() {
-        socket_address_bytes(msg.msg_name.cast(), msg.msg_namelen)
-            .ok()
-            .and_then(|address| socket_target_from_bytes(&address))
-    } else {
-        socket_target_for_object(&socket).or_else(|| Some(String::from("connected")))
-    };
-    let preview = preview_iovecs(&iovs)?;
-    let rights_count = if msg.msg_controllen == 0 || msg.msg_control.is_null() {
-        0
-    } else {
-        let control = user_safe::read_buffer(msg.msg_control, msg.msg_controllen)?;
-        count_scm_rights_in_control(&control)
-    };
-    let result = sendmsg_impl(socket, &msg, flags);
-    if let Some(target) = &log_target {
-        log_user_manager_socket(
-            "sendmsg",
-            target,
-            &result.as_ref().map(|_| ()).map_err(|err| *err),
-        );
-        if result.is_ok() {
-            log_user_manager_socket_payload("sendmsg", target, &preview);
-            log_user_manager_socket_rights("sendmsg", target, rights_count);
-        }
-    }
-    result
+    sendmsg_impl(socket, &msg, flags)
 });
 
 define_syscall!(Sendmmsg, |socket: ObjectRef,
@@ -1284,19 +1034,6 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
                 msg.msg_namelen = 0;
             }
             msg.msg_controllen = 0;
-            if copied_total > 0 {
-                if let Some(target) =
-                    source.map(|address| format!("inet:{:?}:{}", address.addr, address.port))
-                {
-                    log_user_manager_socket_payload("recvmsg", &target, &scratch[..copied_total]);
-                } else {
-                    log_user_manager_socket_payload(
-                        "recvmsg",
-                        "connected",
-                        &scratch[..copied_total],
-                    );
-                }
-            }
             return Ok(copied_total);
         }
 
@@ -1362,20 +1099,6 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
             if copy_len < control.len() {
                 msg.msg_flags |= MSG_CTRUNC;
             }
-        }
-
-        if total_read > 0 {
-            let target = socket
-                .getpeername_bytes()
-                .ok()
-                .and_then(|name| socket_target_from_bytes(&name))
-                .unwrap_or_else(|| String::from("connected"));
-            log_user_manager_socket_payload("recvmsg", &target, &scratch[..total_read]);
-            log_user_manager_socket_rights(
-                "recvmsg",
-                &target,
-                count_scm_rights_in_control(&control),
-            );
         }
 
         Ok(if report_trunc || total_capacity == 0 {

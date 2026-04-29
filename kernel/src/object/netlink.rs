@@ -22,7 +22,6 @@ use crate::{
     },
     polling::{event::PollableEvent, object::Pollable},
     process::manager::get_current_process,
-    s_println,
     socket::{
         AF_NETLINK, NETLINK_ADD_MEMBERSHIP, NETLINK_AUDIT, NETLINK_DROP_MEMBERSHIP,
         NETLINK_EXT_ACK, NETLINK_GET_STRICT_CHK, NETLINK_KOBJECT_UEVENT, NETLINK_LIST_MEMBERSHIPS,
@@ -103,20 +102,6 @@ struct NetlinkErrorMessage {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct UdevMonitorNetlinkHeader {
-    prefix: [u8; 8],
-    magic: u32,
-    header_size: u32,
-    properties_off: u32,
-    properties_len: u32,
-    filter_subsystem_hash: u32,
-    filter_devtype_hash: u32,
-    filter_tag_bloom_hi: u32,
-    filter_tag_bloom_lo: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
 struct IfInfoMessage {
     ifi_family: u8,
     ifi_pad: u8,
@@ -170,32 +155,6 @@ pub struct NetlinkSocketObject {
 }
 
 impl NetlinkSocketObject {
-    fn debug_key<'a>(payload: &'a [u8], key: &str) -> Option<&'a str> {
-        payload
-            .split(|byte| *byte == 0)
-            .find_map(|field| field.strip_prefix(key.as_bytes()))
-            .and_then(|value| core::str::from_utf8(value).ok())
-    }
-
-    fn debug_libudev_message(message: &[u8]) -> Option<(&str, &str)> {
-        if !message.starts_with(b"libudev\0") {
-            return None;
-        }
-        if message.len() < core::mem::size_of::<UdevMonitorNetlinkHeader>() {
-            return None;
-        }
-        let header = unsafe { &*(message.as_ptr() as *const UdevMonitorNetlinkHeader) };
-        let offset = header.properties_off as usize;
-        if offset >= message.len() {
-            return None;
-        }
-        let payload = &message[offset..];
-        Some((
-            Self::debug_key(payload, "ACTION=")?,
-            Self::debug_key(payload, "DEVPATH=")?,
-        ))
-    }
-
     fn parse_sockaddr(address: &[u8]) -> SocketResult<NetlinkSocketAddress> {
         if address.len() < 12 {
             return Err(SocketError::InvalidArguments);
@@ -256,7 +215,6 @@ impl NetlinkSocketObject {
         });
         *socket.self_ref.lock() = Some(Arc::downgrade(&socket));
         if protocol == NETLINK_KOBJECT_UEVENT {
-            s_println!("netlink kobject create type={socket_type:#x}");
             NETLINK_SOCKETS.lock().push(Arc::downgrade(&socket));
         }
         Ok(socket)
@@ -306,13 +264,6 @@ impl NetlinkSocketObject {
         let mut address = address;
         if address.pid == 0 {
             address.pid = NEXT_NETLINK_PORT_ID.fetch_add(1, Ordering::Relaxed) as u32;
-        }
-        if self.protocol == NETLINK_KOBJECT_UEVENT {
-            s_println!(
-                "netlink kobject bind pid={} groups=0x{:x}",
-                address.pid,
-                address.groups
-            );
         }
         *self.address.lock() = address;
         Ok(())
@@ -448,25 +399,6 @@ impl NetlinkSocketObject {
             true
         });
 
-        if let Some((action, devpath)) = Self::debug_libudev_message(message) {
-            s_println!(
-                "netlink kobject send pid={} groups=0x{:x} libudev action={} devpath={} delivered={}",
-                destination.pid,
-                destination.groups,
-                action,
-                devpath,
-                delivered
-            );
-        } else {
-            s_println!(
-                "netlink kobject send pid={} groups=0x{:x} libudev={} delivered={}",
-                destination.pid,
-                destination.groups,
-                message.starts_with(b"libudev\0"),
-                delivered
-            );
-        }
-
         if delivered == 0 {
             return Err(SocketError::ConnectionRefused);
         }
@@ -517,14 +449,6 @@ impl NetlinkSocketObject {
                     }
                 } else {
                     memberships.retain(|existing| *existing != group);
-                }
-                if self.protocol == NETLINK_KOBJECT_UEVENT {
-                    s_println!(
-                        "netlink kobject membership opt={} group=0x{:x} now={:?}",
-                        option_name,
-                        group,
-                        *memberships
-                    );
                 }
                 Ok(())
             }
@@ -1029,14 +953,6 @@ pub fn broadcast_kobject_uevent(action: &str, devpath: &str, extra_env: &[u8]) {
         true
     });
     drop(sockets);
-    s_println!(
-        "kobject uevent action={} devpath={} sockets={} delivered={}",
-        action,
-        devpath,
-        total,
-        delivered_sockets.len()
-    );
-
     for socket in delivered_sockets {
         socket.wake_read_waiters();
     }
