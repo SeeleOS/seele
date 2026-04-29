@@ -22,6 +22,8 @@ fn main() {
             .map(|count| count.get().to_string())
             .unwrap_or_else(|_| "1".to_string())
     });
+    let qemu_gdb = env::var("SEELE_QEMU_GDB").ok();
+    let wait_for_gdb = env::var_os("SEELE_QEMU_WAIT_GDB").is_some();
     let qemu_debug_log = env::var_os("SEELE_QEMU_DEBUG_LOG");
     let qemu_debugcon = env::var_os("SEELE_QEMU_DEBUGCON");
 
@@ -73,6 +75,13 @@ fn main() {
     // enable the guest to exit qemu
     cmd.arg("-device")
         .arg("isa-debug-exit,iobase=0xf4,iosize=0x04");
+    if let Some(endpoint) = &qemu_gdb {
+        eprintln!("qemu gdb stub: {endpoint}");
+        cmd.arg("-gdb").arg(endpoint);
+        if wait_for_gdb {
+            cmd.arg("-S");
+        }
+    }
     if let Some(path) = qemu_debugcon {
         cmd.arg("-debugcon")
             .arg(format!("file:{}", PathBuf::from(path).display()));
