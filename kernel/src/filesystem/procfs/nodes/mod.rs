@@ -1,7 +1,13 @@
 use alloc::{string::String, sync::Arc, vec::Vec};
 use spin::Mutex;
 
-use crate::filesystem::{info::DirectoryContentInfo, vfs::FSResult, vfs_traits::FileLike};
+use crate::{
+    filesystem::{
+        info::DirectoryContentInfo, staticfs::device::StaticDeviceHandle, vfs::FSResult,
+        vfs_traits::FileLike,
+    },
+    object::misc::ObjectRef,
+};
 
 mod directory;
 mod file;
@@ -52,6 +58,16 @@ where
         PROC_FILE_MODE_READWRITE,
         Arc::new(read),
         Some(Arc::new(write)),
+    ))))
+}
+
+pub(super) fn proc_object_file(name: &str, inode: u64, object: ObjectRef) -> FileLike {
+    FileLike::File(Arc::new(Mutex::new(StaticDeviceHandle::from_object(
+        name.into(),
+        inode,
+        PROC_FILE_MODE_READONLY,
+        None,
+        object,
     ))))
 }
 

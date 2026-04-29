@@ -20,16 +20,16 @@ use net::{
     PROC_NET_DEV_INODE, PROC_NET_IF_INET6_INODE, PROC_NET_INODE, PROC_NET_ROUTE_INODE,
     proc_net_dev_bytes, proc_net_entries, proc_net_if_inet6_bytes, proc_net_route_bytes,
 };
-use nodes::{proc_dir, proc_file, proc_rw_file, proc_symlink};
+use nodes::{proc_dir, proc_file, proc_object_file, proc_rw_file, proc_symlink};
 use pid::{
     current_pid, ensure_pid_exists, fd_target, parse_fd, parse_pid, pid_cgroup_inode,
     pid_cmdline_inode, pid_comm_inode, pid_dir_entries, pid_dir_inode, pid_environ_inode,
     pid_fd_dir_inode, pid_fd_entries, pid_fd_inode, pid_fdinfo_dir_inode, pid_fdinfo_entries,
     pid_fdinfo_inode, pid_gid_map_inode, pid_loginuid_inode, pid_mountinfo_inode, pid_ns_dir_inode,
-    pid_ns_entries, pid_ns_inode, pid_oom_score_adj_inode, pid_root_inode, pid_sessionid_inode,
-    pid_setgroups_inode, pid_stat_inode, pid_status_inode, pid_string, pid_uid_map_inode,
-    proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_comm_bytes, proc_pid_environ_bytes,
-    proc_pid_fdinfo_bytes, proc_pid_gid_map_bytes, proc_pid_loginuid_bytes,
+    pid_ns_entries, pid_ns_inode, pid_ns_object, pid_oom_score_adj_inode, pid_root_inode,
+    pid_sessionid_inode, pid_setgroups_inode, pid_stat_inode, pid_status_inode, pid_string,
+    pid_uid_map_inode, proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_comm_bytes,
+    proc_pid_environ_bytes, proc_pid_fdinfo_bytes, proc_pid_gid_map_bytes, proc_pid_loginuid_bytes,
     proc_pid_oom_score_adj_bytes, proc_pid_sessionid_bytes, proc_pid_setgroups_bytes,
     proc_pid_stat_bytes, proc_pid_status_bytes, proc_pid_uid_map_bytes, proc_pid_write_gid_map,
     proc_pid_write_oom_score_adj, proc_pid_write_setgroups, proc_pid_write_uid_map,
@@ -54,6 +54,18 @@ const DEFAULT_NR_OPEN: u64 = 1_048_576;
 
 static PROC_FILE_MAX: AtomicU64 = AtomicU64::new(DEFAULT_FILE_MAX);
 static PROC_NR_OPEN: AtomicU64 = AtomicU64::new(DEFAULT_NR_OPEN);
+
+fn proc_pid_namespace_file(
+    pid: crate::process::misc::ProcessID,
+    namespace: &str,
+) -> FSResult<FileLike> {
+    let inode = pid_ns_inode(pid, namespace)?;
+    if let Some(object) = pid_ns_object(pid, namespace)? {
+        return Ok(proc_object_file(namespace, inode, object));
+    }
+
+    Ok(proc_file(namespace, inode, Vec::new))
+}
 
 fn proc_hostname_bytes() -> Vec<u8> {
     proc_c_string_bytes(crate::misc::utsname::current_hostname(crate::NAME))
@@ -432,11 +444,7 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         }
         ["self", "ns", namespace] => {
             let pid = current_pid()?;
-            Ok(proc_file(
-                namespace,
-                pid_ns_inode(pid, namespace)?,
-                Vec::new,
-            ))
+            proc_pid_namespace_file(pid, namespace)
         }
         ["self", "fd"] => {
             let pid = current_pid()?;
@@ -637,11 +645,7 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         [pid, "ns", namespace] => {
             let pid = parse_pid(pid)?;
             ensure_pid_exists(pid)?;
-            Ok(proc_file(
-                namespace,
-                pid_ns_inode(pid, namespace)?,
-                Vec::new,
-            ))
+            proc_pid_namespace_file(pid, namespace)
         }
         [pid, "fd"] => {
             let pid = parse_pid(pid)?;

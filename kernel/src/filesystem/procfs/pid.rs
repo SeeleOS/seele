@@ -5,6 +5,7 @@ use crate::{
         cgroupfs::pid_cgroup_path, errors::FSError, info::DirectoryContentInfo, vfs::FSResult,
         vfs_traits::DirectoryContentType,
     },
+    object::misc::ObjectRef,
     process::{
         manager::{MANAGER, get_current_process},
         misc::{ProcessID, get_process_with_pid},
@@ -39,7 +40,6 @@ const PROC_NAMESPACE_NAMES: [&str; 8] =
 const PROC_CGROUP_INIT_INO: u64 = 0xEFFF_FFFB;
 const PROC_IPC_INIT_INO: u64 = 0xEFFF_FFFF;
 const PROC_MNT_INIT_INO: u64 = 0xEFFF_FFF8;
-const PROC_NET_INIT_INO: u64 = 0xEFFF_FFF9;
 const PROC_PID_INIT_INO: u64 = 0xEFFF_FFFC;
 const PROC_TIME_INIT_INO: u64 = 0xEFFF_FFFA;
 const PROC_USER_INIT_INO: u64 = 0xEFFF_FFFD;
@@ -487,17 +487,33 @@ pub(super) fn pid_fdinfo_inode(pid: ProcessID, fd: &str) -> u64 {
 }
 
 pub(super) fn pid_ns_inode(pid: ProcessID, name: &str) -> FSResult<u64> {
-    let _ = pid;
     match name {
         "cgroup" => Ok(PROC_CGROUP_INIT_INO),
         "ipc" => Ok(PROC_IPC_INIT_INO),
         "mnt" => Ok(PROC_MNT_INIT_INO),
-        "net" => Ok(PROC_NET_INIT_INO),
+        "net" => Ok(get_process_with_pid(pid)
+            .map_err(|_| FSError::NotFound)?
+            .lock()
+            .net_namespace
+            .inode()),
         "pid" => Ok(PROC_PID_INIT_INO),
         "time" => Ok(PROC_TIME_INIT_INO),
         "user" => Ok(PROC_USER_INIT_INO),
         "uts" => Ok(PROC_UTS_INIT_INO),
         _ => Err(FSError::NotFound),
+    }
+}
+
+pub(super) fn pid_ns_object(pid: ProcessID, name: &str) -> FSResult<Option<ObjectRef>> {
+    match name {
+        "net" => Ok(Some(
+            get_process_with_pid(pid)
+                .map_err(|_| FSError::NotFound)?
+                .lock()
+                .net_namespace
+                .clone(),
+        )),
+        _ => Ok(None),
     }
 }
 

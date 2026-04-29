@@ -10,6 +10,7 @@ use x86_64::VirtAddr;
 use crate::filesystem::absolute_path::AbsolutePath;
 use crate::memory::addrspace::AddrSpace;
 use crate::misc::timer::Timer;
+use crate::net::namespace::{NetNamespace, NetNamespaceRef};
 use crate::object::misc::ObjectRef;
 use crate::process::group::{ProcessGroupID, SessionID};
 use crate::signal::misc::default_signal_action_vec;
@@ -98,6 +99,7 @@ pub struct Process {
     pub capability_permitted: [u32; 2],
     pub capability_inheritable: [u32; 2],
     pub capability_ambient: [u32; 2],
+    pub net_namespace: NetNamespaceRef,
     pub vfork_blocker: Option<ThreadID>,
     pub ptrace: ptrace::PtraceState,
     pub wait_event: Option<wait::ProcessWaitEvent>,
@@ -145,6 +147,7 @@ impl Default for Process {
             capability_permitted: [DEFAULT_CAPABILITY_LOW, DEFAULT_CAPABILITY_HIGH],
             capability_inheritable: [0; 2],
             capability_ambient: [0; 2],
+            net_namespace: NetNamespace::init(),
             vfork_blocker: None,
             ptrace: ptrace::PtraceState::default(),
             wait_event: None,

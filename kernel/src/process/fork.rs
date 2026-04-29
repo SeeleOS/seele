@@ -55,6 +55,7 @@ impl Process {
                 capability_permitted: parent_locked.capability_permitted,
                 capability_inheritable: parent_locked.capability_inheritable,
                 capability_ambient: parent_locked.capability_ambient,
+                net_namespace: parent_locked.net_namespace.clone(),
                 ..Default::default()
             }));
             (pid, new_process)

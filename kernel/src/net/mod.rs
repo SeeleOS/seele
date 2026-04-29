@@ -14,6 +14,8 @@ use spin::Mutex;
 
 use crate::{misc::time::Time, thread::THREAD_MANAGER};
 
+pub mod namespace;
+
 const STATIC_IPV4: [u8; 4] = [10, 0, 2, 15];
 const DEFAULT_GATEWAY_IPV4: [u8; 4] = [10, 0, 2, 2];
 const LOOPBACK_IPV4: [u8; 4] = [127, 0, 0, 1];

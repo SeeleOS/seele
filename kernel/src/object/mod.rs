@@ -13,6 +13,7 @@ bitflags::bitflags! {
 use crate::{
     drm::prime::DrmPrimeBufferObject,
     filesystem::object::FileLikeObject,
+    net::namespace::NetNamespace,
     object::{
         bpf::BpfObject,
         error::ObjectError,
@@ -95,6 +96,7 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function_non_trait!("pidfd", PidFdObject, BadFileDescriptor);
     define_cast_function_non_trait!("signalfd", SignalfdObject, BadFileDescriptor);
     define_cast_function_non_trait!("netlink_socket", NetlinkSocketObject, BadFileDescriptor);
+    define_cast_function_non_trait!("net_namespace", NetNamespace, BadFileDescriptor);
     define_cast_function_non_trait!("inet_socket", InetSocketObject, BadFileDescriptor);
     define_cast_function_non_trait!("timerfd", TimerFdObject, BadFileDescriptor);
     define_cast_function_non_trait!("unix_socket", UnixSocketObject, BadFileDescriptor);
