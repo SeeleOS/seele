@@ -63,6 +63,15 @@ impl DrmState {
                 }
                 (start_frame, kernel_addr, PageTableFlags::empty(), false)
             };
+        crate::s_println!(
+            "debug drm create_dumb: {}x{} bpp={} pitch={} size={} scanout_backed={}",
+            request.width,
+            request.height,
+            request.bpp,
+            pitch,
+            size,
+            scanout_backed
+        );
 
         let handle = self.next_handle;
         self.next_handle = self.next_handle.checked_add(1).ok_or(ObjectError::Other)?;
@@ -106,14 +115,6 @@ impl DrmState {
         size: u64,
         pages: usize,
     ) -> Option<(PhysFrame<Size4KiB>, u64, PageTableFlags)> {
-        if self
-            .dumb_buffers
-            .values()
-            .any(|buffer| buffer.scanout_backed)
-        {
-            return None;
-        }
-
         let fb_info = current_framebuffer_info();
         if bpp != 32
             || width != fb_info.width as u32
