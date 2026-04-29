@@ -34,9 +34,9 @@ pub(super) unsafe extern "C" fn flanterm_callback(
 }
 
 fn write_pty_response(response: &str) {
-    if let Some(writer) = PTY_WRITER.get() {
-        if let Some(writer) = writer.lock().as_mut() {
-            writer(response);
-        }
+    if let Some(writer) = PTY_WRITER.get()
+        && let Some(writer) = writer.lock().as_mut()
+    {
+        writer(response);
     }
 }
