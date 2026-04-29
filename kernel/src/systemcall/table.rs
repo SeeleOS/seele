@@ -187,6 +187,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         EpollCreate1,
         Prlimit64,
         NameToHandleAt,
+        Setns,
         MemfdCreate,
         Getpriority,
         SchedSetparam,

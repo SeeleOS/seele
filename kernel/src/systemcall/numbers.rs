@@ -189,6 +189,7 @@ pub enum SyscallNumber {
     InotifyInit1 = 294,
     Prlimit64 = 302,
     NameToHandleAt = 303,
+    Setns = 308,
     MemfdCreate = 319,
     Setrlimit = 160,
     Sync = 162,

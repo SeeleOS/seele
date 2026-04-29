@@ -79,6 +79,13 @@ bitflags! {
     }
 }
 
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    pub struct SetnsFlags: u32 {
+        const NEWNET = CloneFlags::NEWNET.bits() as u32;
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct LinuxCloneArgs {
@@ -1165,6 +1172,19 @@ define_syscall!(Unshare, |flags: u64| {
         return Err(SyscallError::NoSyscall);
     }
 
+    Ok(0)
+});
+
+define_syscall!(Setns, |fd: ObjectRef, flags: SetnsFlags| {
+    let net_namespace = fd
+        .clone()
+        .as_net_namespace()
+        .map_err(|_| SyscallError::InvalidArguments)?;
+    if !flags.is_empty() && flags != SetnsFlags::NEWNET {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    get_current_process().lock().net_namespace = net_namespace;
     Ok(0)
 });
 
