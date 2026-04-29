@@ -1,6 +1,6 @@
 use core::str::from_utf8;
 
-use alloc::sync::Arc;
+use alloc::{string::String, sync::Arc};
 use spin::Mutex;
 use x86_64::instructions::interrupts::without_interrupts;
 
@@ -41,9 +41,10 @@ impl TerminalObject {
     }
 
     pub fn write_screen_text(&self, text: &str) {
-        if !text.is_empty() {
+        let filtered = strip_osc_sequences(text);
+        if !filtered.is_empty() {
             without_interrupts(|| {
-                self.inner.lock().push_str(text);
+                self.inner.lock().push_str(&filtered);
             });
         }
     }
@@ -53,6 +54,34 @@ impl TerminalObject {
             self.inner.lock().clear();
         });
     }
+}
+
+fn strip_osc_sequences(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let bytes = text.as_bytes();
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b']') {
+            index += 2;
+            while let Some(&byte) = bytes.get(index) {
+                index += 1;
+                if byte == 0x07 {
+                    break;
+                }
+                if byte == 0x1b && bytes.get(index) == Some(&b'\\') {
+                    index += 1;
+                    break;
+                }
+            }
+            continue;
+        }
+
+        output.push(bytes[index] as char);
+        index += 1;
+    }
+
+    output
 }
 
 impl Object for TerminalObject {
