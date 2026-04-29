@@ -686,10 +686,7 @@ fn faccessat_impl(
     } else {
         VirtualFS.lock().open(path.clone())
     };
-    let object: ObjectRef = Arc::new(match open_result {
-        Ok(object) => object,
-        Err(err) => return Err(err.into()),
-    });
+    let object: ObjectRef = Arc::new(open_result?);
     check_access_permissions(&object.as_statable()?.stat(), mode)?;
     Ok(0)
 }
