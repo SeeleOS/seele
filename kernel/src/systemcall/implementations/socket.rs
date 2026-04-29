@@ -1082,7 +1082,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         } else {
             msg.msg_namelen = 0;
         }
-        let control = if total_read > 0 {
+        let control = if total_read > 0 || socket.kind != UnixSocketKind::Stream {
             unix_socket_control_bytes(&socket, total_read, peek, flags)?
         } else {
             Vec::new()
