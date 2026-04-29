@@ -101,7 +101,6 @@ impl UnixSocketObject {
                             }
                             drop(recv_buf);
                             stream.pending_packets.lock().pop_front();
-                            let _ = stream.take_ready_rights(packet_len);
 
                             if was_full {
                                 if let Some(peer) =
