@@ -14,6 +14,7 @@ use crate::misc::systemd_perf::{self, PerfBucket};
 use crate::misc::time::{self, Time as KernelTime};
 use crate::misc::timer::ClockId;
 use crate::misc::{others::protection_to_page_flags, reboot as reboot_state, utsname::UtsName};
+use crate::net::namespace::NetNamespace;
 use crate::object::linux_anon::{
     EventFdFlags, EventFdObject, InotifyObject, PidFdObject, TimerFdObject, wake_linux_io_waiters,
 };
@@ -80,7 +81,7 @@ bitflags! {
 }
 
 bitflags! {
-    #[derive(Clone, Copy, Debug)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct SetnsFlags: u32 {
         const NEWNET = CloneFlags::NEWNET.bits() as u32;
     }
@@ -368,6 +369,9 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
 
     let current = get_current_process();
     let (child_process, child_thread) = Process::fork(current.clone());
+    if clone_flags.contains(CloneFlags::NEWNET) {
+        child_process.lock().net_namespace = NetNamespace::new();
+    }
     let pid = child_process.lock().pid;
     MANAGER.lock().processes.insert(pid, child_process.clone());
 
@@ -1160,16 +1164,19 @@ define_syscall!(Unshare, |flags: u64| {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let namespace_flags = (UnshareFlags::NEWNS
+    let supported_namespace_flags = UnshareFlags::NEWNET.bits();
+    let unsupported_namespace_flags = (UnshareFlags::NEWNS
         | UnshareFlags::NEWCGROUP
         | UnshareFlags::NEWUTS
         | UnshareFlags::NEWIPC
         | UnshareFlags::NEWUSER
-        | UnshareFlags::NEWPID
-        | UnshareFlags::NEWNET)
+        | UnshareFlags::NEWPID)
         .bits();
-    if flags & namespace_flags != 0 {
+    if flags & unsupported_namespace_flags != 0 {
         return Err(SyscallError::NoSyscall);
+    }
+    if flags & supported_namespace_flags != 0 {
+        get_current_process().lock().net_namespace = NetNamespace::new();
     }
 
     Ok(0)
@@ -1226,6 +1233,9 @@ define_syscall!(Clone, |flags: u64,
     }
 
     let flags = clone_flags;
+    if flags.contains(CloneFlags::NEWNET) {
+        return Err(SyscallError::InvalidArguments);
+    }
     if !flags.contains(required) {
         return Err(SyscallError::NoSyscall);
     }
@@ -1286,6 +1296,9 @@ define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
     let clone_flags = CloneFlags::from_bits_truncate(flags);
 
     if clone_flags.contains(CloneFlags::THREAD) {
+        if clone_flags.contains(CloneFlags::NEWNET) {
+            return Err(SyscallError::InvalidArguments);
+        }
         return <Clone as SyscallImpl>::handle_call(
             flags,
             stack_pointer,
