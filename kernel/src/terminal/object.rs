@@ -49,7 +49,6 @@ impl Writable for TerminalObject {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
         let string = from_utf8(buffer).unwrap_or("Unsupported charcter");
         s_print!("{string}");
-        self.inner.lock().push_str(string);
         Ok(buffer.len())
     }
 }
