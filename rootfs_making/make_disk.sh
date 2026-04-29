@@ -40,6 +40,7 @@ ARCH_PACKAGES=(
     xorg-server
     xorg-server-xephyr
     xorg-xinit
+    xorg-xsetroot
     xorg-xwayland
     xorg-xkbcomp
     xkeyboard-config
