@@ -214,6 +214,10 @@ arch_chroot systemctl enable seatd.service
 install_sysroot_file "${ROOTFS_MAKING_DIR}/weston.ini" "${SYSROOT_DIR}/etc/xdg/weston/weston.ini"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/root/.xinitrc"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/cleanup-xorg-log-state.sh" "${SYSROOT_DIR}/usr/local/sbin/cleanup-xorg-log-state"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/cleanup-xorg-log-state.service" "${SYSROOT_DIR}/usr/lib/systemd/system/cleanup-xorg-log-state.service"
+arch_chroot chmod 755 /usr/local/sbin/cleanup-xorg-log-state
+arch_chroot systemctl enable cleanup-xorg-log-state.service
 
 for package in "${AUR_PACKAGES[@]}"; do
     install_aur_package "${package}"
