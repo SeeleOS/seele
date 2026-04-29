@@ -341,7 +341,7 @@ impl NetlinkSocketObject {
         destination: Option<NetlinkSocketAddress>,
     ) -> SocketResult<usize> {
         if self.protocol == NETLINK_ROUTE {
-            self.handle_route_message(message);
+            self.handle_route_messages(message);
             return Ok(message.len());
         }
 
@@ -537,40 +537,47 @@ impl NetlinkSocketObject {
         Ok(vec![0; expected_len])
     }
 
-    fn handle_route_message(&self, message: &[u8]) {
-        let Some((header, payload)) = self.request_header_and_payload(message) else {
-            return;
-        };
-        let reply_pid = self.local_address().pid;
+    fn handle_route_messages(&self, mut message: &[u8]) {
+        while let Some((header, payload, consumed)) = self.request_header_and_payload(message) {
+            let reply_pid = self.local_address().pid;
 
-        match header.nlmsg_type {
-            RTM_NEWLINK => self.handle_new_link(header, payload),
-            RTM_GETLINK => self.handle_get_link(header, payload, reply_pid),
-            RTM_GETADDR => self.handle_get_addr(header, payload, reply_pid),
-            _ => self.enqueue_error_response(header, 0),
+            match header.nlmsg_type {
+                RTM_NEWLINK => self.handle_new_link(header, payload),
+                RTM_GETLINK => self.handle_get_link(header, payload, reply_pid),
+                RTM_GETADDR => self.handle_get_addr(header, payload, reply_pid),
+                _ => self.enqueue_error_response(header, 0),
+            }
+
+            if consumed >= message.len() {
+                break;
+            }
+            message = &message[consumed..];
         }
     }
 
     fn request_header_and_payload<'a>(
         &self,
         message: &'a [u8],
-    ) -> Option<(NetlinkMessageHeader, &'a [u8])> {
+    ) -> Option<(NetlinkMessageHeader, &'a [u8], usize)> {
         if message.len() < core::mem::size_of::<NetlinkMessageHeader>() {
             return None;
         }
 
         let header =
             unsafe { core::ptr::read_unaligned(message.as_ptr().cast::<NetlinkMessageHeader>()) };
-        let message_len = usize::try_from(header.nlmsg_len)
-            .ok()
-            .map(|len| len.min(message.len()))?;
+        let message_len = usize::try_from(header.nlmsg_len).ok()?;
         if message_len < core::mem::size_of::<NetlinkMessageHeader>() {
+            return None;
+        }
+        let consumed = Self::align_to_4(message_len).min(message.len());
+        if message_len > consumed {
             return None;
         }
 
         Some((
             header,
             &message[core::mem::size_of::<NetlinkMessageHeader>()..message_len],
+            consumed,
         ))
     }
 
