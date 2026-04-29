@@ -5,16 +5,15 @@ pub mod line_discipline;
 pub mod linux_kd;
 pub mod linux_vt;
 pub mod macros;
-pub mod misc;
 pub mod pty;
 pub mod state;
 pub mod term_trait;
 pub mod termios;
 
 use alloc::{boxed::Box, sync::Arc};
-pub use macros::term_print;
 pub use color::Color;
 pub use flanterm::KernelTerminal;
+pub use macros::term_print;
 use spin::mutex::Mutex;
 
 use crate::{
@@ -37,7 +36,9 @@ pub fn init() {
     log::debug!("graphics: terminal ready");
 
     let default_terminal = DEFAULT_TERMINAL.get_or_init(|| {
-        Arc::new(Mutex::new(TerminalObject::new(Arc::new(Mutex::new(terminal)))))
+        Arc::new(Mutex::new(TerminalObject::new(Arc::new(Mutex::new(
+            terminal,
+        )))))
     });
 
     init_virtual_ttys();

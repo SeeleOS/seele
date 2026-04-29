@@ -35,7 +35,6 @@ use crate::misc::others::enable_sse;
 use crate::misc::{agent_tty_input, framebuffer, logging, mouse, time};
 use crate::process::manager::MANAGER;
 use crate::smp::{init_bsp, release_application_processors, start_application_processors};
-use crate::terminal::misc::clear;
 #[cfg(test)]
 use core::panic::PanicInfo;
 
@@ -83,7 +82,6 @@ pub fn init() -> ! {
         Err(err) => log::warn!("init: mouse unavailable ({err})"),
     }
     start_application_processors();
-    clear();
     release_application_processors();
     thread::scheduling::run();
 }
