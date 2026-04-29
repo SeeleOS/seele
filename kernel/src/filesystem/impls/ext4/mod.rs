@@ -273,6 +273,7 @@ impl FileSystem for EXT4 {
             )
             .map_err(FSError::from)?;
 
+        lookup_cache_clear(&self.lookup_cache);
         Ok(())
     }
 
