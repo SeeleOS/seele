@@ -99,7 +99,8 @@ fn fallback_dirent_inode(info: &DirectoryContentInfo, offset: usize) -> u64 {
     hash.max(1)
 }
 
-fn log_sddm_dirents(_object_index: u64, _obj: &FileLikeObject, _contents: &[DirectoryContentInfo]) {}
+fn log_sddm_dirents(_object_index: u64, _obj: &FileLikeObject, _contents: &[DirectoryContentInfo]) {
+}
 
 fn log_display_pipe_bytes(_op: &str, _object: &ObjectRef, _bytes: &[u8]) {}
 

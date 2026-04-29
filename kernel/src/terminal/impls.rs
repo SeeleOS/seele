@@ -1,10 +1,8 @@
 use core::fmt::{Debug, Formatter, Result as FmtResult};
 
-use crate::{
-    terminal::{
-        KernelTerminal,
-        term_trait::{AbstractTerminal, PtyWriter, TerminalCursorPosition, TerminalSize},
-    },
+use crate::terminal::{
+    KernelTerminal,
+    term_trait::{AbstractTerminal, PtyWriter, TerminalCursorPosition, TerminalSize},
 };
 
 impl AbstractTerminal for KernelTerminal {
