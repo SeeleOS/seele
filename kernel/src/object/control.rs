@@ -131,21 +131,18 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
             Ok(0)
         }),
         FcntlCmd::GetLk | FcntlCmd::OfdGetLk => {
-            let file_like = object.as_file_like()?;
             let flock_ptr = arg as *mut LinuxFlock;
             if flock_ptr.is_null() {
                 return Err(SyscallError::BadAddress);
             }
 
             let mut flock = user_safe::read(flock_ptr)?;
-            let _ = file_like;
             flock.lock_type = F_UNLCK;
             flock.pid = 0;
             user_safe::write(flock_ptr, &flock)?;
             Ok(0)
         }
         FcntlCmd::SetLk | FcntlCmd::SetLkw | FcntlCmd::OfdSetLk | FcntlCmd::OfdSetLkw => {
-            let _ = object.as_file_like()?;
             if arg == 0 {
                 return Err(SyscallError::BadAddress);
             }
