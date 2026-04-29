@@ -12,6 +12,7 @@ impl Pollable for UnixSocketObject {
             UnixSocketState::Stream(stream) => match event {
                 PollableEvent::CanBeRead => {
                     !stream.recv_buf.lock().is_empty()
+                        || stream.has_front_rights()
                         || *stream.write_closed.lock()
                         || stream
                             .peer

@@ -189,6 +189,7 @@ impl UnixSocketObject {
                     }
 
                     let mut recv_buf = peer.recv_buf.lock();
+                    let byte_offset = recv_buf.len();
                     let write_len = match self.kind {
                         UnixSocketKind::Stream => {
                             let available = STREAM_RECV_CAPACITY.saturating_sub(recv_buf.len());
@@ -200,13 +201,15 @@ impl UnixSocketObject {
                     if self.kind == UnixSocketKind::SeqPacket && write_len > STREAM_RECV_CAPACITY {
                         return Err(SocketError::InvalidArguments);
                     }
-                    if write_len > 0 {
-                        let byte_offset = recv_buf.len();
+                    let has_control_only_stream_rights = self.kind == UnixSocketKind::Stream
+                        && buffer.is_empty()
+                        && !rights.is_empty();
+                    if write_len > 0 || has_control_only_stream_rights {
                         recv_buf.extend(buffer[..write_len].iter().copied());
                         if self.kind == UnixSocketKind::SeqPacket {
                             peer.pending_packets.lock().push_back(write_len);
                         }
-                        if write_len > 0 && !rights.is_empty() {
+                        if !rights.is_empty() {
                             peer.pending_rights.lock().push_back(PendingRights {
                                 byte_offset,
                                 rights,

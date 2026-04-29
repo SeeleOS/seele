@@ -230,6 +230,17 @@ fn unix_seqpacket_next_len(socket: &UnixSocketObject) -> Option<usize> {
     stream.next_packet_len()
 }
 
+fn unix_stream_has_front_rights(socket: &UnixSocketObject) -> bool {
+    if socket.kind != UnixSocketKind::Stream {
+        return false;
+    }
+
+    let UnixSocketState::Stream(stream) = &*socket.state.lock() else {
+        return false;
+    };
+    stream.has_front_rights()
+}
+
 fn netlink_socket_control_bytes(
     socket: &NetlinkSocketObject,
     source_pid: u32,
@@ -1045,7 +1056,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         let mut scratch =
             alloc::vec![0u8; unix_seqpacket_next_len(&socket).unwrap_or(total_capacity)];
         let total_read = socket
-            .read_socket_with_flags_and_mode(&mut scratch, dontwait, peek)
+            .recv_socket_with_flags_and_mode(&mut scratch, dontwait, peek)
             .map_err(ObjectError::from)?;
 
         let mut copied_total = 0usize;
@@ -1082,7 +1093,10 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         } else {
             msg.msg_namelen = 0;
         }
-        let control = if total_read > 0 || socket.kind != UnixSocketKind::Stream {
+        let control = if total_read > 0
+            || socket.kind != UnixSocketKind::Stream
+            || unix_stream_has_front_rights(&socket)
+        {
             unix_socket_control_bytes(&socket, total_read, peek, flags)?
         } else {
             Vec::new()

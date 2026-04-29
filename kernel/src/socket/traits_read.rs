@@ -28,7 +28,7 @@ impl UnixSocketObject {
         buffer: &mut [u8],
         force_nonblocking: bool,
     ) -> SocketResult<usize> {
-        self.read_socket_with_flags_and_mode(buffer, force_nonblocking, false)
+        self.read_socket_with_flags_and_mode_internal(buffer, force_nonblocking, false, false)
     }
 
     pub fn read_socket_with_flags_and_mode(
@@ -36,6 +36,25 @@ impl UnixSocketObject {
         buffer: &mut [u8],
         force_nonblocking: bool,
         peek: bool,
+    ) -> SocketResult<usize> {
+        self.read_socket_with_flags_and_mode_internal(buffer, force_nonblocking, peek, false)
+    }
+
+    pub fn recv_socket_with_flags_and_mode(
+        &self,
+        buffer: &mut [u8],
+        force_nonblocking: bool,
+        peek: bool,
+    ) -> SocketResult<usize> {
+        self.read_socket_with_flags_and_mode_internal(buffer, force_nonblocking, peek, true)
+    }
+
+    fn read_socket_with_flags_and_mode_internal(
+        &self,
+        buffer: &mut [u8],
+        force_nonblocking: bool,
+        peek: bool,
+        allow_control_only: bool,
     ) -> SocketResult<usize> {
         let nonblocking = force_nonblocking || self.is_nonblocking();
         loop {
@@ -117,6 +136,9 @@ impl UnixSocketObject {
                     }
 
                     let mut recv_buf = stream.recv_buf.lock();
+                    if allow_control_only && recv_buf.is_empty() && stream.has_front_rights() {
+                        return Ok(0);
+                    }
                     if !recv_buf.is_empty() {
                         if peek {
                             let read = buffer.len().min(recv_buf.len());
@@ -169,6 +191,9 @@ impl UnixSocketObject {
                     });
 
                     let ready_after_register = !stream.recv_buf.lock().is_empty()
+                        || (allow_control_only
+                            && stream.recv_buf.lock().is_empty()
+                            && stream.has_front_rights())
                         || *stream.write_closed.lock()
                         || stream
                             .peer

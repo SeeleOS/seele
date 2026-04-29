@@ -80,40 +80,51 @@ impl UnixStreamInner {
         wake_io();
     }
 
-    pub fn take_ready_rights(&self, bytes_read: usize) -> Vec<Vec<ObjectRef>> {
-        if bytes_read == 0 {
-            return Vec::new();
-        }
+    pub fn has_front_rights(&self) -> bool {
+        self.pending_rights
+            .lock()
+            .front()
+            .is_some_and(|entry| entry.byte_offset == 0)
+    }
 
+    pub fn take_ready_rights(&self, bytes_read: usize) -> Vec<Vec<ObjectRef>> {
         let mut pending = self.pending_rights.lock();
         let mut ready = Vec::new();
+        let is_ready = |entry: &PendingRights| {
+            if bytes_read == 0 {
+                entry.byte_offset == 0
+            } else {
+                entry.byte_offset < bytes_read
+            }
+        };
 
-        while pending
-            .front()
-            .is_some_and(|entry| entry.byte_offset < bytes_read)
-        {
+        while pending.front().is_some_and(is_ready) {
             let entry = pending
                 .pop_front()
                 .expect("front element must exist while draining ready rights");
             ready.push(entry.rights);
         }
 
-        for entry in pending.iter_mut() {
-            entry.byte_offset = entry.byte_offset.saturating_sub(bytes_read);
+        if bytes_read > 0 {
+            for entry in pending.iter_mut() {
+                entry.byte_offset = entry.byte_offset.saturating_sub(bytes_read);
+            }
         }
 
         ready
     }
 
     pub fn peek_ready_rights(&self, bytes_read: usize) -> Vec<Vec<ObjectRef>> {
-        if bytes_read == 0 {
-            return Vec::new();
-        }
-
         self.pending_rights
             .lock()
             .iter()
-            .take_while(|entry| entry.byte_offset < bytes_read)
+            .take_while(|entry| {
+                if bytes_read == 0 {
+                    entry.byte_offset == 0
+                } else {
+                    entry.byte_offset < bytes_read
+                }
+            })
             .map(|entry| entry.rights.clone())
             .collect()
     }
