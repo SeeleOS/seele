@@ -1,6 +1,6 @@
 use core::str::from_utf8;
 
-use alloc::sync::Arc;
+use alloc::{string::String, sync::Arc};
 use spin::Mutex;
 
 use crate::{
@@ -38,6 +38,60 @@ impl TerminalObject {
             linux_console: Arc::new(Mutex::new(LinuxConsoleState::default())),
         }
     }
+
+    pub fn write_screen_text(&self, text: &str) {
+        let filtered = strip_ansi_sequences(text);
+        if !filtered.is_empty() {
+            self.inner.lock().push_str(&filtered);
+        }
+    }
+}
+
+pub fn strip_ansi_sequences(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let bytes = text.as_bytes();
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        if bytes[index] != 0x1b {
+            output.push(bytes[index] as char);
+            index += 1;
+            continue;
+        }
+
+        index += 1;
+        let Some(&next) = bytes.get(index) else {
+            break;
+        };
+
+        match next {
+            b'[' => {
+                index += 1;
+                while let Some(&byte) = bytes.get(index) {
+                    index += 1;
+                    if (0x40..=0x7e).contains(&byte) {
+                        break;
+                    }
+                }
+            }
+            b']' => {
+                index += 1;
+                while let Some(&byte) = bytes.get(index) {
+                    index += 1;
+                    if byte == 0x07 {
+                        break;
+                    }
+                    if byte == 0x1b && bytes.get(index) == Some(&b'\\') {
+                        index += 1;
+                        break;
+                    }
+                }
+            }
+            _ => index += 1,
+        }
+    }
+
+    output
 }
 
 impl Object for TerminalObject {
@@ -49,6 +103,7 @@ impl Writable for TerminalObject {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
         let string = from_utf8(buffer).unwrap_or("Unsupported charcter");
         s_print!("{string}");
+        self.write_screen_text(string);
         Ok(buffer.len())
     }
 }
