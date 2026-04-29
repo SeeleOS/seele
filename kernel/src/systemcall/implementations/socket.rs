@@ -653,8 +653,8 @@ fn sendmsg_rights(msg: &relibc_msg_hdr) -> Result<Vec<ObjectRef>, SyscallError> 
             return Err(SyscallError::InvalidArguments);
         }
 
-        let next = cmsg_align(offset + header.cmsg_len);
-        if next > control.len() {
+        let end = offset + header.cmsg_len;
+        if end > control.len() {
             return Err(SyscallError::InvalidArguments);
         }
 
@@ -677,6 +677,14 @@ fn sendmsg_rights(msg: &relibc_msg_hdr) -> Result<Vec<ObjectRef>, SyscallError> 
                 }
                 rights.push(get_object_current_process(fd as u64).map_err(SyscallError::from)?);
             }
+        }
+
+        let next = cmsg_align(end);
+        if next > control.len() {
+            if end != control.len() {
+                return Err(SyscallError::InvalidArguments);
+            }
+            break;
         }
 
         offset = next;
