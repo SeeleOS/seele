@@ -17,7 +17,7 @@ use crate::{
         config::ConfigurateRequest,
         error::ObjectError,
         linux_anon::wake_linux_io_waiters,
-        misc::{ObjectRef, ObjectResult},
+        misc::{ObjectRef, ObjectResult, get_object_current_process},
         traits::{Configuratable, Readable, Statable},
     },
     polling::{event::PollableEvent, object::Pollable},
@@ -61,6 +61,7 @@ const IFLA_QDISC: u16 = 6;
 const IFLA_TXQLEN: u16 = 13;
 const IFLA_OPERSTATE: u16 = 16;
 const IFLA_LINKMODE: u16 = 17;
+const IFLA_NET_NS_FD: u16 = 28;
 const IFLA_NUM_TX_QUEUES: u16 = 31;
 const IFLA_NUM_RX_QUEUES: u16 = 32;
 const IFLA_ALT_IFNAME: u16 = 53;
@@ -543,6 +544,7 @@ impl NetlinkSocketObject {
         let reply_pid = self.local_address().pid;
 
         match header.nlmsg_type {
+            RTM_NEWLINK => self.handle_new_link(header, payload),
             RTM_GETLINK => self.handle_get_link(header, payload, reply_pid),
             RTM_GETADDR => self.handle_get_addr(header, payload, reply_pid),
             _ => self.enqueue_error_response(header, 0),
@@ -620,6 +622,83 @@ impl NetlinkSocketObject {
             ));
         } else {
             self.enqueue_error_response(header, -19);
+        }
+    }
+
+    fn handle_new_link(&self, header: NetlinkMessageHeader, payload: &[u8]) {
+        let request = Self::read_struct_prefix::<IfInfoMessage>(payload).unwrap_or(IfInfoMessage {
+            ifi_family: 0,
+            ifi_pad: 0,
+            ifi_type: 0,
+            ifi_index: 0,
+            ifi_flags: 0,
+            ifi_change: 0,
+        });
+        let attrs_offset = core::mem::size_of::<IfInfoMessage>().min(payload.len());
+        let request_name = Self::find_attribute(payload, attrs_offset, IFLA_IFNAME)
+            .and_then(Self::parse_netlink_string);
+        let request_alt_name = Self::find_attribute(payload, attrs_offset, IFLA_ALT_IFNAME)
+            .and_then(Self::parse_netlink_string);
+        if request_alt_name.is_some() {
+            self.enqueue_error_response(header, -22);
+            return;
+        }
+
+        let interfaces = net::interfaces();
+        let requested_interface = interfaces
+            .iter()
+            .copied()
+            .find(|interface| {
+                (request.ifi_index <= 0 || interface.index == request.ifi_index)
+                    && request_name.is_none_or(|name| interface.name == name)
+            });
+
+        let Some(namespace_fd) = Self::find_attribute(payload, attrs_offset, IFLA_NET_NS_FD)
+            .and_then(Self::parse_i32_attribute)
+        else {
+            if requested_interface.is_some() {
+                self.enqueue_ack_from_header(header);
+            } else {
+                self.enqueue_error_response(header, -19);
+            }
+            return;
+        };
+        if namespace_fd < 0 {
+            self.enqueue_error_response(header, -22);
+            return;
+        }
+
+        let Some(interface) = interfaces.into_iter().find(|interface| !interface.loopback) else {
+            self.enqueue_error_response(header, -19);
+            return;
+        };
+        if request.ifi_index > 0 && interface.index != request.ifi_index {
+            self.enqueue_error_response(header, -19);
+            return;
+        }
+        if request_name.is_some_and(|name| interface.name != name) {
+            self.enqueue_error_response(header, -19);
+            return;
+        }
+
+        let Ok(namespace_object) = get_object_current_process(namespace_fd as u64) else {
+            self.enqueue_error_response(header, -22);
+            return;
+        };
+        let Ok(namespace) = namespace_object.as_net_namespace() else {
+            self.enqueue_error_response(header, -22);
+            return;
+        };
+
+        match net::move_primary_device_to_namespace(namespace.inode()) {
+            Ok(()) => self.enqueue_ack_from_header(header),
+            Err(net::NetError::NoDevice) => self.enqueue_error_response(header, -19),
+            Err(net::NetError::InvalidArguments) => self.enqueue_error_response(header, -22),
+            Err(net::NetError::TryAgain) => self.enqueue_error_response(header, -11),
+            Err(net::NetError::NotConnected) => self.enqueue_error_response(header, -107),
+            Err(net::NetError::AddressInUse) => self.enqueue_error_response(header, -98),
+            Err(net::NetError::ConnectionRefused) => self.enqueue_error_response(header, -111),
+            Err(net::NetError::BrokenPipe) => self.enqueue_error_response(header, -32),
         }
     }
 
@@ -860,6 +939,10 @@ impl NetlinkSocketObject {
         core::str::from_utf8(bytes).ok()
     }
 
+    fn parse_i32_attribute(bytes: &[u8]) -> Option<i32> {
+        Some(i32::from_ne_bytes(bytes.get(..4)?.try_into().ok()?))
+    }
+
     fn read_struct_prefix<T: Copy>(bytes: &[u8]) -> Option<T> {
         if bytes.len() < core::mem::size_of::<T>() {
             return None;
@@ -878,6 +961,10 @@ impl NetlinkSocketObject {
 
         let header =
             unsafe { core::ptr::read_unaligned(message.as_ptr().cast::<NetlinkMessageHeader>()) };
+        self.enqueue_ack_from_header(header);
+    }
+
+    fn enqueue_ack_from_header(&self, header: NetlinkMessageHeader) {
         self.enqueue_error_response(header, 0);
     }
 
