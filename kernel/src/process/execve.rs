@@ -77,7 +77,16 @@ impl Process {
         with_profiling(
             || {
                 let mut old_addrspace = mem::replace(&mut self.addrspace, next_addrspace);
-                old_addrspace.clean();
+                if self.borrowed_addrspace_from_parent {
+                    self.borrowed_addrspace_from_parent = false;
+                    if let Some(parent) = self.parent.clone() {
+                        parent.lock().addrspace = old_addrspace;
+                    } else {
+                        old_addrspace.clean();
+                    }
+                } else {
+                    old_addrspace.clean();
+                }
             },
             alloc::format!(
                 "execve clean addrspace pid={} path={}",

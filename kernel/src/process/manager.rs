@@ -70,6 +70,7 @@ pub fn get_current_process() -> ProcessRef {
 pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
     let (threads, vfork_blocker) = {
         let mut process = process.lock();
+        process.restore_borrowed_addrspace_to_parent();
         systemd_perf::log_and_clear_process_summary(&process, exit_status);
         let vfork_blocker = process.vfork_blocker.take();
         (process.terminate_inner(exit_status), vfork_blocker)

@@ -101,6 +101,7 @@ pub struct Process {
     pub capability_ambient: [u32; 2],
     pub net_namespace: NetNamespaceRef,
     pub vfork_blocker: Option<ThreadID>,
+    pub borrowed_addrspace_from_parent: bool,
     pub ptrace: ptrace::PtraceState,
     pub wait_event: Option<wait::ProcessWaitEvent>,
 }
@@ -149,6 +150,7 @@ impl Default for Process {
             capability_ambient: [0; 2],
             net_namespace: NetNamespace::init(),
             vfork_blocker: None,
+            borrowed_addrspace_from_parent: false,
             ptrace: ptrace::PtraceState::default(),
             wait_event: None,
         }

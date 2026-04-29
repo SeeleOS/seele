@@ -2,18 +2,15 @@ use crate::{
     process::ProcessRef,
     thread::{
         THREAD_MANAGER, ThreadRef, misc::ThreadID, stack::allocate_kernel_stack, thread::Thread,
+        yielding::BlockType,
     },
 };
 
 impl Thread {
-    pub fn clone_and_spawn(&self, process: ProcessRef) -> ThreadRef {
-        self.clone_and_spawn_with_id(process, ThreadID::new())
-    }
-
-    pub fn clone_and_spawn_with_id(&self, process: ProcessRef, id: ThreadID) -> ThreadRef {
+    fn clone_for_spawn_with_id(&self, process: ProcessRef, id: ThreadID) -> Thread {
         log::debug!("clone_and_spawn: start");
         let mut snapshot = self.snapshot;
-        let thread = Self {
+        Self {
             parent: process.clone(),
             id,
             snapshot: {
@@ -27,12 +24,35 @@ impl Thread {
             last_user_snapshot: self.last_user_snapshot,
             last_user_fs_base: self.last_user_fs_base,
             ..Default::default()
-        };
+        }
+    }
+
+    pub fn clone_and_spawn(&self, process: ProcessRef) -> ThreadRef {
+        self.clone_and_spawn_with_id(process, ThreadID::new())
+    }
+
+    pub fn clone_and_spawn_with_id(&self, process: ProcessRef, id: ThreadID) -> ThreadRef {
+        let thread = self.clone_for_spawn_with_id(process, id);
 
         log::debug!("clone_and_spawn: thread manager lock start");
         let mut manager = THREAD_MANAGER.get().unwrap().lock();
         log::debug!("clone_and_spawn: thread manager locked");
 
         manager.spawn(thread)
+    }
+
+    pub fn clone_and_spawn_blocked_with_id(
+        &self,
+        process: ProcessRef,
+        id: ThreadID,
+        block_type: BlockType,
+    ) -> ThreadRef {
+        let thread = self.clone_for_spawn_with_id(process, id);
+
+        log::debug!("clone_and_spawn_blocked: thread manager lock start");
+        let mut manager = THREAD_MANAGER.get().unwrap().lock();
+        log::debug!("clone_and_spawn_blocked: thread manager locked");
+
+        manager.spawn_blocked(thread, block_type)
     }
 }

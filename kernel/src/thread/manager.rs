@@ -53,6 +53,22 @@ impl ThreadManager {
         thread
     }
 
+    pub fn spawn_blocked(&mut self, thread: Thread, block_type: BlockType) -> ThreadRef {
+        let id = thread.id;
+        let thread = Arc::new(Mutex::new(thread));
+
+        self.threads.insert(id, thread.clone());
+
+        log::debug!("thread spawn blocked: {:?} {:?}", id, block_type);
+        {
+            let mut locked = thread.lock();
+            locked.state = State::Blocked(block_type.clone());
+        }
+        self.blocked_queues.push(thread.clone(), id, block_type);
+
+        thread
+    }
+
     pub fn push_ready(&mut self, thread: ThreadRef) {
         if self
             .ready_queue

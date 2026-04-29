@@ -368,7 +368,12 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
     }
 
     let current = get_current_process();
-    let (child_process, child_thread) = Process::fork(current.clone());
+    let is_vfork = clone_flags.contains(CloneFlags::VFORK);
+    let (child_process, child_thread) = if is_vfork {
+        Process::vfork(current.clone())
+    } else {
+        Process::fork(current.clone())
+    };
     if clone_flags.contains(CloneFlags::NEWNET) {
         child_process.lock().net_namespace = NetNamespace::new();
     }
@@ -408,7 +413,9 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
         user_safe::write(parent_tid, &(pid.0 as i32))?;
     }
 
-    if clone_flags.intersects(CloneFlags::CHILD_SETTID | CloneFlags::CHILD_CLEARTID) {
+    let needs_child_tid_write =
+        clone_flags.intersects(CloneFlags::CHILD_SETTID | CloneFlags::CHILD_CLEARTID);
+    if needs_child_tid_write && !is_vfork {
         child_process
             .lock()
             .addrspace
@@ -430,7 +437,15 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
         user_safe::write(pidfd_ptr, &pidfd_fd)?;
     }
 
-    if clone_flags.contains(CloneFlags::VFORK) {
+    if is_vfork {
+        Process::borrow_addrspace_from_parent_for_vfork(&current, &child_process);
+        if needs_child_tid_write {
+            child_process
+                .lock()
+                .addrspace
+                .write(child_tid, &(pid.0 as i32))?;
+        }
+        Process::wake_vfork_child(child_thread);
         wait_for_vfork_completion(&child_process);
     }
 

@@ -1,13 +1,14 @@
 use alloc::sync::Arc;
+use core::mem;
 use spin::mutex::Mutex;
 
 use crate::{
     process::{Process, ProcessRef, misc::ProcessID},
-    thread::{ThreadRef, get_current_thread, misc::ThreadID},
+    thread::{THREAD_MANAGER, ThreadRef, get_current_thread, misc::ThreadID, yielding::BlockType},
 };
 
 impl Process {
-    pub fn fork(parent: ProcessRef) -> (ProcessRef, ThreadRef) {
+    fn fork_process(parent: ProcessRef) -> (ProcessID, ProcessRef) {
         let (pid, new_process) = {
             let current_thread = get_current_thread();
             let mut parent_locked = parent.lock();
@@ -61,6 +62,12 @@ impl Process {
             (pid, new_process)
         };
 
+        (pid, new_process)
+    }
+
+    pub fn fork(parent: ProcessRef) -> (ProcessRef, ThreadRef) {
+        let (pid, new_process) = Self::fork_process(parent);
+
         let current_thread = get_current_thread();
         let new_thread = current_thread
             .lock()
@@ -70,5 +77,50 @@ impl Process {
 
         let _ = pid;
         (new_process, new_thread)
+    }
+
+    pub fn vfork(parent: ProcessRef) -> (ProcessRef, ThreadRef) {
+        let (pid, new_process) = Self::fork_process(parent.clone());
+
+        let current_thread = get_current_thread();
+        let new_thread = current_thread.lock().clone_and_spawn_blocked_with_id(
+            new_process.clone(),
+            ThreadID(pid.0),
+            BlockType::Stopped,
+        );
+        new_thread.lock().snapshot.inner.rax = 0;
+        new_process.lock().threads.push(Arc::downgrade(&new_thread));
+
+        (new_process, new_thread)
+    }
+
+    pub fn borrow_addrspace_from_parent_for_vfork(parent: &ProcessRef, child: &ProcessRef) {
+        let mut parent = parent.lock();
+        let mut child = child.lock();
+        let mut old_child_addrspace =
+            mem::replace(&mut child.addrspace, mem::take(&mut parent.addrspace));
+        child.borrowed_addrspace_from_parent = true;
+        drop(child);
+        drop(parent);
+        old_child_addrspace.clean();
+    }
+
+    pub fn restore_borrowed_addrspace_to_parent(&mut self) {
+        if !self.borrowed_addrspace_from_parent {
+            return;
+        }
+
+        let Some(parent) = self.parent.clone() else {
+            self.borrowed_addrspace_from_parent = false;
+            return;
+        };
+
+        let borrowed_addrspace = mem::take(&mut self.addrspace);
+        self.borrowed_addrspace_from_parent = false;
+        parent.lock().addrspace = borrowed_addrspace;
+    }
+
+    pub fn wake_vfork_child(thread: ThreadRef) {
+        THREAD_MANAGER.get().unwrap().lock().wake(thread);
     }
 }
