@@ -63,16 +63,6 @@ impl DrmState {
                 }
                 (start_frame, kernel_addr, PageTableFlags::empty(), false)
             };
-        crate::s_println!(
-            "debug drm create_dumb: {}x{} bpp={} pitch={} size={} scanout_backed={}",
-            request.width,
-            request.height,
-            request.bpp,
-            pitch,
-            size,
-            scanout_backed
-        );
-
         let handle = self.next_handle;
         self.next_handle = self.next_handle.checked_add(1).ok_or(ObjectError::Other)?;
         let map_offset = self.next_map_offset;
