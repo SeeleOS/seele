@@ -25,24 +25,22 @@ use pid::{
     current_pid, ensure_pid_exists, fd_target, parse_fd, parse_pid, pid_cgroup_inode,
     pid_cmdline_inode, pid_comm_inode, pid_dir_entries, pid_dir_inode, pid_environ_inode,
     pid_fd_dir_inode, pid_fd_entries, pid_fd_inode, pid_fdinfo_dir_inode, pid_fdinfo_entries,
-    pid_fdinfo_inode, pid_gid_map_inode, pid_loginuid_inode, pid_mountinfo_inode,
-    pid_ns_dir_inode, pid_ns_entries, pid_ns_inode, pid_oom_score_adj_inode, pid_root_inode,
-    pid_sessionid_inode, pid_setgroups_inode, pid_stat_inode, pid_status_inode, pid_string,
-    pid_uid_map_inode, proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_comm_bytes,
-    proc_pid_environ_bytes, proc_pid_fdinfo_bytes, proc_pid_gid_map_bytes,
-    proc_pid_loginuid_bytes, proc_pid_oom_score_adj_bytes, proc_pid_sessionid_bytes,
-    proc_pid_setgroups_bytes, proc_pid_stat_bytes, proc_pid_status_bytes, proc_pid_uid_map_bytes,
-    proc_pid_write_gid_map, proc_pid_write_oom_score_adj, proc_pid_write_setgroups,
-    proc_pid_write_uid_map,
+    pid_fdinfo_inode, pid_gid_map_inode, pid_loginuid_inode, pid_mountinfo_inode, pid_ns_dir_inode,
+    pid_ns_entries, pid_ns_inode, pid_oom_score_adj_inode, pid_root_inode, pid_sessionid_inode,
+    pid_setgroups_inode, pid_stat_inode, pid_status_inode, pid_string, pid_uid_map_inode,
+    proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_comm_bytes, proc_pid_environ_bytes,
+    proc_pid_fdinfo_bytes, proc_pid_gid_map_bytes, proc_pid_loginuid_bytes,
+    proc_pid_oom_score_adj_bytes, proc_pid_sessionid_bytes, proc_pid_setgroups_bytes,
+    proc_pid_stat_bytes, proc_pid_status_bytes, proc_pid_uid_map_bytes, proc_pid_write_gid_map,
+    proc_pid_write_oom_score_adj, proc_pid_write_setgroups, proc_pid_write_uid_map,
 };
 use root::{
     PROC_CMDLINE_INODE, PROC_DEVICES_INODE, PROC_MEMINFO_INODE, PROC_MOUNTS_INODE,
     PROC_PRESSURE_CPU_INODE, PROC_PRESSURE_INODE, PROC_PRESSURE_IO_INODE,
     PROC_PRESSURE_MEMORY_INODE, PROC_ROOT_INODE, PROC_SELF_INODE, PROC_STAT_INODE,
     PROC_SYS_FS_FILE_MAX_INODE, PROC_SYS_FS_INODE, PROC_SYS_FS_NR_OPEN_INODE, PROC_SYS_INODE,
-    PROC_SYS_KERNEL_CAP_LAST_CAP_INODE,
-    PROC_SYS_KERNEL_DOMAINNAME_INODE, PROC_SYS_KERNEL_HOSTNAME_INODE, PROC_SYS_KERNEL_INODE,
-    PROC_SYS_KERNEL_NGROUPS_MAX_INODE,
+    PROC_SYS_KERNEL_CAP_LAST_CAP_INODE, PROC_SYS_KERNEL_DOMAINNAME_INODE,
+    PROC_SYS_KERNEL_HOSTNAME_INODE, PROC_SYS_KERNEL_INODE, PROC_SYS_KERNEL_NGROUPS_MAX_INODE,
     PROC_SYS_KERNEL_OSRELEASE_INODE, PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE,
     PROC_SYS_KERNEL_RANDOM_INODE, PROC_SYS_KERNEL_RANDOM_UUID_INODE, PROC_UPTIME_INODE,
     proc_boot_id_bytes, proc_cap_last_cap_bytes, proc_devices_bytes, proc_kernel_cmdline_bytes,
@@ -340,9 +338,11 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         }
         ["self", "sessionid"] => {
             let pid = current_pid()?;
-            Ok(proc_file("sessionid", pid_sessionid_inode(pid), move || {
-                proc_pid_sessionid_bytes(pid).unwrap_or_default()
-            }))
+            Ok(proc_file(
+                "sessionid",
+                pid_sessionid_inode(pid),
+                move || proc_pid_sessionid_bytes(pid).unwrap_or_default(),
+            ))
         }
         ["self", "loginuid"] => {
             let pid = current_pid()?;
@@ -517,9 +517,11 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         [pid, "sessionid"] => {
             let pid = parse_pid(pid)?;
             ensure_pid_exists(pid)?;
-            Ok(proc_file("sessionid", pid_sessionid_inode(pid), move || {
-                proc_pid_sessionid_bytes(pid).unwrap_or_default()
-            }))
+            Ok(proc_file(
+                "sessionid",
+                pid_sessionid_inode(pid),
+                move || proc_pid_sessionid_bytes(pid).unwrap_or_default(),
+            ))
         }
         [pid, "loginuid"] => {
             let pid = parse_pid(pid)?;

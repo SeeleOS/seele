@@ -61,7 +61,7 @@
             fi
 
             if [ "$needs_rootfs_init" -eq 1 ]; then
-              ./rootfs_making/make_disk.sh
+              ./rootfs_making/make_rootfs.sh
             fi
 
             exec cargo run -- "$@"

@@ -458,7 +458,8 @@ fn write_file(path: &str, kind: CgroupFileKind, buffer: &[u8]) -> FSResult<usize
                     enabled.insert(token.to_string());
                 }
             }
-            state.directory_mut(path)?.subtree_control = enabled.into_iter().collect::<Vec<_>>().join(" ");
+            state.directory_mut(path)?.subtree_control =
+                enabled.into_iter().collect::<Vec<_>>().join(" ");
         }
         CgroupFileKind::MemoryOomGroup => {
             let text = core::str::from_utf8(buffer).map_err(|_| FSError::Other)?;

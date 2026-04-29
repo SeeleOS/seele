@@ -8,7 +8,6 @@ ROOTFS_MAKING_DIR="${ROOT_DIR}/rootfs_making"
 PACMAN_CONF_TEMPLATE="${ROOTFS_MAKING_DIR}/pacman.conf"
 PACMAN_CONF_IN_SYSROOT="${SYSROOT_DIR}/etc/pacman.conf"
 OVERRIDE_DISK=0
-ARCH_MIRROR="${ARCH_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/archlinux/\$repo/os/\$arch}"
 PACSTRAP_BIN="$(command -v pacstrap)"
 ARCH_CHROOT_BIN="$(command -v arch-chroot)"
 AUR_BUILD_USER="aurbuilder"
@@ -93,7 +92,8 @@ install_sysroot_file() {
     local target="$2"
 
     sudo rm -rf "${target}"
-    sudo install -Dm644 "${source}" "${target}"
+    sudo mkdir -p "$(dirname "${target}")"
+    sudo cp --preserve=mode "${source}" "${target}"
 }
 
 pacstrap_root() {
@@ -204,80 +204,16 @@ fi
 
 sudo mount -o loop "${DISK_IMG}" "${SYSROOT_DIR}"
 
-sudo mkdir -p "${SYSROOT_DIR}/tmp"
-sudo chmod 1777 "${SYSROOT_DIR}/tmp"
-sudo mkdir -p "${SYSROOT_DIR}/var/log"
-sudo mkdir -p "${SYSROOT_DIR}/var/log/journal"
-sudo mkdir -p "${SYSROOT_DIR}/var/log/sddm"
-sudo mkdir -p "${SYSROOT_DIR}/var/tmp"
-sudo chmod 1777 "${SYSROOT_DIR}/var/tmp"
-sudo mkdir -p "${SYSROOT_DIR}/etc/X11"
-sudo mkdir -p "${SYSROOT_DIR}/etc"
-sudo rm -f "${SYSROOT_DIR}/var/lib/pacman/db.lck"
-cat <<EOF | sudo tee "${PACMAN_CONF_TEMPLATE}" >/dev/null
-[options]
-Architecture = auto
-CheckSpace
-ParallelDownloads = 5
-SigLevel = Never
-
-[core]
-Server = ${ARCH_MIRROR}
-
-[extra]
-Server = ${ARCH_MIRROR}
-EOF
-sudo install -Dm644 "${PACMAN_CONF_TEMPLATE}" "${PACMAN_CONF_IN_SYSROOT}"
+install_sysroot_file "${PACMAN_CONF_TEMPLATE}" "${PACMAN_CONF_IN_SYSROOT}"
 
 install_repo_packages
-arch_chroot /bin/sh -lc "update-ca-trust || true"
 
-sudo install -Dm644 "${ROOTFS_MAKING_DIR}/seatd.service" "${SYSROOT_DIR}/etc/systemd/system/seatd.service"
-sudo install -d -m 0755 "${SYSROOT_DIR}/etc/pam.d"
-sudo install -d -m 0755 "${SYSROOT_DIR}/etc/sddm.conf.d"
-sudo install -d -m 0755 "${SYSROOT_DIR}/etc/X11/xorg.conf.d"
-sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/journald.conf.d"
-sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/system/systemd-logind.service.d"
-sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/system/systemd-localed.service.d"
-sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/system/systemd-user-runtime-dir@.service.d"
-sudo install -d -m 0755 "${SYSROOT_DIR}/etc/systemd/system/user@.service.d"
-install_sysroot_file "${ROOTFS_MAKING_DIR}/sddm.conf" "${SYSROOT_DIR}/etc/sddm.conf"
-install_sysroot_file "${ROOTFS_MAKING_DIR}/sddm.conf.d/seele-wayland.conf" "${SYSROOT_DIR}/etc/sddm.conf.d/seele-wayland.conf"
-install_sysroot_file "${ROOTFS_MAKING_DIR}/xorg.conf.d/10-seele-modesetting.conf" "${SYSROOT_DIR}/etc/X11/xorg.conf.d/10-seele-modesetting.conf"
-install_sysroot_file "${ROOTFS_MAKING_DIR}/pam.d/systemd-user" "${SYSROOT_DIR}/etc/pam.d/systemd-user"
-install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd/journald.conf.d/persistent.conf" "${SYSROOT_DIR}/etc/systemd/journald.conf.d/persistent.conf"
-install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd/system/systemd-logind.service.d/bypass-userdb.conf" "${SYSROOT_DIR}/etc/systemd/system/systemd-logind.service.d/bypass-userdb.conf"
-install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd-localed.service.d/override.conf" "${SYSROOT_DIR}/etc/systemd/system/systemd-localed.service.d/override.conf"
-install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd/system/systemd-user-runtime-dir@.service.d/bypass-userdb.conf" "${SYSROOT_DIR}/etc/systemd/system/systemd-user-runtime-dir@.service.d/bypass-userdb.conf"
-install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd/system/user@.service.d/bypass-userdb.conf" "${SYSROOT_DIR}/etc/systemd/system/user@.service.d/bypass-userdb.conf"
-install_sysroot_file "${ROOTFS_MAKING_DIR}/systemd/system/user@.service.d/runtime-dir.conf" "${SYSROOT_DIR}/etc/systemd/system/user@.service.d/runtime-dir.conf"
-arch_chroot /usr/sbin/usermod -p '' root
-arch_chroot /usr/bin/systemctl enable seatd.service
-arch_chroot /usr/bin/systemctl enable sddm.service
+arch_chroot passwd -d root
+arch_chroot systemctl enable seatd.service
 
-install_sysroot_file "${ROOTFS_MAKING_DIR}/xdg-runtime.sh" "${SYSROOT_DIR}/etc/profile.d/xdg-runtime.sh"
-
-sudo chmod 0755 "${SYSROOT_DIR}/run"
-sudo install -d -m 0755 "${SYSROOT_DIR}/run/dbus"
-sudo install -d -m 0755 "${SYSROOT_DIR}/run/udev/data"
-sudo install -d -m 0700 "${SYSROOT_DIR}/run/user/0"
-sudo install -d -m 0700 "${SYSROOT_DIR}/root/.config"
-sudo install -d -m 0700 "${SYSROOT_DIR}/root/.cache"
-sudo install -d -m 0700 "${SYSROOT_DIR}/root/.local/share"
-sudo install -d -m 0700 "${SYSROOT_DIR}/root/.local/state"
-arch_chroot /usr/bin/install -d -m 0750 -o sddm -g sddm /var/lib/sddm
-arch_chroot /usr/bin/install -d -m 0750 -o plasmalogin -g plasmalogin /var/lib/plasmalogin
-sudo install -d -m 1777 "${SYSROOT_DIR}/tmp/.X11-unix"
-sudo install -d -m 0755 "${SYSROOT_DIR}/var/lib/dbus"
-sudo rm -f "${SYSROOT_DIR}/init"
-
-sudo install -Dm644 "${ROOT_DIR}/misc/maplemono.ttf" "${SYSROOT_DIR}/usr/share/fonts/TTF/maplemono.ttf"
-sudo install -Dm644 "${ROOTFS_MAKING_DIR}/weston.ini" "${SYSROOT_DIR}/etc/xdg/weston/weston.ini"
-sudo install -Dm755 "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
-sudo install -Dm755 "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/root/.xinitrc"
-sudo install -Dm755 "${ROOTFS_MAKING_DIR}/startplasma-sddm-wayland.sh" "${SYSROOT_DIR}/usr/bin/startplasma-sddm-wayland.sh"
-sudo install -Dm755 "${ROOTFS_MAKING_DIR}/startplasma-manual.sh" "${SYSROOT_DIR}/usr/bin/startplasma-manual.sh"
-sudo install -Dm644 "${ROOTFS_MAKING_DIR}/wayland-sessions/plasma-sddm.desktop" "${SYSROOT_DIR}/usr/share/wayland-sessions/plasma-sddm.desktop"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/weston.ini" "${SYSROOT_DIR}/etc/xdg/weston/weston.ini"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/root/.xinitrc"
 
 for package in "${AUR_PACKAGES[@]}"; do
     install_aur_package "${package}"
