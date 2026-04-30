@@ -1,6 +1,6 @@
 use core::str::from_utf8;
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{format, string::String, sync::Arc, vec::Vec};
 use spin::Mutex;
 use x86_64::instructions::interrupts::without_interrupts;
 
