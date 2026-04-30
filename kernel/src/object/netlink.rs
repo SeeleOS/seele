@@ -12,6 +12,7 @@ use spin::Mutex;
 use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function, impl_cast_function_non_trait, net,
+    memory::user_safe,
     object::{
         FileFlags, Object,
         config::ConfigurateRequest,
@@ -1084,6 +1085,10 @@ impl Configuratable for NetlinkSocketObject {
                 } else {
                     flags.remove(FileFlags::NONBLOCK);
                 }
+                Ok(0)
+            }
+            ConfigurateRequest::LinuxTiocoutq(outq_ptr) => {
+                user_safe::write(outq_ptr, &0i32).map_err(|_| ObjectError::InvalidArguments)?;
                 Ok(0)
             }
             _ => Err(ObjectError::InvalidRequest),

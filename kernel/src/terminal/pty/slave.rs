@@ -232,6 +232,7 @@ fn request_name(request: &ConfigurateRequest) -> &'static str {
         ConfigurateRequest::LinuxTiocgPgrp(_) => "LinuxTiocgPgrp",
         ConfigurateRequest::LinuxTiocnotty => "LinuxTiocnotty",
         ConfigurateRequest::LinuxTiocspgrp(_) => "LinuxTiocspgrp",
+        ConfigurateRequest::LinuxTiocoutq(_) => "LinuxTiocoutq",
         ConfigurateRequest::LinuxTiocgwinsz(_) => "LinuxTiocgwinsz",
         ConfigurateRequest::LinuxTiocswinsz(_) => "LinuxTiocswinsz",
         ConfigurateRequest::LinuxTiocgptn(_) => "LinuxTiocgptn",
