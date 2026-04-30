@@ -69,11 +69,9 @@ pub fn handle_vt_request(
                 return Err(ObjectError::InvalidArguments);
             }
 
-            // Minimal VT emulation: record that the current VT remains active.
-            if *ack == 2 && !set_active_vt(1) {
-                return Err(ObjectError::InvalidArguments);
-            }
-
+            // VT_RELDISP only acknowledges a release/acquire handshake. The
+            // active VT itself is selected by VT_ACTIVATE/VT_WAITACTIVE, so do
+            // not silently jump back to tty1 here.
             Ok(Some(0))
         }
         _ => Ok(None),
