@@ -68,10 +68,7 @@ pub fn invalid_syscall_flag_error<T>(raw: u64) -> SyscallError {
 }
 
 pub fn log_unsupported_syscall_result(syscall_no: isize, args: [u64; 6], err: SyscallError) {
-    if !matches!(
-        err,
-        SyscallError::NoSyscall | SyscallError::OperationNotSupported
-    ) {
+    if !matches!(err, SyscallError::NoSyscall) {
         return;
     }
 

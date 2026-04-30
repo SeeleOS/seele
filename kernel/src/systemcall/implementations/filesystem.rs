@@ -437,24 +437,6 @@ fn mount_attr_flag_update(attr: &LinuxMountAttr) -> Result<(MountFlags, MountFla
     Ok((flags, mask))
 }
 
-fn log_mount_setattr_unsupported(
-    dirfd: i32,
-    flags: AtFlags,
-    attr: &LinuxMountAttr,
-    reason: &str,
-) {
-    crate::s_println!(
-        "mount_setattr unsupported reason={} dirfd={} flags={:#x} attr_set={:#x} attr_clr={:#x} propagation={:#x} userns_fd={:#x}",
-        reason,
-        dirfd,
-        flags.bits(),
-        attr.attr_set,
-        attr.attr_clr,
-        attr.propagation,
-        attr.userns_fd,
-    );
-}
-
 fn mount_setattr_target_path(
     dirfd: i32,
     path: CString,
@@ -1785,14 +1767,7 @@ define_syscall!(MountSetattr, |dirfd: i32,
 
     let attr = unsafe { &*attr };
     let target_path = mount_setattr_target_path(dirfd, path, flags)?;
-    let (remount_flags, remount_mask) = match mount_attr_flag_update(attr) {
-        Ok(value) => value,
-        Err(SyscallError::OperationNotSupported) => {
-            log_mount_setattr_unsupported(dirfd, flags, attr, "attr-flags");
-            return Err(SyscallError::OperationNotSupported);
-        }
-        Err(err) => return Err(err),
-    };
+    let (remount_flags, remount_mask) = mount_attr_flag_update(attr)?;
 
     VirtualFS
         .lock()
