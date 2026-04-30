@@ -1519,18 +1519,32 @@ define_syscall!(Mount, |source: CString,
         return Err(SyscallError::OperationNotSupported);
     }
 
-    if (operation_flags.contains(MountOperationFlags::MS_REMOUNT)
-        || operation_flags.intersects(
-            MountOperationFlags::MS_PRIVATE
-                | MountOperationFlags::MS_SLAVE
-                | MountOperationFlags::MS_SHARED
-                | MountOperationFlags::MS_UNBINDABLE,
-        )
-        || mountflags == 0
-        || (mountflags & MountFlags::all().bits()) != 0)
-        && filesystemtype.is_none()
+    if operation_flags.contains(MountOperationFlags::MS_REMOUNT) {
+        let (remount_flags, remount_mask) = remount_bind_flag_update(mountflags);
+        VirtualFS
+            .lock()
+            .remount_bind(
+                target_path,
+                remount_flags,
+                remount_mask,
+                operation_flags.contains(MountOperationFlags::MS_REC),
+            )
+            .map_err(SyscallError::from)?;
+        return Ok(0);
+    }
+
+    if operation_flags.intersects(
+        MountOperationFlags::MS_PRIVATE
+            | MountOperationFlags::MS_SLAVE
+            | MountOperationFlags::MS_SHARED
+            | MountOperationFlags::MS_UNBINDABLE,
+    ) && filesystemtype.is_none()
     {
         return Ok(0);
+    }
+
+    if filesystemtype.is_none() {
+        return Err(SyscallError::InvalidArguments);
     }
 
     if filesystemtype
