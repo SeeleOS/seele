@@ -68,7 +68,10 @@ fn main() {
         let _ = fs::create_dir_all(parent);
     }
     cleanup_socket(&tty_input_socket);
-    eprintln!("tty input socket: {}", tty_input_socket.display());
+    eprintln!(
+        "background terminal input path: {}",
+        tty_input_socket.display()
+    );
     cmd.arg("-serial").arg(format!(
         "unix:{},server=on,wait=off",
         tty_input_socket.display()
@@ -182,7 +185,7 @@ fn forward_terminal_input(socket_path: &Path, done: &AtomicBool) {
             }
             Err(err) => {
                 eprintln!(
-                    "failed to connect tty input socket {}: {err}",
+                    "failed to connect background terminal input path {}: {err}",
                     socket_path.display()
                 );
                 return;

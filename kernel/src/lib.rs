@@ -67,9 +67,9 @@ pub fn init() -> ! {
     log::info!("init: keyboard ready");
     let agent_tty_ready = agent_tty_input::init();
     if agent_tty_ready {
-        log::info!("init: agent tty input ready");
+        log::info!("init: agent background terminal input ready");
     } else {
-        log::info!("init: agent tty input unavailable");
+        log::info!("init: agent background terminal input unavailable");
     }
     interrupts::init();
     log::info!("init: interrupts ready");
