@@ -51,9 +51,9 @@ pub const DRM_VBLANK_FLAGS_MASK: u32 = DRM_VBLANK_EVENT
     | DRM_VBLANK_NEXT_ON_MISS
     | DRM_VBLANK_FLIP;
 
-pub const DRIVER_NAME: &str = "seele";
+pub const DRIVER_NAME: &str = "kms_swrast";
 pub const DRIVER_DATE: &str = "20260426";
-pub const DRIVER_DESC: &str = "Seele DRM/KMS";
+pub const DRIVER_DESC: &str = "Seele software DRM/KMS";
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
