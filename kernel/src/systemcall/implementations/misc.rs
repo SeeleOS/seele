@@ -534,6 +534,7 @@ enum RlimitResource {
     Stack = 3,
     NoFile = 7,
     MemLock = 8,
+    RtPrio = 14,
 }
 
 bitflags! {
@@ -1839,6 +1840,13 @@ define_syscall!(Setrlimit, |resource: i32, rlimit: u64| {
             process.rlimit_memlock_max = limit.rlim_max;
             Ok(0)
         }
+        RlimitResource::RtPrio => {
+            let process = get_current_process();
+            let mut process = process.lock();
+            process.rlimit_rtprio_cur = limit.rlim_cur;
+            process.rlimit_rtprio_max = limit.rlim_max;
+            Ok(0)
+        }
     }
 });
 
@@ -1993,6 +2001,10 @@ define_syscall!(
                         rlim_cur: process.rlimit_memlock_cur,
                         rlim_max: process.rlimit_memlock_max,
                     },
+                    RlimitResource::RtPrio => LinuxRlimit64 {
+                        rlim_cur: process.rlimit_rtprio_cur,
+                        rlim_max: process.rlimit_rtprio_max,
+                    },
                 }
             };
             user_safe::write(old_limit, &limit)?;
@@ -2013,6 +2025,10 @@ define_syscall!(
                 RlimitResource::MemLock => {
                     process.rlimit_memlock_cur = limit.rlim_cur;
                     process.rlimit_memlock_max = limit.rlim_max;
+                }
+                RlimitResource::RtPrio => {
+                    process.rlimit_rtprio_cur = limit.rlim_cur;
+                    process.rlimit_rtprio_max = limit.rlim_max;
                 }
             }
         }

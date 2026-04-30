@@ -56,6 +56,8 @@ impl Process {
                 rlimit_nofile_max: parent_locked.rlimit_nofile_max,
                 rlimit_memlock_cur: parent_locked.rlimit_memlock_cur,
                 rlimit_memlock_max: parent_locked.rlimit_memlock_max,
+                rlimit_rtprio_cur: parent_locked.rlimit_rtprio_cur,
+                rlimit_rtprio_max: parent_locked.rlimit_rtprio_max,
                 rlimit_stack_cur: parent_locked.rlimit_stack_cur,
                 rlimit_stack_max: parent_locked.rlimit_stack_max,
                 session_keyring: parent_locked.session_keyring,
