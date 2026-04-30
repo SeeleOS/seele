@@ -1,6 +1,8 @@
+use alloc::string::String;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{
+    misc::{c_types::CString, others::KernelFrom},
     misc::snapshot::Snapshot,
     process::manager::get_current_process,
     process::ptrace::{maybe_stop_current_on_syscall_entry, maybe_stop_current_on_syscall_exit},
@@ -225,8 +227,9 @@ fn log_syscall_event(phase: &str, syscall_name: &str, syscall_no: isize, args: [
             .first()
             .and_then(|command| command.rsplit('/').next())
             .unwrap_or("?");
+        let path = debug_syscall_path_arg(syscall_name, args);
         crate::s_println!(
-            "bootsys {} comm={} pid={} tid={} {}({}) a1={:#x} a2={:#x} a3={:#x} a4={:#x} a5={:#x} a6={:#x}",
+            "bootsys {} comm={} pid={} tid={} {}({}) a1={:#x} a2={:#x} a3={:#x} a4={:#x} a5={:#x} a6={:#x} path={}",
             phase,
             name,
             process.pid.0,
@@ -238,9 +241,19 @@ fn log_syscall_event(phase: &str, syscall_name: &str, syscall_no: isize, args: [
             args[2],
             args[3],
             args[4],
-            args[5]
+            args[5],
+            path.as_deref().unwrap_or("?")
         );
     });
+}
+
+fn debug_syscall_path_arg(syscall_name: &str, args: [u64; 6]) -> Option<String> {
+    let path_ptr = match syscall_name {
+        "openat" | "mkdirat" | "newfstatat" => args[1] as CString,
+        "mkdir" => args[0] as CString,
+        _ => return None,
+    };
+    String::k_from(path_ptr).ok()
 }
 
 fn log_syscall_exit(syscall_name: &str, syscall_no: isize, result: isize) {
