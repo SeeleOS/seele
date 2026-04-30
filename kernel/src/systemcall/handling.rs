@@ -39,12 +39,14 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
             "enter",
             syscall_name,
             syscall_no,
-            snapshot.rdi,
-            snapshot.rsi,
-            snapshot.rdx,
-            snapshot.r10,
-            snapshot.r8,
-            snapshot.r9,
+            [
+                snapshot.rdi,
+                snapshot.rsi,
+                snapshot.rdx,
+                snapshot.r10,
+                snapshot.r8,
+                snapshot.r9,
+            ],
         );
     }
 
@@ -62,12 +64,14 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     if result < 0 {
         log_unsupported_syscall_result(
             syscall_no,
-            snapshot.rdi,
-            snapshot.rsi,
-            snapshot.rdx,
-            snapshot.r10,
-            snapshot.r8,
-            snapshot.r9,
+            [
+                snapshot.rdi,
+                snapshot.rsi,
+                snapshot.rdx,
+                snapshot.r10,
+                snapshot.r8,
+                snapshot.r9,
+            ],
             SyscallError::from(result),
         );
     }
@@ -204,17 +208,7 @@ fn should_log_boot_debug_syscall() -> bool {
     })
 }
 
-fn log_syscall_event(
-    phase: &str,
-    syscall_name: &str,
-    syscall_no: isize,
-    arg1: u64,
-    arg2: u64,
-    arg3: u64,
-    arg4: u64,
-    arg5: u64,
-    arg6: u64,
-) {
+fn log_syscall_event(phase: &str, syscall_name: &str, syscall_no: isize, args: [u64; 6]) {
     crate::process::misc::with_current_process(|process| {
         let tid = crate::thread::get_current_thread().lock().id.0;
         let name = process
@@ -230,12 +224,12 @@ fn log_syscall_event(
             tid,
             syscall_name,
             syscall_no,
-            arg1,
-            arg2,
-            arg3,
-            arg4,
-            arg5,
-            arg6
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+            args[4],
+            args[5]
         );
     });
 }

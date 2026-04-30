@@ -67,16 +67,7 @@ pub fn invalid_syscall_flag_error<T>(raw: u64) -> SyscallError {
     SyscallError::InvalidArguments
 }
 
-pub fn log_unsupported_syscall_result(
-    syscall_no: isize,
-    arg1: u64,
-    arg2: u64,
-    arg3: u64,
-    arg4: u64,
-    arg5: u64,
-    arg6: u64,
-    err: SyscallError,
-) {
+pub fn log_unsupported_syscall_result(syscall_no: isize, args: [u64; 6], err: SyscallError) {
     if !matches!(
         err,
         SyscallError::NoSyscall | SyscallError::OperationNotSupported
@@ -101,12 +92,12 @@ pub fn log_unsupported_syscall_result(
             tid,
             syscall_name,
             err,
-            arg1,
-            arg2,
-            arg3,
-            arg4,
-            arg5,
-            arg6
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+            args[4],
+            args[5]
         );
     });
 }
