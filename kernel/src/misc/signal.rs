@@ -371,6 +371,17 @@ pub struct ProcessSignalsResult {
     stopped_signal: Option<Signal>,
 }
 
+impl ProcessSignalsResult {
+    fn merge(&mut self, other: Self) {
+        self.should_switch |= other.should_switch;
+        self.stop_current |= other.stop_current;
+        if self.stopped_signal.is_none() {
+            self.stopped_signal = other.stopped_signal;
+        }
+        self.exited_threads.extend(other.exited_threads);
+    }
+}
+
 fn wake_process_threads(process: &ProcessRef, wake_stopped_only: bool) {
     let threads = {
         let process = process.lock();
@@ -395,6 +406,17 @@ fn wake_process_threads(process: &ProcessRef, wake_stopped_only: bool) {
         if should_wake {
             thread_manager.wake(thread);
         }
+    }
+}
+
+fn wake_specific_thread(thread: &ThreadRef) {
+    let should_wake = {
+        let thread = thread.lock();
+        matches!(&thread.state, State::Blocked(block_type) if !matches!(block_type, BlockType::Stopped))
+    };
+
+    if should_wake {
+        THREAD_MANAGER.get().unwrap().lock().wake(thread.clone());
     }
 }
 
@@ -429,10 +451,41 @@ pub fn send_signal_to_process_with_siginfo(process: &ProcessRef, signal: Signal,
     queue_signal(process, signal, Some(siginfo));
 }
 
+fn queue_signal_to_thread(thread: &ThreadRef, signal: Signal, siginfo: Option<SigInfo>) {
+    {
+        let mut thread = thread.lock();
+        let signal_bits = Signals::from(signal);
+        let already_pending = thread.pending_signals.contains(signal_bits);
+        thread.pending_signals.insert(signal_bits);
+        if let Some(siginfo) = siginfo
+            && (!already_pending || thread.pending_signal_info[signal.index()].is_none())
+        {
+            thread.pending_signal_info[signal.index()] =
+                Some(PendingSignalInfo::from_siginfo(siginfo));
+        }
+    }
+
+    let pid = thread.lock().parent.lock().pid.0;
+    wake_signalfd_for_process(pid);
+    wake_specific_thread(thread);
+}
+
+pub fn send_signal_to_thread(thread: &ThreadRef, signal: Signal) {
+    queue_signal_to_thread(thread, signal, None);
+}
+
+pub fn send_signal_to_thread_with_siginfo(thread: &ThreadRef, signal: Signal, siginfo: SigInfo) {
+    queue_signal_to_thread(thread, signal, Some(siginfo));
+}
+
 pub fn process_current_process_signals(process: &ProcessRef) -> bool {
     let result = {
         let mut process = process.lock();
-        process.process_signals()
+        let thread_ref = get_current_thread();
+        let mut thread = thread_ref.lock();
+        let mut result = thread.process_signals(&mut process);
+        result.merge(process.process_signals());
+        result
     };
 
     if let Some(signal) = result.stopped_signal {
@@ -471,109 +524,11 @@ impl Process {
     /// caller should stop the current return path so the handler can run next.
     #[must_use]
     pub fn process_signals(&mut self) -> ProcessSignalsResult {
-        let mut result = ProcessSignalsResult::default();
-
-        for signal in Signal::iter() {
-            let signal_bits = Signals::from(signal);
-            if self.pending_signals.contains(signal_bits)
-                && (signal.is_unblockable()
-                    || !get_current_thread()
-                        .lock()
-                        .blocked_signals
-                        .contains(signal_bits))
-            {
-                let action = self.signal_actions[signal.index()].clone();
-                self.pending_signals.remove(signal_bits);
-                let siginfo = self.pending_signal_info[signal.index()]
-                    .take()
-                    .unwrap_or_else(|| PendingSignalInfo::for_signal(signal))
-                    .to_siginfo();
-
-                match action.handling_type {
-                    SignalHandlingType::Default => {
-                        let default_result = self.default_signal_action(signal);
-                        result.should_switch |= default_result.should_switch;
-                        if !default_result.exited_threads.is_empty() {
-                            result.exited_threads = default_result.exited_threads;
-                        }
-                        if default_result.stop_current {
-                            result.stop_current = true;
-                        }
-                        if default_result.stopped_signal.is_some() {
-                            result.stopped_signal = default_result.stopped_signal;
-                        }
-                    }
-                    SignalHandlingType::Ignore => {}
-                    SignalHandlingType::Function1(func) => with_current_thread(|current_thread| {
-                        let (_, mut stack_builder) = self.addrspace.allocate_user_stack(16);
-                        // x86_64 SysV requires %rsp % 16 == 8 on function entry.
-                        // We only push a single synthetic return address, so reserve one
-                        // extra slot before it to keep the handler ABI-compliant.
-                        stack_builder.push(0);
-                        stack_builder.push(action.restorer as u64);
-
-                        let (current_fx_state, current_fs_base) = {
-                            let snapshot = current_thread.get_appropriate_snapshot();
-                            (snapshot.fx_state, snapshot.fs_base)
-                        };
-                        let mut thread_snapshot = ThreadSnapshot::new_with_fx_state(
-                            (func as usize) as u64,
-                            &mut self.addrspace,
-                            stack_builder.finish().as_u64(),
-                            ThreadSnapshotType::Thread,
-                            current_fx_state,
-                        );
-                        thread_snapshot.fs_base = current_fs_base;
-
-                        thread_snapshot.inner.rdi = signal as u64;
-
-                        current_thread
-                            .block_signals_for_handler(action.sig_handler_ignored_sigs, signal);
-                        current_thread.enter_signal_handler(thread_snapshot);
-
-                        result.should_switch = true;
-                    }),
-                    SignalHandlingType::Function2(func) => with_current_thread(|current_thread| {
-                        let (_, mut stack_builder) = self.addrspace.allocate_user_stack(16);
-                        let (_, mut frame_builder) = self.addrspace.allocate_user(1);
-
-                        let ucontext = build_signal_ucontext(current_thread);
-
-                        let ucontext_ptr = frame_builder.push_struct(&ucontext);
-                        let siginfo_ptr = frame_builder.push_struct(&siginfo);
-
-                        // Keep the signal handler entry stack ABI-aligned.
-                        stack_builder.push(0);
-                        stack_builder.push(action.restorer as u64);
-
-                        let (current_fx_state, current_fs_base) = {
-                            let snapshot = current_thread.get_appropriate_snapshot();
-                            (snapshot.fx_state, snapshot.fs_base)
-                        };
-                        let mut thread_snapshot = ThreadSnapshot::new_with_fx_state(
-                            (func as usize) as u64,
-                            &mut self.addrspace,
-                            stack_builder.finish().as_u64(),
-                            ThreadSnapshotType::Thread,
-                            current_fx_state,
-                        );
-                        thread_snapshot.fs_base = current_fs_base;
-
-                        thread_snapshot.inner.rdi = signal as u64;
-                        thread_snapshot.inner.rsi = siginfo_ptr;
-                        thread_snapshot.inner.rdx = ucontext_ptr;
-
-                        current_thread
-                            .block_signals_for_handler(action.sig_handler_ignored_sigs, signal);
-                        current_thread.enter_signal_handler(thread_snapshot);
-
-                        result.should_switch = true;
-                    }),
-                }
-            }
-        }
-
-        result
+        process_pending_signals(
+            self,
+            &mut self.pending_signals,
+            &mut self.pending_signal_info,
+        )
     }
 
     fn default_signal_action(&mut self, signal: Signal) -> ProcessSignalsResult {
@@ -630,7 +585,115 @@ impl Process {
     }
 }
 
+fn process_pending_signals(
+    process: &mut Process,
+    pending_signals: &mut Signals,
+    pending_signal_info: &mut [Option<PendingSignalInfo>],
+) -> ProcessSignalsResult {
+    let mut result = ProcessSignalsResult::default();
+
+    for signal in Signal::iter() {
+        let signal_bits = Signals::from(signal);
+        if pending_signals.contains(signal_bits)
+            && (signal.is_unblockable()
+                || !get_current_thread()
+                    .lock()
+                    .blocked_signals
+                    .contains(signal_bits))
+        {
+            let action = process.signal_actions[signal.index()].clone();
+            pending_signals.remove(signal_bits);
+            let siginfo = pending_signal_info[signal.index()]
+                .take()
+                .unwrap_or_else(|| PendingSignalInfo::for_signal(signal))
+                .to_siginfo();
+
+            match action.handling_type {
+                SignalHandlingType::Default => {
+                    result.merge(process.default_signal_action(signal));
+                }
+                SignalHandlingType::Ignore => {}
+                SignalHandlingType::Function1(func) => with_current_thread(|current_thread| {
+                    let (_, mut stack_builder) = process.addrspace.allocate_user_stack(16);
+                    // x86_64 SysV requires %rsp % 16 == 8 on function entry.
+                    // We only push a single synthetic return address, so reserve one
+                    // extra slot before it to keep the handler ABI-compliant.
+                    stack_builder.push(0);
+                    stack_builder.push(action.restorer as u64);
+
+                    let (current_fx_state, current_fs_base) = {
+                        let snapshot = current_thread.get_appropriate_snapshot();
+                        (snapshot.fx_state, snapshot.fs_base)
+                    };
+                    let mut thread_snapshot = ThreadSnapshot::new_with_fx_state(
+                        (func as usize) as u64,
+                        &mut process.addrspace,
+                        stack_builder.finish().as_u64(),
+                        ThreadSnapshotType::Thread,
+                        current_fx_state,
+                    );
+                    thread_snapshot.fs_base = current_fs_base;
+
+                    thread_snapshot.inner.rdi = signal as u64;
+
+                    current_thread
+                        .block_signals_for_handler(action.sig_handler_ignored_sigs, signal);
+                    current_thread.enter_signal_handler(thread_snapshot);
+
+                    result.should_switch = true;
+                }),
+                SignalHandlingType::Function2(func) => with_current_thread(|current_thread| {
+                    let (_, mut stack_builder) = process.addrspace.allocate_user_stack(16);
+                    let (_, mut frame_builder) = process.addrspace.allocate_user(1);
+
+                    let ucontext = build_signal_ucontext(current_thread);
+
+                    let ucontext_ptr = frame_builder.push_struct(&ucontext);
+                    let siginfo_ptr = frame_builder.push_struct(&siginfo);
+
+                    // Keep the signal handler entry stack ABI-aligned.
+                    stack_builder.push(0);
+                    stack_builder.push(action.restorer as u64);
+
+                    let (current_fx_state, current_fs_base) = {
+                        let snapshot = current_thread.get_appropriate_snapshot();
+                        (snapshot.fx_state, snapshot.fs_base)
+                    };
+                    let mut thread_snapshot = ThreadSnapshot::new_with_fx_state(
+                        (func as usize) as u64,
+                        &mut process.addrspace,
+                        stack_builder.finish().as_u64(),
+                        ThreadSnapshotType::Thread,
+                        current_fx_state,
+                    );
+                    thread_snapshot.fs_base = current_fs_base;
+
+                    thread_snapshot.inner.rdi = signal as u64;
+                    thread_snapshot.inner.rsi = siginfo_ptr;
+                    thread_snapshot.inner.rdx = ucontext_ptr;
+
+                    current_thread
+                        .block_signals_for_handler(action.sig_handler_ignored_sigs, signal);
+                    current_thread.enter_signal_handler(thread_snapshot);
+
+                    result.should_switch = true;
+                }),
+            }
+        }
+    }
+
+    result
+}
+
 impl Thread {
+    fn process_signals(&mut self, process: &mut Process) -> ProcessSignalsResult {
+        process_pending_signals(
+            process,
+            &mut self.pending_signals,
+            &mut self.pending_signal_info,
+        )
+    }
+
     fn block_signals_for_handler(&mut self, mut signals_to_block: Signals, signal: Signal) {
         signals_to_block.insert(Signals::from(signal));
         self.saved_blocked_signals.push(self.blocked_signals);

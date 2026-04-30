@@ -4,7 +4,7 @@ use spin::Mutex;
 use crate::{
     misc::snapshot::Snapshot,
     process::{Process, ProcessRef},
-    signal::Signals,
+    signal::{PendingSignalInfo, SIGNAL_AMOUNT, Signals},
     thread::{
         ThreadRef,
         misc::{SnapshotState, State, ThreadID},
@@ -27,6 +27,8 @@ pub struct Thread {
 
     pub saved_blocked_signals: Vec<Signals>,
     pub blocked_signals: Signals,
+    pub pending_signals: Signals,
+    pub pending_signal_info: Vec<Option<PendingSignalInfo>>,
     pub clear_child_tid: u64,
     pub robust_list_head: u64,
     pub robust_list_len: usize,
@@ -54,6 +56,8 @@ impl Default for Thread {
             state: State::Ready,
             kernel_stack_top: 0,
             blocked_signals: Signals::default(),
+            pending_signals: Signals::default(),
+            pending_signal_info: alloc::vec![None; SIGNAL_AMOUNT],
             clear_child_tid: 0,
             robust_list_head: 0,
             robust_list_len: 0,

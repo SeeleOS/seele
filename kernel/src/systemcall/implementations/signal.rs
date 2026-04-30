@@ -18,7 +18,7 @@ use crate::{
     process::{FdFlags, manager::get_current_process},
     signal::{
         SI_QUEUE, SigInfo, Signal, UContext, action::SignalAction, send_signal_to_process,
-        send_signal_to_process_with_siginfo,
+        send_signal_to_process_with_siginfo, send_signal_to_thread,
     },
 };
 use alloc::vec::Vec;
@@ -352,7 +352,7 @@ define_syscall!(Tgkill, |tgid: i32, tid: i32, signal: i32| {
         return Err(SyscallError::NoProcess);
     }
 
-    send_signal_to_process(&process, signal);
+    send_signal_to_thread(&thread, signal);
     Ok(0)
 });
 
