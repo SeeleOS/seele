@@ -1856,11 +1856,7 @@ define_syscall!(Prctl, |option: i32,
                         _arg4: u64,
                         _arg5: u64| {
     match PrctlOption::try_from(option).map_err(|_| SyscallError::InvalidArguments)? {
-        PrctlOption::SetSeccomp => match arg2 {
-            2 if arg3 == 0 => Err(SyscallError::BadAddress),
-            1 | 2 => Err(SyscallError::InvalidArguments),
-            _ => Err(SyscallError::InvalidArguments),
-        },
+        PrctlOption::SetSeccomp => Err(SyscallError::InvalidArguments),
         PrctlOption::SetMdwe => Err(SyscallError::InvalidArguments),
         PrctlOption::SetPdeathsig => {
             let signal = if arg2 == 0 {
@@ -1915,7 +1911,8 @@ define_syscall!(Prctl, |option: i32,
         }
         PrctlOption::GetDumpable => Ok(get_current_process().lock().dumpable as usize),
         PrctlOption::GetNoNewPrivs => Ok(get_current_process().lock().no_new_privs as usize),
-        PrctlOption::GetSeccomp | PrctlOption::GetMdwe => Ok(0),
+        PrctlOption::GetSeccomp => Err(SyscallError::InvalidArguments),
+        PrctlOption::GetMdwe => Ok(0),
         PrctlOption::GetKeepCaps => Ok(get_current_process().lock().keep_capabilities as usize),
         PrctlOption::GetSecureBits => Ok(get_current_process().lock().secure_bits as usize),
         PrctlOption::GetName => {
