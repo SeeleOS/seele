@@ -23,7 +23,7 @@ use crate::{
     thread::{
         THREAD_MANAGER, ThreadRef, get_current_thread,
         manager::ThreadManager,
-        yielding::{BlockType, finish_block_current, prepare_block_current},
+        yielding::{BlockType, finish_block_current},
     },
 };
 
@@ -185,21 +185,20 @@ fn futex_wait_impl(arg1: u64, arg2: u64, timeout: u64) -> Result<usize, SyscallE
     let current = get_current_thread();
     let deadline = futex_timeout_deadline(timeout)?;
     {
+        let mut manager = THREAD_MANAGER.get().unwrap().lock();
         let mut queue = FUTEX_QUEUE.lock();
         let cur_value = unsafe { *(arg1 as *const u32) } as u64;
         if cur_value != arg2 {
             return Err(SyscallError::TryAgain);
         }
 
+        // Block the thread before publishing it in the futex bucket so any
+        // racing wake observes a consistent Blocked state after we drop both
+        // locks.
+        manager.block(current.clone(), BlockType::Futex { deadline });
         queue.entry(key).or_default().push_back(current.clone());
-
-        // Mark the thread blocked before releasing the futex bucket so a
-        // concurrent wake cannot slip between queue insertion and scheduling.
-        prepare_block_current(BlockType::Futex { deadline });
     }
 
-    // Do not keep FUTEX_QUEUE locked across scheduling, or FutexWake will
-    // deadlock trying to take the same lock from another thread.
     finish_block_current();
 
     remove_futex_waiter(&current);

@@ -251,7 +251,7 @@ impl ThreadManager {
             .retain(|t| !Arc::ptr_eq(t, thread));
     }
 
-    fn block(&mut self, thread_ref: ThreadRef, block_type: BlockType) {
+    pub(crate) fn block(&mut self, thread_ref: ThreadRef, block_type: BlockType) {
         log::debug!("thread block: {:?}", block_type);
         let mut thread = thread_ref.lock();
         let thread_id = thread.id;
@@ -459,16 +459,16 @@ pub fn block_current(block_type: BlockType) {
 // Avoid sleeping forever in interruptible waits by re-checking for pending
 // signals before and after blocking
 pub fn block_current_with_sig_check(block_type: BlockType) -> ObjectResult<()> {
-    if !get_current_process().lock().pending_signals.is_empty()
-        || !current_thread_ref().lock().pending_signals.is_empty()
-    {
+    let process_has_pending_signals = !get_current_process().lock().pending_signals.is_empty();
+    let thread_has_pending_signals = !current_thread_ref().lock().pending_signals.is_empty();
+    if process_has_pending_signals || thread_has_pending_signals {
         return Err(ObjectError::Interrupted);
     }
     prepare_block_current(block_type);
     finish_block_current();
-    if !get_current_process().lock().pending_signals.is_empty()
-        || !current_thread_ref().lock().pending_signals.is_empty()
-    {
+    let process_has_pending_signals = !get_current_process().lock().pending_signals.is_empty();
+    let thread_has_pending_signals = !current_thread_ref().lock().pending_signals.is_empty();
+    if process_has_pending_signals || thread_has_pending_signals {
         return Err(ObjectError::Interrupted);
     }
     Ok(())

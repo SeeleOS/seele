@@ -453,7 +453,7 @@ pub fn send_signal_to_process_with_siginfo(process: &ProcessRef, signal: Signal,
 }
 
 fn queue_signal_to_thread(thread: &ThreadRef, signal: Signal, siginfo: Option<SigInfo>) {
-    {
+    let parent = {
         let mut thread = thread.lock();
         let signal_bits = Signals::from(signal);
         let already_pending = thread.pending_signals.contains(signal_bits);
@@ -464,9 +464,10 @@ fn queue_signal_to_thread(thread: &ThreadRef, signal: Signal, siginfo: Option<Si
             thread.pending_signal_info[signal.index()] =
                 Some(PendingSignalInfo::from_siginfo(siginfo));
         }
-    }
+        thread.parent.clone()
+    };
 
-    let pid = thread.lock().parent.lock().pid.0;
+    let pid = parent.lock().pid.0;
     wake_signalfd_for_process(pid);
     wake_specific_thread(thread);
 }
@@ -480,31 +481,31 @@ pub fn send_signal_to_thread_with_siginfo(thread: &ThreadRef, signal: Signal, si
 }
 
 pub fn process_current_process_signals(process: &ProcessRef) -> bool {
+    let thread_ref = get_current_thread();
+    let (blocked_signals, mut pending_signals, mut pending_signal_info) = {
+        let mut thread = thread_ref.lock();
+        (
+            thread.blocked_signals,
+            mem::take(&mut thread.pending_signals),
+            mem::take(&mut thread.pending_signal_info),
+        )
+    };
     let result = {
         let mut process = process.lock();
-        let thread_ref = get_current_thread();
-        let (blocked_signals, mut pending_signals, mut pending_signal_info) = {
-            let mut thread = thread_ref.lock();
-            (
-                thread.blocked_signals,
-                mem::take(&mut thread.pending_signals),
-                mem::take(&mut thread.pending_signal_info),
-            )
-        };
         let mut result = process_pending_signals(
             &mut process,
             &mut pending_signals,
             &mut pending_signal_info,
             blocked_signals,
         );
-        {
-            let mut thread = thread_ref.lock();
-            thread.pending_signals = pending_signals;
-            thread.pending_signal_info = pending_signal_info;
-        }
-        result.merge(process.process_signals());
+        result.merge(process.process_signals(blocked_signals));
         result
     };
+    {
+        let mut thread = thread_ref.lock();
+        thread.pending_signals = pending_signals;
+        thread.pending_signal_info = pending_signal_info;
+    }
 
     if let Some(signal) = result.stopped_signal {
         report_signal_stop(process, signal);
@@ -541,8 +542,7 @@ impl Process {
     /// Returns `true` if a user-space signal handler was installed and the
     /// caller should stop the current return path so the handler can run next.
     #[must_use]
-    pub fn process_signals(&mut self) -> ProcessSignalsResult {
-        let blocked_signals = get_current_thread().lock().blocked_signals;
+    pub fn process_signals(&mut self, blocked_signals: Signals) -> ProcessSignalsResult {
         let mut pending_signals = mem::take(&mut self.pending_signals);
         let mut pending_signal_info = mem::take(&mut self.pending_signal_info);
         let result = process_pending_signals(
