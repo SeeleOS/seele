@@ -6,7 +6,10 @@ use crate::{
     process::ptrace::{maybe_stop_current_on_syscall_entry, maybe_stop_current_on_syscall_exit},
     signal::process_current_process_signals,
     systemcall::table::SYSCALL_TABLE,
-    systemcall::utils::{SyscallError, log_unsupported_syscall_result},
+    systemcall::utils::{
+        SyscallError, log_syscall_trace_enter, log_syscall_trace_exit,
+        log_unsupported_syscall_result,
+    },
     thread::{
         THREAD_MANAGER, get_current_thread,
         misc::with_current_thread,
@@ -34,29 +37,29 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
 
     maybe_stop_current_on_syscall_entry();
 
-    let result = syscall_handler_unwrapped(
-        syscall_no,
+    let args = [
         snapshot.rdi,
         snapshot.rsi,
         snapshot.rdx,
         snapshot.r10,
         snapshot.r8,
         snapshot.r9,
+    ];
+    log_syscall_trace_enter(syscall_no, args);
+
+    let result = syscall_handler_unwrapped(
+        syscall_no,
+        args[0],
+        args[1],
+        args[2],
+        args[3],
+        args[4],
+        args[5],
     );
     if result < 0 {
-        log_unsupported_syscall_result(
-            syscall_no,
-            [
-                snapshot.rdi,
-                snapshot.rsi,
-                snapshot.rdx,
-                snapshot.r10,
-                snapshot.r8,
-                snapshot.r9,
-            ],
-            SyscallError::from(result),
-        );
+        log_unsupported_syscall_result(syscall_no, args, SyscallError::from(result));
     }
+    log_syscall_trace_exit(syscall_no, args, result);
 
     snapshot.rax = result;
 
