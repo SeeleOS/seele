@@ -52,6 +52,8 @@ impl Process {
                 keep_capabilities: parent_locked.keep_capabilities,
                 oom_score_adj: parent_locked.oom_score_adj,
                 secure_bits: parent_locked.secure_bits,
+                rlimit_nofile_cur: parent_locked.rlimit_nofile_cur,
+                rlimit_nofile_max: parent_locked.rlimit_nofile_max,
                 session_keyring: parent_locked.session_keyring,
                 user_keyring: parent_locked.user_keyring,
                 capability_effective: parent_locked.capability_effective,

@@ -37,6 +37,7 @@ pub struct ControllingTerminal(pub u64);
 pub const CAP_LAST_CAP: u32 = 40;
 const DEFAULT_CAPABILITY_LOW: u32 = u32::MAX;
 const DEFAULT_CAPABILITY_HIGH: u32 = (1u32 << (CAP_LAST_CAP - 31)) - 1;
+const DEFAULT_RLIMIT_NOFILE: u64 = 1024;
 const CLD_EXITED: i32 = 1;
 const CLD_KILLED: i32 = 2;
 
@@ -94,6 +95,8 @@ pub struct Process {
     pub keep_capabilities: bool,
     pub oom_score_adj: i32,
     pub secure_bits: u32,
+    pub rlimit_nofile_cur: u64,
+    pub rlimit_nofile_max: u64,
     pub session_keyring: i32,
     pub user_keyring: i32,
     pub capability_effective: [u32; 2],
@@ -148,6 +151,8 @@ impl Default for Process {
             keep_capabilities: false,
             oom_score_adj: 0,
             secure_bits: 0,
+            rlimit_nofile_cur: DEFAULT_RLIMIT_NOFILE,
+            rlimit_nofile_max: DEFAULT_RLIMIT_NOFILE,
             session_keyring: 0,
             user_keyring: 0,
             capability_effective: [DEFAULT_CAPABILITY_LOW, DEFAULT_CAPABILITY_HIGH],

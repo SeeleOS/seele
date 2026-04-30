@@ -1815,11 +1815,17 @@ define_syscall!(SchedRrGetInterval, |pid: i32, tp: *mut LinuxTimespec| {
 });
 
 define_syscall!(Setrlimit, |resource: i32, rlimit: u64| {
-    log_dangerous_noop_syscall(
-        "setrlimit",
-        alloc::format!("resource={} rlimit_ptr={:#x}", resource, rlimit).as_str(),
-    );
-    Ok(0)
+    let resource = RlimitResource::try_from(resource as u32).map_err(|_| SyscallError::InvalidArguments)?;
+    let limit = user_safe::read(rlimit as *const LinuxRlimit64)?;
+    match resource {
+        RlimitResource::NoFile => {
+            let process = get_current_process();
+            let mut process = process.lock();
+            process.rlimit_nofile_cur = limit.rlim_cur;
+            process.rlimit_nofile_max = limit.rlim_max;
+            Ok(0)
+        }
+    }
 });
 
 define_syscall!(Prctl, |option: i32,
@@ -1828,19 +1834,12 @@ define_syscall!(Prctl, |option: i32,
                         _arg4: u64,
                         _arg5: u64| {
     match PrctlOption::try_from(option).map_err(|_| SyscallError::InvalidArguments)? {
-        PrctlOption::SetSeccomp | PrctlOption::SetMdwe => {
-            log_dangerous_noop_syscall(
-                "prctl",
-                alloc::format!(
-                    "option={:?} arg2={:#x} arg3={:#x}",
-                    PrctlOption::try_from(option).expect("validated prctl option"),
-                    arg2,
-                    arg3
-                )
-                .as_str(),
-            );
-            Ok(0)
-        }
+        PrctlOption::SetSeccomp => match arg2 {
+            2 if arg3 == 0 => Err(SyscallError::BadAddress),
+            1 | 2 => Err(SyscallError::InvalidArguments),
+            _ => Err(SyscallError::InvalidArguments),
+        },
+        PrctlOption::SetMdwe => Err(SyscallError::InvalidArguments),
         PrctlOption::SetPdeathsig => {
             let signal = if arg2 == 0 {
                 None
@@ -1950,18 +1949,33 @@ define_syscall!(Prctl, |option: i32,
 
 define_syscall!(
     Prlimit64,
-    |pid: i32, resource: u32, _new_limit: *const LinuxRlimit64, old_limit: *mut LinuxRlimit64| {
+    |pid: i32, resource: u32, new_limit: *const LinuxRlimit64, old_limit: *mut LinuxRlimit64| {
         if pid != 0 {
             return Err(SyscallError::InvalidArguments);
         }
 
+        let resource = RlimitResource::try_from(resource).map_err(|_| SyscallError::InvalidArguments)?;
+        let process = get_current_process();
+        let mut process = process.lock();
+
         if !old_limit.is_null() {
-            let (rlim_cur, rlim_max) = match RlimitResource::try_from(resource) {
-                Ok(RlimitResource::NoFile) => (RLIMIT_NOFILE_DEFAULT, RLIMIT_NOFILE_DEFAULT),
-                Err(_) => (RLIM64_INFINITY, RLIM64_INFINITY),
+            let limit = match resource {
+                RlimitResource::NoFile => LinuxRlimit64 {
+                    rlim_cur: process.rlimit_nofile_cur,
+                    rlim_max: process.rlimit_nofile_max,
+                },
             };
-            let limit = LinuxRlimit64 { rlim_cur, rlim_max };
             user_safe::write(old_limit, &limit)?;
+        }
+
+        if !new_limit.is_null() {
+            let limit = user_safe::read(new_limit)?;
+            match resource {
+                RlimitResource::NoFile => {
+                    process.rlimit_nofile_cur = limit.rlim_cur;
+                    process.rlimit_nofile_max = limit.rlim_max;
+                }
+            }
         }
 
         Ok(0)
