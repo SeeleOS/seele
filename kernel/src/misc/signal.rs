@@ -482,8 +482,25 @@ pub fn process_current_process_signals(process: &ProcessRef) -> bool {
     let result = {
         let mut process = process.lock();
         let thread_ref = get_current_thread();
-        let mut thread = thread_ref.lock();
-        let mut result = thread.process_signals(&mut process);
+        let (blocked_signals, mut pending_signals, mut pending_signal_info) = {
+            let mut thread = thread_ref.lock();
+            (
+                thread.blocked_signals,
+                mem::take(&mut thread.pending_signals),
+                mem::take(&mut thread.pending_signal_info),
+            )
+        };
+        let mut result = process_pending_signals(
+            &mut process,
+            &mut pending_signals,
+            &mut pending_signal_info,
+            blocked_signals,
+        );
+        {
+            let mut thread = thread_ref.lock();
+            thread.pending_signals = pending_signals;
+            thread.pending_signal_info = pending_signal_info;
+        }
         result.merge(process.process_signals());
         result
     };
@@ -524,12 +541,14 @@ impl Process {
     /// caller should stop the current return path so the handler can run next.
     #[must_use]
     pub fn process_signals(&mut self) -> ProcessSignalsResult {
+        let blocked_signals = get_current_thread().lock().blocked_signals;
         let mut pending_signals = mem::take(&mut self.pending_signals);
         let mut pending_signal_info = mem::take(&mut self.pending_signal_info);
         let result = process_pending_signals(
             self,
             &mut pending_signals,
             &mut pending_signal_info,
+            blocked_signals,
         );
         self.pending_signals = pending_signals;
         self.pending_signal_info = pending_signal_info;
@@ -594,17 +613,14 @@ fn process_pending_signals(
     process: &mut Process,
     pending_signals: &mut Signals,
     pending_signal_info: &mut [Option<PendingSignalInfo>],
+    blocked_signals: Signals,
 ) -> ProcessSignalsResult {
     let mut result = ProcessSignalsResult::default();
 
     for signal in Signal::iter() {
         let signal_bits = Signals::from(signal);
         if pending_signals.contains(signal_bits)
-            && (signal.is_unblockable()
-                || !get_current_thread()
-                    .lock()
-                    .blocked_signals
-                    .contains(signal_bits))
+            && (signal.is_unblockable() || !blocked_signals.contains(signal_bits))
         {
             let action = process.signal_actions[signal.index()].clone();
             pending_signals.remove(signal_bits);
@@ -691,19 +707,6 @@ fn process_pending_signals(
 }
 
 impl Thread {
-    fn process_signals(&mut self, process: &mut Process) -> ProcessSignalsResult {
-        let mut pending_signals = mem::take(&mut self.pending_signals);
-        let mut pending_signal_info = mem::take(&mut self.pending_signal_info);
-        let result = process_pending_signals(
-            process,
-            &mut pending_signals,
-            &mut pending_signal_info,
-        );
-        self.pending_signals = pending_signals;
-        self.pending_signal_info = pending_signal_info;
-        result
-    }
-
     fn block_signals_for_handler(&mut self, mut signals_to_block: Signals, signal: Signal) {
         signals_to_block.insert(Signals::from(signal));
         self.saved_blocked_signals.push(self.blocked_signals);
