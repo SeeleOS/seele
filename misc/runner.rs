@@ -29,7 +29,9 @@ fn main() {
 
     // read env variables that were set in build script
     let uefi_path = env!("UEFI_PATH");
-    let root_disk = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("disk.img");
+    let root_disk = env::var_os("SEELE_ROOT_DISK")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("disk.img"));
     let serial_log = env::temp_dir().join(if agent_mode {
         "seele-agent-serial.log"
     } else {
