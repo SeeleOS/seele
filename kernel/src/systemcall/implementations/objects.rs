@@ -18,6 +18,7 @@ use crate::{
         device::get_device,
         memfd::create_memfd_object,
         misc::{ObjectRef, get_object_current_process},
+        traits::Readable,
     },
     process::{
         FdFlags,
@@ -31,6 +32,7 @@ use crate::{
 static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeMap::new());
 static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
 const COPY_CHUNK_SIZE: usize = 16 * 1024;
+const LINEAR_IO_CHUNK_SIZE: usize = 64 * 1024;
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -201,6 +203,124 @@ fn copy_between_objects(
     Ok(total)
 }
 
+fn read_file_like_in_chunks(
+    file: &FileLikeObject,
+    buf_ptr: *mut u8,
+    len: usize,
+) -> SyscallResult<usize> {
+    if len == 0 {
+        return Ok(0);
+    }
+
+    let mut buffer = vec![0; len.min(LINEAR_IO_CHUNK_SIZE)];
+    let mut total = 0usize;
+
+    while total < len {
+        let chunk_len = (len - total).min(buffer.len());
+        let read = file.read(&mut buffer[..chunk_len])?;
+        if read == 0 {
+            break;
+        }
+
+        user_safe::write_buffer(unsafe { buf_ptr.add(total) }, &buffer[..read])?;
+        total += read;
+        if read < chunk_len {
+            break;
+        }
+    }
+
+    Ok(total)
+}
+
+fn write_object_in_chunks(
+    object: &ObjectRef,
+    buf_ptr: *const u8,
+    len: usize,
+) -> SyscallResult<usize> {
+    if len == 0 {
+        return Ok(0);
+    }
+
+    let writable = object.clone().as_writable()?;
+    let mut total = 0usize;
+
+    while total < len {
+        let chunk_len = (len - total).min(LINEAR_IO_CHUNK_SIZE);
+        let bytes = user_safe::read_buffer(unsafe { buf_ptr.add(total) }, chunk_len)?;
+        log_display_write_dispatch("write", object, bytes.len());
+        log_display_pipe_bytes("write", object, &bytes);
+        log_x_chain_write_bytes(&bytes);
+        log_user_manager_socket_bytes("write", object, &bytes);
+        let written = writable.write(&bytes)?;
+        total += written;
+        if written < chunk_len {
+            break;
+        }
+    }
+
+    Ok(total)
+}
+
+fn pread_file_like_in_chunks(
+    file: &FileLikeObject,
+    buf_ptr: *mut u8,
+    len: usize,
+    offset: u64,
+) -> SyscallResult<usize> {
+    if len == 0 {
+        return Ok(0);
+    }
+
+    let mut buffer = vec![0; len.min(LINEAR_IO_CHUNK_SIZE)];
+    let mut total = 0usize;
+
+    while total < len {
+        let chunk_len = (len - total).min(buffer.len());
+        let read = file.read_at(&mut buffer[..chunk_len], offset + total as u64)?;
+        if read == 0 {
+            break;
+        }
+
+        user_safe::write_buffer(unsafe { buf_ptr.add(total) }, &buffer[..read])?;
+        total += read;
+        if read < chunk_len {
+            break;
+        }
+    }
+
+    Ok(total)
+}
+
+fn pwrite_object_in_chunks(
+    object: &ObjectRef,
+    buf_ptr: *const u8,
+    len: usize,
+    offset: i64,
+) -> SyscallResult<usize> {
+    if len == 0 {
+        return Ok(0);
+    }
+
+    let seekable = object.clone().as_seekable()?;
+    let writable = object.clone().as_writable()?;
+    let current = seekable.clone().seek(0, Whence::Current)? as i64;
+    seekable.clone().seek(offset, Whence::Start)?;
+
+    let mut total = 0usize;
+    while total < len {
+        let chunk_len = (len - total).min(LINEAR_IO_CHUNK_SIZE);
+        let bytes = user_safe::read_buffer(unsafe { buf_ptr.add(total) }, chunk_len)?;
+        let written = writable.write(&bytes)?;
+        total += written;
+        if written < chunk_len {
+            break;
+        }
+    }
+
+    let _ = seekable.seek(current, Whence::Start);
+    Ok(total)
+}
+
 define_syscall!(Getdents, |object_index: u64, buf: *mut u8, len: usize| {
     write_dirents64(object_index, buf, len)
 });
@@ -212,6 +332,10 @@ define_syscall!(Getdents64, |object_index: u64, buf: *mut u8, len: usize| {
 });
 
 define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
+    if let Ok(file) = object.clone().as_file_like() {
+        return read_file_like_in_chunks(&file, buf_ptr, len);
+    }
+
     let mut buffer = vec![0; len];
     let read = object.clone().as_readable()?.read(&mut buffer)?;
     if read > 0 {
@@ -223,6 +347,10 @@ define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
 });
 
 define_syscall!(Write, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
+    if object.clone().as_file_like().is_ok() {
+        return write_object_in_chunks(&object, buf_ptr.cast_const(), len);
+    }
+
     let bytes = user_safe::read_buffer(buf_ptr.cast_const(), len)?;
     log_display_write_dispatch("write", &object, bytes.len());
     log_display_pipe_bytes("write", &object, &bytes);
@@ -567,12 +695,7 @@ define_syscall!(Pread64, |object: ObjectRef,
         return Err(SyscallError::InvalidArguments);
     }
     let file = object.clone().as_file_like()?;
-    let mut buffer = vec![0; len];
-    let read = file.read_at(&mut buffer, offset as u64)?;
-    if read > 0 {
-        user_safe::write_buffer(buf_ptr, &buffer[..read])?;
-    }
-    Ok(read)
+    pread_file_like_in_chunks(&file, buf_ptr, len, offset as u64)
 });
 
 define_syscall!(Pwrite64, |object: ObjectRef,
@@ -583,12 +706,5 @@ define_syscall!(Pwrite64, |object: ObjectRef,
         return Err(SyscallError::InvalidArguments);
     }
 
-    let seekable = object.clone().as_seekable()?;
-    let writable = object.as_writable()?;
-    let current = seekable.clone().seek(0, Whence::Current)? as i64;
-    seekable.clone().seek(offset, Whence::Start)?;
-    let buffer = user_safe::read_buffer(buf_ptr, len)?;
-    let written = writable.write(&buffer)?;
-    let _ = seekable.seek(current, Whence::Start);
-    Ok(written)
+    pwrite_object_in_chunks(&object, buf_ptr, len, offset)
 });
