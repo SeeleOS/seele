@@ -353,9 +353,12 @@ define_syscall!(Tgkill, |tgid: i32, tid: i32, signal: i32| {
         return Err(SyscallError::NoProcess);
     }
 
-    let current = get_current_process();
-    let current = current.lock();
-    let mut siginfo = SigInfo::for_process_signal(signal, current.pid.0 as i32, current.real_uid);
+    let (sender_pid, sender_uid) = {
+        let current = get_current_process();
+        let current = current.lock();
+        (current.pid.0 as i32, current.real_uid)
+    };
+    let mut siginfo = SigInfo::for_process_signal(signal, sender_pid, sender_uid);
     siginfo.si_code = SI_TKILL;
 
     send_signal_to_thread_with_siginfo(&thread, signal, siginfo);
