@@ -113,6 +113,9 @@ fn collect_parent_death_signals_for_children(
         .processes
         .values()
         .filter_map(|candidate| {
+            if alloc::sync::Arc::ptr_eq(candidate, parent_process) {
+                return None;
+            }
             let child = candidate.clone();
             let child_lock = child.lock();
             let parent = child_lock.parent.clone()?;
