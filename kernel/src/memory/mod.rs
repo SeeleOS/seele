@@ -10,7 +10,6 @@ use crate::memory::{
         MAPPER, init_mapper,
     },
 };
-use crate::misc::time::profile_boot_stage;
 
 pub mod addrspace;
 pub mod heap;
@@ -27,34 +26,26 @@ pub static MEMORY_REGIONS: OnceCell<&'static [&'static Entry]> = OnceCell::unini
 
 pub fn init(physical_memory_offset: u64, memory_regions: &'static [&'static Entry]) {
     log::debug!("memory: init offset {:#x}", physical_memory_offset);
-    let mut mapper = profile_boot_stage("memory.init_mapper", || init_mapper(physical_memory_offset));
-    let mut heap_backing_allocator = profile_boot_stage("memory.bootstrap_frame_allocator", || unsafe {
-        BootstrapFrameAllocator::new(memory_regions)
-    });
-    profile_boot_stage("memory.init_heap", || {
+    let mut mapper = init_mapper(physical_memory_offset);
+    let mut heap_backing_allocator = unsafe { BootstrapFrameAllocator::new(memory_regions) };
+    {
         init_heap(&mut mapper, &mut heap_backing_allocator).expect("Failed heap initilization");
-    });
+    }
     log::debug!("memory: heap ready");
 
-    let runtime_cursor = profile_boot_stage("memory.reserve_runtime_frames", || {
+    let runtime_cursor = {
         heap_backing_allocator
             .clone_after_reserving(HEAP_BACKING_RESERVE_SIZE.saturating_sub(heap::INITIAL_HEAP_SIZE))
             .expect("Failed to reserve heap backing frames")
-    });
-    let frame_allocator =
-        profile_boot_stage("memory.runtime_frame_allocator", || {
-            BootinfoFrameAllocator::new(memory_regions, &runtime_cursor)
-        });
+    };
+    let frame_allocator = BootinfoFrameAllocator::new(memory_regions, &runtime_cursor);
 
-    let mapper = profile_boot_stage("memory.publish_mapper", || Arc::new(Mutex::new(mapper)));
-    let frame_allocator =
-        profile_boot_stage("memory.publish_frame_allocator", || Arc::new(Mutex::new(frame_allocator)));
+    let mapper = Arc::new(Mutex::new(mapper));
+    let frame_allocator = Arc::new(Mutex::new(frame_allocator));
 
-    profile_boot_stage("memory.publish_globals", || {
-        MAPPER.get_or_init(|| mapper.clone());
-        FRAME_ALLOCATOR.get_or_init(|| frame_allocator.clone());
-        HEAP_BACKING_ALLOCATOR.get_or_init(|| Mutex::new(heap_backing_allocator));
-    });
+    MAPPER.get_or_init(|| mapper.clone());
+    FRAME_ALLOCATOR.get_or_init(|| frame_allocator.clone());
+    HEAP_BACKING_ALLOCATOR.get_or_init(|| Mutex::new(heap_backing_allocator));
     PHYSICAL_MEMORY_OFFSET.get_or_init(|| physical_memory_offset);
     MEMORY_REGIONS.get_or_init(|| memory_regions);
     USABLE_MEMORY_BYTES.get_or_init(|| {

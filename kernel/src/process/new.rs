@@ -10,7 +10,6 @@ use crate::{
     elfloader::{load_elf_lazy, read_elf_header},
     filesystem::{errors::FSError, object::FileLikeObject, path::Path, vfs::VirtualFS},
     memory::addrspace::AddrSpace,
-    misc::time::with_profiling,
     object::tty_device::get_default_tty,
     process::{
         FdEntry, Process, ProcessRef, new_fd_table,
@@ -91,21 +90,12 @@ impl Process {
 
         log::debug!("process {}: setup start", pid.0);
         let mut fd_table = Vec::new();
-        let context = with_profiling(
-            || {
-                setup_process(
-                    Path::new(INIT_PATH),
-                    Vec::new(),
-                    alloc::vec![
-                        DEFAULT_PATH.into(),
-                        DEFAULT_TERM.into(),
-                        DEFAULT_HOME.into(),
-                    ],
-                    &mut process.addrspace,
-                    &mut fd_table,
-                )
-            },
-            "process init setup_process",
+        let context = setup_process(
+            Path::new(INIT_PATH),
+            Vec::new(),
+            alloc::vec![DEFAULT_PATH.into(), DEFAULT_TERM.into(), DEFAULT_HOME.into()],
+            &mut process.addrspace,
+            &mut fd_table,
         )
         .unwrap();
         log::debug!("process {}: setup done", pid.0);
@@ -144,15 +134,8 @@ fn setup_process_inner(
     }
 
     let path_string = path.clone().as_string();
-    let open_label = alloc::format!("open+shebang {}", path_string);
-    let (program_file, program_prefix) = with_profiling(
-        || {
-            let program_file = open_file(path.clone())?;
-            let program_prefix = read_shebang_prefix(&program_file)?;
-            Ok::<_, FSError>((program_file, program_prefix))
-        },
-        open_label.as_str(),
-    )?;
+    let program_file = open_file(path.clone())?;
+    let program_prefix = read_shebang_prefix(&program_file)?;
 
     if let Some((interpreter, optional_arg)) = parse_shebang(&program_prefix)? {
         log::debug!(
@@ -179,29 +162,14 @@ fn setup_process_inner(
         );
     }
 
-    let program_headers = with_profiling(
-        || read_elf_header(&program_file),
-        alloc::format!("read_elf_header {}", path_string).as_str(),
-    )?;
-    let program = with_profiling(
-        || load_elf_lazy(addrspace, program_file, &program_headers),
-        alloc::format!("load_elf_lazy {}", path_string).as_str(),
-    )?;
+    let program_headers = read_elf_header(&program_file)?;
+    let program = load_elf_lazy(addrspace, program_file, &program_headers)?;
 
     let (entry_point, interpreter_base) = match program.interpreter.as_deref() {
         Some(interpreter_path) => {
-            let interp_file = with_profiling(
-                || open_file(Path::new(interpreter_path)),
-                alloc::format!("open interp {}", interpreter_path).as_str(),
-            )?;
-            let interp_headers = with_profiling(
-                || read_elf_header(&interp_file),
-                alloc::format!("read interp header {}", interpreter_path).as_str(),
-            )?;
-            let interp = with_profiling(
-                || load_elf_lazy(addrspace, interp_file, &interp_headers),
-                alloc::format!("load interp {}", interpreter_path).as_str(),
-            )?;
+            let interp_file = open_file(Path::new(interpreter_path))?;
+            let interp_headers = read_elf_header(&interp_file)?;
+            let interp = load_elf_lazy(addrspace, interp_file, &interp_headers)?;
             (interp.entry_point, Some(interp.load_base))
         }
         None => (program.entry_point, None),
@@ -209,40 +177,24 @@ fn setup_process_inner(
 
     let stack_pages =
         user_stack_pages_for_exec(&path_string, &args, &env, interpreter_base.is_some());
-    let mut stack_builder = with_profiling(
-        || addrspace.allocate_user_stack(stack_pages).1,
-        alloc::format!("allocate user stack {}", path_string).as_str(),
+    let mut stack_builder = addrspace.allocate_user_stack(stack_pages).1;
+
+    init_stack_layout(
+        &mut stack_builder,
+        &program,
+        interpreter_base,
+        &path_string,
+        args,
+        env,
     );
 
-    with_profiling(
-        || {
-            init_stack_layout(
-                &mut stack_builder,
-                &program,
-                interpreter_base,
-                &path_string,
-                args,
-                env,
-            )
-        },
-        alloc::format!("init_stack_layout {}", path_string).as_str(),
-    );
+    init_objects(fd_table);
 
-    with_profiling(
-        || init_objects(fd_table),
-        alloc::format!("init_objects {}", path_string).as_str(),
-    );
-
-    Ok(with_profiling(
-        || {
-            ThreadSnapshot::new(
-                entry_point,
-                addrspace,
-                stack_builder.finish().as_u64(),
-                ThreadSnapshotType::Thread,
-            )
-        },
-        alloc::format!("build ThreadSnapshot {}", path_string).as_str(),
+    Ok(ThreadSnapshot::new(
+        entry_point,
+        addrspace,
+        stack_builder.finish().as_u64(),
+        ThreadSnapshotType::Thread,
     ))
 }
 

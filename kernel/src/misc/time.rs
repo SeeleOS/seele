@@ -21,8 +21,6 @@ const MIN_TSC_FREQ_HZ: u64 = 1_000_000;
 const MAX_TSC_FREQ_HZ: u64 = 10_000_000_000;
 const PIT_FREQUENCY_HZ: u64 = 1_193_182;
 const PIT_CALIBRATION_MS: u64 = 10;
-const PROFILING: bool = true;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Time(pub u64);
 
@@ -156,88 +154,6 @@ impl Time {
     pub const fn unix_timestamp(self) -> u64 {
         self.as_seconds()
     }
-}
-
-pub fn with_profiling<T, F>(f: F, label: &str) -> T
-where
-    F: FnOnce() -> T,
-{
-    if !PROFILING {
-        return f();
-    }
-
-    let start = Time::since_boot();
-    crate::s_println!(
-        "[profile] start {} at {}.{:03}s",
-        label,
-        start.as_seconds(),
-        start.subsec_milliseconds()
-    );
-
-    let result = f();
-
-    let end = Time::since_boot();
-    let elapsed = end.sub(start);
-    crate::s_println!(
-        "[profile] end {} at {}.{:03}s (+{} ms)",
-        label,
-        end.as_seconds(),
-        end.subsec_milliseconds(),
-        elapsed.as_milliseconds()
-    );
-
-    result
-}
-
-pub fn profile_boot_stage<T, F>(label: &str, f: F) -> T
-where
-    F: FnOnce() -> T,
-{
-    if !PROFILING {
-        return f();
-    }
-
-    let start_cycles = get_cycles();
-    let start_time = Time::since_boot();
-    let has_timebase = TSC_FREQ_HZ.load(Ordering::SeqCst) != 0;
-
-    if has_timebase {
-        crate::s_println!(
-            "[profile] start {} at {}.{:03}s",
-            label,
-            start_time.as_seconds(),
-            start_time.subsec_milliseconds()
-        );
-    } else {
-        crate::s_println!("[profile] start {} at cycle {}", label, start_cycles);
-    }
-
-    let result = f();
-
-    let end_cycles = get_cycles();
-    let elapsed_cycles = end_cycles.saturating_sub(start_cycles);
-
-    if has_timebase {
-        let end_time = Time::since_boot();
-        let elapsed = end_time.sub(start_time);
-        crate::s_println!(
-            "[profile] end {} at {}.{:03}s (+{} ms, {} cycles)",
-            label,
-            end_time.as_seconds(),
-            end_time.subsec_milliseconds(),
-            elapsed.as_milliseconds(),
-            elapsed_cycles
-        );
-    } else {
-        crate::s_println!(
-            "[profile] end {} at cycle {} (+{} cycles)",
-            label,
-            end_cycles,
-            elapsed_cycles
-        );
-    }
-
-    result
 }
 
 fn detect_tsc_frequency_hz() -> Option<u64> {

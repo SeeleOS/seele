@@ -4,7 +4,6 @@ use crate::{
     filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
     ipc::sysv_shm::detach_all_process_mappings,
     memory::addrspace::AddrSpace,
-    misc::time::with_profiling,
     process::{
         Process, new_fd_table,
         manager::{MANAGER, wake_vfork_blocker},
@@ -55,64 +54,31 @@ impl Process {
         let mut next_addrspace = AddrSpace::default();
         let mut next_fd_table = self.fd_table.lock().clone();
         close_cloexec_fd_entries(&mut next_fd_table);
-        let pid = self.pid.0;
-
-        let next_snapshot = with_profiling(
-            || {
-                setup_process(
-                    path.clone(),
-                    args,
-                    env,
-                    &mut next_addrspace,
-                    &mut next_fd_table,
-                )
-            },
-            alloc::format!(
-                "execve setup_process pid={} path={}",
-                self.pid.0,
-                path_string
-            )
-            .as_str(),
-        )?;
+        let next_snapshot =
+            setup_process(path.clone(), args, env, &mut next_addrspace, &mut next_fd_table)?;
 
         // TODO: kill all the other threads when execveing
-        with_profiling(
-            || {
-                detach_all_process_mappings(self);
-                let mut old_addrspace = mem::replace(&mut self.addrspace, next_addrspace);
-                if self.borrowed_addrspace_from_parent {
-                    self.borrowed_addrspace_from_parent = false;
-                    if let Some(parent) = self.parent.clone() {
-                        parent.lock().addrspace = old_addrspace;
-                    } else {
-                        old_addrspace.clean();
-                    }
+        {
+            detach_all_process_mappings(self);
+            let mut old_addrspace = mem::replace(&mut self.addrspace, next_addrspace);
+            if self.borrowed_addrspace_from_parent {
+                self.borrowed_addrspace_from_parent = false;
+                if let Some(parent) = self.parent.clone() {
+                    parent.lock().addrspace = old_addrspace;
                 } else {
                     old_addrspace.clean();
                 }
-            },
-            alloc::format!(
-                "execve clean addrspace pid={} path={}",
-                pid,
-                path_string
-            )
-            .as_str(),
-        );
+            } else {
+                old_addrspace.clean();
+            }
+        }
 
         let thread = current_thread();
 
         //thread_manager.kill_all_except(thread.clone());
 
         // Reallocates the kernel stack top (just in case)
-        self.kernel_stack_top = with_profiling(
-            || allocate_kernel_stack(16).finish(),
-            alloc::format!(
-                "execve allocate kernel stack pid={} path={}",
-                self.pid.0,
-                path_string
-            )
-            .as_str(),
-        );
+        self.kernel_stack_top = allocate_kernel_stack(16).finish();
 
         let mut thread_locked = thread.lock();
 
@@ -140,15 +106,7 @@ impl Process {
         self.command_line = command_line;
         self.sysv_shm_mappings.clear();
 
-        with_profiling(
-            || self.addrspace.load(),
-            alloc::format!(
-                "execve addrspace.load pid={} path={}",
-                self.pid.0,
-                path_string
-            )
-            .as_str(),
-        );
+        self.addrspace.load();
         set_current_kernel_stack(thread_locked.kernel_stack_top);
         let vfork_blocker = self.vfork_blocker.take();
         Ok((
@@ -163,10 +121,7 @@ pub fn execve(path: Path, args: Vec<String>, env: Vec<String>) -> Result<(), FSE
     let (snapshot, vfork_blocker) = {
         let _manager = MANAGER.lock();
         let current = current_process();
-        with_profiling(
-            || current.lock().execve(resolved_path, args, env),
-            "process::execve total",
-        )?
+        current.lock().execve(resolved_path, args, env)?
     };
     if let Some(thread_id) = vfork_blocker {
         wake_vfork_blocker(thread_id);
