@@ -1,6 +1,6 @@
 use core::str::from_utf8;
 
-use alloc::{string::String, sync::Arc};
+use alloc::{string::String, sync::Arc, vec::Vec};
 use spin::Mutex;
 use x86_64::instructions::interrupts::without_interrupts;
 
@@ -13,6 +13,7 @@ use crate::{
         traits::{Configuratable, Writable},
     },
     s_print,
+    object::tty_device::get_active_tty,
     terminal::term_trait::AbstractTerminal,
 };
 
@@ -41,7 +42,7 @@ impl TerminalObject {
     }
 
     pub fn write_screen_text(&self, text: &str) {
-        let filtered = strip_osc_sequences(text);
+        let filtered = filter_terminal_output(text);
         if !filtered.is_empty() {
             without_interrupts(|| {
                 self.inner.lock().push_str(&filtered);
@@ -56,7 +57,7 @@ impl TerminalObject {
     }
 }
 
-fn strip_osc_sequences(text: &str) -> String {
+fn filter_terminal_output(text: &str) -> String {
     let mut output = String::with_capacity(text.len());
     let bytes = text.as_bytes();
     let mut index = 0usize;
@@ -77,11 +78,92 @@ fn strip_osc_sequences(text: &str) -> String {
             continue;
         }
 
+        if let Some((next_index, response)) = try_handle_xtgettcap(bytes, index) {
+            get_active_tty().push_terminal_response_bytes(response.as_bytes());
+            index = next_index;
+            continue;
+        }
+
         output.push(bytes[index] as char);
         index += 1;
     }
 
     output
+}
+
+fn try_handle_xtgettcap(bytes: &[u8], start: usize) -> Option<(usize, String)> {
+    if bytes.get(start) != Some(&0x1b) || bytes.get(start + 1) != Some(&b'P') {
+        return None;
+    }
+    if bytes.get(start + 2) != Some(&b'+') || bytes.get(start + 3) != Some(&b'q') {
+        return None;
+    }
+
+    let mut end = start + 4;
+    while end + 1 < bytes.len() {
+        if bytes[end] == 0x1b && bytes[end + 1] == b'\\' {
+            let payload = core::str::from_utf8(&bytes[start + 4..end]).ok()?;
+            let response = xtgettcap_response(payload);
+            return Some((end + 2, response));
+        }
+        end += 1;
+    }
+
+    None
+}
+
+fn xtgettcap_response(payload: &str) -> String {
+    let mut pairs = Vec::new();
+    for encoded_name in payload.split(';') {
+        let Some(name) = decode_hex_ascii(encoded_name) else {
+            return String::from("\x1bP0+r\x1b\\");
+        };
+
+        let value = match name.as_str() {
+            "name" | "TN" => "linux",
+            _ => return String::from("\x1bP0+r\x1b\\"),
+        };
+        pairs.push(format!("{}={}", encode_hex_ascii(&name), encode_hex_ascii(value)));
+    }
+
+    format!("\x1bP1+r{}\x1b\\", pairs.join(";"))
+}
+
+fn decode_hex_ascii(encoded: &str) -> Option<String> {
+    if encoded.len() % 2 != 0 {
+        return None;
+    }
+
+    let mut out = String::with_capacity(encoded.len() / 2);
+    let bytes = encoded.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        let high = decode_hex_nibble(bytes[index])?;
+        let low = decode_hex_nibble(bytes[index + 1])?;
+        out.push(((high << 4) | low) as char);
+        index += 2;
+    }
+    Some(out)
+}
+
+fn decode_hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn encode_hex_ascii(text: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+
+    let mut out = String::with_capacity(text.len() * 2);
+    for byte in text.bytes() {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 impl Object for TerminalObject {
@@ -92,8 +174,11 @@ impl Object for TerminalObject {
 impl Writable for TerminalObject {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
         let string = from_utf8(buffer).unwrap_or("Unsupported charcter");
-        s_print!("{string}");
-        self.write_screen_text(string);
+        let filtered = filter_terminal_output(string);
+        if !filtered.is_empty() {
+            s_print!("{filtered}");
+            self.write_screen_text(&filtered);
+        }
         Ok(buffer.len())
     }
 }
