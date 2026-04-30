@@ -70,7 +70,12 @@ impl Path {
         let mut new_path = if self.is_absolute() {
             AbsolutePath(Vec::new())
         } else {
-            get_current_process().lock().current_directory.clone()
+            get_current_process()
+                .lock()
+                .fs_context
+                .lock()
+                .current_directory
+                .clone()
         };
 
         for part in self.parts.iter() {

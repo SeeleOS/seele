@@ -4,12 +4,18 @@ use spin::mutex::Mutex;
 
 use crate::{
     ipc::sysv_shm::inherit_forked_mappings,
-    process::{Process, ProcessRef, misc::ProcessID},
+    process::{
+        Process, ProcessRef, clone_fd_table, clone_fs_context, misc::ProcessID,
+    },
     thread::{THREAD_MANAGER, ThreadRef, get_current_thread, misc::ThreadID, yielding::BlockType},
 };
 
 impl Process {
-    fn fork_process(parent: ProcessRef) -> (ProcessID, ProcessRef) {
+    fn fork_process(
+        parent: ProcessRef,
+        share_fd_table: bool,
+        share_fs_context: bool,
+    ) -> (ProcessID, ProcessRef) {
         let (pid, new_process, inherited_shm_mappings) = {
             let current_thread = get_current_thread();
             let mut parent_locked = parent.lock();
@@ -21,14 +27,24 @@ impl Process {
 
             log::debug!("fork: parent {} -> child {}", parent_locked.pid.0, pid.0);
             let inherited_shm_mappings = parent_locked.sysv_shm_mappings.clone();
+            let child_fd_table = if share_fd_table {
+                parent_locked.fd_table.clone()
+            } else {
+                clone_fd_table(&parent_locked.fd_table)
+            };
+            let child_fs_context = if share_fs_context {
+                parent_locked.fs_context.clone()
+            } else {
+                clone_fs_context(&parent_locked.fs_context)
+            };
             let new_process = Arc::new(Mutex::new(Self {
                 pid,
                 pending_signals: parent_locked.pending_signals,
                 pending_signal_info: parent_locked.pending_signal_info.clone(),
                 addrspace: parent_locked.addrspace.clone_all(),
                 kernel_stack_top: parent_locked.kernel_stack_top,
-                fd_table: parent_locked.fd_table.clone(),
-                current_directory: parent_locked.current_directory.clone(),
+                fd_table: child_fd_table,
+                fs_context: child_fs_context,
                 command_line: parent_locked.command_line.clone(),
                 parent: Some(parent.clone()),
                 signal_actions: parent_locked.signal_actions.clone(),
@@ -36,7 +52,6 @@ impl Process {
                 session_id: parent_locked.session_id,
                 controlling_terminal: parent_locked.controlling_terminal,
                 program_break: parent_locked.program_break,
-                file_mode_creation_mask: parent_locked.file_mode_creation_mask,
                 real_uid: parent_locked.real_uid,
                 effective_uid: parent_locked.effective_uid,
                 saved_uid: parent_locked.saved_uid,
@@ -81,7 +96,15 @@ impl Process {
     }
 
     pub fn fork(parent: ProcessRef) -> (ProcessRef, ThreadRef) {
-        let (pid, new_process) = Self::fork_process(parent);
+        Self::fork_with_sharing(parent, false, false)
+    }
+
+    pub fn fork_with_sharing(
+        parent: ProcessRef,
+        share_fd_table: bool,
+        share_fs_context: bool,
+    ) -> (ProcessRef, ThreadRef) {
+        let (pid, new_process) = Self::fork_process(parent, share_fd_table, share_fs_context);
 
         let current_thread = get_current_thread();
         let new_thread = current_thread
@@ -95,7 +118,16 @@ impl Process {
     }
 
     pub fn vfork(parent: ProcessRef) -> (ProcessRef, ThreadRef) {
-        let (pid, new_process) = Self::fork_process(parent.clone());
+        Self::vfork_with_sharing(parent, false, false)
+    }
+
+    pub fn vfork_with_sharing(
+        parent: ProcessRef,
+        share_fd_table: bool,
+        share_fs_context: bool,
+    ) -> (ProcessRef, ThreadRef) {
+        let (pid, new_process) =
+            Self::fork_process(parent.clone(), share_fd_table, share_fs_context);
 
         let current_thread = get_current_thread();
         let new_thread = current_thread.lock().clone_and_spawn_blocked_with_id(

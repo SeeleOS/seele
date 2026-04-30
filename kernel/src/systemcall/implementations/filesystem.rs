@@ -273,7 +273,8 @@ fn resolve_path_at(dirfd: i32, path_str: &str) -> Result<Path, SyscallError> {
         }
 
         if dirfd == AT_FDCWD {
-            let mut current_dir = with_current_process(|process| process.current_directory.clone());
+            let mut current_dir =
+                with_current_process(|process| process.fs_context.lock().current_directory.clone());
             current_dir.push_path_str(path_str);
             return Ok(current_dir.as_normal());
         }
@@ -1045,7 +1046,13 @@ define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
     }
 
     let process = get_current_process();
-    let path_str = process.lock().current_directory.clone().as_string();
+    let path_str = process
+        .lock()
+        .fs_context
+        .lock()
+        .current_directory
+        .clone()
+        .as_string();
     let path_bytes = path_str.as_bytes();
     let path_len = path_bytes.len();
 
@@ -1446,7 +1453,8 @@ define_syscall!(Mknodat, |dirfd: i32,
 define_syscall!(Mkdir, |path: CString, mode: u32| {
     let _ = mode;
     let path = path_from_raw(path)?;
-    let mut current_dir = with_current_process(|process| process.current_directory.clone());
+    let mut current_dir =
+        with_current_process(|process| process.fs_context.lock().current_directory.clone());
     current_dir.push_path_str(&path);
 
     VirtualFS.lock().create_dir(current_dir.as_normal())?;
@@ -1455,7 +1463,8 @@ define_syscall!(Mkdir, |path: CString, mode: u32| {
 
 define_syscall!(Rmdir, |path: CString| {
     let path = path_from_raw(path)?;
-    let mut current_dir = with_current_process(|process| process.current_directory.clone());
+    let mut current_dir =
+        with_current_process(|process| process.fs_context.lock().current_directory.clone());
     current_dir.push_path_str(&path);
     let path = current_dir.as_normal();
 

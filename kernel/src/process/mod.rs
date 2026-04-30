@@ -7,7 +7,6 @@ use bitflags::bitflags;
 use spin::Mutex;
 use x86_64::VirtAddr;
 
-use crate::filesystem::absolute_path::AbsolutePath;
 use crate::ipc::sysv_shm::ProcessShmMapping;
 use crate::memory::addrspace::AddrSpace;
 use crate::misc::timer::Timer;
@@ -18,9 +17,13 @@ use crate::signal::misc::default_signal_action_vec;
 use crate::signal::{PendingSignalInfo, SIGNAL_AMOUNT, Signal, Signals, action::SignalAction};
 use crate::thread::misc::ThreadID;
 use crate::{process::misc::ProcessID, thread::thread::Thread};
+use fd_table::FdTableRef;
+use fs_context::FsContextRef;
 
 pub mod execve;
+pub mod fd_table;
 pub mod fork;
+pub mod fs_context;
 pub mod group;
 pub mod manager;
 pub mod misc;
@@ -30,6 +33,8 @@ pub mod ptrace;
 pub mod wait;
 
 pub type ProcessRef = Arc<Mutex<Process>>;
+pub use fd_table::{FdTable, clone_fd_table, new_fd_table};
+pub use fs_context::{FsContext, clone_fs_context, new_fs_context};
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ControllingTerminal(pub u64);
@@ -69,8 +74,8 @@ pub struct Process {
     pub addrspace: AddrSpace,
     pub kernel_stack_top: VirtAddr,
     pub threads: Vec<Weak<Mutex<Thread>>>,
-    pub fd_table: Vec<Option<FdEntry>>,
-    pub current_directory: AbsolutePath,
+    pub fd_table: FdTableRef,
+    pub fs_context: FsContextRef,
     pub command_line: Vec<String>,
     pub exit_status: Option<ProcessExitStatus>,
     pub parent: Option<ProcessRef>,
@@ -82,7 +87,6 @@ pub struct Process {
     pub controlling_terminal: Option<ControllingTerminal>,
     pub timers: Vec<Option<Timer>>,
     pub program_break: u64,
-    pub file_mode_creation_mask: u32,
     pub real_uid: u32,
     pub effective_uid: u32,
     pub saved_uid: u32,
@@ -135,16 +139,15 @@ impl Default for Process {
             signal_actions: default_signal_action_vec(),
             program_break: 0,
             pid: ProcessID::default(),
-            current_directory: AbsolutePath::default(),
             addrspace: AddrSpace::default(),
             kernel_stack_top: VirtAddr::zero(),
             threads: Vec::new(),
-            fd_table: Vec::new(),
+            fd_table: fd_table::new_fd_table(),
+            fs_context: fs_context::new_fs_context(),
             command_line: Vec::new(),
             exit_status: None,
             parent: None,
             timers: Vec::new(),
-            file_mode_creation_mask: 0,
             real_uid: 0,
             effective_uid: 0,
             saved_uid: 0,
@@ -227,7 +230,10 @@ impl Process {
     }
 
     pub fn stdin_terminal_rdev(&self) -> Option<u64> {
-        let object = self.fd_table.first()?.as_ref()?.object.clone();
+        let object = {
+            let fd_table = self.fd_table.lock();
+            fd_table.first()?.as_ref()?.object.clone()
+        };
         let device = object
             .clone()
             .as_file_like()
@@ -240,18 +246,20 @@ impl Process {
             return None;
         }
 
-        self.fd_table
-            .first()?
-            .as_ref()?
-            .object
-            .clone()
-            .as_statable()
-            .ok()
-            .map(|statable| statable.stat().st_rdev)
+        {
+            let fd_table = self.fd_table.lock();
+            fd_table.first()?.as_ref()?.object.clone()
+        }
+        .as_statable()
+        .ok()
+        .map(|statable| statable.stat().st_rdev)
     }
 
     pub fn stdin_foreground_process_group(&self) -> Option<ProcessGroupID> {
-        let object = self.fd_table.first()?.as_ref()?.object.clone();
+        let object = {
+            let fd_table = self.fd_table.lock();
+            fd_table.first()?.as_ref()?.object.clone()
+        };
         let device = object
             .clone()
             .as_file_like()

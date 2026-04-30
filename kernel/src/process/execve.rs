@@ -6,7 +6,7 @@ use crate::{
     memory::addrspace::AddrSpace,
     misc::time::with_profiling,
     process::{
-        Process,
+        Process, new_fd_table,
         manager::{MANAGER, wake_vfork_blocker},
         new::setup_process,
         object::close_cloexec_fd_entries,
@@ -53,7 +53,7 @@ impl Process {
             args.clone()
         };
         let mut next_addrspace = AddrSpace::default();
-        let mut next_fd_table = self.fd_table.clone();
+        let mut next_fd_table = self.fd_table.lock().clone();
         close_cloexec_fd_entries(&mut next_fd_table);
         let pid = self.pid.0;
 
@@ -116,7 +116,9 @@ impl Process {
 
         let mut thread_locked = thread.lock();
 
-        self.fd_table = next_fd_table;
+        let fd_table = new_fd_table();
+        *fd_table.lock() = next_fd_table;
+        self.fd_table = fd_table;
         thread_locked.snapshot = next_snapshot;
         thread_locked.kernel_stack_top = self.kernel_stack_top.as_u64();
         thread_locked.snapshot_state = SnapshotState::Normal;

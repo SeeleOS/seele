@@ -35,6 +35,7 @@ pub fn init_objects(fd_table: &mut Vec<Option<FdEntry>>) {
 impl Process {
     pub fn find_empty_fd_slot(&self, starts_from: usize) -> Option<usize> {
         self.fd_table
+            .lock()
             .iter()
             .enumerate()
             .skip(starts_from)
@@ -46,8 +47,9 @@ impl Process {
         if let Some(index) = self.find_empty_fd_slot(0) {
             index
         } else {
-            self.fd_table.push(None);
-            self.fd_table.len() - 1
+            let mut fd_table = self.fd_table.lock();
+            fd_table.push(None);
+            fd_table.len() - 1
         }
     }
 
@@ -56,17 +58,19 @@ impl Process {
             return index;
         }
 
-        if self.fd_table.len() <= min {
-            self.fd_table.resize(min + 1, None);
+        let mut fd_table = self.fd_table.lock();
+        if fd_table.len() <= min {
+            fd_table.resize(min + 1, None);
             min
         } else {
-            self.fd_table.push(None);
-            self.fd_table.len() - 1
+            fd_table.push(None);
+            fd_table.len() - 1
         }
     }
 
     pub fn get_object(&self, index: u64) -> ObjectResult<ObjectRef> {
         self.fd_table
+            .lock()
             .get(index as usize)
             .ok_or(ObjectError::DoesNotExist)?
             .as_ref()
@@ -80,16 +84,17 @@ impl Process {
         object: ObjectRef,
         fd_flags: FdFlags,
     ) -> ObjectResult<usize> {
-        if self.fd_table.len() <= slot {
-            self.fd_table.resize(slot + 1, None);
+        let mut fd_table = self.fd_table.lock();
+        if fd_table.len() <= slot {
+            fd_table.resize(slot + 1, None);
         }
-        self.fd_table[slot] = Some(FdEntry::new(object, fd_flags));
+        fd_table[slot] = Some(FdEntry::new(object, fd_flags));
         Ok(slot)
     }
 
     pub fn clear_fd_slot(&mut self, slot: usize) -> ObjectResult<()> {
-        let entry = self
-            .fd_table
+        let mut fd_table = self.fd_table.lock();
+        let entry = fd_table
             .get_mut(slot)
             .ok_or(ObjectError::DoesNotExist)?;
         if entry.is_none() {
@@ -101,6 +106,7 @@ impl Process {
 
     pub fn get_fd_flags(&self, index: usize) -> ObjectResult<FdFlags> {
         self.fd_table
+            .lock()
             .get(index)
             .and_then(|entry| entry.as_ref())
             .map(|entry| entry.fd_flags)
@@ -108,8 +114,8 @@ impl Process {
     }
 
     pub fn set_fd_flags(&mut self, index: usize, fd_flags: FdFlags) -> ObjectResult<()> {
-        let entry = self
-            .fd_table
+        let mut fd_table = self.fd_table.lock();
+        let entry = fd_table
             .get_mut(index)
             .and_then(|entry| entry.as_mut())
             .ok_or(ObjectError::DoesNotExist)?;
@@ -160,6 +166,7 @@ impl Process {
     }
 
     pub fn close_cloexec_objects(&mut self) {
-        close_cloexec_fd_entries(&mut self.fd_table);
+        let mut fd_table = self.fd_table.lock();
+        close_cloexec_fd_entries(&mut fd_table);
     }
 }

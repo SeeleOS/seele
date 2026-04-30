@@ -80,7 +80,7 @@ fn current_process_tty() -> Option<ObjectRef> {
     let stdin = {
         let process = get_current_process();
         let process = process.lock();
-        process.fd_table.first()?.as_ref()?.object.clone()
+        process.fd_table.lock().first()?.as_ref()?.object.clone()
     };
 
     let stdin = stdin

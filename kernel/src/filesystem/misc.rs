@@ -23,7 +23,12 @@ pub fn smart_resolve_path(
     if path.starts_with('/') {
         Some(Path::new(&path))
     } else if start_from_current_dir {
-        let mut cur_path = get_current_process().lock().current_directory.clone();
+        let mut cur_path = get_current_process()
+            .lock()
+            .fs_context
+            .lock()
+            .current_directory
+            .clone();
         cur_path.push_path_str(&path);
         Some(cur_path.as_normal())
     } else {

@@ -7,7 +7,7 @@ use crate::{
     ipc::sysv_shm::detach_all_process_mappings,
     misc::systemd_perf,
     object::linux_anon::wake_pidfd_for_process_with_manager,
-    process::{Process, ProcessExitStatus, ProcessRef, misc::ProcessID},
+    process::{Process, ProcessExitStatus, ProcessRef, misc::ProcessID, new_fd_table},
     signal::{Signal, send_signal_to_process},
     smp::{current_process, set_current_process},
     thread::{
@@ -56,7 +56,7 @@ impl Manager {
         self.processes.remove(&pid);
         remove_pid_cgroup_path(pid);
         let mut process = process.lock();
-        process.fd_table.clear();
+        process.fd_table = new_fd_table();
         process.timers.clear();
         detach_all_process_mappings(&mut process);
         process.addrspace.clean();
@@ -166,7 +166,7 @@ impl Process {
             remove_pid_cgroup_path(self.pid);
         }
 
-        self.fd_table.clear();
+        self.fd_table = new_fd_table();
 
         self.threads
             .iter()

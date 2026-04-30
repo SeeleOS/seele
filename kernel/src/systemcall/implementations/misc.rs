@@ -364,6 +364,7 @@ fn clone_cleared_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalActio
 fn process_fd_object(process: &Process, fd: usize) -> Result<ObjectRef, SyscallError> {
     process
         .fd_table
+        .lock()
         .get(fd)
         .and_then(|entry| entry.as_ref())
         .map(|entry| entry.object.clone())
@@ -418,6 +419,8 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
         & !(0xff
             | CloneFlags::VM.bits()
             | CloneFlags::VFORK.bits()
+            | CloneFlags::FS.bits()
+            | CloneFlags::FILES.bits()
             | CloneFlags::NEWNS.bits()
             | CloneFlags::NEWCGROUP.bits()
             | CloneFlags::NEWUTS.bits()
@@ -450,10 +453,12 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
 
     let current = get_current_process();
     let is_vfork = clone_flags.contains(CloneFlags::VFORK);
+    let share_fd_table = clone_flags.contains(CloneFlags::FILES);
+    let share_fs_context = clone_flags.contains(CloneFlags::FS);
     let (child_process, child_thread) = if is_vfork {
-        Process::vfork(current.clone())
+        Process::vfork_with_sharing(current.clone(), share_fd_table, share_fs_context)
     } else {
-        Process::fork(current.clone())
+        Process::fork_with_sharing(current.clone(), share_fd_table, share_fs_context)
     };
     if clone_flags.contains(CloneFlags::NEWNET) {
         child_process.lock().net_namespace = NetNamespace::new();
@@ -1003,9 +1008,10 @@ define_syscall!(
 
 define_syscall!(Umask, |mask: u32| {
     let process = get_current_process();
-    let mut process = process.lock();
-    let old_mask = process.file_mode_creation_mask;
-    process.file_mode_creation_mask = mask & 0o777;
+    let process = process.lock();
+    let mut fs_context = process.fs_context.lock();
+    let old_mask = fs_context.file_mode_creation_mask;
+    fs_context.file_mode_creation_mask = mask & 0o777;
     Ok(old_mask as usize)
 });
 

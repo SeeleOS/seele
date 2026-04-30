@@ -33,9 +33,9 @@ macro_rules! impl_cast_function {
 pub fn get_object_current_process(id: u64) -> ObjectResult<Arc<dyn Object>> {
     let current = get_current_process();
     let current = current.lock();
+    let fd_table = current.fd_table.lock();
 
-    current
-        .fd_table
+    fd_table
         .get(id as usize)
         .and_then(|entry| entry.as_ref())
         .map(|entry| entry.object.clone())

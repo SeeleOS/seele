@@ -464,13 +464,14 @@ define_syscall!(CloseRange, |first: usize, last: usize, flags: u32| {
 
     let process_ref = get_current_process();
     let mut process = process_ref.lock();
-    if first >= process.fd_table.len() {
+    let fd_table_len = process.fd_table.lock().len();
+    if first >= fd_table_len {
         return Ok(0);
     }
 
-    let end = last.min(process.fd_table.len().saturating_sub(1));
+    let end = last.min(fd_table_len.saturating_sub(1));
     for fd in first..=end {
-        if process.fd_table[fd].is_none() {
+        if process.fd_table.lock()[fd].is_none() {
             continue;
         }
         if flags.contains(CloseRangeFlags::CLOSE_RANGE_CLOEXEC) {

@@ -68,9 +68,10 @@ pub(super) fn pid_ns_entries() -> Vec<DirectoryContentInfo> {
 pub(super) fn pid_fd_entries(pid: ProcessID) -> FSResult<Vec<DirectoryContentInfo>> {
     let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
     let process = process.lock();
+    let fd_table = process.fd_table.lock();
     let mut entries = Vec::new();
 
-    for (fd, entry) in process.fd_table.iter().enumerate() {
+    for (fd, entry) in fd_table.iter().enumerate() {
         if entry.is_some() {
             entries.push(DirectoryContentInfo::new(
                 format!("{fd}"),
@@ -191,7 +192,7 @@ pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
             process.effective_gid,
             process.saved_gid,
             process.fs_gid,
-            process.fd_table.len().max(64),
+            process.fd_table.lock().len().max(64),
             if process.supplementary_groups.is_empty() {
                 String::new()
             } else {
@@ -347,9 +348,10 @@ pub(super) fn proc_pid_write_oom_score_adj(pid: ProcessID, buffer: &[u8]) -> FSR
 pub(super) fn pid_fdinfo_entries(pid: ProcessID) -> FSResult<Vec<DirectoryContentInfo>> {
     let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
     let process = process.lock();
+    let fd_table = process.fd_table.lock();
     let mut entries = Vec::new();
 
-    for (fd, entry) in process.fd_table.iter().enumerate() {
+    for (fd, entry) in fd_table.iter().enumerate() {
         if entry.is_some() {
             entries.push(DirectoryContentInfo::new(
                 format!("{fd}"),
@@ -364,8 +366,8 @@ pub(super) fn pid_fdinfo_entries(pid: ProcessID) -> FSResult<Vec<DirectoryConten
 pub(super) fn proc_pid_fdinfo_bytes(pid: ProcessID, fd: usize) -> FSResult<Vec<u8>> {
     let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
     let process = process.lock();
-    let object = process
-        .fd_table
+    let fd_table = process.fd_table.lock();
+    let object = fd_table
         .get(fd)
         .and_then(|entry| entry.as_ref())
         .map(|entry| entry.object.clone())
@@ -521,8 +523,8 @@ pub(super) fn fd_target(pid: ProcessID, fd: &str) -> FSResult<String> {
     let fd_index = fd.parse::<usize>().map_err(|_| FSError::NotFound)?;
     let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
     let process = process.lock();
-    let object = process
-        .fd_table
+    let fd_table = process.fd_table.lock();
+    let object = fd_table
         .get(fd_index)
         .and_then(|entry| entry.as_ref())
         .map(|entry| entry.object.clone())

@@ -13,7 +13,7 @@ use crate::{
     misc::time::with_profiling,
     object::tty_device::get_default_tty,
     process::{
-        FdEntry, Process, ProcessRef,
+        FdEntry, Process, ProcessRef, new_fd_table,
         group::{ProcessGroupID, SessionID},
         misc::{ProcessID, init_stack_layout, user_stack_pages_for_exec},
         object::init_objects,
@@ -90,6 +90,7 @@ impl Process {
         process.command_line = vec![String::from(INIT_PATH)];
 
         log::debug!("process {}: setup start", pid.0);
+        let mut fd_table = Vec::new();
         let context = with_profiling(
             || {
                 setup_process(
@@ -101,13 +102,16 @@ impl Process {
                         DEFAULT_HOME.into(),
                     ],
                     &mut process.addrspace,
-                    &mut process.fd_table,
+                    &mut fd_table,
                 )
             },
             "process init setup_process",
         )
         .unwrap();
         log::debug!("process {}: setup done", pid.0);
+        let new_fd_table = new_fd_table();
+        *new_fd_table.lock() = fd_table;
+        process.fd_table = new_fd_table;
 
         // Initilizes the main thread
         process
