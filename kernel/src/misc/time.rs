@@ -31,12 +31,20 @@ struct TimeCalibration {
 
 pub fn init() {
     let rtc = Rtc::new();
-    let calibration = calibrate_timebase(&rtc).unwrap_or_else(|| TimeCalibration {
-        boot_tsc: get_cycles(),
-        tsc_freq_hz: detect_tsc_frequency_hz().unwrap_or(DEFAULT_TSC_FREQ_HZ),
-        realtime_base_ns: (rtc.get_unix_timestamp() as i64)
-            .saturating_mul(NANOSECONDS_PER_SECOND as i64),
-    });
+    let calibration = detect_tsc_frequency_hz()
+        .map(|tsc_freq_hz| TimeCalibration {
+            boot_tsc: get_cycles(),
+            tsc_freq_hz,
+            realtime_base_ns: (rtc.get_unix_timestamp() as i64)
+                .saturating_mul(NANOSECONDS_PER_SECOND as i64),
+        })
+        .or_else(|| calibrate_timebase(&rtc))
+        .unwrap_or_else(|| TimeCalibration {
+            boot_tsc: get_cycles(),
+            tsc_freq_hz: DEFAULT_TSC_FREQ_HZ,
+            realtime_base_ns: (rtc.get_unix_timestamp() as i64)
+                .saturating_mul(NANOSECONDS_PER_SECOND as i64),
+        });
 
     BOOT_TSC.store(calibration.boot_tsc, Ordering::SeqCst);
     TSC_FREQ_HZ.store(calibration.tsc_freq_hz, Ordering::SeqCst);
