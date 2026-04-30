@@ -28,6 +28,7 @@ use crate::{
 
 pub mod object;
 pub mod object_config;
+pub mod output_filter;
 
 pub fn init() {
     log::info!("graphics: init start");

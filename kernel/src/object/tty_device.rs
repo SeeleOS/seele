@@ -23,6 +23,7 @@ use crate::{
         linux_kd::{DisplayMode, KeyboardMode, LinuxConsoleState, handle_kd_request},
         linux_vt::handle_vt_request,
         object::TerminalObject,
+        output_filter::OutputFilter,
     },
     thread::{THREAD_MANAGER, yielding::WakeType},
 };
@@ -97,6 +98,7 @@ pub struct TtyDevice {
     linux_console: Arc<Mutex<LinuxConsoleState>>,
     virtual_terminal: Option<u32>,
     interactive: bool,
+    output_filter: Mutex<OutputFilter>,
     keyboard_queue: Mutex<VecDeque<u8>>,
     terminal_response_queue: Mutex<VecDeque<u8>>,
     raw_queue: Mutex<VecDeque<u8>>,
@@ -119,6 +121,7 @@ impl TtyDevice {
             linux_console: Arc::new(Mutex::new(LinuxConsoleState::default())),
             virtual_terminal,
             interactive,
+            output_filter: Mutex::new(OutputFilter::default()),
             keyboard_queue: Mutex::new(VecDeque::new()),
             terminal_response_queue: Mutex::new(VecDeque::new()),
             raw_queue: Mutex::new(VecDeque::new()),
@@ -263,7 +266,20 @@ impl Object for TtyDevice {
 
 impl Writable for TtyDevice {
     fn write(&self, buffer: &[u8]) -> super::ObjectResult<usize> {
-        self.terminal.lock().write(buffer)
+        let string = core::str::from_utf8(buffer).unwrap_or("Unsupported charcter");
+        let filtered = self.output_filter.lock().filter(string);
+
+        for response in &filtered.responses {
+            self.push_terminal_response_bytes(response.as_bytes());
+        }
+
+        if !filtered.display_text.is_empty() {
+            self.terminal
+                .lock()
+                .write_screen_text(filtered.display_text.as_str());
+        }
+
+        Ok(buffer.len())
     }
 }
 
