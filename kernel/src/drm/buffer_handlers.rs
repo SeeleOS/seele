@@ -123,16 +123,25 @@ pub(super) fn handle_mode_dirty_fb(ptr: *mut DrmModeFbDirtyCmd) -> ObjectResult<
         return Err(ObjectError::InvalidArguments);
     }
 
-    let current_fb_id = {
+    let (current_fb_id, target_fb_id) = {
         let state = DRM_STATE.lock();
-        if !state.framebuffers.contains_key(&dirty.fb_id) {
+        let target_fb_id = if dirty.fb_id == 0 {
+            state.current_fb_id.unwrap_or(0)
+        } else {
+            dirty.fb_id
+        };
+        if target_fb_id != 0 && !state.framebuffers.contains_key(&target_fb_id) {
             return Err(ObjectError::InvalidArguments);
         }
-        state.current_fb_id
+        (state.current_fb_id, target_fb_id)
     };
 
-    if current_fb_id == Some(dirty.fb_id) {
-        scanout_framebuffer_id(dirty.fb_id)?;
+    if target_fb_id == 0 {
+        return Ok(0);
+    }
+
+    if current_fb_id == Some(target_fb_id) {
+        scanout_framebuffer_id(target_fb_id)?;
     }
     Ok(0)
 }
