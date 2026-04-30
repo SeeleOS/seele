@@ -211,10 +211,6 @@ install_repo_packages
 arch_chroot /usr/sbin/usermod -aG seat sddm
 arch_chroot passwd -d root
 arch_chroot systemctl enable seatd.service
-arch_chroot systemctl enable sddm.service
-
-sudo rm -rf "${SYSROOT_DIR}/etc/systemd/system/sddm.service.d"
-sudo rm -f "${SYSROOT_DIR}/usr/local/bin/sddm-wayland-compositor.sh"
 
 install_sysroot_file "${ROOTFS_MAKING_DIR}/nsswitch.conf" "${SYSROOT_DIR}/etc/nsswitch.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/weston.ini" "${SYSROOT_DIR}/etc/xdg/weston/weston.ini"
