@@ -7,7 +7,7 @@ use crate::{
     signal::process_current_process_signals,
     systemcall::numbers::SyscallNumber,
     systemcall::table::SYSCALL_TABLE,
-    systemcall::utils::SyscallError,
+    systemcall::utils::{SyscallError, log_unsupported_syscall_result},
     thread::{
         THREAD_MANAGER, get_current_thread,
         misc::with_current_thread,
@@ -59,6 +59,18 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
         snapshot.r8,
         snapshot.r9,
     );
+    if result < 0 {
+        log_unsupported_syscall_result(
+            syscall_no,
+            snapshot.rdi,
+            snapshot.rsi,
+            snapshot.rdx,
+            snapshot.r10,
+            snapshot.r8,
+            snapshot.r9,
+            SyscallError::from(result),
+        );
+    }
 
     if syscall_debug.is_some() {
         log_syscall_stage("handler-return", syscall_no, result);

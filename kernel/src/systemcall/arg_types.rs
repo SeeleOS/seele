@@ -28,7 +28,7 @@ use crate::{
         OpenFlags, OpenTreeFlags, PipeFlags, PollEvents, RseqFlags, SetnsFlags, TimerFdFlags,
         TimerSetTimeFlags, UmountFlags, XattrFlags,
     },
-    systemcall::utils::{SyscallError, SyscallResult},
+    systemcall::utils::{SyscallError, SyscallResult, invalid_syscall_flag_error},
 };
 
 macro_rules! add_syscall_arg_type {
@@ -58,7 +58,8 @@ macro_rules! add_syscall_arg_flags_type {
     ($($type:ty, $raw:ty),* $(,)?) => {
         $(
             add_syscall_arg_type!($type, val, {
-                <$type>::from_bits(val as $raw).ok_or(SyscallError::InvalidArguments)
+                <$type>::from_bits(val as $raw)
+                    .ok_or_else(|| invalid_syscall_flag_error::<$type>(val))
             });
         )*
     };

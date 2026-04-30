@@ -423,7 +423,11 @@ bitflags! {
 }
 
 define_syscall!(Dup3, |source_fd: usize, dest: usize, flags: i32| {
-    let flags = DupFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
+    let raw_flags = flags;
+    let flags = DupFlags::from_bits(flags).ok_or_else(|| {
+        crate::s_println!("unsupported dup3 flags raw={:#x}", raw_flags);
+        SyscallError::InvalidArguments
+    })?;
     if source_fd == dest {
         return Err(SyscallError::InvalidArguments);
     }
@@ -449,7 +453,11 @@ bitflags! {
 }
 
 define_syscall!(CloseRange, |first: usize, last: usize, flags: u32| {
-    let flags = CloseRangeFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
+    let raw_flags = flags;
+    let flags = CloseRangeFlags::from_bits(flags).ok_or_else(|| {
+        crate::s_println!("unsupported close_range flags raw={:#x}", raw_flags);
+        SyscallError::InvalidArguments
+    })?;
     if first > last {
         return Err(SyscallError::InvalidArguments);
     }
@@ -495,7 +503,11 @@ bitflags! {
 }
 
 define_syscall!(MemfdCreate, |name: String, flags: u32| {
-    let flags = MemfdFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
+    let raw_flags = flags;
+    let flags = MemfdFlags::from_bits(flags).ok_or_else(|| {
+        crate::s_println!("unsupported memfd_create flags raw={:#x}", raw_flags);
+        SyscallError::InvalidArguments
+    })?;
     if flags.contains(MemfdFlags::MFD_NOEXEC_SEAL) && flags.contains(MemfdFlags::MFD_EXEC) {
         return Err(SyscallError::InvalidArguments);
     }

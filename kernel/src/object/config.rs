@@ -141,7 +141,10 @@ impl PtyPeerOpenRequest {
 
         let flag_bits = u32::try_from(raw & !Self::ACCESS_MODE_MASK)
             .map_err(|_| ObjectError::InvalidArguments)?;
-        let flags = PtyPeerOpenFlags::from_bits(flag_bits).ok_or(ObjectError::InvalidArguments)?;
+        let flags = PtyPeerOpenFlags::from_bits(flag_bits).ok_or_else(|| {
+            crate::s_println!("unsupported pty peer open flags raw={:#x}", flag_bits);
+            ObjectError::InvalidArguments
+        })?;
 
         Ok(Self { access_mode, flags })
     }

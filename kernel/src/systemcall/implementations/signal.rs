@@ -244,8 +244,13 @@ define_syscall!(
             }
 
             let new_stack = &*new_stack;
-            let new_flags =
-                StackFlags::from_bits(new_stack.ss_flags).ok_or(SyscallError::InvalidArguments)?;
+            let new_flags = StackFlags::from_bits(new_stack.ss_flags).ok_or_else(|| {
+                crate::s_println!(
+                    "unsupported sigaltstack flags raw={:#x}",
+                    new_stack.ss_flags
+                );
+                SyscallError::InvalidArguments
+            })?;
             if new_flags.intersects(StackFlags::SS_ONSTACK) {
                 return Err(SyscallError::InvalidArguments);
             }

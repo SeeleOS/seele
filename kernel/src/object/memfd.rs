@@ -221,7 +221,11 @@ pub fn memfd_get_seals(path: &Path) -> Option<u32> {
 }
 
 pub fn memfd_add_seals(path: &Path, seals: u32) -> SyscallResult {
-    let seals = MemFdSealFlags::from_bits(seals).ok_or(SyscallError::InvalidArguments)?;
+    let raw_seals = seals;
+    let seals = MemFdSealFlags::from_bits(seals).ok_or_else(|| {
+        crate::s_println!("unsupported memfd seals raw={:#x}", raw_seals);
+        SyscallError::InvalidArguments
+    })?;
     if seals.bits() & !MemFdSealFlags::SUPPORTED.bits() != 0 {
         return Err(SyscallError::InvalidArguments);
     }

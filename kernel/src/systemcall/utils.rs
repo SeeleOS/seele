@@ -1,3 +1,12 @@
+use core::any::type_name;
+
+use alloc::format;
+
+use crate::{
+    process::misc::with_current_process, systemcall::numbers::SyscallNumber,
+    thread::get_current_thread,
+};
+
 pub type SyscallResult<T = usize> = Result<T, SyscallError>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +56,59 @@ impl SyscallError {
     pub fn as_isize(self) -> isize {
         self as isize
     }
+}
+
+pub fn invalid_syscall_flag_error<T>(raw: u64) -> SyscallError {
+    crate::s_println!(
+        "unsupported syscall flags type={} raw={:#x}",
+        type_name::<T>(),
+        raw
+    );
+    SyscallError::InvalidArguments
+}
+
+pub fn log_unsupported_syscall_result(
+    syscall_no: isize,
+    arg1: u64,
+    arg2: u64,
+    arg3: u64,
+    arg4: u64,
+    arg5: u64,
+    arg6: u64,
+    err: SyscallError,
+) {
+    if !matches!(
+        err,
+        SyscallError::NoSyscall | SyscallError::OperationNotSupported
+    ) {
+        return;
+    }
+
+    with_current_process(|process| {
+        let tid = get_current_thread().lock().id.0;
+        let comm = process
+            .command_line
+            .first()
+            .and_then(|command| command.rsplit('/').next())
+            .unwrap_or("?");
+        let syscall_name = SyscallNumber::from_number(syscall_no as usize)
+            .map(|number| format!("{number:?}"))
+            .unwrap_or_else(|| format!("nr={syscall_no}"));
+        crate::s_println!(
+            "unsupported syscall comm={} pid={} tid={} name={} ret={:?} a1={:#x} a2={:#x} a3={:#x} a4={:#x} a5={:#x} a6={:#x}",
+            comm,
+            process.pid.0,
+            tid,
+            syscall_name,
+            err,
+            arg1,
+            arg2,
+            arg3,
+            arg4,
+            arg5,
+            arg6
+        );
+    });
 }
 
 impl From<isize> for SyscallError {

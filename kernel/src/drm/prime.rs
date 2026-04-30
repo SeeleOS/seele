@@ -122,8 +122,13 @@ impl Statable for DrmPrimeBufferObject {
 
 pub(super) fn handle_prime_handle_to_fd(ptr: *mut DrmPrimeHandle) -> ObjectResult<isize> {
     let mut request = read_user(ptr)?;
-    let flags =
-        DrmPrimeHandleFlags::from_bits(request.flags).ok_or(ObjectError::InvalidArguments)?;
+    let flags = DrmPrimeHandleFlags::from_bits(request.flags).ok_or_else(|| {
+        crate::s_println!(
+            "unsupported drm prime handle flags raw={:#x}",
+            request.flags
+        );
+        ObjectError::InvalidArguments
+    })?;
     let buffer = DRM_STATE.lock().get_user_handle(request.handle)?.clone();
     let object: ObjectRef = Arc::new(DrmPrimeBufferObject::new(buffer));
     let fd_flags = if flags.contains(DrmPrimeHandleFlags::CLOEXEC) {
