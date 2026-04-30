@@ -25,6 +25,7 @@ pub struct TerminalObject {
     pub termios: Mutex<LinuxTermios2>,
     pub winsize: Mutex<LinuxWinsize>,
     pub linux_console: Arc<Mutex<LinuxConsoleState>>,
+    output_escape_buffer: Mutex<String>,
 }
 
 impl TerminalObject {
@@ -38,11 +39,12 @@ impl TerminalObject {
             )),
             inner: term,
             linux_console: Arc::new(Mutex::new(LinuxConsoleState::default())),
+            output_escape_buffer: Mutex::new(String::new()),
         }
     }
 
     pub fn write_screen_text(&self, text: &str) {
-        let filtered = filter_terminal_output(text);
+        let filtered = self.filter_terminal_output(text);
         if !filtered.is_empty() {
             without_interrupts(|| {
                 self.inner.lock().push_str(&filtered);
@@ -55,25 +57,43 @@ impl TerminalObject {
             self.inner.lock().clear();
         });
     }
+
+    fn filter_terminal_output(&self, text: &str) -> String {
+        let mut pending = self.output_escape_buffer.lock();
+        filter_terminal_output(text, &mut pending)
+    }
 }
 
-fn filter_terminal_output(text: &str) -> String {
-    let mut output = String::with_capacity(text.len());
-    let bytes = text.as_bytes();
+fn filter_terminal_output(text: &str, pending: &mut String) -> String {
+    let mut input = String::with_capacity(pending.len() + text.len());
+    input.push_str(pending);
+    input.push_str(text);
+    pending.clear();
+
+    let mut output = String::with_capacity(input.len());
+    let bytes = input.as_bytes();
     let mut index = 0usize;
 
     while index < bytes.len() {
         if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b']') {
+            let sequence_start = index;
             index += 2;
+            let mut terminated = false;
             while let Some(&byte) = bytes.get(index) {
                 index += 1;
                 if byte == 0x07 {
+                    terminated = true;
                     break;
                 }
                 if byte == 0x1b && bytes.get(index) == Some(&b'\\') {
                     index += 1;
+                    terminated = true;
                     break;
                 }
+            }
+            if !terminated {
+                pending.push_str(&input[sequence_start..]);
+                break;
             }
             continue;
         }
@@ -82,6 +102,15 @@ fn filter_terminal_output(text: &str) -> String {
             get_active_tty().push_terminal_response_bytes(response.as_bytes());
             index = next_index;
             continue;
+        }
+
+        if bytes[index] == 0x1b
+            && bytes.get(index + 1) == Some(&b'P')
+            && bytes.get(index + 2) == Some(&b'+')
+            && bytes.get(index + 3) == Some(&b'q')
+        {
+            pending.push_str(&input[index..]);
+            break;
         }
 
         output.push(bytes[index] as char);
@@ -174,10 +203,12 @@ impl Object for TerminalObject {
 impl Writable for TerminalObject {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
         let string = from_utf8(buffer).unwrap_or("Unsupported charcter");
-        let filtered = filter_terminal_output(string);
+        let filtered = self.filter_terminal_output(string);
         if !filtered.is_empty() {
             s_print!("{filtered}");
-            self.write_screen_text(&filtered);
+            without_interrupts(|| {
+                self.inner.lock().push_str(&filtered);
+            });
         }
         Ok(buffer.len())
     }
