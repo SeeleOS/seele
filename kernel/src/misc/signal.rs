@@ -93,6 +93,7 @@ pub enum Signal {
 pub const SIGNAL_AMOUNT: usize = 64;
 pub const SI_USER: i32 = 0;
 pub const SI_QUEUE: i32 = -1;
+pub const SI_TKILL: i32 = -6;
 
 pub type SignalHandlerFn = extern "C" fn(i32);
 pub type SigHandlerFn2 = extern "C" fn(i32, *const SigInfo, *const UContext);
