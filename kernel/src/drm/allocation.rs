@@ -8,7 +8,7 @@ use crate::{
         paging::{FRAME_ALLOCATOR, MAPPER},
         utils::apply_offset,
     },
-    misc::framebuffer::FRAME_BUFFER,
+    misc::framebuffer::{FRAME_BUFFER, FramebufferPixelFormat},
     object::{error::ObjectError, misc::ObjectResult},
 };
 
@@ -105,12 +105,22 @@ impl DrmState {
         size: u64,
         pages: usize,
     ) -> Option<(PhysFrame<Size4KiB>, u64, PageTableFlags)> {
+        if self
+            .dumb_buffers
+            .values()
+            .any(|buffer| buffer.scanout_backed)
+        {
+            return None;
+        }
+
         let fb_info = current_framebuffer_info();
         if bpp != 32
             || width != fb_info.width as u32
             || height != fb_info.height as u32
             || pitch != (fb_info.stride * fb_info.bytes_per_pixel) as u32
             || size > fb_info.byte_len as u64
+            || fb_info.bytes_per_pixel != 4
+            || fb_info.pixel_format != FramebufferPixelFormat::Bgr
         {
             return None;
         }
