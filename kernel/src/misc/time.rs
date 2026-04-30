@@ -238,7 +238,9 @@ where
 }
 
 fn detect_tsc_frequency_hz() -> Option<u64> {
-    detect_tsc_frequency_from_leaf_0x15().or_else(detect_tsc_frequency_from_leaf_0x16)
+    detect_tsc_frequency_from_kvm_leaf_0x40000010()
+        .or_else(detect_tsc_frequency_from_leaf_0x15)
+        .or_else(detect_tsc_frequency_from_leaf_0x16)
 }
 
 fn calibrate_timebase(rtc: &Rtc) -> Option<TimeCalibration> {
@@ -295,6 +297,27 @@ fn detect_tsc_frequency_from_leaf_0x16() -> Option<u64> {
     }
 
     Some((leaf.eax as u64) * 1_000_000)
+}
+
+fn detect_tsc_frequency_from_kvm_leaf_0x40000010() -> Option<u64> {
+    let hypervisor_leaf = cpuid(0x4000_0000);
+    if hypervisor_leaf.eax < 0x4000_0010 {
+        return None;
+    }
+
+    if hypervisor_leaf.ebx != u32::from_le_bytes(*b"KVMK")
+        || hypervisor_leaf.ecx != u32::from_le_bytes(*b"VMKV")
+        || hypervisor_leaf.edx != u32::from_le_bytes(*b"M\0\0\0")
+    {
+        return None;
+    }
+
+    let timing = cpuid(0x4000_0010);
+    if timing.eax == 0 {
+        return None;
+    }
+
+    Some((timing.eax as u64) * 1_000)
 }
 
 #[cfg(target_arch = "x86_64")]
