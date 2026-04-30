@@ -613,6 +613,7 @@ fn stat_mount_root_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<bool
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct LinuxFileHandle {
     handle_bytes: u32,
     handle_type: i32,
