@@ -65,13 +65,7 @@ impl File for TmpfsFileHandle {
                 return Err(FSError::NotAFile);
             }
         };
-        let offset = offset as usize;
-        if offset >= data.len() {
-            return Ok(0);
-        }
-        let len = buffer.len().min(data.len() - offset);
-        buffer[..len].copy_from_slice(&data[offset..offset + len]);
-        Ok(len)
+        Ok(data.read_at(buffer, offset as usize))
     }
 
     fn read(&mut self, buffer: &mut [u8]) -> FSResult<usize> {
@@ -89,16 +83,9 @@ impl File for TmpfsFileHandle {
                 return Err(FSError::NotAFile);
             }
         };
-        let end = self
-            .offset
-            .checked_add(buffer.len())
-            .ok_or(FSError::Other)?;
-        if end > data.len() {
-            data.resize(end, 0);
-        }
-        data[self.offset..end].copy_from_slice(buffer);
-        self.offset = end;
-        Ok(buffer.len())
+        let written = data.write_at(self.offset, buffer);
+        self.offset = self.offset.saturating_add(written);
+        Ok(written)
     }
 
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {
@@ -144,7 +131,7 @@ impl File for TmpfsFileHandle {
                 return Err(FSError::NotAFile);
             }
         };
-        data.resize(length, 0);
+        data.truncate(length);
         Ok(())
     }
 
@@ -164,9 +151,7 @@ impl File for TmpfsFileHandle {
                 return Err(FSError::NotAFile);
             }
         };
-        if end > data.len() {
-            data.resize(end, 0);
-        }
+        data.ensure_len(end);
         Ok(())
     }
 

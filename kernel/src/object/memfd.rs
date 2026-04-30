@@ -3,7 +3,7 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, string::String, sync::Arc};
 use bitflags::bitflags;
 use spin::Mutex;
 
@@ -13,6 +13,7 @@ use crate::{
         info::{FileLikeInfo, UnixPermission},
         object::FileLikeObject,
         path::Path,
+        sparse_file::SparseFileData,
         vfs::{FSResult, WrappedFile},
         vfs_traits::{File, FileLike, FileLikeType, Whence},
     },
@@ -52,7 +53,7 @@ struct MemFdFile {
     inode: u64,
     offset: usize,
     path: Path,
-    data: Vec<u8>,
+    data: SparseFileData,
 }
 
 static NEXT_MEMFD_INODE: AtomicU64 = AtomicU64::new(1);
@@ -68,7 +69,7 @@ impl MemFdFile {
             inode,
             offset: 0,
             path,
-            data: Vec::new(),
+            data: SparseFileData::new(),
         }
     }
 
@@ -96,13 +97,7 @@ impl File for MemFdFile {
 
     fn read_at(&mut self, buffer: &mut [u8], offset: u64) -> FSResult<usize> {
         let offset = usize::try_from(offset).map_err(|_| FSError::Other)?;
-        if offset >= self.data.len() {
-            return Ok(0);
-        }
-
-        let len = buffer.len().min(self.data.len() - offset);
-        buffer[..len].copy_from_slice(&self.data[offset..offset + len]);
-        Ok(len)
+        Ok(self.data.read_at(buffer, offset))
     }
 
     fn read(&mut self, buffer: &mut [u8]) -> FSResult<usize> {
@@ -120,16 +115,9 @@ impl File for MemFdFile {
             .offset
             .checked_add(buffer.len())
             .ok_or(FSError::Other)?;
-        if self.offset > self.data.len() {
-            self.data.resize(self.offset, 0);
-        }
-        if end > self.data.len() {
-            self.data.resize(end, 0);
-        }
-
-        self.data[self.offset..end].copy_from_slice(buffer);
+        let written = self.data.write_at(self.offset, buffer);
         self.offset = end;
-        Ok(buffer.len())
+        Ok(written)
     }
 
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {
@@ -167,7 +155,7 @@ impl File for MemFdFile {
             return Err(FSError::AccessDenied);
         }
 
-        self.data.resize(length, 0);
+        self.data.truncate(length);
         Ok(())
     }
 
@@ -187,9 +175,7 @@ impl File for MemFdFile {
             return Err(FSError::AccessDenied);
         }
 
-        if end > self.data.len() {
-            self.data.resize(end, 0);
-        }
+        self.data.ensure_len(end);
         Ok(())
     }
 }

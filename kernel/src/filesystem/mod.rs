@@ -11,6 +11,7 @@ pub mod page_cache;
 pub mod path;
 pub mod procfs;
 mod resolve;
+pub mod sparse_file;
 pub mod staticfs;
 pub mod storage_operator;
 pub mod sysfs;

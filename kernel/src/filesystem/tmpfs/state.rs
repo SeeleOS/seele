@@ -6,7 +6,12 @@ use alloc::{
 };
 use spin::Mutex;
 
-use crate::filesystem::{errors::FSError, path::Path, vfs::FSResult};
+use crate::filesystem::{
+    errors::FSError,
+    path::Path,
+    sparse_file::SparseFileData,
+    vfs::FSResult,
+};
 
 const ROOT_INODE: u64 = 0x7000_0000;
 pub(crate) const DEFAULT_DIR_MODE: u32 = 0o755;
@@ -20,7 +25,7 @@ pub(crate) enum TmpNodeKind {
         mode: u32,
     },
     File {
-        data: Vec<u8>,
+        data: SparseFileData,
         mode: u32,
     },
     Symlink {
@@ -116,7 +121,7 @@ impl TmpfsState {
             parent,
             name,
             TmpNodeKind::File {
-                data: Vec::new(),
+                data: SparseFileData::new(),
                 mode: DEFAULT_FILE_MODE,
             },
         )
