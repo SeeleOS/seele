@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
 
 use lazy_static::lazy_static;
 use spin::Mutex;
@@ -189,7 +189,11 @@ fn ofd_owner(object: &ObjectRef) -> usize {
 }
 
 fn lock_key(object: &ObjectRef) -> Result<String, SyscallError> {
-    Ok(object.clone().as_file_like()?.path().as_string())
+    if let Ok(file_like) = object.clone().as_file_like() {
+        return Ok(file_like.path().as_string());
+    }
+
+    Ok(format!("object:{:p}", Arc::as_ptr(object)))
 }
 
 fn find_conflict(
