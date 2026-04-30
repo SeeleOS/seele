@@ -531,6 +531,7 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
 #[repr(u32)]
 enum RlimitResource {
+    Stack = 3,
     NoFile = 7,
 }
 
@@ -1816,6 +1817,13 @@ define_syscall!(Setrlimit, |resource: i32, rlimit: u64| {
     let resource = RlimitResource::try_from(resource as u32).map_err(|_| SyscallError::InvalidArguments)?;
     let limit = user_safe::read(rlimit as *const LinuxRlimit64)?;
     match resource {
+        RlimitResource::Stack => {
+            let process = get_current_process();
+            let mut process = process.lock();
+            process.rlimit_stack_cur = limit.rlim_cur;
+            process.rlimit_stack_max = limit.rlim_max;
+            Ok(0)
+        }
         RlimitResource::NoFile => {
             let process = get_current_process();
             let mut process = process.lock();
@@ -1965,6 +1973,10 @@ define_syscall!(
                 let process = get_current_process();
                 let process = process.lock();
                 match resource {
+                    RlimitResource::Stack => LinuxRlimit64 {
+                        rlim_cur: process.rlimit_stack_cur,
+                        rlim_max: process.rlimit_stack_max,
+                    },
                     RlimitResource::NoFile => LinuxRlimit64 {
                         rlim_cur: process.rlimit_nofile_cur,
                         rlim_max: process.rlimit_nofile_max,
@@ -1978,6 +1990,10 @@ define_syscall!(
             let process = get_current_process();
             let mut process = process.lock();
             match resource {
+                RlimitResource::Stack => {
+                    process.rlimit_stack_cur = limit.rlim_cur;
+                    process.rlimit_stack_max = limit.rlim_max;
+                }
                 RlimitResource::NoFile => {
                     process.rlimit_nofile_cur = limit.rlim_cur;
                     process.rlimit_nofile_max = limit.rlim_max;
