@@ -162,6 +162,7 @@ fn syscall_debug_target(syscall_no: usize) -> Option<&'static str> {
         SyscallNumber::Newfstatat => Some("newfstatat"),
         SyscallNumber::Read => Some("read"),
         SyscallNumber::Write => Some("write"),
+        SyscallNumber::Ioctl => Some("ioctl"),
         SyscallNumber::Close => Some("close"),
         SyscallNumber::Getdents64 => Some("getdents64"),
         SyscallNumber::Fcntl => Some("fcntl"),
@@ -204,7 +205,15 @@ fn should_log_boot_debug_syscall() -> bool {
         let Some(name) = command.rsplit('/').next() else {
             return false;
         };
-        matches!(name, "systemd-sysusers" | "systemd-random-seed")
+        matches!(
+            name,
+            "init"
+                | "systemd"
+                | "systemd-sysusers"
+                | "systemd-random-seed"
+                | "agetty"
+                | "login"
+        )
     })
 }
 
