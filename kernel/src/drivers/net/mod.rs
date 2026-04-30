@@ -13,7 +13,7 @@ static DRIVERS: &[&dyn PciNetDriver] = &[&e1000::DRIVER];
 pub fn init() {
     for record in enumerate_devices() {
         for driver in DRIVERS {
-            if !driver.matches(&record) {
+            if !driver.matches(record) {
                 continue;
             }
 
@@ -26,7 +26,7 @@ pub fn init() {
                 record.info.vendor_id,
                 record.info.device_id,
             );
-            driver.probe(&record);
+            driver.probe(record);
         }
     }
 }
