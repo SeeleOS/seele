@@ -83,7 +83,15 @@ fn log_boot_debug_pagefault(stage: &str, address: u64, error_code: PageFaultErro
         let Some(name) = command.rsplit('/').next() else {
             return;
         };
-        if !matches!(name, "init" | "systemd-random-seed" | "systemd-sysusers") {
+        if !matches!(
+            name,
+            "init"
+                | "systemd-random-seed"
+                | "systemd-sysusers"
+                | "10-arch"
+                | "60-flatpak-system-only"
+                | "flatpak"
+        ) {
             return;
         }
 

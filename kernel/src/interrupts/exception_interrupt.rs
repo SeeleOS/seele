@@ -97,7 +97,16 @@ fn log_boot_debug_exception(stackframe: &InterruptStackFrame, sig: Signal) {
         let Some(name) = command.rsplit('/').next() else {
             return;
         };
-        if !matches!(name, "init" | "systemd" | "systemd-random-seed" | "systemd-sysusers") {
+        if !matches!(
+            name,
+            "init"
+                | "systemd"
+                | "systemd-random-seed"
+                | "systemd-sysusers"
+                | "10-arch"
+                | "60-flatpak-system-only"
+                | "flatpak"
+        ) {
             return;
         }
 

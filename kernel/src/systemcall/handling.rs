@@ -211,6 +211,9 @@ fn should_log_boot_debug_syscall() -> bool {
                 | "systemd"
                 | "systemd-sysusers"
                 | "systemd-random-seed"
+                | "10-arch"
+                | "60-flatpak-system-only"
+                | "flatpak"
                 | "agetty"
                 | "login"
         )
