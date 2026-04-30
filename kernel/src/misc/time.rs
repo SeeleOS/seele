@@ -18,7 +18,7 @@ pub const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
 const DEFAULT_TSC_FREQ_HZ: u64 = 1_000_000_000;
 const MIN_TSC_FREQ_HZ: u64 = 1_000_000;
 const MAX_TSC_FREQ_HZ: u64 = 10_000_000_000;
-const PROFILING: bool = false;
+const PROFILING: bool = true;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Time(pub u64);
@@ -174,6 +174,57 @@ where
         end.subsec_milliseconds(),
         elapsed.as_milliseconds()
     );
+
+    result
+}
+
+pub fn profile_boot_stage<T, F>(label: &str, f: F) -> T
+where
+    F: FnOnce() -> T,
+{
+    if !PROFILING {
+        return f();
+    }
+
+    let start_cycles = get_cycles();
+    let start_time = Time::since_boot();
+    let has_timebase = TSC_FREQ_HZ.load(Ordering::SeqCst) != 0;
+
+    if has_timebase {
+        crate::s_println!(
+            "[profile] start {} at {}.{:03}s",
+            label,
+            start_time.as_seconds(),
+            start_time.subsec_milliseconds()
+        );
+    } else {
+        crate::s_println!("[profile] start {} at cycle {}", label, start_cycles);
+    }
+
+    let result = f();
+
+    let end_cycles = get_cycles();
+    let elapsed_cycles = end_cycles.saturating_sub(start_cycles);
+
+    if has_timebase {
+        let end_time = Time::since_boot();
+        let elapsed = end_time.sub(start_time);
+        crate::s_println!(
+            "[profile] end {} at {}.{:03}s (+{} ms, {} cycles)",
+            label,
+            end_time.as_seconds(),
+            end_time.subsec_milliseconds(),
+            elapsed.as_milliseconds(),
+            elapsed_cycles
+        );
+    } else {
+        crate::s_println!(
+            "[profile] end {} at cycle {} (+{} cycles)",
+            label,
+            end_cycles,
+            elapsed_cycles
+        );
+    }
 
     result
 }
