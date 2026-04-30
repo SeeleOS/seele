@@ -218,6 +218,7 @@ install_sysroot_file "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/etc/X11/xini
 install_sysroot_file "${ROOTFS_MAKING_DIR}/10-sddm-greeter.conf" "${SYSROOT_DIR}/etc/sddm.conf.d/10-sddm-greeter.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/Xsetup" "${SYSROOT_DIR}/usr/share/sddm/scripts/Xsetup"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/root/.xinitrc"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/startplasma-wayland-tty.sh" "${SYSROOT_DIR}/usr/bin/startplasma-wayland-tty"
 
 for package in "${AUR_PACKAGES[@]}"; do
     install_aur_package "${package}"
