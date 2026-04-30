@@ -60,6 +60,8 @@ extern "x86-interrupt" fn double_fault_handler(
 }
 
 pub fn handle_usermode_exception(stackframe: &InterruptStackFrame, sig: Signal) -> ! {
+    log_boot_debug_exception(stackframe, sig);
+
     // Save the state of the current thread manually with the stackframe.
     // We need to do this because the snapshot wont
     // get automatically saved, unlike in syscalls.
@@ -85,4 +87,29 @@ pub fn handle_usermode_exception(stackframe: &InterruptStackFrame, sig: Signal) 
 
     terminate_process(get_current_process(), ProcessExitStatus::Signaled(sig));
     return_to_scheduler_no_save();
+}
+
+fn log_boot_debug_exception(stackframe: &InterruptStackFrame, sig: Signal) {
+    crate::process::misc::with_current_process(|process| {
+        let Some(command) = process.command_line.first() else {
+            return;
+        };
+        let Some(name) = command.rsplit('/').next() else {
+            return;
+        };
+        if !matches!(name, "init" | "systemd" | "systemd-random-seed" | "systemd-sysusers") {
+            return;
+        }
+
+        let tid = crate::thread::get_current_thread().lock().id.0;
+        crate::s_println!(
+            "bootexc sig={:?} comm={} pid={} tid={} rip={:#x} rsp={:#x}",
+            sig,
+            name,
+            process.pid.0,
+            tid,
+            stackframe.instruction_pointer.as_u64(),
+            stackframe.stack_pointer.as_u64()
+        );
+    });
 }
