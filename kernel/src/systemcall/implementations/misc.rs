@@ -1952,22 +1952,31 @@ define_syscall!(
             return Err(SyscallError::InvalidArguments);
         }
 
-        let resource = RlimitResource::try_from(resource).map_err(|_| SyscallError::InvalidArguments)?;
-        let process = get_current_process();
-        let mut process = process.lock();
+        let resource =
+            RlimitResource::try_from(resource).map_err(|_| SyscallError::InvalidArguments)?;
+        let new_limit_value = if new_limit.is_null() {
+            None
+        } else {
+            Some(user_safe::read(new_limit)?)
+        };
 
         if !old_limit.is_null() {
-            let limit = match resource {
-                RlimitResource::NoFile => LinuxRlimit64 {
-                    rlim_cur: process.rlimit_nofile_cur,
-                    rlim_max: process.rlimit_nofile_max,
-                },
+            let limit = {
+                let process = get_current_process();
+                let process = process.lock();
+                match resource {
+                    RlimitResource::NoFile => LinuxRlimit64 {
+                        rlim_cur: process.rlimit_nofile_cur,
+                        rlim_max: process.rlimit_nofile_max,
+                    },
+                }
             };
             user_safe::write(old_limit, &limit)?;
         }
 
-        if !new_limit.is_null() {
-            let limit = user_safe::read(new_limit)?;
+        if let Some(limit) = new_limit_value {
+            let process = get_current_process();
+            let mut process = process.lock();
             match resource {
                 RlimitResource::NoFile => {
                     process.rlimit_nofile_cur = limit.rlim_cur;
