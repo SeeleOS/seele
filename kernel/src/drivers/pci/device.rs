@@ -1,9 +1,12 @@
 use alloc::vec::Vec;
+use conquer_once::spin::OnceCell;
 use pci_types::PciAddress;
 
 use virtio_drivers::transport::pci::bus::{DeviceFunction, DeviceFunctionInfo, PciRoot};
 
 use crate::drivers::pci::access::PciConfigPorts;
+
+static DEVICES: OnceCell<Vec<PciDeviceRecord>> = OnceCell::uninit();
 
 #[derive(Clone, Debug)]
 pub struct PciDeviceRecord {
@@ -12,7 +15,11 @@ pub struct PciDeviceRecord {
     pub info: DeviceFunctionInfo,
 }
 
-pub fn enumerate_devices() -> Vec<PciDeviceRecord> {
+pub fn enumerate_devices() -> &'static [PciDeviceRecord] {
+    DEVICES.get_or_init(discover_devices).as_slice()
+}
+
+fn discover_devices() -> Vec<PciDeviceRecord> {
     let root = PciRoot::new(PciConfigPorts);
     let mut devices = Vec::new();
 
