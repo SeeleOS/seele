@@ -5,6 +5,7 @@ use crate::{
     process::manager::get_current_process,
     process::ptrace::{maybe_stop_current_on_syscall_entry, maybe_stop_current_on_syscall_exit},
     signal::process_current_process_signals,
+    systemcall::numbers::SyscallNumber,
     systemcall::table::SYSCALL_TABLE,
     systemcall::utils::SyscallError,
     thread::{
@@ -21,6 +22,7 @@ static FIRST_USER_SYSCALL_LOGGED: AtomicBool = AtomicBool::new(false);
 extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     let snapshot = unsafe { &mut *snapshot_ptr };
     let syscall_no = snapshot.rax;
+    let syscall_debug = syscall_debug_target(syscall_no as usize);
 
     let thread_ref = get_current_thread();
     let mut thread = thread_ref.lock();
@@ -31,6 +33,20 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     thread.last_user_snapshot = *snapshot;
     thread.last_user_fs_base = fs_base;
     drop(thread);
+
+    if let Some(syscall_name) = syscall_debug {
+        log_syscall_event(
+            "enter",
+            syscall_name,
+            syscall_no,
+            snapshot.rdi,
+            snapshot.rsi,
+            snapshot.rdx,
+            snapshot.r10,
+            snapshot.r8,
+            snapshot.r9,
+        );
+    }
 
     maybe_stop_current_on_syscall_entry();
 
@@ -53,6 +69,10 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
         thread.last_user_snapshot = *snapshot;
         thread.last_user_fs_base = fs_base;
     });
+
+    if let Some(syscall_name) = syscall_debug {
+        log_syscall_exit(syscall_name, syscall_no, result);
+    }
 
     maybe_stop_current_on_syscall_exit();
 
@@ -94,4 +114,77 @@ fn syscall_handler_unwrapped(
     } else {
         SyscallError::NoSyscall as isize
     }
+}
+
+fn syscall_debug_target(syscall_no: usize) -> Option<&'static str> {
+    if !should_log_x_syscall() {
+        return None;
+    }
+
+    match SyscallNumber::from_number(syscall_no)? {
+        SyscallNumber::OpenAt => Some("openat"),
+        SyscallNumber::Mmap => Some("mmap"),
+        SyscallNumber::Ioctl => Some("ioctl"),
+        SyscallNumber::Futex => Some("futex"),
+        SyscallNumber::Poll => Some("poll"),
+        SyscallNumber::Ppoll => Some("ppoll"),
+        SyscallNumber::EpollWait => Some("epoll_wait"),
+        SyscallNumber::EpollCtl => Some("epoll_ctl"),
+        SyscallNumber::EpollPwait => Some("epoll_pwait"),
+        SyscallNumber::EpollCreate1 => Some("epoll_create1"),
+        SyscallNumber::EpollPwait2 => Some("epoll_pwait2"),
+        _ => None,
+    }
+}
+
+fn should_log_x_syscall() -> bool {
+    crate::process::misc::with_current_process(|process| {
+        let Some(command) = process.command_line.first() else {
+            return false;
+        };
+        let Some(name) = command.rsplit('/').next() else {
+            return false;
+        };
+        matches!(name, "X" | "Xorg")
+    })
+}
+
+fn log_syscall_event(
+    phase: &str,
+    syscall_name: &str,
+    syscall_no: isize,
+    arg1: u64,
+    arg2: u64,
+    arg3: u64,
+    arg4: u64,
+    arg5: u64,
+    arg6: u64,
+) {
+    crate::process::misc::with_current_process(|process| {
+        crate::s_println!(
+            "xsys {} pid={} {}({}) a1={:#x} a2={:#x} a3={:#x} a4={:#x} a5={:#x} a6={:#x}",
+            phase,
+            process.pid.0,
+            syscall_name,
+            syscall_no,
+            arg1,
+            arg2,
+            arg3,
+            arg4,
+            arg5,
+            arg6
+        );
+    });
+}
+
+fn log_syscall_exit(syscall_name: &str, syscall_no: isize, result: isize) {
+    crate::process::misc::with_current_process(|process| {
+        crate::s_println!(
+            "xsys exit pid={} {}({}) ret={:#x}",
+            process.pid.0,
+            syscall_name,
+            syscall_no,
+            result
+        );
+    });
 }
