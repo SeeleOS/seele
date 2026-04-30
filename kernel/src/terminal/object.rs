@@ -130,7 +130,7 @@ fn xtgettcap_response(payload: &str) -> String {
 }
 
 fn decode_hex_ascii(encoded: &str) -> Option<String> {
-    if encoded.len() % 2 != 0 {
+    if !encoded.len().is_multiple_of(2) {
         return None;
     }
 
