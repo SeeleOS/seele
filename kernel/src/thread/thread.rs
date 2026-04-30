@@ -39,6 +39,7 @@ pub struct Thread {
     pub last_syscall_no: u64,
     pub last_user_snapshot: Snapshot,
     pub last_user_fs_base: u64,
+    pub name: [u8; 16],
 
     pub sig_handler_snapshot: ThreadSnapshot,
 }
@@ -68,6 +69,7 @@ impl Default for Thread {
             last_syscall_no: 0,
             last_user_snapshot: Snapshot::default(),
             last_user_fs_base: 0,
+            name: [0; 16],
         }
     }
 }

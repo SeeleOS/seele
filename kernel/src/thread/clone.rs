@@ -23,6 +23,7 @@ impl Thread {
             last_syscall_no: self.last_syscall_no,
             last_user_snapshot: self.last_user_snapshot,
             last_user_fs_base: self.last_user_fs_base,
+            name: self.name,
             ..Default::default()
         }
     }

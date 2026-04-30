@@ -57,7 +57,10 @@ impl Process {
                 capability_effective: parent_locked.capability_effective,
                 capability_permitted: parent_locked.capability_permitted,
                 capability_inheritable: parent_locked.capability_inheritable,
+                capability_bounding: parent_locked.capability_bounding,
                 capability_ambient: parent_locked.capability_ambient,
+                dumpable: parent_locked.dumpable,
+                no_new_privs: parent_locked.no_new_privs,
                 net_namespace: parent_locked.net_namespace.clone(),
                 sysv_shm_mappings: inherited_shm_mappings.clone(),
                 ..Default::default()

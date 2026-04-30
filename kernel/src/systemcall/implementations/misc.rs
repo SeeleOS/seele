@@ -26,6 +26,7 @@ use crate::process::{
     misc::{ProcessID, get_process_with_pid},
 };
 use crate::signal::{
+    Signal,
     action::{SignalAction, SignalHandlingType, Signals},
     misc::default_signal_action_vec,
 };
@@ -1717,13 +1718,7 @@ define_syscall!(Prctl, |option: i32,
                         _arg4: u64,
                         _arg5: u64| {
     match PrctlOption::try_from(option).map_err(|_| SyscallError::InvalidArguments)? {
-        PrctlOption::SetPdeathsig
-        | PrctlOption::SetDumpable
-        | PrctlOption::SetName
-        | PrctlOption::SetNoNewPrivs
-        | PrctlOption::SetSeccomp
-        | PrctlOption::CapbsetDrop
-        | PrctlOption::SetMdwe => {
+        PrctlOption::SetSeccomp | PrctlOption::SetMdwe => {
             log_dangerous_noop_syscall(
                 "prctl",
                 alloc::format!(
@@ -1734,6 +1729,34 @@ define_syscall!(Prctl, |option: i32,
                 )
                 .as_str(),
             );
+            Ok(0)
+        }
+        PrctlOption::SetPdeathsig => {
+            let signal = if arg2 == 0 {
+                None
+            } else {
+                Some(Signal::try_from(arg2).map_err(|_| SyscallError::InvalidArguments)?)
+            };
+            get_current_process().lock().parent_death_signal = signal;
+            Ok(0)
+        }
+        PrctlOption::SetDumpable => {
+            if arg2 > 1 {
+                return Err(SyscallError::InvalidArguments);
+            }
+            get_current_process().lock().dumpable = arg2 != 0;
+            Ok(0)
+        }
+        PrctlOption::SetName => {
+            let name = read_prctl_name(arg2 as *const u8)?;
+            crate::thread::get_current_thread().lock().name = name;
+            Ok(0)
+        }
+        PrctlOption::SetNoNewPrivs => {
+            if arg2 != 1 || arg3 != 0 {
+                return Err(SyscallError::InvalidArguments);
+            }
+            get_current_process().lock().no_new_privs = true;
             Ok(0)
         }
         PrctlOption::SetKeepCaps => {
@@ -1748,23 +1771,41 @@ define_syscall!(Prctl, |option: i32,
             Ok(0)
         }
         PrctlOption::GetPdeathsig => {
-            user_safe::write(arg2 as *mut u8, &0i32)?;
+            if arg2 == 0 {
+                return Err(SyscallError::BadAddress);
+            }
+            let signal = get_current_process()
+                .lock()
+                .parent_death_signal
+                .map(|signal| signal as i32)
+                .unwrap_or(0);
+            user_safe::write(arg2 as *mut i32, &signal)?;
             Ok(0)
         }
-        PrctlOption::GetDumpable
-        | PrctlOption::GetNoNewPrivs
-        | PrctlOption::GetSeccomp
-        | PrctlOption::GetMdwe => Ok(0),
+        PrctlOption::GetDumpable => Ok(get_current_process().lock().dumpable as usize),
+        PrctlOption::GetNoNewPrivs => Ok(get_current_process().lock().no_new_privs as usize),
+        PrctlOption::GetSeccomp | PrctlOption::GetMdwe => Ok(0),
         PrctlOption::GetKeepCaps => Ok(get_current_process().lock().keep_capabilities as usize),
         PrctlOption::GetSecureBits => Ok(get_current_process().lock().secure_bits as usize),
         PrctlOption::GetName => {
-            let name = b"main\0";
-            let mut buffer = [0u8; 16];
-            buffer[..name.len()].copy_from_slice(name);
-            user_safe::write(arg2 as *mut u8, &buffer)?;
+            if arg2 == 0 {
+                return Err(SyscallError::BadAddress);
+            }
+            let name = current_thread_name();
+            user_safe::write(arg2 as *mut u8, &name)?;
             Ok(0)
         }
-        PrctlOption::CapbsetRead => Ok(0),
+        PrctlOption::CapbsetRead => {
+            let (slot, mask) = capability_slot_and_mask(arg2)?;
+            let process = get_current_process();
+            Ok(((process.lock().capability_bounding[slot] & mask) != 0) as usize)
+        }
+        PrctlOption::CapbsetDrop => {
+            let (slot, mask) = capability_slot_and_mask(arg2)?;
+            let process = get_current_process();
+            process.lock().capability_bounding[slot] &= !mask;
+            Ok(0)
+        }
         PrctlOption::CapAmbient => {
             let op =
                 PrctlCapAmbientOp::try_from(arg2).map_err(|_| SyscallError::InvalidArguments)?;
@@ -1893,6 +1934,41 @@ define_syscall!(SetRobustList, |head: u64, len: usize| {
 
 fn log_dangerous_noop_syscall(name: &str, detail: &str) {
     crate::s_println!("dangerous noop success syscall={} {}", name, detail);
+}
+
+fn read_prctl_name(ptr: *const u8) -> Result<[u8; 16], SyscallError> {
+    if ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let mut name = [0u8; 16];
+    for (index, slot) in name.iter_mut().enumerate() {
+        let byte = user_safe::read(unsafe { ptr.add(index) })?;
+        *slot = byte;
+        if byte == 0 {
+            return Ok(name);
+        }
+    }
+    name[15] = 0;
+    Ok(name)
+}
+
+fn current_thread_name() -> [u8; 16] {
+    let current = crate::thread::get_current_thread();
+    let thread_name = current.lock().name;
+    if thread_name.iter().any(|&byte| byte != 0) {
+        return thread_name;
+    }
+
+    let process = get_current_process();
+    let process = process.lock();
+    let command = process.command_line.first().map(String::as_str).unwrap_or("main");
+    let basename = command.rsplit('/').next().unwrap_or(command);
+    let mut name = [0u8; 16];
+    let bytes = basename.as_bytes();
+    let copy_len = bytes.len().min(15);
+    name[..copy_len].copy_from_slice(&bytes[..copy_len]);
+    name
 }
 
 define_syscall!(Rseq, |rseq_ptr: *mut LinuxRseq,
