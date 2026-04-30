@@ -122,6 +122,11 @@ fn syscall_debug_target(syscall_no: usize) -> Option<&'static str> {
     }
 
     match SyscallNumber::from_number(syscall_no)? {
+        SyscallNumber::Clone => Some("clone"),
+        SyscallNumber::Clone3 => Some("clone3"),
+        SyscallNumber::Exit => Some("exit"),
+        SyscallNumber::ExitGroup => Some("exit_group"),
+        SyscallNumber::SetTidAddress => Some("set_tid_address"),
         SyscallNumber::OpenAt => Some("openat"),
         SyscallNumber::Mmap => Some("mmap"),
         SyscallNumber::Ioctl => Some("ioctl"),
@@ -161,10 +166,12 @@ fn log_syscall_event(
     arg6: u64,
 ) {
     crate::process::misc::with_current_process(|process| {
+        let tid = crate::thread::get_current_thread().lock().id.0;
         crate::s_println!(
-            "xsys {} pid={} {}({}) a1={:#x} a2={:#x} a3={:#x} a4={:#x} a5={:#x} a6={:#x}",
+            "xsys {} pid={} tid={} {}({}) a1={:#x} a2={:#x} a3={:#x} a4={:#x} a5={:#x} a6={:#x}",
             phase,
             process.pid.0,
+            tid,
             syscall_name,
             syscall_no,
             arg1,
@@ -179,9 +186,11 @@ fn log_syscall_event(
 
 fn log_syscall_exit(syscall_name: &str, syscall_no: isize, result: isize) {
     crate::process::misc::with_current_process(|process| {
+        let tid = crate::thread::get_current_thread().lock().id.0;
         crate::s_println!(
-            "xsys exit pid={} {}({}) ret={:#x}",
+            "xsys exit pid={} tid={} {}({}) ret={:#x}",
             process.pid.0,
+            tid,
             syscall_name,
             syscall_no,
             result
