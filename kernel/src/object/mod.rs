@@ -35,6 +35,7 @@ pub mod config;
 pub mod control;
 pub mod device;
 pub mod error;
+pub mod file_locks;
 pub mod fs_context;
 pub mod linux_anon;
 pub mod memfd;

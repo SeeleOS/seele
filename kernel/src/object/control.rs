@@ -1,14 +1,14 @@
-use crate::object::FileFlags;
 use crate::{
-    memory::user_safe,
     object::{
         error::ObjectError,
+        file_locks::{LinuxFlock, fcntl_get_lock, fcntl_set_lock},
         memfd::{memfd_add_seals, memfd_get_seals},
         misc::{ObjectRef, get_object_current_process},
     },
     process::{FdFlags, misc::with_current_process},
     systemcall::utils::{SyscallError, SyscallResult},
 };
+use crate::object::FileFlags;
 use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
 
@@ -33,8 +33,6 @@ enum FcntlCmd {
 
 const O_WRONLY: usize = 0o1;
 const O_RDWR: usize = 0o2;
-const F_UNLCK: i16 = 2;
-
 bitflags! {
     #[derive(Clone, Copy, Debug)]
     struct FileStatusFlags: u64 {
@@ -48,17 +46,6 @@ bitflags! {
     struct DescriptorFlags: u32 {
         const FD_CLOEXEC = 1;
     }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct LinuxFlock {
-    lock_type: i16,
-    whence: i16,
-    start: i64,
-    len: i64,
-    pid: i32,
-    __reserved: i32,
 }
 
 fn access_mode_bits(object: &ObjectRef) -> usize {
@@ -138,34 +125,19 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
             Ok(0)
         }),
         FcntlCmd::GetLk | FcntlCmd::OfdGetLk => {
-            let flock_ptr = arg as *mut LinuxFlock;
-            if flock_ptr.is_null() {
-                return Err(SyscallError::BadAddress);
-            }
-
-            let mut flock = user_safe::read(flock_ptr)?;
-            flock.lock_type = F_UNLCK;
-            flock.pid = 0;
-            user_safe::write(flock_ptr, &flock)?;
-            log_fcntl_noop_success(
-                FcntlCmd::try_from(command).expect("validated fcntl command"),
-                fd,
-                arg,
-                "advisory locks are not implemented",
-            );
-            Ok(0)
+            fcntl_get_lock(
+                &object,
+                arg as *mut LinuxFlock,
+                matches!(command, x if x == FcntlCmd::OfdGetLk as u64),
+            )
         }
         FcntlCmd::SetLk | FcntlCmd::SetLkw | FcntlCmd::OfdSetLk | FcntlCmd::OfdSetLkw => {
-            if arg == 0 {
-                return Err(SyscallError::BadAddress);
-            }
-            log_fcntl_noop_success(
-                FcntlCmd::try_from(command).expect("validated fcntl command"),
-                fd,
-                arg,
-                "advisory locks are not implemented",
-            );
-            Ok(0)
+            fcntl_set_lock(
+                &object,
+                arg as *mut LinuxFlock,
+                matches!(command, x if x == FcntlCmd::OfdSetLk as u64 || x == FcntlCmd::OfdSetLkw as u64),
+                matches!(command, x if x == FcntlCmd::SetLkw as u64 || x == FcntlCmd::OfdSetLkw as u64),
+            )
         }
         FcntlCmd::AddSeals => {
             let file_like = object.as_file_like()?;

@@ -1,12 +1,13 @@
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 
 use crate::{
     object::{
         error::ObjectError,
+        file_locks::{release_fd_entry_locks, release_process_fd_table_locks},
         misc::{ObjectRef, ObjectResult},
         tty_device::get_default_tty,
     },
-    process::{FdEntry, FdFlags, Process},
+    process::{FdEntry, FdFlags, Process, new_fd_table},
 };
 
 pub fn close_cloexec_fd_entries(fd_table: &mut [Option<FdEntry>]) {
@@ -88,6 +89,9 @@ impl Process {
         if fd_table.len() <= slot {
             fd_table.resize(slot + 1, None);
         }
+        if let Some(old_entry) = fd_table[slot].take() {
+            release_fd_entry_locks(self.pid, &old_entry);
+        }
         fd_table[slot] = Some(FdEntry::new(object, fd_flags));
         Ok(slot)
     }
@@ -97,10 +101,10 @@ impl Process {
         let entry = fd_table
             .get_mut(slot)
             .ok_or(ObjectError::DoesNotExist)?;
-        if entry.is_none() {
+        let Some(old_entry) = entry.take() else {
             return Err(ObjectError::DoesNotExist);
-        }
-        *entry = None;
+        };
+        release_fd_entry_locks(self.pid, &old_entry);
         Ok(())
     }
 
@@ -167,6 +171,32 @@ impl Process {
 
     pub fn close_cloexec_objects(&mut self) {
         let mut fd_table = self.fd_table.lock();
-        close_cloexec_fd_entries(&mut fd_table);
+        for entry in fd_table.iter_mut() {
+            if entry
+                .as_ref()
+                .is_some_and(|entry| entry.fd_flags.contains(FdFlags::CLOEXEC))
+                && let Some(old_entry) = entry.take()
+            {
+                release_fd_entry_locks(self.pid, &old_entry);
+            }
+        }
+    }
+
+    pub fn close_all_fds(&mut self) {
+        let is_shared = Arc::strong_count(&self.fd_table) > 1;
+        if is_shared {
+            let entries = self.fd_table.lock().clone();
+            release_process_fd_table_locks(self.pid, &entries);
+        } else {
+            let entries = {
+                let mut fd_table = self.fd_table.lock();
+                core::mem::take(&mut *fd_table)
+            };
+            for entry in entries.into_iter().flatten() {
+                release_fd_entry_locks(self.pid, &entry);
+            }
+        }
+
+        self.fd_table = new_fd_table();
     }
 }
