@@ -147,6 +147,12 @@ enum KeyctlCommand {
     SessionToParent = 18,
 }
 
+#[derive(Clone, Copy, Debug, TryFromPrimitive)]
+#[repr(u32)]
+enum KcmpType {
+    File = 0,
+}
+
 bitflags! {
     #[derive(Clone, Copy, Debug)]
     pub(crate) struct RseqFlags: u32 {
@@ -288,6 +294,15 @@ fn clone_cleared_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalActio
             | SignalHandlingType::Function2(_) => default,
         })
         .collect()
+}
+
+fn process_fd_object(process: &Process, fd: usize) -> Result<ObjectRef, SyscallError> {
+    process
+        .fd_table
+        .get(fd)
+        .and_then(|entry| entry.as_ref())
+        .map(|entry| entry.object.clone())
+        .ok_or(SyscallError::BadFileDescriptor)
 }
 
 struct CloneProcessArgs {
@@ -1365,6 +1380,34 @@ define_syscall!(PidfdOpen, |pid: i32, flags: u32| {
     Ok(get_current_process()
         .lock()
         .push_object_with_flags(pidfd, FdFlags::CLOEXEC))
+});
+
+define_syscall!(Kcmp, |pid1: i32, pid2: i32, kind: u32, idx1: usize, idx2: usize| {
+    if pid1 <= 0 || pid2 <= 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let current_pid = get_current_process().lock().pid.0 as i32;
+    if pid1 != current_pid || pid2 != current_pid {
+        return Err(SyscallError::PermissionDenied);
+    }
+
+    let kind = KcmpType::try_from(kind).map_err(|_| SyscallError::InvalidArguments)?;
+    match kind {
+        KcmpType::File => {
+            let process = get_process_with_pid(ProcessID(pid1 as u64))?;
+            let process = process.lock();
+            let object1 = process_fd_object(&process, idx1)?;
+            let object2 = process_fd_object(&process, idx2)?;
+            if Arc::ptr_eq(&object1, &object2) {
+                Ok(0)
+            } else {
+                let ptr1 = Arc::as_ptr(&object1) as *const () as usize;
+                let ptr2 = Arc::as_ptr(&object2) as *const () as usize;
+                Ok((ptr1 > ptr2) as usize)
+            }
+        }
+    }
 });
 
 define_syscall!(SchedYield, { Ok(0) });

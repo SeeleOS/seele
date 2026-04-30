@@ -193,6 +193,7 @@ pub enum SyscallNumber {
     Prlimit64 = 302,
     NameToHandleAt = 303,
     Setns = 308,
+    Kcmp = 312,
     MemfdCreate = 319,
     Setrlimit = 160,
     Sync = 162,
