@@ -11,6 +11,7 @@ mod ptrace;
 mod select;
 mod signal;
 mod socket;
+mod sysv_shm;
 mod timer;
 
 pub use bpf::*;
@@ -26,4 +27,5 @@ pub use ptrace::*;
 pub use select::*;
 pub use signal::*;
 pub use socket::*;
+pub use sysv_shm::*;
 pub use timer::*;

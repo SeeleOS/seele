@@ -2,6 +2,7 @@ use core::mem;
 
 use crate::{
     filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
+    ipc::sysv_shm::detach_all_process_mappings,
     memory::addrspace::AddrSpace,
     misc::time::with_profiling,
     process::{
@@ -54,6 +55,7 @@ impl Process {
         let mut next_addrspace = AddrSpace::default();
         let mut next_fd_table = self.fd_table.clone();
         close_cloexec_fd_entries(&mut next_fd_table);
+        let pid = self.pid.0;
 
         let next_snapshot = with_profiling(
             || {
@@ -76,6 +78,7 @@ impl Process {
         // TODO: kill all the other threads when execveing
         with_profiling(
             || {
+                detach_all_process_mappings(self);
                 let mut old_addrspace = mem::replace(&mut self.addrspace, next_addrspace);
                 if self.borrowed_addrspace_from_parent {
                     self.borrowed_addrspace_from_parent = false;
@@ -90,7 +93,7 @@ impl Process {
             },
             alloc::format!(
                 "execve clean addrspace pid={} path={}",
-                self.pid.0,
+                pid,
                 path_string
             )
             .as_str(),
@@ -133,6 +136,7 @@ impl Process {
         self.signal_actions = execve_signal_actions(&self.signal_actions);
         self.program_break = 0;
         self.command_line = command_line;
+        self.sysv_shm_mappings.clear();
 
         with_profiling(
             || self.addrspace.load(),

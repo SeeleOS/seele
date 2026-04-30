@@ -3,13 +3,14 @@ use core::mem;
 use spin::mutex::Mutex;
 
 use crate::{
+    ipc::sysv_shm::inherit_forked_mappings,
     process::{Process, ProcessRef, misc::ProcessID},
     thread::{THREAD_MANAGER, ThreadRef, get_current_thread, misc::ThreadID, yielding::BlockType},
 };
 
 impl Process {
     fn fork_process(parent: ProcessRef) -> (ProcessID, ProcessRef) {
-        let (pid, new_process) = {
+        let (pid, new_process, inherited_shm_mappings) = {
             let current_thread = get_current_thread();
             let mut parent_locked = parent.lock();
             log::debug!(
@@ -19,6 +20,7 @@ impl Process {
             let pid = ProcessID::new();
 
             log::debug!("fork: parent {} -> child {}", parent_locked.pid.0, pid.0);
+            let inherited_shm_mappings = parent_locked.sysv_shm_mappings.clone();
             let new_process = Arc::new(Mutex::new(Self {
                 pid,
                 pending_signals: parent_locked.pending_signals,
@@ -57,11 +59,13 @@ impl Process {
                 capability_inheritable: parent_locked.capability_inheritable,
                 capability_ambient: parent_locked.capability_ambient,
                 net_namespace: parent_locked.net_namespace.clone(),
+                sysv_shm_mappings: inherited_shm_mappings.clone(),
                 ..Default::default()
             }));
-            (pid, new_process)
+            (pid, new_process, inherited_shm_mappings)
         };
 
+        inherit_forked_mappings(&inherited_shm_mappings);
         (pid, new_process)
     }
 

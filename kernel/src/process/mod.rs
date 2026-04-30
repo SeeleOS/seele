@@ -8,6 +8,7 @@ use spin::Mutex;
 use x86_64::VirtAddr;
 
 use crate::filesystem::absolute_path::AbsolutePath;
+use crate::ipc::sysv_shm::ProcessShmMapping;
 use crate::memory::addrspace::AddrSpace;
 use crate::misc::timer::Timer;
 use crate::net::namespace::{NetNamespace, NetNamespaceRef};
@@ -100,6 +101,7 @@ pub struct Process {
     pub capability_inheritable: [u32; 2],
     pub capability_ambient: [u32; 2],
     pub net_namespace: NetNamespaceRef,
+    pub sysv_shm_mappings: Vec<ProcessShmMapping>,
     pub vfork_blocker: Option<ThreadID>,
     pub borrowed_addrspace_from_parent: bool,
     pub ptrace: ptrace::PtraceState,
@@ -149,6 +151,7 @@ impl Default for Process {
             capability_inheritable: [0; 2],
             capability_ambient: [0; 2],
             net_namespace: NetNamespace::init(),
+            sysv_shm_mappings: Vec::new(),
             vfork_blocker: None,
             borrowed_addrspace_from_parent: false,
             ptrace: ptrace::PtraceState::default(),

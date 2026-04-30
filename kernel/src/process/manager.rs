@@ -4,6 +4,7 @@ use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
     filesystem::cgroupfs::remove_pid_cgroup_path,
+    ipc::sysv_shm::detach_all_process_mappings,
     misc::systemd_perf,
     object::linux_anon::wake_pidfd_for_process_with_manager,
     process::{Process, ProcessExitStatus, ProcessRef, misc::ProcessID},
@@ -56,6 +57,7 @@ impl Manager {
         let mut process = process.lock();
         process.fd_table.clear();
         process.timers.clear();
+        detach_all_process_mappings(&mut process);
         process.addrspace.clean();
     }
 

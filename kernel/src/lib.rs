@@ -15,6 +15,7 @@ pub mod drm;
 pub mod elfloader;
 pub mod evdev;
 pub mod filesystem;
+pub mod ipc;
 pub mod interrupts;
 pub mod keyboard;
 pub mod memory;
