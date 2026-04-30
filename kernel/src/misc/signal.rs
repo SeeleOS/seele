@@ -524,11 +524,16 @@ impl Process {
     /// caller should stop the current return path so the handler can run next.
     #[must_use]
     pub fn process_signals(&mut self) -> ProcessSignalsResult {
-        process_pending_signals(
+        let mut pending_signals = mem::take(&mut self.pending_signals);
+        let mut pending_signal_info = mem::take(&mut self.pending_signal_info);
+        let result = process_pending_signals(
             self,
-            &mut self.pending_signals,
-            &mut self.pending_signal_info,
-        )
+            &mut pending_signals,
+            &mut pending_signal_info,
+        );
+        self.pending_signals = pending_signals;
+        self.pending_signal_info = pending_signal_info;
+        result
     }
 
     fn default_signal_action(&mut self, signal: Signal) -> ProcessSignalsResult {
@@ -687,11 +692,16 @@ fn process_pending_signals(
 
 impl Thread {
     fn process_signals(&mut self, process: &mut Process) -> ProcessSignalsResult {
-        process_pending_signals(
+        let mut pending_signals = mem::take(&mut self.pending_signals);
+        let mut pending_signal_info = mem::take(&mut self.pending_signal_info);
+        let result = process_pending_signals(
             process,
-            &mut self.pending_signals,
-            &mut self.pending_signal_info,
-        )
+            &mut pending_signals,
+            &mut pending_signal_info,
+        );
+        self.pending_signals = pending_signals;
+        self.pending_signal_info = pending_signal_info;
+        result
     }
 
     fn block_signals_for_handler(&mut self, mut signals_to_block: Signals, signal: Signal) {
