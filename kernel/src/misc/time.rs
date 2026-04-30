@@ -5,6 +5,7 @@ use core::{
 
 use crate::misc::get_cycles;
 use x86_rtc::Rtc;
+use x86_64::instructions::port::Port;
 
 static BOOT_TSC: AtomicU64 = AtomicU64::new(0);
 static TSC_FREQ_HZ: AtomicU64 = AtomicU64::new(0);
@@ -18,6 +19,8 @@ pub const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
 const DEFAULT_TSC_FREQ_HZ: u64 = 1_000_000_000;
 const MIN_TSC_FREQ_HZ: u64 = 1_000_000;
 const MAX_TSC_FREQ_HZ: u64 = 10_000_000_000;
+const PIT_FREQUENCY_HZ: u64 = 1_193_182;
+const PIT_CALIBRATION_MS: u64 = 10;
 const PROFILING: bool = true;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
@@ -244,6 +247,31 @@ fn detect_tsc_frequency_hz() -> Option<u64> {
 }
 
 fn calibrate_timebase(rtc: &Rtc) -> Option<TimeCalibration> {
+    calibrate_timebase_with_pit(rtc).or_else(|| calibrate_timebase_with_rtc(rtc))
+}
+
+fn calibrate_timebase_with_pit(rtc: &Rtc) -> Option<TimeCalibration> {
+    let divisor = (PIT_FREQUENCY_HZ * PIT_CALIBRATION_MS / 1_000) as u16;
+    let realtime_base_ns =
+        (rtc.get_unix_timestamp() as i64).saturating_mul(NANOSECONDS_PER_SECOND as i64);
+    let boot_tsc = get_cycles();
+    let elapsed_cycles = measure_with_pit_channel_2(divisor)?;
+    let tsc_freq_hz = (elapsed_cycles as u128)
+        .checked_mul(1_000)?
+        .checked_div(PIT_CALIBRATION_MS as u128)? as u64;
+
+    if !(MIN_TSC_FREQ_HZ..=MAX_TSC_FREQ_HZ).contains(&tsc_freq_hz) {
+        return None;
+    }
+
+    Some(TimeCalibration {
+        boot_tsc,
+        tsc_freq_hz,
+        realtime_base_ns,
+    })
+}
+
+fn calibrate_timebase_with_rtc(rtc: &Rtc) -> Option<TimeCalibration> {
     let (boot_second, boot_tsc) = wait_for_next_rtc_second(rtc, rtc.get_unix_timestamp())?;
     let (next_second, next_tsc) = wait_for_next_rtc_second(rtc, boot_second)?;
     let elapsed_seconds = next_second.checked_sub(boot_second)?;
@@ -259,6 +287,37 @@ fn calibrate_timebase(rtc: &Rtc) -> Option<TimeCalibration> {
         tsc_freq_hz,
         realtime_base_ns: (boot_second as i64).saturating_mul(NANOSECONDS_PER_SECOND as i64),
     })
+}
+
+fn measure_with_pit_channel_2(divisor: u16) -> Option<u64> {
+    if divisor == 0 {
+        return None;
+    }
+
+    let mut command_port = Port::<u8>::new(0x43);
+    let mut channel_2_port = Port::<u8>::new(0x42);
+    let mut speaker_port = Port::<u8>::new(0x61);
+
+    unsafe {
+        let original = speaker_port.read();
+        speaker_port.write((original & !0x02) | 0x01);
+        command_port.write(0xb0);
+        channel_2_port.write((divisor & 0x00ff) as u8);
+        channel_2_port.write((divisor >> 8) as u8);
+
+        while speaker_port.read() & 0x20 != 0 {
+            spin_loop();
+        }
+
+        let start = get_cycles();
+        while speaker_port.read() & 0x20 == 0 {
+            spin_loop();
+        }
+        let end = get_cycles();
+        speaker_port.write(original);
+
+        Some(end.saturating_sub(start))
+    }
 }
 
 fn wait_for_next_rtc_second(rtc: &Rtc, second: u64) -> Option<(u64, u64)> {
