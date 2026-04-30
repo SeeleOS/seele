@@ -92,9 +92,8 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 
 - If the user provides a workflow or debugging suggestion that is broadly useful for future work in this repository, add it to `AGENTS.md` when appropriate instead of treating it as a one-off remark.
 - When debugging interactive login issues where the user needs to type a username or password manually, run `nix develop -c cargo run` in the foreground instead of the `--agent` path and let the user provide the login input.
-- When a background VM terminal is available, prefer interacting with it directly to send guest tty input, including login credentials and shell commands, instead of routing that input through helper scripts or separate tty socket tooling.
-- If a background VM terminal is available, interact with that terminal session itself for guest input. Do not fall back to tty sockets, `nc`, or similar side channels when direct terminal interaction is possible.
-- `run agent vm` should be treated as directly interactive by default. Do not assume a separate tty socket or extra terminal wrapper is needed just to type into the guest.
+- When a background VM terminal is available, interact with it directly for guest input, including login credentials and shell commands.
+- `run agent vm` should be treated as directly interactive by default.
 - After you finish using an interactive or background VM, terminate it yourself instead of relying on a default runner timeout to clean it up.
 - If `sysroot/` already appears to be mounted, reuse it directly instead of asking for privilege escalation to mount again. Only ask to mount when it is clearly not mounted.
 - When you need to mount `sysroot/`, use `agent-tools/ensure-sysroot-mounted.sh` directly. Run it first, then run the real inspection command separately instead of chaining them together.
