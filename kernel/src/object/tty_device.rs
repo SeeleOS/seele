@@ -193,14 +193,6 @@ impl TtyDevice {
         keyboard_queue.extend(line_buffer.drain(..));
     }
 
-    fn should_route_terminal_responses(&self) -> bool {
-        let keyboard_mode = self.linux_console.lock().keyboard_mode;
-        matches!(
-            keyboard_mode,
-            KeyboardMode::Raw | KeyboardMode::MediumRaw | KeyboardMode::Off
-        ) || self.linux_console.lock().display_mode == DisplayMode::Graphics
-    }
-
     fn clear_terminal_response_queue(&self) {
         self.terminal_response_queue.lock().clear();
     }
@@ -220,14 +212,6 @@ impl TtyDevice {
 
     fn push_terminal_query_responses(&self, bytes: &[u8]) {
         if !self.interactive || bytes.is_empty() {
-            return;
-        }
-
-        // Canonical tty readers expect human text input, not terminal query
-        // responses. In text-console mode we emulate Linux console behavior
-        // and drop xterm-style replies entirely instead of feeding them back
-        // into tty input.
-        if !self.should_route_terminal_responses() {
             return;
         }
 
