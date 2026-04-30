@@ -75,12 +75,14 @@ pub fn get_current_process() -> ProcessRef {
 }
 
 pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
+    let process_ref = process.clone();
     let (threads, vfork_blocker, parent_death_signals) = {
         let mut process = process.lock();
         process.restore_borrowed_addrspace_to_parent();
         systemd_perf::log_and_clear_process_summary(&process, exit_status);
         let vfork_blocker = process.vfork_blocker.take();
-        let parent_death_signals = collect_parent_death_signals_for_children(process.pid, &process);
+        let parent_death_signals =
+            collect_parent_death_signals_for_children(process.pid, &process_ref);
         (
             process.terminate_inner(exit_status),
             vfork_blocker,
