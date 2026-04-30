@@ -60,6 +60,10 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
         snapshot.r9,
     );
 
+    if syscall_debug.is_some() {
+        log_syscall_stage("handler-return", syscall_no, result);
+    }
+
     snapshot.rax = result;
 
     with_current_thread(|thread| {
@@ -76,7 +80,22 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
 
     maybe_stop_current_on_syscall_exit();
 
+    if syscall_debug.is_some() {
+        log_syscall_stage("after-exit-stop", syscall_no, result);
+    }
+
     let should_switch = process_current_process_signals(&get_current_process());
+    if syscall_debug.is_some() {
+        log_syscall_stage(
+            if should_switch {
+                "after-signal-switch"
+            } else {
+                "after-signal-noswitch"
+            },
+            syscall_no,
+            result,
+        );
+    }
     if should_switch {
         THREAD_MANAGER
             .get()
@@ -117,32 +136,51 @@ fn syscall_handler_unwrapped(
 }
 
 fn syscall_debug_target(syscall_no: usize) -> Option<&'static str> {
-    if !should_log_x_syscall() {
+    if !should_log_boot_debug_syscall() {
         return None;
     }
 
     match SyscallNumber::from_number(syscall_no)? {
-        SyscallNumber::Clone => Some("clone"),
-        SyscallNumber::Clone3 => Some("clone3"),
-        SyscallNumber::Exit => Some("exit"),
-        SyscallNumber::ExitGroup => Some("exit_group"),
-        SyscallNumber::SetTidAddress => Some("set_tid_address"),
         SyscallNumber::OpenAt => Some("openat"),
-        SyscallNumber::Mmap => Some("mmap"),
-        SyscallNumber::Ioctl => Some("ioctl"),
+        SyscallNumber::Fstat => Some("fstat"),
+        SyscallNumber::Newfstatat => Some("newfstatat"),
+        SyscallNumber::Read => Some("read"),
+        SyscallNumber::Write => Some("write"),
+        SyscallNumber::Close => Some("close"),
+        SyscallNumber::Getdents64 => Some("getdents64"),
+        SyscallNumber::Fcntl => Some("fcntl"),
+        SyscallNumber::Fsync => Some("fsync"),
+        SyscallNumber::Ftruncate => Some("ftruncate"),
+        SyscallNumber::Fchmod => Some("fchmod"),
+        SyscallNumber::Fchmodat => Some("fchmodat"),
+        SyscallNumber::Fchmodat2 => Some("fchmodat2"),
+        SyscallNumber::Fchown => Some("fchown"),
+        SyscallNumber::Fchownat => Some("fchownat"),
+        SyscallNumber::Lseek => Some("lseek"),
+        SyscallNumber::Rename => Some("rename"),
+        SyscallNumber::RenameAt => Some("renameat"),
+        SyscallNumber::RenameAt2 => Some("renameat2"),
+        SyscallNumber::Unlink => Some("unlink"),
+        SyscallNumber::UnlinkAt => Some("unlinkat"),
+        SyscallNumber::Link => Some("link"),
+        SyscallNumber::LinkAt => Some("linkat"),
+        SyscallNumber::Mkdir => Some("mkdir"),
+        SyscallNumber::MkdirAt => Some("mkdirat"),
         SyscallNumber::Futex => Some("futex"),
         SyscallNumber::Poll => Some("poll"),
         SyscallNumber::Ppoll => Some("ppoll"),
-        SyscallNumber::EpollWait => Some("epoll_wait"),
-        SyscallNumber::EpollCtl => Some("epoll_ctl"),
-        SyscallNumber::EpollPwait => Some("epoll_pwait"),
-        SyscallNumber::EpollCreate1 => Some("epoll_create1"),
-        SyscallNumber::EpollPwait2 => Some("epoll_pwait2"),
+        SyscallNumber::Getrandom => Some("getrandom"),
+        SyscallNumber::Setxattr => Some("setxattr"),
+        SyscallNumber::Getxattr => Some("getxattr"),
+        SyscallNumber::Fgetxattr => Some("fgetxattr"),
+        SyscallNumber::Fsetxattr => Some("fsetxattr"),
+        SyscallNumber::Removexattr => Some("removexattr"),
+        SyscallNumber::Fremovexattr => Some("fremovexattr"),
         _ => None,
     }
 }
 
-fn should_log_x_syscall() -> bool {
+fn should_log_boot_debug_syscall() -> bool {
     crate::process::misc::with_current_process(|process| {
         let Some(command) = process.command_line.first() else {
             return false;
@@ -150,7 +188,7 @@ fn should_log_x_syscall() -> bool {
         let Some(name) = command.rsplit('/').next() else {
             return false;
         };
-        matches!(name, "X" | "Xorg")
+        matches!(name, "systemd-sysusers" | "systemd-random-seed")
     })
 }
 
@@ -167,9 +205,15 @@ fn log_syscall_event(
 ) {
     crate::process::misc::with_current_process(|process| {
         let tid = crate::thread::get_current_thread().lock().id.0;
+        let name = process
+            .command_line
+            .first()
+            .and_then(|command| command.rsplit('/').next())
+            .unwrap_or("?");
         crate::s_println!(
-            "xsys {} pid={} tid={} {}({}) a1={:#x} a2={:#x} a3={:#x} a4={:#x} a5={:#x} a6={:#x}",
+            "bootsys {} comm={} pid={} tid={} {}({}) a1={:#x} a2={:#x} a3={:#x} a4={:#x} a5={:#x} a6={:#x}",
             phase,
+            name,
             process.pid.0,
             tid,
             syscall_name,
@@ -187,11 +231,37 @@ fn log_syscall_event(
 fn log_syscall_exit(syscall_name: &str, syscall_no: isize, result: isize) {
     crate::process::misc::with_current_process(|process| {
         let tid = crate::thread::get_current_thread().lock().id.0;
+        let name = process
+            .command_line
+            .first()
+            .and_then(|command| command.rsplit('/').next())
+            .unwrap_or("?");
         crate::s_println!(
-            "xsys exit pid={} tid={} {}({}) ret={:#x}",
+            "bootsys exit comm={} pid={} tid={} {}({}) ret={:#x}",
+            name,
             process.pid.0,
             tid,
             syscall_name,
+            syscall_no,
+            result
+        );
+    });
+}
+
+fn log_syscall_stage(stage: &str, syscall_no: isize, result: isize) {
+    crate::process::misc::with_current_process(|process| {
+        let tid = crate::thread::get_current_thread().lock().id.0;
+        let name = process
+            .command_line
+            .first()
+            .and_then(|command| command.rsplit('/').next())
+            .unwrap_or("?");
+        crate::s_println!(
+            "bootsys stage={} comm={} pid={} tid={} nr={} ret={:#x}",
+            stage,
+            name,
+            process.pid.0,
+            tid,
             syscall_no,
             result
         );

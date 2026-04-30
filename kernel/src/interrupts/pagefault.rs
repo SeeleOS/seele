@@ -19,6 +19,7 @@ pub extern "x86-interrupt" fn pagefault_handler(
     error_code: PageFaultErrorCode,
 ) {
     let address = Cr2::read().unwrap();
+    log_boot_debug_pagefault("enter", address.as_u64(), error_code);
 
     let handled = {
         let process_ref = get_current_process();
@@ -55,9 +56,11 @@ pub extern "x86-interrupt" fn pagefault_handler(
     };
 
     if handled {
+        log_boot_debug_pagefault("handled", address.as_u64(), error_code);
         return;
     }
 
+    log_boot_debug_pagefault("unhandled", address.as_u64(), error_code);
     actual_pagefault_handler(stack_frame, error_code)
 }
 
@@ -70,4 +73,29 @@ fn actual_pagefault_handler(stack_frame: InterruptStackFrame, error_code: PageFa
         "Kernel page fault. \n {:#?} \n errcode: {:?}",
         stack_frame, error_code
     )
+}
+
+fn log_boot_debug_pagefault(stage: &str, address: u64, error_code: PageFaultErrorCode) {
+    crate::process::misc::with_current_process(|process| {
+        let Some(command) = process.command_line.first() else {
+            return;
+        };
+        let Some(name) = command.rsplit('/').next() else {
+            return;
+        };
+        if !matches!(name, "systemd-random-seed" | "systemd-sysusers") {
+            return;
+        }
+
+        let tid = crate::thread::get_current_thread().lock().id.0;
+        crate::s_println!(
+            "bootpf stage={} comm={} pid={} tid={} addr={:#x} err={:?}",
+            stage,
+            name,
+            process.pid.0,
+            tid,
+            address,
+            error_code
+        );
+    });
 }

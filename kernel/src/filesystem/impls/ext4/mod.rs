@@ -184,6 +184,10 @@ impl FileSystem for EXT4 {
         lookup_cache_clear(&self.lookup_cache);
         let old_path = old_path.normalize();
         let new_path = new_path.normalize();
+        let old_path_string = old_path.clone().as_string();
+        let new_path_string = new_path.clone().as_string();
+        let debug_xorg_log =
+            old_path_string.contains("Xorg.0.log") || new_path_string.contains("Xorg.0.log");
         if old_path == new_path {
             return Ok(());
         }
@@ -206,31 +210,57 @@ impl FileSystem for EXT4 {
         let new_name = new_path.file_name().ok_or(FSError::NotFound)?;
 
         if let Ok(target) = self.lookup(&new_path) {
+            if debug_xorg_log {
+                crate::s_println!("ext4 rename target exists {}", new_path_string);
+            }
             if matches!(target, FileLike::Directory(_)) {
                 return Err(FSError::DirectoryNotEmpty);
             }
-            let new_parent_inode = self
-                .fs
-                .path_to_inode(
-                    Ext4Path::new(&new_parent.clone().as_string()),
-                    FollowSymlinks::All,
-                )
-                .map_err(FSError::from)?;
-            let mut new_parent_dir =
-                Dir::open_inode(&self.fs, new_parent_inode).map_err(FSError::from)?;
-            let target_inode = self
-                .fs
-                .path_to_inode(
-                    Ext4Path::new(&new_path.clone().as_string()),
-                    FollowSymlinks::ExcludeFinalComponent,
-                )
-                .map_err(FSError::from)?;
-            new_parent_dir
-                .unlink(
-                    DirEntryName::try_from(new_name.as_str()).map_err(|_| FSError::Other)?,
-                    target_inode,
-                )
-                .map_err(FSError::from)?;
+            let new_parent_inode = match self.fs.path_to_inode(
+                Ext4Path::new(&new_parent.clone().as_string()),
+                FollowSymlinks::All,
+            ) {
+                Ok(inode) => inode,
+                Err(err) => {
+                    if debug_xorg_log {
+                        crate::s_println!("ext4 rename new_parent_inode err={:?}", err);
+                    }
+                    return Err(FSError::from(err));
+                }
+            };
+            let mut new_parent_dir = match Dir::open_inode(&self.fs, new_parent_inode) {
+                Ok(dir) => dir,
+                Err(err) => {
+                    if debug_xorg_log {
+                        crate::s_println!("ext4 rename open new_parent_dir err={:?}", err);
+                    }
+                    return Err(FSError::from(err));
+                }
+            };
+            let target_inode = match self.fs.path_to_inode(
+                Ext4Path::new(&new_path.clone().as_string()),
+                FollowSymlinks::ExcludeFinalComponent,
+            ) {
+                Ok(inode) => inode,
+                Err(err) => {
+                    if debug_xorg_log {
+                        crate::s_println!("ext4 rename target_inode err={:?}", err);
+                    }
+                    return Err(FSError::from(err));
+                }
+            };
+            if debug_xorg_log {
+                crate::s_println!("ext4 rename target_inode ok");
+            }
+            if let Err(err) = new_parent_dir.unlink(
+                DirEntryName::try_from(new_name.as_str()).map_err(|_| FSError::Other)?,
+                target_inode,
+            ) {
+                if debug_xorg_log {
+                    crate::s_println!("ext4 rename unlink target err={:?}", err);
+                }
+                return Err(FSError::from(err));
+            }
         }
 
         let new_parent_inode = self
@@ -243,12 +273,15 @@ impl FileSystem for EXT4 {
         let mut new_parent_dir =
             Dir::open_inode(&self.fs, new_parent_inode).map_err(FSError::from)?;
         let mut source_inode = source_inode;
-        new_parent_dir
-            .link(
-                DirEntryName::try_from(new_name.as_str()).map_err(|_| FSError::Other)?,
-                &mut source_inode,
-            )
-            .map_err(FSError::from)?;
+        if let Err(err) = new_parent_dir.link(
+            DirEntryName::try_from(new_name.as_str()).map_err(|_| FSError::Other)?,
+            &mut source_inode,
+        ) {
+            if debug_xorg_log {
+                crate::s_println!("ext4 rename link new err={:?}", err);
+            }
+            return Err(FSError::from(err));
+        }
 
         let old_parent_inode = self
             .fs
@@ -266,12 +299,15 @@ impl FileSystem for EXT4 {
                 FollowSymlinks::ExcludeFinalComponent,
             )
             .map_err(FSError::from)?;
-        old_parent_dir
-            .unlink(
-                DirEntryName::try_from(old_name.as_str()).map_err(|_| FSError::Other)?,
-                old_inode,
-            )
-            .map_err(FSError::from)?;
+        if let Err(err) = old_parent_dir.unlink(
+            DirEntryName::try_from(old_name.as_str()).map_err(|_| FSError::Other)?,
+            old_inode,
+        ) {
+            if debug_xorg_log {
+                crate::s_println!("ext4 rename unlink old err={:?}", err);
+            }
+            return Err(FSError::from(err));
+        }
 
         lookup_cache_clear(&self.lookup_cache);
         Ok(())

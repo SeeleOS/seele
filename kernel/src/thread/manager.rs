@@ -131,12 +131,6 @@ impl ThreadManager {
         let (process, clear_child_tid) = {
             let mut thread = thread.lock();
             log::debug!("mark_thread_exited tid={:?}", thread.id);
-            crate::s_println!(
-                "xthread exit pid={} tid={} clear_child_tid={:#x}",
-                thread.parent.lock().pid.0,
-                thread.id.0,
-                thread.clear_child_tid
-            );
             let process = thread.parent.clone();
             let clear_child_tid = thread.clear_child_tid;
 
@@ -234,21 +228,11 @@ impl ThreadManager {
             let pid = {
                 let mut process = pending.process.lock();
                 let pid = process.pid.0;
-                crate::s_println!(
-                    "xthread clear_child_tid pid={} addr={:#x}",
-                    pid,
-                    pending.clear_child_tid
-                );
                 let _ = process
                     .addrspace
                     .write(pending.clear_child_tid as *mut u8, &0i32);
                 pid
             };
-            crate::s_println!(
-                "xthread wake_clear_child_tid pid={} addr={:#x}",
-                pid,
-                pending.clear_child_tid
-            );
             wake_futex_for_process_with_manager(pid, pending.clear_child_tid, 1, self);
         }
     }
