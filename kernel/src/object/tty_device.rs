@@ -19,6 +19,7 @@ use crate::{
     polling::{event::PollableEvent, object::Pollable},
     process::group::ProcessGroupID,
     process::{ControllingTerminal, manager::get_current_process},
+    s_print,
     terminal::{
         linux_kd::{DisplayMode, KeyboardMode, LinuxConsoleState, handle_kd_request},
         linux_vt::handle_vt_request,
@@ -274,6 +275,7 @@ impl Writable for TtyDevice {
         }
 
         if !filtered.display_text.is_empty() {
+            s_print!("{}", filtered.display_text);
             self.terminal
                 .lock()
                 .write_screen_text(filtered.display_text.as_str());
