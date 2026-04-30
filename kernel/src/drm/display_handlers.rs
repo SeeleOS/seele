@@ -104,6 +104,7 @@ pub(super) fn handle_mode_set_crtc(
         DRM_STATE.lock().current_fb_id = None;
         crate::misc::framebuffer::framebuffer_set_user_controlled(false);
     } else {
+        framebuffer::log_framebuffer_sample("setcrtc", crtc.fb_id)?;
         framebuffer::scanout_framebuffer_id(crtc.fb_id)?;
     }
 

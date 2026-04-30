@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     events::queue_page_flip_event,
-    framebuffer::{build_framebuffer, scanout_framebuffer_id},
+    framebuffer::{build_framebuffer, log_framebuffer_sample, scanout_framebuffer_id},
     object::DRM_STATE,
     user::read_user,
 };
@@ -141,6 +141,7 @@ pub(super) fn handle_mode_dirty_fb(ptr: *mut DrmModeFbDirtyCmd) -> ObjectResult<
     }
 
     if current_fb_id == Some(target_fb_id) {
+        log_framebuffer_sample("dirtyfb", target_fb_id)?;
         scanout_framebuffer_id(target_fb_id)?;
     }
     Ok(0)

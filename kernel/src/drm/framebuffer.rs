@@ -1,4 +1,8 @@
-use core::{cmp::min, slice};
+use core::{
+    cmp::min,
+    slice,
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 use crate::{
     drm::mode::{DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888},
@@ -10,6 +14,8 @@ use super::{
     object::DRM_STATE,
     state::{DrmState, DumbBuffer, RegisteredFramebuffer},
 };
+
+static DRM_DEBUG_SAMPLES: AtomicU32 = AtomicU32::new(0);
 
 pub(super) fn build_framebuffer(
     state: &DrmState,
@@ -62,6 +68,56 @@ pub(super) fn scanout_framebuffer_id(fb_id: u32) -> ObjectResult<()> {
         blit_dumb_buffer_to_scanout(&dumb_buffer, &framebuffer)?;
     }
     framebuffer_set_user_controlled(true);
+    Ok(())
+}
+
+pub(super) fn log_framebuffer_sample(phase: &str, fb_id: u32) -> ObjectResult<()> {
+    let sample_index = DRM_DEBUG_SAMPLES.fetch_add(1, Ordering::Relaxed);
+    if sample_index >= 32 {
+        return Ok(());
+    }
+
+    let (framebuffer, dumb_buffer) = {
+        let state = DRM_STATE.lock();
+        let framebuffer = state
+            .framebuffers
+            .get(&fb_id)
+            .cloned()
+            .ok_or(ObjectError::InvalidArguments)?;
+        let dumb_buffer = state
+            .dumb_buffers
+            .get(&framebuffer.handle)
+            .cloned()
+            .ok_or(ObjectError::InvalidArguments)?;
+        (framebuffer, dumb_buffer)
+    };
+
+    let src_start = dumb_buffer
+        .kernel_addr
+        .checked_add(u64::from(framebuffer.offset))
+        .ok_or(ObjectError::InvalidArguments)?;
+    let src_bytes = usize::try_from(
+        dumb_buffer
+            .size
+            .checked_sub(u64::from(framebuffer.offset))
+            .ok_or(ObjectError::InvalidArguments)?,
+    )
+    .map_err(|_| ObjectError::InvalidArguments)?;
+    let src = unsafe { slice::from_raw_parts(src_start as *const u8, src_bytes) };
+    let (sampled, non_zero, checksum) = sample_buffer(src);
+    crate::s_println!(
+        "drm debug phase={} idx={} fb={} {}x{} pitch={} scanout_backed={} sampled={} non_zero={} checksum={:#010x}",
+        phase,
+        sample_index,
+        framebuffer.fb_id,
+        framebuffer.width,
+        framebuffer.height,
+        framebuffer.pitch,
+        dumb_buffer.scanout_backed,
+        sampled,
+        non_zero,
+        checksum
+    );
     Ok(())
 }
 
@@ -158,4 +214,22 @@ pub(super) fn blit_dumb_buffer_to_scanout(
 
     canvas.present_user_controlled();
     Ok(())
+}
+
+fn sample_buffer(buffer: &[u8]) -> (usize, usize, u32) {
+    let mut sampled = 0usize;
+    let mut non_zero = 0usize;
+    let mut checksum = 0u32;
+
+    for chunk in buffer.chunks_exact(4).step_by(97) {
+        sampled += 1;
+        for byte in &chunk[..3] {
+            checksum = checksum.wrapping_mul(16777619) ^ u32::from(*byte);
+            if *byte != 0 {
+                non_zero += 1;
+            }
+        }
+    }
+
+    (sampled, non_zero, checksum)
 }

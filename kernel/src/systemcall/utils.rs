@@ -100,14 +100,9 @@ pub fn log_unsupported_syscall_result(syscall_no: isize, args: [u64; 6], err: Sy
 }
 
 fn should_trace_syscall(syscall_no: isize, comm: &str) -> bool {
-    if !comm.starts_with("sddm") {
-        return false;
-    }
-
-    !matches!(
-        SyscallNumber::from_number(syscall_no as usize),
-        Some(SyscallNumber::ClockGettime)
-    )
+    let _ = syscall_no;
+    let _ = comm;
+    false
 }
 
 pub fn log_syscall_trace_enter(syscall_no: isize, args: [u64; 6]) {
