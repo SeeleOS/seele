@@ -17,6 +17,8 @@ fn main() {
     let agent_mode = env::args().any(|arg| arg == "--agent");
     let agent_timeout = env::var("SEELE_QEMU_TIMEOUT").ok();
     let machine = env::var("SEELE_QEMU_MACHINE").unwrap_or_else(|_| "q35".to_string());
+    let cpu_model = env::var("SEELE_QEMU_CPU")
+        .unwrap_or_else(|_| "host,+hypervisor,+kvmclock,+kvmclock-stable-bit".to_string());
     let smp = env::var("SEELE_QEMU_SMP").unwrap_or_else(|_| {
         thread::available_parallelism()
             .map(|count| count.get().to_string())
@@ -97,7 +99,7 @@ fn main() {
 
     if Path::new("/dev/kvm").exists() {
         cmd.arg("-enable-kvm");
-        cmd.arg("-cpu").arg("host");
+        cmd.arg("-cpu").arg(&cpu_model);
     } else {
         eprintln!("warning: /dev/kvm not found, falling back to software emulation");
     }
