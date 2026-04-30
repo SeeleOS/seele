@@ -26,7 +26,10 @@ use crate::{
 };
 use alloc::{format, string::String, sync::Arc, vec::Vec};
 use bitflags::bitflags;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::{
+    mem::size_of,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 const AT_FDCWD: i32 = -100;
 const UTIME_OMIT: i64 = 0x3fff_ffff;
@@ -38,6 +41,7 @@ const SOCKFS_MAGIC: i64 = 0x534f_434b;
 const AT_STATX_FORCE_SYNC: i32 = 0x2000;
 const AT_STATX_DONT_SYNC: i32 = 0x4000;
 const S_IFMT: u32 = 0o170000;
+const SEELE_FILE_HANDLE_TYPE_INODE: i32 = 1;
 const S_IFREG: u32 = 0o100000;
 const S_IFIFO: u32 = 0o010000;
 const S_IFCHR: u32 = 0o020000;
@@ -613,6 +617,12 @@ struct LinuxFileHandle {
     handle_bytes: u32,
     handle_type: i32,
     f_handle: [u8; 0],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SeeleFileHandle {
+    inode: u64,
 }
 
 fn linux_statfs(f_type: i64) -> LinuxStatFs {
@@ -1773,14 +1783,47 @@ define_syscall!(MountSetattr, |dirfd: i32,
 
 define_syscall!(
     NameToHandleAt,
-    |dirfd: i32, path: CString, _handle: *mut LinuxFileHandle, _mount_id: *mut i32, flags: i32| {
-        if flags != 0 {
+    |dirfd: i32, path: CString, handle: *mut LinuxFileHandle, mount_id: *mut i32, flags: i32| {
+        let flags = AtFlags::from_bits_truncate(flags);
+        let allowed_flags = AtFlags::EMPTY_PATH | AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT;
+        if flags.bits() != (flags & allowed_flags).bits() {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if handle.is_null() || mount_id.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+
+        let path_str = if path.is_null() {
+            if flags.contains(AtFlags::EMPTY_PATH) {
+                String::new()
+            } else {
+                return Err(SyscallError::BadAddress);
+            }
+        } else {
+            path_from_raw(path)?
+        };
+        let stat = stat_at(dirfd, &path_str, flags)?;
+        let kernel_mount_id = stat_mount_id_at(dirfd, &path_str, flags)?;
+        let mount_id_out =
+            i32::try_from(kernel_mount_id).map_err(|_| SyscallError::InvalidArguments)?;
+        let required_bytes =
+            u32::try_from(size_of::<SeeleFileHandle>()).map_err(|_| SyscallError::InvalidArguments)?;
+        let mut file_handle = user_safe::read(handle)?;
+        let caller_bytes = file_handle.handle_bytes;
+        file_handle.handle_type = SEELE_FILE_HANDLE_TYPE_INODE;
+        file_handle.handle_bytes = required_bytes;
+        user_safe::write(handle, &file_handle)?;
+        user_safe::write(mount_id, &mount_id_out)?;
+
+        if required_bytes > caller_bytes {
             return Err(SyscallError::InvalidArguments);
         }
 
-        let path = path_from_raw(path)?;
-        ensure_path_exists_at(dirfd, &path, false)?;
-        Err(SyscallError::OperationNotSupported)
+        let encoded = SeeleFileHandle { inode: stat.st_ino };
+        let handle_bytes = encoded.inode.to_ne_bytes();
+        let handle_ptr = unsafe { handle.cast::<u8>().add(size_of::<LinuxFileHandle>()) };
+        user_safe::write_buffer(handle_ptr, &handle_bytes)?;
+        Ok(0)
     }
 );
 
