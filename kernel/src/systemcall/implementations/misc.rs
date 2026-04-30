@@ -533,6 +533,7 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
 enum RlimitResource {
     Stack = 3,
     NoFile = 7,
+    MemLock = 8,
 }
 
 bitflags! {
@@ -1831,6 +1832,13 @@ define_syscall!(Setrlimit, |resource: i32, rlimit: u64| {
             process.rlimit_nofile_max = limit.rlim_max;
             Ok(0)
         }
+        RlimitResource::MemLock => {
+            let process = get_current_process();
+            let mut process = process.lock();
+            process.rlimit_memlock_cur = limit.rlim_cur;
+            process.rlimit_memlock_max = limit.rlim_max;
+            Ok(0)
+        }
     }
 });
 
@@ -1981,6 +1989,10 @@ define_syscall!(
                         rlim_cur: process.rlimit_nofile_cur,
                         rlim_max: process.rlimit_nofile_max,
                     },
+                    RlimitResource::MemLock => LinuxRlimit64 {
+                        rlim_cur: process.rlimit_memlock_cur,
+                        rlim_max: process.rlimit_memlock_max,
+                    },
                 }
             };
             user_safe::write(old_limit, &limit)?;
@@ -1997,6 +2009,10 @@ define_syscall!(
                 RlimitResource::NoFile => {
                     process.rlimit_nofile_cur = limit.rlim_cur;
                     process.rlimit_nofile_max = limit.rlim_max;
+                }
+                RlimitResource::MemLock => {
+                    process.rlimit_memlock_cur = limit.rlim_cur;
+                    process.rlimit_memlock_max = limit.rlim_max;
                 }
             }
         }
