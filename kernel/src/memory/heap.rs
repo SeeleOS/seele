@@ -20,8 +20,8 @@ static HEAP_MAPPED_BYTES: AtomicUsize = AtomicUsize::new(0);
 // Memory area for the heap
 pub const HEAP_START: usize = 0xFFFF_FFFF_4444_0000;
 pub const HEAP_SIZE: usize = 256 * 1024 * 1024;
-pub const INITIAL_HEAP_SIZE: usize = 16 * 1024 * 1024;
-const HEAP_GROWTH_SIZE: usize = 2 * 1024 * 1024;
+pub const INITIAL_HEAP_SIZE: usize = 64 * 1024 * 1024;
+const HEAP_GROWTH_SIZE: usize = 8 * 1024 * 1024;
 const HEAP_PAGE_TABLE_RESERVE_SIZE: usize = 2 * 1024 * 1024;
 pub const HEAP_BACKING_RESERVE_SIZE: usize = HEAP_SIZE + HEAP_PAGE_TABLE_RESERVE_SIZE;
 
