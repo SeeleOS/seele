@@ -8,7 +8,11 @@ use crate::{
     object::linux_anon::wake_pidfd_for_process_with_manager,
     process::{Process, ProcessExitStatus, ProcessRef, misc::ProcessID},
     smp::{current_process, set_current_process},
-    thread::{THREAD_MANAGER, ThreadRef, manager::ThreadManager, misc::ThreadID},
+    thread::{
+        THREAD_MANAGER, ThreadRef,
+        manager::ThreadManager,
+        misc::{State, ThreadID},
+    },
 };
 
 lazy_static! {
@@ -83,6 +87,29 @@ pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
     for thread in threads {
         thread_manager.mark_thread_exited(thread);
     }
+    thread_manager.cleanup_exited_threads();
+}
+
+pub fn exit_current_thread(exit_status: ProcessExitStatus) {
+    let current = crate::thread::get_current_thread();
+    let process = current.lock().parent.clone();
+    let live_threads = {
+        let process = process.lock();
+        process
+            .threads
+            .iter()
+            .filter_map(|thread| thread.upgrade())
+            .filter(|thread| !matches!(thread.lock().state, State::Zombie))
+            .count()
+    };
+
+    if live_threads <= 1 {
+        terminate_process(process, exit_status);
+        return;
+    }
+
+    let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+    thread_manager.mark_thread_exited(current);
     thread_manager.cleanup_exited_threads();
 }
 

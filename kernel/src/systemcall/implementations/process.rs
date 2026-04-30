@@ -10,7 +10,7 @@ use crate::{
     process::{
         Process, ProcessExitStatus, ProcessRef,
         execve::execve,
-        manager::{MANAGER, get_current_process, terminate_process},
+        manager::{MANAGER, exit_current_thread, get_current_process, terminate_process},
         misc::{ProcessID, get_process_with_pid},
         wait::{ProcessWaitEvent, take_wait_event},
     },
@@ -260,10 +260,7 @@ define_syscall!(Execve, |path_str: String,
 });
 
 define_syscall!(Exit, |exit_code: u64| {
-    terminate_process(
-        get_current_process(),
-        ProcessExitStatus::from_exit_code(exit_code),
-    );
+    exit_current_thread(ProcessExitStatus::from_exit_code(exit_code));
     return_to_scheduler_no_save();
 });
 
