@@ -1,4 +1,4 @@
-use alloc::{string::String, sync::Arc};
+use alloc::sync::Arc;
 use core::{
     arch::naked_asm,
     mem::offset_of,
@@ -27,8 +27,6 @@ use crate::{
 };
 
 static AP_TASK_SCHEDULING_ENABLED: AtomicBool = AtomicBool::new(false);
-static SCHED_LOOP_DEBUG_ONCE: AtomicBool = AtomicBool::new(false);
-
 pub fn enable_ap_task_scheduling() {
     AP_TASK_SCHEDULING_ENABLED.store(true, Ordering::Release);
 }
@@ -159,41 +157,14 @@ pub fn return_to_scheduler_no_save() -> ! {
 
 pub fn run() -> ! {
     loop {
-        let should_debug_loop = !SCHED_LOOP_DEBUG_ONCE.swap(true, Ordering::AcqRel);
-        if should_debug_loop {
-            crate::s_println!("sched loop: deferred start");
-        }
         process_deferred_timer_work();
-        if should_debug_loop {
-            crate::s_println!("sched loop: deferred done");
-        }
         crate::net::poll();
-        if should_debug_loop {
-            crate::s_println!("sched loop: net done");
-        }
         keyboard::process_pending_scancodes();
-        if should_debug_loop {
-            crate::s_println!("sched loop: keyboard done");
-        }
         agent_tty_input::process_pending_input();
-        if should_debug_loop {
-            crate::s_println!("sched loop: agent tty done");
-        }
         mouse::process_pending_mouse_events();
-        if should_debug_loop {
-            crate::s_println!("sched loop: mouse done");
-        }
 
         let next_thread = if can_run_ready_threads_on_current_cpu() {
-            let mut manager = THREAD_MANAGER.get().unwrap().lock();
-            if should_debug_loop {
-                crate::s_println!(
-                    "sched loop: ready_queue={} threads={}",
-                    manager.ready_queue.len(),
-                    manager.threads.len()
-                );
-            }
-            manager.pop_ready()
+            THREAD_MANAGER.get().unwrap().lock().pop_ready()
         } else {
             None
         };
@@ -212,14 +183,6 @@ fn run_ready_thread(thread_ref: ThreadRef) {
         let _manager = THREAD_MANAGER.get().unwrap().lock();
         let mut thread = thread_ref.lock();
         let process = thread.parent.clone();
-        let process_lock = process.lock();
-        crate::s_println!(
-            "sched switch pid={} tid={} cmd={}",
-            process_lock.pid.0,
-            thread.id.0,
-            process_lock.command_line.first().map(String::as_str).unwrap_or("?")
-        );
-        drop(process_lock);
         thread.state = State::Running;
         set_current_thread(Some(thread_ref.clone()));
         set_current_kernel_stack(thread.kernel_stack_top);
@@ -246,7 +209,6 @@ fn run_ready_thread(thread_ref: ThreadRef) {
         )
     };
 
-    crate::s_println!("sched return");
     after_thread_yield(thread_ref);
 }
 
