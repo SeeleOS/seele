@@ -60,7 +60,7 @@ pub(super) fn handle_get_cap(ptr: *mut crate::drm::client::DrmGetCap) -> ObjectR
         DRM_CAP_DUMB_BUFFER => 1,
         DRM_CAP_VBLANK_HIGH_CRTC => 1,
         DRM_CAP_DUMB_PREFERRED_DEPTH => 32,
-        DRM_CAP_DUMB_PREFER_SHADOW => 0,
+        DRM_CAP_DUMB_PREFER_SHADOW => 1,
         DRM_CAP_PRIME => DRM_PRIME_CAP_EXPORT,
         DRM_CAP_TIMESTAMP_MONOTONIC => 1,
         DRM_CAP_ASYNC_PAGE_FLIP => 0,
