@@ -7,6 +7,7 @@ pub mod impls;
 pub mod info;
 pub mod misc;
 pub mod object;
+pub mod page_cache;
 pub mod path;
 pub mod procfs;
 mod resolve;

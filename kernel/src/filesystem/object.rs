@@ -8,12 +8,13 @@ use crate::{
     filesystem::{
         errors::FSError,
         info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
+        page_cache::{self, FileCacheIdentity, FileCacheKey},
         path::Path,
         staticfs::{
             device::StaticDeviceHandle, directory::StaticDirectoryHandle, file::StaticFileHandle,
         },
         vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
-        vfs_traits::{FileLike, Whence},
+        vfs_traits::{FileLike, FileLikeType, Whence},
     },
     impl_cast_function, impl_cast_function_non_trait,
     memory::{addrspace::mem_area::Data, protection::Protection},
@@ -145,6 +146,10 @@ impl OpenedFileObject {
     }
 
     pub fn read_at(&self, buf: &mut [u8], offset: u64) -> FSResult<usize> {
+        if let Some((file, identity)) = self.page_cache_file() {
+            return page_cache::read(&file, identity, buf, offset);
+        }
+
         self.resolve_file()?.lock().read_at(buf, offset)
     }
 
@@ -172,13 +177,11 @@ impl OpenedFileObject {
     }
 
     pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> FSResult<usize> {
-        let file = self.resolve_file()?;
         let len = buf.len();
         let mut read = 0;
-        let mut file = file.lock();
 
         while read < len {
-            let bytes_read = file.read_at(&mut buf[read..], offset + read as u64)?;
+            let bytes_read = self.read_at(&mut buf[read..], offset + read as u64)?;
             if bytes_read == 0 {
                 return Err(FSError::Other);
             }
@@ -206,10 +209,12 @@ impl OpenedFileObject {
     }
 
     pub fn truncate(&self, length: u64) -> FSResult<()> {
+        self.invalidate_page_cache();
         self.resolve_file()?.lock().truncate(length)
     }
 
     pub fn allocate(&self, mode: u32, offset: u64, len: u64) -> FSResult<()> {
+        self.invalidate_page_cache();
         self.resolve_file()?.lock().allocate(mode, offset, len)
     }
 
@@ -259,6 +264,42 @@ impl OpenedFileObject {
 
     pub fn is_device_backed(&self) -> bool {
         self.device_object().is_some()
+    }
+
+    fn page_cache_file_key(&self) -> Option<FileCacheKey> {
+        let OpenBackend::RegularFile(file) = &self.backend else {
+            return None;
+        };
+
+        let mut file = file.lock();
+        if file.as_any().is::<StaticFileHandle>() {
+            return None;
+        }
+
+        let info = file.info().ok()?;
+        if !matches!(info.file_like_type, FileLikeType::File) {
+            return None;
+        }
+
+        Some(FileCacheKey {
+            device_id: mount_device_id_for_path(&self.path),
+            inode: info.inode,
+        })
+    }
+
+    fn page_cache_file(&self) -> Option<(WrappedFile, FileCacheIdentity)> {
+        let key = self.page_cache_file_key()?;
+        let OpenBackend::RegularFile(file) = &self.backend else {
+            return None;
+        };
+        let size = file.lock().info().ok()?.size;
+        Some((file.clone(), FileCacheIdentity::new(key.device_id, key.inode, size)))
+    }
+
+    fn invalidate_page_cache(&self) {
+        if let Some(key) = self.page_cache_file_key() {
+            page_cache::invalidate_file(key);
+        }
     }
 
     pub fn mmap_data(self: Arc<Self>, offset: u64, pages: u64, shared: bool) -> Data {
@@ -321,6 +362,7 @@ impl Writable for OpenedFileObject {
             return writable.write(buffer);
         }
 
+        self.invalidate_page_cache();
         let file = self.resolve_file()?;
         let mut file = file.lock();
 
