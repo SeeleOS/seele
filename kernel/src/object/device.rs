@@ -10,7 +10,7 @@ use crate::{
     },
     object::{
         misc::ObjectRef,
-        tty_device::{get_active_tty, get_console_tty, get_default_tty, get_virtual_tty},
+        tty_device::{get_active_tty, get_default_tty, get_virtual_tty},
     },
     process::manager::get_current_process,
     systemcall::utils::{SyscallError, SyscallResult},
@@ -24,7 +24,7 @@ lazy_static::lazy_static! {
         devices.insert("framebuffer", Arc::new(FramebufferObject) as ObjectRef);
         devices.insert("devnull", Arc::new(DevNull) as ObjectRef);
         devices.insert("kmsg", Arc::new(DevKmsg::default()) as ObjectRef);
-        devices.insert("console", get_console_tty() as ObjectRef);
+        devices.insert("console", get_default_tty() as ObjectRef);
         devices.insert("tty", get_default_tty() as ObjectRef);
         devices.insert("tty0", get_default_tty() as ObjectRef);
         devices.insert("tty1", get_default_tty() as ObjectRef);
@@ -45,6 +45,10 @@ pub fn get_device_ref(name: &str) -> SyscallResult<ObjectRef> {
     }
 
     if name == "tty0" {
+        return Ok(get_active_tty());
+    }
+
+    if name == "console" {
         return Ok(get_active_tty());
     }
 
