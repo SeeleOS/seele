@@ -1273,7 +1273,7 @@ define_syscall!(Unshare, |flags: u64| {
         | UnshareFlags::NEWPID)
         .bits();
     if flags & unsupported_namespace_flags != 0 {
-        return Err(SyscallError::NoSyscall);
+        return Err(SyscallError::OperationNotSupported);
     }
     if flags & supported_namespace_flags != 0 {
         get_current_process().lock().net_namespace = NetNamespace::new();
