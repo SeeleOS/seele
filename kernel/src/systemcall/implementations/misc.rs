@@ -1,7 +1,9 @@
-use alloc::{string::String, sync::Arc, vec, vec::Vec};
+use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc, vec, vec::Vec};
 use bitflags::bitflags;
 use core::sync::atomic::{AtomicI32, Ordering};
+use lazy_static::lazy_static;
 use num_enum::TryFromPrimitive;
+use spin::Mutex;
 use x86_64::VirtAddr;
 
 use crate::memory::{
@@ -209,6 +211,17 @@ const KEY_SPEC_USER_KEYRING: i32 = -4;
 static NEXT_SESSION_KEYRING_ID: AtomicI32 = AtomicI32::new(1);
 static NEXT_KEY_SERIAL: AtomicI32 = AtomicI32::new(1024);
 
+lazy_static! {
+    static ref KEY_REGISTRY: Mutex<BTreeMap<i32, KeyEntry>> = Mutex::new(BTreeMap::new());
+}
+
+#[derive(Clone, Debug, Default)]
+struct KeyEntry {
+    permissions: u32,
+    links: Vec<i32>,
+    is_keyring: bool,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct LinuxCapHeader {
@@ -257,6 +270,7 @@ fn current_session_keyring(create: bool) -> Result<i32, SyscallError> {
             return Err(SyscallError::NoData);
         }
         process.session_keyring = NEXT_SESSION_KEYRING_ID.fetch_add(1, Ordering::Relaxed);
+        ensure_keyring_entry(process.session_keyring);
     }
     Ok(process.session_keyring)
 }
@@ -269,6 +283,7 @@ fn current_user_keyring(create: bool) -> Result<i32, SyscallError> {
             return Err(SyscallError::NoData);
         }
         process.user_keyring = NEXT_SESSION_KEYRING_ID.fetch_add(1, Ordering::Relaxed);
+        ensure_keyring_entry(process.user_keyring);
     }
     Ok(process.user_keyring)
 }
@@ -277,9 +292,61 @@ fn resolve_keyring(spec: i32, create: bool) -> Result<i32, SyscallError> {
     match spec {
         KEY_SPEC_SESSION_KEYRING => current_session_keyring(create),
         KEY_SPEC_USER_KEYRING => current_user_keyring(create),
-        serial if serial > 0 => Ok(serial),
+        serial if serial > 0 => {
+            if create {
+                ensure_keyring_entry(serial);
+                Ok(serial)
+            } else if keyring_exists(serial) {
+                Ok(serial)
+            } else {
+                Err(SyscallError::InvalidArguments)
+            }
+        }
         _ => Err(SyscallError::InvalidArguments),
     }
+}
+
+fn keyring_exists(serial: i32) -> bool {
+    KEY_REGISTRY
+        .lock()
+        .get(&serial)
+        .is_some_and(|entry| entry.is_keyring)
+}
+
+fn ensure_keyring_entry(serial: i32) {
+    let mut registry = KEY_REGISTRY.lock();
+    let entry = registry.entry(serial).or_default();
+    entry.is_keyring = true;
+}
+
+fn ensure_key_entry(serial: i32) {
+    KEY_REGISTRY.lock().entry(serial).or_default();
+}
+
+fn set_key_permissions(serial: i32, permissions: u32) -> Result<(), SyscallError> {
+    let mut registry = KEY_REGISTRY.lock();
+    let entry = registry
+        .get_mut(&serial)
+        .ok_or(SyscallError::InvalidArguments)?;
+    entry.permissions = permissions;
+    Ok(())
+}
+
+fn link_key_into_keyring(source: i32, target: i32) -> Result<(), SyscallError> {
+    let mut registry = KEY_REGISTRY.lock();
+    if !registry.contains_key(&source) {
+        return Err(SyscallError::InvalidArguments);
+    }
+    let target_entry = registry
+        .get_mut(&target)
+        .ok_or(SyscallError::InvalidArguments)?;
+    if !target_entry.is_keyring {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if !target_entry.links.contains(&source) {
+        target_entry.links.push(source);
+    }
+    Ok(())
 }
 
 fn clone_cleared_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalAction> {
@@ -1913,7 +1980,9 @@ define_syscall!(AddKey, |type_name: String,
         return Err(SyscallError::BadAddress);
     }
     let _ = resolve_keyring(keyring, true)?;
-    Ok(NEXT_KEY_SERIAL.fetch_add(1, Ordering::Relaxed) as usize)
+    let serial = NEXT_KEY_SERIAL.fetch_add(1, Ordering::Relaxed);
+    ensure_key_entry(serial);
+    Ok(serial as usize)
 });
 
 define_syscall!(Keyctl, |cmd: u64,
@@ -1928,39 +1997,21 @@ define_syscall!(Keyctl, |cmd: u64,
         }
         Ok(KeyctlCommand::JoinSessionKeyring) => Ok(current_session_keyring(true)? as usize),
         Ok(KeyctlCommand::Setperm) => {
-            let _keyring = resolve_keyring(arg2 as i32, true)?;
-            log_dangerous_noop_syscall(
-                "keyctl",
-                alloc::format!(
-                    "cmd={:?} keyring={} perm={:#x}",
-                    KeyctlCommand::Setperm,
-                    arg2,
-                    arg3
-                )
-                .as_str(),
-            );
+            let keyring = resolve_keyring(arg2 as i32, true)?;
+            set_key_permissions(keyring, arg3 as u32)?;
             Ok(0)
         }
         Ok(KeyctlCommand::Link) => {
-            let _source = resolve_keyring(arg2 as i32, false)?;
-            let _target = resolve_keyring(arg3 as i32, true)?;
-            log_dangerous_noop_syscall(
-                "keyctl",
-                alloc::format!(
-                    "cmd={:?} source={} target={}",
-                    KeyctlCommand::Link,
-                    arg2,
-                    arg3
-                )
-                .as_str(),
-            );
+            let target = resolve_keyring(arg3 as i32, true)?;
+            link_key_into_keyring(arg2 as i32, target)?;
             Ok(0)
         }
         Ok(KeyctlCommand::SessionToParent) => {
-            log_dangerous_noop_syscall(
-                "keyctl",
-                alloc::format!("cmd={:?}", KeyctlCommand::SessionToParent).as_str(),
-            );
+            let current_keyring = current_session_keyring(true)?;
+            let current = get_current_process();
+            let parent = current.lock().parent.clone().ok_or(SyscallError::NoProcess)?;
+            parent.lock().session_keyring = current_keyring;
+            ensure_keyring_entry(current_keyring);
             Ok(0)
         }
         Err(_) => Err(SyscallError::NoSyscall),
@@ -1974,10 +2025,6 @@ define_syscall!(SetRobustList, |head: u64, len: usize| {
     current.robust_list_len = len;
     Ok(0)
 });
-
-fn log_dangerous_noop_syscall(name: &str, detail: &str) {
-    crate::s_println!("dangerous noop success syscall={} {}", name, detail);
-}
 
 fn read_prctl_name(ptr: *const u8) -> Result<[u8; 16], SyscallError> {
     if ptr.is_null() {
