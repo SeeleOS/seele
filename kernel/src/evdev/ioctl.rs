@@ -70,7 +70,14 @@ pub(super) fn handle_ioctl(
             let bits = kind.supported_event_bits((nr - 0x20) as u8);
             write_fixed_sized_ioctl(arg, size, &bits)
         }
-        0x90 | 0x91 => Ok(0),
+        0x90 | 0x91 => {
+            crate::s_println!(
+                "dangerous noop success evdev ioctl nr={:#x} kind={:?}",
+                nr,
+                kind
+            );
+            Ok(0)
+        }
         0xa0 => {
             if arg == 0 {
                 return Err(ObjectError::InvalidArguments);

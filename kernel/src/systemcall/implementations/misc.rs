@@ -1703,7 +1703,13 @@ define_syscall!(SchedRrGetInterval, |pid: i32, tp: *mut LinuxTimespec| {
     Ok(0)
 });
 
-define_syscall!(Setrlimit, |_resource: i32, _rlimit: u64| { Ok(0) });
+define_syscall!(Setrlimit, |resource: i32, rlimit: u64| {
+    log_dangerous_noop_syscall(
+        "setrlimit",
+        alloc::format!("resource={} rlimit_ptr={:#x}", resource, rlimit).as_str(),
+    );
+    Ok(0)
+});
 
 define_syscall!(Prctl, |option: i32,
                         arg2: u64,
@@ -1717,7 +1723,19 @@ define_syscall!(Prctl, |option: i32,
         | PrctlOption::SetNoNewPrivs
         | PrctlOption::SetSeccomp
         | PrctlOption::CapbsetDrop
-        | PrctlOption::SetMdwe => Ok(0),
+        | PrctlOption::SetMdwe => {
+            log_dangerous_noop_syscall(
+                "prctl",
+                alloc::format!(
+                    "option={:?} arg2={:#x} arg3={:#x}",
+                    PrctlOption::try_from(option).expect("validated prctl option"),
+                    arg2,
+                    arg3
+                )
+                .as_str(),
+            );
+            Ok(0)
+        }
         PrctlOption::SetKeepCaps => {
             if arg2 > 1 {
                 return Err(SyscallError::InvalidArguments);
@@ -1827,14 +1845,40 @@ define_syscall!(Keyctl, |cmd: u64,
         Ok(KeyctlCommand::JoinSessionKeyring) => Ok(current_session_keyring(true)? as usize),
         Ok(KeyctlCommand::Setperm) => {
             let _keyring = resolve_keyring(arg2 as i32, true)?;
+            log_dangerous_noop_syscall(
+                "keyctl",
+                alloc::format!(
+                    "cmd={:?} keyring={} perm={:#x}",
+                    KeyctlCommand::Setperm,
+                    arg2,
+                    arg3
+                )
+                .as_str(),
+            );
             Ok(0)
         }
         Ok(KeyctlCommand::Link) => {
             let _source = resolve_keyring(arg2 as i32, false)?;
             let _target = resolve_keyring(arg3 as i32, true)?;
+            log_dangerous_noop_syscall(
+                "keyctl",
+                alloc::format!(
+                    "cmd={:?} source={} target={}",
+                    KeyctlCommand::Link,
+                    arg2,
+                    arg3
+                )
+                .as_str(),
+            );
             Ok(0)
         }
-        Ok(KeyctlCommand::SessionToParent) => Ok(0),
+        Ok(KeyctlCommand::SessionToParent) => {
+            log_dangerous_noop_syscall(
+                "keyctl",
+                alloc::format!("cmd={:?}", KeyctlCommand::SessionToParent).as_str(),
+            );
+            Ok(0)
+        }
         Err(_) => Err(SyscallError::NoSyscall),
     }
 });
@@ -1846,6 +1890,10 @@ define_syscall!(SetRobustList, |head: u64, len: usize| {
     current.robust_list_len = len;
     Ok(0)
 });
+
+fn log_dangerous_noop_syscall(name: &str, detail: &str) {
+    crate::s_println!("dangerous noop success syscall={} {}", name, detail);
+}
 
 define_syscall!(Rseq, |rseq_ptr: *mut LinuxRseq,
                        rseq_len: u32,

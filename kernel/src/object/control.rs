@@ -85,7 +85,11 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
                 flags.insert(FileFlags::NONBLOCK);
             }
             match object.set_flags(flags) {
-                Ok(()) | Err(ObjectError::Unimplemented) => Ok(0),
+                Ok(()) => Ok(0),
+                Err(ObjectError::Unimplemented) => {
+                    log_fcntl_noop_success(FcntlCmd::SetFl, fd, arg, "object.set_flags");
+                    Ok(0)
+                }
                 Err(err) => Err(err.into()),
             }
         }
@@ -101,7 +105,10 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
                     }
                     linux_flags
                 }
-                Err(ObjectError::Unimplemented) => 0,
+                Err(ObjectError::Unimplemented) => {
+                    log_fcntl_noop_success(FcntlCmd::GetFl, fd, arg, "object.get_flags");
+                    0
+                }
                 Err(err) => return Err(err.into()),
             };
 
@@ -140,12 +147,24 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
             flock.lock_type = F_UNLCK;
             flock.pid = 0;
             user_safe::write(flock_ptr, &flock)?;
+            log_fcntl_noop_success(
+                FcntlCmd::try_from(command).expect("validated fcntl command"),
+                fd,
+                arg,
+                "advisory locks are not implemented",
+            );
             Ok(0)
         }
         FcntlCmd::SetLk | FcntlCmd::SetLkw | FcntlCmd::OfdSetLk | FcntlCmd::OfdSetLkw => {
             if arg == 0 {
                 return Err(SyscallError::BadAddress);
             }
+            log_fcntl_noop_success(
+                FcntlCmd::try_from(command).expect("validated fcntl command"),
+                fd,
+                arg,
+                "advisory locks are not implemented",
+            );
             Ok(0)
         }
         FcntlCmd::AddSeals => {
@@ -159,4 +178,14 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
                 .ok_or(SyscallError::InvalidArguments)
         }
     }
+}
+
+fn log_fcntl_noop_success(command: FcntlCmd, fd: u64, arg: u64, reason: &str) {
+    crate::s_println!(
+        "dangerous noop success fcntl cmd={:?} fd={} arg={:#x} reason={}",
+        command,
+        fd,
+        arg,
+        reason
+    );
 }

@@ -196,7 +196,13 @@ impl Configuratable for PtySlave {
                 shared.from_master.clear();
                 Ok(0)
             }
-            _ => Ok(0),
+            _ => {
+                crate::s_println!(
+                    "dangerous noop success pty slave ioctl request={}",
+                    request_name(&request)
+                );
+                Ok(0)
+            }
         }
     }
 }
@@ -204,5 +210,81 @@ impl Configuratable for PtySlave {
 impl Statable for PtySlave {
     fn stat(&self) -> LinuxStat {
         LinuxStat::char_device_with_rdev(0o620, (136u64 << 8) | self.number as u64)
+    }
+}
+
+fn request_name(request: &ConfigurateRequest) -> &'static str {
+    match request {
+        ConfigurateRequest::FbGetVariableScreenInfo(_) => "FbGetVariableScreenInfo",
+        ConfigurateRequest::FbPutVariableScreenInfo(_) => "FbPutVariableScreenInfo",
+        ConfigurateRequest::FbGetFixedScreenInfo(_) => "FbGetFixedScreenInfo",
+        ConfigurateRequest::FbGetColorMap(_) => "FbGetColorMap",
+        ConfigurateRequest::FbPutColorMap(_) => "FbPutColorMap",
+        ConfigurateRequest::FbPanDisplay(_) => "FbPanDisplay",
+        ConfigurateRequest::FbBlank(_) => "FbBlank",
+        ConfigurateRequest::LinuxTcGets(_) => "LinuxTcGets",
+        ConfigurateRequest::LinuxTcSets(_) => "LinuxTcSets",
+        ConfigurateRequest::LinuxTcFlush(_) => "LinuxTcFlush",
+        ConfigurateRequest::LinuxTcGets2(_) => "LinuxTcGets2",
+        ConfigurateRequest::LinuxTcSets2(_) => "LinuxTcSets2",
+        ConfigurateRequest::LinuxTiocnxcl => "LinuxTiocnxcl",
+        ConfigurateRequest::LinuxTiocsctty(_) => "LinuxTiocsctty",
+        ConfigurateRequest::LinuxTiocgPgrp(_) => "LinuxTiocgPgrp",
+        ConfigurateRequest::LinuxTiocnotty => "LinuxTiocnotty",
+        ConfigurateRequest::LinuxTiocspgrp(_) => "LinuxTiocspgrp",
+        ConfigurateRequest::LinuxTiocgwinsz(_) => "LinuxTiocgwinsz",
+        ConfigurateRequest::LinuxTiocswinsz(_) => "LinuxTiocswinsz",
+        ConfigurateRequest::LinuxTiocgptn(_) => "LinuxTiocgptn",
+        ConfigurateRequest::LinuxTiocsptlck(_) => "LinuxTiocsptlck",
+        ConfigurateRequest::LinuxTiocgptpeer(_) => "LinuxTiocgptpeer",
+        ConfigurateRequest::LinuxTiocvhangup => "LinuxTiocvhangup",
+        ConfigurateRequest::LinuxKdGetKeyboardMode(_) => "LinuxKdGetKeyboardMode",
+        ConfigurateRequest::LinuxKdSetKeyboardMode(_) => "LinuxKdSetKeyboardMode",
+        ConfigurateRequest::LinuxKdGetKeyboardType(_) => "LinuxKdGetKeyboardType",
+        ConfigurateRequest::LinuxKdGetKeyboardEntry(_) => "LinuxKdGetKeyboardEntry",
+        ConfigurateRequest::LinuxKdGetDisplayMode(_) => "LinuxKdGetDisplayMode",
+        ConfigurateRequest::LinuxKdSetDisplayMode(_) => "LinuxKdSetDisplayMode",
+        ConfigurateRequest::LinuxKdSignalAccept(_) => "LinuxKdSignalAccept",
+        ConfigurateRequest::LinuxVtOpenQuery(_) => "LinuxVtOpenQuery",
+        ConfigurateRequest::LinuxVtGetMode(_) => "LinuxVtGetMode",
+        ConfigurateRequest::LinuxVtGetState(_) => "LinuxVtGetState",
+        ConfigurateRequest::LinuxVtSetMode(_) => "LinuxVtSetMode",
+        ConfigurateRequest::LinuxVtActivate(_) => "LinuxVtActivate",
+        ConfigurateRequest::LinuxVtWaitActive(_) => "LinuxVtWaitActive",
+        ConfigurateRequest::LinuxVtRelDisp(_) => "LinuxVtRelDisp",
+        ConfigurateRequest::DrmVersion(_) => "DrmVersion",
+        ConfigurateRequest::DrmGetUnique(_) => "DrmGetUnique",
+        ConfigurateRequest::DrmGetMagic(_) => "DrmGetMagic",
+        ConfigurateRequest::DrmGetCap(_) => "DrmGetCap",
+        ConfigurateRequest::DrmWaitVblank(_) => "DrmWaitVblank",
+        ConfigurateRequest::DrmSetUnique(_) => "DrmSetUnique",
+        ConfigurateRequest::DrmAuthMagic(_) => "DrmAuthMagic",
+        ConfigurateRequest::DrmSetClientCap(_) => "DrmSetClientCap",
+        ConfigurateRequest::DrmSetMaster => "DrmSetMaster",
+        ConfigurateRequest::DrmDropMaster => "DrmDropMaster",
+        ConfigurateRequest::DrmModeGetResources(_) => "DrmModeGetResources",
+        ConfigurateRequest::DrmModeGetCrtc(_) => "DrmModeGetCrtc",
+        ConfigurateRequest::DrmModeSetCrtc(_) => "DrmModeSetCrtc",
+        ConfigurateRequest::DrmModeGetGamma(_) => "DrmModeGetGamma",
+        ConfigurateRequest::DrmModeSetGamma(_) => "DrmModeSetGamma",
+        ConfigurateRequest::DrmModeGetEncoder(_) => "DrmModeGetEncoder",
+        ConfigurateRequest::DrmModeGetConnector(_) => "DrmModeGetConnector",
+        ConfigurateRequest::DrmModeGetProperty(_) => "DrmModeGetProperty",
+        ConfigurateRequest::DrmModeObjGetProperties(_) => "DrmModeObjGetProperties",
+        ConfigurateRequest::DrmModeGetPlaneResources(_) => "DrmModeGetPlaneResources",
+        ConfigurateRequest::DrmModeGetPlane(_) => "DrmModeGetPlane",
+        ConfigurateRequest::DrmModeListLessees(_) => "DrmModeListLessees",
+        ConfigurateRequest::DrmModeAddFb(_) => "DrmModeAddFb",
+        ConfigurateRequest::DrmModeAddFb2(_) => "DrmModeAddFb2",
+        ConfigurateRequest::DrmModeRemoveFb(_) => "DrmModeRemoveFb",
+        ConfigurateRequest::DrmModePageFlip(_) => "DrmModePageFlip",
+        ConfigurateRequest::DrmModeDirtyFb(_) => "DrmModeDirtyFb",
+        ConfigurateRequest::DrmModeCreateDumb(_) => "DrmModeCreateDumb",
+        ConfigurateRequest::DrmModeMapDumb(_) => "DrmModeMapDumb",
+        ConfigurateRequest::DrmModeDestroyDumb(_) => "DrmModeDestroyDumb",
+        ConfigurateRequest::DrmGemClose(_) => "DrmGemClose",
+        ConfigurateRequest::DrmPrimeHandleToFd(_) => "DrmPrimeHandleToFd",
+        ConfigurateRequest::DrmPrimeFdToHandle(_) => "DrmPrimeFdToHandle",
+        ConfigurateRequest::RawIoctl { .. } => "RawIoctl",
     }
 }
