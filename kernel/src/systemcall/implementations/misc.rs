@@ -144,6 +144,7 @@ enum PrctlCapAmbientOp {
 enum KeyctlCommand {
     GetKeyringId = 0,
     JoinSessionKeyring = 1,
+    Revoke = 3,
     Setperm = 5,
     Link = 8,
     SessionToParent = 18,
@@ -205,6 +206,7 @@ const LINUX_REBOOT_CMD_CAD_OFF: u32 = 0x0000_0000;
 const LINUX_REBOOT_CMD_CAD_ON: u32 = 0x89ab_cdef;
 const KEY_SPEC_SESSION_KEYRING: i32 = -3;
 const KEY_SPEC_USER_KEYRING: i32 = -4;
+const KEY_SPEC_USER_SESSION_KEYRING: i32 = -5;
 
 static NEXT_SESSION_KEYRING_ID: AtomicI32 = AtomicI32::new(1);
 static NEXT_KEY_SERIAL: AtomicI32 = AtomicI32::new(1024);
@@ -218,6 +220,7 @@ struct KeyEntry {
     permissions: u32,
     links: Vec<i32>,
     is_keyring: bool,
+    revoked: bool,
 }
 
 #[repr(C)]
@@ -290,6 +293,7 @@ fn resolve_keyring(spec: i32, create: bool) -> Result<i32, SyscallError> {
     match spec {
         KEY_SPEC_SESSION_KEYRING => current_session_keyring(create),
         KEY_SPEC_USER_KEYRING => current_user_keyring(create),
+        KEY_SPEC_USER_SESSION_KEYRING => current_session_keyring(create),
         serial if serial > 0 => {
             if create {
                 ensure_keyring_entry(serial);
@@ -308,7 +312,7 @@ fn keyring_exists(serial: i32) -> bool {
     KEY_REGISTRY
         .lock()
         .get(&serial)
-        .is_some_and(|entry| entry.is_keyring)
+        .is_some_and(|entry| entry.is_keyring && !entry.revoked)
 }
 
 fn ensure_keyring_entry(serial: i32) {
@@ -326,24 +330,40 @@ fn set_key_permissions(serial: i32, permissions: u32) -> Result<(), SyscallError
     let entry = registry
         .get_mut(&serial)
         .ok_or(SyscallError::InvalidArguments)?;
+    if entry.revoked {
+        return Err(SyscallError::InvalidArguments);
+    }
     entry.permissions = permissions;
     Ok(())
 }
 
 fn link_key_into_keyring(source: i32, target: i32) -> Result<(), SyscallError> {
     let mut registry = KEY_REGISTRY.lock();
-    if !registry.contains_key(&source) {
+    let Some(source_entry) = registry.get(&source) else {
+        return Err(SyscallError::InvalidArguments);
+    };
+    if source_entry.revoked {
         return Err(SyscallError::InvalidArguments);
     }
     let target_entry = registry
         .get_mut(&target)
         .ok_or(SyscallError::InvalidArguments)?;
-    if !target_entry.is_keyring {
+    if !target_entry.is_keyring || target_entry.revoked {
         return Err(SyscallError::InvalidArguments);
     }
     if !target_entry.links.contains(&source) {
         target_entry.links.push(source);
     }
+    Ok(())
+}
+
+fn revoke_key(serial: i32) -> Result<(), SyscallError> {
+    let mut registry = KEY_REGISTRY.lock();
+    let entry = registry
+        .get_mut(&serial)
+        .ok_or(SyscallError::InvalidArguments)?;
+    entry.revoked = true;
+    entry.links.clear();
     Ok(())
 }
 
@@ -2148,6 +2168,10 @@ define_syscall!(Keyctl, |cmd: u64,
             Ok(keyring as usize)
         }
         Ok(KeyctlCommand::JoinSessionKeyring) => Ok(current_session_keyring(true)? as usize),
+        Ok(KeyctlCommand::Revoke) => {
+            revoke_key(arg2 as i32)?;
+            Ok(0)
+        }
         Ok(KeyctlCommand::Setperm) => {
             let keyring = resolve_keyring(arg2 as i32, true)?;
             set_key_permissions(keyring, arg3 as u32)?;
