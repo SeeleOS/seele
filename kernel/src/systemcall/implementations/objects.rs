@@ -203,6 +203,76 @@ fn copy_between_objects(
     Ok(total)
 }
 
+fn copy_between_objects_with_offsets(
+    input: ObjectRef,
+    input_offset: Option<*mut i64>,
+    output: ObjectRef,
+    output_offset: Option<*mut i64>,
+    mut remaining: usize,
+) -> SyscallResult {
+    let readable = input.clone().as_readable()?;
+    let writable = output.clone().as_writable()?;
+    let input_seekable = if input_offset.is_some() {
+        Some(input.as_seekable()?)
+    } else {
+        None
+    };
+    let output_seekable = if output_offset.is_some() {
+        Some(output.as_seekable()?)
+    } else {
+        None
+    };
+    let mut buffer = [0u8; COPY_CHUNK_SIZE];
+    let mut total = 0usize;
+
+    while remaining > 0 {
+        let chunk_len = remaining.min(buffer.len());
+
+        if let (Some(offset_ptr), Some(seekable)) = (input_offset, input_seekable.as_ref()) {
+            let offset = user_safe::read(offset_ptr)?;
+            seekable.clone().seek(offset, Whence::Start)?;
+        }
+
+        let read = readable.read(&mut buffer[..chunk_len])?;
+        if read == 0 {
+            break;
+        }
+
+        if let Some(offset_ptr) = input_offset {
+            let offset = user_safe::read(offset_ptr)?;
+            user_safe::write(offset_ptr, &(offset + read as i64))?;
+        }
+
+        let mut written = 0usize;
+        while written < read {
+            if let (Some(offset_ptr), Some(seekable)) = (output_offset, output_seekable.as_ref()) {
+                let offset = user_safe::read(offset_ptr)?;
+                seekable.clone().seek(offset, Whence::Start)?;
+            }
+
+            let count = writable.write(&buffer[written..read])?;
+            if count == 0 {
+                return Err(SyscallError::BrokenPipe);
+            }
+
+            if let Some(offset_ptr) = output_offset {
+                let offset = user_safe::read(offset_ptr)?;
+                user_safe::write(offset_ptr, &(offset + count as i64))?;
+            }
+
+            written += count;
+        }
+
+        total += read;
+        remaining -= read;
+        if read < chunk_len {
+            break;
+        }
+    }
+
+    Ok(total)
+}
+
 fn read_file_like_in_chunks(
     file: &FileLikeObject,
     buf_ptr: *mut u8,
@@ -366,8 +436,6 @@ define_syscall!(Writev, |object: ObjectRef,
         return Err(SyscallError::InvalidArguments);
     }
 
-    let writable = object.clone().as_writable()?;
-    let mut written = 0usize;
     if iovcnt > 0 && iov_ptr.is_null() {
         return Err(SyscallError::BadAddress);
     }
@@ -389,35 +457,15 @@ define_syscall!(Writev, |object: ObjectRef,
                 .map(|socket| socket.kind == InetSocketKind::Datagram)
         })
         .unwrap_or(false);
-    if preserve_datagram_boundary {
-        let buffer = copy_iovecs(&iovs)?;
+    let writable = object.clone().as_writable()?;
+    let buffer = copy_iovecs(&iovs)?;
+    if preserve_datagram_boundary || !buffer.is_empty() {
         log_display_write_dispatch("writev", &object, buffer.len());
         log_display_pipe_bytes("writev", &object, &buffer);
         log_x_chain_write_bytes(&buffer);
         log_user_manager_socket_bytes("writev", &object, &buffer);
-        return Ok(writable.write(&buffer)?);
     }
-
-    for iov in iovs {
-        if iov.iov_len == 0 {
-            continue;
-        }
-        if iov.iov_base.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-        let buf = user_safe::read_buffer(iov.iov_base, iov.iov_len)?;
-        log_display_write_dispatch("writev", &object, buf.len());
-        log_display_pipe_bytes("writev", &object, &buf);
-        log_x_chain_write_bytes(&buf);
-        log_user_manager_socket_bytes("writev", &object, &buf);
-        let count = writable.write(&buf)?;
-        written += count;
-        if count < iov.iov_len {
-            break;
-        }
-    }
-
-    Ok(written)
+    Ok(writable.write(&buffer)?)
 });
 
 define_syscall!(Sendfile, |out_fd: ObjectRef,
@@ -445,6 +493,25 @@ define_syscall!(CopyFileRange, |fd_in: ObjectRef,
     }
 
     copy_between_objects(fd_in, fd_out, len)
+});
+
+define_syscall!(Splice, |fd_in: ObjectRef,
+                         off_in: *mut i64,
+                         fd_out: ObjectRef,
+                         off_out: *mut i64,
+                         len: usize,
+                         flags: u32| {
+    if flags != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    copy_between_objects_with_offsets(
+        fd_in,
+        (!off_in.is_null()).then_some(off_in),
+        fd_out,
+        (!off_out.is_null()).then_some(off_out),
+        len,
+    )
 });
 
 define_syscall!(Close, |object_num: usize| {
