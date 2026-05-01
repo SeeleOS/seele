@@ -88,6 +88,16 @@ impl MemoryMappable for DrmPrimeBufferObject {
         pages: u64,
         protection: Protection,
     ) -> ObjectResult<VirtAddr> {
+        if let Some((pid, comm)) = current_debug_process() {
+            crate::s_println!(
+                "drm prime mmap comm={} pid={} offset={:#x} pages={} size={:#x}",
+                comm,
+                pid,
+                offset,
+                pages,
+                self.buffer.aligned_size()
+            );
+        }
         if pages == 0 || !offset.is_multiple_of(4096) {
             return Err(ObjectError::InvalidArguments);
         }
@@ -165,6 +175,16 @@ impl Seekable for DrmPrimeBufferObject {
             }
         };
         *position = next.max(0) as usize;
+        if let Some((pid, comm)) = current_debug_process() {
+            crate::s_println!(
+                "drm prime seek comm={} pid={} whence={:?} offset={} result={}",
+                comm,
+                pid,
+                seek_type,
+                offset,
+                *position
+            );
+        }
         Ok(*position)
     }
 }

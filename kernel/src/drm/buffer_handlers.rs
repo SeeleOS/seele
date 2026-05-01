@@ -200,6 +200,16 @@ pub(super) fn handle_mode_map_dumb(
     let state = DRM_STATE.lock();
     let buffer = state.get_user_handle(request.handle)?;
     request.offset = buffer.map_offset;
+    if let Some((pid, comm)) = current_debug_process() {
+        crate::s_println!(
+            "drm map_dumb comm={} pid={} handle={} offset={:#x} size={:#x}",
+            comm,
+            pid,
+            request.handle,
+            request.offset,
+            buffer.aligned_size()
+        );
+    }
     user_safe::write(ptr, &request).map_err(|_| ObjectError::InvalidArguments)?;
     Ok(0)
 }
