@@ -22,7 +22,7 @@ use crate::{
         fs_context::{FsConfigCommand, FsContextObject},
         misc::{ObjectRef, get_object_current_process},
     },
-    process::{FdFlags, manager::get_current_process, misc::with_current_process},
+    process::{FdFlags, manager::get_current_process},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
 use alloc::{format, string::String, sync::Arc, vec::Vec};
@@ -1485,20 +1485,14 @@ define_syscall!(Mknodat, |dirfd: i32,
 define_syscall!(Mkdir, |path: CString, mode: u32| {
     let _ = mode;
     let path = path_from_raw(path)?;
-    let mut current_dir =
-        with_current_process(|process| process.fs_context.lock().current_directory.clone());
-    current_dir.push_path_str(&path);
-
-    VirtualFS.lock().create_dir(current_dir.as_normal())?;
+    let path = resolve_path_at(AT_FDCWD, &path)?;
+    VirtualFS.lock().create_dir(path)?;
     Ok(0)
 });
 
 define_syscall!(Rmdir, |path: CString| {
     let path = path_from_raw(path)?;
-    let mut current_dir =
-        with_current_process(|process| process.fs_context.lock().current_directory.clone());
-    current_dir.push_path_str(&path);
-    let path = current_dir.as_normal();
+    let path = resolve_path_at(AT_FDCWD, &path)?;
 
     let is_directory = matches!(
         VirtualFS.lock().file_info(path.clone())?.file_like_type,
