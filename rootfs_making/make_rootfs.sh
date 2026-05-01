@@ -228,3 +228,10 @@ install_sysroot_file "${ROOTFS_MAKING_DIR}/startplasma-wayland-tty.sh" "${SYSROO
 for package in "${AUR_PACKAGES[@]}"; do
     install_aur_package "${package}"
 done
+
+# ConditionNeedsUpdate= compares the top-level /usr mtime against stamp files in
+# /etc and /var. Our build updates nested files under /usr, so refresh /usr
+# explicitly before generating the update stamps.
+sudo touch "${SYSROOT_DIR}/usr"
+arch_chroot /usr/bin/ldconfig -X
+arch_chroot /usr/lib/systemd/systemd-update-done
