@@ -3,6 +3,7 @@ use crate::{
     filesystem::{
         absolute_path::AbsolutePath,
         errors::FSError,
+        fusefs::FuseFs,
         info::{DirectoryContentInfo, LinuxStat},
         object::FileLikeObject,
         path::Path,
@@ -265,6 +266,33 @@ fn is_supported_api_mount(fstype: &str) -> bool {
             | "pstore"
             | "securityfs"
     )
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct FuseMountOptions {
+    fd: Option<u64>,
+}
+
+fn parse_fuse_mount_options(data: Option<&str>) -> Result<FuseMountOptions, SyscallError> {
+    let mut options = FuseMountOptions::default();
+    let Some(data) = data else {
+        return Ok(options);
+    };
+
+    for item in data.split(',').filter(|item| !item.is_empty()) {
+        let Some((key, value)) = item.split_once('=') else {
+            continue;
+        };
+        if key == "fd" {
+            options.fd = Some(
+                value
+                    .parse::<u64>()
+                    .map_err(|_| SyscallError::InvalidArguments)?,
+            );
+        }
+    }
+
+    Ok(options)
 }
 
 fn resolve_path_at(dirfd: i32, path_str: &str) -> Result<Path, SyscallError> {
@@ -1613,6 +1641,26 @@ define_syscall!(Mount, |source: CString,
 
     if filesystemtype.is_none() {
         return Err(SyscallError::InvalidArguments);
+    }
+
+    if let Some(filesystemtype) = filesystemtype.as_deref()
+        && (filesystemtype == "fuse" || filesystemtype.starts_with("fuse."))
+    {
+        if !target_is_directory {
+            return Err(SyscallError::NotADirectory);
+        }
+
+        let options = parse_fuse_mount_options(data.as_deref())?;
+        let fd = options.fd.ok_or(SyscallError::InvalidArguments)?;
+        let fuse_device = get_object_current_process(fd)?
+            .as_fuse_device()
+            .map_err(|_| SyscallError::InvalidArguments)?;
+
+        VirtualFS
+            .lock()
+            .mount(target_path, FuseFs::new(fuse_device.connection.clone()))
+            .map_err(SyscallError::from)?;
+        return Ok(0);
     }
 
     if filesystemtype

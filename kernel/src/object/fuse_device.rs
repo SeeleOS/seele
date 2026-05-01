@@ -1,29 +1,30 @@
-use alloc::{collections::vec_deque::VecDeque, sync::Arc};
+use alloc::sync::Arc;
 use spin::Mutex;
 
 use crate::{
+    filesystem::fusefs::FuseConnection,
     filesystem::info::LinuxStat,
     impl_cast_function,
     object::{
         FileFlags, Object,
-        error::ObjectError,
         misc::ObjectResult,
-        queue_helpers::read_or_block_with_flags,
         traits::{Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
-    thread::yielding::WakeType,
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct FuseDevice {
     flags: Mutex<FileFlags>,
-    pending_requests: Mutex<VecDeque<u8>>,
+    pub connection: Arc<FuseConnection>,
 }
 
 impl FuseDevice {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self::default())
+        Arc::new(Self {
+            flags: Mutex::new(FileFlags::empty()),
+            connection: FuseConnection::new(),
+        })
     }
 }
 
@@ -41,6 +42,7 @@ impl Object for FuseDevice {
     impl_cast_function!("writable", Writable);
     impl_cast_function!("pollable", Pollable);
     impl_cast_function!("statable", Statable);
+    crate::impl_cast_function_non_trait!("fuse_device", FuseDevice);
 }
 
 impl Readable for FuseDevice {
@@ -49,36 +51,21 @@ impl Readable for FuseDevice {
     }
 
     fn read_with_flags(&self, buffer: &mut [u8], flags: FileFlags) -> ObjectResult<usize> {
-        read_or_block_with_flags(buffer, flags, WakeType::IO, |buffer| {
-            let mut pending = self.pending_requests.lock();
-            if pending.is_empty() {
-                None
-            } else {
-                let mut read = 0usize;
-                while read < buffer.len() {
-                    let Some(byte) = pending.pop_front() else {
-                        break;
-                    };
-                    buffer[read] = byte;
-                    read += 1;
-                }
-                Some(read)
-            }
-        })
+        self.connection.daemon_read(buffer, flags)
     }
 }
 
 impl Writable for FuseDevice {
-    fn write(&self, _buffer: &[u8]) -> ObjectResult<usize> {
-        Err(ObjectError::Unimplemented)
+    fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
+        self.connection.daemon_write(buffer)
     }
 }
 
 impl Pollable for FuseDevice {
     fn is_event_ready(&self, event: PollableEvent) -> bool {
         match event {
-            PollableEvent::CanBeRead => !self.pending_requests.lock().is_empty(),
-            PollableEvent::CanBeWritten => false,
+            PollableEvent::CanBeRead => self.connection.is_request_pending(),
+            PollableEvent::CanBeWritten => true,
             PollableEvent::Error | PollableEvent::Closed | PollableEvent::Other(_) => false,
         }
     }

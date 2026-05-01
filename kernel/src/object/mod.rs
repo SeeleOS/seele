@@ -18,6 +18,7 @@ use crate::{
         bpf::BpfObject,
         error::ObjectError,
         fs_context::FsContextObject,
+        fuse_device::FuseDevice,
         linux_anon::{EventFdObject, InotifyObject, PidFdObject, SignalfdObject, TimerFdObject},
         misc::ObjectResult,
         netlink::NetlinkSocketObject,
@@ -92,6 +93,7 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function_non_trait!("file_like", FileLikeObject, BadFileDescriptor);
     define_cast_function_non_trait!("eventfd", EventFdObject, BadFileDescriptor);
     define_cast_function_non_trait!("fs_context", FsContextObject, BadFileDescriptor);
+    define_cast_function_non_trait!("fuse_device", FuseDevice, BadFileDescriptor);
     define_cast_function_non_trait!("bpf", BpfObject, BadFileDescriptor);
     define_cast_function_non_trait!("inotify", InotifyObject, BadFileDescriptor);
     define_cast_function_non_trait!("poller", PollerObject, BadFileDescriptor);
