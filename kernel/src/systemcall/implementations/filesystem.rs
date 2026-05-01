@@ -1996,6 +1996,20 @@ define_syscall!(ReadlinkAt, |dirfd: i32,
                              out_buf: *mut u8,
                              out_len: usize| {
     let path_str = path_from_raw(path)?;
+    if path_str.is_empty() {
+        let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
+        let target = match object.as_file_like()?.read_link() {
+            Ok(target) => target,
+            Err(FSError::NotASymlink) => return Err(SyscallError::InvalidArguments),
+            Err(err) => return Err(err.into()),
+        };
+        let bytes = target.as_bytes();
+        let copied = core::cmp::min(bytes.len(), out_len);
+        if copied > 0 {
+            user_safe::write(out_buf, &bytes[..copied])?;
+        }
+        return Ok(copied);
+    }
     let path = resolve_path_at(dirfd, &path_str)?;
     readlink_impl(path, out_buf, out_len)
 });
