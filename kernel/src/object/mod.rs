@@ -37,6 +37,7 @@ pub mod device;
 pub mod error;
 pub mod file_locks;
 pub mod fs_context;
+pub mod fuse_device;
 pub mod linux_anon;
 pub mod memfd;
 pub mod misc;

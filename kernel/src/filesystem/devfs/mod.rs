@@ -198,6 +198,14 @@ static DEV_KMSG_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     rdev: None,
 });
 
+static DEV_FUSE_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
+    name: "fuse",
+    inode: 0x1016,
+    mode: 0o020666,
+    device_name: "fuse",
+    rdev: Some((10u64 << 8) | 229),
+});
+
 static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "null",
@@ -278,6 +286,10 @@ static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "kmsg",
         node: &DEV_KMSG_NODE,
+    },
+    StaticDirEntry {
+        name: "fuse",
+        node: &DEV_FUSE_NODE,
     },
 ];
 

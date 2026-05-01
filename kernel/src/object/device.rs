@@ -9,6 +9,7 @@ use crate::{
         mouse::PS2MouseObject,
     },
     object::{
+        fuse_device::FuseDevice,
         misc::ObjectRef,
         tty_device::{get_active_tty, get_default_tty, get_virtual_tty},
     },
@@ -23,6 +24,7 @@ lazy_static::lazy_static! {
 
         devices.insert("framebuffer", Arc::new(FramebufferObject) as ObjectRef);
         devices.insert("devnull", Arc::new(DevNull) as ObjectRef);
+        devices.insert("fuse", FuseDevice::new() as ObjectRef);
         devices.insert("kmsg", Arc::new(DevKmsg::default()) as ObjectRef);
         devices.insert("console", get_default_tty() as ObjectRef);
         devices.insert("tty", get_default_tty() as ObjectRef);

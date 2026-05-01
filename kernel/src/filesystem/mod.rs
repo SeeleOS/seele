@@ -3,6 +3,7 @@ pub mod block_device;
 pub mod cgroupfs;
 pub mod devfs;
 pub mod errors;
+pub mod fusefs;
 pub mod impls;
 pub mod info;
 pub mod misc;
