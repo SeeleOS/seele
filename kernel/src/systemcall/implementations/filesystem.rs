@@ -1937,7 +1937,7 @@ define_syscall!(RenameAt2, |old_dirfd: i32,
 });
 
 define_syscall!(Utimensat, |dirfd: i32,
-                            path: CString,
+                            path: u64,
                             times: *const [i64; 2],
                             flags: AtFlags| {
     let allowed_flags = AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH;
@@ -1945,8 +1945,9 @@ define_syscall!(Utimensat, |dirfd: i32,
         return Err(SyscallError::InvalidArguments);
     }
 
+    let path = path as CString;
     if path.is_null() {
-        if flags.contains(AtFlags::EMPTY_PATH) {
+        if flags.contains(AtFlags::EMPTY_PATH) || dirfd >= 0 {
             let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
             let _ = object.as_file_like()?;
         } else {
@@ -1955,7 +1956,7 @@ define_syscall!(Utimensat, |dirfd: i32,
     } else {
         let path_str = path_from_raw(path)?;
         if path_str.is_empty() {
-            if flags.contains(AtFlags::EMPTY_PATH) {
+            if flags.contains(AtFlags::EMPTY_PATH) || dirfd >= 0 {
                 let object =
                     get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
                 let _ = object.as_file_like()?;
