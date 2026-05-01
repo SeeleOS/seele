@@ -125,6 +125,7 @@ pub enum SyscallNumber {
     Fstatfs = 138,
     Getpriority = 140,
     Setpriority = 141,
+    Getrusage = 98,
     IoprioSet = 251,
     IoprioGet = 252,
     SchedSetparam = 142,

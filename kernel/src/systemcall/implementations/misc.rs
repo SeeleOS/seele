@@ -587,6 +587,27 @@ struct LinuxTimeval {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
+struct LinuxRusage {
+    ru_utime: LinuxTimeval,
+    ru_stime: LinuxTimeval,
+    ru_maxrss: i64,
+    ru_ixrss: i64,
+    ru_idrss: i64,
+    ru_isrss: i64,
+    ru_minflt: i64,
+    ru_majflt: i64,
+    ru_nswap: i64,
+    ru_inblock: i64,
+    ru_oublock: i64,
+    ru_msgsnd: i64,
+    ru_msgrcv: i64,
+    ru_nsignals: i64,
+    ru_nvcsw: i64,
+    ru_nivcsw: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
 struct LinuxTimezone {
     tz_minuteswest: i32,
     tz_dsttime: i32,
@@ -604,6 +625,14 @@ pub enum LinuxIoprioWho {
     Process = 1,
     Pgrp = 2,
     User = 3,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
+#[repr(i32)]
+enum LinuxRusageWho {
+    Self_ = 0,
+    Children = -1,
+    Thread = 1,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
@@ -1069,6 +1098,16 @@ define_syscall!(
         Ok(0)
     }
 );
+
+define_syscall!(Getrusage, |who: i32, usage: *mut LinuxRusage| {
+    let _ = LinuxRusageWho::try_from(who).map_err(|_| SyscallError::InvalidArguments)?;
+    if usage.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    user_safe::write(usage, &LinuxRusage::default())?;
+    Ok(0)
+});
 
 define_syscall!(
     Settimeofday,
