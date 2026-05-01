@@ -33,7 +33,29 @@ use crate::{
 enum FutexOp {
     Wait = 0,
     Wake = 1,
+    WakeOp = 5,
     WaitBitset = 9,
+}
+
+#[derive(Clone, Copy, Debug, TryFromPrimitive)]
+#[repr(u32)]
+enum FutexWakeOp {
+    Set = 0,
+    Add = 1,
+    Or = 2,
+    AndN = 3,
+    Xor = 4,
+}
+
+#[derive(Clone, Copy, Debug, TryFromPrimitive)]
+#[repr(u32)]
+enum FutexWakeCmp {
+    Eq = 0,
+    Ne = 1,
+    Lt = 2,
+    Le = 3,
+    Gt = 4,
+    Ge = 5,
 }
 
 #[derive(Clone, Copy, Debug, TryFromPrimitive)]
@@ -92,6 +114,9 @@ struct FutexKey {
 }
 
 static FUTEX_QUEUE: Mutex<BTreeMap<FutexKey, VecDeque<ThreadRef>>> = Mutex::new(BTreeMap::new());
+const FUTEX_CLOCK_REALTIME: u64 = 0x100;
+const FUTEX_BITSET_MATCH_ANY: u64 = 0xffff_ffff;
+const FUTEX_OP_OPARG_SHIFT: u32 = 8;
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct LinuxTimespec {
@@ -173,7 +198,7 @@ pub fn remove_futex_waiter(thread_ref: &ThreadRef) {
     }
 }
 
-fn futex_timeout_deadline(timeout: u64) -> Result<Option<Time>, SyscallError> {
+fn futex_timeout_timespec(timeout: u64) -> Result<Option<LinuxTimespec>, SyscallError> {
     if timeout == 0 {
         return Ok(None);
     }
@@ -183,23 +208,52 @@ fn futex_timeout_deadline(timeout: u64) -> Result<Option<Time>, SyscallError> {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let timeout_ns = (timeout.tv_sec as u128)
-        .saturating_mul(1_000_000_000)
-        .saturating_add(timeout.tv_nsec as u128);
-    let timeout_ns = timeout_ns.min(u64::MAX as u128) as u64;
-    Ok(Some(Time::since_boot().add_ns(timeout_ns)))
+    Ok(Some(timeout))
 }
 
-fn futex_wait_impl(arg1: u64, arg2: u64, timeout: u64) -> Result<usize, SyscallError> {
+fn timespec_to_ns(timeout: LinuxTimespec) -> u64 {
+    (timeout.tv_sec as u128)
+        .saturating_mul(1_000_000_000)
+        .saturating_add(timeout.tv_nsec as u128)
+        .min(u64::MAX as u128) as u64
+}
+
+fn futex_relative_timeout_deadline(timeout: u64) -> Result<Option<Time>, SyscallError> {
+    Ok(futex_timeout_timespec(timeout)?.map(|timeout| Time::since_boot().add_ns(timespec_to_ns(timeout))))
+}
+
+fn futex_absolute_timeout_deadline(
+    timeout: u64,
+    clock_realtime: bool,
+) -> Result<Option<Time>, SyscallError> {
+    let Some(timeout) = futex_timeout_timespec(timeout)? else {
+        return Ok(None);
+    };
+
+    let absolute_ns = timespec_to_ns(timeout);
+    if clock_realtime {
+        let now_realtime = Time::current().as_nanoseconds();
+        let delta_ns = absolute_ns.saturating_sub(now_realtime);
+        Ok(Some(Time::since_boot().add_ns(delta_ns)))
+    } else {
+        Ok(Some(Time::from_nanoseconds(absolute_ns)))
+    }
+}
+
+fn futex_wait_impl(arg1: u64, arg2: u64, deadline: Option<Time>) -> Result<usize, SyscallError> {
     let key = current_futex_key(arg1);
     let current = get_current_thread();
-    let deadline = futex_timeout_deadline(timeout)?;
     {
         let mut manager = THREAD_MANAGER.get().unwrap().lock();
         let mut queue = FUTEX_QUEUE.lock();
         let cur_value = unsafe { *(arg1 as *const u32) } as u64;
         if cur_value != arg2 {
             return Err(SyscallError::TryAgain);
+        }
+        if let Some(deadline) = deadline
+            && Time::since_boot() >= deadline
+        {
+            return Err(SyscallError::TimedOut);
         }
 
         // Block the thread before publishing it in the futex bucket so any
@@ -216,7 +270,7 @@ fn futex_wait_impl(arg1: u64, arg2: u64, timeout: u64) -> Result<usize, SyscallE
     if let Some(deadline) = deadline
         && Time::since_boot() >= deadline
     {
-        return Err(SyscallError::TryAgain);
+        return Err(SyscallError::TimedOut);
     }
 
     Ok(0)
@@ -229,21 +283,84 @@ fn futex_wake_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
     Ok(woken)
 }
 
+fn futex_wake_op_apply(old_value: u32, encoded: u32) -> Result<(u32, bool), SyscallError> {
+    let op = FutexWakeOp::try_from((encoded >> 28) & 0xf).map_err(|_| SyscallError::InvalidArguments)?;
+    let cmp =
+        FutexWakeCmp::try_from((encoded >> 24) & 0xf).map_err(|_| SyscallError::InvalidArguments)?;
+    let mut op_arg = (encoded >> 12) & 0xfff;
+    let cmp_arg = encoded & 0xfff;
+    if matches!(op, FutexWakeOp::Set)
+        && (op_arg & FUTEX_OP_OPARG_SHIFT) != 0
+    {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if (op_arg & FUTEX_OP_OPARG_SHIFT) != 0 {
+        let shift = op_arg & !FUTEX_OP_OPARG_SHIFT;
+        op_arg = 1u32
+            .checked_shl(shift)
+            .ok_or(SyscallError::InvalidArguments)?;
+    }
+
+    let new_value = match op {
+        FutexWakeOp::Set => op_arg,
+        FutexWakeOp::Add => old_value.wrapping_add(op_arg),
+        FutexWakeOp::Or => old_value | op_arg,
+        FutexWakeOp::AndN => old_value & !op_arg,
+        FutexWakeOp::Xor => old_value ^ op_arg,
+    };
+    let should_wake_second = match cmp {
+        FutexWakeCmp::Eq => old_value == cmp_arg,
+        FutexWakeCmp::Ne => old_value != cmp_arg,
+        FutexWakeCmp::Lt => old_value < cmp_arg,
+        FutexWakeCmp::Le => old_value <= cmp_arg,
+        FutexWakeCmp::Gt => old_value > cmp_arg,
+        FutexWakeCmp::Ge => old_value >= cmp_arg,
+    };
+    Ok((new_value, should_wake_second))
+}
+
+fn futex_wake_op_impl(
+    arg1: u64,
+    wake_count_1: u64,
+    wake_count_2: u64,
+    uaddr2: u64,
+    encoded_op: u64,
+) -> Result<usize, SyscallError> {
+    let pid = get_current_process().lock().pid.0;
+    let old_value = unsafe { *(uaddr2 as *const u32) };
+    let encoded_op = u32::try_from(encoded_op).map_err(|_| SyscallError::InvalidArguments)?;
+    let (new_value, should_wake_second) = futex_wake_op_apply(old_value, encoded_op)?;
+    unsafe {
+        *(uaddr2 as *mut u32) = new_value;
+    }
+
+    let mut total_woken = wake_futex_for_process(pid, arg1, wake_count_1 as usize);
+    if should_wake_second {
+        total_woken += wake_futex_for_process(pid, uaddr2, wake_count_2 as usize);
+    }
+    Ok(total_woken)
+}
+
 define_syscall!(Futex, |arg1: u64,
                         op: u64,
                         arg2: u64,
                         timeout: u64,
-                        _uaddr2: u64,
+                        uaddr2: u64,
                         val3: u64| {
     systemd_perf::profile_current_process(PerfBucket::Futex, || {
         match FutexOp::try_from(op & 0x7f).map_err(|_| SyscallError::InvalidArguments)? {
-            FutexOp::Wait => futex_wait_impl(arg1, arg2, timeout),
+            FutexOp::Wait => futex_wait_impl(arg1, arg2, futex_relative_timeout_deadline(timeout)?),
             FutexOp::Wake => futex_wake_impl(arg1, arg2),
+            FutexOp::WakeOp => futex_wake_op_impl(arg1, arg2, timeout, uaddr2, val3),
             FutexOp::WaitBitset => {
-                if val3 == 0 {
+                if val3 == 0 || val3 != FUTEX_BITSET_MATCH_ANY {
                     return Err(SyscallError::InvalidArguments);
                 }
-                futex_wait_impl(arg1, arg2, timeout)
+                futex_wait_impl(
+                    arg1,
+                    arg2,
+                    futex_absolute_timeout_deadline(timeout, op & FUTEX_CLOCK_REALTIME != 0)?,
+                )
             }
         }
     })

@@ -49,6 +49,7 @@ pub enum SyscallError {
     NetworkDown = -100,
     IsConnected = -106,
     NotConnected = -107,
+    TimedOut = -110,
     ConnectionRefused = -111,
 }
 
@@ -206,6 +207,7 @@ impl From<isize> for SyscallError {
             -100 => Self::NetworkDown,
             -106 => Self::IsConnected,
             -107 => Self::NotConnected,
+            -110 => Self::TimedOut,
             -111 => Self::ConnectionRefused,
             _ => Self::IOError,
         }
