@@ -79,7 +79,11 @@ impl Directory for TmpfsDirectoryHandle {
         let mut state = self.state.lock();
         match info.content_type {
             DirectoryContentType::File => state.create_file(&self.path, &info.name),
-            DirectoryContentType::Directory => state.create_directory(&self.path, &info.name),
+            DirectoryContentType::Directory => state.create_directory(
+                &self.path,
+                &info.name,
+                info.permission.unwrap_or(UnixPermission::directory()).0,
+            ),
             DirectoryContentType::Symlink => Err(FSError::Readonly),
         }
     }

@@ -6,12 +6,7 @@ use alloc::{
 };
 use spin::Mutex;
 
-use crate::filesystem::{
-    errors::FSError,
-    path::Path,
-    sparse_file::SparseFileData,
-    vfs::FSResult,
-};
+use crate::filesystem::{errors::FSError, path::Path, sparse_file::SparseFileData, vfs::FSResult};
 
 const ROOT_INODE: u64 = 0x7000_0000;
 pub(crate) const DEFAULT_DIR_MODE: u32 = 0o755;
@@ -127,13 +122,13 @@ impl TmpfsState {
         )
     }
 
-    pub(crate) fn create_directory(&mut self, parent: &str, name: &str) -> FSResult<()> {
+    pub(crate) fn create_directory(&mut self, parent: &str, name: &str, mode: u32) -> FSResult<()> {
         self.create_node(
             parent,
             name,
             TmpNodeKind::Directory {
                 children: BTreeSet::new(),
-                mode: DEFAULT_DIR_MODE,
+                mode: mode & 0o7777,
             },
         )
     }

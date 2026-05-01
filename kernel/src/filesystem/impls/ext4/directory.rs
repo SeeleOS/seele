@@ -204,6 +204,7 @@ impl Directory for Ext4Directory {
     }
 
     fn create(&self, info: DirectoryContentInfo) -> FSResult<()> {
+        let requested_mode = info.permission.map(|permission| permission.0 & 0o7777);
         let (file_type, mode) = match info.content_type {
             DirectoryContentType::File => (
                 FileType::Regular,
@@ -215,14 +216,9 @@ impl Directory for Ext4Directory {
             ),
             DirectoryContentType::Directory => (
                 FileType::Directory,
-                InodeMode::S_IFDIR
-                    | InodeMode::S_IRUSR
-                    | InodeMode::S_IWUSR
-                    | InodeMode::S_IXUSR
-                    | InodeMode::S_IRGRP
-                    | InodeMode::S_IXGRP
-                    | InodeMode::S_IROTH
-                    | InodeMode::S_IXOTH,
+                InodeMode::from_bits_retain(
+                    InodeMode::S_IFDIR.bits() | requested_mode.unwrap_or(0o755) as u16,
+                ),
             ),
             _ => unimplemented!(),
         };

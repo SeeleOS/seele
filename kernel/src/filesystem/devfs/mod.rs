@@ -483,7 +483,11 @@ impl Directory for DevDirectoryHandle {
         let mut state = self.state.lock();
         match info.content_type {
             DirectoryContentType::File => state.create_file(&self.path, &info.name),
-            DirectoryContentType::Directory => state.create_directory(&self.path, &info.name),
+            DirectoryContentType::Directory => state.create_directory(
+                &self.path,
+                &info.name,
+                info.permission.unwrap_or(UnixPermission::directory()).0,
+            ),
             DirectoryContentType::Symlink => Err(FSError::Readonly),
         }
     }
@@ -523,7 +527,7 @@ impl DevFs {
             for path in static_root_paths() {
                 let name = path.trim_start_matches('/');
                 state_guard
-                    .create_directory("/", name)
+                    .create_directory("/", name, UnixPermission::directory().0)
                     .expect("devfs static directory seed should succeed");
             }
         }

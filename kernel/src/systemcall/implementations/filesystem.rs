@@ -993,11 +993,11 @@ define_syscall!(OpenAt, |dirfd: i32,
                 // Linux ignores O_TRUNC on device nodes such as /dev/null.
                 // Only regular writable files should be truncated here.
             } else {
-            match info.file_like_type {
-                FileLikeType::File => file_like.truncate(0)?,
-                FileLikeType::Directory => return Err(SyscallError::IsADirectory),
-                FileLikeType::Symlink => {}
-            }
+                match info.file_like_type {
+                    FileLikeType::File => file_like.truncate(0)?,
+                    FileLikeType::Directory => return Err(SyscallError::IsADirectory),
+                    FileLikeType::Symlink => {}
+                }
             }
         }
         let mut file_flags = FileFlags::empty();
@@ -1515,12 +1515,10 @@ define_syscall!(MkdirAt, |dirfd: i32, path: CString, mode: u32| {
     let path = path_from_raw(path)?;
     let path = resolve_path_at(dirfd, &path)?;
     let mode = mode & !S_IFMT;
-    let result = VirtualFS
+    VirtualFS
         .lock()
-        .create_dir(path.clone())
-        .map_err(SyscallError::from);
-    result?;
-    VirtualFS.lock().open(path)?.chmod(mode)?;
+        .create_dir_with_mode(path, Some(mode))
+        .map_err(SyscallError::from)?;
 
     Ok(0)
 });
@@ -1546,8 +1544,7 @@ define_syscall!(Mkdir, |path: CString, mode: u32| {
     let path = path_from_raw(path)?;
     let path = resolve_path_at(AT_FDCWD, &path)?;
     let mode = mode & !S_IFMT;
-    VirtualFS.lock().create_dir(path.clone())?;
-    VirtualFS.lock().open(path)?.chmod(mode)?;
+    VirtualFS.lock().create_dir_with_mode(path, Some(mode))?;
     Ok(0)
 });
 

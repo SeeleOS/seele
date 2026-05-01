@@ -39,12 +39,18 @@ impl VFS {
     }
 
     pub fn create_dir(&mut self, path: Path) -> FSResult<()> {
+        self.create_dir_with_mode(path, None)
+    }
+
+    pub fn create_dir_with_mode(&mut self, path: Path, mode: Option<u32>) -> FSResult<()> {
         let (parent_dir, name) = self.resolve_parent(path)?;
 
-        parent_dir.clone().lock().create(DirectoryContentInfo::new(
-            name,
-            DirectoryContentType::Directory,
-        ))
+        let mut info = DirectoryContentInfo::new(name, DirectoryContentType::Directory);
+        if let Some(mode) = mode {
+            info = info.with_permission(crate::filesystem::info::UnixPermission(mode & 0o7777));
+        }
+
+        parent_dir.clone().lock().create(info)
     }
 
     pub fn create_symlink(&mut self, path: Path, target: &str) -> FSResult<()> {
