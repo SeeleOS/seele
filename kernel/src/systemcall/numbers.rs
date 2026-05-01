@@ -26,6 +26,7 @@ pub enum SyscallNumber {
     Pipe = 22,
     SchedYield = 24,
     Mremap = 25,
+    Mincore = 27,
     Madvise = 28,
     Shmget = 29,
     Shmat = 30,

@@ -36,6 +36,7 @@ pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
         Pipe,
         SchedYield,
         Mremap,
+        Mincore,
         Madvise,
         Shmget,
         Shmat,

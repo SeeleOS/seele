@@ -7,6 +7,7 @@ use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
 use spin::Mutex;
 use x86_64::{VirtAddr, registers::model_specific::FsBase};
+use x86_64::structures::paging::{PageSize, Size4KiB};
 
 use crate::{
     define_syscall,
@@ -489,5 +490,39 @@ define_syscall!(Mprotect, |addr: VirtAddr, len: u64, prot: i32| {
         addr + pages * 4096,
         protection,
     );
+    Ok(0)
+});
+
+define_syscall!(Mincore, |addr: VirtAddr, len: usize, vec: *mut u8| {
+    if len == 0 {
+        return Ok(0);
+    }
+    if vec.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+    if !addr.is_aligned(Size4KiB::SIZE) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let page_count = len.div_ceil(Size4KiB::SIZE as usize);
+    let mut residency = Vec::with_capacity(page_count);
+
+    {
+        let current = get_current_process();
+        let mut current = current.lock();
+
+        for page_index in 0..page_count {
+            let page_addr = addr + (page_index * Size4KiB::SIZE as usize) as u64;
+            if current.addrspace.get_area(page_addr).is_none() {
+                return Err(SyscallError::NoMemory);
+            }
+
+            residency.push(u8::from(
+                current.addrspace.translate_addr(page_addr).is_some(),
+            ));
+        }
+    }
+
+    user_safe::write_buffer(vec, &residency)?;
     Ok(0)
 });
