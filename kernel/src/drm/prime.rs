@@ -2,6 +2,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 use bitflags::bitflags;
+use spin::Mutex;
 use x86_64::{
     PhysAddr, VirtAddr,
     structures::paging::{PhysFrame, Size4KiB},
@@ -10,7 +11,7 @@ use x86_64::{
 use crate::{
     filesystem::{
         info::{FileLikeInfo, LinuxStat, UnixPermission},
-        vfs_traits::FileLikeType,
+        vfs_traits::{FileLikeType, Whence},
     },
     impl_cast_function, impl_cast_function_non_trait,
     memory::{addrspace::mem_area::Data, protection::Protection, user_safe},
@@ -19,7 +20,7 @@ use crate::{
         error::ObjectError,
         misc::{ObjectRef, ObjectResult, get_object_current_process},
         open_state::OpenState,
-        traits::{MemoryMappable, Statable},
+        traits::{MemoryMappable, Seekable, Statable},
     },
     process::{FdFlags, manager::get_current_process, misc::with_current_process},
 };
@@ -46,6 +47,7 @@ pub struct DrmPrimeBufferObject {
     buffer: DumbBuffer,
     inode: u64,
     open_state: OpenState,
+    position: Mutex<usize>,
 }
 
 impl DrmPrimeBufferObject {
@@ -54,6 +56,7 @@ impl DrmPrimeBufferObject {
             buffer,
             inode: NEXT_PRIME_INODE.fetch_add(1, Ordering::Relaxed),
             open_state: OpenState::default(),
+            position: Mutex::new(0),
         }
     }
 
@@ -73,6 +76,7 @@ impl Object for DrmPrimeBufferObject {
     }
 
     impl_cast_function!("mappable", MemoryMappable);
+    impl_cast_function!("seekable", Seekable);
     impl_cast_function!("statable", Statable);
     impl_cast_function_non_trait!("drm_prime_buffer", DrmPrimeBufferObject);
 }
@@ -134,6 +138,34 @@ impl Statable for DrmPrimeBufferObject {
             )
             .with_inode(self.inode),
         )
+    }
+}
+
+impl Seekable for DrmPrimeBufferObject {
+    fn seek(self: Arc<Self>, offset: i64, seek_type: Whence) -> ObjectResult<usize> {
+        let len = i64::try_from(self.buffer.aligned_size()).map_err(|_| ObjectError::Other)?;
+        let mut position = self.position.lock();
+        let next = match seek_type {
+            Whence::Start => offset,
+            Whence::Current => (*position as i64)
+                .checked_add(offset)
+                .ok_or(ObjectError::Other)?,
+            Whence::End => len.checked_add(offset).ok_or(ObjectError::Other)?,
+            Whence::Data => {
+                if offset < 0 || offset >= len {
+                    return Err(ObjectError::InvalidArguments);
+                }
+                offset
+            }
+            Whence::Hole => {
+                if offset < 0 || offset > len {
+                    return Err(ObjectError::InvalidArguments);
+                }
+                len
+            }
+        };
+        *position = next.max(0) as usize;
+        Ok(*position)
     }
 }
 
