@@ -1,12 +1,8 @@
-use alloc::{collections::BTreeMap, format, string::{String, ToString}, vec::Vec};
-use lazy_static::lazy_static;
-use spin::Mutex;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{
     misc::time::Time,
-    process::ProcessExitStatus,
-    smp::try_current_process,
-    process::Process,
+    process::{Process, ProcessExitStatus},
 };
 
 #[derive(Clone, Copy)]
@@ -47,6 +43,10 @@ impl PerfBucket {
         Self::Ext4BlockRead,
     ];
 
+    fn index(self) -> usize {
+        self as usize
+    }
+
     fn label(self) -> &'static str {
         match self {
             Self::OpenAt => "openat",
@@ -66,43 +66,47 @@ impl PerfBucket {
             Self::Ext4BlockRead => "ext4_block_read",
         }
     }
+}
 
-    fn index(self) -> usize {
-        self as usize
+struct BucketPerfStat {
+    total_ns: AtomicU64,
+    count: AtomicU64,
+    slow_count: AtomicU64,
+}
+
+impl BucketPerfStat {
+    const fn new() -> Self {
+        Self {
+            total_ns: AtomicU64::new(0),
+            count: AtomicU64::new(0),
+            slow_count: AtomicU64::new(0),
+        }
     }
 }
 
-#[derive(Clone, Copy, Default)]
-struct BucketStat {
-    total_ns: u64,
-    count: u64,
-    slow_count: u64,
-}
+static BUCKET_STATS: [BucketPerfStat; PerfBucket::ALL.len()] = [
+    BucketPerfStat::new(),
+    BucketPerfStat::new(),
+    BucketPerfStat::new(),
+    BucketPerfStat::new(),
+    BucketPerfStat::new(),
+    BucketPerfStat::new(),
+    BucketPerfStat::new(),
+    BucketPerfStat::new(),
+    BucketPerfStat::new(),
+    BucketPerfStat::new(),
+    BucketPerfStat::new(),
+    BucketPerfStat::new(),
+    BucketPerfStat::new(),
+    BucketPerfStat::new(),
+    BucketPerfStat::new(),
+];
 
-#[derive(Default)]
-struct ProcessPerfState {
-    first_seen_ns: u64,
-    buckets: [BucketStat; PerfBucket::ALL.len()],
-    block_counts: BTreeMap<String, u64>,
-}
-
-lazy_static! {
-    static ref PROCESS_PERF: Mutex<BTreeMap<u64, ProcessPerfState>> = Mutex::new(BTreeMap::new());
-}
-
-const SLOW_BUCKET_THRESHOLD_NS: u64 = 5_000_000;
-const SUMMARY_BUCKET_THRESHOLD_NS: u64 = 1_000_000;
+const SLOW_BUCKET_THRESHOLD_NS: u64 = 20_000_000;
+const SUMMARY_BUCKET_THRESHOLD_NS: u64 = 5_000_000;
 
 fn now_ns() -> u64 {
     Time::since_boot().as_nanoseconds()
-}
-
-fn command_name(process: &Process) -> &str {
-    process
-        .command_line
-        .first()
-        .and_then(|command| command.rsplit('/').next())
-        .unwrap_or("?")
 }
 
 #[inline]
@@ -111,32 +115,14 @@ pub fn profile_current_process<R>(bucket: PerfBucket, func: impl FnOnce() -> R) 
     let result = func();
     let elapsed_ns = now_ns().saturating_sub(start_ns);
 
-    let Some(process) = try_current_process() else {
-        return result;
-    };
-    let process = process.lock();
-    let pid = process.pid.0;
-    let comm = command_name(&process).to_string();
-
-    {
-        let mut perf = PROCESS_PERF.lock();
-        let state = perf.entry(pid).or_insert_with(|| ProcessPerfState {
-            first_seen_ns: start_ns,
-            ..Default::default()
-        });
-        let stat = &mut state.buckets[bucket.index()];
-        stat.total_ns = stat.total_ns.saturating_add(elapsed_ns);
-        stat.count = stat.count.saturating_add(1);
-        if elapsed_ns >= SLOW_BUCKET_THRESHOLD_NS {
-            stat.slow_count = stat.slow_count.saturating_add(1);
-        }
-    }
+    let stat = &BUCKET_STATS[bucket.index()];
+    stat.total_ns.fetch_add(elapsed_ns, Ordering::Relaxed);
+    stat.count.fetch_add(1, Ordering::Relaxed);
 
     if elapsed_ns >= SLOW_BUCKET_THRESHOLD_NS {
+        stat.slow_count.fetch_add(1, Ordering::Relaxed);
         crate::s_println!(
-            "perf slow comm={} pid={} bucket={} elapsed={}ms",
-            comm,
-            pid,
+            "perf slow bucket={} elapsed={}ms",
             bucket.label(),
             elapsed_ns / 1_000_000
         );
@@ -146,67 +132,41 @@ pub fn profile_current_process<R>(bucket: PerfBucket, func: impl FnOnce() -> R) 
 }
 
 #[inline]
-pub fn log_current_block(kind: &str) {
-    let Some(process) = try_current_process() else {
-        return;
-    };
-    let process = process.lock();
-    let pid = process.pid.0;
-    let now_ns = now_ns();
-
-    let mut perf = PROCESS_PERF.lock();
-    let state = perf.entry(pid).or_insert_with(|| ProcessPerfState {
-        first_seen_ns: now_ns,
-        ..Default::default()
-    });
-    *state.block_counts.entry(kind.into()).or_default() += 1;
-}
+pub fn log_current_block(_kind: &str) {}
 
 #[inline]
 pub fn log_and_clear_process_summary(process: &Process, exit_status: ProcessExitStatus) {
-    let pid = process.pid.0;
-    let Some(state) = PROCESS_PERF.lock().remove(&pid) else {
-        return;
-    };
-
-    let lifetime_ms = now_ns()
-        .saturating_sub(state.first_seen_ns)
-        .saturating_div(1_000_000);
-    let mut parts = Vec::new();
+    let mut parts = alloc::vec::Vec::new();
     for bucket in PerfBucket::ALL {
-        let stat = state.buckets[bucket.index()];
-        if stat.total_ns < SUMMARY_BUCKET_THRESHOLD_NS {
+        let stat = &BUCKET_STATS[bucket.index()];
+        let total_ns = stat.total_ns.load(Ordering::Relaxed);
+        if total_ns < SUMMARY_BUCKET_THRESHOLD_NS {
             continue;
         }
-        parts.push(format!(
-            "{}={}ms/{}{}",
+
+        parts.push(alloc::format!(
+            "{}={}ms/{} slow={}",
             bucket.label(),
-            stat.total_ns / 1_000_000,
-            stat.count,
-            if stat.slow_count == 0 {
-                String::new()
-            } else {
-                format!(" slow={}", stat.slow_count)
-            }
+            total_ns / 1_000_000,
+            stat.count.load(Ordering::Relaxed),
+            stat.slow_count.load(Ordering::Relaxed)
         ));
     }
 
-    let mut block_parts = Vec::new();
-    for (kind, count) in state.block_counts {
-        block_parts.push(format!("{kind}={count}"));
-    }
-
-    if parts.is_empty() && block_parts.is_empty() {
+    if parts.is_empty() {
         return;
     }
 
+    let comm = process
+        .command_line
+        .first()
+        .and_then(|command| command.rsplit('/').next())
+        .unwrap_or("?");
     crate::s_println!(
-        "perf summary comm={} pid={} exit={:?} lifetime={}ms buckets=[{}] blocks=[{}]",
-        command_name(process),
-        pid,
+        "perf summary comm={} pid={} exit={:?} buckets=[{}]",
+        comm,
+        process.pid.0,
         exit_status,
-        lifetime_ms,
-        parts.join(", "),
-        block_parts.join(", ")
+        parts.join(", ")
     );
 }
