@@ -3,6 +3,7 @@ use crate::process::manager::MANAGER;
 use crate::process::misc::ProcessID;
 use crate::signal::action::{SignalHandlingType, Signals};
 use crate::systemcall::utils::*;
+use crate::thread::yielding::{BlockType, WakeType, block_current_with_sig_check};
 use crate::thread::misc::{SnapshotState, ThreadID};
 use crate::thread::scheduling::return_to_scheduler_no_save;
 use crate::thread::{THREAD_MANAGER, get_current_thread};
@@ -17,8 +18,8 @@ use crate::{
     process::misc::{get_process_with_pid, with_current_process},
     process::{FdFlags, manager::get_current_process},
     signal::{
-        SI_QUEUE, SI_TKILL, SigInfo, Signal, UContext, action::SignalAction,
-        send_signal_to_process, send_signal_to_process_with_siginfo,
+        PendingSignalInfo, SI_QUEUE, SI_TKILL, SigInfo, Signal, UContext,
+        action::SignalAction, send_signal_to_process, send_signal_to_process_with_siginfo,
         send_signal_to_thread_with_siginfo,
     },
 };
@@ -27,6 +28,7 @@ use bitflags::bitflags;
 use core::mem::size_of;
 use num_enum::TryFromPrimitive;
 use spin::Mutex;
+use strum::IntoEnumIterator;
 
 const SIG_DFL: usize = 0;
 const SIG_IGN: usize = 1;
@@ -76,6 +78,13 @@ struct LinuxSigAction {
     flags: u64,
     restorer: usize,
     mask: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxTimespec {
+    tv_sec: i64,
+    tv_nsec: i64,
 }
 
 fn encode_sigaction(action: &SignalAction) -> LinuxSigAction {
@@ -146,6 +155,55 @@ fn read_or_build_signal_info(
     }
 
     Ok(siginfo)
+}
+
+fn linux_timespec_to_ns(timespec: LinuxTimespec) -> Result<u64, SyscallError> {
+    if timespec.tv_sec < 0 || timespec.tv_nsec < 0 || timespec.tv_nsec >= 1_000_000_000 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    Ok((timespec.tv_sec as u64).saturating_mul(1_000_000_000) + timespec.tv_nsec as u64)
+}
+
+fn dequeue_wait_signal(wait_mask: Signals) -> Option<(Signal, SigInfo)> {
+    let thread_ref = get_current_thread();
+    let process_ref = thread_ref.lock().parent.clone();
+
+    {
+        let mut thread = thread_ref.lock();
+        for signal in Signal::iter() {
+            let signal_bits = Signals::from(signal);
+            if !wait_mask.contains(signal_bits) || !thread.pending_signals.contains(signal_bits) {
+                continue;
+            }
+
+            thread.pending_signals.remove(signal_bits);
+            let siginfo = thread.pending_signal_info[signal.index()]
+                .take()
+                .unwrap_or_else(|| PendingSignalInfo::for_signal(signal))
+                .to_siginfo();
+            return Some((signal, siginfo));
+        }
+    }
+
+    {
+        let mut process = process_ref.lock();
+        for signal in Signal::iter() {
+            let signal_bits = Signals::from(signal);
+            if !wait_mask.contains(signal_bits) || !process.pending_signals.contains(signal_bits) {
+                continue;
+            }
+
+            process.pending_signals.remove(signal_bits);
+            let siginfo = process.pending_signal_info[signal.index()]
+                .take()
+                .unwrap_or_else(|| PendingSignalInfo::for_signal(signal))
+                .to_siginfo();
+            return Some((signal, siginfo));
+        }
+    }
+
+    None
 }
 
 define_syscall!(
@@ -457,6 +515,74 @@ define_syscall!(
         }
 
         Ok(0)
+    }
+);
+
+define_syscall!(RtSigpending, |set: *mut u64, sigsetsize: usize| {
+    if sigsetsize != size_of::<u64>() {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if set.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let thread = get_current_thread();
+    let thread = thread.lock();
+    let process = thread.parent.lock();
+    let pending = (process.pending_signals | thread.pending_signals).bits();
+    user_safe::write(set, &pending)?;
+    Ok(0)
+});
+
+define_syscall!(
+    RtSigtimedwait,
+    |set: *const u64, info: *mut SigInfo, timeout: *const LinuxTimespec, sigsetsize: usize| {
+        if sigsetsize != size_of::<u64>() {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if set.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+
+        let wait_mask = Signals::from_bits_truncate(user_safe::read(set)?);
+        let deadline = if timeout.is_null() {
+            None
+        } else {
+            let timeout = user_safe::read(timeout)?;
+            Some(crate::misc::time::Time::since_boot().add_ns(linux_timespec_to_ns(timeout)?))
+        };
+
+        loop {
+            if let Some((signal, siginfo)) = dequeue_wait_signal(wait_mask) {
+                if !info.is_null() {
+                    user_safe::write(info, &siginfo)?;
+                }
+                return Ok(signal as usize);
+            }
+
+            if let Some(deadline) = deadline
+                && crate::misc::time::Time::since_boot() >= deadline
+            {
+                return Err(SyscallError::TryAgain);
+            }
+
+            let block_type = BlockType::WakeRequired {
+                wake_type: WakeType::IO,
+                deadline,
+            };
+            match block_current_with_sig_check(block_type) {
+                Ok(()) => {}
+                Err(_) => {
+                    if let Some((signal, siginfo)) = dequeue_wait_signal(wait_mask) {
+                        if !info.is_null() {
+                            user_safe::write(info, &siginfo)?;
+                        }
+                        return Ok(signal as usize);
+                    }
+                    return Err(SyscallError::Interrupted);
+                }
+            }
+        }
     }
 );
 
