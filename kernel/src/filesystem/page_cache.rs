@@ -94,7 +94,10 @@ fn load_page(file: &WrappedFile, page_offset: u64, file_size: u64) -> FSResult<C
     if target_len != 0 {
         let mut file = file.lock();
         while valid_len < target_len {
-            let read = file.read_at(&mut data[valid_len..target_len], page_offset + valid_len as u64)?;
+            let read = file.read_at(
+                &mut data[valid_len..target_len],
+                page_offset + valid_len as u64,
+            )?;
             if read == 0 {
                 break;
             }

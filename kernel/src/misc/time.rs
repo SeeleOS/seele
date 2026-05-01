@@ -4,8 +4,8 @@ use core::{
 };
 
 use crate::misc::get_cycles;
-use x86_rtc::Rtc;
 use x86_64::instructions::port::Port;
+use x86_rtc::Rtc;
 
 static BOOT_TSC: AtomicU64 = AtomicU64::new(0);
 static TSC_FREQ_HZ: AtomicU64 = AtomicU64::new(0);

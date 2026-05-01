@@ -1,10 +1,10 @@
-use alloc::{string::String, sync::Arc};
 use crate::filesystem::{
     info::{FileLikeInfo, UnixPermission},
     path::Path,
     vfs::FSResult,
     vfs_traits::{FileLikeType, Symlink},
 };
+use alloc::{string::String, sync::Arc};
 
 use super::connection::FuseConnection;
 

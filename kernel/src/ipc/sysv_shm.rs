@@ -120,7 +120,11 @@ fn allocate_segment_frames(pages: u64) -> Result<Arc<[PhysFrame<Size4KiB>]>, Sys
     for _ in 0..pages {
         let frame = allocator.allocate_frame().ok_or(SyscallError::NoMemory)?;
         unsafe {
-            core::ptr::write_bytes(apply_offset(frame.start_address().as_u64()) as *mut u8, 0, 4096);
+            core::ptr::write_bytes(
+                apply_offset(frame.start_address().as_u64()) as *mut u8,
+                0,
+                4096,
+            );
         }
         increase_ref(frame);
         frames.push(frame);
@@ -280,19 +284,17 @@ pub fn shmget(process: &Process, key: i32, size: usize, shmflg: i32) -> SyscallR
     Ok(shmid as usize)
 }
 
-pub fn shmat(
-    process: &mut Process,
-    shmid: i32,
-    shmaddr: *const u8,
-    shmflg: i32,
-) -> SyscallResult {
+pub fn shmat(process: &mut Process, shmid: i32, shmaddr: *const u8, shmflg: i32) -> SyscallResult {
     if shmflg & !(SHM_RDONLY | SHM_RND) != 0 {
         return Err(SyscallError::InvalidArguments);
     }
 
     let (frames, len) = {
         let state = SYSV_SHM_STATE.lock();
-        let segment = state.segments.get(&shmid).ok_or(SyscallError::InvalidArguments)?;
+        let segment = state
+            .segments
+            .get(&shmid)
+            .ok_or(SyscallError::InvalidArguments)?;
         let readonly = shmflg & SHM_RDONLY != 0;
         if !segment_allows_access(segment, process, readonly) {
             return Err(SyscallError::PermissionDenied);
@@ -331,7 +333,10 @@ pub fn shmat(
     });
 
     let mut state = SYSV_SHM_STATE.lock();
-    let segment = state.segments.get_mut(&shmid).ok_or(SyscallError::InvalidArguments)?;
+    let segment = state
+        .segments
+        .get_mut(&shmid)
+        .ok_or(SyscallError::InvalidArguments)?;
     segment.attach_count = segment.attach_count.saturating_add(1);
     segment.last_pid = process.pid.0 as i32;
     segment.atime = now_seconds();
@@ -354,16 +359,14 @@ pub fn shmdt(process: &mut Process, shmaddr: *const u8) -> SyscallResult {
     Ok(0)
 }
 
-pub fn shmctl(
-    process: &Process,
-    shmid: i32,
-    cmd: i32,
-    buf: *mut LinuxShmidDs,
-) -> SyscallResult {
+pub fn shmctl(process: &Process, shmid: i32, cmd: i32, buf: *mut LinuxShmidDs) -> SyscallResult {
     let mut state = SYSV_SHM_STATE.lock();
     match cmd {
         IPC_RMID => {
-            let segment = state.segments.get_mut(&shmid).ok_or(SyscallError::InvalidArguments)?;
+            let segment = state
+                .segments
+                .get_mut(&shmid)
+                .ok_or(SyscallError::InvalidArguments)?;
             if process.effective_uid != 0
                 && process.effective_uid != segment.owner_uid
                 && process.effective_uid != segment.creator_uid
@@ -381,7 +384,10 @@ pub fn shmctl(
             if buf.is_null() {
                 return Err(SyscallError::BadAddress);
             }
-            let segment = state.segments.get(&shmid).ok_or(SyscallError::InvalidArguments)?;
+            let segment = state
+                .segments
+                .get(&shmid)
+                .ok_or(SyscallError::InvalidArguments)?;
             let ds = LinuxShmidDs {
                 shm_perm: LinuxIpcPerm {
                     __ipc_perm_key: segment.key,

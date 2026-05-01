@@ -219,7 +219,8 @@ fn timespec_to_ns(timeout: LinuxTimespec) -> u64 {
 }
 
 fn futex_relative_timeout_deadline(timeout: u64) -> Result<Option<Time>, SyscallError> {
-    Ok(futex_timeout_timespec(timeout)?.map(|timeout| Time::since_boot().add_ns(timespec_to_ns(timeout))))
+    Ok(futex_timeout_timespec(timeout)?
+        .map(|timeout| Time::since_boot().add_ns(timespec_to_ns(timeout))))
 }
 
 fn futex_absolute_timeout_deadline(
@@ -284,14 +285,13 @@ fn futex_wake_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
 }
 
 fn futex_wake_op_apply(old_value: u32, encoded: u32) -> Result<(u32, bool), SyscallError> {
-    let op = FutexWakeOp::try_from((encoded >> 28) & 0xf).map_err(|_| SyscallError::InvalidArguments)?;
-    let cmp =
-        FutexWakeCmp::try_from((encoded >> 24) & 0xf).map_err(|_| SyscallError::InvalidArguments)?;
+    let op =
+        FutexWakeOp::try_from((encoded >> 28) & 0xf).map_err(|_| SyscallError::InvalidArguments)?;
+    let cmp = FutexWakeCmp::try_from((encoded >> 24) & 0xf)
+        .map_err(|_| SyscallError::InvalidArguments)?;
     let mut op_arg = (encoded >> 12) & 0xfff;
     let cmp_arg = encoded & 0xfff;
-    if matches!(op, FutexWakeOp::Set)
-        && (op_arg & FUTEX_OP_OPARG_SHIFT) != 0
-    {
+    if matches!(op, FutexWakeOp::Set) && (op_arg & FUTEX_OP_OPARG_SHIFT) != 0 {
         return Err(SyscallError::InvalidArguments);
     }
     if (op_arg & FUTEX_OP_OPARG_SHIFT) != 0 {

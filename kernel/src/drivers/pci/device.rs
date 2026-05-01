@@ -2,7 +2,9 @@ use alloc::vec::Vec;
 use conquer_once::spin::OnceCell;
 use pci_types::PciAddress;
 
-use virtio_drivers::transport::pci::bus::{DeviceFunction, DeviceFunctionInfo, HeaderType, PciRoot};
+use virtio_drivers::transport::pci::bus::{
+    DeviceFunction, DeviceFunctionInfo, HeaderType, PciRoot,
+};
 
 use crate::drivers::pci::access::PciConfigPorts;
 

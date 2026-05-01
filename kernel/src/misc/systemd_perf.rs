@@ -1,6 +1,4 @@
-use crate::{
-    process::{Process, ProcessExitStatus},
-};
+use crate::process::{Process, ProcessExitStatus};
 
 #[derive(Clone, Copy)]
 pub enum PerfBucket {

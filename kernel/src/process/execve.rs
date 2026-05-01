@@ -5,9 +5,10 @@ use crate::{
     ipc::sysv_shm::detach_all_process_mappings,
     memory::addrspace::AddrSpace,
     process::{
-        Process, new_fd_table,
+        Process,
         manager::{MANAGER, wake_vfork_blocker},
         new::setup_process,
+        new_fd_table,
         object::close_cloexec_fd_entries,
         ptrace::maybe_stop_current_after_exec,
     },
@@ -54,8 +55,13 @@ impl Process {
         let mut next_addrspace = AddrSpace::default();
         let mut next_fd_table = self.fd_table.lock().clone();
         close_cloexec_fd_entries(&mut next_fd_table);
-        let next_snapshot =
-            setup_process(path.clone(), args, env, &mut next_addrspace, &mut next_fd_table)?;
+        let next_snapshot = setup_process(
+            path.clone(),
+            args,
+            env,
+            &mut next_addrspace,
+            &mut next_fd_table,
+        )?;
 
         // TODO: kill all the other threads when execveing
         {

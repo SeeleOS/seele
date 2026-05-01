@@ -103,7 +103,9 @@ impl File for FuseFile {
     }
 
     fn chmod(&self, mode: u32) -> FSResult<()> {
-        let _ = self.connection.setattr_mode(self.nodeid, Some(mode), None, None)?;
+        let _ = self
+            .connection
+            .setattr_mode(self.nodeid, Some(mode), None, None)?;
         Ok(())
     }
 }

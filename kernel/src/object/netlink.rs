@@ -11,8 +11,9 @@ use spin::Mutex;
 
 use crate::{
     filesystem::info::LinuxStat,
-    impl_cast_function, impl_cast_function_non_trait, net,
+    impl_cast_function, impl_cast_function_non_trait,
     memory::user_safe,
+    net,
     object::{
         FileFlags, Object,
         config::ConfigurateRequest,

@@ -12,27 +12,25 @@ use crate::{
         info::DirectoryContentInfo,
         vfs_traits::{DirectoryContentType, FileLikeType},
     },
-    object::{
-        FileFlags,
-        error::ObjectError,
-        queue_helpers::read_or_block_with_flags,
-    },
+    object::{FileFlags, error::ObjectError, queue_helpers::read_or_block_with_flags},
     process::manager::get_current_process,
     thread::{
-        get_current_thread, THREAD_MANAGER,
-        yielding::{BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current},
+        THREAD_MANAGER, get_current_thread,
+        yielding::{
+            BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
+        },
     },
 };
 
 use super::protocol::{
-    as_bytes, dirent_record_len, read_pod, FuseAttr, FuseAttrOut, FuseDirentHeader,
-    FuseEntryOut, FuseGetattrIn, FuseInHeader, FuseInitIn, FuseInitOut, FuseOpenIn, FuseOpenOut,
-    FuseOutHeader, FuseReadIn, FuseReleaseIn, FuseSetattrIn, FuseWriteIn, FuseWriteOut,
-    RequestContext, FATTR_GID, FATTR_MODE, FATTR_SIZE, FATTR_UID, FUSE_ASYNC_READ,
-    FUSE_ATOMIC_O_TRUNC, FUSE_BIG_WRITES, FUSE_GETATTR, FUSE_INIT, FUSE_KERNEL_MINOR_VERSION,
-    FUSE_KERNEL_VERSION, FUSE_LOOKUP, FUSE_MIN_READ_BUFFER, FUSE_OPEN, FUSE_OPENDIR,
-    FUSE_PARALLEL_DIROPS, FUSE_READ, FUSE_READDIR, FUSE_READLINK, FUSE_RELEASE,
-    FUSE_RELEASEDIR, FUSE_ROOT_ID, FUSE_SETATTR, FUSE_WRITE,
+    FATTR_GID, FATTR_MODE, FATTR_SIZE, FATTR_UID, FUSE_ASYNC_READ, FUSE_ATOMIC_O_TRUNC,
+    FUSE_BIG_WRITES, FUSE_GETATTR, FUSE_INIT, FUSE_KERNEL_MINOR_VERSION, FUSE_KERNEL_VERSION,
+    FUSE_LOOKUP, FUSE_MIN_READ_BUFFER, FUSE_OPEN, FUSE_OPENDIR, FUSE_PARALLEL_DIROPS, FUSE_READ,
+    FUSE_READDIR, FUSE_READLINK, FUSE_RELEASE, FUSE_RELEASEDIR, FUSE_ROOT_ID, FUSE_SETATTR,
+    FUSE_WRITE, FuseAttr, FuseAttrOut, FuseDirentHeader, FuseEntryOut, FuseGetattrIn, FuseInHeader,
+    FuseInitIn, FuseInitOut, FuseOpenIn, FuseOpenOut, FuseOutHeader, FuseReadIn, FuseReleaseIn,
+    FuseSetattrIn, FuseWriteIn, FuseWriteOut, RequestContext, as_bytes, dirent_record_len,
+    read_pod,
 };
 
 const READDIR_CHUNK: u32 = 64 * 1024;
@@ -108,7 +106,8 @@ impl FuseConnection {
         let mut consumed = 0usize;
         while consumed < buffer.len() {
             let remaining = &buffer[consumed..];
-            let header = read_pod::<FuseOutHeader>(remaining).ok_or(ObjectError::InvalidArguments)?;
+            let header =
+                read_pod::<FuseOutHeader>(remaining).ok_or(ObjectError::InvalidArguments)?;
             let total_len = header.len as usize;
             if total_len < core::mem::size_of::<FuseOutHeader>() || total_len > remaining.len() {
                 return Err(ObjectError::InvalidArguments);
@@ -242,8 +241,8 @@ impl FuseConnection {
                     return Err(FSError::Other);
                 }
 
-                let name =
-                    String::from_utf8(response[name_start..name_end].to_vec()).map_err(|_| FSError::Other)?;
+                let name = String::from_utf8(response[name_start..name_end].to_vec())
+                    .map_err(|_| FSError::Other)?;
                 entries.push(FuseDirEntry {
                     info: DirectoryContentInfo::new(name, dirent_type(header.type_))
                         .with_inode(header.ino),
@@ -262,12 +261,7 @@ impl FuseConnection {
         self.open_with_flags(nodeid, FUSE_OPEN, flags)
     }
 
-    pub fn read_file(
-        &self,
-        nodeid: u64,
-        offset: u64,
-        size: u32,
-    ) -> Result<Vec<u8>, FSError> {
+    pub fn read_file(&self, nodeid: u64, offset: u64, size: u32) -> Result<Vec<u8>, FSError> {
         let handle = self.open_file(nodeid, 0)?;
         let input = FuseReadIn {
             fh: handle.fh,
@@ -280,12 +274,7 @@ impl FuseConnection {
         Ok(response)
     }
 
-    pub fn write_file(
-        &self,
-        nodeid: u64,
-        offset: u64,
-        buffer: &[u8],
-    ) -> Result<usize, FSError> {
+    pub fn write_file(&self, nodeid: u64, offset: u64, buffer: &[u8]) -> Result<usize, FSError> {
         let handle = self.open_file(nodeid, 1)?;
         let mut payload = as_bytes(&FuseWriteIn {
             fh: handle.fh,
@@ -296,7 +285,9 @@ impl FuseConnection {
         .to_vec();
         payload.extend_from_slice(buffer);
         let response = self.request(FUSE_WRITE, nodeid, payload)?;
-        let written = read_pod::<FuseWriteOut>(&response).ok_or(FSError::Other)?.size as usize;
+        let written = read_pod::<FuseWriteOut>(&response)
+            .ok_or(FSError::Other)?
+            .size as usize;
         let _ = self.release(nodeid, handle, FUSE_RELEASE);
         Ok(written)
     }
@@ -308,7 +299,9 @@ impl FuseConnection {
             ..Default::default()
         };
         let response = self.request(FUSE_SETATTR, nodeid, as_bytes(&input).to_vec())?;
-        Ok(read_pod::<FuseAttrOut>(&response).ok_or(FSError::Other)?.attr)
+        Ok(read_pod::<FuseAttrOut>(&response)
+            .ok_or(FSError::Other)?
+            .attr)
     }
 
     pub fn setattr_mode(
@@ -334,7 +327,9 @@ impl FuseConnection {
         }
         input.valid = valid;
         let response = self.request(FUSE_SETATTR, nodeid, as_bytes(&input).to_vec())?;
-        Ok(read_pod::<FuseAttrOut>(&response).ok_or(FSError::Other)?.attr)
+        Ok(read_pod::<FuseAttrOut>(&response)
+            .ok_or(FSError::Other)?
+            .attr)
     }
 
     pub fn root_id(&self) -> u64 {
@@ -363,12 +358,7 @@ impl FuseConnection {
         })
     }
 
-    fn release(
-        &self,
-        nodeid: u64,
-        handle: FuseOpenedHandle,
-        opcode: u32,
-    ) -> Result<(), FSError> {
+    fn release(&self, nodeid: u64, handle: FuseOpenedHandle, opcode: u32) -> Result<(), FSError> {
         let input = FuseReleaseIn {
             fh: handle.fh,
             ..Default::default()

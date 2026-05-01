@@ -12,9 +12,10 @@ use crate::{
     memory::addrspace::AddrSpace,
     object::tty_device::get_default_tty,
     process::{
-        FdEntry, Process, ProcessRef, new_fd_table,
+        FdEntry, Process, ProcessRef,
         group::{ProcessGroupID, SessionID},
         misc::{ProcessID, init_stack_layout, user_stack_pages_for_exec},
+        new_fd_table,
         object::init_objects,
     },
     thread::{
@@ -93,7 +94,11 @@ impl Process {
         let context = setup_process(
             Path::new(INIT_PATH),
             Vec::new(),
-            alloc::vec![DEFAULT_PATH.into(), DEFAULT_TERM.into(), DEFAULT_HOME.into()],
+            alloc::vec![
+                DEFAULT_PATH.into(),
+                DEFAULT_TERM.into(),
+                DEFAULT_HOME.into()
+            ],
             &mut process.addrspace,
             &mut fd_table,
         )

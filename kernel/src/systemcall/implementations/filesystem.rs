@@ -302,14 +302,12 @@ fn resolve_path_at(dirfd: i32, path_str: &str) -> Result<Path, SyscallError> {
         let fs_context = process.lock().fs_context.lock().clone();
 
         if path.is_absolute() {
-            return Ok(
-                AbsolutePath::join_under_root(
-                    &fs_context.root_directory,
-                    &fs_context.current_directory,
-                    &path,
-                )
-                .as_normal(),
-            );
+            return Ok(AbsolutePath::join_under_root(
+                &fs_context.root_directory,
+                &fs_context.current_directory,
+                &path,
+            )
+            .as_normal());
         }
 
         if dirfd == AT_FDCWD {
@@ -1048,7 +1046,8 @@ define_syscall!(Access, |path: CString, mode: i32| {
 define_syscall!(Chdir, |dir: String| {
     let process = get_current_process();
     let fs_context = process.lock().fs_context.lock().clone();
-    let path = Path::new(&dir).as_absolute_from(&fs_context.root_directory, &fs_context.current_directory);
+    let path =
+        Path::new(&dir).as_absolute_from(&fs_context.root_directory, &fs_context.current_directory);
     get_current_process().lock().change_directory(path)?;
     Ok(0)
 });
@@ -1060,9 +1059,7 @@ define_syscall!(Fchdir, |fd: u64| {
         return Err(SyscallError::NotADirectory);
     }
     let path = AbsolutePath::from_root_path(&file_like.path());
-    get_current_process()
-        .lock()
-        .change_directory(path)?;
+    get_current_process().lock().change_directory(path)?;
     Ok(0)
 });
 
@@ -1571,7 +1568,8 @@ define_syscall!(Mount, |source: CString,
                         data: CString| {
     let source = string_from_raw_optional(source)?.filter(|value| !value.is_empty());
     let target = path_from_raw(target)?;
-    let filesystemtype = string_from_raw_optional(filesystemtype)?.filter(|value| !value.is_empty());
+    let filesystemtype =
+        string_from_raw_optional(filesystemtype)?.filter(|value| !value.is_empty());
     let data = string_from_raw_optional(data)?.filter(|value| !value.is_empty());
     let target_object = VirtualFS.lock().open(Path::new(&target))?;
     let target_path = target_object.path();

@@ -48,13 +48,7 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     log_syscall_trace_enter(syscall_no, args);
 
     let result = syscall_handler_unwrapped(
-        syscall_no,
-        args[0],
-        args[1],
-        args[2],
-        args[3],
-        args[4],
-        args[5],
+        syscall_no, args[0], args[1], args[2], args[3], args[4], args[5],
     );
     if result < 0 {
         log_unsupported_syscall_result(syscall_no, args, SyscallError::from(result));

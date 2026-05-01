@@ -53,13 +53,13 @@ impl FileSystem for FuseFs {
     fn lookup(&self, path: &Path) -> FSResult<FileLike> {
         let (nodeid, kind) = self.resolve_path(path)?;
         Ok(match kind {
-            FileLikeType::Directory => FileLike::Directory(Arc::new(Mutex::new(FuseDirectory::new(
+            FileLikeType::Directory => FileLike::Directory(Arc::new(Mutex::new(
+                FuseDirectory::new(self.connection.clone(), nodeid),
+            ))),
+            FileLikeType::File => FileLike::File(Arc::new(Mutex::new(FuseFile::new(
                 self.connection.clone(),
                 nodeid,
             )))),
-            FileLikeType::File => {
-                FileLike::File(Arc::new(Mutex::new(FuseFile::new(self.connection.clone(), nodeid))))
-            }
             FileLikeType::Symlink => FileLike::Symlink(Arc::new(Mutex::new(FuseSymlink::new(
                 self.connection.clone(),
                 nodeid,

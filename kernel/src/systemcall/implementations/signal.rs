@@ -3,9 +3,9 @@ use crate::process::manager::MANAGER;
 use crate::process::misc::ProcessID;
 use crate::signal::action::{SignalHandlingType, Signals};
 use crate::systemcall::utils::*;
-use crate::thread::yielding::{BlockType, WakeType, block_current_with_sig_check};
 use crate::thread::misc::{SnapshotState, ThreadID};
 use crate::thread::scheduling::return_to_scheduler_no_save;
+use crate::thread::yielding::{BlockType, WakeType, block_current_with_sig_check};
 use crate::thread::{THREAD_MANAGER, get_current_thread};
 use crate::{
     define_syscall,
@@ -18,8 +18,8 @@ use crate::{
     process::misc::{get_process_with_pid, with_current_process},
     process::{FdFlags, manager::get_current_process},
     signal::{
-        PendingSignalInfo, SI_QUEUE, SI_TKILL, SigInfo, Signal, UContext,
-        action::SignalAction, send_signal_to_process, send_signal_to_process_with_siginfo,
+        PendingSignalInfo, SI_QUEUE, SI_TKILL, SigInfo, Signal, UContext, action::SignalAction,
+        send_signal_to_process, send_signal_to_process_with_siginfo,
         send_signal_to_thread_with_siginfo,
     },
 };

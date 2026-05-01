@@ -49,7 +49,8 @@ impl OutputFilter {
                     }
                 }
                 if !terminated {
-                    self.pending_escape_buffer.push_str(&input[sequence_start..]);
+                    self.pending_escape_buffer
+                        .push_str(&input[sequence_start..]);
                     break;
                 }
                 continue;
@@ -92,10 +93,12 @@ fn parse_xtgettcap(bytes: &[u8], start: usize) -> XtgettcapParse {
         if bytes[end] == 0x1b && bytes[end + 1] == b'\\' {
             let payload = match core::str::from_utf8(&bytes[start + 4..end]) {
                 Ok(payload) => payload,
-                Err(_) => return XtgettcapParse::Complete {
-                    next_index: end + 2,
-                    response: String::from("\x1bP0+r\x1b\\"),
-                },
+                Err(_) => {
+                    return XtgettcapParse::Complete {
+                        next_index: end + 2,
+                        response: String::from("\x1bP0+r\x1b\\"),
+                    };
+                }
             };
 
             return XtgettcapParse::Complete {

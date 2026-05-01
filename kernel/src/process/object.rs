@@ -98,9 +98,7 @@ impl Process {
 
     pub fn clear_fd_slot(&mut self, slot: usize) -> ObjectResult<()> {
         let mut fd_table = self.fd_table.lock();
-        let entry = fd_table
-            .get_mut(slot)
-            .ok_or(ObjectError::DoesNotExist)?;
+        let entry = fd_table.get_mut(slot).ok_or(ObjectError::DoesNotExist)?;
         let Some(old_entry) = entry.take() else {
             return Err(ObjectError::DoesNotExist);
         };

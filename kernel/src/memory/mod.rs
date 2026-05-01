@@ -35,7 +35,9 @@ pub fn init(physical_memory_offset: u64, memory_regions: &'static [&'static Entr
 
     let runtime_cursor = {
         heap_backing_allocator
-            .clone_after_reserving(HEAP_BACKING_RESERVE_SIZE.saturating_sub(heap::INITIAL_HEAP_SIZE))
+            .clone_after_reserving(
+                HEAP_BACKING_RESERVE_SIZE.saturating_sub(heap::INITIAL_HEAP_SIZE),
+            )
             .expect("Failed to reserve heap backing frames")
     };
     let frame_allocator = BootinfoFrameAllocator::new(memory_regions, &runtime_cursor);
