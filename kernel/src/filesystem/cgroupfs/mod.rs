@@ -664,6 +664,30 @@ impl File for CgroupFileHandle {
         Ok(written)
     }
 
+    fn truncate(&mut self, _length: u64) -> FSResult<()> {
+        match self.kind {
+            CgroupFileKind::Controllers
+            | CgroupFileKind::Events
+            | CgroupFileKind::Type
+            | CgroupFileKind::CpuStat
+            | CgroupFileKind::MemoryCurrent => Err(FSError::Readonly),
+            CgroupFileKind::Procs
+            | CgroupFileKind::Threads
+            | CgroupFileKind::SubtreeControl
+            | CgroupFileKind::Kill
+            | CgroupFileKind::Freeze
+            | CgroupFileKind::CpuMax
+            | CgroupFileKind::MemoryMin
+            | CgroupFileKind::MemoryLow
+            | CgroupFileKind::MemoryHigh
+            | CgroupFileKind::MemoryMax
+            | CgroupFileKind::MemorySwapMax
+            | CgroupFileKind::MemoryOomGroup
+            | CgroupFileKind::MemoryReclaim
+            | CgroupFileKind::PidsMax => Ok(()),
+        }
+    }
+
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {
         let len = file_contents(&CGROUP_STATE.lock(), &self.path, self.kind)?.len() as i64;
         let next = match seek_type {
