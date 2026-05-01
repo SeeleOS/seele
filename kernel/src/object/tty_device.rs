@@ -257,6 +257,15 @@ impl Pollable for TtyDevice {
 }
 
 impl Object for TtyDevice {
+    fn get_flags(self: Arc<Self>) -> super::ObjectResult<FileFlags> {
+        Ok(*self.flags.lock())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> super::ObjectResult<()> {
+        *self.flags.lock() = flags;
+        Ok(())
+    }
+
     impl_cast_function!("writable", Writable);
     impl_cast_function!("readable", Readable);
     impl_cast_function!("configuratable", Configuratable);
