@@ -1466,14 +1466,16 @@ define_syscall!(SymlinkAt, |target: CString,
     Ok(0)
 });
 
-define_syscall!(MkdirAt, |dirfd: i32, path: CString, _mode: u32| {
+define_syscall!(MkdirAt, |dirfd: i32, path: CString, mode: u32| {
     let path = path_from_raw(path)?;
     let path = resolve_path_at(dirfd, &path)?;
+    let mode = mode & !S_IFMT;
     let result = VirtualFS
         .lock()
         .create_dir(path.clone())
         .map_err(SyscallError::from);
     result?;
+    VirtualFS.lock().open(path)?.chmod(mode)?;
 
     Ok(0)
 });
@@ -1496,10 +1498,11 @@ define_syscall!(Mknodat, |dirfd: i32,
 });
 
 define_syscall!(Mkdir, |path: CString, mode: u32| {
-    let _ = mode;
     let path = path_from_raw(path)?;
     let path = resolve_path_at(AT_FDCWD, &path)?;
-    VirtualFS.lock().create_dir(path)?;
+    let mode = mode & !S_IFMT;
+    VirtualFS.lock().create_dir(path.clone())?;
+    VirtualFS.lock().open(path)?.chmod(mode)?;
     Ok(0)
 });
 
