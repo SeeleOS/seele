@@ -580,6 +580,67 @@ struct LinuxSchedParam {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
 #[repr(i32)]
+pub enum LinuxIoprioWho {
+    Process = 1,
+    Pgrp = 2,
+    User = 3,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
+#[repr(u16)]
+enum LinuxIoprioClass {
+    None = 0,
+    Realtime = 1,
+    BestEffort = 2,
+    Idle = 3,
+}
+
+const LINUX_IOPRIO_CLASS_SHIFT: u16 = 13;
+const LINUX_IOPRIO_PRIO_MASK: u16 = (1 << LINUX_IOPRIO_CLASS_SHIFT) - 1;
+const LINUX_IOPRIO_LEVEL_MAX: u16 = 7;
+
+fn decode_linux_ioprio(ioprio: i32) -> Result<(LinuxIoprioClass, u16), SyscallError> {
+    let raw = u16::try_from(ioprio).map_err(|_| SyscallError::InvalidArguments)?;
+    let class = LinuxIoprioClass::try_from(raw >> LINUX_IOPRIO_CLASS_SHIFT)
+        .map_err(|_| SyscallError::InvalidArguments)?;
+    let level = raw & LINUX_IOPRIO_PRIO_MASK;
+    if level > LINUX_IOPRIO_LEVEL_MAX {
+        return Err(SyscallError::InvalidArguments);
+    }
+    Ok((class, level))
+}
+
+fn validate_linux_ioprio_target(which: LinuxIoprioWho, who: i32) -> Result<(), SyscallError> {
+    if who < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    match which {
+        LinuxIoprioWho::Process => {
+            if who == 0 {
+                return Ok(());
+            }
+            let current = get_current_process().lock().pid.0 as i32;
+            if who != current {
+                return Err(SyscallError::PermissionDenied);
+            }
+            Ok(())
+        }
+        LinuxIoprioWho::Pgrp | LinuxIoprioWho::User => {
+            if who == 0 {
+                Ok(())
+            } else {
+                Err(SyscallError::PermissionDenied)
+            }
+        }
+    }
+}
+
+fn default_linux_ioprio() -> usize {
+    ((LinuxIoprioClass::BestEffort as u16) << LINUX_IOPRIO_CLASS_SHIFT) as usize
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
+#[repr(i32)]
 pub enum LinuxSchedPolicy {
     Other = 0,
     Fifo = 1,
@@ -1456,7 +1517,11 @@ define_syscall!(PidfdOpen, |pid: i32, flags: u32| {
         .push_object_with_flags(pidfd, FdFlags::CLOEXEC))
 });
 
-define_syscall!(Kcmp, |pid1: i32, pid2: i32, kind: u32, idx1: usize, idx2: usize| {
+define_syscall!(Kcmp, |pid1: i32,
+                       pid2: i32,
+                       kind: u32,
+                       idx1: usize,
+                       idx2: usize| {
     if pid1 <= 0 || pid2 <= 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -1491,6 +1556,20 @@ define_syscall!(Madvise, |_addr: u64, _len: usize, _advice: i32| { Ok(0) });
 define_syscall!(Getpriority, |_which: i32, _who: i32| { Ok(0) });
 
 define_syscall!(Setpriority, |_which: i32, _who: i32, _prio: i32| { Ok(0) });
+
+define_syscall!(IoprioSet, |which: LinuxIoprioWho, who: i32, ioprio: i32| {
+    let (class, _level) = decode_linux_ioprio(ioprio)?;
+    validate_linux_ioprio_target(which, who)?;
+    if matches!(class, LinuxIoprioClass::None) {
+        return Ok(0);
+    }
+    Ok(0)
+});
+
+define_syscall!(IoprioGet, |which: LinuxIoprioWho, who: i32| {
+    validate_linux_ioprio_target(which, who)?;
+    Ok(default_linux_ioprio())
+});
 
 define_syscall!(SchedSetparam, |pid: i32, param: *const LinuxSchedParam| {
     if pid < 0 {
@@ -1822,7 +1901,8 @@ define_syscall!(SchedRrGetInterval, |pid: i32, tp: *mut LinuxTimespec| {
 });
 
 define_syscall!(Setrlimit, |resource: i32, rlimit: u64| {
-    let resource = RlimitResource::try_from(resource as u32).map_err(|_| SyscallError::InvalidArguments)?;
+    let resource =
+        RlimitResource::try_from(resource as u32).map_err(|_| SyscallError::InvalidArguments)?;
     let limit = user_safe::read(rlimit as *const LinuxRlimit64)?;
     match resource {
         RlimitResource::Stack => {
@@ -2081,7 +2161,11 @@ define_syscall!(Keyctl, |cmd: u64,
         Ok(KeyctlCommand::SessionToParent) => {
             let current_keyring = current_session_keyring(true)?;
             let current = get_current_process();
-            let parent = current.lock().parent.clone().ok_or(SyscallError::NoProcess)?;
+            let parent = current
+                .lock()
+                .parent
+                .clone()
+                .ok_or(SyscallError::NoProcess)?;
             parent.lock().session_keyring = current_keyring;
             ensure_keyring_entry(current_keyring);
             Ok(0)
@@ -2124,7 +2208,11 @@ fn current_thread_name() -> [u8; 16] {
 
     let process = get_current_process();
     let process = process.lock();
-    let command = process.command_line.first().map(String::as_str).unwrap_or("main");
+    let command = process
+        .command_line
+        .first()
+        .map(String::as_str)
+        .unwrap_or("main");
     let basename = command.rsplit('/').next().unwrap_or(command);
     let mut name = [0u8; 16];
     let bytes = basename.as_bytes();

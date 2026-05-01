@@ -24,9 +24,9 @@ use crate::{
     signal::{Signal, Signals},
     systemcall::implementations::{
         AtFlags, ClockNanosleepFlags, EpollCreateFlags, FallocateFlags, FsMountFlags, FsOpenFlags,
-        GetRandomFlags, InotifyInitFlags, LinuxSchedPolicy, MmapFlags, MoveMountFlags, MremapFlags,
-        OpenFlags, OpenTreeFlags, PipeFlags, PollEvents, RseqFlags, SetnsFlags, TimerFdFlags,
-        TimerSetTimeFlags, UmountFlags, XattrFlags,
+        GetRandomFlags, InotifyInitFlags, LinuxIoprioWho, LinuxSchedPolicy, MmapFlags,
+        MoveMountFlags, MremapFlags, OpenFlags, OpenTreeFlags, PipeFlags, PollEvents, RseqFlags,
+        SetnsFlags, TimerFdFlags, TimerSetTimeFlags, UmountFlags, XattrFlags,
     },
     systemcall::utils::{SyscallError, SyscallResult, invalid_syscall_flag_error},
 };
@@ -137,6 +137,10 @@ add_syscall_arg_type!(ClockId, val, {
 
 add_syscall_arg_type!(LinuxSchedPolicy, val, {
     LinuxSchedPolicy::try_from(val as i32).map_err(|_| SyscallError::InvalidArguments)
+});
+
+add_syscall_arg_type!(LinuxIoprioWho, val, {
+    LinuxIoprioWho::try_from(val as i32).map_err(|_| SyscallError::InvalidArguments)
 });
 
 add_syscall_arg_flags_type!(
