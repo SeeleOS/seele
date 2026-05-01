@@ -1,6 +1,7 @@
 use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function,
+    misc::time::Time,
     object::{
         FileFlags, Object,
         misc::ObjectResult,
@@ -11,6 +12,20 @@ use crate::{
 
 #[derive(Debug)]
 pub struct DevNull;
+
+fn fill_pseudo_random(buffer: &mut [u8]) {
+    let mut state = Time::since_boot().as_nanoseconds()
+        ^ Time::current().as_nanoseconds()
+        ^ (buffer.as_ptr() as u64).rotate_left(17)
+        ^ (buffer.len() as u64).rotate_left(33);
+
+    for byte in buffer {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        *byte = state as u8;
+    }
+}
 
 impl Object for DevNull {
     impl_cast_function!("writable", Writable);
@@ -31,6 +46,27 @@ impl Readable for DevNull {
 }
 
 impl Statable for DevNull {
+    fn stat(&self) -> LinuxStat {
+        LinuxStat::char_device(0o666)
+    }
+}
+
+#[derive(Debug)]
+pub struct DevRandom;
+
+impl Object for DevRandom {
+    impl_cast_function!("readable", Readable);
+    impl_cast_function!("statable", Statable);
+}
+
+impl Readable for DevRandom {
+    fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
+        fill_pseudo_random(buffer);
+        Ok(buffer.len())
+    }
+}
+
+impl Statable for DevRandom {
     fn stat(&self) -> LinuxStat {
         LinuxStat::char_device(0o666)
     }

@@ -4,7 +4,7 @@ use crate::{
     drm::object::DrmCardObject,
     evdev::open_event_device,
     misc::{
-        devices::{DevKmsg, DevNull},
+        devices::{DevKmsg, DevNull, DevRandom},
         fb_object::FramebufferObject,
         mouse::PS2MouseObject,
     },
@@ -24,6 +24,8 @@ lazy_static::lazy_static! {
 
         devices.insert("framebuffer", Arc::new(FramebufferObject) as ObjectRef);
         devices.insert("devnull", Arc::new(DevNull) as ObjectRef);
+        devices.insert("random", Arc::new(DevRandom) as ObjectRef);
+        devices.insert("urandom", Arc::new(DevRandom) as ObjectRef);
         devices.insert("fuse", FuseDevice::new() as ObjectRef);
         devices.insert("kmsg", Arc::new(DevKmsg::default()) as ObjectRef);
         devices.insert("console", get_default_tty() as ObjectRef);

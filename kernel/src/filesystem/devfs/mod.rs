@@ -31,6 +31,22 @@ static DEV_NULL_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     rdev: Some((1u64 << 8) | 3),
 });
 
+static DEV_RANDOM_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
+    name: "random",
+    inode: 0x1017,
+    mode: 0o020666,
+    device_name: "random",
+    rdev: Some((1u64 << 8) | 8),
+});
+
+static DEV_URANDOM_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
+    name: "urandom",
+    inode: 0x1018,
+    mode: 0o020666,
+    device_name: "urandom",
+    rdev: Some((1u64 << 8) | 9),
+});
+
 static DEV_TTY_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     name: "tty",
     inode: 0x1002,
@@ -210,6 +226,14 @@ static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "null",
         node: &DEV_NULL_NODE,
+    },
+    StaticDirEntry {
+        name: "random",
+        node: &DEV_RANDOM_NODE,
+    },
+    StaticDirEntry {
+        name: "urandom",
+        node: &DEV_URANDOM_NODE,
     },
     StaticDirEntry {
         name: "tty",
