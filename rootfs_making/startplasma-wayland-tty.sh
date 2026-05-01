@@ -32,12 +32,13 @@ fi
 export XDG_RUNTIME_DIR="${runtime_dir}"
 session_bus="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${runtime_dir}/bus}"
 session_bus_path="${session_bus#unix:path=}"
-if [ "${session_bus}" = "${session_bus_path}" ] || [ ! -S "${session_bus_path}" ]; then
-    echo "startplasma-wayland-tty: missing user session bus at ${session_bus_path}" >&2
-    exit 1
+have_session_bus=0
+if [ "${session_bus}" != "${session_bus_path}" ] && [ -S "${session_bus_path}" ]; then
+    have_session_bus=1
+    export DBUS_SESSION_BUS_ADDRESS="${session_bus}"
+else
+    unset DBUS_SESSION_BUS_ADDRESS
 fi
-
-export DBUS_SESSION_BUS_ADDRESS="${session_bus}"
 export XDG_SESSION_TYPE=wayland
 export XDG_SESSION_DESKTOP=KDE
 export XDG_CURRENT_DESKTOP=KDE
@@ -51,7 +52,7 @@ export XDG_SEAT="${XDG_SEAT:-}"
 unset WAYLAND_DISPLAY
 unset XAUTHORITY
 
-if command -v systemctl >/dev/null 2>&1; then
+if [ "${have_session_bus}" = "1" ] && command -v systemctl >/dev/null 2>&1; then
     systemctl --user import-environment \
         DBUS_SESSION_BUS_ADDRESS \
         XDG_RUNTIME_DIR \
@@ -67,7 +68,7 @@ if command -v systemctl >/dev/null 2>&1; then
         XDG_VTNR || true
 fi
 
-if command -v dbus-update-activation-environment >/dev/null 2>&1; then
+if [ "${have_session_bus}" = "1" ] && command -v dbus-update-activation-environment >/dev/null 2>&1; then
     dbus-update-activation-environment --systemd \
         DBUS_SESSION_BUS_ADDRESS \
         XDG_RUNTIME_DIR \
@@ -83,4 +84,4 @@ if command -v dbus-update-activation-environment >/dev/null 2>&1; then
         XDG_VTNR || true
 fi
 
-exec /usr/bin/startplasma-wayland
+exec /usr/lib/plasma-dbus-run-session-if-needed /usr/bin/startplasma-wayland
