@@ -6,6 +6,7 @@ use core::{
 
 use crate::{
     drm::mode::{DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888},
+    misc::time::{NANOSECONDS_PER_MILLISECOND, Time},
     misc::framebuffer::{FRAME_BUFFER, FramebufferPixelFormat, framebuffer_set_user_controlled},
     object::{error::ObjectError, misc::ObjectResult},
 };
@@ -16,6 +17,7 @@ use super::{
 };
 
 static DRM_DEBUG_SAMPLES: AtomicU32 = AtomicU32::new(0);
+static LAST_LEGACY_SCANOUT_REFRESH_NS: AtomicU32 = AtomicU32::new(0);
 
 pub(super) fn build_framebuffer(
     state: &DrmState,
@@ -80,6 +82,35 @@ pub(super) fn refresh_current_scanout() -> ObjectResult<()> {
         Some(fb_id) => scanout_framebuffer_id(fb_id),
         None => Ok(()),
     }
+}
+
+pub(super) fn refresh_legacy_scanout_tick() {
+    const REFRESH_INTERVAL_NS: u64 = 16 * NANOSECONDS_PER_MILLISECOND;
+
+    let now_ns = Time::since_boot().as_nanoseconds();
+    let now_ms = u32::try_from(now_ns / NANOSECONDS_PER_MILLISECOND).unwrap_or(u32::MAX);
+    let last_ms = LAST_LEGACY_SCANOUT_REFRESH_NS.load(Ordering::Relaxed);
+    if now_ms.wrapping_sub(last_ms) < u32::try_from(REFRESH_INTERVAL_NS / NANOSECONDS_PER_MILLISECOND).unwrap_or(16) {
+        return;
+    }
+
+    let should_refresh = {
+        let state = DRM_STATE.lock();
+        state.current_fb_id.is_some_and(|fb_id| {
+            state
+                .framebuffers
+                .get(&fb_id)
+                .and_then(|framebuffer| state.dumb_buffers.get(&framebuffer.handle))
+                .is_some_and(|buffer| !buffer.scanout_backed)
+        })
+    };
+
+    if !should_refresh {
+        return;
+    }
+
+    LAST_LEGACY_SCANOUT_REFRESH_NS.store(now_ms, Ordering::Relaxed);
+    let _ = refresh_current_scanout();
 }
 
 pub(super) fn log_framebuffer_sample(phase: &str, fb_id: u32) -> ObjectResult<()> {

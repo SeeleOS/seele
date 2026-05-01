@@ -9,6 +9,7 @@ use core::{
 use x86_64::instructions::interrupts::{self, enable_and_hlt, without_interrupts};
 
 use crate::{
+    drm,
     keyboard,
     misc::agent_tty_input,
     misc::mouse,
@@ -162,6 +163,7 @@ pub fn run() -> ! {
         keyboard::process_pending_scancodes();
         agent_tty_input::process_pending_input();
         mouse::process_pending_mouse_events();
+        drm::refresh_legacy_scanout_tick();
 
         let next_thread = if can_run_ready_threads_on_current_cpu() {
             THREAD_MANAGER.get().unwrap().lock().pop_ready()

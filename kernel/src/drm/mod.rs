@@ -15,3 +15,5 @@ pub mod object;
 pub(crate) mod prime;
 mod state;
 mod user;
+
+pub(crate) use framebuffer::refresh_legacy_scanout_tick;
