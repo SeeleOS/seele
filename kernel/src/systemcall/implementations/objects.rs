@@ -16,6 +16,7 @@ use crate::{
         config::ConfigurateRequest,
         control::control_object,
         device::get_device,
+        file_locks::flock_lock,
         memfd::create_memfd_object,
         misc::{ObjectRef, get_object_current_process},
         traits::Readable,
@@ -540,7 +541,9 @@ define_syscall!(Fcntl, |fd: u64, command: u64, arg: u64| {
     control_object(fd, command, arg)
 });
 
-define_syscall!(Flock, |_object: ObjectRef, _operation: i32| { Ok(0) });
+define_syscall!(Flock, |object: ObjectRef, operation: i32| {
+    flock_lock(&object, operation)
+});
 
 define_syscall!(Fsync, |_object: ObjectRef| { Ok(0) });
 

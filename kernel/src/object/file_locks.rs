@@ -8,13 +8,20 @@ use crate::{
     object::misc::ObjectRef,
     process::{FdEntry, manager::get_current_process, misc::ProcessID},
     systemcall::utils::{SyscallError, SyscallResult},
-    thread::{THREAD_MANAGER, yielding::{BlockType, WakeType, block_current_with_sig_check}},
+    thread::{
+        THREAD_MANAGER,
+        yielding::{BlockType, WakeType, block_current_with_sig_check},
+    },
 };
 
 pub(crate) const F_RDLCK: i16 = 0;
 pub(crate) const F_WRLCK: i16 = 1;
 pub(crate) const F_UNLCK: i16 = 2;
 const SEEK_SET: i16 = 0;
+const LOCK_SH: i32 = 1;
+const LOCK_EX: i32 = 2;
+const LOCK_NB: i32 = 4;
+const LOCK_UN: i32 = 8;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -34,6 +41,12 @@ enum AdvisoryLockType {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AdvisoryLockApi {
+    Posix,
+    Flock,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AdvisoryLockOwner {
     Process(ProcessID),
     OpenFileDescription(usize),
@@ -41,6 +54,7 @@ enum AdvisoryLockOwner {
 
 #[derive(Clone, Copy, Debug)]
 struct AdvisoryLock {
+    api: AdvisoryLockApi,
     owner: AdvisoryLockOwner,
     lock_type: AdvisoryLockType,
 }
@@ -63,7 +77,7 @@ pub(crate) fn fcntl_get_lock(object: &ObjectRef, arg: *mut LinuxFlock, ofd: bool
         let locks = ADVISORY_LOCKS.lock();
         locks
             .get(&key)
-            .and_then(|entries| find_conflict(entries, owner, requested_type))
+            .and_then(|entries| find_conflict(entries, owner, requested_type, AdvisoryLockApi::Posix))
     };
 
     if let Some(lock) = conflict {
@@ -104,12 +118,71 @@ pub(crate) fn fcntl_set_lock(
         let conflict = {
             let mut locks = ADVISORY_LOCKS.lock();
             let entries = locks.entry(key.clone()).or_default();
-            if let Some(conflict) = find_conflict(entries, owner, requested_type) {
+            if let Some(conflict) =
+                find_conflict(entries, owner, requested_type, AdvisoryLockApi::Posix)
+            {
                 Some(conflict)
             } else {
-                entries.retain(|entry| entry.owner != owner);
+                entries.retain(|entry| {
+                    !(entry.api == AdvisoryLockApi::Posix && entry.owner == owner)
+                });
                 if let Some(lock_type) = requested_type {
-                    entries.push(AdvisoryLock { owner, lock_type });
+                    entries.push(AdvisoryLock {
+                        api: AdvisoryLockApi::Posix,
+                        owner,
+                        lock_type,
+                    });
+                }
+                changed = true;
+                if entries.is_empty() {
+                    locks.remove(&key);
+                }
+                None
+            }
+        };
+
+        if conflict.is_none() {
+            if changed {
+                wake_lock_waiters();
+            }
+            return Ok(0);
+        }
+        if !blocking {
+            return Err(SyscallError::TryAgain);
+        }
+
+        block_current_with_sig_check(BlockType::WakeRequired {
+            wake_type: WakeType::IO,
+            deadline: None,
+        })?;
+    }
+}
+
+pub(crate) fn flock_lock(object: &ObjectRef, operation: i32) -> SyscallResult {
+    let requested_type = parse_flock_operation(operation)?;
+    let owner = AdvisoryLockOwner::OpenFileDescription(ofd_owner(object));
+    let key = lock_key(object)?;
+    let blocking = operation & LOCK_NB == 0;
+
+    loop {
+        let mut changed = false;
+        let conflict = {
+            let mut locks = ADVISORY_LOCKS.lock();
+            let entries = locks.entry(key.clone()).or_default();
+            if let Some(conflict) =
+                find_conflict(entries, owner, requested_type, AdvisoryLockApi::Flock)
+            {
+                Some(conflict)
+            } else {
+                entries.retain(|entry| {
+                    !(entry.api == AdvisoryLockApi::Flock && entry.owner == owner)
+                });
+                if let Some(lock_type) = requested_type {
+                    entries.push(AdvisoryLock {
+                        api: AdvisoryLockApi::Flock,
+                        owner,
+                        lock_type,
+                    });
                 }
                 changed = true;
                 if entries.is_empty() {
@@ -176,6 +249,21 @@ fn parse_flock_request(flock: &LinuxFlock) -> Result<Option<AdvisoryLockType>, S
     }
 }
 
+fn parse_flock_operation(operation: i32) -> Result<Option<AdvisoryLockType>, SyscallError> {
+    let mode = operation & (LOCK_SH | LOCK_EX | LOCK_UN);
+    let extra = operation & !(LOCK_SH | LOCK_EX | LOCK_UN | LOCK_NB);
+    if extra != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    match mode {
+        LOCK_SH => Ok(Some(AdvisoryLockType::Read)),
+        LOCK_EX => Ok(Some(AdvisoryLockType::Write)),
+        LOCK_UN => Ok(None),
+        _ => Err(SyscallError::InvalidArguments),
+    }
+}
+
 fn lock_owner(object: &ObjectRef, ofd: bool) -> AdvisoryLockOwner {
     if ofd {
         AdvisoryLockOwner::OpenFileDescription(ofd_owner(object))
@@ -200,9 +288,13 @@ fn find_conflict(
     entries: &[AdvisoryLock],
     owner: AdvisoryLockOwner,
     requested_type: Option<AdvisoryLockType>,
+    api: AdvisoryLockApi,
 ) -> Option<AdvisoryLock> {
     let requested_type = requested_type?;
     entries.iter().copied().find(|entry| {
+        if entry.api != api {
+            return false;
+        }
         if entry.owner == owner {
             return false;
         }
