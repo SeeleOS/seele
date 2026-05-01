@@ -93,6 +93,28 @@ impl DrmState {
         request.handle = handle;
         request.pitch = pitch;
         request.size = size;
+        if let Some((pid, comm)) = super::user::current_debug_process() {
+            let buffer = self
+                .dumb_buffers
+                .get(&handle)
+                .expect("new dumb buffer must exist");
+            crate::s_println!(
+                "drm create_dumb comm={} pid={} handle={} size={}x{} pitch={} bytes={:#x} pages={} map_offset={:#x} start_frame={:#x} kernel_addr={:#x} shared_flags={:#x} scanout_backed={}",
+                comm,
+                pid,
+                handle,
+                request.width,
+                request.height,
+                pitch,
+                size,
+                pages,
+                buffer.map_offset,
+                buffer.start_frame_addr(),
+                buffer.kernel_addr,
+                buffer.shared_flags.bits(),
+                buffer.scanout_backed
+            );
+        }
         Ok(())
     }
 

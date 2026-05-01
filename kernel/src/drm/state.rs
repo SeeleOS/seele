@@ -224,6 +224,10 @@ impl DumbBuffer {
         self.size.div_ceil(4096) * 4096
     }
 
+    pub(super) fn start_frame_addr(&self) -> u64 {
+        self.start_frame.start_address().as_u64()
+    }
+
     pub(super) fn contains_scanout_range(
         &self,
         offset: u32,

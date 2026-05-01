@@ -144,12 +144,14 @@ impl MemoryMappable for DrmPrimeBufferObject {
     ) -> ObjectResult<VirtAddr> {
         if let Some((pid, comm)) = current_debug_process() {
             crate::s_println!(
-                "drm prime mmap comm={} pid={} offset={:#x} pages={} size={:#x}",
+                "drm prime mmap comm={} pid={} offset={:#x} pages={} size={:#x} start_frame={:#x} shared_flags={:#x}",
                 comm,
                 pid,
                 offset,
                 pages,
-                self.buffer.aligned_size()
+                self.buffer.aligned_size(),
+                self.buffer.start_frame_addr(),
+                self.buffer.shared_flags.bits()
             );
         }
         if pages == 0 || !offset.is_multiple_of(4096) {
@@ -253,7 +255,7 @@ pub(super) fn handle_prime_handle_to_fd(ptr: *mut DrmPrimeHandle) -> ObjectResul
         ObjectError::InvalidArguments
     })?;
     let buffer = DRM_STATE.lock().get_user_handle(request.handle)?.clone();
-    let object: ObjectRef = Arc::new(DrmPrimeBufferObject::new(buffer));
+    let object: ObjectRef = Arc::new(DrmPrimeBufferObject::new(buffer.clone()));
     let fd_flags = if flags.contains(DrmPrimeHandleFlags::CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
@@ -265,12 +267,14 @@ pub(super) fn handle_prime_handle_to_fd(ptr: *mut DrmPrimeHandle) -> ObjectResul
     request.fd = i32::try_from(fd).map_err(|_| ObjectError::Other)?;
     if let Some((pid, comm)) = current_debug_process() {
         crate::s_println!(
-            "drm prime_handle_to_fd comm={} pid={} handle={} flags={:#x} fd={}",
+            "drm prime_handle_to_fd comm={} pid={} handle={} flags={:#x} fd={} start_frame={:#x} map_offset={:#x}",
             comm,
             pid,
             request.handle,
             request.flags,
-            request.fd
+            request.fd,
+            buffer.start_frame_addr(),
+            buffer.map_offset
         );
     }
     user_safe::write(ptr, &request).map_err(|_| ObjectError::InvalidArguments)?;
@@ -515,16 +519,18 @@ pub(super) fn handle_prime_fd_to_handle(ptr: *mut DrmPrimeHandle) -> ObjectResul
     let prime = object
         .as_drm_prime_buffer()
         .map_err(|_| ObjectError::InvalidArguments)?;
-    request.handle = DRM_STATE
-        .lock()
-        .import_prime_buffer(prime.exported_buffer())?;
+    let exported = prime.exported_buffer();
+    request.handle = DRM_STATE.lock().import_prime_buffer(exported)?;
     if let Some((pid, comm)) = current_debug_process() {
         crate::s_println!(
-            "drm prime_fd_to_handle comm={} pid={} fd={} handle={}",
+            "drm prime_fd_to_handle comm={} pid={} fd={} handle={} start_frame={:#x} map_offset={:#x} scanout_backed={}",
             comm,
             pid,
             request.fd,
-            request.handle
+            request.handle,
+            exported.start_frame_addr(),
+            exported.map_offset,
+            exported.scanout_backed
         );
     }
     user_safe::write(ptr, &request).map_err(|_| ObjectError::InvalidArguments)?;

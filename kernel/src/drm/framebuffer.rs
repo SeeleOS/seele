@@ -36,6 +36,23 @@ pub(super) fn build_framebuffer(
     if !matches!(pixel_format, DRM_FORMAT_XRGB8888 | DRM_FORMAT_ARGB8888) {
         return Err(ObjectError::InvalidArguments);
     }
+    if let Some((pid, comm)) = super::user::current_debug_process() {
+        crate::s_println!(
+            "drm build_fb comm={} pid={} handle={} size={}x{} pitch={} offset={:#x} format={:#x} start_frame={:#x} kernel_addr={:#x} map_offset={:#x} scanout_backed={}",
+            comm,
+            pid,
+            handle,
+            width,
+            height,
+            pitch,
+            offset,
+            pixel_format,
+            buffer.start_frame_addr(),
+            buffer.kernel_addr,
+            buffer.map_offset,
+            buffer.scanout_backed
+        );
+    }
 
     Ok(RegisteredFramebuffer {
         fb_id: 0,
