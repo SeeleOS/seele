@@ -93,6 +93,7 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 - If the user provides a workflow or debugging suggestion that is broadly useful for future work in this repository, add it to `AGENTS.md` when appropriate instead of treating it as a one-off remark.
 - When debugging interactive login issues where the user needs to type a username or password manually, run `nix develop -c cargo run` in the foreground instead of the `--agent` path and let the user provide the login input.
 - When a background VM terminal is available, interact with it directly for guest input, including login credentials and shell commands.
+- When a background VM terminal is available, do not focus on manually poking the tty socket itself. Treat that socket as the runner's internal transport and interact through the background terminal path directly.
 - When a background VM terminal is available, do not invent a separate tty-socket workflow or ad-hoc input path. Use the background terminal interaction path directly.
 - `run agent vm` should be treated as directly interactive by default.
 - After you finish using an interactive or background VM, terminate it yourself instead of relying on a default runner timeout to clean it up.
