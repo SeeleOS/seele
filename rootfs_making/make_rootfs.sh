@@ -218,6 +218,8 @@ install_sysroot_file "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/etc/X11/xini
 install_sysroot_file "${ROOTFS_MAKING_DIR}/debuginfod.sh" "${SYSROOT_DIR}/etc/profile.d/debuginfod.sh"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/flatpak.sh" "${SYSROOT_DIR}/etc/profile.d/flatpak.sh"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/gpm.sh" "${SYSROOT_DIR}/etc/profile.d/gpm.sh"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/60-flatpak" "${SYSROOT_DIR}/usr/lib/systemd/user-environment-generators/60-flatpak"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/60-flatpak-system-only" "${SYSROOT_DIR}/usr/lib/systemd/system-environment-generators/60-flatpak-system-only"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/10-sddm-greeter.conf" "${SYSROOT_DIR}/etc/sddm.conf.d/10-sddm-greeter.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/Xsetup" "${SYSROOT_DIR}/usr/share/sddm/scripts/Xsetup"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/root/.xinitrc"

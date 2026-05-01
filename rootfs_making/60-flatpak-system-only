@@ -1,0 +1,20 @@
+#!/bin/sh
+
+system_exports=/var/lib/flatpak/exports/share
+
+case ":${XDG_DATA_DIRS:-}:" in
+    *:"$system_exports":*|*:"$system_exports/":*)
+        printf 'XDG_DATA_DIRS=%s\n' "${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+        ;;
+    *)
+        if [ -d "$system_exports" ]; then
+            if [ -n "${XDG_DATA_DIRS:-}" ]; then
+                printf 'XDG_DATA_DIRS=%s:%s\n' "$system_exports" "$XDG_DATA_DIRS"
+            else
+                printf 'XDG_DATA_DIRS=%s:/usr/local/share:/usr/share\n' "$system_exports"
+            fi
+        else
+            printf 'XDG_DATA_DIRS=%s\n' "${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+        fi
+        ;;
+esac
