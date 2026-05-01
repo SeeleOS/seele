@@ -11,6 +11,7 @@ use x86_64::{VirtAddr, registers::model_specific::FsBase};
 
 use crate::{
     define_syscall,
+    drm::current_debug_process,
     memory::{
         addrspace::mem_area::{Data, MemoryArea},
         protection::Protection,
@@ -423,6 +424,19 @@ define_syscall!(Mmap, |addr: u64,
                        flags: MmapFlags,
                        fd: i32,
                        offset: u64| {
+    if let Some((pid, comm)) = current_debug_process() {
+        crate::s_println!(
+            "mmap enter comm={} pid={} addr={:#x} len={:#x} prot={:#x} flags={:#x} fd={} offset={:#x}",
+            comm,
+            pid,
+            addr,
+            len,
+            prot,
+            flags.bits(),
+            fd,
+            offset
+        );
+    }
     if len == 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -496,6 +510,16 @@ define_syscall!(Mmap, |addr: u64,
     }
     let object =
         crate::object::misc::get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+    if let Some((pid, comm)) = current_debug_process() {
+        crate::s_println!(
+            "mmap object comm={} pid={} fd={} file_like={} mappable={}",
+            comm,
+            pid,
+            fd,
+            object.clone().as_file_like().is_ok(),
+            object.clone().as_mappable().is_ok()
+        );
+    }
     if let Ok(file) = object.clone().as_file_like()
         && !file.is_device_backed()
     {
@@ -508,6 +532,15 @@ define_syscall!(Mmap, |addr: u64,
     }
     let object = object.as_mappable()?;
     let address = object.map(offset, pages, protection)?;
+    if let Some((pid, comm)) = current_debug_process() {
+        crate::s_println!(
+            "mmap exit comm={} pid={} fd={} user_addr={:#x}",
+            comm,
+            pid,
+            fd,
+            address.as_u64()
+        );
+    }
     Ok(address.as_u64() as usize)
 });
 

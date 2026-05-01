@@ -85,7 +85,7 @@ pub(super) fn make_property_enum(value: u64, name: &str) -> DrmModePropertyEnum 
     item
 }
 
-pub(super) fn current_debug_process() -> Option<(u64, String)> {
+pub(crate) fn current_debug_process() -> Option<(u64, String)> {
     with_current_process(|process| {
         let comm = process
             .command_line
