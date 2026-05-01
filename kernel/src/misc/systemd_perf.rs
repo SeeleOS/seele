@@ -4,7 +4,9 @@ use spin::Mutex;
 
 use crate::{
     misc::time::Time,
-    process::{Process, ProcessExitStatus, manager::get_current_process},
+    process::ProcessExitStatus,
+    smp::try_current_process,
+    process::Process,
 };
 
 #[derive(Clone, Copy)]
@@ -109,7 +111,9 @@ pub fn profile_current_process<R>(bucket: PerfBucket, func: impl FnOnce() -> R) 
     let result = func();
     let elapsed_ns = now_ns().saturating_sub(start_ns);
 
-    let process = get_current_process();
+    let Some(process) = try_current_process() else {
+        return result;
+    };
     let process = process.lock();
     let pid = process.pid.0;
     let comm = command_name(&process).to_string();
@@ -143,7 +147,9 @@ pub fn profile_current_process<R>(bucket: PerfBucket, func: impl FnOnce() -> R) 
 
 #[inline]
 pub fn log_current_block(kind: &str) {
-    let process = get_current_process();
+    let Some(process) = try_current_process() else {
+        return;
+    };
     let process = process.lock();
     let pid = process.pid.0;
     let now_ns = now_ns();
