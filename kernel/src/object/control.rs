@@ -1,3 +1,4 @@
+use crate::object::FileFlags;
 use crate::{
     object::{
         error::ObjectError,
@@ -8,7 +9,6 @@ use crate::{
     process::{FdFlags, misc::with_current_process},
     systemcall::utils::{SyscallError, SyscallResult},
 };
-use crate::object::FileFlags;
 use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
 
@@ -124,13 +124,11 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
             process.set_fd_flags(fd as usize, flags)?;
             Ok(0)
         }),
-        FcntlCmd::GetLk | FcntlCmd::OfdGetLk => {
-            fcntl_get_lock(
-                &object,
-                arg as *mut LinuxFlock,
-                matches!(command, x if x == FcntlCmd::OfdGetLk as u64),
-            )
-        }
+        FcntlCmd::GetLk | FcntlCmd::OfdGetLk => fcntl_get_lock(
+            &object,
+            arg as *mut LinuxFlock,
+            matches!(command, x if x == FcntlCmd::OfdGetLk as u64),
+        ),
         FcntlCmd::SetLk | FcntlCmd::SetLkw | FcntlCmd::OfdSetLk | FcntlCmd::OfdSetLkw => {
             fcntl_set_lock(
                 &object,
