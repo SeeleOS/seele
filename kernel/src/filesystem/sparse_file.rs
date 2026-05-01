@@ -36,7 +36,7 @@ impl SparseFileData {
 
         let keep_pages = len.div_ceil(PAGE_SIZE);
         self.pages.retain(|page_index, _| *page_index < keep_pages);
-        if len % PAGE_SIZE != 0
+        if !len.is_multiple_of(PAGE_SIZE)
             && let Some(page) = self.pages.get_mut(&(len / PAGE_SIZE))
         {
             page[len % PAGE_SIZE..].fill(0);

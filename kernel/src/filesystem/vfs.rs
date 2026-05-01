@@ -287,11 +287,7 @@ impl VFS {
     }
 
     pub fn normalize_path(&self, path: Path) -> Path {
-        if path.is_absolute() {
-            path.normalize()
-        } else {
-            path.normalize()
-        }
+        path.normalize()
     }
 }
 
