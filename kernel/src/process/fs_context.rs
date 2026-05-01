@@ -5,6 +5,7 @@ use crate::filesystem::absolute_path::AbsolutePath;
 
 #[derive(Clone, Debug, Default)]
 pub struct FsContext {
+    pub root_directory: AbsolutePath,
     pub current_directory: AbsolutePath,
     pub file_mode_creation_mask: u32,
 }

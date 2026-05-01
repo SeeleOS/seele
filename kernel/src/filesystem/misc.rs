@@ -1,7 +1,7 @@
 use alloc::{string::String, sync::Arc};
 
 use crate::{
-    filesystem::{path::Path, vfs::VirtualFS},
+    filesystem::{absolute_path::AbsolutePath, path::Path, vfs::VirtualFS},
     object::misc::ObjectRef,
     process::manager::get_current_process,
 };
@@ -20,16 +20,22 @@ pub fn smart_resolve_path(
     // Start the path with the current directory
     start_from_current_dir: bool,
 ) -> Option<Path> {
-    if path.starts_with('/') {
-        Some(Path::new(&path))
+    let path = Path::new(&path);
+    let process = get_current_process();
+    let fs_context = process.lock().fs_context.lock().clone();
+
+    if path.is_absolute() {
+        Some(
+            AbsolutePath::join_under_root(
+                &fs_context.root_directory,
+                &fs_context.current_directory,
+                &path,
+            )
+            .as_normal(),
+        )
     } else if start_from_current_dir {
-        let mut cur_path = get_current_process()
-            .lock()
-            .fs_context
-            .lock()
-            .current_directory
-            .clone();
-        cur_path.push_path_str(&path);
+        let mut cur_path = fs_context.current_directory;
+        cur_path.push_path_str(&path.as_string());
         Some(cur_path.as_normal())
     } else {
         None

@@ -1,6 +1,7 @@
 use crate::{
     define_syscall,
     filesystem::{
+        absolute_path::AbsolutePath,
         errors::FSError,
         info::{DirectoryContentInfo, LinuxStat},
         object::FileLikeObject,
@@ -268,13 +269,23 @@ fn is_supported_api_mount(fstype: &str) -> bool {
 
 fn resolve_path_at(dirfd: i32, path_str: &str) -> Result<Path, SyscallError> {
     systemd_perf::profile_current_process(PerfBucket::ResolvePathAt, || {
-        if path_str.starts_with('/') {
-            return Ok(Path::new(path_str));
+        let path = Path::new(path_str);
+        let process = get_current_process();
+        let fs_context = process.lock().fs_context.lock().clone();
+
+        if path.is_absolute() {
+            return Ok(
+                AbsolutePath::join_under_root(
+                    &fs_context.root_directory,
+                    &fs_context.current_directory,
+                    &path,
+                )
+                .as_normal(),
+            );
         }
 
         if dirfd == AT_FDCWD {
-            let mut current_dir =
-                with_current_process(|process| process.fs_context.lock().current_directory.clone());
+            let mut current_dir = fs_context.current_directory;
             current_dir.push_path_str(path_str);
             return Ok(current_dir.as_normal());
         }
@@ -285,7 +296,9 @@ fn resolve_path_at(dirfd: i32, path_str: &str) -> Result<Path, SyscallError> {
             return Err(SyscallError::NotADirectory);
         }
 
-        let mut base = file_like.path().as_absolute();
+        let base_path = file_like.path();
+        let base = AbsolutePath::from_root_path(&base_path);
+        let mut base = AbsolutePath::join_under_root(&base, &base, &Path::new("."));
         base.push_path_str(path_str);
         Ok(base.as_normal())
     })
@@ -975,7 +988,9 @@ define_syscall!(Access, |path: CString, mode: i32| {
 });
 
 define_syscall!(Chdir, |dir: String| {
-    let path = Path::new(&dir).as_absolute();
+    let process = get_current_process();
+    let fs_context = process.lock().fs_context.lock().clone();
+    let path = Path::new(&dir).as_absolute_from(&fs_context.root_directory, &fs_context.current_directory);
     get_current_process().lock().change_directory(path)?;
     Ok(0)
 });
@@ -986,9 +1001,10 @@ define_syscall!(Fchdir, |fd: u64| {
     if !matches!(file_like.info()?.file_like_type, FileLikeType::Directory) {
         return Err(SyscallError::NotADirectory);
     }
+    let path = AbsolutePath::from_root_path(&file_like.path());
     get_current_process()
         .lock()
-        .change_directory(file_like.path().as_absolute())?;
+        .change_directory(path)?;
     Ok(0)
 });
 
@@ -1046,13 +1062,10 @@ define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
     }
 
     let process = get_current_process();
-    let path_str = process
-        .lock()
-        .fs_context
-        .lock()
+    let fs_context = process.lock().fs_context.lock().clone();
+    let path_str = fs_context
         .current_directory
-        .clone()
-        .as_string();
+        .display_string(&fs_context.root_directory);
     let path_bytes = path_str.as_bytes();
     let path_len = path_bytes.len();
 
@@ -1066,6 +1079,25 @@ define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
     }
 
     Ok(path_len + 1)
+});
+
+define_syscall!(Chroot, |path: CString| {
+    let path_str = path_from_raw(path)?;
+    let path = resolve_path_at(AT_FDCWD, &path_str)?;
+    let file = VirtualFS.lock().open(path.clone())?;
+    if !matches!(file.info()?.file_like_type, FileLikeType::Directory) {
+        return Err(SyscallError::NotADirectory);
+    }
+
+    let new_root = AbsolutePath::from_root_path(&path);
+    let process = get_current_process();
+    let process = &mut *process.lock();
+    let current_dir = process.fs_context.lock().current_directory.clone();
+    if !current_dir.starts_with(&new_root) {
+        process.fs_context.lock().current_directory = AbsolutePath::root();
+    }
+    process.fs_context.lock().root_directory = new_root;
+    Ok(0)
 });
 
 define_syscall!(Fstat, |fd: u64, linux_stat_ptr: *mut LinuxStat| {
@@ -1830,8 +1862,8 @@ define_syscall!(
         let kernel_mount_id = stat_mount_id_at(dirfd, &path_str, flags)?;
         let mount_id_out =
             i32::try_from(kernel_mount_id).map_err(|_| SyscallError::InvalidArguments)?;
-        let required_bytes =
-            u32::try_from(size_of::<SeeleFileHandle>()).map_err(|_| SyscallError::InvalidArguments)?;
+        let required_bytes = u32::try_from(size_of::<SeeleFileHandle>())
+            .map_err(|_| SyscallError::InvalidArguments)?;
         let mut file_handle = user_safe::read(handle)?;
         let caller_bytes = file_handle.handle_bytes;
         file_handle.handle_type = SEELE_FILE_HANDLE_TYPE_INODE;

@@ -290,7 +290,7 @@ impl VFS {
         if path.is_absolute() {
             path.normalize()
         } else {
-            path.as_absolute().as_normal().normalize()
+            path.normalize()
         }
     }
 }

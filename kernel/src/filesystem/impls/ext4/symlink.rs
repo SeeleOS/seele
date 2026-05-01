@@ -42,7 +42,7 @@ impl Symlink for Ext4Symlink {
             alloc::format!("{}/{}", self.parent_path, target)
         };
 
-        Ok(Path::new(&combined).as_absolute().as_normal())
+        Ok(Path::new(&combined).normalize())
     }
 
     fn read_link_target(&self) -> FSResult<String> {
