@@ -233,7 +233,7 @@ impl Directory for Ext4Directory {
         })?;
 
         // Parent inode of the new inode. In this case, the parent inode is [`self`]
-        let (mut parent_inode, mut parent) = self.open_parent_dir()?;
+        let (parent_inode, mut parent) = self.open_parent_dir()?;
 
         if matches!(info.content_type, DirectoryContentType::Directory) {
             // A freshly-created ext4 directory needs an initialized first block
@@ -253,15 +253,7 @@ impl Directory for Ext4Directory {
             .map_err(map_ext4_error)?;
         lookup_cache_insert(&self.lookup_cache, &parent_inode, &info.name, &new_inode);
 
-        if matches!(info.content_type, DirectoryContentType::Directory) {
-            let new_links = parent_inode
-                .links_count()
-                .checked_add(1)
-                .ok_or(FSError::Other)?;
-            parent_inode.set_links_count(new_links);
-            parent_inode.write(&self.fs).map_err(map_ext4_error)?;
-            self.update_cached_inode(parent_inode);
-        }
+        self.update_cached_inode(parent.inode().clone());
         Ok(())
     }
 
