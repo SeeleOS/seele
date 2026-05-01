@@ -95,6 +95,7 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 - When a background VM terminal is available, interact with it directly for guest input, including login credentials and shell commands.
 - When a background VM terminal is available, do not focus on manually poking the tty socket itself. Treat that socket as the runner's internal transport and interact through the background terminal path directly.
 - When a background VM terminal is available, do not invent a separate tty-socket workflow or ad-hoc input path. Use the background terminal interaction path directly.
+- If interacting through the background VM terminal appears to produce no reaction, do not assume the background terminal path itself is broken. Treat kernel deadlock, echo being disabled, or the foreground being owned by another program as the primary explanations to check first.
 - `run agent vm` should be treated as directly interactive by default.
 - After you finish using an interactive or background VM, terminate it yourself instead of relying on a default runner timeout to clean it up.
 - If `sysroot/` already appears to be mounted, reuse it directly instead of asking for privilege escalation to mount again. Only ask to mount when it is clearly not mounted.
