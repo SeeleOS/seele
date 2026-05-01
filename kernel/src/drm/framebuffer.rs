@@ -84,7 +84,7 @@ pub(super) fn refresh_current_scanout() -> ObjectResult<()> {
     }
 }
 
-pub(super) fn refresh_legacy_scanout_tick() {
+pub(crate) fn refresh_legacy_scanout_tick() {
     const REFRESH_INTERVAL_NS: u64 = 16 * NANOSECONDS_PER_MILLISECOND;
 
     let now_ns = Time::since_boot().as_nanoseconds();
