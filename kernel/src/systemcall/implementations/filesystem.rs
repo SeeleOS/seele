@@ -943,10 +943,16 @@ define_syscall!(OpenAt, |dirfd: i32,
             return Err(SyscallError::NotADirectory);
         }
         if flags.contains(OpenFlags::TRUNC) && !path_only {
+            let file_like = object.clone().as_file_like()?;
+            if file_like.is_device_backed() {
+                // Linux ignores O_TRUNC on device nodes such as /dev/null.
+                // Only regular writable files should be truncated here.
+            } else {
             match info.file_like_type {
-                FileLikeType::File => object.clone().as_file_like()?.truncate(0)?,
+                FileLikeType::File => file_like.truncate(0)?,
                 FileLikeType::Directory => return Err(SyscallError::IsADirectory),
                 FileLikeType::Symlink => {}
+            }
             }
         }
         let mut file_flags = FileFlags::empty();
