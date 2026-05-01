@@ -451,6 +451,23 @@ fn mount_attr_flag_update(attr: &LinuxMountAttr) -> Result<(MountFlags, MountFla
     Ok((flags, mask))
 }
 
+fn tmpfs_root_mode_from_mount_data(data: Option<&str>) -> Result<Option<u32>, SyscallError> {
+    let Some(data) = data else {
+        return Ok(None);
+    };
+
+    for option in data.split(',') {
+        let Some(value) = option.strip_prefix("mode=") else {
+            continue;
+        };
+        return Ok(Some(
+            u32::from_str_radix(value, 8).map_err(|_| SyscallError::InvalidArguments)?,
+        ));
+    }
+
+    Ok(None)
+}
+
 fn mount_setattr_target_path(
     dirfd: i32,
     path: CString,
@@ -1530,7 +1547,7 @@ define_syscall!(Mount, |source: CString,
     let source = string_from_raw_optional(source)?;
     let target = path_from_raw(target)?;
     let filesystemtype = string_from_raw_optional(filesystemtype)?;
-    let _data = string_from_raw_optional(data)?;
+    let data = string_from_raw_optional(data)?;
     let target_object = VirtualFS.lock().open(Path::new(&target))?;
     let target_path = target_object.path();
     let target_is_directory = matches!(
@@ -1610,10 +1627,14 @@ define_syscall!(Mount, |source: CString,
             return Err(SyscallError::NotADirectory);
         }
         VirtualFS.lock().resolve_dir(target_path.clone())?;
+        let root_mode = tmpfs_root_mode_from_mount_data(data.as_deref())?;
         VirtualFS
             .lock()
             .mount(target_path.clone(), TmpFs::new())
             .map_err(SyscallError::from)?;
+        if let Some(mode) = root_mode {
+            VirtualFS.lock().open(target_path)?.chmod(mode)?;
+        }
     }
     Ok(0)
 });
