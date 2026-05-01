@@ -266,6 +266,8 @@ fn request_name(request: &ConfigurateRequest) -> &'static str {
         ConfigurateRequest::DrmModeGetResources(_) => "DrmModeGetResources",
         ConfigurateRequest::DrmModeGetCrtc(_) => "DrmModeGetCrtc",
         ConfigurateRequest::DrmModeSetCrtc(_) => "DrmModeSetCrtc",
+        ConfigurateRequest::DrmModeCursor(_) => "DrmModeCursor",
+        ConfigurateRequest::DrmModeCursor2(_) => "DrmModeCursor2",
         ConfigurateRequest::DrmModeGetGamma(_) => "DrmModeGetGamma",
         ConfigurateRequest::DrmModeSetGamma(_) => "DrmModeSetGamma",
         ConfigurateRequest::DrmModeGetEncoder(_) => "DrmModeGetEncoder",

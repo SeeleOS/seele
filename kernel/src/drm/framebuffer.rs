@@ -12,7 +12,7 @@ use crate::{
 
 use super::{
     object::DRM_STATE,
-    state::{DrmState, DumbBuffer, RegisteredFramebuffer},
+    state::{CursorState, DrmState, DumbBuffer, RegisteredFramebuffer},
 };
 
 static DRM_DEBUG_SAMPLES: AtomicU32 = AtomicU32::new(0);
@@ -46,7 +46,7 @@ pub(super) fn build_framebuffer(
 }
 
 pub(super) fn scanout_framebuffer_id(fb_id: u32) -> ObjectResult<()> {
-    let (framebuffer, dumb_buffer) = {
+    let (framebuffer, dumb_buffer, cursor) = {
         let mut state = DRM_STATE.lock();
         let framebuffer = state
             .framebuffers
@@ -59,16 +59,27 @@ pub(super) fn scanout_framebuffer_id(fb_id: u32) -> ObjectResult<()> {
             .cloned()
             .ok_or(ObjectError::InvalidArguments)?;
         state.current_fb_id = Some(fb_id);
-        (framebuffer, dumb_buffer)
+        (framebuffer, dumb_buffer, state.cursor.clone())
     };
 
     if !dumb_buffer.scanout_backed {
         // TODO: This is still a legacy compatibility bridge over the Limine
         // framebuffer, not a real KMS scanout implementation.
-        blit_dumb_buffer_to_scanout(&dumb_buffer, &framebuffer)?;
+        blit_dumb_buffer_to_scanout(&dumb_buffer, &framebuffer, cursor.as_ref())?;
     }
     framebuffer_set_user_controlled(true);
     Ok(())
+}
+
+pub(super) fn refresh_current_scanout() -> ObjectResult<()> {
+    let current_fb_id = {
+        let state = DRM_STATE.lock();
+        state.current_fb_id
+    };
+    match current_fb_id {
+        Some(fb_id) => scanout_framebuffer_id(fb_id),
+        None => Ok(()),
+    }
 }
 
 pub(super) fn log_framebuffer_sample(phase: &str, fb_id: u32) -> ObjectResult<()> {
@@ -124,6 +135,7 @@ pub(super) fn log_framebuffer_sample(phase: &str, fb_id: u32) -> ObjectResult<()
 pub(super) fn blit_dumb_buffer_to_scanout(
     dumb_buffer: &DumbBuffer,
     framebuffer: &RegisteredFramebuffer,
+    cursor: Option<&CursorState>,
 ) -> ObjectResult<()> {
     let src_start = dumb_buffer
         .kernel_addr
@@ -212,7 +224,138 @@ pub(super) fn blit_dumb_buffer_to_scanout(
         }
     }
 
+    if let Some(cursor) = cursor {
+        overlay_cursor(&mut canvas, cursor)?;
+    }
+
     canvas.present_user_controlled();
+    Ok(())
+}
+
+fn overlay_cursor(
+    canvas: &mut crate::misc::framebuffer::Canvas,
+    cursor: &CursorState,
+) -> ObjectResult<()> {
+    let buffer = {
+        let state = DRM_STATE.lock();
+        state
+            .dumb_buffers
+            .get(&cursor.handle)
+            .cloned()
+            .ok_or(ObjectError::InvalidArguments)?
+    };
+    let src_bytes = usize::try_from(buffer.size).map_err(|_| ObjectError::InvalidArguments)?;
+    let src = unsafe { slice::from_raw_parts(buffer.kernel_addr as *const u8, src_bytes) };
+    let cursor_pitch = usize::try_from(cursor.width)
+        .map_err(|_| ObjectError::InvalidArguments)?
+        .checked_mul(4)
+        .ok_or(ObjectError::InvalidArguments)?;
+    let canvas_height = i32::try_from(canvas.info.height).unwrap_or(i32::MAX);
+    let canvas_width = i32::try_from(canvas.info.width).unwrap_or(i32::MAX);
+    let dst_bytes_per_pixel = canvas.info.bytes_per_pixel;
+    let dst_stride_bytes = canvas.info.stride * dst_bytes_per_pixel;
+    let pixel_format = canvas.info.pixel_format;
+    let dst = canvas.user_controlled_buffer_mut();
+    let origin_x = cursor
+        .x
+        .checked_sub(cursor.hot_x)
+        .ok_or(ObjectError::InvalidArguments)?;
+    let origin_y = cursor
+        .y
+        .checked_sub(cursor.hot_y)
+        .ok_or(ObjectError::InvalidArguments)?;
+
+    for cursor_y in 0..usize::try_from(cursor.height).map_err(|_| ObjectError::InvalidArguments)? {
+        let dst_y =
+            origin_y + i32::try_from(cursor_y).map_err(|_| ObjectError::InvalidArguments)?;
+        if dst_y < 0 || dst_y >= canvas_height {
+            continue;
+        }
+        let src_row_start = cursor_y
+            .checked_mul(cursor_pitch)
+            .ok_or(ObjectError::InvalidArguments)?;
+        let src_row_end = src_row_start
+            .checked_add(cursor_pitch)
+            .ok_or(ObjectError::InvalidArguments)?;
+        if src_row_end > src.len() {
+            return Err(ObjectError::InvalidArguments);
+        }
+        let src_row = &src[src_row_start..src_row_end];
+
+        for cursor_x in
+            0..usize::try_from(cursor.width).map_err(|_| ObjectError::InvalidArguments)?
+        {
+            let dst_x =
+                origin_x + i32::try_from(cursor_x).map_err(|_| ObjectError::InvalidArguments)?;
+            if dst_x < 0 || dst_x >= canvas_width {
+                continue;
+            }
+
+            let src_px_start = cursor_x
+                .checked_mul(4)
+                .ok_or(ObjectError::InvalidArguments)?;
+            let src_px = &src_row[src_px_start..src_px_start + 4];
+            let alpha = u16::from(src_px[3]);
+            if alpha == 0 {
+                continue;
+            }
+
+            let dst_px_start = usize::try_from(dst_y)
+                .map_err(|_| ObjectError::InvalidArguments)?
+                .checked_mul(dst_stride_bytes)
+                .and_then(|row| {
+                    usize::try_from(dst_x)
+                        .ok()
+                        .and_then(|x| x.checked_mul(dst_bytes_per_pixel))
+                        .and_then(|col| row.checked_add(col))
+                })
+                .ok_or(ObjectError::InvalidArguments)?;
+            let dst_px_end = dst_px_start
+                .checked_add(dst_bytes_per_pixel)
+                .ok_or(ObjectError::InvalidArguments)?;
+            if dst_px_end > dst.len() {
+                return Err(ObjectError::InvalidArguments);
+            }
+            let dst_px = &mut dst[dst_px_start..dst_px_end];
+
+            let src_blue = u16::from(src_px[0]);
+            let src_green = u16::from(src_px[1]);
+            let src_red = u16::from(src_px[2]);
+            let (mut dst_red, mut dst_green, mut dst_blue) = match pixel_format {
+                FramebufferPixelFormat::Rgb => (
+                    u16::from(dst_px[0]),
+                    u16::from(dst_px[1]),
+                    u16::from(dst_px[2]),
+                ),
+                FramebufferPixelFormat::Bgr => (
+                    u16::from(dst_px[2]),
+                    u16::from(dst_px[1]),
+                    u16::from(dst_px[0]),
+                ),
+            };
+
+            dst_red = ((src_red * alpha) + (dst_red * (255 - alpha))) / 255;
+            dst_green = ((src_green * alpha) + (dst_green * (255 - alpha))) / 255;
+            dst_blue = ((src_blue * alpha) + (dst_blue * (255 - alpha))) / 255;
+
+            match pixel_format {
+                FramebufferPixelFormat::Rgb => {
+                    dst_px[0] = dst_red as u8;
+                    dst_px[1] = dst_green as u8;
+                    dst_px[2] = dst_blue as u8;
+                }
+                FramebufferPixelFormat::Bgr => {
+                    dst_px[0] = dst_blue as u8;
+                    dst_px[1] = dst_green as u8;
+                    dst_px[2] = dst_red as u8;
+                }
+            }
+            if dst_bytes_per_pixel >= 4 {
+                dst_px[3] = 0xff;
+            }
+        }
+    }
+
     Ok(())
 }
 

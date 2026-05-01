@@ -18,6 +18,7 @@ pub(super) struct DrmState {
     pub(super) dumb_buffers: BTreeMap<u32, DumbBuffer>,
     pub(super) framebuffers: BTreeMap<u32, RegisteredFramebuffer>,
     pub(super) current_fb_id: Option<u32>,
+    pub(super) cursor: Option<CursorState>,
 }
 
 #[derive(Clone, Debug)]
@@ -47,6 +48,17 @@ pub(super) struct RegisteredFramebuffer {
     pub(super) handle: u32,
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct CursorState {
+    pub(super) handle: u32,
+    pub(super) width: u32,
+    pub(super) height: u32,
+    pub(super) x: i32,
+    pub(super) y: i32,
+    pub(super) hot_x: i32,
+    pub(super) hot_y: i32,
+}
+
 impl DrmState {
     pub(super) const fn new() -> Self {
         Self {
@@ -57,6 +69,7 @@ impl DrmState {
             dumb_buffers: BTreeMap::new(),
             framebuffers: BTreeMap::new(),
             current_fb_id: None,
+            cursor: None,
         }
     }
 

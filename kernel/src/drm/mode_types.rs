@@ -51,6 +51,32 @@ pub struct DrmModeCrtc {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModeCursor {
+    pub flags: u32,
+    pub crtc_id: u32,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub handle: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrmModeCursor2 {
+    pub flags: u32,
+    pub crtc_id: u32,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub handle: u32,
+    pub hot_x: i32,
+    pub hot_y: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct DrmModeGetEncoder {
     pub encoder_id: u32,
     pub encoder_type: u32,

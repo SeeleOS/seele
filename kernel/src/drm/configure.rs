@@ -1,6 +1,9 @@
 use crate::object::{config::ConfigurateRequest, error::ObjectError, misc::ObjectResult};
 
-use super::{buffer_handlers, client_handlers, display_handlers, prime, user::current_debug_process};
+use super::{
+    buffer_handlers, client_handlers, cursor_handlers, display_handlers, prime,
+    user::current_debug_process,
+};
 
 pub(super) fn handle_configure(request: ConfigurateRequest) -> ObjectResult<isize> {
     match request {
@@ -19,6 +22,8 @@ pub(super) fn handle_configure(request: ConfigurateRequest) -> ObjectResult<isiz
         }
         ConfigurateRequest::DrmModeGetCrtc(ptr) => display_handlers::handle_mode_get_crtc(ptr),
         ConfigurateRequest::DrmModeSetCrtc(ptr) => display_handlers::handle_mode_set_crtc(ptr),
+        ConfigurateRequest::DrmModeCursor(ptr) => cursor_handlers::handle_mode_cursor(ptr),
+        ConfigurateRequest::DrmModeCursor2(ptr) => cursor_handlers::handle_mode_cursor2(ptr),
         ConfigurateRequest::DrmModeGetGamma(ptr) => display_handlers::handle_mode_get_gamma(ptr),
         ConfigurateRequest::DrmModeSetGamma(ptr) => display_handlers::handle_mode_set_gamma(ptr),
         ConfigurateRequest::DrmModeGetEncoder(ptr) => {

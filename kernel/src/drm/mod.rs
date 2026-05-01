@@ -4,6 +4,7 @@ pub mod card;
 pub mod client;
 mod client_handlers;
 mod configure;
+mod cursor_handlers;
 mod display_handlers;
 mod events;
 mod framebuffer;
