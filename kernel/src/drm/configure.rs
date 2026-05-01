@@ -6,6 +6,14 @@ use super::{
 };
 
 pub(super) fn handle_configure(request: ConfigurateRequest) -> ObjectResult<isize> {
+    if let Some((pid, comm)) = current_debug_process() {
+        crate::s_println!(
+            "drm ioctl comm={} pid={} request={}",
+            comm,
+            pid,
+            request.name()
+        );
+    }
     match request {
         ConfigurateRequest::DrmVersion(ptr) => client_handlers::handle_version(ptr),
         ConfigurateRequest::DrmGetUnique(ptr) => client_handlers::handle_get_unique(ptr),

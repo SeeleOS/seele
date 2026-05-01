@@ -1,5 +1,6 @@
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
+    format,
     sync::Arc,
     vec::Vec,
 };
@@ -511,13 +512,35 @@ define_syscall!(Mmap, |addr: u64,
     let object =
         crate::object::misc::get_object_current_process(fd as u64).map_err(SyscallError::from)?;
     if let Some((pid, comm)) = current_debug_process() {
+        let file_path = object
+            .clone()
+            .as_file_like()
+            .ok()
+            .map(|file| file.path().as_string())
+            .unwrap_or_else(|| "-".into());
+        let device_backed = object
+            .clone()
+            .as_file_like()
+            .ok()
+            .is_some_and(|file| file.is_device_backed());
+        let device_debug_name = object
+            .clone()
+            .as_file_like()
+            .ok()
+            .and_then(|file| file.device_backing_object())
+            .map(|device| format!("{}", device.debug_name()))
+            .unwrap_or_else(|| "-".into());
         crate::s_println!(
-            "mmap object comm={} pid={} fd={} file_like={} mappable={}",
+            "mmap object comm={} pid={} fd={} debug={} file_like={} mappable={} path={} device_backed={} device={}",
             comm,
             pid,
             fd,
+            object.debug_name(),
             object.clone().as_file_like().is_ok(),
-            object.clone().as_mappable().is_ok()
+            object.clone().as_mappable().is_ok(),
+            file_path,
+            device_backed,
+            device_debug_name
         );
     }
     if let Ok(file) = object.clone().as_file_like()
