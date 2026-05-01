@@ -328,7 +328,7 @@ impl TerminalInputModeGuard {
 
         let mut raw = original;
         raw.c_iflag &= !(libc::BRKINT | libc::ICRNL | libc::INPCK | libc::ISTRIP | libc::IXON);
-        raw.c_lflag &= !(libc::ICANON | libc::ECHO | libc::IEXTEN);
+        raw.c_lflag &= !(libc::ICANON | libc::ECHO | libc::IEXTEN | libc::ISIG);
         raw.c_cc[libc::VMIN] = 1;
         raw.c_cc[libc::VTIME] = 0;
 
