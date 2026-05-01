@@ -45,6 +45,8 @@ export DESKTOP_SESSION=plasma
 export KDE_FULL_SESSION=true
 export QT_QPA_PLATFORM=wayland
 export SDL_VIDEODRIVER=wayland
+export XDG_SESSION_ID="${XDG_SESSION_ID:-}"
+export XDG_SEAT="${XDG_SEAT:-}"
 
 unset WAYLAND_DISPLAY
 unset XAUTHORITY
@@ -53,6 +55,8 @@ if command -v systemctl >/dev/null 2>&1; then
     systemctl --user import-environment \
         DBUS_SESSION_BUS_ADDRESS \
         XDG_RUNTIME_DIR \
+        XDG_SESSION_ID \
+        XDG_SEAT \
         XDG_SESSION_TYPE \
         XDG_SESSION_DESKTOP \
         XDG_CURRENT_DESKTOP \
@@ -67,6 +71,8 @@ if command -v dbus-update-activation-environment >/dev/null 2>&1; then
     dbus-update-activation-environment --systemd \
         DBUS_SESSION_BUS_ADDRESS \
         XDG_RUNTIME_DIR \
+        XDG_SESSION_ID \
+        XDG_SEAT \
         XDG_SESSION_TYPE \
         XDG_SESSION_DESKTOP \
         XDG_CURRENT_DESKTOP \
