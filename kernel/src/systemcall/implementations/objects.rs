@@ -545,9 +545,22 @@ define_syscall!(Flock, |object: ObjectRef, operation: i32| {
     flock_lock(&object, operation)
 });
 
-define_syscall!(Fsync, |_object: ObjectRef| { Ok(0) });
+fn flush_process_file_mappings() -> SyscallResult {
+    get_current_process()
+        .lock()
+        .addrspace
+        .flush_all_file_mappings()
+        .map_err(SyscallError::from)?;
+    Ok(0)
+}
 
-define_syscall!(Fdatasync, |_object: ObjectRef| { Ok(0) });
+define_syscall!(Fsync, |_object: ObjectRef| {
+    flush_process_file_mappings()
+});
+
+define_syscall!(Fdatasync, |_object: ObjectRef| {
+    flush_process_file_mappings()
+});
 
 define_syscall!(Fadvise64, |_object: ObjectRef,
                             _offset: i64,

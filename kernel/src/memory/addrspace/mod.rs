@@ -7,6 +7,7 @@ use x86_64::{
 };
 
 use crate::{
+    filesystem::page_cache::FileCacheKey,
     memory::{
         addrspace::{
             cow::decrease_ref,
@@ -16,6 +17,7 @@ use crate::{
         page_table_wrapper::PageTableWrapped,
         paging::FRAME_ALLOCATOR,
         protection::Protection,
+        utils::apply_offset,
     },
     misc::{others::protection_to_page_flags, stack_builder::StackBuilder},
 };
@@ -31,7 +33,7 @@ pub mod user;
 
 pub const LAZY_MAP: bool = true;
 
-const USER_MEM_START: u64 = 0x0000_0000_c000_0000;
+pub const USER_MEM_START: u64 = 0x0000_0000_c000_0000;
 pub const KERNEL_MEM_START: u64 = 0xFFFF_9000_1000_0000;
 
 static KERNEL_MEM: AtomicU64 = AtomicU64::new(KERNEL_MEM_START);
@@ -59,16 +61,116 @@ impl Default for AddrSpace {
 }
 
 impl AddrSpace {
+    fn write_back_area_range(
+        &mut self,
+        area: &MemoryArea,
+        start: VirtAddr,
+        end: VirtAddr,
+    ) -> Result<(), crate::filesystem::errors::FSError> {
+        let Data::File {
+            offset,
+            file_bytes,
+            file,
+            shared,
+        } = &area.data
+        else {
+            return Ok(());
+        };
+        if !shared {
+            return Ok(());
+        }
+
+        let write_start = core::cmp::max(start, area.start);
+        let write_end = core::cmp::min(end, area.end);
+        if write_start >= write_end {
+            return Ok(());
+        }
+
+        let mapping_identity = file.mapping_identity();
+        let first_page = Page::<Size4KiB>::containing_address(write_start);
+        let last_page = Page::<Size4KiB>::containing_address(write_end - 1u64);
+
+        for page in Page::<Size4KiB>::range_inclusive(first_page, last_page) {
+            let page_addr = page.start_address();
+            let Some(phys) = self.translate_addr(page_addr) else {
+                continue;
+            };
+
+            let page_offset = page_addr.as_u64() - area.start.as_u64();
+            if page_offset >= *file_bytes {
+                continue;
+            }
+
+            let write_len = core::cmp::min(4096, (*file_bytes - page_offset) as usize);
+            let src = unsafe {
+                core::slice::from_raw_parts(apply_offset(phys.as_u64()) as *const u8, write_len)
+            };
+            file.write_exact_at(src, *offset + page_offset)?;
+
+            if let Some(key) = mapping_identity {
+                let page_key = FileCacheKey {
+                    device_id: key.device_id,
+                    inode: key.inode,
+                };
+                crate::filesystem::page_cache::invalidate_file(page_key);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn flush_file_mappings(
+        &mut self,
+        start: VirtAddr,
+        len: u64,
+    ) -> Result<(), crate::filesystem::errors::FSError> {
+        if len == 0 {
+            return Ok(());
+        }
+
+        let end = start + len;
+        let areas = self
+            .memory_areas
+            .iter()
+            .filter(|area| area.start < end && area.end > start)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for area in &areas {
+            self.write_back_area_range(area, start, end)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn flush_all_file_mappings(&mut self) -> Result<(), crate::filesystem::errors::FSError> {
+        let areas = self
+            .memory_areas
+            .iter()
+            .filter(|area| area.is_user())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for area in &areas {
+            self.write_back_area_range(area, area.start, area.end)?;
+        }
+
+        Ok(())
+    }
+
     pub fn load(&mut self) {
         self.page_table.load();
     }
 
     pub fn clean(&mut self) {
         log::debug!("addrspace: clean");
-        for area in &self.memory_areas {
+        let areas = self.memory_areas.clone();
+        for area in &areas {
             if !area.is_user() {
                 continue;
             }
+
+            let _ = self.write_back_area_range(area, area.start, area.end);
 
             for page in area.page_range() {
                 if let Ok((frame, flush)) = self.page_table.inner.unmap(page) {

@@ -6,8 +6,8 @@ use alloc::{
 use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
 use spin::Mutex;
-use x86_64::{VirtAddr, registers::model_specific::FsBase};
 use x86_64::structures::paging::{PageSize, Size4KiB};
+use x86_64::{VirtAddr, registers::model_specific::FsBase};
 
 use crate::{
     define_syscall,
@@ -73,6 +73,15 @@ bitflags! {
         const MAYMOVE = 0x1;
         const FIXED = 0x2;
         const DONTUNMAP = 0x4;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) struct MsyncFlags: i32 {
+        const ASYNC = 0x1;
+        const INVALIDATE = 0x2;
+        const SYNC = 0x4;
     }
 }
 
@@ -387,6 +396,28 @@ define_syscall!(Mmap, |addr: u64,
 
 define_syscall!(Munmap, |addr: VirtAddr, len: u64| {
     get_current_process().lock().addrspace.unmap(addr, len);
+    Ok(0)
+});
+
+define_syscall!(Msync, |addr: VirtAddr, len: u64, flags: MsyncFlags| {
+    if !addr.is_aligned(Size4KiB::SIZE) {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if len == 0 {
+        return Ok(0);
+    }
+    if flags.contains(MsyncFlags::INVALIDATE) {
+        return Err(SyscallError::OperationNotSupported);
+    }
+    if flags.contains(MsyncFlags::ASYNC) && flags.contains(MsyncFlags::SYNC) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    get_current_process()
+        .lock()
+        .addrspace
+        .flush_file_mappings(addr, len)
+        .map_err(SyscallError::from)?;
     Ok(0)
 });
 

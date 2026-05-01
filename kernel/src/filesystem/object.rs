@@ -191,6 +191,31 @@ impl OpenedFileObject {
         Ok(read)
     }
 
+    pub fn write_at(&self, buf: &[u8], offset: u64) -> FSResult<usize> {
+        self.invalidate_page_cache();
+        let file = self.resolve_file()?;
+        let mut file = file.lock();
+        let current = file.seek(0, Whence::Current)? as i64;
+        file.seek(offset as i64, Whence::Start)?;
+
+        let mut written = 0usize;
+        while written < buf.len() {
+            let count = file.write(&buf[written..])?;
+            if count == 0 {
+                let _ = file.seek(current, Whence::Start);
+                return Err(FSError::Other);
+            }
+            written += count;
+        }
+
+        let _ = file.seek(current, Whence::Start);
+        Ok(written)
+    }
+
+    pub fn write_exact_at(&self, buf: &[u8], offset: u64) -> FSResult<usize> {
+        self.write_at(buf, offset)
+    }
+
     pub fn chmod(&self, mode: u32) -> FSResult<()> {
         if self.device_object().is_some() {
             let _ = mode;
@@ -287,13 +312,20 @@ impl OpenedFileObject {
         })
     }
 
+    pub(crate) fn mapping_identity(&self) -> Option<FileCacheKey> {
+        self.page_cache_file_key()
+    }
+
     fn page_cache_file(&self) -> Option<(WrappedFile, FileCacheIdentity)> {
         let key = self.page_cache_file_key()?;
         let OpenBackend::RegularFile(file) = &self.backend else {
             return None;
         };
         let size = file.lock().info().ok()?.size;
-        Some((file.clone(), FileCacheIdentity::new(key.device_id, key.inode, size)))
+        Some((
+            file.clone(),
+            FileCacheIdentity::new(key.device_id, key.inode, size),
+        ))
     }
 
     fn invalidate_page_cache(&self) {

@@ -44,6 +44,8 @@ impl AddrSpace {
             return;
         }
 
+        let _ = self.flush_file_mappings(start, len);
+
         let end = start + len;
         let last_mapped_addr = end - 1u64;
 

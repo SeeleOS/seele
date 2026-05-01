@@ -13,6 +13,7 @@ pub enum SyscallNumber {
     Mmap = 9,
     Mprotect = 10,
     Munmap = 11,
+    Msync = 26,
     Brk = 12,
     RtSigaction = 13,
     RtSigprocmask = 14,
