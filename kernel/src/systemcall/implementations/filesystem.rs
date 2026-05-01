@@ -942,6 +942,13 @@ define_syscall!(OpenAt, |dirfd: i32,
         if directory_only && !matches!(info.file_like_type, FileLikeType::Directory) {
             return Err(SyscallError::NotADirectory);
         }
+        if flags.contains(OpenFlags::TRUNC) && !path_only {
+            match info.file_like_type {
+                FileLikeType::File => object.clone().as_file_like()?.truncate(0)?,
+                FileLikeType::Directory => return Err(SyscallError::IsADirectory),
+                FileLikeType::Symlink => {}
+            }
+        }
         let mut file_flags = FileFlags::empty();
         if flags.contains(OpenFlags::APPEND) {
             file_flags.insert(FileFlags::APPEND);
