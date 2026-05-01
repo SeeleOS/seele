@@ -18,6 +18,7 @@ use super::{
 
 static DRM_DEBUG_SAMPLES: AtomicU32 = AtomicU32::new(0);
 static LAST_LEGACY_SCANOUT_REFRESH_NS: AtomicU32 = AtomicU32::new(0);
+static LEGACY_REFRESH_DEBUG_SAMPLES: AtomicU32 = AtomicU32::new(0);
 
 pub(super) fn build_framebuffer(
     state: &DrmState,
@@ -110,6 +111,19 @@ pub(crate) fn refresh_legacy_scanout_tick() {
     }
 
     LAST_LEGACY_SCANOUT_REFRESH_NS.store(now_ms, Ordering::Relaxed);
+    if LEGACY_REFRESH_DEBUG_SAMPLES.fetch_add(1, Ordering::Relaxed) < 16 {
+        let _ = refresh_current_scanout().and_then(|()| {
+            let current_fb_id = {
+                let state = DRM_STATE.lock();
+                state.current_fb_id
+            };
+            if let Some(fb_id) = current_fb_id {
+                log_framebuffer_sample("legacy-refresh", fb_id)?;
+            }
+            Ok(())
+        });
+        return;
+    }
     let _ = refresh_current_scanout();
 }
 
