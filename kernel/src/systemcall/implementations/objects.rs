@@ -372,6 +372,20 @@ fn pwrite_object_in_chunks(
         return Ok(0);
     }
 
+    if let Ok(file) = object.clone().as_file_like() {
+        let mut total = 0usize;
+        while total < len {
+            let chunk_len = (len - total).min(LINEAR_IO_CHUNK_SIZE);
+            let bytes = user_safe::read_buffer(unsafe { buf_ptr.add(total) }, chunk_len)?;
+            let written = file.write_at(&bytes, offset as u64 + total as u64)?;
+            total += written;
+            if written < chunk_len {
+                break;
+            }
+        }
+        return Ok(total);
+    }
+
     let seekable = object.clone().as_seekable()?;
     let writable = object.clone().as_writable()?;
     let current = seekable.clone().seek(0, Whence::Current)? as i64;
