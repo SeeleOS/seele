@@ -1653,6 +1653,10 @@ define_syscall!(Mount, |source: CString,
         let options = parse_fuse_mount_options(data.as_deref())?;
         let fd = options.fd.ok_or(SyscallError::InvalidArguments)?;
         let fuse_device = get_object_current_process(fd)?
+            .as_file_like()
+            .ok()
+            .and_then(|file| file.device_backing_object())
+            .ok_or(SyscallError::InvalidArguments)?
             .as_fuse_device()
             .map_err(|_| SyscallError::InvalidArguments)?;
 
