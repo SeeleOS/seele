@@ -9,7 +9,7 @@ use crate::{
         vfs_traits::FileLikeType,
     },
     impl_cast_function, impl_cast_function_non_trait,
-    object::{Object, traits::Statable},
+    object::{FileFlags, Object, misc::ObjectResult, open_state::OpenState, traits::Statable},
 };
 
 const PROC_NET_INIT_INO: u64 = 0xEFFF_FFF9;
@@ -21,6 +21,7 @@ static NEXT_DYNAMIC_NET_NAMESPACE_INO: AtomicU64 =
 lazy_static! {
     static ref INIT_NET_NAMESPACE: Arc<NetNamespace> = Arc::new(NetNamespace {
         inode: PROC_NET_INIT_INO,
+        open_state: OpenState::default(),
     });
 }
 
@@ -29,6 +30,7 @@ pub type NetNamespaceRef = Arc<NetNamespace>;
 #[derive(Debug)]
 pub struct NetNamespace {
     inode: u64,
+    open_state: OpenState,
 }
 
 impl NetNamespace {
@@ -39,6 +41,7 @@ impl NetNamespace {
     pub fn new() -> NetNamespaceRef {
         Arc::new(Self {
             inode: NEXT_DYNAMIC_NET_NAMESPACE_INO.fetch_add(1, Ordering::Relaxed),
+            open_state: OpenState::default(),
         })
     }
 
@@ -61,6 +64,15 @@ impl Statable for NetNamespace {
 }
 
 impl Object for NetNamespace {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(self.open_state.get_flags())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        self.open_state.set_flags(flags);
+        Ok(())
+    }
+
     impl_cast_function!("statable", Statable);
     impl_cast_function_non_trait!("net_namespace", NetNamespace);
 }

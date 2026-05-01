@@ -15,9 +15,10 @@ use crate::{
     impl_cast_function, impl_cast_function_non_trait,
     memory::{addrspace::mem_area::Data, protection::Protection, user_safe},
     object::{
-        Object,
+        FileFlags, Object,
         error::ObjectError,
         misc::{ObjectRef, ObjectResult, get_object_current_process},
+        open_state::OpenState,
         traits::{MemoryMappable, Statable},
     },
     process::{FdFlags, manager::get_current_process, misc::with_current_process},
@@ -39,6 +40,7 @@ bitflags! {
 pub struct DrmPrimeBufferObject {
     buffer: DumbBuffer,
     inode: u64,
+    open_state: OpenState,
 }
 
 impl DrmPrimeBufferObject {
@@ -46,6 +48,7 @@ impl DrmPrimeBufferObject {
         Self {
             buffer,
             inode: NEXT_PRIME_INODE.fetch_add(1, Ordering::Relaxed),
+            open_state: OpenState::default(),
         }
     }
 
@@ -55,6 +58,15 @@ impl DrmPrimeBufferObject {
 }
 
 impl Object for DrmPrimeBufferObject {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(self.open_state.get_flags())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        self.open_state.set_flags(flags);
+        Ok(())
+    }
+
     impl_cast_function!("mappable", MemoryMappable);
     impl_cast_function!("statable", Statable);
     impl_cast_function_non_trait!("drm_prime_buffer", DrmPrimeBufferObject);

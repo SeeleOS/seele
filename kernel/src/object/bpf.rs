@@ -4,7 +4,7 @@ use spin::Mutex;
 
 use crate::{
     impl_cast_function_non_trait,
-    object::Object,
+    object::{FileFlags, Object, misc::ObjectResult, open_state::OpenState},
     systemcall::utils::{SyscallError, SyscallResult},
 };
 
@@ -33,12 +33,14 @@ struct BpfMapState {
 #[derive(Debug)]
 pub struct BpfObject {
     kind: BpfObjectKind,
+    open_state: OpenState,
 }
 
 impl BpfObject {
     pub fn new_program(prog_type: u32) -> Arc<Self> {
         Arc::new(Self {
             kind: BpfObjectKind::Program(BpfProgramState { prog_type }),
+            open_state: OpenState::default(),
         })
     }
 
@@ -51,6 +53,7 @@ impl BpfObject {
                 max_entries: max_entries as usize,
                 entries: Mutex::new(BTreeMap::new()),
             }),
+            open_state: OpenState::default(),
         })
     }
 
@@ -148,6 +151,15 @@ impl BpfMapState {
 impl Object for BpfObject {
     fn debug_name(&self) -> &'static str {
         "bpf"
+    }
+
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(self.open_state.get_flags())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        self.open_state.set_flags(flags);
+        Ok(())
     }
 
     impl_cast_function_non_trait!("bpf", BpfObject);

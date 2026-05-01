@@ -7,12 +7,14 @@ use x86_64::instructions::interrupts::without_interrupts;
 use crate::{
     impl_cast_function,
     object::{
-        Object,
+        FileFlags, Object,
         config::{LinuxTermios2, LinuxWinsize},
         misc::ObjectResult,
+        open_state::OpenState,
         traits::{Configuratable, Writable},
     },
-    s_print, terminal::term_trait::AbstractTerminal,
+    s_print,
+    terminal::term_trait::AbstractTerminal,
 };
 
 use super::linux_kd::LinuxConsoleState;
@@ -23,6 +25,7 @@ pub struct TerminalObject {
     pub termios: Mutex<LinuxTermios2>,
     pub winsize: Mutex<LinuxWinsize>,
     pub linux_console: Arc<Mutex<LinuxConsoleState>>,
+    open_state: OpenState,
 }
 
 impl TerminalObject {
@@ -36,6 +39,7 @@ impl TerminalObject {
             )),
             inner: term,
             linux_console: Arc::new(Mutex::new(LinuxConsoleState::default())),
+            open_state: OpenState::default(),
         }
     }
 
@@ -83,6 +87,15 @@ fn filter_terminal_output(text: &str) -> String {
     output
 }
 impl Object for TerminalObject {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(self.open_state.get_flags())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        self.open_state.set_flags(flags);
+        Ok(())
+    }
+
     impl_cast_function!("configuratable", Configuratable);
     impl_cast_function!("writable", Writable);
 }

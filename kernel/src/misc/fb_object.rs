@@ -15,19 +15,31 @@ use crate::{
         },
     },
     object::{
-        Object,
+        FileFlags, Object,
         config::ConfigurateRequest,
         error::ObjectError,
         misc::ObjectResult,
+        open_state::OpenState,
         traits::{Configuratable, MemoryMappable},
     },
     process::misc::with_current_process,
 };
 
-#[derive(Default, Debug)]
-pub struct FramebufferObject;
+#[derive(Debug, Default)]
+pub struct FramebufferObject {
+    open_state: OpenState,
+}
 
 impl Object for FramebufferObject {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(self.open_state.get_flags())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        self.open_state.set_flags(flags);
+        Ok(())
+    }
+
     impl_cast_function!("configuratable", Configuratable);
     impl_cast_function!("mappable", MemoryMappable);
 }

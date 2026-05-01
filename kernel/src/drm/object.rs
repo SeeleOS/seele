@@ -12,6 +12,7 @@ use crate::{
         FileFlags, Object,
         config::ConfigurateRequest,
         misc::ObjectResult,
+        open_state::OpenState,
         queue_helpers::read_or_block_with_flags,
         traits::{Configuratable, MemoryMappable, Readable, Statable},
     },
@@ -29,10 +30,21 @@ lazy_static! {
 
 pub(super) const DRM_BUFFER_OFFSET_BASE: u64 = 0x1000_0000;
 
-#[derive(Default, Debug)]
-pub struct DrmCardObject;
+#[derive(Debug, Default)]
+pub struct DrmCardObject {
+    open_state: OpenState,
+}
 
 impl Object for DrmCardObject {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(self.open_state.get_flags())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        self.open_state.set_flags(flags);
+        Ok(())
+    }
+
     impl_cast_function!("configuratable", Configuratable);
     impl_cast_function!("mappable", MemoryMappable);
     impl_cast_function!("pollable", Pollable);

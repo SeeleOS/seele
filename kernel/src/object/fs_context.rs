@@ -159,6 +159,10 @@ impl Object for FsContextObject {
         Ok(FileFlags::empty())
     }
 
+    fn set_flags(self: Arc<Self>, _flags: FileFlags) -> ObjectResult<()> {
+        Ok(())
+    }
+
     impl_cast_function!("statable", Statable);
     impl_cast_function_non_trait!("fs_context", FsContextObject);
 }

@@ -22,7 +22,7 @@ lazy_static::lazy_static! {
     pub static ref DEVICES: BTreeMap<&'static str,ObjectRef> = {
         let mut devices = BTreeMap::new();
 
-        devices.insert("framebuffer", Arc::new(FramebufferObject) as ObjectRef);
+        devices.insert("framebuffer", Arc::new(FramebufferObject::default()) as ObjectRef);
         devices.insert("devnull", Arc::new(DevNull) as ObjectRef);
         devices.insert("random", Arc::new(DevRandom) as ObjectRef);
         devices.insert("urandom", Arc::new(DevRandom) as ObjectRef);
@@ -33,7 +33,7 @@ lazy_static::lazy_static! {
         devices.insert("tty0", get_default_tty() as ObjectRef);
         devices.insert("tty1", get_default_tty() as ObjectRef);
         devices.insert("ps2mouse", Arc::new(PS2MouseObject::default()) as ObjectRef);
-        devices.insert("drm-card0", Arc::new(DrmCardObject) as ObjectRef);
+        devices.insert("drm-card0", Arc::new(DrmCardObject::default()) as ObjectRef);
 
         devices
     };

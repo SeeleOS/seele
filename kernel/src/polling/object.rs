@@ -6,7 +6,7 @@ use spin::Mutex;
 
 use crate::{
     impl_cast_function, impl_cast_function_non_trait,
-    object::{Object, misc::ObjectRef},
+    object::{FileFlags, Object, misc::ObjectRef, open_state::OpenState},
     polling::{PollerEntry, PollerReadyEvent, event::PollableEvent},
 };
 
@@ -16,6 +16,7 @@ pub struct PollerObject {
     pub entries: Mutex<Vec<PollerEntry>>,
     // Events collected for the next poller_wait call.
     pub woken_events: Mutex<Vec<PollerReadyEvent>>,
+    open_state: OpenState,
     self_ref: Mutex<Option<Weak<PollerObject>>>,
 }
 
@@ -24,6 +25,7 @@ impl PollerObject {
         let poller = Arc::new(Self {
             entries: Mutex::new(Vec::new()),
             woken_events: Mutex::new(Vec::new()),
+            open_state: OpenState::default(),
             self_ref: Mutex::new(None),
         });
         *poller.self_ref.lock() = Some(Arc::downgrade(&poller));
@@ -50,6 +52,15 @@ impl Pollable for PollerObject {
 }
 
 impl Object for PollerObject {
+    fn get_flags(self: Arc<Self>) -> crate::object::misc::ObjectResult<FileFlags> {
+        Ok(self.open_state.get_flags())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> crate::object::misc::ObjectResult<()> {
+        self.open_state.set_flags(flags);
+        Ok(())
+    }
+
     impl_cast_function!("pollable", Pollable);
     impl_cast_function_non_trait!("poller", PollerObject);
 }
