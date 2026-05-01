@@ -3,7 +3,10 @@ mod mouse;
 
 use alloc::{format, vec::Vec};
 
-use crate::drm::fs::{SYS_CLASS_DRM_NODE, SYS_DEV_CHAR_226_0_NODE, SYS_DEVICES_PLATFORM_DRM_NODE};
+use crate::drm::fs::{
+    SYS_CLASS_DRM_NODE, SYS_DEV_CHAR_226_0_NODE, SYS_DEV_CHAR_226_128_NODE,
+    SYS_DEVICES_PLATFORM_DRM_NODE,
+};
 use crate::filesystem::{
     errors::FSError,
     path::Path,
@@ -347,6 +350,10 @@ static SYS_DEV_CHAR_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "226:0",
         node: &SYS_DEV_CHAR_226_0_NODE,
+    },
+    StaticDirEntry {
+        name: "226:128",
+        node: &SYS_DEV_CHAR_226_128_NODE,
     },
     StaticDirEntry {
         name: "13:64",

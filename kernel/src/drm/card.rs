@@ -8,3 +8,5 @@ pub const PLANE_TYPE_PROP_ID: u32 = 0x1100;
 pub const CARD0_MAJOR: u64 = 226;
 pub const CARD0_MINOR: u64 = 0;
 pub const CARD0_RDEV: u64 = (CARD0_MAJOR << 8) | CARD0_MINOR;
+pub const RENDERD128_MINOR: u64 = 128;
+pub const RENDERD128_RDEV: u64 = (CARD0_MAJOR << 8) | RENDERD128_MINOR;
