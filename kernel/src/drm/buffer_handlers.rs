@@ -17,7 +17,7 @@ use super::{
     events::queue_page_flip_event,
     framebuffer::{build_framebuffer, log_framebuffer_sample, scanout_framebuffer_id},
     object::DRM_STATE,
-    user::read_user,
+    user::{current_debug_process, read_user},
 };
 
 pub(super) fn handle_mode_add_fb(
@@ -44,6 +44,20 @@ pub(super) fn handle_mode_add_fb(
     registered.fb_id = fb_id;
     state.register_framebuffer(registered);
     fb.fb_id = fb_id;
+    if let Some((pid, comm)) = current_debug_process() {
+        crate::s_println!(
+            "drm addfb comm={} pid={} handle={} size={}x{} pitch={} bpp={} depth={} fb_id={}",
+            comm,
+            pid,
+            fb.handle,
+            fb.width,
+            fb.height,
+            fb.pitch,
+            fb.bpp,
+            fb.depth,
+            fb.fb_id
+        );
+    }
     user_safe::write(ptr, &fb).map_err(|_| ObjectError::InvalidArguments)?;
     Ok(0)
 }
@@ -82,6 +96,20 @@ pub(super) fn handle_mode_add_fb2(ptr: *mut DrmModeFbCmd2) -> ObjectResult<isize
     registered.fb_id = fb_id;
     state.register_framebuffer(registered);
     fb.fb_id = fb_id;
+    if let Some((pid, comm)) = current_debug_process() {
+        crate::s_println!(
+            "drm addfb2 comm={} pid={} handle={} size={}x{} pitch={} format={:#x} flags={:#x} fb_id={}",
+            comm,
+            pid,
+            fb.handles[0],
+            fb.width,
+            fb.height,
+            fb.pitches[0],
+            fb.pixel_format,
+            fb.flags,
+            fb.fb_id
+        );
+    }
     user_safe::write(ptr, &fb).map_err(|_| ObjectError::InvalidArguments)?;
     Ok(0)
 }
@@ -100,6 +128,17 @@ pub(super) fn handle_mode_page_flip(
     ptr: *mut crate::drm::mode_types::DrmModeCrtcPageFlip,
 ) -> ObjectResult<isize> {
     let flip = read_user(ptr)?;
+    if let Some((pid, comm)) = current_debug_process() {
+        crate::s_println!(
+            "drm page_flip comm={} pid={} crtc_id={} fb_id={} flags={:#x} user_data={:#x}",
+            comm,
+            pid,
+            flip.crtc_id,
+            flip.fb_id,
+            flip.flags,
+            flip.user_data
+        );
+    }
     if flip.crtc_id != CRTC0_ID || flip.reserved != 0 {
         return Err(ObjectError::InvalidArguments);
     }

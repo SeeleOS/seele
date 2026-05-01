@@ -99,9 +99,7 @@ pub fn log_unsupported_syscall_result(syscall_no: isize, args: [u64; 6], err: Sy
     });
 }
 
-fn should_trace_syscall(syscall_no: isize, comm: &str) -> bool {
-    let _ = syscall_no;
-    let _ = comm;
+fn should_trace_syscall(_syscall_no: isize, _comm: &str) -> bool {
     false
 }
 

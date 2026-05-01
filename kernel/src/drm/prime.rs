@@ -24,7 +24,12 @@ use crate::{
     process::{FdFlags, manager::get_current_process, misc::with_current_process},
 };
 
-use super::{client::DrmPrimeHandle, object::DRM_STATE, state::DumbBuffer, user::read_user};
+use super::{
+    client::DrmPrimeHandle,
+    object::DRM_STATE,
+    state::DumbBuffer,
+    user::{current_debug_process, read_user},
+};
 
 static NEXT_PRIME_INODE: AtomicU64 = AtomicU64::new(1);
 
@@ -152,6 +157,16 @@ pub(super) fn handle_prime_handle_to_fd(ptr: *mut DrmPrimeHandle) -> ObjectResul
         .lock()
         .push_object_with_flags(object, fd_flags);
     request.fd = i32::try_from(fd).map_err(|_| ObjectError::Other)?;
+    if let Some((pid, comm)) = current_debug_process() {
+        crate::s_println!(
+            "drm prime_handle_to_fd comm={} pid={} handle={} flags={:#x} fd={}",
+            comm,
+            pid,
+            request.handle,
+            request.flags,
+            request.fd
+        );
+    }
     user_safe::write(ptr, &request).map_err(|_| ObjectError::InvalidArguments)?;
     Ok(0)
 }
@@ -170,6 +185,15 @@ pub(super) fn handle_prime_fd_to_handle(ptr: *mut DrmPrimeHandle) -> ObjectResul
     request.handle = DRM_STATE
         .lock()
         .import_prime_buffer(prime.exported_buffer())?;
+    if let Some((pid, comm)) = current_debug_process() {
+        crate::s_println!(
+            "drm prime_fd_to_handle comm={} pid={} fd={} handle={}",
+            comm,
+            pid,
+            request.fd,
+            request.handle
+        );
+    }
     user_safe::write(ptr, &request).map_err(|_| ObjectError::InvalidArguments)?;
     Ok(0)
 }

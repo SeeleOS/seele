@@ -22,8 +22,8 @@ use super::{
     framebuffer,
     object::DRM_STATE,
     user::{
-        copy_property_name, make_property_enum, maybe_write_struct_slice, maybe_write_u16_slice,
-        maybe_write_u32_slice, maybe_write_u64_slice, read_user,
+        copy_property_name, current_debug_process, make_property_enum, maybe_write_struct_slice,
+        maybe_write_u16_slice, maybe_write_u32_slice, maybe_write_u64_slice, read_user,
     },
 };
 
@@ -81,6 +81,17 @@ pub(super) fn handle_mode_set_crtc(
     ptr: *mut crate::drm::mode_types::DrmModeCrtc,
 ) -> ObjectResult<isize> {
     let mut crtc = read_user(ptr)?;
+    if let Some((pid, comm)) = current_debug_process() {
+        crate::s_println!(
+            "drm setcrtc comm={} pid={} crtc_id={} fb_id={} connectors={} mode_valid={}",
+            comm,
+            pid,
+            crtc.crtc_id,
+            crtc.fb_id,
+            crtc.count_connectors,
+            crtc.mode_valid
+        );
+    }
     if crtc.crtc_id != 0 && crtc.crtc_id != CRTC0_ID {
         return Err(ObjectError::InvalidArguments);
     }

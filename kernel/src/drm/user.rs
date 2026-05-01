@@ -1,3 +1,5 @@
+use alloc::string::String;
+
 use crate::{
     drm::mode_types::DrmModePropertyEnum,
     memory::{addrspace::AddrSpace, user_safe},
@@ -81,4 +83,23 @@ pub(super) fn make_property_enum(value: u64, name: &str) -> DrmModePropertyEnum 
     };
     copy_property_name(&mut item.name, name);
     item
+}
+
+pub(super) fn current_debug_process() -> Option<(u64, String)> {
+    with_current_process(|process| {
+        let comm = process
+            .command_line
+            .first()
+            .and_then(|command| command.rsplit('/').next())
+            .unwrap_or("?");
+        matches!(
+            comm,
+            "startplasma-wayland"
+                | "kwin_wayland_wrapper"
+                | "kwin_wayland"
+                | "ksplashqml"
+                | "plasmashell"
+        )
+        .then(|| (process.pid.0, comm.into()))
+    })
 }
