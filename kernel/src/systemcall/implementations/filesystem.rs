@@ -1572,10 +1572,10 @@ define_syscall!(Mount, |source: CString,
                         filesystemtype: CString,
                         mountflags: u64,
                         data: CString| {
-    let source = string_from_raw_optional(source)?;
+    let source = string_from_raw_optional(source)?.filter(|value| !value.is_empty());
     let target = path_from_raw(target)?;
-    let filesystemtype = string_from_raw_optional(filesystemtype)?;
-    let data = string_from_raw_optional(data)?;
+    let filesystemtype = string_from_raw_optional(filesystemtype)?.filter(|value| !value.is_empty());
+    let data = string_from_raw_optional(data)?.filter(|value| !value.is_empty());
     let target_object = VirtualFS.lock().open(Path::new(&target))?;
     let target_path = target_object.path();
     let target_is_directory = matches!(
