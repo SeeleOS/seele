@@ -46,9 +46,16 @@ fn registry_key(object: &ObjectRef, event: PollableEvent) -> RegistryKey {
     }
 }
 
-fn same_poller(left: &Weak<PollerObject>, right: &Arc<PollerObject>) -> bool {
-    left.upgrade()
-        .is_some_and(|poller| Arc::ptr_eq(&poller, right))
+fn poller_key(poller: &Arc<PollerObject>) -> usize {
+    Arc::as_ptr(poller) as *const () as usize
+}
+
+fn weak_poller_key(poller: &Weak<PollerObject>) -> usize {
+    poller.as_ptr() as *const () as usize
+}
+
+fn same_poller_key(left: &Weak<PollerObject>, right_key: usize) -> bool {
+    weak_poller_key(left) == right_key
 }
 
 fn register_interest(poller: &Arc<PollerObject>, object: &ObjectRef, event: PollableEvent) {
@@ -57,8 +64,12 @@ fn register_interest(poller: &Arc<PollerObject>, object: &ObjectRef, event: Poll
         .watchers
         .entry(registry_key(object, event))
         .or_default();
+    let key = poller_key(poller);
     watchers.retain(|watcher| watcher.strong_count() > 0);
-    if !watchers.iter().any(|watcher| same_poller(watcher, poller)) {
+    if !watchers
+        .iter()
+        .any(|watcher| same_poller_key(watcher, key))
+    {
         watchers.push(Arc::downgrade(poller));
     }
 }
@@ -69,9 +80,25 @@ fn unregister_interest(poller: &Arc<PollerObject>, object: &ObjectRef, event: Po
     let Some(watchers) = registry.watchers.get_mut(&key) else {
         return;
     };
-    watchers.retain(|watcher| watcher.strong_count() > 0 && !same_poller(watcher, poller));
+    let poller_key = poller_key(poller);
+    watchers.retain(|watcher| watcher.strong_count() > 0 && !same_poller_key(watcher, poller_key));
     if watchers.is_empty() {
         registry.watchers.remove(&key);
+    }
+}
+
+pub(super) fn unregister_all_interests(poller_key: usize, entries: &[PollerEntry]) {
+    let mut registry = POLL_REGISTRY.lock();
+
+    for entry in entries {
+        let key = registry_key(&entry.object, entry.event);
+        let Some(watchers) = registry.watchers.get_mut(&key) else {
+            continue;
+        };
+        watchers.retain(|watcher| watcher.strong_count() > 0 && !same_poller_key(watcher, poller_key));
+        if watchers.is_empty() {
+            registry.watchers.remove(&key);
+        }
     }
 }
 

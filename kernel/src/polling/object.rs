@@ -7,7 +7,9 @@ use spin::Mutex;
 use crate::{
     impl_cast_function, impl_cast_function_non_trait,
     object::{FileFlags, Object, misc::ObjectRef, open_state::OpenState},
-    polling::{PollerEntry, PollerReadyEvent, event::PollableEvent},
+    polling::{
+        PollerEntry, PollerReadyEvent, event::PollableEvent, registration::unregister_all_interests,
+    },
 };
 
 #[derive(Debug)]
@@ -42,6 +44,14 @@ impl PollerObject {
 
     pub fn self_poller(&self) -> Option<Arc<Self>> {
         self.self_ref.lock().as_ref().and_then(Weak::upgrade)
+    }
+}
+
+impl Drop for PollerObject {
+    fn drop(&mut self) {
+        let poller_key = self as *const Self as usize;
+        let entries = self.entries.lock();
+        unregister_all_interests(poller_key, &entries);
     }
 }
 
