@@ -1,9 +1,14 @@
 use alloc::{
     collections::vec_deque::VecDeque,
     sync::{Arc, Weak},
+    vec,
     vec::Vec,
 };
-use core::{mem::size_of, slice};
+use core::{
+    mem::size_of,
+    slice,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use crate::{misc::time::Time, object::FileFlags};
 
@@ -29,11 +34,13 @@ struct LinuxInputEvent {
 
 pub(super) const INPUT_EVENT_SIZE: usize = size_of::<LinuxInputEvent>();
 const EVENT_QUEUE_CAPACITY: usize = 4096;
+static NEXT_EVENT_DEVICE_CLIENT_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct EventDeviceHubState {
     pub(super) key_state: [u8; KEY_BITMAP_BYTES],
     pub(super) mouse_buttons: MouseButtons,
+    pub(super) grab_owner: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -42,6 +49,7 @@ pub(super) struct EventDeviceState {
     pub(super) key_state: [u8; KEY_BITMAP_BYTES],
     pub(super) clock_id: i32,
     pub(super) mouse_buttons: MouseButtons,
+    pub(super) revoked: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -58,6 +66,7 @@ impl EventDeviceHub {
             state: spin::Mutex::new(EventDeviceHubState {
                 key_state: [0; KEY_BITMAP_BYTES],
                 mouse_buttons: MouseButtons::default(),
+                grab_owner: None,
             }),
             clients: spin::Mutex::new(Vec::new()),
         }
@@ -85,10 +94,54 @@ impl EventDeviceHub {
         strong
     }
 
+    fn active_clients(&self) -> Vec<Arc<EventDeviceClientObject>> {
+        self.live_clients()
+            .into_iter()
+            .filter(|client| !client.is_revoked())
+            .collect()
+    }
+
+    fn event_targets(&self) -> Vec<Arc<EventDeviceClientObject>> {
+        let active_clients = self.active_clients();
+        let grab_owner = self.state.lock().grab_owner;
+        match grab_owner {
+            Some(owner_id) => {
+                if let Some(client) = active_clients
+                    .iter()
+                    .find(|client| client.client_id == owner_id)
+                {
+                    vec![client.clone()]
+                } else {
+                    self.state.lock().grab_owner = None;
+                    active_clients
+                }
+            }
+            None => active_clients,
+        }
+    }
+
+    pub(super) fn grab(&self, client_id: u64) -> bool {
+        let mut state = self.state.lock();
+        match state.grab_owner {
+            Some(owner_id) if owner_id != client_id => false,
+            _ => {
+                state.grab_owner = Some(client_id);
+                true
+            }
+        }
+    }
+
+    pub(super) fn ungrab(&self, client_id: u64) {
+        let mut state = self.state.lock();
+        if state.grab_owner == Some(client_id) {
+            state.grab_owner = None;
+        }
+    }
+
     pub(crate) fn push_key_event(&self, code: u16, pressed: bool) {
         set_key_state(&mut self.state.lock().key_state, code as usize, pressed);
 
-        for client in self.live_clients() {
+        for client in self.event_targets() {
             client.push_key_event(code, pressed);
         }
     }
@@ -119,7 +172,7 @@ impl EventDeviceHub {
         }
 
         let mut changed = false;
-        for client in self.live_clients() {
+        for client in self.event_targets() {
             changed |= client.enqueue_mouse_packet(mouse_state);
         }
 
@@ -127,7 +180,7 @@ impl EventDeviceHub {
     }
 
     pub(crate) fn wake_readers(&self) {
-        for client in self.live_clients() {
+        for client in self.active_clients() {
             client.wake_readers();
         }
     }
@@ -136,6 +189,11 @@ impl EventDeviceHub {
 impl EventDeviceClientObject {
     pub(super) fn new(kind: EventDeviceKind, snapshot: EventDeviceHubState) -> Self {
         Self {
+            hub: match kind {
+                EventDeviceKind::Keyboard => Arc::downgrade(&super::object::KEYBOARD_EVENT_DEVICE),
+                EventDeviceKind::Mouse => Arc::downgrade(&super::object::MOUSE_EVENT_DEVICE),
+            },
+            client_id: NEXT_EVENT_DEVICE_CLIENT_ID.fetch_add(1, Ordering::Relaxed),
             kind,
             flags: spin::Mutex::new(FileFlags::empty()),
             state: spin::Mutex::new(EventDeviceState {
@@ -143,6 +201,7 @@ impl EventDeviceClientObject {
                 key_state: snapshot.key_state,
                 clock_id: 1,
                 mouse_buttons: snapshot.mouse_buttons,
+                revoked: false,
             }),
         }
     }
@@ -175,6 +234,9 @@ impl EventDeviceClientObject {
 
     pub(crate) fn push_key_event(self: &Arc<Self>, code: u16, pressed: bool) {
         let mut state = self.state.lock();
+        if state.revoked {
+            return;
+        }
         set_key_state(&mut state.key_state, code as usize, pressed);
         self.enqueue_input_event(&mut state.queue, ev_key(), code, pressed as i32);
         self.enqueue_input_event(&mut state.queue, ev_syn(), syn_report(), 0);
@@ -184,6 +246,9 @@ impl EventDeviceClientObject {
 
     pub(crate) fn enqueue_mouse_packet(self: &Arc<Self>, mouse_state: DecodedMousePacket) -> bool {
         let mut state = self.state.lock();
+        if state.revoked {
+            return false;
+        }
         let mut changed = false;
 
         if mouse_state.left != state.mouse_buttons.left {

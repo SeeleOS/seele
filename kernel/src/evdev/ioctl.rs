@@ -1,15 +1,11 @@
 use alloc::{vec, vec::Vec};
-use spin::Mutex;
 
 use crate::{
     memory::user_safe,
     object::{error::ObjectError, misc::ObjectResult},
 };
 
-use super::{
-    device_info::{EventDeviceKind, LinuxInputId},
-    queue::EventDeviceState,
-};
+use super::{device_info::LinuxInputId, object::EventDeviceClientObject};
 
 const EV_VERSION: i32 = 0x01_00_01;
 
@@ -24,8 +20,7 @@ const IOC_TYPESHIFT: u64 = IOC_NRSHIFT + IOC_NRBITS;
 const IOC_SIZESHIFT: u64 = IOC_TYPESHIFT + IOC_TYPEBITS;
 
 pub(super) fn handle_ioctl(
-    kind: EventDeviceKind,
-    state: &Mutex<EventDeviceState>,
+    client: &EventDeviceClientObject,
     request: u64,
     arg: u64,
 ) -> ObjectResult<isize> {
@@ -35,6 +30,7 @@ pub(super) fn handle_ioctl(
 
     let nr = ioc_nr(request);
     let size = ioc_size(request);
+    let kind = client.kind;
 
     match nr {
         0x01 => {
@@ -62,7 +58,7 @@ pub(super) fn handle_ioctl(
             write_fixed_sized_ioctl(arg, size, &props)
         }
         0x18 => {
-            let state = state.lock();
+            let state = client.state.lock();
             write_fixed_sized_ioctl(arg, size, &state.key_state)
         }
         0x19 | 0x1b => write_fixed_sized_ioctl(arg, size, &[]),
@@ -70,24 +66,58 @@ pub(super) fn handle_ioctl(
             let bits = kind.supported_event_bits((nr - 0x20) as u8);
             write_fixed_sized_ioctl(arg, size, &bits)
         }
-        0x90 | 0x91 => {
-            crate::s_println!(
-                "dangerous noop success evdev ioctl nr={:#x} kind={:?}",
-                nr,
-                kind
-            );
-            Ok(0)
-        }
+        0x90 => handle_grab_ioctl(client, arg),
+        0x91 => handle_revoke_ioctl(client, arg),
         0xa0 => {
             if arg == 0 {
                 return Err(ObjectError::InvalidArguments);
             }
             let clock_id = unsafe { *(arg as *const i32) };
-            state.lock().clock_id = clock_id;
+            client.state.lock().clock_id = clock_id;
             Ok(0)
         }
         _ => Err(ObjectError::InvalidRequest),
     }
+}
+
+fn handle_grab_ioctl(client: &EventDeviceClientObject, arg: u64) -> ObjectResult<isize> {
+    let Some(hub) = client.hub.upgrade() else {
+        return Err(ObjectError::DoesNotExist);
+    };
+
+    match arg {
+        0 => {
+            hub.ungrab(client.client_id);
+            Ok(0)
+        }
+        1 => {
+            if hub.grab(client.client_id) {
+                Ok(0)
+            } else {
+                Err(ObjectError::Busy)
+            }
+        }
+        _ => Err(ObjectError::InvalidArguments),
+    }
+}
+
+fn handle_revoke_ioctl(client: &EventDeviceClientObject, arg: u64) -> ObjectResult<isize> {
+    if arg != 0 {
+        return Err(ObjectError::InvalidArguments);
+    }
+
+    let client = client
+        .hub
+        .upgrade()
+        .and_then(|hub| {
+            hub.clients.lock().iter().find_map(|weak| {
+                weak.upgrade()
+                    .filter(|candidate| candidate.client_id == client.client_id)
+            })
+        })
+        .ok_or(ObjectError::DoesNotExist)?;
+    client.revoke();
+    Ok(0)
 }
 
 fn write_bytes_ioctl(arg: u64, size: usize, bytes: &[u8]) -> ObjectResult<isize> {

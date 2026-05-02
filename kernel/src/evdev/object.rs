@@ -13,11 +13,17 @@ use crate::{
         config::ConfigurateRequest,
         error::ObjectError,
         misc::{ObjectRef, ObjectResult},
-        queue_helpers::{copy_from_queue, read_or_block_with_flags},
+        queue_helpers::copy_from_queue,
         traits::{Configuratable, Readable, Statable},
     },
     polling::{event::PollableEvent, object::Pollable},
-    thread::{THREAD_MANAGER, yielding::WakeType},
+    process::manager::get_current_process,
+    thread::{
+        THREAD_MANAGER,
+        yielding::{
+            BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
+        },
+    },
 };
 
 use super::{
@@ -33,6 +39,8 @@ pub struct EventDeviceHub {
 }
 
 pub struct EventDeviceClientObject {
+    pub(super) hub: Weak<EventDeviceHub>,
+    pub(super) client_id: u64,
     pub(super) kind: EventDeviceKind,
     pub(super) flags: Mutex<FileFlags>,
     pub(super) state: Mutex<EventDeviceState>,
@@ -56,6 +64,38 @@ pub fn open_event_device(name: &str) -> Option<ObjectRef> {
 }
 
 impl EventDeviceClientObject {
+    fn hub(&self) -> Option<Arc<EventDeviceHub>> {
+        self.hub.upgrade()
+    }
+
+    pub(super) fn is_revoked(&self) -> bool {
+        self.state.lock().revoked
+    }
+
+    pub(super) fn revoke(self: &Arc<Self>) {
+        {
+            let mut state = self.state.lock();
+            if state.revoked {
+                return;
+            }
+            state.revoked = true;
+            state.queue.clear();
+        }
+
+        if let Some(hub) = self.hub() {
+            hub.ungrab(self.client_id);
+        }
+
+        let mut manager = THREAD_MANAGER.get().unwrap().lock();
+        match self.kind {
+            EventDeviceKind::Keyboard => manager.wake_keyboard(),
+            EventDeviceKind::Mouse => manager.wake_mouse(),
+        }
+        let object: ObjectRef = self.clone();
+        manager.wake_poller(object.clone(), PollableEvent::Error);
+        manager.wake_poller(object, PollableEvent::Closed);
+    }
+
     pub(super) fn wake_type(&self) -> WakeType {
         match self.kind {
             EventDeviceKind::Keyboard => WakeType::Keyboard,
@@ -86,6 +126,14 @@ impl fmt::Debug for EventDeviceClientObject {
     }
 }
 
+impl Drop for EventDeviceClientObject {
+    fn drop(&mut self) {
+        if let Some(hub) = self.hub() {
+            hub.ungrab(self.client_id);
+        }
+    }
+}
+
 impl Object for EventDeviceClientObject {
     fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
         Ok(*self.flags.lock())
@@ -113,24 +161,75 @@ impl Readable for EventDeviceClientObject {
         }
 
         let max_len = buffer.len() - (buffer.len() % INPUT_EVENT_SIZE);
-        read_or_block_with_flags(&mut buffer[..max_len], flags, self.wake_type(), |buffer| {
-            let mut state = self.state.lock();
-            let readable = state.queue.len() - (state.queue.len() % INPUT_EVENT_SIZE);
-            if readable == 0 {
-                None
-            } else {
-                let copy_len = buffer.len().min(readable);
-                Some(copy_from_queue(&mut state.queue, &mut buffer[..copy_len]))
+        let buffer = &mut buffer[..max_len];
+        loop {
+            let maybe_read = {
+                let mut state = self.state.lock();
+                if state.revoked {
+                    return Err(ObjectError::DeviceRevoked);
+                }
+                let readable = state.queue.len() - (state.queue.len() % INPUT_EVENT_SIZE);
+                if readable == 0 {
+                    None
+                } else {
+                    let copy_len = buffer.len().min(readable);
+                    Some(copy_from_queue(&mut state.queue, &mut buffer[..copy_len]))
+                }
+            };
+            if let Some(read) = maybe_read {
+                return Ok(read);
             }
-        })
+
+            if flags.contains(FileFlags::NONBLOCK) {
+                return Err(ObjectError::TryAgain);
+            }
+
+            if !get_current_process().lock().pending_signals.is_empty() {
+                return Err(ObjectError::Interrupted);
+            }
+
+            let current = prepare_block_current(BlockType::WakeRequired {
+                wake_type: self.wake_type(),
+                deadline: None,
+            });
+
+            let maybe_read = {
+                let mut state = self.state.lock();
+                if state.revoked {
+                    cancel_block(&current);
+                    return Err(ObjectError::DeviceRevoked);
+                }
+                let readable = state.queue.len() - (state.queue.len() % INPUT_EVENT_SIZE);
+                if readable == 0 {
+                    None
+                } else {
+                    let copy_len = buffer.len().min(readable);
+                    Some(copy_from_queue(&mut state.queue, &mut buffer[..copy_len]))
+                }
+            };
+            if let Some(read) = maybe_read {
+                cancel_block(&current);
+                return Ok(read);
+            }
+
+            finish_block_current();
+
+            if !get_current_process().lock().pending_signals.is_empty() {
+                return Err(ObjectError::Interrupted);
+            }
+        }
     }
 }
 
 impl Configuratable for EventDeviceClientObject {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
+        if self.is_revoked() {
+            return Err(ObjectError::DeviceRevoked);
+        }
+
         match request {
             ConfigurateRequest::RawIoctl { request, arg } => {
-                handle_ioctl(self.kind, &self.state, request, arg)
+                handle_ioctl(self, request, arg)
             }
             _ => Err(ObjectError::InvalidRequest),
         }
@@ -139,8 +238,12 @@ impl Configuratable for EventDeviceClientObject {
 
 impl Pollable for EventDeviceClientObject {
     fn is_event_ready(&self, event: PollableEvent) -> bool {
-        matches!(event, PollableEvent::CanBeRead)
-            && self.state.lock().queue.len() >= INPUT_EVENT_SIZE
+        let state = self.state.lock();
+        match event {
+            PollableEvent::CanBeRead => !state.revoked && state.queue.len() >= INPUT_EVENT_SIZE,
+            PollableEvent::Error | PollableEvent::Closed => state.revoked,
+            _ => false,
+        }
     }
 }
 
