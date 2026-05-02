@@ -1,12 +1,9 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{string::String, sync::Arc};
 use bitflags::bitflags;
 use spin::Mutex;
-use x86_64::{
-    PhysAddr, VirtAddr,
-    structures::paging::{PhysFrame, Size4KiB},
-};
+use x86_64::{VirtAddr, structures::paging::{PhysFrame, Size4KiB}};
 
 use crate::{
     filesystem::{
@@ -171,21 +168,16 @@ impl MemoryMappable for DrmPrimeBufferObject {
         let page_delta =
             usize::try_from(offset / 4096).map_err(|_| ObjectError::InvalidArguments)?;
         let page_count = usize::try_from(pages).map_err(|_| ObjectError::InvalidArguments)?;
-        let mut frames = Vec::with_capacity(page_count);
-        for index in 0..page_count {
-            let page_addr = self.buffer.start_frame.start_address().as_u64()
-                + ((page_delta + index) as u64 * 4096);
-            frames.push(PhysFrame::<Size4KiB>::containing_address(PhysAddr::new(
-                page_addr,
-            )));
-        }
+        let frames = Arc::<[PhysFrame<Size4KiB>]>::from(
+            self.buffer.frames[page_delta..page_delta + page_count].to_vec(),
+        );
 
         Ok(with_current_process(|process| {
             process.addrspace.allocate_user_lazy(
                 pages,
                 protection,
                 Data::Shared {
-                    frames: Arc::<[PhysFrame<Size4KiB>]>::from(frames),
+                    frames,
                     flags: self.buffer.shared_flags,
                 },
             )

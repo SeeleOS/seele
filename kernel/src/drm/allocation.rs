@@ -1,5 +1,6 @@
+use alloc::{sync::Arc, vec::Vec};
 use x86_64::{
-    VirtAddr,
+    PhysAddr, VirtAddr,
     structures::paging::{PageTableFlags, PhysFrame, Size4KiB, Translate, mapper::TranslateResult},
 };
 
@@ -38,18 +39,16 @@ impl DrmState {
             return Err(ObjectError::InvalidArguments);
         }
 
-        let (start_frame, kernel_addr, shared_flags, scanout_backed) =
-            if let Some((start_frame, kernel_addr, shared_flags)) = self
-                .try_allocate_scanout_backing(
-                    request.width,
-                    request.height,
-                    request.bpp,
-                    pitch,
-                    size,
-                    pages,
-                )
-            {
-                (start_frame, kernel_addr, shared_flags, true)
+        let (frames, kernel_addr, shared_flags, scanout_backed) =
+            if let Some((frames, kernel_addr, shared_flags)) = self.try_allocate_scanout_backing(
+                request.width,
+                request.height,
+                request.bpp,
+                pitch,
+                size,
+                pages,
+            ) {
+                (frames, kernel_addr, shared_flags, true)
             } else {
                 let start_frame = FRAME_ALLOCATOR
                     .get()
@@ -61,7 +60,18 @@ impl DrmState {
                 unsafe {
                     core::ptr::write_bytes(kernel_addr as *mut u8, 0, pages * 4096);
                 }
-                (start_frame, kernel_addr, PageTableFlags::empty(), false)
+                let mut frames = Vec::with_capacity(pages);
+                for page_index in 0..pages {
+                    let frame_addr =
+                        start_frame.start_address().as_u64() + (page_index as u64 * 4096);
+                    frames.push(PhysFrame::containing_address(PhysAddr::new(frame_addr)));
+                }
+                (
+                    Arc::<[PhysFrame<Size4KiB>]>::from(frames),
+                    kernel_addr,
+                    PageTableFlags::empty(),
+                    false,
+                )
             };
         let handle = self.next_handle;
         self.next_handle = self.next_handle.checked_add(1).ok_or(ObjectError::Other)?;
@@ -80,7 +90,7 @@ impl DrmState {
                 bpp: request.bpp,
                 size,
                 map_offset,
-                start_frame,
+                frames,
                 pages,
                 kernel_addr,
                 shared_flags,
@@ -126,7 +136,7 @@ impl DrmState {
         pitch: u32,
         size: u64,
         pages: usize,
-    ) -> Option<(PhysFrame<Size4KiB>, u64, PageTableFlags)> {
+    ) -> Option<(Arc<[PhysFrame<Size4KiB>]>, u64, PageTableFlags)> {
         if self
             .dumb_buffers
             .values()
@@ -149,6 +159,7 @@ impl DrmState {
 
         let framebuffer = FRAME_BUFFER.get().unwrap().lock();
         let fb_addr = VirtAddr::new(framebuffer.fb.as_ptr() as u64);
+        let fb_base_addr = framebuffer.fb.as_ptr() as u64;
         let mut shared_flags = PageTableFlags::NO_CACHE;
         let mapper = MAPPER.get().unwrap().lock();
         let phys = mapper.translate_addr(fb_addr)?;
@@ -162,9 +173,16 @@ impl DrmState {
             return None;
         }
 
+        let mut frames = Vec::with_capacity(pages);
+        for page_index in 0..pages {
+            let page_virt = VirtAddr::new(fb_base_addr + (page_index as u64 * 4096));
+            let page_phys = mapper.translate_addr(page_virt)?;
+            frames.push(PhysFrame::containing_address(page_phys));
+        }
+
         Some((
-            PhysFrame::containing_address(phys),
-            apply_offset(phys.as_u64()),
+            Arc::<[PhysFrame<Size4KiB>]>::from(frames),
+            fb_base_addr,
             shared_flags,
         ))
     }

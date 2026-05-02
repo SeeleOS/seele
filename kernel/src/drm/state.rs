@@ -1,9 +1,6 @@
-use alloc::collections::BTreeMap;
+use alloc::{collections::BTreeMap, sync::Arc};
 
-use x86_64::{
-    PhysAddr,
-    structures::paging::{PageTableFlags, PhysFrame, Size4KiB},
-};
+use x86_64::structures::paging::{PageTableFlags, PhysFrame, Size4KiB};
 
 use crate::object::{error::ObjectError, misc::ObjectResult};
 
@@ -28,7 +25,7 @@ pub(super) struct DumbBuffer {
     pub(super) bpp: u32,
     pub(super) size: u64,
     pub(super) map_offset: u64,
-    pub(super) start_frame: PhysFrame<Size4KiB>,
+    pub(super) frames: Arc<[PhysFrame<Size4KiB>]>,
     pub(super) pages: usize,
     pub(super) kernel_addr: u64,
     pub(super) shared_flags: PageTableFlags,
@@ -123,7 +120,7 @@ impl DrmState {
         &self,
         offset: u64,
         pages: u64,
-    ) -> ObjectResult<(usize, PhysFrame<Size4KiB>, PageTableFlags)> {
+    ) -> ObjectResult<(Arc<[PhysFrame<Size4KiB>]>, PageTableFlags)> {
         for buffer in self.dumb_buffers.values() {
             let end_offset = buffer
                 .map_offset
@@ -146,11 +143,8 @@ impl DrmState {
                 return Err(ObjectError::InvalidArguments);
             }
 
-            let start_addr =
-                buffer.start_frame.start_address().as_u64() + (page_delta as u64 * 4096);
             return Ok((
-                requested_pages,
-                PhysFrame::containing_address(PhysAddr::new(start_addr)),
+                Arc::from(&buffer.frames[page_delta..page_delta + requested_pages]),
                 buffer.shared_flags,
             ));
         }
@@ -225,7 +219,10 @@ impl DumbBuffer {
     }
 
     pub(super) fn start_frame_addr(&self) -> u64 {
-        self.start_frame.start_address().as_u64()
+        self.frames
+            .first()
+            .map(|frame| frame.start_address().as_u64())
+            .unwrap_or(0)
     }
 
     pub(super) fn contains_scanout_range(

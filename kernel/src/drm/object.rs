@@ -1,8 +1,8 @@
-use alloc::{collections::vec_deque::VecDeque, sync::Arc, vec::Vec};
+use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 
 use lazy_static::lazy_static;
 use spin::Mutex;
-use x86_64::{PhysAddr, VirtAddr, structures::paging::PhysFrame};
+use x86_64::VirtAddr;
 
 use crate::{
     filesystem::info::LinuxStat,
@@ -21,12 +21,7 @@ use crate::{
     thread::yielding::WakeType,
 };
 
-use super::{
-    card::CARD0_RDEV,
-    configure, events,
-    state::DrmState,
-    user::current_debug_process,
-};
+use super::{card::CARD0_RDEV, configure, events, state::DrmState, user::current_debug_process};
 
 lazy_static! {
     pub(super) static ref DRM_STATE: Mutex<DrmState> = Mutex::new(DrmState::new());
@@ -70,20 +65,14 @@ impl MemoryMappable for DrmCardObject {
         pages: u64,
         protection: Protection,
     ) -> ObjectResult<VirtAddr> {
-        let (page_count, start_frame, shared_flags) =
-            DRM_STATE.lock().dumb_buffer_for_mapping(offset, pages)?;
-        let mut frames = Vec::with_capacity(page_count);
-        for page_index in 0..page_count {
-            let frame_addr = start_frame.start_address().as_u64() + (page_index as u64 * 4096);
-            frames.push(PhysFrame::containing_address(PhysAddr::new(frame_addr)));
-        }
+        let (frames, shared_flags) = DRM_STATE.lock().dumb_buffer_for_mapping(offset, pages)?;
 
         let mapped = with_current_process(|process| {
             process.addrspace.allocate_user_lazy(
                 pages,
                 protection,
                 Data::Shared {
-                    frames: Arc::<[PhysFrame]>::from(frames),
+                    frames,
                     flags: shared_flags,
                 },
             )
@@ -95,7 +84,13 @@ impl MemoryMappable for DrmCardObject {
                 pid,
                 offset,
                 pages,
-                start_frame.start_address().as_u64(),
+                DRM_STATE
+                    .lock()
+                    .dumb_buffer_for_mapping(offset, 1)?
+                    .0
+                    .first()
+                    .map(|frame| frame.start_address().as_u64())
+                    .unwrap_or(0),
                 shared_flags.bits(),
                 protection.bits(),
                 mapped.as_u64()
