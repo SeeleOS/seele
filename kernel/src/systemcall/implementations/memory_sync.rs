@@ -1,6 +1,5 @@
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
-    format,
     sync::Arc,
     vec::Vec,
 };
@@ -12,7 +11,6 @@ use x86_64::{VirtAddr, registers::model_specific::FsBase};
 
 use crate::{
     define_syscall,
-    drm::current_debug_process,
     memory::{
         addrspace::mem_area::{Data, MemoryArea},
         protection::Protection,
@@ -35,8 +33,14 @@ use crate::{
 enum FutexOp {
     Wait = 0,
     Wake = 1,
+    Requeue = 3,
+    CmpRequeue = 4,
     WakeOp = 5,
+    LockPi = 6,
+    UnlockPi = 7,
+    TrylockPi = 8,
     WaitBitset = 9,
+    WakeBitset = 10,
 }
 
 #[derive(Clone, Copy, Debug, TryFromPrimitive)]
@@ -119,6 +123,9 @@ static FUTEX_QUEUE: Mutex<BTreeMap<FutexKey, VecDeque<ThreadRef>>> = Mutex::new(
 const FUTEX_CLOCK_REALTIME: u64 = 0x100;
 const FUTEX_BITSET_MATCH_ANY: u64 = 0xffff_ffff;
 const FUTEX_OP_OPARG_SHIFT: u32 = 8;
+const FUTEX_WAITERS: u32 = 0x8000_0000;
+const FUTEX_OWNER_DIED: u32 = 0x4000_0000;
+const FUTEX_TID_MASK: u32 = !(FUTEX_WAITERS | FUTEX_OWNER_DIED);
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct LinuxTimespec {
@@ -282,8 +289,64 @@ fn futex_wait_impl(arg1: u64, arg2: u64, deadline: Option<Time>) -> Result<usize
 fn futex_wake_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
     let key = current_futex_key(arg1);
     let woken = wake_futex_for_process(key.pid, key.addr, arg2 as usize);
-
     Ok(woken)
+}
+
+fn futex_requeue_impl(
+    arg1: u64,
+    wake_count: u64,
+    requeue_count: u64,
+    uaddr2: u64,
+    compare: Option<u64>,
+) -> Result<usize, SyscallError> {
+    if let Some(expected) = compare {
+        let cur_value = unsafe { *(arg1 as *const u32) } as u64;
+        if cur_value != expected {
+            return Err(SyscallError::TryAgain);
+        }
+    }
+
+    let pid = get_current_process().lock().pid.0;
+    let source = FutexKey { pid, addr: arg1 };
+    let target = FutexKey { pid, addr: uaddr2 };
+    let mut queue = FUTEX_QUEUE.lock();
+    let mut woken = Vec::new();
+    let mut moved = VecDeque::new();
+    let mut remove_source = false;
+
+    if let Some(waiters) = queue.get_mut(&source) {
+        for _ in 0..wake_count {
+            if let Some(thread) = waiters.pop_front() {
+                woken.push(thread);
+            } else {
+                break;
+            }
+        }
+        for _ in 0..requeue_count {
+            if let Some(thread) = waiters.pop_front() {
+                moved.push_back(thread);
+            } else {
+                break;
+            }
+        }
+        remove_source = waiters.is_empty();
+    }
+
+    if remove_source {
+        queue.remove(&source);
+    }
+    if !moved.is_empty() {
+        queue.entry(target).or_default().extend(moved);
+    }
+    drop(queue);
+
+    let woke = woken.len();
+    let mut manager = THREAD_MANAGER.get().unwrap().lock();
+    for thread in woken {
+        manager.wake(thread);
+    }
+
+    Ok(woke)
 }
 
 fn futex_wake_op_apply(old_value: u32, encoded: u32) -> Result<(u32, bool), SyscallError> {
@@ -343,6 +406,147 @@ fn futex_wake_op_impl(
     Ok(total_woken)
 }
 
+fn current_tid_u32() -> Result<u32, SyscallError> {
+    u32::try_from(get_current_thread().lock().id.0).map_err(|_| SyscallError::InvalidArguments)
+}
+
+fn futex_lock_pi_impl(
+    arg1: u64,
+    timeout: u64,
+    clock_realtime: bool,
+) -> Result<usize, SyscallError> {
+    let key = current_futex_key(arg1);
+    let current = get_current_thread();
+    let tid = current_tid_u32()?;
+    let deadline = if timeout == 0 {
+        None
+    } else {
+        futex_absolute_timeout_deadline(timeout, clock_realtime)?
+    };
+
+    loop {
+        {
+            let cur_value = unsafe { *(arg1 as *const u32) };
+            let owner = cur_value & FUTEX_TID_MASK;
+            if owner == tid {
+                return Err(SyscallError::ResourceDeadlock);
+            }
+
+            if owner == 0 {
+                let new_value = tid | (cur_value & FUTEX_OWNER_DIED);
+                unsafe {
+                    *(arg1 as *mut u32) = new_value;
+                }
+                return Ok(0);
+            }
+
+            if let Some(deadline) = deadline
+                && Time::since_boot() >= deadline
+            {
+                return Err(SyscallError::TimedOut);
+            }
+        }
+
+        {
+            let mut manager = THREAD_MANAGER.get().unwrap().lock();
+            let mut queue = FUTEX_QUEUE.lock();
+            let cur_value = unsafe { *(arg1 as *const u32) };
+            let owner = cur_value & FUTEX_TID_MASK;
+            if owner == 0 {
+                continue;
+            }
+            if owner == tid {
+                return Err(SyscallError::ResourceDeadlock);
+            }
+            if let Some(deadline) = deadline
+                && Time::since_boot() >= deadline
+            {
+                return Err(SyscallError::TimedOut);
+            }
+
+            if (cur_value & FUTEX_WAITERS) == 0 {
+                unsafe {
+                    *(arg1 as *mut u32) = cur_value | FUTEX_WAITERS;
+                }
+            }
+
+            manager.block(current.clone(), BlockType::Futex { deadline });
+            queue.entry(key).or_default().push_back(current.clone());
+        }
+
+        finish_block_current();
+        remove_futex_waiter(&current);
+
+        if let Some(deadline) = deadline
+            && Time::since_boot() >= deadline
+        {
+            return Err(SyscallError::TimedOut);
+        }
+    }
+}
+
+fn futex_trylock_pi_impl(arg1: u64) -> Result<usize, SyscallError> {
+    let tid = current_tid_u32()?;
+    let cur_value = unsafe { *(arg1 as *const u32) };
+    let owner = cur_value & FUTEX_TID_MASK;
+    if owner == tid {
+        return Err(SyscallError::ResourceDeadlock);
+    }
+    if owner != 0 {
+        return Err(SyscallError::TryAgain);
+    }
+
+    unsafe {
+        *(arg1 as *mut u32) = tid | (cur_value & FUTEX_OWNER_DIED);
+    }
+    Ok(0)
+}
+
+fn futex_unlock_pi_impl(arg1: u64) -> Result<usize, SyscallError> {
+    let tid = current_tid_u32()?;
+    let cur_value = unsafe { *(arg1 as *const u32) };
+    let owner = cur_value & FUTEX_TID_MASK;
+    if owner != tid {
+        return Err(SyscallError::PermissionDenied);
+    }
+
+    let next_waiter = {
+        let key = current_futex_key(arg1);
+        let mut queue = FUTEX_QUEUE.lock();
+        let next = queue.get_mut(&key).and_then(|waiters| waiters.pop_front());
+        let remove = queue.get(&key).is_some_and(|waiters| waiters.is_empty());
+        if remove {
+            queue.remove(&key);
+        }
+        next
+    };
+
+    if let Some(next) = next_waiter {
+        let next_tid = {
+            let next = next.lock();
+            u32::try_from(next.id.0).map_err(|_| SyscallError::InvalidArguments)?
+        };
+        let still_has_waiters = {
+            let key = current_futex_key(arg1);
+            FUTEX_QUEUE
+                .lock()
+                .get(&key)
+                .is_some_and(|waiters| !waiters.is_empty())
+        };
+        let new_value = next_tid | if still_has_waiters { FUTEX_WAITERS } else { 0 };
+        unsafe {
+            *(arg1 as *mut u32) = new_value;
+        }
+        THREAD_MANAGER.get().unwrap().lock().wake(next);
+    } else {
+        unsafe {
+            *(arg1 as *mut u32) = 0;
+        }
+    }
+
+    Ok(0)
+}
+
 define_syscall!(Futex, |arg1: u64,
                         op: u64,
                         arg2: u64,
@@ -350,10 +554,18 @@ define_syscall!(Futex, |arg1: u64,
                         uaddr2: u64,
                         val3: u64| {
     systemd_perf::profile_current_process(PerfBucket::Futex, || {
-        match FutexOp::try_from(op & 0x7f).map_err(|_| SyscallError::InvalidArguments)? {
+        let base_op = op & 0x7f;
+        let futex_op = FutexOp::try_from(base_op).map_err(|_| SyscallError::InvalidArguments)?;
+
+        match futex_op {
             FutexOp::Wait => futex_wait_impl(arg1, arg2, futex_relative_timeout_deadline(timeout)?),
             FutexOp::Wake => futex_wake_impl(arg1, arg2),
+            FutexOp::Requeue => futex_requeue_impl(arg1, arg2, timeout, uaddr2, None),
+            FutexOp::CmpRequeue => futex_requeue_impl(arg1, arg2, timeout, uaddr2, Some(val3)),
             FutexOp::WakeOp => futex_wake_op_impl(arg1, arg2, timeout, uaddr2, val3),
+            FutexOp::LockPi => futex_lock_pi_impl(arg1, timeout, op & FUTEX_CLOCK_REALTIME != 0),
+            FutexOp::UnlockPi => futex_unlock_pi_impl(arg1),
+            FutexOp::TrylockPi => futex_trylock_pi_impl(arg1),
             FutexOp::WaitBitset => {
                 if val3 == 0 || val3 != FUTEX_BITSET_MATCH_ANY {
                     return Err(SyscallError::InvalidArguments);
@@ -363,6 +575,12 @@ define_syscall!(Futex, |arg1: u64,
                     arg2,
                     futex_absolute_timeout_deadline(timeout, op & FUTEX_CLOCK_REALTIME != 0)?,
                 )
+            }
+            FutexOp::WakeBitset => {
+                if val3 == 0 {
+                    return Err(SyscallError::InvalidArguments);
+                }
+                futex_wake_impl(arg1, arg2)
             }
         }
     })
@@ -425,19 +643,6 @@ define_syscall!(Mmap, |addr: u64,
                        flags: MmapFlags,
                        fd: i32,
                        offset: u64| {
-    if let Some((pid, comm)) = current_debug_process() {
-        crate::s_println!(
-            "mmap enter comm={} pid={} addr={:#x} len={:#x} prot={:#x} flags={:#x} fd={} offset={:#x}",
-            comm,
-            pid,
-            addr,
-            len,
-            prot,
-            flags.bits(),
-            fd,
-            offset
-        );
-    }
     if len == 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -511,38 +716,6 @@ define_syscall!(Mmap, |addr: u64,
     }
     let object =
         crate::object::misc::get_object_current_process(fd as u64).map_err(SyscallError::from)?;
-    if let Some((pid, comm)) = current_debug_process() {
-        let file_path = object
-            .clone()
-            .as_file_like()
-            .ok()
-            .map(|file| file.path().as_string())
-            .unwrap_or_else(|| "-".into());
-        let device_backed = object
-            .clone()
-            .as_file_like()
-            .ok()
-            .is_some_and(|file| file.is_device_backed());
-        let device_debug_name = object
-            .clone()
-            .as_file_like()
-            .ok()
-            .and_then(|file| file.device_backing_object())
-            .map(|device| format!("{}", device.debug_name()))
-            .unwrap_or_else(|| "-".into());
-        crate::s_println!(
-            "mmap object comm={} pid={} fd={} debug={} file_like={} mappable={} path={} device_backed={} device={}",
-            comm,
-            pid,
-            fd,
-            object.debug_name(),
-            object.clone().as_file_like().is_ok(),
-            object.clone().as_mappable().is_ok(),
-            file_path,
-            device_backed,
-            device_debug_name
-        );
-    }
     if let Ok(file) = object.clone().as_file_like()
         && !file.is_device_backed()
     {
@@ -555,15 +728,6 @@ define_syscall!(Mmap, |addr: u64,
     }
     let object = object.as_mappable()?;
     let address = object.map(offset, pages, protection)?;
-    if let Some((pid, comm)) = current_debug_process() {
-        crate::s_println!(
-            "mmap exit comm={} pid={} fd={} user_addr={:#x}",
-            comm,
-            pid,
-            fd,
-            address.as_u64()
-        );
-    }
     Ok(address.as_u64() as usize)
 });
 
