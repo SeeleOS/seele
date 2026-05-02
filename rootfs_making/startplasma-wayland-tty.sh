@@ -5,7 +5,10 @@ set -eu
 log_file=/var/log/autoplasma.log
 
 log() {
-    printf 'startplasma-wayland-tty: %s\n' "$*" >>"${log_file}"
+    line="startplasma-wayland-tty: $*"
+    printf '%s\n' "${line}" >>"${log_file}"
+    printf '%s\n' "${line}" >/dev/ttyS0 2>/dev/null || true
+    sync
 }
 
 log "enter pid=$$ uid=$(id -u) tty=$(tty 2>/dev/null || echo unknown)"

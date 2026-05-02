@@ -1,15 +1,23 @@
 #!/bin/sh
 
 log_file=/var/log/autoplasma.log
+
+emit_log() {
+    line="$1"
+    printf '%s\n' "${line}" >>"${log_file}"
+    printf '%s\n' "${line}" >/dev/ttyS0 2>/dev/null || true
+    sync
+}
+
 tty_path="$(tty 2>/dev/null || echo unknown)"
-printf 'root-bash-profile enter tty=%s pid=%s\n' "${tty_path}" "$$" >>"${log_file}"
+emit_log "root-bash-profile enter tty=${tty_path} pid=$$"
 
 if [ "${SEELE_PLASMA_AUTOSTARTED:-0}" != "1" ] && [ "$(tty 2>/dev/null)" = "/dev/tty1" ]; then
     export SEELE_PLASMA_AUTOSTARTED=1
-    printf 'root-bash-profile start plasma tty=%s pid=%s\n' "${tty_path}" "$$" >>"${log_file}"
+    emit_log "root-bash-profile start plasma tty=${tty_path} pid=$$"
     echo "AUTOPLASMA: start" >/dev/kmsg
     /usr/bin/startplasma-wayland-tty
     status=$?
-    printf 'root-bash-profile plasma exit status=%s tty=%s pid=%s\n' "${status}" "${tty_path}" "$$" >>"${log_file}"
+    emit_log "root-bash-profile plasma exit status=${status} tty=${tty_path} pid=$$"
     echo "AUTOPLASMA: exit ${status}" >/dev/kmsg
 fi
