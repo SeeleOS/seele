@@ -2,7 +2,16 @@
 
 set -eu
 
+log_file=/var/log/autoplasma.log
+
+log() {
+    printf 'startplasma-wayland-tty: %s\n' "$*" >>"${log_file}"
+}
+
+log "enter pid=$$ uid=$(id -u) tty=$(tty 2>/dev/null || echo unknown)"
+
 if [ -n "${DISPLAY:-}" ]; then
+    log "refuse DISPLAY=${DISPLAY}"
     echo "startplasma-wayland-tty: DISPLAY is set; refuse to start under X11" >&2
     exit 1
 fi
@@ -11,8 +20,10 @@ tty_path="$(tty)"
 case "${tty_path}" in
     /dev/tty[0-9]*)
         export XDG_VTNR="${tty_path#/dev/tty}"
+        log "using tty_path=${tty_path} vtnr=${XDG_VTNR}"
         ;;
     *)
+        log "refuse tty_path=${tty_path}"
         echo "startplasma-wayland-tty: must be run from a local tty" >&2
         exit 1
         ;;
@@ -20,11 +31,13 @@ esac
 
 runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 if [ ! -d "${runtime_dir}" ]; then
+    log "missing runtime_dir=${runtime_dir}"
     echo "startplasma-wayland-tty: missing XDG_RUNTIME_DIR ${runtime_dir}" >&2
     exit 1
 fi
 
 if [ ! -w "${runtime_dir}" ]; then
+    log "runtime_dir_not_writable=${runtime_dir}"
     echo "startplasma-wayland-tty: XDG_RUNTIME_DIR is not writable: ${runtime_dir}" >&2
     exit 1
 fi
@@ -36,8 +49,10 @@ have_session_bus=0
 if [ "${session_bus}" != "${session_bus_path}" ] && [ -S "${session_bus_path}" ]; then
     have_session_bus=1
     export DBUS_SESSION_BUS_ADDRESS="${session_bus}"
+    log "found session_bus=${session_bus}"
 else
     unset DBUS_SESSION_BUS_ADDRESS
+    log "session_bus_missing path=${session_bus_path}"
 fi
 export XDG_SESSION_TYPE=wayland
 export XDG_SESSION_DESKTOP=KDE
@@ -53,6 +68,7 @@ unset WAYLAND_DISPLAY
 unset XAUTHORITY
 
 if [ "${have_session_bus}" = "1" ] && command -v systemctl >/dev/null 2>&1; then
+    log "importing environment into user systemd"
     systemctl --user import-environment \
         DBUS_SESSION_BUS_ADDRESS \
         XDG_RUNTIME_DIR \
@@ -69,6 +85,7 @@ if [ "${have_session_bus}" = "1" ] && command -v systemctl >/dev/null 2>&1; then
 fi
 
 if [ "${have_session_bus}" = "1" ] && command -v dbus-update-activation-environment >/dev/null 2>&1; then
+    log "updating activation environment"
     dbus-update-activation-environment --systemd \
         DBUS_SESSION_BUS_ADDRESS \
         XDG_RUNTIME_DIR \
@@ -84,4 +101,5 @@ if [ "${have_session_bus}" = "1" ] && command -v dbus-update-activation-environm
         XDG_VTNR || true
 fi
 
+log "exec plasma-dbus-run-session-if-needed /usr/bin/startplasma-wayland"
 exec /usr/lib/plasma-dbus-run-session-if-needed /usr/bin/startplasma-wayland
