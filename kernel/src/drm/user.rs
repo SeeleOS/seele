@@ -92,14 +92,9 @@ pub(crate) fn current_debug_process() -> Option<(u64, String)> {
             .first()
             .and_then(|command| command.rsplit('/').next())
             .unwrap_or("?");
-        matches!(
-            comm,
-            "startplasma-wayland"
-                | "kwin_wayland_wrapper"
-                | "kwin_wayland"
-                | "ksplashqml"
-                | "plasmashell"
-        )
-        .then(|| (process.pid.0, comm.into()))
+        None::<(u64, String)>.or_else(|| {
+            matches!(comm, "startplasma-wayland" | "ksplashqml" | "plasmashell")
+                .then(|| (process.pid.0, comm.into()))
+        })
     })
 }
