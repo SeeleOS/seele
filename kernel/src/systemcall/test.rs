@@ -10,13 +10,15 @@ use crate::{
     systemcall::{
         arg_types::SyscallArg,
         implementations::{
-            ArchPrctl, ClockGetres, Getegid, Geteuid, Getgid, Getgroups, Getpgid, Getpgrp, Getpid,
-            Getppid, Getpriority, Getresgid, Getresuid, Getsid, Gettid, Getuid, Ioperm, Iopl,
-            IoprioGet, IoprioSet, Madvise, OpenFlags, PollEvents, PollTimespec, Prctl,
-            SchedGetPriorityMax, SchedGetPriorityMin, SchedGetscheduler, SchedYield,
-            SelectTimespec, Setfsgid, Setfsuid, Setgid, Setgroups, Setpgid, Setpriority, Setregid,
-            Setresgid, Setresuid, Setreuid, Setsid, Setuid, Umask, clear_fdset, fdset_contains,
-            fdset_insert, fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
+            Alarm, ArchPrctl, Capget, Capset, ClockGetres, Getegid, Geteuid, Getgid, Getgroups,
+            Getpgid, Getpgrp, Getpid, Getppid, Getpriority, Getrandom, Getresgid, Getresuid,
+            Getrusage, Getsid, Gettid, Gettimeofday, Getuid, Ioperm, Iopl, IoprioGet, IoprioSet,
+            Madvise, OpenFlags, PollEvents, PollTimespec, Prctl, Rseq, SchedGetPriorityMax,
+            SchedGetPriorityMin, SchedGetparam, SchedGetscheduler, SchedSetparam, SchedYield,
+            SelectTimespec, SetRobustList, SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups,
+            Setpgid, Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setsid, Settimeofday,
+            Setuid, Sync, Sysinfo, Time, Umask, clear_fdset, fdset_contains, fdset_insert,
+            fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
             timeout_to_deadline, translate_ready_events,
         },
         linux_semantics::{
@@ -102,6 +104,11 @@ crate::test!(
     process_session_and_prctl_syscalls,
     "process session and prctl syscalls follow linux state rules",
     process_session_and_prctl_syscalls_follow_linux_state_rules
+);
+crate::test!(
+    misc_state_syscalls,
+    "misc state syscalls follow linux pointer and state rules",
+    misc_state_syscalls_follow_linux_pointer_and_state_rules
 );
 crate::test!(
     typed_syscall_arg_conversion,
@@ -230,6 +237,9 @@ struct CredentialSnapshot {
     effective_gid: u32,
     saved_gid: u32,
     fs_gid: u32,
+    capability_effective: [u32; 2],
+    capability_permitted: [u32; 2],
+    capability_inheritable: [u32; 2],
 }
 
 impl CredentialSnapshot {
@@ -243,6 +253,9 @@ impl CredentialSnapshot {
             effective_gid: process.effective_gid,
             saved_gid: process.saved_gid,
             fs_gid: process.fs_gid,
+            capability_effective: process.capability_effective,
+            capability_permitted: process.capability_permitted,
+            capability_inheritable: process.capability_inheritable,
         }
     }
 
@@ -263,7 +276,96 @@ impl CredentialSnapshot {
         process.effective_gid = self.effective_gid;
         process.saved_gid = self.saved_gid;
         process.fs_gid = self.fs_gid;
+        process.capability_effective = self.capability_effective;
+        process.capability_permitted = self.capability_permitted;
+        process.capability_inheritable = self.capability_inheritable;
     }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxCapHeader {
+    version: u32,
+    pid: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxCapData {
+    effective: u32,
+    permitted: u32,
+    inheritable: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxTimeval {
+    tv_sec: i64,
+    tv_usec: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxTimezone {
+    tz_minuteswest: i32,
+    tz_dsttime: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxRusage {
+    ru_utime: TestLinuxTimeval,
+    ru_stime: TestLinuxTimeval,
+    ru_maxrss: i64,
+    ru_ixrss: i64,
+    ru_idrss: i64,
+    ru_isrss: i64,
+    ru_minflt: i64,
+    ru_majflt: i64,
+    ru_nswap: i64,
+    ru_inblock: i64,
+    ru_oublock: i64,
+    ru_msgsnd: i64,
+    ru_msgrcv: i64,
+    ru_nsignals: i64,
+    ru_nvcsw: i64,
+    ru_nivcsw: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxSchedParam {
+    sched_priority: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxSysinfo {
+    uptime: i64,
+    loads: [u64; 3],
+    totalram: u64,
+    freeram: u64,
+    sharedram: u64,
+    bufferram: u64,
+    totalswap: u64,
+    freeswap: u64,
+    procs: u16,
+    _pad: u16,
+    totalhigh: u64,
+    freehigh: u64,
+    mem_unit: u32,
+    _f: [i8; 0],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxRseq {
+    cpu_id_start: u32,
+    cpu_id: u32,
+    rseq_cs: u64,
+    flags: u32,
+    _padding: u32,
+    _padding2: u64,
 }
 
 fn process_identity_syscalls_match_current_linux_task_state() {
@@ -846,6 +948,344 @@ fn process_session_and_prctl_syscalls_follow_linux_state_rules() {
         process.capability_bounding = old_bounding;
         process.capability_ambient = old_ambient;
         process.fs_context.lock().file_mode_creation_mask = old_umask;
+    }
+    saved.restore();
+}
+
+fn misc_state_syscalls_follow_linux_pointer_and_state_rules() {
+    assert_linux_layout::<TestLinuxCapHeader>(8, 4);
+    assert_linux_layout::<TestLinuxCapData>(12, 4);
+    assert_linux_layout::<TestLinuxTimeval>(16, 8);
+    assert_linux_layout::<TestLinuxTimezone>(8, 4);
+    assert_linux_layout::<TestLinuxRusage>(144, 8);
+    assert_linux_layout::<TestLinuxSchedParam>(4, 4);
+    assert_linux_layout::<TestLinuxSysinfo>(112, 8);
+    assert_linux_layout::<TestLinuxRseq>(32, 8);
+
+    const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
+    const RSEQ_LEN_X86_64: u64 = 32;
+    const RSEQ_FLAG_UNREGISTER: u64 = 1;
+    const RSEQ_CPU_ID_UNINITIALIZED: u32 = u32::MAX;
+    const RSEQ_CPU_ID_SINGLE_CORE: u32 = 0;
+
+    let saved = CredentialSnapshot::save_current();
+    let process = get_current_process();
+    let current = crate::thread::get_current_thread();
+    let (
+        old_clear_child_tid,
+        old_robust_list_head,
+        old_robust_list_len,
+        old_rseq_area,
+        old_rseq_len,
+        old_rseq_flags,
+        old_rseq_sig,
+    ) = {
+        let current = current.lock();
+        (
+            current.clear_child_tid,
+            current.robust_list_head,
+            current.robust_list_len,
+            current.rseq_area,
+            current.rseq_len,
+            current.rseq_flags,
+            current.rseq_sig,
+        )
+    };
+    let old_timezone = crate::misc::time::timezone();
+
+    {
+        let mut process = process.lock();
+        process.capability_effective = [0x1111_1111, 0x22];
+        process.capability_permitted = [0x3333_3333, 0x44];
+        process.capability_inheritable = [0x5555_5555, 0x66];
+    }
+
+    let cap_page = allocate_user_test_page();
+    write_user_value(cap_page, &TestLinuxCapHeader { version: 0, pid: 0 });
+    expect_ok(
+        SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capget>(),
+        0,
+    );
+    let header = read_user_value::<TestLinuxCapHeader>(cap_page);
+    assert_eq!(header.version, LINUX_CAPABILITY_VERSION_3);
+    assert_eq!(header.pid, 0);
+    let cap0 = read_user_value::<TestLinuxCapData>(cap_page + 16);
+    let cap1 = read_user_value::<TestLinuxCapData>(cap_page + 28);
+    assert_eq!(cap0.effective, 0x1111_1111);
+    assert_eq!(cap0.permitted, 0x3333_3333);
+    assert_eq!(cap0.inheritable, 0x5555_5555);
+    assert_eq!(cap1.effective, 0x22);
+    assert_eq!(cap1.permitted, 0x44);
+    assert_eq!(cap1.inheritable, 0x66);
+    expect_errno(
+        SyscallArgs::new([0, cap_page + 16, 0, 0, 0, 0]).call::<Capget>(),
+        SyscallError::BadAddress,
+    );
+
+    write_user_value(
+        cap_page,
+        &TestLinuxCapHeader {
+            version: LINUX_CAPABILITY_VERSION_3,
+            pid: 0,
+        },
+    );
+    let new_caps = [
+        TestLinuxCapData {
+            effective: 0xaa,
+            permitted: 0xbb,
+            inheritable: 0xcc,
+        },
+        TestLinuxCapData {
+            effective: 0xdd,
+            permitted: 0xee,
+            inheritable: 0xff,
+        },
+    ];
+    write_user_value(cap_page + 16, &new_caps);
+    expect_ok(
+        SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capset>(),
+        0,
+    );
+    {
+        let process = process.lock();
+        assert_eq!(process.capability_effective, [0xaa, 0xdd]);
+        assert_eq!(process.capability_permitted, [0xbb, 0xee]);
+        assert_eq!(process.capability_inheritable, [0xcc, 0xff]);
+    }
+    write_user_value(
+        cap_page,
+        &TestLinuxCapHeader {
+            version: 0x1998_0522,
+            pid: 0,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capset>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0, cap_page + 16, 0, 0, 0, 0]).call::<Capset>(),
+        SyscallError::BadAddress,
+    );
+
+    let tid_page = allocate_user_test_page();
+    let tid = crate::thread::get_current_thread().lock().id.0 as i32;
+    expect_ok(
+        SyscallArgs::new([tid_page, 0, 0, 0, 0, 0]).call::<SetTidAddress>(),
+        tid as usize,
+    );
+    assert_eq!(read_user_value::<i32>(tid_page), tid);
+    assert_eq!(
+        crate::thread::get_current_thread().lock().clear_child_tid,
+        tid_page
+    );
+    expect_ok(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<SetTidAddress>(),
+        tid as usize,
+    );
+    assert_eq!(
+        crate::thread::get_current_thread().lock().clear_child_tid,
+        0
+    );
+
+    expect_ok(
+        SyscallArgs::new([0x1234_5000, 24, 0, 0, 0, 0]).call::<SetRobustList>(),
+        0,
+    );
+    {
+        let current = crate::thread::get_current_thread();
+        let current = current.lock();
+        assert_eq!(current.robust_list_head, 0x1234_5000);
+        assert_eq!(current.robust_list_len, 24);
+    }
+
+    {
+        let current = crate::thread::get_current_thread();
+        let mut current = current.lock();
+        current.rseq_area = 0;
+        current.rseq_len = 0;
+        current.rseq_flags = 0;
+        current.rseq_sig = 0;
+    }
+    let rseq_page = allocate_user_test_page();
+    expect_ok(
+        SyscallArgs::new([rseq_page, RSEQ_LEN_X86_64, 0, 0x5305_5305, 0, 0]).call::<Rseq>(),
+        0,
+    );
+    let rseq = read_user_value::<TestLinuxRseq>(rseq_page);
+    assert_eq!(rseq.cpu_id_start, RSEQ_CPU_ID_SINGLE_CORE);
+    assert_eq!(rseq.cpu_id, RSEQ_CPU_ID_SINGLE_CORE);
+    {
+        let current = crate::thread::get_current_thread();
+        let current = current.lock();
+        assert_eq!(current.rseq_area, rseq_page);
+        assert_eq!(current.rseq_len, RSEQ_LEN_X86_64 as u32);
+        assert_eq!(current.rseq_sig, 0x5305_5305);
+    }
+    expect_errno(
+        SyscallArgs::new([rseq_page, RSEQ_LEN_X86_64, 0, 0x5305_5305, 0, 0]).call::<Rseq>(),
+        SyscallError::DeviceOrResourceBusy,
+    );
+    expect_ok(
+        SyscallArgs::new([
+            rseq_page,
+            RSEQ_LEN_X86_64,
+            RSEQ_FLAG_UNREGISTER,
+            0x5305_5305,
+            0,
+            0,
+        ])
+        .call::<Rseq>(),
+        0,
+    );
+    let rseq = read_user_value::<TestLinuxRseq>(rseq_page);
+    assert_eq!(rseq.cpu_id_start, RSEQ_CPU_ID_UNINITIALIZED);
+    assert_eq!(rseq.cpu_id, RSEQ_CPU_ID_UNINITIALIZED);
+    expect_errno(
+        SyscallArgs::new([0, RSEQ_LEN_X86_64, 0, 0, 0, 0]).call::<Rseq>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([rseq_page, 16, 0, 0, 0, 0]).call::<Rseq>(),
+        SyscallError::InvalidArguments,
+    );
+
+    let random_page = allocate_user_test_page();
+    expect_ok(
+        SyscallArgs::new([random_page, 16, 0, 0, 0, 0]).call::<Getrandom>(),
+        16,
+    );
+    expect_ok(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Getrandom>(), 0);
+    expect_errno(
+        SyscallArgs::new([0, 1, 0, 0, 0, 0]).call::<Getrandom>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([random_page, 1, 8, 0, 0, 0]).call::<Getrandom>(),
+        SyscallError::InvalidArguments,
+    );
+
+    let time_page = allocate_user_test_page();
+    let seconds = SyscallArgs::new([time_page, 0, 0, 0, 0, 0])
+        .call::<Time>()
+        .expect("time should succeed");
+    assert_eq!(read_user_value::<i64>(time_page) as usize, seconds);
+    let null_seconds = SyscallArgs::new([0, 0, 0, 0, 0, 0])
+        .call::<Time>()
+        .expect("time null should succeed");
+    assert!(null_seconds >= seconds);
+
+    let tod_page = allocate_user_test_page();
+    expect_ok(
+        SyscallArgs::new([tod_page, tod_page + 32, 0, 0, 0, 0]).call::<Gettimeofday>(),
+        0,
+    );
+    let timeval = read_user_value::<TestLinuxTimeval>(tod_page);
+    assert!(timeval.tv_sec >= 0);
+    assert!((0..1_000_000).contains(&timeval.tv_usec));
+    let timezone = read_user_value::<TestLinuxTimezone>(tod_page + 32);
+    assert_eq!(timezone.tz_minuteswest, old_timezone.0);
+    assert_eq!(timezone.tz_dsttime, old_timezone.1);
+
+    let set_time_page = allocate_user_test_page();
+    write_user_value(
+        set_time_page,
+        &TestLinuxTimeval {
+            tv_sec: -1,
+            tv_usec: 0,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([set_time_page, 0, 0, 0, 0, 0]).call::<Settimeofday>(),
+        SyscallError::InvalidArguments,
+    );
+    write_user_value(
+        set_time_page + 32,
+        &TestLinuxTimezone {
+            tz_minuteswest: 90,
+            tz_dsttime: 1,
+        },
+    );
+    expect_ok(
+        SyscallArgs::new([0, set_time_page + 32, 0, 0, 0, 0]).call::<Settimeofday>(),
+        0,
+    );
+    assert_eq!(crate::misc::time::timezone(), (90, 1));
+    expect_ok(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Settimeofday>(),
+        0,
+    );
+
+    let rusage_page = allocate_user_test_page();
+    expect_ok(
+        SyscallArgs::new([0, rusage_page, 0, 0, 0, 0]).call::<Getrusage>(),
+        0,
+    );
+    assert_eq!(read_user_value::<TestLinuxRusage>(rusage_page).ru_maxrss, 0);
+    expect_errno(
+        SyscallArgs::new([99, rusage_page, 0, 0, 0, 0]).call::<Getrusage>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Getrusage>(),
+        SyscallError::BadAddress,
+    );
+
+    let sysinfo_page = allocate_user_test_page();
+    expect_ok(
+        SyscallArgs::new([sysinfo_page, 0, 0, 0, 0, 0]).call::<Sysinfo>(),
+        0,
+    );
+    let info = read_user_value::<TestLinuxSysinfo>(sysinfo_page);
+    assert!(info.totalram > 0);
+    assert_eq!(info.mem_unit, 1);
+    expect_errno(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Sysinfo>(),
+        SyscallError::BadAddress,
+    );
+
+    let sched_page = allocate_user_test_page();
+    write_user_value(sched_page, &TestLinuxSchedParam { sched_priority: 0 });
+    expect_ok(
+        SyscallArgs::new([0, sched_page, 0, 0, 0, 0]).call::<SchedSetparam>(),
+        0,
+    );
+    write_user_value(sched_page, &TestLinuxSchedParam { sched_priority: -1 });
+    expect_errno(
+        SyscallArgs::new([0, sched_page, 0, 0, 0, 0]).call::<SchedSetparam>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<SchedSetparam>(),
+        SyscallError::BadAddress,
+    );
+    expect_ok(
+        SyscallArgs::new([0, sched_page, 0, 0, 0, 0]).call::<SchedGetparam>(),
+        0,
+    );
+    assert_eq!(
+        read_user_value::<TestLinuxSchedParam>(sched_page).sched_priority,
+        0
+    );
+    expect_errno(
+        SyscallArgs::new([u64::MAX, sched_page, 0, 0, 0, 0]).call::<SchedGetparam>(),
+        SyscallError::InvalidArguments,
+    );
+
+    expect_ok(SyscallArgs::new([30, 0, 0, 0, 0, 0]).call::<Alarm>(), 0);
+    expect_ok(SyscallArgs::none().call::<Sync>(), 0);
+
+    crate::misc::time::set_timezone(old_timezone.0, old_timezone.1);
+    {
+        let current = crate::thread::get_current_thread();
+        let mut current = current.lock();
+        current.clear_child_tid = old_clear_child_tid;
+        current.robust_list_head = old_robust_list_head;
+        current.robust_list_len = old_robust_list_len;
+        current.rseq_area = old_rseq_area;
+        current.rseq_len = old_rseq_len;
+        current.rseq_flags = old_rseq_flags;
+        current.rseq_sig = old_rseq_sig;
     }
     saved.restore();
 }

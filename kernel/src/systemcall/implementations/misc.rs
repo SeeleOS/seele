@@ -727,10 +727,11 @@ struct LinuxSysinfo {
     totalswap: u64,
     freeswap: u64,
     procs: u16,
+    _pad: u16,
     totalhigh: u64,
     freehigh: u64,
     mem_unit: u32,
-    _f: [i8; 8],
+    _f: [i8; 0],
 }
 
 #[repr(C)]
@@ -886,7 +887,7 @@ define_syscall!(Capget, |header: *mut LinuxCapHeader,
         return Err(SyscallError::BadAddress);
     }
 
-    let mut header_value = unsafe { *header };
+    let mut header_value = user_safe::read(header)?;
     if !capability_header_targets_current_process(&header_value) {
         return Err(SyscallError::InvalidArguments);
     }
@@ -905,7 +906,7 @@ define_syscall!(Capset, |header: *const LinuxCapHeader,
         return Err(SyscallError::BadAddress);
     }
 
-    let header_value = unsafe { *header };
+    let header_value = user_safe::read(header)?;
     if header_value.version != LINUX_CAPABILITY_VERSION_3 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -913,7 +914,7 @@ define_syscall!(Capset, |header: *const LinuxCapHeader,
         return Err(SyscallError::InvalidArguments);
     }
 
-    let cap_data = unsafe { core::slice::from_raw_parts(data, LINUX_CAPABILITY_U32S_3) };
+    let cap_data = user_safe::read(data as *const [LinuxCapData; LINUX_CAPABILITY_U32S_3])?;
     let process = get_current_process();
     let mut process = process.lock();
     for (index, caps) in cap_data.iter().enumerate() {
@@ -1638,7 +1639,7 @@ define_syscall!(SchedSetparam, |pid: i32, param: *const LinuxSchedParam| {
         return Err(SyscallError::BadAddress);
     }
 
-    let param = unsafe { *param };
+    let param = user_safe::read(param)?;
     if param.sched_priority < 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -1668,7 +1669,7 @@ define_syscall!(
             return Err(SyscallError::BadAddress);
         }
 
-        let param = unsafe { *param };
+        let param = user_safe::read(param)?;
         if param.sched_priority < policy.min_priority()
             || param.sched_priority > policy.max_priority()
         {
