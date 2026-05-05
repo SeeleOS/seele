@@ -6,11 +6,13 @@ use bootloader_api::{
 use conquer_once::spin::OnceCell;
 
 const KERNEL_STACK_SIZE: u64 = 2 * 1024 * 1024;
+const HIGHER_HALF_START: u64 = 0xffff_8000_0000_0000;
 
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
     config.kernel_stack_size = KERNEL_STACK_SIZE;
     config.mappings.physical_memory = Some(Mapping::Dynamic);
+    config.mappings.dynamic_range_start = Some(HIGHER_HALF_START);
     config
 };
 
