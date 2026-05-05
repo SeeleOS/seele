@@ -1,13 +1,16 @@
 use crate::{
     memory::protection::Protection,
     misc::timer::ClockId,
+    process::{Process, group::ProcessGroupID, manager::get_current_process},
     signal::{Signal, Signals},
     systemcall::{
         arg_types::SyscallArg,
         implementations::{
-            OpenFlags, PollEvents, PollTimespec, SelectTimespec, clear_fdset, fdset_contains,
-            fdset_insert, fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
-            timeout_to_deadline, translate_ready_events,
+            ClockGetres, Getegid, Geteuid, Getgid, Getgroups, Getpgid, Getpgrp, Getpid, Getppid,
+            Getuid, OpenFlags, PollEvents, PollTimespec, SelectTimespec, Setfsgid, Setfsuid,
+            Setgid, Setgroups, Setpgid, Setregid, Setresgid, Setresuid, Setreuid, Setuid,
+            clear_fdset, fdset_contains, fdset_insert, fdset_words, kernel_events_for,
+            saturating_timeout_ms, timeout_is_zero, timeout_to_deadline, translate_ready_events,
         },
         linux_semantics::{
             KNOWN_LINUX_SYSCALL_COVERAGE_GAPS, LINUX_SYSCALL_SEMANTICS_COVERAGE,
@@ -44,6 +47,41 @@ crate::test!(
     syscall_test_helpers,
     "syscall test helpers assert linux errno return and layout expectations",
     syscall_test_helpers_assert_linux_errno_return_and_layout_expectations
+);
+crate::test!(
+    process_identity_syscalls,
+    "process identity syscalls match current linux task state",
+    process_identity_syscalls_match_current_linux_task_state
+);
+crate::test!(
+    process_group_syscalls,
+    "process group syscalls follow linux pid zero and esrch rules",
+    process_group_syscalls_follow_linux_pid_zero_and_esrch_rules
+);
+crate::test!(
+    credential_getter_syscalls,
+    "credential getters return current linux ids",
+    credential_getters_return_current_linux_ids
+);
+crate::test!(
+    credential_setter_syscalls,
+    "credential setters update linux real effective saved and fs ids",
+    credential_setters_update_linux_real_effective_saved_and_fs_ids
+);
+crate::test!(
+    fsuid_fsgid_syscalls,
+    "fsuid and fsgid syscalls return previous ids and update state",
+    fsuid_fsgid_syscalls_return_previous_ids_and_update_state
+);
+crate::test!(
+    group_syscalls,
+    "group syscalls validate linux size rules",
+    group_syscalls_validate_linux_size_rules
+);
+crate::test!(
+    clock_getres_syscall,
+    "clock_getres accepts null for valid clocks and rejects bad clock ids",
+    clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids
 );
 crate::test!(
     typed_syscall_arg_conversion,
@@ -161,6 +199,266 @@ fn syscall_test_helpers_assert_linux_errno_return_and_layout_expectations() {
     );
     assert_eq!(errno_code(SyscallError::BadAddress), -14);
     assert_linux_layout::<u64>(8, 8);
+}
+
+struct CredentialSnapshot {
+    real_uid: u32,
+    effective_uid: u32,
+    saved_uid: u32,
+    fs_uid: u32,
+    real_gid: u32,
+    effective_gid: u32,
+    saved_gid: u32,
+    fs_gid: u32,
+}
+
+impl CredentialSnapshot {
+    fn save(process: &Process) -> Self {
+        Self {
+            real_uid: process.real_uid,
+            effective_uid: process.effective_uid,
+            saved_uid: process.saved_uid,
+            fs_uid: process.fs_uid,
+            real_gid: process.real_gid,
+            effective_gid: process.effective_gid,
+            saved_gid: process.saved_gid,
+            fs_gid: process.fs_gid,
+        }
+    }
+
+    fn save_current() -> Self {
+        let process = get_current_process();
+        let process = process.lock();
+        Self::save(&process)
+    }
+
+    fn restore(self) {
+        let process = get_current_process();
+        let mut process = process.lock();
+        process.real_uid = self.real_uid;
+        process.effective_uid = self.effective_uid;
+        process.saved_uid = self.saved_uid;
+        process.fs_uid = self.fs_uid;
+        process.real_gid = self.real_gid;
+        process.effective_gid = self.effective_gid;
+        process.saved_gid = self.saved_gid;
+        process.fs_gid = self.fs_gid;
+    }
+}
+
+fn process_identity_syscalls_match_current_linux_task_state() {
+    let (pid, ppid, group_id) = {
+        let process = get_current_process();
+        let process = process.lock();
+        (
+            process.pid.0 as usize,
+            process
+                .parent
+                .as_ref()
+                .map(|parent| parent.lock().pid.0 as usize)
+                .unwrap_or(0),
+            process.group_id.0 as usize,
+        )
+    };
+
+    expect_ok(SyscallArgs::none().call::<Getpid>(), pid);
+    expect_ok(SyscallArgs::none().call::<Getppid>(), ppid);
+    expect_ok(SyscallArgs::none().call::<Getpgrp>(), group_id);
+}
+
+fn process_group_syscalls_follow_linux_pid_zero_and_esrch_rules() {
+    let process = get_current_process();
+    let old_group = {
+        let process = process.lock();
+        process.group_id
+    };
+
+    expect_ok(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Setpgid>(), 0);
+    {
+        let process = process.lock();
+        assert_eq!(process.group_id, ProcessGroupID::from_leader(process.pid));
+    }
+    expect_ok(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Getpgid>(),
+        get_current_process().lock().group_id.0 as usize,
+    );
+    expect_errno(
+        SyscallArgs::new([u64::from(u32::MAX), 0, 0, 0, 0, 0]).call::<Getpgid>(),
+        SyscallError::NoProcess,
+    );
+
+    {
+        let mut process = process.lock();
+        process.group_id = old_group;
+    }
+}
+
+fn credential_getters_return_current_linux_ids() {
+    let process = get_current_process();
+    let mut process = process.lock();
+    let saved = CredentialSnapshot::save(&process);
+    process.real_uid = 1001;
+    process.effective_uid = 1002;
+    process.real_gid = 1003;
+    process.effective_gid = 1004;
+    drop(process);
+
+    expect_ok(SyscallArgs::none().call::<Getuid>(), 1001);
+    expect_ok(SyscallArgs::none().call::<Geteuid>(), 1002);
+    expect_ok(SyscallArgs::none().call::<Getgid>(), 1003);
+    expect_ok(SyscallArgs::none().call::<Getegid>(), 1004);
+
+    saved.restore();
+}
+
+fn credential_setters_update_linux_real_effective_saved_and_fs_ids() {
+    let saved = CredentialSnapshot::save_current();
+
+    expect_ok(SyscallArgs::new([42, 0, 0, 0, 0, 0]).call::<Setuid>(), 0);
+    {
+        let process = get_current_process();
+        let process = process.lock();
+        assert_eq!(process.real_uid, 42);
+        assert_eq!(process.effective_uid, 42);
+        assert_eq!(process.saved_uid, 42);
+        assert_eq!(process.fs_uid, 42);
+    }
+
+    expect_ok(SyscallArgs::new([43, 0, 0, 0, 0, 0]).call::<Setgid>(), 0);
+    {
+        let process = get_current_process();
+        let process = process.lock();
+        assert_eq!(process.real_gid, 43);
+        assert_eq!(process.effective_gid, 43);
+        assert_eq!(process.saved_gid, 43);
+        assert_eq!(process.fs_gid, 43);
+    }
+
+    expect_ok(
+        SyscallArgs::new([u64::MAX, 44, 0, 0, 0, 0]).call::<Setreuid>(),
+        0,
+    );
+    {
+        let process = get_current_process();
+        let process = process.lock();
+        assert_eq!(process.real_uid, 42);
+        assert_eq!(process.effective_uid, 44);
+        assert_eq!(process.saved_uid, 44);
+        assert_eq!(process.fs_uid, 44);
+    }
+
+    expect_ok(
+        SyscallArgs::new([u64::MAX, 45, 0, 0, 0, 0]).call::<Setregid>(),
+        0,
+    );
+    {
+        let process = get_current_process();
+        let process = process.lock();
+        assert_eq!(process.real_gid, 43);
+        assert_eq!(process.effective_gid, 45);
+        assert_eq!(process.saved_gid, 45);
+        assert_eq!(process.fs_gid, 45);
+    }
+
+    expect_ok(
+        SyscallArgs::new([50, 51, 52, 0, 0, 0]).call::<Setresuid>(),
+        0,
+    );
+    {
+        let process = get_current_process();
+        let process = process.lock();
+        assert_eq!(process.real_uid, 50);
+        assert_eq!(process.effective_uid, 51);
+        assert_eq!(process.saved_uid, 52);
+        assert_eq!(process.fs_uid, 51);
+    }
+
+    expect_ok(
+        SyscallArgs::new([60, 61, 62, 0, 0, 0]).call::<Setresgid>(),
+        0,
+    );
+    {
+        let process = get_current_process();
+        let process = process.lock();
+        assert_eq!(process.real_gid, 60);
+        assert_eq!(process.effective_gid, 61);
+        assert_eq!(process.saved_gid, 62);
+        assert_eq!(process.fs_gid, 61);
+    }
+
+    saved.restore();
+}
+
+fn fsuid_fsgid_syscalls_return_previous_ids_and_update_state() {
+    let saved = CredentialSnapshot::save_current();
+
+    {
+        let process = get_current_process();
+        let mut process = process.lock();
+        process.fs_uid = 700;
+        process.fs_gid = 800;
+    }
+
+    expect_ok(
+        SyscallArgs::new([701, 0, 0, 0, 0, 0]).call::<Setfsuid>(),
+        700,
+    );
+    expect_ok(
+        SyscallArgs::new([801, 0, 0, 0, 0, 0]).call::<Setfsgid>(),
+        800,
+    );
+    {
+        let process = get_current_process();
+        let process = process.lock();
+        assert_eq!(process.fs_uid, 701);
+        assert_eq!(process.fs_gid, 801);
+    }
+
+    saved.restore();
+}
+
+fn group_syscalls_validate_linux_size_rules() {
+    let process = get_current_process();
+    let saved_groups = process.lock().supplementary_groups.clone();
+    let groups = [10u32, 20u32, 30u32];
+
+    expect_ok(
+        SyscallArgs::new([groups.len() as u64, groups.as_ptr() as u64, 0, 0, 0, 0])
+            .call::<Setgroups>(),
+        0,
+    );
+    expect_ok(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Getgroups>(), 3);
+    expect_errno(
+        SyscallArgs::new([2, 0, 0, 0, 0, 0]).call::<Getgroups>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<Getgroups>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<Setgroups>(),
+        SyscallError::BadAddress,
+    );
+    expect_ok(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Setgroups>(), 0);
+    assert!(process.lock().supplementary_groups.is_empty());
+
+    process.lock().supplementary_groups = saved_groups;
+}
+
+fn clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids() {
+    expect_ok(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<ClockGetres>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<ClockGetres>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<ClockGetres>(),
+        SyscallError::InvalidArguments,
+    );
 }
 
 fn typed_syscall_args_convert_flags_and_enums_at_boundary() {

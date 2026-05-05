@@ -14,14 +14,28 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 234;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 214;
 
-macro_rules! coverage_gap {
-    ($($number:ident),+ $(,)?) => {
+macro_rules! syscall_coverage {
+    (
+        unit {
+            $($unit_number:ident => $unit_test:literal,)*
+        }
+        gap {
+            $($gap_number:ident,)*
+        }
+    ) => {
         &[
             $(
                 LinuxSyscallCoverage {
-                    number: SyscallNumber::$number,
+                    number: SyscallNumber::$unit_number,
+                    kind: LinuxSyscallTestKind::Unit,
+                    test: $unit_test,
+                },
+            )*
+            $(
+                LinuxSyscallCoverage {
+                    number: SyscallNumber::$gap_number,
                     kind: LinuxSyscallTestKind::CoverageGap,
                     test: "needs Linux semantics behavior test",
                 },
@@ -30,7 +44,30 @@ macro_rules! coverage_gap {
     };
 }
 
-pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = coverage_gap!(
+pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_coverage!(
+    unit {
+        Getpid => "process_identity_syscalls_match_current_linux_task_state",
+        Getppid => "process_identity_syscalls_match_current_linux_task_state",
+        Getpgrp => "process_identity_syscalls_match_current_linux_task_state",
+        Getpgid => "process_group_syscalls_follow_linux_pid_zero_and_esrch_rules",
+        Setpgid => "process_group_syscalls_follow_linux_pid_zero_and_esrch_rules",
+        Getuid => "credential_getters_return_current_linux_ids",
+        Getgid => "credential_getters_return_current_linux_ids",
+        Geteuid => "credential_getters_return_current_linux_ids",
+        Getegid => "credential_getters_return_current_linux_ids",
+        Setuid => "credential_setters_update_linux_real_effective_saved_and_fs_ids",
+        Setgid => "credential_setters_update_linux_real_effective_saved_and_fs_ids",
+        Setreuid => "credential_setters_update_linux_real_effective_saved_and_fs_ids",
+        Setregid => "credential_setters_update_linux_real_effective_saved_and_fs_ids",
+        Setresuid => "credential_setters_update_linux_real_effective_saved_and_fs_ids",
+        Setresgid => "credential_setters_update_linux_real_effective_saved_and_fs_ids",
+        Setfsuid => "fsuid_fsgid_syscalls_return_previous_ids_and_update_state",
+        Setfsgid => "fsuid_fsgid_syscalls_return_previous_ids_and_update_state",
+        Getgroups => "group_syscalls_validate_linux_size_rules",
+        Setgroups => "group_syscalls_validate_linux_size_rules",
+        ClockGetres => "clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids",
+    }
+    gap {
     Read,
     Write,
     OpenAt,
@@ -97,26 +134,16 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = coverage_g
     Umask,
     Ptrace,
     Shmdt,
-    Getuid,
-    Getgid,
     Capget,
     Capset,
-    Setuid,
-    Setgid,
-    Geteuid,
-    Getegid,
-    Getgroups,
     Gettimeofday,
     Getrusage,
     Settimeofday,
     Reboot,
     Sethostname,
     Sysinfo,
-    Setgroups,
     Getresuid,
-    Setresuid,
     Getresgid,
-    Setresgid,
     Fcntl,
     Flock,
     Fsync,
@@ -144,16 +171,7 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = coverage_g
     IoprioGet,
     Iopl,
     Ioperm,
-    Getpid,
-    Getppid,
-    Getpgrp,
-    Setpgid,
-    Setreuid,
-    Setregid,
-    Getpgid,
     Getsid,
-    Setfsuid,
-    Setfsgid,
     Setsid,
     Sigaltstack,
     Statfs,
@@ -260,9 +278,9 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = coverage_g
     Clone3,
     CloseRange,
     RtSigsuspend,
-    ClockGetres,
     Setpriority,
     EpollPwait2,
     MountSetattr,
     Fchmodat2,
+    }
 );
