@@ -14,6 +14,16 @@ mod socket;
 mod sysv_shm;
 mod timer;
 
+#[cfg(test)]
+pub(in crate::systemcall) use poll::{
+    Timespec as PollTimespec, kernel_events_for, saturating_timeout_ms, translate_ready_events,
+};
+#[cfg(test)]
+pub(in crate::systemcall) use select::{
+    Timespec as SelectTimespec, clear_fdset, fdset_contains, fdset_insert, fdset_words,
+    timeout_is_zero, timeout_to_deadline,
+};
+
 pub use bpf::*;
 pub use filesystem::*;
 pub use memory_sync::*;

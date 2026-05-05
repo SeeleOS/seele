@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use crate::{
     filesystem::{path::Path, vfs_traits::Whence},
     misc::error::AsSyscallError,

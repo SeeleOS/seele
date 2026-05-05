@@ -5,15 +5,9 @@ use crate::{
     systemcall::{
         arg_types::SyscallArg,
         implementations::{
-            OpenFlags, PollEvents,
-            poll::{
-                Timespec as PollTimespec, kernel_events_for, saturating_timeout_ms,
-                translate_ready_events,
-            },
-            select::{
-                Timespec as SelectTimespec, clear_fdset, fdset_contains, fdset_insert, fdset_words,
-                timeout_is_zero, timeout_to_deadline,
-            },
+            OpenFlags, PollEvents, PollTimespec, SelectTimespec, clear_fdset, fdset_contains,
+            fdset_insert, fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
+            timeout_to_deadline, translate_ready_events,
         },
         numbers::SyscallNumber,
         table::SYSCALL_TABLE,

@@ -42,12 +42,12 @@ struct LinuxPollFd {
 }
 
 #[repr(C)]
-pub(super) struct Timespec {
-    pub(super) tv_sec: i64,
-    pub(super) tv_nsec: i64,
+pub(in crate::systemcall) struct Timespec {
+    pub(in crate::systemcall) tv_sec: i64,
+    pub(in crate::systemcall) tv_nsec: i64,
 }
 
-pub(super) fn kernel_events_for(bits: PollEvents) -> [Option<PollableEvent>; 4] {
+pub(in crate::systemcall) fn kernel_events_for(bits: PollEvents) -> [Option<PollableEvent>; 4] {
     let watch_read = bits.intersects(
         PollEvents::POLLIN | PollEvents::POLLPRI | PollEvents::POLLRDNORM | PollEvents::POLLRDBAND,
     );
@@ -63,7 +63,10 @@ pub(super) fn kernel_events_for(bits: PollEvents) -> [Option<PollableEvent>; 4] 
     ]
 }
 
-pub(super) fn translate_ready_events(requested_events: PollEvents, kernel_events: u32) -> i16 {
+pub(in crate::systemcall) fn translate_ready_events(
+    requested_events: PollEvents,
+    kernel_events: u32,
+) -> i16 {
     let mut translated = PollEvents::empty();
 
     if kernel_events & (PollEvents::POLLIN.bits() as u32) != 0 {
@@ -91,7 +94,9 @@ fn count_ready(fds: &[LinuxPollFd]) -> usize {
     fds.iter().filter(|pfd| pfd.revents != 0).count()
 }
 
-pub(super) fn saturating_timeout_ms(timeout: &Timespec) -> Result<i32, SyscallError> {
+pub(in crate::systemcall) fn saturating_timeout_ms(
+    timeout: &Timespec,
+) -> Result<i32, SyscallError> {
     if timeout.tv_sec < 0 || timeout.tv_nsec < 0 || timeout.tv_nsec >= 1_000_000_000 {
         return Err(SyscallError::InvalidArguments);
     }
