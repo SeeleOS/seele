@@ -13,6 +13,10 @@ default-run = "seeleos-runner"
 name = "seeleos-runner"
 path = "runner/bin.rs"
 
+[[bin]]
+name = "seeleos-runner-test"
+path = "runner/test.rs"
+
 [profile.dev]
 panic = "abort"
 

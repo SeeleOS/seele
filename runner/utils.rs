@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
 use serde_json::Value;
 use std::{
@@ -26,6 +28,11 @@ pub struct RunOptions {
     qemu_debugcon: Option<PathBuf>,
 }
 
+pub enum BuildMode {
+    Run,
+    Test,
+}
+
 impl RunOptions {
     pub fn from_env() -> Self {
         Self {
@@ -41,6 +48,21 @@ impl RunOptions {
             qemu_debugcon: env::var_os("SEELE_QEMU_DEBUGCON").map(PathBuf::from),
         }
     }
+
+    fn for_tests() -> Self {
+        Self {
+            agent_mode: true,
+            agent_timeout: env::var("SEELE_QEMU_TIMEOUT").ok(),
+            machine: env::var("SEELE_QEMU_MACHINE").unwrap_or_else(|_| "q35".to_string()),
+            cpu_model: env::var("SEELE_QEMU_CPU")
+                .unwrap_or_else(|_| "host,+hypervisor,+kvmclock,+kvmclock-stable-bit".to_string()),
+            smp: env::var("SEELE_QEMU_SMP").unwrap_or_else(|_| "1".to_string()),
+            qemu_gdb: env::var("SEELE_QEMU_GDB").ok(),
+            wait_for_gdb: env::var_os("SEELE_QEMU_WAIT_GDB").is_some(),
+            qemu_debug_log: env::var_os("SEELE_QEMU_DEBUG_LOG").map(PathBuf::from),
+            qemu_debugcon: env::var_os("SEELE_QEMU_DEBUGCON").map(PathBuf::from),
+        }
+    }
 }
 
 fn default_smp() -> String {
@@ -50,23 +72,44 @@ fn default_smp() -> String {
 }
 
 pub fn build_kernel() -> Vec<PathBuf> {
+    build_kernel_with_mode(BuildMode::Run)
+}
+
+pub fn build_kernel_tests() -> Vec<PathBuf> {
+    build_kernel_with_mode(BuildMode::Test)
+}
+
+pub fn build_kernel_with_mode(mode: BuildMode) -> Vec<PathBuf> {
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let mut command = Command::new(cargo);
-    command.args([
-        "build",
-        "-p",
-        "kernel",
-        "--target",
-        "x86_64-unknown-none",
-        "--bin",
-        "kernel",
-        "--message-format=json-render-diagnostics",
-    ]);
+    command.arg(match mode {
+        BuildMode::Run => "build",
+        BuildMode::Test => "test",
+    });
+    command.args(["-p", "kernel", "--target", "x86_64-unknown-none"]);
 
     if !cfg!(debug_assertions) {
         command.arg("--release");
     }
 
+    match mode {
+        BuildMode::Run => {
+            command.args(["--bin", "kernel"]);
+        }
+        BuildMode::Test => {
+            command.args([
+                "--lib",
+                "-Z",
+                "build-std=core,alloc",
+                "-Z",
+                "panic-abort-tests",
+                "--no-run",
+            ]);
+            command.env("RUSTFLAGS", append_rustflags());
+        }
+    }
+
+    command.arg("--message-format=json-render-diagnostics");
     command.stdout(Stdio::piped());
     command.stderr(Stdio::inherit());
 
@@ -77,7 +120,7 @@ pub fn build_kernel() -> Vec<PathBuf> {
 
     for line in reader.lines() {
         let line = line.expect("failed to read cargo output");
-        if let Some(path) = handle_cargo_message(&line) {
+        if let Some(path) = handle_cargo_message(&line, &mode) {
             executables.push(path);
         }
     }
@@ -109,6 +152,14 @@ pub fn create_uefi_image(kernel_path: &Path) -> PathBuf {
 }
 
 pub fn run_qemu(uefi_path: &Path, options: &RunOptions) -> i32 {
+    run_qemu_inner(uefi_path, options)
+}
+
+pub fn run_qemu_test(uefi_path: &Path) -> i32 {
+    run_qemu_inner(uefi_path, &RunOptions::for_tests())
+}
+
+fn run_qemu_inner(uefi_path: &Path, options: &RunOptions) -> i32 {
     let root_disk = env::var_os("SEELE_ROOT_DISK")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("disk.img"));
@@ -237,8 +288,8 @@ pub fn run_qemu(uefi_path: &Path, options: &RunOptions) -> i32 {
     let _ = fs::remove_file(serial_log);
     cleanup_socket(&tty_input_socket);
     let exit_code = match status.code().unwrap_or(1) {
-        0x10 => 0,
-        0x11 => 1,
+        33 => 0,
+        35 => 1,
         _ => {
             if let Some(path) = &debug_log {
                 report_qemu_fault(path);
@@ -252,7 +303,7 @@ pub fn run_qemu(uefi_path: &Path, options: &RunOptions) -> i32 {
     exit_code
 }
 
-fn handle_cargo_message(line: &str) -> Option<PathBuf> {
+fn handle_cargo_message(line: &str, mode: &BuildMode) -> Option<PathBuf> {
     let value: Value = match serde_json::from_str(line) {
         Ok(value) => value,
         Err(_) => {
@@ -270,7 +321,15 @@ fn handle_cargo_message(line: &str) -> Option<PathBuf> {
         }
         Some("compiler-artifact") => {
             let kind = value["target"]["kind"].as_array()?;
-            if !kind.iter().any(|item| item.as_str() == Some("bin")) {
+            let keep = match mode {
+                BuildMode::Run => kind.iter().any(|item| item.as_str() == Some("bin")),
+                BuildMode::Test => {
+                    kind.iter().any(|item| item.as_str() == Some("lib"))
+                        && value["profile"]["test"].as_bool() == Some(true)
+                }
+            };
+
+            if !keep {
                 return None;
             }
 
@@ -280,6 +339,14 @@ fn handle_cargo_message(line: &str) -> Option<PathBuf> {
                 .map(PathBuf::from)
         }
         _ => None,
+    }
+}
+
+fn append_rustflags() -> String {
+    let extra = "-Zunstable-options -Cpanic=immediate-abort";
+    match env::var("RUSTFLAGS") {
+        Ok(existing) if !existing.trim().is_empty() => format!("{existing} {extra}"),
+        _ => extra.to_string(),
     }
 }
 

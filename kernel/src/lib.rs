@@ -6,6 +6,8 @@
 
 extern crate alloc;
 
+#[cfg(test)]
+use bootloader_api::entry_point;
 pub const NAME: &str = "Seele";
 
 pub mod acpi;
@@ -30,7 +32,11 @@ pub mod systemcall;
 pub mod terminal;
 pub mod thread;
 pub use misc::signal;
+#[cfg(test)]
+pub use misc::testing;
 
+#[cfg(test)]
+use crate::boot::BOOTLOADER_CONFIG;
 use crate::filesystem::vfs::VirtualFS;
 use crate::misc::others::enable_sse;
 use crate::misc::{agent_tty_input, framebuffer, logging, mouse, time};
@@ -40,7 +46,17 @@ use bootloader_api::BootInfo;
 #[cfg(test)]
 use core::panic::PanicInfo;
 
-pub fn init(boot_info: &'static mut BootInfo) -> ! {
+#[cfg(test)]
+entry_point!(test_kernel_main, config = &BOOTLOADER_CONFIG);
+
+#[cfg(test)]
+fn test_kernel_main(boot_info: &'static mut BootInfo) -> ! {
+    init_kernel(boot_info);
+    test_main();
+    unreachable!("test_main returned");
+}
+
+pub fn init_kernel(boot_info: &'static mut BootInfo) {
     boot::init(boot_info);
     memory::init(boot::physical_memory_offset(), boot::memory_map());
     init_bsp();
@@ -85,6 +101,10 @@ pub fn init(boot_info: &'static mut BootInfo) -> ! {
     }
     start_application_processors();
     release_application_processors();
+}
+
+pub fn init(boot_info: &'static mut BootInfo) -> ! {
+    init_kernel(boot_info);
     thread::scheduling::run();
 }
 
@@ -94,4 +114,11 @@ fn panic(_info: &PanicInfo) -> ! {
     use crate::misc::panic::test_handle_panic;
 
     test_handle_panic(_info);
+}
+
+#[cfg(test)]
+mod tests {
+    crate::test!("kernel test harness", || {
+        assert_eq!(2 + 2, 4);
+    });
 }

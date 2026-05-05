@@ -3,6 +3,7 @@
 ## Build, Test, and Development Commands
 
 - `agent-tools/run-agent-vm.sh`: headless VM run with serial output; use this for runtime verification.
+- `agent-tools/run-tests.sh`: build and run kernel unit tests in QEMU.
 - `cargo fmt --all`: format Rust code before submitting changes.
 - `rootfs_making/make_disk.sh`: build or refresh `disk.img` and the guest root filesystem contents.
 - If a required tool is missing for this repository workflow, add it to the `flake.nix` dev shell instead of treating it as a one-off host prerequisite.
@@ -16,7 +17,7 @@
 - After `agent-tools/ensure-sysroot-mounted.sh`, if you only need to read files from `sysroot/`, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
 - If the sandbox, `no_new_privileges`, missing mounts, or network restrictions block a necessary command, ask the user for privilege escalation or the required access instead of silently giving up on that path.
 
-After finishing a change, run `agent-tools/run-agent-vm.sh` to test the VM. If the VM test fails, keep fixing the issue before considering the work done. If you are validating a shell or userspace fix, prefer the `--agent` path so serial logs are captured automatically.
+After finishing a change, run `agent-tools/run-tests.sh` and `agent-tools/run-agent-vm.sh` to test the kernel unit tests and VM. If either test fails, keep fixing the issue before considering the work done. If you are validating a shell or userspace fix, prefer the `--agent` path so serial logs are captured automatically.
 
 ## Coding Style & Naming Conventions
 
@@ -40,6 +41,7 @@ After finishing a change, run `agent-tools/run-agent-vm.sh` to test the VM. If t
 There is no large standalone test suite yet; verification is primarily compile checks plus QEMU boot tests.
 
 - Run `cargo check --manifest-path kernel/Cargo.toml` for all kernel changes.
+- Run `agent-tools/run-tests.sh` for kernel unit-test coverage.
 - Treat compiler warnings as failures. Do not leave any `cargo check` warnings in the tree.
 - After finishing code changes, run `cargo clippy` and address its findings before considering the work complete.
 - Run `agent-tools/run-agent-vm.sh` for syscall, process, terminal, or userspace changes.

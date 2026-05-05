@@ -1,18 +1,18 @@
-use crate::{s_print, s_println};
+use crate::{
+    misc::debug_exit::{QemuExitCode, debug_exit},
+    misc::hlt_loop,
+    s_print, s_println,
+};
+use owo_colors::OwoColorize;
 
-pub fn run_tests(tests: &[&dyn Fn()]) {
-    use crate::{
-        misc::debug_exit::{QemuExitCode, debug_exit},
-        s_println,
-    };
-
-    s_println!("\nRunning {} tests", tests.len());
+pub fn run_tests(tests: &[&dyn Fn()]) -> ! {
+    s_println!("\nRunning {} tests", tests.len().bold());
     for test in tests {
         test();
     }
 
-    s_println!("\nTest success!");
     debug_exit(QemuExitCode::Success);
+    hlt_loop();
 }
 
 pub struct Test {
@@ -30,7 +30,7 @@ impl Test {
 
         ((self.test)());
 
-        s_println!("[OK]");
+        s_println!("{}", "OK".green().bold());
     }
 }
 
@@ -40,7 +40,7 @@ macro_rules! test {
         #[test_case]
         #[allow(unused_imports)]
         fn __test() {
-            $crate::testing::Test::new($name, $test_fn).run_test();
+            $crate::misc::testing::Test::new($name, $test_fn).run_test();
         }
     };
 }

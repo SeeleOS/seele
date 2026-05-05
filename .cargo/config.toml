@@ -3,6 +3,7 @@ bindeps = true
 
 [alias]
 rr = "run --release"
+rt = "run --bin seeleos-runner-test"
 
 [target.x86_64-seele]
 rustflags = [
