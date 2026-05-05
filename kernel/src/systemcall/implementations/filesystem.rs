@@ -22,6 +22,7 @@ use crate::{
         error::ObjectError,
         fs_context::{FsConfigCommand, FsContextObject},
         misc::{ObjectRef, get_object_current_process},
+        traits::Statable,
     },
     process::{FdFlags, manager::get_current_process},
     systemcall::utils::{SyscallError, SyscallImpl},
@@ -540,13 +541,13 @@ fn check_access_permissions(stat: &LinuxStat, mode: i32) -> Result<(), SyscallEr
     let permission = stat.st_mode & 0o777;
 
     if (mode & 4) != 0 && permission & 0o444 == 0 {
-        return Err(SyscallError::PermissionDenied);
+        return Err(SyscallError::AccessDenied);
     }
     if (mode & 2) != 0 && permission & 0o222 == 0 {
-        return Err(SyscallError::PermissionDenied);
+        return Err(SyscallError::AccessDenied);
     }
     if (mode & 1) != 0 && permission & 0o111 == 0 {
-        return Err(SyscallError::PermissionDenied);
+        return Err(SyscallError::AccessDenied);
     }
 
     Ok(())
@@ -1038,8 +1039,8 @@ define_syscall!(Access, |path: CString, mode: i32| {
     check_access_mode(mode)?;
     let path_str = path_from_raw(path)?;
     let path = resolve_path_at(AT_FDCWD, &path_str)?;
-    let open_result = VirtualFS.lock().open(path);
-    let _ = open_result?;
+    let object = VirtualFS.lock().open(path)?;
+    check_access_permissions(&object.stat(), mode)?;
     Ok(0)
 });
 
@@ -1130,7 +1131,7 @@ define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
         buffer.push(0);
         user_safe::write(buf_ptr, &buffer[..])?;
     } else {
-        return Err(SyscallError::InvalidArguments);
+        return Err(SyscallError::RangeError);
     }
 
     Ok(path_len + 1)

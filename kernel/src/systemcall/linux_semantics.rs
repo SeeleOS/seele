@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 156;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 149;
 
 macro_rules! syscall_coverage {
     (
@@ -124,6 +124,13 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Dup2 => "pipe_and_dup_syscalls_follow_linux_fd_rules",
         Pipe2 => "pipe_and_dup_syscalls_follow_linux_fd_rules",
         Dup3 => "pipe_and_dup_syscalls_follow_linux_fd_rules",
+        Access => "filesystem_path_state_syscalls_follow_linux_rules",
+        Getcwd => "filesystem_path_state_syscalls_follow_linux_rules",
+        Chdir => "filesystem_path_state_syscalls_follow_linux_rules",
+        Chroot => "filesystem_path_state_syscalls_follow_linux_rules",
+        Fchdir => "filesystem_path_state_syscalls_follow_linux_rules",
+        Faccessat => "filesystem_path_state_syscalls_follow_linux_rules",
+        Faccessat2 => "filesystem_path_state_syscalls_follow_linux_rules",
     }
     gap {
     Read,
@@ -148,7 +155,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Pread64,
     Pwrite64,
     Writev,
-    Access,
     Mremap,
     Msync,
     Mincore,
@@ -191,10 +197,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Ftruncate,
     Getdents,
     Getdents64,
-    Getcwd,
-    Chdir,
-    Chroot,
-    Fchdir,
     Rename,
     Mkdir,
     Rmdir,
@@ -241,7 +243,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     LinkAt,
     SymlinkAt,
     ReadlinkAt,
-    Faccessat,
     Pselect6,
     Ppoll,
     Unshare,
@@ -263,7 +264,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     TimerGetoverrun,
     TimerDelete,
     ExitGroup,
-    Faccessat2,
     Bpf,
     CopyFileRange,
     Splice,

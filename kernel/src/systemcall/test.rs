@@ -1,4 +1,5 @@
 use crate::{
+    filesystem::{absolute_path::AbsolutePath, path::Path, vfs::VirtualFS},
     memory::protection::Protection,
     misc::timer::ClockId,
     object::{FileFlags, misc::get_object_current_process},
@@ -11,20 +12,20 @@ use crate::{
     systemcall::{
         arg_types::SyscallArg,
         implementations::{
-            Alarm, ArchPrctl, Capget, Capset, ClockGetres, ClockGettime, ClockNanosleep,
-            ClockSettime, Dup, Dup2, Dup3, Eventfd, Eventfd2, Getegid, Geteuid, Getgid, Getgroups,
-            Getpgid, Getpgrp, Getpid, Getppid, Getpriority, Getrandom, Getresgid, Getresuid,
-            Getrusage, Getsid, Gettid, Gettimeofday, Getuid, InotifyInit, InotifyInit1, Ioperm,
-            Iopl, IoprioGet, IoprioSet, Madvise, OpenFlags, Pipe, Pipe2, PollEvents, PollTimespec,
-            Prctl, Prlimit64, Reboot, Rseq, SchedGetPriorityMax, SchedGetPriorityMin,
-            SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval,
-            SchedSetaffinity, SchedSetparam, SchedYield, SelectTimespec, SetRobustList,
-            SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Sethostname, Setpgid,
-            Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid, Settimeofday,
-            Setuid, Sync, Sysinfo, Time, TimerfdCreate, TimerfdGettime, TimerfdSettime, Umask,
-            Uname, Vhangup, clear_fdset, fdset_contains, fdset_insert, fdset_words,
-            kernel_events_for, saturating_timeout_ms, timeout_is_zero, timeout_to_deadline,
-            translate_ready_events,
+            Access, Alarm, ArchPrctl, Capget, Capset, Chdir, Chroot, ClockGetres, ClockGettime,
+            ClockNanosleep, ClockSettime, Dup, Dup2, Dup3, Eventfd, Eventfd2, Faccessat,
+            Faccessat2, Fchdir, Getcwd, Getegid, Geteuid, Getgid, Getgroups, Getpgid, Getpgrp,
+            Getpid, Getppid, Getpriority, Getrandom, Getresgid, Getresuid, Getrusage, Getsid,
+            Gettid, Gettimeofday, Getuid, InotifyInit, InotifyInit1, Ioperm, Iopl, IoprioGet,
+            IoprioSet, Madvise, OpenAt, OpenFlags, Pipe, Pipe2, PollEvents, PollTimespec, Prctl,
+            Prlimit64, Reboot, Rseq, SchedGetPriorityMax, SchedGetPriorityMin, SchedGetaffinity,
+            SchedGetparam, SchedGetscheduler, SchedRrGetInterval, SchedSetaffinity, SchedSetparam,
+            SchedYield, SelectTimespec, SetRobustList, SetTidAddress, Setfsgid, Setfsuid, Setgid,
+            Setgroups, Sethostname, Setpgid, Setpriority, Setregid, Setresgid, Setresuid, Setreuid,
+            Setrlimit, Setsid, Settimeofday, Setuid, Sync, Sysinfo, Time, TimerfdCreate,
+            TimerfdGettime, TimerfdSettime, Umask, Uname, Vhangup, clear_fdset, fdset_contains,
+            fdset_insert, fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
+            timeout_to_deadline, translate_ready_events,
         },
         linux_semantics::{
             KNOWN_LINUX_SYSCALL_COVERAGE_GAPS, LINUX_SYSCALL_SEMANTICS_COVERAGE,
@@ -144,6 +145,11 @@ crate::test!(
     pipe_and_dup_syscalls,
     "pipe and dup syscalls follow linux fd rules",
     pipe_and_dup_syscalls_follow_linux_fd_rules
+);
+crate::test!(
+    filesystem_path_state_syscalls,
+    "filesystem path state syscalls follow linux rules",
+    filesystem_path_state_syscalls_follow_linux_rules
 );
 crate::test!(
     typed_syscall_arg_conversion,
@@ -1761,6 +1767,15 @@ fn occupied_fd_count() -> usize {
     fd_table.lock().iter().flatten().count()
 }
 
+fn write_user_cstr(addr: u64, value: &[u8]) {
+    assert_eq!(value.last(), Some(&0));
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer(addr as *mut u8, value)
+        .expect("test user c string should be writable");
+}
+
 fn eventfd_syscalls_follow_linux_flag_rules() {
     const EFD_SEMAPHORE: u64 = 0x1;
     const EFD_NONBLOCK: u64 = 0o4_000;
@@ -2005,6 +2020,189 @@ fn pipe_and_dup_syscalls_follow_linux_fd_rules() {
     close_test_fd(pipe2_read_fd);
     close_test_fd(write_fd);
     close_test_fd(read_fd);
+}
+
+fn filesystem_path_state_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+    const AT_EMPTY_PATH: u64 = 0x1000;
+    const AT_EACCESS: u64 = 0x200;
+
+    let process = get_current_process();
+    let saved_fs_context = process.lock().fs_context.lock().clone();
+    let base_path = Path::new("/tmp/syscall-path-state-test");
+    let subdir_path = Path::new("/tmp/syscall-path-state-test/subdir");
+    let locked_file_path = Path::new("/tmp/syscall-path-state-test/locked");
+    let existing_file_path = Path::new("/tmp/syscall-path-state-test/existing");
+    let _ = VirtualFS.lock().delete_file(existing_file_path.clone());
+    let _ = VirtualFS.lock().delete_file(locked_file_path.clone());
+    let _ = VirtualFS.lock().delete_file(subdir_path.clone());
+    let _ = VirtualFS.lock().delete_file(base_path.clone());
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS.lock().create_dir(subdir_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(locked_file_path.clone())
+        .unwrap();
+    VirtualFS
+        .lock()
+        .open(locked_file_path.clone())
+        .unwrap()
+        .chmod(0)
+        .unwrap();
+    VirtualFS
+        .lock()
+        .create_file(existing_file_path.clone())
+        .unwrap();
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"/tmp/syscall-path-state-test/locked\0");
+    expect_ok(
+        SyscallArgs::new([user_page, 0, 0, 0, 0, 0]).call::<Access>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([user_page, 4, 0, 0, 0, 0]).call::<Access>(),
+        SyscallError::AccessDenied,
+    );
+    expect_errno(
+        SyscallArgs::new([user_page, 8, 0, 0, 0, 0]).call::<Access>(),
+        SyscallError::InvalidArguments,
+    );
+
+    write_user_cstr(user_page, b"/tmp/syscall-path-state-test/existing\0");
+    let file_fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            OpenFlags::empty().bits() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
+    expect_ok(
+        SyscallArgs::new([file_fd as u64, user_page + 128, 0, AT_EMPTY_PATH, 0, 0])
+            .call::<Faccessat>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([
+            file_fd as u64,
+            user_page + 128,
+            0,
+            AT_EMPTY_PATH | AT_EACCESS,
+            0,
+            0,
+        ])
+        .call::<Faccessat2>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([file_fd as u64, user_page + 128, 0, 0, 0, 0]).call::<Faccessat>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([file_fd as u64, user_page + 128, 0, 0x8000_0000, 0, 0])
+            .call::<Faccessat2>(),
+        SyscallError::NoSyscall,
+    );
+    close_test_fd(file_fd);
+
+    write_user_cstr(user_page, b"/tmp/syscall-path-state-test/subdir\0");
+    expect_ok(
+        SyscallArgs::new([user_page, 0, 0, 0, 0, 0]).call::<Chdir>(),
+        0,
+    );
+    {
+        let current = process.lock().fs_context.lock().current_directory.clone();
+        assert_eq!(current.as_string(), "/tmp/syscall-path-state-test/subdir");
+    }
+    expect_ok(
+        SyscallArgs::new([user_page + 256, 64, 0, 0, 0, 0]).call::<Getcwd>(),
+        b"/tmp/syscall-path-state-test/subdir\0".len(),
+    );
+    assert_user_bytes(user_page + 256, b"/tmp/syscall-path-state-test/subdir\0");
+    expect_errno(
+        SyscallArgs::new([user_page + 384, 4, 0, 0, 0, 0]).call::<Getcwd>(),
+        SyscallError::RangeError,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 64, 0, 0, 0, 0]).call::<Getcwd>(),
+        SyscallError::BadAddress,
+    );
+
+    let dir_fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            OpenFlags::empty().bits() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
+    write_user_cstr(user_page, b"/tmp/syscall-path-state-test/existing\0");
+    let non_dir_fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            OpenFlags::empty().bits() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
+    expect_errno(
+        SyscallArgs::new([non_dir_fd as u64, 0, 0, 0, 0, 0]).call::<Fchdir>(),
+        SyscallError::NotADirectory,
+    );
+    expect_ok(
+        SyscallArgs::new([dir_fd as u64, 0, 0, 0, 0, 0]).call::<Fchdir>(),
+        0,
+    );
+    {
+        let current = process.lock().fs_context.lock().current_directory.clone();
+        assert_eq!(current.as_string(), "/tmp/syscall-path-state-test/subdir");
+    }
+    close_test_fd(non_dir_fd);
+    close_test_fd(dir_fd);
+
+    {
+        let process = process.lock();
+        process.fs_context.lock().current_directory =
+            AbsolutePath::from_root_path(&Path::new("/tmp/syscall-path-state-test/subdir"));
+    }
+    write_user_cstr(user_page, b"/tmp\0");
+    expect_ok(
+        SyscallArgs::new([user_page, 0, 0, 0, 0, 0]).call::<Chroot>(),
+        0,
+    );
+    {
+        let fs_context = process.lock().fs_context.lock().clone();
+        assert_eq!(fs_context.root_directory.clone().as_string(), "/tmp");
+        assert_eq!(
+            fs_context
+                .current_directory
+                .display_string(&fs_context.root_directory),
+            "/syscall-path-state-test/subdir"
+        );
+    }
+    write_user_cstr(user_page, b"/syscall-path-state-test/existing\0");
+    expect_errno(
+        SyscallArgs::new([user_page, 0, 0, 0, 0, 0]).call::<Chroot>(),
+        SyscallError::NotADirectory,
+    );
+
+    {
+        *process.lock().fs_context.lock() = saved_fs_context;
+    }
+    let _ = VirtualFS.lock().delete_file(existing_file_path);
+    let _ = VirtualFS.lock().delete_file(locked_file_path);
+    let _ = VirtualFS.lock().delete_file(subdir_path);
+    let _ = VirtualFS.lock().delete_file(base_path);
 }
 
 fn typed_syscall_args_convert_flags_and_enums_at_boundary() {
