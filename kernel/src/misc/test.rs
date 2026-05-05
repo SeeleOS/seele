@@ -7,12 +7,26 @@ use crate::{
     process::ProcessExitStatus,
 };
 
-crate::test!("misc time timer and signal conversions", || {
-    time_arithmetic_saturates_and_splits_subseconds();
-    timer_spec_round_trips_state_and_notify_method();
-    signal_masks_and_siginfo_conversion_match_linux_numbers();
-    process_exit_status_exports_wait_encodings();
-});
+crate::test!(
+    time_arithmetic,
+    "time arithmetic saturates and splits subseconds",
+    time_arithmetic_saturates_and_splits_subseconds
+);
+crate::test!(
+    timer_state_conversion,
+    "timer spec round trips state and notify method",
+    timer_spec_round_trips_state_and_notify_method
+);
+crate::test!(
+    signal_siginfo_conversion,
+    "signal masks and siginfo conversion match linux numbers",
+    signal_masks_and_siginfo_conversion_match_linux_numbers
+);
+crate::test!(
+    process_exit_wait_encodings,
+    "process exit status exports wait encodings",
+    process_exit_status_exports_wait_encodings
+);
 
 fn time_arithmetic_saturates_and_splits_subseconds() {
     let time = Time::from_nanoseconds(1_234_567_890);

@@ -11,11 +11,21 @@ use crate::{
     },
 };
 
-crate::test!("systemcall lookup and typed arg conversion", || {
-    syscall_number_lookup_matches_x86_64_abi_values();
-    syscall_table_contains_registered_and_rejects_unknown_numbers();
-    typed_syscall_args_convert_flags_and_enums_at_boundary();
-});
+crate::test!(
+    syscall_number_lookup,
+    "syscall number lookup matches x86_64 abi values",
+    syscall_number_lookup_matches_x86_64_abi_values
+);
+crate::test!(
+    syscall_table_coverage,
+    "syscall table contains registered and rejects unknown numbers",
+    syscall_table_contains_registered_and_rejects_unknown_numbers
+);
+crate::test!(
+    typed_syscall_arg_conversion,
+    "typed syscall args convert flags and enums at boundary",
+    typed_syscall_args_convert_flags_and_enums_at_boundary
+);
 
 fn syscall_number_lookup_matches_x86_64_abi_values() {
     assert_eq!(SyscallNumber::from_number(0), Some(SyscallNumber::Read));

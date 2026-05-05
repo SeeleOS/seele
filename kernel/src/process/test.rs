@@ -3,11 +3,21 @@ use crate::{
     signal::Signal,
 };
 
-crate::test!("process newtypes and wait status helpers", || {
-    default_process_starts_with_linux_root_credentials_and_limits();
-    fd_flags_track_cloexec_bit();
-    exit_and_wait_events_preserve_linux_status_encoding();
-});
+crate::test!(
+    default_process_credentials_and_limits,
+    "default process starts with linux root credentials and limits",
+    default_process_starts_with_linux_root_credentials_and_limits
+);
+crate::test!(
+    fd_flags_cloexec,
+    "fd flags track cloexec bit",
+    fd_flags_track_cloexec_bit
+);
+crate::test!(
+    wait_status_encoding,
+    "exit and wait events preserve linux status encoding",
+    exit_and_wait_events_preserve_linux_status_encoding
+);
 
 fn default_process_starts_with_linux_root_credentials_and_limits() {
     let process = Process::default();

@@ -6,10 +6,16 @@ use crate::elfloader::{
     util::{align_down, align_up},
 };
 
-crate::test!("elfloader alignment and flag helpers", || {
-    elf_alignment_helpers_round_to_requested_power_of_two();
-    elf_segment_flags_map_to_user_page_flags();
-});
+crate::test!(
+    elf_alignment_helpers,
+    "elf alignment helpers round to requested power of two",
+    elf_alignment_helpers_round_to_requested_power_of_two
+);
+crate::test!(
+    elf_segment_page_flags,
+    "elf segment flags map to user page flags",
+    elf_segment_flags_map_to_user_page_flags
+);
 
 fn elf_alignment_helpers_round_to_requested_power_of_two() {
     assert_eq!(align_down(0x1234, 0x1000), 0x1000);

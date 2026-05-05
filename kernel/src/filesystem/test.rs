@@ -8,12 +8,26 @@ use crate::filesystem::{
     tmpfs::TmpfsState,
 };
 
-crate::test!("filesystem broad pure helpers", || {
-    path_normalization_handles_absolute_and_relative_components();
-    absolute_path_respects_root_jail();
-    sparse_file_reads_holes_as_zeroes();
-    tmpfs_state_tracks_children_and_empty_directory_rules();
-});
+crate::test!(
+    path_normalization_cases,
+    "path normalization handles absolute and relative components",
+    path_normalization_handles_absolute_and_relative_components
+);
+crate::test!(
+    absolute_path_root_jail,
+    "absolute path respects root jail",
+    absolute_path_respects_root_jail
+);
+crate::test!(
+    sparse_file_holes,
+    "sparse file reads holes as zeroes",
+    sparse_file_reads_holes_as_zeroes
+);
+crate::test!(
+    tmpfs_child_state,
+    "tmpfs state tracks children and empty directory rules",
+    tmpfs_state_tracks_children_and_empty_directory_rules
+);
 
 fn path_normalization_handles_absolute_and_relative_components() {
     let normalized = Path::new("/usr//bin/../lib/./").normalize();

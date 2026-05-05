@@ -11,12 +11,26 @@ use crate::{
     systemcall::utils::SyscallError,
 };
 
-crate::test!("object pure state helpers", || {
-    open_state_tracks_file_flags();
-    object_errors_map_to_syscall_errors();
-    bpf_array_maps_default_missing_entries_to_zero();
-    memfd_registry_applies_seal_rules();
-});
+crate::test!(
+    open_state_file_flags,
+    "open state tracks file flags",
+    open_state_tracks_file_flags
+);
+crate::test!(
+    object_error_syscall_mapping,
+    "object errors map to syscall errors",
+    object_errors_map_to_syscall_errors
+);
+crate::test!(
+    bpf_array_default_entries,
+    "bpf array maps default missing entries to zero",
+    bpf_array_maps_default_missing_entries_to_zero
+);
+crate::test!(
+    memfd_seal_rules,
+    "memfd registry applies seal rules",
+    memfd_registry_applies_seal_rules
+);
 
 fn open_state_tracks_file_flags() {
     let state = OpenState::new(FileFlags::NONBLOCK);

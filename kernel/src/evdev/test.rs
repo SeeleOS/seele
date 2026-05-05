@@ -1,9 +1,15 @@
 use crate::evdev::{device_info::EventDeviceKind, event_bits::KEY_BITMAP_BYTES};
 
-crate::test!("evdev metadata and bitmap helpers", || {
-    event_devices_report_stable_names_minors_and_ids();
-    event_bitmaps_cover_keyboard_and_mouse_capabilities();
-});
+crate::test!(
+    evdev_metadata,
+    "event devices report stable names minors and ids",
+    event_devices_report_stable_names_minors_and_ids
+);
+crate::test!(
+    evdev_bitmaps,
+    "event bitmaps cover keyboard and mouse capabilities",
+    event_bitmaps_cover_keyboard_and_mouse_capabilities
+);
 
 fn bit_is_set(bytes: &[u8], bit: usize) -> bool {
     bytes

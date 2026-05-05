@@ -6,10 +6,16 @@ use crate::drm::mode::{
     DRM_MODE_PAGE_FLIP_TARGET_RELATIVE, MODE_GAMMA_LUT_SIZE, MODE_REFRESH_HZ,
 };
 
-crate::test!("drm mode constants and flag groups", || {
-    drm_fourcc_and_mode_defaults_match_linux_values();
-    drm_grouped_flags_are_exact_unions();
-});
+crate::test!(
+    drm_mode_defaults,
+    "drm fourcc and mode defaults match linux values",
+    drm_fourcc_and_mode_defaults_match_linux_values
+);
+crate::test!(
+    drm_flag_groups,
+    "drm grouped flags are exact unions",
+    drm_grouped_flags_are_exact_unions
+);
 
 fn drm_fourcc_and_mode_defaults_match_linux_values() {
     assert_eq!(DRM_FORMAT_XRGB8888, 0x3432_5258);

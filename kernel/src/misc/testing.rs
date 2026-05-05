@@ -36,6 +36,13 @@ impl Test {
 
 #[macro_export]
 macro_rules! test {
+    ($fn_name:ident, $name:literal, $test_fn: expr) => {
+        #[test_case]
+        #[allow(unused_imports)]
+        fn $fn_name() {
+            $crate::misc::testing::Test::new($name, $test_fn).run_test();
+        }
+    };
     ($name:literal, $test_fn: expr) => {
         #[test_case]
         #[allow(unused_imports)]

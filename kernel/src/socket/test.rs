@@ -8,11 +8,21 @@ use crate::{
     },
 };
 
-crate::test!("socket sockaddr and option helpers", || {
-    unix_sockaddr_round_trips_path_and_abstract_names();
-    inet_sockaddr_uses_network_byte_order_for_ports();
-    timeout_sockopts_have_linux_timeval_size();
-});
+crate::test!(
+    unix_sockaddr_round_trip,
+    "unix sockaddr round trips path and abstract names",
+    unix_sockaddr_round_trips_path_and_abstract_names
+);
+crate::test!(
+    inet_sockaddr_byte_order,
+    "inet sockaddr uses network byte order for ports",
+    inet_sockaddr_uses_network_byte_order_for_ports
+);
+crate::test!(
+    timeout_sockopt_sizes,
+    "timeout sockopts have linux timeval size",
+    timeout_sockopts_have_linux_timeval_size
+);
 
 fn unix_sockaddr_round_trips_path_and_abstract_names() {
     let pathname = serialize_unix_addr(Some("/tmp/socket"));

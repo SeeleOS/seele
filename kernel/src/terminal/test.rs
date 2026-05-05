@@ -9,13 +9,31 @@ use crate::{
     },
 };
 
-crate::test!("terminal line discipline and termios helpers", || {
-    canonical_input_buffers_until_newline_and_handles_erase();
-    noncanonical_input_queues_immediately_and_interrupts_signal();
-    output_filter_maps_lone_newline_to_crlf();
-    xtgettcap_filter_buffers_incomplete_sequences();
-    default_termios_matches_linux_tty_basics();
-});
+crate::test!(
+    canonical_input_buffering,
+    "canonical input buffers until newline and handles erase",
+    canonical_input_buffers_until_newline_and_handles_erase
+);
+crate::test!(
+    noncanonical_input_and_interrupts,
+    "noncanonical input queues immediately and interrupts signal",
+    noncanonical_input_queues_immediately_and_interrupts_signal
+);
+crate::test!(
+    output_newline_filtering,
+    "output filter maps lone newline to crlf",
+    output_filter_maps_lone_newline_to_crlf
+);
+crate::test!(
+    xtgettcap_sequence_buffering,
+    "xtgettcap filter buffers incomplete sequences",
+    xtgettcap_filter_buffers_incomplete_sequences
+);
+crate::test!(
+    default_termios_basics,
+    "default termios matches linux tty basics",
+    default_termios_matches_linux_tty_basics
+);
 
 fn canonical_input_buffers_until_newline_and_handles_erase() {
     let termios = LinuxTermios2::new_default();
