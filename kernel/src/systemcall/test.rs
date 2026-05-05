@@ -9,8 +9,13 @@ use crate::{
             fdset_insert, fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
             timeout_to_deadline, translate_ready_events,
         },
+        linux_semantics::{
+            KNOWN_LINUX_SYSCALL_COVERAGE_GAPS, LINUX_SYSCALL_SEMANTICS_COVERAGE,
+            LinuxSyscallTestKind,
+        },
         numbers::SyscallNumber,
-        table::SYSCALL_TABLE,
+        table::{REGISTERED_SYSCALLS, SYSCALL_TABLE},
+        test_helpers::{SyscallArgs, assert_linux_layout, errno_code, expect_errno, expect_ok},
         utils::SyscallError,
     },
 };
@@ -24,6 +29,21 @@ crate::test!(
     syscall_table_coverage,
     "syscall table contains registered and rejects unknown numbers",
     syscall_table_contains_registered_and_rejects_unknown_numbers
+);
+crate::test!(
+    syscall_registration_list,
+    "registered syscall list matches populated table slots",
+    registered_syscall_list_matches_populated_table_slots
+);
+crate::test!(
+    linux_syscall_semantics_coverage_ledger,
+    "linux syscall semantics ledger covers every registered syscall exactly once",
+    linux_syscall_semantics_ledger_covers_every_registered_syscall_exactly_once
+);
+crate::test!(
+    syscall_test_helpers,
+    "syscall test helpers assert linux errno return and layout expectations",
+    syscall_test_helpers_assert_linux_errno_return_and_layout_expectations
 );
 crate::test!(
     typed_syscall_arg_conversion,
@@ -62,6 +82,85 @@ fn syscall_table_contains_registered_and_rejects_unknown_numbers() {
     assert!(SYSCALL_TABLE[SyscallNumber::Read as usize].is_some());
     assert!(SYSCALL_TABLE[SyscallNumber::OpenAt as usize].is_some());
     assert!(SYSCALL_TABLE[999].is_none());
+}
+
+fn registered_syscall_list_matches_populated_table_slots() {
+    for &number in REGISTERED_SYSCALLS {
+        assert!(
+            SYSCALL_TABLE[number as usize].is_some(),
+            "registered syscall {number:?} is missing from SYSCALL_TABLE"
+        );
+    }
+
+    for (index, handler) in SYSCALL_TABLE.iter().enumerate() {
+        if handler.is_none() {
+            continue;
+        }
+
+        let Some(number) = SyscallNumber::from_number(index) else {
+            panic!("SYSCALL_TABLE contains handler at unknown syscall number {index}");
+        };
+
+        assert!(
+            REGISTERED_SYSCALLS.contains(&number),
+            "SYSCALL_TABLE contains {number:?} but REGISTERED_SYSCALLS does not"
+        );
+    }
+}
+
+fn linux_syscall_semantics_ledger_covers_every_registered_syscall_exactly_once() {
+    let mut covered = [false; 1500];
+    let mut coverage_gaps = 0;
+
+    for entry in LINUX_SYSCALL_SEMANTICS_COVERAGE {
+        let index = entry.number as usize;
+        assert!(
+            !covered[index],
+            "duplicate semantics ledger entry for {:?}",
+            entry.number
+        );
+        covered[index] = true;
+        assert!(
+            REGISTERED_SYSCALLS.contains(&entry.number),
+            "semantics ledger contains unregistered syscall {:?}",
+            entry.number
+        );
+        assert!(
+            !entry.test.is_empty(),
+            "semantics ledger entry {:?} must describe its test coverage",
+            entry.number
+        );
+
+        if entry.kind == LinuxSyscallTestKind::CoverageGap {
+            coverage_gaps += 1;
+        }
+    }
+
+    for &number in REGISTERED_SYSCALLS {
+        assert!(
+            covered[number as usize],
+            "registered syscall {number:?} has no Linux semantics ledger entry"
+        );
+    }
+
+    assert!(
+        coverage_gaps <= KNOWN_LINUX_SYSCALL_COVERAGE_GAPS,
+        "Linux syscall semantics CoverageGap entries increased from {} to {}; new registered syscalls need Unit or Integration behavior tests",
+        KNOWN_LINUX_SYSCALL_COVERAGE_GAPS,
+        coverage_gaps
+    );
+}
+
+fn syscall_test_helpers_assert_linux_errno_return_and_layout_expectations() {
+    assert_eq!(SyscallArgs::none().0, [0; 6]);
+    assert_eq!(SyscallArgs::new([1, 2, 3, 4, 5, 6]).0[5], 6);
+    expect_ok(Ok(0), 0);
+    expect_errno(
+        Err(SyscallError::InvalidArguments),
+        SyscallError::InvalidArguments,
+    );
+    assert_eq!(errno_code(SyscallError::BadAddress), -14);
+    assert_linux_layout::<u64>(8, 8);
 }
 
 fn typed_syscall_args_convert_flags_and_enums_at_boundary() {

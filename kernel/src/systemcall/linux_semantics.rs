@@ -1,26 +1,36 @@
-use crate::register_syscalls;
-use crate::systemcall::implementations::*;
 use crate::systemcall::numbers::SyscallNumber;
-use crate::systemcall::utils::SyscallImpl;
-use crate::systemcall::utils::SyscallResult;
 
-type SyscallHandler = fn(u64, u64, u64, u64, u64, u64) -> SyscallResult;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinuxSyscallTestKind {
+    Unit,
+    Integration,
+    CoverageGap,
+}
 
-macro_rules! define_syscall_table {
-    ($($no:ident),+ $(,)?) => {
-        pub const REGISTERED_SYSCALLS: &[SyscallNumber] = &[
-            $(SyscallNumber::$no,)*
-        ];
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinuxSyscallCoverage {
+    pub number: SyscallNumber,
+    pub kind: LinuxSyscallTestKind,
+    pub test: &'static str,
+}
 
-        pub static SYSCALL_TABLE: [Option<SyscallHandler>; 1500] = {
-            let mut table = [None; 1500];
-            register_syscalls!(table, $($no),*);
-            table
-        };
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 234;
+
+macro_rules! coverage_gap {
+    ($($number:ident),+ $(,)?) => {
+        &[
+            $(
+                LinuxSyscallCoverage {
+                    number: SyscallNumber::$number,
+                    kind: LinuxSyscallTestKind::CoverageGap,
+                    test: "needs Linux semantics behavior test",
+                },
+            )*
+        ]
     };
 }
 
-define_syscall_table!(
+pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = coverage_gap!(
     Read,
     Write,
     OpenAt,

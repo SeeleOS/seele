@@ -228,8 +228,7 @@ impl From<isize> for SyscallError {
 
 #[macro_export]
 macro_rules! register_syscalls {
-    // 注意这里的 $( ... ),* 模式
-    ($table: expr, $($no: ident),*) => {
+    ($table: expr, $($no: ident),+ $(,)?) => {
         $(
             $table[$crate::systemcall::numbers::SyscallNumber::$no as usize] = Some(
                 <$no as SyscallImpl>::handle_call

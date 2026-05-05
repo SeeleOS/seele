@@ -40,6 +40,7 @@ After finishing a change, run `agent-tools/run-tests.sh` and `agent-tools/run-ag
 
 There is no large standalone test suite yet; verification is primarily compile checks plus QEMU boot tests.
 
+- This kernel targets Linux binary compatibility. Syscall tests and other ABI-facing tests must use Linux semantics as the only oracle, not the current implementation behavior. Validate x86_64 Linux syscall ABI return values, errno values, struct layouts, flag combinations, state side effects, and Linux-specific edge cases. If implementation behavior disagrees with Linux semantics, fix the kernel implementation instead of relaxing tests to accept the wrong behavior.
 - Run `cargo check --manifest-path kernel/Cargo.toml` for all kernel changes.
 - Run `agent-tools/run-tests.sh` for kernel unit-test coverage.
 - Treat compiler warnings as failures. Do not leave any `cargo check` warnings in the tree.
