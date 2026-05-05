@@ -350,7 +350,7 @@ fn handle_dmabuf_ioctl(request: u64, arg: u64) -> ObjectResult<isize> {
 
 fn handle_dmabuf_sync_ioctl(arg: u64) -> ObjectResult<isize> {
     const DMA_BUF_SYNC_READ: u64 = 1 << 0;
-    const DMA_BUF_SYNC_WRITE: u64 = 2 << 0;
+    const DMA_BUF_SYNC_WRITE: u64 = 2;
     const DMA_BUF_SYNC_END: u64 = 1 << 2;
     const DMA_BUF_SYNC_VALID_FLAGS_MASK: u64 =
         DMA_BUF_SYNC_READ | DMA_BUF_SYNC_WRITE | DMA_BUF_SYNC_END;
@@ -367,7 +367,7 @@ fn handle_dmabuf_sync_ioctl(arg: u64) -> ObjectResult<isize> {
 
 fn handle_dmabuf_export_sync_file_ioctl(arg: u64) -> ObjectResult<isize> {
     const DMA_BUF_SYNC_READ: u32 = 1 << 0;
-    const DMA_BUF_SYNC_WRITE: u32 = 2 << 0;
+    const DMA_BUF_SYNC_WRITE: u32 = 2;
 
     let mut sync_file = read_user(arg as *mut DmaBufExportSyncFile)?;
     if sync_file.flags & !(DMA_BUF_SYNC_READ | DMA_BUF_SYNC_WRITE) != 0 {
@@ -399,7 +399,7 @@ fn handle_dmabuf_export_sync_file_ioctl(arg: u64) -> ObjectResult<isize> {
 
 fn handle_dmabuf_import_sync_file_ioctl(arg: u64) -> ObjectResult<isize> {
     const DMA_BUF_SYNC_READ: u32 = 1 << 0;
-    const DMA_BUF_SYNC_WRITE: u32 = 2 << 0;
+    const DMA_BUF_SYNC_WRITE: u32 = 2;
 
     let sync_file = read_user(arg as *mut DmaBufImportSyncFile)?;
     if sync_file.flags & !(DMA_BUF_SYNC_READ | DMA_BUF_SYNC_WRITE) != 0 {

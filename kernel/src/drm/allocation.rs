@@ -16,6 +16,8 @@ use crate::{
 use super::state::{DrmState, DumbBuffer};
 use crate::drm::mode::current_framebuffer_info;
 
+type ScanoutBacking = (Arc<[PhysFrame<Size4KiB>]>, u64, PageTableFlags);
+
 impl DrmState {
     pub(super) fn create_dumb_buffer(
         &mut self,
@@ -136,7 +138,7 @@ impl DrmState {
         pitch: u32,
         size: u64,
         pages: usize,
-    ) -> Option<(Arc<[PhysFrame<Size4KiB>]>, u64, PageTableFlags)> {
+    ) -> Option<ScanoutBacking> {
         if self
             .dumb_buffers
             .values()
