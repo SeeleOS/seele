@@ -36,11 +36,12 @@ use crate::misc::others::enable_sse;
 use crate::misc::{agent_tty_input, framebuffer, logging, mouse, time};
 use crate::process::manager::MANAGER;
 use crate::smp::{init_bsp, release_application_processors, start_application_processors};
+use bootloader_api::BootInfo;
 #[cfg(test)]
 use core::panic::PanicInfo;
 
-pub fn init() -> ! {
-    boot::assert_supported();
+pub fn init(boot_info: &'static mut BootInfo) -> ! {
+    boot::init(boot_info);
     memory::init(boot::physical_memory_offset(), boot::memory_map());
     init_bsp();
     framebuffer::init(boot::framebuffer());

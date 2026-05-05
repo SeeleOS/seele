@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
+use bootloader_api::info::{MemoryRegion, MemoryRegionKind};
 use conquer_once::spin::OnceCell;
-use limine::memory_map::{Entry, EntryType};
 use spin::Mutex;
 
 use crate::memory::{
@@ -22,9 +22,9 @@ pub mod utils;
 
 pub static PHYSICAL_MEMORY_OFFSET: OnceCell<u64> = OnceCell::uninit();
 pub static USABLE_MEMORY_BYTES: OnceCell<u64> = OnceCell::uninit();
-pub static MEMORY_REGIONS: OnceCell<&'static [&'static Entry]> = OnceCell::uninit();
+pub static MEMORY_REGIONS: OnceCell<&'static [MemoryRegion]> = OnceCell::uninit();
 
-pub fn init(physical_memory_offset: u64, memory_regions: &'static [&'static Entry]) {
+pub fn init(physical_memory_offset: u64, memory_regions: &'static [MemoryRegion]) {
     log::debug!("memory: init offset {:#x}", physical_memory_offset);
     let mut mapper = init_mapper(physical_memory_offset);
     let mut heap_backing_allocator = unsafe { BootstrapFrameAllocator::new(memory_regions) };
@@ -53,8 +53,8 @@ pub fn init(physical_memory_offset: u64, memory_regions: &'static [&'static Entr
     USABLE_MEMORY_BYTES.get_or_init(|| {
         memory_regions
             .iter()
-            .filter(|region| region.entry_type == EntryType::USABLE)
-            .map(|region| region.length)
+            .filter(|region| region.kind == MemoryRegionKind::Usable)
+            .map(|region| region.end.saturating_sub(region.start))
             .sum()
     });
     log::debug!("memory: mapper/frame allocator ready");

@@ -6,8 +6,8 @@ use core::{
 
 use crate::{
     drm::mode::{DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888},
-    misc::time::{NANOSECONDS_PER_MILLISECOND, Time},
     misc::framebuffer::{FRAME_BUFFER, FramebufferPixelFormat, framebuffer_set_user_controlled},
+    misc::time::{NANOSECONDS_PER_MILLISECOND, Time},
     object::{error::ObjectError, misc::ObjectResult},
 };
 
@@ -83,7 +83,7 @@ pub(super) fn scanout_framebuffer_id(fb_id: u32) -> ObjectResult<()> {
     };
 
     if !dumb_buffer.scanout_backed {
-        // TODO: This is still a legacy compatibility bridge over the Limine
+        // TODO: This is still a legacy compatibility bridge over the boot
         // framebuffer, not a real KMS scanout implementation.
         blit_dumb_buffer_to_scanout(&dumb_buffer, &framebuffer, cursor.as_ref())?;
     }
@@ -108,7 +108,9 @@ pub(crate) fn refresh_legacy_scanout_tick() {
     let now_ns = Time::since_boot().as_nanoseconds();
     let now_ms = u32::try_from(now_ns / NANOSECONDS_PER_MILLISECOND).unwrap_or(u32::MAX);
     let last_ms = LAST_LEGACY_SCANOUT_REFRESH_NS.load(Ordering::Relaxed);
-    if now_ms.wrapping_sub(last_ms) < u32::try_from(REFRESH_INTERVAL_NS / NANOSECONDS_PER_MILLISECOND).unwrap_or(16) {
+    if now_ms.wrapping_sub(last_ms)
+        < u32::try_from(REFRESH_INTERVAL_NS / NANOSECONDS_PER_MILLISECOND).unwrap_or(16)
+    {
         return;
     }
 

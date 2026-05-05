@@ -1,6 +1,7 @@
+use acpi::sdt::madt::{Madt, MadtEntry};
 use alloc::vec::Vec;
+use core::pin::Pin;
 use lazy_static::lazy_static;
-use limine::response::MpResponse;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Processor {
@@ -37,16 +38,26 @@ pub fn application_processors() -> Vec<Processor> {
         .collect()
 }
 
-pub fn discover_from_limine(response: &MpResponse) {
-    let bsp_apic_id = response.bsp_lapic_id();
+pub fn discover_from_acpi(bsp_apic_id: u32, madt: Pin<&Madt>) {
     let mut processors = PROCESSORS.lock();
     processors.clear();
 
-    for (index, cpu) in response.cpus().iter().enumerate() {
+    for entry in madt.entries() {
+        let apic_id = match entry {
+            MadtEntry::LocalApic(local_apic) if local_apic.flags & 1 != 0 => {
+                local_apic.apic_id as u32
+            }
+            MadtEntry::LocalX2Apic(local_x2apic) if local_x2apic.flags & 1 != 0 => {
+                local_x2apic.x2apic_id
+            }
+            _ => continue,
+        };
+
+        let index = processors.len();
         processors.push(Processor {
             index,
-            apic_id: cpu.lapic_id,
-            is_bsp: cpu.lapic_id == bsp_apic_id,
+            apic_id,
+            is_bsp: apic_id == bsp_apic_id,
         });
     }
 }

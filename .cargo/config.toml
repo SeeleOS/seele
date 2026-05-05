@@ -16,6 +16,6 @@ rustflags = [
 
 [target.x86_64-unknown-none]
 rustflags = [
-  "-C", "relocation-model=static",
-  "-C", "link-arg=-no-pie",
+  "-C", "relocation-model=pic",
+  "-C", "link-arg=-pie",
 ]

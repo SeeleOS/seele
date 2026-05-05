@@ -1,10 +1,11 @@
 use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
+use serde_json::Value;
 use std::{
     env, fs,
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write},
     os::{fd::AsRawFd, unix::net::UnixStream},
     path::{Path, PathBuf},
-    process::{Command, exit},
+    process::{Command, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -13,28 +14,103 @@ use std::{
     time::Duration,
 };
 
-fn main() {
-    let agent_mode = env::args().any(|arg| arg == "--agent");
-    let agent_timeout = env::var("SEELE_QEMU_TIMEOUT").ok();
-    let machine = env::var("SEELE_QEMU_MACHINE").unwrap_or_else(|_| "q35".to_string());
-    let cpu_model = env::var("SEELE_QEMU_CPU")
-        .unwrap_or_else(|_| "host,+hypervisor,+kvmclock,+kvmclock-stable-bit".to_string());
-    let smp = env::var("SEELE_QEMU_SMP").unwrap_or_else(|_| {
-        thread::available_parallelism()
-            .map(|count| count.get().to_string())
-            .unwrap_or_else(|_| "1".to_string())
-    });
-    let qemu_gdb = env::var("SEELE_QEMU_GDB").ok();
-    let wait_for_gdb = env::var_os("SEELE_QEMU_WAIT_GDB").is_some();
-    let qemu_debug_log = env::var_os("SEELE_QEMU_DEBUG_LOG");
-    let qemu_debugcon = env::var_os("SEELE_QEMU_DEBUGCON");
+pub struct RunOptions {
+    pub agent_mode: bool,
+    agent_timeout: Option<String>,
+    machine: String,
+    cpu_model: String,
+    smp: String,
+    qemu_gdb: Option<String>,
+    wait_for_gdb: bool,
+    qemu_debug_log: Option<PathBuf>,
+    qemu_debugcon: Option<PathBuf>,
+}
 
-    // read env variables that were set in build script
-    let uefi_path = env!("UEFI_PATH");
+impl RunOptions {
+    pub fn from_env() -> Self {
+        Self {
+            agent_mode: env::args().any(|arg| arg == "--agent"),
+            agent_timeout: env::var("SEELE_QEMU_TIMEOUT").ok(),
+            machine: env::var("SEELE_QEMU_MACHINE").unwrap_or_else(|_| "q35".to_string()),
+            cpu_model: env::var("SEELE_QEMU_CPU")
+                .unwrap_or_else(|_| "host,+hypervisor,+kvmclock,+kvmclock-stable-bit".to_string()),
+            smp: env::var("SEELE_QEMU_SMP").unwrap_or_else(|_| {
+                thread::available_parallelism()
+                    .map(|count| count.get().to_string())
+                    .unwrap_or_else(|_| "1".to_string())
+            }),
+            qemu_gdb: env::var("SEELE_QEMU_GDB").ok(),
+            wait_for_gdb: env::var_os("SEELE_QEMU_WAIT_GDB").is_some(),
+            qemu_debug_log: env::var_os("SEELE_QEMU_DEBUG_LOG").map(PathBuf::from),
+            qemu_debugcon: env::var_os("SEELE_QEMU_DEBUGCON").map(PathBuf::from),
+        }
+    }
+}
+
+pub fn build_kernel() -> Vec<PathBuf> {
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    let mut command = Command::new(cargo);
+    command.args([
+        "build",
+        "-p",
+        "kernel",
+        "--target",
+        "x86_64-unknown-none",
+        "--bin",
+        "kernel",
+        "--message-format=json-render-diagnostics",
+    ]);
+
+    if !cfg!(debug_assertions) {
+        command.arg("--release");
+    }
+
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::inherit());
+
+    let mut child = command.spawn().expect("failed to start cargo");
+    let stdout = child.stdout.take().expect("missing cargo stdout");
+    let reader = BufReader::new(stdout);
+    let mut executables = Vec::new();
+
+    for line in reader.lines() {
+        let line = line.expect("failed to read cargo output");
+        if let Some(path) = handle_cargo_message(&line) {
+            executables.push(path);
+        }
+    }
+
+    let status = child.wait().expect("failed to wait on cargo");
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
+
+    assert!(
+        !executables.is_empty(),
+        "kernel executable missing from cargo output"
+    );
+    executables
+}
+
+pub fn create_uefi_image(kernel_path: &Path) -> PathBuf {
+    let image_path = kernel_path.with_extension("img");
+    let _ = fs::remove_file(&image_path);
+
+    let mut config = bootloader::BootConfig::default();
+    config.frame_buffer_logging = false;
+
+    bootloader::UefiBoot::new(kernel_path)
+        .set_boot_config(&config)
+        .create_disk_image(&image_path)
+        .expect("failed to create UEFI disk image");
+    image_path
+}
+
+pub fn run_qemu(uefi_path: &Path, options: &RunOptions) -> i32 {
     let root_disk = env::var_os("SEELE_ROOT_DISK")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("disk.img"));
-    let serial_log = env::temp_dir().join(if agent_mode {
+    let serial_log = env::temp_dir().join(if options.agent_mode {
         "seele-agent-serial.log"
     } else {
         "seele-serial.log"
@@ -42,14 +118,15 @@ fn main() {
     let tty_input_socket = env::var_os("SEELE_AGENT_TTY_SOCKET")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/tmp/seele-agent-tty.sock"));
-    let keep_debug_log = qemu_debug_log.is_some();
-    let debug_log = qemu_debug_log
-        .as_ref()
-        .map(PathBuf::from)
-        .or_else(|| agent_mode.then(|| env::temp_dir().join("seele-agent-qemu.log")));
+    let keep_debug_log = options.qemu_debug_log.is_some();
+    let debug_log = options.qemu_debug_log.clone().or_else(|| {
+        options
+            .agent_mode
+            .then(|| env::temp_dir().join("seele-agent-qemu.log"))
+    });
 
-    let mut cmd = if agent_mode {
-        if let Some(timeout) = &agent_timeout {
+    let mut cmd = if options.agent_mode {
+        if let Some(timeout) = &options.agent_timeout {
             let mut timeout_cmd = Command::new("timeout");
             timeout_cmd.arg(timeout).arg("qemu-system-x86_64");
             timeout_cmd
@@ -59,10 +136,10 @@ fn main() {
     } else {
         Command::new("qemu-system-x86_64")
     };
-    // give the guest 8 GiB of RAM
+
     cmd.arg("-m").arg("4G");
-    cmd.arg("-machine").arg(&machine);
-    cmd.arg("-smp").arg(&smp);
+    cmd.arg("-machine").arg(&options.machine);
+    cmd.arg("-smp").arg(&options.smp);
     let _ = fs::remove_file(&serial_log);
     cmd.arg("-serial")
         .arg(format!("file:{}", serial_log.display()));
@@ -79,39 +156,39 @@ fn main() {
         tty_input_socket.display()
     ));
     cmd.arg("-monitor").arg("none");
-    // enable the guest to exit qemu
     cmd.arg("-device")
         .arg("isa-debug-exit,iobase=0xf4,iosize=0x04");
-    if let Some(endpoint) = &qemu_gdb {
+
+    if let Some(endpoint) = &options.qemu_gdb {
         eprintln!("qemu gdb stub: {endpoint}");
         cmd.arg("-gdb").arg(endpoint);
-        if wait_for_gdb {
+        if options.wait_for_gdb {
             cmd.arg("-S");
         }
     }
-    if let Some(path) = qemu_debugcon {
-        cmd.arg("-debugcon")
-            .arg(format!("file:{}", PathBuf::from(path).display()));
+    if let Some(path) = &options.qemu_debugcon {
+        cmd.arg("-debugcon").arg(format!("file:{}", path.display()));
         cmd.arg("-global").arg("isa-debugcon.iobase=0xe9");
     }
     cmd.arg("-display")
-        .arg(if agent_mode { "none" } else { "sdl" });
+        .arg(if options.agent_mode { "none" } else { "sdl" });
 
     if Path::new("/dev/kvm").exists() {
         cmd.arg("-enable-kvm");
-        cmd.arg("-cpu").arg(&cpu_model);
+        cmd.arg("-cpu").arg(&options.cpu_model);
     } else {
         eprintln!("warning: /dev/kvm not found, falling back to software emulation");
     }
 
     let prebuilt =
         Prebuilt::fetch(Source::LATEST, "target/ovmf").expect("failed to update prebuilt");
-
     let code = prebuilt.get_file(Arch::X64, FileType::Code);
     let vars = prebuilt.get_file(Arch::X64, FileType::Vars);
 
-    cmd.arg("-drive")
-        .arg(format!("if=none,format=raw,file={uefi_path},id=bootdisk"));
+    cmd.arg("-drive").arg(format!(
+        "if=none,format=raw,file={},id=bootdisk",
+        uefi_path.display()
+    ));
     cmd.arg("-device")
         .arg("virtio-blk-pci,drive=bootdisk,disable-legacy=on,disable-modern=off");
     if root_disk.exists() {
@@ -134,7 +211,6 @@ fn main() {
         cmd.arg("-d").arg("int,cpu_reset,guest_errors");
         cmd.arg("-D").arg(path);
     }
-    // copy vars and enable rw instead of snapshot if you want to store data (e.g. enroll secure boot keys)
     cmd.arg("-drive").arg(format!(
         "if=pflash,format=raw,unit=1,file={},snapshot=on",
         vars.display()
@@ -159,19 +235,50 @@ fn main() {
     let _ = fs::remove_file(serial_log);
     cleanup_socket(&tty_input_socket);
     let exit_code = match status.code().unwrap_or(1) {
-        0x10 => 0, // success
-        0x11 => 1, // failure
+        0x10 => 0,
+        0x11 => 1,
         _ => {
             if let Some(path) = &debug_log {
                 report_qemu_fault(path);
             }
             2
-        } // unknown fault
+        }
     };
     if !keep_debug_log && let Some(path) = debug_log {
         let _ = fs::remove_file(path);
     }
-    exit(exit_code);
+    exit_code
+}
+
+fn handle_cargo_message(line: &str) -> Option<PathBuf> {
+    let value: Value = match serde_json::from_str(line) {
+        Ok(value) => value,
+        Err(_) => {
+            println!("{line}");
+            return None;
+        }
+    };
+
+    match value.get("reason").and_then(Value::as_str) {
+        Some("compiler-message") => {
+            if let Some(rendered) = value["message"]["rendered"].as_str() {
+                print!("{rendered}");
+            }
+            None
+        }
+        Some("compiler-artifact") => {
+            let kind = value["target"]["kind"].as_array()?;
+            if !kind.iter().any(|item| item.as_str() == Some("bin")) {
+                return None;
+            }
+
+            value
+                .get("executable")
+                .and_then(Value::as_str)
+                .map(PathBuf::from)
+        }
+        _ => None,
+    }
 }
 
 fn cleanup_socket(path: &Path) {

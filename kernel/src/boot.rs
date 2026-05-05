@@ -1,89 +1,58 @@
-use limine::{
-    BaseRevision,
-    framebuffer::Framebuffer,
-    memory_map::Entry,
-    request::{
-        FramebufferRequest, HhdmRequest, MemoryMapRequest, MpRequest, RequestsEndMarker,
-        RequestsStartMarker, RsdpRequest, StackSizeRequest,
-    },
-    response::MpResponse,
+use bootloader_api::{
+    BootInfo, BootloaderConfig,
+    config::Mapping,
+    info::{FrameBuffer, MemoryRegion},
 };
+use conquer_once::spin::OnceCell;
 
 const KERNEL_STACK_SIZE: u64 = 2 * 1024 * 1024;
 
-#[used]
-#[unsafe(link_section = ".requests")]
-static BASE_REVISION: BaseRevision = BaseRevision::new();
+pub static BOOTLOADER_CONFIG: BootloaderConfig = {
+    let mut config = BootloaderConfig::new_default();
+    config.kernel_stack_size = KERNEL_STACK_SIZE;
+    config.mappings.physical_memory = Some(Mapping::Dynamic);
+    config
+};
 
-#[used]
-#[unsafe(link_section = ".requests")]
-static STACK_SIZE_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(KERNEL_STACK_SIZE);
+static BOOT_INFO: OnceCell<usize> = OnceCell::uninit();
 
-#[used]
-#[unsafe(link_section = ".requests")]
-static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
+pub fn init(boot_info: &'static mut BootInfo) {
+    BOOT_INFO
+        .try_init_once(|| boot_info as *mut BootInfo as usize)
+        .expect("boot info already initialized");
+}
 
-#[used]
-#[unsafe(link_section = ".requests")]
-static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
+fn boot_info() -> &'static BootInfo {
+    let ptr = *BOOT_INFO.get().expect("boot info missing") as *const BootInfo;
+    unsafe { &*ptr }
+}
 
-#[used]
-#[unsafe(link_section = ".requests")]
-static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
-
-#[used]
-#[unsafe(link_section = ".requests")]
-static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
-
-#[used]
-#[unsafe(link_section = ".requests")]
-static MP_REQUEST: MpRequest = MpRequest::new();
-
-#[used]
-#[unsafe(link_section = ".requests_start_marker")]
-static REQUESTS_START: RequestsStartMarker = RequestsStartMarker::new();
-
-#[used]
-#[unsafe(link_section = ".requests_end_marker")]
-static REQUESTS_END: RequestsEndMarker = RequestsEndMarker::new();
-
-pub fn assert_supported() {
-    assert!(BASE_REVISION.is_supported());
-    let _ = STACK_SIZE_REQUEST.get_response();
+fn boot_info_mut() -> &'static mut BootInfo {
+    let ptr = *BOOT_INFO.get().expect("boot info missing") as *mut BootInfo;
+    unsafe { &mut *ptr }
 }
 
 pub fn physical_memory_offset() -> u64 {
-    HHDM_REQUEST
-        .get_response()
-        .expect("limine hhdm response missing")
-        .offset()
+    boot_info()
+        .physical_memory_offset
+        .into_option()
+        .expect("bootloader physical memory offset missing")
 }
 
-pub fn memory_map() -> &'static [&'static Entry] {
-    MEMORY_MAP_REQUEST
-        .get_response()
-        .expect("limine memory map response missing")
-        .entries()
+pub fn memory_map() -> &'static [MemoryRegion] {
+    &boot_info().memory_regions
 }
 
-pub fn framebuffer() -> Framebuffer<'static> {
-    FRAMEBUFFER_REQUEST
-        .get_response()
-        .expect("limine framebuffer response missing")
-        .framebuffers()
-        .next()
-        .expect("limine framebuffer missing")
+pub fn framebuffer() -> &'static mut FrameBuffer {
+    boot_info_mut()
+        .framebuffer
+        .as_mut()
+        .expect("bootloader framebuffer missing")
 }
 
 pub fn rsdp_address() -> u64 {
-    RSDP_REQUEST
-        .get_response()
-        .expect("limine rsdp response missing")
-        .address() as u64
-}
-
-pub fn mp_response() -> &'static MpResponse {
-    MP_REQUEST
-        .get_response()
-        .expect("limine mp response missing")
+    boot_info()
+        .rsdp_addr
+        .into_option()
+        .expect("bootloader rsdp missing")
 }

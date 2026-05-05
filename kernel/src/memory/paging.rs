@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
+use bootloader_api::info::{MemoryRegion, MemoryRegionKind};
 use buddy_system_allocator::FrameAllocator as BuddyFrameAllocator;
 use conquer_once::spin::OnceCell;
-use limine::memory_map::{Entry, EntryType};
 use spin::Mutex;
 use x86_64::{
     PhysAddr, VirtAddr,
@@ -15,6 +15,7 @@ pub static MAPPER: OnceCell<Arc<Mutex<OffsetPageTable<'static>>>> = OnceCell::un
 pub static FRAME_ALLOCATOR: OnceCell<Arc<Mutex<BootinfoFrameAllocator>>> = OnceCell::uninit();
 pub static HEAP_BACKING_ALLOCATOR: OnceCell<Mutex<BootstrapFrameAllocator>> = OnceCell::uninit();
 const LOWER_MEMORY_END: u64 = 0x10_0000;
+const AP_TRAMPOLINE_END: u64 = 0x9000;
 const FRAME_ALLOCATOR_ORDER: usize = 33;
 
 pub fn init_mapper(physcal_memory_offset: u64) -> OffsetPageTable<'static> {
@@ -36,7 +37,7 @@ pub fn get_l4_table(phys_mem_offset: VirtAddr) -> &'static mut PageTable {
 
 #[derive(Clone)]
 pub struct BootstrapFrameAllocator {
-    memory_map: &'static [&'static Entry],
+    memory_map: &'static [MemoryRegion],
     next_region_index: usize,
     next_frame_addr: u64,
 }
@@ -46,7 +47,7 @@ impl BootstrapFrameAllocator {
     ///
     /// `memory_map` must remain valid for the allocator's lifetime and must
     /// describe physical memory that is not concurrently mutated elsewhere.
-    pub unsafe fn new(memory_map: &'static [&'static Entry]) -> Self {
+    pub unsafe fn new(memory_map: &'static [MemoryRegion]) -> Self {
         Self {
             memory_map,
             next_region_index: 0,
@@ -56,14 +57,14 @@ impl BootstrapFrameAllocator {
 
     fn next_usable_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
         while let Some(region) = self.memory_map.get(self.next_region_index) {
-            if region.entry_type != EntryType::USABLE {
+            if region.kind != MemoryRegionKind::Usable {
                 self.next_region_index += 1;
                 self.next_frame_addr = 0;
                 continue;
             }
 
-            let start = align_up_4k(region.base.max(LOWER_MEMORY_END));
-            let end = align_down_4k(region.base.saturating_add(region.length));
+            let start = align_up_4k(region.start.max(LOWER_MEMORY_END));
+            let end = align_down_4k(region.end);
 
             if start >= end {
                 self.next_region_index += 1;
@@ -92,14 +93,14 @@ impl BootstrapFrameAllocator {
 
     pub fn reserve_pages(&mut self, mut pages: usize) -> Option<()> {
         while let Some(region) = self.memory_map.get(self.next_region_index) {
-            if region.entry_type != EntryType::USABLE {
+            if region.kind != MemoryRegionKind::Usable {
                 self.next_region_index += 1;
                 self.next_frame_addr = 0;
                 continue;
             }
 
-            let start = align_up_4k(region.base.max(LOWER_MEMORY_END));
-            let end = align_down_4k(region.base.saturating_add(region.length));
+            let start = align_up_4k(region.start.max(LOWER_MEMORY_END));
+            let end = align_down_4k(region.end);
 
             if start >= end {
                 self.next_region_index += 1;
@@ -156,18 +157,18 @@ pub struct BootinfoFrameAllocator {
 }
 
 impl BootinfoFrameAllocator {
-    pub fn new(memory_map: &'static [&'static Entry], cursor: &BootstrapFrameAllocator) -> Self {
+    pub fn new(memory_map: &'static [MemoryRegion], cursor: &BootstrapFrameAllocator) -> Self {
         let mut allocator = Self {
             inner: BuddyFrameAllocator::new(),
         };
 
         for (index, region) in memory_map.iter().enumerate() {
-            if region.entry_type != EntryType::USABLE {
+            if region.kind != MemoryRegionKind::Usable {
                 continue;
             }
 
-            let start = align_up_4k(region.base.max(LOWER_MEMORY_END));
-            let end = align_down_4k(region.base.saturating_add(region.length));
+            let start = align_up_4k(region.start.max(AP_TRAMPOLINE_END));
+            let end = align_down_4k(region.end);
             if start >= end {
                 continue;
             }
