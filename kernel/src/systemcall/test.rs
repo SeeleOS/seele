@@ -12,18 +12,19 @@ use crate::{
         arg_types::SyscallArg,
         implementations::{
             Alarm, ArchPrctl, Capget, Capset, ClockGetres, ClockGettime, ClockNanosleep,
-            ClockSettime, Eventfd, Eventfd2, Getegid, Geteuid, Getgid, Getgroups, Getpgid, Getpgrp,
-            Getpid, Getppid, Getpriority, Getrandom, Getresgid, Getresuid, Getrusage, Getsid,
-            Gettid, Gettimeofday, Getuid, InotifyInit, InotifyInit1, Ioperm, Iopl, IoprioGet,
-            IoprioSet, Madvise, OpenFlags, PollEvents, PollTimespec, Prctl, Prlimit64, Reboot,
-            Rseq, SchedGetPriorityMax, SchedGetPriorityMin, SchedGetaffinity, SchedGetparam,
-            SchedGetscheduler, SchedRrGetInterval, SchedSetaffinity, SchedSetparam, SchedYield,
-            SelectTimespec, SetRobustList, SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups,
-            Sethostname, Setpgid, Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit,
-            Setsid, Settimeofday, Setuid, Sync, Sysinfo, Time, TimerfdCreate, TimerfdGettime,
-            TimerfdSettime, Umask, Uname, Vhangup, clear_fdset, fdset_contains, fdset_insert,
-            fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
-            timeout_to_deadline, translate_ready_events,
+            ClockSettime, Dup, Dup2, Dup3, Eventfd, Eventfd2, Getegid, Geteuid, Getgid, Getgroups,
+            Getpgid, Getpgrp, Getpid, Getppid, Getpriority, Getrandom, Getresgid, Getresuid,
+            Getrusage, Getsid, Gettid, Gettimeofday, Getuid, InotifyInit, InotifyInit1, Ioperm,
+            Iopl, IoprioGet, IoprioSet, Madvise, OpenFlags, Pipe, Pipe2, PollEvents, PollTimespec,
+            Prctl, Prlimit64, Reboot, Rseq, SchedGetPriorityMax, SchedGetPriorityMin,
+            SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval,
+            SchedSetaffinity, SchedSetparam, SchedYield, SelectTimespec, SetRobustList,
+            SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Sethostname, Setpgid,
+            Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid, Settimeofday,
+            Setuid, Sync, Sysinfo, Time, TimerfdCreate, TimerfdGettime, TimerfdSettime, Umask,
+            Uname, Vhangup, clear_fdset, fdset_contains, fdset_insert, fdset_words,
+            kernel_events_for, saturating_timeout_ms, timeout_is_zero, timeout_to_deadline,
+            translate_ready_events,
         },
         linux_semantics::{
             KNOWN_LINUX_SYSCALL_COVERAGE_GAPS, LINUX_SYSCALL_SEMANTICS_COVERAGE,
@@ -138,6 +139,11 @@ crate::test!(
     timerfd_syscalls,
     "timerfd syscalls follow linux flag and timer rules",
     timerfd_syscalls_follow_linux_flag_and_timer_rules
+);
+crate::test!(
+    pipe_and_dup_syscalls,
+    "pipe and dup syscalls follow linux fd rules",
+    pipe_and_dup_syscalls_follow_linux_fd_rules
 );
 crate::test!(
     typed_syscall_arg_conversion,
@@ -1744,6 +1750,17 @@ fn assert_object_flags(fd: usize, expected: FileFlags) {
     assert_eq!(flags, expected);
 }
 
+fn assert_same_object(left_fd: usize, right_fd: usize) {
+    let left = get_object_current_process(left_fd as u64).expect("left fd should resolve");
+    let right = get_object_current_process(right_fd as u64).expect("right fd should resolve");
+    assert!(alloc::sync::Arc::ptr_eq(&left, &right));
+}
+
+fn occupied_fd_count() -> usize {
+    let fd_table = get_current_process().lock().fd_table.clone();
+    fd_table.lock().iter().flatten().count()
+}
+
 fn eventfd_syscalls_follow_linux_flag_rules() {
     const EFD_SEMAPHORE: u64 = 0x1;
     const EFD_NONBLOCK: u64 = 0o4_000;
@@ -1882,6 +1899,112 @@ fn timerfd_syscalls_follow_linux_flag_and_timer_rules() {
     );
     close_test_fd(non_timerfd);
     close_test_fd(timerfd);
+}
+
+fn pipe_and_dup_syscalls_follow_linux_fd_rules() {
+    const O_NONBLOCK: u64 = 0o4_000;
+    const O_CLOEXEC: u64 = 0o2_000_000;
+
+    let fd_page = allocate_user_test_page();
+
+    let occupied_before_bad_pipe = occupied_fd_count();
+    expect_errno(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Pipe>(),
+        SyscallError::BadAddress,
+    );
+    assert_eq!(occupied_fd_count(), occupied_before_bad_pipe);
+
+    expect_ok(SyscallArgs::new([fd_page, 0, 0, 0, 0, 0]).call::<Pipe>(), 0);
+    let pipe_fds = read_user_value::<[i32; 2]>(fd_page);
+    let read_fd = pipe_fds[0] as usize;
+    let write_fd = pipe_fds[1] as usize;
+    assert_ne!(read_fd, write_fd);
+    assert!(
+        get_object_current_process(read_fd as u64)
+            .expect("pipe read fd should resolve")
+            .as_unix_socket()
+            .is_ok()
+    );
+    assert!(
+        get_object_current_process(write_fd as u64)
+            .expect("pipe write fd should resolve")
+            .as_unix_socket()
+            .is_ok()
+    );
+    assert_fd_flags(read_fd, FdFlags::empty());
+    assert_fd_flags(write_fd, FdFlags::empty());
+    assert_object_flags(read_fd, FileFlags::empty());
+    assert_object_flags(write_fd, FileFlags::empty());
+
+    expect_ok(
+        SyscallArgs::new([fd_page, O_NONBLOCK | O_CLOEXEC, 0, 0, 0, 0]).call::<Pipe2>(),
+        0,
+    );
+    let pipe2_fds = read_user_value::<[i32; 2]>(fd_page);
+    let pipe2_read_fd = pipe2_fds[0] as usize;
+    let pipe2_write_fd = pipe2_fds[1] as usize;
+    assert_ne!(pipe2_read_fd, pipe2_write_fd);
+    assert_fd_flags(pipe2_read_fd, FdFlags::CLOEXEC);
+    assert_fd_flags(pipe2_write_fd, FdFlags::CLOEXEC);
+    assert_object_flags(pipe2_read_fd, FileFlags::NONBLOCK);
+    assert_object_flags(pipe2_write_fd, FileFlags::NONBLOCK);
+    expect_errno(
+        SyscallArgs::new([fd_page, 0x8000_0000, 0, 0, 0, 0]).call::<Pipe2>(),
+        SyscallError::InvalidArguments,
+    );
+
+    let dup_fd = expect_fd(SyscallArgs::new([pipe2_read_fd as u64, 0, 0, 0, 0, 0]).call::<Dup>());
+    assert_same_object(pipe2_read_fd, dup_fd);
+    assert_fd_flags(dup_fd, FdFlags::empty());
+
+    let dup2_dest = dup_fd + 5;
+    expect_ok(
+        SyscallArgs::new([pipe2_read_fd as u64, dup2_dest as u64, 0, 0, 0, 0]).call::<Dup2>(),
+        dup2_dest,
+    );
+    assert_same_object(pipe2_read_fd, dup2_dest);
+    assert_fd_flags(dup2_dest, FdFlags::empty());
+    expect_ok(
+        SyscallArgs::new([pipe2_read_fd as u64, pipe2_read_fd as u64, 0, 0, 0, 0]).call::<Dup2>(),
+        pipe2_read_fd,
+    );
+    expect_errno(
+        SyscallArgs::new([u64::MAX, u64::MAX, 0, 0, 0, 0]).call::<Dup2>(),
+        SyscallError::BadFileDescriptor,
+    );
+
+    let dup3_dest = dup2_dest + 1;
+    expect_ok(
+        SyscallArgs::new([pipe2_read_fd as u64, dup3_dest as u64, O_CLOEXEC, 0, 0, 0])
+            .call::<Dup3>(),
+        dup3_dest,
+    );
+    assert_same_object(pipe2_read_fd, dup3_dest);
+    assert_fd_flags(dup3_dest, FdFlags::CLOEXEC);
+    expect_errno(
+        SyscallArgs::new([pipe2_read_fd as u64, pipe2_read_fd as u64, 0, 0, 0, 0]).call::<Dup3>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([
+            pipe2_read_fd as u64,
+            (dup3_dest + 1) as u64,
+            O_NONBLOCK,
+            0,
+            0,
+            0,
+        ])
+        .call::<Dup3>(),
+        SyscallError::InvalidArguments,
+    );
+
+    close_test_fd(dup3_dest);
+    close_test_fd(dup2_dest);
+    close_test_fd(dup_fd);
+    close_test_fd(pipe2_write_fd);
+    close_test_fd(pipe2_read_fd);
+    close_test_fd(write_fd);
+    close_test_fd(read_fd);
 }
 
 fn typed_syscall_args_convert_flags_and_enums_at_boundary() {

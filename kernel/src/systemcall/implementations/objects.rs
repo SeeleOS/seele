@@ -629,11 +629,11 @@ define_syscall!(Dup, |object: ObjectRef| {
 });
 
 define_syscall!(Dup2, |source_fd: usize, dest: usize| {
+    let source = get_object_current_process(source_fd as u64).map_err(SyscallError::from)?;
     if source_fd == dest {
         return Ok(dest);
     }
 
-    let source = get_object_current_process(source_fd as u64).map_err(SyscallError::from)?;
     get_current_process()
         .lock()
         .clone_object_to(source, dest)
@@ -648,11 +648,7 @@ bitflags! {
 }
 
 define_syscall!(Dup3, |source_fd: usize, dest: usize, flags: i32| {
-    let raw_flags = flags;
-    let flags = DupFlags::from_bits(flags).ok_or_else(|| {
-        crate::s_println!("unsupported dup3 flags raw={:#x}", raw_flags);
-        SyscallError::InvalidArguments
-    })?;
+    let flags = DupFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
     if source_fd == dest {
         return Err(SyscallError::InvalidArguments);
     }

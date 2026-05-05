@@ -17,6 +17,10 @@ bitflags! {
 }
 
 fn create_pipe(fds: *mut i32, flags: PipeFlags) -> Result<usize, SyscallError> {
+    if fds.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
     let kind = SOCK_STREAM
         | if flags.contains(PipeFlags::O_NONBLOCK) {
             SOCK_NONBLOCK

@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 161;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 156;
 
 macro_rules! syscall_coverage {
     (
@@ -119,6 +119,11 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         TimerfdGettime => "timerfd_syscalls_follow_linux_flag_and_timer_rules",
         Eventfd2 => "eventfd_syscalls_follow_linux_flag_rules",
         InotifyInit1 => "inotify_init_syscalls_follow_linux_flag_rules",
+        Pipe => "pipe_and_dup_syscalls_follow_linux_fd_rules",
+        Dup => "pipe_and_dup_syscalls_follow_linux_fd_rules",
+        Dup2 => "pipe_and_dup_syscalls_follow_linux_fd_rules",
+        Pipe2 => "pipe_and_dup_syscalls_follow_linux_fd_rules",
+        Dup3 => "pipe_and_dup_syscalls_follow_linux_fd_rules",
     }
     gap {
     Read,
@@ -144,15 +149,12 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Pwrite64,
     Writev,
     Access,
-    Pipe,
     Mremap,
     Msync,
     Mincore,
     Shmget,
     Shmat,
     Shmctl,
-    Dup,
-    Dup2,
     Pause,
     Nanosleep,
     Setitimer,
@@ -247,8 +249,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     EpollPwait,
     Fallocate,
     Signalfd4,
-    Pipe2,
-    Dup3,
     EpollCreate1,
     NameToHandleAt,
     Setns,
