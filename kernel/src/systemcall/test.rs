@@ -10,12 +10,13 @@ use crate::{
     systemcall::{
         arg_types::SyscallArg,
         implementations::{
-            Alarm, ArchPrctl, Capget, Capset, ClockGetres, Getegid, Geteuid, Getgid, Getgroups,
-            Getpgid, Getpgrp, Getpid, Getppid, Getpriority, Getrandom, Getresgid, Getresuid,
-            Getrusage, Getsid, Gettid, Gettimeofday, Getuid, Ioperm, Iopl, IoprioGet, IoprioSet,
-            Madvise, OpenFlags, PollEvents, PollTimespec, Prctl, Prlimit64, Reboot, Rseq,
-            SchedGetPriorityMax, SchedGetPriorityMin, SchedGetparam, SchedGetscheduler,
-            SchedRrGetInterval, SchedSetparam, SchedYield, SelectTimespec, SetRobustList,
+            Alarm, ArchPrctl, Capget, Capset, ClockGetres, ClockGettime, ClockNanosleep,
+            ClockSettime, Getegid, Geteuid, Getgid, Getgroups, Getpgid, Getpgrp, Getpid, Getppid,
+            Getpriority, Getrandom, Getresgid, Getresuid, Getrusage, Getsid, Gettid, Gettimeofday,
+            Getuid, Ioperm, Iopl, IoprioGet, IoprioSet, Madvise, OpenFlags, PollEvents,
+            PollTimespec, Prctl, Prlimit64, Reboot, Rseq, SchedGetPriorityMax, SchedGetPriorityMin,
+            SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval,
+            SchedSetaffinity, SchedSetparam, SchedYield, SelectTimespec, SetRobustList,
             SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Sethostname, Setpgid,
             Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid, Settimeofday,
             Setuid, Sync, Sysinfo, Time, Umask, Uname, Vhangup, clear_fdset, fdset_contains,
@@ -115,6 +116,11 @@ crate::test!(
     uname_reboot_and_rlimit_syscalls,
     "uname reboot and rlimit syscalls follow linux abi rules",
     uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules
+);
+crate::test!(
+    clock_and_affinity_syscalls,
+    "clock and affinity syscalls follow linux pointer rules",
+    clock_and_affinity_syscalls_follow_linux_pointer_rules
 );
 crate::test!(
     typed_syscall_arg_conversion,
@@ -1540,6 +1546,148 @@ fn uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules() {
         process.rlimit_rtprio_max = old_rtprio_max;
     }
     crate::misc::reboot::set_ctrl_alt_del_enabled(old_cad);
+}
+
+fn clock_and_affinity_syscalls_follow_linux_pointer_rules() {
+    const CLOCK_REALTIME: u64 = 0;
+    const CLOCK_MONOTONIC: u64 = 1;
+    const TIMER_ABSTIME: u64 = 1;
+
+    let clock_page = allocate_user_test_page();
+    expect_ok(
+        SyscallArgs::new([CLOCK_REALTIME, clock_page, 0, 0, 0, 0]).call::<ClockGettime>(),
+        0,
+    );
+    let realtime = read_user_value::<TestLinuxTimespec>(clock_page);
+    assert!(realtime.tv_sec >= 0);
+    assert!((0..1_000_000_000).contains(&realtime.tv_nsec));
+    expect_ok(
+        SyscallArgs::new([CLOCK_MONOTONIC, clock_page, 0, 0, 0, 0]).call::<ClockGettime>(),
+        0,
+    );
+    let monotonic = read_user_value::<TestLinuxTimespec>(clock_page);
+    assert!(monotonic.tv_sec >= 0);
+    assert!((0..1_000_000_000).contains(&monotonic.tv_nsec));
+    expect_errno(
+        SyscallArgs::new([99, clock_page, 0, 0, 0, 0]).call::<ClockGettime>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([CLOCK_REALTIME, 0, 0, 0, 0, 0]).call::<ClockGettime>(),
+        SyscallError::BadAddress,
+    );
+
+    write_user_value(
+        clock_page,
+        &TestLinuxTimespec {
+            tv_sec: -1,
+            tv_nsec: 0,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([CLOCK_REALTIME, clock_page, 0, 0, 0, 0]).call::<ClockSettime>(),
+        SyscallError::InvalidArguments,
+    );
+    write_user_value(
+        clock_page,
+        &TestLinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 1_000_000_000,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([CLOCK_REALTIME, clock_page, 0, 0, 0, 0]).call::<ClockSettime>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([CLOCK_MONOTONIC, clock_page, 0, 0, 0, 0]).call::<ClockSettime>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([CLOCK_REALTIME, 0, 0, 0, 0, 0]).call::<ClockSettime>(),
+        SyscallError::BadAddress,
+    );
+
+    write_user_value(
+        clock_page,
+        &TestLinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        },
+    );
+    expect_ok(
+        SyscallArgs::new([CLOCK_MONOTONIC, TIMER_ABSTIME, clock_page, 0, 0, 0])
+            .call::<ClockNanosleep>(),
+        0,
+    );
+    write_user_value(
+        clock_page,
+        &TestLinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 1_000_000_000,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([CLOCK_MONOTONIC, 0, clock_page, 0, 0, 0]).call::<ClockNanosleep>(),
+        SyscallError::InvalidArguments,
+    );
+    write_user_value(
+        clock_page,
+        &TestLinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        },
+    );
+    expect_ok(
+        SyscallArgs::new([CLOCK_MONOTONIC, TIMER_ABSTIME, clock_page, 0, 0, 0])
+            .call::<ClockNanosleep>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([99, 0, clock_page, 0, 0, 0]).call::<ClockNanosleep>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([CLOCK_MONOTONIC, 0, 0, 0, 0, 0]).call::<ClockNanosleep>(),
+        SyscallError::BadAddress,
+    );
+
+    let mask_page = allocate_user_test_page();
+    write_user_value(mask_page, &[1u8, 0, 0, 0, 0, 0, 0, 0]);
+    expect_ok(
+        SyscallArgs::new([0, 8, mask_page, 0, 0, 0]).call::<SchedSetaffinity>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([u64::MAX, 8, mask_page, 0, 0, 0]).call::<SchedSetaffinity>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 0, mask_page, 0, 0, 0]).call::<SchedSetaffinity>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 8, 0, 0, 0, 0]).call::<SchedSetaffinity>(),
+        SyscallError::BadAddress,
+    );
+
+    expect_ok(
+        SyscallArgs::new([0, 8, mask_page, 0, 0, 0]).call::<SchedGetaffinity>(),
+        8,
+    );
+    assert_user_bytes(mask_page, &[1, 0, 0, 0, 0, 0, 0, 0]);
+    expect_errno(
+        SyscallArgs::new([u64::MAX, 8, mask_page, 0, 0, 0]).call::<SchedGetaffinity>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 4, mask_page, 0, 0, 0]).call::<SchedGetaffinity>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 8, 0, 0, 0, 0]).call::<SchedGetaffinity>(),
+        SyscallError::BadAddress,
+    );
 }
 
 fn typed_syscall_args_convert_flags_and_enums_at_boundary() {

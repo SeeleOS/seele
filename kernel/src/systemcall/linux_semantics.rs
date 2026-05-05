@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 173;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 168;
 
 macro_rules! syscall_coverage {
     (
@@ -107,6 +107,11 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Setrlimit => "uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules",
         Prlimit64 => "uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules",
         Vhangup => "uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules",
+        ClockGettime => "clock_and_affinity_syscalls_follow_linux_pointer_rules",
+        ClockSettime => "clock_and_affinity_syscalls_follow_linux_pointer_rules",
+        ClockNanosleep => "clock_and_affinity_syscalls_follow_linux_pointer_rules",
+        SchedSetaffinity => "clock_and_affinity_syscalls_follow_linux_pointer_rules",
+        SchedGetaffinity => "clock_and_affinity_syscalls_follow_linux_pointer_rules",
     }
     gap {
     Read,
@@ -209,8 +214,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Fremovexattr,
     Futex,
     SchedSetscheduler,
-    SchedSetaffinity,
-    SchedGetaffinity,
     Fadvise64,
     InotifyInit,
     InotifyAddWatch,
@@ -221,9 +224,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     EpollWait,
     EpollCtl,
     Tgkill,
-    ClockSettime,
-    ClockGettime,
-    ClockNanosleep,
     MkdirAt,
     Mknodat,
     Fchownat,

@@ -1247,7 +1247,7 @@ define_syscall!(
         if req.is_null() {
             return Err(SyscallError::BadAddress);
         }
-        let requested = unsafe { &*req };
+        let requested = user_safe::read(req)?;
         if requested.tv_sec < 0 || requested.tv_nsec < 0 || requested.tv_nsec >= 1_000_000_000 {
             return Err(SyscallError::InvalidArguments);
         }
@@ -1327,7 +1327,7 @@ define_syscall!(
             return Err(SyscallError::BadAddress);
         }
 
-        let requested = unsafe { &*req };
+        let requested = user_safe::read(req)?;
         if requested.tv_sec < 0 || requested.tv_nsec < 0 || requested.tv_nsec >= 1_000_000_000 {
             return Err(SyscallError::InvalidArguments);
         }
@@ -1357,7 +1357,7 @@ define_syscall!(
             block_current_with_sig_check(BlockType::SetTime(deadline))?;
         }
 
-        if !rem.is_null() {
+        if !flags.contains(ClockNanosleepFlags::TIMER_ABSTIME) && !rem.is_null() {
             let remaining = LinuxTimespec {
                 tv_sec: 0,
                 tv_nsec: 0,
@@ -1938,7 +1938,7 @@ define_syscall!(
 
         let mut mask = vec![0; cpusetsize];
         mask[0] = 1;
-        user_safe::write(mask_ptr, &mask)?;
+        user_safe::write_buffer(mask_ptr, &mask)?;
 
         Ok(core::mem::size_of::<usize>())
     }
