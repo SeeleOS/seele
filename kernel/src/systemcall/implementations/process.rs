@@ -331,9 +331,13 @@ define_syscall!(Getsid, |pid: i32| {
 
 define_syscall!(Setsid, {
     let current = get_current_process();
-    let pid = current.lock().pid.0;
-    current.lock().group_id.0 = pid;
-    current.lock().session_id.0 = pid;
-    current.lock().controlling_terminal = None;
+    let mut current = current.lock();
+    let pid = current.pid.0;
+    if current.group_id.0 == pid {
+        return Err(SyscallError::PermissionDenied);
+    }
+    current.group_id.0 = pid;
+    current.session_id.0 = pid;
+    current.controlling_terminal = None;
     Ok(pid as usize)
 });

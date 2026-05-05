@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 203;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 195;
 
 macro_rules! syscall_coverage {
     (
@@ -77,6 +77,14 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         SchedGetPriorityMin => "scheduler_priority_and_io_permission_syscalls_validate_linux_arguments",
         Iopl => "scheduler_priority_and_io_permission_syscalls_validate_linux_arguments",
         Ioperm => "scheduler_priority_and_io_permission_syscalls_validate_linux_arguments",
+        Gettid => "process_session_and_prctl_syscalls_follow_linux_state_rules",
+        Getsid => "process_session_and_prctl_syscalls_follow_linux_state_rules",
+        Setsid => "process_session_and_prctl_syscalls_follow_linux_state_rules",
+        Umask => "process_session_and_prctl_syscalls_follow_linux_state_rules",
+        Getresuid => "process_session_and_prctl_syscalls_follow_linux_state_rules",
+        Getresgid => "process_session_and_prctl_syscalls_follow_linux_state_rules",
+        Prctl => "process_session_and_prctl_syscalls_follow_linux_state_rules",
+        ArchPrctl => "process_session_and_prctl_syscalls_follow_linux_state_rules",
     }
     gap {
     Read,
@@ -140,7 +148,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Alarm,
     Kill,
     Uname,
-    Umask,
     Ptrace,
     Shmdt,
     Capget,
@@ -151,15 +158,12 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Reboot,
     Sethostname,
     Sysinfo,
-    Getresuid,
-    Getresgid,
     Fcntl,
     Flock,
     Fsync,
     Fdatasync,
     Ftruncate,
     Getdents,
-    Prctl,
     Getdents64,
     Getcwd,
     Chdir,
@@ -176,13 +180,9 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Fchmod,
     Chown,
     Fchown,
-    Getsid,
-    Setsid,
     Sigaltstack,
     Statfs,
     Fstatfs,
-    ArchPrctl,
-    Gettid,
     Setxattr,
     Lsetxattr,
     Fsetxattr,
