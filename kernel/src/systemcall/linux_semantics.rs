@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 180;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 173;
 
 macro_rules! syscall_coverage {
     (
@@ -100,6 +100,13 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Sync => "misc_state_syscalls_follow_linux_pointer_and_state_rules",
         SchedSetparam => "misc_state_syscalls_follow_linux_pointer_and_state_rules",
         SchedGetparam => "misc_state_syscalls_follow_linux_pointer_and_state_rules",
+        Uname => "uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules",
+        Sethostname => "uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules",
+        Reboot => "uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules",
+        SchedRrGetInterval => "uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules",
+        Setrlimit => "uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules",
+        Prlimit64 => "uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules",
+        Vhangup => "uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules",
     }
     gap {
     Read,
@@ -161,11 +168,8 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Exit,
     Wait4,
     Kill,
-    Uname,
     Ptrace,
     Shmdt,
-    Reboot,
-    Sethostname,
     Fcntl,
     Flock,
     Fsync,
@@ -246,13 +250,10 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Dup3,
     InotifyInit1,
     EpollCreate1,
-    Prlimit64,
     NameToHandleAt,
     Setns,
     Kcmp,
     MemfdCreate,
-    SchedRrGetInterval,
-    Setrlimit,
     Mount,
     Umount2,
     RenameAt2,
@@ -261,7 +262,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     TimerGettime,
     TimerGetoverrun,
     TimerDelete,
-    Vhangup,
     ExitGroup,
     Faccessat2,
     Bpf,

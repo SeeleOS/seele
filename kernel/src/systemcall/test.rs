@@ -13,12 +13,13 @@ use crate::{
             Alarm, ArchPrctl, Capget, Capset, ClockGetres, Getegid, Geteuid, Getgid, Getgroups,
             Getpgid, Getpgrp, Getpid, Getppid, Getpriority, Getrandom, Getresgid, Getresuid,
             Getrusage, Getsid, Gettid, Gettimeofday, Getuid, Ioperm, Iopl, IoprioGet, IoprioSet,
-            Madvise, OpenFlags, PollEvents, PollTimespec, Prctl, Rseq, SchedGetPriorityMax,
-            SchedGetPriorityMin, SchedGetparam, SchedGetscheduler, SchedSetparam, SchedYield,
-            SelectTimespec, SetRobustList, SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups,
-            Setpgid, Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setsid, Settimeofday,
-            Setuid, Sync, Sysinfo, Time, Umask, clear_fdset, fdset_contains, fdset_insert,
-            fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
+            Madvise, OpenFlags, PollEvents, PollTimespec, Prctl, Prlimit64, Reboot, Rseq,
+            SchedGetPriorityMax, SchedGetPriorityMin, SchedGetparam, SchedGetscheduler,
+            SchedRrGetInterval, SchedSetparam, SchedYield, SelectTimespec, SetRobustList,
+            SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Sethostname, Setpgid,
+            Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid, Settimeofday,
+            Setuid, Sync, Sysinfo, Time, Umask, Uname, Vhangup, clear_fdset, fdset_contains,
+            fdset_insert, fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
             timeout_to_deadline, translate_ready_events,
         },
         linux_semantics::{
@@ -109,6 +110,11 @@ crate::test!(
     misc_state_syscalls,
     "misc state syscalls follow linux pointer and state rules",
     misc_state_syscalls_follow_linux_pointer_and_state_rules
+);
+crate::test!(
+    uname_reboot_and_rlimit_syscalls,
+    "uname reboot and rlimit syscalls follow linux abi rules",
+    uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules
 );
 crate::test!(
     typed_syscall_arg_conversion,
@@ -366,6 +372,31 @@ struct TestLinuxRseq {
     flags: u32,
     _padding: u32,
     _padding2: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct TestUtsName {
+    sysname: [u8; 65],
+    nodename: [u8; 65],
+    release: [u8; 65],
+    version: [u8; 65],
+    machine: [u8; 65],
+    domainname: [u8; 65],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxTimespec {
+    tv_sec: i64,
+    tv_nsec: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxRlimit64 {
+    rlim_cur: u64,
+    rlim_max: u64,
 }
 
 fn process_identity_syscalls_match_current_linux_task_state() {
@@ -1288,6 +1319,227 @@ fn misc_state_syscalls_follow_linux_pointer_and_state_rules() {
         current.rseq_sig = old_rseq_sig;
     }
     saved.restore();
+}
+
+fn uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules() {
+    assert_linux_layout::<TestUtsName>(390, 1);
+    assert_linux_layout::<TestLinuxTimespec>(16, 8);
+    assert_linux_layout::<TestLinuxRlimit64>(16, 8);
+
+    const LINUX_REBOOT_MAGIC1: u64 = 0xfee1_dead;
+    const LINUX_REBOOT_MAGIC2: u64 = 0x2812_1969;
+    const LINUX_REBOOT_CMD_CAD_OFF: u64 = 0x0000_0000;
+    const LINUX_REBOOT_CMD_CAD_ON: u64 = 0x89ab_cdef;
+    const RLIMIT_STACK: u64 = 3;
+    const RLIMIT_NOFILE: u64 = 7;
+    const RLIMIT_MEMLOCK: u64 = 8;
+    const RLIMIT_RTPRIO: u64 = 14;
+
+    let process = get_current_process();
+    let (
+        old_stack_cur,
+        old_stack_max,
+        old_nofile_cur,
+        old_nofile_max,
+        old_memlock_cur,
+        old_memlock_max,
+        old_rtprio_cur,
+        old_rtprio_max,
+    ) = {
+        let process = process.lock();
+        (
+            process.rlimit_stack_cur,
+            process.rlimit_stack_max,
+            process.rlimit_nofile_cur,
+            process.rlimit_nofile_max,
+            process.rlimit_memlock_cur,
+            process.rlimit_memlock_max,
+            process.rlimit_rtprio_cur,
+            process.rlimit_rtprio_max,
+        )
+    };
+    let old_cad = crate::misc::reboot::ctrl_alt_del_enabled();
+
+    let host_page = allocate_user_test_page();
+    write_user_value(host_page, b"linuxhost");
+    expect_ok(
+        SyscallArgs::new([host_page, 9, 0, 0, 0, 0]).call::<Sethostname>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([host_page, 65, 0, 0, 0, 0]).call::<Sethostname>(),
+        SyscallError::InvalidArguments,
+    );
+    write_user_value(host_page, b"bad\0host");
+    expect_errno(
+        SyscallArgs::new([host_page, 8, 0, 0, 0, 0]).call::<Sethostname>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 1, 0, 0, 0, 0]).call::<Sethostname>(),
+        SyscallError::BadAddress,
+    );
+
+    let uts_page = allocate_user_test_page();
+    expect_ok(
+        SyscallArgs::new([uts_page, 0, 0, 0, 0, 0]).call::<Uname>(),
+        0,
+    );
+    let uts = read_user_value::<TestUtsName>(uts_page);
+    assert_eq!(&uts.sysname[..6], b"Seele\0");
+    assert_eq!(&uts.nodename[..10], b"linuxhost\0");
+    assert_eq!(&uts.machine[..7], b"x86_64\0");
+    expect_errno(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Uname>(),
+        SyscallError::BadAddress,
+    );
+
+    expect_errno(
+        SyscallArgs::new([0, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_CAD_OFF, 0, 0, 0])
+            .call::<Reboot>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_ok(
+        SyscallArgs::new([
+            LINUX_REBOOT_MAGIC1,
+            LINUX_REBOOT_MAGIC2,
+            LINUX_REBOOT_CMD_CAD_OFF,
+            0,
+            0,
+            0,
+        ])
+        .call::<Reboot>(),
+        0,
+    );
+    assert!(!crate::misc::reboot::ctrl_alt_del_enabled());
+    expect_ok(
+        SyscallArgs::new([
+            LINUX_REBOOT_MAGIC1,
+            LINUX_REBOOT_MAGIC2,
+            LINUX_REBOOT_CMD_CAD_ON,
+            0,
+            0,
+            0,
+        ])
+        .call::<Reboot>(),
+        0,
+    );
+    assert!(crate::misc::reboot::ctrl_alt_del_enabled());
+    expect_errno(
+        SyscallArgs::new([LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, 0x1234, 0, 0, 0])
+            .call::<Reboot>(),
+        SyscallError::InvalidArguments,
+    );
+
+    let timespec_page = allocate_user_test_page();
+    expect_ok(
+        SyscallArgs::new([0, timespec_page, 0, 0, 0, 0]).call::<SchedRrGetInterval>(),
+        0,
+    );
+    let interval = read_user_value::<TestLinuxTimespec>(timespec_page);
+    assert_eq!(interval.tv_sec, 0);
+    assert_eq!(interval.tv_nsec, 100_000_000);
+    expect_errno(
+        SyscallArgs::new([u64::MAX, timespec_page, 0, 0, 0, 0]).call::<SchedRrGetInterval>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<SchedRrGetInterval>(),
+        SyscallError::BadAddress,
+    );
+
+    let rlimit_page = allocate_user_test_page();
+    write_user_value(
+        rlimit_page,
+        &TestLinuxRlimit64 {
+            rlim_cur: 4096,
+            rlim_max: 8192,
+        },
+    );
+    expect_ok(
+        SyscallArgs::new([RLIMIT_STACK, rlimit_page, 0, 0, 0, 0]).call::<Setrlimit>(),
+        0,
+    );
+    {
+        let process = process.lock();
+        assert_eq!(process.rlimit_stack_cur, 4096);
+        assert_eq!(process.rlimit_stack_max, 8192);
+    }
+    expect_errno(
+        SyscallArgs::new([99, rlimit_page, 0, 0, 0, 0]).call::<Setrlimit>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([RLIMIT_STACK, 0, 0, 0, 0, 0]).call::<Setrlimit>(),
+        SyscallError::BadAddress,
+    );
+
+    write_user_value(
+        rlimit_page,
+        &TestLinuxRlimit64 {
+            rlim_cur: 256,
+            rlim_max: 512,
+        },
+    );
+    expect_ok(
+        SyscallArgs::new([0, RLIMIT_NOFILE, rlimit_page, rlimit_page + 32, 0, 0])
+            .call::<Prlimit64>(),
+        0,
+    );
+    let old_nofile = read_user_value::<TestLinuxRlimit64>(rlimit_page + 32);
+    assert_eq!(old_nofile.rlim_cur, old_nofile_cur);
+    assert_eq!(old_nofile.rlim_max, old_nofile_max);
+    {
+        let process = process.lock();
+        assert_eq!(process.rlimit_nofile_cur, 256);
+        assert_eq!(process.rlimit_nofile_max, 512);
+    }
+    expect_ok(
+        SyscallArgs::new([0, RLIMIT_MEMLOCK, 0, rlimit_page + 32, 0, 0]).call::<Prlimit64>(),
+        0,
+    );
+    let old_memlock = read_user_value::<TestLinuxRlimit64>(rlimit_page + 32);
+    assert_eq!(old_memlock.rlim_cur, old_memlock_cur);
+    assert_eq!(old_memlock.rlim_max, old_memlock_max);
+    write_user_value(
+        rlimit_page,
+        &TestLinuxRlimit64 {
+            rlim_cur: 7,
+            rlim_max: 9,
+        },
+    );
+    expect_ok(
+        SyscallArgs::new([0, RLIMIT_RTPRIO, rlimit_page, 0, 0, 0]).call::<Prlimit64>(),
+        0,
+    );
+    {
+        let process = process.lock();
+        assert_eq!(process.rlimit_rtprio_cur, 7);
+        assert_eq!(process.rlimit_rtprio_max, 9);
+    }
+    expect_errno(
+        SyscallArgs::new([1, RLIMIT_NOFILE, 0, 0, 0, 0]).call::<Prlimit64>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 99, 0, 0, 0, 0]).call::<Prlimit64>(),
+        SyscallError::InvalidArguments,
+    );
+
+    expect_ok(SyscallArgs::none().call::<Vhangup>(), 0);
+
+    {
+        let mut process = process.lock();
+        process.rlimit_stack_cur = old_stack_cur;
+        process.rlimit_stack_max = old_stack_max;
+        process.rlimit_nofile_cur = old_nofile_cur;
+        process.rlimit_nofile_max = old_nofile_max;
+        process.rlimit_memlock_cur = old_memlock_cur;
+        process.rlimit_memlock_max = old_memlock_max;
+        process.rlimit_rtprio_cur = old_rtprio_cur;
+        process.rlimit_rtprio_max = old_rtprio_max;
+    }
+    crate::misc::reboot::set_ctrl_alt_del_enabled(old_cad);
 }
 
 fn typed_syscall_args_convert_flags_and_enums_at_boundary() {
