@@ -5,7 +5,6 @@ use x86_64::VirtAddr;
 
 use crate::object::misc::ObjectRef;
 use crate::{
-    drm::current_debug_process,
     filesystem::{
         errors::FSError,
         info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
@@ -427,17 +426,6 @@ impl MemoryMappable for OpenedFileObject {
         pages: u64,
         protection: Protection,
     ) -> ObjectResult<VirtAddr> {
-        if let Some((pid, comm)) = current_debug_process() {
-            crate::s_println!(
-                "file map comm={} pid={} path={} offset={:#x} pages={} device_backed={}",
-                comm,
-                pid,
-                self.path().as_string(),
-                offset,
-                pages,
-                self.device_object().is_some()
-            );
-        }
         if let Some(device) = self.device_object() {
             let mappable = device
                 .as_mappable()

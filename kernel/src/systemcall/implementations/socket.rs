@@ -1,4 +1,5 @@
 use crate::{
+    drm::current_debug_process,
     define_syscall,
     memory::user_safe,
     misc::systemd_perf::{self, PerfBucket},
@@ -126,6 +127,8 @@ fn rights_control_bytes_for_read(
         return Ok(Vec::new());
     }
 
+    let rights_group_count = ready_rights.len();
+    let total_rights: usize = ready_rights.iter().map(Vec::len).sum();
     let current_process = get_current_process();
     let mut current = current_process.lock();
     let fd_flags = if cloexec {
@@ -133,7 +136,6 @@ fn rights_control_bytes_for_read(
     } else {
         FdFlags::empty()
     };
-    let total_rights: usize = ready_rights.iter().map(Vec::len).sum();
     let mut payload = Vec::with_capacity(total_rights * mem::size_of::<i32>());
     for rights in ready_rights {
         for right in rights {
@@ -141,6 +143,16 @@ fn rights_control_bytes_for_read(
                 .map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
             payload.extend_from_slice(&fd.to_ne_bytes());
         }
+    }
+    if let Some((pid, comm)) = current_debug_process() {
+        crate::s_println!(
+            "unix recv rights comm={} pid={} groups={} total_fds={} cloexec={}",
+            comm,
+            pid,
+            rights_group_count,
+            total_rights,
+            cloexec
+        );
     }
     Ok(encode_control_message(SCM_RIGHTS, &payload))
 }
@@ -688,6 +700,18 @@ fn sendmsg_rights(msg: &relibc_msg_hdr) -> Result<Vec<ObjectRef>, SyscallError> 
         }
 
         offset = next;
+    }
+
+    if !rights.is_empty()
+        && let Some((pid, comm)) = current_debug_process()
+    {
+        crate::s_println!(
+            "unix send rights comm={} pid={} total_fds={} controllen={}",
+            comm,
+            pid,
+            rights.len(),
+            msg.msg_controllen
+        );
     }
 
     Ok(rights)

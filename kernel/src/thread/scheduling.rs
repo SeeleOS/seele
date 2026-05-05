@@ -9,8 +9,7 @@ use core::{
 use x86_64::instructions::interrupts::{self, enable_and_hlt, without_interrupts};
 
 use crate::{
-    drm,
-    keyboard,
+    drm, keyboard,
     misc::agent_tty_input,
     misc::mouse,
     misc::snapshot::Snapshot,

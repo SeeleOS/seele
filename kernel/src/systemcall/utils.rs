@@ -103,7 +103,17 @@ pub fn log_unsupported_syscall_result(syscall_no: isize, args: [u64; 6], err: Sy
 }
 
 fn should_trace_syscall(_syscall_no: isize, _comm: &str) -> bool {
-    false
+    let trace_comm = matches!(_comm, "kwin_wayland");
+    if !trace_comm {
+        return false;
+    }
+
+    matches!(
+        SyscallNumber::from_number(_syscall_no as usize),
+        Some(
+            SyscallNumber::Mmap
+        )
+    )
 }
 
 pub fn log_syscall_trace_enter(syscall_no: isize, args: [u64; 6]) {

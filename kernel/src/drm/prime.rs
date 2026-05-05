@@ -3,7 +3,10 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use alloc::{string::String, sync::Arc};
 use bitflags::bitflags;
 use spin::Mutex;
-use x86_64::{VirtAddr, structures::paging::{PhysFrame, Size4KiB}};
+use x86_64::{
+    VirtAddr,
+    structures::paging::{PhysFrame, Size4KiB},
+};
 
 use crate::{
     filesystem::{

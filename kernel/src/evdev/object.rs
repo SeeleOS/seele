@@ -228,9 +228,7 @@ impl Configuratable for EventDeviceClientObject {
         }
 
         match request {
-            ConfigurateRequest::RawIoctl { request, arg } => {
-                handle_ioctl(self, request, arg)
-            }
+            ConfigurateRequest::RawIoctl { request, arg } => handle_ioctl(self, request, arg),
             _ => Err(ObjectError::InvalidRequest),
         }
     }
