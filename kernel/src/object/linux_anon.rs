@@ -444,7 +444,10 @@ impl EventFdObject {
             semaphore: flags.contains(EventFdFlags::EFD_SEMAPHORE),
             self_ref: Mutex::new(None),
         });
-        *eventfd.self_ref.lock() = Some(Arc::downgrade(&eventfd));
+        {
+            let mut self_ref = eventfd.self_ref.lock();
+            *self_ref = Some(Arc::downgrade(&eventfd));
+        }
         if flags.contains(EventFdFlags::EFD_NONBLOCK) {
             let _ = eventfd.clone().set_flags(FileFlags::NONBLOCK);
         }

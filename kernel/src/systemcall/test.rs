@@ -1,8 +1,9 @@
 use crate::{
     memory::protection::Protection,
     misc::timer::ClockId,
+    object::{FileFlags, misc::get_object_current_process},
     process::{
-        ControllingTerminal, Process,
+        ControllingTerminal, FdFlags, Process,
         group::{ProcessGroupID, SessionID},
         manager::get_current_process,
     },
@@ -11,16 +12,17 @@ use crate::{
         arg_types::SyscallArg,
         implementations::{
             Alarm, ArchPrctl, Capget, Capset, ClockGetres, ClockGettime, ClockNanosleep,
-            ClockSettime, Getegid, Geteuid, Getgid, Getgroups, Getpgid, Getpgrp, Getpid, Getppid,
-            Getpriority, Getrandom, Getresgid, Getresuid, Getrusage, Getsid, Gettid, Gettimeofday,
-            Getuid, Ioperm, Iopl, IoprioGet, IoprioSet, Madvise, OpenFlags, PollEvents,
-            PollTimespec, Prctl, Prlimit64, Reboot, Rseq, SchedGetPriorityMax, SchedGetPriorityMin,
-            SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval,
-            SchedSetaffinity, SchedSetparam, SchedYield, SelectTimespec, SetRobustList,
-            SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Sethostname, Setpgid,
-            Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid, Settimeofday,
-            Setuid, Sync, Sysinfo, Time, Umask, Uname, Vhangup, clear_fdset, fdset_contains,
-            fdset_insert, fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
+            ClockSettime, Eventfd, Eventfd2, Getegid, Geteuid, Getgid, Getgroups, Getpgid, Getpgrp,
+            Getpid, Getppid, Getpriority, Getrandom, Getresgid, Getresuid, Getrusage, Getsid,
+            Gettid, Gettimeofday, Getuid, InotifyInit, InotifyInit1, Ioperm, Iopl, IoprioGet,
+            IoprioSet, Madvise, OpenFlags, PollEvents, PollTimespec, Prctl, Prlimit64, Reboot,
+            Rseq, SchedGetPriorityMax, SchedGetPriorityMin, SchedGetaffinity, SchedGetparam,
+            SchedGetscheduler, SchedRrGetInterval, SchedSetaffinity, SchedSetparam, SchedYield,
+            SelectTimespec, SetRobustList, SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups,
+            Sethostname, Setpgid, Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit,
+            Setsid, Settimeofday, Setuid, Sync, Sysinfo, Time, TimerfdCreate, TimerfdGettime,
+            TimerfdSettime, Umask, Uname, Vhangup, clear_fdset, fdset_contains, fdset_insert,
+            fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
             timeout_to_deadline, translate_ready_events,
         },
         linux_semantics::{
@@ -121,6 +123,21 @@ crate::test!(
     clock_and_affinity_syscalls,
     "clock and affinity syscalls follow linux pointer rules",
     clock_and_affinity_syscalls_follow_linux_pointer_rules
+);
+crate::test!(
+    eventfd_syscalls,
+    "eventfd syscalls follow linux flag rules",
+    eventfd_syscalls_follow_linux_flag_rules
+);
+crate::test!(
+    inotify_init_syscalls,
+    "inotify init syscalls follow linux flag rules",
+    inotify_init_syscalls_follow_linux_flag_rules
+);
+crate::test!(
+    timerfd_syscalls,
+    "timerfd syscalls follow linux flag and timer rules",
+    timerfd_syscalls_follow_linux_flag_and_timer_rules
 );
 crate::test!(
     typed_syscall_arg_conversion,
@@ -396,6 +413,13 @@ struct TestUtsName {
 struct TestLinuxTimespec {
     tv_sec: i64,
     tv_nsec: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxItimerspec {
+    it_interval: TestLinuxTimespec,
+    it_value: TestLinuxTimespec,
 }
 
 #[repr(C)]
@@ -1688,6 +1712,176 @@ fn clock_and_affinity_syscalls_follow_linux_pointer_rules() {
         SyscallArgs::new([0, 8, 0, 0, 0, 0]).call::<SchedGetaffinity>(),
         SyscallError::BadAddress,
     );
+}
+
+fn close_test_fd(fd: usize) {
+    let fd_table = get_current_process().lock().fd_table.clone();
+    let mut fd_table = fd_table.lock();
+    assert!(fd < fd_table.len());
+    assert!(fd_table[fd].take().is_some());
+}
+
+fn expect_fd(result: Result<usize, SyscallError>) -> usize {
+    result.expect("syscall should create a file descriptor")
+}
+
+fn assert_fd_flags(fd: usize, expected: FdFlags) {
+    let fd_table = get_current_process().lock().fd_table.clone();
+    let fd_table = fd_table.lock();
+    let flags = fd_table
+        .get(fd)
+        .and_then(|entry| entry.as_ref())
+        .map(|entry| entry.fd_flags)
+        .expect("test fd should exist");
+    assert_eq!(flags, expected);
+}
+
+fn assert_object_flags(fd: usize, expected: FileFlags) {
+    let flags = get_object_current_process(fd as u64)
+        .expect("test fd should resolve")
+        .get_flags()
+        .expect("test object should report flags");
+    assert_eq!(flags, expected);
+}
+
+fn eventfd_syscalls_follow_linux_flag_rules() {
+    const EFD_SEMAPHORE: u64 = 0x1;
+    const EFD_NONBLOCK: u64 = 0o4_000;
+    const EFD_CLOEXEC: u64 = 0o2_000_000;
+
+    let eventfd = expect_fd(SyscallArgs::new([7, 0, 0, 0, 0, 0]).call::<Eventfd>());
+    assert!(
+        get_object_current_process(eventfd as u64)
+            .expect("eventfd should resolve")
+            .as_eventfd()
+            .is_ok()
+    );
+    assert_fd_flags(eventfd, FdFlags::empty());
+    assert_object_flags(eventfd, FileFlags::empty());
+    close_test_fd(eventfd);
+
+    let eventfd2 = expect_fd(
+        SyscallArgs::new([0, EFD_SEMAPHORE | EFD_NONBLOCK | EFD_CLOEXEC, 0, 0, 0, 0])
+            .call::<Eventfd2>(),
+    );
+    assert_fd_flags(eventfd2, FdFlags::CLOEXEC);
+    assert_object_flags(eventfd2, FileFlags::NONBLOCK);
+    close_test_fd(eventfd2);
+    expect_errno(
+        SyscallArgs::new([0, 0x8000_0000, 0, 0, 0, 0]).call::<Eventfd2>(),
+        SyscallError::InvalidArguments,
+    );
+}
+
+fn inotify_init_syscalls_follow_linux_flag_rules() {
+    const IN_NONBLOCK: u64 = 0o4_000;
+    const IN_CLOEXEC: u64 = 0o2_000_000;
+
+    let inotify = expect_fd(SyscallArgs::none().call::<InotifyInit>());
+    assert!(
+        get_object_current_process(inotify as u64)
+            .expect("inotify fd should resolve")
+            .as_inotify()
+            .is_ok()
+    );
+    assert_fd_flags(inotify, FdFlags::empty());
+    assert_object_flags(inotify, FileFlags::empty());
+    close_test_fd(inotify);
+
+    let inotify1 = expect_fd(
+        SyscallArgs::new([IN_NONBLOCK | IN_CLOEXEC, 0, 0, 0, 0, 0]).call::<InotifyInit1>(),
+    );
+    assert_fd_flags(inotify1, FdFlags::CLOEXEC);
+    assert_object_flags(inotify1, FileFlags::NONBLOCK);
+    close_test_fd(inotify1);
+    expect_errno(
+        SyscallArgs::new([0x8000_0000, 0, 0, 0, 0, 0]).call::<InotifyInit1>(),
+        SyscallError::InvalidArguments,
+    );
+}
+
+fn timerfd_syscalls_follow_linux_flag_and_timer_rules() {
+    const TFD_NONBLOCK: u64 = 0o4_000;
+    const TFD_CLOEXEC: u64 = 0o2_000_000;
+    const CLOCK_REALTIME: u64 = 0;
+    const CLOCK_MONOTONIC: u64 = 1;
+
+    let timerfd = expect_fd(
+        SyscallArgs::new([CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC, 0, 0, 0, 0])
+            .call::<TimerfdCreate>(),
+    );
+    assert!(
+        get_object_current_process(timerfd as u64)
+            .expect("timerfd should resolve")
+            .as_timerfd()
+            .is_ok()
+    );
+    assert_fd_flags(timerfd, FdFlags::CLOEXEC);
+    assert_object_flags(timerfd, FileFlags::NONBLOCK);
+    expect_errno(
+        SyscallArgs::new([99, 0, 0, 0, 0, 0]).call::<TimerfdCreate>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([CLOCK_REALTIME, 0x8000_0000, 0, 0, 0, 0]).call::<TimerfdCreate>(),
+        SyscallError::InvalidArguments,
+    );
+
+    let spec_page = allocate_user_test_page();
+    expect_ok(
+        SyscallArgs::new([timerfd as u64, spec_page, 0, 0, 0, 0]).call::<TimerfdGettime>(),
+        0,
+    );
+    let spec = read_user_value::<TestLinuxItimerspec>(spec_page);
+    assert_eq!(spec.it_interval.tv_sec, 0);
+    assert_eq!(spec.it_interval.tv_nsec, 0);
+    assert_eq!(spec.it_value.tv_sec, 0);
+    assert_eq!(spec.it_value.tv_nsec, 0);
+    expect_errno(
+        SyscallArgs::new([timerfd as u64, 0, 0, 0, 0, 0]).call::<TimerfdGettime>(),
+        SyscallError::BadAddress,
+    );
+
+    write_user_value(spec_page, &TestLinuxItimerspec::default());
+    expect_ok(
+        SyscallArgs::new([timerfd as u64, 0, spec_page, spec_page + 64, 0, 0])
+            .call::<TimerfdSettime>(),
+        0,
+    );
+    let old_spec = read_user_value::<TestLinuxItimerspec>(spec_page + 64);
+    assert_eq!(old_spec.it_interval.tv_sec, 0);
+    assert_eq!(old_spec.it_interval.tv_nsec, 0);
+    assert_eq!(old_spec.it_value.tv_sec, 0);
+    assert_eq!(old_spec.it_value.tv_nsec, 0);
+    expect_errno(
+        SyscallArgs::new([timerfd as u64, 0, 0, 0, 0, 0]).call::<TimerfdSettime>(),
+        SyscallError::BadAddress,
+    );
+    write_user_value(
+        spec_page,
+        &TestLinuxItimerspec {
+            it_value: TestLinuxTimespec {
+                tv_sec: 0,
+                tv_nsec: 1_000_000_000,
+            },
+            ..Default::default()
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([timerfd as u64, 0, spec_page, 0, 0, 0]).call::<TimerfdSettime>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([u64::MAX, spec_page, 0, 0, 0, 0]).call::<TimerfdGettime>(),
+        SyscallError::BadFileDescriptor,
+    );
+    let non_timerfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+    expect_errno(
+        SyscallArgs::new([non_timerfd as u64, 0, spec_page, 0, 0, 0]).call::<TimerfdSettime>(),
+        SyscallError::BadFileDescriptor,
+    );
+    close_test_fd(non_timerfd);
+    close_test_fd(timerfd);
 }
 
 fn typed_syscall_args_convert_flags_and_enums_at_boundary() {

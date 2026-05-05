@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 168;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 161;
 
 macro_rules! syscall_coverage {
     (
@@ -112,6 +112,13 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         ClockNanosleep => "clock_and_affinity_syscalls_follow_linux_pointer_rules",
         SchedSetaffinity => "clock_and_affinity_syscalls_follow_linux_pointer_rules",
         SchedGetaffinity => "clock_and_affinity_syscalls_follow_linux_pointer_rules",
+        InotifyInit => "inotify_init_syscalls_follow_linux_flag_rules",
+        TimerfdCreate => "timerfd_syscalls_follow_linux_flag_and_timer_rules",
+        Eventfd => "eventfd_syscalls_follow_linux_flag_rules",
+        TimerfdSettime => "timerfd_syscalls_follow_linux_flag_and_timer_rules",
+        TimerfdGettime => "timerfd_syscalls_follow_linux_flag_and_timer_rules",
+        Eventfd2 => "eventfd_syscalls_follow_linux_flag_rules",
+        InotifyInit1 => "inotify_init_syscalls_follow_linux_flag_rules",
     }
     gap {
     Read,
@@ -215,7 +222,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Futex,
     SchedSetscheduler,
     Fadvise64,
-    InotifyInit,
     InotifyAddWatch,
     InotifyRmWatch,
     Waitid,
@@ -239,16 +245,10 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Unshare,
     Utimensat,
     EpollPwait,
-    TimerfdCreate,
-    Eventfd,
     Fallocate,
-    TimerfdSettime,
-    TimerfdGettime,
     Signalfd4,
-    Eventfd2,
     Pipe2,
     Dup3,
-    InotifyInit1,
     EpollCreate1,
     NameToHandleAt,
     Setns,

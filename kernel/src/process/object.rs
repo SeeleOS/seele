@@ -162,8 +162,15 @@ impl Process {
     }
 
     pub fn push_object_with_flags(&mut self, object: ObjectRef, fd_flags: FdFlags) -> usize {
-        let slot = self.alloc_fd_slot();
-        let _ = self.set_fd_entry(slot, object, fd_flags);
+        let mut fd_table = self.fd_table.lock();
+        let slot = fd_table
+            .iter()
+            .position(Option::is_none)
+            .unwrap_or_else(|| {
+                fd_table.push(None);
+                fd_table.len() - 1
+            });
+        fd_table[slot] = Some(FdEntry::new(object, fd_flags));
         slot
     }
 

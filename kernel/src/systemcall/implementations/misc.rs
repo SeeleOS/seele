@@ -927,9 +927,8 @@ define_syscall!(Capset, |header: *const LinuxCapHeader,
 });
 
 define_syscall!(InotifyInit, {
-    let fd = get_current_process()
-        .lock()
-        .push_object(Arc::new(InotifyObject::default()));
+    let object = Arc::new(InotifyObject::default());
+    let fd = get_current_process().lock().push_object(object);
     Ok(fd)
 });
 
@@ -950,14 +949,15 @@ define_syscall!(InotifyInit1, |flags: InotifyInitFlags| {
 });
 
 fn create_eventfd(initval: u32, flags: EventFdFlags) -> Result<usize, SyscallError> {
-    let fd = get_current_process().lock().push_object_with_flags(
-        EventFdObject::new(initval as u64, flags),
-        if flags.contains(EventFdFlags::EFD_CLOEXEC) {
-            FdFlags::CLOEXEC
-        } else {
-            FdFlags::empty()
-        },
-    );
+    let object = EventFdObject::new(initval as u64, flags);
+    let fd_flags = if flags.contains(EventFdFlags::EFD_CLOEXEC) {
+        FdFlags::CLOEXEC
+    } else {
+        FdFlags::empty()
+    };
+    let fd = get_current_process()
+        .lock()
+        .push_object_with_flags(object, fd_flags);
     Ok(fd)
 }
 
@@ -1027,7 +1027,7 @@ define_syscall!(
             user_safe::write(old_value, &old_spec)?;
         }
 
-        let new_spec = unsafe { *new_value };
+        let new_spec = user_safe::read(new_value)?;
         let value_ns = linux_timespec_to_ns(new_spec.it_value)?;
         let interval_ns = linux_timespec_to_ns(new_spec.it_interval)?;
         let deadline = if value_ns == 0 {
