@@ -5,9 +5,15 @@ use crate::{
         FileFlags,
         bpf::BpfObject,
         error::ObjectError,
+        file_locks::{
+            AdvisoryLock, AdvisoryLockApi, AdvisoryLockOwner, AdvisoryLockRange, AdvisoryLockType,
+            F_RDLCK, F_WRLCK, apply_posix_lock, find_conflict, parse_flock_operation,
+            ranges_overlap,
+        },
         memfd::{memfd_add_seals, memfd_get_seals, register_memfd},
         open_state::OpenState,
     },
+    process::misc::ProcessID,
     systemcall::utils::SyscallError,
 };
 
@@ -30,6 +36,21 @@ crate::test!(
     memfd_seal_rules,
     "memfd registry applies seal rules",
     memfd_registry_applies_seal_rules
+);
+crate::test!(
+    file_lock_range_conflicts,
+    "file lock ranges overlap and detect read write conflicts",
+    file_lock_ranges_overlap_and_detect_read_write_conflicts
+);
+crate::test!(
+    file_lock_posix_merge,
+    "posix file locks merge adjacent ranges and split unlocks",
+    posix_file_locks_merge_adjacent_ranges_and_split_unlocks
+);
+crate::test!(
+    flock_operation_parsing,
+    "flock operation parser accepts one mode plus nonblock",
+    flock_operation_parser_accepts_one_mode_plus_nonblock
 );
 
 fn open_state_tracks_file_flags() {
@@ -98,4 +119,141 @@ fn memfd_registry_applies_seal_rules() {
         Err(SyscallError::InvalidArguments)
     ));
     assert!(matches!(Whence::try_from(0), Ok(Whence::Start)));
+}
+
+fn file_lock_ranges_overlap_and_detect_read_write_conflicts() {
+    let owner_a = AdvisoryLockOwner::Process(ProcessID(1));
+    let owner_b = AdvisoryLockOwner::Process(ProcessID(2));
+    let read_lock = AdvisoryLock {
+        api: AdvisoryLockApi::Posix,
+        owner: owner_a,
+        lock_type: AdvisoryLockType::Read,
+        range: AdvisoryLockRange {
+            start: 10,
+            end: Some(20),
+        },
+    };
+    let write_lock = AdvisoryLock {
+        api: AdvisoryLockApi::Posix,
+        owner: owner_b,
+        lock_type: AdvisoryLockType::Write,
+        range: AdvisoryLockRange {
+            start: 15,
+            end: Some(25),
+        },
+    };
+
+    assert!(ranges_overlap(read_lock.range, write_lock.range));
+    assert!(!ranges_overlap(
+        read_lock.range,
+        AdvisoryLockRange {
+            start: 20,
+            end: Some(30)
+        }
+    ));
+    assert_eq!(
+        find_conflict(
+            &[read_lock],
+            owner_b,
+            Some(write_lock),
+            AdvisoryLockApi::Posix
+        )
+        .map(|lock| lock.owner),
+        Some(owner_a)
+    );
+    assert_eq!(
+        find_conflict(
+            &[read_lock],
+            owner_b,
+            Some(AdvisoryLock {
+                lock_type: AdvisoryLockType::Read,
+                ..write_lock
+            }),
+            AdvisoryLockApi::Posix
+        )
+        .map(|lock| lock.owner),
+        None
+    );
+}
+
+fn posix_file_locks_merge_adjacent_ranges_and_split_unlocks() {
+    let owner = AdvisoryLockOwner::Process(ProcessID(7));
+    let mut entries = Vec::new();
+
+    apply_posix_lock(
+        &mut entries,
+        owner,
+        crate::object::file_locks::ParsedFlockRequest {
+            lock_type: Some(AdvisoryLockType::Write),
+            range: AdvisoryLockRange {
+                start: 0,
+                end: Some(10),
+            },
+        },
+    );
+    apply_posix_lock(
+        &mut entries,
+        owner,
+        crate::object::file_locks::ParsedFlockRequest {
+            lock_type: Some(AdvisoryLockType::Write),
+            range: AdvisoryLockRange {
+                start: 10,
+                end: Some(20),
+            },
+        },
+    );
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].range.start, 0);
+    assert_eq!(entries[0].range.end, Some(20));
+
+    apply_posix_lock(
+        &mut entries,
+        owner,
+        crate::object::file_locks::ParsedFlockRequest {
+            lock_type: None,
+            range: AdvisoryLockRange {
+                start: 5,
+                end: Some(15),
+            },
+        },
+    );
+
+    assert_eq!(entries.len(), 2);
+    assert_eq!(
+        entries[0].range,
+        AdvisoryLockRange {
+            start: 0,
+            end: Some(5)
+        }
+    );
+    assert_eq!(
+        entries[1].range,
+        AdvisoryLockRange {
+            start: 15,
+            end: Some(20)
+        }
+    );
+}
+
+fn flock_operation_parser_accepts_one_mode_plus_nonblock() {
+    assert_eq!(
+        parse_flock_operation(1).unwrap(),
+        Some(AdvisoryLockType::Read)
+    );
+    assert_eq!(
+        parse_flock_operation(2 | 4).unwrap(),
+        Some(AdvisoryLockType::Write)
+    );
+    assert_eq!(parse_flock_operation(8).unwrap(), None);
+    assert!(matches!(
+        parse_flock_operation(1 | 2),
+        Err(SyscallError::InvalidArguments)
+    ));
+    assert!(matches!(
+        parse_flock_operation(1 | 0x100),
+        Err(SyscallError::InvalidArguments)
+    ));
+    assert_eq!(F_RDLCK, 0);
+    assert_eq!(F_WRLCK, 1);
 }

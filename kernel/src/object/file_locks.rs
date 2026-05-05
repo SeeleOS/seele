@@ -35,41 +35,41 @@ pub(crate) struct LinuxFlock {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AdvisoryLockType {
+pub(super) enum AdvisoryLockType {
     Read,
     Write,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AdvisoryLockApi {
+pub(super) enum AdvisoryLockApi {
     Posix,
     Flock,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AdvisoryLockOwner {
+pub(super) enum AdvisoryLockOwner {
     Process(ProcessID),
     OpenFileDescription(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct AdvisoryLockRange {
-    start: u64,
-    end: Option<u64>,
+pub(super) struct AdvisoryLockRange {
+    pub(super) start: u64,
+    pub(super) end: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug)]
-struct AdvisoryLock {
-    api: AdvisoryLockApi,
-    owner: AdvisoryLockOwner,
-    lock_type: AdvisoryLockType,
-    range: AdvisoryLockRange,
+pub(super) struct AdvisoryLock {
+    pub(super) api: AdvisoryLockApi,
+    pub(super) owner: AdvisoryLockOwner,
+    pub(super) lock_type: AdvisoryLockType,
+    pub(super) range: AdvisoryLockRange,
 }
 
 #[derive(Clone, Copy, Debug)]
-struct ParsedFlockRequest {
-    lock_type: Option<AdvisoryLockType>,
-    range: AdvisoryLockRange,
+pub(super) struct ParsedFlockRequest {
+    pub(super) lock_type: Option<AdvisoryLockType>,
+    pub(super) range: AdvisoryLockRange,
 }
 
 lazy_static! {
@@ -285,7 +285,9 @@ fn parse_flock_request(
     Ok(ParsedFlockRequest { lock_type, range })
 }
 
-fn parse_flock_operation(operation: i32) -> Result<Option<AdvisoryLockType>, SyscallError> {
+pub(super) fn parse_flock_operation(
+    operation: i32,
+) -> Result<Option<AdvisoryLockType>, SyscallError> {
     let mode = operation & (LOCK_SH | LOCK_EX | LOCK_UN);
     let extra = operation & !(LOCK_SH | LOCK_EX | LOCK_UN | LOCK_NB);
     if extra != 0 {
@@ -320,7 +322,7 @@ fn lock_key(object: &ObjectRef) -> Result<String, SyscallError> {
     Ok(format!("object:{:p}", Arc::as_ptr(object)))
 }
 
-fn find_conflict(
+pub(super) fn find_conflict(
     entries: &[AdvisoryLock],
     owner: AdvisoryLockOwner,
     requested_lock: Option<AdvisoryLock>,
@@ -389,7 +391,7 @@ fn resolve_flock_range(
     Ok(AdvisoryLockRange { start, end })
 }
 
-fn ranges_overlap(left: AdvisoryLockRange, right: AdvisoryLockRange) -> bool {
+pub(super) fn ranges_overlap(left: AdvisoryLockRange, right: AdvisoryLockRange) -> bool {
     left.start < range_end_bound(right) && right.start < range_end_bound(left)
 }
 
@@ -397,7 +399,7 @@ fn range_end_bound(range: AdvisoryLockRange) -> u64 {
     range.end.unwrap_or(u64::MAX)
 }
 
-fn apply_posix_lock(
+pub(super) fn apply_posix_lock(
     entries: &mut Vec<AdvisoryLock>,
     owner: AdvisoryLockOwner,
     request: ParsedFlockRequest,

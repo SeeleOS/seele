@@ -16,9 +16,9 @@ use crate::thread::yielding::{
 };
 
 #[repr(C)]
-struct Timespec {
-    tv_sec: i64,
-    tv_nsec: i64,
+pub(super) struct Timespec {
+    pub(super) tv_sec: i64,
+    pub(super) tv_nsec: i64,
 }
 
 #[repr(C)]
@@ -42,32 +42,32 @@ fn block_on_poller(poller: Arc<PollerObject>, timeout: Option<Time>) {
     cancel_block(&current);
 }
 
-fn fdset_words(nfds: usize) -> usize {
+pub(super) fn fdset_words(nfds: usize) -> usize {
     nfds.div_ceil(64)
 }
 
-unsafe fn fdset_contains(fdset: *const u64, fd: usize) -> bool {
+pub(super) unsafe fn fdset_contains(fdset: *const u64, fd: usize) -> bool {
     let word = fd / 64;
     let bit = fd % 64;
     // SAFETY: caller guarantees fdset is valid for the requested nfds.
     (unsafe { *fdset.add(word) } & (1u64 << bit)) != 0
 }
 
-unsafe fn fdset_insert(fdset: *mut u64, fd: usize) {
+pub(super) unsafe fn fdset_insert(fdset: *mut u64, fd: usize) {
     let word = fd / 64;
     let bit = fd % 64;
     // SAFETY: caller guarantees fdset is valid for the requested nfds.
     unsafe { *fdset.add(word) |= 1u64 << bit };
 }
 
-unsafe fn clear_fdset(fdset: *mut u64, nfds: usize) {
+pub(super) unsafe fn clear_fdset(fdset: *mut u64, nfds: usize) {
     for index in 0..fdset_words(nfds) {
         // SAFETY: caller guarantees fdset is valid for the requested nfds.
         unsafe { *fdset.add(index) = 0 };
     }
 }
 
-fn timeout_to_deadline(timeout: *const Timespec) -> Result<Option<Time>, SyscallError> {
+pub(super) fn timeout_to_deadline(timeout: *const Timespec) -> Result<Option<Time>, SyscallError> {
     if timeout.is_null() {
         return Ok(None);
     }
@@ -83,7 +83,7 @@ fn timeout_to_deadline(timeout: *const Timespec) -> Result<Option<Time>, Syscall
     Ok(Some(Time::since_boot().add_ns(timeout_ns)))
 }
 
-fn timeout_is_zero(timeout: *const Timespec) -> bool {
+pub(super) fn timeout_is_zero(timeout: *const Timespec) -> bool {
     if timeout.is_null() {
         return false;
     }

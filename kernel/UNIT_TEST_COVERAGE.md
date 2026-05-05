@@ -20,7 +20,7 @@ Update this file when adding or deliberately deferring kernel tests.
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| `filesystem/path.rs`, `absolute_path.rs`, `sparse_file.rs` | `unit-tested` | Path normalization, root-relative resolution, and sparse hole reads are covered in `filesystem/test.rs`. |
+| `filesystem/path.rs`, `absolute_path.rs`, `sparse_file.rs`, `info.rs`, `vfs_traits.rs` | `unit-tested` | Path normalization, root-relative resolution, sparse hole reads, Linux stat mode conversion, and mount option rendering are covered in `filesystem/test.rs`. |
 | `filesystem/tmpfs/state.rs` | `unit-tested` | Child creation, duplicate detection, and non-empty directory removal are covered. |
 | `filesystem/staticfs`, `procfs`, `sysfs`, `devfs`, `cgroupfs` | `integration-only` | Node metadata and tree shape should get focused tests next; live population still depends on boot/runtime state. |
 | `filesystem/vfs.rs`, `vfs_operations.rs`, `resolve.rs` | `integration-only` | VFS side effects depend on global mounted filesystems and process context. Add pure helper tests when helpers are extracted. |
@@ -33,14 +33,14 @@ Update this file when adding or deliberately deferring kernel tests.
 | `process/execve.rs`, `fork.rs`, `group.rs`, `ptrace.rs` | `integration-only` | Exec/fork/session/ptrace behavior currently couples to global process state. Extract pure helpers before unit testing. |
 | `thread/*` | `integration-only` | Thread lifecycle, blocking, scheduling, stacks, and context switching depend on live scheduler and CPU state. |
 | `ipc/sysv_shm.rs` | `integration-only` | Global segment registry and process attach state need isolatable helpers before focused unit tests. |
-| `object/open_state.rs`, `error.rs`, `bpf.rs`, `memfd.rs` | `unit-tested` | File flag state, error mapping, BPF array behavior, and memfd seal rules are covered. |
-| `object/file_locks.rs`, `queue_helpers.rs`, `linux_anon.rs`, `netlink.rs` | `integration-only` | Local conflict and queue helpers should be unit-tested in a later object batch. |
+| `object/open_state.rs`, `error.rs`, `bpf.rs`, `memfd.rs`, `file_locks.rs` | `unit-tested` | File flag state, error mapping, BPF array behavior, memfd seal rules, and advisory lock range/conflict/merge helpers are covered. |
+| `object/queue_helpers.rs`, `linux_anon.rs`, `netlink.rs` | `integration-only` | Local queue helpers, eventfd/timerfd/signalfd/pidfd, and netlink state should be unit-tested in a later object batch. |
 | `socket/name.rs`, `inet.rs`, `sockopt.rs` | `unit-tested` | Unix address encoding, inet byte order, and timeout socket-option sizes are covered. |
 | `socket/stream.rs`, `datagram.rs`, `registry.rs`, `pair.rs` | `integration-only` | Local socket state and registry-key behavior should be unit-tested without live process dependencies where possible. |
 | `polling/event.rs` | `unit-tested` | Known and unknown pollable-event conversions are covered. |
 | `polling/entry.rs`, `poller.rs`, `ready.rs`, `wake.rs` | `integration-only` | Queue wakeups and object registrations depend on runtime waiters. Extract event translation helpers before testing. |
-| `systemcall/numbers.rs`, `table.rs`, `arg_types.rs` | `unit-tested` | Syscall number lookup, table registration, and typed argument conversion are covered. |
-| `systemcall/implementations/*` | `integration-only` | Syscall bodies generally depend on current process, memory, fd tables, or object side effects. Boundary flag/timeout helpers should be tested when extracted. |
+| `systemcall/numbers.rs`, `table.rs`, `arg_types.rs`, `implementations/poll.rs`, `implementations/select.rs` | `unit-tested` | Syscall number lookup, table registration, typed argument conversion, poll event/timeout helpers, and select fdset/timeout helpers are covered. |
+| `systemcall/implementations/*` syscall bodies | `integration-only` | Syscall bodies generally depend on current process, memory, fd tables, or object side effects. Boundary flag/timeout helpers should be tested when extracted. |
 | `misc/time.rs`, `timer.rs`, `signal.rs`, process exit encoding | `unit-tested` | Time arithmetic, timer state conversion, signal masks, siginfo conversion, and wait encodings are covered. |
 | `misc/utsname.rs`, `error.rs`, `stack_builder.rs`, `auxv.rs` | `integration-only` | Pure conversion/layout helpers should be unit-tested in a later misc batch. |
 | `terminal/line_discipline.rs`, `output_filter.rs`, `termios.rs` | `unit-tested` | Canonical/noncanonical input, output CRLF mapping, XTGETTCAP buffering, and default termios basics are covered. |
