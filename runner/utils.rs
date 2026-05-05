@@ -13,7 +13,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub struct RunOptions {
@@ -65,6 +65,54 @@ impl RunOptions {
             wait_for_gdb: env::var_os("SEELE_QEMU_WAIT_GDB").is_some(),
             qemu_debug_log: env::var_os("SEELE_QEMU_DEBUG_LOG").map(PathBuf::from),
             qemu_debugcon: env::var_os("SEELE_QEMU_DEBUGCON").map(PathBuf::from),
+        }
+    }
+
+    fn for_userspace_boot_test() -> Self {
+        Self {
+            agent_mode: true,
+            agent_timeout: None,
+            machine: env::var("SEELE_QEMU_MACHINE").unwrap_or_else(|_| "q35".to_string()),
+            cpu_model: env::var("SEELE_QEMU_CPU")
+                .unwrap_or_else(|_| "host,+hypervisor,+kvmclock,+kvmclock-stable-bit".to_string()),
+            smp: env::var("SEELE_QEMU_SMP").unwrap_or_else(|_| default_smp()),
+            qemu_gdb: env::var("SEELE_QEMU_GDB").ok(),
+            wait_for_gdb: env::var_os("SEELE_QEMU_WAIT_GDB").is_some(),
+            qemu_debug_log: env::var_os("SEELE_QEMU_DEBUG_LOG").map(PathBuf::from),
+            qemu_debugcon: env::var_os("SEELE_QEMU_DEBUGCON").map(PathBuf::from),
+        }
+    }
+}
+
+struct QemuRunContext {
+    serial_log: PathBuf,
+    tty_input_socket: PathBuf,
+    debug_log: Option<PathBuf>,
+    keep_debug_log: bool,
+}
+
+impl QemuRunContext {
+    fn new(options: &RunOptions) -> Self {
+        let serial_log = env::temp_dir().join(if options.agent_mode {
+            "seele-agent-serial.log"
+        } else {
+            "seele-serial.log"
+        });
+        let tty_input_socket = env::var_os("SEELE_AGENT_TTY_SOCKET")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/tmp/seele-agent-tty.sock"));
+        let keep_debug_log = options.qemu_debug_log.is_some();
+        let debug_log = options.qemu_debug_log.clone().or_else(|| {
+            options
+                .agent_mode
+                .then(|| env::temp_dir().join("seele-agent-qemu.log"))
+        });
+
+        Self {
+            serial_log,
+            tty_input_socket,
+            debug_log,
+            keep_debug_log,
         }
     }
 }
@@ -180,25 +228,115 @@ pub fn run_qemu_test(uefi_path: &Path) -> i32 {
     run_qemu_inner(uefi_path, &RunOptions::for_tests())
 }
 
+pub fn run_qemu_userspace_boot_test(uefi_path: &Path) -> i32 {
+    run_qemu_until_userspace(uefi_path, &RunOptions::for_userspace_boot_test())
+}
+
 fn run_qemu_inner(uefi_path: &Path, options: &RunOptions) -> i32 {
+    let context = QemuRunContext::new(options);
+    let mut cmd = build_qemu_command(uefi_path, options, &context);
+    let mut child = cmd.spawn().expect("failed to start qemu-system-x86_64");
+    let background_done = Arc::new(AtomicBool::new(false));
+    let serial_log_thread = {
+        let serial_log = context.serial_log.clone();
+        let done = background_done.clone();
+        thread::spawn(move || stream_serial_log(&serial_log, &done))
+    };
+    let tty_input_thread = {
+        let tty_input_socket = context.tty_input_socket.clone();
+        let done = background_done.clone();
+        thread::spawn(move || forward_terminal_input(&tty_input_socket, &done))
+    };
+    let status = child.wait().expect("failed to wait on qemu");
+    background_done.store(true, Ordering::Release);
+    let _ = serial_log_thread.join();
+    let _ = tty_input_thread.join();
+    cleanup_qemu_context(&context);
+    let exit_code = match status.code().unwrap_or(1) {
+        33 => 0,
+        35 => 1,
+        _ => {
+            if let Some(path) = &context.debug_log {
+                report_qemu_fault(path);
+            }
+            2
+        }
+    };
+    cleanup_qemu_debug_log(&context);
+    exit_code
+}
+
+fn run_qemu_until_userspace(uefi_path: &Path, options: &RunOptions) -> i32 {
+    let context = QemuRunContext::new(options);
+    let mut cmd = build_qemu_command(uefi_path, options, &context);
+    let mut child = cmd.spawn().expect("failed to start qemu-system-x86_64");
+    let background_done = Arc::new(AtomicBool::new(false));
+    let tty_input_thread = {
+        let tty_input_socket = context.tty_input_socket.clone();
+        let done = background_done.clone();
+        thread::spawn(move || forward_terminal_input(&tty_input_socket, &done))
+    };
+    let deadline = Instant::now() + qemu_test_timeout();
+    let mut offset = 0;
+    let mut serial_log = None;
+    let mut captured = String::new();
+
+    let exit_code = loop {
+        if serial_log.is_none() {
+            match fs::File::open(&context.serial_log) {
+                Ok(opened) => serial_log = Some(opened),
+                Err(_) => {}
+            }
+        }
+
+        if let Some(file) = serial_log.as_mut() {
+            captured.push_str(&drain_serial_log(file, &mut offset));
+            if userspace_startup_observed(&captured) {
+                eprintln!("integration test userspace_boot: startup signal observed");
+                let _ = child.kill();
+                let _ = child.wait();
+                break 0;
+            }
+        }
+
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                eprintln!("integration test userspace_boot: qemu exited before startup signal");
+                if let Some(path) = &context.debug_log {
+                    report_qemu_fault(path);
+                }
+                break status.code().unwrap_or(1).max(1);
+            }
+            Ok(None) => {}
+            Err(err) => {
+                eprintln!("integration test userspace_boot: failed to poll qemu: {err}");
+                let _ = child.kill();
+                let _ = child.wait();
+                break 1;
+            }
+        }
+
+        if Instant::now() >= deadline {
+            eprintln!("integration test userspace_boot: timed out waiting for startup signal");
+            let _ = child.kill();
+            let _ = child.wait();
+            break 1;
+        }
+
+        thread::sleep(Duration::from_millis(10));
+    };
+
+    background_done.store(true, Ordering::Release);
+    let _ = tty_input_thread.join();
+    cleanup_qemu_context(&context);
+    cleanup_qemu_debug_log(&context);
+    exit_code
+}
+
+fn build_qemu_command(uefi_path: &Path, options: &RunOptions, context: &QemuRunContext) -> Command {
     let root_disk = env::var_os("SEELE_ROOT_DISK")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("disk.img"));
-    let serial_log = env::temp_dir().join(if options.agent_mode {
-        "seele-agent-serial.log"
-    } else {
-        "seele-serial.log"
-    });
-    let tty_input_socket = env::var_os("SEELE_AGENT_TTY_SOCKET")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp/seele-agent-tty.sock"));
-    let keep_debug_log = options.qemu_debug_log.is_some();
-    let debug_log = options.qemu_debug_log.clone().or_else(|| {
-        options
-            .agent_mode
-            .then(|| env::temp_dir().join("seele-agent-qemu.log"))
-    });
-
     let mut cmd = if options.agent_mode {
         if let Some(timeout) = &options.agent_timeout {
             let mut timeout_cmd = Command::new("timeout");
@@ -214,20 +352,20 @@ fn run_qemu_inner(uefi_path: &Path, options: &RunOptions) -> i32 {
     cmd.arg("-m").arg("4G");
     cmd.arg("-machine").arg(&options.machine);
     cmd.arg("-smp").arg(&options.smp);
-    let _ = fs::remove_file(&serial_log);
+    let _ = fs::remove_file(&context.serial_log);
     cmd.arg("-serial")
-        .arg(format!("file:{}", serial_log.display()));
-    if let Some(parent) = tty_input_socket.parent() {
+        .arg(format!("file:{}", context.serial_log.display()));
+    if let Some(parent) = context.tty_input_socket.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    cleanup_socket(&tty_input_socket);
+    cleanup_socket(&context.tty_input_socket);
     eprintln!(
         "background terminal input path: {}",
-        tty_input_socket.display()
+        context.tty_input_socket.display()
     );
     cmd.arg("-serial").arg(format!(
         "unix:{},server=on,wait=off",
-        tty_input_socket.display()
+        context.tty_input_socket.display()
     ));
     cmd.arg("-monitor").arg("none");
     cmd.arg("-device")
@@ -281,7 +419,7 @@ fn run_qemu_inner(uefi_path: &Path, options: &RunOptions) -> i32 {
         code.display()
     ));
     cmd.arg("-no-reboot").arg("-action").arg("reboot=shutdown");
-    if let Some(path) = &debug_log {
+    if let Some(path) = &context.debug_log {
         cmd.arg("-d").arg("int,cpu_reset,guest_errors");
         cmd.arg("-D").arg(path);
     }
@@ -290,38 +428,20 @@ fn run_qemu_inner(uefi_path: &Path, options: &RunOptions) -> i32 {
         vars.display()
     ));
 
-    let mut child = cmd.spawn().expect("failed to start qemu-system-x86_64");
-    let background_done = Arc::new(AtomicBool::new(false));
-    let serial_log_thread = {
-        let serial_log = serial_log.clone();
-        let done = background_done.clone();
-        thread::spawn(move || stream_serial_log(&serial_log, &done))
-    };
-    let tty_input_thread = {
-        let tty_input_socket = tty_input_socket.clone();
-        let done = background_done.clone();
-        thread::spawn(move || forward_terminal_input(&tty_input_socket, &done))
-    };
-    let status = child.wait().expect("failed to wait on qemu");
-    background_done.store(true, Ordering::Release);
-    let _ = serial_log_thread.join();
-    let _ = tty_input_thread.join();
-    let _ = fs::remove_file(serial_log);
-    cleanup_socket(&tty_input_socket);
-    let exit_code = match status.code().unwrap_or(1) {
-        33 => 0,
-        35 => 1,
-        _ => {
-            if let Some(path) = &debug_log {
-                report_qemu_fault(path);
-            }
-            2
-        }
-    };
-    if !keep_debug_log && let Some(path) = debug_log {
+    cmd
+}
+
+fn cleanup_qemu_context(context: &QemuRunContext) {
+    let _ = fs::remove_file(&context.serial_log);
+    cleanup_socket(&context.tty_input_socket);
+}
+
+fn cleanup_qemu_debug_log(context: &QemuRunContext) {
+    if !context.keep_debug_log
+        && let Some(path) = &context.debug_log
+    {
         let _ = fs::remove_file(path);
     }
-    exit_code
 }
 
 fn handle_cargo_message(line: &str, mode: &BuildMode) -> Option<PathBuf> {
@@ -377,6 +497,41 @@ fn append_rustflags() -> String {
 
 fn cleanup_socket(path: &Path) {
     let _ = fs::remove_file(path);
+}
+
+fn userspace_startup_observed(output: &str) -> bool {
+    [
+        "Welcome to Arch Linux",
+        "Reached target",
+        "login",
+        "systemd",
+    ]
+    .iter()
+    .any(|pattern| output.contains(pattern))
+}
+
+fn qemu_test_timeout() -> Duration {
+    env::var("SEELE_QEMU_TIMEOUT")
+        .ok()
+        .and_then(|value| parse_duration(&value))
+        .unwrap_or_else(|| Duration::from_secs(60))
+}
+
+fn parse_duration(value: &str) -> Option<Duration> {
+    let value = value.trim();
+    if let Some(milliseconds) = value.strip_suffix("ms") {
+        return milliseconds.parse::<u64>().ok().map(Duration::from_millis);
+    }
+    if let Some(seconds) = value.strip_suffix('s') {
+        return seconds.parse::<u64>().ok().map(Duration::from_secs);
+    }
+    if let Some(minutes) = value.strip_suffix('m') {
+        return minutes
+            .parse::<u64>()
+            .ok()
+            .map(|minutes| Duration::from_secs(minutes.saturating_mul(60)));
+    }
+    value.parse::<u64>().ok().map(Duration::from_secs)
 }
 
 fn forward_terminal_input(socket_path: &Path, done: &AtomicBool) {
@@ -458,7 +613,7 @@ fn stream_serial_log(serial_log: &Path, done: &AtomicBool) {
         }
 
         let drained = match file.as_mut() {
-            Some(file) => drain_serial_log(file, &mut offset),
+            Some(file) => drain_serial_log(file, &mut offset).len(),
             None => 0,
         };
 
@@ -470,26 +625,27 @@ fn stream_serial_log(serial_log: &Path, done: &AtomicBool) {
     }
 }
 
-fn drain_serial_log(file: &mut fs::File, offset: &mut u64) -> usize {
+fn drain_serial_log(file: &mut fs::File, offset: &mut u64) -> String {
     if file.seek(SeekFrom::Start(*offset)).is_err() {
-        return 0;
+        return String::new();
     }
 
     let mut buffer = [0; 4096];
-    let mut total = 0;
+    let mut output = String::new();
     loop {
         match file.read(&mut buffer) {
             Ok(0) => break,
             Ok(read) => {
-                total += read;
                 *offset += read as u64;
-                print!("{}", String::from_utf8_lossy(&buffer[..read]));
+                let chunk = String::from_utf8_lossy(&buffer[..read]);
+                print!("{chunk}");
                 let _ = io::stdout().flush();
+                output.push_str(&chunk);
             }
             Err(_) => break,
         }
     }
-    total
+    output
 }
 
 fn poll_stdin(fd: i32, timeout_ms: i32) -> io::Result<bool> {
