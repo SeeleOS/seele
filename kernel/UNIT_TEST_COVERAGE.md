@@ -3,7 +3,7 @@
 This ledger tracks meaningful kernel unit-test coverage. It is not a line
 coverage target: hardware programming, boot sequencing, MMU side effects,
 interrupt execution, scheduler switching, and full userspace flows stay under
-the QEMU unit harness and VM smoke tests.
+the QEMU unit harness and full-VM userspace checks.
 
 Update this file when adding or deliberately deferring kernel tests.
 
@@ -56,5 +56,5 @@ Update this file when adding or deliberately deferring kernel tests.
 | `acpi/*` | `integration-only` | ACPI table mapping depends on bootloader memory and physical mapping. |
 | `smp/*` | `integration-only` | AP startup, per-CPU state, GS, and topology setup depend on CPU boot sequencing. |
 | `interrupts/*` | `integration-only` | IDT/LAPIC/IOAPIC setup and handlers need real interrupt/exception execution. |
-| `boot.rs`, `main.rs`, `lib.rs` boot path | `integration-only` | Initialization order is covered by the QEMU harness and VM smoke test. |
+| `boot.rs`, `main.rs`, `lib.rs` boot path | `integration-only` | Initialization order is covered by the QEMU harness and full-VM userspace check. |
 | Module-only `mod.rs` files | `not worth testing` | Re-export and module wiring should stay untested unless behavior is added. |

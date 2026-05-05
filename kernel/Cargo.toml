@@ -48,7 +48,28 @@ version = "0.7.5"
 default-features = false
 
 [[test]]
-name = "stack_overflow"
+name = "boot"
+harness = false
+
+[[test]]
+name = "interrupt_breakpoint"
+harness = false
+
+[[test]]
+name = "memory"
+harness = false
+
+[[test]]
+name = "stack_overflow_manual"
+path = "tests/stack_overflow.rs"
+harness = false
+
+[[test]]
+name = "syscall"
+harness = false
+
+[[test]]
+name = "vfs"
 harness = false
 
 [dependencies.crossbeam-queue]

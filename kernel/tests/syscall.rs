@@ -1,28 +1,31 @@
 #![no_std]
-// Disables main function to customize entry point
 #![no_main]
-#![feature(abi_x86_interrupt, custom_test_frameworks)]
-#![reexport_test_harness_main = "test_main"]
-#![test_runner(kernel::testing::run_tests)]
+#![feature(abi_x86_interrupt)]
 
-use core::panic::PanicInfo;
+mod common;
 
-use bootloader::{BootInfo, entry_point};
 use kernel::{
-    debug_exit::debug_exit, init, misc::hlt_loop, panic_handler::test_handle_panic, s_println,
+    memory::protection::Protection,
+    systemcall::{arg_types::SyscallArg, numbers::SyscallNumber, table::SYSCALL_TABLE},
 };
 
-entry_point!(k_main);
+common::integration_test_entry!(test_main);
 
-fn k_main(bootinfo: &'static BootInfo) -> ! {
-    init(bootinfo);
+fn test_main() {
+    for number in [
+        SyscallNumber::Read,
+        SyscallNumber::Write,
+        SyscallNumber::OpenAt,
+        SyscallNumber::Mmap,
+        SyscallNumber::Munmap,
+        SyscallNumber::ClockGettime,
+        SyscallNumber::Socket,
+        SyscallNumber::Exit,
+    ] {
+        assert!(SYSCALL_TABLE[number as usize].is_some());
+    }
 
-    s_println!("todo");
-    debug_exit(kernel::debug_exit::QemuExitCode::Success);
-
-    hlt_loop()
-}
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    test_handle_panic(info);
+    assert!(Protection::from_u64((Protection::READ | Protection::WRITE).bits()).is_ok());
+    assert!(bool::from_u64(1).unwrap());
+    assert_eq!(u32::from_u64(42).unwrap(), 42);
 }

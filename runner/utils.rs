@@ -30,8 +30,12 @@ pub struct RunOptions {
 
 pub enum BuildMode {
     Run,
-    Test,
+    UnitTest,
+    IntegrationTest,
 }
+
+const KERNEL_INTEGRATION_TESTS: &[&str] =
+    &["boot", "interrupt_breakpoint", "memory", "syscall", "vfs"];
 
 impl RunOptions {
     pub fn from_env() -> Self {
@@ -76,7 +80,11 @@ pub fn build_kernel() -> Vec<PathBuf> {
 }
 
 pub fn build_kernel_tests() -> Vec<PathBuf> {
-    build_kernel_with_mode(BuildMode::Test)
+    build_kernel_with_mode(BuildMode::UnitTest)
+}
+
+pub fn build_kernel_integration_tests() -> Vec<PathBuf> {
+    build_kernel_with_mode(BuildMode::IntegrationTest)
 }
 
 pub fn build_kernel_with_mode(mode: BuildMode) -> Vec<PathBuf> {
@@ -84,7 +92,7 @@ pub fn build_kernel_with_mode(mode: BuildMode) -> Vec<PathBuf> {
     let mut command = Command::new(cargo);
     command.arg(match mode {
         BuildMode::Run => "build",
-        BuildMode::Test => "test",
+        BuildMode::UnitTest | BuildMode::IntegrationTest => "test",
     });
     command.args(["-p", "kernel", "--target", "x86_64-unknown-none"]);
 
@@ -96,9 +104,22 @@ pub fn build_kernel_with_mode(mode: BuildMode) -> Vec<PathBuf> {
         BuildMode::Run => {
             command.args(["--bin", "kernel"]);
         }
-        BuildMode::Test => {
+        BuildMode::UnitTest => {
             command.args([
                 "--lib",
+                "-Z",
+                "build-std=core,alloc",
+                "-Z",
+                "panic-abort-tests",
+                "--no-run",
+            ]);
+            command.env("RUSTFLAGS", append_rustflags());
+        }
+        BuildMode::IntegrationTest => {
+            for test in KERNEL_INTEGRATION_TESTS {
+                command.args(["--test", test]);
+            }
+            command.args([
                 "-Z",
                 "build-std=core,alloc",
                 "-Z",
@@ -323,8 +344,12 @@ fn handle_cargo_message(line: &str, mode: &BuildMode) -> Option<PathBuf> {
             let kind = value["target"]["kind"].as_array()?;
             let keep = match mode {
                 BuildMode::Run => kind.iter().any(|item| item.as_str() == Some("bin")),
-                BuildMode::Test => {
+                BuildMode::UnitTest => {
                     kind.iter().any(|item| item.as_str() == Some("lib"))
+                        && value["profile"]["test"].as_bool() == Some(true)
+                }
+                BuildMode::IntegrationTest => {
+                    kind.iter().any(|item| item.as_str() == Some("test"))
                         && value["profile"]["test"].as_bool() == Some(true)
                 }
             };

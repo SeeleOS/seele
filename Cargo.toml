@@ -17,6 +17,10 @@ path = "runner/bin.rs"
 name = "seeleos-runner-test"
 path = "runner/test.rs"
 
+[[bin]]
+name = "seeleos-runner-integration-test"
+path = "runner/integration_test.rs"
+
 [profile.dev]
 panic = "abort"
 
