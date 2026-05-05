@@ -31,11 +31,8 @@ pub struct RunOptions {
 pub enum BuildMode {
     Run,
     UnitTest,
-    IntegrationTest,
+    IntegrationTests(&'static [&'static str]),
 }
-
-const KERNEL_INTEGRATION_TESTS: &[&str] =
-    &["boot", "interrupt_breakpoint", "memory", "syscall", "vfs"];
 
 impl RunOptions {
     pub fn from_env() -> Self {
@@ -68,7 +65,7 @@ impl RunOptions {
         }
     }
 
-    fn for_userspace_boot_test() -> Self {
+    pub fn for_agent_run_without_timeout() -> Self {
         Self {
             agent_mode: true,
             agent_timeout: None,
@@ -131,16 +128,12 @@ pub fn build_kernel_tests() -> Vec<PathBuf> {
     build_kernel_with_mode(BuildMode::UnitTest)
 }
 
-pub fn build_kernel_integration_tests() -> Vec<PathBuf> {
-    build_kernel_with_mode(BuildMode::IntegrationTest)
-}
-
 pub fn build_kernel_with_mode(mode: BuildMode) -> Vec<PathBuf> {
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let mut command = Command::new(cargo);
     command.arg(match mode {
         BuildMode::Run => "build",
-        BuildMode::UnitTest | BuildMode::IntegrationTest => "test",
+        BuildMode::UnitTest | BuildMode::IntegrationTests(_) => "test",
     });
     command.args(["-p", "kernel", "--target", "x86_64-unknown-none"]);
 
@@ -163,8 +156,8 @@ pub fn build_kernel_with_mode(mode: BuildMode) -> Vec<PathBuf> {
             ]);
             command.env("RUSTFLAGS", append_rustflags());
         }
-        BuildMode::IntegrationTest => {
-            for test in KERNEL_INTEGRATION_TESTS {
+        BuildMode::IntegrationTests(tests) => {
+            for test in tests {
                 command.args(["--test", test]);
             }
             command.args([
@@ -228,10 +221,6 @@ pub fn run_qemu_test(uefi_path: &Path) -> i32 {
     run_qemu_inner(uefi_path, &RunOptions::for_tests())
 }
 
-pub fn run_qemu_userspace_boot_test(uefi_path: &Path) -> i32 {
-    run_qemu_until_userspace(uefi_path, &RunOptions::for_userspace_boot_test())
-}
-
 fn run_qemu_inner(uefi_path: &Path, options: &RunOptions) -> i32 {
     let context = QemuRunContext::new(options);
     let mut cmd = build_qemu_command(uefi_path, options, &context);
@@ -266,7 +255,12 @@ fn run_qemu_inner(uefi_path: &Path, options: &RunOptions) -> i32 {
     exit_code
 }
 
-fn run_qemu_until_userspace(uefi_path: &Path, options: &RunOptions) -> i32 {
+pub fn run_qemu_until_serial_condition(
+    uefi_path: &Path,
+    options: &RunOptions,
+    timeout: Duration,
+    mut condition: impl FnMut(&str) -> bool,
+) -> i32 {
     let context = QemuRunContext::new(options);
     let mut cmd = build_qemu_command(uefi_path, options, &context);
     let mut child = cmd.spawn().expect("failed to start qemu-system-x86_64");
@@ -276,7 +270,7 @@ fn run_qemu_until_userspace(uefi_path: &Path, options: &RunOptions) -> i32 {
         let done = background_done.clone();
         thread::spawn(move || forward_terminal_input(&tty_input_socket, &done))
     };
-    let deadline = Instant::now() + qemu_test_timeout();
+    let deadline = Instant::now() + timeout;
     let mut offset = 0;
     let mut serial_log = None;
     let mut captured = String::new();
@@ -291,8 +285,7 @@ fn run_qemu_until_userspace(uefi_path: &Path, options: &RunOptions) -> i32 {
 
         if let Some(file) = serial_log.as_mut() {
             captured.push_str(&drain_serial_log(file, &mut offset));
-            if userspace_startup_observed(&captured) {
-                eprintln!("integration test userspace_boot: startup signal observed");
+            if condition(&captured) {
                 let _ = child.kill();
                 let _ = child.wait();
                 break 0;
@@ -301,7 +294,7 @@ fn run_qemu_until_userspace(uefi_path: &Path, options: &RunOptions) -> i32 {
 
         match child.try_wait() {
             Ok(Some(status)) => {
-                eprintln!("integration test userspace_boot: qemu exited before startup signal");
+                eprintln!("qemu exited before serial condition was observed");
                 if let Some(path) = &context.debug_log {
                     report_qemu_fault(path);
                 }
@@ -309,7 +302,7 @@ fn run_qemu_until_userspace(uefi_path: &Path, options: &RunOptions) -> i32 {
             }
             Ok(None) => {}
             Err(err) => {
-                eprintln!("integration test userspace_boot: failed to poll qemu: {err}");
+                eprintln!("failed to poll qemu: {err}");
                 let _ = child.kill();
                 let _ = child.wait();
                 break 1;
@@ -317,7 +310,7 @@ fn run_qemu_until_userspace(uefi_path: &Path, options: &RunOptions) -> i32 {
         }
 
         if Instant::now() >= deadline {
-            eprintln!("integration test userspace_boot: timed out waiting for startup signal");
+            eprintln!("timed out waiting for serial condition");
             let _ = child.kill();
             let _ = child.wait();
             break 1;
@@ -468,7 +461,7 @@ fn handle_cargo_message(line: &str, mode: &BuildMode) -> Option<PathBuf> {
                     kind.iter().any(|item| item.as_str() == Some("lib"))
                         && value["profile"]["test"].as_bool() == Some(true)
                 }
-                BuildMode::IntegrationTest => {
+                BuildMode::IntegrationTests(_) => {
                     kind.iter().any(|item| item.as_str() == Some("test"))
                         && value["profile"]["test"].as_bool() == Some(true)
                 }
@@ -497,41 +490,6 @@ fn append_rustflags() -> String {
 
 fn cleanup_socket(path: &Path) {
     let _ = fs::remove_file(path);
-}
-
-fn userspace_startup_observed(output: &str) -> bool {
-    [
-        "Welcome to Arch Linux",
-        "Reached target",
-        "login",
-        "systemd",
-    ]
-    .iter()
-    .any(|pattern| output.contains(pattern))
-}
-
-fn qemu_test_timeout() -> Duration {
-    env::var("SEELE_QEMU_TIMEOUT")
-        .ok()
-        .and_then(|value| parse_duration(&value))
-        .unwrap_or_else(|| Duration::from_secs(60))
-}
-
-fn parse_duration(value: &str) -> Option<Duration> {
-    let value = value.trim();
-    if let Some(milliseconds) = value.strip_suffix("ms") {
-        return milliseconds.parse::<u64>().ok().map(Duration::from_millis);
-    }
-    if let Some(seconds) = value.strip_suffix('s') {
-        return seconds.parse::<u64>().ok().map(Duration::from_secs);
-    }
-    if let Some(minutes) = value.strip_suffix('m') {
-        return minutes
-            .parse::<u64>()
-            .ok()
-            .map(|minutes| Duration::from_secs(minutes.saturating_mul(60)));
-    }
-    value.parse::<u64>().ok().map(Duration::from_secs)
 }
 
 fn forward_terminal_input(socket_path: &Path, done: &AtomicBool) {

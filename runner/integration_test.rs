@@ -1,7 +1,17 @@
 #[path = "utils.rs"]
 mod utils;
 
+use std::{env, time::Duration};
 use std::{fs, path::Path, process::exit};
+
+const KERNEL_TEST_IMAGES: &[&str] = &["boot", "interrupt_breakpoint", "memory", "syscall", "vfs"];
+
+const USERSPACE_STARTUP_PATTERNS: &[&str] = &[
+    "Welcome to Arch Linux",
+    "Reached target",
+    "login",
+    "systemd",
+];
 
 struct IntegrationCase {
     name: &'static str,
@@ -33,7 +43,9 @@ fn main() {
 }
 
 fn run_kernel_test_images() -> i32 {
-    for kernel_test in utils::build_kernel_integration_tests() {
+    for kernel_test in
+        utils::build_kernel_with_mode(utils::BuildMode::IntegrationTests(KERNEL_TEST_IMAGES))
+    {
         eprintln!("running integration test: {}", kernel_test.display());
         let uefi_path = utils::create_uefi_image(&kernel_test);
         let exit_code = utils::run_qemu_test(&uefi_path);
@@ -54,7 +66,48 @@ fn run_userspace_boot() -> i32 {
         .map(Path::new)
         .expect("kernel executable missing");
     let uefi_path = utils::create_uefi_image(kernel_path);
-    let exit_code = utils::run_qemu_userspace_boot_test(&uefi_path);
+    let options = utils::RunOptions::for_agent_run_without_timeout();
+    let exit_code = utils::run_qemu_until_serial_condition(
+        &uefi_path,
+        &options,
+        qemu_test_timeout(),
+        |output| userspace_startup_observed(output),
+    );
+    if exit_code == 0 {
+        eprintln!("integration test userspace_boot: startup signal observed");
+    } else {
+        eprintln!("integration test userspace_boot: startup signal not observed");
+    }
     let _ = fs::remove_file(&uefi_path);
     exit_code
+}
+
+fn userspace_startup_observed(output: &str) -> bool {
+    USERSPACE_STARTUP_PATTERNS
+        .iter()
+        .any(|pattern| output.contains(pattern))
+}
+
+fn qemu_test_timeout() -> Duration {
+    env::var("SEELE_QEMU_TIMEOUT")
+        .ok()
+        .and_then(|value| parse_duration(&value))
+        .unwrap_or_else(|| Duration::from_secs(60))
+}
+
+fn parse_duration(value: &str) -> Option<Duration> {
+    let value = value.trim();
+    if let Some(milliseconds) = value.strip_suffix("ms") {
+        return milliseconds.parse::<u64>().ok().map(Duration::from_millis);
+    }
+    if let Some(seconds) = value.strip_suffix('s') {
+        return seconds.parse::<u64>().ok().map(Duration::from_secs);
+    }
+    if let Some(minutes) = value.strip_suffix('m') {
+        return minutes
+            .parse::<u64>()
+            .ok()
+            .map(|minutes| Duration::from_secs(minutes.saturating_mul(60)));
+    }
+    value.parse::<u64>().ok().map(Duration::from_secs)
 }
