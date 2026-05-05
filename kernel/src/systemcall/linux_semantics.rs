@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 214;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 203;
 
 macro_rules! syscall_coverage {
     (
@@ -66,6 +66,17 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Getgroups => "group_syscalls_validate_linux_size_rules",
         Setgroups => "group_syscalls_validate_linux_size_rules",
         ClockGetres => "clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids",
+        SchedYield => "scheduler_priority_and_io_permission_syscalls_validate_linux_arguments",
+        Madvise => "scheduler_priority_and_io_permission_syscalls_validate_linux_arguments",
+        Getpriority => "scheduler_priority_and_io_permission_syscalls_validate_linux_arguments",
+        Setpriority => "scheduler_priority_and_io_permission_syscalls_validate_linux_arguments",
+        IoprioSet => "scheduler_priority_and_io_permission_syscalls_validate_linux_arguments",
+        IoprioGet => "scheduler_priority_and_io_permission_syscalls_validate_linux_arguments",
+        SchedGetscheduler => "scheduler_priority_and_io_permission_syscalls_validate_linux_arguments",
+        SchedGetPriorityMax => "scheduler_priority_and_io_permission_syscalls_validate_linux_arguments",
+        SchedGetPriorityMin => "scheduler_priority_and_io_permission_syscalls_validate_linux_arguments",
+        Iopl => "scheduler_priority_and_io_permission_syscalls_validate_linux_arguments",
+        Ioperm => "scheduler_priority_and_io_permission_syscalls_validate_linux_arguments",
     }
     gap {
     Read,
@@ -92,11 +103,9 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Writev,
     Access,
     Pipe,
-    SchedYield,
     Mremap,
     Msync,
     Mincore,
-    Madvise,
     Shmget,
     Shmat,
     Shmctl,
@@ -167,10 +176,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Fchmod,
     Chown,
     Fchown,
-    IoprioSet,
-    IoprioGet,
-    Iopl,
-    Ioperm,
     Getsid,
     Setsid,
     Sigaltstack,
@@ -241,13 +246,9 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Setns,
     Kcmp,
     MemfdCreate,
-    Getpriority,
     SchedSetparam,
     SchedGetparam,
     SchedRrGetInterval,
-    SchedGetscheduler,
-    SchedGetPriorityMax,
-    SchedGetPriorityMin,
     Setrlimit,
     Sync,
     Mount,
@@ -278,7 +279,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Clone3,
     CloseRange,
     RtSigsuspend,
-    Setpriority,
     EpollPwait2,
     MountSetattr,
     Fchmodat2,

@@ -7,10 +7,12 @@ use crate::{
         arg_types::SyscallArg,
         implementations::{
             ClockGetres, Getegid, Geteuid, Getgid, Getgroups, Getpgid, Getpgrp, Getpid, Getppid,
-            Getuid, OpenFlags, PollEvents, PollTimespec, SelectTimespec, Setfsgid, Setfsuid,
-            Setgid, Setgroups, Setpgid, Setregid, Setresgid, Setresuid, Setreuid, Setuid,
-            clear_fdset, fdset_contains, fdset_insert, fdset_words, kernel_events_for,
-            saturating_timeout_ms, timeout_is_zero, timeout_to_deadline, translate_ready_events,
+            Getpriority, Getuid, Ioperm, Iopl, IoprioGet, IoprioSet, Madvise, OpenFlags,
+            PollEvents, PollTimespec, SchedGetPriorityMax, SchedGetPriorityMin, SchedGetscheduler,
+            SchedYield, SelectTimespec, Setfsgid, Setfsuid, Setgid, Setgroups, Setpgid,
+            Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setuid, clear_fdset,
+            fdset_contains, fdset_insert, fdset_words, kernel_events_for, saturating_timeout_ms,
+            timeout_is_zero, timeout_to_deadline, translate_ready_events,
         },
         linux_semantics::{
             KNOWN_LINUX_SYSCALL_COVERAGE_GAPS, LINUX_SYSCALL_SEMANTICS_COVERAGE,
@@ -82,6 +84,11 @@ crate::test!(
     clock_getres_syscall,
     "clock_getres accepts null for valid clocks and rejects bad clock ids",
     clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids
+);
+crate::test!(
+    scheduler_priority_and_io_permission_syscalls,
+    "scheduler priority and io permission syscalls validate linux arguments",
+    scheduler_priority_and_io_permission_syscalls_validate_linux_arguments
 );
 crate::test!(
     typed_syscall_arg_conversion,
@@ -459,6 +466,77 @@ fn clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids() {
         SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<ClockGetres>(),
         SyscallError::InvalidArguments,
     );
+}
+
+fn scheduler_priority_and_io_permission_syscalls_validate_linux_arguments() {
+    expect_ok(SyscallArgs::none().call::<SchedYield>(), 0);
+    expect_ok(SyscallArgs::new([0, 4096, 0, 0, 0, 0]).call::<Madvise>(), 0);
+    expect_ok(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Getpriority>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([0, 0, 10, 0, 0, 0]).call::<Setpriority>(),
+        0,
+    );
+
+    expect_ok(
+        SyscallArgs::new([1, 0, (2u64 << 13) | 4, 0, 0, 0]).call::<IoprioSet>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<IoprioGet>(),
+        2usize << 13,
+    );
+    expect_errno(
+        SyscallArgs::new([1, u64::MAX, 0, 0, 0, 0]).call::<IoprioGet>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([1, 0, (2u64 << 13) | 8, 0, 0, 0]).call::<IoprioSet>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([99, 0, 0, 0, 0, 0]).call::<IoprioGet>(),
+        SyscallError::InvalidArguments,
+    );
+
+    expect_ok(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<SchedGetscheduler>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<SchedGetscheduler>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_ok(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<SchedGetPriorityMin>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<SchedGetPriorityMin>(),
+        1,
+    );
+    expect_ok(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<SchedGetPriorityMax>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<SchedGetPriorityMax>(),
+        99,
+    );
+    expect_errno(
+        SyscallArgs::new([99, 0, 0, 0, 0, 0]).call::<SchedGetPriorityMax>(),
+        SyscallError::InvalidArguments,
+    );
+
+    expect_ok(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Iopl>(), 0);
+    expect_ok(SyscallArgs::new([3, 0, 0, 0, 0, 0]).call::<Iopl>(), 0);
+    expect_errno(
+        SyscallArgs::new([4, 0, 0, 0, 0, 0]).call::<Iopl>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_ok(SyscallArgs::new([0, 1, 1, 0, 0, 0]).call::<Ioperm>(), 0);
 }
 
 fn typed_syscall_args_convert_flags_and_enums_at_boundary() {
