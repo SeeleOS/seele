@@ -197,7 +197,7 @@ impl BootinfoFrameAllocator {
         }
     }
 
-    fn normalized_pages(pages: usize) -> Option<usize> {
+    pub(crate) fn normalized_pages(pages: usize) -> Option<usize> {
         if pages == 0 {
             return None;
         }
@@ -225,11 +225,11 @@ impl BootinfoFrameAllocator {
     }
 }
 
-const fn align_up_4k(addr: u64) -> u64 {
+pub(crate) const fn align_up_4k(addr: u64) -> u64 {
     (addr + 4095) & !4095
 }
 
-const fn align_down_4k(addr: u64) -> u64 {
+pub(crate) const fn align_down_4k(addr: u64) -> u64 {
     addr & !4095
 }
 

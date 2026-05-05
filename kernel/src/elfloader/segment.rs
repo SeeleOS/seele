@@ -8,7 +8,7 @@ use crate::{
     memory::addrspace::mem_area::{Data, MemoryArea},
 };
 
-fn elf_flags_to_page_flags(flags: Flags) -> PageTableFlags {
+pub(crate) fn elf_flags_to_page_flags(flags: Flags) -> PageTableFlags {
     let mut page_flags = PageTableFlags::USER_ACCESSIBLE | PageTableFlags::PRESENT;
     if flags.is_write() {
         page_flags |= PageTableFlags::WRITABLE;

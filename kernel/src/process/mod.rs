@@ -32,6 +32,9 @@ pub mod object;
 pub mod ptrace;
 pub mod wait;
 
+#[cfg(test)]
+mod test;
+
 pub type ProcessRef = Arc<Mutex<Process>>;
 pub use fd_table::{FdTable, clone_fd_table, new_fd_table};
 pub use fs_context::{FsContext, clone_fs_context, new_fs_context};

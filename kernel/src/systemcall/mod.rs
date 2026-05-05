@@ -25,6 +25,9 @@ pub mod numbers;
 pub mod table;
 pub mod utils;
 
+#[cfg(test)]
+mod test;
+
 pub fn init() {
     without_interrupts(|| {
         // enable systemcalls

@@ -45,3 +45,6 @@ pub use entry::PollerEntry;
 pub use object::PollerObject;
 pub use ready::PollerReadyEvent;
 pub use registration::notify_pollers;
+
+#[cfg(test)]
+mod test;

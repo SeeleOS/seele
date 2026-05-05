@@ -66,7 +66,7 @@ struct LinuxSockAddrIn {
 }
 
 impl InetSocketObject {
-    fn decode_addr(address: &[u8]) -> SocketResult<InetAddress> {
+    pub(crate) fn decode_addr(address: &[u8]) -> SocketResult<InetAddress> {
         if address.len() < mem::size_of::<LinuxSockAddrIn>() {
             return Err(SocketError::InvalidArguments);
         }
@@ -152,7 +152,7 @@ impl InetSocketObject {
         self.flags.lock().contains(FileFlags::NONBLOCK)
     }
 
-    fn encode_addr(addr: InetAddress) -> Vec<u8> {
+    pub(crate) fn encode_addr(addr: InetAddress) -> Vec<u8> {
         let sockaddr = LinuxSockAddrIn {
             sin_family: AF_INET as u16,
             sin_port: addr.port.to_be(),

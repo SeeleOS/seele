@@ -6,7 +6,7 @@ use super::{AF_UNIX, SocketError, SocketResult, UnixSocketObject, UnixSocketStat
 const SOCKADDR_UN_PATH_LEN: usize = 108;
 const SA_FAMILY_LEN: usize = 2;
 
-fn serialize_unix_addr(path: Option<&str>) -> Vec<u8> {
+pub(crate) fn serialize_unix_addr(path: Option<&str>) -> Vec<u8> {
     let mut out = vec![0u8; SA_FAMILY_LEN];
     out[..SA_FAMILY_LEN].copy_from_slice(&(AF_UNIX as u16).to_ne_bytes());
 

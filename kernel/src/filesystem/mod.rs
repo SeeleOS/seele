@@ -20,3 +20,6 @@ pub mod tmpfs;
 pub mod vfs;
 pub mod vfs_operations;
 pub mod vfs_traits;
+
+#[cfg(test)]
+mod test;

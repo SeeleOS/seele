@@ -20,6 +20,9 @@ pub mod protection;
 pub mod user_safe;
 pub mod utils;
 
+#[cfg(test)]
+mod test;
+
 pub static PHYSICAL_MEMORY_OFFSET: OnceCell<u64> = OnceCell::uninit();
 pub static USABLE_MEMORY_BYTES: OnceCell<u64> = OnceCell::uninit();
 pub static MEMORY_REGIONS: OnceCell<&'static [MemoryRegion]> = OnceCell::uninit();

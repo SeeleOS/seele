@@ -110,9 +110,7 @@ fn should_trace_syscall(_syscall_no: isize, _comm: &str) -> bool {
 
     matches!(
         SyscallNumber::from_number(_syscall_no as usize),
-        Some(
-            SyscallNumber::Mmap
-        )
+        Some(SyscallNumber::Mmap)
     )
 }
 

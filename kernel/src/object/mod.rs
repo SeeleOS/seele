@@ -48,6 +48,9 @@ pub mod queue_helpers;
 pub mod traits;
 pub mod tty_device;
 
+#[cfg(test)]
+mod test;
+
 macro_rules! define_cast_function_non_trait {
     ($name: literal, $type: ty, $err: ty) => {
         paste::paste! {

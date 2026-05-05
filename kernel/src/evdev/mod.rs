@@ -10,3 +10,6 @@ pub use ps2::{
     init_mouse_packet_decoder, process_ps2_mouse_packet, process_ps2_mouse_packet_deferred_wake,
     push_keyboard_event,
 };
+
+#[cfg(test)]
+mod test;

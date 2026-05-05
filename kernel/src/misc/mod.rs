@@ -27,6 +27,9 @@ pub mod timer;
 pub mod tss;
 pub mod utsname;
 
+#[cfg(test)]
+mod test;
+
 pub fn hlt_loop() -> ! {
     loop {
         hlt();

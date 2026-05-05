@@ -7,6 +7,9 @@ pub mod key_to_escape_sequence;
 pub mod ps2;
 pub mod raw_key_processing;
 
+#[cfg(test)]
+mod test;
+
 pub static SCANCODE_QUEUE: OnceCell<ArrayQueue<u8>> = OnceCell::uninit();
 
 pub(super) fn encode_linux_raw_byte(scancode: u8) -> u8 {

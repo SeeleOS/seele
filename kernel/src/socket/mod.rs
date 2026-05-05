@@ -104,3 +104,6 @@ pub(crate) fn socket_timeout_option_len(option_name: u64) -> Option<usize> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod test;

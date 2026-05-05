@@ -101,7 +101,7 @@ pub(crate) fn current_debug_process() -> Option<(u64, String)> {
                     | "kwin_wayland"
                     | "kwin_wayland_wrapper"
             )
-                .then(|| (process.pid.0, comm.into()))
+            .then(|| (process.pid.0, comm.into()))
         })
     })
 }

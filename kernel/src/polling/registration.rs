@@ -66,10 +66,7 @@ fn register_interest(poller: &Arc<PollerObject>, object: &ObjectRef, event: Poll
         .or_default();
     let key = poller_key(poller);
     watchers.retain(|watcher| watcher.strong_count() > 0);
-    if !watchers
-        .iter()
-        .any(|watcher| same_poller_key(watcher, key))
-    {
+    if !watchers.iter().any(|watcher| same_poller_key(watcher, key)) {
         watchers.push(Arc::downgrade(poller));
     }
 }
@@ -95,7 +92,8 @@ pub(super) fn unregister_all_interests(poller_key: usize, entries: &[PollerEntry
         let Some(watchers) = registry.watchers.get_mut(&key) else {
             continue;
         };
-        watchers.retain(|watcher| watcher.strong_count() > 0 && !same_poller_key(watcher, poller_key));
+        watchers
+            .retain(|watcher| watcher.strong_count() > 0 && !same_poller_key(watcher, poller_key));
         if watchers.is_empty() {
             registry.watchers.remove(&key);
         }

@@ -30,6 +30,9 @@ pub mod object;
 pub mod object_config;
 pub mod output_filter;
 
+#[cfg(test)]
+mod test;
+
 pub fn init() {
     log::info!("graphics: init start");
     let terminal = KernelTerminal::new(FRAME_BUFFER.get().unwrap());
