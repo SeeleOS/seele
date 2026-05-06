@@ -12,6 +12,7 @@
 - `agent-tools/run-agent-vm.sh` should not impose a default timeout. If a timeout is needed for a specific debugging pass, set it explicitly and shut the VM down yourself when finished.
 - When polling a background VM terminal, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
 - After finishing VM-based testing, shut the VM down and verify there is no leftover background runner or QEMU process before moving on.
+- To inspect the current agent VM and runner processes before shutdown, use `agent-tools/list-agent-vm-processes.sh`. If it shows a leftover VM or runner, kill those PIDs explicitly.
 - Do not assume `sysroot/` is mounted or synchronized with `disk.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the VM wrapper when in doubt.
 - If you need `sysroot/` mounted, run `agent-tools/ensure-sysroot-mounted.sh` as a separate step first. Do not chain the mount step together with the real inspection command.
 - After `agent-tools/ensure-sysroot-mounted.sh`, if you only need to read files from `sysroot/`, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
@@ -40,6 +41,7 @@ After finishing a change, run `agent-tools/run-tests.sh` and `agent-tools/run-ag
 
 There is no large standalone test suite yet; verification is primarily compile checks plus QEMU boot tests.
 
+- IMPORTANT: Syscall tests and other ABI-facing tests must not stop at a minimal smoke test. They must cover Linux-standard flag combinations, errno behavior, Linux-specific edge cases, structure/layout expectations, state side effects, and the actual Linux semantics required for binary compatibility.
 - This kernel targets Linux binary compatibility. Syscall tests and other ABI-facing tests must use Linux semantics as the only oracle, not the current implementation behavior. Validate x86_64 Linux syscall ABI return values, errno values, struct layouts, flag combinations, state side effects, and Linux-specific edge cases. If implementation behavior disagrees with Linux semantics, fix the kernel implementation instead of relaxing tests to accept the wrong behavior.
 - Run `cargo check --manifest-path kernel/Cargo.toml` for all kernel changes.
 - Run `agent-tools/run-tests.sh` for kernel unit-test coverage.
@@ -101,5 +103,6 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 - If interacting through the background VM terminal appears to produce no reaction, do not assume the background terminal path itself is broken. Treat kernel deadlock, echo being disabled, or the foreground being owned by another program as the primary explanations to check first.
 - `run agent vm` should be treated as directly interactive by default.
 - After you finish using an interactive or background VM, terminate it yourself instead of relying on a default runner timeout to clean it up.
+- When terminating a leftover agent VM, first run `agent-tools/list-agent-vm-processes.sh`, then `kill` the reported runner and QEMU PIDs.
 - If `sysroot/` already appears to be mounted, reuse it directly instead of asking for privilege escalation to mount again. Only ask to mount when it is clearly not mounted.
 - When you need to mount `sysroot/`, use `agent-tools/ensure-sysroot-mounted.sh` directly. Run it first, then run the real inspection command separately instead of chaining them together.
