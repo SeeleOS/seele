@@ -772,6 +772,9 @@ define_syscall!(
 define_syscall!(Lseek, |object: ObjectRef,
                         offset: i64,
                         seek_type: Whence| {
+    if matches!(seek_type, Whence::Start | Whence::End) && offset < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
     let result = object
         .clone()
         .as_seekable()?

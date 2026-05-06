@@ -520,16 +520,6 @@ fn mount_setattr_target_path(
     resolve_path_at(dirfd, &path).map(|path| path.normalize())
 }
 
-fn symlink_target_matches(path: &Path, expected_target: &str) -> bool {
-    let Ok(link) = VirtualFS.lock().open_nofollow(path.clone()) else {
-        return false;
-    };
-    let Ok(target) = link.read_link() else {
-        return false;
-    };
-    target == expected_target
-}
-
 fn check_access_mode(mode: i32) -> Result<(), SyscallError> {
     if (mode & !7) != 0 {
         return Err(SyscallError::InvalidArguments);
@@ -903,12 +893,17 @@ fn chown_fd_object(object: ObjectRef) -> Result<(), SyscallError> {
 define_syscall!(OpenAt, |dirfd: i32,
                          path: CString,
                          flags: OpenFlags,
-                         _mode: u32| {
+                         mode: u32| {
     systemd_perf::profile_current_process(PerfBucket::OpenAt, || {
         let current_process = get_current_process();
         let path_str = path_from_raw(path)?;
+        let create_mode = mode & 0o7777;
         if flags.contains(OpenFlags::TMPFILE) {
             let object = open_tmpfile_at(dirfd, &path_str)?;
+            if create_mode != 0 {
+                let file_like = object.clone().as_file_like()?;
+                file_like.chmod(create_mode)?;
+            }
             let fd_flags = if flags.contains(OpenFlags::CLOEXEC) {
                 FdFlags::CLOEXEC
             } else {
@@ -946,7 +941,12 @@ define_syscall!(OpenAt, |dirfd: i32,
                         create_file_unlocked(path.clone())?;
                         let reopen_result = VirtualFS.lock().open(path.clone());
                         match reopen_result {
-                            Ok(file) => Arc::new(file),
+                            Ok(file) => {
+                                if create_mode != 0 {
+                                    file.chmod(create_mode)?;
+                                }
+                                Arc::new(file)
+                            }
                             Err(err) => return Err(SyscallError::from(err)),
                         }
                     }
@@ -971,7 +971,12 @@ define_syscall!(OpenAt, |dirfd: i32,
                     create_file_unlocked(path.clone())?;
                     let reopen_result = VirtualFS.lock().open(path.clone());
                     match reopen_result {
-                        Ok(file) => Arc::new(file),
+                        Ok(file) => {
+                            if create_mode != 0 {
+                                file.chmod(create_mode)?;
+                            }
+                            Arc::new(file)
+                        }
                         Err(err) => return Err(SyscallError::from(err)),
                     }
                 }
@@ -1442,10 +1447,11 @@ define_syscall!(UnlinkAt, |dirfd: i32, path: CString, flags: AtFlags| {
         return Err(SyscallError::InvalidArguments);
     }
     let path = resolve_path_at(dirfd, &path)?;
-    let is_directory = matches!(
-        VirtualFS.lock().file_info(path.clone())?.file_like_type,
-        FileLikeType::Directory
-    );
+    let object = {
+        let mut vfs = VirtualFS.lock();
+        vfs.open_nofollow(path.clone())?
+    };
+    let is_directory = matches!(object.info()?.file_like_type, FileLikeType::Directory);
     if flags.contains(AtFlags::REMOVEDIR) {
         if !is_directory {
             return Err(SyscallError::NotADirectory);
@@ -1500,11 +1506,7 @@ define_syscall!(SymlinkAt, |target: CString,
     let link_path = path_from_raw(link_path)?;
     let link_path = resolve_path_at(new_dirfd, &link_path)?;
 
-    let result = VirtualFS.lock().create_symlink(link_path.clone(), &target);
-    if result.is_err() && symlink_target_matches(&link_path, &target) {
-        return Ok(0);
-    }
-    result?;
+    VirtualFS.lock().create_symlink(link_path, &target)?;
 
     Ok(0)
 });
@@ -1531,7 +1533,11 @@ define_syscall!(Mknodat, |dirfd: i32,
     match mode & S_IFMT {
         0 | S_IFREG | S_IFIFO | S_IFCHR | S_IFBLK | S_IFSOCK => {
             VirtualFS.lock().create_file(path.clone())?;
-            VirtualFS.lock().open(path)?.chmod(mode)?;
+            let file = {
+                let mut vfs = VirtualFS.lock();
+                vfs.open(path)?
+            };
+            file.chmod(mode)?;
             Ok(0)
         }
         _ => Err(SyscallError::NoSyscall),
@@ -1550,10 +1556,11 @@ define_syscall!(Rmdir, |path: CString| {
     let path = path_from_raw(path)?;
     let path = resolve_path_at(AT_FDCWD, &path)?;
 
-    let is_directory = matches!(
-        VirtualFS.lock().file_info(path.clone())?.file_like_type,
-        FileLikeType::Directory
-    );
+    let object = {
+        let mut vfs = VirtualFS.lock();
+        vfs.open_nofollow(path.clone())?
+    };
+    let is_directory = matches!(object.info()?.file_like_type, FileLikeType::Directory);
     if !is_directory {
         return Err(SyscallError::NotADirectory);
     }
@@ -1681,7 +1688,11 @@ define_syscall!(Mount, |source: CString,
             .mount(target_path.clone(), TmpFs::new())
             .map_err(SyscallError::from)?;
         if let Some(mode) = root_mode {
-            VirtualFS.lock().open(target_path)?.chmod(mode)?;
+            let mount_root = {
+                let mut vfs = VirtualFS.lock();
+                vfs.open(target_path)?
+            };
+            mount_root.chmod(mode)?;
         }
     }
     Ok(0)
@@ -1760,10 +1771,17 @@ define_syscall!(Fsmount, |fd: i32,
         .mount_ref(mount_path.clone(), mounted_fs)
         .map_err(SyscallError::from)?;
     if let Some(mode) = fs_context.root_mode()? {
-        VirtualFS.lock().open(mount_path.clone())?.chmod(mode)?;
+        let mount_root = {
+            let mut vfs = VirtualFS.lock();
+            vfs.open(mount_path.clone())?
+        };
+        mount_root.chmod(mode)?;
     }
 
-    let mount_root: ObjectRef = Arc::new(VirtualFS.lock().open(mount_path)?);
+    let mount_root: ObjectRef = Arc::new({
+        let mut vfs = VirtualFS.lock();
+        vfs.open(mount_path)?
+    });
     let fd_flags = if flags.contains(FsMountFlags::FSMOUNT_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {

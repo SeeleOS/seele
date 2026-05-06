@@ -34,7 +34,7 @@ impl UnixPermission {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Clone, Copy, Default, Debug)]
 #[repr(C)]
 pub struct LinuxStat {
     pub st_dev: u64,     // 随便填个 1
