@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 125;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 110;
 
 macro_rules! syscall_coverage {
     (
@@ -175,6 +175,21 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Mknodat => "filesystem_file_metadata_syscalls_follow_linux_rules",
         Statfs => "filesystem_file_metadata_syscalls_follow_linux_rules",
         Fstatfs => "filesystem_file_metadata_syscalls_follow_linux_rules",
+        Setxattr => "filesystem_xattr_syscalls_follow_linux_rules",
+        Lsetxattr => "filesystem_xattr_syscalls_follow_linux_rules",
+        Fsetxattr => "filesystem_xattr_syscalls_follow_linux_rules",
+        Getxattr => "filesystem_xattr_syscalls_follow_linux_rules",
+        Lgetxattr => "filesystem_xattr_syscalls_follow_linux_rules",
+        Fgetxattr => "filesystem_xattr_syscalls_follow_linux_rules",
+        Listxattr => "filesystem_xattr_syscalls_follow_linux_rules",
+        Llistxattr => "filesystem_xattr_syscalls_follow_linux_rules",
+        Flistxattr => "filesystem_xattr_syscalls_follow_linux_rules",
+        Removexattr => "filesystem_xattr_syscalls_follow_linux_rules",
+        Lremovexattr => "filesystem_xattr_syscalls_follow_linux_rules",
+        Fremovexattr => "filesystem_xattr_syscalls_follow_linux_rules",
+        InotifyAddWatch => "memfd_and_inotify_watch_syscalls_follow_linux_rules",
+        InotifyRmWatch => "memfd_and_inotify_watch_syscalls_follow_linux_rules",
+        MemfdCreate => "memfd_and_inotify_watch_syscalls_follow_linux_rules",
     }
     gap {
     Poll,
@@ -225,22 +240,8 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Ptrace,
     Shmdt,
     Sigaltstack,
-    Setxattr,
-    Lsetxattr,
-    Fsetxattr,
-    Getxattr,
-    Lgetxattr,
-    Fgetxattr,
-    Listxattr,
-    Llistxattr,
-    Flistxattr,
-    Removexattr,
-    Lremovexattr,
-    Fremovexattr,
     Futex,
     SchedSetscheduler,
-    InotifyAddWatch,
-    InotifyRmWatch,
     Waitid,
     AddKey,
     Keyctl,
@@ -257,7 +258,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     NameToHandleAt,
     Setns,
     Kcmp,
-    MemfdCreate,
     Mount,
     Umount2,
     TimerCreate,

@@ -16,21 +16,23 @@ use crate::{
             Access, Alarm, ArchPrctl, Capget, Capset, Chdir, Chroot, ClockGetres, ClockGettime,
             ClockNanosleep, ClockSettime, Close, Dup, Dup2, Dup3, Eventfd, Eventfd2, Faccessat,
             Faccessat2, Fadvise64, Fallocate, Fchdir, Fchmod, Fchmodat, Fchown, Fchownat, Fcntl,
-            Fdatasync, Flock, Fstat, Fstatfs, Fsync, Ftruncate, Getcwd, Getegid, Geteuid, Getgid,
-            Getgroups, Getpgid, Getpgrp, Getpid, Getppid, Getpriority, Getrandom, Getresgid,
-            Getresuid, Getrusage, Getsid, Gettid, Gettimeofday, Getuid, InotifyInit, InotifyInit1,
-            Ioperm, Iopl, IoprioGet, IoprioSet, Link, LinkAt, Lseek, Madvise, Mkdir, MkdirAt,
+            Fdatasync, Fgetxattr, Flistxattr, Flock, Fremovexattr, Fsetxattr, Fstat, Fstatfs,
+            Fsync, Ftruncate, Getcwd, Getegid, Geteuid, Getgid, Getgroups, Getpgid, Getpgrp,
+            Getpid, Getppid, Getpriority, Getrandom, Getresgid, Getresuid, Getrusage, Getsid,
+            Gettid, Gettimeofday, Getuid, Getxattr, InotifyAddWatch, InotifyInit, InotifyInit1,
+            InotifyRmWatch, Ioperm, Iopl, IoprioGet, IoprioSet, Lgetxattr, Link, LinkAt, Listxattr,
+            Llistxattr, Lremovexattr, Lseek, Lsetxattr, Madvise, MemfdCreate, Mkdir, MkdirAt,
             Mknodat, Newfstatat, Open, OpenAt, OpenFlags, Pipe, Pipe2, PollEvents, PollTimespec,
-            Prctl, Pread64, Prlimit64, Pwrite64, Read, Readlink, ReadlinkAt, Reboot, Rename,
-            RenameAt, RenameAt2, Rmdir, Rseq, SchedGetPriorityMax, SchedGetPriorityMin,
+            Prctl, Pread64, Prlimit64, Pwrite64, Read, Readlink, ReadlinkAt, Reboot, Removexattr,
+            Rename, RenameAt, RenameAt2, Rmdir, Rseq, SchedGetPriorityMax, SchedGetPriorityMin,
             SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval,
             SchedSetaffinity, SchedSetparam, SchedYield, SelectTimespec, SetRobustList,
             SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Sethostname, Setpgid,
             Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid, Settimeofday,
-            Setuid, Statfs, Symlink, SymlinkAt, Sync, Sysinfo, Time, TimerfdCreate, TimerfdGettime,
-            TimerfdSettime, Umask, Uname, Unlink, UnlinkAt, Vhangup, Write, Writev, clear_fdset,
-            fdset_contains, fdset_insert, fdset_words, kernel_events_for, saturating_timeout_ms,
-            timeout_is_zero, timeout_to_deadline, translate_ready_events,
+            Setuid, Setxattr, Statfs, Symlink, SymlinkAt, Sync, Sysinfo, Time, TimerfdCreate,
+            TimerfdGettime, TimerfdSettime, Umask, Uname, Unlink, UnlinkAt, Vhangup, Write, Writev,
+            clear_fdset, fdset_contains, fdset_insert, fdset_words, kernel_events_for,
+            saturating_timeout_ms, timeout_is_zero, timeout_to_deadline, translate_ready_events,
         },
         linux_semantics::{
             KNOWN_LINUX_SYSCALL_COVERAGE_GAPS, LINUX_SYSCALL_SEMANTICS_COVERAGE,
@@ -204,6 +206,16 @@ crate::test!(
     filesystem_file_metadata_syscalls,
     "filesystem file metadata syscalls follow linux rules",
     filesystem_file_metadata_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_xattr_syscalls,
+    "filesystem xattr syscalls follow linux rules",
+    filesystem_xattr_syscalls_follow_linux_rules
+);
+crate::test!(
+    memfd_and_inotify_watch_syscalls,
+    "memfd and inotify watch syscalls follow linux rules",
+    memfd_and_inotify_watch_syscalls_follow_linux_rules
 );
 crate::test!(
     typed_syscall_arg_conversion,
@@ -3521,6 +3533,239 @@ fn filesystem_file_metadata_syscalls_follow_linux_rules() {
     for path in cleanup_paths {
         let _ = VirtualFS.lock().delete_file(Path::new(path));
     }
+}
+
+fn filesystem_xattr_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+    const XATTR_CREATE: u64 = 0x1;
+    const XATTR_REPLACE: u64 = 0x2;
+
+    let base_path = Path::new("/tmp/syscall-xattr-test");
+    let cleanup_paths = [
+        "/tmp/syscall-xattr-test/link",
+        "/tmp/syscall-xattr-test/file",
+        "/tmp/syscall-xattr-test",
+    ];
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-xattr-test/file"))
+        .unwrap();
+    VirtualFS
+        .lock()
+        .create_symlink(
+            Path::new("/tmp/syscall-xattr-test/link"),
+            "/tmp/syscall-xattr-test/file",
+        )
+        .unwrap();
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"/tmp/syscall-xattr-test/file\0");
+    write_user_cstr(user_page + 128, b"user.test\0");
+    let fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            OpenFlags::empty().bits() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
+
+    expect_ok(
+        SyscallArgs::new([user_page, user_page + 128, user_page + 256, 4, 0, 0]).call::<Setxattr>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([
+            user_page,
+            user_page + 128,
+            user_page + 256,
+            4,
+            XATTR_CREATE,
+            0,
+        ])
+        .call::<Setxattr>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([
+            user_page,
+            user_page + 128,
+            user_page + 256,
+            4,
+            XATTR_REPLACE,
+            0,
+        ])
+        .call::<Setxattr>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([
+            user_page,
+            user_page + 128,
+            user_page + 256,
+            4,
+            XATTR_CREATE | XATTR_REPLACE,
+            0,
+        ])
+        .call::<Setxattr>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([user_page, user_page + 128, user_page + 256, 4, 0x4, 0])
+            .call::<Setxattr>(),
+        SyscallError::InvalidArguments,
+    );
+
+    write_user_cstr(user_page + 64, b"/tmp/syscall-xattr-test/link\0");
+    expect_ok(
+        SyscallArgs::new([user_page + 64, user_page + 128, user_page + 256, 4, 0, 0])
+            .call::<Lsetxattr>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([fd as u64, user_page + 128, user_page + 256, 4, 0, 0])
+            .call::<Fsetxattr>(),
+        0,
+    );
+
+    expect_errno(
+        SyscallArgs::new([user_page, user_page + 128, user_page + 384, 16, 0, 0])
+            .call::<Getxattr>(),
+        SyscallError::NoData,
+    );
+    expect_errno(
+        SyscallArgs::new([user_page + 64, user_page + 128, user_page + 384, 16, 0, 0])
+            .call::<Lgetxattr>(),
+        SyscallError::NoData,
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, user_page + 128, user_page + 384, 16, 0, 0])
+            .call::<Fgetxattr>(),
+        SyscallError::NoData,
+    );
+
+    expect_ok(
+        SyscallArgs::new([user_page, user_page + 512, 0, 0, 0, 0]).call::<Listxattr>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([user_page + 64, user_page + 512, 0, 0, 0, 0]).call::<Llistxattr>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([fd as u64, user_page + 512, 0, 0, 0, 0]).call::<Flistxattr>(),
+        0,
+    );
+
+    expect_errno(
+        SyscallArgs::new([user_page, user_page + 128, 0, 0, 0, 0]).call::<Removexattr>(),
+        SyscallError::NoData,
+    );
+    expect_errno(
+        SyscallArgs::new([user_page + 64, user_page + 128, 0, 0, 0, 0]).call::<Lremovexattr>(),
+        SyscallError::NoData,
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, user_page + 128, 0, 0, 0, 0]).call::<Fremovexattr>(),
+        SyscallError::NoData,
+    );
+
+    write_user_cstr(user_page + 192, b"/tmp/syscall-xattr-test/missing\0");
+    expect_errno(
+        SyscallArgs::new([user_page + 192, user_page + 128, user_page + 256, 4, 0, 0])
+            .call::<Setxattr>(),
+        SyscallError::FileNotFound,
+    );
+    expect_errno(
+        SyscallArgs::new([user_page + 192, user_page + 128, user_page + 384, 16, 0, 0])
+            .call::<Getxattr>(),
+        SyscallError::FileNotFound,
+    );
+
+    close_test_fd(fd);
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+}
+
+fn memfd_and_inotify_watch_syscalls_follow_linux_rules() {
+    const MFD_CLOEXEC: u64 = 0x0001;
+    const MFD_ALLOW_SEALING: u64 = 0x0002;
+    const MFD_NOEXEC_SEAL: u64 = 0x0008;
+    const MFD_EXEC: u64 = 0x0010;
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"demo/memfd\0");
+    let memfd = expect_fd(
+        SyscallArgs::new([user_page, MFD_CLOEXEC | MFD_ALLOW_SEALING, 0, 0, 0, 0])
+            .call::<MemfdCreate>(),
+    );
+    assert_fd_flags(memfd, FdFlags::CLOEXEC);
+    let memfd_stat = get_object_current_process(memfd as u64)
+        .unwrap()
+        .as_statable()
+        .unwrap()
+        .stat();
+    assert_eq!(memfd_stat.st_mode & 0o170000, 0o100000);
+    assert_eq!(memfd_stat.st_mode & 0o777, 0o600);
+
+    expect_ok(
+        SyscallArgs::new([memfd as u64, 1034, 0, 0, 0, 0]).call::<Fcntl>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([memfd as u64, 1033, 0x0002, 0, 0, 0]).call::<Fcntl>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([memfd as u64, 1034, 0, 0, 0, 0]).call::<Fcntl>(),
+        0x0002,
+    );
+
+    expect_errno(
+        SyscallArgs::new([user_page, 0x4, 0, 0, 0, 0]).call::<MemfdCreate>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([user_page, MFD_NOEXEC_SEAL | MFD_EXEC, 0, 0, 0, 0]).call::<MemfdCreate>(),
+        SyscallError::InvalidArguments,
+    );
+
+    let inotify = expect_fd(SyscallArgs::none().call::<InotifyInit>());
+    write_user_cstr(user_page + 128, b"/tmp\0");
+    let wd1 = SyscallArgs::new([inotify as u64, user_page + 128, 0xffff_ffff, 0, 0, 0])
+        .call::<InotifyAddWatch>()
+        .expect("inotify_add_watch should succeed");
+    let wd2 = SyscallArgs::new([inotify as u64, user_page + 128, 0, 0, 0, 0])
+        .call::<InotifyAddWatch>()
+        .expect("second watch should succeed");
+    assert!(wd2 > wd1);
+    expect_ok(
+        SyscallArgs::new([inotify as u64, wd1 as u64, 0, 0, 0, 0]).call::<InotifyRmWatch>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([inotify as u64, wd2 as u64, 0, 0, 0, 0]).call::<InotifyRmWatch>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([memfd as u64, user_page + 128, 0, 0, 0, 0]).call::<InotifyAddWatch>(),
+        SyscallError::BadFileDescriptor,
+    );
+    expect_errno(
+        SyscallArgs::new([memfd as u64, 1, 0, 0, 0, 0]).call::<InotifyRmWatch>(),
+        SyscallError::BadFileDescriptor,
+    );
+
+    close_test_fd(inotify);
+    close_test_fd(memfd);
 }
 
 fn typed_syscall_args_convert_flags_and_enums_at_boundary() {
