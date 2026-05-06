@@ -15,20 +15,22 @@ use crate::{
         implementations::{
             Access, Alarm, ArchPrctl, Capget, Capset, Chdir, Chroot, ClockGetres, ClockGettime,
             ClockNanosleep, ClockSettime, Close, Dup, Dup2, Dup3, Eventfd, Eventfd2, Faccessat,
-            Faccessat2, Fchdir, Fstat, Getcwd, Getegid, Geteuid, Getgid, Getgroups, Getpgid,
-            Getpgrp, Getpid, Getppid, Getpriority, Getrandom, Getresgid, Getresuid, Getrusage,
-            Getsid, Gettid, Gettimeofday, Getuid, InotifyInit, InotifyInit1, Ioperm, Iopl,
-            IoprioGet, IoprioSet, Link, LinkAt, Lseek, Madvise, Mkdir, MkdirAt, Open, OpenAt,
-            OpenFlags, Pipe, Pipe2, PollEvents, PollTimespec, Prctl, Prlimit64, Readlink,
-            ReadlinkAt, Reboot, Rmdir, Rseq, SchedGetPriorityMax, SchedGetPriorityMin,
+            Faccessat2, Fadvise64, Fallocate, Fchdir, Fchmod, Fchmodat, Fchown, Fchownat, Fcntl,
+            Fdatasync, Flock, Fstat, Fstatfs, Fsync, Ftruncate, Getcwd, Getegid, Geteuid, Getgid,
+            Getgroups, Getpgid, Getpgrp, Getpid, Getppid, Getpriority, Getrandom, Getresgid,
+            Getresuid, Getrusage, Getsid, Gettid, Gettimeofday, Getuid, InotifyInit, InotifyInit1,
+            Ioperm, Iopl, IoprioGet, IoprioSet, Link, LinkAt, Lseek, Madvise, Mkdir, MkdirAt,
+            Mknodat, Newfstatat, Open, OpenAt, OpenFlags, Pipe, Pipe2, PollEvents, PollTimespec,
+            Prctl, Pread64, Prlimit64, Pwrite64, Read, Readlink, ReadlinkAt, Reboot, Rename,
+            RenameAt, RenameAt2, Rmdir, Rseq, SchedGetPriorityMax, SchedGetPriorityMin,
             SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval,
             SchedSetaffinity, SchedSetparam, SchedYield, SelectTimespec, SetRobustList,
             SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Sethostname, Setpgid,
             Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid, Settimeofday,
-            Setuid, Symlink, SymlinkAt, Sync, Sysinfo, Time, TimerfdCreate, TimerfdGettime,
-            TimerfdSettime, Umask, Uname, Unlink, UnlinkAt, Vhangup, clear_fdset, fdset_contains,
-            fdset_insert, fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
-            timeout_to_deadline, translate_ready_events,
+            Setuid, Statfs, Symlink, SymlinkAt, Sync, Sysinfo, Time, TimerfdCreate, TimerfdGettime,
+            TimerfdSettime, Umask, Uname, Unlink, UnlinkAt, Vhangup, Write, Writev, clear_fdset,
+            fdset_contains, fdset_insert, fdset_words, kernel_events_for, saturating_timeout_ms,
+            timeout_is_zero, timeout_to_deadline, translate_ready_events,
         },
         linux_semantics::{
             KNOWN_LINUX_SYSCALL_COVERAGE_GAPS, LINUX_SYSCALL_SEMANTICS_COVERAGE,
@@ -43,6 +45,15 @@ use crate::{
         utils::SyscallError,
     },
 };
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+struct LinuxDirent64Header {
+    d_ino: u64,
+    d_off: i64,
+    d_reclen: u16,
+    d_type: u8,
+}
 
 crate::test!(
     syscall_number_lookup,
@@ -163,6 +174,36 @@ crate::test!(
     filesystem_fd_state_syscalls,
     "filesystem fd state syscalls follow linux rules",
     filesystem_fd_state_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_metadata_syscalls,
+    "filesystem metadata syscalls follow linux rules",
+    filesystem_metadata_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_io_syscalls,
+    "filesystem io syscalls follow linux rules",
+    filesystem_io_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_rename_syscalls,
+    "filesystem rename syscalls follow linux rules",
+    filesystem_rename_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_getdents_syscalls,
+    "filesystem getdents syscalls follow linux rules",
+    filesystem_getdents_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_file_object_syscalls,
+    "filesystem file object syscalls follow linux rules",
+    filesystem_file_object_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_file_metadata_syscalls,
+    "filesystem file metadata syscalls follow linux rules",
+    filesystem_file_metadata_syscalls_follow_linux_rules
 );
 crate::test!(
     typed_syscall_arg_conversion,
@@ -2542,6 +2583,941 @@ fn filesystem_fd_state_syscalls_follow_linux_rules() {
         SyscallError::NotADirectory,
     );
 
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+}
+
+fn filesystem_metadata_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+    const AT_SYMLINK_NOFOLLOW: u64 = 0x100;
+    const AT_EMPTY_PATH: u64 = 0x1000;
+    const AT_NO_AUTOMOUNT: u64 = 0x800;
+
+    let base_path = Path::new("/tmp/syscall-metadata-test");
+    let cleanup_paths = [
+        "/tmp/syscall-metadata-test/link",
+        "/tmp/syscall-metadata-test/file",
+        "/tmp/syscall-metadata-test",
+    ];
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-metadata-test/file"))
+        .unwrap();
+    VirtualFS
+        .lock()
+        .create_symlink(
+            Path::new("/tmp/syscall-metadata-test/link"),
+            "/tmp/syscall-metadata-test/file",
+        )
+        .unwrap();
+
+    let user_page = allocate_user_test_page();
+    let stat_ptr = (user_page + 512) as *mut LinuxStat;
+
+    write_user_cstr(user_page, b"/tmp/syscall-metadata-test/file\0");
+    expect_ok(
+        SyscallArgs::new([user_page, 0o640, 0, 0, 0, 0])
+            .call::<crate::systemcall::implementations::Chmod>(),
+        0,
+    );
+    let file_object = {
+        let mut vfs = VirtualFS.lock();
+        vfs.open(Path::new("/tmp/syscall-metadata-test/file"))
+            .unwrap()
+    };
+    assert_eq!(file_object.stat().st_mode & 0o777, 0o640);
+
+    let file_fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            OpenFlags::empty().bits() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
+    expect_ok(
+        SyscallArgs::new([file_fd as u64, 0o600, 0, 0, 0, 0]).call::<Fchmod>(),
+        0,
+    );
+    let file_stat_after_fchmod = get_object_current_process(file_fd as u64)
+        .unwrap()
+        .as_statable()
+        .unwrap()
+        .stat();
+    assert_eq!(file_stat_after_fchmod.st_mode & 0o777, 0o600);
+
+    write_user_cstr(user_page + 128, b"\0");
+    expect_ok(
+        SyscallArgs::new([file_fd as u64, user_page + 128, 0o644, AT_EMPTY_PATH, 0, 0])
+            .call::<crate::systemcall::implementations::Fchmodat2>(),
+        0,
+    );
+    let file_stat_after_empty_path = get_object_current_process(file_fd as u64)
+        .unwrap()
+        .as_statable()
+        .unwrap()
+        .stat();
+    assert_eq!(file_stat_after_empty_path.st_mode & 0o777, 0o644);
+
+    expect_errno(
+        SyscallArgs::new([file_fd as u64, 0, 0o644, 0, 0, 0])
+            .call::<crate::systemcall::implementations::Fchmodat2>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([file_fd as u64, user_page + 128, 0o644, 0x4000_0000, 0, 0])
+            .call::<crate::systemcall::implementations::Fchmodat2>(),
+        SyscallError::InvalidArguments,
+    );
+
+    write_user_cstr(user_page, b"/tmp/syscall-metadata-test/link\0");
+    expect_errno(
+        SyscallArgs::new([AT_FDCWD, user_page, 0o700, AT_SYMLINK_NOFOLLOW, 0, 0])
+            .call::<crate::systemcall::implementations::Fchmodat2>(),
+        SyscallError::OperationNotSupported,
+    );
+    let target_object_after_link_nofollow = {
+        let mut vfs = VirtualFS.lock();
+        vfs.open(Path::new("/tmp/syscall-metadata-test/file"))
+            .unwrap()
+    };
+    let target_stat_after_link_nofollow = target_object_after_link_nofollow.stat();
+    assert_eq!(target_stat_after_link_nofollow.st_mode & 0o777, 0o644);
+
+    expect_ok(
+        SyscallArgs::new([AT_FDCWD, user_page, 0o700, 0, 0, 0]).call::<Fchmodat>(),
+        0,
+    );
+    let target_object_after_follow = {
+        let mut vfs = VirtualFS.lock();
+        vfs.open(Path::new("/tmp/syscall-metadata-test/file"))
+            .unwrap()
+    };
+    let target_stat_after_follow = target_object_after_follow.stat();
+    assert_eq!(target_stat_after_follow.st_mode & 0o777, 0o700);
+
+    expect_ok(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            stat_ptr as u64,
+            AT_SYMLINK_NOFOLLOW,
+            0,
+            0,
+        ])
+        .call::<Newfstatat>(),
+        0,
+    );
+    let symlink_stat = read_user_value::<LinuxStat>(stat_ptr as u64);
+    assert_eq!(symlink_stat.st_mode & 0o170000, 0o120000);
+
+    expect_ok(
+        SyscallArgs::new([AT_FDCWD, user_page, stat_ptr as u64, 0, 0, 0]).call::<Newfstatat>(),
+        0,
+    );
+    let followed_stat = read_user_value::<LinuxStat>(stat_ptr as u64);
+    assert_eq!(followed_stat.st_mode & 0o170000, 0o100000);
+    assert_eq!(followed_stat.st_mode & 0o777, 0o700);
+
+    expect_ok(
+        SyscallArgs::new([
+            file_fd as u64,
+            user_page + 128,
+            stat_ptr as u64,
+            AT_EMPTY_PATH | AT_NO_AUTOMOUNT,
+            0,
+            0,
+        ])
+        .call::<Newfstatat>(),
+        0,
+    );
+    let empty_path_stat = read_user_value::<LinuxStat>(stat_ptr as u64);
+    assert_eq!(empty_path_stat.st_mode & 0o170000, 0o100000);
+    assert_eq!(empty_path_stat.st_mode & 0o777, 0o700);
+
+    expect_errno(
+        SyscallArgs::new([file_fd as u64, 0, stat_ptr as u64, 0, 0, 0]).call::<Newfstatat>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([
+            file_fd as u64,
+            user_page + 128,
+            stat_ptr as u64,
+            0x4000_0000,
+            0,
+            0,
+        ])
+        .call::<Newfstatat>(),
+        SyscallError::NoSyscall,
+    );
+
+    close_test_fd(file_fd);
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+}
+
+fn filesystem_io_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+
+    let base_path = Path::new("/tmp/syscall-io-test");
+    let cleanup_paths = ["/tmp/syscall-io-test/file", "/tmp/syscall-io-test"];
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-io-test/file"))
+        .unwrap();
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"/tmp/syscall-io-test/file\0");
+    let fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            OpenFlags::empty().bits() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
+
+    get_object_current_process(fd as u64)
+        .unwrap()
+        .as_file_like()
+        .unwrap()
+        .truncate(0)
+        .unwrap();
+
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer(user_page as *mut u8, b"abcdef")
+        .unwrap();
+    expect_ok(
+        SyscallArgs::new([fd as u64, user_page, 6, 0, 0, 0]).call::<Write>(),
+        6,
+    );
+
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Lseek>(),
+        0,
+    );
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer((user_page + 128) as *mut u8, &[0; 6])
+        .unwrap();
+    expect_ok(
+        SyscallArgs::new([fd as u64, user_page + 128, 6, 0, 0, 0]).call::<Read>(),
+        6,
+    );
+    assert_user_bytes(user_page + 128, b"abcdef");
+
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer((user_page + 256) as *mut u8, b"ZZ")
+        .unwrap();
+    expect_ok(
+        SyscallArgs::new([fd as u64, user_page + 256, 2, 2, 0, 0]).call::<Pwrite64>(),
+        2,
+    );
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Lseek>(),
+        0,
+    );
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer((user_page + 384) as *mut u8, &[0; 6])
+        .unwrap();
+    expect_ok(
+        SyscallArgs::new([fd as u64, user_page + 384, 6, 0, 0, 0]).call::<Read>(),
+        6,
+    );
+    assert_user_bytes(user_page + 384, b"abZZef");
+
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer((user_page + 512) as *mut u8, &[0; 3])
+        .unwrap();
+    expect_ok(
+        SyscallArgs::new([fd as u64, user_page + 512, 3, 1, 0, 0]).call::<Pread64>(),
+        3,
+    );
+    assert_user_bytes(user_page + 512, b"bZZ");
+
+    let current_offset = get_object_current_process(fd as u64)
+        .unwrap()
+        .as_seekable()
+        .unwrap()
+        .seek(0, crate::filesystem::vfs_traits::Whence::Current)
+        .unwrap();
+    assert_eq!(current_offset, 6);
+
+    expect_errno(
+        SyscallArgs::new([fd as u64, user_page + 640, 1, (-1i64) as u64, 0, 0]).call::<Pread64>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, user_page + 640, 1, (-1i64) as u64, 0, 0]).call::<Pwrite64>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Lseek>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, 0, 1, 0, 0, 0]).call::<Read>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, 0, 1, 0, 0, 0]).call::<Write>(),
+        SyscallError::BadAddress,
+    );
+
+    close_test_fd(fd);
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+}
+
+fn filesystem_rename_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+
+    let base_path = Path::new("/tmp/syscall-rename-test");
+    let cleanup_paths = [
+        "/tmp/syscall-rename-test/dst",
+        "/tmp/syscall-rename-test/src",
+        "/tmp/syscall-rename-test/subdir/child",
+        "/tmp/syscall-rename-test/subdir/renamed",
+        "/tmp/syscall-rename-test/subdir",
+        "/tmp/syscall-rename-test",
+    ];
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-rename-test/src"))
+        .unwrap();
+    VirtualFS
+        .lock()
+        .create_dir(Path::new("/tmp/syscall-rename-test/subdir"))
+        .unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-rename-test/subdir/child"))
+        .unwrap();
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"/tmp/syscall-rename-test/src\0");
+    write_user_cstr(user_page + 128, b"/tmp/syscall-rename-test/dst\0");
+    expect_ok(
+        SyscallArgs::new([user_page, user_page + 128, 0, 0, 0, 0]).call::<Rename>(),
+        0,
+    );
+    {
+        let mut vfs = VirtualFS.lock();
+        assert!(vfs.open(Path::new("/tmp/syscall-rename-test/dst")).is_ok());
+        assert!(matches!(
+            vfs.open(Path::new("/tmp/syscall-rename-test/src")),
+            Err(crate::filesystem::errors::FSError::NotFound)
+        ));
+    }
+
+    expect_ok(
+        SyscallArgs::new([user_page + 128, user_page + 128, 0, 0, 0, 0]).call::<Rename>(),
+        0,
+    );
+
+    write_user_cstr(user_page, b"/tmp/syscall-rename-test/missing\0");
+    expect_errno(
+        SyscallArgs::new([user_page, user_page + 128, 0, 0, 0, 0]).call::<Rename>(),
+        SyscallError::FileNotFound,
+    );
+
+    write_user_cstr(user_page, b"/tmp/syscall-rename-test\0");
+    let dir_fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            OpenFlags::DIRECTORY.bits() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
+    write_user_cstr(user_page, b"subdir/child\0");
+    write_user_cstr(user_page + 128, b"subdir/renamed\0");
+    expect_ok(
+        SyscallArgs::new([
+            dir_fd as u64,
+            user_page,
+            dir_fd as u64,
+            user_page + 128,
+            0,
+            0,
+        ])
+        .call::<RenameAt>(),
+        0,
+    );
+    {
+        let mut vfs = VirtualFS.lock();
+        assert!(
+            vfs.open(Path::new("/tmp/syscall-rename-test/subdir/renamed"))
+                .is_ok()
+        );
+        assert!(matches!(
+            vfs.open(Path::new("/tmp/syscall-rename-test/subdir/child")),
+            Err(crate::filesystem::errors::FSError::NotFound)
+        ));
+    }
+
+    expect_errno(
+        SyscallArgs::new([
+            dir_fd as u64,
+            user_page,
+            dir_fd as u64,
+            user_page + 128,
+            1,
+            0,
+        ])
+        .call::<RenameAt2>(),
+        SyscallError::NoSyscall,
+    );
+    close_test_fd(dir_fd);
+
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+}
+
+fn filesystem_getdents_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+    const DT_DIR: u8 = 4;
+    const DT_REG: u8 = 8;
+    const DT_LNK: u8 = 10;
+
+    let base_path = Path::new("/tmp/syscall-getdents-test");
+    let cleanup_paths = [
+        "/tmp/syscall-getdents-test/file",
+        "/tmp/syscall-getdents-test/link",
+        "/tmp/syscall-getdents-test/subdir",
+        "/tmp/syscall-getdents-test",
+    ];
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-getdents-test/file"))
+        .unwrap();
+    VirtualFS
+        .lock()
+        .create_dir(Path::new("/tmp/syscall-getdents-test/subdir"))
+        .unwrap();
+    VirtualFS
+        .lock()
+        .create_symlink(Path::new("/tmp/syscall-getdents-test/link"), "file")
+        .unwrap();
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"/tmp/syscall-getdents-test\0");
+    let dir_fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            OpenFlags::DIRECTORY.bits() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
+
+    expect_errno(
+        SyscallArgs::new([dir_fd as u64, 0, 256, 0, 0, 0])
+            .call::<crate::systemcall::implementations::Getdents64>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([dir_fd as u64, user_page + 128, 8, 0, 0, 0])
+            .call::<crate::systemcall::implementations::Getdents64>(),
+        SyscallError::InvalidArguments,
+    );
+
+    let bytes_result = SyscallArgs::new([dir_fd as u64, user_page + 128, 512, 0, 0, 0])
+        .call::<crate::systemcall::implementations::Getdents64>();
+    let bytes = bytes_result.expect("getdents64 should return byte count");
+    assert!(bytes > 0);
+
+    let mut offset = 0usize;
+    let mut saw_file = false;
+    let mut saw_dir = false;
+    let mut saw_link = false;
+    while offset < bytes {
+        let entry =
+            read_user_value::<LinuxDirent64Header>((user_page + 128 + offset as u64) as u64);
+        assert!(entry.d_reclen as usize >= 24);
+        assert!(entry.d_off >= 1);
+        let name_len = entry.d_reclen as usize - 19;
+        let raw_name = get_current_process()
+            .lock()
+            .addrspace
+            .read_buffer(
+                (user_page + 128 + offset as u64 + 19) as *const u8,
+                name_len,
+            )
+            .unwrap();
+        let nul = raw_name.iter().position(|byte| *byte == 0).unwrap();
+        let name = core::str::from_utf8(&raw_name[..nul]).unwrap();
+        match (name, entry.d_type) {
+            ("file", DT_REG) => saw_file = true,
+            ("subdir", DT_DIR) => saw_dir = true,
+            ("link", DT_LNK) => saw_link = true,
+            _ => {}
+        }
+        offset += entry.d_reclen as usize;
+    }
+    assert!(saw_file);
+    assert!(saw_dir);
+    assert!(saw_link);
+
+    expect_ok(
+        SyscallArgs::new([dir_fd as u64, user_page + 128, 512, 0, 0, 0])
+            .call::<crate::systemcall::implementations::Getdents>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([dir_fd as u64, user_page + 128, 8, 0, 0, 0])
+            .call::<crate::systemcall::implementations::Getdents64>(),
+        0,
+    );
+
+    close_test_fd(dir_fd);
+    expect_errno(
+        SyscallArgs::new([dir_fd as u64, user_page + 128, 512, 0, 0, 0])
+            .call::<crate::systemcall::implementations::Getdents64>(),
+        SyscallError::BadFileDescriptor,
+    );
+
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+}
+
+fn filesystem_file_object_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+    const O_APPEND: u64 = 0o2_000;
+    const LOCK_SH: u64 = 1;
+    const LOCK_EX: u64 = 2;
+    const LOCK_NB: u64 = 4;
+    const LOCK_UN: u64 = 8;
+    const F_GETFD: u64 = 1;
+    const F_SETFD: u64 = 2;
+    const F_GETFL: u64 = 3;
+    const F_SETFL: u64 = 4;
+    const FD_CLOEXEC: u64 = 1;
+    const POSIX_FADV_RANDOM: u64 = 1;
+    const FALLOC_FL_KEEP_SIZE: u64 = 0x01;
+    const FALLOC_FL_PUNCH_HOLE: u64 = 0x02;
+
+    let base_path = Path::new("/tmp/syscall-file-object-test");
+    let cleanup_paths = [
+        "/tmp/syscall-file-object-test/file",
+        "/tmp/syscall-file-object-test/out",
+        "/tmp/syscall-file-object-test",
+    ];
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-file-object-test/file"))
+        .unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-file-object-test/out"))
+        .unwrap();
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"/tmp/syscall-file-object-test/file\0");
+    let fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            OpenFlags::empty().bits() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
+    write_user_cstr(user_page + 128, b"/tmp/syscall-file-object-test/file\0");
+    let out_fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page + 128,
+            OpenFlags::empty().bits() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
+
+    get_object_current_process(fd as u64)
+        .unwrap()
+        .as_file_like()
+        .unwrap()
+        .truncate(0)
+        .unwrap();
+    get_object_current_process(out_fd as u64)
+        .unwrap()
+        .as_file_like()
+        .unwrap()
+        .truncate(0)
+        .unwrap();
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct TestLinuxIovec {
+        iov_base: *const u8,
+        iov_len: usize,
+    }
+
+    let chunk_a = user_page + 256;
+    let chunk_b = user_page + 320;
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer(chunk_a as *mut u8, b"ab")
+        .unwrap();
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer(chunk_b as *mut u8, b"cdef")
+        .unwrap();
+    write_user_value(
+        user_page + 384,
+        &[
+            TestLinuxIovec {
+                iov_base: chunk_a as *const u8,
+                iov_len: 2,
+            },
+            TestLinuxIovec {
+                iov_base: chunk_b as *const u8,
+                iov_len: 4,
+            },
+        ],
+    );
+    expect_ok(
+        SyscallArgs::new([fd as u64, user_page + 384, 2, 0, 0, 0]).call::<Writev>(),
+        6,
+    );
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Lseek>(),
+        0,
+    );
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer((user_page + 512) as *mut u8, &[0; 6])
+        .unwrap();
+    expect_ok(
+        SyscallArgs::new([fd as u64, user_page + 512, 6, 0, 0, 0]).call::<Read>(),
+        6,
+    );
+    assert_user_bytes(user_page + 512, b"abcdef");
+
+    expect_errno(
+        SyscallArgs::new([fd as u64, 0, 1, 0, 0, 0]).call::<Writev>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, user_page + 384, u64::MAX, 0, 0, 0]).call::<Writev>(),
+        SyscallError::InvalidArguments,
+    );
+    write_user_value(
+        user_page + 448,
+        &[TestLinuxIovec {
+            iov_base: core::ptr::null(),
+            iov_len: 1,
+        }],
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, user_page + 448, 1, 0, 0, 0]).call::<Writev>(),
+        SyscallError::BadAddress,
+    );
+
+    expect_ok(
+        SyscallArgs::new([fd as u64, F_GETFD, 0, 0, 0, 0]).call::<Fcntl>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([fd as u64, F_SETFD, FD_CLOEXEC, 0, 0, 0]).call::<Fcntl>(),
+        0,
+    );
+    assert_fd_flags(fd, FdFlags::CLOEXEC);
+    expect_ok(
+        SyscallArgs::new([fd as u64, F_GETFD, 0, 0, 0, 0]).call::<Fcntl>(),
+        1,
+    );
+    expect_ok(
+        SyscallArgs::new([fd as u64, F_SETFL, O_APPEND, 0, 0, 0]).call::<Fcntl>(),
+        0,
+    );
+    assert_object_flags(fd, FileFlags::APPEND);
+    assert_eq!(
+        SyscallArgs::new([fd as u64, F_GETFL, 0, 0, 0, 0])
+            .call::<Fcntl>()
+            .unwrap() as u64
+            & O_APPEND,
+        O_APPEND
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, 9999, 0, 0, 0, 0]).call::<Fcntl>(),
+        SyscallError::InvalidArguments,
+    );
+
+    expect_ok(
+        SyscallArgs::new([fd as u64, LOCK_EX | LOCK_NB, 0, 0, 0, 0]).call::<Flock>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([out_fd as u64, LOCK_EX | LOCK_NB, 0, 0, 0, 0]).call::<Flock>(),
+        SyscallError::TryAgain,
+    );
+    expect_ok(
+        SyscallArgs::new([fd as u64, LOCK_UN, 0, 0, 0, 0]).call::<Flock>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([out_fd as u64, LOCK_SH | LOCK_NB, 0, 0, 0, 0]).call::<Flock>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, LOCK_EX | LOCK_NB, 0, 0, 0, 0]).call::<Flock>(),
+        SyscallError::TryAgain,
+    );
+    expect_ok(
+        SyscallArgs::new([out_fd as u64, LOCK_UN, 0, 0, 0, 0]).call::<Flock>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Flock>(),
+        SyscallError::InvalidArguments,
+    );
+
+    expect_ok(
+        SyscallArgs::new([fd as u64, 2, 0, 0, 0, 0]).call::<Ftruncate>(),
+        0,
+    );
+    let truncated_stat = get_object_current_process(fd as u64)
+        .unwrap()
+        .as_statable()
+        .unwrap()
+        .stat();
+    assert_eq!(truncated_stat.st_size, 2);
+    expect_errno(
+        SyscallArgs::new([fd as u64, (-1i64) as u64, 0, 0, 0, 0]).call::<Ftruncate>(),
+        SyscallError::InvalidArguments,
+    );
+
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, 0, POSIX_FADV_RANDOM, 0, 0]).call::<Fadvise64>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, 0, 0, 6, 0, 0]).call::<Fadvise64>(),
+        SyscallError::InvalidArguments,
+    );
+
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, 1, 2, 0, 0]).call::<Fallocate>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([
+            fd as u64,
+            FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE,
+            0,
+            0,
+            0,
+            0,
+        ])
+        .call::<Fallocate>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, 0x10, 0, 1, 0, 0]).call::<Fallocate>(),
+        SyscallError::OperationNotSupported,
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, 0, (-1i64) as u64, 1, 0, 0]).call::<Fallocate>(),
+        SyscallError::InvalidArguments,
+    );
+
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Fsync>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Fdatasync>(),
+        0,
+    );
+
+    close_test_fd(out_fd);
+    close_test_fd(fd);
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+}
+
+fn filesystem_file_metadata_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+    const AT_SYMLINK_NOFOLLOW: u64 = 0x100;
+    const TMPFS_MAGIC: i64 = 0x0102_1994;
+
+    let base_path = Path::new("/tmp/syscall-file-metadata-test");
+    let cleanup_paths = [
+        "/tmp/syscall-file-metadata-test/link",
+        "/tmp/syscall-file-metadata-test/file",
+        "/tmp/syscall-file-metadata-test/node",
+        "/tmp/syscall-file-metadata-test",
+    ];
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-file-metadata-test/file"))
+        .unwrap();
+    VirtualFS
+        .lock()
+        .create_symlink(
+            Path::new("/tmp/syscall-file-metadata-test/link"),
+            "/tmp/syscall-file-metadata-test/file",
+        )
+        .unwrap();
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct TestLinuxStatFs {
+        f_type: i64,
+        f_bsize: i64,
+        f_blocks: u64,
+        f_bfree: u64,
+        f_bavail: u64,
+        f_files: u64,
+        f_ffree: u64,
+        f_fsid: i64,
+        f_namelen: i64,
+        f_frsize: i64,
+        f_flags: i64,
+        f_spare: [i64; 4],
+    }
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"/tmp/syscall-file-metadata-test/file\0");
+    let fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            OpenFlags::empty().bits() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
+
+    expect_ok(
+        SyscallArgs::new([user_page, user_page + 256, 0, 0, 0, 0]).call::<Statfs>(),
+        0,
+    );
+    let statfs = read_user_value::<TestLinuxStatFs>(user_page + 256);
+    assert_eq!(statfs.f_type, TMPFS_MAGIC);
+    assert_eq!(statfs.f_bsize, 4096);
+    assert_eq!(statfs.f_namelen, 255);
+
+    expect_ok(
+        SyscallArgs::new([fd as u64, user_page + 384, 0, 0, 0, 0]).call::<Fstatfs>(),
+        0,
+    );
+    let fstatfs = read_user_value::<TestLinuxStatFs>(user_page + 384);
+    assert_eq!(fstatfs.f_type, TMPFS_MAGIC);
+    expect_errno(
+        SyscallArgs::new([4096, user_page + 384, 0, 0, 0, 0]).call::<Fstatfs>(),
+        SyscallError::BadFileDescriptor,
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Fstatfs>(),
+        SyscallError::BadAddress,
+    );
+
+    expect_ok(
+        SyscallArgs::new([user_page, 123, 456, 0, 0, 0])
+            .call::<crate::systemcall::implementations::Chown>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([fd as u64, 123, 456, 0, 0, 0]).call::<Fchown>(),
+        0,
+    );
+    write_user_cstr(user_page + 128, b"/tmp/syscall-file-metadata-test/link\0");
+    expect_ok(
+        SyscallArgs::new([AT_FDCWD, user_page + 128, 1, 2, AT_SYMLINK_NOFOLLOW, 0])
+            .call::<Fchownat>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([AT_FDCWD, 0, 1, 2, 0, 0]).call::<Fchownat>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, user_page + 128, 1, 2, 0x4000_0000, 0]).call::<Fchownat>(),
+        SyscallError::InvalidArguments,
+    );
+
+    write_user_cstr(user_page + 192, b"/tmp/syscall-file-metadata-test/node\0");
+    expect_ok(
+        SyscallArgs::new([AT_FDCWD, user_page + 192, 0o100600, 0, 0, 0]).call::<Mknodat>(),
+        0,
+    );
+    let node_object = {
+        let mut vfs = VirtualFS.lock();
+        vfs.open(Path::new("/tmp/syscall-file-metadata-test/node"))
+            .unwrap()
+    };
+    assert_eq!(node_object.stat().st_mode & 0o170000, 0o100000);
+    assert_eq!(node_object.stat().st_mode & 0o777, 0o600);
+    expect_errno(
+        SyscallArgs::new([AT_FDCWD, user_page + 192, 0o040755, 0, 0, 0]).call::<Mknodat>(),
+        SyscallError::NoSyscall,
+    );
+
+    close_test_fd(fd);
     for path in cleanup_paths {
         let _ = VirtualFS.lock().delete_file(Path::new(path));
     }
