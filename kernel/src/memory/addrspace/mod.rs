@@ -3,7 +3,7 @@ use core::sync::atomic::AtomicU64;
 use alloc::vec::Vec;
 use x86_64::{
     PhysAddr, VirtAddr,
-    structures::paging::{FrameDeallocator, Mapper, Page, Size4KiB, Translate},
+    structures::paging::{FrameDeallocator, Page, Size4KiB},
 };
 
 use crate::{
@@ -173,7 +173,7 @@ impl AddrSpace {
             let _ = self.write_back_area_range(area, area.start, area.end);
 
             for page in area.page_range() {
-                if let Ok((frame, flush)) = self.page_table.inner.unmap(page) {
+                if let Ok((frame, flush)) = self.page_table.unmap(page) {
                     flush.flush();
                     if decrease_ref(frame) {
                         unsafe {
@@ -255,15 +255,15 @@ impl AddrSpace {
             Page::<Size4KiB>::containing_address(last_addr),
         ) {
             unsafe {
-                if let Ok(flush) = self.page_table.inner.update_flags(page, new_flags) {
+                if let Ok(flush) = self.page_table.update_flags(page, new_flags) {
                     flush.flush();
                 }
             }
         }
     }
 
-    pub fn translate_addr(&self, addr: VirtAddr) -> Option<PhysAddr> {
-        self.page_table.inner.translate_addr(addr)
+    pub fn translate_addr(&mut self, addr: VirtAddr) -> Option<PhysAddr> {
+        self.page_table.translate_addr(addr)
     }
 
     pub fn get_area(&mut self, addr: VirtAddr) -> Option<&MemoryArea> {

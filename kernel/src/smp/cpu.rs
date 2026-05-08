@@ -20,7 +20,7 @@ use crate::{
     interrupts::default_local_apic,
     process::ProcessRef,
     smp::{gs::GsContext, topology},
-    thread::{ThreadRef, stack::allocate_kernel_stack},
+    thread::{ThreadRef, stack::allocate_kernel_stack, thread::Thread},
 };
 
 const MAX_XAPIC_IDS: usize = 256;
@@ -44,6 +44,7 @@ pub struct CpuCoreContext {
     pub online: AtomicBool,
     pub gs_context: GsContext,
     pub local_apic: LocalApic,
+    pub scheduler_thread: ThreadRef,
     pub current_thread: Option<ThreadRef>,
     pub current_process: Option<ProcessRef>,
     pub(crate) segments: CpuSegments,
@@ -242,6 +243,7 @@ impl CpuCoreContext {
                 cpu_context: core::ptr::null_mut(),
             },
             local_apic: default_local_apic(),
+            scheduler_thread: Thread::empty(),
             current_thread: None,
             current_process: None,
             segments,

@@ -2,7 +2,7 @@ use x86_64::{
     registers::control::Cr2,
     structures::{
         idt::{InterruptStackFrame, PageFaultErrorCode},
-        paging::{Page, Translate, mapper::TranslateResult},
+        paging::{Page, mapper::TranslateResult},
     },
 };
 
@@ -24,10 +24,9 @@ pub extern "x86-interrupt" fn pagefault_handler(
         let process_ref = get_current_process();
         let mut process = process_ref.lock();
         let addrspace = &mut process.addrspace;
-        let page_table = &mut addrspace.page_table.inner;
 
         if error_code.contains(PageFaultErrorCode::CAUSED_BY_WRITE)
-            && let TranslateResult::Mapped { flags, .. } = page_table.translate(address)
+            && let TranslateResult::Mapped { flags, .. } = addrspace.page_table.translate(address)
             && flags.contains(COW_FLAG)
         {
             process.addrspace.replace_cow_page(address);

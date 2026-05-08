@@ -2,7 +2,7 @@ use core::ptr::copy_nonoverlapping;
 
 use x86_64::{
     VirtAddr,
-    structures::paging::{Page, PageTableFlags, Size4KiB, Translate, mapper::TranslateResult},
+    structures::paging::{Page, PageTableFlags, Size4KiB, mapper::TranslateResult},
 };
 
 use alloc::{vec, vec::Vec};
@@ -14,7 +14,7 @@ use crate::{
 
 impl AddrSpace {
     fn ensure_user_page_readable(&mut self, addr: VirtAddr) -> bool {
-        match self.page_table.inner.translate(addr) {
+        match self.page_table.translate(addr) {
             TranslateResult::Mapped { .. } => true,
             _ => match self.get_area(addr).cloned() {
                 Some(area) if area.lazy => {
@@ -33,7 +33,7 @@ impl AddrSpace {
     }
 
     fn ensure_user_page_writable(&mut self, addr: VirtAddr) -> bool {
-        match self.page_table.inner.translate(addr) {
+        match self.page_table.translate(addr) {
             TranslateResult::Mapped { flags, .. } => {
                 if flags.contains(COW_FLAG) {
                     self.replace_cow_page(addr);

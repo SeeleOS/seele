@@ -1,8 +1,6 @@
 use x86_64::{
     VirtAddr,
-    structures::paging::{
-        Mapper, Page, PageTableFlags, Size4KiB, Translate, mapper::TranslateResult,
-    },
+    structures::paging::{Page, PageTableFlags, Size4KiB, mapper::TranslateResult},
 };
 
 use crate::memory::{
@@ -37,17 +35,16 @@ impl AddrSpace {
             // Loops through all of the mapped pages of the previous addr space
             for page in pages {
                 // Get the frame of the page on the old page table
-                if let Ok(frame) = old_page_table.inner.translate_page(page)
+                if let Ok(frame) = old_page_table.translate_page(page)
                     && page.start_address() < VirtAddr::new(KERNEL_MEM_START)
                         // Get the flags
                     && let TranslateResult::Mapped { flags, .. } =
-                        old_page_table.inner.translate(page.start_address())
+                        old_page_table.translate(page.start_address())
                 {
                     unsafe {
                         let already_ref_counted = is_ref_counted(frame);
                         let new_flags = if flags.contains(PageTableFlags::WRITABLE) {
                             old_page_table
-                                .inner
                                 .update_flags(page, as_cow_flags(flags))
                                 .unwrap()
                                 .flush();
@@ -59,7 +56,6 @@ impl AddrSpace {
                         // Only writable pages should enter the CoW path. Read-only
                         // mappings can stay shared with their original permissions.
                         new_page_table
-                            .inner
                             .map_to(page, frame, new_flags, &mut *frame_allocator)
                             .unwrap()
                             .flush();

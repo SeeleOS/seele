@@ -5,7 +5,7 @@ use conquer_once::spin::OnceCell;
 use spin::Mutex;
 
 use crate::{
-    smp::{current_thread, set_current_thread},
+    smp::{current_thread, set_current_thread, with_current_cpu},
     thread::{manager::ThreadManager, thread::Thread},
 };
 
@@ -22,12 +22,12 @@ pub mod yielding;
 pub static THREAD_MANAGER: OnceCell<Mutex<ThreadManager>> = OnceCell::uninit();
 
 pub fn init() {
-    let mut thread_manager = THREAD_MANAGER
+    THREAD_MANAGER
         .get_or_init(|| Mutex::new(ThreadManager::default()))
-        .lock();
-    let idle_thread = Thread::empty();
-    thread_manager.init(idle_thread.clone());
-    set_current_thread(Some(idle_thread));
+        .lock()
+        .init();
+    let scheduler_thread = with_current_cpu(|cpu| cpu.scheduler_thread.clone());
+    set_current_thread(Some(scheduler_thread));
 }
 
 pub type ThreadRef = Arc<Mutex<Thread>>;
@@ -37,11 +37,5 @@ pub fn get_current_thread() -> ThreadRef {
 }
 
 pub fn scheduler_thread() -> ThreadRef {
-    THREAD_MANAGER
-        .get()
-        .unwrap()
-        .lock()
-        .idle_thread
-        .clone()
-        .expect("scheduler thread not initialized")
+    with_current_cpu(|cpu| cpu.scheduler_thread.clone())
 }

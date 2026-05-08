@@ -2,7 +2,11 @@ use spin::MutexGuard;
 use x86_64::{
     PhysAddr, VirtAddr,
     registers::control::{Cr3, Cr3Flags},
-    structures::paging::{FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB},
+    structures::paging::{
+        FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame,
+        Size4KiB, Translate, mapper::FlagUpdateError, mapper::MapToError, mapper::MapperFlush,
+        mapper::TranslateError, mapper::UnmapError,
+    },
 };
 
 use crate::memory::{
@@ -14,7 +18,6 @@ use crate::memory::{
 #[derive(Debug)]
 pub struct PageTableWrapped {
     pub frame: PhysFrame<Size4KiB>,
-    pub inner: OffsetPageTable<'static>,
 }
 
 impl Default for PageTableWrapped {
@@ -38,12 +41,6 @@ impl Default for PageTableWrapped {
 
         Self {
             frame: page_table_frame,
-            inner: unsafe {
-                OffsetPageTable::new(
-                    page_table,
-                    VirtAddr::new(*PHYSICAL_MEMORY_OFFSET.get().unwrap()),
-                )
-            },
         }
     }
 }
@@ -65,26 +62,78 @@ impl PageTableWrapped {
 
         Self {
             frame: page_table_frame,
-            inner: unsafe {
-                OffsetPageTable::new(
-                    page_table,
-                    VirtAddr::new(*PHYSICAL_MEMORY_OFFSET.get().unwrap()),
-                )
-            },
-        }
-    }
-}
-
-impl From<OffsetPageTable<'static>> for PageTableWrapped {
-    fn from(value: OffsetPageTable<'static>) -> Self {
-        Self {
-            frame: PhysFrame::containing_address(PhysAddr::new(0x114514)),
-            inner: value,
         }
     }
 }
 
 impl PageTableWrapped {
+    fn table_addr(&self) -> VirtAddr {
+        VirtAddr::new(apply_offset(self.frame.start_address().as_u64()))
+    }
+
+    fn level_4_table_mut(&mut self) -> &mut PageTable {
+        unsafe { &mut *self.table_addr().as_mut_ptr() }
+    }
+
+    fn with_mapper<R>(&mut self, f: impl FnOnce(&mut OffsetPageTable<'_>) -> R) -> R {
+        let page_table = self.level_4_table_mut();
+        let phys_offset = VirtAddr::new(*PHYSICAL_MEMORY_OFFSET.get().unwrap());
+        let mut mapper = unsafe { OffsetPageTable::new(page_table, phys_offset) };
+        f(&mut mapper)
+    }
+
+    pub fn translate(
+        &mut self,
+        addr: VirtAddr,
+    ) -> x86_64::structures::paging::mapper::TranslateResult {
+        self.with_mapper(|mapper| mapper.translate(addr))
+    }
+
+    pub fn translate_addr(&mut self, addr: VirtAddr) -> Option<PhysAddr> {
+        self.with_mapper(|mapper| mapper.translate_addr(addr))
+    }
+
+    pub fn translate_page(
+        &mut self,
+        page: Page<Size4KiB>,
+    ) -> Result<PhysFrame<Size4KiB>, TranslateError> {
+        self.with_mapper(|mapper| mapper.translate_page(page))
+    }
+
+    /// # Safety
+    ///
+    /// The caller must ensure that `page`, `frame`, and `flags` describe a valid mapping
+    /// operation for this page table and that `allocator` can safely provide any required
+    /// intermediate page-table frames.
+    pub unsafe fn map_to<A: FrameAllocator<Size4KiB> + ?Sized>(
+        &mut self,
+        page: Page<Size4KiB>,
+        frame: PhysFrame<Size4KiB>,
+        flags: PageTableFlags,
+        allocator: &mut A,
+    ) -> Result<MapperFlush<Size4KiB>, MapToError<Size4KiB>> {
+        self.with_mapper(|mapper| unsafe { mapper.map_to(page, frame, flags, allocator) })
+    }
+
+    pub fn unmap(
+        &mut self,
+        page: Page<Size4KiB>,
+    ) -> Result<(PhysFrame<Size4KiB>, MapperFlush<Size4KiB>), UnmapError> {
+        self.with_mapper(|mapper| mapper.unmap(page))
+    }
+
+    /// # Safety
+    ///
+    /// The caller must ensure that updating `page` with `flags` preserves all required page-table
+    /// invariants for this address space.
+    pub unsafe fn update_flags(
+        &mut self,
+        page: Page<Size4KiB>,
+        flags: PageTableFlags,
+    ) -> Result<MapperFlush<Size4KiB>, FlagUpdateError> {
+        self.with_mapper(|mapper| unsafe { mapper.update_flags(page, flags) })
+    }
+
     pub fn load(&mut self) {
         unsafe {
             Cr3::write(self.frame, Cr3Flags::empty());

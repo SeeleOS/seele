@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use x86_64::{
     VirtAddr,
-    structures::paging::{Mapper, Page, Size4KiB},
+    structures::paging::{Page, Size4KiB},
 };
 
 use crate::memory::addrspace::mem_area::{Data, MemoryArea};
@@ -53,7 +53,7 @@ impl AddrSpace {
             Page::containing_address(start),
             Page::containing_address(last_mapped_addr),
         ) {
-            if let Ok((_, flush)) = self.page_table.inner.unmap(page) {
+            if let Ok((_, flush)) = self.page_table.unmap(page) {
                 flush.flush();
             }
         }

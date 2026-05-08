@@ -1,8 +1,6 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use spin::Mutex;
-use x86_64::structures::paging::{
-    FrameAllocator, Mapper, Page, PageTableFlags, PhysFrame, Size4KiB, Translate,
-};
+use x86_64::structures::paging::{FrameAllocator, Page, PageTableFlags, PhysFrame, Size4KiB};
 
 use crate::{
     filesystem::object::mount_device_id_for_path,
@@ -45,7 +43,6 @@ impl AddrSpace {
 
         unsafe {
             self.page_table
-                .inner
                 .map_to(page, frame, flags, &mut *frame_allocator)
                 .unwrap()
                 .flush();
@@ -142,7 +139,6 @@ impl AddrSpace {
                     let current_page = page + i;
                     if self
                         .page_table
-                        .inner
                         .translate_addr(current_page.start_address())
                         .is_some()
                     {
@@ -181,7 +177,6 @@ impl AddrSpace {
 
                 first_frame.unwrap_or_else(|| {
                     self.page_table
-                        .inner
                         .translate_page(page)
                         .expect("file-backed cluster fault target page still unmapped")
                 })
@@ -256,7 +251,6 @@ impl AddrSpace {
 
         unsafe {
             self.page_table
-                .inner
                 .map_to(page, frame, area.flags, &mut *frame_allocator)
                 .unwrap()
                 .flush();

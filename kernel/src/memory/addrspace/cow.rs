@@ -5,8 +5,7 @@ use ext4plus::sync::Mutex;
 use x86_64::{
     VirtAddr,
     structures::paging::{
-        FrameAllocator, FrameDeallocator, Mapper, Page, PageTableFlags, PhysFrame, Translate,
-        mapper::TranslateResult,
+        FrameAllocator, FrameDeallocator, Page, PageTableFlags, PhysFrame, mapper::TranslateResult,
     },
 };
 
@@ -28,12 +27,12 @@ impl AddrSpace {
         let new_addr = apply_offset(new_frame.start_address().as_u64());
 
         let TranslateResult::Mapped { mut flags, .. } =
-            self.page_table.inner.translate(page.start_address())
+            self.page_table.translate(page.start_address())
         else {
             return;
         };
 
-        let (old_frame, flush) = self.page_table.inner.unmap(page).unwrap();
+        let (old_frame, flush) = self.page_table.unmap(page).unwrap();
         flush.flush();
 
         flags.remove(COW_FLAG);
@@ -47,7 +46,6 @@ impl AddrSpace {
             );
 
             self.page_table
-                .inner
                 .map_to(page, new_frame, flags, &mut *frame_allocator)
                 .unwrap()
                 .flush()

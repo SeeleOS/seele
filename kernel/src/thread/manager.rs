@@ -29,7 +29,6 @@ struct PendingThreadExit {
 #[derive(Default, Debug)]
 pub struct ThreadManager {
     pub threads: BTreeMap<ThreadID, ThreadRef>,
-    pub idle_thread: Option<ThreadRef>,
     pub ready_queue: VecDeque<ThreadRef>,
     pub zombies: Vec<ThreadRef>,
     pending_thread_exits: Vec<PendingThreadExit>,
@@ -37,9 +36,7 @@ pub struct ThreadManager {
 }
 
 impl ThreadManager {
-    pub fn init(&mut self, idle_thread: ThreadRef) {
-        self.idle_thread = Some(idle_thread);
-    }
+    pub fn init(&mut self) {}
 
     pub fn spawn(&mut self, thread: Thread) -> ThreadRef {
         let id = thread.id;
@@ -103,8 +100,9 @@ impl ThreadManager {
 
     pub fn kill_all_except(&mut self, thread: ThreadRef) {
         let threads = self
-            .idle_thread
-            .clone()
+            .threads
+            .get(&thread.lock().id)
+            .cloned()
             .unwrap_or_else(current_thread)
             .lock()
             .parent
