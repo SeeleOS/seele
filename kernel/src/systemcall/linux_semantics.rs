@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 69;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 66;
 
 macro_rules! syscall_coverage {
     (
@@ -169,6 +169,9 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Ftruncate => "filesystem_file_object_syscalls_follow_linux_rules",
         Fadvise64 => "filesystem_file_object_syscalls_follow_linux_rules",
         Fallocate => "filesystem_file_object_syscalls_follow_linux_rules",
+        Sendfile => "filesystem_file_object_syscalls_follow_linux_rules",
+        CopyFileRange => "filesystem_file_object_syscalls_follow_linux_rules",
+        Splice => "filesystem_file_object_syscalls_follow_linux_rules",
         Chown => "filesystem_file_metadata_syscalls_follow_linux_rules",
         Fchown => "filesystem_file_metadata_syscalls_follow_linux_rules",
         Fchownat => "filesystem_file_metadata_syscalls_follow_linux_rules",
@@ -252,7 +255,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Shmat,
     Shmctl,
     Pause,
-    Sendfile,
     Clone,
     Fork,
     Execve,
@@ -272,8 +274,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Umount2,
     ExitGroup,
     Bpf,
-    CopyFileRange,
-    Splice,
     PidfdSendSignal,
     OpenTree,
     MoveMount,

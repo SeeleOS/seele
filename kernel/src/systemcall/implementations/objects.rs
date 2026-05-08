@@ -165,40 +165,40 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
     Ok(bytes_written)
 }
 
-fn copy_between_objects(
-    input: ObjectRef,
-    output: ObjectRef,
-    mut remaining: usize,
-) -> SyscallResult {
-    let readable = input.as_readable()?;
-    let writable = output.as_writable()?;
-    let mut buffer = [0u8; COPY_CHUNK_SIZE];
-    let mut total = 0usize;
-
-    while remaining > 0 {
-        let chunk_len = remaining.min(buffer.len());
-        let read = readable.read(&mut buffer[..chunk_len])?;
-        if read == 0 {
-            break;
-        }
-
-        let mut written = 0usize;
-        while written < read {
-            let count = writable.write(&buffer[written..read])?;
-            if count == 0 {
-                return Err(SyscallError::BrokenPipe);
-            }
-            written += count;
-        }
-
-        total += read;
-        remaining -= read;
-        if read < chunk_len {
-            break;
-        }
+fn read_object_at_offset(object: &ObjectRef, buffer: &mut [u8], offset: i64) -> SyscallResult<usize> {
+    if offset < 0 {
+        return Err(SyscallError::InvalidArguments);
     }
 
-    Ok(total)
+    if let Ok(file) = object.clone().as_file_like() {
+        return Ok(file.read_at(buffer, offset as u64)?);
+    }
+
+    let seekable = object.clone().as_seekable()?;
+    let readable = object.clone().as_readable()?;
+    let current = seekable.clone().seek(0, Whence::Current)? as i64;
+    seekable.clone().seek(offset, Whence::Start)?;
+    let read = readable.read(buffer)?;
+    let _ = seekable.seek(current, Whence::Start);
+    Ok(read)
+}
+
+fn write_object_at_offset(object: &ObjectRef, buffer: &[u8], offset: i64) -> SyscallResult<usize> {
+    if offset < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    if let Ok(file) = object.clone().as_file_like() {
+        return Ok(file.write_at(buffer, offset as u64)?);
+    }
+
+    let seekable = object.clone().as_seekable()?;
+    let writable = object.clone().as_writable()?;
+    let current = seekable.clone().seek(0, Whence::Current)? as i64;
+    seekable.clone().seek(offset, Whence::Start)?;
+    let written = writable.write(buffer)?;
+    let _ = seekable.seek(current, Whence::Start);
+    Ok(written)
 }
 
 fn copy_between_objects_with_offsets(
@@ -210,28 +210,18 @@ fn copy_between_objects_with_offsets(
 ) -> SyscallResult {
     let readable = input.clone().as_readable()?;
     let writable = output.clone().as_writable()?;
-    let input_seekable = if input_offset.is_some() {
-        Some(input.as_seekable()?)
-    } else {
-        None
-    };
-    let output_seekable = if output_offset.is_some() {
-        Some(output.as_seekable()?)
-    } else {
-        None
-    };
     let mut buffer = [0u8; COPY_CHUNK_SIZE];
     let mut total = 0usize;
 
     while remaining > 0 {
         let chunk_len = remaining.min(buffer.len());
 
-        if let (Some(offset_ptr), Some(seekable)) = (input_offset, input_seekable.as_ref()) {
+        let read = if let Some(offset_ptr) = input_offset {
             let offset = user_safe::read(offset_ptr)?;
-            seekable.clone().seek(offset, Whence::Start)?;
-        }
-
-        let read = readable.read(&mut buffer[..chunk_len])?;
+            read_object_at_offset(&input, &mut buffer[..chunk_len], offset)?
+        } else {
+            readable.read(&mut buffer[..chunk_len])?
+        };
         if read == 0 {
             break;
         }
@@ -243,12 +233,12 @@ fn copy_between_objects_with_offsets(
 
         let mut written = 0usize;
         while written < read {
-            if let (Some(offset_ptr), Some(seekable)) = (output_offset, output_seekable.as_ref()) {
+            let count = if let Some(offset_ptr) = output_offset {
                 let offset = user_safe::read(offset_ptr)?;
-                seekable.clone().seek(offset, Whence::Start)?;
-            }
-
-            let count = writable.write(&buffer[written..read])?;
+                write_object_at_offset(&output, &buffer[written..read], offset)?
+            } else {
+                writable.write(&buffer[written..read])?
+            };
             if count == 0 {
                 return Err(SyscallError::BrokenPipe);
             }
@@ -484,11 +474,7 @@ define_syscall!(Sendfile, |out_fd: ObjectRef,
                            in_fd: ObjectRef,
                            offset: *mut i64,
                            count: usize| {
-    if !offset.is_null() {
-        return Err(SyscallError::OperationNotSupported);
-    }
-
-    copy_between_objects(in_fd, out_fd, count)
+    copy_between_objects_with_offsets(in_fd, (!offset.is_null()).then_some(offset), out_fd, None, count)
 });
 
 define_syscall!(CopyFileRange, |fd_in: ObjectRef,
@@ -497,14 +483,17 @@ define_syscall!(CopyFileRange, |fd_in: ObjectRef,
                                 off_out: *mut i64,
                                 len: usize,
                                 flags: u32| {
-    if !off_in.is_null() || !off_out.is_null() {
-        return Err(SyscallError::OperationNotSupported);
-    }
     if flags != 0 {
         return Err(SyscallError::InvalidArguments);
     }
 
-    copy_between_objects(fd_in, fd_out, len)
+    copy_between_objects_with_offsets(
+        fd_in,
+        (!off_in.is_null()).then_some(off_in),
+        fd_out,
+        (!off_out.is_null()).then_some(off_out),
+        len,
+    )
 });
 
 define_syscall!(Splice, |fd_in: ObjectRef,

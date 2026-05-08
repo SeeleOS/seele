@@ -34,11 +34,12 @@ use crate::{
             SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Setitimer, Sethostname, Setns,
             Setpgid, Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid,
             Settimeofday, Setuid, Setxattr, Setsockopt, Shutdown, Signalfd4, Socket, Socketpair,
-            Statfs, Statx, Symlink, SymlinkAt, Sync,
+            Sendfile, Statfs, Statx, Symlink, SymlinkAt, Sync,
             Sysinfo, Time, TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime,
             TimerfdCreate, TimerfdGettime, TimerfdSettime, Umask, Uname, Unlink, UnlinkAt,
             Unshare, Utimensat, Vhangup, Wait4, Waitid, Write, Writev, Getsockname, Getpeername,
-            Getsockopt, Connect, Recvfrom, Recvmsg, Sendmmsg, Sendmsg, Sendto, clear_fdset,
+            Getsockopt, Connect, CopyFileRange, Recvfrom, Recvmsg, Sendmmsg, Sendmsg, Sendto,
+            Splice, clear_fdset,
             fdset_contains, fdset_insert,
             fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
             timeout_to_deadline, translate_ready_events,
@@ -3615,6 +3616,7 @@ fn filesystem_getdents_syscalls_follow_linux_rules() {
 fn filesystem_file_object_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const O_APPEND: u64 = 0o2_000;
+    const SEEK_CUR: u64 = 1;
     const LOCK_SH: u64 = 1;
     const LOCK_EX: u64 = 2;
     const LOCK_NB: u64 = 4;
@@ -3672,6 +3674,18 @@ fn filesystem_file_object_syscalls_follow_linux_rules() {
         ])
         .call::<OpenAt>(),
     );
+    write_user_cstr(user_page + 192, b"/tmp/syscall-file-object-test/out\0");
+    let copy_out_fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page + 192,
+            OpenFlags::empty().bits() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
 
     get_object_current_process(fd as u64)
         .unwrap()
@@ -3679,7 +3693,7 @@ fn filesystem_file_object_syscalls_follow_linux_rules() {
         .unwrap()
         .truncate(0)
         .unwrap();
-    get_object_current_process(out_fd as u64)
+    get_object_current_process(copy_out_fd as u64)
         .unwrap()
         .as_file_like()
         .unwrap()
@@ -3874,6 +3888,199 @@ fn filesystem_file_object_syscalls_follow_linux_rules() {
         0,
     );
 
+    write_user_value(user_page + 704, b"abcdef");
+    get_object_current_process(fd as u64)
+        .unwrap()
+        .as_file_like()
+        .unwrap()
+        .truncate(0)
+        .unwrap();
+    get_object_current_process(out_fd as u64)
+        .unwrap()
+        .as_file_like()
+        .unwrap()
+        .truncate(0)
+        .unwrap();
+    expect_ok(
+        SyscallArgs::new([fd as u64, user_page + 704, 6, 0, 0, 0]).call::<Write>(),
+        6,
+    );
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Lseek>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([copy_out_fd as u64, 0, 0, 0, 0, 0]).call::<Lseek>(),
+        0,
+    );
+    assert_eq!(
+        SyscallArgs::new([copy_out_fd as u64, fd as u64, 0, 3, 0, 0]).call::<Sendfile>(),
+        Ok(3),
+        "sendfile result",
+    );
+    expect_ok(
+        SyscallArgs::new([copy_out_fd as u64, 0, 0, 0, 0, 0]).call::<Lseek>(),
+        0,
+    );
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer((user_page + 576) as *mut u8, &[0; 6])
+        .unwrap();
+    assert_eq!(
+        SyscallArgs::new([copy_out_fd as u64, user_page + 576, 6, 0, 0, 0]).call::<Read>(),
+        Ok(3),
+        "sendfile readback",
+    );
+    assert_user_bytes(user_page + 576, b"abc");
+    write_user_value(user_page + 608, &1i64);
+    assert_eq!(
+        SyscallArgs::new([copy_out_fd as u64, fd as u64, user_page + 608, 2, 0, 0]).call::<Sendfile>(),
+        Ok(2),
+        "sendfile offset result",
+    );
+    assert_eq!(read_user_value::<i64>(user_page + 608), 3);
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, SEEK_CUR, 0, 0, 0]).call::<Lseek>(),
+        3,
+    );
+
+    get_object_current_process(fd as u64)
+        .unwrap()
+        .as_file_like()
+        .unwrap()
+        .truncate(0)
+        .unwrap();
+    get_object_current_process(copy_out_fd as u64)
+        .unwrap()
+        .as_file_like()
+        .unwrap()
+        .truncate(0)
+        .unwrap();
+    let pipe_page = user_page + 800;
+    expect_ok(SyscallArgs::new([pipe_page, 0, 0, 0, 0, 0]).call::<Pipe>(), 0);
+    let pipe_fds = read_user_value::<[i32; 2]>(pipe_page);
+    let pipe_read_fd = pipe_fds[0] as usize;
+    let pipe_write_fd = pipe_fds[1] as usize;
+    expect_ok(
+        SyscallArgs::new([fd as u64, user_page + 704, 6, 0, 0, 0]).call::<Write>(),
+        6,
+    );
+    write_user_value(user_page + 616, &1i64);
+    assert_eq!(
+        SyscallArgs::new([
+            fd as u64,
+            user_page + 616,
+            pipe_write_fd as u64,
+            0,
+            3,
+            0,
+        ])
+        .call::<Splice>(),
+        Ok(3),
+        "splice result",
+    );
+    assert_eq!(read_user_value::<i64>(user_page + 616), 4);
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, SEEK_CUR, 0, 0, 0]).call::<Lseek>(),
+        6,
+    );
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer((user_page + 632) as *mut u8, &[0; 6])
+        .unwrap();
+    assert_eq!(
+        SyscallArgs::new([pipe_read_fd as u64, user_page + 632, 6, 0, 0, 0]).call::<Read>(),
+        Ok(3),
+        "splice readback",
+    );
+    assert_user_bytes(user_page + 632, b"bcd");
+    expect_errno(
+        SyscallArgs::new([fd as u64, user_page + 616, pipe_write_fd as u64, 0, 1, 1])
+            .call::<Splice>(),
+        SyscallError::InvalidArguments,
+    );
+
+    get_object_current_process(fd as u64)
+        .unwrap()
+        .as_file_like()
+        .unwrap()
+        .truncate(0)
+        .unwrap();
+    get_object_current_process(copy_out_fd as u64)
+        .unwrap()
+        .as_file_like()
+        .unwrap()
+        .truncate(0)
+        .unwrap();
+    expect_ok(
+        SyscallArgs::new([fd as u64, user_page + 704, 6, 0, 0, 0]).call::<Write>(),
+        6,
+    );
+    write_user_value(user_page + 640, &2i64);
+    write_user_value(user_page + 648, &1i64);
+    assert_eq!(
+        SyscallArgs::new([
+            fd as u64,
+            user_page + 640,
+            copy_out_fd as u64,
+            user_page + 648,
+            2,
+            0,
+        ])
+        .call::<CopyFileRange>(),
+        Ok(2),
+        "copy_file_range result",
+    );
+    assert_eq!(read_user_value::<i64>(user_page + 640), 4);
+    assert_eq!(read_user_value::<i64>(user_page + 648), 3);
+    expect_ok(
+        SyscallArgs::new([copy_out_fd as u64, 0, 0, 0, 0, 0]).call::<Lseek>(),
+        0,
+    );
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer((user_page + 656) as *mut u8, &[0; 6])
+        .unwrap();
+    assert_eq!(
+        SyscallArgs::new([copy_out_fd as u64, user_page + 656, 6, 0, 0, 0]).call::<Read>(),
+        Ok(3),
+        "copy_file_range readback",
+    );
+    assert_user_bytes(user_page + 656, b"\0cd");
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, SEEK_CUR, 0, 0, 0]).call::<Lseek>(),
+        6,
+    );
+    expect_ok(
+        SyscallArgs::new([copy_out_fd as u64, 0, 0, 0, 0, 0]).call::<Lseek>(),
+        0,
+    );
+    write_user_value(user_page + 640, &0i64);
+    assert_eq!(
+        SyscallArgs::new([fd as u64, user_page + 640, copy_out_fd as u64, 0, 1, 0]).call::<CopyFileRange>(),
+        Ok(1),
+        "copy_file_range mixed offset result",
+    );
+    assert_eq!(read_user_value::<i64>(user_page + 640), 1);
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, SEEK_CUR, 0, 0, 0]).call::<Lseek>(),
+        6,
+    );
+    expect_ok(
+        SyscallArgs::new([copy_out_fd as u64, 0, SEEK_CUR, 0, 0, 0]).call::<Lseek>(),
+        1,
+    );
+    expect_errno(
+        SyscallArgs::new([fd as u64, 0, copy_out_fd as u64, 0, 1, 1]).call::<CopyFileRange>(),
+        SyscallError::InvalidArguments,
+    );
+
+    close_test_fd(pipe_write_fd);
+    close_test_fd(pipe_read_fd);
+    close_test_fd(copy_out_fd);
     close_test_fd(out_fd);
     close_test_fd(fd);
     for path in cleanup_paths {
