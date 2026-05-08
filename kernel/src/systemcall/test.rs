@@ -33,10 +33,11 @@ use crate::{
             SchedSetaffinity, SchedSetparam, SchedYield, SelectTimespec, SetRobustList,
             SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Setitimer, Sethostname, Setns,
             Setpgid, Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid,
-            Settimeofday, Setuid, Setxattr, Signalfd4, Statfs, Statx, Symlink, SymlinkAt, Sync,
+            Settimeofday, Setuid, Setxattr, Shutdown, Signalfd4, Socket, Socketpair, Statfs,
+            Statx, Symlink, SymlinkAt, Sync,
             Sysinfo, Time, TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime,
             TimerfdCreate, TimerfdGettime, TimerfdSettime, Umask, Uname, Unlink, UnlinkAt,
-            Unshare, Utimensat, Vhangup, Wait4, Waitid, Write, Writev, clear_fdset,
+            Unshare, Utimensat, Vhangup, Wait4, Waitid, Write, Writev, Getsockname, Getpeername, clear_fdset,
             fdset_contains, fdset_insert,
             fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
             timeout_to_deadline, translate_ready_events,
@@ -149,6 +150,31 @@ struct TestLinuxSignalfdSiginfo {
     ssi_call_addr: u64,
     ssi_arch: u32,
     __pad: [u8; 28],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TestLinuxSockAddrUn {
+    sun_family: u16,
+    sun_path: [u8; 108],
+}
+
+impl Default for TestLinuxSockAddrUn {
+    fn default() -> Self {
+        Self {
+            sun_family: 0,
+            sun_path: [0; 108],
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+struct TestLinuxSockAddrIn {
+    sin_family: u16,
+    sin_port: u16,
+    sin_addr: [u8; 4],
+    sin_zero: [u8; 8],
 }
 
 crate::test!(
@@ -385,6 +411,11 @@ crate::test!(
     signalfd_syscalls,
     "signalfd syscalls follow linux rules",
     signalfd_syscalls_follow_linux_rules
+);
+crate::test!(
+    socket_name_and_shutdown_syscalls,
+    "socketpair shutdown getsockname and getpeername follow linux rules",
+    socket_name_and_shutdown_syscalls_follow_linux_rules
 );
 crate::test!(
     namespace_and_kcmp_syscalls,
@@ -4925,6 +4956,143 @@ fn signalfd_syscalls_follow_linux_rules() {
     );
 
     close_test_fd(signalfd);
+}
+
+fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
+    const AF_INET: u64 = 2;
+    const AF_UNIX: u64 = 1;
+    const SOCK_STREAM: u64 = 1;
+    const SOCK_DGRAM: u64 = 2;
+    const SOCK_NONBLOCK: u64 = 0o0004000;
+    const SOCK_CLOEXEC: u64 = 0o2000000;
+    const SHUT_RD: u64 = 0;
+    const SHUT_WR: u64 = 1;
+    const SHUT_RDWR: u64 = 2;
+
+    assert_linux_layout::<TestLinuxSockAddrUn>(110, 2);
+    assert_linux_layout::<TestLinuxSockAddrIn>(16, 2);
+
+    let page = allocate_user_test_page();
+
+    let socketpair_fds_page = page;
+    expect_ok(
+        SyscallArgs::new([
+            AF_UNIX,
+            SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+            0,
+            socketpair_fds_page,
+            0,
+            0,
+        ])
+        .call::<Socketpair>(),
+        0,
+    );
+    let [left_fd, right_fd] = read_user_value::<[i32; 2]>(socketpair_fds_page);
+    let left_fd = usize::try_from(left_fd).expect("socketpair left fd should be non-negative");
+    let right_fd = usize::try_from(right_fd).expect("socketpair right fd should be non-negative");
+    assert_fd_flags(left_fd, FdFlags::CLOEXEC);
+    assert_fd_flags(right_fd, FdFlags::CLOEXEC);
+    assert_object_flags(left_fd, FileFlags::NONBLOCK);
+    assert_object_flags(right_fd, FileFlags::NONBLOCK);
+
+    write_user_value(page + 64, &111u32);
+    expect_ok(
+        SyscallArgs::new([left_fd as u64, page + 128, page + 64, 0, 0, 0]).call::<Getsockname>(),
+        0,
+    );
+    assert_eq!(read_user_value::<u32>(page + 64), 2);
+    let local_un = read_user_value::<TestLinuxSockAddrUn>(page + 128);
+    assert_eq!(local_un.sun_family, AF_UNIX as u16);
+    assert!(local_un.sun_path.iter().all(|&byte| byte == 0));
+
+    write_user_value(page + 80, &111u32);
+    expect_ok(
+        SyscallArgs::new([left_fd as u64, page + 256, page + 80, 0, 0, 0]).call::<Getpeername>(),
+        0,
+    );
+    assert_eq!(read_user_value::<u32>(page + 80), 2);
+    let peer_un = read_user_value::<TestLinuxSockAddrUn>(page + 256);
+    assert_eq!(peer_un.sun_family, AF_UNIX as u16);
+    assert!(peer_un.sun_path.iter().all(|&byte| byte == 0));
+
+    write_user_value(page + 96, &1u32);
+    expect_ok(
+        SyscallArgs::new([left_fd as u64, page + 384, page + 96, 0, 0, 0]).call::<Getpeername>(),
+        0,
+    );
+    assert_eq!(read_user_value::<u32>(page + 96), 2);
+    assert_user_bytes(page + 384, &[AF_UNIX as u8]);
+
+    expect_errno(
+        SyscallArgs::new([left_fd as u64, page + 384, 0, 0, 0, 0]).call::<Getsockname>(),
+        SyscallError::BadAddress,
+    );
+    write_user_value(page + 96, &4u32);
+    expect_errno(
+        SyscallArgs::new([left_fd as u64, 0, page + 96, 0, 0, 0]).call::<Getsockname>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([left_fd as u64, page + 384, page + 96, 99, 0, 0]).call::<Shutdown>(),
+        SyscallError::InvalidArguments,
+    );
+
+    expect_ok(
+        SyscallArgs::new([left_fd as u64, SHUT_RD, 0, 0, 0, 0]).call::<Shutdown>(),
+        0,
+    );
+    write_user_value(page + 512, b"x");
+    expect_errno(
+        SyscallArgs::new([right_fd as u64, page + 512, 1, 0, 0, 0]).call::<Write>(),
+        SyscallError::BrokenPipe,
+    );
+    expect_ok(
+        SyscallArgs::new([right_fd as u64, SHUT_WR, 0, 0, 0, 0]).call::<Shutdown>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([right_fd as u64, SHUT_RDWR, 0, 0, 0, 0]).call::<Shutdown>(),
+        0,
+    );
+
+    expect_errno(
+        SyscallArgs::new([AF_INET, SOCK_STREAM, 0, socketpair_fds_page, 0, 0]).call::<Socketpair>(),
+        SyscallError::AddressFamilyNotSupported,
+    );
+    expect_errno(
+        SyscallArgs::new([AF_UNIX, SOCK_STREAM, 1, socketpair_fds_page, 0, 0]).call::<Socketpair>(),
+        SyscallError::ProtocolNotSupported,
+    );
+    expect_errno(
+        SyscallArgs::new([AF_UNIX, SOCK_STREAM, 0, 0, 0, 0]).call::<Socketpair>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([AF_UNIX, 7, 0, socketpair_fds_page, 0, 0]).call::<Socketpair>(),
+        SyscallError::ProtocolNotSupported,
+    );
+
+    let inet_socket = expect_fd(SyscallArgs::new([AF_INET, SOCK_DGRAM, 0, 0, 0, 0]).call::<Socket>());
+    write_user_value(page + 96, &111u32);
+    expect_ok(
+        SyscallArgs::new([inet_socket as u64, page + 640, page + 96, 0, 0, 0]).call::<Getsockname>(),
+        0,
+    );
+    assert_eq!(read_user_value::<u32>(page + 96), 16);
+    let inet_name = read_user_value::<TestLinuxSockAddrIn>(page + 640);
+    assert_eq!(inet_name.sin_family, AF_INET as u16);
+    assert_eq!(inet_name.sin_port, 0);
+    assert_eq!(inet_name.sin_addr, [0, 0, 0, 0]);
+    assert_eq!(inet_name.sin_zero, [0; 8]);
+
+    expect_errno(
+        SyscallArgs::new([inet_socket as u64, page + 768, page + 96, 0, 0, 0]).call::<Getpeername>(),
+        SyscallError::NotConnected,
+    );
+
+    close_test_fd(inet_socket);
+    close_test_fd(right_fd);
+    close_test_fd(left_fd);
 }
 
 fn namespace_and_kcmp_syscalls_follow_linux_rules() {

@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 86;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 82;
 
 macro_rules! syscall_coverage {
     (
@@ -216,6 +216,10 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         TimerGettime => "posix_timer_syscalls_follow_linux_rules",
         TimerGetoverrun => "posix_timer_syscalls_follow_linux_rules",
         TimerDelete => "posix_timer_syscalls_follow_linux_rules",
+        Shutdown => "socket_name_and_shutdown_syscalls_follow_linux_rules",
+        Getsockname => "socket_name_and_shutdown_syscalls_follow_linux_rules",
+        Getpeername => "socket_name_and_shutdown_syscalls_follow_linux_rules",
+        Socketpair => "socket_name_and_shutdown_syscalls_follow_linux_rules",
     }
     gap {
     Poll,
@@ -245,12 +249,8 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Sendto,
     Recvfrom,
     Recvmsg,
-    Shutdown,
     Bind,
     Listen,
-    Getsockname,
-    Getpeername,
-    Socketpair,
     Setsockopt,
     Getsockopt,
     Clone,

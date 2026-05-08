@@ -363,7 +363,7 @@ fn write_socket_name(
         return Err(SyscallError::BadAddress);
     }
 
-    let requested_len = unsafe { *address_len_ptr as usize };
+    let requested_len = user_safe::read(address_len_ptr)? as usize;
     let copy_len = requested_len.min(name.len());
     if copy_len > 0 && address.is_null() {
         return Err(SyscallError::BadAddress);
@@ -605,7 +605,7 @@ define_syscall!(
                         nl_pid: source.pid,
                         nl_groups: source.groups,
                     };
-                    let requested_len = unsafe { *address_len_ptr as usize };
+                    let requested_len = user_safe::read(address_len_ptr)? as usize;
                     let name_bytes = unsafe {
                         core::slice::from_raw_parts(
                             (&name as *const LinuxSockAddrNl).cast::<u8>(),
@@ -891,7 +891,7 @@ define_syscall!(
             return Err(SyscallError::BadAddress);
         }
 
-        let option_len = unsafe { *option_len_ptr as usize };
+        let option_len = user_safe::read(option_len_ptr)? as usize;
         let value = socket
             .as_socket_like()?
             .getsockopt(level as u64, option_name as u64, option_len)
