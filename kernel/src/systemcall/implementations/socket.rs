@@ -377,8 +377,11 @@ fn write_socket_name(
 }
 
 fn socket_address_bytes(address: *const u8, address_len: u32) -> Result<Vec<u8>, SyscallError> {
-    if address.is_null() || address_len < 2 {
+    if address.is_null() {
         return Err(SyscallError::BadAddress);
+    }
+    if address_len < 2 {
+        return Err(SyscallError::InvalidArguments);
     }
     user_safe::read_buffer(address, address_len as usize)
 }

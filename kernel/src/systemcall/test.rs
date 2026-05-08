@@ -15,7 +15,7 @@ use crate::{
     systemcall::{
         arg_types::SyscallArg,
         implementations::{
-            Access, Alarm, ArchPrctl, Capget, Capset, Chdir, Chroot, ClockGetres, ClockGettime,
+            Accept4, Access, Alarm, ArchPrctl, Bind, Capget, Capset, Chdir, Chroot, ClockGetres, ClockGettime,
             ClockNanosleep, ClockSettime, Close, CloseRange, Dup, Dup2, Dup3, EpollCreate1,
             EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Eventfd2, Faccessat,
             Faccessat2, Fadvise64, Fallocate, Fchdir, Fchmod, Fchmodat, Fchown, Fchownat, Fcntl,
@@ -23,7 +23,7 @@ use crate::{
             Fsync, Ftruncate, Getcwd, Getegid, Geteuid, Getgid, Getgroups, Getpgid, Getpgrp,
             Getpid, Getppid, Getpriority, Getrandom, Getresgid, Getresuid, Getrusage, Getsid,
             Gettid, Gettimeofday, Getuid, Getxattr, InotifyAddWatch, InotifyInit, InotifyInit1,
-            InotifyRmWatch, Ioperm, Iopl, IoprioGet, IoprioSet, Kcmp, Lgetxattr, Link, LinkAt,
+            InotifyRmWatch, Ioperm, Iopl, IoprioGet, IoprioSet, Kcmp, Lgetxattr, Link, LinkAt, Listen,
             Listxattr, Llistxattr, Lremovexattr, Lseek, Lsetxattr, Madvise, MemfdCreate, Mkdir,
             MkdirAt, Mknodat, NameToHandleAt, Nanosleep, Newfstatat, Open, OpenAt, OpenFlags,
             PidfdOpen, Pipe, Pipe2, Poll, PollEvents, PollTimespec, Ppoll, Prctl, Pread64,
@@ -38,7 +38,7 @@ use crate::{
             Sysinfo, Time, TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime,
             TimerfdCreate, TimerfdGettime, TimerfdSettime, Umask, Uname, Unlink, UnlinkAt,
             Unshare, Utimensat, Vhangup, Wait4, Waitid, Write, Writev, Getsockname, Getpeername,
-            Getsockopt, clear_fdset,
+            Getsockopt, Connect, clear_fdset,
             fdset_contains, fdset_insert,
             fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
             timeout_to_deadline, translate_ready_events,
@@ -417,6 +417,11 @@ crate::test!(
     socket_name_and_shutdown_syscalls,
     "socketpair shutdown getsockname and getpeername follow linux rules",
     socket_name_and_shutdown_syscalls_follow_linux_rules
+);
+crate::test!(
+    socket_bind_connect_accept_syscalls,
+    "bind listen connect and accept4 follow linux socket rules",
+    socket_bind_connect_accept_syscalls_follow_linux_rules
 );
 crate::test!(
     namespace_and_kcmp_syscalls,
@@ -5302,6 +5307,148 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     close_test_fd(unix_socket);
     close_test_fd(right_fd);
     close_test_fd(left_fd);
+}
+
+fn socket_bind_connect_accept_syscalls_follow_linux_rules() {
+    const AF_INET: u64 = 2;
+    const AF_UNIX: u64 = 1;
+    const SOCK_STREAM: u64 = 1;
+    const SOCK_DGRAM: u64 = 2;
+    const SOCK_NONBLOCK: u64 = 0o0004000;
+    const SOCK_CLOEXEC: u64 = 0o2000000;
+
+    assert_linux_layout::<TestLinuxSockAddrUn>(110, 2);
+    assert_linux_layout::<TestLinuxSockAddrIn>(16, 2);
+
+    let page = allocate_user_test_page();
+    let socket_path = b"/tmp/accept4-linux.sock\0";
+    let missing_socket_path = b"/tmp/accept4-missing.sock\0";
+    write_user_value(page, socket_path);
+    write_user_value(page + 384, missing_socket_path);
+
+    let mut unix_addr = TestLinuxSockAddrUn::default();
+    unix_addr.sun_family = AF_UNIX as u16;
+    unix_addr.sun_path[..socket_path.len()].copy_from_slice(socket_path);
+    write_user_value(page + 128, &unix_addr);
+    let mut missing_unix_addr = TestLinuxSockAddrUn::default();
+    missing_unix_addr.sun_family = AF_UNIX as u16;
+    missing_unix_addr.sun_path[..missing_socket_path.len()].copy_from_slice(missing_socket_path);
+    write_user_value(page + 640, &missing_unix_addr);
+
+    let server = expect_fd(SyscallArgs::new([AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, 0, 0, 0]).call::<Socket>());
+    expect_ok(
+        SyscallArgs::new([server as u64, page + 128, 110, 0, 0, 0]).call::<Bind>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([server as u64, page + 128, 110, 0, 0, 0]).call::<Bind>(),
+        SyscallError::InvalidArguments,
+    );
+    let occupied = expect_fd(SyscallArgs::new([AF_UNIX, SOCK_STREAM, 0, 0, 0, 0]).call::<Socket>());
+    expect_errno(
+        SyscallArgs::new([occupied as u64, page + 128, 110, 0, 0, 0]).call::<Bind>(),
+        SyscallError::AddressInUse,
+    );
+    expect_ok(
+        SyscallArgs::new([server as u64, 0, 0, 0, 0, 0]).call::<Listen>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([server as u64, page + 256, page + 264, SOCK_NONBLOCK, 0, 0]).call::<Accept4>(),
+        SyscallError::TryAgain,
+    );
+
+    let client = expect_fd(SyscallArgs::new([AF_UNIX, SOCK_STREAM, 0, 0, 0, 0]).call::<Socket>());
+    expect_ok(
+        SyscallArgs::new([client as u64, page + 128, 110, 0, 0, 0]).call::<Connect>(),
+        0,
+    );
+
+    write_user_value(page + 264, &2u32);
+    let accepted = expect_fd(
+        SyscallArgs::new([
+            server as u64,
+            page + 256,
+            page + 264,
+            SOCK_NONBLOCK | SOCK_CLOEXEC,
+            0,
+            0,
+        ])
+        .call::<Accept4>(),
+    );
+    assert_fd_flags(accepted, FdFlags::CLOEXEC);
+    assert_object_flags(accepted, FileFlags::NONBLOCK);
+    assert_eq!(read_user_value::<u32>(page + 264), 2);
+    let peer = read_user_value::<TestLinuxSockAddrUn>(page + 256);
+    assert_eq!(peer.sun_family, AF_UNIX as u16);
+
+    let rebound = expect_fd(SyscallArgs::new([AF_UNIX, SOCK_STREAM, 0, 0, 0, 0]).call::<Socket>());
+    expect_errno(
+        SyscallArgs::new([rebound as u64, page + 128, 1, 0, 0, 0]).call::<Bind>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([rebound as u64, 0, 110, 0, 0, 0]).call::<Bind>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([rebound as u64, 0, 0, 0, 0, 0]).call::<Connect>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([rebound as u64, page + 640, 110, 0, 0, 0]).call::<Connect>(),
+        SyscallError::ConnectionRefused,
+    );
+
+    let unix_dgram = expect_fd(SyscallArgs::new([AF_UNIX, SOCK_DGRAM, 0, 0, 0, 0]).call::<Socket>());
+    expect_errno(
+        SyscallArgs::new([unix_dgram as u64, 1, 0, 0, 0, 0]).call::<Listen>(),
+        SyscallError::InvalidArguments,
+    );
+
+    let inet_stream = expect_fd(SyscallArgs::new([AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0, 0, 0, 0]).call::<Socket>());
+    let inet_any = TestLinuxSockAddrIn {
+        sin_family: AF_INET as u16,
+        sin_port: 0,
+        sin_addr: [0, 0, 0, 0],
+        sin_zero: [0; 8],
+    };
+    write_user_value(page + 512, &inet_any);
+    expect_errno(
+        SyscallArgs::new([inet_stream as u64, page + 512, 16, 0, 0, 0]).call::<Bind>(),
+        SyscallError::AddressNotAvailable,
+    );
+    expect_errno(
+        SyscallArgs::new([inet_stream as u64, 1, 0, 0, 0, 0]).call::<Listen>(),
+        SyscallError::AddressNotAvailable,
+    );
+    expect_errno(
+        SyscallArgs::new([inet_stream as u64, page + 512, 16, 0, 0, 0]).call::<Connect>(),
+        SyscallError::ConnectionRefused,
+    );
+
+    let inet_dgram = expect_fd(SyscallArgs::new([AF_INET, SOCK_DGRAM, 0, 0, 0, 0]).call::<Socket>());
+    expect_errno(
+        SyscallArgs::new([inet_dgram as u64, 1, 0, 0, 0, 0]).call::<Listen>(),
+        SyscallError::OperationNotSupported,
+    );
+    expect_errno(
+        SyscallArgs::new([inet_dgram as u64, page + 512, 16, 0, 0, 0]).call::<Connect>(),
+        SyscallError::ConnectionRefused,
+    );
+    expect_errno(
+        SyscallArgs::new([inet_dgram as u64, page + 256, page + 264, 0, 0, 0]).call::<Accept4>(),
+        SyscallError::OperationNotSupported,
+    );
+
+    close_test_fd(inet_dgram);
+    close_test_fd(inet_stream);
+    close_test_fd(unix_dgram);
+    close_test_fd(rebound);
+    close_test_fd(occupied);
+    close_test_fd(accepted);
+    close_test_fd(client);
+    close_test_fd(server);
 }
 
 fn namespace_and_kcmp_syscalls_follow_linux_rules() {
