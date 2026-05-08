@@ -264,8 +264,11 @@ define_syscall!(
         }
 
         let signal = Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?;
-        let new_action_decoded =
-            unsafe { (!new_action.is_null()).then(|| decode_sigaction(*new_action)) };
+        let new_action_decoded = if new_action.is_null() {
+            None
+        } else {
+            Some(decode_sigaction(user_safe::read(new_action)?))
+        };
         let old_encoded = {
             let process = get_current_process();
             let mut process = process.lock();
@@ -292,49 +295,42 @@ define_syscall!(
     |new_stack: *const LinuxStack, old_stack: *mut LinuxStack| {
         let mut state = SIGALTSTACK_STATE.lock();
 
-        unsafe {
-            if !old_stack.is_null() {
-                user_safe::write(old_stack, &*state)?;
-            }
-
-            if new_stack.is_null() {
-                return Ok(0);
-            }
-
-            let new_stack = &*new_stack;
-            let new_flags = StackFlags::from_bits(new_stack.ss_flags).ok_or_else(|| {
-                crate::s_println!(
-                    "unsupported sigaltstack flags raw={:#x}",
-                    new_stack.ss_flags
-                );
-                SyscallError::InvalidArguments
-            })?;
-            if new_flags.intersects(StackFlags::SS_ONSTACK) {
-                return Err(SyscallError::InvalidArguments);
-            }
-
-            if new_flags.contains(StackFlags::SS_DISABLE) {
-                *state = LinuxStack {
-                    ss_sp: 0,
-                    ss_flags: StackFlags::SS_DISABLE.bits(),
-                    ss_size: 0,
-                };
-                return Ok(0);
-            }
-
-            if new_stack.ss_sp == 0 {
-                return Err(SyscallError::InvalidArguments);
-            }
-            if new_stack.ss_size < MINSIGSTKSZ {
-                return Err(SyscallError::NoMemory);
-            }
-
-            *state = LinuxStack {
-                ss_sp: new_stack.ss_sp,
-                ss_flags: new_flags.bits(),
-                ss_size: new_stack.ss_size,
-            };
+        if !old_stack.is_null() {
+            user_safe::write(old_stack, &*state)?;
         }
+
+        if new_stack.is_null() {
+            return Ok(0);
+        }
+
+        let new_stack = user_safe::read(new_stack)?;
+        let new_flags =
+            StackFlags::from_bits(new_stack.ss_flags).ok_or(SyscallError::InvalidArguments)?;
+        if new_flags.intersects(StackFlags::SS_ONSTACK) {
+            return Err(SyscallError::InvalidArguments);
+        }
+
+        if new_flags.contains(StackFlags::SS_DISABLE) {
+            *state = LinuxStack {
+                ss_sp: 0,
+                ss_flags: StackFlags::SS_DISABLE.bits(),
+                ss_size: 0,
+            };
+            return Ok(0)
+        }
+
+        if new_stack.ss_sp == 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if new_stack.ss_size < MINSIGSTKSZ {
+            return Err(SyscallError::NoMemory);
+        }
+
+        *state = LinuxStack {
+            ss_sp: new_stack.ss_sp,
+            ss_flags: new_flags.bits(),
+            ss_size: new_stack.ss_size,
+        };
 
         Ok(0)
     }

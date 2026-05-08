@@ -34,7 +34,8 @@ use crate::{
             SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Setitimer, Sethostname, Setns,
             Setpgid, Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid,
             Settimeofday, Setuid, Setxattr, Setsockopt, Shutdown, Signalfd4, Socket, Socketpair,
-            Sendfile, Statfs, Statx, Symlink, SymlinkAt, Sync, Pause, Kill,
+            Sendfile, Statfs, Statx, Symlink, SymlinkAt, Sync, Pause, Kill, Sigaltstack,
+            RtSigaction, RtSigqueueinfo, RtSigtimedwait,
             Sysinfo, Time, TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime,
             TimerfdCreate, TimerfdGettime, TimerfdSettime, Umask, Uname, Unlink, UnlinkAt,
             Unshare, Utimensat, Vhangup, Wait4, Waitid, Write, Writev, Getsockname, Getpeername,
@@ -770,6 +771,23 @@ struct TestUtsName {
 struct TestLinuxTimespec {
     tv_sec: i64,
     tv_nsec: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxStack {
+    ss_sp: u64,
+    ss_flags: i32,
+    ss_size: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxSigAction {
+    handler: usize,
+    flags: u64,
+    restorer: usize,
+    mask: u64,
 }
 
 #[repr(C)]
@@ -6238,8 +6256,9 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
     let current_uid = get_current_process().lock().real_uid;
     let mut queued_siginfo = SigInfo::for_process_signal(Signal::SIGUSR1, current_pid, current_uid);
     queued_siginfo.si_code = SI_QUEUE;
+    write_user_value(info_page + 128, &queued_siginfo);
     expect_ok(
-        SyscallArgs::new([child_pidfd as u64, Signal::SIGUSR1 as u64, &queued_siginfo as *const _ as u64, 0, 0, 0])
+        SyscallArgs::new([child_pidfd as u64, Signal::SIGUSR1 as u64, info_page + 128, 0, 0, 0])
             .call::<PidfdSendSignal>(),
         0,
     );
@@ -6258,12 +6277,12 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
         0,
     );
     expect_errno(
-        SyscallArgs::new([child_pidfd as u64, 0, &queued_siginfo as *const _ as u64, 0, 0, 0])
+        SyscallArgs::new([child_pidfd as u64, 0, info_page + 128, 0, 0, 0])
             .call::<PidfdSendSignal>(),
         SyscallError::InvalidArguments,
     );
     expect_errno(
-        SyscallArgs::new([child_pidfd as u64, Signal::SIGUSR1 as u64, &queued_siginfo as *const _ as u64, 1, 0, 0])
+        SyscallArgs::new([child_pidfd as u64, Signal::SIGUSR1 as u64, info_page + 128, 1, 0, 0])
             .call::<PidfdSendSignal>(),
         SyscallError::InvalidArguments,
     );
@@ -6465,6 +6484,14 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
     const SIG_BLOCK: u64 = 0;
     const SIG_UNBLOCK: u64 = 1;
     const SIG_SETMASK: u64 = 2;
+    const SS_ONSTACK: i32 = 1;
+    const SS_DISABLE: i32 = 2;
+    const SA_SIGINFO: u64 = 0x0000_0004;
+    const SI_QUEUE: i32 = -1;
+    const MINSIGSTKSZ: usize = 2048;
+
+    assert_linux_layout::<TestLinuxStack>(24, 8);
+    assert_linux_layout::<TestLinuxSigAction>(32, 8);
 
     let page = allocate_user_test_page();
     write_user_value(
@@ -6624,10 +6651,235 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
         .pending_signals
         .remove(Signals::from(Signal::SIGUSR1));
 
-    send_signal_to_process_with_siginfo(&current, Signal::SIGUSR2, SigInfo::for_signal(Signal::SIGUSR2));
+    send_signal_to_process_with_siginfo(
+        &current,
+        Signal::SIGUSR2,
+        SigInfo::for_signal(Signal::SIGUSR2),
+    );
     expect_errno(
         SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Pause>(),
         SyscallError::Interrupted,
+    );
+    {
+        let mut current = current.lock();
+        current.pending_signals.remove(Signals::from(Signal::SIGUSR2));
+        current.pending_signal_info[Signal::SIGUSR2.index()] = None;
+    }
+
+    expect_ok(SyscallArgs::new([0, page + 192, 0, 0, 0, 0]).call::<Sigaltstack>(), 0);
+    assert_eq!(read_user_value::<TestLinuxStack>(page + 192).ss_flags, SS_DISABLE);
+    let altstack = TestLinuxStack {
+        ss_sp: page + 4096,
+        ss_flags: 0,
+        ss_size: MINSIGSTKSZ,
+    };
+    write_user_value(page + 224, &altstack);
+    expect_ok(
+        SyscallArgs::new([page + 224, page + 256, 0, 0, 0, 0]).call::<Sigaltstack>(),
+        0,
+    );
+    assert_eq!(read_user_value::<TestLinuxStack>(page + 256).ss_flags, SS_DISABLE);
+    expect_ok(SyscallArgs::new([0, page + 288, 0, 0, 0, 0]).call::<Sigaltstack>(), 0);
+    assert_eq!(read_user_value::<TestLinuxStack>(page + 288).ss_sp, altstack.ss_sp);
+    assert_eq!(read_user_value::<TestLinuxStack>(page + 288).ss_size, MINSIGSTKSZ);
+    write_user_value(
+        page + 320,
+        &TestLinuxStack {
+            ss_sp: page + 8192,
+            ss_flags: SS_DISABLE,
+            ss_size: 9999,
+        },
+    );
+    expect_ok(SyscallArgs::new([page + 320, 0, 0, 0, 0, 0]).call::<Sigaltstack>(), 0);
+    expect_ok(SyscallArgs::new([0, page + 352, 0, 0, 0, 0]).call::<Sigaltstack>(), 0);
+    let disabled_stack = read_user_value::<TestLinuxStack>(page + 352);
+    assert_eq!(disabled_stack.ss_flags, SS_DISABLE);
+    assert_eq!(disabled_stack.ss_sp, 0);
+    assert_eq!(disabled_stack.ss_size, 0);
+    write_user_value(
+        page + 384,
+        &TestLinuxStack {
+            ss_sp: page + 12288,
+            ss_flags: SS_ONSTACK,
+            ss_size: MINSIGSTKSZ,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([page + 384, 0, 0, 0, 0, 0]).call::<Sigaltstack>(),
+        SyscallError::InvalidArguments,
+    );
+    write_user_value(
+        page + 416,
+        &TestLinuxStack {
+            ss_sp: 0,
+            ss_flags: 0,
+            ss_size: MINSIGSTKSZ,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([page + 416, 0, 0, 0, 0, 0]).call::<Sigaltstack>(),
+        SyscallError::InvalidArguments,
+    );
+    write_user_value(
+        page + 448,
+        &TestLinuxStack {
+            ss_sp: page + 16384,
+            ss_flags: 0,
+            ss_size: MINSIGSTKSZ - 1,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([page + 448, 0, 0, 0, 0, 0]).call::<Sigaltstack>(),
+        SyscallError::NoMemory,
+    );
+
+    extern "C" fn test_siginfo_handler(_: i32, _: *const SigInfo, _: *const crate::signal::UContext) {}
+    let new_action = TestLinuxSigAction {
+        handler: test_siginfo_handler as *const () as usize,
+        flags: SA_SIGINFO,
+        restorer: 0x1234_5678_9abc_def0usize,
+        mask: Signal::SIGUSR1.mask(),
+    };
+    write_user_value(page + 480, &new_action);
+    expect_ok(
+        SyscallArgs::new([Signal::SIGUSR2 as u64, page + 480, page + 544, 8, 0, 0]).call::<RtSigaction>(),
+        0,
+    );
+    let old_action = read_user_value::<TestLinuxSigAction>(page + 544);
+    assert_eq!(old_action.handler, 0);
+    assert_eq!(old_action.flags & SA_SIGINFO, 0);
+    assert_eq!(old_action.mask, 0);
+    expect_ok(
+        SyscallArgs::new([Signal::SIGUSR2 as u64, 0, page + 576, 8, 0, 0]).call::<RtSigaction>(),
+        0,
+    );
+    let installed_action = read_user_value::<TestLinuxSigAction>(page + 576);
+    assert_eq!(installed_action.handler, test_siginfo_handler as *const () as usize);
+    assert_ne!(installed_action.flags & SA_SIGINFO, 0);
+    assert_eq!(installed_action.restorer, new_action.restorer);
+    assert_eq!(installed_action.mask, Signal::SIGUSR1.mask());
+    expect_errno(
+        SyscallArgs::new([Signal::SIGUSR2 as u64, 1, 0, 8, 0, 0]).call::<RtSigaction>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([Signal::SIGUSR2 as u64, 0, 1, 8, 0, 0]).call::<RtSigaction>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([Signal::SIGUSR2 as u64, 0, 0, 4, 0, 0]).call::<RtSigaction>(),
+        SyscallError::InvalidArguments,
+    );
+
+    let queued_process = Process::empty();
+    let queued_pid = {
+        let mut process = queued_process.lock();
+        process.pid = ProcessID::new();
+        process.parent = Some(current.clone());
+        process.group_id = current_group;
+        process.pid.0 as i32
+    };
+    MANAGER
+        .lock()
+        .processes
+        .insert(ProcessID(queued_pid as u64), queued_process.clone());
+    let mut queued_siginfo = SigInfo::for_process_signal(Signal::SIGTERM, 77, 88);
+    queued_siginfo.si_code = SI_QUEUE;
+    write_user_value(page + 768, &queued_siginfo);
+    expect_ok(
+        SyscallArgs::new([queued_pid as u64, Signal::SIGTERM as u64, page + 768, 0, 0, 0])
+            .call::<RtSigqueueinfo>(),
+        0,
+    );
+    {
+        let queued_process = queued_process.lock();
+        assert!(queued_process.pending_signals.contains(Signals::from(Signal::SIGTERM)));
+        let pending = queued_process.pending_signal_info[Signal::SIGTERM.index()]
+            .expect("sigqueueinfo should store pending siginfo");
+        assert_eq!(pending.si_code, SI_QUEUE);
+        assert_eq!(pending.si_pid, 77);
+        assert_eq!(pending.si_uid, 88);
+    }
+    expect_errno(
+        SyscallArgs::new([0, Signal::SIGTERM as u64, 0, 0, 0, 0]).call::<RtSigqueueinfo>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([queued_pid as u64, 65, 0, 0, 0, 0]).call::<RtSigqueueinfo>(),
+        SyscallError::InvalidArguments,
+    );
+
+    {
+        let thread_ref = crate::thread::get_current_thread();
+        let mut thread = thread_ref.lock();
+        thread.pending_signals = Signals::empty();
+        thread.pending_signal_info.fill(None);
+    }
+    {
+        let thread_parent = crate::thread::get_current_thread().lock().parent.clone();
+        let mut current = thread_parent.lock();
+        current.pending_signals = Signals::empty();
+        current.pending_signal_info.fill(None);
+    }
+
+    let mut timed_siginfo = SigInfo::for_process_signal(Signal::SIGUSR1, 123, 456);
+    timed_siginfo.si_code = SI_QUEUE;
+    let thread_parent = crate::thread::get_current_thread().lock().parent.clone();
+    send_signal_to_process_with_siginfo(&thread_parent, Signal::SIGUSR1, timed_siginfo);
+    assert_eq!(
+        crate::thread::get_current_thread().lock().pending_signals.bits(),
+        0
+    );
+    assert_eq!(
+        thread_parent.lock().pending_signals.bits(),
+        Signal::SIGUSR1.mask()
+    );
+    send_signal_to_process_with_siginfo(&thread_parent, Signal::SIGUSR1, timed_siginfo);
+    write_user_value(page + 608, &Signal::SIGUSR1.mask());
+    expect_ok(
+        SyscallArgs::new([page + 608, page + 640, 0, 8, 0, 0]).call::<RtSigtimedwait>(),
+        Signal::SIGUSR1 as usize,
+    );
+    let waited_info = read_user_value::<TestWaitidSigInfo>(page + 640);
+    assert_eq!(waited_info.si_signo, Signal::SIGUSR1 as i32);
+    assert_eq!(waited_info.si_code, SI_QUEUE);
+    assert_eq!(waited_info.si_pid, 123);
+    assert_eq!(waited_info.si_uid, 456);
+    assert!(
+        !current
+            .lock()
+            .pending_signals
+            .contains(Signals::from(Signal::SIGUSR1))
+    );
+    write_user_value(
+        page + 736,
+        &TestLinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([page + 608, page + 640, page + 736, 8, 0, 0]).call::<RtSigtimedwait>(),
+        SyscallError::TryAgain,
+    );
+    expect_errno(
+        SyscallArgs::new([0, page + 640, 0, 8, 0, 0]).call::<RtSigtimedwait>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([page + 608, page + 640, page + 736, 4, 0, 0]).call::<RtSigtimedwait>(),
+        SyscallError::InvalidArguments,
+    );
+    write_user_value(
+        page + 736,
+        &TestLinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 1_000_000_000,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([page + 608, page + 640, page + 736, 8, 0, 0]).call::<RtSigtimedwait>(),
+        SyscallError::InvalidArguments,
     );
 
     {
@@ -6666,6 +6918,7 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
         SyscallArgs::new([1, 8, 0, 0, 0, 0]).call::<RtSigsuspend>(),
         SyscallError::BadAddress,
     );
+    MANAGER.lock().processes.remove(&ProcessID(queued_pid as u64));
     MANAGER.lock().processes.remove(&ProcessID(peer_pid as u64));
     crate::thread::get_current_thread().lock().blocked_signals = saved_mask;
 }

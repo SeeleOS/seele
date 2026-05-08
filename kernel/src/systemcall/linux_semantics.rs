@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 63;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 59;
 
 macro_rules! syscall_coverage {
     (
@@ -210,6 +210,10 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         RtSigpending => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         Pause => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         Kill => "sleep_and_signal_mask_syscalls_follow_linux_rules",
+        Sigaltstack => "sleep_and_signal_mask_syscalls_follow_linux_rules",
+        RtSigaction => "sleep_and_signal_mask_syscalls_follow_linux_rules",
+        RtSigqueueinfo => "sleep_and_signal_mask_syscalls_follow_linux_rules",
+        RtSigtimedwait => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         Wait4 => "pidfd_and_waitid_syscalls_follow_linux_rules",
         Waitid => "pidfd_and_waitid_syscalls_follow_linux_rules",
         PidfdOpen => "pidfd_and_waitid_syscalls_follow_linux_process_rules",
@@ -246,9 +250,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Mprotect,
     Munmap,
     Brk,
-    RtSigaction,
-    RtSigtimedwait,
-    RtSigqueueinfo,
     RtSigreturn,
     Ioctl,
     Mremap,
@@ -263,7 +264,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Exit,
     Ptrace,
     Shmdt,
-    Sigaltstack,
     Futex,
     SchedSetscheduler,
     AddKey,
