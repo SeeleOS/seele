@@ -3,6 +3,7 @@
 
 use core::panic::PanicInfo;
 
+use owo_colors::OwoColorize;
 use x86_64::instructions::interrupts;
 
 use crate::{misc::hlt_loop, s_println, terminal::state::DEFAULT_TERMINAL};
@@ -25,12 +26,8 @@ pub fn handle_panic(_info: &PanicInfo) -> ! {
 }
 
 pub fn test_handle_panic(_info: &PanicInfo) -> ! {
-    s_println!("[FAILED]\n");
+    s_println!("{}", "Failed".red().bold());
     s_println!("{}\n", _info);
-    test_fail()
-}
-
-pub fn test_fail() -> ! {
     use crate::misc::debug_exit::{QemuExitCode, debug_exit};
 
     debug_exit(QemuExitCode::Failed);

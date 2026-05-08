@@ -221,6 +221,65 @@ pub fn run_qemu_test(uefi_path: &Path) -> i32 {
     run_qemu_inner(uefi_path, &RunOptions::for_tests())
 }
 
+pub fn run_qemu_expect_serial_failure(
+    uefi_path: &Path,
+    serial_pattern: &str,
+    expected_exit_code: i32,
+) -> i32 {
+    let options = RunOptions::for_tests();
+    let context = QemuRunContext::new(&options);
+    let mut cmd = build_qemu_command(uefi_path, &options, &context);
+    let mut child = cmd.spawn().expect("failed to start qemu-system-x86_64");
+    let background_done = Arc::new(AtomicBool::new(false));
+    let serial_log_thread = {
+        let serial_log = context.serial_log.clone();
+        let done = background_done.clone();
+        thread::spawn(move || stream_serial_log(&serial_log, &done))
+    };
+    let tty_input_thread = {
+        let tty_input_socket = context.tty_input_socket.clone();
+        let done = background_done.clone();
+        thread::spawn(move || forward_terminal_input(&tty_input_socket, &done))
+    };
+
+    let status = child.wait().expect("failed to wait on qemu");
+    background_done.store(true, Ordering::Release);
+    let _ = serial_log_thread.join();
+    let _ = tty_input_thread.join();
+
+    let serial_output = fs::read_to_string(&context.serial_log).unwrap_or_default();
+    let actual_exit_code = match status.code().unwrap_or(1) {
+        33 => 0,
+        35 => 1,
+        _ => {
+            if let Some(path) = &context.debug_log {
+                report_qemu_fault(path);
+            }
+            2
+        }
+    };
+
+    if !serial_output.contains(serial_pattern) {
+        eprintln!("expected serial pattern not observed: {serial_pattern}");
+        cleanup_qemu_context(&context);
+        cleanup_qemu_debug_log(&context);
+        return 1;
+    }
+
+    if actual_exit_code != expected_exit_code {
+        eprintln!(
+            "unexpected qemu exit code: expected {expected_exit_code}, got {actual_exit_code}"
+        );
+        cleanup_qemu_context(&context);
+        cleanup_qemu_debug_log(&context);
+        return 1;
+    }
+
+    cleanup_qemu_context(&context);
+    cleanup_qemu_debug_log(&context);
+    0
+}
+
 fn run_qemu_inner(uefi_path: &Path, options: &RunOptions) -> i32 {
     let context = QemuRunContext::new(options);
     let mut cmd = build_qemu_command(uefi_path, options, &context);
@@ -481,7 +540,7 @@ fn handle_cargo_message(line: &str, mode: &BuildMode) -> Option<PathBuf> {
 }
 
 fn append_rustflags() -> String {
-    let extra = "-Zunstable-options -Cpanic=immediate-abort";
+    let extra = "-Zunstable-options";
     match env::var("RUSTFLAGS") {
         Ok(existing) if !existing.trim().is_empty() => format!("{existing} {extra}"),
         _ => extra.to_string(),

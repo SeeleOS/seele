@@ -14,9 +14,6 @@ use crate::{
     thread::{THREAD_MANAGER, misc::with_current_thread, scheduling::return_to_scheduler_no_save},
 };
 
-#[cfg(test)]
-use crate::misc::panic::test_fail;
-
 pub fn init_exception_interrupts(idt: &mut InterruptDescriptorTable) {
     idt.breakpoint.set_handler_fn(breakpoint_handler);
     idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
@@ -38,12 +35,6 @@ extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) 
 extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
     if is_user_mode(&stack_frame) {
         handle_usermode_exception(&stack_frame, Signal::SIGILL);
-    }
-
-    #[cfg(test)]
-    {
-        let _ = stack_frame;
-        test_fail()
     }
 
     #[cfg(not(test))]

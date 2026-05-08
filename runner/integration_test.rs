@@ -5,6 +5,8 @@ use std::{env, time::Duration};
 use std::{fs, path::Path, process::exit};
 
 const KERNEL_TEST_IMAGES: &[&str] = &["boot", "interrupt_breakpoint", "memory", "syscall", "vfs"];
+const PANIC_HANDLER_SMOKE: &[&str] = &["panic_handler"];
+const PANIC_HANDLER_PATTERN: &str = "panic handler smoke";
 
 const USERSPACE_STARTUP_PATTERNS: &[&str] = &[
     "Welcome to Arch Linux",
@@ -27,6 +29,10 @@ fn main() {
         IntegrationCase {
             name: "userspace_boot",
             run: run_userspace_boot,
+        },
+        IntegrationCase {
+            name: "panic_handler_smoke",
+            run: run_panic_handler_smoke,
         },
     ];
 
@@ -80,6 +86,23 @@ fn run_userspace_boot() -> i32 {
     }
     let _ = fs::remove_file(&uefi_path);
     exit_code
+}
+
+fn run_panic_handler_smoke() -> i32 {
+    for kernel_test in
+        utils::build_kernel_with_mode(utils::BuildMode::IntegrationTests(PANIC_HANDLER_SMOKE))
+    {
+        eprintln!("running integration test: {}", kernel_test.display());
+        let uefi_path = utils::create_uefi_image(&kernel_test);
+        let exit_code = utils::run_qemu_expect_serial_failure(&uefi_path, PANIC_HANDLER_PATTERN, 1);
+        let _ = fs::remove_file(&uefi_path);
+
+        if exit_code != 0 {
+            return exit_code;
+        }
+    }
+
+    0
 }
 
 fn userspace_startup_observed(output: &str) -> bool {

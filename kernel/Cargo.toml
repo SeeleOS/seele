@@ -60,6 +60,10 @@ name = "memory"
 harness = false
 
 [[test]]
+name = "panic_handler"
+harness = false
+
+[[test]]
 name = "stack_overflow_manual"
 path = "tests/stack_overflow.rs"
 harness = false

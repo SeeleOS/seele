@@ -1,4 +1,5 @@
 use crate::filesystem::object::poll_identity_object;
+use crate::memory::user_safe;
 use crate::misc::systemd_perf::{self, PerfBucket};
 use crate::misc::time::Time;
 use crate::object::{Object, misc::ObjectRef};
@@ -70,21 +71,26 @@ struct LinuxTimespec {
     tv_nsec: i64,
 }
 
-fn read_epoll_event(event_ptr: *const LinuxEpollEvent) -> LinuxEpollEvent {
-    unsafe { event_ptr.read_unaligned() }
+fn read_epoll_event(event_ptr: *const LinuxEpollEvent) -> Result<LinuxEpollEvent, SyscallError> {
+    user_safe::read(event_ptr)
 }
 
 fn epoll_event_data_u64(event: &LinuxEpollEvent) -> u64 {
     unsafe { core::ptr::addr_of!(event.data.u64_).read_unaligned() }
 }
 
-fn write_epoll_event(event_ptr: *mut LinuxEpollEvent, events: u32, data: u64) {
-    unsafe {
-        event_ptr.write_unaligned(LinuxEpollEvent {
+fn write_epoll_event(
+    event_ptr: *mut LinuxEpollEvent,
+    events: u32,
+    data: u64,
+) -> Result<(), SyscallError> {
+    user_safe::write(
+        event_ptr,
+        &LinuxEpollEvent {
             events,
             data: LinuxEpollData { u64_: data },
-        });
-    }
+        },
+    )
 }
 
 fn epoll_interest_entries(bits: EpollEvents) -> [(bool, PollableEvent, u32); 6] {
@@ -181,7 +187,7 @@ define_syscall!(
                 if event.is_null() {
                     return Err(SyscallError::BadAddress);
                 }
-                let event = read_epoll_event(event);
+                let event = read_epoll_event(event)?;
                 for existing in [
                     PollableEvent::CanBeRead,
                     PollableEvent::CanBeWritten,
@@ -271,7 +277,7 @@ fn epoll_wait_impl(
                     unsafe { events_ptr.add(index) },
                     woken.ready_bits,
                     woken.data,
-                );
+                )?;
             }
         }
 
@@ -284,7 +290,7 @@ fn epoll_pwait2_timeout_ms(timeout: *const LinuxTimespec) -> Result<i32, Syscall
         return Ok(-1);
     }
 
-    let timeout = unsafe { timeout.read() };
+    let timeout = user_safe::read(timeout)?;
     if timeout.tv_sec < 0 || !(0..1_000_000_000).contains(&timeout.tv_nsec) {
         return Err(SyscallError::InvalidArguments);
     }
