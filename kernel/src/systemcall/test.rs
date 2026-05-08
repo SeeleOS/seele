@@ -33,11 +33,12 @@ use crate::{
             SchedSetaffinity, SchedSetparam, SchedYield, SelectTimespec, SetRobustList,
             SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Setitimer, Sethostname, Setns,
             Setpgid, Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid,
-            Settimeofday, Setuid, Setxattr, Shutdown, Signalfd4, Socket, Socketpair, Statfs,
-            Statx, Symlink, SymlinkAt, Sync,
+            Settimeofday, Setuid, Setxattr, Setsockopt, Shutdown, Signalfd4, Socket, Socketpair,
+            Statfs, Statx, Symlink, SymlinkAt, Sync,
             Sysinfo, Time, TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime,
             TimerfdCreate, TimerfdGettime, TimerfdSettime, Umask, Uname, Unlink, UnlinkAt,
-            Unshare, Utimensat, Vhangup, Wait4, Waitid, Write, Writev, Getsockname, Getpeername, clear_fdset,
+            Unshare, Utimensat, Vhangup, Wait4, Waitid, Write, Writev, Getsockname, Getpeername,
+            Getsockopt, clear_fdset,
             fdset_contains, fdset_insert,
             fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
             timeout_to_deadline, translate_ready_events,
@@ -4960,14 +4961,27 @@ fn signalfd_syscalls_follow_linux_rules() {
 
 fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     const AF_INET: u64 = 2;
+    const AF_NETLINK: u64 = 16;
     const AF_UNIX: u64 = 1;
+    const SOL_SOCKET: u64 = 1;
+    const SOL_TCP: u64 = 6;
     const SOCK_STREAM: u64 = 1;
     const SOCK_DGRAM: u64 = 2;
+    const SOCK_RAW: u64 = 3;
     const SOCK_NONBLOCK: u64 = 0o0004000;
     const SOCK_CLOEXEC: u64 = 0o2000000;
     const SHUT_RD: u64 = 0;
     const SHUT_WR: u64 = 1;
     const SHUT_RDWR: u64 = 2;
+    const SO_TYPE: u64 = 3;
+    const SO_ERROR: u64 = 4;
+    const SO_SNDBUF: u64 = 7;
+    const SO_PASSCRED: u64 = 16;
+    const SO_PEERCRED: u64 = 17;
+    const SO_ACCEPTCONN: u64 = 30;
+    const SO_PROTOCOL: u64 = 38;
+    const SO_DOMAIN: u64 = 39;
+    const TCP_NODELAY: u64 = 1;
 
     assert_linux_layout::<TestLinuxSockAddrUn>(110, 2);
     assert_linux_layout::<TestLinuxSockAddrIn>(16, 2);
@@ -5072,6 +5086,83 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
         SyscallError::ProtocolNotSupported,
     );
 
+    let unix_socket = expect_fd(
+        SyscallArgs::new([AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, 0, 0, 0])
+            .call::<Socket>(),
+    );
+    assert_fd_flags(unix_socket, FdFlags::CLOEXEC);
+    assert_object_flags(unix_socket, FileFlags::NONBLOCK);
+    write_user_value(page + 896, &1i32);
+    expect_ok(
+        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_PASSCRED, page + 896, 4, 0])
+            .call::<Setsockopt>(),
+        0,
+    );
+    write_user_value(page + 904, &4u32);
+    expect_ok(
+        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_PASSCRED, page + 912, page + 904, 0])
+            .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<u32>(page + 904), 4);
+    assert_eq!(read_user_value::<i32>(page + 912), 1);
+    write_user_value(page + 920, &4u32);
+    expect_ok(
+        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_TYPE, page + 928, page + 920, 0])
+            .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<u32>(page + 920), 4);
+    assert_eq!(read_user_value::<i32>(page + 928), SOCK_DGRAM as i32);
+    write_user_value(page + 936, &4u32);
+    expect_ok(
+        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_DOMAIN, page + 944, page + 936, 0])
+            .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(page + 944), AF_UNIX as i32);
+    write_user_value(page + 952, &12u32);
+    expect_ok(
+        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_PEERCRED, page + 960, page + 952, 0])
+            .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<u32>(page + 952), 12);
+    let peercred_words = read_user_value::<[u32; 3]>(page + 960);
+    let current = get_current_process();
+    let current_locked = current.lock();
+    assert_eq!(peercred_words[0], current_locked.pid.0 as u32);
+    assert_eq!(peercred_words[1], current_locked.effective_uid);
+    assert_eq!(peercred_words[2], current_locked.effective_gid);
+    drop(current_locked);
+    expect_errno(
+        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_PEERCRED, page + 960, 0, 0])
+            .call::<Getsockopt>(),
+        SyscallError::BadAddress,
+    );
+    write_user_value(page + 952, &3u32);
+    expect_errno(
+        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_TYPE, page + 928, page + 952, 0])
+            .call::<Getsockopt>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_TYPE, 0, page + 920, 0]).call::<Getsockopt>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_TYPE, page + 928, 0, 0]).call::<Getsockopt>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_PASSCRED, 0, 4, 0]).call::<Setsockopt>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_ERROR, page + 896, 4, 0]).call::<Setsockopt>(),
+        SyscallError::InvalidArguments,
+    );
+
     let inet_socket = expect_fd(SyscallArgs::new([AF_INET, SOCK_DGRAM, 0, 0, 0, 0]).call::<Socket>());
     write_user_value(page + 96, &111u32);
     expect_ok(
@@ -5089,8 +5180,126 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
         SyscallArgs::new([inet_socket as u64, page + 768, page + 96, 0, 0, 0]).call::<Getpeername>(),
         SyscallError::NotConnected,
     );
+    write_user_value(page + 968, &4u32);
+    expect_ok(
+        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_TYPE, page + 976, page + 968, 0])
+            .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(page + 976), SOCK_DGRAM as i32);
+    write_user_value(page + 984, &4u32);
+    expect_ok(
+        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_PROTOCOL, page + 992, page + 984, 0])
+            .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(page + 992), 17);
+    write_user_value(page + 1000, &4u32);
+    expect_ok(
+        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_ACCEPTCONN, page + 1008, page + 1000, 0])
+            .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(page + 1008), 0);
+    write_user_value(page + 1016, &4u32);
+    expect_ok(
+        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_DOMAIN, page + 1024, page + 1016, 0])
+            .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(page + 1024), AF_INET as i32);
+    write_user_value(page + 1032, &4u32);
+    expect_ok(
+        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_ERROR, page + 1040, page + 1032, 0])
+            .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(page + 1040), 0);
+    write_user_value(page + 1048, &8192i32);
+    expect_ok(
+        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_SNDBUF, page + 1048, 4, 0])
+            .call::<Setsockopt>(),
+        0,
+    );
+    write_user_value(page + 1056, &4i32);
+    expect_ok(
+        SyscallArgs::new([inet_socket as u64, SOL_TCP, TCP_NODELAY, page + 1056, 4, 0])
+            .call::<Setsockopt>(),
+        0,
+    );
+    write_user_value(page + 1064, &4u32);
+    expect_ok(
+        SyscallArgs::new([inet_socket as u64, SOL_TCP, TCP_NODELAY, page + 1072, page + 1064, 0])
+            .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(page + 1072), 1);
+    expect_errno(
+        SyscallArgs::new([inet_socket as u64, SOL_TCP, 99, page + 1056, 4, 0]).call::<Setsockopt>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([inet_socket as u64, SOL_TCP, 99, page + 1072, page + 1064, 0]).call::<Getsockopt>(),
+        SyscallError::InvalidArguments,
+    );
 
+    let netlink_socket = expect_fd(
+        SyscallArgs::new([AF_NETLINK, SOCK_RAW | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, 0, 0, 0])
+            .call::<Socket>(),
+    );
+    assert_fd_flags(netlink_socket, FdFlags::CLOEXEC);
+    assert_object_flags(netlink_socket, FileFlags::NONBLOCK);
+    write_user_value(page + 1080, &4u32);
+    expect_ok(
+        SyscallArgs::new([netlink_socket as u64, SOL_SOCKET, SO_TYPE, page + 1088, page + 1080, 0])
+            .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(page + 1088), SOCK_RAW as i32);
+    write_user_value(page + 1096, &4u32);
+    expect_ok(
+        SyscallArgs::new([netlink_socket as u64, SOL_SOCKET, SO_DOMAIN, page + 1104, page + 1096, 0])
+            .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(page + 1104), AF_NETLINK as i32);
+    write_user_value(page + 1112, &4u32);
+    expect_ok(
+        SyscallArgs::new([netlink_socket as u64, SOL_SOCKET, SO_PROTOCOL, page + 1120, page + 1112, 0])
+            .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(page + 1120), 0);
+    write_user_value(page + 1128, &1i32);
+    expect_ok(
+        SyscallArgs::new([netlink_socket as u64, SOL_SOCKET, SO_PASSCRED, page + 1128, 4, 0])
+            .call::<Setsockopt>(),
+        0,
+    );
+    write_user_value(page + 1136, &4u32);
+    expect_ok(
+        SyscallArgs::new([netlink_socket as u64, SOL_SOCKET, SO_PASSCRED, page + 1144, page + 1136, 0])
+            .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(page + 1144), 1);
+
+    expect_errno(
+        SyscallArgs::new([99, SOCK_STREAM, 0, 0, 0, 0]).call::<Socket>(),
+        SyscallError::AddressFamilyNotSupported,
+    );
+    expect_errno(
+        SyscallArgs::new([AF_INET, SOCK_STREAM, 17, 0, 0, 0]).call::<Socket>(),
+        SyscallError::ProtocolNotSupported,
+    );
+    expect_errno(
+        SyscallArgs::new([AF_NETLINK, SOCK_STREAM, 0, 0, 0, 0]).call::<Socket>(),
+        SyscallError::ProtocolNotSupported,
+    );
+
+    close_test_fd(netlink_socket);
     close_test_fd(inet_socket);
+    close_test_fd(unix_socket);
     close_test_fd(right_fd);
     close_test_fd(left_fd);
 }

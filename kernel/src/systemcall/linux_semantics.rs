@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 82;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 79;
 
 macro_rules! syscall_coverage {
     (
@@ -220,6 +220,9 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Getsockname => "socket_name_and_shutdown_syscalls_follow_linux_rules",
         Getpeername => "socket_name_and_shutdown_syscalls_follow_linux_rules",
         Socketpair => "socket_name_and_shutdown_syscalls_follow_linux_rules",
+        Socket => "socket_name_and_shutdown_syscalls_follow_linux_rules",
+        Setsockopt => "socket_name_and_shutdown_syscalls_follow_linux_rules",
+        Getsockopt => "socket_name_and_shutdown_syscalls_follow_linux_rules",
     }
     gap {
     Poll,
@@ -240,7 +243,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Shmctl,
     Pause,
     Sendfile,
-    Socket,
     Connect,
     Accept,
     Accept4,
@@ -251,8 +253,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Recvmsg,
     Bind,
     Listen,
-    Setsockopt,
-    Getsockopt,
     Clone,
     Fork,
     Execve,

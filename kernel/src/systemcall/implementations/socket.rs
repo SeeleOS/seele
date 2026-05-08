@@ -380,7 +380,7 @@ fn socket_address_bytes(address: *const u8, address_len: u32) -> Result<Vec<u8>,
     if address.is_null() || address_len < 2 {
         return Err(SyscallError::BadAddress);
     }
-    Ok(unsafe { slice::from_raw_parts(address, address_len as usize) }.to_vec())
+    user_safe::read_buffer(address, address_len as usize)
 }
 
 fn accept_socket(socket: ObjectRef, flags: u32) -> Result<usize, SyscallError> {
@@ -551,17 +551,17 @@ define_syscall!(Sendto, |socket: ObjectRef,
         return Err(SyscallError::BadAddress);
     }
 
-    let buffer = if len == 0 {
-        &[][..]
+    let user_buffer = if len == 0 {
+        Vec::new()
     } else {
-        unsafe { slice::from_raw_parts(buffer, len) }
+        user_safe::read_buffer(buffer, len)?
     };
     let address = (!address.is_null())
         .then(|| socket_address_bytes(address, address_len))
         .transpose()?;
     let written = socket
         .as_socket_like()?
-        .sendto(buffer, address.as_deref())
+        .sendto(user_buffer.as_slice(), address.as_deref())
         .map_err(ObjectError::from)?;
 
     Ok(written)
@@ -868,13 +868,13 @@ define_syscall!(Setsockopt, |socket: ObjectRef,
     }
 
     let option_value = if option_len == 0 {
-        &[][..]
+        Vec::new()
     } else {
-        unsafe { slice::from_raw_parts(option_value, option_len as usize) }
+        user_safe::read_buffer(option_value, option_len as usize)?
     };
     socket
         .as_socket_like()?
-        .setsockopt(level as u64, option_name as u64, option_value)
+        .setsockopt(level as u64, option_name as u64, option_value.as_slice())
         .map_err(ObjectError::from)?;
 
     Ok(0)
