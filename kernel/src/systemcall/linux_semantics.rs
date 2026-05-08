@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 59;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 57;
 
 macro_rules! syscall_coverage {
     (
@@ -214,6 +214,7 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         RtSigaction => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         RtSigqueueinfo => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         RtSigtimedwait => "sleep_and_signal_mask_syscalls_follow_linux_rules",
+        Tgkill => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         Wait4 => "pidfd_and_waitid_syscalls_follow_linux_rules",
         Waitid => "pidfd_and_waitid_syscalls_follow_linux_rules",
         PidfdOpen => "pidfd_and_waitid_syscalls_follow_linux_process_rules",
@@ -226,6 +227,7 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         TimerGettime => "posix_timer_syscalls_follow_linux_rules",
         TimerGetoverrun => "posix_timer_syscalls_follow_linux_rules",
         TimerDelete => "posix_timer_syscalls_follow_linux_rules",
+        Pselect6 => "pselect6_syscalls_follow_linux_rules",
         Shutdown => "socket_name_and_shutdown_syscalls_follow_linux_rules",
         Getsockname => "socket_name_and_shutdown_syscalls_follow_linux_rules",
         Getpeername => "socket_name_and_shutdown_syscalls_follow_linux_rules",
@@ -268,8 +270,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     SchedSetscheduler,
     AddKey,
     Keyctl,
-    Tgkill,
-    Pselect6,
     Ppoll,
     Mount,
     Umount2,

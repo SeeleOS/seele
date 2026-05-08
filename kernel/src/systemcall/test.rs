@@ -26,7 +26,7 @@ use crate::{
             InotifyRmWatch, Ioperm, Iopl, IoprioGet, IoprioSet, Kcmp, Lgetxattr, Link, LinkAt, Listen,
             Listxattr, Llistxattr, Lremovexattr, Lseek, Lsetxattr, Madvise, MemfdCreate, Mkdir,
             MkdirAt, Mknodat, NameToHandleAt, Nanosleep, Newfstatat, Open, OpenAt, OpenFlags,
-            PidfdOpen, PidfdSendSignal, Pipe, Pipe2, Poll, PollEvents, PollTimespec, Ppoll, Prctl, Pread64,
+            PidfdOpen, PidfdSendSignal, Pipe, Pipe2, Poll, PollEvents, PollTimespec, Ppoll, Pselect6, Prctl, Pread64,
             Prlimit64, Pwrite64, Read, Readlink, ReadlinkAt, Reboot, Removexattr, Rename, RenameAt,
             RenameAt2, Rmdir, Rseq, RtSigpending, RtSigprocmask, RtSigsuspend, SchedGetPriorityMax, SchedGetPriorityMin,
             SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval,
@@ -34,7 +34,7 @@ use crate::{
             SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Setitimer, Sethostname, Setns,
             Setpgid, Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid,
             Settimeofday, Setuid, Setxattr, Setsockopt, Shutdown, Signalfd4, Socket, Socketpair,
-            Sendfile, Statfs, Statx, Symlink, SymlinkAt, Sync, Pause, Kill, Sigaltstack,
+            Sendfile, Statfs, Statx, Symlink, SymlinkAt, Sync, Pause, Kill, Tgkill, Sigaltstack,
             RtSigaction, RtSigqueueinfo, RtSigtimedwait,
             Sysinfo, Time, TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime,
             TimerfdCreate, TimerfdGettime, TimerfdSettime, Umask, Uname, Unlink, UnlinkAt,
@@ -522,6 +522,11 @@ crate::test!(
     "select timeout helpers validate null zero and invalid timespecs",
     select_timeout_helpers_validate_null_zero_and_invalid_timespecs
 );
+crate::test!(
+    pselect6_syscalls,
+    "pselect6 follows linux rules",
+    pselect6_syscalls_follow_linux_rules
+);
 
 fn syscall_number_lookup_matches_x86_64_abi_values() {
     assert_eq!(SyscallNumber::from_number(0), Some(SyscallNumber::Read));
@@ -788,6 +793,13 @@ struct TestLinuxSigAction {
     flags: u64,
     restorer: usize,
     mask: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxSigSetArg {
+    sigmask: u64,
+    sigsetsize: usize,
 }
 
 #[repr(C)]
@@ -5079,8 +5091,23 @@ fn poll_and_ppoll_syscalls_follow_linux_rules() {
         SyscallArgs::new([poll_page, 1, poll_page + 128, poll_page + 192, 4, 0]).call::<Ppoll>(),
         SyscallError::InvalidArguments,
     );
+    write_user_value(
+        poll_page + 128,
+        &TestLinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 1_000_000_000,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([poll_page, 1, poll_page + 128, 0, 0, 0]).call::<Ppoll>(),
+        SyscallError::InvalidArguments,
+    );
     expect_errno(
         SyscallArgs::new([0, 1, 0, 0, 0, 0]).call::<Poll>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 1, 0, 0, 0, 0]).call::<Ppoll>(),
         SyscallError::BadAddress,
     );
 
@@ -6808,6 +6835,97 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
         SyscallArgs::new([queued_pid as u64, 65, 0, 0, 0, 0]).call::<RtSigqueueinfo>(),
         SyscallError::InvalidArguments,
     );
+    let tgkill_thread = crate::thread::thread::Thread::empty();
+    let target_tid = {
+        let mut thread = tgkill_thread.lock();
+        thread.parent = current.clone();
+        thread.id = crate::thread::misc::ThreadID::new();
+        thread.id.0 as u64
+    };
+    crate::thread::THREAD_MANAGER
+        .get()
+        .unwrap()
+        .lock()
+        .threads
+        .insert(crate::thread::misc::ThreadID(target_tid), tgkill_thread.clone());
+    current
+        .lock()
+        .threads
+        .push(alloc::sync::Arc::downgrade(&tgkill_thread));
+    let target_tgid = current.lock().pid.0 as u64;
+    expect_ok(
+        SyscallArgs::new([
+            target_tgid,
+            target_tid,
+            Signal::SIGUSR1 as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Tgkill>(),
+        0,
+    );
+    {
+        let thread = tgkill_thread.lock();
+        assert!(thread.pending_signals.contains(Signals::from(Signal::SIGUSR1)));
+        let pending = thread.pending_signal_info[Signal::SIGUSR1.index()]
+            .expect("tgkill should queue thread siginfo");
+        assert_eq!(pending.si_code, crate::misc::signal::SI_TKILL);
+        assert_eq!(pending.si_pid, current.lock().pid.0 as i32);
+        assert_eq!(pending.si_uid, current.lock().real_uid);
+    }
+    {
+        let mut thread = tgkill_thread.lock();
+        thread.pending_signals.remove(Signals::from(Signal::SIGUSR1));
+        thread.pending_signal_info[Signal::SIGUSR1.index()] = None;
+    }
+    expect_errno(
+        SyscallArgs::new([
+            u64::MAX,
+            target_tid,
+            Signal::SIGUSR1 as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Tgkill>(),
+        SyscallError::NoProcess,
+    );
+    expect_errno(
+        SyscallArgs::new([
+            target_tgid,
+            u64::MAX,
+            Signal::SIGUSR1 as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Tgkill>(),
+        SyscallError::NoProcess,
+    );
+    expect_errno(
+        SyscallArgs::new([
+            target_tgid,
+            target_tid,
+            65,
+            0,
+            0,
+            0,
+        ])
+        .call::<Tgkill>(),
+        SyscallError::InvalidArguments,
+    );
+    crate::thread::THREAD_MANAGER
+        .get()
+        .unwrap()
+        .lock()
+        .threads
+        .remove(&crate::thread::misc::ThreadID(target_tid));
+    current.lock().threads.retain(|candidate| {
+        candidate
+            .upgrade()
+            .is_some_and(|thread| thread.lock().id.0 != target_tid)
+    });
 
     {
         let thread_ref = crate::thread::get_current_thread();
@@ -7123,4 +7241,91 @@ fn select_timeout_helpers_validate_null_zero_and_invalid_timespecs() {
         timeout_to_deadline(&invalid),
         Err(SyscallError::InvalidArguments)
     ));
+}
+
+fn pselect6_syscalls_follow_linux_rules() {
+    let page = allocate_user_test_page();
+    let thread = crate::thread::get_current_thread();
+    let saved_mask = thread.lock().blocked_signals;
+
+    write_user_value(
+        page,
+        &TestLinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        },
+    );
+    let new_mask = Signal::SIGUSR1.mask();
+    write_user_value(page + 32, &new_mask);
+    write_user_value(
+        page + 64,
+        &TestLinuxSigSetArg {
+            sigmask: page + 32,
+            sigsetsize: 8,
+        },
+    );
+    expect_ok(
+        SyscallArgs::new([0, 0, 0, 0, page, page + 64]).call::<Pselect6>(),
+        0,
+    );
+    assert_eq!(thread.lock().blocked_signals.bits(), saved_mask.bits());
+
+    let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+    let readfds = [0u64; 1];
+    let mut writefds = [0u64; 1];
+    unsafe {
+        fdset_insert(writefds.as_mut_ptr(), eventfd);
+    }
+    write_user_value(page + 96, &readfds);
+    write_user_value(page + 104, &writefds);
+    write_user_value(page + 112, &[0u64; 1]);
+    expect_ok(
+        SyscallArgs::new([eventfd as u64 + 1, page + 96, page + 104, page + 112, 0, 0])
+            .call::<Pselect6>(),
+        1,
+    );
+    assert_eq!(read_user_value::<u64>(page + 96), 0);
+    assert_eq!(read_user_value::<u64>(page + 104), 1u64 << eventfd);
+    assert_eq!(read_user_value::<u64>(page + 112), 0);
+
+    write_user_value(
+        page + 120,
+        &TestLinuxSigSetArg {
+            sigmask: page + 32,
+            sigsetsize: 4,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([0, 0, 0, 0, 0, page + 120]).call::<Pselect6>(),
+        SyscallError::InvalidArguments,
+    );
+    write_user_value(
+        page + 120,
+        &TestLinuxSigSetArg {
+            sigmask: 1,
+            sigsetsize: 8,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([0, 0, 0, 0, 0, page + 120]).call::<Pselect6>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<Pselect6>(),
+        SyscallError::InvalidArguments,
+    );
+    write_user_value(
+        page,
+        &TestLinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 1_000_000_000,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([0, 0, 0, 0, page, 0]).call::<Pselect6>(),
+        SyscallError::InvalidArguments,
+    );
+
+    close_test_fd(eventfd);
+    crate::thread::get_current_thread().lock().blocked_signals = saved_mask;
 }
