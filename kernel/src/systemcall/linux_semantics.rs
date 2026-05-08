@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 87;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 86;
 
 macro_rules! syscall_coverage {
     (
@@ -205,7 +205,8 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Setitimer => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         RtSigprocmask => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         RtSigpending => "sleep_and_signal_mask_syscalls_follow_linux_rules",
-        Waitid => "pidfd_and_waitid_syscalls_follow_linux_process_rules",
+        Wait4 => "pidfd_and_waitid_syscalls_follow_linux_rules",
+        Waitid => "pidfd_and_waitid_syscalls_follow_linux_rules",
         PidfdOpen => "pidfd_and_waitid_syscalls_follow_linux_process_rules",
         CloseRange => "close_range_syscalls_follow_linux_rules",
         RtSigsuspend => "sleep_and_signal_mask_syscalls_follow_linux_rules",
@@ -256,7 +257,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Fork,
     Execve,
     Exit,
-    Wait4,
     Kill,
     Ptrace,
     Shmdt,

@@ -27,11 +27,50 @@ use crate::{
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    struct WaitOptions: i32 {
+    pub(crate) struct Wait4Options: i32 {
         const NOHANG = 1;
+        const WUNTRACED = 2;
+        const WCONTINUED = 8;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) struct WaitidOptions: i32 {
+        const NOHANG = 1;
+        const WSTOPPED = 2;
         const WEXITED = 4;
+        const WCONTINUED = 8;
         const WNOWAIT = 0x0100_0000;
     }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxTimeval {
+    tv_sec: i64,
+    tv_usec: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxRusage {
+    ru_utime: LinuxTimeval,
+    ru_stime: LinuxTimeval,
+    ru_maxrss: i64,
+    ru_ixrss: i64,
+    ru_idrss: i64,
+    ru_isrss: i64,
+    ru_minflt: i64,
+    ru_majflt: i64,
+    ru_nswap: i64,
+    ru_inblock: i64,
+    ru_oublock: i64,
+    ru_msgsnd: i64,
+    ru_msgrcv: i64,
+    ru_nsignals: i64,
+    ru_nvcsw: i64,
+    ru_nivcsw: i64,
 }
 
 fn has_wait_interrupt_signal(process: &ProcessRef) -> bool {
@@ -48,16 +87,50 @@ enum WaitOutcome {
     Stopped(ProcessRef, u64, ProcessWaitEvent),
 }
 
+#[derive(Clone, Copy)]
+struct WaitBehavior {
+    nohang: bool,
+    preserve_child: bool,
+    report_exited: bool,
+    report_stopped: bool,
+}
+
+impl WaitBehavior {
+    fn for_wait4(options: Wait4Options) -> Self {
+        Self {
+            nohang: options.contains(Wait4Options::NOHANG),
+            preserve_child: false,
+            report_exited: true,
+            report_stopped: options.contains(Wait4Options::WUNTRACED),
+        }
+    }
+
+    fn for_waitid(options: WaitidOptions) -> Self {
+        Self {
+            nohang: options.contains(WaitidOptions::NOHANG),
+            preserve_child: options.contains(WaitidOptions::WNOWAIT),
+            report_exited: options.contains(WaitidOptions::WEXITED),
+            report_stopped: options.contains(WaitidOptions::WSTOPPED),
+        }
+    }
+}
+
 fn check_wait_outcome(
     target_process: i32,
-    wait_options: WaitOptions,
+    wait_behavior: WaitBehavior,
     current_process: &ProcessRef,
 ) -> Result<Option<WaitOutcome>, SyscallError> {
-    let preserve_child = wait_options.contains(WaitOptions::WNOWAIT);
     let current_group = current_process.lock().group_id;
     let manager = MANAGER.lock();
     let mut matched_child = false;
     let mut ready_child = None;
+    if target_process == i32::MIN {
+        return Err(SyscallError::NoProcess);
+    }
+    let target_group = match target_process {
+        -1..=i32::MAX => None,
+        ..=-2 => Some(target_process.wrapping_neg() as u64),
+    };
 
     for (pid, process) in manager.processes.iter() {
         let mut p_lock = process.lock();
@@ -70,7 +143,7 @@ fn check_wait_outcome(
             -1 => is_current_child,
             0 => is_current_child && p_lock.group_id == current_group,
             1.. => pid.0 == target_process as u64 && is_current_child,
-            i32::MIN..=-2 => is_current_child && p_lock.group_id.0 == (-target_process) as u64,
+            ..=-2 => is_current_child && Some(p_lock.group_id.0) == target_group,
         };
 
         if !matches {
@@ -79,7 +152,7 @@ fn check_wait_outcome(
 
         matched_child = true;
 
-        if p_lock.threads.is_empty() {
+        if wait_behavior.report_exited && p_lock.threads.is_empty() {
             ready_child = Some(WaitOutcome::Exited(
                 process.clone(),
                 pid.0,
@@ -88,7 +161,9 @@ fn check_wait_outcome(
             break;
         }
 
-        if let Some(wait_event) = take_wait_event(&mut p_lock, preserve_child) {
+        if wait_behavior.report_stopped
+            && let Some(wait_event) = take_wait_event(&mut p_lock, wait_behavior.preserve_child)
+        {
             ready_child = Some(WaitOutcome::Stopped(process.clone(), pid.0, wait_event));
             break;
         }
@@ -105,9 +180,8 @@ fn check_wait_outcome(
 
 fn wait_for_child_exit(
     target_process: i32,
-    wait_options: WaitOptions,
+    wait_behavior: WaitBehavior,
 ) -> Result<Option<WaitOutcome>, SyscallError> {
-    let preserve_child = wait_options.contains(WaitOptions::WNOWAIT);
     let current_process = get_current_process();
 
     loop {
@@ -117,11 +191,11 @@ fn wait_for_child_exit(
             .lock()
             .cleanup_exited_threads();
 
-        let check_result = check_wait_outcome(target_process, wait_options, &current_process)?;
+        let check_result = check_wait_outcome(target_process, wait_behavior, &current_process)?;
 
         match check_result {
             Some(WaitOutcome::Exited(process, pid, exit_status)) => {
-                if !preserve_child {
+                if !wait_behavior.preserve_child {
                     MANAGER.lock().reap_process(process.clone());
                 }
                 return Ok(Some(WaitOutcome::Exited(process, pid, exit_status)));
@@ -129,7 +203,7 @@ fn wait_for_child_exit(
             Some(WaitOutcome::Stopped(process, pid, wait_event)) => {
                 return Ok(Some(WaitOutcome::Stopped(process, pid, wait_event)));
             }
-            None if wait_options.contains(WaitOptions::NOHANG) => return Ok(None),
+            None if wait_behavior.nohang => return Ok(None),
             None => {
                 if has_wait_interrupt_signal(&current_process) {
                     return Err(SyscallError::Interrupted);
@@ -139,7 +213,7 @@ fn wait_for_child_exit(
                     wake_type: WakeType::ProcsesExit,
                     deadline: None,
                 });
-                match check_wait_outcome(target_process, wait_options, &current_process) {
+                match check_wait_outcome(target_process, wait_behavior, &current_process) {
                     Ok(Some(outcome)) => {
                         cancel_block(&current);
                         finish_block_current();
@@ -181,10 +255,10 @@ define_syscall!(Getpgrp, {
 
 define_syscall!(Wait4, |target_process: i32,
                         status_ptr: *mut i32,
-                        options: i32,
-                        _rusage: u64| {
-    let wait_options = WaitOptions::from_bits_truncate(options);
-    let Some(outcome) = wait_for_child_exit(target_process, wait_options)? else {
+                        options: Wait4Options,
+                        rusage: *mut LinuxRusage| {
+    let wait_behavior = WaitBehavior::for_wait4(options);
+    let Some(outcome) = wait_for_child_exit(target_process, wait_behavior)? else {
         return Ok(0);
     };
 
@@ -194,6 +268,9 @@ define_syscall!(Wait4, |target_process: i32,
             WaitOutcome::Stopped(_, _, wait_event) => wait_event.wait_status(),
         };
         user_safe::write(status_ptr, &status)?;
+    }
+    if !rusage.is_null() {
+        user_safe::write(rusage, &LinuxRusage::default())?;
     }
 
     let pid = match outcome {
@@ -205,7 +282,7 @@ define_syscall!(Wait4, |target_process: i32,
 define_syscall!(Waitid, |id_type: i32,
                          id: u32,
                          info_ptr: *mut SigInfo,
-                         options: i32| {
+                         options: WaitidOptions| {
     let target_process = match id_type {
         0 => -1,
         1 => id as i32,
@@ -214,12 +291,12 @@ define_syscall!(Waitid, |id_type: i32,
         _ => return Err(SyscallError::InvalidArguments),
     };
 
-    if options & WaitOptions::WEXITED.bits() == 0 {
+    if !options.contains(WaitidOptions::WEXITED) {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let wait_options = WaitOptions::from_bits_truncate(options);
-    let result = wait_for_child_exit(target_process, wait_options)?;
+    let wait_behavior = WaitBehavior::for_waitid(options);
+    let result = wait_for_child_exit(target_process, wait_behavior)?;
 
     if !info_ptr.is_null() {
         let info = if let Some(result) = result {

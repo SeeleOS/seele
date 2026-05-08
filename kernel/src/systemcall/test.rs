@@ -36,7 +36,7 @@ use crate::{
             Settimeofday, Setuid, Setxattr, Signalfd4, Statfs, Statx, Symlink, SymlinkAt, Sync,
             Sysinfo, Time, TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime,
             TimerfdCreate, TimerfdGettime, TimerfdSettime, Umask, Uname, Unlink, UnlinkAt,
-            Unshare, Utimensat, Vhangup, Waitid, Write, Writev, clear_fdset,
+            Unshare, Utimensat, Vhangup, Wait4, Waitid, Write, Writev, clear_fdset,
             fdset_contains, fdset_insert,
             fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
             timeout_to_deadline, translate_ready_events,
@@ -5131,11 +5131,16 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
     const P_PID: u64 = 1;
     const P_PIDFD: u64 = 3;
     const WNOHANG: u64 = 1;
+    const WUNTRACED: u64 = 2;
+    const WSTOPPED: u64 = 2;
     const WEXITED: u64 = 4;
+    const WBAD: u64 = 0x20;
     const WNOWAIT: u64 = 0x0100_0000;
     const CLD_EXITED: i32 = 1;
+    const STOP_STATUS: i32 = 0x7f;
 
     assert_linux_layout::<TestWaitidSigInfo>(128, 8);
+    assert_linux_layout::<TestLinuxRusage>(144, 8);
 
     let current = get_current_process();
     let current_pid = current.lock().pid.0;
@@ -5189,6 +5194,153 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
     );
     assert!(!MANAGER.lock().processes.contains_key(&ProcessID(child_pid)));
 
+    write_user_value(info_page + 256, &0x55aa55aai32);
+    write_user_value(info_page + 320, &[0xa5u8; 144]);
+
+    let wait4_child = Process::empty();
+    let wait4_child_pid = {
+        let mut child = wait4_child.lock();
+        child.pid = ProcessID::new();
+        child.parent = Some(current.clone());
+        child.group_id = current.lock().group_id;
+        child.exit_status = Some(ProcessExitStatus::Exited(9));
+        child.pid.0
+    };
+    MANAGER
+        .lock()
+        .processes
+        .insert(ProcessID(wait4_child_pid), wait4_child.clone());
+    expect_ok(
+        SyscallArgs::new([
+            wait4_child_pid,
+            info_page + 256,
+            WNOHANG,
+            info_page + 320,
+            0,
+            0,
+        ])
+        .call::<Wait4>(),
+        wait4_child_pid as usize,
+    );
+    assert_eq!(read_user_value::<i32>(info_page + 256), 9 << 8);
+    assert_eq!(
+        read_user_value::<TestLinuxRusage>(info_page + 320).ru_maxrss,
+        0
+    );
+    assert!(!MANAGER.lock().processes.contains_key(&ProcessID(wait4_child_pid)));
+
+    let wait4_preserve_child = Process::empty();
+    let wait4_preserve_child_pid = {
+        let mut child = wait4_preserve_child.lock();
+        child.pid = ProcessID::new();
+        child.parent = Some(current.clone());
+        child.group_id = current.lock().group_id;
+        child.exit_status = Some(ProcessExitStatus::Exited(11));
+        child.pid.0
+    };
+    MANAGER
+        .lock()
+        .processes
+        .insert(ProcessID(wait4_preserve_child_pid), wait4_preserve_child.clone());
+    expect_ok(
+        SyscallArgs::new([wait4_preserve_child_pid, 0, WNOHANG, 0, 0, 0]).call::<Wait4>(),
+        wait4_preserve_child_pid as usize,
+    );
+    assert!(!MANAGER
+        .lock()
+        .processes
+        .contains_key(&ProcessID(wait4_preserve_child_pid)));
+
+    let stopped_child = Process::empty();
+    let stopped_child_pid = {
+        let mut child = stopped_child.lock();
+        child.pid = ProcessID::new();
+        child.parent = Some(current.clone());
+        child.group_id = current.lock().group_id;
+        child.wait_event = Some(crate::process::wait::ProcessWaitEvent::Stopped {
+            status: STOP_STATUS,
+            ptrace: false,
+        });
+        child.threads.push(alloc::sync::Arc::downgrade(&crate::thread::thread::Thread::empty()));
+        child.pid.0
+    };
+    MANAGER
+        .lock()
+        .processes
+        .insert(ProcessID(stopped_child_pid), stopped_child.clone());
+
+    expect_ok(
+        SyscallArgs::new([stopped_child_pid, info_page + 256, WNOHANG, 0, 0, 0]).call::<Wait4>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(info_page + 256), 9 << 8);
+    assert!(stopped_child.lock().wait_event.is_some());
+
+    expect_ok(
+        SyscallArgs::new([
+            stopped_child_pid,
+            info_page + 256,
+            WNOHANG | WUNTRACED,
+            info_page + 320,
+            0,
+            0,
+        ])
+        .call::<Wait4>(),
+        stopped_child_pid as usize,
+    );
+    assert_eq!(read_user_value::<i32>(info_page + 256), STOP_STATUS);
+    assert_eq!(
+        read_user_value::<TestLinuxRusage>(info_page + 320).ru_nivcsw,
+        0
+    );
+    assert!(stopped_child.lock().wait_event.is_none());
+
+    let stopped_child_wnowait = Process::empty();
+    let stopped_child_wnowait_pid = {
+        let mut child = stopped_child_wnowait.lock();
+        child.pid = ProcessID::new();
+        child.parent = Some(current.clone());
+        child.group_id = current.lock().group_id;
+        child.wait_event = Some(crate::process::wait::ProcessWaitEvent::Stopped {
+            status: STOP_STATUS,
+            ptrace: false,
+        });
+        child.threads.push(alloc::sync::Arc::downgrade(&crate::thread::thread::Thread::empty()));
+        child.pid.0
+    };
+    MANAGER.lock().processes.insert(
+        ProcessID(stopped_child_wnowait_pid),
+        stopped_child_wnowait.clone(),
+    );
+    expect_ok(
+        SyscallArgs::new([
+            P_PID,
+            stopped_child_wnowait_pid,
+            info_page,
+            WEXITED | WNOWAIT | WSTOPPED,
+            0,
+            0,
+        ])
+        .call::<Waitid>(),
+        0,
+    );
+    assert_eq!(read_user_value::<TestWaitidSigInfo>(info_page).si_code, 5);
+    assert!(stopped_child_wnowait.lock().wait_event.is_some());
+    expect_ok(
+        SyscallArgs::new([
+            stopped_child_wnowait_pid,
+            info_page + 256,
+            WNOHANG | WUNTRACED,
+            0,
+            0,
+            0,
+        ])
+        .call::<Wait4>(),
+        stopped_child_wnowait_pid as usize,
+    );
+    assert_eq!(read_user_value::<i32>(info_page + 256), STOP_STATUS);
+    assert!(stopped_child_wnowait.lock().wait_event.is_none());
+
     let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
     expect_errno(
         SyscallArgs::new([99, 0, 0, WEXITED, 0, 0]).call::<Waitid>(),
@@ -5206,8 +5358,25 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
         SyscallArgs::new([P_PID, child_pid, 0, WEXITED, 0, 0]).call::<Waitid>(),
         SyscallError::NoChildProcesses,
     );
+    expect_errno(
+        SyscallArgs::new([current_pid, 0, WBAD, 0, 0, 0]).call::<Wait4>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([i32::MIN as u32 as u64, 0, WNOHANG, 0, 0, 0]).call::<Wait4>(),
+        SyscallError::NoProcess,
+    );
+    expect_errno(
+        SyscallArgs::new([current_pid + 10_000, 0, WNOHANG, 0, 0, 0]).call::<Wait4>(),
+        SyscallError::NoChildProcesses,
+    );
 
     MANAGER.lock().processes.remove(&ProcessID(child_pid));
+    MANAGER.lock().processes.remove(&ProcessID(stopped_child_pid));
+    MANAGER
+        .lock()
+        .processes
+        .remove(&ProcessID(stopped_child_wnowait_pid));
     close_test_fd(eventfd);
     close_test_fd(child_pidfd);
 }
