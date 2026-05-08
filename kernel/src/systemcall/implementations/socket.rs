@@ -1,6 +1,5 @@
 use crate::{
     define_syscall,
-    drm::current_debug_process,
     memory::user_safe,
     misc::systemd_perf::{self, PerfBucket},
     net::InetAddress,
@@ -127,7 +126,6 @@ fn rights_control_bytes_for_read(
         return Ok(Vec::new());
     }
 
-    let rights_group_count = ready_rights.len();
     let total_rights: usize = ready_rights.iter().map(Vec::len).sum();
     let current_process = get_current_process();
     let mut current = current_process.lock();
@@ -143,16 +141,6 @@ fn rights_control_bytes_for_read(
                 .map_err(|_| SyscallError::TooManyOpenFilesProcess)?;
             payload.extend_from_slice(&fd.to_ne_bytes());
         }
-    }
-    if let Some((pid, comm)) = current_debug_process() {
-        crate::s_println!(
-            "unix recv rights comm={} pid={} groups={} total_fds={} cloexec={}",
-            comm,
-            pid,
-            rights_group_count,
-            total_rights,
-            cloexec
-        );
     }
     Ok(encode_control_message(SCM_RIGHTS, &payload))
 }
@@ -516,6 +504,9 @@ define_syscall!(Connect, |socket: ObjectRef,
 define_syscall!(Accept, |socket: ObjectRef,
                          address: *mut u8,
                          address_len_ptr: *mut u32| {
+    if !address.is_null() && address_len_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
     let fd = accept_socket(socket, 0)?;
     if !address_len_ptr.is_null() {
         let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
@@ -532,6 +523,9 @@ define_syscall!(Accept4, |socket: ObjectRef,
                           address: *mut u8,
                           address_len_ptr: *mut u32,
                           flags: u32| {
+    if !address.is_null() && address_len_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
     let fd = accept_socket(socket, flags)?;
     if !address_len_ptr.is_null() {
         let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
@@ -705,18 +699,6 @@ fn sendmsg_rights(msg: &relibc_msg_hdr) -> Result<Vec<ObjectRef>, SyscallError> 
         offset = next;
     }
 
-    if !rights.is_empty()
-        && let Some((pid, comm)) = current_debug_process()
-    {
-        crate::s_println!(
-            "unix send rights comm={} pid={} total_fds={} controllen={}",
-            comm,
-            pid,
-            rights.len(),
-            msg.msg_controllen
-        );
-    }
-
     Ok(rights)
 }
 
@@ -839,18 +821,15 @@ define_syscall!(Sendmmsg, |socket: ObjectRef,
         return Err(SyscallError::BadAddress);
     }
 
-    let messages = if vlen == 0 {
-        &mut [][..]
-    } else {
-        unsafe { core::slice::from_raw_parts_mut(msgvec, vlen as usize) }
-    };
     let mut sent = 0usize;
 
-    for message in messages {
+    for index in 0..(vlen as usize) {
+        let message_ptr = unsafe { msgvec.add(index) };
+        let mut message = user_safe::read(message_ptr)?;
         match sendmsg_impl(socket.clone(), &message.msg_hdr, flags as u64) {
             Ok(written) => {
-                message.msg_len =
-                    u32::try_from(written).map_err(|_| SyscallError::InvalidArguments)?;
+                message.msg_len = u32::try_from(written).map_err(|_| SyscallError::InvalidArguments)?;
+                user_safe::write(message_ptr, &message)?;
                 sent += 1;
             }
             Err(_) if sent > 0 => break,
@@ -1212,6 +1191,7 @@ struct relibc_msg_hdr {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct relibc_mmsghdr {
     msg_hdr: relibc_msg_hdr,
     msg_len: u32,

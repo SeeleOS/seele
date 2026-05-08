@@ -15,7 +15,7 @@ use crate::{
     systemcall::{
         arg_types::SyscallArg,
         implementations::{
-            Accept4, Access, Alarm, ArchPrctl, Bind, Capget, Capset, Chdir, Chroot, ClockGetres, ClockGettime,
+            Accept, Accept4, Access, Alarm, ArchPrctl, Bind, Capget, Capset, Chdir, Chroot, ClockGetres, ClockGettime,
             ClockNanosleep, ClockSettime, Close, CloseRange, Dup, Dup2, Dup3, EpollCreate1,
             EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Eventfd2, Faccessat,
             Faccessat2, Fadvise64, Fallocate, Fchdir, Fchmod, Fchmodat, Fchown, Fchownat, Fcntl,
@@ -38,7 +38,7 @@ use crate::{
             Sysinfo, Time, TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime,
             TimerfdCreate, TimerfdGettime, TimerfdSettime, Umask, Uname, Unlink, UnlinkAt,
             Unshare, Utimensat, Vhangup, Wait4, Waitid, Write, Writev, Getsockname, Getpeername,
-            Getsockopt, Connect, clear_fdset,
+            Getsockopt, Connect, Recvfrom, Recvmsg, Sendmmsg, Sendmsg, Sendto, clear_fdset,
             fdset_contains, fdset_insert,
             fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
             timeout_to_deadline, translate_ready_events,
@@ -176,6 +176,48 @@ struct TestLinuxSockAddrIn {
     sin_port: u16,
     sin_addr: [u8; 4],
     sin_zero: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestRelibcIovec {
+    iov_base: *mut u8,
+    iov_len: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestRelibcMsgHdr {
+    msg_name: *mut u8,
+    msg_namelen: u32,
+    msg_iov: *mut TestRelibcIovec,
+    msg_iovlen: usize,
+    msg_control: *mut u8,
+    msg_controllen: usize,
+    msg_flags: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestRelibcMmsghdr {
+    msg_hdr: TestRelibcMsgHdr,
+    msg_len: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxCmsgHdr {
+    cmsg_len: usize,
+    cmsg_level: i32,
+    cmsg_type: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestRightsControlMessage {
+    header: TestLinuxCmsgHdr,
+    fd: i32,
+    pad: i32,
 }
 
 crate::test!(
@@ -422,6 +464,11 @@ crate::test!(
     socket_bind_connect_accept_syscalls,
     "bind listen connect and accept4 follow linux socket rules",
     socket_bind_connect_accept_syscalls_follow_linux_rules
+);
+crate::test!(
+    socket_message_syscalls,
+    "accept sendto recvfrom sendmsg sendmmsg and recvmsg follow linux socket rules",
+    socket_message_syscalls_follow_linux_rules
 );
 crate::test!(
     namespace_and_kcmp_syscalls,
@@ -5449,6 +5496,274 @@ fn socket_bind_connect_accept_syscalls_follow_linux_rules() {
     close_test_fd(accepted);
     close_test_fd(client);
     close_test_fd(server);
+}
+
+fn socket_message_syscalls_follow_linux_rules() {
+    const AF_UNIX: u64 = 1;
+    const SOCK_STREAM: u64 = 1;
+    const SOCK_DGRAM: u64 = 2;
+    const SOCK_NONBLOCK: u64 = 0o0004000;
+    const SOL_SOCKET: i32 = 1;
+    const SCM_RIGHTS: i32 = 1;
+    const MSG_CMSG_CLOEXEC: u64 = 0x4000_0000;
+
+    assert_linux_layout::<TestRelibcIovec>(16, 8);
+    assert_linux_layout::<TestRelibcMsgHdr>(56, 8);
+    assert_linux_layout::<TestRelibcMmsghdr>(64, 8);
+    assert_linux_layout::<TestLinuxCmsgHdr>(16, 8);
+    assert_linux_layout::<TestRightsControlMessage>(24, 8);
+
+    let page = allocate_user_test_page();
+    let listener_path = b"/tmp/accept-linux.sock\0";
+    let source_path = b"/tmp/sendto-src.sock\0";
+    let target_path = b"/tmp/sendto-dst.sock\0";
+    write_user_value(page, listener_path);
+    write_user_value(page + 256, source_path);
+    write_user_value(page + 512, target_path);
+
+    let mut listener_addr = TestLinuxSockAddrUn::default();
+    listener_addr.sun_family = AF_UNIX as u16;
+    listener_addr.sun_path[..listener_path.len()].copy_from_slice(listener_path);
+    write_user_value(page + 128, &listener_addr);
+
+    let mut source_addr = TestLinuxSockAddrUn::default();
+    source_addr.sun_family = AF_UNIX as u16;
+    source_addr.sun_path[..source_path.len()].copy_from_slice(source_path);
+    write_user_value(page + 384, &source_addr);
+
+    let mut target_addr = TestLinuxSockAddrUn::default();
+    target_addr.sun_family = AF_UNIX as u16;
+    target_addr.sun_path[..target_path.len()].copy_from_slice(target_path);
+    write_user_value(page + 640, &target_addr);
+
+    let listener =
+        expect_fd(SyscallArgs::new([AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, 0, 0, 0]).call::<Socket>());
+    expect_ok(
+        SyscallArgs::new([listener as u64, page + 128, 110, 0, 0, 0]).call::<Bind>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([listener as u64, 4, 0, 0, 0, 0]).call::<Listen>(),
+        0,
+    );
+    let client = expect_fd(SyscallArgs::new([AF_UNIX, SOCK_STREAM, 0, 0, 0, 0]).call::<Socket>());
+    expect_ok(
+        SyscallArgs::new([client as u64, page + 128, 110, 0, 0, 0]).call::<Connect>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([listener as u64, page + 768, 0, 0, 0, 0]).call::<Accept>(),
+        SyscallError::BadAddress,
+    );
+    write_user_value(page + 776, &2u32);
+    let accepted =
+        expect_fd(SyscallArgs::new([listener as u64, page + 768, page + 776, 0, 0, 0]).call::<Accept>());
+    assert_fd_flags(accepted, FdFlags::empty());
+    assert_object_flags(accepted, FileFlags::empty());
+    assert_eq!(read_user_value::<u32>(page + 776), 2);
+    let accepted_peer = read_user_value::<TestLinuxSockAddrUn>(page + 768);
+    assert_eq!(accepted_peer.sun_family, AF_UNIX as u16);
+
+    let sender = expect_fd(SyscallArgs::new([AF_UNIX, SOCK_DGRAM, 0, 0, 0, 0]).call::<Socket>());
+    let receiver = expect_fd(SyscallArgs::new([AF_UNIX, SOCK_DGRAM, 0, 0, 0, 0]).call::<Socket>());
+    expect_ok(
+        SyscallArgs::new([sender as u64, page + 384, 110, 0, 0, 0]).call::<Bind>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([receiver as u64, page + 640, 110, 0, 0, 0]).call::<Bind>(),
+        0,
+    );
+
+    write_user_value(page + 896, b"hey");
+    expect_ok(
+        SyscallArgs::new([sender as u64, page + 896, 3, 0, page + 640, 110]).call::<Sendto>(),
+        3,
+    );
+    write_user_value(page + 1048, &2u32);
+    expect_ok(
+        SyscallArgs::new([receiver as u64, page + 1024, 8, 0, page + 1152, page + 1048]).call::<Recvfrom>(),
+        3,
+    );
+    assert_user_bytes(page + 1024, b"hey");
+    assert_eq!(read_user_value::<u32>(page + 1048), 110);
+    let recv_source = read_user_value::<TestLinuxSockAddrUn>(page + 1152);
+    assert_eq!(recv_source.sun_family, AF_UNIX as u16);
+    expect_errno(
+        SyscallArgs::new([sender as u64, page + 896, 1, 0, page + 640, 1]).call::<Sendto>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([sender as u64, 0, 1, 0, page + 640, 110]).call::<Sendto>(),
+        SyscallError::BadAddress,
+    );
+
+    let rights_fd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+    let socketpair_page = page + 1408;
+    expect_ok(
+        SyscallArgs::new([AF_UNIX, SOCK_STREAM, 0, socketpair_page, 0, 0]).call::<Socketpair>(),
+        0,
+    );
+    let stream_left = read_user_value::<i32>(socketpair_page) as usize;
+    let stream_right = read_user_value::<i32>(socketpair_page + 4) as usize;
+
+    write_user_value(page + 1424, &[b'R']);
+    let send_iov = TestRelibcIovec {
+        iov_base: (page + 1424) as *mut u8,
+        iov_len: 1,
+    };
+    write_user_value(page + 1440, &send_iov);
+    let send_control = TestRightsControlMessage {
+        header: TestLinuxCmsgHdr {
+            cmsg_len: 20,
+            cmsg_level: SOL_SOCKET,
+            cmsg_type: SCM_RIGHTS,
+        },
+        fd: rights_fd as i32,
+        pad: 0,
+    };
+    write_user_value(page + 1472, &send_control);
+    let send_msg = TestRelibcMsgHdr {
+        msg_name: core::ptr::null_mut(),
+        msg_namelen: 0,
+        msg_iov: (page + 1440) as *mut TestRelibcIovec,
+        msg_iovlen: 1,
+        msg_control: (page + 1472) as *mut u8,
+        msg_controllen: core::mem::size_of::<TestRightsControlMessage>(),
+        msg_flags: 0,
+    };
+    write_user_value(page + 1504, &send_msg);
+    expect_ok(
+        SyscallArgs::new([stream_left as u64, page + 1504, 0, 0, 0, 0]).call::<Sendmsg>(),
+        1,
+    );
+
+    write_user_value(page + 1568, &[0u8]);
+    let recv_iov = TestRelibcIovec {
+        iov_base: (page + 1568) as *mut u8,
+        iov_len: 1,
+    };
+    write_user_value(page + 1584, &recv_iov);
+    write_user_value(page + 1616, &TestRightsControlMessage::default());
+    let recv_msg = TestRelibcMsgHdr {
+        msg_name: core::ptr::null_mut(),
+        msg_namelen: 0,
+        msg_iov: (page + 1584) as *mut TestRelibcIovec,
+        msg_iovlen: 1,
+        msg_control: (page + 1616) as *mut u8,
+        msg_controllen: core::mem::size_of::<TestRightsControlMessage>(),
+        msg_flags: 0,
+    };
+    write_user_value(page + 1648, &recv_msg);
+    expect_ok(
+        SyscallArgs::new([stream_right as u64, page + 1648, MSG_CMSG_CLOEXEC, 0, 0, 0]).call::<Recvmsg>(),
+        1,
+    );
+    assert_user_bytes(page + 1568, b"R");
+    let recv_msg_after = read_user_value::<TestRelibcMsgHdr>(page + 1648);
+    assert_eq!(recv_msg_after.msg_flags, 0);
+    assert_eq!(
+        recv_msg_after.msg_controllen,
+        core::mem::size_of::<TestRightsControlMessage>()
+    );
+    let received_control = read_user_value::<TestRightsControlMessage>(page + 1616);
+    assert_eq!(received_control.header.cmsg_len, 20);
+    assert_eq!(received_control.header.cmsg_level, SOL_SOCKET);
+    assert_eq!(received_control.header.cmsg_type, SCM_RIGHTS);
+    let received_fd = usize::try_from(received_control.fd).expect("received fd should be non-negative");
+    assert_ne!(received_fd, rights_fd);
+    assert_fd_flags(received_fd, FdFlags::CLOEXEC);
+    assert_same_object(received_fd, rights_fd);
+    expect_errno(
+        SyscallArgs::new([stream_left as u64, 0, 0, 0, 0, 0]).call::<Sendmsg>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([stream_right as u64, 0, 0, 0, 0, 0]).call::<Recvmsg>(),
+        SyscallError::BadAddress,
+    );
+
+    let dgram_pair_page = page + 1728;
+    expect_ok(
+        SyscallArgs::new([AF_UNIX, SOCK_DGRAM, 0, dgram_pair_page, 0, 0]).call::<Socketpair>(),
+        0,
+    );
+    let dgram_left = read_user_value::<i32>(dgram_pair_page) as usize;
+    let dgram_right = read_user_value::<i32>(dgram_pair_page + 4) as usize;
+    write_user_value(page + 1744, b"go");
+    write_user_value(page + 1760, b"again");
+    let sendmmsg_iov = [
+        TestRelibcIovec {
+            iov_base: (page + 1744) as *mut u8,
+            iov_len: 2,
+        },
+        TestRelibcIovec {
+            iov_base: (page + 1760) as *mut u8,
+            iov_len: 5,
+        },
+    ];
+    write_user_value(page + 1792, &sendmmsg_iov);
+    let msgvec = [
+        TestRelibcMmsghdr {
+            msg_hdr: TestRelibcMsgHdr {
+                msg_name: core::ptr::null_mut(),
+                msg_namelen: 0,
+                msg_iov: (page + 1792) as *mut TestRelibcIovec,
+                msg_iovlen: 1,
+                msg_control: core::ptr::null_mut(),
+                msg_controllen: 0,
+                msg_flags: 0,
+            },
+            msg_len: 0,
+        },
+        TestRelibcMmsghdr {
+            msg_hdr: TestRelibcMsgHdr {
+                msg_name: core::ptr::null_mut(),
+                msg_namelen: 0,
+                msg_iov: (page + 1792 + core::mem::size_of::<TestRelibcIovec>() as u64)
+                    as *mut TestRelibcIovec,
+                msg_iovlen: 1,
+                msg_control: core::ptr::null_mut(),
+                msg_controllen: 0,
+                msg_flags: 0,
+            },
+            msg_len: 0,
+        },
+    ];
+    write_user_value(page + 1856, &msgvec);
+    expect_ok(
+        SyscallArgs::new([dgram_left as u64, page + 1856, 2, 0, 0, 0]).call::<Sendmmsg>(),
+        2,
+    );
+    let sent_vec = read_user_value::<[TestRelibcMmsghdr; 2]>(page + 1856);
+    assert_eq!(sent_vec[0].msg_len, 2);
+    assert_eq!(sent_vec[1].msg_len, 5);
+    expect_ok(
+        SyscallArgs::new([dgram_right as u64, page + 2000, 8, 0, 0, 0]).call::<Recvfrom>(),
+        2,
+    );
+    assert_user_bytes(page + 2000, b"go");
+    expect_ok(
+        SyscallArgs::new([dgram_right as u64, page + 2016, 8, 0, 0, 0]).call::<Recvfrom>(),
+        5,
+    );
+    assert_user_bytes(page + 2016, b"again");
+    expect_errno(
+        SyscallArgs::new([dgram_left as u64, 0, 1, 0, 0, 0]).call::<Sendmmsg>(),
+        SyscallError::BadAddress,
+    );
+
+    close_test_fd(dgram_right);
+    close_test_fd(dgram_left);
+    close_test_fd(received_fd);
+    close_test_fd(stream_right);
+    close_test_fd(stream_left);
+    close_test_fd(rights_fd);
+    close_test_fd(receiver);
+    close_test_fd(sender);
+    close_test_fd(accepted);
+    close_test_fd(client);
+    close_test_fd(listener);
 }
 
 fn namespace_and_kcmp_syscalls_follow_linux_rules() {
