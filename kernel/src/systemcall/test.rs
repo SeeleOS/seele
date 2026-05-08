@@ -28,7 +28,7 @@ use crate::{
             MkdirAt, Mknodat, NameToHandleAt, Nanosleep, Newfstatat, Open, OpenAt, OpenFlags,
             PidfdOpen, Pipe, Pipe2, Poll, PollEvents, PollTimespec, Ppoll, Prctl, Pread64,
             Prlimit64, Pwrite64, Read, Readlink, ReadlinkAt, Reboot, Removexattr, Rename, RenameAt,
-            RenameAt2, Rmdir, Rseq, RtSigsuspend, SchedGetPriorityMax, SchedGetPriorityMin,
+            RenameAt2, Rmdir, Rseq, RtSigpending, RtSigprocmask, RtSigsuspend, SchedGetPriorityMax, SchedGetPriorityMin,
             SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval,
             SchedSetaffinity, SchedSetparam, SchedYield, SelectTimespec, SetRobustList,
             SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Setitimer, Sethostname, Setns,
@@ -5213,6 +5213,10 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
 }
 
 fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
+    const SIG_BLOCK: u64 = 0;
+    const SIG_UNBLOCK: u64 = 1;
+    const SIG_SETMASK: u64 = 2;
+
     let page = allocate_user_test_page();
     write_user_value(
         page,
@@ -5264,7 +5268,86 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
         SyscallError::BadAddress,
     );
 
-    let saved_mask = crate::thread::get_current_thread().lock().blocked_signals;
+    let thread = crate::thread::get_current_thread();
+    let saved_mask = thread.lock().blocked_signals;
+    write_user_value(page + 128, &Signal::SIGUSR1.mask());
+    expect_ok(
+        SyscallArgs::new([SIG_BLOCK, page + 128, page + 136, 8, 0, 0]).call::<RtSigprocmask>(),
+        0,
+    );
+    assert_eq!(read_user_value::<u64>(page + 136), saved_mask.bits());
+    assert!(
+        crate::thread::get_current_thread()
+            .lock()
+            .blocked_signals
+            .contains(Signals::from(Signal::SIGUSR1))
+    );
+
+    write_user_value(page + 144, &(Signal::SIGKILL.mask() | Signal::SIGSTOP.mask()));
+    expect_ok(
+        SyscallArgs::new([SIG_BLOCK, page + 144, 0, 8, 0, 0]).call::<RtSigprocmask>(),
+        0,
+    );
+    let blocked = crate::thread::get_current_thread().lock().blocked_signals;
+    assert!(!blocked.contains(Signals::from(Signal::SIGKILL)));
+    assert!(!blocked.contains(Signals::from(Signal::SIGSTOP)));
+
+    expect_ok(
+        SyscallArgs::new([SIG_UNBLOCK, page + 128, 0, 8, 0, 0]).call::<RtSigprocmask>(),
+        0,
+    );
+    assert!(
+        !crate::thread::get_current_thread()
+            .lock()
+            .blocked_signals
+            .contains(Signals::from(Signal::SIGUSR1))
+    );
+
+    write_user_value(page + 152, &Signal::SIGTERM.mask());
+    expect_ok(
+        SyscallArgs::new([SIG_SETMASK, page + 152, 0, 8, 0, 0]).call::<RtSigprocmask>(),
+        0,
+    );
+    assert_eq!(
+        crate::thread::get_current_thread().lock().blocked_signals.bits(),
+        Signal::SIGTERM.mask()
+    );
+    expect_errno(
+        SyscallArgs::new([99, page + 152, 0, 8, 0, 0]).call::<RtSigprocmask>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([SIG_BLOCK, 1, 0, 8, 0, 0]).call::<RtSigprocmask>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([SIG_BLOCK, page + 152, 0, 4, 0, 0]).call::<RtSigprocmask>(),
+        SyscallError::InvalidArguments,
+    );
+
+    {
+        let mut current = thread.lock();
+        current.pending_signals.insert(Signals::from(Signal::SIGUSR1));
+        current.parent.lock().pending_signals.insert(Signals::from(Signal::SIGTERM));
+    }
+    expect_ok(SyscallArgs::new([page + 168, 8, 0, 0, 0, 0]).call::<RtSigpending>(), 0);
+    let pending = read_user_value::<u64>(page + 168);
+    assert_ne!(pending & Signal::SIGUSR1.mask(), 0);
+    assert_ne!(pending & Signal::SIGTERM.mask(), 0);
+    expect_errno(
+        SyscallArgs::new([0, 8, 0, 0, 0, 0]).call::<RtSigpending>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([page + 168, 4, 0, 0, 0, 0]).call::<RtSigpending>(),
+        SyscallError::InvalidArguments,
+    );
+    {
+        let mut current = thread.lock();
+        current.pending_signals.remove(Signals::from(Signal::SIGUSR1));
+        current.parent.lock().pending_signals.remove(Signals::from(Signal::SIGTERM));
+    }
+
     write_user_value(page + 160, &Signal::SIGUSR1.mask());
     expect_errno(
         SyscallArgs::new([page + 160, 4, 0, 0, 0, 0]).call::<RtSigsuspend>(),

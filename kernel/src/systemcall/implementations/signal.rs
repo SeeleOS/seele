@@ -495,16 +495,18 @@ define_syscall!(
             return Err(SyscallError::InvalidArguments);
         }
 
-        let current = get_current_thread();
-        let mut current = current.lock();
+        let set = if set.is_null() {
+            None
+        } else {
+            Some(Signals::from_bits_truncate(user_safe::read(set)?))
+        };
 
-        unsafe {
-            if !old_set.is_null() {
-                user_safe::write(old_set, &current.blocked_signals.bits())?;
-            }
+        let old_bits = {
+            let current = get_current_thread();
+            let mut current = current.lock();
+            let old_bits = current.blocked_signals.bits();
 
-            if !set.is_null() {
-                let set = Signals::from_bits_truncate(*set);
+            if let Some(set) = set {
                 let unmaskable = Signals::from(Signal::SIGKILL) | Signals::from(Signal::SIGSTOP);
                 match SigMaskHow::try_from(how).map_err(|_| SyscallError::InvalidArguments)? {
                     SigMaskHow::Block => current.blocked_signals.insert(set - unmaskable),
@@ -512,6 +514,12 @@ define_syscall!(
                     SigMaskHow::SetMask => current.blocked_signals = set - unmaskable,
                 }
             }
+
+            old_bits
+        };
+
+        if !old_set.is_null() {
+            user_safe::write(old_set, &old_bits)?;
         }
 
         Ok(0)
@@ -526,10 +534,12 @@ define_syscall!(RtSigpending, |set: *mut u64, sigsetsize: usize| {
         return Err(SyscallError::BadAddress);
     }
 
-    let thread = get_current_thread();
-    let thread = thread.lock();
-    let process = thread.parent.lock();
-    let pending = (process.pending_signals | thread.pending_signals).bits();
+    let pending = {
+        let thread = get_current_thread();
+        let thread = thread.lock();
+        let process = thread.parent.lock();
+        (process.pending_signals | thread.pending_signals).bits()
+    };
     user_safe::write(set, &pending)?;
     Ok(0)
 });

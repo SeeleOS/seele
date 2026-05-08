@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 89;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 87;
 
 macro_rules! syscall_coverage {
     (
@@ -203,6 +203,8 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Statx => "filesystem_statx_syscalls_follow_linux_rules",
         Nanosleep => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         Setitimer => "sleep_and_signal_mask_syscalls_follow_linux_rules",
+        RtSigprocmask => "sleep_and_signal_mask_syscalls_follow_linux_rules",
+        RtSigpending => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         Waitid => "pidfd_and_waitid_syscalls_follow_linux_process_rules",
         PidfdOpen => "pidfd_and_waitid_syscalls_follow_linux_process_rules",
         CloseRange => "close_range_syscalls_follow_linux_rules",
@@ -221,8 +223,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Munmap,
     Brk,
     RtSigaction,
-    RtSigprocmask,
-    RtSigpending,
     RtSigtimedwait,
     RtSigqueueinfo,
     RtSigreturn,
