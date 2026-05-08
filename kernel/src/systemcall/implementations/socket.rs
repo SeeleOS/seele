@@ -828,7 +828,8 @@ define_syscall!(Sendmmsg, |socket: ObjectRef,
         let mut message = user_safe::read(message_ptr)?;
         match sendmsg_impl(socket.clone(), &message.msg_hdr, flags as u64) {
             Ok(written) => {
-                message.msg_len = u32::try_from(written).map_err(|_| SyscallError::InvalidArguments)?;
+                message.msg_len =
+                    u32::try_from(written).map_err(|_| SyscallError::InvalidArguments)?;
                 user_safe::write(message_ptr, &message)?;
                 sent += 1;
             }

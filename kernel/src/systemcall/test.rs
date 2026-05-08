@@ -4,12 +4,7 @@ use crate::{
     ipc::sysv_shm::LinuxShmidDs,
     memory::{addrspace::mem_area::Data, protection::Protection},
     misc::{signal::send_signal_to_process_with_siginfo, timer::ClockId},
-    object::{
-        FileFlags,
-        config::LinuxTermios,
-        misc::get_object_current_process,
-        traits::Statable,
-    },
+    object::{FileFlags, config::LinuxTermios, misc::get_object_current_process, traits::Statable},
     process::{
         ControllingTerminal, FdFlags, Process, ProcessExitStatus,
         group::{ProcessGroupID, SessionID},
@@ -21,38 +16,36 @@ use crate::{
     systemcall::{
         arg_types::SyscallArg,
         implementations::{
-            Accept, Accept4, Access, Alarm, ArchPrctl, Bind, Capget, Capset, Chdir, Chroot, ClockGetres, ClockGettime,
-            Clone, Clone3, ClockNanosleep, ClockSettime, Close, CloseRange, CreatePty, Dup, Dup2, Dup3, EpollCreate1,
-            EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Eventfd2, Faccessat,
-            Execve, Faccessat2, Fadvise64, Fallocate, Fchdir, Fchmod, Fchmodat, Fchown, Fchownat, Fcntl,
-            Fdatasync, Fgetxattr, Flistxattr, Flock, Fremovexattr, Fsetxattr, Fstat, Fstatfs,
-            Fsmount, Fsconfig, Fsopen, Fsync, Ftruncate, Getcwd, Getegid, Geteuid, Getgid, Getgroups, Getpgid, Getpgrp,
-            Futex,
-            Getpid, Getppid, Getpriority, Getrandom, Getresgid, Getresuid, Getrusage, Getsid,
-            Gettid, Gettimeofday, Getuid, Getxattr, InotifyAddWatch, InotifyInit, InotifyInit1,
-            InotifyRmWatch, Ioctl, Ioperm, Iopl, IoprioGet, IoprioSet, Kcmp, Lgetxattr, Link, LinkAt, Listen,
-            Listxattr, Llistxattr, Lremovexattr, Lseek, Lsetxattr, Madvise, MemfdCreate, Mkdir,
-            MkdirAt, Mknodat, Mount, MountSetattr, MoveMount, NameToHandleAt, Nanosleep, Newfstatat, Open, OpenAt, OpenFlags,
-            OpenTree,
-            PidfdOpen, PidfdSendSignal, Pipe, Pipe2, Poll, PollEvents, PollTimespec, Ppoll, Pselect6, Prctl, Pread64,
-            Prlimit64, Ptrace, Pwrite64, Read, Readlink, ReadlinkAt, Reboot, Removexattr, Rename, RenameAt,
-            RenameAt2, Rmdir, Rseq, RtSigpending, RtSigprocmask, RtSigsuspend, SchedGetPriorityMax, SchedGetPriorityMin,
-            SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval, SchedSetscheduler,
-            SchedSetaffinity, SchedSetparam, SchedYield, SelectTimespec, SetRobustList,
-            SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Setitimer, Sethostname, Setns,
-            Setpgid, Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid,
-            Settimeofday, Setuid, Setxattr, Setsockopt, Shutdown, Signalfd4, Socket, Socketpair,
-            Sendfile, Statfs, Statx, Symlink, SymlinkAt, Sync, Pause, Kill, Tgkill, Sigaltstack,
-            RtSigaction, RtSigqueueinfo, RtSigtimedwait,
-            Sysinfo, Time, TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime,
-            TimerfdCreate, TimerfdGettime, TimerfdSettime, Umask, Uname, Unlink, UnlinkAt,
-            Umount2, Unshare, Utimensat, Vhangup, Wait4, Waitid, Write, Writev, Getsockname, Getpeername,
-            Getsockopt, Connect, CopyFileRange, Recvfrom, Recvmsg, Sendmmsg, Sendmsg, Sendto,
-            AddKey, Bpf, Brk, Keyctl, Mincore, Mmap, Mprotect, Mremap, Msync, Munmap, Shmat,
-            Shmctl, Shmdt, Shmget,
-            Splice, clear_fdset,
-            fdset_contains, fdset_insert,
-            fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
+            Accept, Accept4, Access, AddKey, Alarm, ArchPrctl, Bind, Bpf, Brk, Capget, Capset,
+            Chdir, Chroot, ClockGetres, ClockGettime, ClockNanosleep, ClockSettime, Clone, Clone3,
+            Close, CloseRange, Connect, CopyFileRange, CreatePty, Dup, Dup2, Dup3, EpollCreate1,
+            EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Eventfd2, Execve, Faccessat,
+            Faccessat2, Fadvise64, Fallocate, Fchdir, Fchmod, Fchmodat, Fchown, Fchownat, Fcntl,
+            Fdatasync, Fgetxattr, Flistxattr, Flock, Fremovexattr, Fsconfig, Fsetxattr, Fsmount,
+            Fsopen, Fstat, Fstatfs, Fsync, Ftruncate, Futex, Getcwd, Getegid, Geteuid, Getgid,
+            Getgroups, Getpeername, Getpgid, Getpgrp, Getpid, Getppid, Getpriority, Getrandom,
+            Getresgid, Getresuid, Getrusage, Getsid, Getsockname, Getsockopt, Gettid, Gettimeofday,
+            Getuid, Getxattr, InotifyAddWatch, InotifyInit, InotifyInit1, InotifyRmWatch, Ioctl,
+            Ioperm, Iopl, IoprioGet, IoprioSet, Kcmp, Keyctl, Kill, Lgetxattr, Link, LinkAt,
+            Listen, Listxattr, Llistxattr, Lremovexattr, Lseek, Lsetxattr, Madvise, MemfdCreate,
+            Mincore, Mkdir, MkdirAt, Mknodat, Mmap, Mount, MountSetattr, MoveMount, Mprotect,
+            Mremap, Msync, Munmap, NameToHandleAt, Nanosleep, Newfstatat, Open, OpenAt, OpenFlags,
+            OpenTree, Pause, PidfdOpen, PidfdSendSignal, Pipe, Pipe2, Poll, PollEvents,
+            PollTimespec, Ppoll, Prctl, Pread64, Prlimit64, Pselect6, Ptrace, Pwrite64, Read,
+            Readlink, ReadlinkAt, Reboot, Recvfrom, Recvmsg, Removexattr, Rename, RenameAt,
+            RenameAt2, Rmdir, Rseq, RtSigaction, RtSigpending, RtSigprocmask, RtSigqueueinfo,
+            RtSigsuspend, RtSigtimedwait, SchedGetPriorityMax, SchedGetPriorityMin,
+            SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval,
+            SchedSetaffinity, SchedSetparam, SchedSetscheduler, SchedYield, SelectTimespec,
+            Sendfile, Sendmmsg, Sendmsg, Sendto, SetRobustList, SetTidAddress, Setfsgid, Setfsuid,
+            Setgid, Setgroups, Sethostname, Setitimer, Setns, Setpgid, Setpriority, Setregid,
+            Setresgid, Setresuid, Setreuid, Setrlimit, Setsid, Setsockopt, Settimeofday, Setuid,
+            Setxattr, Shmat, Shmctl, Shmdt, Shmget, Shutdown, Sigaltstack, Signalfd4, Socket,
+            Socketpair, Splice, Statfs, Statx, Symlink, SymlinkAt, Sync, Sysinfo, Tgkill, Time,
+            TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime, TimerfdCreate,
+            TimerfdGettime, TimerfdSettime, Umask, Umount2, Uname, Unlink, UnlinkAt, Unshare,
+            Utimensat, Vhangup, Wait4, Waitid, Write, Writev, clear_fdset, fdset_contains,
+            fdset_insert, fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
             timeout_to_deadline, translate_ready_events,
         },
         linux_semantics::{
@@ -4107,7 +4100,8 @@ fn filesystem_file_object_syscalls_follow_linux_rules() {
     assert_user_bytes(user_page + 576, b"abc");
     write_user_value(user_page + 608, &1i64);
     assert_eq!(
-        SyscallArgs::new([copy_out_fd as u64, fd as u64, user_page + 608, 2, 0, 0]).call::<Sendfile>(),
+        SyscallArgs::new([copy_out_fd as u64, fd as u64, user_page + 608, 2, 0, 0])
+            .call::<Sendfile>(),
         Ok(2),
         "sendfile offset result",
     );
@@ -4130,7 +4124,10 @@ fn filesystem_file_object_syscalls_follow_linux_rules() {
         .truncate(0)
         .unwrap();
     let pipe_page = user_page + 800;
-    expect_ok(SyscallArgs::new([pipe_page, 0, 0, 0, 0, 0]).call::<Pipe>(), 0);
+    expect_ok(
+        SyscallArgs::new([pipe_page, 0, 0, 0, 0, 0]).call::<Pipe>(),
+        0,
+    );
     let pipe_fds = read_user_value::<[i32; 2]>(pipe_page);
     let pipe_read_fd = pipe_fds[0] as usize;
     let pipe_write_fd = pipe_fds[1] as usize;
@@ -4140,15 +4137,8 @@ fn filesystem_file_object_syscalls_follow_linux_rules() {
     );
     write_user_value(user_page + 616, &1i64);
     assert_eq!(
-        SyscallArgs::new([
-            fd as u64,
-            user_page + 616,
-            pipe_write_fd as u64,
-            0,
-            3,
-            0,
-        ])
-        .call::<Splice>(),
+        SyscallArgs::new([fd as u64, user_page + 616, pipe_write_fd as u64, 0, 3, 0,])
+            .call::<Splice>(),
         Ok(3),
         "splice result",
     );
@@ -4232,7 +4222,8 @@ fn filesystem_file_object_syscalls_follow_linux_rules() {
     );
     write_user_value(user_page + 640, &0i64);
     assert_eq!(
-        SyscallArgs::new([fd as u64, user_page + 640, copy_out_fd as u64, 0, 1, 0]).call::<CopyFileRange>(),
+        SyscallArgs::new([fd as u64, user_page + 640, copy_out_fd as u64, 0, 1, 0])
+            .call::<CopyFileRange>(),
         Ok(1),
         "copy_file_range mixed offset result",
     );
@@ -5545,44 +5536,86 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     );
 
     let unix_socket = expect_fd(
-        SyscallArgs::new([AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, 0, 0, 0])
-            .call::<Socket>(),
+        SyscallArgs::new([
+            AF_UNIX,
+            SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+            0,
+            0,
+            0,
+            0,
+        ])
+        .call::<Socket>(),
     );
     assert_fd_flags(unix_socket, FdFlags::CLOEXEC);
     assert_object_flags(unix_socket, FileFlags::NONBLOCK);
     write_user_value(page + 896, &1i32);
     expect_ok(
-        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_PASSCRED, page + 896, 4, 0])
-            .call::<Setsockopt>(),
+        SyscallArgs::new([
+            unix_socket as u64,
+            SOL_SOCKET,
+            SO_PASSCRED,
+            page + 896,
+            4,
+            0,
+        ])
+        .call::<Setsockopt>(),
         0,
     );
     write_user_value(page + 904, &4u32);
     expect_ok(
-        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_PASSCRED, page + 912, page + 904, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            unix_socket as u64,
+            SOL_SOCKET,
+            SO_PASSCRED,
+            page + 912,
+            page + 904,
+            0,
+        ])
+        .call::<Getsockopt>(),
         0,
     );
     assert_eq!(read_user_value::<u32>(page + 904), 4);
     assert_eq!(read_user_value::<i32>(page + 912), 1);
     write_user_value(page + 920, &4u32);
     expect_ok(
-        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_TYPE, page + 928, page + 920, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            unix_socket as u64,
+            SOL_SOCKET,
+            SO_TYPE,
+            page + 928,
+            page + 920,
+            0,
+        ])
+        .call::<Getsockopt>(),
         0,
     );
     assert_eq!(read_user_value::<u32>(page + 920), 4);
     assert_eq!(read_user_value::<i32>(page + 928), SOCK_DGRAM as i32);
     write_user_value(page + 936, &4u32);
     expect_ok(
-        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_DOMAIN, page + 944, page + 936, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            unix_socket as u64,
+            SOL_SOCKET,
+            SO_DOMAIN,
+            page + 944,
+            page + 936,
+            0,
+        ])
+        .call::<Getsockopt>(),
         0,
     );
     assert_eq!(read_user_value::<i32>(page + 944), AF_UNIX as i32);
     write_user_value(page + 952, &12u32);
     expect_ok(
-        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_PEERCRED, page + 960, page + 952, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            unix_socket as u64,
+            SOL_SOCKET,
+            SO_PEERCRED,
+            page + 960,
+            page + 952,
+            0,
+        ])
+        .call::<Getsockopt>(),
         0,
     );
     assert_eq!(read_user_value::<u32>(page + 952), 12);
@@ -5594,37 +5627,57 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     assert_eq!(peercred_words[2], current_locked.effective_gid);
     drop(current_locked);
     expect_errno(
-        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_PEERCRED, page + 960, 0, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            unix_socket as u64,
+            SOL_SOCKET,
+            SO_PEERCRED,
+            page + 960,
+            0,
+            0,
+        ])
+        .call::<Getsockopt>(),
         SyscallError::BadAddress,
     );
     write_user_value(page + 952, &3u32);
     expect_errno(
-        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_TYPE, page + 928, page + 952, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            unix_socket as u64,
+            SOL_SOCKET,
+            SO_TYPE,
+            page + 928,
+            page + 952,
+            0,
+        ])
+        .call::<Getsockopt>(),
         SyscallError::InvalidArguments,
     );
     expect_errno(
-        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_TYPE, 0, page + 920, 0]).call::<Getsockopt>(),
+        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_TYPE, 0, page + 920, 0])
+            .call::<Getsockopt>(),
         SyscallError::BadAddress,
     );
     expect_errno(
-        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_TYPE, page + 928, 0, 0]).call::<Getsockopt>(),
+        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_TYPE, page + 928, 0, 0])
+            .call::<Getsockopt>(),
         SyscallError::BadAddress,
     );
     expect_errno(
-        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_PASSCRED, 0, 4, 0]).call::<Setsockopt>(),
+        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_PASSCRED, 0, 4, 0])
+            .call::<Setsockopt>(),
         SyscallError::BadAddress,
     );
     expect_errno(
-        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_ERROR, page + 896, 4, 0]).call::<Setsockopt>(),
+        SyscallArgs::new([unix_socket as u64, SOL_SOCKET, SO_ERROR, page + 896, 4, 0])
+            .call::<Setsockopt>(),
         SyscallError::InvalidArguments,
     );
 
-    let inet_socket = expect_fd(SyscallArgs::new([AF_INET, SOCK_DGRAM, 0, 0, 0, 0]).call::<Socket>());
+    let inet_socket =
+        expect_fd(SyscallArgs::new([AF_INET, SOCK_DGRAM, 0, 0, 0, 0]).call::<Socket>());
     write_user_value(page + 96, &111u32);
     expect_ok(
-        SyscallArgs::new([inet_socket as u64, page + 640, page + 96, 0, 0, 0]).call::<Getsockname>(),
+        SyscallArgs::new([inet_socket as u64, page + 640, page + 96, 0, 0, 0])
+            .call::<Getsockname>(),
         0,
     );
     assert_eq!(read_user_value::<u32>(page + 96), 16);
@@ -5635,41 +5688,77 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     assert_eq!(inet_name.sin_zero, [0; 8]);
 
     expect_errno(
-        SyscallArgs::new([inet_socket as u64, page + 768, page + 96, 0, 0, 0]).call::<Getpeername>(),
+        SyscallArgs::new([inet_socket as u64, page + 768, page + 96, 0, 0, 0])
+            .call::<Getpeername>(),
         SyscallError::NotConnected,
     );
     write_user_value(page + 968, &4u32);
     expect_ok(
-        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_TYPE, page + 976, page + 968, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            inet_socket as u64,
+            SOL_SOCKET,
+            SO_TYPE,
+            page + 976,
+            page + 968,
+            0,
+        ])
+        .call::<Getsockopt>(),
         0,
     );
     assert_eq!(read_user_value::<i32>(page + 976), SOCK_DGRAM as i32);
     write_user_value(page + 984, &4u32);
     expect_ok(
-        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_PROTOCOL, page + 992, page + 984, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            inet_socket as u64,
+            SOL_SOCKET,
+            SO_PROTOCOL,
+            page + 992,
+            page + 984,
+            0,
+        ])
+        .call::<Getsockopt>(),
         0,
     );
     assert_eq!(read_user_value::<i32>(page + 992), 17);
     write_user_value(page + 1000, &4u32);
     expect_ok(
-        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_ACCEPTCONN, page + 1008, page + 1000, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            inet_socket as u64,
+            SOL_SOCKET,
+            SO_ACCEPTCONN,
+            page + 1008,
+            page + 1000,
+            0,
+        ])
+        .call::<Getsockopt>(),
         0,
     );
     assert_eq!(read_user_value::<i32>(page + 1008), 0);
     write_user_value(page + 1016, &4u32);
     expect_ok(
-        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_DOMAIN, page + 1024, page + 1016, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            inet_socket as u64,
+            SOL_SOCKET,
+            SO_DOMAIN,
+            page + 1024,
+            page + 1016,
+            0,
+        ])
+        .call::<Getsockopt>(),
         0,
     );
     assert_eq!(read_user_value::<i32>(page + 1024), AF_INET as i32);
     write_user_value(page + 1032, &4u32);
     expect_ok(
-        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_ERROR, page + 1040, page + 1032, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            inet_socket as u64,
+            SOL_SOCKET,
+            SO_ERROR,
+            page + 1040,
+            page + 1032,
+            0,
+        ])
+        .call::<Getsockopt>(),
         0,
     );
     assert_eq!(read_user_value::<i32>(page + 1040), 0);
@@ -5687,8 +5776,15 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     );
     write_user_value(page + 1064, &4u32);
     expect_ok(
-        SyscallArgs::new([inet_socket as u64, SOL_TCP, TCP_NODELAY, page + 1072, page + 1064, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            inet_socket as u64,
+            SOL_TCP,
+            TCP_NODELAY,
+            page + 1072,
+            page + 1064,
+            0,
+        ])
+        .call::<Getsockopt>(),
         0,
     );
     assert_eq!(read_user_value::<i32>(page + 1072), 1);
@@ -5697,47 +5793,90 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
         SyscallError::InvalidArguments,
     );
     expect_errno(
-        SyscallArgs::new([inet_socket as u64, SOL_TCP, 99, page + 1072, page + 1064, 0]).call::<Getsockopt>(),
+        SyscallArgs::new([inet_socket as u64, SOL_TCP, 99, page + 1072, page + 1064, 0])
+            .call::<Getsockopt>(),
         SyscallError::InvalidArguments,
     );
 
     let netlink_socket = expect_fd(
-        SyscallArgs::new([AF_NETLINK, SOCK_RAW | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, 0, 0, 0])
-            .call::<Socket>(),
+        SyscallArgs::new([
+            AF_NETLINK,
+            SOCK_RAW | SOCK_NONBLOCK | SOCK_CLOEXEC,
+            0,
+            0,
+            0,
+            0,
+        ])
+        .call::<Socket>(),
     );
     assert_fd_flags(netlink_socket, FdFlags::CLOEXEC);
     assert_object_flags(netlink_socket, FileFlags::NONBLOCK);
     write_user_value(page + 1080, &4u32);
     expect_ok(
-        SyscallArgs::new([netlink_socket as u64, SOL_SOCKET, SO_TYPE, page + 1088, page + 1080, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            netlink_socket as u64,
+            SOL_SOCKET,
+            SO_TYPE,
+            page + 1088,
+            page + 1080,
+            0,
+        ])
+        .call::<Getsockopt>(),
         0,
     );
     assert_eq!(read_user_value::<i32>(page + 1088), SOCK_RAW as i32);
     write_user_value(page + 1096, &4u32);
     expect_ok(
-        SyscallArgs::new([netlink_socket as u64, SOL_SOCKET, SO_DOMAIN, page + 1104, page + 1096, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            netlink_socket as u64,
+            SOL_SOCKET,
+            SO_DOMAIN,
+            page + 1104,
+            page + 1096,
+            0,
+        ])
+        .call::<Getsockopt>(),
         0,
     );
     assert_eq!(read_user_value::<i32>(page + 1104), AF_NETLINK as i32);
     write_user_value(page + 1112, &4u32);
     expect_ok(
-        SyscallArgs::new([netlink_socket as u64, SOL_SOCKET, SO_PROTOCOL, page + 1120, page + 1112, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            netlink_socket as u64,
+            SOL_SOCKET,
+            SO_PROTOCOL,
+            page + 1120,
+            page + 1112,
+            0,
+        ])
+        .call::<Getsockopt>(),
         0,
     );
     assert_eq!(read_user_value::<i32>(page + 1120), 0);
     write_user_value(page + 1128, &1i32);
     expect_ok(
-        SyscallArgs::new([netlink_socket as u64, SOL_SOCKET, SO_PASSCRED, page + 1128, 4, 0])
-            .call::<Setsockopt>(),
+        SyscallArgs::new([
+            netlink_socket as u64,
+            SOL_SOCKET,
+            SO_PASSCRED,
+            page + 1128,
+            4,
+            0,
+        ])
+        .call::<Setsockopt>(),
         0,
     );
     write_user_value(page + 1136, &4u32);
     expect_ok(
-        SyscallArgs::new([netlink_socket as u64, SOL_SOCKET, SO_PASSCRED, page + 1144, page + 1136, 0])
-            .call::<Getsockopt>(),
+        SyscallArgs::new([
+            netlink_socket as u64,
+            SOL_SOCKET,
+            SO_PASSCRED,
+            page + 1144,
+            page + 1136,
+            0,
+        ])
+        .call::<Getsockopt>(),
         0,
     );
     assert_eq!(read_user_value::<i32>(page + 1144), 1);
@@ -5788,7 +5927,9 @@ fn socket_bind_connect_accept_syscalls_follow_linux_rules() {
     missing_unix_addr.sun_path[..missing_socket_path.len()].copy_from_slice(missing_socket_path);
     write_user_value(page + 640, &missing_unix_addr);
 
-    let server = expect_fd(SyscallArgs::new([AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, 0, 0, 0]).call::<Socket>());
+    let server = expect_fd(
+        SyscallArgs::new([AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, 0, 0, 0]).call::<Socket>(),
+    );
     expect_ok(
         SyscallArgs::new([server as u64, page + 128, 110, 0, 0, 0]).call::<Bind>(),
         0,
@@ -5807,7 +5948,8 @@ fn socket_bind_connect_accept_syscalls_follow_linux_rules() {
         0,
     );
     expect_errno(
-        SyscallArgs::new([server as u64, page + 256, page + 264, SOCK_NONBLOCK, 0, 0]).call::<Accept4>(),
+        SyscallArgs::new([server as u64, page + 256, page + 264, SOCK_NONBLOCK, 0, 0])
+            .call::<Accept4>(),
         SyscallError::TryAgain,
     );
 
@@ -5853,13 +5995,16 @@ fn socket_bind_connect_accept_syscalls_follow_linux_rules() {
         SyscallError::ConnectionRefused,
     );
 
-    let unix_dgram = expect_fd(SyscallArgs::new([AF_UNIX, SOCK_DGRAM, 0, 0, 0, 0]).call::<Socket>());
+    let unix_dgram =
+        expect_fd(SyscallArgs::new([AF_UNIX, SOCK_DGRAM, 0, 0, 0, 0]).call::<Socket>());
     expect_errno(
         SyscallArgs::new([unix_dgram as u64, 1, 0, 0, 0, 0]).call::<Listen>(),
         SyscallError::InvalidArguments,
     );
 
-    let inet_stream = expect_fd(SyscallArgs::new([AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0, 0, 0, 0]).call::<Socket>());
+    let inet_stream = expect_fd(
+        SyscallArgs::new([AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0, 0, 0, 0]).call::<Socket>(),
+    );
     let inet_any = TestLinuxSockAddrIn {
         sin_family: AF_INET as u16,
         sin_port: 0,
@@ -5880,7 +6025,8 @@ fn socket_bind_connect_accept_syscalls_follow_linux_rules() {
         SyscallError::ConnectionRefused,
     );
 
-    let inet_dgram = expect_fd(SyscallArgs::new([AF_INET, SOCK_DGRAM, 0, 0, 0, 0]).call::<Socket>());
+    let inet_dgram =
+        expect_fd(SyscallArgs::new([AF_INET, SOCK_DGRAM, 0, 0, 0, 0]).call::<Socket>());
     expect_errno(
         SyscallArgs::new([inet_dgram as u64, 1, 0, 0, 0, 0]).call::<Listen>(),
         SyscallError::OperationNotSupported,
@@ -5942,8 +6088,9 @@ fn socket_message_syscalls_follow_linux_rules() {
     target_addr.sun_path[..target_path.len()].copy_from_slice(target_path);
     write_user_value(page + 640, &target_addr);
 
-    let listener =
-        expect_fd(SyscallArgs::new([AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, 0, 0, 0]).call::<Socket>());
+    let listener = expect_fd(
+        SyscallArgs::new([AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, 0, 0, 0]).call::<Socket>(),
+    );
     expect_ok(
         SyscallArgs::new([listener as u64, page + 128, 110, 0, 0, 0]).call::<Bind>(),
         0,
@@ -5962,8 +6109,9 @@ fn socket_message_syscalls_follow_linux_rules() {
         SyscallError::BadAddress,
     );
     write_user_value(page + 776, &2u32);
-    let accepted =
-        expect_fd(SyscallArgs::new([listener as u64, page + 768, page + 776, 0, 0, 0]).call::<Accept>());
+    let accepted = expect_fd(
+        SyscallArgs::new([listener as u64, page + 768, page + 776, 0, 0, 0]).call::<Accept>(),
+    );
     assert_fd_flags(accepted, FdFlags::empty());
     assert_object_flags(accepted, FileFlags::empty());
     assert_eq!(read_user_value::<u32>(page + 776), 2);
@@ -5988,7 +6136,8 @@ fn socket_message_syscalls_follow_linux_rules() {
     );
     write_user_value(page + 1048, &2u32);
     expect_ok(
-        SyscallArgs::new([receiver as u64, page + 1024, 8, 0, page + 1152, page + 1048]).call::<Recvfrom>(),
+        SyscallArgs::new([receiver as u64, page + 1024, 8, 0, page + 1152, page + 1048])
+            .call::<Recvfrom>(),
         3,
     );
     assert_user_bytes(page + 1024, b"hey");
@@ -6062,7 +6211,8 @@ fn socket_message_syscalls_follow_linux_rules() {
     };
     write_user_value(page + 1648, &recv_msg);
     expect_ok(
-        SyscallArgs::new([stream_right as u64, page + 1648, MSG_CMSG_CLOEXEC, 0, 0, 0]).call::<Recvmsg>(),
+        SyscallArgs::new([stream_right as u64, page + 1648, MSG_CMSG_CLOEXEC, 0, 0, 0])
+            .call::<Recvmsg>(),
         1,
     );
     assert_user_bytes(page + 1568, b"R");
@@ -6076,7 +6226,8 @@ fn socket_message_syscalls_follow_linux_rules() {
     assert_eq!(received_control.header.cmsg_len, 20);
     assert_eq!(received_control.header.cmsg_level, SOL_SOCKET);
     assert_eq!(received_control.header.cmsg_type, SCM_RIGHTS);
-    let received_fd = usize::try_from(received_control.fd).expect("received fd should be non-negative");
+    let received_fd =
+        usize::try_from(received_control.fd).expect("received fd should be non-negative");
     assert_ne!(received_fd, rights_fd);
     assert_fd_flags(received_fd, FdFlags::CLOEXEC);
     assert_same_object(received_fd, rights_fd);
@@ -6422,8 +6573,15 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
     );
     let info_page = allocate_user_test_page();
     expect_ok(
-        SyscallArgs::new([P_PIDFD, child_pidfd as u64, info_page, WEXITED | WNOWAIT, 0, 0])
-            .call::<Waitid>(),
+        SyscallArgs::new([
+            P_PIDFD,
+            child_pidfd as u64,
+            info_page,
+            WEXITED | WNOWAIT,
+            0,
+            0,
+        ])
+        .call::<Waitid>(),
         0,
     );
     let info = read_user_value::<TestWaitidSigInfo>(info_page);
@@ -6439,13 +6597,24 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
     queued_siginfo.si_code = SI_QUEUE;
     write_user_value(info_page + 128, &queued_siginfo);
     expect_ok(
-        SyscallArgs::new([child_pidfd as u64, Signal::SIGUSR1 as u64, info_page + 128, 0, 0, 0])
-            .call::<PidfdSendSignal>(),
+        SyscallArgs::new([
+            child_pidfd as u64,
+            Signal::SIGUSR1 as u64,
+            info_page + 128,
+            0,
+            0,
+            0,
+        ])
+        .call::<PidfdSendSignal>(),
         0,
     );
     {
         let child = child.lock();
-        assert!(child.pending_signals.contains(Signals::from(Signal::SIGUSR1)));
+        assert!(
+            child
+                .pending_signals
+                .contains(Signals::from(Signal::SIGUSR1))
+        );
         let pending = child.pending_signal_info[Signal::SIGUSR1.index()]
             .expect("siginfo should be stored for pidfd_send_signal");
         assert_eq!(pending.si_signo, Signal::SIGUSR1 as i32);
@@ -6463,8 +6632,15 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
         SyscallError::InvalidArguments,
     );
     expect_errno(
-        SyscallArgs::new([child_pidfd as u64, Signal::SIGUSR1 as u64, info_page + 128, 1, 0, 0])
-            .call::<PidfdSendSignal>(),
+        SyscallArgs::new([
+            child_pidfd as u64,
+            Signal::SIGUSR1 as u64,
+            info_page + 128,
+            1,
+            0,
+            0,
+        ])
+        .call::<PidfdSendSignal>(),
         SyscallError::InvalidArguments,
     );
 
@@ -6507,7 +6683,12 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
         read_user_value::<TestLinuxRusage>(info_page + 320).ru_maxrss,
         0
     );
-    assert!(!MANAGER.lock().processes.contains_key(&ProcessID(wait4_child_pid)));
+    assert!(
+        !MANAGER
+            .lock()
+            .processes
+            .contains_key(&ProcessID(wait4_child_pid))
+    );
 
     let wait4_preserve_child = Process::empty();
     let wait4_preserve_child_pid = {
@@ -6518,18 +6699,20 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
         child.exit_status = Some(ProcessExitStatus::Exited(11));
         child.pid.0
     };
-    MANAGER
-        .lock()
-        .processes
-        .insert(ProcessID(wait4_preserve_child_pid), wait4_preserve_child.clone());
+    MANAGER.lock().processes.insert(
+        ProcessID(wait4_preserve_child_pid),
+        wait4_preserve_child.clone(),
+    );
     expect_ok(
         SyscallArgs::new([wait4_preserve_child_pid, 0, WNOHANG, 0, 0, 0]).call::<Wait4>(),
         wait4_preserve_child_pid as usize,
     );
-    assert!(!MANAGER
-        .lock()
-        .processes
-        .contains_key(&ProcessID(wait4_preserve_child_pid)));
+    assert!(
+        !MANAGER
+            .lock()
+            .processes
+            .contains_key(&ProcessID(wait4_preserve_child_pid))
+    );
 
     let stopped_child = Process::empty();
     let stopped_child_pid = {
@@ -6541,7 +6724,9 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
             status: STOP_STATUS,
             ptrace: false,
         });
-        child.threads.push(alloc::sync::Arc::downgrade(&crate::thread::thread::Thread::empty()));
+        child.threads.push(alloc::sync::Arc::downgrade(
+            &crate::thread::thread::Thread::empty(),
+        ));
         child.pid.0
     };
     MANAGER
@@ -6585,7 +6770,9 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
             status: STOP_STATUS,
             ptrace: false,
         });
-        child.threads.push(alloc::sync::Arc::downgrade(&crate::thread::thread::Thread::empty()));
+        child.threads.push(alloc::sync::Arc::downgrade(
+            &crate::thread::thread::Thread::empty(),
+        ));
         child.pid.0
     };
     MANAGER.lock().processes.insert(
@@ -6652,7 +6839,10 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
     );
 
     MANAGER.lock().processes.remove(&ProcessID(child_pid));
-    MANAGER.lock().processes.remove(&ProcessID(stopped_child_pid));
+    MANAGER
+        .lock()
+        .processes
+        .remove(&ProcessID(stopped_child_pid));
     MANAGER
         .lock()
         .processes
@@ -6682,11 +6872,11 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
             tv_nsec: 0,
         },
     );
-    expect_ok(SyscallArgs::new([page, page + 32, 0, 0, 0, 0]).call::<Nanosleep>(), 0);
-    assert_eq!(
-        read_user_value::<TestLinuxTimespec>(page + 32).tv_nsec,
-        0
+    expect_ok(
+        SyscallArgs::new([page, page + 32, 0, 0, 0, 0]).call::<Nanosleep>(),
+        0,
     );
+    assert_eq!(read_user_value::<TestLinuxTimespec>(page + 32).tv_nsec, 0);
     write_user_value(
         page,
         &TestLinuxTimespec {
@@ -6709,7 +6899,9 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
         0,
     );
     assert_eq!(
-        read_user_value::<TestLinuxItimerval>(page + 96).it_value.tv_sec,
+        read_user_value::<TestLinuxItimerval>(page + 96)
+            .it_value
+            .tv_sec,
         0
     );
     expect_errno(
@@ -6740,7 +6932,10 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
             .contains(Signals::from(Signal::SIGUSR1))
     );
 
-    write_user_value(page + 144, &(Signal::SIGKILL.mask() | Signal::SIGSTOP.mask()));
+    write_user_value(
+        page + 144,
+        &(Signal::SIGKILL.mask() | Signal::SIGSTOP.mask()),
+    );
     expect_ok(
         SyscallArgs::new([SIG_BLOCK, page + 144, 0, 8, 0, 0]).call::<RtSigprocmask>(),
         0,
@@ -6766,7 +6961,10 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
         0,
     );
     assert_eq!(
-        crate::thread::get_current_thread().lock().blocked_signals.bits(),
+        crate::thread::get_current_thread()
+            .lock()
+            .blocked_signals
+            .bits(),
         Signal::SIGTERM.mask()
     );
     expect_errno(
@@ -6843,12 +7041,20 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
     );
     {
         let mut current = current.lock();
-        current.pending_signals.remove(Signals::from(Signal::SIGUSR2));
+        current
+            .pending_signals
+            .remove(Signals::from(Signal::SIGUSR2));
         current.pending_signal_info[Signal::SIGUSR2.index()] = None;
     }
 
-    expect_ok(SyscallArgs::new([0, page + 192, 0, 0, 0, 0]).call::<Sigaltstack>(), 0);
-    assert_eq!(read_user_value::<TestLinuxStack>(page + 192).ss_flags, SS_DISABLE);
+    expect_ok(
+        SyscallArgs::new([0, page + 192, 0, 0, 0, 0]).call::<Sigaltstack>(),
+        0,
+    );
+    assert_eq!(
+        read_user_value::<TestLinuxStack>(page + 192).ss_flags,
+        SS_DISABLE
+    );
     let altstack = TestLinuxStack {
         ss_sp: page + 4096,
         ss_flags: 0,
@@ -6859,10 +7065,22 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
         SyscallArgs::new([page + 224, page + 256, 0, 0, 0, 0]).call::<Sigaltstack>(),
         0,
     );
-    assert_eq!(read_user_value::<TestLinuxStack>(page + 256).ss_flags, SS_DISABLE);
-    expect_ok(SyscallArgs::new([0, page + 288, 0, 0, 0, 0]).call::<Sigaltstack>(), 0);
-    assert_eq!(read_user_value::<TestLinuxStack>(page + 288).ss_sp, altstack.ss_sp);
-    assert_eq!(read_user_value::<TestLinuxStack>(page + 288).ss_size, MINSIGSTKSZ);
+    assert_eq!(
+        read_user_value::<TestLinuxStack>(page + 256).ss_flags,
+        SS_DISABLE
+    );
+    expect_ok(
+        SyscallArgs::new([0, page + 288, 0, 0, 0, 0]).call::<Sigaltstack>(),
+        0,
+    );
+    assert_eq!(
+        read_user_value::<TestLinuxStack>(page + 288).ss_sp,
+        altstack.ss_sp
+    );
+    assert_eq!(
+        read_user_value::<TestLinuxStack>(page + 288).ss_size,
+        MINSIGSTKSZ
+    );
     write_user_value(
         page + 320,
         &TestLinuxStack {
@@ -6871,8 +7089,14 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
             ss_size: 9999,
         },
     );
-    expect_ok(SyscallArgs::new([page + 320, 0, 0, 0, 0, 0]).call::<Sigaltstack>(), 0);
-    expect_ok(SyscallArgs::new([0, page + 352, 0, 0, 0, 0]).call::<Sigaltstack>(), 0);
+    expect_ok(
+        SyscallArgs::new([page + 320, 0, 0, 0, 0, 0]).call::<Sigaltstack>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([0, page + 352, 0, 0, 0, 0]).call::<Sigaltstack>(),
+        0,
+    );
     let disabled_stack = read_user_value::<TestLinuxStack>(page + 352);
     assert_eq!(disabled_stack.ss_flags, SS_DISABLE);
     assert_eq!(disabled_stack.ss_sp, 0);
@@ -6914,7 +7138,12 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
         SyscallError::NoMemory,
     );
 
-    extern "C" fn test_siginfo_handler(_: i32, _: *const SigInfo, _: *const crate::signal::UContext) {}
+    extern "C" fn test_siginfo_handler(
+        _: i32,
+        _: *const SigInfo,
+        _: *const crate::signal::UContext,
+    ) {
+    }
     let new_action = TestLinuxSigAction {
         handler: test_siginfo_handler as *const () as usize,
         flags: SA_SIGINFO,
@@ -6923,7 +7152,8 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
     };
     write_user_value(page + 480, &new_action);
     expect_ok(
-        SyscallArgs::new([Signal::SIGUSR2 as u64, page + 480, page + 544, 8, 0, 0]).call::<RtSigaction>(),
+        SyscallArgs::new([Signal::SIGUSR2 as u64, page + 480, page + 544, 8, 0, 0])
+            .call::<RtSigaction>(),
         0,
     );
     let old_action = read_user_value::<TestLinuxSigAction>(page + 544);
@@ -6935,7 +7165,10 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
         0,
     );
     let installed_action = read_user_value::<TestLinuxSigAction>(page + 576);
-    assert_eq!(installed_action.handler, test_siginfo_handler as *const () as usize);
+    assert_eq!(
+        installed_action.handler,
+        test_siginfo_handler as *const () as usize
+    );
     assert_ne!(installed_action.flags & SA_SIGINFO, 0);
     assert_eq!(installed_action.restorer, new_action.restorer);
     assert_eq!(installed_action.mask, Signal::SIGUSR1.mask());
@@ -6968,13 +7201,24 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
     queued_siginfo.si_code = SI_QUEUE;
     write_user_value(page + 768, &queued_siginfo);
     expect_ok(
-        SyscallArgs::new([queued_pid as u64, Signal::SIGTERM as u64, page + 768, 0, 0, 0])
-            .call::<RtSigqueueinfo>(),
+        SyscallArgs::new([
+            queued_pid as u64,
+            Signal::SIGTERM as u64,
+            page + 768,
+            0,
+            0,
+            0,
+        ])
+        .call::<RtSigqueueinfo>(),
         0,
     );
     {
         let queued_process = queued_process.lock();
-        assert!(queued_process.pending_signals.contains(Signals::from(Signal::SIGTERM)));
+        assert!(
+            queued_process
+                .pending_signals
+                .contains(Signals::from(Signal::SIGTERM))
+        );
         let pending = queued_process.pending_signal_info[Signal::SIGTERM.index()]
             .expect("sigqueueinfo should store pending siginfo");
         assert_eq!(pending.si_code, SI_QUEUE);
@@ -7001,27 +7245,27 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
         .unwrap()
         .lock()
         .threads
-        .insert(crate::thread::misc::ThreadID(target_tid), tgkill_thread.clone());
+        .insert(
+            crate::thread::misc::ThreadID(target_tid),
+            tgkill_thread.clone(),
+        );
     current
         .lock()
         .threads
         .push(alloc::sync::Arc::downgrade(&tgkill_thread));
     let target_tgid = current.lock().pid.0 as u64;
     expect_ok(
-        SyscallArgs::new([
-            target_tgid,
-            target_tid,
-            Signal::SIGUSR1 as u64,
-            0,
-            0,
-            0,
-        ])
-        .call::<Tgkill>(),
+        SyscallArgs::new([target_tgid, target_tid, Signal::SIGUSR1 as u64, 0, 0, 0])
+            .call::<Tgkill>(),
         0,
     );
     {
         let thread = tgkill_thread.lock();
-        assert!(thread.pending_signals.contains(Signals::from(Signal::SIGUSR1)));
+        assert!(
+            thread
+                .pending_signals
+                .contains(Signals::from(Signal::SIGUSR1))
+        );
         let pending = thread.pending_signal_info[Signal::SIGUSR1.index()]
             .expect("tgkill should queue thread siginfo");
         assert_eq!(pending.si_code, crate::misc::signal::SI_TKILL);
@@ -7030,43 +7274,21 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
     }
     {
         let mut thread = tgkill_thread.lock();
-        thread.pending_signals.remove(Signals::from(Signal::SIGUSR1));
+        thread
+            .pending_signals
+            .remove(Signals::from(Signal::SIGUSR1));
         thread.pending_signal_info[Signal::SIGUSR1.index()] = None;
     }
     expect_errno(
-        SyscallArgs::new([
-            u64::MAX,
-            target_tid,
-            Signal::SIGUSR1 as u64,
-            0,
-            0,
-            0,
-        ])
-        .call::<Tgkill>(),
+        SyscallArgs::new([u64::MAX, target_tid, Signal::SIGUSR1 as u64, 0, 0, 0]).call::<Tgkill>(),
         SyscallError::NoProcess,
     );
     expect_errno(
-        SyscallArgs::new([
-            target_tgid,
-            u64::MAX,
-            Signal::SIGUSR1 as u64,
-            0,
-            0,
-            0,
-        ])
-        .call::<Tgkill>(),
+        SyscallArgs::new([target_tgid, u64::MAX, Signal::SIGUSR1 as u64, 0, 0, 0]).call::<Tgkill>(),
         SyscallError::NoProcess,
     );
     expect_errno(
-        SyscallArgs::new([
-            target_tgid,
-            target_tid,
-            65,
-            0,
-            0,
-            0,
-        ])
-        .call::<Tgkill>(),
+        SyscallArgs::new([target_tgid, target_tid, 65, 0, 0, 0]).call::<Tgkill>(),
         SyscallError::InvalidArguments,
     );
     crate::thread::THREAD_MANAGER
@@ -7099,7 +7321,10 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
     let thread_parent = crate::thread::get_current_thread().lock().parent.clone();
     send_signal_to_process_with_siginfo(&thread_parent, Signal::SIGUSR1, timed_siginfo);
     assert_eq!(
-        crate::thread::get_current_thread().lock().pending_signals.bits(),
+        crate::thread::get_current_thread()
+            .lock()
+            .pending_signals
+            .bits(),
         0
     );
     assert_eq!(
@@ -7156,10 +7381,19 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
 
     {
         let mut current = thread.lock();
-        current.pending_signals.insert(Signals::from(Signal::SIGUSR1));
-        current.parent.lock().pending_signals.insert(Signals::from(Signal::SIGTERM));
+        current
+            .pending_signals
+            .insert(Signals::from(Signal::SIGUSR1));
+        current
+            .parent
+            .lock()
+            .pending_signals
+            .insert(Signals::from(Signal::SIGTERM));
     }
-    expect_ok(SyscallArgs::new([page + 168, 8, 0, 0, 0, 0]).call::<RtSigpending>(), 0);
+    expect_ok(
+        SyscallArgs::new([page + 168, 8, 0, 0, 0, 0]).call::<RtSigpending>(),
+        0,
+    );
     let pending = read_user_value::<u64>(page + 168);
     assert_ne!(pending & Signal::SIGUSR1.mask(), 0);
     assert_ne!(pending & Signal::SIGTERM.mask(), 0);
@@ -7173,8 +7407,14 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
     );
     {
         let mut current = thread.lock();
-        current.pending_signals.remove(Signals::from(Signal::SIGUSR1));
-        current.parent.lock().pending_signals.remove(Signals::from(Signal::SIGTERM));
+        current
+            .pending_signals
+            .remove(Signals::from(Signal::SIGUSR1));
+        current
+            .parent
+            .lock()
+            .pending_signals
+            .remove(Signals::from(Signal::SIGTERM));
     }
 
     write_user_value(page + 160, &Signal::SIGUSR1.mask());
@@ -7190,7 +7430,10 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
         SyscallArgs::new([1, 8, 0, 0, 0, 0]).call::<RtSigsuspend>(),
         SyscallError::BadAddress,
     );
-    MANAGER.lock().processes.remove(&ProcessID(queued_pid as u64));
+    MANAGER
+        .lock()
+        .processes
+        .remove(&ProcessID(queued_pid as u64));
     MANAGER.lock().processes.remove(&ProcessID(peer_pid as u64));
     crate::thread::get_current_thread().lock().blocked_signals = saved_mask;
 }
@@ -7361,7 +7604,10 @@ fn ptrace_syscalls_follow_linux_rules() {
     parent.lock().pid = ProcessID::new();
     current.lock().parent = Some(parent.clone());
 
-    expect_ok(SyscallArgs::new([PTRACE_TRACEME, 0, 0, 0, 0, 0]).call::<Ptrace>(), 0);
+    expect_ok(
+        SyscallArgs::new([PTRACE_TRACEME, 0, 0, 0, 0, 0]).call::<Ptrace>(),
+        0,
+    );
     assert_eq!(current.lock().ptrace.tracer, Some(parent.lock().pid));
     expect_errno(
         SyscallArgs::new([PTRACE_TRACEME, 0, 0, 0, 0, 0]).call::<Ptrace>(),
@@ -7439,11 +7685,16 @@ fn ptrace_syscalls_follow_linux_rules() {
     assert_eq!(read_user_value::<TestLinuxIovec>(page + 192).iov_len, 216);
 
     traced.lock().ptrace.last_stop_kind = crate::process::ptrace::PtraceStopKind::SyscallExit;
-    let copied = expect_fd(Ok(
-        SyscallArgs::new([PTRACE_GET_SYSCALL_INFO, traced_pid, 88, page + 512, 0, 0])
-            .call::<Ptrace>()
-            .expect("ptrace get syscall info should succeed"),
-    ));
+    let copied = expect_fd(Ok(SyscallArgs::new([
+        PTRACE_GET_SYSCALL_INFO,
+        traced_pid,
+        88,
+        page + 512,
+        0,
+        0,
+    ])
+    .call::<Ptrace>()
+    .expect("ptrace get syscall info should succeed")));
     assert_eq!(copied, 88);
 
     expect_ok(
@@ -7569,8 +7820,15 @@ fn mount_api_syscalls_follow_linux_rules() {
     let fsfd = expect_fd(SyscallArgs::new([page + 384, 1, 0, 0, 0, 0]).call::<Fsopen>());
     assert_fd_flags(fsfd, FdFlags::CLOEXEC);
     expect_ok(
-        SyscallArgs::new([fsfd as u64, FSCONFIG_SET_STRING, page + 512, page + 576, 0, 0])
-            .call::<Fsconfig>(),
+        SyscallArgs::new([
+            fsfd as u64,
+            FSCONFIG_SET_STRING,
+            page + 512,
+            page + 576,
+            0,
+            0,
+        ])
+        .call::<Fsconfig>(),
         0,
     );
     expect_ok(
@@ -7604,7 +7862,8 @@ fn mount_api_syscalls_follow_linux_rules() {
     );
     let moved_root = {
         let mut vfs = VirtualFS.lock();
-        vfs.open(Path::new("/tmp/syscall-mount-test/newdst")).unwrap()
+        vfs.open(Path::new("/tmp/syscall-mount-test/newdst"))
+            .unwrap()
     };
     let moved_stat = moved_root.stat();
     assert_eq!(moved_stat.st_mode & 0o777, 0o755);
@@ -7635,8 +7894,15 @@ fn mount_api_syscalls_follow_linux_rules() {
         SyscallError::InvalidArguments,
     );
     expect_errno(
-        SyscallArgs::new([AT_FDCWD, 0, 0, 0, core::mem::size_of::<TestLinuxMountAttr>() as u64, 0])
-            .call::<MountSetattr>(),
+        SyscallArgs::new([
+            AT_FDCWD,
+            0,
+            0,
+            0,
+            core::mem::size_of::<TestLinuxMountAttr>() as u64,
+            0,
+        ])
+        .call::<MountSetattr>(),
         SyscallError::BadAddress,
     );
     expect_errno(
@@ -7648,10 +7914,18 @@ fn mount_api_syscalls_follow_linux_rules() {
     close_test_fd(mount_fd);
     close_test_fd(fsfd);
     let _ = SyscallArgs::new([page + 256, 0, 0, 0, 0, 0]).call::<Umount2>();
-    let _ = VirtualFS.lock().delete_file(Path::new("/tmp/syscall-mount-test/newdst"));
-    let _ = VirtualFS.lock().delete_file(Path::new("/tmp/syscall-mount-test/dst"));
-    let _ = VirtualFS.lock().delete_file(Path::new("/tmp/syscall-mount-test/src"));
-    let _ = VirtualFS.lock().delete_file(Path::new("/tmp/syscall-mount-test"));
+    let _ = VirtualFS
+        .lock()
+        .delete_file(Path::new("/tmp/syscall-mount-test/newdst"));
+    let _ = VirtualFS
+        .lock()
+        .delete_file(Path::new("/tmp/syscall-mount-test/dst"));
+    let _ = VirtualFS
+        .lock()
+        .delete_file(Path::new("/tmp/syscall-mount-test/src"));
+    let _ = VirtualFS
+        .lock()
+        .delete_file(Path::new("/tmp/syscall-mount-test"));
 }
 
 fn process_and_signal_transition_helpers_follow_linux_rules() {
@@ -7660,7 +7934,9 @@ fn process_and_signal_transition_helpers_follow_linux_rules() {
         let mut thread = thread.lock();
         thread.snapshot_state = crate::thread::misc::SnapshotState::SignalHandler;
         thread.blocked_signals = Signals::from(Signal::SIGTERM);
-        thread.saved_blocked_signals.push(Signals::from(Signal::SIGUSR1));
+        thread
+            .saved_blocked_signals
+            .push(Signals::from(Signal::SIGUSR1));
         thread.restore_blocked_signals();
         assert_eq!(thread.blocked_signals.bits(), Signal::SIGUSR1.mask());
         thread.snapshot_state = crate::thread::misc::SnapshotState::Normal;
@@ -7713,8 +7989,15 @@ fn clone_and_fork_syscalls_follow_linux_rules() {
     );
 
     expect_errno(
-        SyscallArgs::new([CLONE_THREAD | CLONE_VM | CLONE_FS | CLONE_FILES, 0, 0, 0, 0, 0])
-            .call::<Clone>(),
+        SyscallArgs::new([
+            CLONE_THREAD | CLONE_VM | CLONE_FS | CLONE_FILES,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ])
+        .call::<Clone>(),
         SyscallError::NoSyscall,
     );
 
@@ -7726,11 +8009,27 @@ fn clone_and_fork_syscalls_follow_linux_rules() {
         },
     );
     expect_errno(
-        SyscallArgs::new([page + 256, core::mem::size_of::<TestLinuxCloneArgs>() as u64, 0, 0, 0, 0]).call::<Clone3>(),
+        SyscallArgs::new([
+            page + 256,
+            core::mem::size_of::<TestLinuxCloneArgs>() as u64,
+            0,
+            0,
+            0,
+            0,
+        ])
+        .call::<Clone3>(),
         SyscallError::NoSyscall,
     );
     expect_errno(
-        SyscallArgs::new([0, core::mem::size_of::<TestLinuxCloneArgs>() as u64, 0, 0, 0, 0]).call::<Clone3>(),
+        SyscallArgs::new([
+            0,
+            core::mem::size_of::<TestLinuxCloneArgs>() as u64,
+            0,
+            0,
+            0,
+            0,
+        ])
+        .call::<Clone3>(),
         SyscallError::BadAddress,
     );
     expect_errno(
@@ -7795,12 +8094,21 @@ fn futex_syscalls_follow_linux_rules() {
         SyscallArgs::new([page + 384, FUTEX_WAIT, 8, 0, 0, 0]).call::<Futex>(),
         SyscallError::TryAgain,
     );
-    write_user_value(page + 392, &TestLinuxTimespec { tv_sec: 0, tv_nsec: 1_000_000_000 });
+    write_user_value(
+        page + 392,
+        &TestLinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 1_000_000_000,
+        },
+    );
     expect_errno(
         SyscallArgs::new([page + 384, FUTEX_WAIT, 7, page + 392, 0, 0]).call::<Futex>(),
         SyscallError::InvalidArguments,
     );
-    expect_ok(SyscallArgs::new([page + 384, FUTEX_WAKE, 3, 0, 0, 0]).call::<Futex>(), 0);
+    expect_ok(
+        SyscallArgs::new([page + 384, FUTEX_WAKE, 3, 0, 0, 0]).call::<Futex>(),
+        0,
+    );
     expect_errno(
         SyscallArgs::new([page + 384, FUTEX_WAIT_BITSET, 7, 0, 0, 0]).call::<Futex>(),
         SyscallError::InvalidArguments,
@@ -7809,7 +8117,13 @@ fn futex_syscalls_follow_linux_rules() {
         SyscallArgs::new([page + 384, FUTEX_WAKE_BITSET, 1, 0, 0, 0]).call::<Futex>(),
         SyscallError::InvalidArguments,
     );
-    write_user_value(page + 392, &TestLinuxTimespec { tv_sec: 0, tv_nsec: 0 });
+    write_user_value(
+        page + 392,
+        &TestLinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        },
+    );
     expect_errno(
         SyscallArgs::new([page + 384, FUTEX_WAIT_BITSET, 7, page + 392, 0, 1]).call::<Futex>(),
         SyscallError::TimedOut,
@@ -8327,8 +8641,14 @@ fn memory_mapping_syscalls_follow_linux_rules() {
         SyscallError::OperationNotSupported,
     );
 
-    expect_ok(SyscallArgs::new([file_map_addr, 4096, 0, 0, 0, 0]).call::<Munmap>(), 0);
-    expect_ok(SyscallArgs::new([remapped_addr, 8192, 0, 0, 0, 0]).call::<Munmap>(), 0);
+    expect_ok(
+        SyscallArgs::new([file_map_addr, 4096, 0, 0, 0, 0]).call::<Munmap>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([remapped_addr, 8192, 0, 0, 0, 0]).call::<Munmap>(),
+        0,
+    );
     assert!(
         process
             .lock()
@@ -8337,7 +8657,9 @@ fn memory_mapping_syscalls_follow_linux_rules() {
             .is_none()
     );
     close_test_fd(fd);
-    let _ = VirtualFS.lock().delete_file(Path::new("/tmp/syscall-mmap-file-test"));
+    let _ = VirtualFS
+        .lock()
+        .delete_file(Path::new("/tmp/syscall-mmap-file-test"));
 }
 
 fn sysv_shm_syscalls_follow_linux_rules() {
@@ -8432,8 +8754,14 @@ fn sysv_shm_syscalls_follow_linux_rules() {
         SyscallArgs::new([shmid, IPC_RMID, 0, 0, 0, 0]).call::<Shmctl>(),
         0,
     );
-    expect_ok(SyscallArgs::new([rounded_addr, 0, 0, 0, 0, 0]).call::<Shmdt>(), 0);
-    expect_ok(SyscallArgs::new([attach_addr, 0, 0, 0, 0, 0]).call::<Shmdt>(), 0);
+    expect_ok(
+        SyscallArgs::new([rounded_addr, 0, 0, 0, 0, 0]).call::<Shmdt>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([attach_addr, 0, 0, 0, 0, 0]).call::<Shmdt>(),
+        0,
+    );
     expect_errno(
         SyscallArgs::new([attach_addr, 0, 0, 0, 0, 0]).call::<Shmdt>(),
         SyscallError::InvalidArguments,

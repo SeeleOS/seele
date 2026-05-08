@@ -105,10 +105,7 @@ fn read_pollfds(fds: *const LinuxPollFd, nfds: usize) -> Result<Vec<LinuxPollFd>
     Ok(local)
 }
 
-fn write_pollfds_revents(
-    fds: *mut LinuxPollFd,
-    local: &[LinuxPollFd],
-) -> Result<(), SyscallError> {
+fn write_pollfds_revents(fds: *mut LinuxPollFd, local: &[LinuxPollFd]) -> Result<(), SyscallError> {
     for (index, pollfd) in local.iter().enumerate() {
         user_safe::write(unsafe { fds.add(index) }, pollfd)?;
     }

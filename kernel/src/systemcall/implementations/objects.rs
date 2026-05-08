@@ -165,7 +165,11 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
     Ok(bytes_written)
 }
 
-fn read_object_at_offset(object: &ObjectRef, buffer: &mut [u8], offset: i64) -> SyscallResult<usize> {
+fn read_object_at_offset(
+    object: &ObjectRef,
+    buffer: &mut [u8],
+    offset: i64,
+) -> SyscallResult<usize> {
     if offset < 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -474,7 +478,13 @@ define_syscall!(Sendfile, |out_fd: ObjectRef,
                            in_fd: ObjectRef,
                            offset: *mut i64,
                            count: usize| {
-    copy_between_objects_with_offsets(in_fd, (!offset.is_null()).then_some(offset), out_fd, None, count)
+    copy_between_objects_with_offsets(
+        in_fd,
+        (!offset.is_null()).then_some(offset),
+        out_fd,
+        None,
+        count,
+    )
 });
 
 define_syscall!(CopyFileRange, |fd_in: ObjectRef,

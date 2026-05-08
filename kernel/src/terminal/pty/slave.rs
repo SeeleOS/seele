@@ -7,8 +7,8 @@ use crate::{
     memory::user_safe,
     object::{
         FileFlags, Object,
-        error::ObjectError,
         config::ConfigurateRequest,
+        error::ObjectError,
         misc::ObjectResult,
         queue_helpers::{copy_from_queue, read_or_block_with_flags},
         traits::{Configuratable, Readable, Statable, Writable},
@@ -193,7 +193,7 @@ impl Configuratable for PtySlave {
                     shared.winsize.ws_col = winsize.ws_col;
                 }
                 Ok(0)
-            },
+            }
             ConfigurateRequest::LinuxTiocvhangup => {
                 let mut shared = self.shared.lock();
                 shared.line_buffer.clear();

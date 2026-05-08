@@ -1,6 +1,12 @@
 use alloc::{sync::Arc, vec, vec::Vec};
 use core::mem::size_of;
 
+use crate::object::Object;
+use crate::object::misc::get_object_current_process;
+use crate::polling::event::PollableEvent;
+use crate::polling::poller::PollerObject;
+use crate::systemcall::utils::{SyscallError, SyscallImpl};
+use crate::thread::yielding::{cancel_block, finish_block_current, prepare_block_current};
 use crate::{
     define_syscall,
     filesystem::object::poll_identity_object,
@@ -12,12 +18,6 @@ use crate::{
     signal::{Signal, Signals},
     thread::{get_current_thread, yielding::BlockType, yielding::WakeType},
 };
-use crate::object::Object;
-use crate::object::misc::get_object_current_process;
-use crate::polling::event::PollableEvent;
-use crate::polling::poller::PollerObject;
-use crate::systemcall::utils::{SyscallError, SyscallImpl};
-use crate::thread::yielding::{cancel_block, finish_block_current, prepare_block_current};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -180,7 +180,9 @@ fn read_fdset(fdset: *const u64, nfds: usize) -> Result<Option<Vec<u64>>, Syscal
 fn fdset_slice_contains(fdset: &[u64], fd: usize) -> bool {
     let word = fd / 64;
     let bit = fd % 64;
-    fdset.get(word).is_some_and(|entry| (*entry & (1u64 << bit)) != 0)
+    fdset
+        .get(word)
+        .is_some_and(|entry| (*entry & (1u64 << bit)) != 0)
 }
 
 fn register_interest(
@@ -302,7 +304,9 @@ define_syscall!(
                 if sigmask.sigmask.is_null() {
                     None
                 } else {
-                    Some(Signals::from_bits_truncate(user_safe::read(sigmask.sigmask)?))
+                    Some(Signals::from_bits_truncate(user_safe::read(
+                        sigmask.sigmask,
+                    )?))
                 }
             };
 

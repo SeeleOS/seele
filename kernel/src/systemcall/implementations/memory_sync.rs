@@ -180,12 +180,7 @@ pub fn wake_futex_for_process_with_manager(
     woken
 }
 
-fn take_futex_waiters(
-    pid: u64,
-    addr: u64,
-    count: usize,
-    wake_mask: Option<u32>,
-) -> Vec<ThreadRef> {
+fn take_futex_waiters(pid: u64, addr: u64, count: usize, wake_mask: Option<u32>) -> Vec<ThreadRef> {
     let key = FutexKey { pid, addr };
     let mut queue = FUTEX_QUEUE.lock();
     let mut woken = Vec::new();
@@ -619,8 +614,7 @@ define_syscall!(Futex, |arg1: u64,
             FutexOp::UnlockPi => futex_unlock_pi_impl(arg1),
             FutexOp::TrylockPi => futex_trylock_pi_impl(arg1),
             FutexOp::WaitBitset => {
-                let bitset =
-                    u32::try_from(val3).map_err(|_| SyscallError::InvalidArguments)?;
+                let bitset = u32::try_from(val3).map_err(|_| SyscallError::InvalidArguments)?;
                 if bitset == 0 {
                     return Err(SyscallError::InvalidArguments);
                 }
@@ -632,8 +626,7 @@ define_syscall!(Futex, |arg1: u64,
                 )
             }
             FutexOp::WakeBitset => {
-                let bitset =
-                    u32::try_from(val3).map_err(|_| SyscallError::InvalidArguments)?;
+                let bitset = u32::try_from(val3).map_err(|_| SyscallError::InvalidArguments)?;
                 if bitset == 0 {
                     return Err(SyscallError::InvalidArguments);
                 }

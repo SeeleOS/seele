@@ -316,7 +316,7 @@ define_syscall!(
                 ss_flags: StackFlags::SS_DISABLE.bits(),
                 ss_size: 0,
             };
-            return Ok(0)
+            return Ok(0);
         }
 
         if new_stack.ss_sp == 0 {
