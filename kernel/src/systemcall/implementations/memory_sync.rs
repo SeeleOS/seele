@@ -750,8 +750,9 @@ define_syscall!(Msync, |addr: VirtAddr, len: u64, flags: MsyncFlags| {
         return Err(SyscallError::InvalidArguments);
     }
 
-    get_current_process()
-        .lock()
+    let process = get_current_process();
+    let mut process = process.lock();
+    process
         .addrspace
         .flush_file_mappings(addr, len)
         .map_err(SyscallError::from)?;
@@ -839,8 +840,8 @@ define_syscall!(Mremap, |old_addr: VirtAddr,
         let copy_len = core::cmp::min(4096, (old_len - page_index * 4096) as usize);
         unsafe {
             core::ptr::copy_nonoverlapping(
-                src_addr.as_u64() as *const u8,
-                dst_addr.as_u64() as *mut u8,
+                crate::memory::utils::apply_offset(src_phys.as_u64()) as *const u8,
+                crate::memory::utils::apply_offset(dst_phys.as_u64()) as *mut u8,
                 copy_len,
             );
         }

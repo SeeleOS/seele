@@ -1,7 +1,8 @@
 use crate::{
     filesystem::info::LinuxStat,
     filesystem::{absolute_path::AbsolutePath, path::Path, vfs::VirtualFS},
-    memory::protection::Protection,
+    ipc::sysv_shm::LinuxShmidDs,
+    memory::{addrspace::mem_area::Data, protection::Protection},
     misc::{signal::send_signal_to_process_with_siginfo, timer::ClockId},
     object::{FileFlags, misc::get_object_current_process, traits::Statable},
     process::{
@@ -40,6 +41,8 @@ use crate::{
             TimerfdCreate, TimerfdGettime, TimerfdSettime, Umask, Uname, Unlink, UnlinkAt,
             Unshare, Utimensat, Vhangup, Wait4, Waitid, Write, Writev, Getsockname, Getpeername,
             Getsockopt, Connect, CopyFileRange, Recvfrom, Recvmsg, Sendmmsg, Sendmsg, Sendto,
+            AddKey, Bpf, Brk, Keyctl, Mincore, Mmap, Mprotect, Mremap, Msync, Munmap, Shmat,
+            Shmctl, Shmdt, Shmget,
             Splice, clear_fdset,
             fdset_contains, fdset_insert,
             fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
@@ -527,6 +530,21 @@ crate::test!(
     "pselect6 follows linux rules",
     pselect6_syscalls_follow_linux_rules
 );
+crate::test!(
+    memory_mapping_syscalls,
+    "brk mmap mprotect munmap mremap msync and mincore follow linux rules",
+    memory_mapping_syscalls_follow_linux_rules
+);
+crate::test!(
+    sysv_shm_syscalls,
+    "sysv shm syscalls follow linux rules",
+    sysv_shm_syscalls_follow_linux_rules
+);
+crate::test!(
+    key_and_bpf_syscalls,
+    "add_key keyctl and bpf follow linux rules",
+    key_and_bpf_syscalls_follow_linux_rules
+);
 
 fn syscall_number_lookup_matches_x86_64_abi_values() {
     assert_eq!(SyscallNumber::from_number(0), Some(SyscallNumber::Read));
@@ -800,6 +818,56 @@ struct TestLinuxSigAction {
 struct TestLinuxSigSetArg {
     sigmask: u64,
     sigsetsize: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestBpfMapCreateAttr {
+    map_type: u32,
+    key_size: u32,
+    value_size: u32,
+    max_entries: u32,
+    map_flags: u32,
+    inner_map_fd: u32,
+    numa_node: u32,
+    map_name: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestBpfMapElemAttr {
+    map_fd: u32,
+    padding: u32,
+    key: u64,
+    value: u64,
+    flags: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestBpfProgLoadAttr {
+    prog_type: u32,
+    insn_cnt: u32,
+    insns: u64,
+    license: u64,
+    log_level: u32,
+    log_size: u32,
+    log_buf: u64,
+    kern_version: u32,
+    prog_flags: u32,
+    prog_name: [u8; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestBpfProgAttachAttr {
+    target_fd: u32,
+    attach_bpf_fd: u32,
+    attach_type: u32,
+    attach_flags: u32,
+    replace_bpf_fd: u32,
+    relative_fd: u32,
+    expected_revision: u64,
 }
 
 #[repr(C)]
@@ -7328,4 +7396,580 @@ fn pselect6_syscalls_follow_linux_rules() {
 
     close_test_fd(eventfd);
     crate::thread::get_current_thread().lock().blocked_signals = saved_mask;
+}
+
+fn memory_mapping_syscalls_follow_linux_rules() {
+    const MAP_SHARED: u64 = 0x01;
+    const MAP_PRIVATE: u64 = 0x02;
+    const MAP_ANONYMOUS: u64 = 0x20;
+    const MAP_FIXED_NOREPLACE: u64 = 0x100000;
+    const MREMAP_MAYMOVE: u64 = 0x1;
+    const MS_ASYNC: u64 = 0x1;
+    const MS_INVALIDATE: u64 = 0x2;
+    const MS_SYNC: u64 = 0x4;
+    const AT_FDCWD: u64 = (-100i32) as u64;
+
+    let process = get_current_process();
+    let original_break = process.lock().program_break;
+    let current_break = SyscallArgs::new([0, 0, 0, 0, 0, 0])
+        .call::<Brk>()
+        .expect("brk query should succeed") as u64;
+    let grown_break = current_break + 5000;
+    expect_ok(
+        SyscallArgs::new([grown_break, 0, 0, 0, 0, 0]).call::<Brk>(),
+        grown_break as usize,
+    );
+    assert_eq!(process.lock().program_break, grown_break);
+    let brk_area = process
+        .lock()
+        .addrspace
+        .get_area(x86_64::VirtAddr::new(current_break.div_ceil(4096) * 4096))
+        .cloned()
+        .expect("brk growth should create mapped area");
+    assert!(matches!(brk_area.data, Data::Normal));
+    expect_ok(
+        SyscallArgs::new([current_break, 0, 0, 0, 0, 0]).call::<Brk>(),
+        current_break as usize,
+    );
+    process.lock().program_break = original_break;
+
+    let anon_addr = SyscallArgs::new([
+        0,
+        8192,
+        (Protection::READ | Protection::WRITE).bits() as u64,
+        MAP_PRIVATE | MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    ])
+    .call::<Mmap>()
+    .expect("anon mmap should succeed") as u64;
+    let anon_area = process
+        .lock()
+        .addrspace
+        .get_area(x86_64::VirtAddr::new(anon_addr))
+        .cloned()
+        .expect("anon mmap should register area");
+    assert!(matches!(anon_area.data, Data::Normal));
+    process
+        .lock()
+        .addrspace
+        .write_buffer(anon_addr as *mut u8, b"mmap")
+        .unwrap();
+    assert_user_bytes(anon_addr, b"mmap");
+    expect_errno(
+        SyscallArgs::new([
+            0,
+            0,
+            Protection::READ.bits() as u64,
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            u64::MAX,
+            0,
+        ])
+        .call::<Mmap>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([
+            0x2000,
+            4096,
+            Protection::READ.bits() as u64,
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            u64::MAX,
+            0,
+        ])
+        .call::<Mmap>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([
+            anon_addr,
+            4096,
+            Protection::READ.bits() as u64,
+            MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
+            u64::MAX,
+            0,
+        ])
+        .call::<Mmap>(),
+        SyscallError::FileAlreadyExists,
+    );
+
+    expect_ok(
+        SyscallArgs::new([anon_addr, 4096, Protection::READ.bits() as u64, 0, 0, 0])
+            .call::<Mprotect>(),
+        0,
+    );
+    let readonly_area = process
+        .lock()
+        .addrspace
+        .get_area(x86_64::VirtAddr::new(anon_addr))
+        .cloned()
+        .expect("mprotect should keep mapping");
+    assert!(
+        !readonly_area
+            .flags
+            .contains(x86_64::structures::paging::PageTableFlags::WRITABLE)
+    );
+
+    let remapped_addr = SyscallArgs::new([anon_addr, 4096, 8192, MREMAP_MAYMOVE, 0, 0])
+        .call::<Mremap>()
+        .expect("mremap should succeed") as u64;
+    assert_user_bytes(remapped_addr, b"mmap");
+    assert!(
+        process
+            .lock()
+            .addrspace
+            .get_area(x86_64::VirtAddr::new(anon_addr))
+            .is_none()
+    );
+    expect_errno(
+        SyscallArgs::new([remapped_addr, 4096, 12288, 0, 0, 0]).call::<Mremap>(),
+        SyscallError::NoMemory,
+    );
+
+    let mincore_vec = allocate_user_test_page();
+    expect_ok(
+        SyscallArgs::new([remapped_addr, 4096, mincore_vec, 0, 0, 0]).call::<Mincore>(),
+        0,
+    );
+    assert_ne!(read_user_value::<u8>(mincore_vec), 0);
+    expect_errno(
+        SyscallArgs::new([remapped_addr + 1, 4096, mincore_vec, 0, 0, 0]).call::<Mincore>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([remapped_addr, 4096, 0, 0, 0, 0]).call::<Mincore>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([0x2000_0000, 4096, mincore_vec, 0, 0, 0]).call::<Mincore>(),
+        SyscallError::NoMemory,
+    );
+
+    let page = allocate_user_test_page();
+    write_user_cstr(page, b"/tmp/syscall-mmap-file-test\0");
+    let fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            page,
+            (OpenFlags::CREAT | OpenFlags::TRUNC).bits() as u64,
+            0o600,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
+    process
+        .lock()
+        .addrspace
+        .write_buffer((page + 128) as *mut u8, b"abcdef")
+        .unwrap();
+    expect_ok(
+        SyscallArgs::new([fd as u64, page + 128, 6, 0, 0, 0]).call::<Write>(),
+        6,
+    );
+    let file_map_addr = SyscallArgs::new([
+        0,
+        4096,
+        (Protection::READ | Protection::WRITE).bits() as u64,
+        MAP_SHARED,
+        fd as u64,
+        0,
+    ])
+    .call::<Mmap>()
+    .expect("file mmap should succeed") as u64;
+    process
+        .lock()
+        .addrspace
+        .write_buffer(file_map_addr as *mut u8, b"XYZ")
+        .unwrap();
+    expect_ok(
+        SyscallArgs::new([file_map_addr, 4096, MS_SYNC, 0, 0, 0]).call::<Msync>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Lseek>(),
+        0,
+    );
+    process
+        .lock()
+        .addrspace
+        .write_buffer((page + 256) as *mut u8, &[0; 6])
+        .unwrap();
+    expect_ok(
+        SyscallArgs::new([fd as u64, page + 256, 6, 0, 0, 0]).call::<Read>(),
+        6,
+    );
+    assert_user_bytes(page + 256, b"XYZdef");
+    expect_ok(
+        SyscallArgs::new([file_map_addr, 0, 0, 0, 0, 0]).call::<Msync>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([file_map_addr + 1, 4096, MS_SYNC, 0, 0, 0]).call::<Msync>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([file_map_addr, 4096, MS_ASYNC | MS_SYNC, 0, 0, 0]).call::<Msync>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([file_map_addr, 4096, MS_INVALIDATE, 0, 0, 0]).call::<Msync>(),
+        SyscallError::OperationNotSupported,
+    );
+
+    expect_ok(SyscallArgs::new([file_map_addr, 4096, 0, 0, 0, 0]).call::<Munmap>(), 0);
+    expect_ok(SyscallArgs::new([remapped_addr, 8192, 0, 0, 0, 0]).call::<Munmap>(), 0);
+    assert!(
+        process
+            .lock()
+            .addrspace
+            .get_area(x86_64::VirtAddr::new(remapped_addr))
+            .is_none()
+    );
+    close_test_fd(fd);
+    let _ = VirtualFS.lock().delete_file(Path::new("/tmp/syscall-mmap-file-test"));
+}
+
+fn sysv_shm_syscalls_follow_linux_rules() {
+    const IPC_PRIVATE: u64 = 0;
+    const IPC_CREAT: u64 = 0o1000;
+    const IPC_EXCL: u64 = 0o2000;
+    const IPC_RMID: u64 = 0;
+    const IPC_STAT: u64 = 2;
+    const SHM_RDONLY: u64 = 0o10000;
+    const SHM_RND: u64 = 0o20000;
+
+    let key = 0x55aa_u64;
+    let shmid = SyscallArgs::new([key, 4097, IPC_CREAT | IPC_EXCL | 0o600, 0, 0, 0])
+        .call::<Shmget>()
+        .expect("shmget should create segment") as u64;
+    expect_ok(
+        SyscallArgs::new([key, 4096, IPC_CREAT, 0, 0, 0]).call::<Shmget>(),
+        shmid as usize,
+    );
+    expect_errno(
+        SyscallArgs::new([key, 4096, IPC_CREAT | IPC_EXCL, 0, 0, 0]).call::<Shmget>(),
+        SyscallError::FileAlreadyExists,
+    );
+    expect_errno(
+        SyscallArgs::new([key, 8192, IPC_CREAT, 0, 0, 0]).call::<Shmget>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0xdead, 4096, 0, 0, 0, 0]).call::<Shmget>(),
+        SyscallError::FileNotFound,
+    );
+    expect_errno(
+        SyscallArgs::new([IPC_PRIVATE, 0, IPC_CREAT, 0, 0, 0]).call::<Shmget>(),
+        SyscallError::InvalidArguments,
+    );
+
+    let attach_addr = SyscallArgs::new([shmid, 0, 0, 0, 0, 0])
+        .call::<Shmat>()
+        .expect("shmat should attach") as u64;
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer(attach_addr as *mut u8, b"shm!")
+        .unwrap();
+    assert_user_bytes(attach_addr, b"shm!");
+
+    let stat_page = allocate_user_test_page();
+    expect_ok(
+        SyscallArgs::new([shmid, IPC_STAT, stat_page, 0, 0, 0]).call::<Shmctl>(),
+        0,
+    );
+    let stat = read_user_value::<LinuxShmidDs>(stat_page);
+    assert_eq!(stat.shm_perm.__ipc_perm_key, key as i32);
+    assert_eq!(stat.shm_perm.mode & 0o777, 0o600);
+    assert_eq!(stat.shm_segsz, 4097);
+    assert_eq!(stat.shm_nattch, 1);
+
+    expect_errno(
+        SyscallArgs::new([shmid, IPC_STAT, 0, 0, 0, 0]).call::<Shmctl>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([shmid, 99, 0, 0, 0, 0]).call::<Shmctl>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([shmid, 0, SHM_RDONLY | 0x8, 0, 0, 0]).call::<Shmat>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([shmid, 123, SHM_RDONLY, 0, 0, 0]).call::<Shmat>(),
+        SyscallError::InvalidArguments,
+    );
+
+    let rounded_addr = SyscallArgs::new([shmid, 0x12345, SHM_RDONLY | SHM_RND, 0, 0, 0])
+        .call::<Shmat>()
+        .expect("shmat with SHM_RND should round address") as u64;
+    assert_eq!(rounded_addr, 0x12000);
+    let readonly_area = get_current_process()
+        .lock()
+        .addrspace
+        .get_area(x86_64::VirtAddr::new(rounded_addr))
+        .cloned()
+        .expect("readonly shm attach should create area");
+    assert!(
+        !readonly_area
+            .flags
+            .contains(x86_64::structures::paging::PageTableFlags::WRITABLE)
+    );
+
+    expect_ok(
+        SyscallArgs::new([shmid, IPC_RMID, 0, 0, 0, 0]).call::<Shmctl>(),
+        0,
+    );
+    expect_ok(SyscallArgs::new([rounded_addr, 0, 0, 0, 0, 0]).call::<Shmdt>(), 0);
+    expect_ok(SyscallArgs::new([attach_addr, 0, 0, 0, 0, 0]).call::<Shmdt>(), 0);
+    expect_errno(
+        SyscallArgs::new([attach_addr, 0, 0, 0, 0, 0]).call::<Shmdt>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([shmid, IPC_STAT, stat_page, 0, 0, 0]).call::<Shmctl>(),
+        SyscallError::InvalidArguments,
+    );
+}
+
+fn key_and_bpf_syscalls_follow_linux_rules() {
+    const KEY_SPEC_SESSION_KEYRING: u64 = (-3i32) as u64;
+    const KEY_SPEC_USER_KEYRING: u64 = (-4i32) as u64;
+    const BPF_MAP_CREATE: u64 = 0;
+    const BPF_MAP_LOOKUP_ELEM: u64 = 1;
+    const BPF_MAP_UPDATE_ELEM: u64 = 2;
+    const BPF_PROG_LOAD: u64 = 5;
+    const BPF_PROG_ATTACH: u64 = 8;
+    const BPF_PROG_DETACH: u64 = 9;
+    const BPF_MAP_TYPE_ARRAY: u32 = 2;
+
+    let page = allocate_user_test_page();
+    write_user_cstr(page, b"user\0");
+    write_user_cstr(page + 64, b"demo\0");
+    expect_errno(
+        SyscallArgs::new([page, page + 64, 1, 1, KEY_SPEC_SESSION_KEYRING, 0]).call::<AddKey>(),
+        SyscallError::BadAddress,
+    );
+    let key_serial = SyscallArgs::new([page, page + 64, 0, 0, KEY_SPEC_SESSION_KEYRING, 0])
+        .call::<AddKey>()
+        .expect("add_key should create key") as u64;
+    let session_keyring = SyscallArgs::new([0, KEY_SPEC_SESSION_KEYRING, 0, 0, 0, 0])
+        .call::<Keyctl>()
+        .expect("get_keyring_id should create session keyring") as u64;
+    assert_eq!(
+        SyscallArgs::new([1, 0, 0, 0, 0, 0])
+            .call::<Keyctl>()
+            .expect("join_session_keyring should return current session keyring") as u64,
+        session_keyring
+    );
+    expect_ok(
+        SyscallArgs::new([5, session_keyring, 0x1234_5678, 0, 0, 0]).call::<Keyctl>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([8, key_serial, session_keyring, 0, 0, 0]).call::<Keyctl>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([3, key_serial, 0, 0, 0, 0]).call::<Keyctl>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([8, key_serial, session_keyring, 0, 0, 0]).call::<Keyctl>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0, KEY_SPEC_USER_KEYRING, 0, 0, 0, 0]).call::<Keyctl>(),
+        SyscallError::NoData,
+    );
+    expect_errno(
+        SyscallArgs::new([99, 0, 0, 0, 0, 0]).call::<Keyctl>(),
+        SyscallError::NoSyscall,
+    );
+
+    expect_errno(
+        SyscallArgs::new([BPF_MAP_CREATE, 0, 0, 0, 0, 0]).call::<Bpf>(),
+        SyscallError::BadAddress,
+    );
+    let mut create_attr = TestBpfMapCreateAttr {
+        map_type: BPF_MAP_TYPE_ARRAY,
+        key_size: 0,
+        value_size: 4,
+        max_entries: 2,
+        ..Default::default()
+    };
+    write_user_value(page + 128, &create_attr);
+    expect_errno(
+        SyscallArgs::new([
+            BPF_MAP_CREATE,
+            page + 128,
+            core::mem::size_of::<TestBpfMapCreateAttr>() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Bpf>(),
+        SyscallError::InvalidArguments,
+    );
+    create_attr.key_size = 4;
+    write_user_value(page + 128, &create_attr);
+    let map_fd = expect_fd(
+        SyscallArgs::new([
+            BPF_MAP_CREATE,
+            page + 128,
+            core::mem::size_of::<TestBpfMapCreateAttr>() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Bpf>(),
+    );
+
+    write_user_value(page + 256, &0u32);
+    write_user_value(page + 264, &0x1122_3344u32);
+    let elem_attr = TestBpfMapElemAttr {
+        map_fd: map_fd as u32,
+        key: page + 256,
+        value: page + 264,
+        flags: 0,
+        ..Default::default()
+    };
+    write_user_value(page + 272, &elem_attr);
+    expect_ok(
+        SyscallArgs::new([
+            BPF_MAP_UPDATE_ELEM,
+            page + 272,
+            core::mem::size_of::<TestBpfMapElemAttr>() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Bpf>(),
+        0,
+    );
+    write_user_value(page + 320, &0u32);
+    let lookup_attr = TestBpfMapElemAttr {
+        map_fd: map_fd as u32,
+        key: page + 256,
+        value: page + 320,
+        flags: 0,
+        ..Default::default()
+    };
+    write_user_value(page + 328, &lookup_attr);
+    expect_ok(
+        SyscallArgs::new([
+            BPF_MAP_LOOKUP_ELEM,
+            page + 328,
+            core::mem::size_of::<TestBpfMapElemAttr>() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Bpf>(),
+        0,
+    );
+    assert_eq!(read_user_value::<u32>(page + 320), 0x1122_3344);
+
+    write_user_value(page + 256, &9u32);
+    expect_errno(
+        SyscallArgs::new([
+            BPF_MAP_LOOKUP_ELEM,
+            page + 328,
+            core::mem::size_of::<TestBpfMapElemAttr>() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Bpf>(),
+        SyscallError::FileNotFound,
+    );
+
+    let bad_prog = TestBpfProgLoadAttr {
+        prog_type: 0,
+        insn_cnt: 0,
+        ..Default::default()
+    };
+    write_user_value(page + 384, &bad_prog);
+    expect_errno(
+        SyscallArgs::new([
+            BPF_PROG_LOAD,
+            page + 384,
+            core::mem::size_of::<TestBpfProgLoadAttr>() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Bpf>(),
+        SyscallError::InvalidArguments,
+    );
+    write_user_value(page + 448, &[0u8; 8]);
+    write_user_cstr(page + 512, b"GPL\0");
+    let prog = TestBpfProgLoadAttr {
+        prog_type: 1,
+        insn_cnt: 1,
+        insns: page + 448,
+        license: page + 512,
+        ..Default::default()
+    };
+    write_user_value(page + 384, &prog);
+    let prog_fd = expect_fd(
+        SyscallArgs::new([
+            BPF_PROG_LOAD,
+            page + 384,
+            core::mem::size_of::<TestBpfProgLoadAttr>() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Bpf>(),
+    );
+    let target_fd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+    let attach_attr = TestBpfProgAttachAttr {
+        target_fd: target_fd as u32,
+        attach_bpf_fd: prog_fd as u32,
+        ..Default::default()
+    };
+    write_user_value(page + 576, &attach_attr);
+    expect_ok(
+        SyscallArgs::new([
+            BPF_PROG_ATTACH,
+            page + 576,
+            core::mem::size_of::<TestBpfProgAttachAttr>() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Bpf>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([
+            BPF_PROG_DETACH,
+            page + 576,
+            core::mem::size_of::<TestBpfProgAttachAttr>() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Bpf>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([
+            99,
+            page + 576,
+            core::mem::size_of::<TestBpfProgAttachAttr>() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Bpf>(),
+        SyscallError::InvalidArguments,
+    );
+
+    close_test_fd(target_fd);
+    close_test_fd(prog_fd);
+    close_test_fd(map_fd);
 }

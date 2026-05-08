@@ -2198,8 +2198,11 @@ define_syscall!(AddKey, |type_name: String,
                          plen: usize,
                          keyring: i32| {
     let _ = (type_name, description);
-    if plen != 0 && payload.is_null() {
-        return Err(SyscallError::BadAddress);
+    if plen != 0 {
+        if payload.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+        let _ = user_safe::read_buffer(payload, plen)?;
     }
     let _ = resolve_keyring(keyring, true)?;
     let serial = NEXT_KEY_SERIAL.fetch_add(1, Ordering::Relaxed);

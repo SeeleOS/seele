@@ -546,8 +546,9 @@ define_syscall!(Flock, |object: ObjectRef, operation: i32| {
 });
 
 fn flush_process_file_mappings() -> SyscallResult {
-    get_current_process()
-        .lock()
+    let process = get_current_process();
+    let mut process = process.lock();
+    process
         .addrspace
         .flush_all_file_mappings()
         .map_err(SyscallError::from)?;

@@ -20,7 +20,9 @@ define_syscall!(Shmat, |shmid: i32, shmaddr: *const u8, shmflg: i32| {
 define_syscall!(Shmctl, |shmid: i32, cmd: i32, buf: *mut LinuxShmidDs| {
     let process = get_current_process();
     let process = process.lock();
-    sysv_shm::shmctl(&process, shmid, cmd, buf)
+    let effective_uid = process.effective_uid;
+    drop(process);
+    sysv_shm::shmctl(effective_uid, shmid, cmd, buf)
 });
 
 define_syscall!(Shmdt, |shmaddr: *const u8| {

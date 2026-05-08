@@ -359,7 +359,7 @@ pub fn shmdt(process: &mut Process, shmaddr: *const u8) -> SyscallResult {
     Ok(0)
 }
 
-pub fn shmctl(process: &Process, shmid: i32, cmd: i32, buf: *mut LinuxShmidDs) -> SyscallResult {
+pub fn shmctl(effective_uid: u32, shmid: i32, cmd: i32, buf: *mut LinuxShmidDs) -> SyscallResult {
     let mut state = SYSV_SHM_STATE.lock();
     match cmd {
         IPC_RMID => {
@@ -367,9 +367,9 @@ pub fn shmctl(process: &Process, shmid: i32, cmd: i32, buf: *mut LinuxShmidDs) -
                 .segments
                 .get_mut(&shmid)
                 .ok_or(SyscallError::InvalidArguments)?;
-            if process.effective_uid != 0
-                && process.effective_uid != segment.owner_uid
-                && process.effective_uid != segment.creator_uid
+            if effective_uid != 0
+                && effective_uid != segment.owner_uid
+                && effective_uid != segment.creator_uid
             {
                 return Err(SyscallError::PermissionDenied);
             }
