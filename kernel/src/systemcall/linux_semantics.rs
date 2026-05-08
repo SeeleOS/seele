@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 66;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 63;
 
 macro_rules! syscall_coverage {
     (
@@ -208,9 +208,12 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Setitimer => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         RtSigprocmask => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         RtSigpending => "sleep_and_signal_mask_syscalls_follow_linux_rules",
+        Pause => "sleep_and_signal_mask_syscalls_follow_linux_rules",
+        Kill => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         Wait4 => "pidfd_and_waitid_syscalls_follow_linux_rules",
         Waitid => "pidfd_and_waitid_syscalls_follow_linux_rules",
         PidfdOpen => "pidfd_and_waitid_syscalls_follow_linux_process_rules",
+        PidfdSendSignal => "pidfd_and_waitid_syscalls_follow_linux_rules",
         CloseRange => "close_range_syscalls_follow_linux_rules",
         RtSigsuspend => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         EpollPwait2 => "epoll_pwait2_syscalls_follow_linux_timeout_rules",
@@ -254,12 +257,10 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Shmget,
     Shmat,
     Shmctl,
-    Pause,
     Clone,
     Fork,
     Execve,
     Exit,
-    Kill,
     Ptrace,
     Shmdt,
     Sigaltstack,
@@ -274,7 +275,6 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
     Umount2,
     ExitGroup,
     Bpf,
-    PidfdSendSignal,
     OpenTree,
     MoveMount,
     Fsopen,

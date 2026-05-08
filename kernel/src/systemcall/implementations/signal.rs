@@ -446,13 +446,20 @@ define_syscall!(
 define_syscall!(
     PidfdSendSignal,
     |pidfd: ObjectRef, signal: i32, info: *const SigInfo, flags: u32| {
-        let signal = Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?;
         if flags != 0 {
             return Err(SyscallError::InvalidArguments);
         }
 
         let pid = pidfd.as_pidfd()?.pid();
         let process = get_process_with_pid(ProcessID(pid))?;
+        if signal == 0 {
+            if !info.is_null() {
+                return Err(SyscallError::InvalidArguments);
+            }
+            return Ok(0);
+        }
+
+        let signal = Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?;
         let siginfo = read_or_build_signal_info(signal, info, SI_QUEUE)?;
         send_signal_to_process_with_siginfo(&process, signal, siginfo);
         Ok(0)

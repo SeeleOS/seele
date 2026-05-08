@@ -26,7 +26,7 @@ use crate::{
             InotifyRmWatch, Ioperm, Iopl, IoprioGet, IoprioSet, Kcmp, Lgetxattr, Link, LinkAt, Listen,
             Listxattr, Llistxattr, Lremovexattr, Lseek, Lsetxattr, Madvise, MemfdCreate, Mkdir,
             MkdirAt, Mknodat, NameToHandleAt, Nanosleep, Newfstatat, Open, OpenAt, OpenFlags,
-            PidfdOpen, Pipe, Pipe2, Poll, PollEvents, PollTimespec, Ppoll, Prctl, Pread64,
+            PidfdOpen, PidfdSendSignal, Pipe, Pipe2, Poll, PollEvents, PollTimespec, Ppoll, Prctl, Pread64,
             Prlimit64, Pwrite64, Read, Readlink, ReadlinkAt, Reboot, Removexattr, Rename, RenameAt,
             RenameAt2, Rmdir, Rseq, RtSigpending, RtSigprocmask, RtSigsuspend, SchedGetPriorityMax, SchedGetPriorityMin,
             SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval,
@@ -34,7 +34,7 @@ use crate::{
             SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Setitimer, Sethostname, Setns,
             Setpgid, Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid,
             Settimeofday, Setuid, Setxattr, Setsockopt, Shutdown, Signalfd4, Socket, Socketpair,
-            Sendfile, Statfs, Statx, Symlink, SymlinkAt, Sync,
+            Sendfile, Statfs, Statx, Symlink, SymlinkAt, Sync, Pause, Kill,
             Sysinfo, Time, TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime,
             TimerfdCreate, TimerfdGettime, TimerfdSettime, Umask, Uname, Unlink, UnlinkAt,
             Unshare, Utimensat, Vhangup, Wait4, Waitid, Write, Writev, Getsockname, Getpeername,
@@ -6183,13 +6183,13 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
     const WBAD: u64 = 0x20;
     const WNOWAIT: u64 = 0x0100_0000;
     const CLD_EXITED: i32 = 1;
+    const SI_QUEUE: i32 = -1;
     const STOP_STATUS: i32 = 0x7f;
 
     assert_linux_layout::<TestWaitidSigInfo>(128, 8);
     assert_linux_layout::<TestLinuxRusage>(144, 8);
 
     let current = get_current_process();
-    let current_pid = current.lock().pid.0;
 
     let child = Process::empty();
     let child_pid = {
@@ -6233,6 +6233,40 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
     assert_eq!(info.si_pid, child_pid as i32);
     assert_eq!(info.si_status, 7);
     assert!(MANAGER.lock().processes.contains_key(&ProcessID(child_pid)));
+
+    let current_pid = get_current_process().lock().pid.0 as i32;
+    let current_uid = get_current_process().lock().real_uid;
+    let mut queued_siginfo = SigInfo::for_process_signal(Signal::SIGUSR1, current_pid, current_uid);
+    queued_siginfo.si_code = SI_QUEUE;
+    expect_ok(
+        SyscallArgs::new([child_pidfd as u64, Signal::SIGUSR1 as u64, &queued_siginfo as *const _ as u64, 0, 0, 0])
+            .call::<PidfdSendSignal>(),
+        0,
+    );
+    {
+        let child = child.lock();
+        assert!(child.pending_signals.contains(Signals::from(Signal::SIGUSR1)));
+        let pending = child.pending_signal_info[Signal::SIGUSR1.index()]
+            .expect("siginfo should be stored for pidfd_send_signal");
+        assert_eq!(pending.si_signo, Signal::SIGUSR1 as i32);
+        assert_eq!(pending.si_code, SI_QUEUE);
+        assert_eq!(pending.si_pid, current_pid);
+        assert_eq!(pending.si_uid, current_uid);
+    }
+    expect_ok(
+        SyscallArgs::new([child_pidfd as u64, 0, 0, 0, 0, 0]).call::<PidfdSendSignal>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([child_pidfd as u64, 0, &queued_siginfo as *const _ as u64, 0, 0, 0])
+            .call::<PidfdSendSignal>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([child_pidfd as u64, Signal::SIGUSR1 as u64, &queued_siginfo as *const _ as u64, 1, 0, 0])
+            .call::<PidfdSendSignal>(),
+        SyscallError::InvalidArguments,
+    );
 
     expect_ok(
         SyscallArgs::new([P_PID, child_pid, info_page, WEXITED | WNOHANG, 0, 0]).call::<Waitid>(),
@@ -6393,7 +6427,7 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
         SyscallError::InvalidArguments,
     );
     expect_errno(
-        SyscallArgs::new([P_PID, current_pid, 0, WNOHANG, 0, 0]).call::<Waitid>(),
+        SyscallArgs::new([P_PID, current_pid as u64, 0, WNOHANG, 0, 0]).call::<Waitid>(),
         SyscallError::InvalidArguments,
     );
     expect_errno(
@@ -6405,7 +6439,7 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
         SyscallError::NoChildProcesses,
     );
     expect_errno(
-        SyscallArgs::new([current_pid, 0, WBAD, 0, 0, 0]).call::<Wait4>(),
+        SyscallArgs::new([current_pid as u64, 0, WBAD, 0, 0, 0]).call::<Wait4>(),
         SyscallError::InvalidArguments,
     );
     expect_errno(
@@ -6413,7 +6447,7 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
         SyscallError::NoProcess,
     );
     expect_errno(
-        SyscallArgs::new([current_pid + 10_000, 0, WNOHANG, 0, 0, 0]).call::<Wait4>(),
+        SyscallArgs::new([(current_pid + 10_000) as u64, 0, WNOHANG, 0, 0, 0]).call::<Wait4>(),
         SyscallError::NoChildProcesses,
     );
 
@@ -6540,6 +6574,62 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
         SyscallError::InvalidArguments,
     );
 
+    let current = get_current_process();
+    let current_group = current.lock().group_id;
+    let peer = Process::empty();
+    let peer_pid = {
+        let mut peer = peer.lock();
+        peer.pid = ProcessID::new();
+        peer.group_id = current_group;
+        peer.parent = Some(current.clone());
+        peer.pid.0 as i32
+    };
+    MANAGER
+        .lock()
+        .processes
+        .insert(ProcessID(peer_pid as u64), peer.clone());
+
+    expect_ok(
+        SyscallArgs::new([peer_pid as u64, 0, 0, 0, 0, 0]).call::<Kill>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([peer_pid as u64, 65, 0, 0, 0, 0]).call::<Kill>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_ok(
+        SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<Kill>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([0, Signal::SIGUSR1 as u64, 0, 0, 0, 0]).call::<Kill>(),
+        0,
+    );
+    assert!(
+        current
+            .lock()
+            .pending_signals
+            .contains(Signals::from(Signal::SIGUSR1))
+    );
+    assert!(
+        peer.lock()
+            .pending_signals
+            .contains(Signals::from(Signal::SIGUSR1))
+    );
+    current
+        .lock()
+        .pending_signals
+        .remove(Signals::from(Signal::SIGUSR1));
+    peer.lock()
+        .pending_signals
+        .remove(Signals::from(Signal::SIGUSR1));
+
+    send_signal_to_process_with_siginfo(&current, Signal::SIGUSR2, SigInfo::for_signal(Signal::SIGUSR2));
+    expect_errno(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Pause>(),
+        SyscallError::Interrupted,
+    );
+
     {
         let mut current = thread.lock();
         current.pending_signals.insert(Signals::from(Signal::SIGUSR1));
@@ -6576,6 +6666,7 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
         SyscallArgs::new([1, 8, 0, 0, 0, 0]).call::<RtSigsuspend>(),
         SyscallError::BadAddress,
     );
+    MANAGER.lock().processes.remove(&ProcessID(peer_pid as u64));
     crate::thread::get_current_thread().lock().blocked_signals = saved_mask;
 }
 
