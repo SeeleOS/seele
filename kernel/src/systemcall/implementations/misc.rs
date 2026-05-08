@@ -1254,7 +1254,9 @@ define_syscall!(
         let nanoseconds = (requested.tv_sec as u64) * 1_000_000_000 + (requested.tv_nsec as u64);
         let time = KernelTime::since_boot().add_ns(nanoseconds);
 
-        block_current_with_sig_check(BlockType::SetTime(time))?;
+        if time > KernelTime::since_boot() {
+            block_current_with_sig_check(BlockType::SetTime(time))?;
+        }
 
         if !rem.is_null() {
             let remaining = LinuxTimespec {
@@ -1279,6 +1281,7 @@ define_syscall!(
         if new_value.is_null() {
             return Err(SyscallError::BadAddress);
         }
+        let _ = user_safe::read(new_value)?;
         if !old_value.is_null() {
             user_safe::write(old_value, &LinuxItimerval::default())?;
         }
@@ -1295,7 +1298,7 @@ define_syscall!(RtSigsuspend, |mask: *const u64, sigset_size: usize| {
         return Err(SyscallError::BadAddress);
     }
 
-    let new_mask = Signals::from_bits_truncate(unsafe { *mask });
+    let new_mask = Signals::from_bits_truncate(user_safe::read(mask)?);
     let old_mask = {
         let current = crate::thread::get_current_thread();
         let mut current = current.lock();
@@ -1586,7 +1589,10 @@ define_syscall!(Kcmp, |pid1: i32,
         return Err(SyscallError::InvalidArguments);
     }
 
-    let current_pid = get_current_process().lock().pid.0 as i32;
+    let current_pid = {
+        let process = get_current_process();
+        process.lock().pid.0 as i32
+    };
     if pid1 != current_pid || pid2 != current_pid {
         return Err(SyscallError::PermissionDenied);
     }
@@ -1603,7 +1609,11 @@ define_syscall!(Kcmp, |pid1: i32,
             } else {
                 let ptr1 = Arc::as_ptr(&object1) as *const () as usize;
                 let ptr2 = Arc::as_ptr(&object2) as *const () as usize;
-                Ok((ptr1 > ptr2) as usize)
+                Ok(match ptr1.cmp(&ptr2) {
+                    core::cmp::Ordering::Less => 1,
+                    core::cmp::Ordering::Greater => 2,
+                    core::cmp::Ordering::Equal => 0,
+                })
             }
         }
     }

@@ -2,37 +2,44 @@ use crate::{
     filesystem::info::LinuxStat,
     filesystem::{absolute_path::AbsolutePath, path::Path, vfs::VirtualFS},
     memory::protection::Protection,
-    misc::timer::ClockId,
+    misc::{signal::send_signal_to_process_with_siginfo, timer::ClockId},
     object::{FileFlags, misc::get_object_current_process, traits::Statable},
     process::{
-        ControllingTerminal, FdFlags, Process,
+        ControllingTerminal, FdFlags, Process, ProcessExitStatus,
         group::{ProcessGroupID, SessionID},
-        manager::get_current_process,
+        manager::{MANAGER, get_current_process},
+        misc::ProcessID,
     },
-    signal::{Signal, Signals},
+    signal::{SigInfo, Signal, Signals},
+    smp::set_current_process,
     systemcall::{
         arg_types::SyscallArg,
         implementations::{
             Access, Alarm, ArchPrctl, Capget, Capset, Chdir, Chroot, ClockGetres, ClockGettime,
-            ClockNanosleep, ClockSettime, Close, Dup, Dup2, Dup3, Eventfd, Eventfd2, Faccessat,
+            ClockNanosleep, ClockSettime, Close, CloseRange, Dup, Dup2, Dup3, EpollCreate1,
+            EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Eventfd2, Faccessat,
             Faccessat2, Fadvise64, Fallocate, Fchdir, Fchmod, Fchmodat, Fchown, Fchownat, Fcntl,
             Fdatasync, Fgetxattr, Flistxattr, Flock, Fremovexattr, Fsetxattr, Fstat, Fstatfs,
             Fsync, Ftruncate, Getcwd, Getegid, Geteuid, Getgid, Getgroups, Getpgid, Getpgrp,
             Getpid, Getppid, Getpriority, Getrandom, Getresgid, Getresuid, Getrusage, Getsid,
             Gettid, Gettimeofday, Getuid, Getxattr, InotifyAddWatch, InotifyInit, InotifyInit1,
-            InotifyRmWatch, Ioperm, Iopl, IoprioGet, IoprioSet, Lgetxattr, Link, LinkAt, Listxattr,
-            Llistxattr, Lremovexattr, Lseek, Lsetxattr, Madvise, MemfdCreate, Mkdir, MkdirAt,
-            Mknodat, Newfstatat, Open, OpenAt, OpenFlags, Pipe, Pipe2, PollEvents, PollTimespec,
-            Prctl, Pread64, Prlimit64, Pwrite64, Read, Readlink, ReadlinkAt, Reboot, Removexattr,
-            Rename, RenameAt, RenameAt2, Rmdir, Rseq, SchedGetPriorityMax, SchedGetPriorityMin,
+            InotifyRmWatch, Ioperm, Iopl, IoprioGet, IoprioSet, Kcmp, Lgetxattr, Link, LinkAt,
+            Listxattr, Llistxattr, Lremovexattr, Lseek, Lsetxattr, Madvise, MemfdCreate, Mkdir,
+            MkdirAt, Mknodat, NameToHandleAt, Nanosleep, Newfstatat, Open, OpenAt, OpenFlags,
+            PidfdOpen, Pipe, Pipe2, Poll, PollEvents, PollTimespec, Ppoll, Prctl, Pread64,
+            Prlimit64, Pwrite64, Read, Readlink, ReadlinkAt, Reboot, Removexattr, Rename, RenameAt,
+            RenameAt2, Rmdir, Rseq, RtSigsuspend, SchedGetPriorityMax, SchedGetPriorityMin,
             SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval,
             SchedSetaffinity, SchedSetparam, SchedYield, SelectTimespec, SetRobustList,
-            SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Sethostname, Setpgid,
-            Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid, Settimeofday,
-            Setuid, Setxattr, Statfs, Symlink, SymlinkAt, Sync, Sysinfo, Time, TimerfdCreate,
-            TimerfdGettime, TimerfdSettime, Umask, Uname, Unlink, UnlinkAt, Vhangup, Write, Writev,
-            clear_fdset, fdset_contains, fdset_insert, fdset_words, kernel_events_for,
-            saturating_timeout_ms, timeout_is_zero, timeout_to_deadline, translate_ready_events,
+            SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Setitimer, Sethostname, Setns,
+            Setpgid, Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid,
+            Settimeofday, Setuid, Setxattr, Signalfd4, Statfs, Statx, Symlink, SymlinkAt, Sync,
+            Sysinfo, Time, TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime,
+            TimerfdCreate, TimerfdGettime, TimerfdSettime, Umask, Uname, Unlink, UnlinkAt,
+            Unshare, Utimensat, Vhangup, Waitid, Write, Writev, clear_fdset,
+            fdset_contains, fdset_insert,
+            fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
+            timeout_to_deadline, translate_ready_events,
         },
         linux_semantics::{
             KNOWN_LINUX_SYSCALL_COVERAGE_GAPS, LINUX_SYSCALL_SEMANTICS_COVERAGE,
@@ -55,6 +62,93 @@ struct LinuxDirent64Header {
     d_off: i64,
     d_reclen: u16,
     d_type: u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxStatxTimestamp {
+    tv_sec: i64,
+    tv_nsec: u32,
+    __reserved: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxStatx {
+    stx_mask: u32,
+    stx_blksize: u32,
+    stx_attributes: u64,
+    stx_nlink: u32,
+    stx_uid: u32,
+    stx_gid: u32,
+    stx_mode: u16,
+    __spare0: u16,
+    stx_ino: u64,
+    stx_size: u64,
+    stx_blocks: u64,
+    stx_attributes_mask: u64,
+    stx_atime: TestLinuxStatxTimestamp,
+    stx_btime: TestLinuxStatxTimestamp,
+    stx_ctime: TestLinuxStatxTimestamp,
+    stx_mtime: TestLinuxStatxTimestamp,
+    stx_rdev_major: u32,
+    stx_rdev_minor: u32,
+    stx_dev_major: u32,
+    stx_dev_minor: u32,
+    stx_mnt_id: u64,
+    stx_dio_mem_align: u32,
+    stx_dio_offset_align: u32,
+    __spare3: [u64; 12],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxFileHandle {
+    handle_bytes: u32,
+    handle_type: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+#[allow(dead_code)]
+struct TestLinuxPollFd {
+    fd: i32,
+    events: i16,
+    revents: i16,
+}
+
+#[repr(C, packed)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxEpollEvent {
+    events: u32,
+    data: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxSignalfdSiginfo {
+    ssi_signo: u32,
+    ssi_errno: i32,
+    ssi_code: i32,
+    ssi_pid: u32,
+    ssi_uid: u32,
+    ssi_fd: i32,
+    ssi_tid: u32,
+    ssi_band: u32,
+    ssi_overrun: u32,
+    ssi_trapno: u32,
+    ssi_status: i32,
+    ssi_int: i32,
+    ssi_ptr: u64,
+    ssi_utime: u64,
+    ssi_stime: u64,
+    ssi_addr: u64,
+    ssi_addr_lsb: u16,
+    __pad2: u16,
+    ssi_syscall: i32,
+    ssi_call_addr: u64,
+    ssi_arch: u32,
+    __pad: [u8; 28],
 }
 
 crate::test!(
@@ -158,6 +252,11 @@ crate::test!(
     timerfd_syscalls_follow_linux_flag_and_timer_rules
 );
 crate::test!(
+    posix_timer_syscalls,
+    "posix timer syscalls follow linux rules",
+    posix_timer_syscalls_follow_linux_rules
+);
+crate::test!(
     pipe_and_dup_syscalls,
     "pipe and dup syscalls follow linux fd rules",
     pipe_and_dup_syscalls_follow_linux_fd_rules
@@ -216,6 +315,101 @@ crate::test!(
     memfd_and_inotify_watch_syscalls,
     "memfd and inotify watch syscalls follow linux rules",
     memfd_and_inotify_watch_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_statx_syscalls,
+    "statx follows linux rules",
+    filesystem_statx_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_name_to_handle_short_buffer_syscalls,
+    "name_to_handle_at short buffer follows linux rules",
+    filesystem_name_to_handle_short_buffer_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_name_to_handle_success_syscalls,
+    "name_to_handle_at success path follows linux rules",
+    filesystem_name_to_handle_success_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_name_to_handle_null_handle_syscalls,
+    "name_to_handle_at null handle follows linux rules",
+    filesystem_name_to_handle_null_handle_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_name_to_handle_null_mount_id_syscalls,
+    "name_to_handle_at null mount id follows linux rules",
+    filesystem_name_to_handle_null_mount_id_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_name_to_handle_bad_flag_syscalls,
+    "name_to_handle_at invalid flag follows linux rules",
+    filesystem_name_to_handle_bad_flag_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_utimensat_success_syscalls,
+    "utimensat success paths follow linux rules",
+    filesystem_utimensat_success_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_utimensat_negative_nsec_syscalls,
+    "utimensat rejects invalid nanoseconds like linux",
+    filesystem_utimensat_negative_nsec_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_utimensat_null_path_empty_path_syscalls,
+    "utimensat rejects null path with empty_path like linux",
+    filesystem_utimensat_null_path_empty_path_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_utimensat_empty_path_without_flag_syscalls,
+    "utimensat rejects empty path without empty_path like linux",
+    filesystem_utimensat_empty_path_without_flag_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_utimensat_at_fdcwd_null_path_syscalls,
+    "utimensat rejects at_fdcwd with null path like linux",
+    filesystem_utimensat_at_fdcwd_null_path_syscalls_follow_linux_rules
+);
+crate::test!(
+    filesystem_utimensat_invalid_flag_syscalls,
+    "utimensat rejects invalid flags like linux",
+    filesystem_utimensat_invalid_flag_syscalls_follow_linux_rules
+);
+crate::test!(
+    epoll_syscalls,
+    "epoll syscalls follow linux rules",
+    epoll_syscalls_follow_linux_rules
+);
+crate::test!(
+    signalfd_syscalls,
+    "signalfd syscalls follow linux rules",
+    signalfd_syscalls_follow_linux_rules
+);
+crate::test!(
+    namespace_and_kcmp_syscalls,
+    "namespace and kcmp syscalls follow linux rules",
+    namespace_and_kcmp_syscalls_follow_linux_rules
+);
+crate::test!(
+    close_range_syscalls,
+    "close_range follows linux fd rules",
+    close_range_syscalls_follow_linux_rules
+);
+crate::test!(
+    pidfd_and_waitid_syscalls,
+    "pidfd_open and waitid follow linux process rules",
+    pidfd_and_waitid_syscalls_follow_linux_rules
+);
+crate::test!(
+    sleep_and_signal_mask_syscalls,
+    "nanosleep setitimer and rt_sigsuspend follow linux rules",
+    sleep_and_signal_mask_syscalls_follow_linux_rules
+);
+crate::test!(
+    epoll_pwait2_syscalls,
+    "epoll_pwait2 follows linux timeout rules",
+    epoll_pwait2_syscalls_follow_linux_rules
 );
 crate::test!(
     typed_syscall_arg_conversion,
@@ -498,6 +692,29 @@ struct TestLinuxTimespec {
 struct TestLinuxItimerspec {
     it_interval: TestLinuxTimespec,
     it_value: TestLinuxTimespec,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxItimerval {
+    it_interval: TestLinuxTimeval,
+    it_value: TestLinuxTimeval,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct TestWaitidSigInfo {
+    si_signo: i32,
+    si_errno: i32,
+    si_code: i32,
+    _pad0: i32,
+    si_pid: i32,
+    si_uid: u32,
+    si_status: i32,
+    _pad1: i32,
+    si_utime: i64,
+    si_stime: i64,
+    _rest: [u8; 80],
 }
 
 #[repr(C)]
@@ -1980,6 +2197,181 @@ fn timerfd_syscalls_follow_linux_flag_and_timer_rules() {
     );
     close_test_fd(non_timerfd);
     close_test_fd(timerfd);
+}
+
+fn posix_timer_syscalls_follow_linux_rules() {
+    const CLOCK_REALTIME: u64 = 0;
+    const TIMER_ABSTIME: u64 = 1;
+    const SIGEV_NONE: u8 = 0;
+    const SIGEV_SIGNAL: u8 = 1;
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct TestLinuxSigevent {
+        notify_type: u8,
+        signal: Signal,
+    }
+
+    assert_linux_layout::<TestLinuxItimerspec>(32, 8);
+
+    let page = allocate_user_test_page();
+    write_user_value(
+        page,
+        &TestLinuxSigevent {
+            notify_type: SIGEV_SIGNAL,
+            signal: Signal::SIGUSR1,
+        },
+    );
+
+    expect_errno(
+        SyscallArgs::new([CLOCK_REALTIME, page, 0, 0, 0, 0]).call::<TimerCreate>(),
+        SyscallError::BadAddress,
+    );
+
+    expect_errno(
+        SyscallArgs::new([99, page, page + 64, 0, 0, 0]).call::<TimerCreate>(),
+        SyscallError::InvalidArguments,
+    );
+
+    let timer_id_page = page + 64;
+    expect_ok(
+        SyscallArgs::new([CLOCK_REALTIME, page, timer_id_page, 0, 0, 0]).call::<TimerCreate>(),
+        0,
+    );
+    let signal_timer_id = read_user_value::<usize>(timer_id_page);
+
+    expect_ok(
+        SyscallArgs::new([CLOCK_REALTIME, 0, timer_id_page + 8, 0, 0, 0]).call::<TimerCreate>(),
+        0,
+    );
+    let default_timer_id = read_user_value::<usize>(timer_id_page + 8);
+    assert_ne!(signal_timer_id, default_timer_id);
+
+    expect_ok(
+        SyscallArgs::new([signal_timer_id as u64, page + 128, 0, 0, 0, 0]).call::<TimerGettime>(),
+        0,
+    );
+    let initial = read_user_value::<TestLinuxItimerspec>(page + 128);
+    assert_eq!(initial.it_value.tv_sec, 0);
+    assert_eq!(initial.it_value.tv_nsec, 0);
+    assert_eq!(initial.it_interval.tv_sec, 0);
+    assert_eq!(initial.it_interval.tv_nsec, 0);
+
+    write_user_value(
+        page + 192,
+        &TestLinuxItimerspec {
+            it_interval: TestLinuxTimespec {
+                tv_sec: 2,
+                tv_nsec: 3,
+            },
+            it_value: TestLinuxTimespec {
+                tv_sec: 4,
+                tv_nsec: 5,
+            },
+        },
+    );
+    expect_ok(
+        SyscallArgs::new([signal_timer_id as u64, 0, page + 192, page + 256, 0, 0])
+            .call::<TimerSettime>(),
+        0,
+    );
+    let old_spec = read_user_value::<TestLinuxItimerspec>(page + 256);
+    assert_eq!(old_spec.it_value.tv_sec, 0);
+    assert_eq!(old_spec.it_value.tv_nsec, 0);
+    assert_eq!(old_spec.it_interval.tv_sec, 0);
+    assert_eq!(old_spec.it_interval.tv_nsec, 0);
+
+    expect_ok(
+        SyscallArgs::new([signal_timer_id as u64, page + 320, 0, 0, 0, 0]).call::<TimerGettime>(),
+        0,
+    );
+    let armed = read_user_value::<TestLinuxItimerspec>(page + 320);
+    assert_eq!(armed.it_interval.tv_sec, 2);
+    assert_eq!(armed.it_interval.tv_nsec, 3);
+    assert!(armed.it_value.tv_sec <= 4);
+    assert!(armed.it_value.tv_nsec < 1_000_000_000);
+
+    write_user_value(
+        page + 384,
+        &TestLinuxItimerspec {
+            it_interval: TestLinuxTimespec::default(),
+            it_value: TestLinuxTimespec::default(),
+        },
+    );
+    expect_ok(
+        SyscallArgs::new([signal_timer_id as u64, TIMER_ABSTIME, page + 384, 0, 0, 0])
+            .call::<TimerSettime>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([signal_timer_id as u64, page + 448, 0, 0, 0, 0]).call::<TimerGettime>(),
+        0,
+    );
+    let disarmed = read_user_value::<TestLinuxItimerspec>(page + 448);
+    assert_eq!(disarmed.it_value.tv_sec, 0);
+    assert_eq!(disarmed.it_value.tv_nsec, 0);
+    assert_eq!(disarmed.it_interval.tv_sec, 0);
+    assert_eq!(disarmed.it_interval.tv_nsec, 0);
+
+    expect_ok(
+        SyscallArgs::new([signal_timer_id as u64, 0, 0, 0, 0, 0]).call::<TimerGetoverrun>(),
+        0,
+    );
+
+    expect_errno(
+        SyscallArgs::new([signal_timer_id as u64, 0, 0, 0, 0, 0]).call::<TimerSettime>(),
+        SyscallError::BadAddress,
+    );
+    write_user_value(
+        page + 512,
+        &TestLinuxItimerspec {
+            it_value: TestLinuxTimespec {
+                tv_sec: 0,
+                tv_nsec: 1_000_000_000,
+            },
+            ..Default::default()
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([signal_timer_id as u64, 0, page + 512, 0, 0, 0]).call::<TimerSettime>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([signal_timer_id as u64, 0, 0, 0, 0, 0]).call::<TimerGettime>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([signal_timer_id as u64, 0, 1, 0, 0, 0]).call::<TimerSettime>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([usize::MAX as u64, 0, 0, 0, 0, 0]).call::<TimerDelete>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([usize::MAX as u64, 0, 0, 0, 0, 0]).call::<TimerGetoverrun>(),
+        SyscallError::InvalidArguments,
+    );
+
+    expect_ok(
+        SyscallArgs::new([default_timer_id as u64, 0, 0, 0, 0, 0]).call::<TimerDelete>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([default_timer_id as u64, page + 640, 0, 0, 0, 0]).call::<TimerGettime>(),
+        SyscallError::InvalidArguments,
+    );
+
+    expect_ok(
+        SyscallArgs::new([signal_timer_id as u64, 0, 0, 0, 0, 0]).call::<TimerDelete>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([signal_timer_id as u64, 0, 0, 0, 0, 0]).call::<TimerGetoverrun>(),
+        SyscallError::InvalidArguments,
+    );
+
+    let _ = SIGEV_NONE;
 }
 
 fn pipe_and_dup_syscalls_follow_linux_fd_rules() {
@@ -3766,6 +4158,1191 @@ fn memfd_and_inotify_watch_syscalls_follow_linux_rules() {
 
     close_test_fd(inotify);
     close_test_fd(memfd);
+}
+
+fn filesystem_statx_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+    const AT_EMPTY_PATH: u64 = 0x1000;
+    const AT_SYMLINK_NOFOLLOW: u64 = 0x100;
+    const AT_STATX_FORCE_SYNC: u64 = 0x2000;
+    const AT_STATX_DONT_SYNC: u64 = 0x4000;
+    const STATX_BASIC_STATS: u64 = 0x0000_07ff;
+    const STATX_MNT_ID: u32 = 0x0000_1000;
+    const STATX_ATTR_MOUNT_ROOT: u64 = 0x0000_2000;
+
+    let base_path = Path::new("/tmp/syscall-statx-test");
+    let cleanup_paths = [
+        "/tmp/syscall-statx-test/link",
+        "/tmp/syscall-statx-test/file",
+        "/tmp/syscall-statx-test",
+    ];
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-statx-test/file"))
+        .unwrap();
+    VirtualFS
+        .lock()
+        .create_symlink(
+            Path::new("/tmp/syscall-statx-test/link"),
+            "/tmp/syscall-statx-test/file",
+        )
+        .unwrap();
+
+    assert_linux_layout::<TestLinuxStatxTimestamp>(16, 8);
+    assert_linux_layout::<TestLinuxStatx>(256, 8);
+    assert_linux_layout::<TestLinuxFileHandle>(8, 4);
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"/tmp/syscall-statx-test/file\0");
+    write_user_cstr(user_page + 64, b"/tmp/syscall-statx-test/link\0");
+    let file_fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            OpenFlags::empty().bits() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
+
+    expect_ok(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            0,
+            STATX_BASIC_STATS,
+            user_page + 256,
+            0,
+        ])
+        .call::<Statx>(),
+        0,
+    );
+    let statx = read_user_value::<TestLinuxStatx>(user_page + 256);
+    let file_stat = {
+        let file = {
+            let mut vfs = VirtualFS.lock();
+            vfs.open(Path::new("/tmp/syscall-statx-test/file")).unwrap()
+        };
+        file.stat()
+    };
+    assert_eq!(statx.stx_mask, STATX_BASIC_STATS as u32 | STATX_MNT_ID);
+    assert_eq!(statx.stx_mode, file_stat.st_mode as u16);
+    assert_eq!(statx.stx_nlink, file_stat.st_nlink as u32);
+    assert_eq!(statx.stx_size, file_stat.st_size as u64);
+    assert_eq!(statx.stx_ino, file_stat.st_ino);
+    assert_eq!(statx.stx_attributes_mask, STATX_ATTR_MOUNT_ROOT);
+    assert_eq!(statx.stx_attributes & STATX_ATTR_MOUNT_ROOT, 0);
+    assert!(statx.stx_mnt_id >= 1);
+    assert_eq!(statx.stx_btime.tv_sec, 0);
+    assert_eq!(statx.stx_btime.tv_nsec, 0);
+
+    expect_ok(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page + 64,
+            AT_SYMLINK_NOFOLLOW,
+            STATX_BASIC_STATS,
+            user_page + 256,
+            0,
+        ])
+        .call::<Statx>(),
+        0,
+    );
+    let link_statx = read_user_value::<TestLinuxStatx>(user_page + 256);
+    assert_ne!(link_statx.stx_ino, statx.stx_ino);
+
+    expect_ok(
+        SyscallArgs::new([
+            file_fd as u64,
+            0,
+            AT_EMPTY_PATH,
+            STATX_BASIC_STATS,
+            user_page + 256,
+            0,
+        ])
+        .call::<Statx>(),
+        0,
+    );
+    let empty_path_statx = read_user_value::<TestLinuxStatx>(user_page + 256);
+    assert_eq!(empty_path_statx.stx_ino, statx.stx_ino);
+
+    expect_errno(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            0x8000_0000,
+            STATX_BASIC_STATS,
+            user_page + 256,
+            0,
+        ])
+        .call::<Statx>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            AT_STATX_FORCE_SYNC | AT_STATX_DONT_SYNC,
+            STATX_BASIC_STATS,
+            user_page + 256,
+            0,
+        ])
+        .call::<Statx>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([file_fd as u64, 0, 0, STATX_BASIC_STATS, user_page + 256, 0])
+            .call::<Statx>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([file_fd as u64, 0, AT_EMPTY_PATH, STATX_BASIC_STATS, 0, 0])
+            .call::<Statx>(),
+        SyscallError::BadAddress,
+    );
+
+    close_test_fd(file_fd);
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+}
+
+fn filesystem_name_to_handle_short_buffer_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+
+    let base_path = Path::new("/tmp/syscall-name-handle-test");
+    let cleanup_paths = [
+        "/tmp/syscall-name-handle-test/file",
+        "/tmp/syscall-name-handle-test",
+    ];
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-name-handle-test/file"))
+        .unwrap();
+
+    assert_linux_layout::<TestLinuxFileHandle>(8, 4);
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"/tmp/syscall-name-handle-test/file\0");
+    write_user_value(
+        user_page + 512,
+        &TestLinuxFileHandle {
+            handle_bytes: 4,
+            handle_type: 0,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([AT_FDCWD, user_page, user_page + 512, user_page + 520, 0, 0])
+            .call::<NameToHandleAt>(),
+        SyscallError::ValueTooLarge,
+    );
+    let short_handle = read_user_value::<TestLinuxFileHandle>(user_page + 512);
+    assert_eq!(short_handle.handle_bytes, 8);
+    assert_eq!(short_handle.handle_type, 1);
+    assert!(read_user_value::<i32>(user_page + 520) >= 1);
+
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+}
+
+fn filesystem_name_to_handle_success_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+
+    let base_path = Path::new("/tmp/syscall-name-handle-test");
+    let cleanup_paths = [
+        "/tmp/syscall-name-handle-test/file",
+        "/tmp/syscall-name-handle-test",
+    ];
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-name-handle-test/file"))
+        .unwrap();
+
+    assert_linux_layout::<TestLinuxFileHandle>(8, 4);
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"/tmp/syscall-name-handle-test/file\0");
+    let file_stat = {
+        let file = {
+            let mut vfs = VirtualFS.lock();
+            vfs.open(Path::new("/tmp/syscall-name-handle-test/file"))
+                .unwrap()
+        };
+        file.stat()
+    };
+
+    write_user_value(
+        user_page + 512,
+        &TestLinuxFileHandle {
+            handle_bytes: 8,
+            handle_type: 0,
+        },
+    );
+    expect_ok(
+        SyscallArgs::new([AT_FDCWD, user_page, user_page + 512, user_page + 520, 0, 0])
+            .call::<NameToHandleAt>(),
+        0,
+    );
+    let full_handle = read_user_value::<TestLinuxFileHandle>(user_page + 512);
+    assert_eq!(full_handle.handle_bytes, 8);
+    assert_eq!(full_handle.handle_type, 1);
+    assert_eq!(
+        read_user_value::<u64>(user_page + 512 + 8),
+        file_stat.st_ino
+    );
+
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+}
+
+fn filesystem_name_to_handle_null_handle_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+
+    let base_path = Path::new("/tmp/syscall-name-handle-test");
+    let cleanup_paths = [
+        "/tmp/syscall-name-handle-test/file",
+        "/tmp/syscall-name-handle-test",
+    ];
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-name-handle-test/file"))
+        .unwrap();
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"/tmp/syscall-name-handle-test/file\0");
+    write_user_value(
+        user_page + 512,
+        &TestLinuxFileHandle {
+            handle_bytes: 8,
+            handle_type: 0,
+        },
+    );
+
+    expect_errno(
+        SyscallArgs::new([AT_FDCWD, user_page, 0, user_page + 520, 0, 0]).call::<NameToHandleAt>(),
+        SyscallError::BadAddress,
+    );
+
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+}
+
+fn filesystem_name_to_handle_null_mount_id_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+
+    let base_path = Path::new("/tmp/syscall-name-handle-test");
+    let cleanup_paths = [
+        "/tmp/syscall-name-handle-test/file",
+        "/tmp/syscall-name-handle-test",
+    ];
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-name-handle-test/file"))
+        .unwrap();
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"/tmp/syscall-name-handle-test/file\0");
+    write_user_value(
+        user_page + 512,
+        &TestLinuxFileHandle {
+            handle_bytes: 8,
+            handle_type: 0,
+        },
+    );
+
+    expect_errno(
+        SyscallArgs::new([AT_FDCWD, user_page, user_page + 512, 0, 0, 0]).call::<NameToHandleAt>(),
+        SyscallError::BadAddress,
+    );
+
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+}
+
+fn filesystem_name_to_handle_bad_flag_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+
+    let base_path = Path::new("/tmp/syscall-name-handle-test");
+    let cleanup_paths = [
+        "/tmp/syscall-name-handle-test/file",
+        "/tmp/syscall-name-handle-test",
+    ];
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-name-handle-test/file"))
+        .unwrap();
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"/tmp/syscall-name-handle-test/file\0");
+    write_user_value(
+        user_page + 512,
+        &TestLinuxFileHandle {
+            handle_bytes: 8,
+            handle_type: 0,
+        },
+    );
+
+    expect_errno(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            user_page + 512,
+            user_page + 520,
+            0x4000_0000,
+            0,
+        ])
+        .call::<NameToHandleAt>(),
+        SyscallError::InvalidArguments,
+    );
+
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+}
+
+fn filesystem_utimensat_success_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+    const AT_EMPTY_PATH: u64 = 0x1000;
+    const UTIME_OMIT: i64 = 0x3fff_ffff;
+
+    let base_path = Path::new("/tmp/syscall-utimensat-test");
+    let cleanup_paths = [
+        "/tmp/syscall-utimensat-test/file",
+        "/tmp/syscall-utimensat-test",
+    ];
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-utimensat-test/file"))
+        .unwrap();
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"/tmp/syscall-utimensat-test/file\0");
+    let file_fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            OpenFlags::empty().bits() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
+
+    let valid_times = [[0i64, 0i64], [0i64, UTIME_OMIT]];
+    write_user_value(user_page + 640, &valid_times);
+    expect_ok(
+        SyscallArgs::new([file_fd as u64, 0, user_page + 640, 0, 0, 0]).call::<Utimensat>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([file_fd as u64, user_page, user_page + 640, 0, 0, 0]).call::<Utimensat>(),
+        0,
+    );
+    write_user_cstr(user_page + 704, b"\0");
+    expect_ok(
+        SyscallArgs::new([
+            file_fd as u64,
+            user_page + 704,
+            user_page + 640,
+            AT_EMPTY_PATH,
+            0,
+            0,
+        ])
+        .call::<Utimensat>(),
+        0,
+    );
+
+    close_test_fd(file_fd);
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+}
+
+fn prepare_utimensat_test_file() -> (usize, [u64; 2]) {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+
+    let base_path = Path::new("/tmp/syscall-utimensat-test");
+    let cleanup_paths = [
+        "/tmp/syscall-utimensat-test/file",
+        "/tmp/syscall-utimensat-test",
+    ];
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+    VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-utimensat-test/file"))
+        .unwrap();
+
+    let user_page = allocate_user_test_page();
+    write_user_cstr(user_page, b"/tmp/syscall-utimensat-test/file\0");
+    write_user_cstr(user_page + 704, b"\0");
+    let file_fd = expect_fd(
+        SyscallArgs::new([
+            AT_FDCWD,
+            user_page,
+            OpenFlags::empty().bits() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<OpenAt>(),
+    );
+
+    (file_fd, [user_page, user_page + 640])
+}
+
+fn cleanup_utimensat_test_file(file_fd: usize) {
+    let cleanup_paths = [
+        "/tmp/syscall-utimensat-test/file",
+        "/tmp/syscall-utimensat-test",
+    ];
+    close_test_fd(file_fd);
+    for path in cleanup_paths {
+        let _ = VirtualFS.lock().delete_file(Path::new(path));
+    }
+}
+
+fn filesystem_utimensat_negative_nsec_syscalls_follow_linux_rules() {
+    let (file_fd, pages) = prepare_utimensat_test_file();
+    let [user_page, times_page] = pages;
+
+    write_user_value(times_page, &[[0i64, 0i64], [0i64, -1i64]]);
+    expect_errno(
+        SyscallArgs::new([file_fd as u64, user_page, times_page, 0, 0, 0]).call::<Utimensat>(),
+        SyscallError::InvalidArguments,
+    );
+    write_user_value(times_page, &[[-1i64, -1i64], [0i64, 0i64]]);
+    expect_errno(
+        SyscallArgs::new([file_fd as u64, user_page, times_page, 0, 0, 0]).call::<Utimensat>(),
+        SyscallError::InvalidArguments,
+    );
+
+    cleanup_utimensat_test_file(file_fd);
+}
+
+fn filesystem_utimensat_null_path_empty_path_syscalls_follow_linux_rules() {
+    const AT_EMPTY_PATH: u64 = 0x1000;
+
+    let (file_fd, [_user_page, times_page]) = prepare_utimensat_test_file();
+    write_user_value(times_page, &[[0i64, 0i64], [0i64, 0i64]]);
+    expect_errno(
+        SyscallArgs::new([file_fd as u64, 0, times_page, AT_EMPTY_PATH, 0, 0]).call::<Utimensat>(),
+        SyscallError::InvalidArguments,
+    );
+
+    cleanup_utimensat_test_file(file_fd);
+}
+
+fn filesystem_utimensat_empty_path_without_flag_syscalls_follow_linux_rules() {
+    let (file_fd, pages) = prepare_utimensat_test_file();
+    let [_user_page, times_page] = pages;
+
+    write_user_value(times_page, &[[0i64, 0i64], [0i64, 0i64]]);
+    expect_errno(
+        SyscallArgs::new([file_fd as u64, times_page + 64, times_page, 0, 0, 0])
+            .call::<Utimensat>(),
+        SyscallError::FileNotFound,
+    );
+
+    cleanup_utimensat_test_file(file_fd);
+}
+
+fn filesystem_utimensat_at_fdcwd_null_path_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+
+    let (file_fd, [_user_page, times_page]) = prepare_utimensat_test_file();
+    write_user_value(times_page, &[[0i64, 0i64], [0i64, 0i64]]);
+    expect_errno(
+        SyscallArgs::new([AT_FDCWD, 0, times_page, 0, 0, 0]).call::<Utimensat>(),
+        SyscallError::BadAddress,
+    );
+
+    cleanup_utimensat_test_file(file_fd);
+}
+
+fn filesystem_utimensat_invalid_flag_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+
+    let (file_fd, [user_page, times_page]) = prepare_utimensat_test_file();
+    write_user_value(times_page, &[[0i64, 0i64], [0i64, 0i64]]);
+    expect_errno(
+        SyscallArgs::new([AT_FDCWD, user_page, times_page, 0x200, 0, 0]).call::<Utimensat>(),
+        SyscallError::InvalidArguments,
+    );
+
+    cleanup_utimensat_test_file(file_fd);
+}
+
+#[allow(dead_code)]
+fn poll_and_ppoll_syscalls_follow_linux_rules() {
+    const POLLIN: i16 = 0x001;
+    const POLLOUT: i16 = 0x004;
+    const POLLNVAL: i16 = 0x020;
+
+    assert_linux_layout::<TestLinuxPollFd>(8, 4);
+
+    let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+    let poll_page = allocate_user_test_page();
+    write_user_value(
+        poll_page,
+        &[
+            TestLinuxPollFd {
+                fd: eventfd as i32,
+                events: POLLOUT,
+                revents: 0,
+            },
+            TestLinuxPollFd {
+                fd: 4096,
+                events: POLLIN,
+                revents: 0,
+            },
+        ],
+    );
+    expect_ok(
+        SyscallArgs::new([poll_page, 2, 0, 0, 0, 0]).call::<Poll>(),
+        2,
+    );
+    let pollfds = read_user_value::<[TestLinuxPollFd; 2]>(poll_page);
+    assert_eq!(pollfds[0].revents & POLLOUT, POLLOUT);
+    assert_eq!(pollfds[1].revents & POLLNVAL, POLLNVAL);
+
+    write_user_value(
+        poll_page,
+        &[TestLinuxPollFd {
+            fd: eventfd as i32,
+            events: POLLIN,
+            revents: 123,
+        }],
+    );
+    expect_ok(
+        SyscallArgs::new([poll_page, 1, 0, 0, 0, 0]).call::<Poll>(),
+        0,
+    );
+    assert_eq!(read_user_value::<TestLinuxPollFd>(poll_page).revents, 0);
+
+    let ppoll_timeout = TestLinuxTimespec {
+        tv_sec: 0,
+        tv_nsec: 1_000_000,
+    };
+    write_user_value(poll_page + 128, &ppoll_timeout);
+    let ppoll_result = SyscallArgs::new([poll_page, 1, poll_page + 128, 0, 0, 0]).call::<Ppoll>();
+    expect_ok(ppoll_result, 0);
+    let sigmask: u64 = Signal::SIGUSR1.mask();
+    write_user_value(poll_page + 192, &sigmask);
+    expect_errno(
+        SyscallArgs::new([poll_page, 1, poll_page + 128, poll_page + 192, 4, 0]).call::<Ppoll>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 1, 0, 0, 0, 0]).call::<Poll>(),
+        SyscallError::BadAddress,
+    );
+
+    close_test_fd(eventfd);
+}
+
+fn epoll_syscalls_follow_linux_rules() {
+    const EPOLL_CTL_ADD: u64 = 1;
+    const EPOLL_CTL_MOD: u64 = 3;
+    const EPOLL_CTL_DEL: u64 = 2;
+    const EPOLLOUT: u32 = 0x004;
+    const EPOLLONESHOT: u32 = 0x4000_0000;
+
+    assert_linux_layout::<TestLinuxEpollEvent>(12, 1);
+
+    let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+    let epoll_fd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<EpollCreate1>());
+    let event = TestLinuxEpollEvent {
+        events: EPOLLOUT,
+        data: 0xfeed_beef,
+    };
+    expect_ok(
+        SyscallArgs::new([
+            epoll_fd as u64,
+            EPOLL_CTL_ADD,
+            eventfd as u64,
+            (&event as *const TestLinuxEpollEvent) as u64,
+            0,
+            0,
+        ])
+        .call::<EpollCtl>(),
+        0,
+    );
+    let epoll_events = allocate_user_test_page();
+    expect_ok(
+        SyscallArgs::new([epoll_fd as u64, epoll_events, 4, 0, 0, 0]).call::<EpollWait>(),
+        1,
+    );
+    let ready = read_user_value::<TestLinuxEpollEvent>(epoll_events);
+    let ready_events = ready.events;
+    let ready_data = ready.data;
+    assert_eq!(ready_events, EPOLLOUT);
+    assert_eq!(ready_data, 0xfeed_beef);
+
+    let oneshot = TestLinuxEpollEvent {
+        events: EPOLLOUT | EPOLLONESHOT,
+        data: 7,
+    };
+    expect_ok(
+        SyscallArgs::new([
+            epoll_fd as u64,
+            EPOLL_CTL_MOD,
+            eventfd as u64,
+            (&oneshot as *const TestLinuxEpollEvent) as u64,
+            0,
+            0,
+        ])
+        .call::<EpollCtl>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([epoll_fd as u64, epoll_events, 4, 0, 0, 0]).call::<EpollPwait>(),
+        1,
+    );
+    expect_ok(
+        SyscallArgs::new([epoll_fd as u64, epoll_events, 4, 0, 0, 0]).call::<EpollWait>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([epoll_fd as u64, EPOLL_CTL_DEL, eventfd as u64, 0, 0, 0])
+            .call::<EpollCtl>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([epoll_fd as u64, 99, eventfd as u64, 0, 0, 0]).call::<EpollCtl>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([epoll_fd as u64, EPOLL_CTL_ADD, eventfd as u64, 0, 0, 0])
+            .call::<EpollCtl>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([epoll_fd as u64, epoll_events, 0, 0, 0, 0]).call::<EpollWait>(),
+        SyscallError::InvalidArguments,
+    );
+
+    close_test_fd(epoll_fd);
+    close_test_fd(eventfd);
+}
+
+fn signalfd_syscalls_follow_linux_rules() {
+    const SFD_NONBLOCK: u64 = 0o4_000;
+    const SFD_CLOEXEC: u64 = 0o2_000_000;
+
+    assert_linux_layout::<TestLinuxSignalfdSiginfo>(128, 8);
+
+    let sigmask_user = allocate_user_test_page();
+    write_user_value(sigmask_user, &Signal::SIGUSR1.mask());
+    let signalfd = expect_fd(
+        SyscallArgs::new([
+            (-1i32) as u64,
+            sigmask_user,
+            core::mem::size_of::<u64>() as u64,
+            SFD_NONBLOCK | SFD_CLOEXEC,
+            0,
+            0,
+        ])
+        .call::<Signalfd4>(),
+    );
+    assert_fd_flags(signalfd, FdFlags::CLOEXEC);
+    assert_object_flags(signalfd, FileFlags::NONBLOCK);
+    let siginfo_buf = allocate_user_test_page();
+    expect_errno(
+        SyscallArgs::new([(-1i32) as u64, sigmask_user, 4, 0, 0, 0]).call::<Signalfd4>(),
+        SyscallError::InvalidArguments,
+    );
+
+    let mut siginfo: SigInfo = unsafe { core::mem::zeroed() };
+    siginfo.si_signo = Signal::SIGUSR1 as i32;
+    siginfo.si_errno = 123;
+    siginfo.si_code = -6;
+    let process = get_current_process();
+    send_signal_to_process_with_siginfo(&process, Signal::SIGUSR1, siginfo);
+    expect_ok(
+        SyscallArgs::new([signalfd as u64, siginfo_buf, 128, 0, 0, 0]).call::<Read>(),
+        128,
+    );
+    let signalfd_info = read_user_value::<TestLinuxSignalfdSiginfo>(siginfo_buf);
+    assert_eq!(signalfd_info.ssi_signo, Signal::SIGUSR1 as u32);
+    assert_eq!(signalfd_info.ssi_errno, 123);
+    assert_eq!(signalfd_info.ssi_code, -6);
+    assert_eq!(signalfd_info.ssi_pid, process.lock().pid.0 as u32);
+
+    write_user_value(sigmask_user, &Signal::SIGTERM.mask());
+    expect_ok(
+        SyscallArgs::new([
+            signalfd as u64,
+            sigmask_user,
+            core::mem::size_of::<u64>() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Signalfd4>(),
+        signalfd,
+    );
+    expect_errno(
+        SyscallArgs::new([signalfd as u64, siginfo_buf, 127, 0, 0, 0]).call::<Read>(),
+        SyscallError::InvalidArguments,
+    );
+
+    close_test_fd(signalfd);
+}
+
+fn namespace_and_kcmp_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+    const CLONE_NEWNET: u64 = 0x4000_0000;
+
+    let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+    let saved_namespace = get_current_process().lock().net_namespace.clone();
+    let proc_ns = allocate_user_test_page();
+    write_user_cstr(proc_ns, b"/proc/self/ns/net\0");
+    let ns_fd = expect_fd(
+        SyscallArgs::new([AT_FDCWD, proc_ns, OpenFlags::empty().bits() as u64, 0, 0, 0])
+            .call::<OpenAt>(),
+    );
+    let original_inode = saved_namespace.inode();
+    expect_ok(
+        SyscallArgs::new([CLONE_NEWNET, 0, 0, 0, 0, 0]).call::<Unshare>(),
+        0,
+    );
+    let new_inode = get_current_process().lock().net_namespace.inode();
+    assert_ne!(new_inode, original_inode);
+    expect_ok(
+        SyscallArgs::new([ns_fd as u64, 0, 0, 0, 0, 0]).call::<Setns>(),
+        0,
+    );
+    assert_eq!(
+        get_current_process().lock().net_namespace.inode(),
+        original_inode
+    );
+    expect_ok(
+        SyscallArgs::new([ns_fd as u64, CLONE_NEWNET, 0, 0, 0, 0]).call::<Setns>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([eventfd as u64, 0, 0, 0, 0, 0]).call::<Setns>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([ns_fd as u64, 0x2000_0000, 0, 0, 0, 0]).call::<Setns>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0x8000_0000, 0, 0, 0, 0, 0]).call::<Unshare>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0x20000, 0, 0, 0, 0, 0]).call::<Unshare>(),
+        SyscallError::OperationNotSupported,
+    );
+
+    let saved_process = get_current_process();
+    let other_eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+    let kcmp_process = Process::init();
+    let kcmp_pid = kcmp_process.lock().pid.0 as u64;
+    MANAGER.lock().processes.insert(
+        crate::process::misc::ProcessID(kcmp_pid),
+        kcmp_process.clone(),
+    );
+    let same_object;
+    let other_kcmp_fd;
+    {
+        let mut process = kcmp_process.lock();
+        same_object = (
+            process.push_object_with_flags(
+                get_object_current_process(eventfd as u64).unwrap(),
+                FdFlags::empty(),
+            ),
+            process.push_object_with_flags(
+                get_object_current_process(eventfd as u64).unwrap(),
+                FdFlags::empty(),
+            ),
+        );
+        other_kcmp_fd = process.push_object_with_flags(
+            get_object_current_process(other_eventfd as u64).unwrap(),
+            FdFlags::empty(),
+        );
+    }
+    set_current_process(Some(kcmp_process.clone()));
+    let kcmp_equal = SyscallArgs::new([
+        kcmp_pid,
+        kcmp_pid,
+        0,
+        same_object.0 as u64,
+        same_object.1 as u64,
+        0,
+    ])
+    .call::<Kcmp>();
+    expect_ok(kcmp_equal, 0);
+    let cmp_ab = SyscallArgs::new([
+        kcmp_pid,
+        kcmp_pid,
+        0,
+        same_object.0 as u64,
+        other_kcmp_fd as u64,
+        0,
+    ])
+    .call::<Kcmp>()
+    .expect("kcmp should compare file objects");
+    let cmp_ba = SyscallArgs::new([
+        kcmp_pid,
+        kcmp_pid,
+        0,
+        other_kcmp_fd as u64,
+        same_object.0 as u64,
+        0,
+    ])
+    .call::<Kcmp>()
+    .expect("kcmp reverse should compare file objects");
+    assert!(matches!((cmp_ab, cmp_ba), (1, 2) | (2, 1)));
+    expect_errno(
+        SyscallArgs::new([
+            0,
+            kcmp_pid,
+            0,
+            same_object.0 as u64,
+            other_kcmp_fd as u64,
+            0,
+        ])
+        .call::<Kcmp>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([
+            kcmp_pid + 1,
+            kcmp_pid,
+            0,
+            same_object.0 as u64,
+            other_kcmp_fd as u64,
+            0,
+        ])
+        .call::<Kcmp>(),
+        SyscallError::PermissionDenied,
+    );
+    expect_errno(
+        SyscallArgs::new([
+            kcmp_pid,
+            kcmp_pid,
+            99,
+            same_object.0 as u64,
+            other_kcmp_fd as u64,
+            0,
+        ])
+        .call::<Kcmp>(),
+        SyscallError::InvalidArguments,
+    );
+    set_current_process(Some(saved_process));
+    MANAGER
+        .lock()
+        .processes
+        .remove(&crate::process::misc::ProcessID(kcmp_pid));
+
+    close_test_fd(other_eventfd);
+    close_test_fd(ns_fd);
+    close_test_fd(eventfd);
+    get_current_process().lock().net_namespace = saved_namespace;
+}
+
+fn close_range_syscalls_follow_linux_rules() {
+    const CLOSE_RANGE_CLOEXEC: u64 = 0x4;
+
+    let base_count = occupied_fd_count();
+    let fd0 = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+    let fd1 = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+    let fd2 = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+    let fd3 = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+
+    expect_ok(
+        SyscallArgs::new([fd1 as u64, fd2 as u64, CLOSE_RANGE_CLOEXEC, 0, 0, 0])
+            .call::<CloseRange>(),
+        0,
+    );
+    assert_fd_flags(fd0, FdFlags::empty());
+    assert_fd_flags(fd1, FdFlags::CLOEXEC);
+    assert_fd_flags(fd2, FdFlags::CLOEXEC);
+    assert_fd_flags(fd3, FdFlags::empty());
+    assert_eq!(occupied_fd_count(), base_count + 4);
+
+    expect_ok(
+        SyscallArgs::new([fd1 as u64, fd2 as u64, 0, 0, 0, 0]).call::<CloseRange>(),
+        0,
+    );
+    assert!(get_object_current_process(fd1 as u64).is_err());
+    assert!(get_object_current_process(fd2 as u64).is_err());
+    assert_eq!(occupied_fd_count(), base_count + 2);
+
+    expect_errno(
+        SyscallArgs::new([fd0 as u64, fd3 as u64, 1, 0, 0, 0]).call::<CloseRange>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([fd3 as u64, fd0 as u64, 0, 0, 0, 0]).call::<CloseRange>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_ok(
+        SyscallArgs::new([4096, 8192, 0, 0, 0, 0]).call::<CloseRange>(),
+        0,
+    );
+
+    close_test_fd(fd0);
+    close_test_fd(fd3);
+}
+
+fn pidfd_and_waitid_syscalls_follow_linux_rules() {
+    const P_PID: u64 = 1;
+    const P_PIDFD: u64 = 3;
+    const WNOHANG: u64 = 1;
+    const WEXITED: u64 = 4;
+    const WNOWAIT: u64 = 0x0100_0000;
+    const CLD_EXITED: i32 = 1;
+
+    assert_linux_layout::<TestWaitidSigInfo>(128, 8);
+
+    let current = get_current_process();
+    let current_pid = current.lock().pid.0;
+
+    let child = Process::empty();
+    let child_pid = {
+        let mut child = child.lock();
+        child.pid = ProcessID::new();
+        child.parent = Some(current.clone());
+        child.group_id = current.lock().group_id;
+        child.exit_status = Some(ProcessExitStatus::Exited(7));
+        child.pid.0
+    };
+    MANAGER
+        .lock()
+        .processes
+        .insert(ProcessID(child_pid), child.clone());
+
+    let child_pidfd = expect_fd(SyscallArgs::new([child_pid, 0, 0, 0, 0, 0]).call::<PidfdOpen>());
+    assert_fd_flags(child_pidfd, FdFlags::CLOEXEC);
+    assert!(
+        get_object_current_process(child_pidfd as u64)
+            .expect("pidfd should resolve")
+            .as_pidfd()
+            .is_ok()
+    );
+    expect_errno(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<PidfdOpen>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([child_pid, 1, 0, 0, 0, 0]).call::<PidfdOpen>(),
+        SyscallError::InvalidArguments,
+    );
+    let info_page = allocate_user_test_page();
+    expect_ok(
+        SyscallArgs::new([P_PIDFD, child_pidfd as u64, info_page, WEXITED | WNOWAIT, 0, 0])
+            .call::<Waitid>(),
+        0,
+    );
+    let info = read_user_value::<TestWaitidSigInfo>(info_page);
+    assert_eq!(info.si_signo, Signal::SIGCHLD as i32);
+    assert_eq!(info.si_code, CLD_EXITED);
+    assert_eq!(info.si_pid, child_pid as i32);
+    assert_eq!(info.si_status, 7);
+    assert!(MANAGER.lock().processes.contains_key(&ProcessID(child_pid)));
+
+    expect_ok(
+        SyscallArgs::new([P_PID, child_pid, info_page, WEXITED | WNOHANG, 0, 0]).call::<Waitid>(),
+        0,
+    );
+    assert!(!MANAGER.lock().processes.contains_key(&ProcessID(child_pid)));
+
+    let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+    expect_errno(
+        SyscallArgs::new([99, 0, 0, WEXITED, 0, 0]).call::<Waitid>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([P_PID, current_pid, 0, WNOHANG, 0, 0]).call::<Waitid>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([P_PIDFD, eventfd as u64, 0, WEXITED, 0, 0]).call::<Waitid>(),
+        SyscallError::BadFileDescriptor,
+    );
+    expect_errno(
+        SyscallArgs::new([P_PID, child_pid, 0, WEXITED, 0, 0]).call::<Waitid>(),
+        SyscallError::NoChildProcesses,
+    );
+
+    MANAGER.lock().processes.remove(&ProcessID(child_pid));
+    close_test_fd(eventfd);
+    close_test_fd(child_pidfd);
+}
+
+fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
+    let page = allocate_user_test_page();
+    write_user_value(
+        page,
+        &TestLinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        },
+    );
+    expect_ok(SyscallArgs::new([page, page + 32, 0, 0, 0, 0]).call::<Nanosleep>(), 0);
+    assert_eq!(
+        read_user_value::<TestLinuxTimespec>(page + 32).tv_nsec,
+        0
+    );
+    write_user_value(
+        page,
+        &TestLinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 1_000_000_000,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([page, 0, 0, 0, 0, 0]).call::<Nanosleep>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<Nanosleep>(),
+        SyscallError::BadAddress,
+    );
+
+    write_user_value(page + 64, &TestLinuxItimerval::default());
+    expect_ok(
+        SyscallArgs::new([0, page + 64, page + 96, 0, 0, 0]).call::<Setitimer>(),
+        0,
+    );
+    assert_eq!(
+        read_user_value::<TestLinuxItimerval>(page + 96).it_value.tv_sec,
+        0
+    );
+    expect_errno(
+        SyscallArgs::new([99, page + 64, 0, 0, 0, 0]).call::<Setitimer>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Setitimer>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 1, 0, 0, 0, 0]).call::<Setitimer>(),
+        SyscallError::BadAddress,
+    );
+
+    let saved_mask = crate::thread::get_current_thread().lock().blocked_signals;
+    write_user_value(page + 160, &Signal::SIGUSR1.mask());
+    expect_errno(
+        SyscallArgs::new([page + 160, 4, 0, 0, 0, 0]).call::<RtSigsuspend>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 8, 0, 0, 0, 0]).call::<RtSigsuspend>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([1, 8, 0, 0, 0, 0]).call::<RtSigsuspend>(),
+        SyscallError::BadAddress,
+    );
+    crate::thread::get_current_thread().lock().blocked_signals = saved_mask;
+}
+
+fn epoll_pwait2_syscalls_follow_linux_rules() {
+    const EPOLLOUT: u32 = 0x004;
+
+    let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+    let epoll_fd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<EpollCreate1>());
+    let event = TestLinuxEpollEvent {
+        events: EPOLLOUT,
+        data: 0x1234_5678,
+    };
+    expect_ok(
+        SyscallArgs::new([
+            epoll_fd as u64,
+            1,
+            eventfd as u64,
+            (&event as *const TestLinuxEpollEvent) as u64,
+            0,
+            0,
+        ])
+        .call::<EpollCtl>(),
+        0,
+    );
+
+    let page = allocate_user_test_page();
+    write_user_value(
+        page,
+        &TestLinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 1,
+        },
+    );
+    expect_ok(
+        SyscallArgs::new([epoll_fd as u64, page + 64, 1, page, 0, 0]).call::<EpollPwait2>(),
+        1,
+    );
+    let ready = read_user_value::<TestLinuxEpollEvent>(page + 64);
+    let ready_events = ready.events;
+    let ready_data = ready.data;
+    assert_eq!(ready_events, EPOLLOUT);
+    assert_eq!(ready_data, 0x1234_5678);
+
+    write_user_value(
+        page,
+        &TestLinuxTimespec {
+            tv_sec: 0,
+            tv_nsec: 1_000_000_000,
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([epoll_fd as u64, page + 64, 1, page, 0, 0]).call::<EpollPwait2>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([epoll_fd as u64, page + 64, 0, 0, 0, 0]).call::<EpollPwait2>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([epoll_fd as u64, page + 64, 1, 1, 0, 0]).call::<EpollPwait2>(),
+        SyscallError::BadAddress,
+    );
+
+    close_test_fd(epoll_fd);
+    close_test_fd(eventfd);
 }
 
 fn typed_syscall_args_convert_flags_and_enums_at_boundary() {
