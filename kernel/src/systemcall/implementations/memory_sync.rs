@@ -119,7 +119,13 @@ struct FutexKey {
     addr: u64,
 }
 
-static FUTEX_QUEUE: Mutex<BTreeMap<FutexKey, VecDeque<ThreadRef>>> = Mutex::new(BTreeMap::new());
+#[derive(Clone)]
+struct FutexWaiter {
+    thread: ThreadRef,
+    bitset: u32,
+}
+
+static FUTEX_QUEUE: Mutex<BTreeMap<FutexKey, VecDeque<FutexWaiter>>> = Mutex::new(BTreeMap::new());
 const FUTEX_CLOCK_REALTIME: u64 = 0x100;
 const FUTEX_BITSET_MATCH_ANY: u64 = 0xffff_ffff;
 const FUTEX_OP_OPARG_SHIFT: u32 = 8;
@@ -133,13 +139,21 @@ struct LinuxTimespec {
     tv_nsec: i64,
 }
 
+fn read_user_u32(addr: u64) -> Result<u32, SyscallError> {
+    user_safe::read(addr as *const u32)
+}
+
+fn write_user_u32(addr: u64, value: u32) -> Result<(), SyscallError> {
+    user_safe::write(addr as *mut u32, &value)
+}
+
 fn current_futex_key(addr: u64) -> FutexKey {
     let pid = get_current_process().lock().pid.0;
     FutexKey { pid, addr }
 }
 
 pub fn wake_futex_for_process(pid: u64, addr: u64, count: usize) -> usize {
-    let threads = take_futex_waiters(pid, addr, count);
+    let threads = take_futex_waiters(pid, addr, count, None);
     let woken = threads.len();
 
     let mut manager = THREAD_MANAGER.get().unwrap().lock();
@@ -156,7 +170,7 @@ pub fn wake_futex_for_process_with_manager(
     count: usize,
     manager: &mut ThreadManager,
 ) -> usize {
-    let threads = take_futex_waiters(pid, addr, count);
+    let threads = take_futex_waiters(pid, addr, count, None);
     let woken = threads.len();
 
     for thread in threads {
@@ -166,19 +180,30 @@ pub fn wake_futex_for_process_with_manager(
     woken
 }
 
-fn take_futex_waiters(pid: u64, addr: u64, count: usize) -> Vec<ThreadRef> {
+fn take_futex_waiters(
+    pid: u64,
+    addr: u64,
+    count: usize,
+    wake_mask: Option<u32>,
+) -> Vec<ThreadRef> {
     let key = FutexKey { pid, addr };
     let mut queue = FUTEX_QUEUE.lock();
     let mut woken = Vec::new();
     let mut remove_key = false;
 
     if let Some(queue) = queue.get_mut(&key) {
-        for _ in 0..count {
-            if let Some(thread) = queue.pop_front() {
-                woken.push(thread);
+        let mut scanned = 0;
+        while woken.len() < count && scanned < queue.len() {
+            let waiter = queue
+                .pop_front()
+                .expect("futex waiter queue length changed during wake");
+            let should_wake = wake_mask.is_none_or(|mask| waiter.bitset & mask != 0);
+            if should_wake {
+                woken.push(waiter.thread);
             } else {
-                break;
+                queue.push_back(waiter);
             }
+            scanned += 1;
         }
 
         remove_key = queue.is_empty();
@@ -196,7 +221,7 @@ pub fn remove_futex_waiter(thread_ref: &ThreadRef) {
     let mut empty_keys = Vec::new();
 
     for (key, waiters) in queue.iter_mut() {
-        waiters.retain(|thread| !Arc::ptr_eq(thread, thread_ref));
+        waiters.retain(|waiter| !Arc::ptr_eq(&waiter.thread, thread_ref));
         if waiters.is_empty() {
             empty_keys.push(*key);
         }
@@ -212,12 +237,17 @@ fn futex_timeout_timespec(timeout: u64) -> Result<Option<LinuxTimespec>, Syscall
         return Ok(None);
     }
 
-    let timeout = unsafe { *(timeout as *const LinuxTimespec) };
+    let timeout = user_safe::read(timeout as *const LinuxTimespec)?;
     if timeout.tv_sec < 0 || !(0..1_000_000_000).contains(&timeout.tv_nsec) {
         return Err(SyscallError::InvalidArguments);
     }
 
     Ok(Some(timeout))
+}
+
+fn validate_futex_user_addr(addr: u64) -> Result<(), SyscallError> {
+    let _ = read_user_u32(addr)?;
+    Ok(())
 }
 
 fn timespec_to_ns(timeout: LinuxTimespec) -> u64 {
@@ -250,13 +280,18 @@ fn futex_absolute_timeout_deadline(
     }
 }
 
-fn futex_wait_impl(arg1: u64, arg2: u64, deadline: Option<Time>) -> Result<usize, SyscallError> {
+fn futex_wait_impl(
+    arg1: u64,
+    arg2: u64,
+    deadline: Option<Time>,
+    bitset: u32,
+) -> Result<usize, SyscallError> {
     let key = current_futex_key(arg1);
     let current = get_current_thread();
     {
         let mut manager = THREAD_MANAGER.get().unwrap().lock();
         let mut queue = FUTEX_QUEUE.lock();
-        let cur_value = unsafe { *(arg1 as *const u32) } as u64;
+        let cur_value = u64::from(read_user_u32(arg1)?);
         if cur_value != arg2 {
             return Err(SyscallError::TryAgain);
         }
@@ -270,7 +305,10 @@ fn futex_wait_impl(arg1: u64, arg2: u64, deadline: Option<Time>) -> Result<usize
         // racing wake observes a consistent Blocked state after we drop both
         // locks.
         manager.block(current.clone(), BlockType::Futex { deadline });
-        queue.entry(key).or_default().push_back(current.clone());
+        queue.entry(key).or_default().push_back(FutexWaiter {
+            thread: current.clone(),
+            bitset,
+        });
     }
 
     finish_block_current();
@@ -287,8 +325,23 @@ fn futex_wait_impl(arg1: u64, arg2: u64, deadline: Option<Time>) -> Result<usize
 }
 
 fn futex_wake_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
+    validate_futex_user_addr(arg1)?;
     let key = current_futex_key(arg1);
     let woken = wake_futex_for_process(key.pid, key.addr, arg2 as usize);
+    Ok(woken)
+}
+
+fn futex_wake_bitset_impl(arg1: u64, arg2: u64, bitset: u32) -> Result<usize, SyscallError> {
+    validate_futex_user_addr(arg1)?;
+    let key = current_futex_key(arg1);
+    let threads = take_futex_waiters(key.pid, key.addr, arg2 as usize, Some(bitset));
+    let woken = threads.len();
+
+    let mut manager = THREAD_MANAGER.get().unwrap().lock();
+    for thread in threads {
+        manager.wake(thread);
+    }
+
     Ok(woken)
 }
 
@@ -300,7 +353,7 @@ fn futex_requeue_impl(
     compare: Option<u64>,
 ) -> Result<usize, SyscallError> {
     if let Some(expected) = compare {
-        let cur_value = unsafe { *(arg1 as *const u32) } as u64;
+        let cur_value = u64::from(read_user_u32(arg1)?);
         if cur_value != expected {
             return Err(SyscallError::TryAgain);
         }
@@ -316,15 +369,15 @@ fn futex_requeue_impl(
 
     if let Some(waiters) = queue.get_mut(&source) {
         for _ in 0..wake_count {
-            if let Some(thread) = waiters.pop_front() {
-                woken.push(thread);
+            if let Some(waiter) = waiters.pop_front() {
+                woken.push(waiter.thread);
             } else {
                 break;
             }
         }
         for _ in 0..requeue_count {
-            if let Some(thread) = waiters.pop_front() {
-                moved.push_back(thread);
+            if let Some(waiter) = waiters.pop_front() {
+                moved.push_back(waiter);
             } else {
                 break;
             }
@@ -392,12 +445,10 @@ fn futex_wake_op_impl(
     encoded_op: u64,
 ) -> Result<usize, SyscallError> {
     let pid = get_current_process().lock().pid.0;
-    let old_value = unsafe { *(uaddr2 as *const u32) };
+    let old_value = read_user_u32(uaddr2)?;
     let encoded_op = u32::try_from(encoded_op).map_err(|_| SyscallError::InvalidArguments)?;
     let (new_value, should_wake_second) = futex_wake_op_apply(old_value, encoded_op)?;
-    unsafe {
-        *(uaddr2 as *mut u32) = new_value;
-    }
+    write_user_u32(uaddr2, new_value)?;
 
     let mut total_woken = wake_futex_for_process(pid, arg1, wake_count_1 as usize);
     if should_wake_second {
@@ -426,7 +477,7 @@ fn futex_lock_pi_impl(
 
     loop {
         {
-            let cur_value = unsafe { *(arg1 as *const u32) };
+            let cur_value = read_user_u32(arg1)?;
             let owner = cur_value & FUTEX_TID_MASK;
             if owner == tid {
                 return Err(SyscallError::ResourceDeadlock);
@@ -434,9 +485,7 @@ fn futex_lock_pi_impl(
 
             if owner == 0 {
                 let new_value = tid | (cur_value & FUTEX_OWNER_DIED);
-                unsafe {
-                    *(arg1 as *mut u32) = new_value;
-                }
+                write_user_u32(arg1, new_value)?;
                 return Ok(0);
             }
 
@@ -450,7 +499,7 @@ fn futex_lock_pi_impl(
         {
             let mut manager = THREAD_MANAGER.get().unwrap().lock();
             let mut queue = FUTEX_QUEUE.lock();
-            let cur_value = unsafe { *(arg1 as *const u32) };
+            let cur_value = read_user_u32(arg1)?;
             let owner = cur_value & FUTEX_TID_MASK;
             if owner == 0 {
                 continue;
@@ -465,13 +514,14 @@ fn futex_lock_pi_impl(
             }
 
             if (cur_value & FUTEX_WAITERS) == 0 {
-                unsafe {
-                    *(arg1 as *mut u32) = cur_value | FUTEX_WAITERS;
-                }
+                write_user_u32(arg1, cur_value | FUTEX_WAITERS)?;
             }
 
             manager.block(current.clone(), BlockType::Futex { deadline });
-            queue.entry(key).or_default().push_back(current.clone());
+            queue.entry(key).or_default().push_back(FutexWaiter {
+                thread: current.clone(),
+                bitset: FUTEX_BITSET_MATCH_ANY as u32,
+            });
         }
 
         finish_block_current();
@@ -487,7 +537,7 @@ fn futex_lock_pi_impl(
 
 fn futex_trylock_pi_impl(arg1: u64) -> Result<usize, SyscallError> {
     let tid = current_tid_u32()?;
-    let cur_value = unsafe { *(arg1 as *const u32) };
+    let cur_value = read_user_u32(arg1)?;
     let owner = cur_value & FUTEX_TID_MASK;
     if owner == tid {
         return Err(SyscallError::ResourceDeadlock);
@@ -496,15 +546,13 @@ fn futex_trylock_pi_impl(arg1: u64) -> Result<usize, SyscallError> {
         return Err(SyscallError::TryAgain);
     }
 
-    unsafe {
-        *(arg1 as *mut u32) = tid | (cur_value & FUTEX_OWNER_DIED);
-    }
+    write_user_u32(arg1, tid | (cur_value & FUTEX_OWNER_DIED))?;
     Ok(0)
 }
 
 fn futex_unlock_pi_impl(arg1: u64) -> Result<usize, SyscallError> {
     let tid = current_tid_u32()?;
-    let cur_value = unsafe { *(arg1 as *const u32) };
+    let cur_value = read_user_u32(arg1)?;
     let owner = cur_value & FUTEX_TID_MASK;
     if owner != tid {
         return Err(SyscallError::PermissionDenied);
@@ -513,7 +561,10 @@ fn futex_unlock_pi_impl(arg1: u64) -> Result<usize, SyscallError> {
     let next_waiter = {
         let key = current_futex_key(arg1);
         let mut queue = FUTEX_QUEUE.lock();
-        let next = queue.get_mut(&key).and_then(|waiters| waiters.pop_front());
+        let next = queue
+            .get_mut(&key)
+            .and_then(|waiters| waiters.pop_front())
+            .map(|waiter| waiter.thread);
         let remove = queue.get(&key).is_some_and(|waiters| waiters.is_empty());
         if remove {
             queue.remove(&key);
@@ -534,14 +585,10 @@ fn futex_unlock_pi_impl(arg1: u64) -> Result<usize, SyscallError> {
                 .is_some_and(|waiters| !waiters.is_empty())
         };
         let new_value = next_tid | if still_has_waiters { FUTEX_WAITERS } else { 0 };
-        unsafe {
-            *(arg1 as *mut u32) = new_value;
-        }
+        write_user_u32(arg1, new_value)?;
         THREAD_MANAGER.get().unwrap().lock().wake(next);
     } else {
-        unsafe {
-            *(arg1 as *mut u32) = 0;
-        }
+        write_user_u32(arg1, 0)?;
     }
 
     Ok(0)
@@ -558,7 +605,12 @@ define_syscall!(Futex, |arg1: u64,
         let futex_op = FutexOp::try_from(base_op).map_err(|_| SyscallError::InvalidArguments)?;
 
         match futex_op {
-            FutexOp::Wait => futex_wait_impl(arg1, arg2, futex_relative_timeout_deadline(timeout)?),
+            FutexOp::Wait => futex_wait_impl(
+                arg1,
+                arg2,
+                futex_relative_timeout_deadline(timeout)?,
+                FUTEX_BITSET_MATCH_ANY as u32,
+            ),
             FutexOp::Wake => futex_wake_impl(arg1, arg2),
             FutexOp::Requeue => futex_requeue_impl(arg1, arg2, timeout, uaddr2, None),
             FutexOp::CmpRequeue => futex_requeue_impl(arg1, arg2, timeout, uaddr2, Some(val3)),
@@ -567,20 +619,25 @@ define_syscall!(Futex, |arg1: u64,
             FutexOp::UnlockPi => futex_unlock_pi_impl(arg1),
             FutexOp::TrylockPi => futex_trylock_pi_impl(arg1),
             FutexOp::WaitBitset => {
-                if val3 == 0 || val3 != FUTEX_BITSET_MATCH_ANY {
+                let bitset =
+                    u32::try_from(val3).map_err(|_| SyscallError::InvalidArguments)?;
+                if bitset == 0 {
                     return Err(SyscallError::InvalidArguments);
                 }
                 futex_wait_impl(
                     arg1,
                     arg2,
                     futex_absolute_timeout_deadline(timeout, op & FUTEX_CLOCK_REALTIME != 0)?,
+                    bitset,
                 )
             }
             FutexOp::WakeBitset => {
-                if val3 == 0 {
+                let bitset =
+                    u32::try_from(val3).map_err(|_| SyscallError::InvalidArguments)?;
+                if bitset == 0 {
                     return Err(SyscallError::InvalidArguments);
                 }
-                futex_wake_impl(arg1, arg2)
+                futex_wake_bitset_impl(arg1, arg2, bitset)
             }
         }
     })

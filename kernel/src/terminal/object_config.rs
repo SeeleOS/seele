@@ -1,6 +1,5 @@
-use core::ptr::{read_volatile, write_volatile};
-
 use crate::{
+    memory::user_safe,
     object::{
         config::ConfigurateRequest, error::ObjectError, misc::ObjectResult, traits::Configuratable,
     },
@@ -18,25 +17,28 @@ impl Configuratable for TerminalObject {
         }
 
         match request {
-            ConfigurateRequest::LinuxTcGets(termios) => unsafe {
-                write_volatile(termios, self.termios.lock().as_linux_termios());
-            },
-            ConfigurateRequest::LinuxTcSets(termios) => unsafe {
-                let termios = read_volatile(termios);
+            ConfigurateRequest::LinuxTcGets(termios) => {
+                user_safe::write(termios, &self.termios.lock().as_linux_termios())
+                    .map_err(|_| ObjectError::BadAddress)?;
+            }
+            ConfigurateRequest::LinuxTcSets(termios) => {
+                let termios = user_safe::read(termios).map_err(|_| ObjectError::BadAddress)?;
                 self.termios.lock().apply_linux_termios(&termios);
-            },
-            ConfigurateRequest::LinuxTcGets2(termios) => unsafe {
-                write_volatile(termios, *self.termios.lock());
-            },
-            ConfigurateRequest::LinuxTcSets2(termios) => unsafe {
-                let termios = read_volatile(termios);
+            }
+            ConfigurateRequest::LinuxTcGets2(termios) => {
+                user_safe::write(termios, &*self.termios.lock())
+                    .map_err(|_| ObjectError::BadAddress)?;
+            }
+            ConfigurateRequest::LinuxTcSets2(termios) => {
+                let termios = user_safe::read(termios).map_err(|_| ObjectError::BadAddress)?;
                 self.termios.lock().apply_linux_termios2(&termios);
-            },
-            ConfigurateRequest::LinuxTiocgwinsz(winsize) => unsafe {
-                write_volatile(winsize, *self.winsize.lock());
-            },
-            ConfigurateRequest::LinuxTiocswinsz(winsize) => unsafe {
-                let winsize = read_volatile(winsize);
+            }
+            ConfigurateRequest::LinuxTiocgwinsz(winsize) => {
+                user_safe::write(winsize, &*self.winsize.lock())
+                    .map_err(|_| ObjectError::BadAddress)?;
+            }
+            ConfigurateRequest::LinuxTiocswinsz(winsize) => {
+                let winsize = user_safe::read(winsize).map_err(|_| ObjectError::BadAddress)?;
                 let mut current = self.winsize.lock();
                 if winsize.ws_row != 0 {
                     current.ws_row = winsize.ws_row;
@@ -44,7 +46,7 @@ impl Configuratable for TerminalObject {
                 if winsize.ws_col != 0 {
                     current.ws_col = winsize.ws_col;
                 }
-            },
+            }
             _ => return Err(ObjectError::InvalidArguments),
         }
         Ok(0)

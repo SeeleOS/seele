@@ -6,6 +6,7 @@ use crate::{
 #[derive(Debug)]
 pub enum ObjectError {
     DoesNotExist,
+    BadAddress,
     Interrupted,
     TryAgain,
     Busy,
@@ -34,6 +35,7 @@ impl AsSyscallError for ObjectError {
     fn as_syscall_error(&self) -> SyscallError {
         match self {
             Self::Unimplemented => SyscallError::OperationNotSupported,
+            Self::BadAddress => SyscallError::BadAddress,
             Self::InvalidArguments => SyscallError::InvalidArguments,
             Self::Interrupted => SyscallError::Interrupted,
             Self::TryAgain => SyscallError::TryAgain,

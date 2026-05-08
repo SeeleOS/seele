@@ -14,7 +14,7 @@ pub struct LinuxSyscallCoverage {
     pub test: &'static str,
 }
 
-pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 43;
+pub const KNOWN_LINUX_SYSCALL_COVERAGE_GAPS: usize = 0;
 
 macro_rules! syscall_coverage {
     (
@@ -222,6 +222,8 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         CloseRange => "close_range_syscalls_follow_linux_rules",
         RtSigsuspend => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         EpollPwait2 => "epoll_pwait2_syscalls_follow_linux_timeout_rules",
+        Poll => "poll_and_ppoll_syscalls_follow_linux_rules",
+        Ppoll => "poll_and_ppoll_syscalls_follow_linux_rules",
         TimerCreate => "posix_timer_syscalls_follow_linux_rules",
         TimerSettime => "posix_timer_syscalls_follow_linux_rules",
         TimerGettime => "posix_timer_syscalls_follow_linux_rules",
@@ -259,28 +261,26 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         AddKey => "key_and_bpf_syscalls_follow_linux_rules",
         Keyctl => "key_and_bpf_syscalls_follow_linux_rules",
         Bpf => "key_and_bpf_syscalls_follow_linux_rules",
+        Ioctl => "object_control_syscalls_follow_linux_rules",
+        RtSigreturn => "process_and_signal_transition_helpers_follow_linux_rules",
+        SchedSetscheduler => "object_control_syscalls_follow_linux_rules",
+        Mount => "mount_api_syscalls_follow_linux_rules",
+        Umount2 => "mount_api_syscalls_follow_linux_rules",
+        OpenTree => "mount_api_syscalls_follow_linux_rules",
+        MoveMount => "mount_api_syscalls_follow_linux_rules",
+        Fsopen => "mount_api_syscalls_follow_linux_rules",
+        Fsconfig => "mount_api_syscalls_follow_linux_rules",
+        Fsmount => "mount_api_syscalls_follow_linux_rules",
+        MountSetattr => "mount_api_syscalls_follow_linux_rules",
+        Ptrace => "ptrace_syscalls_follow_linux_rules",
+        Clone => "clone_and_fork_syscalls_follow_linux_rules",
+        Fork => "clone_and_fork_syscalls_follow_linux_rules",
+        Clone3 => "clone_and_fork_syscalls_follow_linux_rules",
+        Futex => "futex_syscalls_follow_linux_rules",
+        Execve => "execve_syscalls_follow_linux_rules",
+        Exit => "exit_thread_semantics_follow_linux_rules",
+        ExitGroup => "exit_group_semantics_follow_linux_rules",
     }
     gap {
-    Poll,
-    RtSigreturn,
-    Ioctl,
-    Clone,
-    Fork,
-    Execve,
-    Exit,
-    Ptrace,
-    Futex,
-    SchedSetscheduler,
-    Ppoll,
-    Mount,
-    Umount2,
-    ExitGroup,
-    OpenTree,
-    MoveMount,
-    Fsopen,
-    Fsconfig,
-    Fsmount,
-    Clone3,
-    MountSetattr,
     }
 );

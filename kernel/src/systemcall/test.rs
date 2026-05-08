@@ -4,7 +4,12 @@ use crate::{
     ipc::sysv_shm::LinuxShmidDs,
     memory::{addrspace::mem_area::Data, protection::Protection},
     misc::{signal::send_signal_to_process_with_siginfo, timer::ClockId},
-    object::{FileFlags, misc::get_object_current_process, traits::Statable},
+    object::{
+        FileFlags,
+        config::LinuxTermios,
+        misc::get_object_current_process,
+        traits::Statable,
+    },
     process::{
         ControllingTerminal, FdFlags, Process, ProcessExitStatus,
         group::{ProcessGroupID, SessionID},
@@ -17,20 +22,22 @@ use crate::{
         arg_types::SyscallArg,
         implementations::{
             Accept, Accept4, Access, Alarm, ArchPrctl, Bind, Capget, Capset, Chdir, Chroot, ClockGetres, ClockGettime,
-            ClockNanosleep, ClockSettime, Close, CloseRange, Dup, Dup2, Dup3, EpollCreate1,
+            Clone, Clone3, ClockNanosleep, ClockSettime, Close, CloseRange, CreatePty, Dup, Dup2, Dup3, EpollCreate1,
             EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Eventfd2, Faccessat,
-            Faccessat2, Fadvise64, Fallocate, Fchdir, Fchmod, Fchmodat, Fchown, Fchownat, Fcntl,
+            Execve, Faccessat2, Fadvise64, Fallocate, Fchdir, Fchmod, Fchmodat, Fchown, Fchownat, Fcntl,
             Fdatasync, Fgetxattr, Flistxattr, Flock, Fremovexattr, Fsetxattr, Fstat, Fstatfs,
-            Fsync, Ftruncate, Getcwd, Getegid, Geteuid, Getgid, Getgroups, Getpgid, Getpgrp,
+            Fsmount, Fsconfig, Fsopen, Fsync, Ftruncate, Getcwd, Getegid, Geteuid, Getgid, Getgroups, Getpgid, Getpgrp,
+            Futex,
             Getpid, Getppid, Getpriority, Getrandom, Getresgid, Getresuid, Getrusage, Getsid,
             Gettid, Gettimeofday, Getuid, Getxattr, InotifyAddWatch, InotifyInit, InotifyInit1,
-            InotifyRmWatch, Ioperm, Iopl, IoprioGet, IoprioSet, Kcmp, Lgetxattr, Link, LinkAt, Listen,
+            InotifyRmWatch, Ioctl, Ioperm, Iopl, IoprioGet, IoprioSet, Kcmp, Lgetxattr, Link, LinkAt, Listen,
             Listxattr, Llistxattr, Lremovexattr, Lseek, Lsetxattr, Madvise, MemfdCreate, Mkdir,
-            MkdirAt, Mknodat, NameToHandleAt, Nanosleep, Newfstatat, Open, OpenAt, OpenFlags,
+            MkdirAt, Mknodat, Mount, MountSetattr, MoveMount, NameToHandleAt, Nanosleep, Newfstatat, Open, OpenAt, OpenFlags,
+            OpenTree,
             PidfdOpen, PidfdSendSignal, Pipe, Pipe2, Poll, PollEvents, PollTimespec, Ppoll, Pselect6, Prctl, Pread64,
-            Prlimit64, Pwrite64, Read, Readlink, ReadlinkAt, Reboot, Removexattr, Rename, RenameAt,
+            Prlimit64, Ptrace, Pwrite64, Read, Readlink, ReadlinkAt, Reboot, Removexattr, Rename, RenameAt,
             RenameAt2, Rmdir, Rseq, RtSigpending, RtSigprocmask, RtSigsuspend, SchedGetPriorityMax, SchedGetPriorityMin,
-            SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval,
+            SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval, SchedSetscheduler,
             SchedSetaffinity, SchedSetparam, SchedYield, SelectTimespec, SetRobustList,
             SetTidAddress, Setfsgid, Setfsuid, Setgid, Setgroups, Setitimer, Sethostname, Setns,
             Setpgid, Setpriority, Setregid, Setresgid, Setresuid, Setreuid, Setrlimit, Setsid,
@@ -39,7 +46,7 @@ use crate::{
             RtSigaction, RtSigqueueinfo, RtSigtimedwait,
             Sysinfo, Time, TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime,
             TimerfdCreate, TimerfdGettime, TimerfdSettime, Umask, Uname, Unlink, UnlinkAt,
-            Unshare, Utimensat, Vhangup, Wait4, Waitid, Write, Writev, Getsockname, Getpeername,
+            Umount2, Unshare, Utimensat, Vhangup, Wait4, Waitid, Write, Writev, Getsockname, Getpeername,
             Getsockopt, Connect, CopyFileRange, Recvfrom, Recvmsg, Sendmmsg, Sendmsg, Sendto,
             AddKey, Bpf, Brk, Keyctl, Mincore, Mmap, Mprotect, Mremap, Msync, Munmap, Shmat,
             Shmctl, Shmdt, Shmget,
@@ -60,6 +67,7 @@ use crate::{
         },
         utils::SyscallError,
     },
+    thread::THREAD_MANAGER,
 };
 
 #[repr(C)]
@@ -451,6 +459,11 @@ crate::test!(
     filesystem_utimensat_invalid_flag_syscalls_follow_linux_rules
 );
 crate::test!(
+    poll_and_ppoll_syscalls,
+    "poll and ppoll follow linux rules",
+    poll_and_ppoll_syscalls_follow_linux_rules
+);
+crate::test!(
     epoll_syscalls,
     "epoll syscalls follow linux rules",
     epoll_syscalls_follow_linux_rules
@@ -499,6 +512,51 @@ crate::test!(
     epoll_pwait2_syscalls,
     "epoll_pwait2 follows linux timeout rules",
     epoll_pwait2_syscalls_follow_linux_rules
+);
+crate::test!(
+    object_control_syscalls,
+    "ioctl and sched_setscheduler follow linux rules",
+    object_control_syscalls_follow_linux_rules
+);
+crate::test!(
+    ptrace_syscalls,
+    "ptrace syscalls follow linux rules",
+    ptrace_syscalls_follow_linux_rules
+);
+crate::test!(
+    mount_api_syscalls,
+    "mount and new mount api syscalls follow linux rules",
+    mount_api_syscalls_follow_linux_rules
+);
+crate::test!(
+    process_and_signal_transition_helpers,
+    "signal return and process transition helpers follow linux rules",
+    process_and_signal_transition_helpers_follow_linux_rules
+);
+crate::test!(
+    clone_and_fork_syscalls,
+    "clone fork and clone3 syscalls follow linux rules",
+    clone_and_fork_syscalls_follow_linux_rules
+);
+crate::test!(
+    futex_syscalls,
+    "futex syscalls follow linux rules",
+    futex_syscalls_follow_linux_rules
+);
+crate::test!(
+    execve_syscalls,
+    "execve syscall semantics follow linux rules",
+    execve_syscalls_follow_linux_rules
+);
+crate::test!(
+    exit_thread_semantics,
+    "exit helper semantics follow linux rules",
+    exit_thread_semantics_follow_linux_rules
+);
+crate::test!(
+    exit_group_semantics,
+    "exit_group helper semantics follow linux rules",
+    exit_group_semantics_follow_linux_rules
 );
 crate::test!(
     typed_syscall_arg_conversion,
@@ -794,6 +852,22 @@ struct TestUtsName {
 struct TestLinuxTimespec {
     tv_sec: i64,
     tv_nsec: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct TestLinuxCloneArgs {
+    flags: u64,
+    pidfd: u64,
+    child_tid: u64,
+    parent_tid: u64,
+    exit_signal: u64,
+    stack: u64,
+    stack_size: u64,
+    tls: u64,
+    set_tid: u64,
+    set_tid_size: u64,
+    cgroup: u64,
 }
 
 #[repr(C)]
@@ -5150,9 +5224,21 @@ fn poll_and_ppoll_syscalls_follow_linux_rules() {
         tv_sec: 0,
         tv_nsec: 1_000_000,
     };
+    write_user_value(
+        poll_page,
+        &[TestLinuxPollFd {
+            fd: eventfd as i32,
+            events: POLLOUT,
+            revents: 0,
+        }],
+    );
     write_user_value(poll_page + 128, &ppoll_timeout);
     let ppoll_result = SyscallArgs::new([poll_page, 1, poll_page + 128, 0, 0, 0]).call::<Ppoll>();
-    expect_ok(ppoll_result, 0);
+    expect_ok(ppoll_result, 1);
+    assert_eq!(
+        read_user_value::<TestLinuxPollFd>(poll_page).revents & POLLOUT,
+        POLLOUT
+    );
     let sigmask: u64 = Signal::SIGUSR1.mask();
     write_user_value(poll_page + 192, &sigmask);
     expect_errno(
@@ -7171,6 +7257,630 @@ fn epoll_pwait2_syscalls_follow_linux_rules() {
 
     close_test_fd(epoll_fd);
     close_test_fd(eventfd);
+}
+
+fn object_control_syscalls_follow_linux_rules() {
+    const TCGETS: u64 = 0x5401;
+    const TIOCSPTLCK: u64 = 0x4004_5431;
+    const SCHED_OTHER: u64 = 0;
+    const SCHED_FIFO: u64 = 1;
+
+    assert_linux_layout::<LinuxTermios>(36, 4);
+    assert_linux_layout::<TestLinuxSchedParam>(4, 4);
+
+    let page = allocate_user_test_page();
+    let [master_fd, slave_fd] = {
+        write_user_value(page + 896, &0i32);
+        write_user_value(page + 900, &0i32);
+        expect_ok(
+            SyscallArgs::new([page + 896, page + 900, 0, 0, 0, 0]).call::<CreatePty>(),
+            0,
+        );
+        [
+            read_user_value::<i32>(page + 896) as usize,
+            read_user_value::<i32>(page + 900) as usize,
+        ]
+    };
+
+    expect_ok(
+        SyscallArgs::new([slave_fd as u64, TCGETS, page, 0, 0, 0]).call::<Ioctl>(),
+        0,
+    );
+    let termios = read_user_value::<LinuxTermios>(page);
+    assert_eq!(termios.c_cc.len(), 19);
+
+    write_user_value(page + 128, &1i32);
+    expect_ok(
+        SyscallArgs::new([master_fd as u64, TIOCSPTLCK, page + 128, 0, 0, 0]).call::<Ioctl>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([master_fd as u64, TIOCSPTLCK, 1, 0, 0, 0]).call::<Ioctl>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([usize::MAX as u64, TCGETS, page, 0, 0, 0]).call::<Ioctl>(),
+        SyscallError::BadFileDescriptor,
+    );
+
+    write_user_value(page + 256, &TestLinuxSchedParam { sched_priority: 0 });
+    expect_ok(
+        SyscallArgs::new([0, SCHED_OTHER, page + 256, 0, 0, 0]).call::<SchedSetscheduler>(),
+        0,
+    );
+    write_user_value(page + 260, &TestLinuxSchedParam { sched_priority: 1 });
+    expect_ok(
+        SyscallArgs::new([0, SCHED_FIFO, page + 260, 0, 0, 0]).call::<SchedSetscheduler>(),
+        0,
+    );
+    write_user_value(page + 264, &TestLinuxSchedParam { sched_priority: 0 });
+    expect_errno(
+        SyscallArgs::new([0, SCHED_FIFO, page + 264, 0, 0, 0]).call::<SchedSetscheduler>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([u64::MAX, SCHED_OTHER, page + 256, 0, 0, 0]).call::<SchedSetscheduler>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([0, SCHED_OTHER, 0, 0, 0, 0]).call::<SchedSetscheduler>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([0, 99, page + 256, 0, 0, 0]).call::<SchedSetscheduler>(),
+        SyscallError::InvalidArguments,
+    );
+
+    close_test_fd(master_fd);
+    close_test_fd(slave_fd);
+}
+
+fn ptrace_syscalls_follow_linux_rules() {
+    const PTRACE_TRACEME: u64 = 0;
+    const PTRACE_SETOPTIONS: u64 = 0x4200;
+    const PTRACE_GETEVENTMSG: u64 = 0x4201;
+    const PTRACE_GETSIGINFO: u64 = 0x4202;
+    const PTRACE_GETREGSET: u64 = 0x4204;
+    const PTRACE_SEIZE: u64 = 0x4206;
+    const PTRACE_GET_SYSCALL_INFO: u64 = 0x420e;
+    const PTRACE_CONT: u64 = 7;
+    const NT_PRSTATUS: u64 = 1;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct TestLinuxIovec {
+        iov_base: *mut u8,
+        iov_len: usize,
+    }
+
+    let current = get_current_process();
+    let tracer_pid = current.lock().pid;
+    let original_parent = current.lock().parent.clone();
+    let original_ptrace = current.lock().ptrace;
+    let parent = Process::empty();
+    parent.lock().pid = ProcessID::new();
+    current.lock().parent = Some(parent.clone());
+
+    expect_ok(SyscallArgs::new([PTRACE_TRACEME, 0, 0, 0, 0, 0]).call::<Ptrace>(), 0);
+    assert_eq!(current.lock().ptrace.tracer, Some(parent.lock().pid));
+    expect_errno(
+        SyscallArgs::new([PTRACE_TRACEME, 0, 0, 0, 0, 0]).call::<Ptrace>(),
+        SyscallError::PermissionDenied,
+    );
+
+    let traced = Process::empty();
+    let traced_pid = {
+        let mut traced_locked = traced.lock();
+        traced_locked.pid = ProcessID::new();
+        traced_locked.parent = Some(current.clone());
+        traced_locked.ptrace.tracer = Some(tracer_pid);
+        traced_locked.ptrace.resume_mode = crate::process::ptrace::PtraceResumeMode::Stopped;
+        traced_locked.ptrace.last_stop_status = ((Signal::SIGTRAP as i32) << 8) | 0x7f;
+        traced_locked.wait_event = Some(crate::process::wait::ProcessWaitEvent::Stopped {
+            status: (((Signal::SIGTRAP as i32) << 8) | 0x7f),
+            ptrace: true,
+        });
+        traced_locked.pid.0
+    };
+    let traced_thread = crate::thread::thread::Thread::empty();
+    {
+        let mut thread = traced_thread.lock();
+        thread.parent = traced.clone();
+        thread.last_syscall_no = SyscallNumber::Read as u64;
+        thread.last_user_snapshot.rax = -38;
+        thread.last_user_snapshot.rip = 0x1234;
+        thread.last_user_snapshot.rsp = 0x5678;
+    }
+    traced
+        .lock()
+        .threads
+        .push(alloc::sync::Arc::downgrade(&traced_thread));
+    MANAGER
+        .lock()
+        .processes
+        .insert(ProcessID(traced_pid), traced.clone());
+    crate::thread::THREAD_MANAGER
+        .get()
+        .unwrap()
+        .lock()
+        .threads
+        .insert(traced_thread.lock().id, traced_thread.clone());
+
+    let page = allocate_user_test_page();
+    expect_ok(
+        SyscallArgs::new([PTRACE_SETOPTIONS, traced_pid, 0, 1, 0, 0]).call::<Ptrace>(),
+        0,
+    );
+    assert_eq!(traced.lock().ptrace.options, 1);
+
+    expect_ok(
+        SyscallArgs::new([PTRACE_GETEVENTMSG, traced_pid, 0, page, 0, 0]).call::<Ptrace>(),
+        0,
+    );
+    assert_eq!(read_user_value::<usize>(page), 0);
+
+    expect_ok(
+        SyscallArgs::new([PTRACE_GETSIGINFO, traced_pid, 0, page + 64, 0, 0]).call::<Ptrace>(),
+        0,
+    );
+    let siginfo = read_user_value::<SigInfo>(page + 64);
+    assert_eq!(siginfo.si_signo, Signal::SIGTRAP as i32);
+
+    let iov = TestLinuxIovec {
+        iov_base: (page + 256) as *mut u8,
+        iov_len: 216,
+    };
+    write_user_value(page + 192, &iov);
+    expect_ok(
+        SyscallArgs::new([PTRACE_GETREGSET, traced_pid, NT_PRSTATUS, page + 192, 0, 0])
+            .call::<Ptrace>(),
+        0,
+    );
+    assert_eq!(read_user_value::<TestLinuxIovec>(page + 192).iov_len, 216);
+
+    traced.lock().ptrace.last_stop_kind = crate::process::ptrace::PtraceStopKind::SyscallExit;
+    let copied = expect_fd(Ok(
+        SyscallArgs::new([PTRACE_GET_SYSCALL_INFO, traced_pid, 88, page + 512, 0, 0])
+            .call::<Ptrace>()
+            .expect("ptrace get syscall info should succeed"),
+    ));
+    assert_eq!(copied, 88);
+
+    expect_ok(
+        SyscallArgs::new([PTRACE_CONT, traced_pid, 0, 0, 0, 0]).call::<Ptrace>(),
+        0,
+    );
+    assert_eq!(
+        traced.lock().ptrace.resume_mode,
+        crate::process::ptrace::PtraceResumeMode::Continue
+    );
+
+    let seize_target = Process::empty();
+    let seize_pid = {
+        let mut process = seize_target.lock();
+        process.pid = ProcessID::new();
+        process.pid.0 as i32
+    };
+    MANAGER
+        .lock()
+        .processes
+        .insert(ProcessID(seize_pid as u64), seize_target.clone());
+    expect_ok(
+        SyscallArgs::new([PTRACE_SEIZE, seize_pid as u64, 0, 0, 0, 0]).call::<Ptrace>(),
+        0,
+    );
+    assert_eq!(seize_target.lock().ptrace.tracer, Some(tracer_pid));
+    expect_errno(
+        SyscallArgs::new([PTRACE_CONT, seize_pid as u64, 0, 1, 0, 0]).call::<Ptrace>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([PTRACE_GETREGSET, traced_pid, 2, page + 192, 0, 0]).call::<Ptrace>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([9999, traced_pid, 0, 0, 0, 0]).call::<Ptrace>(),
+        SyscallError::InvalidArguments,
+    );
+
+    current.lock().parent = original_parent;
+    current.lock().ptrace = original_ptrace;
+    MANAGER.lock().processes.remove(&ProcessID(traced_pid));
+    MANAGER
+        .lock()
+        .processes
+        .remove(&ProcessID(seize_pid as u64));
+    crate::thread::THREAD_MANAGER
+        .get()
+        .unwrap()
+        .lock()
+        .threads
+        .remove(&traced_thread.lock().id);
+}
+
+fn mount_api_syscalls_follow_linux_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+    const AT_RECURSIVE: u64 = 0x8000;
+    const OPEN_TREE_CLOEXEC: u64 = 0x0008_0000;
+    const MOVE_MOUNT_F_EMPTY_PATH: u64 = 0x0000_0004;
+    const FSCONFIG_SET_STRING: u64 = 1;
+    const FSCONFIG_CMD_CREATE: u64 = 6;
+    const MS_BIND: u64 = 4096;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct TestLinuxMountAttr {
+        attr_set: u64,
+        attr_clr: u64,
+        propagation: u64,
+        userns_fd: u64,
+    }
+
+    let page = allocate_user_test_page();
+    VirtualFS
+        .lock()
+        .create_dir(Path::new("/tmp/syscall-mount-test"))
+        .unwrap();
+    VirtualFS
+        .lock()
+        .create_dir(Path::new("/tmp/syscall-mount-test/src"))
+        .unwrap();
+    VirtualFS
+        .lock()
+        .create_dir(Path::new("/tmp/syscall-mount-test/dst"))
+        .unwrap();
+    VirtualFS
+        .lock()
+        .create_dir(Path::new("/tmp/syscall-mount-test/newdst"))
+        .unwrap();
+    write_user_cstr(page, b"/tmp/syscall-mount-test/src\0");
+    write_user_cstr(page + 128, b"/tmp/syscall-mount-test/dst\0");
+    write_user_cstr(page + 256, b"/tmp/syscall-mount-test/newdst\0");
+    write_user_cstr(page + 384, b"tmpfs\0");
+    write_user_cstr(page + 448, b"mode=700\0");
+    write_user_cstr(page + 512, b"mode\0");
+    write_user_cstr(page + 576, b"755\0");
+    write_user_cstr(page + 704, b"\0");
+
+    expect_ok(
+        SyscallArgs::new([0, page + 128, page + 384, 0, page + 448, 0]).call::<Mount>(),
+        0,
+    );
+    let mounted_root = {
+        let mut vfs = VirtualFS.lock();
+        vfs.open(Path::new("/tmp/syscall-mount-test/dst")).unwrap()
+    };
+    let mounted_stat = mounted_root.stat();
+    assert_eq!(mounted_stat.st_mode & 0o777, 0o700);
+
+    expect_ok(
+        SyscallArgs::new([page, page + 128, 0, MS_BIND, 0, 0]).call::<Mount>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([page + 128, 0, 0, 0, 0, 0]).call::<Umount2>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([page + 128, 16, 0, 0, 0, 0]).call::<Umount2>(),
+        SyscallError::InvalidArguments,
+    );
+
+    let fsfd = expect_fd(SyscallArgs::new([page + 384, 1, 0, 0, 0, 0]).call::<Fsopen>());
+    assert_fd_flags(fsfd, FdFlags::CLOEXEC);
+    expect_ok(
+        SyscallArgs::new([fsfd as u64, FSCONFIG_SET_STRING, page + 512, page + 576, 0, 0])
+            .call::<Fsconfig>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([fsfd as u64, FSCONFIG_CMD_CREATE, 0, 0, 0, 0]).call::<Fsconfig>(),
+        0,
+    );
+    let mount_fd = expect_fd(SyscallArgs::new([fsfd as u64, 1, 0, 0, 0, 0]).call::<Fsmount>());
+    assert_fd_flags(mount_fd, FdFlags::CLOEXEC);
+    let mount_root_stat = get_object_current_process(mount_fd as u64)
+        .unwrap()
+        .as_statable()
+        .unwrap()
+        .stat();
+    assert_eq!(mount_root_stat.st_mode & 0o777, 0o755);
+
+    let tree_fd = expect_fd(
+        SyscallArgs::new([AT_FDCWD, page + 128, OPEN_TREE_CLOEXEC, 0, 0, 0]).call::<OpenTree>(),
+    );
+    assert_fd_flags(tree_fd, FdFlags::CLOEXEC);
+    expect_ok(
+        SyscallArgs::new([
+            mount_fd as u64,
+            page + 704,
+            AT_FDCWD,
+            page + 256,
+            MOVE_MOUNT_F_EMPTY_PATH,
+            0,
+        ])
+        .call::<MoveMount>(),
+        0,
+    );
+    let moved_root = {
+        let mut vfs = VirtualFS.lock();
+        vfs.open(Path::new("/tmp/syscall-mount-test/newdst")).unwrap()
+    };
+    let moved_stat = moved_root.stat();
+    assert_eq!(moved_stat.st_mode & 0o777, 0o755);
+
+    write_user_value(
+        page + 768,
+        &TestLinuxMountAttr {
+            attr_set: 1,
+            attr_clr: 0,
+            propagation: 0,
+            userns_fd: 0,
+        },
+    );
+    expect_ok(
+        SyscallArgs::new([
+            AT_FDCWD,
+            page + 256,
+            AT_RECURSIVE,
+            page + 768,
+            core::mem::size_of::<TestLinuxMountAttr>() as u64,
+            0,
+        ])
+        .call::<MountSetattr>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([AT_FDCWD, 0, 0, page + 768, 1, 0]).call::<MountSetattr>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([AT_FDCWD, 0, 0, 0, core::mem::size_of::<TestLinuxMountAttr>() as u64, 0])
+            .call::<MountSetattr>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([AT_FDCWD, page + 128, 2, 0, 0, 0]).call::<OpenTree>(),
+        SyscallError::InvalidArguments,
+    );
+
+    close_test_fd(tree_fd);
+    close_test_fd(mount_fd);
+    close_test_fd(fsfd);
+    let _ = SyscallArgs::new([page + 256, 0, 0, 0, 0, 0]).call::<Umount2>();
+    let _ = VirtualFS.lock().delete_file(Path::new("/tmp/syscall-mount-test/newdst"));
+    let _ = VirtualFS.lock().delete_file(Path::new("/tmp/syscall-mount-test/dst"));
+    let _ = VirtualFS.lock().delete_file(Path::new("/tmp/syscall-mount-test/src"));
+    let _ = VirtualFS.lock().delete_file(Path::new("/tmp/syscall-mount-test"));
+}
+
+fn process_and_signal_transition_helpers_follow_linux_rules() {
+    let thread = crate::thread::get_current_thread();
+    {
+        let mut thread = thread.lock();
+        thread.snapshot_state = crate::thread::misc::SnapshotState::SignalHandler;
+        thread.blocked_signals = Signals::from(Signal::SIGTERM);
+        thread.saved_blocked_signals.push(Signals::from(Signal::SIGUSR1));
+        thread.restore_blocked_signals();
+        assert_eq!(thread.blocked_signals.bits(), Signal::SIGUSR1.mask());
+        thread.snapshot_state = crate::thread::misc::SnapshotState::Normal;
+        thread.saved_blocked_signals.clear();
+    }
+}
+
+fn clone_and_fork_syscalls_follow_linux_rules() {
+    const SIGCHLD: u64 = 17;
+    const CLONE_VM: u64 = 0x0000_0100;
+    const CLONE_FS: u64 = 0x0000_0200;
+    const CLONE_FILES: u64 = 0x0000_0400;
+    const CLONE_PIDFD: u64 = 0x0000_1000;
+    const CLONE_VFORK: u64 = 0x0000_4000;
+    const CLONE_THREAD: u64 = 0x0001_0000;
+    const CLONE_PARENT_SETTID: u64 = 0x0010_0000;
+    const CLONE_CHILD_CLEARTID: u64 = 0x0020_0000;
+    const CLONE_CHILD_SETTID: u64 = 0x0100_0000;
+
+    assert_linux_layout::<TestLinuxCloneArgs>(88, 8);
+
+    let page = allocate_user_test_page();
+
+    write_user_value(page, &0i32);
+    write_user_value(page + 8, &0i32);
+    expect_errno(
+        SyscallArgs::new([
+            CLONE_PIDFD | CLONE_PARENT_SETTID | CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID | SIGCHLD,
+            0,
+            page,
+            page + 8,
+            0,
+            0,
+        ])
+        .call::<Clone>(),
+        SyscallError::NoSyscall,
+    );
+
+    expect_errno(
+        SyscallArgs::new([CLONE_VFORK | SIGCHLD, 0, 0, 0, 0, 0]).call::<Clone>(),
+        SyscallError::NoSyscall,
+    );
+    expect_errno(
+        SyscallArgs::new([CLONE_VM | SIGCHLD, 0, 0, 0, 0, 0]).call::<Clone>(),
+        SyscallError::NoSyscall,
+    );
+    expect_errno(
+        SyscallArgs::new([CLONE_PIDFD | SIGCHLD, 0, 0, 0, 0, 0]).call::<Clone>(),
+        SyscallError::BadAddress,
+    );
+
+    expect_errno(
+        SyscallArgs::new([CLONE_THREAD | CLONE_VM | CLONE_FS | CLONE_FILES, 0, 0, 0, 0, 0])
+            .call::<Clone>(),
+        SyscallError::NoSyscall,
+    );
+
+    write_user_value(
+        page + 256,
+        &TestLinuxCloneArgs {
+            set_tid: 1,
+            ..Default::default()
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([page + 256, core::mem::size_of::<TestLinuxCloneArgs>() as u64, 0, 0, 0, 0]).call::<Clone3>(),
+        SyscallError::NoSyscall,
+    );
+    expect_errno(
+        SyscallArgs::new([0, core::mem::size_of::<TestLinuxCloneArgs>() as u64, 0, 0, 0, 0]).call::<Clone3>(),
+        SyscallError::BadAddress,
+    );
+    expect_errno(
+        SyscallArgs::new([page + 256, 8, 0, 0, 0, 0]).call::<Clone3>(),
+        SyscallError::InvalidArguments,
+    );
+
+    write_user_value(
+        page + 288,
+        &TestLinuxCloneArgs {
+            flags: CLONE_PIDFD | CLONE_PARENT_SETTID,
+            pidfd: page + 320,
+            parent_tid: page + 320,
+            exit_signal: SIGCHLD,
+            ..Default::default()
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([
+            page + 288,
+            core::mem::size_of::<TestLinuxCloneArgs>() as u64,
+            0,
+            0,
+            0,
+            0,
+        ])
+        .call::<Clone3>(),
+        SyscallError::NoSyscall,
+    );
+
+    write_user_value(
+        page + 384,
+        &TestLinuxCloneArgs {
+            flags: CLONE_PIDFD,
+            exit_signal: SIGCHLD,
+            ..Default::default()
+        },
+    );
+    expect_errno(
+        SyscallArgs::new([
+            page + 384,
+            core::mem::size_of::<TestLinuxCloneArgs>() as u64,
+            0,
+            0,
+            0,
+            0,
+        ])
+        .call::<Clone3>(),
+        SyscallError::InvalidArguments,
+    );
+}
+
+fn futex_syscalls_follow_linux_rules() {
+    const FUTEX_WAIT: u64 = 0;
+    const FUTEX_WAKE: u64 = 1;
+    const FUTEX_WAIT_BITSET: u64 = 9;
+    const FUTEX_WAKE_BITSET: u64 = 10;
+
+    let page = allocate_user_test_page();
+    write_user_value(page + 384, &7u32);
+    expect_errno(
+        SyscallArgs::new([page + 384, FUTEX_WAIT, 8, 0, 0, 0]).call::<Futex>(),
+        SyscallError::TryAgain,
+    );
+    write_user_value(page + 392, &TestLinuxTimespec { tv_sec: 0, tv_nsec: 1_000_000_000 });
+    expect_errno(
+        SyscallArgs::new([page + 384, FUTEX_WAIT, 7, page + 392, 0, 0]).call::<Futex>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_ok(SyscallArgs::new([page + 384, FUTEX_WAKE, 3, 0, 0, 0]).call::<Futex>(), 0);
+    expect_errno(
+        SyscallArgs::new([page + 384, FUTEX_WAIT_BITSET, 7, 0, 0, 0]).call::<Futex>(),
+        SyscallError::InvalidArguments,
+    );
+    expect_errno(
+        SyscallArgs::new([page + 384, FUTEX_WAKE_BITSET, 1, 0, 0, 0]).call::<Futex>(),
+        SyscallError::InvalidArguments,
+    );
+    write_user_value(page + 392, &TestLinuxTimespec { tv_sec: 0, tv_nsec: 0 });
+    expect_errno(
+        SyscallArgs::new([page + 384, FUTEX_WAIT_BITSET, 7, page + 392, 0, 1]).call::<Futex>(),
+        SyscallError::TimedOut,
+    );
+    expect_ok(
+        SyscallArgs::new([page + 384, FUTEX_WAKE_BITSET, 1, 0, 0, 1]).call::<Futex>(),
+        0,
+    );
+    expect_errno(
+        SyscallArgs::new([0, FUTEX_WAKE, 1, 0, 0, 0]).call::<Futex>(),
+        SyscallError::BadAddress,
+    );
+}
+
+fn execve_syscalls_follow_linux_rules() {
+    let page = allocate_user_test_page();
+
+    expect_errno(
+        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Execve>(),
+        SyscallError::BadAddress,
+    );
+    write_user_cstr(page + 512, b"/does-not-exist\0");
+    let argv = [page + 512, 0];
+    let envp = [0u64];
+    write_user_value(page + 640, &argv);
+    write_user_value(page + 704, &envp);
+    expect_errno(
+        SyscallArgs::new([page + 512, page + 640, page + 704, 0, 0, 0]).call::<Execve>(),
+        SyscallError::FileNotFound,
+    );
+}
+
+fn exit_thread_semantics_follow_linux_rules() {
+    let saved_process_ref = get_current_process();
+    let page = allocate_user_test_page();
+
+    write_user_value(page + 448, &99i32);
+    let (helper_process, helper_thread) = Process::fork(saved_process_ref.clone());
+    let helper_pid = helper_process.lock().pid;
+    MANAGER
+        .lock()
+        .processes
+        .insert(helper_pid, helper_process.clone());
+    helper_thread.lock().clear_child_tid = page + 448;
+    helper_process.lock().exit_status = Some(ProcessExitStatus::Exited(12));
+    let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+    thread_manager.mark_thread_exited(helper_thread.clone());
+    thread_manager.cleanup_exited_threads();
+    drop(thread_manager);
+    assert_eq!(
+        helper_process
+            .lock()
+            .addrspace
+            .read::<i32>((page + 448) as *const i32)
+            .expect("child clear_child_tid should be zeroed"),
+        0
+    );
+    MANAGER.lock().processes.remove(&helper_pid);
+}
+
+fn exit_group_semantics_follow_linux_rules() {
+    let exit_group_process = Process::empty();
+    exit_group_process.lock().pid = ProcessID::new();
+    let terminated_threads = exit_group_process
+        .lock()
+        .terminate_inner(ProcessExitStatus::from_exit_code(23));
+    assert_eq!(
+        exit_group_process.lock().exit_status,
+        Some(ProcessExitStatus::Exited(23))
+    );
+    assert!(terminated_threads.is_empty());
 }
 
 fn typed_syscall_args_convert_flags_and_enums_at_boundary() {

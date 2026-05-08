@@ -1,9 +1,10 @@
-use alloc::{collections::BTreeMap, sync::Arc};
+use alloc::{sync::Arc, vec, vec::Vec};
 use bitflags::bitflags;
 
 use crate::{
     define_syscall,
     filesystem::object::poll_identity_object,
+    memory::user_safe,
     misc::{
         error::AsSyscallError,
         systemd_perf::{self, PerfBucket},
@@ -35,6 +36,7 @@ bitflags! {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct LinuxPollFd {
     fd: i32,
     events: i16,
@@ -42,6 +44,7 @@ struct LinuxPollFd {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub(in crate::systemcall) struct Timespec {
     pub(in crate::systemcall) tv_sec: i64,
     pub(in crate::systemcall) tv_nsec: i64,
@@ -94,6 +97,24 @@ fn count_ready(fds: &[LinuxPollFd]) -> usize {
     fds.iter().filter(|pfd| pfd.revents != 0).count()
 }
 
+fn read_pollfds(fds: *const LinuxPollFd, nfds: usize) -> Result<Vec<LinuxPollFd>, SyscallError> {
+    let mut local = Vec::with_capacity(nfds);
+    for index in 0..nfds {
+        local.push(user_safe::read(unsafe { fds.add(index) })?);
+    }
+    Ok(local)
+}
+
+fn write_pollfds_revents(
+    fds: *mut LinuxPollFd,
+    local: &[LinuxPollFd],
+) -> Result<(), SyscallError> {
+    for (index, pollfd) in local.iter().enumerate() {
+        user_safe::write(unsafe { fds.add(index) }, pollfd)?;
+    }
+    Ok(())
+}
+
 pub(in crate::systemcall) fn saturating_timeout_ms(
     timeout: &Timespec,
 ) -> Result<i32, SyscallError> {
@@ -109,7 +130,11 @@ pub(in crate::systemcall) fn saturating_timeout_ms(
 }
 
 fn wait_on_poller(poller: Arc<PollerObject>, timeout_ms: i32) -> Result<(), SyscallError> {
-    if poller.has_woken_events() || poller.push_already_ready_events() {
+    if !poller.has_woken_events() {
+        poller.push_already_ready_events();
+    }
+
+    if poller.has_woken_events() {
         return Ok(());
     }
 
@@ -129,16 +154,9 @@ fn wait_on_poller(poller: Arc<PollerObject>, timeout_ms: i32) -> Result<(), Sysc
         deadline,
     });
 
-    if !poller.has_woken_events() {
-        poller.push_already_ready_events();
-    }
-
-    if poller.has_woken_events() {
-        cancel_block(&current);
-        return Ok(());
-    }
-
     finish_block_current();
+    cancel_block(&current);
+
     Ok(())
 }
 
@@ -221,20 +239,22 @@ fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallE
             return Ok(count_ready(fds));
         }
 
-        if count_ready(fds) == 0 {
+        let already_ready = poller.push_already_ready_events();
+        if count_ready(fds) == 0 && !already_ready {
             wait_on_poller(poller.clone(), timeout_ms)?;
         }
 
-        let mut ready_by_index = BTreeMap::<usize, u32>::new();
+        let mut ready_by_index = vec![0; fds.len()];
         for ready in poller.take_woken_events(fds.len()) {
-            ready_by_index
-                .entry(ready.data as usize)
-                .and_modify(|events| *events |= ready.ready_bits)
-                .or_insert(ready.ready_bits);
+            let index = ready.data as usize;
+            if let Some(events) = ready_by_index.get_mut(index) {
+                *events |= ready.ready_bits;
+            }
         }
 
-        for (index, kernel_ready) in ready_by_index {
-            if let Some(pfd) = fds.get_mut(index) {
+        for (index, kernel_ready) in ready_by_index.into_iter().enumerate() {
+            if kernel_ready != 0 {
+                let pfd = &mut fds[index];
                 pfd.revents |=
                     translate_ready_events(PollEvents::from_bits_retain(pfd.events), kernel_ready);
             }
@@ -249,8 +269,10 @@ define_syscall!(Poll, |fds: *mut LinuxPollFd, nfds: usize, timeout: i32| {
         return Err(SyscallError::BadAddress);
     }
 
-    let fds = unsafe { core::slice::from_raw_parts_mut(fds, nfds) };
-    poll_impl(fds, timeout)
+    let mut local_fds = read_pollfds(fds, nfds)?;
+    let result = poll_impl(&mut local_fds, timeout)?;
+    write_pollfds_revents(fds, &local_fds)?;
+    Ok(result)
 });
 
 define_syscall!(Ppoll, |fds: *mut LinuxPollFd,
@@ -265,7 +287,7 @@ define_syscall!(Ppoll, |fds: *mut LinuxPollFd,
     let timeout_ms = if timeout.is_null() {
         -1
     } else {
-        let timeout = unsafe { &*timeout };
+        let timeout = &user_safe::read(timeout)?;
         saturating_timeout_ms(timeout)?
     };
 
@@ -273,6 +295,8 @@ define_syscall!(Ppoll, |fds: *mut LinuxPollFd,
         return Err(SyscallError::BadAddress);
     }
 
-    let fds = unsafe { core::slice::from_raw_parts_mut(fds, nfds) };
-    poll_impl(fds, timeout_ms)
+    let mut local_fds = read_pollfds(fds, nfds)?;
+    let result = poll_impl(&mut local_fds, timeout_ms)?;
+    write_pollfds_revents(fds, &local_fds)?;
+    Ok(result)
 });

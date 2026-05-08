@@ -35,6 +35,7 @@ use core::{
 };
 
 const AT_FDCWD: i32 = -100;
+const UTIME_NOW: i64 = 0x3fff_fffe;
 const UTIME_OMIT: i64 = 0x3fff_ffff;
 const STATX_BASIC_STATS: u32 = 0x0000_07ff;
 const STATX_MNT_ID: u32 = 0x0000_1000;
@@ -86,6 +87,13 @@ struct StatxTimestamp {
     tv_sec: i64,
     tv_nsec: u32,
     __reserved: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct LinuxTimespec {
+    tv_sec: i64,
+    tv_nsec: i64,
 }
 
 #[repr(C)]
@@ -1263,7 +1271,10 @@ define_syscall!(Statx, |dirfd: i32,
                 | AT_STATX_FORCE_SYNC
                 | AT_STATX_DONT_SYNC;
         if flags.bits() != flags.bits() & allowed_flags {
-            return Err(SyscallError::NoSyscall);
+            return Err(SyscallError::InvalidArguments);
+        }
+        if flags.contains(AtFlags::STATX_FORCE_SYNC) && flags.contains(AtFlags::STATX_DONT_SYNC) {
+            return Err(SyscallError::InvalidArguments);
         }
         let path_str = if path.is_null() {
             if flags.contains(AtFlags::EMPTY_PATH) {
@@ -1917,9 +1928,9 @@ define_syscall!(MountSetattr, |dirfd: i32,
         return Err(SyscallError::BadAddress);
     }
 
-    let attr = unsafe { &*attr };
+    let attr = user_safe::read(attr)?;
     let target_path = mount_setattr_target_path(dirfd, path, flags)?;
-    let (remount_flags, remount_mask) = mount_attr_flag_update(attr)?;
+    let (remount_flags, remount_mask) = mount_attr_flag_update(&attr)?;
 
     VirtualFS
         .lock()
@@ -1937,9 +1948,10 @@ define_syscall!(MountSetattr, |dirfd: i32,
 define_syscall!(
     NameToHandleAt,
     |dirfd: i32, path: CString, handle: *mut LinuxFileHandle, mount_id: *mut i32, flags: i32| {
+        let raw_flags = flags;
         let flags = AtFlags::from_bits_truncate(flags);
         let allowed_flags = AtFlags::EMPTY_PATH | AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT;
-        if flags.bits() != (flags & allowed_flags).bits() {
+        if raw_flags != (flags & allowed_flags).bits() {
             return Err(SyscallError::InvalidArguments);
         }
         if handle.is_null() || mount_id.is_null() {
@@ -1969,7 +1981,7 @@ define_syscall!(
         user_safe::write(mount_id, &mount_id_out)?;
 
         if required_bytes > caller_bytes {
-            return Err(SyscallError::InvalidArguments);
+            return Err(SyscallError::ValueTooLarge);
         }
 
         let encoded = SeeleFileHandle { inode: stat.st_ino };
@@ -2055,7 +2067,7 @@ define_syscall!(RenameAt2, |old_dirfd: i32,
 
 define_syscall!(Utimensat, |dirfd: i32,
                             path: u64,
-                            times: *const [i64; 2],
+                            times: *const [LinuxTimespec; 2],
                             flags: AtFlags| {
     let allowed_flags = AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH;
     if flags.bits() != (flags & allowed_flags).bits() {
@@ -2064,7 +2076,10 @@ define_syscall!(Utimensat, |dirfd: i32,
 
     let path = path as CString;
     if path.is_null() {
-        if flags.contains(AtFlags::EMPTY_PATH) || dirfd >= 0 {
+        if flags.contains(AtFlags::EMPTY_PATH) {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if dirfd >= 0 {
             let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
             let _ = object.as_file_like()?;
         } else {
@@ -2073,12 +2088,12 @@ define_syscall!(Utimensat, |dirfd: i32,
     } else {
         let path_str = path_from_raw(path)?;
         if path_str.is_empty() {
-            if flags.contains(AtFlags::EMPTY_PATH) || dirfd >= 0 {
+            if flags.contains(AtFlags::EMPTY_PATH) {
                 let object =
                     get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
                 let _ = object.as_file_like()?;
             } else {
-                return Err(SyscallError::InvalidArguments);
+                return Err(SyscallError::FileNotFound);
             }
         } else {
             let path = resolve_path_at(dirfd, &path_str)?;
@@ -2091,8 +2106,11 @@ define_syscall!(Utimensat, |dirfd: i32,
     }
 
     if !times.is_null() {
-        unsafe {
-            if (*times)[1] != UTIME_OMIT && (*times)[1] < 0 {
+        for timespec in user_safe::read(times)?.iter() {
+            if timespec.tv_nsec != UTIME_NOW
+                && timespec.tv_nsec != UTIME_OMIT
+                && !(0..1_000_000_000).contains(&timespec.tv_nsec)
+            {
                 return Err(SyscallError::InvalidArguments);
             }
         }

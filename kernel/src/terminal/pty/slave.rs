@@ -1,13 +1,13 @@
-use core::ptr::{read_volatile, write_volatile};
-
 use alloc::sync::Arc;
 use spin::Mutex;
 
 use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function,
+    memory::user_safe,
     object::{
         FileFlags, Object,
+        error::ObjectError,
         config::ConfigurateRequest,
         misc::ObjectResult,
         queue_helpers::{copy_from_queue, read_or_block_with_flags},
@@ -149,38 +149,42 @@ impl Configuratable for PtySlave {
                 get_current_process().lock().controlling_terminal = None;
                 Ok(0)
             }
-            ConfigurateRequest::LinuxTiocspgrp(ptr) => unsafe {
-                let requested_group = *ptr as u64;
+            ConfigurateRequest::LinuxTiocspgrp(ptr) => {
+                let requested_group =
+                    user_safe::read(ptr).map_err(|_| ObjectError::BadAddress)? as u64;
                 self.shared.lock().active_group = Some(ProcessGroupID(requested_group));
                 Ok(0)
-            },
-            ConfigurateRequest::LinuxTcGets(termios) => unsafe {
+            }
+            ConfigurateRequest::LinuxTcGets(termios) => {
                 let termios_state = self.shared.lock().termios;
-                write_volatile(termios, termios_state.as_linux_termios());
+                user_safe::write(termios, &termios_state.as_linux_termios())
+                    .map_err(|_| ObjectError::BadAddress)?;
                 Ok(0)
-            },
-            ConfigurateRequest::LinuxTcSets(termios) => unsafe {
-                let termios = read_volatile(termios);
+            }
+            ConfigurateRequest::LinuxTcSets(termios) => {
+                let termios = user_safe::read(termios).map_err(|_| ObjectError::BadAddress)?;
                 let mut shared = self.shared.lock();
                 shared.termios.apply_linux_termios(&termios);
                 Ok(0)
-            },
-            ConfigurateRequest::LinuxTcGets2(termios) => unsafe {
-                write_volatile(termios, self.shared.lock().termios);
+            }
+            ConfigurateRequest::LinuxTcGets2(termios) => {
+                user_safe::write(termios, &self.shared.lock().termios)
+                    .map_err(|_| ObjectError::BadAddress)?;
                 Ok(0)
-            },
-            ConfigurateRequest::LinuxTcSets2(termios) => unsafe {
-                let termios = read_volatile(termios);
+            }
+            ConfigurateRequest::LinuxTcSets2(termios) => {
+                let termios = user_safe::read(termios).map_err(|_| ObjectError::BadAddress)?;
                 let mut shared = self.shared.lock();
                 shared.termios.apply_linux_termios2(&termios);
                 Ok(0)
-            },
-            ConfigurateRequest::LinuxTiocgwinsz(winsize) => unsafe {
-                write_volatile(winsize, self.shared.lock().winsize);
+            }
+            ConfigurateRequest::LinuxTiocgwinsz(winsize) => {
+                user_safe::write(winsize, &self.shared.lock().winsize)
+                    .map_err(|_| ObjectError::BadAddress)?;
                 Ok(0)
-            },
-            ConfigurateRequest::LinuxTiocswinsz(winsize) => unsafe {
-                let winsize = read_volatile(winsize);
+            }
+            ConfigurateRequest::LinuxTiocswinsz(winsize) => {
+                let winsize = user_safe::read(winsize).map_err(|_| ObjectError::BadAddress)?;
                 let mut shared = self.shared.lock();
                 if winsize.ws_row != 0 {
                     shared.winsize.ws_row = winsize.ws_row;

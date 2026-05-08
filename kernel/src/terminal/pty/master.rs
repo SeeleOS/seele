@@ -1,11 +1,10 @@
-use core::ptr::{read_volatile, write_volatile};
-
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 use spin::Mutex;
 
 use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function,
+    memory::user_safe,
     object::{
         FileFlags, Object,
         config::ConfigurateRequest,
@@ -156,15 +155,16 @@ impl Readable for PtyMaster {
 impl Configuratable for PtyMaster {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
         match request {
-            ConfigurateRequest::LinuxTiocgptn(number_ptr) => unsafe {
-                write_volatile(number_ptr, self.number as i32);
+            ConfigurateRequest::LinuxTiocgptn(number_ptr) => {
+                user_safe::write(number_ptr, &(self.number as i32))
+                    .map_err(|_| ObjectError::BadAddress)?;
                 return Ok(0);
-            },
-            ConfigurateRequest::LinuxTiocsptlck(lock_ptr) => unsafe {
-                let locked = read_volatile(lock_ptr) != 0;
+            }
+            ConfigurateRequest::LinuxTiocsptlck(lock_ptr) => {
+                let locked = user_safe::read(lock_ptr).map_err(|_| ObjectError::BadAddress)? != 0;
                 set_pty_lock(self.number, locked);
                 return Ok(0);
-            },
+            }
             ConfigurateRequest::LinuxTiocgptpeer(open_request) => {
                 let slave = {
                     let shared = self.shared.lock();
