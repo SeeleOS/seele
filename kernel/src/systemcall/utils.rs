@@ -104,7 +104,9 @@ pub fn log_unsupported_syscall_result(syscall_no: isize, args: [u64; 6], err: Sy
     });
 }
 
+#[allow(unreachable_code)]
 fn should_trace_syscall(_syscall_no: isize, _comm: &str) -> bool {
+    return false;
     let trace_comm = matches!(_comm, "kwin_wayland");
     if !trace_comm {
         return false;
