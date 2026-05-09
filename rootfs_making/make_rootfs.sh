@@ -133,6 +133,16 @@ EOF
     "
 }
 
+ensure_guest_user() {
+    arch_chroot /bin/sh -lc "
+        set -eu
+        if ! id -u 'seele' >/dev/null 2>&1; then
+            useradd -m -U seele
+        fi
+        passwd -d seele
+    "
+}
+
 install_aur_package() {
     local package="$1"
     local host_build_dir host_snapshot pkg_file host_pkg_file
@@ -209,6 +219,7 @@ install_sysroot_file "${PACMAN_CONF_TEMPLATE}" "${PACMAN_CONF_IN_SYSROOT}"
 install_repo_packages
 
 arch_chroot /usr/sbin/usermod -aG seat sddm
+ensure_guest_user
 arch_chroot passwd -d root
 arch_chroot systemctl enable seatd.service
 
