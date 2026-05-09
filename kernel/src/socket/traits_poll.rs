@@ -44,14 +44,6 @@ impl Pollable for UnixSocketObject {
                             .as_ref()
                             .and_then(Weak::upgrade)
                             .is_none()
-                        || stream
-                            .peer
-                            .lock()
-                            .as_ref()
-                            .and_then(Weak::upgrade)
-                            .is_some_and(|peer| {
-                                *stream.peer_write_closed.lock() && *peer.read_shutdown.lock()
-                            })
                 }
                 PollableEvent::ReadClosed => *stream.peer_write_closed.lock(),
                 _ => false,

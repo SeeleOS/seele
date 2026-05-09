@@ -76,7 +76,6 @@ impl UnixStreamInner {
             if let Some(owner) = peer.owner.lock().as_ref().and_then(Weak::upgrade) {
                 wake_pollers(&owner, PollableEvent::CanBeRead);
                 wake_pollers(&owner, PollableEvent::ReadClosed);
-                wake_pollers(&owner, PollableEvent::Closed);
                 wake_pollers(&owner, PollableEvent::CanBeWritten);
             }
         }

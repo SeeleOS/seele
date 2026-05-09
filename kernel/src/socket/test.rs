@@ -8,6 +8,7 @@ use crate::{
         netlink::NetlinkSocketObject,
         traits::Configuratable,
     },
+    polling::{event::PollableEvent, object::Pollable},
     socket::{
         AF_INET, NETLINK_ROUTE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD,
         SOCK_DGRAM, SOCK_RAW, UnixSocketObject,
@@ -42,6 +43,11 @@ crate::test!(
     socket_and_netlink_ioctl_semantics,
     "socket and netlink ioctls follow linux rules",
     socket_and_netlink_ioctls_follow_linux_rules
+);
+crate::test!(
+    unix_stream_shutdown_poll_semantics,
+    "unix stream shutdown keeps RDHUP separate from HUP readiness",
+    unix_stream_shutdown_poll_semantics_follow_linux_rules
 );
 
 fn unix_sockaddr_round_trips_path_and_abstract_names() {
@@ -179,4 +185,25 @@ fn socket_and_netlink_ioctls_follow_linux_rules() {
         }),
         Err(ObjectError::InvalidRequest)
     ));
+}
+
+fn unix_stream_shutdown_poll_semantics_follow_linux_rules() {
+    let (left, right) =
+        UnixSocketObject::pair(crate::socket::AF_UNIX, crate::socket::SOCK_STREAM, 0)
+            .expect("unix stream socketpair should be created");
+
+    assert!(!left.is_event_ready(PollableEvent::Closed));
+    assert!(!left.is_event_ready(PollableEvent::ReadClosed));
+
+    right.shutdown(1).unwrap();
+
+    assert!(left.is_event_ready(PollableEvent::CanBeRead));
+    assert!(left.is_event_ready(PollableEvent::CanBeWritten));
+    assert!(left.is_event_ready(PollableEvent::ReadClosed));
+    assert!(!left.is_event_ready(PollableEvent::Closed));
+
+    drop(right);
+
+    assert!(left.is_event_ready(PollableEvent::Closed));
+    assert!(left.is_event_ready(PollableEvent::ReadClosed));
 }
