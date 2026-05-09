@@ -255,6 +255,7 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Msync => "memory_mapping_syscalls_follow_linux_rules",
         Mincore => "memory_mapping_syscalls_follow_linux_rules",
         Mlock => "memory_mapping_syscalls_follow_linux_rules",
+        Munlock => "memory_mapping_syscalls_follow_linux_rules",
         Shmget => "sysv_shm_syscalls_follow_linux_rules",
         Shmat => "sysv_shm_syscalls_follow_linux_rules",
         Shmctl => "sysv_shm_syscalls_follow_linux_rules",

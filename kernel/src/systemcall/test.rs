@@ -29,10 +29,10 @@ use crate::{
             Ioperm, Iopl, IoprioGet, IoprioSet, Kcmp, Keyctl, Kill, Lgetxattr, Link, LinkAt,
             Listen, Listxattr, Llistxattr, Lremovexattr, Lseek, Lsetxattr, Madvise, MemfdCreate,
             Mincore, Mkdir, MkdirAt, Mknodat, Mlock, Mmap, Mount, MountSetattr, MoveMount,
-            Mprotect, Mremap, Msync, Munmap, NameToHandleAt, Nanosleep, Newfstatat, Open, OpenAt,
-            OpenFlags, OpenTree, Pause, PidfdOpen, PidfdSendSignal, Pipe, Pipe2, Poll, PollEvents,
-            PollTimespec, Ppoll, Prctl, Pread64, Prlimit64, Pselect6, Ptrace, Pwrite64, Read,
-            Readlink, ReadlinkAt, Reboot, Recvfrom, Recvmsg, Removexattr, Rename, RenameAt,
+            Mprotect, Mremap, Msync, Munlock, Munmap, NameToHandleAt, Nanosleep, Newfstatat, Open,
+            OpenAt, OpenFlags, OpenTree, Pause, PidfdOpen, PidfdSendSignal, Pipe, Pipe2, Poll,
+            PollEvents, PollTimespec, Ppoll, Prctl, Pread64, Prlimit64, Pselect6, Ptrace, Pwrite64,
+            Read, Readlink, ReadlinkAt, Reboot, Recvfrom, Recvmsg, Removexattr, Rename, RenameAt,
             RenameAt2, Rmdir, Rseq, RtSigaction, RtSigpending, RtSigprocmask, RtSigqueueinfo,
             RtSigsuspend, RtSigtimedwait, SchedGetPriorityMax, SchedGetPriorityMin,
             SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval,
@@ -8528,6 +8528,10 @@ fn memory_mapping_syscalls_follow_linux_rules() {
         Ok(0),
         "mlock should succeed on initial anonymous mapping"
     );
+    expect_ok(
+        SyscallArgs::new([anon_addr, 4096, 0, 0, 0, 0]).call::<Munlock>(),
+        0,
+    );
     process
         .lock()
         .addrspace
@@ -8607,17 +8611,33 @@ fn memory_mapping_syscalls_follow_linux_rules() {
         SyscallArgs::new([anon_addr, 0, 0, 0, 0, 0]).call::<Mlock>(),
         0,
     );
+    expect_ok(
+        SyscallArgs::new([anon_addr, 0, 0, 0, 0, 0]).call::<Munlock>(),
+        0,
+    );
     assert_eq!(
         SyscallArgs::new([remapped_addr + 1, 4095, 0, 0, 0, 0]).call::<Mlock>(),
         Ok(0),
         "mlock should succeed on unaligned remapped address"
+    );
+    expect_ok(
+        SyscallArgs::new([remapped_addr + 1, 4095, 0, 0, 0, 0]).call::<Munlock>(),
+        0,
     );
     expect_errno(
         SyscallArgs::new([anon_addr, 4096, 0, 0, 0, 0]).call::<Mlock>(),
         SyscallError::NoMemory,
     );
     expect_errno(
+        SyscallArgs::new([anon_addr, 4096, 0, 0, 0, 0]).call::<Munlock>(),
+        SyscallError::NoMemory,
+    );
+    expect_errno(
         SyscallArgs::new([0x2000_0000, 4096, 0, 0, 0, 0]).call::<Mlock>(),
+        SyscallError::NoMemory,
+    );
+    expect_errno(
+        SyscallArgs::new([0x2000_0000, 4096, 0, 0, 0, 0]).call::<Munlock>(),
         SyscallError::NoMemory,
     );
     let old_memlock_limit = process.lock().rlimit_memlock_cur;

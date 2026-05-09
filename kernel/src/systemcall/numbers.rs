@@ -139,6 +139,7 @@ pub enum SyscallNumber {
     SchedGetPriorityMin = 147,
     Setsid = 112,
     Mlock = 149,
+    Munlock = 150,
     Time = 201,
     Futex = 202,
     SchedSetaffinity = 203,

@@ -222,6 +222,7 @@ define_syscall_table!(
     SchedGetPriorityMax,
     SchedGetPriorityMin,
     Mlock,
+    Munlock,
     Setrlimit,
     Sync,
     Mount,

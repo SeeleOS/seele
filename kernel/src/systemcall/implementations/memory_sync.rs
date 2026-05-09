@@ -965,6 +965,38 @@ define_syscall!(Mlock, |addr: VirtAddr, len: u64| {
     Ok(0)
 });
 
+define_syscall!(Munlock, |addr: VirtAddr, len: u64| {
+    if len == 0 {
+        return Ok(0);
+    }
+
+    let start = align_down(addr.as_u64(), Size4KiB::SIZE);
+    let end = align_up(
+        addr.as_u64()
+            .checked_add(len)
+            .ok_or(SyscallError::InvalidArguments)?,
+        Size4KiB::SIZE,
+    );
+    let start = VirtAddr::new(start);
+    let last_page = VirtAddr::new(end - 1);
+
+    let process = get_current_process();
+    let mut process = process.lock();
+    let addrspace = &mut process.addrspace;
+    let mut page_addr = start;
+    loop {
+        if addrspace.get_area(page_addr).is_none() {
+            return Err(SyscallError::NoMemory);
+        }
+        if page_addr >= last_page {
+            break;
+        }
+        page_addr += Size4KiB::SIZE;
+    }
+
+    Ok(0)
+});
+
 define_syscall!(Mincore, |addr: VirtAddr, len: usize, vec: *mut u8| {
     if len == 0 {
         return Ok(0);
