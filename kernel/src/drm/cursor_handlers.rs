@@ -124,8 +124,6 @@ fn apply_cursor_update(request: CursorRequest) -> ObjectResult<isize> {
         {
             cursor.x = request.x;
             cursor.y = request.y;
-            cursor.hot_x = request.hot_x;
-            cursor.hot_y = request.hot_y;
         }
     }
 

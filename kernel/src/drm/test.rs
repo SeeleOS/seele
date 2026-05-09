@@ -29,7 +29,7 @@ use crate::{
             DrmModeGetPlaneRes, DrmModeGetProperty, DrmModeListLessees, DrmModeMapDumb,
             DrmModeObjGetProperties, DrmModePropertyEnum,
         },
-        object::{DRM_EVENT_QUEUE, DrmCardObject},
+        object::{DRM_EVENT_QUEUE, DRM_STATE, DrmCardObject},
     },
     misc::framebuffer::FRAME_BUFFER,
     object::{
@@ -430,6 +430,7 @@ fn drm_card_ioctls_follow_linux_rules() {
         0
     );
     assert_ne!(map.offset, 0);
+    write_dumb_xrgb_pixel(create.handle, 0, 0, [0xab, 0xcd, 0xef, 0x01]);
 
     let mut addfb = DrmModeFbCmd {
         width: 64,
@@ -479,7 +480,9 @@ fn drm_card_ioctls_follow_linux_rules() {
             .unwrap(),
         0
     );
+    assert_visible_bgr_pixel(0, 0, [0xab, 0xcd, 0xef, 0xff]);
 
+    write_dumb_xrgb_pixel(create.handle, 0, 0, [0x44, 0x55, 0x66, 0x77]);
     let mut dirty = DrmModeFbDirtyCmd {
         fb_id: addfb.fb_id,
         flags: DRM_MODE_FB_DIRTY_ANNOTATE_COPY,
@@ -490,15 +493,42 @@ fn drm_card_ioctls_follow_linux_rules() {
             .unwrap(),
         0
     );
+    assert_visible_bgr_pixel(0, 0, [0x44, 0x55, 0x66, 0xff]);
     dirty.flags = 0x8000_0000;
     assert!(matches!(
         card.configure(ConfigurateRequest::DrmModeDirtyFb(&mut dirty)),
         Err(ObjectError::InvalidArguments)
     ));
 
+    let mut flip_create = DrmModeCreateDumb {
+        width: 64,
+        height: 64,
+        bpp: 32,
+        ..Default::default()
+    };
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeCreateDumb(&mut flip_create))
+            .unwrap(),
+        0
+    );
+    write_dumb_xrgb_pixel(flip_create.handle, 0, 0, [0x88, 0x99, 0xaa, 0xbb]);
+    let mut flip_fb = DrmModeFbCmd {
+        width: 64,
+        height: 64,
+        pitch: flip_create.pitch,
+        bpp: 32,
+        depth: 24,
+        handle: flip_create.handle,
+        ..Default::default()
+    };
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeAddFb(&mut flip_fb))
+            .unwrap(),
+        0
+    );
     let mut page_flip = DrmModeCrtcPageFlip {
         crtc_id: CRTC0_ID,
-        fb_id: addfb2.fb_id,
+        fb_id: flip_fb.fb_id,
         flags: DRM_MODE_PAGE_FLIP_EVENT,
         user_data: 0xfeed_face,
         ..Default::default()
@@ -508,6 +538,7 @@ fn drm_card_ioctls_follow_linux_rules() {
             .unwrap(),
         0
     );
+    assert_visible_bgr_pixel(0, 0, [0x88, 0x99, 0xaa, 0xff]);
     let flip_event = pop_drm_event();
     assert_eq!(flip_event.base.type_, DRM_EVENT_FLIP_COMPLETE);
     assert_eq!(flip_event.user_data, 0xfeed_face);
@@ -516,6 +547,177 @@ fn drm_card_ioctls_follow_linux_rules() {
         card.configure(ConfigurateRequest::DrmModePageFlip(&mut page_flip)),
         Err(ObjectError::Unimplemented)
     ));
+
+    let mut fullscreen_create = DrmModeCreateDumb {
+        width: fb.width as u32,
+        height: fb.height as u32,
+        bpp: 32,
+        ..Default::default()
+    };
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeCreateDumb(
+            &mut fullscreen_create
+        ))
+        .unwrap(),
+        0
+    );
+    assert!(
+        !DRM_STATE
+            .lock()
+            .dumb_buffers
+            .get(&fullscreen_create.handle)
+            .unwrap()
+            .scanout_backed
+    );
+    write_dumb_xrgb_pixel(fullscreen_create.handle, 0, 0, [0x10, 0x20, 0x30, 0x40]);
+    write_dumb_xrgb_pixel(
+        fullscreen_create.handle,
+        fb.width - 1,
+        fb.height - 1,
+        [0x50, 0x60, 0x70, 0x80],
+    );
+    let mut fullscreen_fb = DrmModeFbCmd {
+        width: fullscreen_create.width,
+        height: fullscreen_create.height,
+        pitch: fullscreen_create.pitch,
+        bpp: 32,
+        depth: 24,
+        handle: fullscreen_create.handle,
+        ..Default::default()
+    };
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeAddFb(&mut fullscreen_fb))
+            .unwrap(),
+        0
+    );
+    let mut fullscreen_set_crtc = DrmModeCrtc {
+        crtc_id: CRTC0_ID,
+        fb_id: fullscreen_fb.fb_id,
+        ..Default::default()
+    };
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeSetCrtc(&mut fullscreen_set_crtc))
+            .unwrap(),
+        0
+    );
+    assert_visible_bgr_pixel(0, 0, [0x10, 0x20, 0x30, 0xff]);
+    assert_visible_bgr_pixel(fb.width - 1, fb.height - 1, [0x50, 0x60, 0x70, 0xff]);
+
+    write_dumb_xrgb_pixel(fullscreen_create.handle, 0, 0, [0x90, 0xa0, 0xb0, 0xc0]);
+    let mut fullscreen_dirty = DrmModeFbDirtyCmd {
+        fb_id: fullscreen_fb.fb_id,
+        ..Default::default()
+    };
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeDirtyFb(&mut fullscreen_dirty))
+            .unwrap(),
+        0
+    );
+    assert_visible_bgr_pixel(0, 0, [0x90, 0xa0, 0xb0, 0xff]);
+
+    let mut fullscreen_flip_create = DrmModeCreateDumb {
+        width: fb.width as u32,
+        height: fb.height as u32,
+        bpp: 32,
+        ..Default::default()
+    };
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeCreateDumb(
+            &mut fullscreen_flip_create
+        ))
+        .unwrap(),
+        0
+    );
+    assert!(
+        !DRM_STATE
+            .lock()
+            .dumb_buffers
+            .get(&fullscreen_flip_create.handle)
+            .unwrap()
+            .scanout_backed
+    );
+    write_dumb_xrgb_pixel(
+        fullscreen_flip_create.handle,
+        fb.width - 1,
+        fb.height - 1,
+        [0xd0, 0xe0, 0xf0, 0x12],
+    );
+    let mut fullscreen_flip_fb = DrmModeFbCmd {
+        width: fullscreen_flip_create.width,
+        height: fullscreen_flip_create.height,
+        pitch: fullscreen_flip_create.pitch,
+        bpp: 32,
+        depth: 24,
+        handle: fullscreen_flip_create.handle,
+        ..Default::default()
+    };
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeAddFb(&mut fullscreen_flip_fb))
+            .unwrap(),
+        0
+    );
+    let mut fullscreen_page_flip = DrmModeCrtcPageFlip {
+        crtc_id: CRTC0_ID,
+        fb_id: fullscreen_flip_fb.fb_id,
+        flags: DRM_MODE_PAGE_FLIP_EVENT,
+        user_data: 0xcafe_babe,
+        ..Default::default()
+    };
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModePageFlip(
+            &mut fullscreen_page_flip
+        ))
+        .unwrap(),
+        0
+    );
+    assert_visible_bgr_pixel(fb.width - 1, fb.height - 1, [0xd0, 0xe0, 0xf0, 0xff]);
+    let fullscreen_flip_event = pop_drm_event();
+    assert_eq!(fullscreen_flip_event.base.type_, DRM_EVENT_FLIP_COMPLETE);
+    assert_eq!(fullscreen_flip_event.user_data, 0xcafe_babe);
+
+    let mut offset_create = DrmModeCreateDumb {
+        width: 66,
+        height: 66,
+        bpp: 32,
+        ..Default::default()
+    };
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeCreateDumb(&mut offset_create))
+            .unwrap(),
+        0
+    );
+    write_dumb_xrgb_at_offset(offset_create.handle, 4, [0x21, 0x32, 0x43, 0x54]);
+    write_dumb_xrgb_at_offset(
+        offset_create.handle,
+        4 + (63 * offset_create.pitch as usize) + (63 * 4),
+        [0x65, 0x76, 0x87, 0x98],
+    );
+    let mut offset_fb = DrmModeFbCmd2 {
+        width: 64,
+        height: 64,
+        pixel_format: DRM_FORMAT_XRGB8888,
+        handles: [offset_create.handle, 0, 0, 0],
+        pitches: [offset_create.pitch, 0, 0, 0],
+        offsets: [4, 0, 0, 0],
+        ..Default::default()
+    };
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeAddFb2(&mut offset_fb))
+            .unwrap(),
+        0
+    );
+    let mut offset_set_crtc = DrmModeCrtc {
+        crtc_id: CRTC0_ID,
+        fb_id: offset_fb.fb_id,
+        ..Default::default()
+    };
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeSetCrtc(&mut offset_set_crtc))
+            .unwrap(),
+        0
+    );
+    assert_visible_bgr_pixel(0, 0, [0x21, 0x32, 0x43, 0xff]);
+    assert_visible_bgr_pixel(63, 63, [0x65, 0x76, 0x87, 0xff]);
 
     let mut cursor = DrmModeCursor {
         flags: DRM_MODE_CURSOR_BO,
@@ -544,6 +746,33 @@ fn drm_card_ioctls_follow_linux_rules() {
             .unwrap(),
         0
     );
+    let current_cursor = DRM_STATE.lock().cursor.clone().unwrap();
+    assert_eq!(current_cursor.x, 4);
+    assert_eq!(current_cursor.y, 5);
+    assert_eq!(current_cursor.hot_x, 0);
+    assert_eq!(current_cursor.hot_y, 0);
+    write_dumb_xrgb_pixel(flip_create.handle, 4, 5, [0x00, 0x00, 0x20, 0xff]);
+    write_dumb_xrgb_pixel(flip_create.handle, 6, 7, [0x00, 0x30, 0x00, 0xff]);
+    write_dumb_xrgb_pixel(create.handle, 0, 0, [0xff, 0xff, 0xff, 0x80]);
+    page_flip.fb_id = flip_fb.fb_id;
+    page_flip.flags = 0;
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModePageFlip(&mut page_flip))
+            .unwrap(),
+        0
+    );
+    assert_visible_bgr_pixel(4, 5, [0x80, 0x80, 0x8f, 0xff]);
+    cursor2.x = 6;
+    cursor2.y = 7;
+    cursor2.hot_x = 99;
+    cursor2.hot_y = 99;
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeCursor2(&mut cursor2))
+            .unwrap(),
+        0
+    );
+    assert_visible_bgr_pixel(4, 5, [0x00, 0x00, 0x20, 0xff]);
+    assert_visible_bgr_pixel(6, 7, [0x80, 0x97, 0x80, 0xff]);
     cursor2.hot_x = -1;
     assert!(matches!(
         card.configure(ConfigurateRequest::DrmModeCursor2(&mut cursor2)),
@@ -670,6 +899,30 @@ fn drm_card_ioctls_follow_linux_rules() {
         0
     );
     assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeRemoveFb(&mut flip_fb.fb_id))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeRemoveFb(&mut offset_fb.fb_id))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeRemoveFb(
+            &mut fullscreen_fb.fb_id
+        ))
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeRemoveFb(
+            &mut fullscreen_flip_fb.fb_id
+        ))
+        .unwrap(),
+        0
+    );
+    assert_eq!(
         card.configure(ConfigurateRequest::DrmModeRemoveFb(&mut addfb.fb_id))
             .unwrap(),
         0
@@ -677,6 +930,30 @@ fn drm_card_ioctls_follow_linux_rules() {
     let mut destroy = DrmModeDestroyDumb {
         handle: prime_import.handle,
     };
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeDestroyDumb(&mut destroy))
+            .unwrap(),
+        0
+    );
+    destroy.handle = flip_create.handle;
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeDestroyDumb(&mut destroy))
+            .unwrap(),
+        0
+    );
+    destroy.handle = offset_create.handle;
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeDestroyDumb(&mut destroy))
+            .unwrap(),
+        0
+    );
+    destroy.handle = fullscreen_create.handle;
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeDestroyDumb(&mut destroy))
+            .unwrap(),
+        0
+    );
+    destroy.handle = fullscreen_flip_create.handle;
     assert_eq!(
         card.configure(ConfigurateRequest::DrmModeDestroyDumb(&mut destroy))
             .unwrap(),
@@ -721,6 +998,38 @@ fn drm_card_ioctls_follow_linux_rules() {
         }),
         Err(ObjectError::InvalidRequest)
     ));
+}
+
+fn write_dumb_xrgb_pixel(handle: u32, x: usize, y: usize, bgra: [u8; 4]) {
+    let (kernel_addr, pitch) = {
+        let state = DRM_STATE.lock();
+        let buffer = state.dumb_buffers.get(&handle).unwrap();
+        (buffer.kernel_addr, buffer.width as usize * 4)
+    };
+    let offset = y
+        .checked_mul(pitch)
+        .and_then(|row| row.checked_add(x * 4))
+        .unwrap();
+    unsafe {
+        core::ptr::copy_nonoverlapping(bgra.as_ptr(), (kernel_addr as *mut u8).add(offset), 4);
+    }
+}
+
+fn write_dumb_xrgb_at_offset(handle: u32, offset: usize, bgra: [u8; 4]) {
+    let kernel_addr = {
+        let state = DRM_STATE.lock();
+        state.dumb_buffers.get(&handle).unwrap().kernel_addr
+    };
+    unsafe {
+        core::ptr::copy_nonoverlapping(bgra.as_ptr(), (kernel_addr as *mut u8).add(offset), 4);
+    }
+}
+
+fn assert_visible_bgr_pixel(x: usize, y: usize, bgra: [u8; 4]) {
+    let framebuffer = FRAME_BUFFER.get().unwrap().lock();
+    assert_eq!(framebuffer.info.bytes_per_pixel, 4);
+    let offset = (y * framebuffer.info.stride + x) * framebuffer.info.bytes_per_pixel;
+    assert_eq!(&framebuffer.fb[offset..offset + 4], &bgra);
 }
 
 fn pop_drm_event() -> DrmEventVblank {

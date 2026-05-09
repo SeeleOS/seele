@@ -1,22 +1,18 @@
 use alloc::{sync::Arc, vec::Vec};
 use x86_64::{
-    PhysAddr, VirtAddr,
-    structures::paging::{PageTableFlags, PhysFrame, Size4KiB, Translate, mapper::TranslateResult},
+    PhysAddr,
+    structures::paging::{PageTableFlags, PhysFrame, Size4KiB},
 };
 
 use crate::{
     memory::{
-        paging::{FRAME_ALLOCATOR, MAPPER},
+        paging::FRAME_ALLOCATOR,
         utils::apply_offset,
     },
-    misc::framebuffer::{FRAME_BUFFER, FramebufferPixelFormat},
     object::{error::ObjectError, misc::ObjectResult},
 };
 
 use super::state::{DrmState, DumbBuffer};
-use crate::drm::mode::current_framebuffer_info;
-
-type ScanoutBacking = (Arc<[PhysFrame<Size4KiB>]>, u64, PageTableFlags);
 
 impl DrmState {
     pub(super) fn create_dumb_buffer(
@@ -41,40 +37,23 @@ impl DrmState {
             return Err(ObjectError::InvalidArguments);
         }
 
-        let (frames, kernel_addr, shared_flags, scanout_backed) =
-            if let Some((frames, kernel_addr, shared_flags)) = self.try_allocate_scanout_backing(
-                request.width,
-                request.height,
-                request.bpp,
-                pitch,
-                size,
-                pages,
-            ) {
-                (frames, kernel_addr, shared_flags, true)
-            } else {
-                let start_frame = FRAME_ALLOCATOR
-                    .get()
-                    .unwrap()
-                    .lock()
-                    .allocate_contiguous(pages)
-                    .ok_or(ObjectError::Other)?;
-                let kernel_addr = apply_offset(start_frame.start_address().as_u64());
-                unsafe {
-                    core::ptr::write_bytes(kernel_addr as *mut u8, 0, pages * 4096);
-                }
-                let mut frames = Vec::with_capacity(pages);
-                for page_index in 0..pages {
-                    let frame_addr =
-                        start_frame.start_address().as_u64() + (page_index as u64 * 4096);
-                    frames.push(PhysFrame::containing_address(PhysAddr::new(frame_addr)));
-                }
-                (
-                    Arc::<[PhysFrame<Size4KiB>]>::from(frames),
-                    kernel_addr,
-                    PageTableFlags::empty(),
-                    false,
-                )
-            };
+        let start_frame = FRAME_ALLOCATOR
+            .get()
+            .unwrap()
+            .lock()
+            .allocate_contiguous(pages)
+            .ok_or(ObjectError::Other)?;
+        let kernel_addr = apply_offset(start_frame.start_address().as_u64());
+        unsafe {
+            core::ptr::write_bytes(kernel_addr as *mut u8, 0, pages * 4096);
+        }
+        let mut frames = Vec::with_capacity(pages);
+        for page_index in 0..pages {
+            let frame_addr = start_frame.start_address().as_u64() + (page_index as u64 * 4096);
+            frames.push(PhysFrame::containing_address(PhysAddr::new(frame_addr)));
+        }
+        let frames = Arc::<[PhysFrame<Size4KiB>]>::from(frames);
+        let shared_flags = PageTableFlags::empty();
         let handle = self.next_handle;
         self.next_handle = self.next_handle.checked_add(1).ok_or(ObjectError::Other)?;
         let map_offset = self.next_map_offset;
@@ -98,7 +77,7 @@ impl DrmState {
                 shared_flags,
                 user_handle_open: true,
                 framebuffer_refs: 0,
-                scanout_backed,
+                scanout_backed: false,
             },
         );
 
@@ -128,64 +107,5 @@ impl DrmState {
             );
         }
         Ok(())
-    }
-
-    fn try_allocate_scanout_backing(
-        &self,
-        width: u32,
-        height: u32,
-        bpp: u32,
-        pitch: u32,
-        size: u64,
-        pages: usize,
-    ) -> Option<ScanoutBacking> {
-        if self
-            .dumb_buffers
-            .values()
-            .any(|buffer| buffer.scanout_backed)
-        {
-            return None;
-        }
-
-        let fb_info = current_framebuffer_info();
-        if bpp != 32
-            || width != fb_info.width as u32
-            || height != fb_info.height as u32
-            || pitch != (fb_info.stride * fb_info.bytes_per_pixel) as u32
-            || size > fb_info.byte_len as u64
-            || fb_info.bytes_per_pixel != 4
-            || fb_info.pixel_format != FramebufferPixelFormat::Bgr
-        {
-            return None;
-        }
-
-        let framebuffer = FRAME_BUFFER.get().unwrap().lock();
-        let fb_addr = VirtAddr::new(framebuffer.fb.as_ptr() as u64);
-        let fb_base_addr = framebuffer.fb.as_ptr() as u64;
-        let mut shared_flags = PageTableFlags::NO_CACHE;
-        let mapper = MAPPER.get().unwrap().lock();
-        let phys = mapper.translate_addr(fb_addr)?;
-        if phys.as_u64() & 0xfff != 0 {
-            return None;
-        }
-        if let TranslateResult::Mapped { flags, .. } = mapper.translate(fb_addr) {
-            shared_flags |= flags & (PageTableFlags::WRITE_THROUGH | PageTableFlags::NO_CACHE);
-        }
-        if (pages as u64) * 4096 > (fb_info.byte_len as u64).div_ceil(4096) * 4096 {
-            return None;
-        }
-
-        let mut frames = Vec::with_capacity(pages);
-        for page_index in 0..pages {
-            let page_virt = VirtAddr::new(fb_base_addr + (page_index as u64 * 4096));
-            let page_phys = mapper.translate_addr(page_virt)?;
-            frames.push(PhysFrame::containing_address(page_phys));
-        }
-
-        Some((
-            Arc::<[PhysFrame<Size4KiB>]>::from(frames),
-            fb_base_addr,
-            shared_flags,
-        ))
     }
 }
