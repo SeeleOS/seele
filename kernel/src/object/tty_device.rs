@@ -8,10 +8,12 @@ use spin::Mutex;
 use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function,
+    memory::user_safe,
     misc::framebuffer::{FRAME_BUFFER, framebuffer_set_user_controlled},
     object::{
         FileFlags, Object,
         config::ConfigurateRequest,
+        error::ObjectError,
         misc::ObjectRef,
         queue_helpers::{copy_from_queue, read_or_block_with_flags},
         traits::{Configuratable, Readable, Statable, Writable},
@@ -372,22 +374,27 @@ impl Configuratable for TtyDevice {
                 process.lock().controlling_terminal = controlling_terminal;
                 Ok(0)
             }
-            ConfigurateRequest::LinuxTiocgPgrp(ptr) => unsafe {
-                *ptr = self
-                    .active_group
-                    .lock()
-                    .map(|group| group.0 as i32)
-                    .unwrap_or(0);
+            ConfigurateRequest::LinuxTiocgPgrp(ptr) => {
+                user_safe::write(
+                    ptr,
+                    &self
+                        .active_group
+                        .lock()
+                        .map(|group| group.0 as i32)
+                        .unwrap_or(0),
+                )
+                .map_err(|_| ObjectError::BadAddress)?;
                 Ok(0)
-            },
+            }
             ConfigurateRequest::LinuxTiocnotty => {
                 get_current_process().lock().controlling_terminal = None;
                 Ok(0)
             }
-            ConfigurateRequest::LinuxTiocspgrp(ptr) => unsafe {
-                self.set_active_group(Some(ProcessGroupID((*ptr) as u64)));
+            ConfigurateRequest::LinuxTiocspgrp(ptr) => {
+                let group = user_safe::read(ptr).map_err(|_| ObjectError::BadAddress)?;
+                self.set_active_group(Some(ProcessGroupID(group as u64)));
                 Ok(0)
-            },
+            }
             ConfigurateRequest::LinuxTiocvhangup => {
                 self.clear_input_state();
                 Ok(0)

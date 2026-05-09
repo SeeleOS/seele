@@ -47,7 +47,7 @@ impl Configuratable for TerminalObject {
                     current.ws_col = winsize.ws_col;
                 }
             }
-            _ => return Err(ObjectError::InvalidArguments),
+            _ => return Err(ObjectError::InvalidRequest),
         }
         Ok(0)
     }

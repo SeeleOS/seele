@@ -1,7 +1,16 @@
 use crate::{
     net::InetAddress,
+    object::{
+        FileFlags, Object,
+        config::ConfigurateRequest,
+        error::ObjectError,
+        linux_ioctl::{RAW_IOCTL_FIOCLEX, RAW_IOCTL_FIONBIO},
+        netlink::NetlinkSocketObject,
+        traits::Configuratable,
+    },
     socket::{
-        SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD,
+        AF_INET, NETLINK_ROUTE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD,
+        SOCK_DGRAM, SOCK_RAW, UnixSocketObject,
         inet::InetSocketObject,
         name::{parse_unix_socket_path, serialize_unix_addr},
         registry::UnixSocketRegistryKey,
@@ -28,6 +37,11 @@ crate::test!(
     unix_registry_key_ordering,
     "unix registry keys order abstract before path by derived key ordering",
     unix_registry_keys_order_abstract_before_path_by_derived_key_ordering
+);
+crate::test!(
+    socket_and_netlink_ioctl_semantics,
+    "socket and netlink ioctls follow linux rules",
+    socket_and_netlink_ioctls_follow_linux_rules
 );
 
 fn unix_sockaddr_round_trips_path_and_abstract_names() {
@@ -70,4 +84,99 @@ fn unix_registry_keys_order_abstract_before_path_by_derived_key_ordering() {
         inode: 2,
     };
     assert!(abstract_key < path_key);
+}
+
+fn socket_and_netlink_ioctls_follow_linux_rules() {
+    let unix = UnixSocketObject::default();
+    let inet = InetSocketObject::create(AF_INET, SOCK_DGRAM, 0).unwrap();
+    let netlink = NetlinkSocketObject::create(SOCK_RAW, NETLINK_ROUTE).unwrap();
+
+    let mut nonblocking = 1i32;
+    assert_eq!(
+        unix.configure(ConfigurateRequest::RawIoctl {
+            request: RAW_IOCTL_FIONBIO,
+            arg: (&mut nonblocking as *mut i32) as u64,
+        })
+        .unwrap(),
+        0
+    );
+    assert!(unix.flags.lock().contains(FileFlags::NONBLOCK));
+
+    nonblocking = 0;
+    assert_eq!(
+        inet.configure(ConfigurateRequest::RawIoctl {
+            request: RAW_IOCTL_FIONBIO,
+            arg: (&mut nonblocking as *mut i32) as u64,
+        })
+        .unwrap(),
+        0
+    );
+    assert!(
+        !inet
+            .clone()
+            .get_flags()
+            .unwrap()
+            .contains(FileFlags::NONBLOCK)
+    );
+
+    nonblocking = 7;
+    assert_eq!(
+        netlink
+            .configure(ConfigurateRequest::RawIoctl {
+                request: RAW_IOCTL_FIONBIO,
+                arg: (&mut nonblocking as *mut i32) as u64,
+            })
+            .unwrap(),
+        0
+    );
+    assert!(
+        netlink
+            .clone()
+            .get_flags()
+            .unwrap()
+            .contains(FileFlags::NONBLOCK)
+    );
+
+    for socket in [
+        &unix as &dyn Configuratable,
+        inet.as_ref(),
+        netlink.as_ref(),
+    ] {
+        let mut outq = -1i32;
+        assert_eq!(
+            socket
+                .configure(ConfigurateRequest::LinuxTiocoutq(&mut outq))
+                .unwrap(),
+            0
+        );
+        assert_eq!(outq, 0);
+        assert_eq!(
+            socket
+                .configure(ConfigurateRequest::RawIoctl {
+                    request: RAW_IOCTL_FIOCLEX,
+                    arg: 0,
+                })
+                .unwrap(),
+            0
+        );
+    }
+
+    assert!(matches!(
+        unix.configure(ConfigurateRequest::RawIoctl {
+            request: RAW_IOCTL_FIONBIO,
+            arg: 0,
+        }),
+        Err(ObjectError::BadAddress)
+    ));
+    assert!(matches!(
+        inet.configure(ConfigurateRequest::LinuxTiocoutq(core::ptr::null_mut())),
+        Err(ObjectError::BadAddress)
+    ));
+    assert!(matches!(
+        netlink.configure(ConfigurateRequest::RawIoctl {
+            request: 0xdead_beef,
+            arg: 0,
+        }),
+        Err(ObjectError::InvalidRequest)
+    ));
 }

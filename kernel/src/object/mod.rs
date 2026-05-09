@@ -40,6 +40,8 @@ pub mod file_locks;
 pub mod fs_context;
 pub mod fuse_device;
 pub mod linux_anon;
+pub mod linux_ioctl;
+pub mod linux_ioctl_semantics;
 pub mod memfd;
 pub mod misc;
 pub mod netlink;

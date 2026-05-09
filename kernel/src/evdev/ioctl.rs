@@ -2,52 +2,47 @@ use alloc::{vec, vec::Vec};
 
 use crate::{
     memory::user_safe,
-    object::{error::ObjectError, misc::ObjectResult},
+    object::{
+        error::ObjectError,
+        linux_ioctl::{EVDEV_IOCTL_TYPE, evdev_raw_ioctl_op, ioctl_nr, ioctl_size, ioctl_type},
+        misc::ObjectResult,
+    },
 };
 
 use super::{device_info::LinuxInputId, object::EventDeviceClientObject};
 
 const EV_VERSION: i32 = 0x01_00_01;
 
-const IOC_NRBITS: u64 = 8;
-const IOC_TYPEBITS: u64 = 8;
-const IOC_SIZEBITS: u64 = 14;
-const IOC_NRMASK: u64 = (1 << IOC_NRBITS) - 1;
-const IOC_TYPEMASK: u64 = (1 << IOC_TYPEBITS) - 1;
-const IOC_SIZEMASK: u64 = (1 << IOC_SIZEBITS) - 1;
-const IOC_NRSHIFT: u64 = 0;
-const IOC_TYPESHIFT: u64 = IOC_NRSHIFT + IOC_NRBITS;
-const IOC_SIZESHIFT: u64 = IOC_TYPESHIFT + IOC_TYPEBITS;
-
 pub(super) fn handle_ioctl(
     client: &EventDeviceClientObject,
     request: u64,
     arg: u64,
 ) -> ObjectResult<isize> {
-    if ioc_type(request) != b'E' {
+    if ioctl_type(request) != EVDEV_IOCTL_TYPE {
         return Err(ObjectError::InvalidRequest);
     }
 
-    let nr = ioc_nr(request);
-    let size = ioc_size(request);
+    let nr = ioctl_nr(request);
+    let size = ioctl_size(request);
     let kind = client.kind;
+
+    if evdev_raw_ioctl_op(request).is_none() {
+        return Err(ObjectError::InvalidRequest);
+    }
 
     match nr {
         0x01 => {
-            user_safe::write(arg as *mut i32, &EV_VERSION)
-                .map_err(|_| ObjectError::InvalidArguments)?;
+            user_safe::write(arg as *mut i32, &EV_VERSION).map_err(|_| ObjectError::BadAddress)?;
             Ok(0)
         }
         0x02 => {
             let id = kind.input_id();
-            user_safe::write(arg as *mut LinuxInputId, &id)
-                .map_err(|_| ObjectError::InvalidArguments)?;
+            user_safe::write(arg as *mut LinuxInputId, &id).map_err(|_| ObjectError::BadAddress)?;
             Ok(0)
         }
         0x03 => {
             let rep = [250u32, 33u32];
-            user_safe::write(arg as *mut [u32; 2], &rep)
-                .map_err(|_| ObjectError::InvalidArguments)?;
+            user_safe::write(arg as *mut [u32; 2], &rep).map_err(|_| ObjectError::BadAddress)?;
             Ok(0)
         }
         0x06 => write_bytes_ioctl(arg, size, kind.name().as_bytes()),
@@ -61,7 +56,7 @@ pub(super) fn handle_ioctl(
             let state = client.state.lock();
             write_fixed_sized_ioctl(arg, size, &state.key_state)
         }
-        0x19 | 0x1b => write_fixed_sized_ioctl(arg, size, &[]),
+        0x19..=0x1b => write_fixed_sized_ioctl(arg, size, &[]),
         0x20..=0x3f => {
             let bits = kind.supported_event_bits((nr - 0x20) as u8);
             write_fixed_sized_ioctl(arg, size, &bits)
@@ -70,7 +65,7 @@ pub(super) fn handle_ioctl(
         0x91 => handle_revoke_ioctl(client, arg),
         0xa0 => {
             if arg == 0 {
-                return Err(ObjectError::InvalidArguments);
+                return Err(ObjectError::BadAddress);
             }
             let clock_id = unsafe { *(arg as *const i32) };
             client.state.lock().clock_id = clock_id;
@@ -132,40 +127,23 @@ fn write_fixed_sized_ioctl(arg: u64, size: usize, source: &[u8]) -> ObjectResult
         return Ok(0);
     }
     if arg == 0 {
-        return Err(ObjectError::InvalidArguments);
+        return Err(ObjectError::BadAddress);
     }
 
     let mut out = vec![0u8; size];
     let copy_len = out.len().min(source.len());
     out[..copy_len].copy_from_slice(&source[..copy_len]);
-    user_safe::write(arg as *mut u8, &out[..]).map_err(|_| ObjectError::InvalidArguments)?;
+    user_safe::write(arg as *mut u8, &out[..]).map_err(|_| ObjectError::BadAddress)?;
     Ok(0)
-}
-
-fn ioc_nr(request: u64) -> u64 {
-    (request >> IOC_NRSHIFT) & IOC_NRMASK
-}
-
-fn ioc_type(request: u64) -> u8 {
-    ((request >> IOC_TYPESHIFT) & IOC_TYPEMASK) as u8
-}
-
-fn ioc_size(request: u64) -> usize {
-    ((request >> IOC_SIZESHIFT) & IOC_SIZEMASK) as usize
 }
 
 #[cfg(test)]
 mod tests {
     use alloc::vec;
 
-    use super::{
-        EV_VERSION, ioc_nr, ioc_size, ioc_type, write_bytes_ioctl, write_fixed_sized_ioctl,
-    };
+    use super::{EV_VERSION, write_bytes_ioctl, write_fixed_sized_ioctl};
     use crate::object::error::ObjectError;
-
-    fn ioc_request(ty: u8, nr: u8, size: usize) -> u64 {
-        (nr as u64) | ((ty as u64) << 8) | ((size as u64) << 16)
-    }
+    use crate::object::linux_ioctl::{ioctl_nr, ioctl_request, ioctl_size, ioctl_type};
 
     crate::test!(
         evdev_ioctl_request_decode,
@@ -184,10 +162,10 @@ mod tests {
     );
 
     fn evdev_ioctl_helpers_decode_ioc_fields() {
-        let request = ioc_request(b'E', 0x06, 32);
-        assert_eq!(ioc_type(request), b'E');
-        assert_eq!(ioc_nr(request), 0x06);
-        assert_eq!(ioc_size(request), 32);
+        let request = ioctl_request(0, b'E', 0x06, 32);
+        assert_eq!(ioctl_type(request), b'E');
+        assert_eq!(ioctl_nr(request), 0x06);
+        assert_eq!(ioctl_size(request), 32);
         assert_eq!(EV_VERSION, 0x01_00_01);
     }
 
@@ -209,7 +187,7 @@ mod tests {
         assert_eq!(write_fixed_sized_ioctl(0, 0, &[1]).unwrap(), 0);
         assert!(matches!(
             write_fixed_sized_ioctl(0, 2, &[1]),
-            Err(ObjectError::InvalidArguments)
+            Err(ObjectError::BadAddress)
         ));
     }
 

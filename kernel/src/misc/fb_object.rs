@@ -142,17 +142,17 @@ impl Configuratable for FramebufferObject {
         match request {
             ConfigurateRequest::FbGetFixedScreenInfo(ptr) => {
                 user_safe::write(ptr, &current_fb_fix_info())
-                    .map_err(|_| ObjectError::InvalidArguments)?;
+                    .map_err(|_| ObjectError::BadAddress)?;
                 Ok(0)
             }
             ConfigurateRequest::FbGetVariableScreenInfo(ptr) => {
                 user_safe::write(ptr, &current_fb_var_info())
-                    .map_err(|_| ObjectError::InvalidArguments)?;
+                    .map_err(|_| ObjectError::BadAddress)?;
                 Ok(0)
             }
             ConfigurateRequest::FbPutVariableScreenInfo(ptr) => {
                 if ptr.is_null() {
-                    return Err(ObjectError::InvalidArguments);
+                    return Err(ObjectError::BadAddress);
                 }
 
                 let requested = unsafe { read_volatile(ptr) };
@@ -160,12 +160,12 @@ impl Configuratable for FramebufferObject {
                 if !fb_var_matches_current(&requested, &current) {
                     return Err(ObjectError::InvalidArguments);
                 }
-                user_safe::write(ptr, &current).map_err(|_| ObjectError::InvalidArguments)?;
+                user_safe::write(ptr, &current).map_err(|_| ObjectError::BadAddress)?;
                 Ok(0)
             }
             ConfigurateRequest::FbPanDisplay(ptr) => {
                 if ptr.is_null() {
-                    return Err(ObjectError::InvalidArguments);
+                    return Err(ObjectError::BadAddress);
                 }
 
                 let requested = unsafe { read_volatile(ptr) };
@@ -173,24 +173,24 @@ impl Configuratable for FramebufferObject {
                     return Err(ObjectError::InvalidArguments);
                 }
                 user_safe::write(ptr, &current_fb_var_info())
-                    .map_err(|_| ObjectError::InvalidArguments)?;
+                    .map_err(|_| ObjectError::BadAddress)?;
                 Ok(0)
             }
             ConfigurateRequest::FbGetColorMap(ptr) => {
                 if ptr.is_null() {
-                    return Err(ObjectError::InvalidArguments);
+                    return Err(ObjectError::BadAddress);
                 }
                 unsafe { fill_fb_cmap(&mut *ptr) };
                 Ok(0)
             }
             ConfigurateRequest::FbPutColorMap(ptr) => {
                 if ptr.is_null() {
-                    return Err(ObjectError::InvalidArguments);
+                    return Err(ObjectError::BadAddress);
                 }
                 Ok(0)
             }
             ConfigurateRequest::FbBlank(_) => Ok(0),
-            _ => Err(ObjectError::InvalidArguments),
+            _ => Err(ObjectError::InvalidRequest),
         }
     }
 }

@@ -1,10 +1,11 @@
-use core::ptr::write_volatile;
-
 use num_enum::TryFromPrimitive;
 use pc_keyboard::KeyCode;
 use spin::Mutex;
 
-use crate::object::{config::ConfigurateRequest, error::ObjectError, misc::ObjectResult};
+use crate::{
+    memory::user_safe,
+    object::{config::ConfigurateRequest, error::ObjectError, misc::ObjectResult},
+};
 
 #[derive(Debug, Clone, Copy, TryFromPrimitive, PartialEq, Eq)]
 #[repr(u32)]
@@ -509,12 +510,8 @@ pub fn handle_kd_request(
 ) -> ObjectResult<Option<isize>> {
     match request {
         ConfigurateRequest::LinuxKdGetKeyboardMode(ptr) => {
-            if ptr.is_null() {
-                return Err(ObjectError::InvalidArguments);
-            }
-
             let mode = state.lock().keyboard_mode;
-            unsafe { write_volatile(*ptr, mode as u32) };
+            user_safe::write(*ptr, &(mode as u32)).map_err(|_| ObjectError::BadAddress)?;
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxKdSetKeyboardMode(mode) => {
@@ -523,30 +520,20 @@ pub fn handle_kd_request(
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxKdGetKeyboardType(ptr) => {
-            if ptr.is_null() {
-                return Err(ObjectError::InvalidArguments);
-            }
-
-            unsafe { write_volatile(*ptr, KeyboardType::Kb101 as u8) };
+            user_safe::write(*ptr, &(KeyboardType::Kb101 as u8))
+                .map_err(|_| ObjectError::BadAddress)?;
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxKdGetKeyboardEntry(ptr) => {
-            if ptr.is_null() {
-                return Err(ObjectError::InvalidArguments);
-            }
-
-            let mut entry = unsafe { *(*ptr) };
+            let mut entry =
+                user_safe::read((*ptr).cast_const()).map_err(|_| ObjectError::BadAddress)?;
             entry.kb_value = linux_kb_entry_value(entry.kb_table, entry.kb_index).unwrap_or(0);
-            unsafe { write_volatile(*ptr, entry) };
+            user_safe::write(*ptr, &entry).map_err(|_| ObjectError::BadAddress)?;
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxKdGetDisplayMode(ptr) => {
-            if ptr.is_null() {
-                return Err(ObjectError::InvalidArguments);
-            }
-
             let mode = state.lock().display_mode;
-            unsafe { write_volatile(*ptr, mode as u32) };
+            user_safe::write(*ptr, &(mode as u32)).map_err(|_| ObjectError::BadAddress)?;
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxKdSetDisplayMode(mode) => {

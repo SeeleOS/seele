@@ -7505,6 +7505,15 @@ fn epoll_pwait2_syscalls_follow_linux_rules() {
 fn object_control_syscalls_follow_linux_rules() {
     const TCGETS: u64 = 0x5401;
     const TIOCSPTLCK: u64 = 0x4004_5431;
+    const TIOCGPTN: u64 = 0x8004_5430;
+    const TIOCOUTQ: u64 = 0x5411;
+    const FIONBIO: u64 = 0x5421;
+    const FIOCLEX: u64 = 0x5451;
+    const SOCK_STREAM: u64 = 1;
+    const SOCK_RAW: u64 = 3;
+    const AF_UNIX: u64 = 1;
+    const AF_NETLINK: u64 = 16;
+    const NETLINK_ROUTE: u64 = 0;
     const SCHED_OTHER: u64 = 0;
     const SCHED_FIFO: u64 = 1;
 
@@ -7545,6 +7554,45 @@ fn object_control_syscalls_follow_linux_rules() {
         SyscallArgs::new([usize::MAX as u64, TCGETS, page, 0, 0, 0]).call::<Ioctl>(),
         SyscallError::BadFileDescriptor,
     );
+
+    let unix_socket =
+        expect_fd(SyscallArgs::new([AF_UNIX, SOCK_STREAM, 0, 0, 0, 0]).call::<Socket>());
+    assert_fd_flags(unix_socket, FdFlags::empty());
+    write_user_value(page + 384, &1i32);
+    expect_ok(
+        SyscallArgs::new([unix_socket as u64, FIONBIO, page + 384, 0, 0, 0]).call::<Ioctl>(),
+        0,
+    );
+    assert_object_flags(unix_socket, FileFlags::NONBLOCK);
+    expect_ok(
+        SyscallArgs::new([unix_socket as u64, FIOCLEX, 0, 0, 0, 0]).call::<Ioctl>(),
+        0,
+    );
+    assert_fd_flags(unix_socket, FdFlags::CLOEXEC);
+    expect_errno(
+        SyscallArgs::new([unix_socket as u64, FIONBIO, 1, 0, 0, 0]).call::<Ioctl>(),
+        SyscallError::BadAddress,
+    );
+    expect_ok(
+        SyscallArgs::new([unix_socket as u64, TIOCOUTQ, page + 392, 0, 0, 0]).call::<Ioctl>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(page + 392), 0);
+    expect_errno(
+        SyscallArgs::new([unix_socket as u64, TIOCGPTN, page + 392, 0, 0, 0]).call::<Ioctl>(),
+        SyscallError::InappropriateIoctl,
+    );
+
+    let netlink_socket = expect_fd(
+        SyscallArgs::new([AF_NETLINK, SOCK_RAW, NETLINK_ROUTE, 0, 0, 0]).call::<Socket>(),
+    );
+    expect_ok(
+        SyscallArgs::new([netlink_socket as u64, FIOCLEX, 0, 0, 0, 0]).call::<Ioctl>(),
+        0,
+    );
+    assert_fd_flags(netlink_socket, FdFlags::CLOEXEC);
+    close_test_fd(netlink_socket);
+    close_test_fd(unix_socket);
 
     write_user_value(page + 256, &TestLinuxSchedParam { sched_priority: 0 });
     expect_ok(

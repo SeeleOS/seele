@@ -17,6 +17,7 @@ use crate::{
         control::control_object,
         device::get_device,
         file_locks::flock_lock,
+        linux_ioctl::{LinuxIoctlOp, socket_raw_ioctl_op},
         memfd::create_memfd_object,
         misc::{ObjectRef, get_object_current_process},
         traits::Readable,
@@ -537,12 +538,18 @@ define_syscall!(Close, |object_num: usize| {
     }
 });
 
-define_syscall!(Ioctl, |object: ObjectRef,
-                        request: u64,
-                        request_ptr: u64| {
-    let res = object
-        .as_configuratable()?
-        .configure(ConfigurateRequest::new(request, request_ptr)?);
+define_syscall!(Ioctl, |fd: usize, request: u64, request_ptr: u64| {
+    let object = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+    let config_request = ConfigurateRequest::new(request, request_ptr)?;
+    let res = object.as_configuratable()?.configure(config_request);
+
+    if matches!(socket_raw_ioctl_op(request), Some(LinuxIoctlOp::RawFioclex)) && res.is_ok() {
+        let process_ref = get_current_process();
+        let mut process = process_ref.lock();
+        process
+            .set_fd_flags(fd, FdFlags::CLOEXEC)
+            .map_err(SyscallError::from)?;
+    }
 
     res.map(|val| val as usize).map_err(Into::into)
 });

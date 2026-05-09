@@ -1,12 +1,18 @@
 use crate::{
+    misc::fb_object::FramebufferObject,
     misc::{
         auxv::AuxType,
         error::KernelError,
+        framebuffer::FRAME_BUFFER,
+        framebuffer_ioctl::{
+            FB_TYPE_PACKED_PIXELS, FB_VISUAL_TRUECOLOR, FbCmap, FbFixScreeninfo, FbVarScreeninfo,
+        },
         signal::{PendingSignalInfo, SI_QUEUE, SigInfo, Signal, Signals},
         time::Time,
         timer::{Sigevent, TimerMode, TimerNotify, TimerNotifyMethod, TimerSpec, TimerState},
         utsname::{DEFAULT_MACHINE, DEFAULT_RELEASE, DEFAULT_SYSNAME, DEFAULT_VERSION, UtsName},
     },
+    object::{config::ConfigurateRequest, error::ObjectError, traits::Configuratable},
     process::ProcessExitStatus,
     systemcall::utils::SyscallError,
 };
@@ -35,6 +41,11 @@ crate::test!(
     misc_layout_and_constants,
     "misc pure layout constants and kernel error mapping stay stable",
     misc_pure_layout_constants_and_kernel_error_mapping_stay_stable
+);
+crate::test!(
+    framebuffer_ioctl_semantics,
+    "framebuffer ioctls follow linux rules",
+    framebuffer_ioctls_follow_linux_rules
 );
 
 fn time_arithmetic_saturates_and_splits_subseconds() {
@@ -139,4 +150,136 @@ fn misc_pure_layout_constants_and_kernel_error_mapping_stay_stable() {
         KernelError::InvalidString.as_syscall_error(),
         SyscallError::InvalidArguments
     );
+}
+
+fn framebuffer_ioctls_follow_linux_rules() {
+    let framebuffer = FramebufferObject::default();
+    let info = FRAME_BUFFER.get().unwrap().lock().fb_info();
+
+    let mut fix = FbFixScreeninfo::default();
+    assert_eq!(
+        framebuffer
+            .configure(ConfigurateRequest::FbGetFixedScreenInfo(&mut fix))
+            .unwrap(),
+        0
+    );
+    assert_eq!(fix.type_, FB_TYPE_PACKED_PIXELS);
+    assert_eq!(fix.visual, FB_VISUAL_TRUECOLOR);
+    assert_eq!(fix.smem_len, info.byte_len as u32);
+    assert_eq!(fix.line_length, (info.stride * info.bytes_per_pixel) as u32);
+    assert_eq!(&fix.id[..8], &[115, 101, 101, 108, 101, 102, 98, 0]);
+
+    let mut var = FbVarScreeninfo::default();
+    assert_eq!(
+        framebuffer
+            .configure(ConfigurateRequest::FbGetVariableScreenInfo(&mut var))
+            .unwrap(),
+        0
+    );
+    assert_eq!(var.xres, info.width as u32);
+    assert_eq!(var.yres, info.height as u32);
+    assert_eq!(var.xres_virtual, info.stride as u32);
+    assert_eq!(var.yres_virtual, info.height as u32);
+    assert_eq!(var.bits_per_pixel, (info.bytes_per_pixel * 8) as u32);
+
+    let mut roundtrip = var;
+    assert_eq!(
+        framebuffer
+            .configure(ConfigurateRequest::FbPutVariableScreenInfo(&mut roundtrip))
+            .unwrap(),
+        0
+    );
+    assert_eq!(roundtrip.xres, var.xres);
+
+    let mut invalid_var = var;
+    invalid_var.grayscale = 1;
+    assert!(matches!(
+        framebuffer.configure(ConfigurateRequest::FbPutVariableScreenInfo(
+            &mut invalid_var
+        )),
+        Err(ObjectError::InvalidArguments)
+    ));
+
+    let mut pan = var;
+    assert_eq!(
+        framebuffer
+            .configure(ConfigurateRequest::FbPanDisplay(&mut pan))
+            .unwrap(),
+        0
+    );
+    assert_eq!(pan.xoffset, 0);
+    assert_eq!(pan.yoffset, 0);
+
+    pan.xoffset = 1;
+    assert!(matches!(
+        framebuffer.configure(ConfigurateRequest::FbPanDisplay(&mut pan)),
+        Err(ObjectError::InvalidArguments)
+    ));
+
+    let mut red = [0xaaaa; 4];
+    let mut green = [0xbbbb; 4];
+    let mut blue = [0xcccc; 4];
+    let mut transp = [0xdddd; 4];
+    let mut cmap = FbCmap {
+        start: 0,
+        len: 4,
+        red: red.as_mut_ptr(),
+        green: green.as_mut_ptr(),
+        blue: blue.as_mut_ptr(),
+        transp: transp.as_mut_ptr(),
+    };
+    assert_eq!(
+        framebuffer
+            .configure(ConfigurateRequest::FbGetColorMap(&mut cmap))
+            .unwrap(),
+        0
+    );
+    assert_eq!(red, [0; 4]);
+    assert_eq!(green, [0; 4]);
+    assert_eq!(blue, [0; 4]);
+    assert_eq!(transp, [0; 4]);
+
+    assert_eq!(
+        framebuffer
+            .configure(ConfigurateRequest::FbPutColorMap(&mut cmap))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        framebuffer
+            .configure(ConfigurateRequest::FbBlank(4))
+            .unwrap(),
+        0
+    );
+
+    assert!(matches!(
+        framebuffer.configure(ConfigurateRequest::FbGetFixedScreenInfo(
+            core::ptr::null_mut()
+        )),
+        Err(ObjectError::BadAddress)
+    ));
+    assert!(matches!(
+        framebuffer.configure(ConfigurateRequest::FbGetVariableScreenInfo(
+            core::ptr::null_mut()
+        )),
+        Err(ObjectError::BadAddress)
+    ));
+    assert!(matches!(
+        framebuffer.configure(ConfigurateRequest::FbPutVariableScreenInfo(
+            core::ptr::null_mut()
+        )),
+        Err(ObjectError::BadAddress)
+    ));
+    assert!(matches!(
+        framebuffer.configure(ConfigurateRequest::FbPanDisplay(core::ptr::null_mut())),
+        Err(ObjectError::BadAddress)
+    ));
+    assert!(matches!(
+        framebuffer.configure(ConfigurateRequest::FbGetColorMap(core::ptr::null_mut())),
+        Err(ObjectError::BadAddress)
+    ));
+    assert!(matches!(
+        framebuffer.configure(ConfigurateRequest::FbPutColorMap(core::ptr::null_mut())),
+        Err(ObjectError::BadAddress)
+    ));
 }

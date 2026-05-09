@@ -12,6 +12,7 @@ use crate::{
         FileFlags, Object,
         config::ConfigurateRequest,
         error::ObjectError,
+        linux_ioctl::{LinuxIoctlOp, socket_raw_ioctl_op},
         misc::ObjectResult,
         traits::{Configuratable, Readable, Statable, Writable},
     },
@@ -30,9 +31,6 @@ use super::{
 };
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
-const FIONBIO: u64 = 0x5421;
-const FIOCLEX: u64 = 0x5451;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InetSocketKind {
     Stream,
@@ -538,14 +536,11 @@ impl Object for InetSocketObject {
 impl Configuratable for InetSocketObject {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
         match request {
-            ConfigurateRequest::RawIoctl {
-                request: FIOCLEX, ..
-            } => Ok(0),
-            ConfigurateRequest::RawIoctl {
-                request: FIONBIO,
-                arg,
-            } => {
-                let nonblocking = unsafe { *(arg as *const i32) };
+            ConfigurateRequest::RawIoctl { request, arg }
+                if matches!(socket_raw_ioctl_op(request), Some(LinuxIoctlOp::RawFionbio)) =>
+            {
+                let nonblocking =
+                    user_safe::read(arg as *const i32).map_err(|_| ObjectError::BadAddress)?;
                 let mut flags = self.flags.lock();
                 if nonblocking != 0 {
                     flags.insert(FileFlags::NONBLOCK);
@@ -554,8 +549,13 @@ impl Configuratable for InetSocketObject {
                 }
                 Ok(0)
             }
+            ConfigurateRequest::RawIoctl { request, .. }
+                if matches!(socket_raw_ioctl_op(request), Some(LinuxIoctlOp::RawFioclex)) =>
+            {
+                Ok(0)
+            }
             ConfigurateRequest::LinuxTiocoutq(outq_ptr) => {
-                user_safe::write(outq_ptr, &0i32).map_err(|_| ObjectError::InvalidArguments)?;
+                user_safe::write(outq_ptr, &0i32).map_err(|_| ObjectError::BadAddress)?;
                 Ok(0)
             }
             _ => Err(ObjectError::InvalidRequest),

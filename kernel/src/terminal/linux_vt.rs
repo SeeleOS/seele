@@ -1,8 +1,7 @@
-use core::ptr::{read_volatile, write_volatile};
-
 use spin::Mutex;
 
 use crate::{
+    memory::user_safe,
     object::{
         config::ConfigurateRequest,
         error::ObjectError,
@@ -18,43 +17,28 @@ pub fn handle_vt_request(
 ) -> ObjectResult<Option<isize>> {
     match request {
         ConfigurateRequest::LinuxVtOpenQuery(ptr) => {
-            if ptr.is_null() {
-                return Err(ObjectError::InvalidArguments);
-            }
-
             let vt = find_unused_virtual_tty().ok_or(ObjectError::InvalidArguments)? as u16;
-            unsafe { write_volatile(*ptr, u32::from(vt)) };
+            user_safe::write(*ptr, &u32::from(vt)).map_err(|_| ObjectError::BadAddress)?;
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxVtGetMode(ptr) => {
-            if ptr.is_null() {
-                return Err(ObjectError::InvalidArguments);
-            }
-
             let mode = state.lock().vt_mode;
-            unsafe { write_volatile(*ptr, mode) };
+            user_safe::write(*ptr, &mode).map_err(|_| ObjectError::BadAddress)?;
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxVtGetState(ptr) => {
-            if ptr.is_null() {
-                return Err(ObjectError::InvalidArguments);
-            }
-
             let active = get_active_vt() as u16;
             let vt_state = LinuxVtStat {
                 v_active: active,
                 v_signal: 0,
                 v_state: 1u16 << active,
             };
-            unsafe { write_volatile(*ptr, vt_state) };
+            user_safe::write(*ptr, &vt_state).map_err(|_| ObjectError::BadAddress)?;
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxVtSetMode(ptr) => {
-            if ptr.is_null() {
-                return Err(ObjectError::InvalidArguments);
-            }
-
-            let new_mode: LinuxVtMode = unsafe { read_volatile(*ptr) };
+            let new_mode: LinuxVtMode = user_safe::read((*ptr) as *const LinuxVtMode)
+                .map_err(|_| ObjectError::BadAddress)?;
             state.lock().vt_mode = new_mode;
             Ok(Some(0))
         }

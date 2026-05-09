@@ -12,6 +12,10 @@ use crate::{
             F_RDLCK, F_WRLCK, apply_posix_lock, find_conflict, parse_flock_operation,
             ranges_overlap,
         },
+        linux_ioctl_semantics::{
+            KNOWN_LINUX_IOCTL_COVERAGE_GAPS, LINUX_IOCTL_SEMANTICS_COVERAGE, LinuxIoctlTestKind,
+            SUPPORTED_LINUX_IOCTL_ABI,
+        },
         memfd::{memfd_add_seals, memfd_get_seals, register_memfd},
         open_state::OpenState,
     },
@@ -54,6 +58,11 @@ crate::test!(
     "flock operation parser accepts one mode plus nonblock",
     flock_operation_parser_accepts_one_mode_plus_nonblock
 );
+crate::test!(
+    linux_ioctl_semantics_coverage_ledger,
+    "linux ioctl semantics ledger covers every supported ioctl exactly once",
+    linux_ioctl_semantics_ledger_covers_every_supported_ioctl_exactly_once
+);
 
 fn open_state_tracks_file_flags() {
     let state = OpenState::new(FileFlags::NONBLOCK);
@@ -71,6 +80,64 @@ fn object_errors_map_to_syscall_errors() {
     assert_eq!(
         ObjectError::InvalidRequest.as_syscall_error(),
         SyscallError::InappropriateIoctl
+    );
+}
+
+fn linux_ioctl_semantics_ledger_covers_every_supported_ioctl_exactly_once() {
+    let mut supported = Vec::new();
+    for target in SUPPORTED_LINUX_IOCTL_ABI {
+        for &op in target.ops {
+            assert!(
+                !supported.contains(&(target.target, op)),
+                "duplicate supported ioctl registration for {:?} {:?}",
+                target.target,
+                op
+            );
+            supported.push((target.target, op));
+        }
+    }
+
+    let mut covered = Vec::new();
+    let mut coverage_gaps = 0usize;
+    for entry in LINUX_IOCTL_SEMANTICS_COVERAGE {
+        assert!(
+            supported.contains(&(entry.target, entry.op)),
+            "ioctl semantics ledger contains unsupported ioctl {:?} {:?}",
+            entry.target,
+            entry.op
+        );
+        assert!(
+            !covered.contains(&(entry.target, entry.op)),
+            "duplicate ioctl semantics ledger entry for {:?} {:?}",
+            entry.target,
+            entry.op
+        );
+        assert!(
+            !entry.test.is_empty(),
+            "ioctl semantics ledger entry {:?} {:?} must describe its test coverage",
+            entry.target,
+            entry.op
+        );
+        if entry.kind == LinuxIoctlTestKind::CoverageGap {
+            coverage_gaps += 1;
+        }
+        covered.push((entry.target, entry.op));
+    }
+
+    for (target, op) in supported {
+        assert!(
+            covered.contains(&(target, op)),
+            "supported ioctl {:?} {:?} has no Linux semantics ledger entry",
+            target,
+            op
+        );
+    }
+
+    assert!(
+        coverage_gaps <= KNOWN_LINUX_IOCTL_COVERAGE_GAPS,
+        "Linux ioctl semantics CoverageGap entries increased from {} to {}; new supported ioctls need Unit or Integration behavior tests",
+        KNOWN_LINUX_IOCTL_COVERAGE_GAPS,
+        coverage_gaps
     );
 }
 

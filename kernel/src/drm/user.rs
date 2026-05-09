@@ -8,7 +8,7 @@ use crate::{
 };
 
 pub(super) fn read_user<T: Copy>(ptr: *mut T) -> ObjectResult<T> {
-    user_safe::read(ptr.cast_const()).map_err(|_| ObjectError::InvalidArguments)
+    user_safe::read(ptr.cast_const()).map_err(|_| ObjectError::BadAddress)
 }
 
 pub(super) fn maybe_write_u32_slice(ptr: u64, capacity: u32, values: &[u32]) -> ObjectResult<()> {
@@ -36,7 +36,7 @@ pub(super) fn maybe_write_struct_slice<T: Copy>(
         process
             .addrspace
             .write(ptr as *mut T, values)
-            .map_err(|_| ObjectError::InvalidArguments)
+            .map_err(|_| ObjectError::BadAddress)
     })
 }
 
@@ -61,11 +61,11 @@ fn write_c_string(
 ) -> ObjectResult<()> {
     addrspace
         .write(ptr, &bytes[..copy_len])
-        .map_err(|_| ObjectError::InvalidArguments)?;
+        .map_err(|_| ObjectError::BadAddress)?;
     if len > copy_len {
         addrspace
             .write(unsafe { ptr.add(copy_len) }, &[0u8])
-            .map_err(|_| ObjectError::InvalidArguments)?;
+            .map_err(|_| ObjectError::BadAddress)?;
     }
     Ok(())
 }

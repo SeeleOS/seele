@@ -76,8 +76,8 @@ pub(super) fn handle_configure(request: ConfigurateRequest) -> ObjectResult<isiz
                     arg
                 );
             }
-            Err(ObjectError::InvalidArguments)
+            Err(ObjectError::InvalidRequest)
         }
-        _ => Err(ObjectError::InvalidArguments),
+        _ => Err(ObjectError::InvalidRequest),
     }
 }
