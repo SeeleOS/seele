@@ -220,6 +220,14 @@ struct TestLinuxCmsgHdr {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
+struct TestLinuxUcred {
+    pid: i32,
+    uid: u32,
+    gid: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
 struct TestRightsControlMessage {
     header: TestLinuxCmsgHdr,
     fd: i32,
@@ -5422,6 +5430,9 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     const SHUT_RD: u64 = 0;
     const SHUT_WR: u64 = 1;
     const SHUT_RDWR: u64 = 2;
+    const POLLIN: i16 = 0x001;
+    const POLLOUT: i16 = 0x004;
+    const POLLHUP: i16 = 0x010;
     const SO_TYPE: u64 = 3;
     const SO_ERROR: u64 = 4;
     const SO_SNDBUF: u64 = 7;
@@ -5430,6 +5441,7 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     const SO_ACCEPTCONN: u64 = 30;
     const SO_PROTOCOL: u64 = 38;
     const SO_DOMAIN: u64 = 39;
+    const SO_PEERPIDFD: u64 = 77;
     const TCP_NODELAY: u64 = 1;
 
     assert_linux_layout::<TestLinuxSockAddrUn>(110, 2);
@@ -5457,6 +5469,90 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     assert_fd_flags(right_fd, FdFlags::CLOEXEC);
     assert_object_flags(left_fd, FileFlags::NONBLOCK);
     assert_object_flags(right_fd, FileFlags::NONBLOCK);
+
+    let pollfds_page = page + 48;
+    write_user_value(
+        pollfds_page,
+        &[TestLinuxPollFd {
+            fd: left_fd as i32,
+            events: POLLIN | POLLOUT | POLLHUP,
+            revents: -1,
+        }],
+    );
+    expect_ok(
+        SyscallArgs::new([pollfds_page, 1, 0, 0, 0, 0]).call::<Poll>(),
+        1,
+    );
+    let initial_poll = read_user_value::<TestLinuxPollFd>(pollfds_page);
+    assert_eq!(initial_poll.revents & POLLOUT, POLLOUT);
+    assert_eq!(initial_poll.revents & POLLIN, 0);
+    assert_eq!(initial_poll.revents & POLLHUP, 0);
+
+    write_user_value(page + 56, b"z");
+    expect_ok(
+        SyscallArgs::new([right_fd as u64, page + 56, 1, 0, 0, 0]).call::<Write>(),
+        1,
+    );
+    write_user_value(
+        pollfds_page,
+        &[TestLinuxPollFd {
+            fd: left_fd as i32,
+            events: POLLIN | POLLOUT | POLLHUP,
+            revents: 0,
+        }],
+    );
+    expect_ok(
+        SyscallArgs::new([pollfds_page, 1, 0, 0, 0, 0]).call::<Poll>(),
+        1,
+    );
+    let readable_poll = read_user_value::<TestLinuxPollFd>(pollfds_page);
+    assert_eq!(readable_poll.revents & POLLIN, POLLIN);
+    assert_eq!(readable_poll.revents & POLLOUT, POLLOUT);
+    assert_eq!(readable_poll.revents & POLLHUP, 0);
+    expect_ok(
+        SyscallArgs::new([left_fd as u64, page + 57, 1, 0, 0, 0]).call::<Read>(),
+        1,
+    );
+    assert_user_bytes(page + 57, b"z");
+
+    write_user_value(page + 64, &4u32);
+    expect_ok(
+        SyscallArgs::new([
+            left_fd as u64,
+            SOL_SOCKET,
+            SO_PEERPIDFD,
+            page + 72,
+            page + 64,
+            0,
+        ])
+        .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<u32>(page + 64), 4);
+    let socketpair_peer_pidfd = read_user_value::<i32>(page + 72);
+    let socketpair_peer_pidfd =
+        usize::try_from(socketpair_peer_pidfd).expect("peer pidfd should be non-negative");
+    assert_fd_flags(socketpair_peer_pidfd, FdFlags::CLOEXEC);
+    let current_pid = get_current_process().lock().pid.0;
+    let socketpair_peer_pidfd_object = get_object_current_process(socketpair_peer_pidfd as u64)
+        .expect("peer pidfd should resolve")
+        .as_pidfd()
+        .expect("SO_PEERPIDFD should install a pidfd");
+    assert_eq!(socketpair_peer_pidfd_object.pid(), current_pid);
+    write_user_value(
+        page + 96,
+        &[TestLinuxPollFd {
+            fd: socketpair_peer_pidfd as i32,
+            events: POLLIN,
+            revents: -1,
+        }],
+    );
+    expect_ok(
+        SyscallArgs::new([page + 96, 1, 0, 0, 0, 0]).call::<Poll>(),
+        0,
+    );
+    assert_eq!(read_user_value::<TestLinuxPollFd>(page + 96).revents, 0);
+    close_test_fd(socketpair_peer_pidfd);
 
     write_user_value(page + 64, &111u32);
     expect_ok(
@@ -5511,6 +5607,26 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     );
     expect_ok(
         SyscallArgs::new([right_fd as u64, SHUT_WR, 0, 0, 0, 0]).call::<Shutdown>(),
+        0,
+    );
+    write_user_value(
+        pollfds_page,
+        &[TestLinuxPollFd {
+            fd: left_fd as i32,
+            events: POLLIN | POLLOUT | POLLHUP,
+            revents: 0,
+        }],
+    );
+    expect_ok(
+        SyscallArgs::new([pollfds_page, 1, 0, 0, 0, 0]).call::<Poll>(),
+        1,
+    );
+    let peer_shutdown_poll = read_user_value::<TestLinuxPollFd>(pollfds_page);
+    assert_eq!(peer_shutdown_poll.revents & POLLIN, POLLIN);
+    assert_eq!(peer_shutdown_poll.revents & POLLOUT, POLLOUT);
+    assert_eq!(peer_shutdown_poll.revents & POLLHUP, POLLHUP);
+    expect_ok(
+        SyscallArgs::new([left_fd as u64, page + 58, 1, 0, 0, 0]).call::<Read>(),
         0,
     );
     expect_ok(
@@ -6056,7 +6172,10 @@ fn socket_message_syscalls_follow_linux_rules() {
     const SOCK_DGRAM: u64 = 2;
     const SOCK_NONBLOCK: u64 = 0o0004000;
     const SOL_SOCKET: i32 = 1;
+    const SO_PASSCRED: u64 = 16;
     const SCM_RIGHTS: i32 = 1;
+    const SCM_CREDENTIALS: i32 = 2;
+    const MSG_CTRUNC: i32 = 0x8;
     const MSG_CMSG_CLOEXEC: u64 = 0x4000_0000;
 
     assert_linux_layout::<TestRelibcIovec>(16, 8);
@@ -6231,6 +6350,96 @@ fn socket_message_syscalls_follow_linux_rules() {
     assert_ne!(received_fd, rights_fd);
     assert_fd_flags(received_fd, FdFlags::CLOEXEC);
     assert_same_object(received_fd, rights_fd);
+
+    write_user_value(page + 1680, &1i32);
+    expect_ok(
+        SyscallArgs::new([
+            stream_right as u64,
+            SOL_SOCKET as u64,
+            SO_PASSCRED,
+            page + 1680,
+            4,
+            0,
+        ])
+        .call::<Setsockopt>(),
+        0,
+    );
+    write_user_value(page + 2048, b"C");
+    expect_ok(
+        SyscallArgs::new([stream_left as u64, page + 2048, 1, 0, 0, 0]).call::<Write>(),
+        1,
+    );
+    write_user_value(page + 2064, &[0u8]);
+    let cred_recv_iov = TestRelibcIovec {
+        iov_base: (page + 2064) as *mut u8,
+        iov_len: 1,
+    };
+    write_user_value(page + 2080, &cred_recv_iov);
+    write_user_value(page + 2112, &[0u8; 32]);
+    let cred_recv_msg = TestRelibcMsgHdr {
+        msg_name: core::ptr::null_mut(),
+        msg_namelen: 0,
+        msg_iov: (page + 2080) as *mut TestRelibcIovec,
+        msg_iovlen: 1,
+        msg_control: (page + 2112) as *mut u8,
+        msg_controllen: 32,
+        msg_flags: 0,
+    };
+    write_user_value(page + 2160, &cred_recv_msg);
+    expect_ok(
+        SyscallArgs::new([stream_right as u64, page + 2160, 0, 0, 0, 0]).call::<Recvmsg>(),
+        1,
+    );
+    assert_user_bytes(page + 2064, b"C");
+    let cred_recv_after = read_user_value::<TestRelibcMsgHdr>(page + 2160);
+    assert_eq!(cred_recv_after.msg_flags, 0);
+    assert_eq!(cred_recv_after.msg_controllen, 32);
+    let credential_control = read_user_value::<TestLinuxCmsgHdr>(page + 2112);
+    assert_eq!(credential_control.cmsg_len, 28);
+    assert_eq!(credential_control.cmsg_level, SOL_SOCKET);
+    assert_eq!(credential_control.cmsg_type, SCM_CREDENTIALS);
+    let received_cred = read_user_value::<TestLinuxUcred>(page + 2128);
+    let current = get_current_process();
+    let current = current.lock();
+    assert_eq!(received_cred.pid, current.pid.0 as i32);
+    assert_eq!(received_cred.uid, current.effective_uid);
+    assert_eq!(received_cred.gid, current.effective_gid);
+    drop(current);
+
+    write_user_value(page + 2208, b"T");
+    expect_ok(
+        SyscallArgs::new([stream_left as u64, page + 2208, 1, 0, 0, 0]).call::<Write>(),
+        1,
+    );
+    write_user_value(page + 2224, &[0u8]);
+    let trunc_recv_iov = TestRelibcIovec {
+        iov_base: (page + 2224) as *mut u8,
+        iov_len: 1,
+    };
+    write_user_value(page + 2240, &trunc_recv_iov);
+    write_user_value(page + 2272, &TestLinuxCmsgHdr::default());
+    let trunc_recv_msg = TestRelibcMsgHdr {
+        msg_name: core::ptr::null_mut(),
+        msg_namelen: 0,
+        msg_iov: (page + 2240) as *mut TestRelibcIovec,
+        msg_iovlen: 1,
+        msg_control: (page + 2272) as *mut u8,
+        msg_controllen: core::mem::size_of::<TestLinuxCmsgHdr>(),
+        msg_flags: 0,
+    };
+    write_user_value(page + 2304, &trunc_recv_msg);
+    expect_ok(
+        SyscallArgs::new([stream_right as u64, page + 2304, 0, 0, 0, 0]).call::<Recvmsg>(),
+        1,
+    );
+    assert_user_bytes(page + 2224, b"T");
+    let trunc_recv_after = read_user_value::<TestRelibcMsgHdr>(page + 2304);
+    assert_eq!(trunc_recv_after.msg_flags & MSG_CTRUNC, MSG_CTRUNC);
+    assert_eq!(
+        trunc_recv_after.msg_controllen,
+        core::mem::size_of::<TestLinuxCmsgHdr>()
+    );
+
     expect_errno(
         SyscallArgs::new([stream_left as u64, 0, 0, 0, 0, 0]).call::<Sendmsg>(),
         SyscallError::BadAddress,
@@ -6526,6 +6735,10 @@ fn close_range_syscalls_follow_linux_rules() {
 fn pidfd_and_waitid_syscalls_follow_linux_rules() {
     const P_PID: u64 = 1;
     const P_PIDFD: u64 = 3;
+    const EPOLL_CTL_ADD: u64 = 1;
+    const EPOLLIN: u32 = 0x001;
+    const POLLIN: i16 = 0x001;
+    const POLLHUP: i16 = 0x010;
     const WNOHANG: u64 = 1;
     const WUNTRACED: u64 = 2;
     const WSTOPPED: u64 = 2;
@@ -6548,7 +6761,6 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
         child.pid = ProcessID::new();
         child.parent = Some(current.clone());
         child.group_id = current.lock().group_id;
-        child.exit_status = Some(ProcessExitStatus::Exited(7));
         child.pid.0
     };
     MANAGER
@@ -6573,6 +6785,67 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
         SyscallError::InvalidArguments,
     );
     let info_page = allocate_user_test_page();
+    let poll_page = info_page + 512;
+    write_user_value(
+        poll_page,
+        &[TestLinuxPollFd {
+            fd: child_pidfd as i32,
+            events: POLLIN | POLLHUP,
+            revents: -1,
+        }],
+    );
+    expect_ok(
+        SyscallArgs::new([poll_page, 1, 0, 0, 0, 0]).call::<Poll>(),
+        0,
+    );
+    assert_eq!(read_user_value::<TestLinuxPollFd>(poll_page).revents, 0);
+
+    child.lock().exit_status = Some(ProcessExitStatus::Exited(7));
+    write_user_value(
+        poll_page,
+        &[TestLinuxPollFd {
+            fd: child_pidfd as i32,
+            events: POLLIN | POLLHUP,
+            revents: 0,
+        }],
+    );
+    expect_ok(
+        SyscallArgs::new([poll_page, 1, 0, 0, 0, 0]).call::<Poll>(),
+        1,
+    );
+    let pidfd_poll = read_user_value::<TestLinuxPollFd>(poll_page);
+    assert_eq!(pidfd_poll.revents & POLLIN, POLLIN);
+    assert_eq!(pidfd_poll.revents & POLLHUP, 0);
+
+    let pidfd_epoll = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<EpollCreate1>());
+    let pidfd_event = TestLinuxEpollEvent {
+        events: EPOLLIN,
+        data: 0x7069_6466,
+    };
+    write_user_value(info_page + 640, &pidfd_event);
+    expect_ok(
+        SyscallArgs::new([
+            pidfd_epoll as u64,
+            EPOLL_CTL_ADD,
+            child_pidfd as u64,
+            info_page + 640,
+            0,
+            0,
+        ])
+        .call::<EpollCtl>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([pidfd_epoll as u64, info_page + 704, 1, 0, 0, 0]).call::<EpollWait>(),
+        1,
+    );
+    let pidfd_ready = read_user_value::<TestLinuxEpollEvent>(info_page + 704);
+    let pidfd_ready_events = pidfd_ready.events;
+    let pidfd_ready_data = pidfd_ready.data;
+    assert_eq!(pidfd_ready_events & EPOLLIN, EPOLLIN);
+    assert_eq!(pidfd_ready_data, 0x7069_6466);
+    close_test_fd(pidfd_epoll);
+
     expect_ok(
         SyscallArgs::new([
             P_PIDFD,
