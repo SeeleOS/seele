@@ -1503,6 +1503,19 @@ define_syscall!(Clone, |flags: u64,
     })
 });
 
+define_syscall!(Vfork, {
+    let current = get_current_process();
+    let (child_process, child_thread) = Process::vfork(current.clone());
+    let pid = child_process.lock().pid;
+    MANAGER.lock().processes.insert(pid, child_process.clone());
+    child_process.lock().vfork_blocker = Some(crate::thread::get_current_thread().lock().id);
+
+    Process::wake_vfork_child(child_thread);
+    wait_for_vfork_completion(&child_process);
+
+    Ok(pid.0 as usize)
+});
+
 define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
     if size < core::mem::size_of::<LinuxCloneArgs>() {
         return Err(SyscallError::InvalidArguments);

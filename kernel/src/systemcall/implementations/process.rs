@@ -31,6 +31,9 @@ bitflags! {
         const NOHANG = 1;
         const WUNTRACED = 2;
         const WCONTINUED = 8;
+        const __WNOTHREAD = 0x2000_0000;
+        const __WALL = 0x4000_0000;
+        const __WCLONE = i32::MIN;
     }
 }
 

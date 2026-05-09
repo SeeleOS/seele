@@ -28,9 +28,9 @@ use crate::{
             Getuid, Getxattr, InotifyAddWatch, InotifyInit, InotifyInit1, InotifyRmWatch, Ioctl,
             Ioperm, Iopl, IoprioGet, IoprioSet, Kcmp, Keyctl, Kill, Lgetxattr, Link, LinkAt,
             Listen, Listxattr, Llistxattr, Lremovexattr, Lseek, Lsetxattr, Madvise, MemfdCreate,
-            Mincore, Mkdir, MkdirAt, Mknodat, Mmap, Mount, MountSetattr, MoveMount, Mprotect,
-            Mremap, Msync, Munmap, NameToHandleAt, Nanosleep, Newfstatat, Open, OpenAt, OpenFlags,
-            OpenTree, Pause, PidfdOpen, PidfdSendSignal, Pipe, Pipe2, Poll, PollEvents,
+            Mincore, Mkdir, MkdirAt, Mknodat, Mlock, Mmap, Mount, MountSetattr, MoveMount,
+            Mprotect, Mremap, Msync, Munmap, NameToHandleAt, Nanosleep, Newfstatat, Open, OpenAt,
+            OpenFlags, OpenTree, Pause, PidfdOpen, PidfdSendSignal, Pipe, Pipe2, Poll, PollEvents,
             PollTimespec, Ppoll, Prctl, Pread64, Prlimit64, Pselect6, Ptrace, Pwrite64, Read,
             Readlink, ReadlinkAt, Reboot, Recvfrom, Recvmsg, Removexattr, Rename, RenameAt,
             RenameAt2, Rmdir, Rseq, RtSigaction, RtSigpending, RtSigprocmask, RtSigqueueinfo,
@@ -6531,6 +6531,7 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
     const WSTOPPED: u64 = 2;
     const WEXITED: u64 = 4;
     const WBAD: u64 = 0x20;
+    const __WCLONE: u64 = 0x8000_0000;
     const WNOWAIT: u64 = 0x0100_0000;
     const CLD_EXITED: i32 = 1;
     const SI_QUEUE: i32 = -1;
@@ -6670,7 +6671,7 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
         SyscallArgs::new([
             wait4_child_pid,
             info_page + 256,
-            WNOHANG,
+            WNOHANG | __WCLONE,
             info_page + 320,
             0,
             0,
@@ -8522,6 +8523,11 @@ fn memory_mapping_syscalls_follow_linux_rules() {
         .cloned()
         .expect("anon mmap should register area");
     assert!(matches!(anon_area.data, Data::Normal));
+    assert_eq!(
+        SyscallArgs::new([anon_addr, 4096, 0, 0, 0, 0]).call::<Mlock>(),
+        Ok(0),
+        "mlock should succeed on initial anonymous mapping"
+    );
     process
         .lock()
         .addrspace
@@ -8597,6 +8603,30 @@ fn memory_mapping_syscalls_follow_linux_rules() {
         SyscallArgs::new([remapped_addr, 4096, 12288, 0, 0, 0]).call::<Mremap>(),
         SyscallError::NoMemory,
     );
+    expect_ok(
+        SyscallArgs::new([anon_addr, 0, 0, 0, 0, 0]).call::<Mlock>(),
+        0,
+    );
+    assert_eq!(
+        SyscallArgs::new([remapped_addr + 1, 4095, 0, 0, 0, 0]).call::<Mlock>(),
+        Ok(0),
+        "mlock should succeed on unaligned remapped address"
+    );
+    expect_errno(
+        SyscallArgs::new([anon_addr, 4096, 0, 0, 0, 0]).call::<Mlock>(),
+        SyscallError::NoMemory,
+    );
+    expect_errno(
+        SyscallArgs::new([0x2000_0000, 4096, 0, 0, 0, 0]).call::<Mlock>(),
+        SyscallError::NoMemory,
+    );
+    let old_memlock_limit = process.lock().rlimit_memlock_cur;
+    process.lock().rlimit_memlock_cur = 0;
+    expect_errno(
+        SyscallArgs::new([remapped_addr, 4096, 0, 0, 0, 0]).call::<Mlock>(),
+        SyscallError::NoMemory,
+    );
+    process.lock().rlimit_memlock_cur = old_memlock_limit;
 
     let mincore_vec = allocate_user_test_page();
     expect_ok(

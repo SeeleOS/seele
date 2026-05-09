@@ -132,6 +132,19 @@ const FUTEX_OP_OPARG_SHIFT: u32 = 8;
 const FUTEX_WAITERS: u32 = 0x8000_0000;
 const FUTEX_OWNER_DIED: u32 = 0x4000_0000;
 const FUTEX_TID_MASK: u32 = !(FUTEX_WAITERS | FUTEX_OWNER_DIED);
+
+fn align_down(value: u64, align: u64) -> u64 {
+    value & !(align - 1)
+}
+
+fn align_up(value: u64, align: u64) -> u64 {
+    let addend = align - 1;
+    value
+        .checked_add(addend)
+        .map(|value| align_down(value, align))
+        .unwrap_or(u64::MAX & !(align - 1))
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct LinuxTimespec {
@@ -909,6 +922,46 @@ define_syscall!(Mprotect, |addr: VirtAddr, len: u64, prot: i32| {
         addr + pages * 4096,
         protection,
     );
+    Ok(0)
+});
+
+define_syscall!(Mlock, |addr: VirtAddr, len: u64| {
+    if len == 0 {
+        return Ok(0);
+    }
+
+    let start = align_down(addr.as_u64(), Size4KiB::SIZE);
+    let end = align_up(
+        addr.as_u64()
+            .checked_add(len)
+            .ok_or(SyscallError::InvalidArguments)?,
+        Size4KiB::SIZE,
+    );
+    let rounded_len = end
+        .checked_sub(start)
+        .ok_or(SyscallError::InvalidArguments)?;
+    let start = VirtAddr::new(start);
+    let last_page = VirtAddr::new(end - 1);
+
+    let process = get_current_process();
+    if rounded_len > process.lock().rlimit_memlock_cur {
+        return Err(SyscallError::NoMemory);
+    }
+
+    let mut process = process.lock();
+    let addrspace = &mut process.addrspace;
+    let mut page_addr = start;
+    loop {
+        if addrspace.get_area(page_addr).is_none() {
+            return Err(SyscallError::NoMemory);
+        }
+        let _ = addrspace.read(page_addr.as_u64() as *const u8)?;
+        if page_addr >= last_page {
+            break;
+        }
+        page_addr += Size4KiB::SIZE;
+    }
+
     Ok(0)
 });
 
