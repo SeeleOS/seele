@@ -4,6 +4,7 @@ use alloc::{
     vec::Vec,
 };
 use bitflags::bitflags;
+use core::sync::atomic::{AtomicBool, Ordering};
 use spin::Mutex;
 
 use crate::{
@@ -17,8 +18,7 @@ use crate::{
         traits::{Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
-    process::manager::MANAGER,
-    process::misc::ProcessID,
+    process::{manager::MANAGER, misc::ProcessID},
     signal::{PendingSignalInfo, Signal, Signals},
     thread::{
         THREAD_MANAGER,
@@ -101,14 +101,22 @@ struct LinuxSignalfdSiginfo {
 pub struct PidFdObject {
     flags: Mutex<FileFlags>,
     pid: u64,
+    alive: AtomicBool,
+    process: Mutex<Option<Weak<spin::Mutex<crate::process::Process>>>>,
     self_ref: Mutex<Option<Weak<PidFdObject>>>,
 }
 
 impl PidFdObject {
     pub fn new(pid: u64) -> Arc<Self> {
+        let process = MANAGER.lock().processes.get(&ProcessID(pid)).cloned();
+        let alive = process
+            .as_ref()
+            .is_some_and(|process| !process.lock().have_exited());
         let pidfd = Arc::new(Self {
             flags: Mutex::new(FileFlags::empty()),
             pid,
+            alive: AtomicBool::new(alive),
+            process: Mutex::new(process.as_ref().map(Arc::downgrade)),
             self_ref: Mutex::new(None),
         });
         *pidfd.self_ref.lock() = Some(Arc::downgrade(&pidfd));
@@ -129,11 +137,24 @@ impl PidFdObject {
     }
 
     fn is_alive(&self) -> bool {
-        MANAGER
-            .lock()
-            .processes
-            .get(&ProcessID(self.pid))
-            .is_some_and(|process| !process.lock().have_exited())
+        if !self.alive.load(Ordering::Acquire) {
+            return false;
+        }
+
+        let Some(process) = self.process.lock().as_ref().and_then(Weak::upgrade) else {
+            self.alive.store(false, Ordering::Release);
+            return false;
+        };
+
+        let alive = !process.lock().have_exited();
+        if !alive {
+            self.alive.store(false, Ordering::Release);
+        }
+        alive
+    }
+
+    fn mark_exited(&self) {
+        self.alive.store(false, Ordering::Release);
     }
 
     fn wake_waiters_with_manager(&self, manager: &mut ThreadManager) {
@@ -173,6 +194,7 @@ fn pidfds_for_process(pid: u64) -> Vec<Arc<PidFdObject>> {
 
 pub fn wake_pidfd_for_process_with_manager(pid: u64, manager: &mut ThreadManager) {
     for pidfd in pidfds_for_process(pid) {
+        pidfd.mark_exited();
         pidfd.wake_waiters_with_manager(manager);
     }
 }
@@ -185,6 +207,7 @@ pub fn wake_pidfd_for_process(pid: u64) {
 
     let mut manager = THREAD_MANAGER.get().unwrap().lock();
     for pidfd in watchers {
+        pidfd.mark_exited();
         pidfd.wake_waiters_with_manager(&mut manager);
     }
 }

@@ -5,6 +5,7 @@ use crate::{
     memory::{addrspace::mem_area::Data, protection::Protection},
     misc::{signal::send_signal_to_process_with_siginfo, timer::ClockId},
     object::{FileFlags, config::LinuxTermios, misc::get_object_current_process, traits::Statable},
+    polling::{event::PollableEvent, object::Pollable},
     process::{
         ControllingTerminal, FdFlags, Process, ProcessExitStatus,
         group::{ProcessGroupID, SessionID},
@@ -6923,6 +6924,11 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
         0,
     );
     assert_eq!(read_user_value::<TestLinuxPollFd>(poll_page).revents, 0);
+    let child_pidfd_object = get_object_current_process(child_pidfd as u64)
+        .expect("pidfd should resolve")
+        .as_pidfd()
+        .expect("pidfd fd should point at a pidfd object");
+    assert!(!child_pidfd_object.is_event_ready(PollableEvent::CanBeRead));
 
     child.lock().exit_status = Some(ProcessExitStatus::Exited(7));
     write_user_value(
@@ -6940,6 +6946,7 @@ fn pidfd_and_waitid_syscalls_follow_linux_rules() {
     let pidfd_poll = read_user_value::<TestLinuxPollFd>(poll_page);
     assert_eq!(pidfd_poll.revents & POLLIN, POLLIN);
     assert_eq!(pidfd_poll.revents & POLLHUP, 0);
+    assert!(child_pidfd_object.is_event_ready(PollableEvent::CanBeRead));
 
     let pidfd_epoll = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<EpollCreate1>());
     let pidfd_event = TestLinuxEpollEvent {
