@@ -2,7 +2,10 @@ use alloc::sync::Arc;
 
 use crate::{
     object::{FileFlags, Object},
-    polling::{event::PollableEvent, ready::PollerReadyEvent},
+    polling::{
+        event::PollableEvent, notify_pollers, object::Pollable, poller::PollerObject,
+        ready::PollerReadyEvent,
+    },
 };
 
 crate::test!(
@@ -15,6 +18,11 @@ crate::test!(
     "poller ready events preserve data event and ready bits",
     poller_ready_events_preserve_data_event_and_ready_bits
 );
+crate::test!(
+    notify_pollers_only_wakes_became_readable_pollers,
+    "notify_pollers ignores interested pollers with no ready events",
+    notify_pollers_only_wakes_became_readable_pollers
+);
 
 #[derive(Debug)]
 struct DummyObject;
@@ -22,6 +30,12 @@ struct DummyObject;
 impl Object for DummyObject {
     fn get_flags(self: Arc<Self>) -> crate::object::misc::ObjectResult<FileFlags> {
         Ok(FileFlags::empty())
+    }
+}
+
+impl Pollable for DummyObject {
+    fn is_event_ready(&self, _event: PollableEvent) -> bool {
+        false
     }
 }
 
@@ -42,4 +56,15 @@ fn poller_ready_events_preserve_data_event_and_ready_bits() {
     assert!(Arc::ptr_eq(&ready.object, &object));
     assert_eq!(ready.event, PollableEvent::Error);
     assert_eq!(ready.ready_bits, 0x11);
+}
+
+fn notify_pollers_only_wakes_became_readable_pollers() {
+    let object: Arc<dyn Object> = Arc::new(DummyObject);
+    let poller = PollerObject::new();
+    poller.register_obj(object.clone(), PollableEvent::CanBeRead, 0x44);
+
+    let affected = notify_pollers(object, PollableEvent::CanBeRead);
+
+    assert!(affected.is_empty());
+    assert!(!poller.has_woken_events());
 }

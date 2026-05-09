@@ -140,7 +140,7 @@ pub fn notify_pollers(object: ObjectRef, event: PollableEvent) -> Vec<ObjectRef>
         let pollers = interested_pollers(&current_object, current_event);
         for poller in pollers {
             let result = poller.push_woken_event(current_object.clone(), current_event);
-            if !result.interested {
+            if !result.interested || !result.became_readable {
                 continue;
             }
 
