@@ -697,3 +697,40 @@ fn static_path_exists(path: &str) -> bool {
     }
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        overlay_directory_path, pts_inode, seeded_static_directory, static_path_exists,
+        static_root_paths,
+    };
+    use crate::filesystem::path::Path;
+
+    crate::test!(
+        devfs_overlay_path_rules,
+        "devfs overlay path normalization and seeded static gating stay stable",
+        devfs_overlay_path_normalization_and_seeded_static_gating_stay_stable
+    );
+
+    fn devfs_overlay_path_normalization_and_seeded_static_gating_stay_stable() {
+        assert_eq!(overlay_directory_path(&Path::new("/")), "/");
+        assert_eq!(overlay_directory_path(&Path::new("/pts/../shm/.")), "/shm");
+        assert_eq!(
+            overlay_directory_path(&Path::new("input/./foo")),
+            "/input/foo"
+        );
+
+        assert_eq!(static_root_paths(), &["/input", "/dri", "/pts", "/shm"]);
+        assert!(seeded_static_directory("/"));
+        assert!(seeded_static_directory("/pts"));
+        assert!(!seeded_static_directory("/null"));
+
+        assert!(static_path_exists("/null"));
+        assert!(static_path_exists("/input/event0"));
+        assert!(static_path_exists("/log"));
+        assert!(!static_path_exists("/input/missing"));
+
+        assert_eq!(pts_inode(0), 0x2000);
+        assert_eq!(pts_inode(7), 0x2007);
+    }
+}

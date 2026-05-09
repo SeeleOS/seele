@@ -234,6 +234,83 @@ fn sorted_mounts() -> Vec<(String, FileSystemRef, String, MountFlags)> {
     mounts
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{
+        generate_uuid, proc_boot_id_bytes, proc_cap_last_cap_bytes, proc_kernel_entries,
+        proc_kernel_random_entries, proc_ngroups_max_bytes, proc_pressure_entries,
+    };
+
+    crate::test!(
+        procfs_root_uuid_layout,
+        "procfs root uuid generation preserves version and variant layout",
+        procfs_root_uuid_generation_preserves_version_and_variant_layout
+    );
+    crate::test!(
+        procfs_root_static_entries,
+        "procfs root static entry builders expose expected names",
+        procfs_root_static_entry_builders_expose_expected_names
+    );
+    crate::test!(
+        procfs_root_static_bytes,
+        "procfs root static bytes end with newline",
+        procfs_root_static_bytes_end_with_newline
+    );
+
+    fn procfs_root_uuid_generation_preserves_version_and_variant_layout() {
+        let uuid = generate_uuid(0x1234_5678_9abc_def0);
+        let bytes = uuid.as_bytes();
+
+        assert_eq!(uuid.len(), 36);
+        assert_eq!(bytes[8], b'-');
+        assert_eq!(bytes[13], b'-');
+        assert_eq!(bytes[18], b'-');
+        assert_eq!(bytes[23], b'-');
+        assert_eq!(bytes[14], b'4');
+        assert!(matches!(bytes[19], b'8'..=b'b'));
+    }
+
+    fn procfs_root_static_entry_builders_expose_expected_names() {
+        let kernel_entries = proc_kernel_entries();
+        assert_eq!(
+            kernel_entries
+                .into_iter()
+                .map(|entry| entry.name)
+                .collect::<alloc::vec::Vec<_>>(),
+            alloc::vec![
+                "hostname",
+                "domainname",
+                "osrelease",
+                "ngroups_max",
+                "cap_last_cap",
+                "random"
+            ]
+        );
+        let random_entries = proc_kernel_random_entries();
+        assert_eq!(
+            random_entries
+                .into_iter()
+                .map(|entry| entry.name)
+                .collect::<alloc::vec::Vec<_>>(),
+            alloc::vec!["boot_id", "uuid"]
+        );
+        let pressure_entries = proc_pressure_entries();
+        assert_eq!(
+            pressure_entries
+                .into_iter()
+                .map(|entry| entry.name)
+                .collect::<alloc::vec::Vec<_>>(),
+            alloc::vec!["cpu", "io", "memory"]
+        );
+    }
+
+    fn procfs_root_static_bytes_end_with_newline() {
+        assert!(proc_boot_id_bytes().ends_with(b"\n"));
+        assert_eq!(proc_ngroups_max_bytes(), b"65536\n");
+        assert!(proc_cap_last_cap_bytes().ends_with(b"\n"));
+    }
+}
+
 pub(super) fn proc_mounts_bytes() -> Vec<u8> {
     let mut out = String::new();
     for (path, fs, _, flags) in sorted_mounts() {

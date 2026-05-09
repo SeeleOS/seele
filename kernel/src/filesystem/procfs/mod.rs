@@ -722,3 +722,64 @@ impl FileSystem for ProcFs {
             | crate::filesystem::vfs_traits::MountFlags::MS_RELATIME
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        proc_c_string_bytes, proc_fs_entries, proc_pressure_bytes, proc_sys_entries,
+        proc_sysctl_value_bytes, proc_trim_sysctl_string,
+    };
+    use crate::filesystem::errors::FSError;
+    use core::sync::atomic::AtomicU64;
+
+    crate::test!(
+        procfs_string_helpers,
+        "procfs string helpers trim sysctl values and preserve c-string bytes",
+        procfs_string_helpers_trim_sysctl_values_and_preserve_c_string_bytes
+    );
+    crate::test!(
+        procfs_static_entry_sets,
+        "procfs static entry builders expose stable names",
+        procfs_static_entry_builders_expose_stable_names
+    );
+    crate::test!(
+        procfs_pressure_and_sysctl_bytes,
+        "procfs pressure and sysctl rendering stay stable",
+        procfs_pressure_and_sysctl_rendering_stays_stable
+    );
+
+    fn procfs_string_helpers_trim_sysctl_values_and_preserve_c_string_bytes() {
+        assert_eq!(proc_trim_sysctl_string(b" host \n\0").unwrap(), "host");
+        assert!(matches!(
+            proc_trim_sysctl_string(&[0xff]),
+            Err(FSError::Other)
+        ));
+
+        let mut field = [0u8; 65];
+        field[..4].copy_from_slice(b"host");
+        assert_eq!(proc_c_string_bytes(field), b"host\n");
+    }
+
+    fn procfs_static_entry_builders_expose_stable_names() {
+        let fs_entries = proc_fs_entries();
+        assert_eq!(fs_entries.len(), 2);
+        assert_eq!(fs_entries[0].name, "file-max");
+        assert_eq!(fs_entries[1].name, "nr_open");
+
+        let sys_entries = proc_sys_entries();
+        assert_eq!(sys_entries.len(), 2);
+        assert_eq!(sys_entries[0].name, "fs");
+        assert_eq!(sys_entries[1].name, "kernel");
+    }
+
+    fn procfs_pressure_and_sysctl_rendering_stays_stable() {
+        let rendered = proc_pressure_bytes();
+        assert!(
+            core::str::from_utf8(&rendered)
+                .unwrap()
+                .contains("some avg10=0.00")
+        );
+        let value = AtomicU64::new(1234);
+        assert_eq!(proc_sysctl_value_bytes(&value), b"1234\n");
+    }
+}

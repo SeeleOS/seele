@@ -536,3 +536,56 @@ pub(super) fn fd_target(pid: ProcessID, fd: &str) -> FSResult<String> {
 
     Ok(format!("anon_inode:[{}]", object.debug_name()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        PROC_NAMESPACE_NAMES, default_user_namespace_map, format_capability_set,
+        normalize_proc_control_write, pid_dir_entries, pid_ns_entries, pid_string,
+    };
+    use crate::{filesystem::errors::FSError, process::misc::ProcessID};
+
+    crate::test!(
+        procfs_pid_format_helpers,
+        "procfs pid helpers normalize writes format ids and capability sets",
+        procfs_pid_helpers_normalize_writes_format_ids_and_capability_sets
+    );
+    crate::test!(
+        procfs_pid_static_entry_sets,
+        "procfs pid static entry builders expose stable names",
+        procfs_pid_static_entry_builders_expose_stable_names
+    );
+
+    fn procfs_pid_helpers_normalize_writes_format_ids_and_capability_sets() {
+        assert_eq!(default_user_namespace_map(42), "0 42 1\n");
+        assert_eq!(normalize_proc_control_write(b"allow").unwrap(), "allow\n");
+        assert_eq!(normalize_proc_control_write(b"deny\n").unwrap(), "deny\n");
+        assert!(matches!(
+            normalize_proc_control_write(&[0xff]),
+            Err(FSError::Other)
+        ));
+        assert_eq!(
+            format_capability_set(0x1234_5678, 0x9abc_def0),
+            "9abcdef012345678"
+        );
+        assert_eq!(pid_string(ProcessID(77)), "77");
+    }
+
+    fn procfs_pid_static_entry_builders_expose_stable_names() {
+        assert_eq!(PROC_NAMESPACE_NAMES.len(), 8);
+        assert_eq!(
+            pid_ns_entries()
+                .into_iter()
+                .map(|entry| entry.name)
+                .collect::<alloc::vec::Vec<_>>(),
+            alloc::vec!["cgroup", "ipc", "mnt", "net", "pid", "time", "user", "uts"]
+        );
+        let names = pid_dir_entries()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect::<alloc::vec::Vec<_>>();
+        assert!(names.contains(&alloc::string::String::from("comm")));
+        assert!(names.contains(&alloc::string::String::from("mountinfo")));
+        assert!(names.contains(&alloc::string::String::from("fdinfo")));
+    }
+}

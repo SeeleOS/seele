@@ -110,3 +110,43 @@ fn ipv4_and(addr: [u8; 4], mask: [u8; 4]) -> [u8; 4] {
 fn proc_hex_ipv4(addr: [u8; 4]) -> u32 {
     u32::from_le_bytes(addr)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ipv4_and, prefix_mask, proc_hex_ipv4, proc_net_entries, proc_net_if_inet6_bytes};
+
+    crate::test!(
+        procfs_net_helpers,
+        "procfs net helpers derive masks and route hex values in linux order",
+        procfs_net_helpers_derive_masks_and_route_hex_values_in_linux_order
+    );
+    crate::test!(
+        procfs_net_static_entries,
+        "procfs net static entries and inet6 contents stay stable",
+        procfs_net_static_entries_and_inet6_contents_stay_stable
+    );
+
+    fn procfs_net_helpers_derive_masks_and_route_hex_values_in_linux_order() {
+        assert_eq!(prefix_mask(0), [0, 0, 0, 0]);
+        assert_eq!(prefix_mask(24), [255, 255, 255, 0]);
+        assert_eq!(
+            ipv4_and([192, 168, 1, 23], [255, 255, 255, 0]),
+            [192, 168, 1, 0]
+        );
+        assert_eq!(proc_hex_ipv4([127, 0, 0, 1]), 0x0100_007f);
+    }
+
+    fn procfs_net_static_entries_and_inet6_contents_stay_stable() {
+        assert_eq!(
+            proc_net_entries()
+                .into_iter()
+                .map(|entry| entry.name)
+                .collect::<alloc::vec::Vec<_>>(),
+            alloc::vec!["dev", "route", "if_inet6"]
+        );
+        assert_eq!(
+            core::str::from_utf8(&proc_net_if_inet6_bytes()).unwrap(),
+            "00000000000000000000000000000001 01 80 10 80       lo\n"
+        );
+    }
+}

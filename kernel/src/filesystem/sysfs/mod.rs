@@ -570,3 +570,33 @@ impl FileSystem for SysFs {
             | crate::filesystem::vfs_traits::MountFlags::MS_RELATIME
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{devices_uevent, parse_uevent_write, platform_uevent};
+
+    crate::test!(
+        sysfs_uevent_payloads,
+        "sysfs uevent payload builders and parsers preserve linux synthetic env rules",
+        sysfs_uevent_payload_builders_and_parsers_preserve_linux_synthetic_env_rules
+    );
+
+    fn sysfs_uevent_payload_builders_and_parsers_preserve_linux_synthetic_env_rules() {
+        assert_eq!(devices_uevent(), b"SUBSYSTEM=devices\n");
+        assert_eq!(platform_uevent(), b"SUBSYSTEM=platform\n");
+
+        let parsed = parse_uevent_write(b"add 1234 KEY=VALUE OTHER=yes");
+        assert_eq!(parsed.action, "add");
+        assert_eq!(
+            core::str::from_utf8(&parsed.synthetic_env).unwrap(),
+            "SYNTH_ARG_KEY=VALUE\nSYNTH_ARG_OTHER=yes\nSYNTH_UUID=1234\n"
+        );
+
+        let defaulted = parse_uevent_write(b"");
+        assert_eq!(defaulted.action, "change");
+        assert_eq!(
+            core::str::from_utf8(&defaulted.synthetic_env).unwrap(),
+            "SYNTH_UUID=0\n"
+        );
+    }
+}
