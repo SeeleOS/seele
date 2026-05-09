@@ -86,3 +86,40 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::collections::vec_deque::VecDeque;
+
+    use super::{copy_from_queue, push_to_queue};
+
+    crate::test!(
+        queue_helpers_copy_semantics,
+        "queue helpers copy up to buffer length and drain consumed bytes",
+        queue_helpers_copy_up_to_buffer_length_and_drain_consumed_bytes
+    );
+    crate::test!(
+        queue_helpers_push_semantics,
+        "queue helpers append bytes in order",
+        queue_helpers_append_bytes_in_order
+    );
+
+    fn queue_helpers_copy_up_to_buffer_length_and_drain_consumed_bytes() {
+        let mut queue = VecDeque::from([1u8, 2, 3, 4]);
+        let mut buffer = [0u8; 3];
+        let read = copy_from_queue(&mut queue, &mut buffer);
+
+        assert_eq!(read, 3);
+        assert_eq!(buffer, [1, 2, 3]);
+        assert_eq!(queue.into_iter().collect::<alloc::vec::Vec<_>>(), [4]);
+    }
+
+    fn queue_helpers_append_bytes_in_order() {
+        let mut queue = VecDeque::from([7u8]);
+        push_to_queue(&mut queue, &[8, 9, 10]);
+        assert_eq!(
+            queue.into_iter().collect::<alloc::vec::Vec<_>>(),
+            [7, 8, 9, 10]
+        );
+    }
+}

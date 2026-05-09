@@ -4,6 +4,7 @@ use crate::{
         SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD,
         inet::InetSocketObject,
         name::{parse_unix_socket_path, serialize_unix_addr},
+        registry::UnixSocketRegistryKey,
         socket_timeout_option_len,
     },
 };
@@ -22,6 +23,11 @@ crate::test!(
     timeout_sockopt_sizes,
     "timeout sockopts have linux timeval size",
     timeout_sockopts_have_linux_timeval_size
+);
+crate::test!(
+    unix_registry_key_ordering,
+    "unix registry keys order abstract before path by derived key ordering",
+    unix_registry_keys_order_abstract_before_path_by_derived_key_ordering
 );
 
 fn unix_sockaddr_round_trips_path_and_abstract_names() {
@@ -55,4 +61,13 @@ fn timeout_sockopts_have_linux_timeval_size() {
         assert_eq!(socket_timeout_option_len(option), Some(16));
     }
     assert_eq!(socket_timeout_option_len(0), None);
+}
+
+fn unix_registry_keys_order_abstract_before_path_by_derived_key_ordering() {
+    let abstract_key = UnixSocketRegistryKey::Abstract("\0x".into());
+    let path_key = UnixSocketRegistryKey::Path {
+        mount_device_id: 1,
+        inode: 2,
+    };
+    assert!(abstract_key < path_key);
 }

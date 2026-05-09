@@ -1,10 +1,14 @@
 use crate::{
     misc::{
+        auxv::AuxType,
+        error::KernelError,
         signal::{PendingSignalInfo, SI_QUEUE, SigInfo, Signal, Signals},
         time::Time,
         timer::{Sigevent, TimerMode, TimerNotify, TimerNotifyMethod, TimerSpec, TimerState},
+        utsname::{DEFAULT_MACHINE, DEFAULT_RELEASE, DEFAULT_SYSNAME, DEFAULT_VERSION, UtsName},
     },
     process::ProcessExitStatus,
+    systemcall::utils::SyscallError,
 };
 
 crate::test!(
@@ -26,6 +30,11 @@ crate::test!(
     process_exit_wait_encodings,
     "process exit status exports wait encodings",
     process_exit_status_exports_wait_encodings
+);
+crate::test!(
+    misc_layout_and_constants,
+    "misc pure layout constants and kernel error mapping stay stable",
+    misc_pure_layout_constants_and_kernel_error_mapping_stay_stable
 );
 
 fn time_arithmetic_saturates_and_splits_subseconds() {
@@ -109,5 +118,25 @@ fn process_exit_status_exports_wait_encodings() {
     assert_eq!(
         ProcessExitStatus::Signaled(Signal::SIGKILL).wait_status(),
         Signal::SIGKILL as i32
+    );
+}
+
+fn misc_pure_layout_constants_and_kernel_error_mapping_stay_stable() {
+    let uts = UtsName::new(
+        DEFAULT_SYSNAME,
+        DEFAULT_RELEASE,
+        DEFAULT_VERSION,
+        DEFAULT_MACHINE,
+    );
+    assert_eq!(core::mem::size_of::<UtsName>(), 390);
+    assert_eq!(&uts.machine[..6], b"x86_64");
+
+    assert_eq!(AuxType::ProgramHeaderTable as u64, 3);
+    assert_eq!(AuxType::PageSize as u64, 6);
+    assert_eq!(AuxType::Null as u64, 0);
+
+    assert_eq!(
+        KernelError::InvalidString.as_syscall_error(),
+        SyscallError::InvalidArguments
     );
 }

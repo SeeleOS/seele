@@ -41,3 +41,25 @@ lazy_static! {
     pub static ref UNIX_SOCKET_REGISTRY: Mutex<BTreeMap<UnixSocketRegistryKey, UnixSocketRegistryEntry>> =
         Mutex::new(BTreeMap::new());
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::string::String;
+
+    use super::UnixSocketRegistryKey;
+
+    crate::test!(
+        unix_socket_registry_abstract_keys,
+        "unix socket registry keeps abstract names verbatim",
+        unix_socket_registry_keeps_abstract_names_verbatim
+    );
+
+    fn unix_socket_registry_keeps_abstract_names_verbatim() {
+        let key = UnixSocketRegistryKey::from_socket_path("\0wayland-0").unwrap();
+        assert_eq!(
+            key,
+            UnixSocketRegistryKey::Abstract(String::from("\0wayland-0"))
+        );
+        assert!(UnixSocketRegistryKey::from_socket_path("/definitely/missing").is_none());
+    }
+}

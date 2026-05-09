@@ -48,3 +48,37 @@ impl KernelError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::KernelError;
+    use crate::{
+        filesystem::errors::FSError, misc::error::AsSyscallError, object::error::ObjectError,
+        systemcall::utils::SyscallError,
+    };
+
+    crate::test!(
+        kernel_error_syscall_mapping,
+        "kernel errors preserve syscall mappings across wrapped subsystems",
+        kernel_errors_preserve_syscall_mappings_across_wrapped_subsystems
+    );
+
+    fn kernel_errors_preserve_syscall_mappings_across_wrapped_subsystems() {
+        assert_eq!(
+            KernelError::from(FSError::Readonly).as_syscall_error(),
+            SyscallError::ReadOnlyFileSystem
+        );
+        assert_eq!(
+            KernelError::from(ObjectError::InvalidRequest).as_syscall_error(),
+            SyscallError::InappropriateIoctl
+        );
+        assert_eq!(
+            KernelError::InvalidString.as_syscall_error(),
+            SyscallError::InvalidArguments
+        );
+        assert_eq!(
+            FSError::NotFound.as_syscall_error(),
+            SyscallError::FileNotFound
+        );
+    }
+}

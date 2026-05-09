@@ -97,3 +97,47 @@ fn write_c_field(dst: &mut [u8], src: &[u8]) {
     let len = len.min(dst.len().saturating_sub(1));
     dst[..len].copy_from_slice(&src[..len]);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        DEFAULT_MACHINE, DEFAULT_RELEASE, DEFAULT_SYSNAME, DEFAULT_VERSION, SetHostnameError,
+        UtsName, current_domainname, current_hostname, set_domainname, set_hostname,
+    };
+
+    crate::test!(
+        utsname_default_layout,
+        "utsname constructor writes c-string fields with trailing zeros",
+        utsname_constructor_writes_c_string_fields_with_trailing_zeros
+    );
+    crate::test!(
+        utsname_setters_validate_and_trim,
+        "utsname setters validate length and embedded nul bytes",
+        utsname_setters_validate_length_and_embedded_nul_bytes
+    );
+
+    fn utsname_constructor_writes_c_string_fields_with_trailing_zeros() {
+        let uts = UtsName::new(
+            DEFAULT_SYSNAME,
+            DEFAULT_RELEASE,
+            DEFAULT_VERSION,
+            DEFAULT_MACHINE,
+        );
+
+        assert_eq!(&uts.sysname[..5], b"Seele");
+        assert_eq!(&uts.release[..12], b"6.12.0-seele");
+        assert_eq!(&uts.version[..8], b"#1 Seele");
+        assert_eq!(&uts.machine[..6], b"x86_64");
+        assert_eq!(uts.sysname[5], 0);
+    }
+
+    fn utsname_setters_validate_length_and_embedded_nul_bytes() {
+        set_hostname(b"node").unwrap();
+        set_domainname(b"example").unwrap();
+        assert_eq!(&current_hostname("fallback")[..4], b"node");
+        assert_eq!(&current_domainname("fallback")[..7], b"example");
+
+        assert_eq!(set_hostname(&[b'a'; 65]), Err(SetHostnameError::Invalid));
+        assert_eq!(set_domainname(b"bad\0name"), Err(SetHostnameError::Invalid));
+    }
+}

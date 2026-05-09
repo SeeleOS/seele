@@ -171,3 +171,83 @@ impl StackBuilder {
         unsafe { (page_base.add(offset_in_page), 4096 - offset_in_page) }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::{vec, vec::Vec};
+
+    use super::StackBuilder;
+    use crate::{elfloader::ElfInfo, misc::auxv::AuxType};
+
+    crate::test!(
+        stack_builder_string_and_alignment,
+        "stack builder writes strings and keeps alignment accounting stable",
+        stack_builder_writes_strings_and_keeps_alignment_accounting_stable
+    );
+    crate::test!(
+        stack_builder_aux_entries,
+        "stack builder pushes auxv entries in value then type order",
+        stack_builder_pushes_auxv_entries_in_value_then_type_order
+    );
+
+    fn stack_builder_writes_strings_and_keeps_alignment_accounting_stable() {
+        let mut pages = vec![[0u8; 4096], [0u8; 4096]];
+        let page_bases = pages
+            .iter_mut()
+            .map(|page| page.as_mut_ptr() as u64)
+            .collect::<alloc::vec::Vec<_>>();
+        let top = 0x20_000u64;
+        let mut builder = StackBuilder::new(top, page_bases);
+
+        let ptr = builder.push_str("abc");
+        assert_eq!(ptr, top - 4);
+        builder.align_down(16);
+        assert_eq!(builder.finish().as_u64() % 16, 0);
+
+        let stored = &pages[1][4092..4096];
+        assert_eq!(stored, b"abc\0");
+    }
+
+    fn stack_builder_pushes_auxv_entries_in_value_then_type_order() {
+        let mut pages = vec![[0u8; 4096], [0u8; 4096]];
+        let page_bases = pages
+            .iter_mut()
+            .map(|page| page.as_mut_ptr() as u64)
+            .collect::<alloc::vec::Vec<_>>();
+        let top = 0x30_000u64;
+        let mut builder = StackBuilder::new(top, page_bases);
+        let elf = ElfInfo {
+            entry_point: 0x401000,
+            program_header_table: 0x40,
+            program_header_count: 9,
+            program_header_entry_size: 56,
+            interpreter: None,
+            load_base: 0,
+        };
+
+        builder.push_aux_entries(&elf, Some(0x7000), 0x8000, 0x9000, 0xa000);
+        let sp = builder.finish().as_u64();
+        let start = top - (pages.len() as u64 * 4096);
+        let mut words = Vec::new();
+        let mut cursor = sp;
+        while cursor < top {
+            let offset = (cursor - start) as usize;
+            let page_index = offset / 4096;
+            let offset_in_page = offset % 4096;
+            let page = &pages[page_index];
+            words.push(u64::from_ne_bytes(
+                page[offset_in_page..offset_in_page + 8].try_into().unwrap(),
+            ));
+            cursor += 8;
+        }
+
+        assert_eq!(words[0], AuxType::PageSize as u64);
+        assert_eq!(words[1], 4096);
+        assert_eq!(words[2], AuxType::BaseAddress as u64);
+        assert_eq!(words[3], 0x7000);
+        assert_eq!(words[4], AuxType::ProgramHeaderTable as u64);
+        assert_eq!(words[5], 0x40);
+        assert_eq!(words[words.len() - 2], AuxType::Null as u64);
+        assert_eq!(words[words.len() - 1], 0);
+    }
+}
