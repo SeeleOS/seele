@@ -5271,9 +5271,13 @@ fn epoll_syscalls_follow_linux_rules() {
     const EPOLL_CTL_ADD: u64 = 1;
     const EPOLL_CTL_MOD: u64 = 3;
     const EPOLL_CTL_DEL: u64 = 2;
+    const EPOLLIN: u32 = 0x001;
     const EPOLLOUT: u32 = 0x004;
+    const EPOLLHUP: u32 = 0x010;
+    const EPOLLRDHUP: u32 = 0x2000;
     const EPOLLONESHOT: u32 = 0x4000_0000;
-
+    const AF_UNIX: u64 = 1;
+    const SOCK_STREAM: u64 = 1;
     assert_linux_layout::<TestLinuxEpollEvent>(12, 1);
 
     let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
@@ -5348,6 +5352,95 @@ fn epoll_syscalls_follow_linux_rules() {
         SyscallError::InvalidArguments,
     );
 
+    let socketpair_page = epoll_events + 128;
+    expect_ok(
+        SyscallArgs::new([AF_UNIX, SOCK_STREAM, 0, socketpair_page, 0, 0]).call::<Socketpair>(),
+        0,
+    );
+    let left = read_user_value::<i32>(socketpair_page) as usize;
+    let right = read_user_value::<i32>(socketpair_page + 4) as usize;
+    let socket_event = TestLinuxEpollEvent {
+        events: EPOLLIN | EPOLLOUT | EPOLLHUP | EPOLLRDHUP,
+        data: 0x55aa,
+    };
+    write_user_value(epoll_events + 192, &socket_event);
+    expect_ok(
+        SyscallArgs::new([
+            epoll_fd as u64,
+            EPOLL_CTL_ADD,
+            left as u64,
+            epoll_events + 192,
+            0,
+            0,
+        ])
+        .call::<EpollCtl>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([epoll_fd as u64, epoll_events + 256, 4, 0, 0, 0]).call::<EpollWait>(),
+        1,
+    );
+    let socket_ready = read_user_value::<TestLinuxEpollEvent>(epoll_events + 256);
+    let socket_ready_events = socket_ready.events;
+    let socket_ready_data = socket_ready.data;
+    assert_eq!(socket_ready_events, EPOLLOUT);
+    assert_eq!(socket_ready_data, 0x55aa);
+
+    write_user_value(epoll_events + 320, b"u");
+    expect_ok(
+        SyscallArgs::new([right as u64, epoll_events + 320, 1, 0, 0, 0]).call::<Write>(),
+        1,
+    );
+    expect_ok(
+        SyscallArgs::new([epoll_fd as u64, epoll_events + 384, 4, 0, 0, 0]).call::<EpollWait>(),
+        1,
+    );
+    let readable_socket_ready = read_user_value::<TestLinuxEpollEvent>(epoll_events + 384);
+    let readable_socket_events = readable_socket_ready.events;
+    let readable_socket_data = readable_socket_ready.data;
+    assert_eq!(readable_socket_events, EPOLLIN | EPOLLOUT);
+    assert_eq!(readable_socket_data, 0x55aa);
+    expect_ok(
+        SyscallArgs::new([left as u64, epoll_events + 321, 1, 0, 0, 0]).call::<Read>(),
+        1,
+    );
+    assert_user_bytes(epoll_events + 321, b"u");
+
+    expect_ok(
+        SyscallArgs::new([epoll_fd as u64, EPOLL_CTL_DEL, left as u64, 0, 0, 0]).call::<EpollCtl>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([
+            epoll_fd as u64,
+            EPOLL_CTL_ADD,
+            left as u64,
+            epoll_events + 192,
+            0,
+            0,
+        ])
+        .call::<EpollCtl>(),
+        0,
+    );
+    close_test_fd(right);
+    expect_ok(
+        SyscallArgs::new([epoll_fd as u64, epoll_events + 512, 4, 0, 0, 0]).call::<EpollWait>(),
+        1,
+    );
+    let peer_closed_socket_ready = read_user_value::<TestLinuxEpollEvent>(epoll_events + 512);
+    let peer_closed_socket_events = peer_closed_socket_ready.events;
+    let peer_closed_socket_data = peer_closed_socket_ready.data;
+    assert_eq!(
+        peer_closed_socket_events,
+        EPOLLIN | EPOLLOUT | EPOLLHUP | EPOLLRDHUP
+    );
+    assert_eq!(peer_closed_socket_data, 0x55aa);
+
+    expect_ok(
+        SyscallArgs::new([epoll_fd as u64, EPOLL_CTL_DEL, left as u64, 0, 0, 0]).call::<EpollCtl>(),
+        0,
+    );
+    close_test_fd(left);
     close_test_fd(epoll_fd);
     close_test_fd(eventfd);
 }

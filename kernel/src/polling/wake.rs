@@ -9,6 +9,16 @@ use crate::{
 };
 
 impl PollerObject {
+    fn ready_entries_for_object(&self, object: &ObjectRef) -> Vec<(u64, u32, bool)> {
+        self.entries
+            .lock()
+            .iter()
+            .filter(|entry| entry.enabled && Arc::ptr_eq(&entry.object, object))
+            .filter(|entry| Self::is_entry_ready(entry))
+            .map(|entry| (entry.data, entry.ready_bits, entry.oneshot))
+            .collect()
+    }
+
     fn queue_ready_event(
         woken_events: &mut Vec<PollerReadyEvent>,
         object: &ObjectRef,
@@ -53,11 +63,12 @@ impl PollerObject {
         let interested = !matching_entries.is_empty();
         let mut became_readable = false;
         let disable_oneshot = matching_entries.iter().any(|(_, _, oneshot)| *oneshot);
+        let ready_entries = interested.then(|| self.ready_entries_for_object(&object));
 
         if interested {
             let mut woken_events = self.woken_events.lock();
             let was_empty = woken_events.is_empty();
-            for (data, ready_bits, _) in matching_entries {
+            for (data, ready_bits, _) in ready_entries.unwrap_or_default() {
                 let _ =
                     Self::queue_ready_event(&mut woken_events, &object, event, data, ready_bits);
             }
