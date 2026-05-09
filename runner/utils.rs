@@ -335,11 +335,10 @@ pub fn run_qemu_until_serial_condition(
     let mut captured = String::new();
 
     let exit_code = loop {
-        if serial_log.is_none() {
-            match fs::File::open(&context.serial_log) {
-                Ok(opened) => serial_log = Some(opened),
-                Err(_) => {}
-            }
+        if serial_log.is_none()
+            && let Ok(opened) = fs::File::open(&context.serial_log)
+        {
+            serial_log = Some(opened);
         }
 
         if let Some(file) = serial_log.as_mut() {

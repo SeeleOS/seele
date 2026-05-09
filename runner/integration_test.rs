@@ -77,7 +77,7 @@ fn run_userspace_boot() -> i32 {
         &uefi_path,
         &options,
         qemu_test_timeout(),
-        |output| userspace_startup_observed(output),
+        userspace_startup_observed,
     );
     if exit_code == 0 {
         eprintln!("integration test userspace_boot: startup signal observed");
