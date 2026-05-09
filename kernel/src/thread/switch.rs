@@ -18,9 +18,28 @@ impl ThreadSnapshot {
         source: Option<&mut ThreadSnapshot>,
         snapshot: Option<&mut Snapshot>,
     ) {
+        self.switch_from_inner(source, snapshot, true);
+    }
+
+    pub fn switch_from_presaved_scheduler(
+        &mut self,
+        source: Option<&mut ThreadSnapshot>,
+        snapshot: Option<&mut Snapshot>,
+    ) {
+        self.switch_from_inner(source, snapshot, false);
+    }
+
+    fn switch_from_inner(
+        &mut self,
+        source: Option<&mut ThreadSnapshot>,
+        snapshot: Option<&mut Snapshot>,
+        save_scheduler_rsp: bool,
+    ) {
         without_interrupts(|| {
             if let Some(source) = source {
-                if matches!(source.snapshot_type, ThreadSnapshotType::Scheduler) {
+                if save_scheduler_rsp
+                    && matches!(source.snapshot_type, ThreadSnapshotType::Scheduler)
+                {
                     // Saves the current RSP, which have the RIP saved
                     // on the stacktop when we called switch_from()
                     // So when we use jump_to_scheduler(), it will load

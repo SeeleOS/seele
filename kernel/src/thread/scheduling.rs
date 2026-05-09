@@ -204,13 +204,87 @@ fn run_ready_thread(thread_ref: ThreadRef) {
     });
 
     unsafe {
-        (*thread_snapshot).switch_from(
-            Some(&mut *scheduler_snapshot),
-            Some(&mut Snapshot::from_current()),
-        )
+        switch_from_scheduler_to_thread(thread_snapshot, scheduler_snapshot);
     };
 
     after_thread_yield(thread_ref);
+}
+
+#[unsafe(naked)]
+unsafe extern "C" fn switch_from_scheduler_to_thread(
+    thread_snapshot: *mut ThreadSnapshot,
+    scheduler_snapshot: *mut ThreadSnapshot,
+) {
+    naked_asm!(
+        "mov [rsi + {K_RSP_OFF}], rsp",
+        "sub rsp, {SNAPSHOT_SIZE}",
+        "mov [rsp + {R15_OFF}], r15",
+        "mov [rsp + {R14_OFF}], r14",
+        "mov [rsp + {R13_OFF}], r13",
+        "mov [rsp + {R12_OFF}], r12",
+        "mov [rsp + {R11_OFF}], r11",
+        "mov [rsp + {R10_OFF}], r10",
+        "mov [rsp + {R9_OFF}], r9",
+        "mov [rsp + {R8_OFF}], r8",
+        "mov [rsp + {RDI_OFF}], rdi",
+        "mov [rsp + {RSI_OFF}], rsi",
+        "mov [rsp + {RBP_OFF}], rbp",
+        "mov [rsp + {RBX_OFF}], rbx",
+        "mov [rsp + {RDX_OFF}], rdx",
+        "mov [rsp + {RCX_OFF}], rcx",
+        "mov [rsp + {RAX_OFF}], rax",
+        "mov rax, [rsp + {SNAPSHOT_SIZE}]",
+        "mov [rsp + {RIP_OFF}], rax",
+        "mov rax, cs",
+        "mov [rsp + {CS_OFF}], rax",
+        "pushfq",
+        "pop qword ptr [rsp + {RFLAGS_OFF}]",
+        "lea rax, [rsp + {SNAPSHOT_SIZE} + 8]",
+        "mov [rsp + {RSP_OFF}], rax",
+        "mov rax, ss",
+        "mov [rsp + {SS_OFF}], rax",
+        "mov rdx, rsp",
+        "call {inner}",
+        "ud2",
+        inner = sym switch_from_scheduler_to_thread_inner,
+        K_RSP_OFF = const offset_of!(ThreadSnapshot, kernel_rsp),
+        SNAPSHOT_SIZE = const size_of::<Snapshot>(),
+        R15_OFF = const offset_of!(Snapshot, r15),
+        R14_OFF = const offset_of!(Snapshot, r14),
+        R13_OFF = const offset_of!(Snapshot, r13),
+        R12_OFF = const offset_of!(Snapshot, r12),
+        R11_OFF = const offset_of!(Snapshot, r11),
+        R10_OFF = const offset_of!(Snapshot, r10),
+        R9_OFF = const offset_of!(Snapshot, r9),
+        R8_OFF = const offset_of!(Snapshot, r8),
+        RDI_OFF = const offset_of!(Snapshot, rdi),
+        RSI_OFF = const offset_of!(Snapshot, rsi),
+        RBP_OFF = const offset_of!(Snapshot, rbp),
+        RBX_OFF = const offset_of!(Snapshot, rbx),
+        RDX_OFF = const offset_of!(Snapshot, rdx),
+        RCX_OFF = const offset_of!(Snapshot, rcx),
+        RAX_OFF = const offset_of!(Snapshot, rax),
+        RIP_OFF = const offset_of!(Snapshot, rip),
+        CS_OFF = const offset_of!(Snapshot, cs),
+        RFLAGS_OFF = const offset_of!(Snapshot, rflags),
+        RSP_OFF = const offset_of!(Snapshot, rsp),
+        SS_OFF = const offset_of!(Snapshot, ss),
+    )
+}
+
+extern "C" fn switch_from_scheduler_to_thread_inner(
+    thread_snapshot: *mut ThreadSnapshot,
+    scheduler_snapshot: *mut ThreadSnapshot,
+    snapshot_ptr: *mut Snapshot,
+) -> ! {
+    unsafe {
+        (*thread_snapshot).switch_from_presaved_scheduler(
+            Some(&mut *scheduler_snapshot),
+            Some(&mut *snapshot_ptr),
+        );
+    }
+
+    unreachable!()
 }
 
 fn after_thread_yield(thread_ref: ThreadRef) {
