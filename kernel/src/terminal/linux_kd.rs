@@ -561,3 +561,68 @@ pub fn handle_kd_request(
         _ => Ok(None),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pc_keyboard::KeyCode;
+
+    use super::{
+        DisplayMode, KeyType, KeyValue, KeyboardMode, LinuxConsoleState, linux_kb_entry_value,
+        linux_keycode_from_keycode,
+    };
+
+    crate::test!(
+        linux_kd_defaults,
+        "linux console defaults match expected keyboard and display modes",
+        linux_console_defaults_match_expected_keyboard_and_display_modes
+    );
+    crate::test!(
+        linux_kd_entry_mapping,
+        "linux keyboard entry mapping preserves shifted letters punctuation and keypad fallbacks",
+        linux_keyboard_entry_mapping_preserves_shifted_letters_punctuation_and_keypad_fallbacks
+    );
+    crate::test!(
+        linux_kd_keycode_mapping,
+        "linux keycode mapping covers common keys and extended arrows",
+        linux_keycode_mapping_covers_common_keys_and_extended_arrows
+    );
+
+    fn linux_console_defaults_match_expected_keyboard_and_display_modes() {
+        let state = LinuxConsoleState::default();
+        assert_eq!(state.keyboard_mode, KeyboardMode::Unicode);
+        assert_eq!(state.display_mode, DisplayMode::Text);
+        assert_eq!(state.kbrequest_signal, 0);
+        assert_eq!(state.vt_mode.mode, 0);
+    }
+
+    fn linux_keyboard_entry_mapping_preserves_shifted_letters_punctuation_and_keypad_fallbacks() {
+        assert_eq!(
+            linux_kb_entry_value(0, 16),
+            Some(((KeyType::Letter as u16) << 8) | b'q' as u16)
+        );
+        assert_eq!(
+            linux_kb_entry_value(1, 16),
+            Some(((KeyType::Letter as u16) << 8) | b'Q' as u16)
+        );
+        assert_eq!(
+            linux_kb_entry_value(0, 2),
+            Some(((KeyType::Latin as u16) << 8) | b'1' as u16)
+        );
+        assert_eq!(
+            linux_kb_entry_value(1, 2),
+            Some(((KeyType::Latin as u16) << 8) | b'!' as u16)
+        );
+        assert_eq!(linux_kb_entry_value(0, 71), Some(KeyValue::P7.code()));
+        assert_eq!(linux_kb_entry_value(1, 71), Some(KeyValue::Find.code()));
+        assert_eq!(linux_kb_entry_value(0, 111), Some(KeyValue::Remove.code()));
+        assert_eq!(linux_kb_entry_value(0, 200), None);
+    }
+
+    fn linux_keycode_mapping_covers_common_keys_and_extended_arrows() {
+        assert_eq!(linux_keycode_from_keycode(KeyCode::A), Some(30));
+        assert_eq!(linux_keycode_from_keycode(KeyCode::NumpadEnter), Some(96));
+        assert_eq!(linux_keycode_from_keycode(KeyCode::ArrowUp), Some(103));
+        assert_eq!(linux_keycode_from_keycode(KeyCode::Delete), Some(111));
+        assert_eq!(linux_keycode_from_keycode(KeyCode::Apps), Some(127));
+    }
+}

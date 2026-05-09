@@ -153,3 +153,86 @@ fn ioc_type(request: u64) -> u8 {
 fn ioc_size(request: u64) -> usize {
     ((request >> IOC_SIZESHIFT) & IOC_SIZEMASK) as usize
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+
+    use super::{
+        EV_VERSION, ioc_nr, ioc_size, ioc_type, write_bytes_ioctl, write_fixed_sized_ioctl,
+    };
+    use crate::object::error::ObjectError;
+
+    fn ioc_request(ty: u8, nr: u8, size: usize) -> u64 {
+        (nr as u64) | ((ty as u64) << 8) | ((size as u64) << 16)
+    }
+
+    crate::test!(
+        evdev_ioctl_request_decode,
+        "evdev ioctl helpers decode ioc fields",
+        evdev_ioctl_helpers_decode_ioc_fields
+    );
+    crate::test!(
+        evdev_ioctl_fixed_size_copy,
+        "evdev ioctl fixed-sized writes copy truncate and reject null pointers",
+        evdev_ioctl_fixed_sized_writes_copy_truncate_and_reject_null_pointers
+    );
+    crate::test!(
+        evdev_ioctl_string_copy,
+        "evdev ioctl string writes append nul and truncate predictably",
+        evdev_ioctl_string_writes_append_nul_and_truncate_predictably
+    );
+
+    fn evdev_ioctl_helpers_decode_ioc_fields() {
+        let request = ioc_request(b'E', 0x06, 32);
+        assert_eq!(ioc_type(request), b'E');
+        assert_eq!(ioc_nr(request), 0x06);
+        assert_eq!(ioc_size(request), 32);
+        assert_eq!(EV_VERSION, 0x01_00_01);
+    }
+
+    fn evdev_ioctl_fixed_sized_writes_copy_truncate_and_reject_null_pointers() {
+        let mut out = [0xaau8; 6];
+        assert_eq!(
+            write_fixed_sized_ioctl(out.as_mut_ptr() as u64, out.len(), &[1, 2, 3]).unwrap(),
+            0
+        );
+        assert_eq!(out, [1, 2, 3, 0, 0, 0]);
+
+        let mut short = [0xaau8; 2];
+        assert_eq!(
+            write_fixed_sized_ioctl(short.as_mut_ptr() as u64, short.len(), &[9, 8, 7]).unwrap(),
+            0
+        );
+        assert_eq!(short, [9, 8]);
+
+        assert_eq!(write_fixed_sized_ioctl(0, 0, &[1]).unwrap(), 0);
+        assert!(matches!(
+            write_fixed_sized_ioctl(0, 2, &[1]),
+            Err(ObjectError::InvalidArguments)
+        ));
+    }
+
+    fn evdev_ioctl_string_writes_append_nul_and_truncate_predictably() {
+        let mut out = [0xaau8; 8];
+        assert_eq!(
+            write_bytes_ioctl(out.as_mut_ptr() as u64, out.len(), b"mouse").unwrap(),
+            0
+        );
+        assert_eq!(&out, b"mouse\0\0\0");
+
+        let mut short = [0xaau8; 4];
+        assert_eq!(
+            write_bytes_ioctl(short.as_mut_ptr() as u64, short.len(), b"keyboard").unwrap(),
+            0
+        );
+        assert_eq!(&short, b"keyb");
+
+        let mut empty = vec![0xaa; 3];
+        assert_eq!(
+            write_bytes_ioctl(empty.as_mut_ptr() as u64, empty.len(), b"").unwrap(),
+            0
+        );
+        assert_eq!(empty, vec![0, 0xaa, 0xaa]);
+    }
+}

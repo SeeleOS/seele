@@ -531,3 +531,71 @@ pub(super) fn handle_prime_fd_to_handle(ptr: *mut DrmPrimeHandle) -> ObjectResul
     user_safe::write(ptr, &request).map_err(|_| ObjectError::InvalidArguments)?;
     Ok(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{DrmPrimeHandleFlags, dma_buf_ioctl_name, ioc_dir, ioc_nr, ioc_size, ioc_type};
+
+    const IOC_NRBITS: u64 = 8;
+    const IOC_TYPEBITS: u64 = 8;
+    const IOC_SIZEBITS: u64 = 14;
+    const IOC_NRSHIFT: u64 = 0;
+    const IOC_TYPESHIFT: u64 = IOC_NRSHIFT + IOC_NRBITS;
+    const IOC_SIZESHIFT: u64 = IOC_TYPESHIFT + IOC_TYPEBITS;
+    const IOC_DIRSHIFT: u64 = IOC_SIZESHIFT + IOC_SIZEBITS;
+
+    fn ioctl_request(dir: u64, ty: u8, nr: u8, size: usize) -> u64 {
+        (nr as u64)
+            | ((ty as u64) << IOC_TYPESHIFT)
+            | ((size as u64) << IOC_SIZESHIFT)
+            | (dir << IOC_DIRSHIFT)
+    }
+
+    crate::test!(
+        drm_prime_dmabuf_ioctl_decode,
+        "drm prime dmabuf ioctl decode reports stable type nr dir size and names",
+        drm_prime_dmabuf_ioctl_decode_reports_stable_type_nr_dir_size_and_names
+    );
+    crate::test!(
+        drm_prime_ioctl_name_fallbacks,
+        "drm prime dmabuf ioctl naming rejects non-dmabuf and unknown requests",
+        drm_prime_dmabuf_ioctl_naming_rejects_non_dmabuf_and_unknown_requests
+    );
+    crate::test!(
+        drm_prime_handle_flag_bits,
+        "drm prime handle flags expose linux rdwr and cloexec bits",
+        drm_prime_handle_flags_expose_linux_rdwr_and_cloexec_bits
+    );
+
+    fn drm_prime_dmabuf_ioctl_decode_reports_stable_type_nr_dir_size_and_names() {
+        let request = ioctl_request(3, b'b', 2, 8);
+        assert_eq!(ioc_type(request), b'b');
+        assert_eq!(ioc_nr(request), 2);
+        assert_eq!(ioc_size(request), 8);
+        assert_eq!(ioc_dir(request), 3);
+        assert_eq!(
+            dma_buf_ioctl_name(request),
+            "DMA_BUF_IOCTL_EXPORT_SYNC_FILE"
+        );
+    }
+
+    fn drm_prime_dmabuf_ioctl_naming_rejects_non_dmabuf_and_unknown_requests() {
+        let non_dmabuf = ioctl_request(0, b'x', 0, 0);
+        let unknown_dmabuf = ioctl_request(0, b'b', 9, 0);
+
+        assert_eq!(dma_buf_ioctl_name(non_dmabuf), "non-dmabuf");
+        assert_eq!(dma_buf_ioctl_name(unknown_dmabuf), "unknown-dmabuf");
+        assert_eq!(
+            dma_buf_ioctl_name(ioctl_request(1, b'b', 3, 8)),
+            "DMA_BUF_IOCTL_IMPORT_SYNC_FILE"
+        );
+    }
+
+    fn drm_prime_handle_flags_expose_linux_rdwr_and_cloexec_bits() {
+        let flags = DrmPrimeHandleFlags::RDWR | DrmPrimeHandleFlags::CLOEXEC;
+        assert!(flags.contains(DrmPrimeHandleFlags::RDWR));
+        assert!(flags.contains(DrmPrimeHandleFlags::CLOEXEC));
+        assert_eq!(DrmPrimeHandleFlags::RDWR.bits(), 0x0000_0002);
+        assert_eq!(DrmPrimeHandleFlags::CLOEXEC.bits(), 0x0008_0000);
+    }
+}

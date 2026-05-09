@@ -192,6 +192,78 @@ impl ConfigurateRequest {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{ConfigurateRequest, PtyPeerAccessMode, PtyPeerOpenFlags, PtyPeerOpenRequest};
+    use crate::object::{FileFlags, error::ObjectError};
+    use crate::process::FdFlags;
+
+    crate::test!(
+        pty_peer_open_request_parse,
+        "pty peer open request parses access mode and translates cloexec nonblock flags",
+        pty_peer_open_request_parses_access_mode_and_translates_cloexec_nonblock_flags
+    );
+    crate::test!(
+        pty_peer_open_request_rejects_invalid_bits,
+        "pty peer open request rejects unsupported access modes and flag bits",
+        pty_peer_open_request_rejects_unsupported_access_modes_and_flag_bits
+    );
+    crate::test!(
+        configurate_request_routes_linux_terminal_and_drm_ioctl_numbers,
+        "configurate request routes known linux terminal and drm ioctl numbers before raw fallback",
+        configurate_request_routes_known_linux_terminal_and_drm_ioctl_numbers_before_raw_fallback
+    );
+
+    fn pty_peer_open_request_parses_access_mode_and_translates_cloexec_nonblock_flags() {
+        let request = PtyPeerOpenRequest::new(
+            2 | PtyPeerOpenFlags::O_NONBLOCK.bits() as u64
+                | PtyPeerOpenFlags::O_CLOEXEC.bits() as u64,
+        )
+        .unwrap();
+
+        assert!(matches!(request.access_mode, PtyPeerAccessMode::ReadWrite));
+        assert_eq!(request.fd_flags(), FdFlags::CLOEXEC);
+        assert_eq!(request.file_flags(), FileFlags::NONBLOCK);
+    }
+
+    fn pty_peer_open_request_rejects_unsupported_access_modes_and_flag_bits() {
+        assert!(matches!(
+            PtyPeerOpenRequest::new(3),
+            Err(ObjectError::InvalidArguments)
+        ));
+        assert!(matches!(
+            PtyPeerOpenRequest::new(2 | (1u64 << 63)),
+            Err(ObjectError::InvalidArguments)
+        ));
+    }
+
+    fn configurate_request_routes_known_linux_terminal_and_drm_ioctl_numbers_before_raw_fallback() {
+        assert!(matches!(
+            ConfigurateRequest::new(0x5413, 0x1234).unwrap(),
+            ConfigurateRequest::LinuxTiocgwinsz(ptr) if ptr as usize == 0x1234
+        ));
+        assert!(matches!(
+            ConfigurateRequest::new(0x5441, 2).unwrap(),
+            ConfigurateRequest::LinuxTiocgptpeer(_)
+        ));
+        assert!(matches!(
+            ConfigurateRequest::new(0x5607, 4).unwrap(),
+            ConfigurateRequest::LinuxVtWaitActive(4)
+        ));
+        assert!(matches!(
+            ConfigurateRequest::new(crate::drm::client::DRM_IOCTL_GET_CAP, 0xfeed).unwrap(),
+            ConfigurateRequest::DrmGetCap(ptr) if ptr as usize == 0xfeed
+        ));
+        assert!(matches!(
+            ConfigurateRequest::new(0xdead_beef, 0xbeef).unwrap(),
+            ConfigurateRequest::RawIoctl {
+                request: 0xdead_beef,
+                arg: 0xbeef
+            }
+        ));
+    }
+}
+
 bitflags! {
     #[derive(Clone, Copy, Debug)]
     pub struct PtyPeerOpenFlags: u32 {
