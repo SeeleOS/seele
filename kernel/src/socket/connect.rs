@@ -63,11 +63,13 @@ impl UnixSocketObject {
                 *server_stream.local_name.lock() = Some(listener.path.clone());
                 *server_stream.local_key.lock() = Some(listener.registry_key.clone());
 
-                let mut pending = listener.pending.lock();
-                if pending.len() >= listener.backlog {
-                    return Err(SocketError::TryAgain);
+                {
+                    let mut pending = listener.pending.lock();
+                    if pending.len() >= listener.backlog {
+                        return Err(SocketError::TryAgain);
+                    }
+                    pending.push_back(server_socket);
                 }
-                pending.push_back(server_socket);
                 *self.state.lock() = UnixSocketState::Stream(client_stream);
                 if let Some(owner) = listener.owner.lock().as_ref().and_then(Weak::upgrade) {
                     wake_pollers(&owner, PollableEvent::CanBeRead);

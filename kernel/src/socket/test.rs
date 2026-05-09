@@ -8,7 +8,7 @@ use crate::{
         netlink::NetlinkSocketObject,
         traits::Configuratable,
     },
-    polling::{event::PollableEvent, object::Pollable},
+    polling::{event::PollableEvent, object::Pollable, poller::PollerObject},
     socket::{
         AF_INET, NETLINK_ROUTE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD,
         SOCK_DGRAM, SOCK_RAW, UnixSocketObject,
@@ -48,6 +48,11 @@ crate::test!(
     unix_stream_shutdown_poll_semantics,
     "unix stream shutdown keeps RDHUP separate from HUP readiness",
     unix_stream_shutdown_poll_semantics_follow_linux_rules
+);
+crate::test!(
+    unix_listener_connect_wakes_poller,
+    "unix listener connect wakes pollers without self-deadlocking on the pending queue",
+    unix_listener_connect_wakes_poller_without_self_deadlock
 );
 
 fn unix_sockaddr_round_trips_path_and_abstract_names() {
@@ -206,4 +211,31 @@ fn unix_stream_shutdown_poll_semantics_follow_linux_rules() {
 
     assert!(left.is_event_ready(PollableEvent::Closed));
     assert!(left.is_event_ready(PollableEvent::ReadClosed));
+}
+
+fn unix_listener_connect_wakes_poller_without_self_deadlock() {
+    let listener = UnixSocketObject::create(crate::socket::AF_UNIX, crate::socket::SOCK_STREAM, 0)
+        .expect("listener socket should be created");
+    listener
+        .bind("\0poll-listener-self-deadlock".into())
+        .expect("listener should bind");
+    listener.listen(1).expect("listener should listen");
+
+    let poller = PollerObject::new();
+    let listener_object: crate::object::misc::ObjectRef = listener.clone();
+    poller.register_obj(listener_object, PollableEvent::CanBeRead, 0x44);
+
+    let client = UnixSocketObject::create(crate::socket::AF_UNIX, crate::socket::SOCK_STREAM, 0)
+        .expect("client socket should be created");
+    client
+        .connect("\0poll-listener-self-deadlock".into())
+        .expect("connect should succeed without deadlocking");
+
+    assert!(listener.is_event_ready(PollableEvent::CanBeRead));
+    assert!(poller.has_woken_events());
+
+    let ready = poller.take_woken_events(1);
+    assert_eq!(ready.len(), 1);
+    assert_eq!(ready[0].data, 0x44);
+    assert_eq!(ready[0].event, PollableEvent::CanBeRead);
 }
