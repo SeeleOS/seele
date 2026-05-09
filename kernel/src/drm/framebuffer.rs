@@ -1,13 +1,8 @@
-use core::{
-    cmp::min,
-    slice,
-    sync::atomic::{AtomicU32, Ordering},
-};
+use core::{cmp::min, slice};
 
 use crate::{
     drm::mode::{DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888},
     misc::framebuffer::{FRAME_BUFFER, FramebufferPixelFormat, framebuffer_set_user_controlled},
-    misc::time::{NANOSECONDS_PER_MILLISECOND, Time},
     object::{error::ObjectError, misc::ObjectResult},
 };
 
@@ -15,10 +10,6 @@ use super::{
     object::DRM_STATE,
     state::{CursorState, DrmState, DumbBuffer, RegisteredFramebuffer},
 };
-
-static DRM_DEBUG_SAMPLES: AtomicU32 = AtomicU32::new(0);
-static LAST_LEGACY_SCANOUT_REFRESH_NS: AtomicU32 = AtomicU32::new(0);
-static LEGACY_REFRESH_DEBUG_SAMPLES: AtomicU32 = AtomicU32::new(0);
 
 pub(super) fn build_framebuffer(
     state: &DrmState,
@@ -36,24 +27,6 @@ pub(super) fn build_framebuffer(
     if !matches!(pixel_format, DRM_FORMAT_XRGB8888 | DRM_FORMAT_ARGB8888) {
         return Err(ObjectError::InvalidArguments);
     }
-    if let Some((pid, comm)) = super::user::current_debug_process() {
-        crate::s_println!(
-            "drm build_fb comm={} pid={} handle={} size={}x{} pitch={} offset={:#x} format={:#x} start_frame={:#x} kernel_addr={:#x} map_offset={:#x} scanout_backed={}",
-            comm,
-            pid,
-            handle,
-            width,
-            height,
-            pitch,
-            offset,
-            pixel_format,
-            buffer.start_frame_addr(),
-            buffer.kernel_addr,
-            buffer.map_offset,
-            buffer.scanout_backed
-        );
-    }
-
     Ok(RegisteredFramebuffer {
         fb_id: 0,
         width,
@@ -100,100 +73,6 @@ pub(super) fn refresh_current_scanout() -> ObjectResult<()> {
         Some(fb_id) => scanout_framebuffer_id(fb_id),
         None => Ok(()),
     }
-}
-
-pub(crate) fn refresh_legacy_scanout_tick() {
-    const REFRESH_INTERVAL_NS: u64 = 16 * NANOSECONDS_PER_MILLISECOND;
-
-    let now_ns = Time::since_boot().as_nanoseconds();
-    let now_ms = u32::try_from(now_ns / NANOSECONDS_PER_MILLISECOND).unwrap_or(u32::MAX);
-    let last_ms = LAST_LEGACY_SCANOUT_REFRESH_NS.load(Ordering::Relaxed);
-    if now_ms.wrapping_sub(last_ms)
-        < u32::try_from(REFRESH_INTERVAL_NS / NANOSECONDS_PER_MILLISECOND).unwrap_or(16)
-    {
-        return;
-    }
-
-    let should_refresh = {
-        let state = DRM_STATE.lock();
-        state.current_fb_id.is_some_and(|fb_id| {
-            state
-                .framebuffers
-                .get(&fb_id)
-                .and_then(|framebuffer| state.dumb_buffers.get(&framebuffer.handle))
-                .is_some_and(|buffer| !buffer.scanout_backed)
-        })
-    };
-
-    if !should_refresh {
-        return;
-    }
-
-    LAST_LEGACY_SCANOUT_REFRESH_NS.store(now_ms, Ordering::Relaxed);
-    if LEGACY_REFRESH_DEBUG_SAMPLES.fetch_add(1, Ordering::Relaxed) < 16 {
-        let _ = refresh_current_scanout().and_then(|()| {
-            let current_fb_id = {
-                let state = DRM_STATE.lock();
-                state.current_fb_id
-            };
-            if let Some(fb_id) = current_fb_id {
-                log_framebuffer_sample("legacy-refresh", fb_id)?;
-            }
-            Ok(())
-        });
-        return;
-    }
-    let _ = refresh_current_scanout();
-}
-
-pub(super) fn log_framebuffer_sample(phase: &str, fb_id: u32) -> ObjectResult<()> {
-    let sample_index = DRM_DEBUG_SAMPLES.fetch_add(1, Ordering::Relaxed);
-    if sample_index >= 32 {
-        return Ok(());
-    }
-
-    let (framebuffer, dumb_buffer) = {
-        let state = DRM_STATE.lock();
-        let framebuffer = state
-            .framebuffers
-            .get(&fb_id)
-            .cloned()
-            .ok_or(ObjectError::InvalidArguments)?;
-        let dumb_buffer = state
-            .dumb_buffers
-            .get(&framebuffer.handle)
-            .cloned()
-            .ok_or(ObjectError::InvalidArguments)?;
-        (framebuffer, dumb_buffer)
-    };
-
-    let src_start = dumb_buffer
-        .kernel_addr
-        .checked_add(u64::from(framebuffer.offset))
-        .ok_or(ObjectError::InvalidArguments)?;
-    let src_bytes = usize::try_from(
-        dumb_buffer
-            .size
-            .checked_sub(u64::from(framebuffer.offset))
-            .ok_or(ObjectError::InvalidArguments)?,
-    )
-    .map_err(|_| ObjectError::InvalidArguments)?;
-    let src = unsafe { slice::from_raw_parts(src_start as *const u8, src_bytes) };
-    let (sampled, non_zero, checksum) = sample_buffer(src);
-    crate::s_println!(
-        "drm debug phase={} idx={} fb={} {}x{} pitch={} scanout_backed={} sampled={} non_zero={} checksum={:#010x}",
-        phase,
-        sample_index,
-        framebuffer.fb_id,
-        framebuffer.width,
-        framebuffer.height,
-        framebuffer.pitch,
-        dumb_buffer.scanout_backed,
-        sampled,
-        non_zero,
-        checksum
-    );
-    Ok(())
 }
 
 pub(super) fn blit_dumb_buffer_to_scanout(
@@ -421,22 +300,4 @@ fn overlay_cursor(
     }
 
     Ok(())
-}
-
-fn sample_buffer(buffer: &[u8]) -> (usize, usize, u32) {
-    let mut sampled = 0usize;
-    let mut non_zero = 0usize;
-    let mut checksum = 0u32;
-
-    for chunk in buffer.chunks_exact(4).step_by(97) {
-        sampled += 1;
-        for byte in &chunk[..3] {
-            checksum = checksum.wrapping_mul(16777619) ^ u32::from(*byte);
-            if *byte != 0 {
-                non_zero += 1;
-            }
-        }
-    }
-
-    (sampled, non_zero, checksum)
 }

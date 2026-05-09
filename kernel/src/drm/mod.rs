@@ -16,7 +16,5 @@ pub(crate) mod prime;
 mod state;
 mod user;
 
-pub(crate) use framebuffer::refresh_legacy_scanout_tick;
-
 #[cfg(test)]
 mod test;
