@@ -178,7 +178,7 @@ impl UnixSocketObject {
                         .as_ref()
                         .and_then(Weak::upgrade)
                         .is_none();
-                    if peer_gone || *stream.write_closed.lock() {
+                    if peer_gone || *stream.peer_write_closed.lock() {
                         return Ok(0);
                     }
                     if nonblocking {
@@ -194,7 +194,7 @@ impl UnixSocketObject {
                         || (allow_control_only
                             && stream.recv_buf.lock().is_empty()
                             && stream.has_front_rights())
-                        || *stream.write_closed.lock()
+                        || *stream.peer_write_closed.lock()
                         || stream
                             .peer
                             .lock()

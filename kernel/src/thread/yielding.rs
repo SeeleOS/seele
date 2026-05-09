@@ -53,6 +53,7 @@ fn poll_event_name(event: PollableEvent) -> &'static str {
         PollableEvent::CanBeWritten => "write",
         PollableEvent::Error => "error",
         PollableEvent::Closed => "closed",
+        PollableEvent::ReadClosed => "read-closed",
         PollableEvent::Other(_) => "other",
     }
 }

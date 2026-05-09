@@ -66,7 +66,10 @@ impl Pollable for FuseDevice {
         match event {
             PollableEvent::CanBeRead => self.connection.is_request_pending(),
             PollableEvent::CanBeWritten => true,
-            PollableEvent::Error | PollableEvent::Closed | PollableEvent::Other(_) => false,
+            PollableEvent::Error
+            | PollableEvent::Closed
+            | PollableEvent::ReadClosed
+            | PollableEvent::Other(_) => false,
         }
     }
 }

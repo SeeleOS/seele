@@ -108,18 +108,20 @@ impl UnixSocketObject {
             UnixSocketState::Stream(stream) => match how {
                 0 => {
                     *stream.read_shutdown.lock() = true;
+                    stream.notify_peer_read_shutdown();
                 }
                 1 => {
                     if !*stream.write_shutdown.lock() {
                         *stream.write_shutdown.lock() = true;
-                        stream.close_local();
+                        stream.notify_peer_write_shutdown();
                     }
                 }
                 2 => {
                     *stream.read_shutdown.lock() = true;
+                    stream.notify_peer_read_shutdown();
                     if !*stream.write_shutdown.lock() {
                         *stream.write_shutdown.lock() = true;
-                        stream.close_local();
+                        stream.notify_peer_write_shutdown();
                     }
                 }
                 _ => return Err(SocketError::InvalidArguments),

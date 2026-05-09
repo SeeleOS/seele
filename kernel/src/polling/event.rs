@@ -5,6 +5,7 @@ pub enum PollableEvent {
     CanBeWritten,
     Error,
     Closed,
+    ReadClosed,
     Other(u64),
 }
 
@@ -15,6 +16,7 @@ impl From<u64> for PollableEvent {
             1 => Self::CanBeWritten,
             2 => Self::Error,
             3 => Self::Closed,
+            4 => Self::ReadClosed,
             _ => Self::Other(value),
         }
     }

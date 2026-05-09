@@ -5278,6 +5278,7 @@ fn epoll_syscalls_follow_linux_rules() {
     const EPOLLONESHOT: u32 = 0x4000_0000;
     const AF_UNIX: u64 = 1;
     const SOCK_STREAM: u64 = 1;
+    const SHUT_WR: u64 = 1;
     assert_linux_layout::<TestLinuxEpollEvent>(12, 1);
 
     let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
@@ -5405,6 +5406,24 @@ fn epoll_syscalls_follow_linux_rules() {
         1,
     );
     assert_user_bytes(epoll_events + 321, b"u");
+    expect_ok(
+        SyscallArgs::new([right as u64, SHUT_WR, 0, 0, 0, 0]).call::<Shutdown>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([epoll_fd as u64, epoll_events + 448, 4, 0, 0, 0]).call::<EpollWait>(),
+        1,
+    );
+    let peer_shutdown_socket_ready = read_user_value::<TestLinuxEpollEvent>(epoll_events + 448);
+    let peer_shutdown_socket_events = peer_shutdown_socket_ready.events;
+    let peer_shutdown_socket_data = peer_shutdown_socket_ready.data;
+    assert_eq!(peer_shutdown_socket_events, EPOLLIN | EPOLLOUT | EPOLLRDHUP);
+    assert_eq!(peer_shutdown_socket_events & EPOLLHUP, 0);
+    assert_eq!(peer_shutdown_socket_data, 0x55aa);
+    expect_ok(
+        SyscallArgs::new([left as u64, epoll_events + 449, 1, 0, 0, 0]).call::<Read>(),
+        0,
+    );
 
     expect_ok(
         SyscallArgs::new([epoll_fd as u64, EPOLL_CTL_DEL, left as u64, 0, 0, 0]).call::<EpollCtl>(),
@@ -5526,6 +5545,7 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     const POLLIN: i16 = 0x001;
     const POLLOUT: i16 = 0x004;
     const POLLHUP: i16 = 0x010;
+    const POLLRDHUP: i16 = 0x2000;
     const SO_TYPE: u64 = 3;
     const SO_ERROR: u64 = 4;
     const SO_SNDBUF: u64 = 7;
@@ -5706,7 +5726,7 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
         pollfds_page,
         &[TestLinuxPollFd {
             fd: left_fd as i32,
-            events: POLLIN | POLLOUT | POLLHUP,
+            events: POLLIN | POLLOUT | POLLHUP | POLLRDHUP,
             revents: 0,
         }],
     );
@@ -5717,10 +5737,21 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     let peer_shutdown_poll = read_user_value::<TestLinuxPollFd>(pollfds_page);
     assert_eq!(peer_shutdown_poll.revents & POLLIN, POLLIN);
     assert_eq!(peer_shutdown_poll.revents & POLLOUT, POLLOUT);
-    assert_eq!(peer_shutdown_poll.revents & POLLHUP, POLLHUP);
+    assert_eq!(peer_shutdown_poll.revents & POLLHUP, 0);
+    assert_eq!(peer_shutdown_poll.revents & POLLRDHUP, POLLRDHUP);
     expect_ok(
         SyscallArgs::new([left_fd as u64, page + 58, 1, 0, 0, 0]).call::<Read>(),
         0,
+    );
+    write_user_value(page + 768, b"q");
+    expect_errno(
+        SyscallArgs::new([right_fd as u64, page + 768, 1, 0, 0, 0]).call::<Write>(),
+        SyscallError::BrokenPipe,
+    );
+    write_user_value(page + 776, b"r");
+    expect_ok(
+        SyscallArgs::new([left_fd as u64, page + 776, 1, 0, 0, 0]).call::<Write>(),
+        1,
     );
     expect_ok(
         SyscallArgs::new([right_fd as u64, SHUT_RDWR, 0, 0, 0, 0]).call::<Shutdown>(),
@@ -8666,15 +8697,20 @@ fn poll_helpers_translate_linux_events_to_kernel_readiness() {
         events[3],
         Some(crate::polling::event::PollableEvent::Closed)
     );
+    assert_eq!(
+        events[4],
+        Some(crate::polling::event::PollableEvent::ReadClosed)
+    );
 
     let translated = translate_ready_events(
-        PollEvents::POLLIN | PollEvents::POLLRDNORM | PollEvents::POLLHUP,
-        (PollEvents::POLLIN | PollEvents::POLLHUP).bits() as u32,
+        PollEvents::POLLIN | PollEvents::POLLRDNORM | PollEvents::POLLHUP | PollEvents::POLLRDHUP,
+        (PollEvents::POLLIN | PollEvents::POLLHUP | PollEvents::POLLRDHUP).bits() as u32,
     );
     let translated = PollEvents::from_bits_retain(translated);
     assert!(translated.contains(PollEvents::POLLIN));
     assert!(translated.contains(PollEvents::POLLRDNORM));
     assert!(translated.contains(PollEvents::POLLHUP));
+    assert!(translated.contains(PollEvents::POLLRDHUP));
     assert!(!translated.contains(PollEvents::POLLOUT));
 }
 

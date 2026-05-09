@@ -94,13 +94,7 @@ fn write_epoll_event(
 }
 
 fn epoll_interest_entries(bits: EpollEvents) -> [(bool, PollableEvent, u32); 6] {
-    let watch_any = bits.intersects(
-        EpollEvents::IN
-            | EpollEvents::PRI
-            | EpollEvents::OUT
-            | EpollEvents::HUP
-            | EpollEvents::RDHUP,
-    );
+    let watch_any = bits.intersects(EpollEvents::IN | EpollEvents::PRI | EpollEvents::OUT);
 
     [
         (
@@ -129,8 +123,8 @@ fn epoll_interest_entries(bits: EpollEvents) -> [(bool, PollableEvent, u32); 6] 
             EpollEvents::HUP.bits(),
         ),
         (
-            bits.contains(EpollEvents::RDHUP),
-            PollableEvent::Closed,
+            watch_any || bits.contains(EpollEvents::RDHUP),
+            PollableEvent::ReadClosed,
             EpollEvents::RDHUP.bits(),
         ),
     ]
@@ -193,6 +187,7 @@ define_syscall!(
                     PollableEvent::CanBeWritten,
                     PollableEvent::Error,
                     PollableEvent::Closed,
+                    PollableEvent::ReadClosed,
                 ] {
                     poller
                         .clone()
@@ -212,6 +207,7 @@ define_syscall!(
                     PollableEvent::CanBeWritten,
                     PollableEvent::Error,
                     PollableEvent::Closed,
+                    PollableEvent::ReadClosed,
                 ] {
                     poller
                         .clone()

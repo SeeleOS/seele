@@ -32,6 +32,7 @@ bitflags! {
         const POLLRDBAND = 0x080;
         const POLLWRNORM = 0x100;
         const POLLWRBAND = 0x200;
+        const POLLRDHUP = 0x2000;
     }
 }
 
@@ -50,7 +51,7 @@ pub(in crate::systemcall) struct Timespec {
     pub(in crate::systemcall) tv_nsec: i64,
 }
 
-pub(in crate::systemcall) fn kernel_events_for(bits: PollEvents) -> [Option<PollableEvent>; 4] {
+pub(in crate::systemcall) fn kernel_events_for(bits: PollEvents) -> [Option<PollableEvent>; 5] {
     let watch_read = bits.intersects(
         PollEvents::POLLIN | PollEvents::POLLPRI | PollEvents::POLLRDNORM | PollEvents::POLLRDBAND,
     );
@@ -63,6 +64,7 @@ pub(in crate::systemcall) fn kernel_events_for(bits: PollEvents) -> [Option<Poll
         watch_write.then_some(PollableEvent::CanBeWritten),
         (watch_any || bits.contains(PollEvents::POLLERR)).then_some(PollableEvent::Error),
         (watch_any || bits.contains(PollEvents::POLLHUP)).then_some(PollableEvent::Closed),
+        (watch_any || bits.contains(PollEvents::POLLRDHUP)).then_some(PollableEvent::ReadClosed),
     ]
 }
 
@@ -88,6 +90,14 @@ pub(in crate::systemcall) fn translate_ready_events(
     }
     if kernel_events & (PollEvents::POLLHUP.bits() as u32) != 0 {
         translated |= PollEvents::POLLHUP;
+    }
+    if kernel_events & (PollEvents::POLLRDHUP.bits() as u32) != 0 {
+        translated |= requested_events
+            & (PollEvents::POLLIN
+                | PollEvents::POLLPRI
+                | PollEvents::POLLRDNORM
+                | PollEvents::POLLRDBAND);
+        translated |= requested_events & PollEvents::POLLRDHUP;
     }
 
     translated.bits()

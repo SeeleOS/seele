@@ -35,6 +35,7 @@ fn event_key(event: PollableEvent) -> u64 {
         PollableEvent::CanBeWritten => 1,
         PollableEvent::Error => 2,
         PollableEvent::Closed => 3,
+        PollableEvent::ReadClosed => 4,
         PollableEvent::Other(bits) => bits,
     }
 }
@@ -170,6 +171,7 @@ impl PollerObject {
                 PollableEvent::CanBeWritten => 0x004,
                 PollableEvent::Error => 0x008,
                 PollableEvent::Closed => 0x010,
+                PollableEvent::ReadClosed => 0x2000,
                 PollableEvent::Other(bits) => bits as u32,
             },
             false,

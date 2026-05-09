@@ -13,7 +13,7 @@ impl Pollable for UnixSocketObject {
                 PollableEvent::CanBeRead => {
                     !stream.recv_buf.lock().is_empty()
                         || stream.has_front_rights()
-                        || *stream.write_closed.lock()
+                        || *stream.peer_write_closed.lock()
                         || stream
                             .peer
                             .lock()
@@ -27,24 +27,33 @@ impl Pollable for UnixSocketObject {
                     }
 
                     let Some(peer) = stream.peer.lock().as_ref().and_then(Weak::upgrade) else {
-                        return false;
+                        return true;
                     };
 
                     if *peer.read_shutdown.lock() {
-                        return false;
+                        return true;
                     }
 
                     peer.recv_buf.lock().len() < STREAM_RECV_CAPACITY
                 }
                 PollableEvent::Closed => {
-                    *stream.write_closed.lock()
+                    *stream.peer_closed.lock()
                         || stream
                             .peer
                             .lock()
                             .as_ref()
                             .and_then(Weak::upgrade)
                             .is_none()
+                        || stream
+                            .peer
+                            .lock()
+                            .as_ref()
+                            .and_then(Weak::upgrade)
+                            .is_some_and(|peer| {
+                                *stream.peer_write_closed.lock() && *peer.read_shutdown.lock()
+                            })
                 }
+                PollableEvent::ReadClosed => *stream.peer_write_closed.lock(),
                 _ => false,
             },
             UnixSocketState::Datagram(datagram) => match event {

@@ -268,7 +268,9 @@ fn collect_ready(
         }
 
         match ready.event {
-            PollableEvent::CanBeRead | PollableEvent::Closed => read_ready[fd] = true,
+            PollableEvent::CanBeRead | PollableEvent::Closed | PollableEvent::ReadClosed => {
+                read_ready[fd] = true;
+            }
             PollableEvent::CanBeWritten => write_ready[fd] = true,
             PollableEvent::Error => except_ready[fd] = true,
             PollableEvent::Other(_) => {}
@@ -361,6 +363,15 @@ define_syscall!(
                     readfds_in.as_deref(),
                     nfds,
                     PollableEvent::Closed,
+                    &mut read_ready,
+                    &mut ready_fds,
+                    &mut ready_count,
+                )?;
+                register_interest(
+                    &poller,
+                    readfds_in.as_deref(),
+                    nfds,
+                    PollableEvent::ReadClosed,
                     &mut read_ready,
                     &mut ready_fds,
                     &mut ready_count,

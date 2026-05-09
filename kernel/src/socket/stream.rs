@@ -32,7 +32,8 @@ pub struct UnixStreamInner {
     pub peer: Mutex<Option<Weak<UnixStreamInner>>>,
     pub owner: Mutex<Option<Weak<UnixSocketObject>>>,
     pub peer_cred: Mutex<SocketPeerCred>,
-    pub write_closed: Mutex<bool>,
+    pub peer_write_closed: Mutex<bool>,
+    pub peer_closed: Mutex<bool>,
     pub read_shutdown: Mutex<bool>,
     pub write_shutdown: Mutex<bool>,
     pub local_name: Mutex<Option<String>>,
@@ -49,7 +50,8 @@ impl UnixStreamInner {
             peer: Mutex::new(None),
             owner: Mutex::new(None),
             peer_cred: Mutex::new(SocketPeerCred::default()),
-            write_closed: Mutex::new(false),
+            peer_write_closed: Mutex::new(false),
+            peer_closed: Mutex::new(false),
             read_shutdown: Mutex::new(false),
             write_shutdown: Mutex::new(false),
             local_name: Mutex::new(None),
@@ -68,11 +70,35 @@ impl UnixStreamInner {
         (left, right)
     }
 
-    pub fn close_local(&self) {
+    pub fn notify_peer_write_shutdown(&self) {
         if let Some(peer) = self.peer.lock().as_ref().and_then(Weak::upgrade) {
-            *peer.write_closed.lock() = true;
+            *peer.peer_write_closed.lock() = true;
             if let Some(owner) = peer.owner.lock().as_ref().and_then(Weak::upgrade) {
                 wake_pollers(&owner, PollableEvent::CanBeRead);
+                wake_pollers(&owner, PollableEvent::ReadClosed);
+                wake_pollers(&owner, PollableEvent::Closed);
+                wake_pollers(&owner, PollableEvent::CanBeWritten);
+            }
+        }
+        wake_io();
+    }
+
+    pub fn notify_peer_read_shutdown(&self) {
+        if let Some(peer) = self.peer.lock().as_ref().and_then(Weak::upgrade)
+            && let Some(owner) = peer.owner.lock().as_ref().and_then(Weak::upgrade)
+        {
+            wake_pollers(&owner, PollableEvent::CanBeWritten);
+        }
+        wake_io();
+    }
+
+    pub fn close_local(&self) {
+        if let Some(peer) = self.peer.lock().as_ref().and_then(Weak::upgrade) {
+            *peer.peer_write_closed.lock() = true;
+            *peer.peer_closed.lock() = true;
+            if let Some(owner) = peer.owner.lock().as_ref().and_then(Weak::upgrade) {
+                wake_pollers(&owner, PollableEvent::CanBeRead);
+                wake_pollers(&owner, PollableEvent::ReadClosed);
                 wake_pollers(&owner, PollableEvent::Closed);
                 wake_pollers(&owner, PollableEvent::CanBeWritten);
             }
