@@ -58,6 +58,11 @@ pub fn start_application_processors() {
     for processor in processors {
         register_application_processor(processor.index, processor.apic_id);
     }
+    if let Some(thread_manager) = thread::THREAD_MANAGER.get() {
+        thread_manager
+            .lock()
+            .resize_ready_queues(topology::processors().len());
+    }
     let register_done = Time::since_boot();
     log::info!(
         "smp: ap discovery took {}ms, context registration took {}ms",

@@ -1,3 +1,4 @@
+use x2apic::lapic::IpiAllShorthand;
 use x86_64::{VirtAddr, structures::idt::InterruptDescriptorTable};
 
 use crate::{
@@ -14,6 +15,7 @@ pub enum HardwareInterrupt {
     Timer = PIC_1_OFFSET,
     Keyboard,
     Mouse,
+    SchedulerWake = PIC_1_OFFSET + 15,
 }
 
 impl HardwareInterrupt {
@@ -29,12 +31,31 @@ pub fn send_eoi() {
     unsafe { with_current_cpu(|cpu| cpu.local_apic.end_of_interrupt()) };
 }
 
+pub fn wake_scheduler_cpus() {
+    unsafe {
+        with_current_cpu(|cpu| {
+            cpu.local_apic.send_ipi_all(
+                HardwareInterrupt::SchedulerWake.as_u8(),
+                IpiAllShorthand::AllExcludingSelf,
+            );
+        });
+    }
+}
+
 pub fn init_hardware_interrupts(idt: &mut InterruptDescriptorTable) {
     unsafe {
         idt[HardwareInterrupt::Timer.as_u8()].set_handler_addr(VirtAddr::new(
             timer_interrupt_handler_wrapper as *const () as u64,
         ));
         idt[HardwareInterrupt::Keyboard.as_u8()].set_handler_fn(keyboard_interrupt_handler);
-        idt[HardwareInterrupt::Mouse.as_u8()].set_handler_fn(mouse_interrupt_handler)
+        idt[HardwareInterrupt::Mouse.as_u8()].set_handler_fn(mouse_interrupt_handler);
+        idt[HardwareInterrupt::SchedulerWake.as_u8()]
+            .set_handler_fn(scheduler_wake_interrupt_handler)
     };
+}
+
+extern "x86-interrupt" fn scheduler_wake_interrupt_handler(
+    _: crate::interrupts::InterruptStackFrame,
+) {
+    send_eoi();
 }

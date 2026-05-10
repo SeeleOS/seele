@@ -29,14 +29,29 @@ struct PendingThreadExit {
 #[derive(Default, Debug)]
 pub struct ThreadManager {
     pub threads: BTreeMap<ThreadID, ThreadRef>,
-    pub ready_queue: VecDeque<ThreadRef>,
+    pub ready_queues: Vec<VecDeque<ThreadRef>>,
     pub zombies: Vec<ThreadRef>,
     pending_thread_exits: Vec<PendingThreadExit>,
     pub blocked_queues: BlockedQueues,
+    next_ready_cpu: usize,
 }
 
 impl ThreadManager {
-    pub fn init(&mut self) {}
+    pub fn init(&mut self) {
+        self.resize_ready_queues(crate::smp::topology::processors().len().max(1));
+    }
+
+    pub fn resize_ready_queues(&mut self, cpu_count: usize) {
+        let cpu_count = cpu_count.max(1);
+        if self.ready_queues.len() >= cpu_count {
+            return;
+        }
+
+        self.ready_queues.resize_with(cpu_count, VecDeque::new);
+        if self.next_ready_cpu >= self.ready_queues.len() {
+            self.next_ready_cpu = 0;
+        }
+    }
 
     pub fn spawn(&mut self, thread: Thread) -> ThreadRef {
         let id = thread.id;
@@ -45,7 +60,7 @@ impl ThreadManager {
         self.threads.insert(id, thread.clone());
 
         log::debug!("thread spawn: {:?}", id);
-        self.push_ready(thread.clone());
+        self.push_ready_balanced(thread.clone());
 
         thread
     }
@@ -66,21 +81,57 @@ impl ThreadManager {
         thread
     }
 
-    pub fn push_ready(&mut self, thread: ThreadRef) {
-        if self
-            .ready_queue
+    pub fn push_ready_balanced(&mut self, thread: ThreadRef) {
+        let cpu_index = self.next_balanced_cpu();
+        self.push_ready_on_cpu(thread, cpu_index);
+    }
+
+    pub fn push_ready_on_cpu(&mut self, thread: ThreadRef, cpu_index: usize) {
+        if self.ready_queues.is_empty() {
+            self.resize_ready_queues(1);
+        }
+
+        let queue_index = cpu_index.min(self.ready_queues.len() - 1);
+        if self.ready_queues[queue_index]
             .iter()
             .any(|queued| Arc::ptr_eq(queued, &thread))
         {
             return;
         }
 
-        self.ready_queue.push_back(thread);
+        self.ready_queues[queue_index].push_back(thread);
     }
 
-    pub fn pop_ready(&mut self) -> Option<ThreadRef> {
-        while let Some(thread) = self.ready_queue.pop_front() {
-            if matches!(thread.lock().state, State::Ready) {
+    pub fn pop_ready_for_cpu(&mut self, cpu_index: usize) -> Option<ThreadRef> {
+        self.pop_ready_for_cpu_inner(cpu_index, true)
+    }
+
+    pub fn pop_local_ready_for_cpu(&mut self, cpu_index: usize) -> Option<ThreadRef> {
+        self.pop_ready_for_cpu_inner(cpu_index, false)
+    }
+
+    fn pop_ready_for_cpu_inner(
+        &mut self,
+        cpu_index: usize,
+        allow_steal: bool,
+    ) -> Option<ThreadRef> {
+        if self.ready_queues.is_empty() {
+            self.resize_ready_queues(1);
+        }
+
+        let local_index = cpu_index.min(self.ready_queues.len() - 1);
+        if let Some(thread) = Self::pop_ready_from_queue(&mut self.ready_queues[local_index]) {
+            return Some(thread);
+        }
+        if !allow_steal {
+            return None;
+        }
+
+        for index in 0..self.ready_queues.len() {
+            if index == local_index {
+                continue;
+            }
+            if let Some(thread) = Self::pop_ready_from_queue(&mut self.ready_queues[index]) {
                 return Some(thread);
             }
         }
@@ -89,7 +140,13 @@ impl ThreadManager {
     }
 
     pub fn has_ready_threads(&self) -> bool {
-        !self.ready_queue.is_empty()
+        self.ready_queues.iter().any(|queue| !queue.is_empty())
+    }
+
+    pub fn has_ready_threads_for_cpu(&self, cpu_index: usize) -> bool {
+        self.ready_queues
+            .get(cpu_index)
+            .is_some_and(|queue| !queue.is_empty())
     }
 
     pub fn wake_thread_by_id(&mut self, thread_id: ThreadID) {
@@ -233,5 +290,31 @@ impl ThreadManager {
             };
             wake_futex_for_process_with_manager(pid, pending.clear_child_tid, 1, self);
         }
+    }
+
+    pub fn remove_ready_thread(&mut self, thread: &ThreadRef) {
+        for queue in &mut self.ready_queues {
+            queue.retain(|queued| !Arc::ptr_eq(queued, thread));
+        }
+    }
+
+    fn next_balanced_cpu(&mut self) -> usize {
+        if self.ready_queues.is_empty() {
+            self.resize_ready_queues(1);
+        }
+
+        let cpu_index = self.next_ready_cpu % self.ready_queues.len();
+        self.next_ready_cpu = (cpu_index + 1) % self.ready_queues.len();
+        cpu_index
+    }
+
+    fn pop_ready_from_queue(queue: &mut VecDeque<ThreadRef>) -> Option<ThreadRef> {
+        while let Some(thread) = queue.pop_front() {
+            if matches!(thread.lock().state, State::Ready) {
+                return Some(thread);
+            }
+        }
+
+        None
     }
 }

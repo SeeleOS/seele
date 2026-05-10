@@ -17,7 +17,10 @@ use crate::{
     object::linux_anon::wake_expired_timerfds_with_manager,
     process::manager::MANAGER,
     signal::process_current_process_signals,
-    smp::{set_current_kernel_stack, set_current_process, set_current_thread, try_current_process},
+    smp::{
+        current_cpu_index, set_current_kernel_stack, set_current_process, set_current_thread,
+        try_current_process,
+    },
     thread::{
         THREAD_MANAGER, ThreadRef,
         misc::State,
@@ -36,6 +39,10 @@ fn can_run_ready_threads_on_current_cpu() -> bool {
         || AP_TASK_SCHEDULING_ENABLED.load(Ordering::Acquire)
 }
 
+fn should_run_global_scheduler_work() -> bool {
+    crate::smp::with_current_cpu(|cpu| cpu.is_bsp)
+}
+
 fn process_deferred_timer_work() {
     process_expired_process_timers();
 
@@ -46,16 +53,11 @@ fn process_deferred_timer_work() {
 }
 
 pub fn return_to_scheduler(snapshot: &mut Snapshot, snapshot_type: ThreadSnapshotType) {
-    let (thread_snapshot, scheduler_snapshot) = {
-        let _manager = THREAD_MANAGER.get().unwrap().lock();
-        let current_ref = crate::thread::get_current_thread();
-        let mut current = current_ref.lock();
-
-        (
-            current.get_appropriate_snapshot() as *mut ThreadSnapshot,
-            &mut current.scheduler_snapshot as *mut ThreadSnapshot,
-        )
-    };
+    let current_ref = crate::thread::get_current_thread();
+    let mut current = current_ref.lock();
+    let thread_snapshot = current.get_appropriate_snapshot() as *mut ThreadSnapshot;
+    let scheduler_snapshot = &mut current.scheduler_snapshot as *mut ThreadSnapshot;
+    drop(current);
 
     unsafe {
         (*thread_snapshot).snapshot_type = snapshot_type;
@@ -139,16 +141,11 @@ extern "C" fn return_to_scheduler_from_current_inner(snapshot_ptr: *mut Snapshot
 
 pub fn return_to_scheduler_no_save() -> ! {
     log::trace!("return_to_scheduler_no_save");
-    let (thread_snapshot, scheduler_snapshot) = {
-        let _manager = THREAD_MANAGER.get().unwrap().lock();
-        let current_ref = crate::thread::get_current_thread();
-        let mut current = current_ref.lock();
-
-        (
-            current.get_appropriate_snapshot() as *mut ThreadSnapshot,
-            &mut current.scheduler_snapshot as *mut ThreadSnapshot,
-        )
-    };
+    let current_ref = crate::thread::get_current_thread();
+    let mut current = current_ref.lock();
+    let thread_snapshot = current.get_appropriate_snapshot() as *mut ThreadSnapshot;
+    let scheduler_snapshot = &mut current.scheduler_snapshot as *mut ThreadSnapshot;
+    drop(current);
 
     unsafe { (*scheduler_snapshot).switch_from(Some(&mut *thread_snapshot), None) };
 
@@ -157,16 +154,27 @@ pub fn return_to_scheduler_no_save() -> ! {
 
 pub fn run() -> ! {
     loop {
-        process_deferred_timer_work();
-        crate::net::poll();
-        keyboard::process_pending_scancodes();
-        agent_tty_input::process_pending_input();
-        mouse::process_pending_mouse_events();
+        if should_run_global_scheduler_work() {
+            process_deferred_timer_work();
+            crate::net::poll();
+            keyboard::process_pending_scancodes();
+            agent_tty_input::process_pending_input();
+            mouse::process_pending_mouse_events();
+        }
 
-        let next_thread = if can_run_ready_threads_on_current_cpu() {
-            THREAD_MANAGER.get().unwrap().lock().pop_ready()
+        let can_run_ready_threads = can_run_ready_threads_on_current_cpu();
+        let next_thread = if can_run_ready_threads {
+            THREAD_MANAGER
+                .get()
+                .unwrap()
+                .lock()
+                .pop_ready_for_cpu(current_cpu_index())
         } else {
-            None
+            THREAD_MANAGER
+                .get()
+                .unwrap()
+                .lock()
+                .pop_local_ready_for_cpu(current_cpu_index())
         };
 
         if let Some(thread) = next_thread {
@@ -179,9 +187,12 @@ pub fn run() -> ! {
 }
 
 fn run_ready_thread(thread_ref: ThreadRef) {
-    let (thread_snapshot, scheduler_snapshot) = without_interrupts(|| {
-        let _manager = THREAD_MANAGER.get().unwrap().lock();
+    let Some((thread_snapshot, scheduler_snapshot)) = without_interrupts(|| {
         let mut thread = thread_ref.lock();
+        if !matches!(thread.state, State::Ready) {
+            return None;
+        }
+
         let process = thread.parent.clone();
         thread.state = State::Running;
         set_current_thread(Some(thread_ref.clone()));
@@ -196,11 +207,13 @@ fn run_ready_thread(thread_ref: ThreadRef) {
             set_current_process(Some(process));
         }
 
-        (
+        Some((
             thread.get_appropriate_snapshot() as *mut ThreadSnapshot,
             &mut thread.scheduler_snapshot as *mut ThreadSnapshot,
-        )
-    });
+        ))
+    }) else {
+        return;
+    };
 
     unsafe {
         switch_from_scheduler_to_thread(thread_snapshot, scheduler_snapshot);
@@ -305,18 +318,12 @@ fn after_thread_yield(thread_ref: ThreadRef) {
     match state {
         State::Running => {
             thread_ref.lock().state = State::Ready;
-            THREAD_MANAGER
-                .get()
-                .unwrap()
-                .lock()
-                .push_ready(thread_ref.clone());
+            let mut manager = THREAD_MANAGER.get().unwrap().lock();
+            manager.push_ready_balanced(thread_ref.clone());
         }
         State::Ready => {
-            THREAD_MANAGER
-                .get()
-                .unwrap()
-                .lock()
-                .push_ready(thread_ref.clone());
+            let mut manager = THREAD_MANAGER.get().unwrap().lock();
+            manager.push_ready_balanced(thread_ref.clone());
         }
         State::Blocked(_) => {}
         State::Zombie => {
@@ -334,12 +341,23 @@ fn after_thread_yield(thread_ref: ThreadRef) {
 fn sleep_if_idle() {
     interrupts::disable();
 
-    process_deferred_timer_work();
+    if should_run_global_scheduler_work() {
+        process_deferred_timer_work();
+    }
 
-    let has_pending_work = keyboard::has_pending_scancodes()
-        || agent_tty_input::has_pending_input()
-        || mouse::has_pending_events()
-        || { THREAD_MANAGER.get().unwrap().lock().has_ready_threads() };
+    let has_pending_threads = {
+        let manager = THREAD_MANAGER.get().unwrap().lock();
+        if can_run_ready_threads_on_current_cpu() {
+            manager.has_ready_threads()
+        } else {
+            manager.has_ready_threads_for_cpu(current_cpu_index())
+        }
+    };
+    let has_pending_work = has_pending_threads
+        || (should_run_global_scheduler_work()
+            && (keyboard::has_pending_scancodes()
+                || agent_tty_input::has_pending_input()
+                || mouse::has_pending_events()));
 
     if has_pending_work {
         interrupts::enable();
