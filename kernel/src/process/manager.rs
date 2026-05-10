@@ -76,16 +76,18 @@ pub fn get_current_process() -> ProcessRef {
 
 pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
     let process_ref = process.clone();
-    let (threads, vfork_blocker, parent_death_signals) = {
+    let (threads, vfork_blocker, parent_death_signals, reparented_children) = {
         let mut process = process.lock();
         process.restore_borrowed_addrspace_to_parent();
         let vfork_blocker = process.vfork_blocker.take();
         let parent_death_signals =
             collect_parent_death_signals_for_children(process.pid, &process_ref);
+        let reparented_children = reparent_children(process.pid, &process_ref);
         (
             process.terminate_inner(exit_status),
             vfork_blocker,
             parent_death_signals,
+            reparented_children,
         )
     };
     if let Some(process) = process.try_lock() {
@@ -97,6 +99,20 @@ pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
     }
 
     let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+    for child in &reparented_children {
+        let (pid, parent, has_pending_wait) = {
+            let child = child.lock();
+            (
+                child.pid,
+                child.parent.clone(),
+                child.exit_status.is_some() || child.wait_event.is_some(),
+            )
+        };
+        if has_pending_wait && let Some(parent) = parent {
+            send_signal_to_process(&parent, Signal::SIGCHLD);
+            thread_manager.wake_process_exit_waiters(pid);
+        }
+    }
     if let Some(thread_id) = vfork_blocker {
         thread_manager.wake_thread_by_id(thread_id);
     }
@@ -127,6 +143,60 @@ fn collect_parent_death_signals_for_children(
             Some((child.clone(), child_lock.parent_death_signal?))
         })
         .collect()
+}
+
+fn init_process_ref() -> Option<ProcessRef> {
+    MANAGER.lock().processes.values().find_map(|process| {
+        let process = process.clone();
+        let is_init = process.lock().pid.0 == 1;
+        is_init.then_some(process)
+    })
+}
+
+fn nearest_live_subreaper(process: &ProcessRef) -> Option<ProcessRef> {
+    let mut current = process.lock().parent.clone();
+    while let Some(candidate) = current {
+        let next = {
+            let candidate_lock = candidate.lock();
+            if candidate_lock.exit_status.is_none() && candidate_lock.child_subreaper {
+                return Some(candidate.clone());
+            }
+            candidate_lock.parent.clone()
+        };
+        current = next;
+    }
+
+    None
+}
+
+fn reparent_children(parent_pid: ProcessID, parent_process: &ProcessRef) -> Vec<ProcessRef> {
+    let init = init_process_ref();
+    let manager = MANAGER.lock();
+    let mut reparented = Vec::new();
+
+    for candidate in manager.processes.values() {
+        if alloc::sync::Arc::ptr_eq(candidate, parent_process) {
+            continue;
+        }
+
+        let child = candidate.clone();
+        let should_reparent = {
+            let child_lock = child.lock();
+            let parent = child_lock.parent.clone();
+            child_lock.pid != parent_pid
+                && parent
+                    .as_ref()
+                    .is_some_and(|parent| alloc::sync::Arc::ptr_eq(parent, parent_process))
+        };
+        if !should_reparent {
+            continue;
+        }
+
+        child.lock().parent = nearest_live_subreaper(parent_process).or_else(|| init.clone());
+        reparented.push(child);
+    }
+
+    reparented
 }
 
 pub fn exit_current_thread(exit_status: ProcessExitStatus) {

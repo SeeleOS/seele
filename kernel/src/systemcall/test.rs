@@ -16,7 +16,7 @@ use crate::{
     process::{
         ControllingTerminal, FdFlags, Process, ProcessExitStatus,
         group::{ProcessGroupID, SessionID},
-        manager::{MANAGER, get_current_process},
+        manager::{MANAGER, get_current_process, terminate_process},
         misc::ProcessID,
     },
     signal::{SigInfo, Signal, Signals},
@@ -1301,6 +1301,7 @@ fn process_session_and_prctl_syscalls_follow_linux_state_rules() {
         old_secure_bits,
         old_bounding,
         old_ambient,
+        old_child_subreaper,
         old_umask,
     ) = {
         let process = process.lock();
@@ -1317,6 +1318,7 @@ fn process_session_and_prctl_syscalls_follow_linux_state_rules() {
             process.secure_bits,
             process.capability_bounding,
             process.capability_ambient,
+            process.child_subreaper,
             old_umask,
         )
     };
@@ -1418,6 +1420,8 @@ fn process_session_and_prctl_syscalls_follow_linux_state_rules() {
     const PR_CAPBSET_DROP: u64 = 24;
     const PR_GET_SECUREBITS: u64 = 27;
     const PR_SET_SECUREBITS: u64 = 28;
+    const PR_SET_CHILD_SUBREAPER: u64 = 36;
+    const PR_GET_CHILD_SUBREAPER: u64 = 37;
     const PR_SET_NO_NEW_PRIVS: u64 = 38;
     const PR_GET_NO_NEW_PRIVS: u64 = 39;
     const PR_CAP_AMBIENT: u64 = 47;
@@ -1470,6 +1474,28 @@ fn process_session_and_prctl_syscalls_follow_linux_state_rules() {
         0x24,
     );
     expect_ok(
+        SyscallArgs::new([PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0, 0]).call::<Prctl>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([PR_GET_CHILD_SUBREAPER, pdeath_page, 9, 8, 7, 0]).call::<Prctl>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(pdeath_page), 1);
+    expect_ok(
+        SyscallArgs::new([PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0, 0]).call::<Prctl>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([PR_GET_CHILD_SUBREAPER, pdeath_page, 0, 0, 0, 0]).call::<Prctl>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(pdeath_page), 0);
+    expect_errno(
+        SyscallArgs::new([PR_GET_CHILD_SUBREAPER, 0, 0, 0, 0, 0]).call::<Prctl>(),
+        SyscallError::BadAddress,
+    );
+    expect_ok(
         SyscallArgs::new([PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0, 0]).call::<Prctl>(),
         0,
     );
@@ -1511,6 +1537,32 @@ fn process_session_and_prctl_syscalls_follow_linux_state_rules() {
         SyscallArgs::new([PR_CAPBSET_READ, 64, 0, 0, 0, 0]).call::<Prctl>(),
         SyscallError::InvalidArguments,
     );
+
+    let current = get_current_process();
+    let original_parent = current.lock().parent.clone();
+    let subreaper_parent = Process::empty();
+    {
+        let mut subreaper_parent = subreaper_parent.lock();
+        subreaper_parent.pid = ProcessID::new();
+        subreaper_parent.child_subreaper = true;
+        subreaper_parent.parent = original_parent.clone();
+    }
+    let exiting_parent = Process::empty();
+    {
+        let mut exiting_parent = exiting_parent.lock();
+        exiting_parent.pid = ProcessID::new();
+        exiting_parent.parent = Some(subreaper_parent.clone());
+    }
+    current.lock().parent = Some(exiting_parent.clone());
+    let (forked_process, _) = Process::fork(current.clone());
+    assert!(!forked_process.lock().child_subreaper);
+    terminate_process(exiting_parent.clone(), ProcessExitStatus::Exited(0));
+    assert!(current
+        .lock()
+        .parent
+        .as_ref()
+        .is_some_and(|parent| alloc::sync::Arc::ptr_eq(parent, &subreaper_parent)));
+    current.lock().parent = original_parent;
 
     expect_ok(
         SyscallArgs::new([PR_CAP_AMBIENT, PR_CAP_AMBIENT_RAISE, 2, 0, 0, 0]).call::<Prctl>(),
@@ -1579,6 +1631,7 @@ fn process_session_and_prctl_syscalls_follow_linux_state_rules() {
         process.secure_bits = old_secure_bits;
         process.capability_bounding = old_bounding;
         process.capability_ambient = old_ambient;
+        process.child_subreaper = old_child_subreaper;
         process.fs_context.lock().file_mode_creation_mask = old_umask;
     }
     saved.restore();

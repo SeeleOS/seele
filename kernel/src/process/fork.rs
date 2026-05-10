@@ -80,6 +80,7 @@ impl Process {
                 capability_inheritable: parent_locked.capability_inheritable,
                 capability_bounding: parent_locked.capability_bounding,
                 capability_ambient: parent_locked.capability_ambient,
+                child_subreaper: false,
                 dumpable: parent_locked.dumpable,
                 no_new_privs: parent_locked.no_new_privs,
                 net_namespace: parent_locked.net_namespace.clone(),

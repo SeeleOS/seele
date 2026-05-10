@@ -123,6 +123,8 @@ enum PrctlOption {
     CapbsetDrop = 24,
     GetSecureBits = 27,
     SetSecureBits = 28,
+    SetChildSubreaper = 36,
+    GetChildSubreaper = 37,
     SetNoNewPrivs = 38,
     GetNoNewPrivs = 39,
     CapAmbient = 47,
@@ -2048,6 +2050,10 @@ define_syscall!(Prctl, |option: i32,
             crate::thread::get_current_thread().lock().name = name;
             Ok(0)
         }
+        PrctlOption::SetChildSubreaper => {
+            get_current_process().lock().child_subreaper = arg2 != 0;
+            Ok(0)
+        }
         PrctlOption::SetNoNewPrivs => {
             if arg2 != 1 || arg3 != 0 {
                 return Err(SyscallError::InvalidArguments);
@@ -2079,6 +2085,14 @@ define_syscall!(Prctl, |option: i32,
             Ok(0)
         }
         PrctlOption::GetDumpable => Ok(get_current_process().lock().dumpable as usize),
+        PrctlOption::GetChildSubreaper => {
+            if arg2 == 0 {
+                return Err(SyscallError::BadAddress);
+            }
+            let child_subreaper = get_current_process().lock().child_subreaper as i32;
+            user_safe::write(arg2 as *mut i32, &child_subreaper)?;
+            Ok(0)
+        }
         PrctlOption::GetNoNewPrivs => Ok(get_current_process().lock().no_new_privs as usize),
         PrctlOption::GetSeccomp => Err(SyscallError::InvalidArguments),
         PrctlOption::GetMdwe => Ok(0),
