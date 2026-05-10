@@ -270,13 +270,10 @@ impl ThreadManager {
         self.remove_from_blocked_queues(&thread);
         let mut locked_thread = thread.lock();
         if matches!(locked_thread.state, State::Blocked(_)) {
-            let was_empty = !self.has_ready_threads();
             locked_thread.state = State::Ready;
             drop(locked_thread);
             self.push_ready_balanced(thread);
-            if was_empty {
-                wake_scheduler_cpus();
-            }
+            wake_scheduler_cpus();
         }
     }
 

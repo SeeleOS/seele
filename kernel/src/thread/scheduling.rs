@@ -15,7 +15,6 @@ use crate::{
     misc::snapshot::Snapshot,
     misc::timer::process_expired_process_timers,
     object::linux_anon::wake_expired_timerfds_with_manager,
-    process::manager::MANAGER,
     signal::process_current_process_signals,
     smp::{
         current_cpu_index, set_current_kernel_stack, set_current_process, set_current_thread,
@@ -36,7 +35,6 @@ pub fn enable_ap_task_scheduling() {
 
 fn can_run_ready_threads_on_current_cpu() -> bool {
     crate::smp::with_current_cpu(|cpu| cpu.is_bsp)
-        || AP_TASK_SCHEDULING_ENABLED.load(Ordering::Acquire)
 }
 
 fn should_run_global_scheduler_work() -> bool {
@@ -170,11 +168,7 @@ pub fn run() -> ! {
                 .lock()
                 .pop_ready_for_cpu(current_cpu_index())
         } else {
-            THREAD_MANAGER
-                .get()
-                .unwrap()
-                .lock()
-                .pop_local_ready_for_cpu(current_cpu_index())
+            None
         };
 
         if let Some(thread) = next_thread {
@@ -198,11 +192,13 @@ fn run_ready_thread(thread_ref: ThreadRef) {
         set_current_thread(Some(thread_ref.clone()));
         set_current_kernel_stack(thread.kernel_stack_top);
 
-        if try_current_process()
+        let should_load_process = try_current_process()
             .as_ref()
-            .is_some_and(|current| !Arc::ptr_eq(current, &process))
-        {
-            MANAGER.lock().load_process(process);
+            .is_none_or(|current| !Arc::ptr_eq(current, &process));
+
+        if should_load_process {
+            process.lock().addrspace.load();
+            set_current_process(Some(process));
         } else {
             set_current_process(Some(process));
         }

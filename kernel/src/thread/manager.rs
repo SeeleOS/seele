@@ -91,14 +91,11 @@ impl ThreadManager {
             self.resize_ready_queues(1);
         }
 
-        let queue_index = cpu_index.min(self.ready_queues.len() - 1);
-        if self.ready_queues[queue_index]
-            .iter()
-            .any(|queued| Arc::ptr_eq(queued, &thread))
-        {
+        if self.is_ready_queued(&thread) {
             return;
         }
 
+        let queue_index = cpu_index.min(self.ready_queues.len() - 1);
         self.ready_queues[queue_index].push_back(thread);
     }
 
@@ -306,6 +303,12 @@ impl ThreadManager {
         let cpu_index = self.next_ready_cpu % self.ready_queues.len();
         self.next_ready_cpu = (cpu_index + 1) % self.ready_queues.len();
         cpu_index
+    }
+
+    fn is_ready_queued(&self, thread: &ThreadRef) -> bool {
+        self.ready_queues
+            .iter()
+            .any(|queue| queue.iter().any(|queued| Arc::ptr_eq(queued, thread)))
     }
 
     fn pop_ready_from_queue(queue: &mut VecDeque<ThreadRef>) -> Option<ThreadRef> {
