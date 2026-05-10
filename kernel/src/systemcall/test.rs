@@ -6600,7 +6600,7 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
         process.effective_uid = 1000;
         process.capability_effective = [0; 2];
     }
-    write_user_value(page + 1052, &1i32);
+    write_user_value(page + 1052, &7i32);
     expect_errno(
         SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_PRIORITY, page + 1052, 4, 0])
             .call::<Setsockopt>(),
