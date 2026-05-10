@@ -1,4 +1,4 @@
-use alloc::{sync::Arc, vec, vec::Vec};
+use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec, vec::Vec};
 use bitflags::bitflags;
 
 use crate::{
@@ -12,6 +12,7 @@ use crate::{
     },
     object::{Object, error::ObjectError, misc::get_object_current_process},
     polling::{event::PollableEvent, poller::PollerObject},
+    socket::UnixSocketState,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::yielding::{
         BlockType, WakeType, block_current_with_sig_check, cancel_block, finish_block_current,
@@ -103,6 +104,92 @@ pub(in crate::systemcall) fn translate_ready_events(
     translated.bits()
 }
 
+fn pollable_object_kind(object: &Arc<dyn Object>) -> &'static str {
+    if object.clone().as_unix_socket().is_ok() {
+        "unix"
+    } else if object.clone().as_netlink_socket().is_ok() {
+        "netlink"
+    } else if object.clone().as_eventfd().is_ok() {
+        "eventfd"
+    } else if object.clone().as_timerfd().is_ok() {
+        "timerfd"
+    } else if object.clone().as_signalfd().is_ok() {
+        "signalfd"
+    } else if object.clone().as_inotify().is_ok() {
+        "inotify"
+    } else if object.clone().as_pidfd().is_ok() {
+        "pidfd"
+    } else if object.debug_name().contains("DrmCardObject") {
+        "drm"
+    } else if object.debug_name().contains("Pty") {
+        "pty"
+    } else {
+        "other"
+    }
+}
+
+fn poll_event_name(event: PollableEvent) -> &'static str {
+    match event {
+        PollableEvent::CanBeRead => "read",
+        PollableEvent::CanBeWritten => "write",
+        PollableEvent::Error => "error",
+        PollableEvent::Closed => "closed",
+        PollableEvent::ReadClosed => "read-closed",
+        PollableEvent::Other(_) => "other",
+    }
+}
+
+fn unix_socket_name(object: &Arc<dyn Object>) -> Option<String> {
+    let socket = object.clone().as_unix_socket().ok()?;
+    match &*socket.state.lock() {
+        UnixSocketState::Bound { path, .. } => Some(path.clone()),
+        UnixSocketState::Listener(listener) => Some(listener.path.clone()),
+        UnixSocketState::Datagram(datagram) => datagram
+            .local_name
+            .lock()
+            .clone()
+            .or_else(|| datagram.peer_name.lock().clone()),
+        UnixSocketState::Stream(stream) => stream
+            .local_name
+            .lock()
+            .clone()
+            .or_else(|| stream.peer_name.lock().clone()),
+        UnixSocketState::Unbound | UnixSocketState::Closed => None,
+    }
+}
+
+fn poll_object_detail(object: &Arc<dyn Object>) -> String {
+    if let Some(name) = unix_socket_name(object) {
+        return format!("unix({name})");
+    }
+    pollable_object_kind(object).into()
+}
+
+fn log_slow_poll_details(poller: &PollerObject, timeout_ms: i32, nfds: usize, elapsed_ms: u64) {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for entry in poller.entries.lock().iter() {
+        let key = format!(
+            "{}:{}",
+            poll_object_detail(&entry.object),
+            poll_event_name(entry.event)
+        );
+        *counts.entry(key).or_default() += 1;
+    }
+
+    let mut parts = Vec::new();
+    for (key, count) in counts {
+        parts.push(format!("{key}={count}"));
+    }
+
+    crate::s_println!(
+        "kde-perf poll-slow-detail dur={}ms timeout={}ms nfds={} [{}]",
+        elapsed_ms,
+        timeout_ms,
+        nfds,
+        parts.join(",")
+    );
+}
+
 fn count_ready(fds: &[LinuxPollFd]) -> usize {
     fds.iter().filter(|pfd| pfd.revents != 0).count()
 }
@@ -190,6 +277,9 @@ fn sleep_without_fds(timeout_ms: i32) -> Result<(), SyscallError> {
 
 fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallError> {
     systemd_perf::profile_current_process(PerfBucket::Poll, || {
+        let profiled = systemd_perf::is_current_process_profiled();
+        let wait_start = profiled.then(Time::since_boot);
+
         for pfd in fds.iter_mut() {
             pfd.revents = 0;
         }
@@ -249,6 +339,13 @@ fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallE
         let already_ready = poller.push_already_ready_events();
         if count_ready(fds) == 0 && !already_ready {
             wait_on_poller(poller.clone(), timeout_ms)?;
+        }
+
+        if let Some(wait_start) = wait_start {
+            let elapsed_ms = Time::since_boot().sub(wait_start).as_milliseconds();
+            if elapsed_ms >= 250 {
+                log_slow_poll_details(&poller, timeout_ms, fds.len(), elapsed_ms);
+            }
         }
 
         let mut ready_by_index = vec![0; fds.len()];

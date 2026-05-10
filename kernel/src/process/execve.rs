@@ -4,6 +4,7 @@ use crate::{
     filesystem::{errors::FSError, path::Path, vfs::VirtualFS},
     ipc::sysv_shm::detach_all_process_mappings,
     memory::addrspace::AddrSpace,
+    misc::systemd_perf,
     process::{
         Process,
         manager::{MANAGER, wake_vfork_blocker},
@@ -124,11 +125,18 @@ impl Process {
 
 pub fn execve(path: Path, args: Vec<String>, env: Vec<String>) -> Result<(), FSError> {
     let (_, resolved_path) = VirtualFS.lock().resolve_with_path(path)?;
+    let exec_path = resolved_path.clone().as_string();
     let (snapshot, vfork_blocker) = {
         let _manager = MANAGER.lock();
         let current = current_process();
         current.lock().execve(resolved_path, args, env)?
     };
+    {
+        let current = current_process();
+        if let Some(process) = current.try_lock() {
+            systemd_perf::note_execve(&process, &exec_path);
+        }
+    }
     if let Some(thread_id) = vfork_blocker {
         wake_vfork_blocker(thread_id);
     }
