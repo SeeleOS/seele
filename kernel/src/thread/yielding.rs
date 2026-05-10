@@ -17,8 +17,8 @@ use crate::{
     process::{manager::get_current_process, misc::ProcessID},
     systemcall::implementations::remove_futex_waiter,
     thread::{
-        THREAD_MANAGER, ThreadRef, manager::ThreadManager, misc::State, misc::ThreadID,
-        scheduling::return_to_scheduler_from_current,
+        ThreadRef, manager::ThreadManager, misc::State, misc::ThreadID,
+        scheduling::return_to_scheduler_from_current, try_with_thread_manager, with_thread_manager,
     },
 };
 
@@ -228,10 +228,12 @@ impl ThreadManager {
         let timed_key = {
             let thread = thread.lock();
             match &thread.state {
-                State::Blocked(block_type) => {
+                State::Blocking(block_type) | State::Blocked(block_type) => {
                     block_deadline(block_type).map(|deadline| (deadline, thread.id))
                 }
-                State::Ready | State::Running | State::Zombie => None,
+                State::Ready | State::Running | State::Woken | State::Exiting | State::Zombie => {
+                    None
+                }
             }
         };
         if let Some(key) = timed_key {
@@ -258,7 +260,7 @@ impl ThreadManager {
         let mut thread = thread_ref.lock();
         let thread_id = thread.id;
 
-        thread.state = State::Blocked(block_type.clone());
+        thread.state = State::Blocking(block_type.clone());
         drop(thread);
 
         self.blocked_queues
@@ -269,11 +271,17 @@ impl ThreadManager {
         log::debug!("thread wake");
         self.remove_from_blocked_queues(&thread);
         let mut locked_thread = thread.lock();
-        if matches!(locked_thread.state, State::Blocked(_)) {
-            locked_thread.state = State::Ready;
-            drop(locked_thread);
-            self.push_ready_balanced(thread);
-            wake_scheduler_cpus();
+        match locked_thread.state {
+            State::Blocking(_) => {
+                locked_thread.state = State::Woken;
+            }
+            State::Blocked(_) => {
+                locked_thread.state = State::Ready;
+                drop(locked_thread);
+                self.push_ready_balanced(thread);
+                wake_scheduler_cpus();
+            }
+            _ => {}
         }
     }
 
@@ -299,9 +307,8 @@ impl ThreadManager {
         }
     }
 
-    pub fn wake_poller(&mut self, target_object: ObjectRef, event: PollableEvent) {
+    pub fn wake_affected_pollers(&mut self, affected_pollers: &[ObjectRef]) {
         let mut to_wake = Vec::new();
-        let affected_pollers = crate::polling::notify_pollers(target_object, event);
 
         self.blocked_queues.poller.retain(|f| {
             if let State::Blocked(BlockType::WakeRequired {
@@ -336,7 +343,7 @@ impl ThreadManager {
             }) = &thread.lock().state
             {
                 if let Ok(poller) = poller.clone().as_poller() {
-                    poller.has_woken_events() || poller.push_already_ready_events()
+                    poller.has_woken_events()
                 } else {
                     false
                 }
@@ -360,18 +367,27 @@ impl ThreadManager {
     register_wake_func!(io);
 }
 
-pub fn block(thread_ref: ThreadRef, block_type: BlockType) {
-    {
-        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-
-        thread_manager.block(thread_ref, block_type);
+pub fn wake_pollers_for_object(target_object: ObjectRef, event: PollableEvent) {
+    let affected_pollers = crate::polling::notify_pollers(target_object, event);
+    if affected_pollers.is_empty() {
+        return;
     }
+
+    let _ = try_with_thread_manager(|manager| manager.wake_affected_pollers(&affected_pollers));
+}
+
+pub fn block(thread_ref: ThreadRef, block_type: BlockType) {
+    with_thread_manager(|thread_manager| thread_manager.block(thread_ref, block_type));
 
     return_to_scheduler_from_current();
 }
 
 fn current_thread_ref() -> ThreadRef {
     crate::thread::get_current_thread()
+}
+
+fn is_current_thread(thread_ref: &ThreadRef) -> bool {
+    Arc::ptr_eq(thread_ref, &crate::thread::get_current_thread())
 }
 
 pub fn prepare_block_current(block_type: BlockType) -> ThreadRef {
@@ -415,20 +431,16 @@ pub fn prepare_block_current(block_type: BlockType) -> ThreadRef {
 
     let current = current_thread_ref();
 
-    {
-        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-        thread_manager.block(current.clone(), block_type);
-    }
+    with_thread_manager(|thread_manager| thread_manager.block(current.clone(), block_type));
 
     current
 }
 
 pub fn cancel_block(thread_ref: &ThreadRef) {
-    let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-    thread_manager.remove_from_blocked_queues(thread_ref);
+    with_thread_manager(|thread_manager| thread_manager.remove_from_blocked_queues(thread_ref));
 
     let mut thread = thread_ref.lock();
-    if matches!(thread.state, State::Blocked(_)) {
+    if matches!(thread.state, State::Blocking(_) | State::Blocked(_)) {
         thread.state = State::Running;
     }
 }
@@ -436,16 +448,35 @@ pub fn cancel_block(thread_ref: &ThreadRef) {
 pub fn finish_block_current() {
     let current = current_thread_ref();
     {
-        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-        let mut thread = current.lock();
-        match thread.state {
-            State::Blocked(_) => {}
-            State::Ready => {
-                thread_manager.remove_ready_thread(&current);
-                thread.state = State::Running;
-                return;
+        let should_return = with_thread_manager(|thread_manager| {
+            let mut thread = current.lock();
+            match thread.state {
+                State::Blocking(_) => {
+                    thread.state = State::Blocked(match &thread.state {
+                        State::Blocking(block_type) => block_type.clone(),
+                        _ => unreachable!(),
+                    });
+                    false
+                }
+                State::Blocked(_) => false,
+                State::Woken => {
+                    thread.state = State::Running;
+                    true
+                }
+                State::Ready => {
+                    if thread_manager.remove_ready_thread(&current) {
+                        thread.state = State::Running;
+                        true
+                    } else {
+                        false
+                    }
+                }
+                State::Running if is_current_thread(&current) => true,
+                State::Exiting | State::Zombie | State::Running => false,
             }
-            _ => return,
+        });
+        if should_return {
+            return;
         }
     }
 

@@ -8,7 +8,6 @@ use crate::{
     evdev::push_keyboard_event,
     object::tty_device::{get_active_tty, wake_tty_poller_readable},
     terminal::linux_kd::{KeyboardMode, linux_keycode_from_keycode},
-    thread::THREAD_MANAGER,
 };
 
 pub fn process_pending_scancodes() {
@@ -28,7 +27,7 @@ pub fn process_pending_scancodes() {
                 }
 
                 active_tty.push_raw_byte(encode_linux_raw_byte(scancode));
-                THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+                crate::thread::with_thread_manager(|manager| manager.wake_keyboard());
                 wake_tty_poller_readable();
 
                 match active_tty.keyboard_mode() {
@@ -44,7 +43,7 @@ pub fn process_pending_scancodes() {
             } else {
                 if receives_hardware_keyboard_input {
                     active_tty.push_raw_byte(encode_linux_raw_byte(scancode));
-                    THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+                    crate::thread::with_thread_manager(|manager| manager.wake_keyboard());
                     wake_tty_poller_readable();
                 }
 
@@ -79,6 +78,6 @@ fn push_medium_raw_event(active_tty: &crate::object::tty_device::TtyDevice, even
     };
     active_tty.push_medium_raw_bytes(&encoded[..len]);
 
-    THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+    crate::thread::with_thread_manager(|manager| manager.wake_keyboard());
     wake_tty_poller_readable();
 }

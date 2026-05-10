@@ -11,8 +11,8 @@ use crate::{
         log_unsupported_syscall_result,
     },
     thread::{
-        THREAD_MANAGER, get_current_thread,
-        misc::with_current_thread,
+        get_current_thread,
+        misc::{State, with_current_thread},
         scheduling::{enable_ap_task_scheduling, return_to_scheduler_no_save},
     },
 };
@@ -28,8 +28,10 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     let thread_ref = get_current_thread();
     let mut thread = thread_ref.lock();
     let fs_base = FsBase::read().as_u64();
-    thread.get_appropriate_snapshot().inner = *snapshot;
-    thread.get_appropriate_snapshot().fs_base = fs_base;
+    let thread_snapshot = thread.get_appropriate_snapshot();
+    thread_snapshot.inner = *snapshot;
+    thread_snapshot.fs_base = fs_base;
+    thread_snapshot.snapshot_type = crate::thread::snapshot::ThreadSnapshotType::Thread;
     thread.last_syscall_no = syscall_no as u64;
     thread.last_user_snapshot = *snapshot;
     thread.last_user_fs_base = fs_base;
@@ -59,21 +61,23 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
 
     with_current_thread(|thread| {
         let fs_base = FsBase::read().as_u64();
-        thread.get_appropriate_snapshot().inner = *snapshot;
-        thread.get_appropriate_snapshot().fs_base = fs_base;
+        let thread_snapshot = thread.get_appropriate_snapshot();
+        thread_snapshot.inner = *snapshot;
+        thread_snapshot.fs_base = fs_base;
+        thread_snapshot.snapshot_type = crate::thread::snapshot::ThreadSnapshotType::Thread;
         thread.last_user_snapshot = *snapshot;
         thread.last_user_fs_base = fs_base;
     });
 
     maybe_stop_current_on_syscall_exit();
 
+    if matches!(get_current_thread().lock().state, State::Exiting) {
+        return_to_scheduler_no_save();
+    }
+
     let should_switch = process_current_process_signals(&get_current_process());
     if should_switch {
-        THREAD_MANAGER
-            .get()
-            .unwrap()
-            .lock()
-            .cleanup_exited_threads();
+        crate::thread::with_thread_manager(|manager| manager.cleanup_exited_threads());
         // Its fine to no_save becuase we've already saved everything manually
         // And returned the value (snapshot.rax = result)
         return_to_scheduler_no_save();

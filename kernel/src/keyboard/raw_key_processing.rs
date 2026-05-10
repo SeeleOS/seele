@@ -7,7 +7,6 @@ use crate::{
     object::tty_device::{get_active_tty, wake_tty_poller_readable},
     print,
     terminal::state::DEFAULT_TERMINAL,
-    thread::THREAD_MANAGER,
 };
 
 pub fn process_key(key: KeyCode) {
@@ -28,7 +27,7 @@ pub fn process_key(key: KeyCode) {
 
         active_tty.push_keyboard_bytes(sequence);
 
-        THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+        crate::thread::with_thread_manager(|manager| manager.wake_keyboard());
         wake_tty_poller_readable();
 
         return;

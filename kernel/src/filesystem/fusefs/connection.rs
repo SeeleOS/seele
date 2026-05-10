@@ -15,7 +15,7 @@ use crate::{
     object::{FileFlags, error::ObjectError, queue_helpers::read_or_block_with_flags},
     process::manager::get_current_process,
     thread::{
-        THREAD_MANAGER, get_current_thread,
+        get_current_thread,
         yielding::{
             BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
         },
@@ -131,7 +131,7 @@ impl FuseConnection {
             }
             drop(state);
 
-            THREAD_MANAGER.get().unwrap().lock().wake_io();
+            crate::thread::with_thread_manager(|manager| manager.wake_io());
             consumed += total_len;
         }
 
@@ -158,7 +158,7 @@ impl FuseConnection {
         }
         drop(state);
 
-        THREAD_MANAGER.get().unwrap().lock().wake_io();
+        crate::thread::with_thread_manager(|manager| manager.wake_io());
         Ok(())
     }
 
@@ -382,7 +382,7 @@ impl FuseConnection {
             unique
         };
 
-        THREAD_MANAGER.get().unwrap().lock().wake_io();
+        crate::thread::with_thread_manager(|manager| manager.wake_io());
         self.wait_for_response(unique)
     }
 

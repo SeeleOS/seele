@@ -18,7 +18,7 @@ use crate::{
     signal::{Signal, send_signal_to_process},
     terminal::line_discipline::{process_input_byte, process_output_bytes},
     terminal::pty::{set_pty_lock, shared::PtyShared},
-    thread::{THREAD_MANAGER, yielding::WakeType},
+    thread::yielding::{WakeType, wake_pollers_for_object},
 };
 
 impl Pollable for PtyMaster {
@@ -123,13 +123,14 @@ impl Writable for PtyMaster {
                 .for_each(|process| send_signal_to_process(process, Signal::SIGINT));
         }
 
-        let mut manager = THREAD_MANAGER.get().unwrap().lock();
-        manager.wake_pty();
+        crate::thread::with_thread_manager(|manager| {
+            manager.wake_pty();
+        });
         if wrote_input {
-            manager.wake_poller(slave, PollableEvent::CanBeRead);
+            wake_pollers_for_object(slave, PollableEvent::CanBeRead);
         }
         if wrote_echo {
-            manager.wake_poller(master, PollableEvent::CanBeRead);
+            wake_pollers_for_object(master, PollableEvent::CanBeRead);
         }
         Ok(buffer.len())
     }

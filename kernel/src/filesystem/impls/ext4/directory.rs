@@ -28,7 +28,6 @@ use crate::filesystem::{
     vfs::FSResult,
     vfs_traits::{Directory, DirectoryContentType, FileLike, FileLikeType},
 };
-use crate::misc::systemd_perf::{self, PerfBucket};
 
 fn map_ext4_error(err: Ext4Error) -> FSError {
     FSError::from(err)
@@ -323,20 +322,18 @@ impl Directory for Ext4Directory {
     }
 
     fn get(&self, name: &str) -> FSResult<FileLike> {
-        systemd_perf::profile_current_process(PerfBucket::Ext4DirGet, || {
-            let path = self.join_child(name);
-            let (parent_inode, parent) = self.open_parent_dir()?;
-            let parent_id = parent_inode.index.get();
+        let path = self.join_child(name);
+        let (parent_inode, parent) = self.open_parent_dir()?;
+        let parent_id = parent_inode.index.get();
 
-            if let Some(inode) = lookup_cache_get(&self.lookup_cache, &parent_inode, name) {
-                return self.file_like_from_inode(name.to_string(), path, parent_id, inode);
-            }
+        if let Some(inode) = lookup_cache_get(&self.lookup_cache, &parent_inode, name) {
+            return self.file_like_from_inode(name.to_string(), path, parent_id, inode);
+        }
 
-            let entry_name = DirEntryName::try_from(name).map_err(|_| FSError::Other)?;
-            let inode = parent.get_entry(entry_name).map_err(map_ext4_error)?;
-            lookup_cache_insert(&self.lookup_cache, &parent_inode, name, &inode);
-            self.file_like_from_inode(name.to_string(), path, parent_id, inode)
-        })
+        let entry_name = DirEntryName::try_from(name).map_err(|_| FSError::Other)?;
+        let inode = parent.get_entry(entry_name).map_err(map_ext4_error)?;
+        lookup_cache_insert(&self.lookup_cache, &parent_inode, name, &inode);
+        self.file_like_from_inode(name.to_string(), path, parent_id, inode)
     }
 
     fn chmod(&self, mode: u32) -> FSResult<()> {

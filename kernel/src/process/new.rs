@@ -8,7 +8,7 @@ use spin::Mutex;
 
 use crate::{
     elfloader::{load_elf_lazy, read_elf_header},
-    filesystem::{errors::FSError, object::FileLikeObject, path::Path, vfs::VirtualFS},
+    filesystem::{errors::FSError, object::FileLikeObject, path::Path, vfs_operations::open_path},
     memory::addrspace::AddrSpace,
     object::tty_device::get_default_tty,
     process::{
@@ -19,7 +19,6 @@ use crate::{
         object::init_objects,
     },
     thread::{
-        THREAD_MANAGER,
         misc::ThreadID,
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
         stack::allocate_kernel_stack,
@@ -61,7 +60,7 @@ fn parse_shebang(program_bytes: &[u8]) -> Result<Option<(Path, Option<String>)>,
 }
 
 fn open_file(path: Path) -> Result<Arc<FileLikeObject>, FSError> {
-    Ok(Arc::new(VirtualFS.lock().open(path)?))
+    Ok(Arc::new(open_path(path)?))
 }
 
 fn read_shebang_prefix(file: &FileLikeObject) -> Result<Vec<u8>, FSError> {
@@ -109,16 +108,15 @@ impl Process {
         process.fd_table = new_fd_table;
 
         // Initilizes the main thread
-        process
-            .threads
-            .push(Arc::downgrade(&THREAD_MANAGER.get().unwrap().lock().spawn(
-                Thread::from_snapshot_with_id(
-                    context,
-                    process_arc.clone(),
-                    kernel_stack_top.as_u64(),
-                    ThreadID(pid.0),
-                ),
-            )));
+        let main_thread = crate::thread::with_thread_manager(|manager| {
+            manager.spawn(Thread::from_snapshot_with_id(
+                context,
+                process_arc.clone(),
+                kernel_stack_top.as_u64(),
+                ThreadID(pid.0),
+            ))
+        });
+        process.threads.push(Arc::downgrade(&main_thread));
 
         *get_default_tty().active_group.lock() = Some(process.group_id);
 

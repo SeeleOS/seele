@@ -21,10 +21,10 @@ use crate::{
     process::{manager::MANAGER, misc::ProcessID},
     signal::{PendingSignalInfo, Signal, Signals},
     thread::{
-        THREAD_MANAGER,
         manager::ThreadManager,
         yielding::{
             BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
+            wake_pollers_for_object,
         },
     },
 };
@@ -159,9 +159,6 @@ impl PidFdObject {
 
     fn wake_waiters_with_manager(&self, manager: &mut ThreadManager) {
         manager.wake_io();
-        if let Some(object) = self.self_object() {
-            manager.wake_poller(object, PollableEvent::CanBeRead);
-        }
     }
 }
 
@@ -205,10 +202,18 @@ pub fn wake_pidfd_for_process(pid: u64) {
         return;
     }
 
-    let mut manager = THREAD_MANAGER.get().unwrap().lock();
-    for pidfd in watchers {
-        pidfd.mark_exited();
-        pidfd.wake_waiters_with_manager(&mut manager);
+    let mut poller_objects = Vec::new();
+    crate::thread::with_thread_manager(|manager| {
+        for pidfd in &watchers {
+            pidfd.mark_exited();
+            pidfd.wake_waiters_with_manager(manager);
+            if let Some(object) = pidfd.self_object() {
+                poller_objects.push(object);
+            }
+        }
+    });
+    for object in poller_objects {
+        wake_pollers_for_object(object, PollableEvent::CanBeRead);
     }
 }
 
@@ -312,10 +317,11 @@ impl SignalfdObject {
     }
 
     fn wake_waiters(&self) {
-        let mut manager = THREAD_MANAGER.get().unwrap().lock();
-        manager.wake_io();
+        crate::thread::with_thread_manager(|manager| {
+            manager.wake_io();
+        });
         if let Some(object) = self.self_object() {
-            manager.wake_poller(object, PollableEvent::CanBeRead);
+            wake_pollers_for_object(object, PollableEvent::CanBeRead);
         }
     }
 }
@@ -372,13 +378,8 @@ pub fn wake_signalfd_for_process_with_manager(pid: u64, manager: &mut ThreadMana
         strong
     };
 
-    for signalfd in watchers {
-        if signalfd.next_ready_signal().is_some() {
-            manager.wake_io();
-            if let Some(object) = signalfd.self_object() {
-                manager.wake_poller(object, PollableEvent::CanBeRead);
-            }
-        }
+    for _ in watchers {
+        manager.wake_io();
     }
 }
 
@@ -494,10 +495,11 @@ impl EventFdObject {
     }
 
     fn wake_waiters(&self, event: PollableEvent) {
-        let mut manager = THREAD_MANAGER.get().unwrap().lock();
-        manager.wake_io();
+        crate::thread::with_thread_manager(|manager| {
+            manager.wake_io();
+        });
         if let Some(object) = self.self_object() {
-            manager.wake_poller(object, event);
+            wake_pollers_for_object(object, event);
         }
     }
 }
@@ -805,13 +807,8 @@ impl TimerFdObject {
     }
 
     pub fn wake_waiters(&self) {
-        let mut manager = THREAD_MANAGER.get().unwrap().lock();
-        self.wake_waiters_with_manager(&mut manager);
-    }
-
-    fn wake_waiters_with_manager(&self, manager: &mut ThreadManager) {
         if let Some(object) = self.self_object() {
-            manager.wake_poller(object, PollableEvent::CanBeRead);
+            wake_pollers_for_object(object, PollableEvent::CanBeRead);
         }
     }
 }
@@ -858,12 +855,12 @@ fn expired_timerfds(now: Time) -> Vec<Arc<TimerFdObject>> {
     strong
 }
 
-pub fn wake_expired_timerfds_with_manager(manager: &mut ThreadManager) {
-    for timerfd in expired_timerfds(Time::since_boot()) {
-        if timerfd.is_read_ready() {
-            timerfd.wake_waiters_with_manager(manager);
-        }
-    }
+pub fn expired_timerfd_poll_objects() -> Vec<ObjectRef> {
+    expired_timerfds(Time::since_boot())
+        .into_iter()
+        .filter(|timerfd| timerfd.is_read_ready())
+        .filter_map(|timerfd| timerfd.self_object())
+        .collect()
 }
 
 impl Object for TimerFdObject {
@@ -936,5 +933,5 @@ impl Statable for TimerFdObject {
 }
 
 pub fn wake_linux_io_waiters() {
-    THREAD_MANAGER.get().unwrap().lock().wake_io();
+    crate::thread::with_thread_manager(|manager| manager.wake_io());
 }

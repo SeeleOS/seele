@@ -1,6 +1,6 @@
 use core::any::Any;
 
-use alloc::{string::String, vec::Vec};
+use alloc::{string::String, sync::Arc, vec::Vec};
 
 use crate::filesystem::{
     errors::FSError,
@@ -14,6 +14,7 @@ pub(super) struct ProcDirectory {
     path: String,
     inode: u64,
     entries: Vec<DirectoryContentInfo>,
+    entries_fn: Option<Arc<dyn Fn() -> Vec<DirectoryContentInfo> + Send + Sync>>,
 }
 
 impl ProcDirectory {
@@ -28,6 +29,22 @@ impl ProcDirectory {
             path,
             inode,
             entries,
+            entries_fn: None,
+        }
+    }
+
+    pub(super) fn new_dynamic(
+        name: String,
+        path: String,
+        inode: u64,
+        entries_fn: Arc<dyn Fn() -> Vec<DirectoryContentInfo> + Send + Sync>,
+    ) -> Self {
+        Self {
+            name,
+            path,
+            inode,
+            entries: Vec::new(),
+            entries_fn: Some(entries_fn),
         }
     }
 }
@@ -52,6 +69,9 @@ impl Directory for ProcDirectory {
     }
 
     fn contents(&self) -> FSResult<Vec<DirectoryContentInfo>> {
+        if let Some(entries_fn) = &self.entries_fn {
+            return Ok(entries_fn());
+        }
         Ok(self.entries.clone())
     }
 

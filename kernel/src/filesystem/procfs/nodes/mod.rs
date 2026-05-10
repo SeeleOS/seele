@@ -34,6 +34,18 @@ pub(super) fn proc_dir(
     ))))
 }
 
+pub(super) fn proc_dynamic_dir<F>(path: &str, name: &str, inode: u64, entries: F) -> FileLike
+where
+    F: Fn() -> Vec<DirectoryContentInfo> + Send + Sync + 'static,
+{
+    FileLike::Directory(Arc::new(Mutex::new(ProcDirectory::new_dynamic(
+        name.into(),
+        path.into(),
+        inode,
+        Arc::new(entries),
+    ))))
+}
+
 pub(super) fn proc_file<F>(name: &str, inode: u64, read: F) -> FileLike
 where
     F: Fn() -> Vec<u8> + Send + Sync + 'static,
@@ -76,5 +88,16 @@ pub(super) fn proc_symlink(name: &str, inode: u64, target: String) -> FileLike {
         name.into(),
         inode,
         target,
+    ))))
+}
+
+pub(super) fn proc_dynamic_symlink<F>(name: &str, inode: u64, target: F) -> FileLike
+where
+    F: Fn() -> FSResult<String> + Send + Sync + 'static,
+{
+    FileLike::Symlink(Arc::new(Mutex::new(ProcSymlink::new_dynamic(
+        name.into(),
+        inode,
+        Arc::new(target),
     ))))
 }

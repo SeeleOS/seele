@@ -1,8 +1,8 @@
 use crate::{
     process::ProcessRef,
     thread::{
-        THREAD_MANAGER, ThreadRef, misc::ThreadID, stack::allocate_kernel_stack, thread::Thread,
-        yielding::BlockType,
+        ThreadRef, misc::ThreadID, stack::allocate_kernel_stack, thread::Thread,
+        with_thread_manager, yielding::BlockType,
     },
 };
 
@@ -36,10 +36,10 @@ impl Thread {
         let thread = self.clone_for_spawn_with_id(process, id);
 
         log::debug!("clone_and_spawn: thread manager lock start");
-        let mut manager = THREAD_MANAGER.get().unwrap().lock();
-        log::debug!("clone_and_spawn: thread manager locked");
-
-        manager.spawn(thread)
+        with_thread_manager(|manager| {
+            log::debug!("clone_and_spawn: thread manager locked");
+            manager.spawn(thread)
+        })
     }
 
     pub fn clone_and_spawn_blocked_with_id(
@@ -51,9 +51,9 @@ impl Thread {
         let thread = self.clone_for_spawn_with_id(process, id);
 
         log::debug!("clone_and_spawn_blocked: thread manager lock start");
-        let mut manager = THREAD_MANAGER.get().unwrap().lock();
-        log::debug!("clone_and_spawn_blocked: thread manager locked");
-
-        manager.spawn_blocked(thread, block_type)
+        with_thread_manager(|manager| {
+            log::debug!("clone_and_spawn_blocked: thread manager locked");
+            manager.spawn_blocked(thread, block_type)
+        })
     }
 }

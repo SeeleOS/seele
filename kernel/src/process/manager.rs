@@ -11,9 +11,10 @@ use crate::{
     signal::{Signal, send_signal_to_process},
     smp::{current_process, set_current_process},
     thread::{
-        THREAD_MANAGER, ThreadRef,
+        ThreadRef,
         manager::ThreadManager,
         misc::{State, ThreadID},
+        with_thread_manager,
     },
 };
 
@@ -76,20 +77,19 @@ pub fn get_current_process() -> ProcessRef {
 
 pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
     let process_ref = process.clone();
-    let (pid, threads, vfork_blocker, reparent_target) = {
+    let (pid, threads, vfork_blocker, parent) = {
         let mut process = process.lock();
         process.restore_borrowed_addrspace_to_parent();
         let vfork_blocker = process.vfork_blocker.take();
         let pid = process.pid;
-        let reparent_target =
-            nearest_live_subreaper(process.parent.clone()).or_else(init_process_ref);
         (
             pid,
             process.terminate_inner(exit_status),
             vfork_blocker,
-            reparent_target,
+            process.parent.clone(),
         )
     };
+    let reparent_target = nearest_live_subreaper(parent).or_else(init_process_ref);
     let parent_death_signals = collect_parent_death_signals_for_children(pid, &process_ref);
     let reparented_children = reparent_children(pid, &process_ref, reparent_target);
     if let Some(process) = process.try_lock() {
@@ -100,28 +100,37 @@ pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
         send_signal_to_process(&child, signal);
     }
 
-    let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-    for child in &reparented_children {
-        let (pid, parent, has_pending_wait) = {
-            let child = child.lock();
-            (
-                child.pid,
-                child.parent.clone(),
-                child.exit_status.is_some() || child.wait_event.is_some(),
-            )
-        };
-        if has_pending_wait && let Some(parent) = parent {
-            send_signal_to_process(&parent, Signal::SIGCHLD);
+    let pending_child_wait_signals = reparented_children
+        .iter()
+        .filter_map(|child| {
+            let (pid, parent, has_pending_wait) = {
+                let child = child.lock();
+                (
+                    child.pid,
+                    child.parent.clone(),
+                    child.exit_status.is_some() || child.wait_event.is_some(),
+                )
+            };
+            has_pending_wait.then_some((pid, parent?))
+        })
+        .collect::<Vec<_>>();
+
+    for (_, parent) in &pending_child_wait_signals {
+        send_signal_to_process(parent, Signal::SIGCHLD);
+    }
+
+    with_thread_manager(|thread_manager| {
+        for (pid, _) in pending_child_wait_signals {
             thread_manager.wake_process_exit_waiters(pid);
         }
-    }
-    if let Some(thread_id) = vfork_blocker {
-        thread_manager.wake_thread_by_id(thread_id);
-    }
-    for thread in threads {
-        thread_manager.mark_thread_exited(thread);
-    }
-    thread_manager.cleanup_exited_threads();
+        if let Some(thread_id) = vfork_blocker {
+            thread_manager.wake_thread_by_id(thread_id);
+        }
+        for thread in threads {
+            thread_manager.mark_thread_exited(thread);
+        }
+        thread_manager.cleanup_exited_threads();
+    });
 }
 
 fn collect_parent_death_signals_for_children(
@@ -221,17 +230,14 @@ pub fn exit_current_thread(exit_status: ProcessExitStatus) {
         return;
     }
 
-    let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-    thread_manager.mark_thread_exited(current);
-    thread_manager.cleanup_exited_threads();
+    with_thread_manager(|thread_manager| {
+        thread_manager.mark_thread_exited(current);
+        thread_manager.cleanup_exited_threads();
+    });
 }
 
 pub fn wake_vfork_blocker(thread_id: ThreadID) {
-    THREAD_MANAGER
-        .get()
-        .unwrap()
-        .lock()
-        .wake_thread_by_id(thread_id);
+    with_thread_manager(|thread_manager| thread_manager.wake_thread_by_id(thread_id));
 }
 
 impl Process {

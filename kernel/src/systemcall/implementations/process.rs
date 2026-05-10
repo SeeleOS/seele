@@ -17,7 +17,7 @@ use crate::{
     signal::Signal,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
-        THREAD_MANAGER, get_current_thread,
+        get_current_thread,
         scheduling::return_to_scheduler_no_save,
         yielding::{
             BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
@@ -188,11 +188,7 @@ fn wait_for_child_exit(
     let current_process = get_current_process();
 
     loop {
-        THREAD_MANAGER
-            .get()
-            .unwrap()
-            .lock()
-            .cleanup_exited_threads();
+        crate::thread::with_thread_manager(|manager| manager.cleanup_exited_threads());
 
         let check_result = check_wait_outcome(target_process, wait_behavior, &current_process)?;
 

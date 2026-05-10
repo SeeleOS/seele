@@ -174,17 +174,19 @@ impl CgroupState {
     }
 
     fn prune_dead_pid_paths(&mut self) {
-        self.pid_paths
-            .retain(|pid, _| MANAGER.lock().processes.contains_key(&ProcessID(*pid)));
+        let live_pids = MANAGER
+            .lock()
+            .processes
+            .keys()
+            .map(|pid| pid.0)
+            .collect::<BTreeSet<_>>();
+        self.pid_paths.retain(|pid, _| live_pids.contains(pid));
     }
 
     fn pids_in_path(&self, path: &str) -> Vec<ProcessID> {
         let path = Self::normalize_dir_path(path);
-        MANAGER
-            .lock()
-            .processes
-            .keys()
-            .copied()
+        let pids = MANAGER.lock().processes.keys().copied().collect::<Vec<_>>();
+        pids.into_iter()
             .filter(|pid| self.pid_path(*pid) == path)
             .collect()
     }

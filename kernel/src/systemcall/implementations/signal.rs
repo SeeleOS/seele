@@ -3,10 +3,10 @@ use crate::process::manager::MANAGER;
 use crate::process::misc::ProcessID;
 use crate::signal::action::{SignalHandlingType, Signals};
 use crate::systemcall::utils::*;
+use crate::thread::get_current_thread;
 use crate::thread::misc::{SnapshotState, ThreadID};
 use crate::thread::scheduling::return_to_scheduler_no_save;
 use crate::thread::yielding::{BlockType, WakeType, block_current_with_sig_check};
-use crate::thread::{THREAD_MANAGER, get_current_thread};
 use crate::{
     define_syscall,
     memory::user_safe,
@@ -398,13 +398,7 @@ define_syscall!(Tgkill, |tgid: i32, tid: i32, signal: i32| {
     let tgid = ProcessID(tgid as u64);
     let tid = ThreadID(tid as u64);
 
-    let thread = THREAD_MANAGER
-        .get()
-        .unwrap()
-        .lock()
-        .threads
-        .get(&tid)
-        .cloned()
+    let thread = crate::thread::with_thread_manager(|manager| manager.threads.get(&tid).cloned())
         .ok_or(SyscallError::NoProcess)?;
 
     let process = thread.lock().parent.clone();

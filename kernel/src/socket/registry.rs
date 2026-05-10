@@ -6,7 +6,7 @@ use alloc::{
 use lazy_static::lazy_static;
 use spin::Mutex;
 
-use crate::filesystem::{object::mount_device_id_for_path, path::Path, vfs::VirtualFS};
+use crate::filesystem::{object::mount_device_id_for_path, path::Path, vfs_operations::open_path};
 
 use super::{UnixListenerInner, UnixSocketObject};
 
@@ -22,7 +22,7 @@ impl UnixSocketRegistryKey {
             return Some(Self::Abstract(String::from(path)));
         }
 
-        let opened = VirtualFS.lock().open(Path::new(path)).ok()?;
+        let opened = open_path(Path::new(path)).ok()?;
         let info = opened.info().ok()?;
         Some(Self::Path {
             mount_device_id: mount_device_id_for_path(&opened.path()),

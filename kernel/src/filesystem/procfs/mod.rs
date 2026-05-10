@@ -1,6 +1,6 @@
 use alloc::format;
 
-use alloc::{vec, vec::Vec};
+use alloc::{string::String, vec, vec::Vec};
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::filesystem::{
@@ -20,16 +20,19 @@ use net::{
     PROC_NET_DEV_INODE, PROC_NET_IF_INET6_INODE, PROC_NET_INODE, PROC_NET_ROUTE_INODE,
     proc_net_dev_bytes, proc_net_entries, proc_net_if_inet6_bytes, proc_net_route_bytes,
 };
-use nodes::{proc_dir, proc_file, proc_object_file, proc_rw_file, proc_symlink};
+use nodes::{
+    proc_dir, proc_dynamic_dir, proc_dynamic_symlink, proc_file, proc_object_file, proc_rw_file,
+    proc_symlink,
+};
 use pid::{
-    current_pid, ensure_pid_exists, fd_target, parse_fd, parse_pid, pid_cgroup_inode,
-    pid_cmdline_inode, pid_comm_inode, pid_dir_entries, pid_dir_inode, pid_environ_inode,
-    pid_fd_dir_inode, pid_fd_entries, pid_fd_inode, pid_fdinfo_dir_inode, pid_fdinfo_entries,
-    pid_fdinfo_inode, pid_gid_map_inode, pid_loginuid_inode, pid_mountinfo_inode, pid_ns_dir_inode,
-    pid_ns_entries, pid_ns_inode, pid_ns_object, pid_oom_score_adj_inode, pid_root_inode,
-    pid_sessionid_inode, pid_setgroups_inode, pid_stat_inode, pid_status_inode, pid_string,
-    pid_uid_map_inode, proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_comm_bytes,
-    proc_pid_environ_bytes, proc_pid_fdinfo_bytes, proc_pid_gid_map_bytes, proc_pid_loginuid_bytes,
+    current_pid, fd_target, parse_fd, parse_pid, pid_cgroup_inode, pid_cmdline_inode,
+    pid_comm_inode, pid_dir_entries, pid_dir_inode, pid_environ_inode, pid_fd_dir_inode,
+    pid_fd_entries, pid_fd_inode, pid_fdinfo_dir_inode, pid_fdinfo_entries, pid_fdinfo_inode,
+    pid_gid_map_inode, pid_loginuid_inode, pid_mountinfo_inode, pid_ns_dir_inode, pid_ns_entries,
+    pid_ns_inode, pid_ns_object, pid_oom_score_adj_inode, pid_root_inode, pid_sessionid_inode,
+    pid_setgroups_inode, pid_stat_inode, pid_status_inode, pid_string, pid_uid_map_inode,
+    proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_comm_bytes, proc_pid_environ_bytes,
+    proc_pid_fdinfo_bytes, proc_pid_gid_map_bytes, proc_pid_loginuid_bytes,
     proc_pid_oom_score_adj_bytes, proc_pid_sessionid_bytes, proc_pid_setgroups_bytes,
     proc_pid_stat_bytes, proc_pid_status_bytes, proc_pid_uid_map_bytes, proc_pid_write_gid_map,
     proc_pid_write_oom_score_adj, proc_pid_write_setgroups, proc_pid_write_uid_map,
@@ -199,7 +202,12 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         .collect::<Vec<_>>();
 
     match parts.as_slice() {
-        [] => Ok(proc_dir("/", "/", PROC_ROOT_INODE, proc_root_entries())),
+        [] => Ok(proc_dynamic_dir(
+            "/",
+            "/",
+            PROC_ROOT_INODE,
+            proc_root_entries,
+        )),
         ["cmdline"] => Ok(proc_file(
             "cmdline",
             PROC_CMDLINE_INODE,
@@ -448,25 +456,28 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         }
         ["self", "fd"] => {
             let pid = current_pid()?;
-            Ok(proc_dir(
+            Ok(proc_dynamic_dir(
                 "/self/fd",
                 "fd",
                 pid_fd_dir_inode(pid),
-                pid_fd_entries(pid)?,
+                move || pid_fd_entries(pid).unwrap_or_default(),
             ))
         }
         ["self", "fd", fd] => {
             let pid = current_pid()?;
             let fd = parse_fd(fd)?;
-            Ok(proc_symlink(fd, pid_fd_inode(pid, fd), fd_target(pid, fd)?))
+            let fd_name = String::from(fd);
+            Ok(proc_dynamic_symlink(fd, pid_fd_inode(pid, fd), move || {
+                fd_target(pid, &fd_name)
+            }))
         }
         ["self", "fdinfo"] => {
             let pid = current_pid()?;
-            Ok(proc_dir(
+            Ok(proc_dynamic_dir(
                 "/self/fdinfo",
                 "fdinfo",
                 pid_fdinfo_dir_inode(pid),
-                pid_fdinfo_entries(pid)?,
+                move || pid_fdinfo_entries(pid).unwrap_or_default(),
             ))
         }
         ["self", "fdinfo", fd] => {
@@ -479,7 +490,6 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         }
         [pid] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_dir(
                 &alloc::format!("/{}", pid.0),
                 pid_string(pid).as_str(),
@@ -489,42 +499,36 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         }
         [pid, "cmdline"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_file("cmdline", pid_cmdline_inode(pid), move || {
                 proc_pid_cmdline_bytes(pid)
             }))
         }
         [pid, "comm"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_file("comm", pid_comm_inode(pid), move || {
                 proc_pid_comm_bytes(pid).unwrap_or_default()
             }))
         }
         [pid, "environ"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_file("environ", pid_environ_inode(pid), move || {
                 proc_pid_environ_bytes(pid).unwrap_or_default()
             }))
         }
         [pid, "stat"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_file("stat", pid_stat_inode(pid), move || {
                 proc_pid_stat_bytes(pid).unwrap_or_default()
             }))
         }
         [pid, "status"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_file("status", pid_status_inode(pid), move || {
                 proc_pid_status_bytes(pid).unwrap_or_default()
             }))
         }
         [pid, "sessionid"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_file(
                 "sessionid",
                 pid_sessionid_inode(pid),
@@ -533,21 +537,18 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         }
         [pid, "loginuid"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_file("loginuid", pid_loginuid_inode(pid), move || {
                 proc_pid_loginuid_bytes(pid).unwrap_or_default()
             }))
         }
         [pid, "cgroup"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_file("cgroup", pid_cgroup_inode(pid), move || {
                 proc_pid_cgroup_bytes(pid)
             }))
         }
         [pid, "oom_score_adj"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_rw_file(
                 "oom_score_adj",
                 pid_oom_score_adj_inode(pid),
@@ -557,7 +558,6 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         }
         [pid, "mountinfo"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_file(
                 "mountinfo",
                 pid_mountinfo_inode(pid),
@@ -566,7 +566,6 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         }
         [pid, "uid_map"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_rw_file(
                 "uid_map",
                 pid_uid_map_inode(pid),
@@ -576,7 +575,6 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         }
         [pid, "gid_map"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_rw_file(
                 "gid_map",
                 pid_gid_map_inode(pid),
@@ -586,7 +584,6 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         }
         [pid, "setgroups"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_rw_file(
                 "setgroups",
                 pid_setgroups_inode(pid),
@@ -596,12 +593,10 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         }
         [pid, "root"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_symlink("root", pid_root_inode(pid), "/".into()))
         }
         [pid, "net"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_dir(
                 &format!("/{}/net", pid.0),
                 "net",
@@ -610,13 +605,11 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             ))
         }
         [pid, "net", "dev"] => {
-            let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
+            parse_pid(pid)?;
             Ok(proc_file("dev", PROC_NET_DEV_INODE, proc_net_dev_bytes))
         }
         [pid, "net", "route"] => {
-            let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
+            parse_pid(pid)?;
             Ok(proc_file(
                 "route",
                 PROC_NET_ROUTE_INODE,
@@ -624,8 +617,7 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             ))
         }
         [pid, "net", "if_inet6"] => {
-            let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
+            parse_pid(pid)?;
             Ok(proc_file(
                 "if_inet6",
                 PROC_NET_IF_INET6_INODE,
@@ -634,7 +626,6 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         }
         [pid, "ns"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             Ok(proc_dir(
                 &alloc::format!("/{}/ns", pid.0),
                 "ns",
@@ -644,38 +635,36 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         }
         [pid, "ns", namespace] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             proc_pid_namespace_file(pid, namespace)
         }
         [pid, "fd"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
-            Ok(proc_dir(
+            Ok(proc_dynamic_dir(
                 &alloc::format!("/{}/fd", pid.0),
                 "fd",
                 pid_fd_dir_inode(pid),
-                pid_fd_entries(pid)?,
+                move || pid_fd_entries(pid).unwrap_or_default(),
             ))
         }
         [pid, "fd", fd] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             let fd = parse_fd(fd)?;
-            Ok(proc_symlink(fd, pid_fd_inode(pid, fd), fd_target(pid, fd)?))
+            let fd_name = String::from(fd);
+            Ok(proc_dynamic_symlink(fd, pid_fd_inode(pid, fd), move || {
+                fd_target(pid, &fd_name)
+            }))
         }
         [pid, "fdinfo"] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
-            Ok(proc_dir(
+            Ok(proc_dynamic_dir(
                 &alloc::format!("/{}/fdinfo", pid.0),
                 "fdinfo",
                 pid_fdinfo_dir_inode(pid),
-                pid_fdinfo_entries(pid)?,
+                move || pid_fdinfo_entries(pid).unwrap_or_default(),
             ))
         }
         [pid, "fdinfo", fd] => {
             let pid = parse_pid(pid)?;
-            ensure_pid_exists(pid)?;
             let fd = parse_fd(fd)?;
             let fd_num = fd.parse::<usize>().map_err(|_| FSError::NotFound)?;
             Ok(proc_file("fdinfo", pid_fdinfo_inode(pid, fd), move || {

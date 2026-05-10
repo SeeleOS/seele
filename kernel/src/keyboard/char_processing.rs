@@ -7,7 +7,6 @@ use crate::{
         line_discipline::{process_input_byte, process_output_bytes},
         state::DEFAULT_TERMINAL,
     },
-    thread::THREAD_MANAGER,
 };
 
 fn handle_interrupt_char(
@@ -27,7 +26,7 @@ fn handle_interrupt_char(
         }
     }
 
-    THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+    crate::thread::with_thread_manager(|manager| manager.wake_keyboard());
     wake_tty_poller_readable();
 }
 
@@ -73,6 +72,6 @@ pub fn process_char(char: char) {
     if byte == b'\n' {
         active_tty.flush_line_buffer();
     }
-    THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+    crate::thread::with_thread_manager(|manager| manager.wake_keyboard());
     wake_tty_poller_readable();
 }

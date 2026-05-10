@@ -7,7 +7,7 @@ use crate::{
     },
     object::misc::ObjectRef,
     process::{
-        manager::{MANAGER, get_current_process},
+        manager::get_current_process,
         misc::{ProcessID, get_process_with_pid},
     },
 };
@@ -390,14 +390,6 @@ pub(super) fn parse_pid(pid: &str) -> FSResult<ProcessID> {
 pub(super) fn parse_fd(fd: &str) -> FSResult<&str> {
     fd.parse::<usize>().map_err(|_| FSError::NotFound)?;
     Ok(fd)
-}
-
-pub(super) fn ensure_pid_exists(pid: ProcessID) -> FSResult<()> {
-    if MANAGER.lock().processes.contains_key(&pid) {
-        Ok(())
-    } else {
-        Err(FSError::NotFound)
-    }
 }
 
 pub(super) fn current_pid() -> FSResult<ProcessID> {

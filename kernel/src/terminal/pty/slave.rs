@@ -22,7 +22,7 @@ use crate::{
         linux_vt::handle_vt_request,
         pty::shared::PtyShared,
     },
-    thread::{THREAD_MANAGER, yielding::WakeType},
+    thread::yielding::{WakeType, wake_pollers_for_object},
 };
 
 impl Pollable for PtySlave {
@@ -87,9 +87,10 @@ impl Writable for PtySlave {
             shared.get_master()
         };
 
-        let mut manager = THREAD_MANAGER.get().unwrap().lock();
-        manager.wake_pty();
-        manager.wake_poller(master, PollableEvent::CanBeRead);
+        crate::thread::with_thread_manager(|manager| {
+            manager.wake_pty();
+        });
+        wake_pollers_for_object(master, PollableEvent::CanBeRead);
         Ok(buffer.len())
     }
 }

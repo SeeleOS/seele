@@ -5,14 +5,14 @@ use alloc::{string::String, vec::Vec};
 use crate::{
     define_with_accessor,
     elfloader::ElfInfo,
-    filesystem::{absolute_path::AbsolutePath, errors::FSError, vfs::VirtualFS},
+    filesystem::{absolute_path::AbsolutePath, errors::FSError, vfs_operations::resolve_dir_path},
     misc::{stack_builder::StackBuilder, time::Time},
     process::{
         Process, ProcessRef,
         manager::{MANAGER, get_current_process},
     },
     systemcall::utils::{SyscallError, SyscallResult},
-    thread::{THREAD_MANAGER, misc::State, yielding::BlockType},
+    thread::{misc::State, with_thread_manager, yielding::BlockType},
 };
 
 impl Process {
@@ -26,7 +26,7 @@ impl Process {
             return Err(FSError::AccessDenied);
         }
 
-        if VirtualFS.lock().resolve_dir(directory.as_normal()).is_ok() {
+        if resolve_dir_path(directory.as_normal()).is_ok() {
             self.fs_context.lock().current_directory = directory;
             Ok(())
         } else {
@@ -35,18 +35,19 @@ impl Process {
     }
 
     pub fn wake_blocked_threads(&self) {
-        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-        for weak in &self.threads {
-            let Some(thread) = weak.upgrade() else {
-                continue;
-            };
+        with_thread_manager(|thread_manager| {
+            for weak in &self.threads {
+                let Some(thread) = weak.upgrade() else {
+                    continue;
+                };
 
-            if matches!(thread.lock().state, State::Blocked(_))
-                && !matches!(thread.lock().state, State::Blocked(BlockType::Stopped))
-            {
-                thread_manager.wake(thread.clone());
+                if matches!(thread.lock().state, State::Blocked(_))
+                    && !matches!(thread.lock().state, State::Blocked(BlockType::Stopped))
+                {
+                    thread_manager.wake(thread.clone());
+                }
             }
-        }
+        });
     }
 }
 

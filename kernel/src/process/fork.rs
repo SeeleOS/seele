@@ -5,7 +5,7 @@ use spin::mutex::Mutex;
 use crate::{
     ipc::sysv_shm::inherit_forked_mappings,
     process::{Process, ProcessRef, clone_fd_table, clone_fs_context, misc::ProcessID},
-    thread::{THREAD_MANAGER, ThreadRef, get_current_thread, misc::ThreadID, yielding::BlockType},
+    thread::{ThreadRef, get_current_thread, misc::ThreadID, yielding::BlockType},
 };
 
 impl Process {
@@ -156,6 +156,6 @@ impl Process {
     }
 
     pub fn wake_vfork_child(thread: ThreadRef) {
-        THREAD_MANAGER.get().unwrap().lock().wake(thread);
+        crate::thread::with_thread_manager(|manager| manager.wake(thread));
     }
 }

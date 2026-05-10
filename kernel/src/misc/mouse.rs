@@ -20,11 +20,9 @@ use crate::{
         traits::Readable,
     },
     polling::{event::PollableEvent, object::Pollable},
-    thread::{
-        THREAD_MANAGER,
-        yielding::{
-            BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
-        },
+    thread::yielding::{
+        BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
+        wake_pollers_for_object,
     },
 };
 
@@ -81,11 +79,11 @@ pub fn process_pending_mouse_events() {
             MOUSE_EVENT_DEVICE.wake_readers();
         }
 
-        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-        thread_manager.wake_mouse();
-
+        crate::thread::with_thread_manager(|thread_manager| {
+            thread_manager.wake_mouse();
+        });
         if let Ok(mouse_obj) = get_device_ref("ps2mouse") {
-            thread_manager.wake_poller(mouse_obj, PollableEvent::CanBeRead);
+            wake_pollers_for_object(mouse_obj, PollableEvent::CanBeRead);
         }
     }
 }

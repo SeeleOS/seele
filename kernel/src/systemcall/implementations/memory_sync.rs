@@ -22,8 +22,9 @@ use crate::{
     process::manager::get_current_process,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
-        THREAD_MANAGER, ThreadRef, get_current_thread,
+        ThreadRef, get_current_thread,
         manager::ThreadManager,
+        with_thread_manager,
         yielding::{BlockType, finish_block_current},
     },
 };
@@ -169,10 +170,11 @@ pub fn wake_futex_for_process(pid: u64, addr: u64, count: usize) -> usize {
     let threads = take_futex_waiters(pid, addr, count, None);
     let woken = threads.len();
 
-    let mut manager = THREAD_MANAGER.get().unwrap().lock();
-    for thread in threads {
-        manager.wake(thread);
-    }
+    with_thread_manager(|manager| {
+        for thread in threads {
+            manager.wake(thread);
+        }
+    });
 
     woken
 }
@@ -297,8 +299,6 @@ fn futex_wait_impl(
     let key = current_futex_key(arg1);
     let current = get_current_thread();
     {
-        let mut manager = THREAD_MANAGER.get().unwrap().lock();
-        let mut queue = FUTEX_QUEUE.lock();
         let cur_value = u64::from(read_user_u32(arg1)?);
         if cur_value != arg2 {
             return Err(SyscallError::TryAgain);
@@ -312,10 +312,13 @@ fn futex_wait_impl(
         // Block the thread before publishing it in the futex bucket so any
         // racing wake observes a consistent Blocked state after we drop both
         // locks.
-        manager.block(current.clone(), BlockType::Futex { deadline });
-        queue.entry(key).or_default().push_back(FutexWaiter {
-            thread: current.clone(),
-            bitset,
+        with_thread_manager(|manager| {
+            let mut queue = FUTEX_QUEUE.lock();
+            manager.block(current.clone(), BlockType::Futex { deadline });
+            queue.entry(key).or_default().push_back(FutexWaiter {
+                thread: current.clone(),
+                bitset,
+            });
         });
     }
 
@@ -345,10 +348,11 @@ fn futex_wake_bitset_impl(arg1: u64, arg2: u64, bitset: u32) -> Result<usize, Sy
     let threads = take_futex_waiters(key.pid, key.addr, arg2 as usize, Some(bitset));
     let woken = threads.len();
 
-    let mut manager = THREAD_MANAGER.get().unwrap().lock();
-    for thread in threads {
-        manager.wake(thread);
-    }
+    with_thread_manager(|manager| {
+        for thread in threads {
+            manager.wake(thread);
+        }
+    });
 
     Ok(woken)
 }
@@ -402,10 +406,11 @@ fn futex_requeue_impl(
     drop(queue);
 
     let woke = woken.len();
-    let mut manager = THREAD_MANAGER.get().unwrap().lock();
-    for thread in woken {
-        manager.wake(thread);
-    }
+    with_thread_manager(|manager| {
+        for thread in woken {
+            manager.wake(thread);
+        }
+    });
 
     Ok(woke)
 }
@@ -505,8 +510,6 @@ fn futex_lock_pi_impl(
         }
 
         {
-            let mut manager = THREAD_MANAGER.get().unwrap().lock();
-            let mut queue = FUTEX_QUEUE.lock();
             let cur_value = read_user_u32(arg1)?;
             let owner = cur_value & FUTEX_TID_MASK;
             if owner == 0 {
@@ -525,10 +528,13 @@ fn futex_lock_pi_impl(
                 write_user_u32(arg1, cur_value | FUTEX_WAITERS)?;
             }
 
-            manager.block(current.clone(), BlockType::Futex { deadline });
-            queue.entry(key).or_default().push_back(FutexWaiter {
-                thread: current.clone(),
-                bitset: FUTEX_BITSET_MATCH_ANY as u32,
+            with_thread_manager(|manager| {
+                let mut queue = FUTEX_QUEUE.lock();
+                manager.block(current.clone(), BlockType::Futex { deadline });
+                queue.entry(key).or_default().push_back(FutexWaiter {
+                    thread: current.clone(),
+                    bitset: FUTEX_BITSET_MATCH_ANY as u32,
+                });
             });
         }
 
@@ -594,7 +600,7 @@ fn futex_unlock_pi_impl(arg1: u64) -> Result<usize, SyscallError> {
         };
         let new_value = next_tid | if still_has_waiters { FUTEX_WAITERS } else { 0 };
         write_user_u32(arg1, new_value)?;
-        THREAD_MANAGER.get().unwrap().lock().wake(next);
+        with_thread_manager(|manager| manager.wake(next));
     } else {
         write_user_u32(arg1, 0)?;
     }

@@ -3,7 +3,7 @@ use crate::{
     object::linux_anon::wake_signalfd_for_process,
     process::{Process, ProcessExitStatus, ProcessRef, ptrace::report_signal_stop},
     thread::{
-        THREAD_MANAGER, ThreadRef, get_current_thread,
+        ThreadRef, get_current_thread,
         misc::{SnapshotState, State, with_current_thread},
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
         thread::Thread,
@@ -389,25 +389,26 @@ fn wake_process_threads(process: &ProcessRef, wake_stopped_only: bool) {
         process.threads.clone()
     };
 
-    let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-    for weak in threads {
-        let Some(thread) = weak.upgrade() else {
-            continue;
-        };
+    crate::thread::with_thread_manager(|thread_manager| {
+        for weak in threads {
+            let Some(thread) = weak.upgrade() else {
+                continue;
+            };
 
-        let should_wake = {
-            let thread = thread.lock();
-            match &thread.state {
-                State::Blocked(BlockType::Stopped) => wake_stopped_only,
-                State::Blocked(_) => !wake_stopped_only,
-                _ => false,
+            let should_wake = {
+                let thread = thread.lock();
+                match &thread.state {
+                    State::Blocked(BlockType::Stopped) => wake_stopped_only,
+                    State::Blocked(_) => !wake_stopped_only,
+                    _ => false,
+                }
+            };
+
+            if should_wake {
+                thread_manager.wake(thread);
             }
-        };
-
-        if should_wake {
-            thread_manager.wake(thread);
         }
-    }
+    });
 }
 
 fn wake_specific_thread(thread: &ThreadRef) {
@@ -417,7 +418,7 @@ fn wake_specific_thread(thread: &ThreadRef) {
     };
 
     if should_wake {
-        THREAD_MANAGER.get().unwrap().lock().wake(thread.clone());
+        crate::thread::with_thread_manager(|manager| manager.wake(thread.clone()));
     }
 }
 
@@ -525,10 +526,11 @@ pub fn process_current_process_signals(process: &ProcessRef) -> bool {
     }
 
     if !result.exited_threads.is_empty() {
-        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
-        for thread in result.exited_threads {
-            thread_manager.mark_thread_exited(thread);
-        }
+        crate::thread::with_thread_manager(|thread_manager| {
+            for thread in result.exited_threads {
+                thread_manager.mark_thread_exited(thread);
+            }
+        });
     }
 
     result.should_switch

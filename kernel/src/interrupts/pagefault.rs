@@ -61,12 +61,13 @@ pub extern "x86-interrupt" fn pagefault_handler(
 }
 
 fn actual_pagefault_handler(stack_frame: InterruptStackFrame, error_code: PageFaultErrorCode) -> ! {
+    let address = Cr2::read().unwrap();
     if is_user_mode(&stack_frame) {
         handle_usermode_exception(&stack_frame, Signal::SIGSEGV);
     }
 
     panic!(
-        "Kernel page fault. \n {:#?} \n errcode: {:?}",
-        stack_frame, error_code
+        "Kernel page fault. \n {:#?} \n fault address: {:?} \n errcode: {:?}",
+        stack_frame, address, error_code
     )
 }

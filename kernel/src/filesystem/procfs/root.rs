@@ -58,7 +58,8 @@ pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("uptime".into(), DirectoryContentType::File),
     ];
 
-    for pid in MANAGER.lock().processes.keys() {
+    let pids = MANAGER.lock().processes.keys().copied().collect::<Vec<_>>();
+    for pid in pids {
         entries.push(DirectoryContentInfo::new(
             format!("{}", pid.0),
             DirectoryContentType::Directory,

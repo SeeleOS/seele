@@ -1,8 +1,6 @@
-use alloc::sync::Arc;
 use core::{
     arch::naked_asm,
-    mem::offset_of,
-    mem::size_of,
+    mem::{offset_of, size_of},
     sync::atomic::{AtomicBool, Ordering},
 };
 
@@ -14,17 +12,16 @@ use crate::{
     misc::mouse,
     misc::snapshot::Snapshot,
     misc::timer::process_expired_process_timers,
-    object::linux_anon::wake_expired_timerfds_with_manager,
+    object::linux_anon::expired_timerfd_poll_objects,
+    polling::event::PollableEvent,
     signal::process_current_process_signals,
-    smp::{
-        current_cpu_index, set_current_kernel_stack, set_current_process, set_current_thread,
-        try_current_process,
-    },
+    smp::{current_cpu_index, set_current_kernel_stack, set_current_process, set_current_thread},
     thread::{
-        THREAD_MANAGER, ThreadRef,
+        ThreadRef,
         misc::State,
         scheduler_thread,
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
+        with_thread_manager,
     },
 };
 
@@ -35,6 +32,7 @@ pub fn enable_ap_task_scheduling() {
 
 fn can_run_ready_threads_on_current_cpu() -> bool {
     crate::smp::with_current_cpu(|cpu| cpu.is_bsp)
+        || AP_TASK_SCHEDULING_ENABLED.load(Ordering::Acquire)
 }
 
 fn should_run_global_scheduler_work() -> bool {
@@ -44,10 +42,13 @@ fn should_run_global_scheduler_work() -> bool {
 fn process_deferred_timer_work() {
     process_expired_process_timers();
 
-    let mut manager = THREAD_MANAGER.get().unwrap().lock();
-    manager.process_timed_out_threads();
-    wake_expired_timerfds_with_manager(&mut manager);
-    manager.wake_ready_pollers();
+    with_thread_manager(|manager| {
+        manager.process_timed_out_threads();
+        manager.wake_ready_pollers();
+    });
+    for object in expired_timerfd_poll_objects() {
+        crate::thread::yielding::wake_pollers_for_object(object, PollableEvent::CanBeRead);
+    }
 }
 
 pub fn return_to_scheduler(snapshot: &mut Snapshot, snapshot_type: ThreadSnapshotType) {
@@ -162,13 +163,15 @@ pub fn run() -> ! {
 
         let can_run_ready_threads = can_run_ready_threads_on_current_cpu();
         let next_thread = if can_run_ready_threads {
-            THREAD_MANAGER
-                .get()
-                .unwrap()
-                .lock()
-                .pop_ready_for_cpu(current_cpu_index())
+            with_thread_manager(|manager| {
+                if should_run_global_scheduler_work() {
+                    manager.pop_ready_for_cpu(current_cpu_index())
+                } else {
+                    manager.pop_user_ready_for_cpu(current_cpu_index())
+                }
+            })
         } else {
-            None
+            with_thread_manager(|manager| manager.pop_local_ready_for_cpu(current_cpu_index()))
         };
 
         if let Some(thread) = next_thread {
@@ -192,16 +195,10 @@ fn run_ready_thread(thread_ref: ThreadRef) {
         set_current_thread(Some(thread_ref.clone()));
         set_current_kernel_stack(thread.kernel_stack_top);
 
-        let should_load_process = try_current_process()
-            .as_ref()
-            .is_none_or(|current| !Arc::ptr_eq(current, &process));
-
-        if should_load_process {
-            process.lock().addrspace.load();
-            set_current_process(Some(process));
-        } else {
-            set_current_process(Some(process));
-        }
+        // The process object can keep the same Arc while execve replaces its
+        // address space, so each CPU must refresh CR3 before resuming it.
+        process.lock().addrspace.load();
+        set_current_process(Some(process));
 
         Some((
             thread.get_appropriate_snapshot() as *mut ThreadSnapshot,
@@ -296,17 +293,23 @@ extern "C" fn switch_from_scheduler_to_thread_inner(
 }
 
 fn after_thread_yield(thread_ref: ThreadRef) {
+    let state = thread_ref.lock().state.clone();
+    if matches!(state, State::Exiting) {
+        with_thread_manager(|manager| {
+            manager.mark_thread_exited(thread_ref.clone());
+            manager.cleanup_exited_threads();
+        });
+        set_current_thread(Some(scheduler_thread()));
+        return;
+    }
+
     let process = {
         let thread = thread_ref.lock();
         thread.parent.clone()
     };
     let should_cleanup = process_current_process_signals(&process);
     if should_cleanup {
-        THREAD_MANAGER
-            .get()
-            .unwrap()
-            .lock()
-            .cleanup_exited_threads();
+        with_thread_manager(|manager| manager.cleanup_exited_threads());
     }
 
     let state = thread_ref.lock().state.clone();
@@ -314,20 +317,25 @@ fn after_thread_yield(thread_ref: ThreadRef) {
     match state {
         State::Running => {
             thread_ref.lock().state = State::Ready;
-            let mut manager = THREAD_MANAGER.get().unwrap().lock();
-            manager.push_ready_balanced(thread_ref.clone());
+            with_thread_manager(|manager| manager.push_ready_balanced(thread_ref.clone()));
         }
         State::Ready => {
-            let mut manager = THREAD_MANAGER.get().unwrap().lock();
-            manager.push_ready_balanced(thread_ref.clone());
+            with_thread_manager(|manager| manager.push_ready_balanced(thread_ref.clone()));
         }
         State::Blocked(_) => {}
+        State::Blocking(block_type) => {
+            thread_ref.lock().state = State::Blocked(block_type);
+        }
+        State::Woken => {
+            thread_ref.lock().state = State::Ready;
+            with_thread_manager(|manager| manager.push_ready_balanced(thread_ref.clone()));
+        }
+        State::Exiting => {
+            with_thread_manager(|manager| manager.mark_thread_exited(thread_ref.clone()));
+            with_thread_manager(|manager| manager.cleanup_exited_threads());
+        }
         State::Zombie => {
-            THREAD_MANAGER
-                .get()
-                .unwrap()
-                .lock()
-                .cleanup_exited_threads();
+            with_thread_manager(|manager| manager.cleanup_exited_threads());
         }
     }
 
@@ -341,13 +349,10 @@ fn sleep_if_idle() {
         process_deferred_timer_work();
     }
 
-    let has_pending_threads = {
-        let manager = THREAD_MANAGER.get().unwrap().lock();
-        if can_run_ready_threads_on_current_cpu() {
-            manager.has_ready_threads()
-        } else {
-            manager.has_ready_threads_for_cpu(current_cpu_index())
-        }
+    let has_pending_threads = if should_run_global_scheduler_work() {
+        with_thread_manager(|manager| manager.has_ready_threads())
+    } else {
+        false
     };
     let has_pending_work = has_pending_threads
         || (should_run_global_scheduler_work()

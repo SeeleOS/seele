@@ -8,10 +8,7 @@ use crate::{
     object::misc::ObjectRef,
     process::{FdEntry, manager::get_current_process, misc::ProcessID},
     systemcall::utils::{SyscallError, SyscallResult},
-    thread::{
-        THREAD_MANAGER,
-        yielding::{BlockType, WakeType, block_current_with_sig_check},
-    },
+    thread::yielding::{BlockType, WakeType, block_current_with_sig_check},
 };
 
 pub(crate) const F_RDLCK: i16 = 0;
@@ -542,5 +539,5 @@ fn release_ofd_lock(key: &str, owner: usize) -> bool {
 }
 
 fn wake_lock_waiters() {
-    THREAD_MANAGER.get().unwrap().lock().wake_io();
+    crate::thread::with_thread_manager(|manager| manager.wake_io());
 }

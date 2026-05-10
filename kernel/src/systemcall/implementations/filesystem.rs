@@ -9,6 +9,7 @@ use crate::{
         path::Path,
         tmpfs::TmpFs,
         vfs::VirtualFS,
+        vfs_operations::{file_info_path, open_path, open_path_nofollow, resolve_dir_path},
         vfs_traits::{DirectoryContentType, FileLikeType, MountFlags},
     },
     memory::user_safe,
@@ -341,7 +342,7 @@ fn resolve_path_at(dirfd: i32, path_str: &str) -> Result<Path, SyscallError> {
 
 fn ensure_directory_exists(path: &str) -> Result<(), SyscallError> {
     let path = Path::new(path);
-    if let Ok(info) = VirtualFS.lock().file_info(path.clone()) {
+    if let Ok(info) = file_info_path(path.clone()) {
         return match info.file_like_type {
             FileLikeType::Directory => Ok(()),
             _ => Err(SyscallError::NotADirectory),
@@ -373,7 +374,7 @@ fn next_tmpfile_path(dir_path: &Path) -> Path {
 
 fn open_tmpfile_at(dirfd: i32, path_str: &str) -> Result<ObjectRef, SyscallError> {
     let dir_path = resolve_path_at(dirfd, path_str)?;
-    let dir = VirtualFS.lock().open(dir_path.clone())?;
+    let dir = open_path(dir_path.clone())?;
     if !matches!(dir.info()?.file_like_type, FileLikeType::Directory) {
         return Err(SyscallError::NotADirectory);
     }
@@ -383,7 +384,7 @@ fn open_tmpfile_at(dirfd: i32, path_str: &str) -> Result<ObjectRef, SyscallError
         let create_result = VirtualFS.lock().create_file(tmp_path.clone());
         match create_result {
             Ok(()) => {
-                let object: ObjectRef = Arc::new(VirtualFS.lock().open(tmp_path.clone())?);
+                let object: ObjectRef = Arc::new(open_path(tmp_path.clone())?);
                 VirtualFS.lock().delete_file(tmp_path)?;
                 return Ok(object);
             }
@@ -589,18 +590,24 @@ fn filesystem_magic_for_object(object: &ObjectRef) -> Result<i64, SyscallError> 
 }
 
 fn filesystem_magic_for_path(path: &Path) -> Result<i64, SyscallError> {
-    let (_mount_path, fs, _, _) = VirtualFS.lock().mount_metadata(path.clone())?;
+    let fs = {
+        let (_mount_path, fs, _, _) = VirtualFS.lock().mount_metadata(path.clone())?;
+        fs
+    };
     Ok(fs.lock().magic())
 }
 
 fn mount_id_for_path(path: &Path) -> Result<u64, SyscallError> {
-    let mount_path = VirtualFS.lock().mount_path(path.clone())?.as_string();
-    let mut mounts = VirtualFS
-        .lock()
-        .mount_snapshots()
-        .into_iter()
-        .map(|(path, _, _, _)| path.as_string())
-        .collect::<Vec<_>>();
+    let (mount_path, mut mounts) = {
+        let vfs = VirtualFS.lock();
+        let mount_path = vfs.mount_path(path.clone())?.as_string();
+        let mounts = vfs
+            .mount_snapshots()
+            .into_iter()
+            .map(|(path, _, _, _)| path.as_string())
+            .collect::<Vec<_>>();
+        (mount_path, mounts)
+    };
     mounts.sort_by_key(|path| (path.matches('/').count(), path.len()));
     Ok(mounts
         .iter()
@@ -620,7 +627,8 @@ fn pseudo_mount_id(magic: i64) -> Option<u64> {
         _ => return None,
     };
 
-    Some(VirtualFS.lock().mount_snapshots().len() as u64 + 1 + offset)
+    let mount_count = VirtualFS.lock().mount_snapshots().len() as u64;
+    Some(mount_count + 1 + offset)
 }
 
 fn mount_id_for_object(object: &ObjectRef) -> Result<u64, SyscallError> {
@@ -635,7 +643,7 @@ fn mount_id_for_object(object: &ObjectRef) -> Result<u64, SyscallError> {
 fn mount_root_for_object(object: &ObjectRef) -> Result<bool, SyscallError> {
     if let Ok(file_like) = object.clone().as_file_like() {
         let path = file_like.path().normalize();
-        let mount_path = VirtualFS.lock().mount_path(path.clone())?;
+        let mount_path = { VirtualFS.lock().mount_path(path.clone())? };
         return Ok(path.as_string() == mount_path.as_string());
     }
 
@@ -664,7 +672,7 @@ fn stat_mount_root_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<bool
     }
 
     let path = resolve_path_at(dirfd, path_str)?.normalize();
-    let mount_path = VirtualFS.lock().mount_path(path.clone())?;
+    let mount_path = { VirtualFS.lock().mount_path(path.clone())? };
     Ok(path.as_string() == mount_path.as_string())
 }
 
@@ -700,7 +708,7 @@ fn linux_statfs(f_type: i64) -> LinuxStatFs {
 }
 
 fn readlink_impl(path: Path, out_buf: *mut u8, out_len: usize) -> Result<usize, SyscallError> {
-    let target = match VirtualFS.lock().open_nofollow(path)?.read_link() {
+    let target = match open_path_nofollow(path)?.read_link() {
         Ok(target) => target,
         Err(FSError::NotASymlink) => return Err(SyscallError::InvalidArguments),
         Err(err) => return Err(err.into()),
@@ -721,9 +729,9 @@ fn xattr_name_from_raw(name: CString) -> Result<String, SyscallError> {
 fn ensure_path_exists_at(dirfd: i32, path_str: &str, nofollow: bool) -> Result<(), SyscallError> {
     let path = resolve_path_at(dirfd, path_str)?;
     let _ = if nofollow {
-        VirtualFS.lock().open_nofollow(path)?
+        open_path_nofollow(path)?
     } else {
-        VirtualFS.lock().open(path)?
+        open_path(path)?
     };
     Ok(())
 }
@@ -782,9 +790,9 @@ fn faccessat_impl(
 
     let path = resolve_path_at(dirfd, path_str)?;
     let open_result = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
-        VirtualFS.lock().open_nofollow(path.clone())
+        open_path_nofollow(path.clone())
     } else {
-        VirtualFS.lock().open(path.clone())
+        open_path(path.clone())
     };
     let object: ObjectRef = Arc::new(open_result?);
     check_access_permissions(&object.as_statable()?.stat(), mode)?;
@@ -819,9 +827,9 @@ fn stat_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<LinuxStat, Sysc
 
     let path = resolve_path_at(dirfd, path_str)?;
     let open_result = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
-        VirtualFS.lock().open_nofollow(path.clone())
+        open_path_nofollow(path.clone())
     } else {
-        VirtualFS.lock().open(path.clone())
+        open_path(path.clone())
     };
     let object: ObjectRef = Arc::new(open_result?);
     let stat = object.as_statable()?.stat();
@@ -848,9 +856,9 @@ fn chmod_at(dirfd: i32, path_str: &str, mode: u32, flags: AtFlags) -> Result<usi
 
     let path = resolve_path_at(dirfd, path_str)?;
     let file = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
-        VirtualFS.lock().open_nofollow(path)?
+        open_path_nofollow(path)?
     } else {
-        VirtualFS.lock().open(path)?
+        open_path(path)?
     };
     if flags.contains(AtFlags::SYMLINK_NOFOLLOW)
         && matches!(file.info()?.file_like_type, FileLikeType::Symlink)
@@ -932,10 +940,7 @@ define_syscall!(OpenAt, |dirfd: i32,
 
         let path = resolve_path_at(dirfd, &path_str)?;
         let object = if !nofollow {
-            let open_result = {
-                let mut vfs = VirtualFS.lock();
-                vfs.open(path.clone())
-            };
+            let open_result = open_path(path.clone());
             match open_result {
                 Ok(file) => {
                     if create && flags.contains(OpenFlags::EXCL) {
@@ -947,7 +952,7 @@ define_syscall!(OpenAt, |dirfd: i32,
                     Ok(Some(object)) => object,
                     Ok(None) if create => {
                         create_file_unlocked(path.clone())?;
-                        let reopen_result = VirtualFS.lock().open(path.clone());
+                        let reopen_result = open_path(path.clone());
                         match reopen_result {
                             Ok(file) => {
                                 if create_mode != 0 {
@@ -964,10 +969,7 @@ define_syscall!(OpenAt, |dirfd: i32,
                 Err(err) => return Err(SyscallError::from(err)),
             }
         } else {
-            let open_result = {
-                let mut vfs = VirtualFS.lock();
-                vfs.open_nofollow(path.clone())
-            };
+            let open_result = open_path_nofollow(path.clone());
             match open_result {
                 Ok(file) => {
                     if create && flags.contains(OpenFlags::EXCL) {
@@ -977,7 +979,7 @@ define_syscall!(OpenAt, |dirfd: i32,
                 }
                 Err(FSError::NotFound) if create => {
                     create_file_unlocked(path.clone())?;
-                    let reopen_result = VirtualFS.lock().open(path.clone());
+                    let reopen_result = open_path(path.clone());
                     match reopen_result {
                         Ok(file) => {
                             if create_mode != 0 {
@@ -1052,7 +1054,7 @@ define_syscall!(Access, |path: CString, mode: i32| {
     check_access_mode(mode)?;
     let path_str = path_from_raw(path)?;
     let path = resolve_path_at(AT_FDCWD, &path_str)?;
-    let object = VirtualFS.lock().open(path)?;
+    let object = open_path(path)?;
     check_access_permissions(&object.stat(), mode)?;
     Ok(0)
 });
@@ -1115,7 +1117,7 @@ define_syscall!(Symlink, |target: CString, link_path: CString| {
 define_syscall!(Chmod, |path: CString, mode: u32| {
     let path_str = path_from_raw(path)?;
     let path = resolve_path_at(AT_FDCWD, &path_str)?;
-    let file = VirtualFS.lock().open(path)?;
+    let file = open_path(path)?;
     file.chmod(mode)?;
     Ok(0)
 });
@@ -1153,7 +1155,7 @@ define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
 define_syscall!(Chroot, |path: CString| {
     let path_str = path_from_raw(path)?;
     let path = resolve_path_at(AT_FDCWD, &path_str)?;
-    let file = VirtualFS.lock().open(path.clone())?;
+    let file = open_path(path.clone())?;
     if !matches!(file.info()?.file_like_type, FileLikeType::Directory) {
         return Err(SyscallError::NotADirectory);
     }
@@ -1458,10 +1460,7 @@ define_syscall!(UnlinkAt, |dirfd: i32, path: CString, flags: AtFlags| {
         return Err(SyscallError::InvalidArguments);
     }
     let path = resolve_path_at(dirfd, &path)?;
-    let object = {
-        let mut vfs = VirtualFS.lock();
-        vfs.open_nofollow(path.clone())?
-    };
+    let object = open_path_nofollow(path.clone())?;
     let is_directory = matches!(object.info()?.file_like_type, FileLikeType::Directory);
     if flags.contains(AtFlags::REMOVEDIR) {
         if !is_directory {
@@ -1544,10 +1543,7 @@ define_syscall!(Mknodat, |dirfd: i32,
     match mode & S_IFMT {
         0 | S_IFREG | S_IFIFO | S_IFCHR | S_IFBLK | S_IFSOCK => {
             VirtualFS.lock().create_file(path.clone())?;
-            let file = {
-                let mut vfs = VirtualFS.lock();
-                vfs.open(path)?
-            };
+            let file = open_path(path)?;
             file.chmod(mode)?;
             Ok(0)
         }
@@ -1567,10 +1563,7 @@ define_syscall!(Rmdir, |path: CString| {
     let path = path_from_raw(path)?;
     let path = resolve_path_at(AT_FDCWD, &path)?;
 
-    let object = {
-        let mut vfs = VirtualFS.lock();
-        vfs.open_nofollow(path.clone())?
-    };
+    let object = open_path_nofollow(path.clone())?;
     let is_directory = matches!(object.info()?.file_like_type, FileLikeType::Directory);
     if !is_directory {
         return Err(SyscallError::NotADirectory);
@@ -1590,7 +1583,7 @@ define_syscall!(Mount, |source: CString,
     let filesystemtype =
         string_from_raw_optional(filesystemtype)?.filter(|value| !value.is_empty());
     let data = string_from_raw_optional(data)?.filter(|value| !value.is_empty());
-    let target_object = VirtualFS.lock().open(Path::new(&target))?;
+    let target_object = open_path(Path::new(&target))?;
     let target_path = target_object.path();
     let target_is_directory = matches!(
         target_object.info()?.file_like_type,
@@ -1692,17 +1685,14 @@ define_syscall!(Mount, |source: CString,
         if !target_is_directory {
             return Err(SyscallError::NotADirectory);
         }
-        VirtualFS.lock().resolve_dir(target_path.clone())?;
+        resolve_dir_path(target_path.clone())?;
         let root_mode = tmpfs_root_mode_from_mount_data(data.as_deref())?;
         VirtualFS
             .lock()
             .mount(target_path.clone(), TmpFs::new())
             .map_err(SyscallError::from)?;
         if let Some(mode) = root_mode {
-            let mount_root = {
-                let mut vfs = VirtualFS.lock();
-                vfs.open(target_path)?
-            };
+            let mount_root = open_path(target_path)?;
             mount_root.chmod(mode)?;
         }
     }
@@ -1715,9 +1705,9 @@ define_syscall!(Umount2, |target: CString, flags: UmountFlags| {
     let path = resolve_path_at(AT_FDCWD, &target)?.normalize();
 
     if flags.contains(UmountFlags::NOFOLLOW) {
-        let _ = VirtualFS.lock().open_nofollow(path.clone())?;
+        let _ = open_path_nofollow(path.clone())?;
     } else {
-        let _ = VirtualFS.lock().open(path.clone())?;
+        let _ = open_path(path.clone())?;
     }
 
     if path == Path::new("/") {
@@ -1782,17 +1772,11 @@ define_syscall!(Fsmount, |fd: i32,
         .mount_ref(mount_path.clone(), mounted_fs)
         .map_err(SyscallError::from)?;
     if let Some(mode) = fs_context.root_mode()? {
-        let mount_root = {
-            let mut vfs = VirtualFS.lock();
-            vfs.open(mount_path.clone())?
-        };
+        let mount_root = open_path(mount_path.clone())?;
         mount_root.chmod(mode)?;
     }
 
-    let mount_root: ObjectRef = Arc::new({
-        let mut vfs = VirtualFS.lock();
-        vfs.open(mount_path)?
-    });
+    let mount_root: ObjectRef = Arc::new(open_path(mount_path)?);
     let fd_flags = if flags.contains(FsMountFlags::FSMOUNT_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
@@ -1857,7 +1841,7 @@ define_syscall!(
             }
         };
 
-        let _ = VirtualFS.lock().open(target_path.clone())?;
+        let _ = open_path(target_path.clone())?;
 
         VirtualFS
             .lock()
@@ -1891,9 +1875,9 @@ define_syscall!(OpenTree, |dirfd: i32,
         } else {
             let path = resolve_path_at(dirfd, &path)?;
             let file = if flags.contains(OpenTreeFlags::AT_SYMLINK_NOFOLLOW) {
-                VirtualFS.lock().open_nofollow(path)?
+                open_path_nofollow(path)?
             } else {
-                VirtualFS.lock().open(path)?
+                open_path(path)?
             };
             Arc::new(file)
         }
@@ -1996,7 +1980,7 @@ define_syscall!(Statfs, |path: CString, buf: *mut LinuxStatFs| {
     let path = path_from_raw(path)?;
     let path = resolve_path_at(AT_FDCWD, &path)?;
 
-    let _ = VirtualFS.lock().open(path.clone())?;
+    let _ = open_path(path.clone())?;
     let statfs = linux_statfs(filesystem_magic_for_path(&path)?);
     user_safe::write(buf, &statfs)?;
 
@@ -2098,9 +2082,9 @@ define_syscall!(Utimensat, |dirfd: i32,
         } else {
             let path = resolve_path_at(dirfd, &path_str)?;
             let _ = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
-                VirtualFS.lock().open_nofollow(path)?
+                open_path_nofollow(path)?
             } else {
-                VirtualFS.lock().open(path)?
+                open_path(path)?
             };
         }
     }

@@ -3,9 +3,11 @@ use alloc::{string::String, vec::Vec};
 use crate::filesystem::{
     errors::FSError,
     path::{Path, PathPart},
-    vfs::{FSResult, Mount, VFS},
+    vfs::{FSResult, FileSystemRef, Mount, VFS, VirtualFS},
     vfs_traits::FileLike,
 };
+
+type MountSnapshot = (Path, FileSystemRef, Path);
 
 impl VFS {
     fn resolve_raw(&self, path: Path) -> FSResult<FileLike> {
@@ -181,6 +183,140 @@ impl VFS {
         }
 
         Err(FSError::NotFound)
+    }
+}
+
+pub fn resolve_path(path: Path, follow_final_symlink: bool) -> FSResult<(FileLike, Path)> {
+    let mounts = mount_snapshots();
+    resolve_with_mounts(path, follow_final_symlink, &mounts)
+}
+
+fn mount_snapshots() -> Vec<MountSnapshot> {
+    VirtualFS
+        .lock()
+        .mount_snapshots()
+        .into_iter()
+        .map(|(path, fs, source_path, _)| (path, fs, source_path))
+        .collect()
+}
+
+fn find_mount_in_snapshots(path: &Path, mounts: &[MountSnapshot]) -> FSResult<MountSnapshot> {
+    for (mount_path, fs, source_path) in mounts {
+        if let Some(stripped) = path.strip_prefix(mount_path) {
+            return Ok((
+                mount_path.clone(),
+                fs.clone(),
+                join_mount_source(source_path, &stripped),
+            ));
+        }
+    }
+
+    Err(FSError::NotFound)
+}
+
+fn resolve_raw_with_mounts(path: Path, mounts: &[MountSnapshot]) -> FSResult<FileLike> {
+    let normalized_path = path.normalize();
+    let (_, fs, mount_path) = find_mount_in_snapshots(&normalized_path, mounts)?;
+    fs.lock().lookup(&mount_path)
+}
+
+fn resolve_with_mounts(
+    path: Path,
+    follow_final_symlink: bool,
+    mounts: &[MountSnapshot],
+) -> FSResult<(FileLike, Path)> {
+    const MAX_SYMLINKS: usize = 40;
+
+    let mut path = path.normalize();
+    let mut followed_symlinks = 0;
+
+    'restart: loop {
+        let had_trailing_slash = path.clone().as_string().ends_with('/');
+        let normalized = path.normalize();
+        let components = normalized
+            .parts
+            .iter()
+            .filter_map(|part| match part {
+                PathPart::Normal(component) => Some(component.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        if components.is_empty() {
+            return Ok((
+                resolve_raw_with_mounts(Path::new("/"), mounts)?,
+                Path::new("/"),
+            ));
+        }
+
+        let mut current = resolve_raw_with_mounts(Path::new("/"), mounts)?;
+        let mut current_path = Path::new("/");
+
+        for (index, component) in components.iter().enumerate() {
+            let is_final = index + 1 == components.len();
+            let next_path = VFS::append_component(&current_path, component);
+
+            let next = match current {
+                FileLike::Directory(dir) => {
+                    let (mount_path, _, _) = find_mount_in_snapshots(&next_path, mounts)?;
+                    if mount_path == next_path {
+                        resolve_raw_with_mounts(next_path.clone(), mounts)?
+                    } else {
+                        dir.lock().get(component)?
+                    }
+                }
+                FileLike::File(_) => return Err(FSError::NotADirectory),
+                FileLike::Symlink(_) => unreachable!("path walk should not keep raw symlinks"),
+            };
+
+            match next {
+                FileLike::Symlink(symlink) if !is_final || follow_final_symlink => {
+                    followed_symlinks += 1;
+                    if followed_symlinks > MAX_SYMLINKS {
+                        return Err(FSError::TooManySymlinks);
+                    }
+
+                    let remainder = &components[index + 1..];
+                    path = VFS::rewrite_symlink_target(
+                        &next_path,
+                        symlink.lock().target()?,
+                        remainder,
+                    );
+                    continue 'restart;
+                }
+                FileLike::Directory(_) if !is_final => {
+                    current = next;
+                    current_path = next_path;
+                }
+                FileLike::File(_) if !is_final => return Err(FSError::NotADirectory),
+                entry @ FileLike::Directory(_) if is_final => return Ok((entry, next_path)),
+                entry @ FileLike::File(_) if is_final => {
+                    if had_trailing_slash {
+                        return Err(FSError::NotADirectory);
+                    }
+                    return Ok((entry, next_path));
+                }
+                entry @ FileLike::Symlink(_) if is_final => {
+                    if had_trailing_slash {
+                        followed_symlinks += 1;
+                        if followed_symlinks > MAX_SYMLINKS {
+                            return Err(FSError::TooManySymlinks);
+                        }
+
+                        let FileLike::Symlink(symlink) = entry else {
+                            unreachable!();
+                        };
+                        path =
+                            VFS::rewrite_symlink_target(&next_path, symlink.lock().target()?, &[]);
+                        continue 'restart;
+                    }
+                    return Ok((entry, next_path));
+                }
+                FileLike::File(_) | FileLike::Directory(_) | FileLike::Symlink(_) => {
+                    unreachable!()
+                }
+            }
+        }
     }
 }
 

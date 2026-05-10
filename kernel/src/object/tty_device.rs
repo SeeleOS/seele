@@ -28,7 +28,7 @@ use crate::{
         object::TerminalObject,
         output_filter::OutputFilter,
     },
-    thread::{THREAD_MANAGER, yielding::WakeType},
+    thread::yielding::{WakeType, wake_pollers_for_object},
 };
 
 pub static CONSOLE_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();
@@ -88,11 +88,7 @@ pub fn find_unused_virtual_tty() -> Option<u32> {
 
 pub fn wake_tty_poller_readable() {
     let tty: ObjectRef = get_active_tty();
-    THREAD_MANAGER
-        .get()
-        .unwrap()
-        .lock()
-        .wake_poller(tty, PollableEvent::CanBeRead);
+    wake_pollers_for_object(tty, PollableEvent::CanBeRead);
 }
 
 #[derive(Debug)]
@@ -225,7 +221,7 @@ impl TtyDevice {
             .lock()
             .extend(bytes.iter().copied());
 
-        THREAD_MANAGER.get().unwrap().lock().wake_keyboard();
+        crate::thread::with_thread_manager(|manager| manager.wake_keyboard());
     }
 
     pub fn push_terminal_response_bytes(&self, bytes: &[u8]) {

@@ -11,7 +11,7 @@ use crate::{
         manager::{get_current_process, terminate_process},
     },
     signal::{Signal, process_current_process_signals, send_signal_to_process},
-    thread::{THREAD_MANAGER, misc::with_current_thread, scheduling::return_to_scheduler_no_save},
+    thread::{misc::with_current_thread, scheduling::return_to_scheduler_no_save},
 };
 
 pub fn init_exception_interrupts(idt: &mut InterruptDescriptorTable) {
@@ -76,11 +76,7 @@ pub fn handle_usermode_exception(stackframe: &InterruptStackFrame, sig: Signal) 
     let should_switch = process_current_process_signals(&process);
 
     if should_switch {
-        THREAD_MANAGER
-            .get()
-            .unwrap()
-            .lock()
-            .cleanup_exited_threads();
+        crate::thread::with_thread_manager(|manager| manager.cleanup_exited_threads());
         return_to_scheduler_no_save();
     }
 

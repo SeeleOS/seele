@@ -2,7 +2,8 @@ use crate::{
     filesystem::{
         info::{DirectoryContentInfo, FileLikeInfo},
         object::OpenedFileObject,
-        vfs::{FSResult, VFS, VirtualFS, WrappedDirectory, WrappedFile},
+        resolve,
+        vfs::{FSResult, VFS, WrappedDirectory, WrappedFile},
     },
     object::traits::Readable,
 };
@@ -207,7 +208,7 @@ impl VFS {
 
 pub fn read_all(path: Path) -> FSResult<Vec<u8>> {
     log::debug!("read_all: {}", path.clone().as_string());
-    let file_object = VirtualFS.lock().open(path)?;
+    let file_object = open_path(path)?;
     let mut content = Vec::with_capacity(file_object.info().unwrap().size);
 
     let mut total_read = 0;
@@ -222,4 +223,45 @@ pub fn read_all(path: Path) -> FSResult<Vec<u8>> {
 
     log::debug!("read_all: total {} bytes", total_read);
     Ok(content)
+}
+
+pub fn open_path(path: Path) -> FSResult<OpenedFileObject> {
+    let normalized = path.normalize();
+    log::trace!("vfs: open {}", normalized.clone().as_string());
+    let (file, resolved_path) = resolve::resolve_path(normalized, true)?;
+    OpenedFileObject::new(file, resolved_path)
+}
+
+pub fn open_path_nofollow(path: Path) -> FSResult<OpenedFileObject> {
+    let normalized = path.normalize();
+    log::trace!("vfs: open_nofollow {}", normalized.clone().as_string());
+    let (file, resolved_path) = resolve::resolve_path(normalized, false)?;
+    OpenedFileObject::new(file, resolved_path)
+}
+
+pub fn resolve_path_with_final(
+    path: Path,
+    follow_final_symlink: bool,
+) -> FSResult<(FileLike, Path)> {
+    resolve::resolve_path(path.normalize(), follow_final_symlink)
+}
+
+pub fn file_info_path(path: Path) -> FSResult<FileLikeInfo> {
+    resolve::resolve_path(path.normalize(), true)?.0.info()
+}
+
+pub fn resolve_file_path(path: Path) -> FSResult<WrappedFile> {
+    match resolve::resolve_path(path.normalize(), true)?.0 {
+        FileLike::File(file) => Ok(file),
+        FileLike::Symlink(symlink) => resolve_file_path(symlink.lock().target()?),
+        FileLike::Directory(_) => Err(FSError::NotAFile),
+    }
+}
+
+pub fn resolve_dir_path(path: Path) -> FSResult<WrappedDirectory> {
+    match resolve::resolve_path(path.normalize(), true)?.0 {
+        FileLike::File(_) => Err(FSError::NotADirectory),
+        FileLike::Directory(dir) => Ok(dir),
+        FileLike::Symlink(symlink) => resolve_dir_path(symlink.lock().target()?),
+    }
 }

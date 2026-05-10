@@ -1,7 +1,6 @@
 use crate::{
     process::{Process, ProcessRef},
     signal::{Signal, send_signal_to_process},
-    thread::THREAD_MANAGER,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -32,11 +31,7 @@ pub fn report_wait_event(process: &ProcessRef, event: ProcessWaitEvent) {
 
     if let Some(parent) = parent {
         send_signal_to_process(&parent, Signal::SIGCHLD);
-        THREAD_MANAGER
-            .get()
-            .unwrap()
-            .lock()
-            .wake_process_exit_waiters(pid);
+        crate::thread::with_thread_manager(|manager| manager.wake_process_exit_waiters(pid));
     }
 }
 

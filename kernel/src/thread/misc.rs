@@ -18,8 +18,11 @@ pub enum State {
     #[default]
     Ready, // ready to run (in a queue)
     Running,
-    Blocked(BlockType), // stuck, waiting for something (like keyboard input)
-    Zombie,             // Exited process
+    Blocking(BlockType), // preparing to sleep but still running on its CPU
+    Woken,               // wakeup raced with Blocking before the CPU switched out
+    Blocked(BlockType),  // stuck, waiting for something (like keyboard input)
+    Exiting,             // running on another CPU and must stop at the next scheduler return
+    Zombie,              // Exited process
 }
 
 /// Selects which execution context of the thread should be resumed next.

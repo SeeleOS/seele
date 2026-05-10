@@ -36,7 +36,6 @@ use crate::{
         SOL_NETLINK, SOL_SOCKET, SocketError, SocketLike, SocketResult, can_set_socket_priority,
         socket_timeout_option_len,
     },
-    thread::THREAD_MANAGER,
 };
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
@@ -238,11 +237,7 @@ impl NetlinkSocketObject {
         let Some(object) = self.self_object() else {
             return;
         };
-        THREAD_MANAGER
-            .get()
-            .unwrap()
-            .lock()
-            .wake_poller(object, PollableEvent::CanBeRead);
+        crate::thread::yielding::wake_pollers_for_object(object, PollableEvent::CanBeRead);
     }
 
     fn queue_message(&self, message: Vec<u8>) {

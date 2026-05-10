@@ -12,7 +12,9 @@ use smoltcp::{
 };
 use spin::Mutex;
 
-use crate::{misc::time::Time, process::manager::get_current_process, thread::THREAD_MANAGER};
+use crate::{
+    misc::time::Time, process::manager::get_current_process, thread::try_with_thread_manager,
+};
 
 pub mod namespace;
 use namespace::NetNamespace;
@@ -210,9 +212,7 @@ fn smoltcp_now() -> Instant {
 }
 
 fn wake_io() {
-    if let Some(manager) = THREAD_MANAGER.get() {
-        manager.lock().wake_io();
-    }
+    let _ = try_with_thread_manager(|manager| manager.wake_io());
 }
 
 impl NetStack {

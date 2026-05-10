@@ -1,20 +1,22 @@
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
-    sync::Arc,
+    sync::{Arc, Weak},
     vec::Vec,
 };
 use core::mem;
 use spin::Mutex;
 
 use crate::{
-    object::linux_anon::wake_signalfd_for_process_with_manager,
-    process::{ProcessRef, manager::MANAGER},
+    object::linux_anon::{
+        wake_pidfd_for_process_with_manager, wake_signalfd_for_process_with_manager,
+    },
+    process::ProcessRef,
     signal::{Signal, Signals},
-    smp::current_thread,
     systemcall::implementations::wake_futex_for_process_with_manager,
     thread::{
         ThreadRef,
         misc::{State, ThreadID},
+        snapshot::ThreadSnapshotType,
         thread::Thread,
         yielding::{BlockType, BlockedQueues},
     },
@@ -100,24 +102,31 @@ impl ThreadManager {
     }
 
     pub fn pop_ready_for_cpu(&mut self, cpu_index: usize) -> Option<ThreadRef> {
-        self.pop_ready_for_cpu_inner(cpu_index, true)
+        self.pop_ready_for_cpu_inner(cpu_index, true, ReadyThreadFilter::Any)
+    }
+
+    pub fn pop_user_ready_for_cpu(&mut self, cpu_index: usize) -> Option<ThreadRef> {
+        self.pop_ready_for_cpu_inner(cpu_index, true, ReadyThreadFilter::UserThread)
     }
 
     pub fn pop_local_ready_for_cpu(&mut self, cpu_index: usize) -> Option<ThreadRef> {
-        self.pop_ready_for_cpu_inner(cpu_index, false)
+        self.pop_ready_for_cpu_inner(cpu_index, false, ReadyThreadFilter::Any)
     }
 
     fn pop_ready_for_cpu_inner(
         &mut self,
         cpu_index: usize,
         allow_steal: bool,
+        filter: ReadyThreadFilter,
     ) -> Option<ThreadRef> {
         if self.ready_queues.is_empty() {
             self.resize_ready_queues(1);
         }
 
         let local_index = cpu_index.min(self.ready_queues.len() - 1);
-        if let Some(thread) = Self::pop_ready_from_queue(&mut self.ready_queues[local_index]) {
+        if let Some(thread) =
+            Self::pop_ready_from_queue_matching(&mut self.ready_queues[local_index], filter)
+        {
             return Some(thread);
         }
         if !allow_steal {
@@ -128,7 +137,9 @@ impl ThreadManager {
             if index == local_index {
                 continue;
             }
-            if let Some(thread) = Self::pop_ready_from_queue(&mut self.ready_queues[index]) {
+            if let Some(thread) =
+                Self::pop_ready_from_queue_matching(&mut self.ready_queues[index], filter)
+            {
                 return Some(thread);
             }
         }
@@ -153,24 +164,50 @@ impl ThreadManager {
     }
 
     pub fn kill_all_except(&mut self, thread: ThreadRef) {
-        let threads = self
-            .threads
-            .get(&thread.lock().id)
-            .cloned()
-            .unwrap_or_else(current_thread)
-            .lock()
-            .parent
-            .lock()
-            .threads
-            .clone();
+        self.exit_process_threads_except(thread);
+    }
 
-        let zombies = threads
-            .iter()
-            .filter(|p| p.upgrade().unwrap().lock().id != thread.lock().id);
+    pub fn exit_process_threads_except(&mut self, current: ThreadRef) -> bool {
+        let (threads, current_id) = {
+            let current = current.lock();
+            (current.parent.lock().threads.clone(), current.id)
+        };
+        self.exit_thread_list_except(threads, current_id)
+    }
 
-        for zombie in zombies {
-            self.mark_thread_exited(zombie.upgrade().unwrap());
+    pub fn exit_thread_list_except(
+        &mut self,
+        threads: Vec<Weak<Mutex<Thread>>>,
+        current_id: ThreadID,
+    ) -> bool {
+        let mut all_stopped = true;
+
+        for weak in threads {
+            let Some(thread) = weak.upgrade() else {
+                continue;
+            };
+            let mut thread_lock = thread.lock();
+            if thread_lock.id == current_id {
+                continue;
+            }
+
+            match thread_lock.state {
+                State::Zombie => {}
+                State::Running => {
+                    thread_lock.state = State::Exiting;
+                    all_stopped = false;
+                }
+                State::Exiting => {
+                    all_stopped = false;
+                }
+                State::Ready | State::Blocking(_) | State::Woken | State::Blocked(_) => {
+                    drop(thread_lock);
+                    self.mark_thread_exited(thread);
+                }
+            }
         }
+
+        all_stopped
     }
 
     pub fn mark_current_thread_exited(&mut self) {
@@ -206,7 +243,7 @@ impl ThreadManager {
         self.zombies.push(thread);
     }
 
-    pub fn cleanup_exited_threads(&mut self) {
+    pub fn cleanup_exited_threads(&mut self) -> Vec<ProcessRef> {
         let mut to_remove = Vec::new();
 
         self.flush_pending_thread_exits();
@@ -238,7 +275,7 @@ impl ThreadManager {
             }
         }
 
-        for dead_process in to_remove {
+        for dead_process in &to_remove {
             if let Some(parent) = dead_process.lock().parent.clone() {
                 let (parent_pid, threads) = {
                     let mut parent = parent.lock();
@@ -268,11 +305,12 @@ impl ThreadManager {
                     }
                 }
             }
-            MANAGER
-                .lock()
-                .notify_process_exit_waiters(dead_process, self);
+            let pid = dead_process.lock().pid;
+            self.wake_process_exit_waiters(pid);
+            wake_pidfd_for_process_with_manager(pid.0, self);
         }
         log::debug!("cleanup_exited_threads done");
+        to_remove
     }
 
     fn flush_pending_thread_exits(&mut self) {
@@ -289,10 +327,14 @@ impl ThreadManager {
         }
     }
 
-    pub fn remove_ready_thread(&mut self, thread: &ThreadRef) {
+    pub fn remove_ready_thread(&mut self, thread: &ThreadRef) -> bool {
+        let mut removed = false;
         for queue in &mut self.ready_queues {
+            let old_len = queue.len();
             queue.retain(|queued| !Arc::ptr_eq(queued, thread));
+            removed |= queue.len() != old_len;
         }
+        removed
     }
 
     fn next_balanced_cpu(&mut self) -> usize {
@@ -311,13 +353,45 @@ impl ThreadManager {
             .any(|queue| queue.iter().any(|queued| Arc::ptr_eq(queued, thread)))
     }
 
-    fn pop_ready_from_queue(queue: &mut VecDeque<ThreadRef>) -> Option<ThreadRef> {
-        while let Some(thread) = queue.pop_front() {
-            if matches!(thread.lock().state, State::Ready) {
+    fn pop_ready_from_queue_matching(
+        queue: &mut VecDeque<ThreadRef>,
+        filter: ReadyThreadFilter,
+    ) -> Option<ThreadRef> {
+        let queued_len = queue.len();
+        for _ in 0..queued_len {
+            let Some(thread) = queue.pop_front() else {
+                break;
+            };
+
+            let is_eligible = {
+                let mut thread_lock = thread.lock();
+                matches!(thread_lock.state, State::Ready)
+                    && filter.matches(thread_lock.get_appropriate_snapshot().snapshot_type)
+            };
+            if is_eligible {
                 return Some(thread);
+            }
+
+            if matches!(thread.lock().state, State::Ready) {
+                queue.push_back(thread);
             }
         }
 
         None
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ReadyThreadFilter {
+    Any,
+    UserThread,
+}
+
+impl ReadyThreadFilter {
+    fn matches(self, snapshot_type: ThreadSnapshotType) -> bool {
+        match self {
+            Self::Any => true,
+            Self::UserThread => matches!(snapshot_type, ThreadSnapshotType::Thread),
+        }
     }
 }

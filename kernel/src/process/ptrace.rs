@@ -120,11 +120,7 @@ pub fn resume(
             .find_map(|thread| thread.upgrade().map(|thread| thread.lock().id))
             .ok_or(SyscallError::NoProcess)?
     };
-    crate::thread::THREAD_MANAGER
-        .get()
-        .unwrap()
-        .lock()
-        .wake_thread_by_id(thread_id);
+    crate::thread::with_thread_manager(|manager| manager.wake_thread_by_id(thread_id));
     Ok(())
 }
 

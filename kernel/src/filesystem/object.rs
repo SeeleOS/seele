@@ -14,6 +14,7 @@ use crate::{
             device::StaticDeviceHandle, directory::StaticDirectoryHandle, file::StaticFileHandle,
         },
         vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
+        vfs_operations::{open_path, resolve_dir_path, resolve_file_path},
         vfs_traits::{FileLike, FileLikeType, Whence},
     },
     impl_cast_function, impl_cast_function_non_trait,
@@ -227,7 +228,7 @@ impl OpenedFileObject {
             OpenBackend::Device { .. } => Ok(()),
             OpenBackend::Directory(dir) => dir.lock().chmod(mode),
             OpenBackend::SymlinkPath { target, .. } => {
-                let nested = VirtualFS.lock().open(target.clone())?;
+                let nested = open_path(target.clone())?;
                 nested.chmod(mode)
             }
         }
@@ -259,9 +260,7 @@ impl OpenedFileObject {
     fn resolve_file(&self) -> FSResult<WrappedFile> {
         match &self.backend {
             OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => Ok(file.clone()),
-            OpenBackend::SymlinkPath { target, .. } => {
-                VirtualFS.lock().resolve_file(target.clone())
-            }
+            OpenBackend::SymlinkPath { target, .. } => resolve_file_path(target.clone()),
             OpenBackend::Directory(_) => Err(FSError::NotAFile),
         }
     }
@@ -269,7 +268,7 @@ impl OpenedFileObject {
     fn resolve_dir(&self) -> FSResult<WrappedDirectory> {
         match &self.backend {
             OpenBackend::Directory(dir) => Ok(dir.clone()),
-            OpenBackend::SymlinkPath { target, .. } => VirtualFS.lock().resolve_dir(target.clone()),
+            OpenBackend::SymlinkPath { target, .. } => resolve_dir_path(target.clone()),
             OpenBackend::RegularFile(_) | OpenBackend::Device { .. } => Err(FSError::NotADirectory),
         }
     }

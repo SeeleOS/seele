@@ -5,7 +5,7 @@ use crate::{
     misc::time::Time,
     object::{device::DEVICES, queue_helpers::copy_from_queue},
     polling::event::PollableEvent,
-    thread::THREAD_MANAGER,
+    thread::{with_thread_manager, yielding::wake_pollers_for_object},
 };
 
 use super::{
@@ -70,9 +70,8 @@ fn next_vblank_sequence() -> u32 {
 
 fn wake_drm_readable() {
     let drm_object = DEVICES.get("drm-card0").cloned().unwrap();
-    let mut manager = THREAD_MANAGER.get().unwrap().lock();
-    manager.wake_io();
-    manager.wake_poller(drm_object, PollableEvent::CanBeRead);
+    with_thread_manager(|manager| manager.wake_io());
+    wake_pollers_for_object(drm_object, PollableEvent::CanBeRead);
 }
 
 pub(super) fn try_read_drm_events(buffer: &mut [u8]) -> Option<usize> {

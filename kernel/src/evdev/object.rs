@@ -19,9 +19,10 @@ use crate::{
     polling::{event::PollableEvent, object::Pollable},
     process::manager::get_current_process,
     thread::{
-        THREAD_MANAGER,
+        with_thread_manager,
         yielding::{
             BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
+            wake_pollers_for_object,
         },
     },
 };
@@ -86,14 +87,13 @@ impl EventDeviceClientObject {
             hub.ungrab(self.client_id);
         }
 
-        let mut manager = THREAD_MANAGER.get().unwrap().lock();
-        match self.kind {
+        with_thread_manager(|manager| match self.kind {
             EventDeviceKind::Keyboard => manager.wake_keyboard(),
             EventDeviceKind::Mouse => manager.wake_mouse(),
-        }
+        });
         let object: ObjectRef = self.clone();
-        manager.wake_poller(object.clone(), PollableEvent::Error);
-        manager.wake_poller(object, PollableEvent::Closed);
+        wake_pollers_for_object(object.clone(), PollableEvent::Error);
+        wake_pollers_for_object(object, PollableEvent::Closed);
     }
 
     pub(super) fn wake_type(&self) -> WakeType {
@@ -104,13 +104,12 @@ impl EventDeviceClientObject {
     }
 
     pub(super) fn wake_readers(self: &Arc<Self>) {
-        let mut manager = THREAD_MANAGER.get().unwrap().lock();
-        match self.kind {
+        with_thread_manager(|manager| match self.kind {
             EventDeviceKind::Keyboard => manager.wake_keyboard(),
             EventDeviceKind::Mouse => manager.wake_mouse(),
-        }
+        });
         let object: ObjectRef = self.clone();
-        manager.wake_poller(object, PollableEvent::CanBeRead);
+        wake_pollers_for_object(object, PollableEvent::CanBeRead);
     }
 }
 
