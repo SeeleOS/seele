@@ -37,7 +37,7 @@ pub fn handle_vt_request(
             Ok(Some(0))
         }
         ConfigurateRequest::LinuxVtSetMode(ptr) => {
-            let new_mode: LinuxVtMode = user_safe::read((*ptr) as *const LinuxVtMode)
+            let new_mode: LinuxVtMode = user_safe::read(*ptr)
                 .map_err(|_| ObjectError::BadAddress)?;
             state.lock().vt_mode = new_mode;
             Ok(Some(0))

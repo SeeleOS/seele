@@ -142,7 +142,7 @@ fn align_up(value: u64, align: u64) -> u64 {
     value
         .checked_add(addend)
         .map(|value| align_down(value, align))
-        .unwrap_or(u64::MAX & !(align - 1))
+        .unwrap_or(!(align - 1))
 }
 
 #[repr(C)]

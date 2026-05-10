@@ -1,19 +1,8 @@
 use crate::object::{config::ConfigurateRequest, error::ObjectError, misc::ObjectResult};
 
-use super::{
-    buffer_handlers, client_handlers, cursor_handlers, display_handlers, prime,
-    user::current_debug_process,
-};
+use super::{buffer_handlers, client_handlers, cursor_handlers, display_handlers, prime};
 
 pub(super) fn handle_configure(request: ConfigurateRequest) -> ObjectResult<isize> {
-    if let Some((pid, comm)) = current_debug_process() {
-        crate::s_println!(
-            "drm ioctl comm={} pid={} request={}",
-            comm,
-            pid,
-            request.name()
-        );
-    }
     match request {
         ConfigurateRequest::DrmVersion(ptr) => client_handlers::handle_version(ptr),
         ConfigurateRequest::DrmGetUnique(ptr) => client_handlers::handle_get_unique(ptr),
@@ -67,7 +56,7 @@ pub(super) fn handle_configure(request: ConfigurateRequest) -> ObjectResult<isiz
         ConfigurateRequest::DrmPrimeHandleToFd(ptr) => prime::handle_prime_handle_to_fd(ptr),
         ConfigurateRequest::DrmPrimeFdToHandle(ptr) => prime::handle_prime_fd_to_handle(ptr),
         ConfigurateRequest::RawIoctl { request, arg } => {
-            if let Some((pid, comm)) = current_debug_process() {
+            if let Some((pid, comm)) = super::user::current_debug_process() {
                 crate::s_println!(
                     "drm raw ioctl comm={} pid={} request={:#x} arg={:#x}",
                     comm,

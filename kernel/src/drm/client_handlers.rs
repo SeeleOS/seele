@@ -23,7 +23,7 @@ use crate::{
 use super::{
     events::{make_vblank_reply, queue_vblank_event},
     object::DRM_STATE,
-    user::{copy_c_string, current_debug_process, read_user},
+    user::{copy_c_string, read_user},
 };
 
 pub(super) fn handle_version(ptr: *mut crate::drm::client::DrmVersion) -> ObjectResult<isize> {
@@ -113,15 +113,6 @@ pub(super) fn handle_set_client_cap(
     ptr: *mut crate::drm::client::DrmSetClientCap,
 ) -> ObjectResult<isize> {
     let cap = read_user(ptr)?;
-    if let Some((pid, comm)) = current_debug_process() {
-        crate::s_println!(
-            "drm set_client_cap comm={} pid={} cap={} value={}",
-            comm,
-            pid,
-            cap.capability,
-            cap.value
-        );
-    }
     match (cap.capability, cap.value) {
         (DRM_CLIENT_CAP_STEREO_3D, 0 | 1)
         | (DRM_CLIENT_CAP_UNIVERSAL_PLANES, 0 | 1)
