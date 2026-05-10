@@ -1,4 +1,4 @@
-use alloc::{vec, vec::Vec};
+use alloc::{format, vec, vec::Vec};
 use core::str;
 
 use crate::filesystem::info::DirectoryContentInfo;
@@ -19,6 +19,11 @@ use crate::filesystem::{
     tmpfs::TmpfsState,
     vfs_traits::{FileLikeType, MountFlags},
 };
+use crate::misc::utsname::{
+    current_domainname, current_hostname, set_domainname, set_hostname,
+};
+use crate::object::tty_device::{get_active_vt, set_active_vt};
+use crate::process::manager::get_current_process;
 
 crate::test!(
     path_normalization_cases,
@@ -69,6 +74,16 @@ crate::test!(
     procfs_static_entries,
     "procfs exposes stable static directories files and mount flags",
     procfs_exposes_stable_static_directories_files_and_mount_flags
+);
+crate::test!(
+    procfs_dynamic_entries_and_rw_nodes,
+    "procfs exposes dynamic pid entries symlinks and writable control nodes",
+    procfs_exposes_dynamic_pid_entries_symlinks_and_writable_control_nodes
+);
+crate::test!(
+    sysfs_dynamic_nodes_and_uevent_payloads,
+    "sysfs exposes dynamic tty state readonly nodes and stable uevent payloads",
+    sysfs_exposes_dynamic_tty_state_readonly_nodes_and_stable_uevent_payloads
 );
 
 fn path_normalization_handles_absolute_and_relative_components() {
@@ -463,4 +478,209 @@ fn procfs_exposes_stable_static_directories_files_and_mount_flags() {
     let mut bytes = [0; 32];
     let read = file.read(&mut bytes).unwrap();
     assert_eq!(str::from_utf8(&bytes[..read]).unwrap(), "6.12.0-seele\n");
+}
+
+fn procfs_exposes_dynamic_pid_entries_symlinks_and_writable_control_nodes() {
+    let fs = ProcFs::new();
+    let current_pid = get_current_process().lock().pid;
+    let current_pid_name = format!("{}", current_pid.0);
+
+    let FileLike::Directory(root) = fs.lookup(&Path::new("/")).unwrap() else {
+        panic!("/proc root should be a directory");
+    };
+    let root_names = root
+        .lock()
+        .contents()
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.name)
+        .collect::<Vec<_>>();
+    assert!(root_names.contains(&current_pid_name));
+    assert!(root_names.contains(&"self".into()));
+
+    let FileLike::Symlink(self_link) = fs.lookup(&Path::new("/self")).unwrap() else {
+        panic!("/proc/self should be a symlink");
+    };
+    assert_eq!(self_link.lock().target().unwrap().as_string(), current_pid_name);
+
+    let FileLike::Symlink(root_link) = fs.lookup(&Path::new("/self/root")).unwrap() else {
+        panic!("/proc/self/root should be a symlink");
+    };
+    assert_eq!(root_link.lock().target().unwrap().as_string(), "/");
+
+    let FileLike::Directory(pid_ns) = fs.lookup(&Path::new("/self/ns")).unwrap() else {
+        panic!("/proc/self/ns should be a directory");
+    };
+    let pid_ns_info = pid_ns.lock().info().unwrap();
+    assert_eq!(pid_ns_info.name, "ns");
+
+    let FileLike::File(net_ns) = fs.lookup(&Path::new("/self/ns/net")).unwrap() else {
+        panic!("/proc/self/ns/net should be a file-like namespace node");
+    };
+    let net_ns_inode = net_ns.lock().info().unwrap().inode;
+    assert_ne!(net_ns_inode, 0);
+
+    let FileLike::Directory(fd_dir) = fs.lookup(&Path::new("/self/fd")).unwrap() else {
+        panic!("/proc/self/fd should be a directory");
+    };
+    let fd_entries = fd_dir
+        .lock()
+        .contents()
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.name)
+        .collect::<Vec<_>>();
+    let expected_fds = {
+        let process = get_current_process();
+        let process = process.lock();
+        process
+            .fd_table
+            .lock()
+            .iter()
+            .enumerate()
+            .filter_map(|(fd, entry)| entry.as_ref().map(|_| format!("{fd}")))
+            .collect::<Vec<_>>()
+    };
+    for fd in expected_fds {
+        assert!(fd_entries.contains(&fd), "missing fd entry {fd}");
+    }
+
+    let hostname_before = c_string_field_to_string(current_hostname(crate::NAME));
+    let domainname_before = c_string_field_to_string(current_domainname("(none)"));
+
+    let FileLike::File(hostname) = fs.lookup(&Path::new("/sys/kernel/hostname")).unwrap() else {
+        panic!("hostname should be a writable proc file");
+    };
+    let mut hostname = hostname.lock();
+    assert_eq!(hostname.write(b" proc-host \n").unwrap(), 12);
+    hostname.seek(0, Whence::Start).unwrap();
+    let mut hostname_bytes = [0; 32];
+    let hostname_read = hostname.read(&mut hostname_bytes).unwrap();
+    assert_eq!(
+        str::from_utf8(&hostname_bytes[..hostname_read]).unwrap(),
+        "proc-host\n"
+    );
+    assert!(matches!(hostname.write(&[0xff]), Err(FSError::Other)));
+    set_hostname(hostname_before.as_bytes()).unwrap();
+
+    let FileLike::File(domainname) = fs.lookup(&Path::new("/sys/kernel/domainname")).unwrap()
+    else {
+        panic!("domainname should be a writable proc file");
+    };
+    let mut domainname = domainname.lock();
+    assert_eq!(domainname.write(b" example.test \0").unwrap(), 15);
+    domainname.seek(0, Whence::Start).unwrap();
+    let mut domainname_bytes = [0; 32];
+    let domainname_read = domainname.read(&mut domainname_bytes).unwrap();
+    assert_eq!(
+        str::from_utf8(&domainname_bytes[..domainname_read]).unwrap(),
+        "example.test\n"
+    );
+    assert!(matches!(domainname.write(&[0xff]), Err(FSError::Other)));
+    set_domainname(domainname_before.as_bytes()).unwrap();
+
+    let FileLike::File(file_max) = fs.lookup(&Path::new("/sys/fs/file-max")).unwrap() else {
+        panic!("file-max should be writable");
+    };
+    let mut file_max = file_max.lock();
+    assert_eq!(file_max.write(b" 12345\n").unwrap(), 7);
+    file_max.seek(0, Whence::Start).unwrap();
+    let mut file_max_bytes = [0; 32];
+    let file_max_read = file_max.read(&mut file_max_bytes).unwrap();
+    assert_eq!(str::from_utf8(&file_max_bytes[..file_max_read]).unwrap(), "12345\n");
+    assert!(matches!(file_max.write(b"not-a-number"), Err(FSError::Other)));
+
+    let oom_path = format!("/{}/oom_score_adj", current_pid.0);
+    let FileLike::File(oom_score_adj) = fs.lookup(&Path::new(&oom_path)).unwrap() else {
+        panic!("oom_score_adj should be writable");
+    };
+    let mut oom_score_adj = oom_score_adj.lock();
+    assert_eq!(oom_score_adj.write(b"1000\n").unwrap(), 5);
+    oom_score_adj.seek(0, Whence::Start).unwrap();
+    let mut oom_bytes = [0; 16];
+    let oom_read = oom_score_adj.read(&mut oom_bytes).unwrap();
+    assert_eq!(str::from_utf8(&oom_bytes[..oom_read]).unwrap(), "1000\n");
+    assert!(matches!(oom_score_adj.write(b"1001"), Err(FSError::Other)));
+    assert!(matches!(oom_score_adj.write(b"abc"), Err(FSError::Other)));
+    oom_score_adj.write(b"0").unwrap();
+
+    let FileLike::File(pressure_cpu) = fs.lookup(&Path::new("/pressure/cpu")).unwrap() else {
+        panic!("pressure cpu node should be writable");
+    };
+    let mut pressure_cpu = pressure_cpu.lock();
+    assert_eq!(
+        pressure_cpu.write(b"some 150000 1000000").unwrap(),
+        b"some 150000 1000000".len()
+    );
+    pressure_cpu.seek(0, Whence::Start).unwrap();
+    let mut pressure_bytes = [0; 128];
+    let pressure_read = pressure_cpu.read(&mut pressure_bytes).unwrap();
+    let rendered = str::from_utf8(&pressure_bytes[..pressure_read]).unwrap();
+    assert!(rendered.contains("some avg10=0.00"));
+    assert!(rendered.contains("full avg10=0.00"));
+}
+
+fn sysfs_exposes_dynamic_tty_state_readonly_nodes_and_stable_uevent_payloads() {
+    let fs = SysFs::new();
+
+    let active_before = get_active_vt();
+    let FileLike::File(active) = fs.lookup(&Path::new("/class/tty/tty0/active")).unwrap() else {
+        panic!("tty0/active should be a file");
+    };
+    let mut active = active.lock();
+    let mut active_bytes = [0; 16];
+    let first_read = active.read(&mut active_bytes).unwrap();
+    assert_eq!(
+        str::from_utf8(&active_bytes[..first_read]).unwrap(),
+        format!("tty{}\n", active_before)
+    );
+    assert!(matches!(active.write(b"tty2"), Err(FSError::Readonly)));
+
+    assert!(set_active_vt(2));
+    active.seek(0, Whence::Start).unwrap();
+    let second_read = active.read(&mut active_bytes).unwrap();
+    assert_eq!(str::from_utf8(&active_bytes[..second_read]).unwrap(), "tty2\n");
+    assert!(set_active_vt(active_before));
+
+    for (path, expected_lines) in [
+        ("/devices/uevent", vec!["SUBSYSTEM=devices"]),
+        ("/devices/platform/uevent", vec!["SUBSYSTEM=platform"]),
+        (
+            "/devices/platform/i8042/uevent",
+            vec![
+                "DRIVER=i8042",
+                "MODALIAS=platform:i8042",
+                "SUBSYSTEM=platform",
+            ],
+        ),
+    ] {
+        let FileLike::File(node) = fs.lookup(&Path::new(path)).unwrap() else {
+            panic!("{path} should be a file");
+        };
+        let mut node = node.lock();
+        let mut bytes = [0; 128];
+        let read = node.read(&mut bytes).unwrap();
+        let rendered = str::from_utf8(&bytes[..read]).unwrap();
+        for line in expected_lines {
+            assert!(rendered.contains(line), "{path} missing {line}");
+        }
+    }
+
+    let FileLike::Symlink(subsystem) = fs
+        .lookup(&Path::new(
+            "/devices/platform/i8042/serio0/input/input0/event0/subsystem",
+        ))
+        .unwrap()
+    else {
+        panic!("event0 subsystem should be a symlink");
+    };
+    assert_eq!(
+        subsystem.lock().target().unwrap().as_string(),
+        "/sys/class/input"
+    );
+}
+
+fn c_string_field_to_string(field: [u8; 65]) -> alloc::string::String {
+    let len = field.iter().position(|&byte| byte == 0).unwrap_or(field.len());
+    str::from_utf8(&field[..len]).unwrap().into()
 }

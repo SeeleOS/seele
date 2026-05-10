@@ -573,12 +573,20 @@ impl FileSystem for SysFs {
 
 #[cfg(test)]
 mod tests {
-    use super::{devices_uevent, parse_uevent_write, platform_uevent};
+    use super::{devices_uevent, emit_uevent, parse_uevent_write, platform_uevent};
+    use crate::object::netlink::{NetlinkSocketAddress, NetlinkSocketObject};
+    use crate::object::traits::Readable;
+    use crate::socket::{NETLINK_KOBJECT_UEVENT, SOCK_DGRAM, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP};
 
     crate::test!(
         sysfs_uevent_payloads,
         "sysfs uevent payload builders and parsers preserve linux synthetic env rules",
         sysfs_uevent_payload_builders_and_parsers_preserve_linux_synthetic_env_rules
+    );
+    crate::test!(
+        sysfs_emit_uevent_side_effects,
+        "sysfs uevent emission broadcasts kernel generated env without allowing overrides",
+        sysfs_uevent_emission_broadcasts_kernel_generated_env_without_allowing_overrides
     );
 
     fn sysfs_uevent_payload_builders_and_parsers_preserve_linux_synthetic_env_rules() {
@@ -598,5 +606,45 @@ mod tests {
             core::str::from_utf8(&defaulted.synthetic_env).unwrap(),
             "SYNTH_UUID=0\n"
         );
+    }
+
+    fn sysfs_uevent_emission_broadcasts_kernel_generated_env_without_allowing_overrides() {
+        let socket = NetlinkSocketObject::create(SOCK_DGRAM, NETLINK_KOBJECT_UEVENT).unwrap();
+        socket
+            .setsockopt(SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &1u32.to_ne_bytes())
+            .unwrap();
+        socket
+            .bind(NetlinkSocketAddress { pid: 0, groups: 0 })
+            .unwrap();
+
+        emit_uevent(
+            b"add abc123 ACTION=bad DEVPATH=/wrong KEY=VALUE SEQNUM=999",
+            "/devices/platform",
+            b"SUBSYSTEM=platform\nACTION=ignored\nDEVPATH=ignored\nSEQNUM=ignored\n",
+        )
+        .unwrap();
+
+        let mut buffer = [0u8; 512];
+        let read = socket.read(&mut buffer).unwrap();
+        let parts = buffer[..read]
+            .split(|byte| *byte == 0)
+            .filter(|part| !part.is_empty())
+            .map(|part| core::str::from_utf8(part).unwrap())
+            .collect::<alloc::vec::Vec<_>>();
+
+        assert_eq!(parts[0], "add@/devices/platform");
+        assert!(parts.contains(&"ACTION=add"));
+        assert!(parts.contains(&"DEVPATH=/devices/platform"));
+        assert!(parts.contains(&"SUBSYSTEM=platform"));
+        assert!(parts.contains(&"SYNTH_ARG_ACTION=bad"));
+        assert!(parts.contains(&"SYNTH_ARG_DEVPATH=/wrong"));
+        assert!(parts.contains(&"SYNTH_ARG_KEY=VALUE"));
+        assert!(parts.contains(&"SYNTH_ARG_SEQNUM=999"));
+        assert!(parts.contains(&"SYNTH_UUID=abc123"));
+        let seqnum = parts
+            .iter()
+            .find(|part| part.starts_with("SEQNUM="))
+            .expect("uevent should contain seqnum");
+        assert!(seqnum[7..].parse::<u64>().is_ok());
     }
 }

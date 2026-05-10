@@ -727,9 +727,13 @@ impl FileSystem for ProcFs {
 mod tests {
     use super::{
         proc_c_string_bytes, proc_fs_entries, proc_pressure_bytes, proc_sys_entries,
-        proc_sysctl_value_bytes, proc_trim_sysctl_string,
+        proc_sysctl_value_bytes, proc_trim_sysctl_string, proc_write_domainname,
+        proc_write_hostname, proc_write_pressure, proc_write_sysctl_u64,
     };
     use crate::filesystem::errors::FSError;
+    use crate::misc::utsname::{
+        current_domainname, current_hostname, set_domainname, set_hostname,
+    };
     use core::sync::atomic::AtomicU64;
 
     crate::test!(
@@ -746,6 +750,11 @@ mod tests {
         procfs_pressure_and_sysctl_bytes,
         "procfs pressure and sysctl rendering stay stable",
         procfs_pressure_and_sysctl_rendering_stays_stable
+    );
+    crate::test!(
+        procfs_write_helpers,
+        "procfs write helpers trim values update state and reject invalid inputs",
+        procfs_write_helpers_trim_values_update_state_and_reject_invalid_inputs
     );
 
     fn procfs_string_helpers_trim_sysctl_values_and_preserve_c_string_bytes() {
@@ -781,5 +790,35 @@ mod tests {
         );
         let value = AtomicU64::new(1234);
         assert_eq!(proc_sysctl_value_bytes(&value), b"1234\n");
+    }
+
+    fn procfs_write_helpers_trim_values_update_state_and_reject_invalid_inputs() {
+        let hostname_before = current_hostname(crate::NAME);
+        let domain_before = current_domainname("(none)");
+
+        assert_eq!(proc_write_hostname(b" proc-host \n").unwrap(), 12);
+        assert_eq!(proc_c_string_bytes(current_hostname(crate::NAME)), b"proc-host\n");
+        assert!(matches!(proc_write_hostname(&[0xff]), Err(FSError::Other)));
+        set_hostname(proc_trim_sysctl_string(&proc_c_string_bytes(hostname_before)).unwrap().as_bytes())
+            .unwrap();
+
+        assert_eq!(proc_write_domainname(b" domain.test \n").unwrap(), 14);
+        assert_eq!(
+            proc_c_string_bytes(current_domainname("(none)")),
+            b"domain.test\n"
+        );
+        assert!(matches!(proc_write_domainname(&[0xff]), Err(FSError::Other)));
+        set_domainname(proc_trim_sysctl_string(&proc_c_string_bytes(domain_before)).unwrap().as_bytes())
+            .unwrap();
+
+        let value = AtomicU64::new(7);
+        assert_eq!(proc_write_sysctl_u64(&value, b" 123 \0").unwrap(), 6);
+        assert_eq!(proc_sysctl_value_bytes(&value), b"123\n");
+        assert!(matches!(
+            proc_write_sysctl_u64(&value, b"not-a-number"),
+            Err(FSError::Other)
+        ));
+
+        assert_eq!(proc_write_pressure(b"some 100 1000").unwrap(), 13);
     }
 }

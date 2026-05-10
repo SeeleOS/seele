@@ -542,8 +542,18 @@ mod tests {
     use super::{
         PROC_NAMESPACE_NAMES, default_user_namespace_map, format_capability_set,
         normalize_proc_control_write, pid_dir_entries, pid_ns_entries, pid_string,
+        proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_comm_bytes, proc_pid_fdinfo_bytes,
+        proc_pid_gid_map_bytes, proc_pid_loginuid_bytes, proc_pid_oom_score_adj_bytes,
+        proc_pid_sessionid_bytes, proc_pid_setgroups_bytes, proc_pid_stat_bytes,
+        proc_pid_status_bytes, proc_pid_uid_map_bytes, proc_pid_write_gid_map,
+        proc_pid_write_oom_score_adj, proc_pid_write_setgroups, proc_pid_write_uid_map, fd_target,
     };
-    use crate::{filesystem::errors::FSError, process::misc::ProcessID};
+    use alloc::format;
+    use crate::{
+        filesystem::errors::FSError,
+        object::linux_anon::{EventFdFlags, EventFdObject},
+        process::{FdFlags, manager::MANAGER, misc::ProcessID, Process},
+    };
 
     crate::test!(
         procfs_pid_format_helpers,
@@ -554,6 +564,11 @@ mod tests {
         procfs_pid_static_entry_sets,
         "procfs pid static entry builders expose stable names",
         procfs_pid_static_entry_builders_expose_stable_names
+    );
+    crate::test!(
+        procfs_pid_content_and_write_helpers,
+        "procfs pid helpers render linux style content and update writable controls",
+        procfs_pid_helpers_render_linux_style_content_and_update_writable_controls
     );
 
     fn procfs_pid_helpers_normalize_writes_format_ids_and_capability_sets() {
@@ -587,5 +602,88 @@ mod tests {
         assert!(names.contains(&alloc::string::String::from("comm")));
         assert!(names.contains(&alloc::string::String::from("mountinfo")));
         assert!(names.contains(&alloc::string::String::from("fdinfo")));
+    }
+
+    fn procfs_pid_helpers_render_linux_style_content_and_update_writable_controls() {
+        let process = Process::empty();
+        let pid = {
+            let mut process_locked = process.lock();
+            process_locked.pid = ProcessID::new();
+            process_locked.command_line =
+                alloc::vec![alloc::string::String::from("/bin/test-proc"), alloc::string::String::from("--flag")];
+            process_locked.real_uid = 1000;
+            process_locked.effective_uid = 1001;
+            process_locked.saved_uid = 1002;
+            process_locked.fs_uid = 1003;
+            process_locked.real_gid = 2000;
+            process_locked.effective_gid = 2001;
+            process_locked.saved_gid = 2002;
+            process_locked.fs_gid = 2003;
+            process_locked.supplementary_groups = alloc::vec![10, 20];
+            process_locked.session_id = crate::process::group::SessionID(77);
+            process_locked.group_id = crate::process::group::ProcessGroupID(55);
+            process_locked.oom_score_adj = 0;
+            let fd = process_locked.push_object_with_flags(
+                EventFdObject::new(0, EventFdFlags::empty()),
+                FdFlags::empty(),
+            );
+            assert_eq!(fd, 0);
+            process_locked.pid
+        };
+        MANAGER.lock().processes.insert(pid, process.clone());
+
+        let cmdline = proc_pid_cmdline_bytes(pid);
+        assert_eq!(cmdline, b"/bin/test-proc\0--flag\0");
+        assert_eq!(proc_pid_comm_bytes(pid).unwrap(), b"test-proc\n");
+
+        let status = alloc::string::String::from_utf8(proc_pid_status_bytes(pid).unwrap()).unwrap();
+        assert!(status.contains("Name:\t"));
+        assert!(status.contains("Pid:\t"));
+        assert!(status.contains("Uid:\t1000\t1001\t1002\t1003\n"));
+        assert!(status.contains("Gid:\t2000\t2001\t2002\t2003\n"));
+        assert!(status.contains("Groups:\t10 20\n"));
+
+        let stat = alloc::string::String::from_utf8(proc_pid_stat_bytes(pid).unwrap()).unwrap();
+        assert!(stat.starts_with(&format!("{} (", pid.0)));
+        assert!(stat.contains(" 55 77 "));
+
+        assert_eq!(proc_pid_sessionid_bytes(pid).unwrap(), b"77\n");
+        assert_eq!(proc_pid_loginuid_bytes(pid).unwrap(), b"4294967295\n");
+        assert_eq!(proc_pid_uid_map_bytes(pid).unwrap(), b"0 1000 1\n");
+        assert_eq!(proc_pid_gid_map_bytes(pid).unwrap(), b"0 2000 1\n");
+        assert_eq!(proc_pid_setgroups_bytes(pid).unwrap(), b"allow\n");
+        assert_eq!(proc_pid_oom_score_adj_bytes(pid).unwrap(), b"0\n");
+        assert!(alloc::string::String::from_utf8(proc_pid_cgroup_bytes(pid))
+            .unwrap()
+            .starts_with("0::/"));
+
+        proc_pid_write_uid_map(pid, b"0 2000 1").unwrap();
+        proc_pid_write_gid_map(pid, b"0 3000 1").unwrap();
+        proc_pid_write_setgroups(pid, b"deny").unwrap();
+        proc_pid_write_oom_score_adj(pid, b"-1000").unwrap();
+        assert_eq!(proc_pid_uid_map_bytes(pid).unwrap(), b"0 2000 1\n");
+        assert_eq!(proc_pid_gid_map_bytes(pid).unwrap(), b"0 3000 1\n");
+        assert_eq!(proc_pid_setgroups_bytes(pid).unwrap(), b"deny\n");
+        assert_eq!(proc_pid_oom_score_adj_bytes(pid).unwrap(), b"-1000\n");
+        assert!(matches!(
+            proc_pid_write_oom_score_adj(pid, b"1001"),
+            Err(FSError::Other)
+        ));
+        assert!(matches!(
+            proc_pid_write_oom_score_adj(pid, b"bad"),
+            Err(FSError::Other)
+        ));
+
+        assert_eq!(
+            fd_target(pid, "0").unwrap(),
+            "anon_inode:[kernel::object::linux_anon::EventFdObject]"
+        );
+        let fdinfo = alloc::string::String::from_utf8(proc_pid_fdinfo_bytes(pid, 0).unwrap()).unwrap();
+        assert!(fdinfo.contains("pos:\t0\n"));
+        assert!(fdinfo.contains("flags:\t0\n"));
+        assert!(fdinfo.contains("mnt_id:\t0\n"));
+        assert!(fdinfo.contains("ino:\t0\n"));
+
+        MANAGER.lock().processes.remove(&pid);
     }
 }

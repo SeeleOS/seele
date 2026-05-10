@@ -238,8 +238,11 @@ fn sorted_mounts() -> Vec<(String, FileSystemRef, String, MountFlags)> {
 mod tests {
     use super::{
         generate_uuid, proc_boot_id_bytes, proc_cap_last_cap_bytes, proc_kernel_entries,
-        proc_kernel_random_entries, proc_ngroups_max_bytes, proc_pressure_entries,
+        proc_kernel_random_entries, proc_mountinfo_bytes, proc_mounts_bytes,
+        proc_ngroups_max_bytes, proc_pressure_entries, proc_root_entries,
     };
+    use alloc::string::ToString;
+    use crate::process::manager::get_current_process;
 
     crate::test!(
         procfs_root_uuid_layout,
@@ -255,6 +258,11 @@ mod tests {
         procfs_root_static_bytes,
         "procfs root static bytes end with newline",
         procfs_root_static_bytes_end_with_newline
+    );
+    crate::test!(
+        procfs_root_dynamic_entries_and_mount_bytes,
+        "procfs root includes current pid and stable mount renderings",
+        procfs_root_includes_current_pid_and_stable_mount_renderings
     );
 
     fn procfs_root_uuid_generation_preserves_version_and_variant_layout() {
@@ -308,6 +316,28 @@ mod tests {
         assert!(proc_boot_id_bytes().ends_with(b"\n"));
         assert_eq!(proc_ngroups_max_bytes(), b"65536\n");
         assert!(proc_cap_last_cap_bytes().ends_with(b"\n"));
+    }
+
+    fn procfs_root_includes_current_pid_and_stable_mount_renderings() {
+        let current_pid = get_current_process().lock().pid.0.to_string();
+        let root_entries = proc_root_entries()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect::<alloc::vec::Vec<_>>();
+        assert!(root_entries.contains(&current_pid));
+        assert!(root_entries.contains(&alloc::string::String::from("self")));
+
+        let mounts = alloc::string::String::from_utf8(proc_mounts_bytes()).unwrap();
+        assert!(mounts.contains("proc /proc proc "));
+        assert!(mounts.contains("sysfs /sys sysfs "));
+        assert!(mounts.contains("devtmpfs /dev devtmpfs "));
+
+        let mountinfo = alloc::string::String::from_utf8(proc_mountinfo_bytes()).unwrap();
+        assert!(mountinfo.contains(" / / "));
+        assert!(mountinfo.contains(" /proc "));
+        assert!(mountinfo.contains(" - proc proc "));
+        assert!(mountinfo.contains(" - sysfs sysfs "));
+        assert!(mountinfo.contains(" - devtmpfs devtmpfs "));
     }
 }
 

@@ -1,3 +1,10 @@
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+
 use crate::{
     filesystem::info::LinuxStat,
     filesystem::{absolute_path::AbsolutePath, path::Path, vfs::VirtualFS},
@@ -459,6 +466,16 @@ crate::test!(
     filesystem_utimensat_invalid_flag_syscalls,
     "utimensat rejects invalid flags like linux",
     filesystem_utimensat_invalid_flag_syscalls_follow_linux_rules
+);
+crate::test!(
+    procfs_syscalls,
+    "procfs syscall paths follow linux proc abi rules",
+    procfs_syscalls_follow_linux_proc_abi_rules
+);
+crate::test!(
+    sysfs_syscalls,
+    "sysfs syscall paths follow linux sysfs abi rules",
+    sysfs_syscalls_follow_linux_sysfs_abi_rules
 );
 crate::test!(
     poll_and_ppoll_syscalls,
@@ -2269,10 +2286,7 @@ fn clock_and_affinity_syscalls_follow_linux_pointer_rules() {
 }
 
 fn close_test_fd(fd: usize) {
-    let fd_table = get_current_process().lock().fd_table.clone();
-    let mut fd_table = fd_table.lock();
-    assert!(fd < fd_table.len());
-    assert!(fd_table[fd].take().is_some());
+    expect_ok(SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Close>(), 0);
 }
 
 fn expect_fd(result: Result<usize, SyscallError>) -> usize {
@@ -2316,6 +2330,78 @@ fn write_user_cstr(addr: u64, value: &[u8]) {
         .addrspace
         .write_buffer(addr as *mut u8, value)
         .expect("test user c string should be writable");
+}
+
+fn allocate_large_user_test_region(pages: u64) -> u64 {
+    let process = get_current_process();
+    let mut process = process.lock();
+    process.addrspace.allocate_user(pages).0.as_u64()
+}
+
+fn read_user_bytes(addr: u64, len: usize) -> Vec<u8> {
+    get_current_process()
+        .lock()
+        .addrspace
+        .read_buffer(addr as *const u8, len)
+        .expect("test user address should be readable")
+}
+
+fn read_file_via_fd(fd: usize, page: u64, offset: u64, max_len: usize) -> Vec<u8> {
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Lseek>(),
+        0,
+    );
+    let read = SyscallArgs::new([fd as u64, page + offset, max_len as u64, 0, 0, 0])
+        .call::<Read>()
+        .expect("read should succeed");
+    read_user_bytes(page + offset, read)
+}
+
+fn openat_fd(dirfd: u64, path_addr: u64, flags: OpenFlags) -> usize {
+    expect_fd(
+        SyscallArgs::new([dirfd, path_addr, flags.bits() as u64, 0, 0, 0]).call::<OpenAt>(),
+    )
+}
+
+fn readlink_bytes(dirfd: u64, path_addr: u64, buf_addr: u64, buf_len: usize) -> Vec<u8> {
+    let read = if dirfd == (-1i32) as u64 {
+        SyscallArgs::new([path_addr, buf_addr, buf_len as u64, 0, 0, 0])
+            .call::<Readlink>()
+            .expect("readlink should succeed")
+    } else {
+        SyscallArgs::new([dirfd, path_addr, buf_addr, buf_len as u64, 0, 0])
+            .call::<ReadlinkAt>()
+            .expect("readlinkat should succeed")
+    };
+    read_user_bytes(buf_addr, read)
+}
+
+fn parse_dirent_names(addr: u64, bytes: usize) -> Vec<(String, u8)> {
+    let mut offset = 0usize;
+    let mut names = Vec::new();
+    while offset < bytes {
+        let entry = read_user_value::<LinuxDirent64Header>(addr + offset as u64);
+        assert!(entry.d_reclen as usize >= 24);
+        let name_len = entry.d_reclen as usize - 19;
+        let raw_name = read_user_bytes(addr + offset as u64 + 19, name_len);
+        let nul = raw_name
+            .iter()
+            .position(|byte| *byte == 0)
+            .expect("dirent name should be nul terminated");
+        let name = core::str::from_utf8(&raw_name[..nul])
+            .expect("dirent name should be utf8")
+            .to_string();
+        names.push((name, entry.d_type));
+        offset += entry.d_reclen as usize;
+    }
+    names
+}
+
+fn getdents_names(fd: usize, page: u64, offset: u64, capacity: usize) -> Vec<(String, u8)> {
+    let bytes = SyscallArgs::new([fd as u64, page + offset, capacity as u64, 0, 0, 0])
+        .call::<crate::systemcall::implementations::Getdents64>()
+        .expect("getdents64 should succeed");
+    parse_dirent_names(page + offset, bytes)
 }
 
 fn eventfd_syscalls_follow_linux_flag_rules() {
@@ -2473,7 +2559,7 @@ fn posix_timer_syscalls_follow_linux_rules() {
 
     assert_linux_layout::<TestLinuxItimerspec>(32, 8);
 
-    let page = allocate_user_test_page();
+    let page = allocate_large_user_test_region(4);
     write_user_value(
         page,
         &TestLinuxSigevent {
@@ -5171,6 +5257,430 @@ fn filesystem_utimensat_invalid_flag_syscalls_follow_linux_rules() {
     );
 
     cleanup_utimensat_test_file(file_fd);
+}
+
+fn procfs_syscalls_follow_linux_proc_abi_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+    const O_WRONLY: u64 = 1;
+    const O_DIRECTORY: u64 = 0o200000;
+    const STATX_BASIC_STATS: u64 = 0x0000_07ff;
+    const AT_SYMLINK_NOFOLLOW: u64 = 0x100;
+
+    let page = allocate_large_user_test_region(4);
+    let current_pid = get_current_process().lock().pid.0;
+    let proc_pid_path = format!("/proc/{current_pid}/status\0");
+
+    write_user_cstr(page, b"/proc/self/status\0");
+    write_user_cstr(page + 128, proc_pid_path.as_bytes());
+    write_user_cstr(page + 256, b"/proc/self\0");
+    write_user_cstr(page + 384, b"/proc/self/root\0");
+    write_user_cstr(page + 512, b"/proc/self/ns/net\0");
+    write_user_cstr(page + 640, b"/proc/self/fd\0");
+    write_user_cstr(page + 768, b"/proc/self/fdinfo\0");
+    write_user_cstr(page + 896, b"/proc\0");
+    write_user_cstr(page + 1024, b"/proc/pressure\0");
+    write_user_cstr(page + 1152, b"/proc/sys/kernel/random\0");
+    write_user_cstr(page + 1280, b"/proc/sys/kernel/hostname\0");
+    write_user_cstr(page + 1408, b"/proc/sys/kernel/domainname\0");
+    write_user_cstr(page + 1536, b"/proc/sys/fs/file-max\0");
+    write_user_cstr(page + 1664, b"/proc/sys/fs/nr_open\0");
+    write_user_cstr(page + 1792, b"/proc/self/oom_score_adj\0");
+    write_user_cstr(page + 1920, b"/proc/self/uid_map\0");
+    write_user_cstr(page + 2048, b"/proc/self/gid_map\0");
+    write_user_cstr(page + 2176, b"/proc/self/setgroups\0");
+    write_user_cstr(page + 2304, b"/proc/pressure/cpu\0");
+    write_user_cstr(page + 2432, b"/proc/stat\0");
+    write_user_cstr(page + 2560, b"/proc/uptime\0");
+    write_user_cstr(page + 2688, b"/proc/mounts\0");
+    write_user_cstr(page + 2816, b"/proc/self/mountinfo\0");
+
+    let self_status_fd = openat_fd(AT_FDCWD, page, OpenFlags::empty());
+    let pid_status_fd = openat_fd(AT_FDCWD, page + 128, OpenFlags::empty());
+    let self_status = read_file_via_fd(self_status_fd, page, 2944, 512);
+    let pid_status = read_file_via_fd(pid_status_fd, page, 3584, 512);
+    let self_status = core::str::from_utf8(&self_status).unwrap();
+    let pid_status = core::str::from_utf8(&pid_status).unwrap();
+    assert!(self_status.contains(&format!("Pid:\t{current_pid}\n")));
+    assert!(pid_status.contains(&format!("Pid:\t{current_pid}\n")));
+    close_test_fd(self_status_fd);
+    close_test_fd(pid_status_fd);
+
+    let self_target = readlink_bytes((-1i32) as u64, page + 256, page + 3200, 64);
+    assert_eq!(core::str::from_utf8(&self_target).unwrap(), format!("{current_pid}"));
+    let root_target = readlink_bytes((-1i32) as u64, page + 384, page + 3264, 64);
+    assert_eq!(core::str::from_utf8(&root_target).unwrap(), "/");
+
+    expect_ok(
+        SyscallArgs::new([
+            AT_FDCWD,
+            page + 512,
+            AT_SYMLINK_NOFOLLOW,
+            STATX_BASIC_STATS,
+            page + 3328,
+            0,
+        ])
+        .call::<Statx>(),
+        0,
+    );
+    let net_ns_statx = read_user_value::<TestLinuxStatx>(page + 3328);
+    assert_eq!(net_ns_statx.stx_mode & 0o170000, 0o100000);
+    assert!(net_ns_statx.stx_ino != 0);
+
+    let known_fd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+    let fd_path = format!("/proc/self/fd/{known_fd}\0");
+    let fdinfo_path = format!("/proc/self/fdinfo/{known_fd}\0");
+    write_user_cstr(page + 3840, fd_path.as_bytes());
+    write_user_cstr(page + 3968, fdinfo_path.as_bytes());
+    let fd_target = readlink_bytes((-1i32) as u64, page + 3840, page + 4096, 128);
+    assert_eq!(
+        core::str::from_utf8(&fd_target).unwrap(),
+        "anon_inode:[kernel::object::linux_anon::EventFdObject]"
+    );
+    let fdinfo_fd = openat_fd(AT_FDCWD, page + 3968, OpenFlags::empty());
+    let fdinfo = read_file_via_fd(fdinfo_fd, page, 4224, 256);
+    let fdinfo = core::str::from_utf8(&fdinfo).unwrap();
+    assert!(fdinfo.contains("pos:\t0\n"));
+    assert!(fdinfo.contains("flags:\t0\n"));
+    assert!(fdinfo.contains("mnt_id:\t0\n"));
+    assert!(fdinfo.contains("ino:\t0\n"));
+    close_test_fd(fdinfo_fd);
+    close_test_fd(known_fd);
+
+    for (path_addr, expected) in [
+        (page + 896, vec!["self".to_string(), current_pid.to_string()]),
+        (
+            page + 1024,
+            vec!["cpu".to_string(), "io".to_string(), "memory".to_string()],
+        ),
+        (
+            page + 1152,
+            vec!["boot_id".to_string(), "uuid".to_string()],
+        ),
+    ] {
+        let dir_fd = openat_fd(AT_FDCWD, path_addr, OpenFlags::DIRECTORY);
+        let names = getdents_names(dir_fd, page, 4480, 1024)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>();
+        for item in expected {
+            assert!(names.contains(&item), "missing {item} in getdents output");
+        }
+        close_test_fd(dir_fd);
+    }
+
+    let hostname_snapshot_fd = openat_fd(AT_FDCWD, page + 1280, OpenFlags::empty());
+    let hostname_before =
+        core::str::from_utf8(&read_file_via_fd(hostname_snapshot_fd, page, 5632, 128))
+            .unwrap()
+            .trim()
+            .to_string();
+    close_test_fd(hostname_snapshot_fd);
+    let domain_snapshot_fd = openat_fd(AT_FDCWD, page + 1408, OpenFlags::empty());
+    let domain_before =
+        core::str::from_utf8(&read_file_via_fd(domain_snapshot_fd, page, 5760, 128))
+            .unwrap()
+            .trim()
+            .to_string();
+    close_test_fd(domain_snapshot_fd);
+
+    let rw_cases = [
+        (page + 1280, b"proc-syscall-host\n".as_slice(), "proc-syscall-host\n"),
+        (page + 1408, b"proc-syscall-domain\n".as_slice(), "proc-syscall-domain\n"),
+        (page + 1536, b"456789\n".as_slice(), "456789\n"),
+        (page + 1664, b"654321\n".as_slice(), "654321\n"),
+        (page + 1792, b"321\n".as_slice(), "321\n"),
+        (page + 1920, b"0 1000 1".as_slice(), "0 1000 1\n"),
+        (page + 2048, b"0 1000 1".as_slice(), "0 1000 1\n"),
+        (page + 2176, b"deny".as_slice(), "deny\n"),
+    ];
+    for (index, (path_addr, payload, expected)) in rw_cases.into_iter().enumerate() {
+        let payload_addr = page + 5888 + (index as u64 * 64);
+        let read_addr = page + 6656 + (index as u64 * 64);
+        get_current_process()
+            .lock()
+            .addrspace
+            .write_buffer(payload_addr as *mut u8, payload)
+            .expect("test payload should be writable");
+        let fd = openat_fd(AT_FDCWD, path_addr, OpenFlags::empty());
+        expect_ok(
+            SyscallArgs::new([fd as u64, payload_addr, payload.len() as u64, 0, 0, 0])
+                .call::<Write>(),
+            payload.len(),
+        );
+        let rendered = read_file_via_fd(fd, page, read_addr - page, 128);
+        assert_eq!(core::str::from_utf8(&rendered).unwrap(), expected);
+        close_test_fd(fd);
+    }
+
+    let restore_hostname_fd = openat_fd(AT_FDCWD, page + 1280, OpenFlags::empty());
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer((page + 7424) as *mut u8, hostname_before.as_bytes())
+        .expect("hostname restore payload should be writable");
+    expect_ok(
+        SyscallArgs::new([
+            restore_hostname_fd as u64,
+            page + 7424,
+            hostname_before.len() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Write>(),
+        hostname_before.len(),
+    );
+    close_test_fd(restore_hostname_fd);
+    let restore_domain_fd = openat_fd(AT_FDCWD, page + 1408, OpenFlags::empty());
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer((page + 7552) as *mut u8, domain_before.as_bytes())
+        .expect("domain restore payload should be writable");
+    expect_ok(
+        SyscallArgs::new([
+            restore_domain_fd as u64,
+            page + 7552,
+            domain_before.len() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Write>(),
+        domain_before.len(),
+    );
+    close_test_fd(restore_domain_fd);
+
+    let invalid_numeric_fd = expect_fd(
+        SyscallArgs::new([AT_FDCWD, page + 1536, O_WRONLY, 0, 0, 0]).call::<OpenAt>(),
+    );
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer((page + 7680) as *mut u8, b"not-a-number")
+        .expect("invalid numeric payload should be writable");
+    expect_errno(
+        SyscallArgs::new([invalid_numeric_fd as u64, page + 7680, 12, 0, 0, 0]).call::<Write>(),
+        SyscallError::IOError,
+    );
+    close_test_fd(invalid_numeric_fd);
+    let invalid_oom_fd = expect_fd(
+        SyscallArgs::new([AT_FDCWD, page + 1792, O_WRONLY, 0, 0, 0]).call::<OpenAt>(),
+    );
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer((page + 7808) as *mut u8, b"1001")
+        .expect("invalid oom payload should be writable");
+    expect_errno(
+        SyscallArgs::new([invalid_oom_fd as u64, page + 7808, 4, 0, 0, 0]).call::<Write>(),
+        SyscallError::IOError,
+    );
+    close_test_fd(invalid_oom_fd);
+
+    let pressure_fd = openat_fd(AT_FDCWD, page + 2304, OpenFlags::empty());
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer((page + 7936) as *mut u8, b"some 150000 1000000")
+        .expect("pressure payload should be writable");
+    expect_ok(
+        SyscallArgs::new([pressure_fd as u64, page + 7936, 19, 0, 0, 0]).call::<Write>(),
+        19,
+    );
+    let pressure = read_file_via_fd(pressure_fd, page, 8064, 128);
+    let pressure = core::str::from_utf8(&pressure).unwrap();
+    assert!(pressure.contains("some avg10=0.00"));
+    assert!(pressure.contains("full avg10=0.00"));
+    close_test_fd(pressure_fd);
+
+    for (path_addr, expected_fragments) in [
+        (page + 2432, vec!["cpu  ", "btime ", "processes "]),
+        (page + 2560, vec![".", "\n"]),
+        (page + 2688, vec![" proc ", " sysfs ", " devtmpfs "]),
+        (page + 2816, vec![" /proc ", " /sys ", " /dev "]),
+    ] {
+        let fd = openat_fd(AT_FDCWD, path_addr, OpenFlags::empty());
+        let rendered = read_file_via_fd(fd, page, 8192, 2048);
+        let rendered = core::str::from_utf8(&rendered).unwrap();
+        for fragment in expected_fragments {
+            assert!(rendered.contains(fragment), "missing {fragment} in {rendered}");
+        }
+        close_test_fd(fd);
+    }
+
+    expect_errno(
+        SyscallArgs::new([AT_FDCWD, page + 2432, O_DIRECTORY, 0, 0, 0]).call::<OpenAt>(),
+        SyscallError::NotADirectory,
+    );
+}
+
+fn sysfs_syscalls_follow_linux_sysfs_abi_rules() {
+    const AT_FDCWD: u64 = (-100i32) as u64;
+    const O_WRONLY: u64 = 1;
+    const O_DIRECTORY: u64 = 0o200000;
+    const AF_NETLINK: u64 = 16;
+    const SOCK_DGRAM: u64 = 2;
+    const SOL_NETLINK: u64 = 270;
+    const NETLINK_KOBJECT_UEVENT: u64 = 15;
+    const NETLINK_ADD_MEMBERSHIP: u64 = 1;
+    const STATX_BASIC_STATS: u64 = 0x0000_07ff;
+    const AT_SYMLINK_NOFOLLOW: u64 = 0x100;
+
+    let page = allocate_user_test_page();
+    write_user_cstr(page, b"/sys/class/tty/tty0/active\0");
+    write_user_cstr(page + 128, b"/sys/devices/platform/i8042/uevent\0");
+    write_user_cstr(page + 256, b"/sys/class/graphics/fb0/device/subsystem\0");
+    write_user_cstr(page + 384, b"/sys/class/input/event0/device/subsystem\0");
+    write_user_cstr(page + 512, b"/sys/class\0");
+    write_user_cstr(page + 640, b"/sys/devices/platform\0");
+    write_user_cstr(page + 768, b"/sys/dev/char\0");
+    write_user_cstr(page + 896, b"/sys/devices/platform/uevent\0");
+    write_user_cstr(page + 1024, b"/sys/devices\0");
+
+    let active_fd = openat_fd(AT_FDCWD, page, OpenFlags::empty());
+    let active = read_file_via_fd(active_fd, page, 1152, 64);
+    let active = core::str::from_utf8(&active).unwrap();
+    assert!(active.starts_with("tty"));
+    assert!(active.ends_with('\n'));
+    close_test_fd(active_fd);
+
+    let i8042_fd = openat_fd(AT_FDCWD, page + 128, OpenFlags::empty());
+    let i8042 = read_file_via_fd(i8042_fd, page, 1216, 128);
+    let i8042 = core::str::from_utf8(&i8042).unwrap();
+    assert!(i8042.contains("DRIVER=i8042"));
+    assert!(i8042.contains("SUBSYSTEM=platform"));
+    close_test_fd(i8042_fd);
+
+    let fb_subsystem = readlink_bytes((-1i32) as u64, page + 256, page + 1344, 128);
+    assert_eq!(core::str::from_utf8(&fb_subsystem).unwrap(), "/sys/bus/platform");
+    let input_subsystem = readlink_bytes((-1i32) as u64, page + 384, page + 1472, 128);
+    assert_eq!(core::str::from_utf8(&input_subsystem).unwrap(), "/sys/class/input");
+    expect_ok(
+        SyscallArgs::new([
+            AT_FDCWD,
+            page + 384,
+            AT_SYMLINK_NOFOLLOW,
+            STATX_BASIC_STATS,
+            page + 1600,
+            0,
+        ])
+        .call::<Statx>(),
+        0,
+    );
+    let link_statx = read_user_value::<TestLinuxStatx>(page + 1600);
+    assert_eq!(link_statx.stx_mode & 0o170000, 0o120000);
+
+    for (path_addr, expected) in [
+        (
+            page + 512,
+            vec!["drm".to_string(), "graphics".to_string(), "input".to_string(), "tty".to_string()],
+        ),
+        (
+            page + 640,
+            vec!["uevent".to_string(), "i8042".to_string(), "seele-drm".to_string()],
+        ),
+        (
+            page + 768,
+            vec!["13:64".to_string(), "13:65".to_string(), "226:0".to_string()],
+        ),
+    ] {
+        let fd = openat_fd(AT_FDCWD, path_addr, OpenFlags::DIRECTORY);
+        let names = getdents_names(fd, page, 1856, 1024)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>();
+        for item in expected {
+            assert!(names.contains(&item), "missing {item} in sysfs getdents");
+        }
+        close_test_fd(fd);
+    }
+
+    let uevent_sock = expect_fd(
+        SyscallArgs::new([AF_NETLINK, SOCK_DGRAM, NETLINK_KOBJECT_UEVENT, 0, 0, 0]).call::<Socket>(),
+    );
+    write_user_value(page + 1984, &1i32);
+    expect_ok(
+        SyscallArgs::new([
+            uevent_sock as u64,
+            SOL_NETLINK,
+            NETLINK_ADD_MEMBERSHIP,
+            page + 1984,
+            4,
+            0,
+        ])
+        .call::<Setsockopt>(),
+        0,
+    );
+    let uevent_fd = expect_fd(
+        SyscallArgs::new([AT_FDCWD, page + 896, O_WRONLY, 0, 0, 0]).call::<OpenAt>(),
+    );
+    let uevent_payload = b"add synthetic-uuid ACTION=spoof DEVPATH=/fake KEY=VALUE";
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer((page + 2048) as *mut u8, uevent_payload)
+        .expect("uevent payload should be writable");
+    expect_ok(
+        SyscallArgs::new([
+            uevent_fd as u64,
+            page + 2048,
+            uevent_payload.len() as u64,
+            0,
+            0,
+            0,
+        ])
+        .call::<Write>(),
+        uevent_payload.len(),
+    );
+    write_user_value(page + 2816, &12u32);
+    let recv_len = SyscallArgs::new([
+        uevent_sock as u64,
+        page + 2112,
+        512,
+        0,
+        page + 2688,
+        page + 2816,
+    ])
+    .call::<Recvfrom>()
+    .expect("uevent recvfrom should succeed");
+    let uevent_bytes = read_user_bytes(page + 2112, recv_len);
+    let uevent_text = uevent_bytes
+        .split(|byte| *byte == 0)
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| core::str::from_utf8(segment).unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(uevent_text[0], "add@/devices/platform");
+    assert!(uevent_text.iter().any(|line| line == "ACTION=add"));
+    assert!(uevent_text.iter().any(|line| line == "DEVPATH=/devices/platform"));
+    assert!(uevent_text.iter().any(|line| line == "SUBSYSTEM=platform"));
+    assert!(uevent_text.iter().any(|line| line == "SYNTH_ARG_KEY=VALUE"));
+    assert!(uevent_text.iter().any(|line| line == "SYNTH_ARG_ACTION=spoof"));
+    assert!(uevent_text.iter().any(|line| line == "SYNTH_ARG_DEVPATH=/fake"));
+    assert!(uevent_text.iter().any(|line| line == "SYNTH_UUID=synthetic-uuid"));
+    let seq_line = uevent_text
+        .iter()
+        .find(|line| line.starts_with("SEQNUM="))
+        .expect("uevent should include seqnum");
+    assert!(seq_line[7..].parse::<u64>().is_ok());
+    close_test_fd(uevent_fd);
+    close_test_fd(uevent_sock);
+
+    expect_errno(
+        SyscallArgs::new([AT_FDCWD, page, O_DIRECTORY, 0, 0, 0]).call::<OpenAt>(),
+        SyscallError::NotADirectory,
+    );
+    let readonly_active_fd = openat_fd(AT_FDCWD, page, OpenFlags::empty());
+    get_current_process()
+        .lock()
+        .addrspace
+        .write_buffer((page + 2432) as *mut u8, b"tty2")
+        .expect("readonly payload should be writable");
+    expect_errno(
+        SyscallArgs::new([readonly_active_fd as u64, page + 2432, 4, 0, 0, 0]).call::<Write>(),
+        SyscallError::ReadOnlyFileSystem,
+    );
+    close_test_fd(readonly_active_fd);
 }
 
 #[allow(dead_code)]
