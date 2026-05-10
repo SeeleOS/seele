@@ -18,6 +18,7 @@ use crate::{
         paging::{FRAME_ALLOCATOR, MAPPER},
         utils::page_range_from_addr,
     },
+    misc::time::Time,
     smp::{
         cpu::{CpuCoreContext, register_application_processor},
         current_apic_id_raw, set_current_thread, topology, wait_for_cpu_online,
@@ -33,12 +34,14 @@ static AP_SCHEDULER_ENTRY_COUNT: AtomicUsize = AtomicUsize::new(0);
 pub fn start_application_processors() {
     AP_SCHEDULER_ENTRY_COUNT.store(0, Ordering::Release);
 
+    let discover_start = Time::since_boot();
     let current_apic_id = current_apic_id_raw();
     let acpi_tables = ACPI_TABLE
         .get()
         .expect("ACPI must be initialized before SMP");
     let madt = acpi_tables.find_table::<Madt>().expect("ACPI MADT missing");
     topology::discover_from_acpi(current_apic_id, madt.get());
+    let discover_done = Time::since_boot();
 
     let processors = topology::application_processors();
     if processors.is_empty() {
@@ -51,13 +54,21 @@ pub fn start_application_processors() {
         processors.len()
     );
 
+    let register_start = Time::since_boot();
     for processor in processors {
         register_application_processor(processor.index, processor.apic_id);
     }
+    let register_done = Time::since_boot();
+    log::info!(
+        "smp: ap discovery took {}ms, context registration took {}ms",
+        discover_done.sub(discover_start).as_milliseconds(),
+        register_done.sub(register_start).as_milliseconds()
+    );
 }
 
 pub fn release_application_processors() {
     let processors = topology::application_processors();
+    let release_start = Time::since_boot();
 
     let acpi_tables = ACPI_TABLE
         .get()
@@ -70,7 +81,13 @@ pub fn release_application_processors() {
         start_all_aps::<SeelePlatform, ACPIHandler>(application_processor_main, ctx)
             .expect("failed to start application processors");
     });
+    let wakeup_done = Time::since_boot();
+    log::info!(
+        "smp: ap init/sipi and trampoline confirmation took {}ms",
+        wakeup_done.sub(release_start).as_milliseconds()
+    );
 
+    let online_wait_start = Time::since_boot();
     for processor in &processors {
         assert!(
             wait_for_cpu_online(processor.apic_id, AP_WAKE_SPINS),
@@ -78,14 +95,25 @@ pub fn release_application_processors() {
             processor.apic_id
         );
     }
+    let online_done = Time::since_boot();
+    log::info!(
+        "smp: {} application processor(s) reported online in {}ms ({}ms since release)",
+        processors.len(),
+        online_done.sub(online_wait_start).as_milliseconds(),
+        online_done.sub(release_start).as_milliseconds()
+    );
 
+    let scheduler_wait_start = Time::since_boot();
     assert!(
         wait_for_ap_scheduler_entries(processors.len(), AP_WAKE_SPINS),
         "not all APs entered the scheduler"
     );
+    let scheduler_done = Time::since_boot();
     log::info!(
-        "smp: {} application processor(s) entered scheduler",
-        processors.len()
+        "smp: {} application processor(s) entered scheduler in {}ms ({}ms since release)",
+        processors.len(),
+        scheduler_done.sub(scheduler_wait_start).as_milliseconds(),
+        scheduler_done.sub(release_start).as_milliseconds()
     );
 }
 
@@ -122,7 +150,8 @@ impl ap_startup::platform::Platform for SeelePlatform {
     const STACK_SIZE: usize = 0x40_000;
 
     fn sleep_us(us: u64) {
-        for _ in 0..us.saturating_mul(1000) {
+        let deadline = Time::since_boot().add_ns(us.saturating_mul(1_000));
+        while Time::since_boot() < deadline {
             spin_loop();
         }
     }
