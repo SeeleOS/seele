@@ -29,11 +29,12 @@ use crate::{
         AF_NETLINK, NETLINK_ADD_MEMBERSHIP, NETLINK_AUDIT, NETLINK_DROP_MEMBERSHIP,
         NETLINK_EXT_ACK, NETLINK_GET_STRICT_CHK, NETLINK_KOBJECT_UEVENT, NETLINK_LIST_MEMBERSHIPS,
         NETLINK_PKTINFO, NETLINK_ROUTE, SO_ATTACH_FILTER, SO_DETACH_FILTER, SO_DOMAIN, SO_ERROR,
-        SO_PASSCRED, SO_PASSPIDFD, SO_PASSRIGHTS, SO_PASSSEC, SO_PROTOCOL, SO_RCVBUF,
+        SO_PASSCRED, SO_PASSPIDFD, SO_PASSRIGHTS, SO_PASSSEC, SO_PRIORITY, SO_PROTOCOL, SO_RCVBUF,
         SO_RCVBUFFORCE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_REUSEADDR, SO_SNDBUF, SO_SNDBUFFORCE,
         SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD, SO_TIMESTAMP_NEW, SO_TIMESTAMP_OLD, SO_TIMESTAMPNS_NEW,
         SO_TIMESTAMPNS_OLD, SO_TYPE, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_RAW,
-        SOL_NETLINK, SOL_SOCKET, SocketError, SocketLike, SocketResult, socket_timeout_option_len,
+        SOL_NETLINK, SOL_SOCKET, SocketError, SocketLike, SocketResult, can_set_socket_priority,
+        socket_timeout_option_len,
     },
     thread::THREAD_MANAGER,
 };
@@ -148,6 +149,7 @@ struct QueuedNetlinkMessage {
 pub struct NetlinkSocketObject {
     flags: Mutex<FileFlags>,
     pass_cred: Mutex<bool>,
+    priority: Mutex<i32>,
     socket_type: u64,
     protocol: u64,
     address: Mutex<NetlinkSocketAddress>,
@@ -208,6 +210,7 @@ impl NetlinkSocketObject {
         let socket = Arc::new(Self {
             flags: Mutex::new(FileFlags::empty()),
             pass_cred: Mutex::new(false),
+            priority: Mutex::new(0),
             socket_type,
             protocol,
             address: Mutex::new(NetlinkSocketAddress::default()),
@@ -420,6 +423,12 @@ impl NetlinkSocketObject {
                     *self.pass_cred.lock() = enabled;
                     Ok(())
                 }
+                SO_PRIORITY => {
+                    let priority = Self::decode_i32(option_value)?;
+                    can_set_socket_priority(priority)?;
+                    *self.priority.lock() = priority;
+                    Ok(())
+                }
                 SO_REUSEADDR | SO_SNDBUF | SO_RCVBUF | SO_SNDBUFFORCE | SO_RCVBUFFORCE
                 | SO_ATTACH_FILTER | SO_DETACH_FILTER | SO_PASSSEC | SO_PASSRIGHTS
                 | SO_PASSPIDFD | SO_TIMESTAMP_OLD | SO_TIMESTAMP_NEW | SO_TIMESTAMPNS_OLD
@@ -473,6 +482,7 @@ impl NetlinkSocketObject {
                 SO_SNDBUF | SO_RCVBUF | SO_SNDBUFFORCE | SO_RCVBUFFORCE => {
                     Self::encode_i32(option_len, DEFAULT_SOCKET_BUFFER_SIZE)
                 }
+                SO_PRIORITY => Self::encode_i32(option_len, *self.priority.lock()),
                 SO_PASSCRED => Self::encode_i32(option_len, self.pass_cred_enabled() as i32),
                 SO_REUSEADDR | SO_PASSSEC | SO_PASSRIGHTS | SO_PASSPIDFD | SO_TIMESTAMP_OLD
                 | SO_TIMESTAMP_NEW | SO_TIMESTAMPNS_OLD | SO_TIMESTAMPNS_NEW => {
@@ -502,6 +512,18 @@ impl NetlinkSocketObject {
             return Err(SocketError::InvalidArguments);
         }
         Ok(value.to_ne_bytes().to_vec())
+    }
+
+    fn decode_i32(option_value: &[u8]) -> SocketResult<i32> {
+        if option_value.len() < core::mem::size_of::<i32>() {
+            return Err(SocketError::InvalidArguments);
+        }
+
+        Ok(i32::from_ne_bytes(
+            option_value[..core::mem::size_of::<i32>()]
+                .try_into()
+                .map_err(|_| SocketError::InvalidArguments)?,
+        ))
     }
 
     fn decode_u32(option_value: &[u8]) -> SocketResult<u32> {

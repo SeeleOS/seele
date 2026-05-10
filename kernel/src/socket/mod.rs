@@ -39,6 +39,7 @@ pub const SOCK_CLOEXEC: u64 = 0o2_000_000;
 pub const SO_REUSEADDR: u64 = 2;
 pub const SO_TYPE: u64 = 3;
 pub const SO_ERROR: u64 = 4;
+pub const SO_PRIORITY: u64 = 12;
 pub const SO_SNDBUF: u64 = 7;
 pub const SO_RCVBUF: u64 = 8;
 pub const SO_PASSCRED: u64 = 16;
@@ -102,6 +103,26 @@ pub(crate) fn socket_timeout_option_len(option_name: u64) -> Option<usize> {
     match option_name {
         SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD | SO_RCVTIMEO_NEW | SO_SNDTIMEO_NEW => Some(16),
         _ => None,
+    }
+}
+
+pub(crate) fn can_set_socket_priority(priority: i32) -> SocketResult<()> {
+    if priority < 0 {
+        return Err(SocketError::PermissionDenied);
+    }
+    if priority <= 6 {
+        return Ok(());
+    }
+
+    const CAP_NET_ADMIN: usize = 12;
+    let process = get_current_process();
+    let process = process.lock();
+    let slot = CAP_NET_ADMIN / 32;
+    let mask = 1u32 << (CAP_NET_ADMIN % 32);
+    if (process.capability_effective[slot] & mask) != 0 {
+        Ok(())
+    } else {
+        Err(SocketError::PermissionDenied)
     }
 }
 

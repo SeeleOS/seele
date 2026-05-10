@@ -34,6 +34,7 @@ impl UnixSocketObject {
                     state: Mutex::new(UnixSocketState::Stream(left_stream.clone())),
                     flags: Mutex::new(FileFlags::empty()),
                     pass_cred: Mutex::new(false),
+                    priority: Mutex::new(0),
                     creator_cred,
                 });
                 let right = Arc::new(Self {
@@ -41,6 +42,7 @@ impl UnixSocketObject {
                     state: Mutex::new(UnixSocketState::Stream(right_stream.clone())),
                     flags: Mutex::new(FileFlags::empty()),
                     pass_cred: Mutex::new(false),
+                    priority: Mutex::new(0),
                     creator_cred,
                 });
 
@@ -59,6 +61,7 @@ impl UnixSocketObject {
                     state: Mutex::new(UnixSocketState::Datagram(left_inner.clone())),
                     flags: Mutex::new(FileFlags::empty()),
                     pass_cred: Mutex::new(false),
+                    priority: Mutex::new(0),
                     creator_cred,
                 });
                 let right = Arc::new(Self {
@@ -66,6 +69,7 @@ impl UnixSocketObject {
                     state: Mutex::new(UnixSocketState::Datagram(right_inner.clone())),
                     flags: Mutex::new(FileFlags::empty()),
                     pass_cred: Mutex::new(false),
+                    priority: Mutex::new(0),
                     creator_cred,
                 });
 

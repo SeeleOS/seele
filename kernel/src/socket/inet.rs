@@ -23,10 +23,11 @@ use crate::{
 };
 
 use super::{
-    AF_INET, IPPROTO_TCP, IPPROTO_UDP, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PROTOCOL, SO_RCVBUF,
+    AF_INET, IPPROTO_TCP, IPPROTO_UDP, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PRIORITY, SO_PROTOCOL, SO_RCVBUF,
     SO_RCVBUFFORCE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_REUSEADDR, SO_SNDBUF, SO_SNDBUFFORCE,
     SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD, SO_TYPE, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK,
     SOCK_STREAM, SOL_SOCKET, SOL_TCP, SocketError, SocketLike, SocketResult,
+    can_set_socket_priority,
     socket_timeout_option_len,
 };
 
@@ -52,6 +53,7 @@ pub struct InetSocketObject {
     pub kind: InetSocketKind,
     state: Mutex<InetState>,
     flags: Mutex<FileFlags>,
+    priority: Mutex<i32>,
 }
 
 #[repr(C)]
@@ -112,6 +114,7 @@ impl InetSocketObject {
                 write_shutdown: false,
             }),
             flags: Mutex::new(FileFlags::empty()),
+            priority: Mutex::new(0),
         }))
     }
 
@@ -127,6 +130,7 @@ impl InetSocketObject {
                 write_shutdown: false,
             }),
             flags: Mutex::new(FileFlags::empty()),
+            priority: Mutex::new(0),
         })
     }
 
@@ -686,6 +690,12 @@ impl SocketLike for InetSocketObject {
                 let _ = Self::decode_i32(option_value)?;
                 Ok(())
             }
+            SO_PRIORITY => {
+                let priority = Self::decode_i32(option_value)?;
+                can_set_socket_priority(priority)?;
+                *self.priority.lock() = priority;
+                Ok(())
+            }
             SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD | SO_RCVTIMEO_NEW | SO_SNDTIMEO_NEW => {
                 let expected_len =
                     socket_timeout_option_len(option_name).ok_or(SocketError::InvalidArguments)?;
@@ -731,6 +741,7 @@ impl SocketLike for InetSocketObject {
             SO_SNDBUF | SO_RCVBUF | SO_SNDBUFFORCE | SO_RCVBUFFORCE => {
                 Self::encode_i32(option_len, DEFAULT_SOCKET_BUFFER_SIZE)
             }
+            SO_PRIORITY => Self::encode_i32(option_len, *self.priority.lock()),
             SO_REUSEADDR => Self::encode_i32(option_len, 0),
             SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD | SO_RCVTIMEO_NEW | SO_SNDTIMEO_NEW => {
                 let expected_len =

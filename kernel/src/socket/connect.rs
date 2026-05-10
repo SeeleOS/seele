@@ -51,6 +51,7 @@ impl UnixSocketObject {
                     state: Mutex::new(UnixSocketState::Stream(server_stream.clone())),
                     flags: Mutex::new(FileFlags::empty()),
                     pass_cred: Mutex::new(false),
+                    priority: Mutex::new(*self.priority.lock()),
                     creator_cred: server_cred,
                 });
                 *server_stream.owner.lock() = Some(Arc::downgrade(&server_socket));

@@ -23,5 +23,6 @@ pub struct UnixSocketObject {
     pub state: Mutex<UnixSocketState>,
     pub flags: Mutex<FileFlags>,
     pub pass_cred: Mutex<bool>,
+    pub priority: Mutex<i32>,
     pub creator_cred: SocketPeerCred,
 }

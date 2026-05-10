@@ -22,6 +22,7 @@ impl UnixSocketObject {
             state: Mutex::new(state),
             flags: Mutex::new(FileFlags::empty()),
             pass_cred: Mutex::new(false),
+            priority: Mutex::new(0),
             creator_cred: current_socket_peer_cred(),
         }
     }

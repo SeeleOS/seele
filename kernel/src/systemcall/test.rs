@@ -6113,6 +6113,7 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     const SO_TYPE: u64 = 3;
     const SO_ERROR: u64 = 4;
     const SO_SNDBUF: u64 = 7;
+    const SO_PRIORITY: u64 = 12;
     const SO_PASSCRED: u64 = 16;
     const SO_PEERCRED: u64 = 17;
     const SO_ACCEPTCONN: u64 = 30;
@@ -6124,6 +6125,7 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     assert_linux_layout::<TestLinuxSockAddrUn>(110, 2);
     assert_linux_layout::<TestLinuxSockAddrIn>(16, 2);
 
+    let saved = CredentialSnapshot::save_current();
     let page = allocate_user_test_page();
 
     let socketpair_fds_page = page;
@@ -6572,6 +6574,59 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
             .call::<Setsockopt>(),
         0,
     );
+    write_user_value(page + 1052, &6i32);
+    expect_ok(
+        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_PRIORITY, page + 1052, 4, 0])
+            .call::<Setsockopt>(),
+        0,
+    );
+    write_user_value(page + 1060, &4u32);
+    expect_ok(
+        SyscallArgs::new([
+            inet_socket as u64,
+            SOL_SOCKET,
+            SO_PRIORITY,
+            page + 1068,
+            page + 1060,
+            0,
+        ])
+        .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(page + 1068), 6);
+    {
+        let process = get_current_process();
+        let mut process = process.lock();
+        process.effective_uid = 1000;
+        process.capability_effective = [0; 2];
+    }
+    write_user_value(page + 1052, &1i32);
+    expect_errno(
+        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_PRIORITY, page + 1052, 4, 0])
+            .call::<Setsockopt>(),
+        SyscallError::PermissionDenied,
+    );
+    write_user_value(page + 1052, &(-1i32));
+    expect_errno(
+        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_PRIORITY, page + 1052, 4, 0])
+            .call::<Setsockopt>(),
+        SyscallError::PermissionDenied,
+    );
+    write_user_value(page + 1060, &4u32);
+    expect_ok(
+        SyscallArgs::new([
+            inet_socket as u64,
+            SOL_SOCKET,
+            SO_PRIORITY,
+            page + 1068,
+            page + 1060,
+            0,
+        ])
+        .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(page + 1068), 6);
+    saved.restore();
     write_user_value(page + 1056, &4i32);
     expect_ok(
         SyscallArgs::new([inet_socket as u64, SOL_TCP, TCP_NODELAY, page + 1056, 4, 0])
@@ -6684,6 +6739,20 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
         0,
     );
     assert_eq!(read_user_value::<i32>(page + 1144), 1);
+    write_user_value(page + 1152, &4u32);
+    expect_ok(
+        SyscallArgs::new([
+            netlink_socket as u64,
+            SOL_SOCKET,
+            SO_PRIORITY,
+            page + 1160,
+            page + 1152,
+            0,
+        ])
+        .call::<Getsockopt>(),
+        0,
+    );
+    assert_eq!(read_user_value::<i32>(page + 1160), 0);
 
     expect_errno(
         SyscallArgs::new([99, SOCK_STREAM, 0, 0, 0, 0]).call::<Socket>(),

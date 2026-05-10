@@ -3,12 +3,12 @@ use core::{mem, slice};
 
 use super::{
     AF_UNIX, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PASSCRED, SO_PASSPIDFD, SO_PASSRIGHTS,
-    SO_PASSSEC, SO_PEERCRED, SO_PEERGROUPS, SO_PEERPIDFD, SO_PEERSEC, SO_PROTOCOL, SO_RCVBUF,
+    SO_PASSSEC, SO_PEERCRED, SO_PEERGROUPS, SO_PEERPIDFD, SO_PEERSEC, SO_PRIORITY, SO_PROTOCOL, SO_RCVBUF,
     SO_RCVBUFFORCE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_REUSEADDR, SO_SNDBUF, SO_SNDBUFFORCE,
     SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD, SO_TIMESTAMP_NEW, SO_TIMESTAMP_OLD, SO_TIMESTAMPNS_NEW,
     SO_TIMESTAMPNS_OLD, SO_TYPE, SOCK_DGRAM, SOCK_SEQPACKET, SOCK_STREAM, SOL_SOCKET, SocketError,
     SocketLike, SocketPeerCred, SocketResult, UnixSocketKind, UnixSocketObject, UnixSocketState,
-    parse_unix_socket_path, socket_timeout_option_len,
+    can_set_socket_priority, parse_unix_socket_path, socket_timeout_option_len,
 };
 use crate::{
     object::{
@@ -64,6 +64,12 @@ impl UnixSocketObject {
                 let _ = Self::decode_i32(option_value)?;
                 Ok(())
             }
+            SO_PRIORITY => {
+                let priority = Self::decode_i32(option_value)?;
+                can_set_socket_priority(priority)?;
+                *self.priority.lock() = priority;
+                Ok(())
+            }
             SO_RCVTIMEO_OLD | SO_SNDTIMEO_OLD | SO_RCVTIMEO_NEW | SO_SNDTIMEO_NEW => {
                 let expected_len =
                     socket_timeout_option_len(option_name).ok_or(SocketError::InvalidArguments)?;
@@ -117,6 +123,7 @@ impl UnixSocketObject {
             SO_SNDBUF | SO_RCVBUF | SO_SNDBUFFORCE | SO_RCVBUFFORCE => {
                 Self::encode_i32(option_len, DEFAULT_SOCKET_BUFFER_SIZE)
             }
+            SO_PRIORITY => Self::encode_i32(option_len, *self.priority.lock()),
             SO_REUSEADDR => Self::encode_i32(option_len, 0),
             SO_PASSCRED => Self::encode_i32(option_len, *self.pass_cred.lock() as i32),
             option_name if Self::is_boolean_sockopt(option_name) => Self::encode_i32(option_len, 0),
