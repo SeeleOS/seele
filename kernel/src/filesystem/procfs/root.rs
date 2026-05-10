@@ -241,8 +241,8 @@ mod tests {
         proc_kernel_random_entries, proc_mountinfo_bytes, proc_mounts_bytes,
         proc_ngroups_max_bytes, proc_pressure_entries, proc_root_entries,
     };
-    use alloc::string::ToString;
     use crate::process::manager::get_current_process;
+    use alloc::string::ToString;
 
     crate::test!(
         procfs_root_uuid_layout,

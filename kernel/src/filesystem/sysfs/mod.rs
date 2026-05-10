@@ -576,7 +576,7 @@ mod tests {
     use super::{devices_uevent, emit_uevent, parse_uevent_write, platform_uevent};
     use crate::object::netlink::{NetlinkSocketAddress, NetlinkSocketObject};
     use crate::object::traits::Readable;
-    use crate::socket::{NETLINK_KOBJECT_UEVENT, SOCK_DGRAM, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP};
+    use crate::socket::{NETLINK_ADD_MEMBERSHIP, NETLINK_KOBJECT_UEVENT, SOCK_DGRAM, SOL_NETLINK};
 
     crate::test!(
         sysfs_uevent_payloads,

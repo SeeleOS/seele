@@ -19,9 +19,7 @@ use crate::filesystem::{
     tmpfs::TmpfsState,
     vfs_traits::{FileLikeType, MountFlags},
 };
-use crate::misc::utsname::{
-    current_domainname, current_hostname, set_domainname, set_hostname,
-};
+use crate::misc::utsname::{current_domainname, current_hostname, set_domainname, set_hostname};
 use crate::object::tty_device::{get_active_vt, set_active_vt};
 use crate::process::manager::get_current_process;
 
@@ -501,7 +499,10 @@ fn procfs_exposes_dynamic_pid_entries_symlinks_and_writable_control_nodes() {
     let FileLike::Symlink(self_link) = fs.lookup(&Path::new("/self")).unwrap() else {
         panic!("/proc/self should be a symlink");
     };
-    assert_eq!(self_link.lock().target().unwrap().as_string(), current_pid_name);
+    assert_eq!(
+        self_link.lock().target().unwrap().as_string(),
+        current_pid_name
+    );
 
     let FileLike::Symlink(root_link) = fs.lookup(&Path::new("/self/root")).unwrap() else {
         panic!("/proc/self/root should be a symlink");
@@ -587,8 +588,14 @@ fn procfs_exposes_dynamic_pid_entries_symlinks_and_writable_control_nodes() {
     file_max.seek(0, Whence::Start).unwrap();
     let mut file_max_bytes = [0; 32];
     let file_max_read = file_max.read(&mut file_max_bytes).unwrap();
-    assert_eq!(str::from_utf8(&file_max_bytes[..file_max_read]).unwrap(), "12345\n");
-    assert!(matches!(file_max.write(b"not-a-number"), Err(FSError::Other)));
+    assert_eq!(
+        str::from_utf8(&file_max_bytes[..file_max_read]).unwrap(),
+        "12345\n"
+    );
+    assert!(matches!(
+        file_max.write(b"not-a-number"),
+        Err(FSError::Other)
+    ));
 
     let oom_path = format!("/{}/oom_score_adj", current_pid.0);
     let FileLike::File(oom_score_adj) = fs.lookup(&Path::new(&oom_path)).unwrap() else {
@@ -639,7 +646,10 @@ fn sysfs_exposes_dynamic_tty_state_readonly_nodes_and_stable_uevent_payloads() {
     assert!(set_active_vt(2));
     active.seek(0, Whence::Start).unwrap();
     let second_read = active.read(&mut active_bytes).unwrap();
-    assert_eq!(str::from_utf8(&active_bytes[..second_read]).unwrap(), "tty2\n");
+    assert_eq!(
+        str::from_utf8(&active_bytes[..second_read]).unwrap(),
+        "tty2\n"
+    );
     assert!(set_active_vt(active_before));
 
     for (path, expected_lines) in [
@@ -681,6 +691,9 @@ fn sysfs_exposes_dynamic_tty_state_readonly_nodes_and_stable_uevent_payloads() {
 }
 
 fn c_string_field_to_string(field: [u8; 65]) -> alloc::string::String {
-    let len = field.iter().position(|&byte| byte == 0).unwrap_or(field.len());
+    let len = field
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(field.len());
     str::from_utf8(&field[..len]).unwrap().into()
 }

@@ -540,20 +540,20 @@ pub(super) fn fd_target(pid: ProcessID, fd: &str) -> FSResult<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        PROC_NAMESPACE_NAMES, default_user_namespace_map, format_capability_set,
+        PROC_NAMESPACE_NAMES, default_user_namespace_map, fd_target, format_capability_set,
         normalize_proc_control_write, pid_dir_entries, pid_ns_entries, pid_string,
         proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_comm_bytes, proc_pid_fdinfo_bytes,
         proc_pid_gid_map_bytes, proc_pid_loginuid_bytes, proc_pid_oom_score_adj_bytes,
         proc_pid_sessionid_bytes, proc_pid_setgroups_bytes, proc_pid_stat_bytes,
         proc_pid_status_bytes, proc_pid_uid_map_bytes, proc_pid_write_gid_map,
-        proc_pid_write_oom_score_adj, proc_pid_write_setgroups, proc_pid_write_uid_map, fd_target,
+        proc_pid_write_oom_score_adj, proc_pid_write_setgroups, proc_pid_write_uid_map,
     };
-    use alloc::format;
     use crate::{
         filesystem::errors::FSError,
         object::linux_anon::{EventFdFlags, EventFdObject},
-        process::{FdFlags, manager::MANAGER, misc::ProcessID, Process},
+        process::{FdFlags, Process, manager::MANAGER, misc::ProcessID},
     };
+    use alloc::format;
 
     crate::test!(
         procfs_pid_format_helpers,
@@ -609,8 +609,10 @@ mod tests {
         let pid = {
             let mut process_locked = process.lock();
             process_locked.pid = ProcessID::new();
-            process_locked.command_line =
-                alloc::vec![alloc::string::String::from("/bin/test-proc"), alloc::string::String::from("--flag")];
+            process_locked.command_line = alloc::vec![
+                alloc::string::String::from("/bin/test-proc"),
+                alloc::string::String::from("--flag")
+            ];
             process_locked.real_uid = 1000;
             process_locked.effective_uid = 1001;
             process_locked.saved_uid = 1002;
@@ -653,9 +655,11 @@ mod tests {
         assert_eq!(proc_pid_gid_map_bytes(pid).unwrap(), b"0 2000 1\n");
         assert_eq!(proc_pid_setgroups_bytes(pid).unwrap(), b"allow\n");
         assert_eq!(proc_pid_oom_score_adj_bytes(pid).unwrap(), b"0\n");
-        assert!(alloc::string::String::from_utf8(proc_pid_cgroup_bytes(pid))
-            .unwrap()
-            .starts_with("0::/"));
+        assert!(
+            alloc::string::String::from_utf8(proc_pid_cgroup_bytes(pid))
+                .unwrap()
+                .starts_with("0::/")
+        );
 
         proc_pid_write_uid_map(pid, b"0 2000 1").unwrap();
         proc_pid_write_gid_map(pid, b"0 3000 1").unwrap();
@@ -678,7 +682,8 @@ mod tests {
             fd_target(pid, "0").unwrap(),
             "anon_inode:[kernel::object::linux_anon::EventFdObject]"
         );
-        let fdinfo = alloc::string::String::from_utf8(proc_pid_fdinfo_bytes(pid, 0).unwrap()).unwrap();
+        let fdinfo =
+            alloc::string::String::from_utf8(proc_pid_fdinfo_bytes(pid, 0).unwrap()).unwrap();
         assert!(fdinfo.contains("pos:\t0\n"));
         assert!(fdinfo.contains("flags:\t0\n"));
         assert!(fdinfo.contains("mnt_id:\t0\n"));

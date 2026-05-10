@@ -797,19 +797,33 @@ mod tests {
         let domain_before = current_domainname("(none)");
 
         assert_eq!(proc_write_hostname(b" proc-host \n").unwrap(), 12);
-        assert_eq!(proc_c_string_bytes(current_hostname(crate::NAME)), b"proc-host\n");
+        assert_eq!(
+            proc_c_string_bytes(current_hostname(crate::NAME)),
+            b"proc-host\n"
+        );
         assert!(matches!(proc_write_hostname(&[0xff]), Err(FSError::Other)));
-        set_hostname(proc_trim_sysctl_string(&proc_c_string_bytes(hostname_before)).unwrap().as_bytes())
-            .unwrap();
+        set_hostname(
+            proc_trim_sysctl_string(&proc_c_string_bytes(hostname_before))
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
 
         assert_eq!(proc_write_domainname(b" domain.test \n").unwrap(), 14);
         assert_eq!(
             proc_c_string_bytes(current_domainname("(none)")),
             b"domain.test\n"
         );
-        assert!(matches!(proc_write_domainname(&[0xff]), Err(FSError::Other)));
-        set_domainname(proc_trim_sysctl_string(&proc_c_string_bytes(domain_before)).unwrap().as_bytes())
-            .unwrap();
+        assert!(matches!(
+            proc_write_domainname(&[0xff]),
+            Err(FSError::Other)
+        ));
+        set_domainname(
+            proc_trim_sysctl_string(&proc_c_string_bytes(domain_before))
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
 
         let value = AtomicU64::new(7);
         assert_eq!(proc_write_sysctl_u64(&value, b" 123 \0").unwrap(), 6);

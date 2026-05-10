@@ -1557,11 +1557,13 @@ fn process_session_and_prctl_syscalls_follow_linux_state_rules() {
     let (forked_process, _) = Process::fork(current.clone());
     assert!(!forked_process.lock().child_subreaper);
     terminate_process(exiting_parent.clone(), ProcessExitStatus::Exited(0));
-    assert!(current
-        .lock()
-        .parent
-        .as_ref()
-        .is_some_and(|parent| alloc::sync::Arc::ptr_eq(parent, &subreaper_parent)));
+    assert!(
+        current
+            .lock()
+            .parent
+            .as_ref()
+            .is_some_and(|parent| alloc::sync::Arc::ptr_eq(parent, &subreaper_parent))
+    );
     current.lock().parent = original_parent;
 
     expect_ok(
@@ -2339,7 +2341,10 @@ fn clock_and_affinity_syscalls_follow_linux_pointer_rules() {
 }
 
 fn close_test_fd(fd: usize) {
-    expect_ok(SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Close>(), 0);
+    expect_ok(
+        SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Close>(),
+        0,
+    );
 }
 
 fn expect_fd(result: Result<usize, SyscallError>) -> usize {
@@ -2411,9 +2416,7 @@ fn read_file_via_fd(fd: usize, page: u64, offset: u64, max_len: usize) -> Vec<u8
 }
 
 fn openat_fd(dirfd: u64, path_addr: u64, flags: OpenFlags) -> usize {
-    expect_fd(
-        SyscallArgs::new([dirfd, path_addr, flags.bits() as u64, 0, 0, 0]).call::<OpenAt>(),
-    )
+    expect_fd(SyscallArgs::new([dirfd, path_addr, flags.bits() as u64, 0, 0, 0]).call::<OpenAt>())
 }
 
 fn readlink_bytes(dirfd: u64, path_addr: u64, buf_addr: u64, buf_len: usize) -> Vec<u8> {
@@ -5359,7 +5362,10 @@ fn procfs_syscalls_follow_linux_proc_abi_rules() {
     close_test_fd(pid_status_fd);
 
     let self_target = readlink_bytes((-1i32) as u64, page + 256, page + 3200, 64);
-    assert_eq!(core::str::from_utf8(&self_target).unwrap(), format!("{current_pid}"));
+    assert_eq!(
+        core::str::from_utf8(&self_target).unwrap(),
+        format!("{current_pid}")
+    );
     let root_target = readlink_bytes((-1i32) as u64, page + 384, page + 3264, 64);
     assert_eq!(core::str::from_utf8(&root_target).unwrap(), "/");
 
@@ -5400,15 +5406,15 @@ fn procfs_syscalls_follow_linux_proc_abi_rules() {
     close_test_fd(known_fd);
 
     for (path_addr, expected) in [
-        (page + 896, vec!["self".to_string(), current_pid.to_string()]),
+        (
+            page + 896,
+            vec!["self".to_string(), current_pid.to_string()],
+        ),
         (
             page + 1024,
             vec!["cpu".to_string(), "io".to_string(), "memory".to_string()],
         ),
-        (
-            page + 1152,
-            vec!["boot_id".to_string(), "uuid".to_string()],
-        ),
+        (page + 1152, vec!["boot_id".to_string(), "uuid".to_string()]),
     ] {
         let dir_fd = openat_fd(AT_FDCWD, path_addr, OpenFlags::DIRECTORY);
         let names = getdents_names(dir_fd, page, 4480, 1024)
@@ -5437,8 +5443,16 @@ fn procfs_syscalls_follow_linux_proc_abi_rules() {
     close_test_fd(domain_snapshot_fd);
 
     let rw_cases = [
-        (page + 1280, b"proc-syscall-host\n".as_slice(), "proc-syscall-host\n"),
-        (page + 1408, b"proc-syscall-domain\n".as_slice(), "proc-syscall-domain\n"),
+        (
+            page + 1280,
+            b"proc-syscall-host\n".as_slice(),
+            "proc-syscall-host\n",
+        ),
+        (
+            page + 1408,
+            b"proc-syscall-domain\n".as_slice(),
+            "proc-syscall-domain\n",
+        ),
         (page + 1536, b"456789\n".as_slice(), "456789\n"),
         (page + 1664, b"654321\n".as_slice(), "654321\n"),
         (page + 1792, b"321\n".as_slice(), "321\n"),
@@ -5504,9 +5518,8 @@ fn procfs_syscalls_follow_linux_proc_abi_rules() {
     );
     close_test_fd(restore_domain_fd);
 
-    let invalid_numeric_fd = expect_fd(
-        SyscallArgs::new([AT_FDCWD, page + 1536, O_WRONLY, 0, 0, 0]).call::<OpenAt>(),
-    );
+    let invalid_numeric_fd =
+        expect_fd(SyscallArgs::new([AT_FDCWD, page + 1536, O_WRONLY, 0, 0, 0]).call::<OpenAt>());
     get_current_process()
         .lock()
         .addrspace
@@ -5517,9 +5530,8 @@ fn procfs_syscalls_follow_linux_proc_abi_rules() {
         SyscallError::IOError,
     );
     close_test_fd(invalid_numeric_fd);
-    let invalid_oom_fd = expect_fd(
-        SyscallArgs::new([AT_FDCWD, page + 1792, O_WRONLY, 0, 0, 0]).call::<OpenAt>(),
-    );
+    let invalid_oom_fd =
+        expect_fd(SyscallArgs::new([AT_FDCWD, page + 1792, O_WRONLY, 0, 0, 0]).call::<OpenAt>());
     get_current_process()
         .lock()
         .addrspace
@@ -5557,7 +5569,10 @@ fn procfs_syscalls_follow_linux_proc_abi_rules() {
         let rendered = read_file_via_fd(fd, page, 8192, 2048);
         let rendered = core::str::from_utf8(&rendered).unwrap();
         for fragment in expected_fragments {
-            assert!(rendered.contains(fragment), "missing {fragment} in {rendered}");
+            assert!(
+                rendered.contains(fragment),
+                "missing {fragment} in {rendered}"
+            );
         }
         close_test_fd(fd);
     }
@@ -5606,9 +5621,15 @@ fn sysfs_syscalls_follow_linux_sysfs_abi_rules() {
     close_test_fd(i8042_fd);
 
     let fb_subsystem = readlink_bytes((-1i32) as u64, page + 256, page + 1344, 128);
-    assert_eq!(core::str::from_utf8(&fb_subsystem).unwrap(), "/sys/bus/platform");
+    assert_eq!(
+        core::str::from_utf8(&fb_subsystem).unwrap(),
+        "/sys/bus/platform"
+    );
     let input_subsystem = readlink_bytes((-1i32) as u64, page + 384, page + 1472, 128);
-    assert_eq!(core::str::from_utf8(&input_subsystem).unwrap(), "/sys/class/input");
+    assert_eq!(
+        core::str::from_utf8(&input_subsystem).unwrap(),
+        "/sys/class/input"
+    );
     expect_ok(
         SyscallArgs::new([
             AT_FDCWD,
@@ -5627,15 +5648,28 @@ fn sysfs_syscalls_follow_linux_sysfs_abi_rules() {
     for (path_addr, expected) in [
         (
             page + 512,
-            vec!["drm".to_string(), "graphics".to_string(), "input".to_string(), "tty".to_string()],
+            vec![
+                "drm".to_string(),
+                "graphics".to_string(),
+                "input".to_string(),
+                "tty".to_string(),
+            ],
         ),
         (
             page + 640,
-            vec!["uevent".to_string(), "i8042".to_string(), "seele-drm".to_string()],
+            vec![
+                "uevent".to_string(),
+                "i8042".to_string(),
+                "seele-drm".to_string(),
+            ],
         ),
         (
             page + 768,
-            vec!["13:64".to_string(), "13:65".to_string(), "226:0".to_string()],
+            vec![
+                "13:64".to_string(),
+                "13:65".to_string(),
+                "226:0".to_string(),
+            ],
         ),
     ] {
         let fd = openat_fd(AT_FDCWD, path_addr, OpenFlags::DIRECTORY);
@@ -5650,7 +5684,8 @@ fn sysfs_syscalls_follow_linux_sysfs_abi_rules() {
     }
 
     let uevent_sock = expect_fd(
-        SyscallArgs::new([AF_NETLINK, SOCK_DGRAM, NETLINK_KOBJECT_UEVENT, 0, 0, 0]).call::<Socket>(),
+        SyscallArgs::new([AF_NETLINK, SOCK_DGRAM, NETLINK_KOBJECT_UEVENT, 0, 0, 0])
+            .call::<Socket>(),
     );
     write_user_value(page + 1984, &1i32);
     expect_ok(
@@ -5665,9 +5700,8 @@ fn sysfs_syscalls_follow_linux_sysfs_abi_rules() {
         .call::<Setsockopt>(),
         0,
     );
-    let uevent_fd = expect_fd(
-        SyscallArgs::new([AT_FDCWD, page + 896, O_WRONLY, 0, 0, 0]).call::<OpenAt>(),
-    );
+    let uevent_fd =
+        expect_fd(SyscallArgs::new([AT_FDCWD, page + 896, O_WRONLY, 0, 0, 0]).call::<OpenAt>());
     let uevent_payload = b"add synthetic-uuid ACTION=spoof DEVPATH=/fake KEY=VALUE";
     get_current_process()
         .lock()
@@ -5705,12 +5739,28 @@ fn sysfs_syscalls_follow_linux_sysfs_abi_rules() {
         .collect::<Vec<_>>();
     assert_eq!(uevent_text[0], "add@/devices/platform");
     assert!(uevent_text.iter().any(|line| line == "ACTION=add"));
-    assert!(uevent_text.iter().any(|line| line == "DEVPATH=/devices/platform"));
+    assert!(
+        uevent_text
+            .iter()
+            .any(|line| line == "DEVPATH=/devices/platform")
+    );
     assert!(uevent_text.iter().any(|line| line == "SUBSYSTEM=platform"));
     assert!(uevent_text.iter().any(|line| line == "SYNTH_ARG_KEY=VALUE"));
-    assert!(uevent_text.iter().any(|line| line == "SYNTH_ARG_ACTION=spoof"));
-    assert!(uevent_text.iter().any(|line| line == "SYNTH_ARG_DEVPATH=/fake"));
-    assert!(uevent_text.iter().any(|line| line == "SYNTH_UUID=synthetic-uuid"));
+    assert!(
+        uevent_text
+            .iter()
+            .any(|line| line == "SYNTH_ARG_ACTION=spoof")
+    );
+    assert!(
+        uevent_text
+            .iter()
+            .any(|line| line == "SYNTH_ARG_DEVPATH=/fake")
+    );
+    assert!(
+        uevent_text
+            .iter()
+            .any(|line| line == "SYNTH_UUID=synthetic-uuid")
+    );
     let seq_line = uevent_text
         .iter()
         .find(|line| line.starts_with("SEQNUM="))
@@ -6576,8 +6626,15 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     );
     write_user_value(page + 1052, &6i32);
     expect_ok(
-        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_PRIORITY, page + 1052, 4, 0])
-            .call::<Setsockopt>(),
+        SyscallArgs::new([
+            inet_socket as u64,
+            SOL_SOCKET,
+            SO_PRIORITY,
+            page + 1052,
+            4,
+            0,
+        ])
+        .call::<Setsockopt>(),
         0,
     );
     write_user_value(page + 1060, &4u32);
@@ -6602,14 +6659,28 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     }
     write_user_value(page + 1052, &7i32);
     expect_errno(
-        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_PRIORITY, page + 1052, 4, 0])
-            .call::<Setsockopt>(),
+        SyscallArgs::new([
+            inet_socket as u64,
+            SOL_SOCKET,
+            SO_PRIORITY,
+            page + 1052,
+            4,
+            0,
+        ])
+        .call::<Setsockopt>(),
         SyscallError::PermissionDenied,
     );
     write_user_value(page + 1052, &(-1i32));
     expect_errno(
-        SyscallArgs::new([inet_socket as u64, SOL_SOCKET, SO_PRIORITY, page + 1052, 4, 0])
-            .call::<Setsockopt>(),
+        SyscallArgs::new([
+            inet_socket as u64,
+            SOL_SOCKET,
+            SO_PRIORITY,
+            page + 1052,
+            4,
+            0,
+        ])
+        .call::<Setsockopt>(),
         SyscallError::PermissionDenied,
     );
     write_user_value(page + 1060, &4u32);
