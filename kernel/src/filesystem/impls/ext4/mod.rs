@@ -188,10 +188,6 @@ impl FileSystem for EXT4 {
             return Ok(());
         }
 
-        let source = self.lookup(&old_path)?;
-        if matches!(source, FileLike::Directory(_)) {
-            return Err(FSError::Other);
-        }
         let source_inode = self
             .fs
             .path_to_inode(
@@ -199,14 +195,20 @@ impl FileSystem for EXT4 {
                 FollowSymlinks::ExcludeFinalComponent,
             )
             .map_err(FSError::from)?;
+        if source_inode.metadata().is_dir() {
+            return Err(FSError::Other);
+        }
 
         let old_parent = old_path.parent().ok_or(FSError::NotFound)?;
         let old_name = old_path.file_name().ok_or(FSError::NotFound)?;
         let new_parent = new_path.parent().ok_or(FSError::NotFound)?;
         let new_name = new_path.file_name().ok_or(FSError::NotFound)?;
 
-        if let Ok(target) = self.lookup(&new_path) {
-            if matches!(target, FileLike::Directory(_)) {
+        if let Ok(target_inode) = self.fs.path_to_inode(
+            Ext4Path::new(&new_path.clone().as_string()),
+            FollowSymlinks::ExcludeFinalComponent,
+        ) {
+            if target_inode.metadata().is_dir() {
                 return Err(FSError::DirectoryNotEmpty);
             }
             let new_parent_inode = match self.fs.path_to_inode(
@@ -218,13 +220,6 @@ impl FileSystem for EXT4 {
             };
             let mut new_parent_dir = match Dir::open_inode(&self.fs, new_parent_inode) {
                 Ok(dir) => dir,
-                Err(err) => return Err(FSError::from(err)),
-            };
-            let target_inode = match self.fs.path_to_inode(
-                Ext4Path::new(&new_path.clone().as_string()),
-                FollowSymlinks::ExcludeFinalComponent,
-            ) {
-                Ok(inode) => inode,
                 Err(err) => return Err(FSError::from(err)),
             };
             if let Err(err) = new_parent_dir.unlink(
@@ -280,35 +275,31 @@ impl FileSystem for EXT4 {
     }
 
     fn link(&self, old_path: &Path, new_path: &Path) -> FSResult<()> {
-        let source = self.lookup(old_path)?;
-        let source_inode = match source {
-            FileLike::File(file) => {
-                let file = file.lock();
-                let ext4_file = file
-                    .as_any()
-                    .downcast_ref::<Ext4File>()
-                    .ok_or(FSError::Other)?;
-                ext4_file.inode()
-            }
-            FileLike::Symlink(_) | FileLike::Directory(_) => return Err(FSError::Other),
-        };
+        let source_inode = self
+            .fs
+            .path_to_inode(
+                Ext4Path::new(&old_path.clone().as_string()),
+                FollowSymlinks::ExcludeFinalComponent,
+            )
+            .map_err(FSError::from)?;
+        let metadata = source_inode.metadata();
+        if metadata.is_dir() || metadata.is_symlink() {
+            return Err(FSError::Other);
+        }
 
         let new_parent = new_path.parent().ok_or(FSError::NotFound)?;
         let new_name = new_path.file_name().ok_or(FSError::NotFound)?;
-        let parent = self.lookup(&new_parent)?;
-        let parent = match parent {
-            FileLike::Directory(parent) => parent,
-            FileLike::File(_) | FileLike::Symlink(_) => return Err(FSError::NotADirectory),
-        };
-        let parent = parent.lock();
-        let ext4_parent = parent
-            .as_any()
-            .downcast_ref::<Ext4Directory>()
-            .ok_or(FSError::Other)?;
-
-        let parent_inode = ext4_parent.inode();
-        let mut parent_dir =
-            Dir::open_inode(ext4_parent.fs(), parent_inode).map_err(FSError::from)?;
+        let parent_inode = self
+            .fs
+            .path_to_inode(
+                Ext4Path::new(&new_parent.clone().as_string()),
+                FollowSymlinks::All,
+            )
+            .map_err(FSError::from)?;
+        if !parent_inode.metadata().is_dir() {
+            return Err(FSError::NotADirectory);
+        }
+        let mut parent_dir = Dir::open_inode(&self.fs, parent_inode).map_err(FSError::from)?;
         let mut source_inode = source_inode;
         parent_dir
             .link(
@@ -316,7 +307,7 @@ impl FileSystem for EXT4 {
                 &mut source_inode,
             )
             .map_err(FSError::from)?;
-        ext4_parent.clear_lookup_cache();
+        lookup_cache_clear(&self.lookup_cache);
         Ok(())
     }
 
