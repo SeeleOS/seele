@@ -1,4 +1,3 @@
 #!/bin/sh
 
-xsetroot -solid "#205d9c"
-exec icewm
+exec /usr/bin/startplasma-x11
