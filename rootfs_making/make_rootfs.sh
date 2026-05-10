@@ -68,6 +68,14 @@ ARCH_PACKAGES=(
 AUR_PACKAGES=(
 )
 
+cleanup() {
+    if mountpoint -q "${SYSROOT_DIR}"; then
+        sudo umount -l "${SYSROOT_DIR}"
+    fi
+}
+
+trap cleanup EXIT
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --override)
@@ -224,6 +232,8 @@ arch_chroot passwd -d root
 arch_chroot systemctl enable seatd.service
 
 install_sysroot_file "${ROOTFS_MAKING_DIR}/nsswitch.conf" "${SYSROOT_DIR}/etc/nsswitch.conf"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/locale.conf" "${SYSROOT_DIR}/etc/locale.conf"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/vconsole.conf" "${SYSROOT_DIR}/etc/vconsole.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/weston.ini" "${SYSROOT_DIR}/etc/xdg/weston/weston.ini"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/etc/X11/xinit/xinitrc"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/debuginfod.sh" "${SYSROOT_DIR}/etc/profile.d/debuginfod.sh"
