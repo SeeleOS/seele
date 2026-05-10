@@ -76,20 +76,22 @@ pub fn get_current_process() -> ProcessRef {
 
 pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
     let process_ref = process.clone();
-    let (threads, vfork_blocker, parent_death_signals, reparented_children) = {
+    let (pid, threads, vfork_blocker, reparent_target) = {
         let mut process = process.lock();
         process.restore_borrowed_addrspace_to_parent();
         let vfork_blocker = process.vfork_blocker.take();
-        let parent_death_signals =
-            collect_parent_death_signals_for_children(process.pid, &process_ref);
-        let reparented_children = reparent_children(process.pid, &process_ref);
+        let pid = process.pid;
+        let reparent_target = nearest_live_subreaper(process.parent.clone())
+            .or_else(init_process_ref);
         (
+            pid,
             process.terminate_inner(exit_status),
             vfork_blocker,
-            parent_death_signals,
-            reparented_children,
+            reparent_target,
         )
     };
+    let parent_death_signals = collect_parent_death_signals_for_children(pid, &process_ref);
+    let reparented_children = reparent_children(pid, &process_ref, reparent_target);
     if let Some(process) = process.try_lock() {
         systemd_perf::log_and_clear_process_summary(&process, exit_status);
     }
@@ -153,8 +155,7 @@ fn init_process_ref() -> Option<ProcessRef> {
     })
 }
 
-fn nearest_live_subreaper(process: &ProcessRef) -> Option<ProcessRef> {
-    let mut current = process.lock().parent.clone();
+fn nearest_live_subreaper(mut current: Option<ProcessRef>) -> Option<ProcessRef> {
     while let Some(candidate) = current {
         let next = {
             let candidate_lock = candidate.lock();
@@ -169,8 +170,11 @@ fn nearest_live_subreaper(process: &ProcessRef) -> Option<ProcessRef> {
     None
 }
 
-fn reparent_children(parent_pid: ProcessID, parent_process: &ProcessRef) -> Vec<ProcessRef> {
-    let init = init_process_ref();
+fn reparent_children(
+    parent_pid: ProcessID,
+    parent_process: &ProcessRef,
+    reparent_target: Option<ProcessRef>,
+) -> Vec<ProcessRef> {
     let manager = MANAGER.lock();
     let mut reparented = Vec::new();
 
@@ -192,7 +196,7 @@ fn reparent_children(parent_pid: ProcessID, parent_process: &ProcessRef) -> Vec<
             continue;
         }
 
-        child.lock().parent = nearest_live_subreaper(parent_process).or_else(|| init.clone());
+        child.lock().parent = reparent_target.clone();
         reparented.push(child);
     }
 
