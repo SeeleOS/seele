@@ -81,8 +81,8 @@ pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
         process.restore_borrowed_addrspace_to_parent();
         let vfork_blocker = process.vfork_blocker.take();
         let pid = process.pid;
-        let reparent_target = nearest_live_subreaper(process.parent.clone())
-            .or_else(init_process_ref);
+        let reparent_target =
+            nearest_live_subreaper(process.parent.clone()).or_else(init_process_ref);
         (
             pid,
             process.terminate_inner(exit_status),
