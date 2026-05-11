@@ -4,10 +4,7 @@ use alloc::{format, string::String, sync::Arc};
 use heapless::Deque;
 use ps2_mouse::Mouse;
 use spin::Mutex;
-use x86_64::{
-    instructions::interrupts::without_interrupts, instructions::port::Port,
-    structures::idt::InterruptStackFrame,
-};
+use x86_64::{instructions::interrupts::without_interrupts, instructions::port::Port};
 
 use crate::{
     evdev::{
@@ -88,7 +85,7 @@ pub fn process_pending_mouse_events() {
     }
 }
 
-pub extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
+pub extern "C" fn mouse_interrupt_handler() {
     let packet = unsafe { Port::new(0x60).read() };
     without_interrupts(|| {
         let mut packets = MOUSE_PACKETS.lock();

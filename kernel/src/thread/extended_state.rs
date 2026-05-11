@@ -10,7 +10,13 @@ use x86_64::registers::{
     xcontrol::{XCr0, XCr0Flags},
 };
 
+use crate::{
+    smp::with_current_cpu,
+    thread::{misc::SnapshotState, thread::Thread},
+};
+
 const XSAVE_CPUID_BIT: u32 = 1 << 26;
+const OSXSAVE_CPUID_BIT: u32 = 1 << 27;
 const AVX_CPUID_BIT: u32 = 1 << 28;
 pub const EXTENDED_STATE_ALIGNMENT: usize = 64;
 pub const FXSAVE_AREA_SIZE: usize = 512;
@@ -137,6 +143,10 @@ impl ExtendedState {
         unsafe { slice::from_raw_parts(self.as_ptr(), self.save_area_size) }
     }
 
+    pub fn active_ptr(&mut self) -> *mut u8 {
+        self.as_mut_ptr()
+    }
+
     pub const fn uses_xsave(&self) -> bool {
         self.uses_xsave
     }
@@ -211,6 +221,12 @@ pub fn initialize_current_cpu_extended_state() {
     } else {
         EXTENDED_STATE_CONFIG.get_or_init(|| config);
     }
+
+    with_current_cpu(|cpu| {
+        cpu.gs_context.extended_state_uses_xsave = u64::from(config.uses_xsave());
+        cpu.gs_context.extended_state_xcr0 = config.xcr0_bits();
+        cpu.gs_context.active_user_extended_state_saved = 0;
+    });
 }
 
 pub fn current_extended_state_config() -> ExtendedStateConfig {
@@ -237,7 +253,10 @@ fn detect_xsave_candidate() -> Option<u64> {
     }
 
     let feature_leaf = __cpuid(1);
-    if (feature_leaf.ecx & XSAVE_CPUID_BIT) == 0 || (feature_leaf.ecx & AVX_CPUID_BIT) == 0 {
+    if (feature_leaf.ecx & XSAVE_CPUID_BIT) == 0
+        || (feature_leaf.ecx & OSXSAVE_CPUID_BIT) == 0
+        || (feature_leaf.ecx & AVX_CPUID_BIT) == 0
+    {
         return None;
     }
 
@@ -253,6 +272,52 @@ fn detect_xsave_candidate() -> Option<u64> {
 
 fn required_xcr0_bits() -> u64 {
     (XCr0Flags::X87 | XCr0Flags::SSE | XCr0Flags::AVX).bits()
+}
+
+pub fn update_active_user_extended_state_ptr_for_thread(thread: &mut Thread) {
+    let snapshot = match thread.snapshot_state {
+        SnapshotState::Normal => &mut thread.snapshot,
+        SnapshotState::SignalHandler => &mut thread.sig_handler_snapshot,
+    };
+    set_active_user_extended_state_ptr(snapshot.extended_state.active_ptr());
+}
+
+pub fn set_active_user_extended_state_ptr(ptr: *mut u8) {
+    with_current_cpu(|cpu| {
+        cpu.gs_context.active_user_extended_state = ptr;
+        cpu.gs_context.active_user_extended_state_saved = 0;
+    });
+}
+
+pub fn clear_active_user_extended_state_ptr() {
+    with_current_cpu(|cpu| {
+        cpu.gs_context.active_user_extended_state = ptr::null_mut();
+        cpu.gs_context.active_user_extended_state_saved = 0;
+    });
+}
+
+pub fn mark_active_user_extended_state_saved() {
+    with_current_cpu(|cpu| {
+        cpu.gs_context.active_user_extended_state_saved = 1;
+    });
+}
+
+pub fn mark_active_user_extended_state_dirty() {
+    with_current_cpu(|cpu| {
+        cpu.gs_context.active_user_extended_state_saved = 0;
+    });
+}
+
+pub fn active_user_extended_state_is_saved() -> bool {
+    with_current_cpu(|cpu| cpu.gs_context.active_user_extended_state_saved != 0)
+}
+
+pub fn active_user_extended_state_ptr() -> *mut u8 {
+    with_current_cpu(|cpu| cpu.gs_context.active_user_extended_state)
+}
+
+pub fn is_active_user_extended_state_ptr(ptr: *mut u8) -> bool {
+    active_user_extended_state_ptr() == ptr
 }
 
 #[cfg(test)]
@@ -319,6 +384,32 @@ mod tests {
                 snapshot.extended_state.as_bytes(),
                 extended_state.as_bytes()
             );
+            assert_same_metadata(&snapshot.kernel_extended_state, &extended_state);
+        }
+    );
+
+    crate::test!(
+        active_user_extended_state_tracking_updates_and_resets,
+        "active user extended state tracking follows pointer and saved state transitions",
+        || {
+            let mut addrspace = AddrSpace::default();
+            let mut snapshot =
+                ThreadSnapshot::new(0x1234, &mut addrspace, 0x5678, ThreadSnapshotType::Thread);
+            let ptr = snapshot.extended_state.active_ptr();
+
+            set_active_user_extended_state_ptr(ptr);
+            assert_eq!(active_user_extended_state_ptr(), ptr);
+            assert!(!active_user_extended_state_is_saved());
+
+            mark_active_user_extended_state_saved();
+            assert!(active_user_extended_state_is_saved());
+
+            mark_active_user_extended_state_dirty();
+            assert!(!active_user_extended_state_is_saved());
+
+            clear_active_user_extended_state_ptr();
+            assert!(active_user_extended_state_ptr().is_null());
+            assert!(!active_user_extended_state_is_saved());
         }
     );
 }

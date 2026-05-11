@@ -16,6 +16,7 @@ use crate::{
     },
     smp::{current_process, current_thread, set_current_kernel_stack},
     thread::{
+        extended_state::update_active_user_extended_state_ptr_for_thread,
         misc::{SnapshotState, ThreadID},
         snapshot::ThreadSnapshot,
         stack::allocate_kernel_stack,
@@ -118,6 +119,7 @@ impl Process {
         thread_locked.rseq_sig = 0;
         thread_locked.last_user_snapshot = thread_locked.snapshot.inner;
         thread_locked.last_user_fs_base = thread_locked.snapshot.fs_base;
+        update_active_user_extended_state_ptr_for_thread(&mut thread_locked);
         self.pending_signals = Signals::default();
         self.pending_signal_info.fill(None);
         self.signal_actions = execve_signal_actions(&self.signal_actions);

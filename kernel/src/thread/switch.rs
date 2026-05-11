@@ -8,7 +8,13 @@ use x86_64::{
 use crate::{
     misc::snapshot::Snapshot,
     smp::{load_current_kernel_gs_base, with_current_cpu},
-    thread::snapshot::{ThreadSnapshot, ThreadSnapshotType},
+    thread::{
+        extended_state::{
+            active_user_extended_state_is_saved, is_active_user_extended_state_ptr,
+            mark_active_user_extended_state_dirty,
+        },
+        snapshot::{ThreadSnapshot, ThreadSnapshotType},
+    },
 };
 
 impl ThreadSnapshot {
@@ -80,11 +86,38 @@ impl ThreadSnapshot {
     }
 
     fn save_fp(&mut self) {
-        self.extended_state.save_current();
+        match self.snapshot_type {
+            ThreadSnapshotType::Thread => {
+                if is_active_user_extended_state_ptr(self.extended_state.as_mut_ptr())
+                    && active_user_extended_state_is_saved()
+                {
+                    return;
+                }
+
+                self.extended_state.save_current();
+            }
+            ThreadSnapshotType::Kernel => {
+                self.kernel_extended_state.save_current();
+            }
+            ThreadSnapshotType::Scheduler => {
+                self.extended_state.save_current();
+            }
+        }
     }
 
     fn load_fp(&self) {
-        self.extended_state.load_current();
+        match self.snapshot_type {
+            ThreadSnapshotType::Thread => {
+                self.extended_state.load_current();
+                mark_active_user_extended_state_dirty();
+            }
+            ThreadSnapshotType::Kernel => {
+                self.kernel_extended_state.load_current();
+            }
+            ThreadSnapshotType::Scheduler => {
+                self.extended_state.load_current();
+            }
+        }
     }
 
     #[unsafe(naked)]

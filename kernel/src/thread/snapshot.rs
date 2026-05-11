@@ -13,6 +13,7 @@ pub struct ThreadSnapshot {
     // RSP used on context switching in kernel space to not messup the userstack
     pub kernel_rsp: u64,
     pub extended_state: ExtendedState,
+    pub kernel_extended_state: ExtendedState,
     pub fs_base: u64,
     pub snapshot_type: ThreadSnapshotType,
 }
@@ -66,6 +67,7 @@ impl ThreadSnapshot {
             ),
             kernel_rsp: allocate_kernel_stack(16).finish().as_u64(),
             extended_state,
+            kernel_extended_state: ExtendedState::capture_current(),
             fs_base: 0,
             snapshot_type,
         }
@@ -77,6 +79,7 @@ impl ThreadSnapshot {
             snapshot_type: ThreadSnapshotType::Scheduler,
             kernel_rsp: allocate_kernel_stack(16).finish().as_u64(),
             extended_state: ExtendedState::capture_current(),
+            kernel_extended_state: ExtendedState::capture_current(),
             fs_base: 0,
         }
     }

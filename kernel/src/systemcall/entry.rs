@@ -1,3 +1,7 @@
+use core::mem::offset_of;
+
+use crate::smp::gs::GsContext;
+
 #[unsafe(no_mangle)]
 #[unsafe(naked)]
 pub extern "C" fn syscall_entry() {
@@ -30,10 +34,42 @@ pub extern "C" fn syscall_entry() {
         "push r13",
         "push r14",
         "push r15",
+        // Save the live user FP/SIMD state before any Rust code can clobber it.
+        "mov r8, qword ptr gs:[{ACTIVE_EXT_STATE_OFF}]",
+        "test r8, r8",
+        "je 2f",
+        "cmp qword ptr gs:[{ACTIVE_EXT_STATE_SAVED_OFF}], 0",
+        "jne 2f",
+        "cmp qword ptr gs:[{USES_XSAVE_OFF}], 0",
+        "je 0f",
+        "mov eax, dword ptr gs:[{XCR0_LOW_OFF}]",
+        "mov edx, dword ptr gs:[{XCR0_HIGH_OFF}]",
+        "xsave64 [r8]",
+        "jmp 1f",
+        "0:",
+        "fxsave64 [r8]",
+        "1:",
+        "mov qword ptr gs:[{ACTIVE_EXT_STATE_SAVED_OFF}], 1",
+        "2:",
         // 4. 此时 RSP 正好指向 Snapshot 结构体的起始地址 (r15)
         // 且一共压入了 20 个 u64 (160 字节)，16 字节对齐已满足，无需 sub rsp, 8
         "mov rdi, rsp", // 将 Snapshot 指针作为第一个参数传递给 Rust
         "call syscall_handler",
+        // Restore the active user FP/SIMD state before returning to userspace.
+        "mov r8, qword ptr gs:[{ACTIVE_EXT_STATE_OFF}]",
+        "test r8, r8",
+        "je 5f",
+        "cmp qword ptr gs:[{USES_XSAVE_OFF}], 0",
+        "je 3f",
+        "mov eax, dword ptr gs:[{XCR0_LOW_OFF}]",
+        "mov edx, dword ptr gs:[{XCR0_HIGH_OFF}]",
+        "xrstor64 [r8]",
+        "jmp 4f",
+        "3:",
+        "fxrstor64 [r8]",
+        "4:",
+        "mov qword ptr gs:[{ACTIVE_EXT_STATE_SAVED_OFF}], 0",
+        "5:",
         // 5. 从 Snapshot 恢复现场
         // 如果 syscall_handler 修改了 snapshot.rax，pop 出来的就是新值
         "pop r15",
@@ -54,6 +90,12 @@ pub extern "C" fn syscall_entry() {
         // 6. 跳过 rip, cs, rflags, rsp, ss，这些将由 iretq 处理
         // 但我们已经在栈上了，直接准备好 iretq 即可
         "swapgs",
-        "iretq"
+        "iretq",
+        ACTIVE_EXT_STATE_OFF = const offset_of!(GsContext, active_user_extended_state),
+        ACTIVE_EXT_STATE_SAVED_OFF =
+            const offset_of!(GsContext, active_user_extended_state_saved),
+        USES_XSAVE_OFF = const offset_of!(GsContext, extended_state_uses_xsave),
+        XCR0_LOW_OFF = const offset_of!(GsContext, extended_state_xcr0),
+        XCR0_HIGH_OFF = const offset_of!(GsContext, extended_state_xcr0) + 4,
     )
 }

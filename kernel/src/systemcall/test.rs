@@ -68,7 +68,7 @@ use crate::{
         },
         utils::SyscallError,
     },
-    thread::THREAD_MANAGER,
+    thread::{THREAD_MANAGER, extended_state::active_user_extended_state_ptr},
 };
 
 #[repr(C)]
@@ -9088,14 +9088,24 @@ fn process_and_signal_transition_helpers_follow_linux_rules() {
     let thread = crate::thread::get_current_thread();
     {
         let mut thread = thread.lock();
+        let normal_ptr = thread.snapshot.extended_state.active_ptr();
         thread.snapshot_state = crate::thread::misc::SnapshotState::SignalHandler;
+        let signal_ptr = thread.sig_handler_snapshot.extended_state.active_ptr();
         thread.blocked_signals = Signals::from(Signal::SIGTERM);
         thread
             .saved_blocked_signals
             .push(Signals::from(Signal::SIGUSR1));
+        crate::thread::extended_state::update_active_user_extended_state_ptr_for_thread(
+            &mut thread,
+        );
+        assert_eq!(active_user_extended_state_ptr(), signal_ptr);
         thread.restore_blocked_signals();
         assert_eq!(thread.blocked_signals.bits(), Signal::SIGUSR1.mask());
         thread.snapshot_state = crate::thread::misc::SnapshotState::Normal;
+        crate::thread::extended_state::update_active_user_extended_state_ptr_for_thread(
+            &mut thread,
+        );
+        assert_eq!(active_user_extended_state_ptr(), normal_ptr);
         thread.saved_blocked_signals.clear();
     }
 }

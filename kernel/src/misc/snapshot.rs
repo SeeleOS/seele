@@ -30,6 +30,32 @@ pub struct Snapshot {
     pub ss: u64,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Default, Debug)]
+pub struct SnapshotWithErrorCode {
+    pub r15: u64,
+    pub r14: u64,
+    pub r13: u64,
+    pub r12: u64,
+    pub r11: u64,
+    pub r10: u64,
+    pub r9: u64,
+    pub r8: u64,
+    pub rdi: u64,
+    pub rsi: u64,
+    pub rbp: u64,
+    pub rbx: u64,
+    pub rdx: u64,
+    pub rcx: u64,
+    pub rax: isize,
+    pub error_code: u64,
+    pub rip: u64,
+    pub cs: u64,
+    pub rflags: u64,
+    pub rsp: u64,
+    pub ss: u64,
+}
+
 impl Snapshot {
     pub fn default_regs(rip: u64, cs: u16, rflags: u64, rsp: u64, ss: u16) -> Self {
         Self {
@@ -110,5 +136,32 @@ impl Snapshot {
             );
         }
         snp
+    }
+}
+
+impl SnapshotWithErrorCode {
+    pub fn as_snapshot(&self) -> Snapshot {
+        Snapshot {
+            r15: self.r15,
+            r14: self.r14,
+            r13: self.r13,
+            r12: self.r12,
+            r11: self.r11,
+            r10: self.r10,
+            r9: self.r9,
+            r8: self.r8,
+            rdi: self.rdi,
+            rsi: self.rsi,
+            rbp: self.rbp,
+            rbx: self.rbx,
+            rdx: self.rdx,
+            rcx: self.rcx,
+            rax: self.rax,
+            rip: self.rip,
+            cs: self.cs,
+            rflags: self.rflags,
+            rsp: self.rsp,
+            ss: self.ss,
+        }
     }
 }

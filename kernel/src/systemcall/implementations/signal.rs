@@ -3,6 +3,7 @@ use crate::process::manager::MANAGER;
 use crate::process::misc::ProcessID;
 use crate::signal::action::{SignalHandlingType, Signals};
 use crate::systemcall::utils::*;
+use crate::thread::extended_state::update_active_user_extended_state_ptr_for_thread;
 use crate::thread::get_current_thread;
 use crate::thread::misc::{SnapshotState, ThreadID};
 use crate::thread::scheduling::return_to_scheduler_no_save;
@@ -594,8 +595,12 @@ define_syscall!(
 );
 
 define_syscall!(RtSigreturn, {
-    get_current_thread().lock().snapshot_state = SnapshotState::Normal;
-    get_current_thread().lock().restore_blocked_signals();
+    let current = get_current_thread();
+    let mut thread = current.lock();
+    thread.snapshot_state = SnapshotState::Normal;
+    thread.restore_blocked_signals();
+    update_active_user_extended_state_ptr_for_thread(&mut thread);
+    drop(thread);
 
     return_to_scheduler_no_save();
 });

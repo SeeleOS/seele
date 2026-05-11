@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use pc_keyboard::{Keyboard, ScancodeSet1, layouts};
 use spin::Mutex;
-use x86_64::{instructions::port::Port, structures::idt::InterruptStackFrame};
+use x86_64::instructions::port::Port;
 
 const STATUS_OUTPUT_FULL: u8 = 1 << 0;
 const STATUS_AUX_DATA: u8 = 1 << 5;
@@ -24,7 +24,7 @@ pub fn init() {
     }
 }
 
-pub extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
+pub extern "C" fn keyboard_interrupt_handler() {
     let mut status_port: Port<u8> = Port::new(0x64);
     let status = unsafe { status_port.read() };
     if (status & STATUS_OUTPUT_FULL) == 0 || (status & STATUS_AUX_DATA) != 0 {

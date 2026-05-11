@@ -18,6 +18,9 @@ use crate::{
     smp::{current_cpu_index, set_current_kernel_stack, set_current_process, set_current_thread},
     thread::{
         ThreadRef,
+        extended_state::{
+            clear_active_user_extended_state_ptr, update_active_user_extended_state_ptr_for_thread,
+        },
         misc::State,
         scheduler_thread,
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
@@ -193,6 +196,7 @@ fn run_ready_thread(thread_ref: ThreadRef) {
         let process = thread.parent.clone();
         thread.state = State::Running;
         set_current_thread(Some(thread_ref.clone()));
+        update_active_user_extended_state_ptr_for_thread(&mut thread);
         set_current_kernel_stack(thread.kernel_stack_top);
 
         // The process object can keep the same Arc while execve replaces its
@@ -300,6 +304,7 @@ fn after_thread_yield(thread_ref: ThreadRef) {
             manager.cleanup_exited_threads();
         });
         set_current_thread(Some(scheduler_thread()));
+        clear_active_user_extended_state_ptr();
         return;
     }
 
@@ -340,6 +345,7 @@ fn after_thread_yield(thread_ref: ThreadRef) {
     }
 
     set_current_thread(Some(scheduler_thread()));
+    clear_active_user_extended_state_ptr();
 }
 
 fn sleep_if_idle() {

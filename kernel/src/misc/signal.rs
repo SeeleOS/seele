@@ -3,7 +3,9 @@ use crate::{
     object::linux_anon::wake_signalfd_for_process,
     process::{Process, ProcessExitStatus, ProcessRef, ptrace::report_signal_stop},
     thread::{
-        ThreadRef, get_current_thread,
+        ThreadRef,
+        extended_state::update_active_user_extended_state_ptr_for_thread,
+        get_current_thread,
         misc::{SnapshotState, State, with_current_thread},
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
         thread::Thread,
@@ -719,6 +721,7 @@ impl Thread {
     fn enter_signal_handler(&mut self, snapshot: ThreadSnapshot) {
         self.snapshot_state = SnapshotState::SignalHandler;
         self.sig_handler_snapshot = snapshot;
+        update_active_user_extended_state_ptr_for_thread(self);
     }
 
     pub fn restore_blocked_signals(&mut self) {
