@@ -645,16 +645,16 @@ fn process_pending_signals(
                     stack_builder.push(0);
                     stack_builder.push(action.restorer as u64);
 
-                    let (current_fx_state, current_fs_base) = {
+                    let (current_extended_state, current_fs_base) = {
                         let snapshot = current_thread.get_appropriate_snapshot();
-                        (snapshot.fx_state, snapshot.fs_base)
+                        (snapshot.extended_state.clone(), snapshot.fs_base)
                     };
-                    let mut thread_snapshot = ThreadSnapshot::new_with_fx_state(
+                    let mut thread_snapshot = ThreadSnapshot::new_with_extended_state(
                         (func as usize) as u64,
                         &mut process.addrspace,
                         stack_builder.finish().as_u64(),
                         ThreadSnapshotType::Thread,
-                        current_fx_state,
+                        current_extended_state,
                     );
                     thread_snapshot.fs_base = current_fs_base;
 
@@ -679,16 +679,16 @@ fn process_pending_signals(
                     stack_builder.push(0);
                     stack_builder.push(action.restorer as u64);
 
-                    let (current_fx_state, current_fs_base) = {
+                    let (current_extended_state, current_fs_base) = {
                         let snapshot = current_thread.get_appropriate_snapshot();
-                        (snapshot.fx_state, snapshot.fs_base)
+                        (snapshot.extended_state.clone(), snapshot.fs_base)
                     };
-                    let mut thread_snapshot = ThreadSnapshot::new_with_fx_state(
+                    let mut thread_snapshot = ThreadSnapshot::new_with_extended_state(
                         (func as usize) as u64,
                         &mut process.addrspace,
                         stack_builder.finish().as_u64(),
                         ThreadSnapshotType::Thread,
-                        current_fx_state,
+                        current_extended_state,
                     );
                     thread_snapshot.fs_base = current_fs_base;
 

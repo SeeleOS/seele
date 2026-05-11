@@ -5,7 +5,10 @@ use x86_64::{
     structures::{idt::InterruptStackFrame, paging::PageTableFlags},
 };
 
-use crate::{memory::protection::Protection, misc::error::KernelResult};
+use crate::{
+    memory::protection::Protection, misc::error::KernelResult,
+    thread::extended_state::initialize_current_cpu_extended_state,
+};
 pub fn calc_cr3_value(addr: PhysAddr, flags: Cr3Flags) -> u64 {
     ((false as u64) << 63) | addr.as_u64() | flags.bits()
 }
@@ -26,6 +29,8 @@ pub fn enable_sse() {
         cr4.insert(Cr4Flags::OSXMMEXCPT_ENABLE);
         Cr4::write(cr4);
     }
+
+    initialize_current_cpu_extended_state();
 }
 
 pub trait KernelFrom<T> {

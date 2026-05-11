@@ -18,7 +18,7 @@ use crate::{
         paging::{FRAME_ALLOCATOR, MAPPER},
         utils::page_range_from_addr,
     },
-    misc::time::Time,
+    misc::{others::enable_sse, time::Time},
     smp::{
         cpu::{CpuCoreContext, register_application_processor},
         current_apic_id_raw, set_current_thread, topology, wait_for_cpu_online,
@@ -127,6 +127,7 @@ extern "C" fn application_processor_main() -> ! {
     let context_ptr = with_cpu_by_apic_id(apic_id, |current| current as *const CpuCoreContext);
 
     crate::smp::cpu::load_segments_for_cpu(unsafe { &*context_ptr });
+    enable_sse();
     systemcall::init();
     interrupts::init_ap();
 

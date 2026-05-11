@@ -2,57 +2,22 @@ use crate::{
     memory::addrspace::AddrSpace,
     misc::snapshot::Snapshot,
     smp::{user_code_selector, user_data_selector},
+    thread::extended_state::ExtendedState,
     thread::stack::allocate_kernel_stack,
 };
 
-#[repr(C, align(16))]
-#[derive(Clone, Copy, Debug)]
-pub struct FxState {
-    bytes: [u8; 512],
-}
-
-impl FxState {
-    pub fn capture_current() -> Self {
-        let mut state = Self { bytes: [0; 512] };
-
-        unsafe {
-            core::arch::asm!(
-                "fxsave64 [{ptr}]",
-                ptr = in(reg) state.bytes.as_mut_ptr(),
-                options(nostack)
-            );
-        }
-
-        state
-    }
-
-    pub fn as_ptr(&self) -> *const u8 {
-        self.bytes.as_ptr()
-    }
-
-    pub fn as_mut_ptr(&mut self) -> *mut u8 {
-        self.bytes.as_mut_ptr()
-    }
-}
-
-impl Default for FxState {
-    fn default() -> Self {
-        Self::capture_current()
-    }
-}
-
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ThreadSnapshot {
     pub inner: Snapshot,
     // RSP used on context switching in kernel space to not messup the userstack
     pub kernel_rsp: u64,
-    pub fx_state: FxState,
+    pub extended_state: ExtendedState,
     pub fs_base: u64,
     pub snapshot_type: ThreadSnapshotType,
 }
 
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThreadSnapshotType {
     // Snapshot of the thread it self
     #[default]
@@ -70,21 +35,21 @@ impl ThreadSnapshot {
         virt_stack_addr: u64,
         snapshot_type: ThreadSnapshotType,
     ) -> Self {
-        Self::new_with_fx_state(
+        Self::new_with_extended_state(
             entry_point,
             addrspace,
             virt_stack_addr,
             snapshot_type,
-            FxState::capture_current(),
+            ExtendedState::capture_current(),
         )
     }
 
-    pub fn new_with_fx_state(
+    pub fn new_with_extended_state(
         entry_point: u64,
         _addrspace: &mut AddrSpace,
         virt_stack_addr: u64,
         snapshot_type: ThreadSnapshotType,
-        fx_state: FxState,
+        extended_state: ExtendedState,
     ) -> Self {
         log::trace!(
             "ThreadSnapshot::new: entry_point = {:#x}, user_rsp = {:#x}",
@@ -100,7 +65,7 @@ impl ThreadSnapshot {
                 user_data_selector().0,
             ),
             kernel_rsp: allocate_kernel_stack(16).finish().as_u64(),
-            fx_state,
+            extended_state,
             fs_base: 0,
             snapshot_type,
         }
@@ -111,7 +76,7 @@ impl ThreadSnapshot {
             inner: Snapshot::default(),
             snapshot_type: ThreadSnapshotType::Scheduler,
             kernel_rsp: allocate_kernel_stack(16).finish().as_u64(),
-            fx_state: FxState::capture_current(),
+            extended_state: ExtendedState::capture_current(),
             fs_base: 0,
         }
     }

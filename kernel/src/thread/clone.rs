@@ -9,7 +9,7 @@ use crate::{
 impl Thread {
     fn clone_for_spawn_with_id(&self, process: ProcessRef, id: ThreadID) -> Thread {
         log::debug!("clone_and_spawn: start");
-        let mut snapshot = self.snapshot;
+        let mut snapshot = self.snapshot.clone();
         Self {
             parent: process.clone(),
             id,

@@ -65,7 +65,7 @@ pub fn init_kernel(boot_info: &'static mut BootInfo) {
     logging::init();
     time::init();
     enable_sse();
-    log::info!("init: sse enabled");
+    log::info!("init: extended state enabled");
     drivers::init_early();
     log::info!("init: early drivers ready");
 

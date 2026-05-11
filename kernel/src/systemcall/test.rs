@@ -7109,7 +7109,7 @@ fn socket_message_syscalls_follow_linux_rules() {
     let stream_left = read_user_value::<i32>(socketpair_page) as usize;
     let stream_right = read_user_value::<i32>(socketpair_page + 4) as usize;
 
-    write_user_value(page + 1424, &[b'R']);
+    write_user_value(page + 1424, b"R");
     let send_iov = TestRelibcIovec {
         iov_base: (page + 1424) as *mut u8,
         iov_len: 1,

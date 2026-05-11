@@ -80,23 +80,11 @@ impl ThreadSnapshot {
     }
 
     fn save_fp(&mut self) {
-        unsafe {
-            core::arch::asm!(
-                "fxsave64 [{ptr}]",
-                ptr = in(reg) self.fx_state.as_mut_ptr(),
-                options(nostack)
-            );
-        }
+        self.extended_state.save_current();
     }
 
     fn load_fp(&self) {
-        unsafe {
-            core::arch::asm!(
-                "fxrstor64 [{ptr}]",
-                ptr = in(reg) self.fx_state.as_ptr(),
-                options(nostack)
-            );
-        }
+        self.extended_state.load_current();
     }
 
     #[unsafe(naked)]

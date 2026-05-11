@@ -11,6 +11,7 @@ use crate::{
 };
 
 pub mod clone;
+pub mod extended_state;
 pub mod manager;
 pub mod misc;
 pub mod scheduling;
