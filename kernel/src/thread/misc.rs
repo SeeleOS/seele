@@ -4,6 +4,57 @@ use crate::{
     thread::{get_current_thread, snapshot::ThreadSnapshot, thread::Thread, yielding::BlockType},
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockedSyscall {
+    Wait4,
+    Waitid,
+    Poll,
+    Ppoll,
+    EpollWait,
+    Pselect6,
+    Nanosleep,
+    ClockNanosleep,
+    Pause,
+    Futex,
+}
+
+impl BlockedSyscall {
+    pub fn from_syscall_number(number: usize) -> Option<Self> {
+        use crate::systemcall::numbers::SyscallNumber;
+
+        match SyscallNumber::from_number(number)? {
+            SyscallNumber::Wait4 => Some(Self::Wait4),
+            SyscallNumber::Waitid => Some(Self::Waitid),
+            SyscallNumber::Poll => Some(Self::Poll),
+            SyscallNumber::Ppoll => Some(Self::Ppoll),
+            SyscallNumber::EpollWait => Some(Self::EpollWait),
+            SyscallNumber::Pselect6 => Some(Self::Pselect6),
+            SyscallNumber::Nanosleep => Some(Self::Nanosleep),
+            SyscallNumber::ClockNanosleep => Some(Self::ClockNanosleep),
+            SyscallNumber::Pause => Some(Self::Pause),
+            SyscallNumber::Futex => Some(Self::Futex),
+            _ => None,
+        }
+    }
+
+    pub fn syscall_number(self) -> usize {
+        use crate::systemcall::numbers::SyscallNumber;
+
+        match self {
+            Self::Wait4 => SyscallNumber::Wait4 as usize,
+            Self::Waitid => SyscallNumber::Waitid as usize,
+            Self::Poll => SyscallNumber::Poll as usize,
+            Self::Ppoll => SyscallNumber::Ppoll as usize,
+            Self::EpollWait => SyscallNumber::EpollWait as usize,
+            Self::Pselect6 => SyscallNumber::Pselect6 as usize,
+            Self::Nanosleep => SyscallNumber::Nanosleep as usize,
+            Self::ClockNanosleep => SyscallNumber::ClockNanosleep as usize,
+            Self::Pause => SyscallNumber::Pause as usize,
+            Self::Futex => SyscallNumber::Futex as usize,
+        }
+    }
+}
+
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ThreadID(pub u64);
 

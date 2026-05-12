@@ -6,7 +6,7 @@ use alloc::{
 
 use crate::{
     interrupts::hardware_interrupt::wake_scheduler_cpus,
-    misc::time::Time,
+    misc::{profile, time::Time},
     object::{
         error::ObjectError,
         misc::{ObjectRef, ObjectResult},
@@ -198,6 +198,7 @@ impl ThreadManager {
         log::debug!("thread block: {:?}", block_type);
         let mut thread = thread_ref.lock();
         let thread_id = thread.id;
+        profile::start_blocked_syscall(&mut thread);
 
         thread.state = State::Blocking(block_type.clone());
         drop(thread);
@@ -273,6 +274,10 @@ impl ThreadManager {
     }
 
     pub fn wake_ready_pollers(&mut self) {
+        if self.blocked_queues.poller.is_empty() {
+            return;
+        }
+
         let mut to_wake = Vec::new();
 
         for thread in &self.blocked_queues.poller {
@@ -304,6 +309,10 @@ impl ThreadManager {
     register_wake_func!(keyboard);
     register_wake_func!(mouse);
     register_wake_func!(io);
+
+    pub fn has_blocked_pollers(&self) -> bool {
+        !self.blocked_queues.poller.is_empty()
+    }
 }
 
 pub fn wake_pollers_for_object(target_object: ObjectRef, event: PollableEvent) {
@@ -341,6 +350,7 @@ pub fn cancel_block(thread_ref: &ThreadRef) {
     with_thread_manager(|thread_manager| thread_manager.remove_from_blocked_queues(thread_ref));
 
     let mut thread = thread_ref.lock();
+    profile::finish_blocked_syscall(&mut thread);
     if matches!(thread.state, State::Blocking(_) | State::Blocked(_)) {
         thread.state = State::Running;
     }
@@ -361,11 +371,13 @@ pub fn finish_block_current() {
                 }
                 State::Blocked(_) => false,
                 State::Woken => {
+                    profile::finish_blocked_syscall(&mut thread);
                     thread.state = State::Running;
                     true
                 }
                 State::Ready => {
                     if thread_manager.remove_ready_thread(&current) {
+                        profile::finish_blocked_syscall(&mut thread);
                         thread.state = State::Running;
                         true
                     } else {

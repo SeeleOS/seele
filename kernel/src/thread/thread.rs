@@ -7,7 +7,7 @@ use crate::{
     signal::{PendingSignalInfo, SIGNAL_AMOUNT, Signals},
     thread::{
         ThreadRef,
-        misc::{SnapshotState, State, ThreadID},
+        misc::{BlockedSyscall, SnapshotState, State, ThreadID},
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
         stack::allocate_kernel_stack,
     },
@@ -39,6 +39,9 @@ pub struct Thread {
     pub last_syscall_no: u64,
     pub last_user_snapshot: Snapshot,
     pub last_user_fs_base: u64,
+    pub active_syscall_profile: Option<BlockedSyscall>,
+    pub blocked_syscall_started_at: Option<u64>,
+    pub blocked_syscall_cycles: u64,
     pub name: [u8; 16],
 
     pub sig_handler_snapshot: ThreadSnapshot,
@@ -69,6 +72,9 @@ impl Default for Thread {
             last_syscall_no: 0,
             last_user_snapshot: Snapshot::default(),
             last_user_fs_base: 0,
+            active_syscall_profile: None,
+            blocked_syscall_started_at: None,
+            blocked_syscall_cycles: 0,
             name: [0; 16],
         }
     }

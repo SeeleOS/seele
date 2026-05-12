@@ -1,7 +1,7 @@
 use core::{
     arch::naked_asm,
     mem::{offset_of, size_of},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
 use x86_64::instructions::interrupts::{self, enable_and_hlt, without_interrupts};
@@ -30,6 +30,7 @@ use crate::{
 };
 
 static AP_TASK_SCHEDULING_ENABLED: AtomicBool = AtomicBool::new(false);
+static PROFILE_REPORT_TICK: AtomicU32 = AtomicU32::new(0);
 pub fn enable_ap_task_scheduling() {
     AP_TASK_SCHEDULING_ENABLED.store(true, Ordering::Release);
 }
@@ -44,14 +45,23 @@ fn should_run_global_scheduler_work() -> bool {
 }
 
 fn process_deferred_timer_work() {
+    let timerfd_objects = expired_timerfd_poll_objects();
     process_expired_process_timers();
 
     with_thread_manager(|manager| {
         manager.process_timed_out_threads();
-        manager.wake_ready_pollers();
+        if manager.has_blocked_pollers() {
+            manager.wake_ready_pollers();
+        }
     });
-    for object in expired_timerfd_poll_objects() {
+    for object in timerfd_objects {
         crate::thread::yielding::wake_pollers_for_object(object, PollableEvent::CanBeRead);
+    }
+}
+
+fn maybe_report_profile() {
+    if PROFILE_REPORT_TICK.fetch_add(1, Ordering::Relaxed) & 0x3f == 0 {
+        profile::maybe_report();
     }
 }
 
@@ -193,16 +203,16 @@ pub fn run() -> ! {
             let switch_start = profile::scope_start();
             run_ready_thread(thread);
             profile::record(ProfileCategory::SchedulerSwitch, switch_start);
-            profile::record(ProfileCategory::Scheduler, scheduler_start);
-            profile::maybe_report();
+            profile::record(ProfileCategory::SchedulerWork, scheduler_start);
+            maybe_report_profile();
             continue;
         }
 
         let idle_start = profile::scope_start();
         sleep_if_idle();
         profile::record(ProfileCategory::Idle, idle_start);
-        profile::record(ProfileCategory::Scheduler, scheduler_start);
-        profile::maybe_report();
+        profile::record(ProfileCategory::SchedulerWork, scheduler_start);
+        maybe_report_profile();
     }
 }
 

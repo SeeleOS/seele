@@ -15,7 +15,7 @@ use crate::{
     },
     thread::{
         get_current_thread,
-        misc::{State, with_current_thread},
+        misc::{BlockedSyscall, State, with_current_thread},
         scheduling::{enable_ap_task_scheduling, return_to_scheduler_no_save},
     },
 };
@@ -39,6 +39,9 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     thread.last_syscall_no = syscall_no as u64;
     thread.last_user_snapshot = *snapshot;
     thread.last_user_fs_base = fs_base;
+    thread.active_syscall_profile = BlockedSyscall::from_syscall_number(syscall_no as usize);
+    thread.blocked_syscall_started_at = None;
+    thread.blocked_syscall_cycles = 0;
     drop(thread);
 
     maybe_stop_current_on_syscall_entry();
@@ -63,8 +66,17 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
 
     snapshot.rax = result;
 
-    let elapsed = profile::record(ProfileCategory::Syscall, syscall_start);
-    profile::record_syscall(syscall_no as usize, elapsed);
+    let blocked_cycles = {
+        let mut thread = thread_ref.lock();
+        if thread.blocked_syscall_started_at.is_some() {
+            profile::finish_blocked_syscall(&mut thread);
+        }
+        thread.blocked_syscall_cycles
+    };
+    let elapsed = profile::scope_start().saturating_sub(syscall_start);
+    let cpu_cycles = elapsed.saturating_sub(blocked_cycles);
+    profile::record_cycles(ProfileCategory::SyscallCpu, cpu_cycles);
+    profile::record_syscall_cpu(syscall_no as usize, cpu_cycles);
 
     with_current_thread(|thread| {
         let fs_base = FsBase::read().as_u64();
@@ -74,6 +86,9 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
         thread_snapshot.snapshot_type = crate::thread::snapshot::ThreadSnapshotType::Thread;
         thread.last_user_snapshot = *snapshot;
         thread.last_user_fs_base = fs_base;
+        thread.active_syscall_profile = None;
+        thread.blocked_syscall_started_at = None;
+        thread.blocked_syscall_cycles = 0;
     });
 
     maybe_stop_current_on_syscall_exit();
