@@ -8,4 +8,5 @@ pub struct ElfInfo {
     pub program_header_entry_size: u16,
     pub interpreter: Option<String>,
     pub load_base: u64,
+    pub prefault_addrs: alloc::vec::Vec<u64>,
 }

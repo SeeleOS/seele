@@ -19,6 +19,13 @@ use lazy_static::lazy_static;
 
 const FILE_LAZY_CLUSTER_PAGES: u64 = 16;
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FileLazyFaultStats {
+    pub cluster_pages_loaded: u64,
+    pub cache_hits: u64,
+    pub cache_misses: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct FilePageCacheKey {
     device_id: u64,
@@ -112,7 +119,7 @@ impl AddrSpace {
     }
 
     pub fn apply_page(&mut self, page: Page<Size4KiB>, area: MemoryArea) -> PhysFrame {
-        self.apply_page_cluster(page, area, 1)
+        self.apply_page_cluster(page, area, 1).frame
     }
 
     pub fn apply_page_cluster(
@@ -120,9 +127,12 @@ impl AddrSpace {
         page: Page<Size4KiB>,
         area: MemoryArea,
         cluster_pages: u64,
-    ) -> PhysFrame {
+    ) -> AppliedPageCluster {
         match area.data {
-            Data::Normal => self.alloc_map_zeroed_page(page, area, true).0,
+            Data::Normal => AppliedPageCluster {
+                frame: self.alloc_map_zeroed_page(page, area, true).0,
+                file_lazy_stats: FileLazyFaultStats::default(),
+            },
             Data::File {
                 offset,
                 file_bytes,
@@ -139,6 +149,7 @@ impl AddrSpace {
                 let max_pages =
                     core::cmp::min(cluster_pages, area.pages().saturating_sub(page_index));
                 let mut first_frame = None;
+                let mut stats = FileLazyFaultStats::default();
 
                 for i in 0..max_pages {
                     let current_page = page + i;
@@ -159,6 +170,8 @@ impl AddrSpace {
                         Self::get_or_load_shared_file_frame(file, file_offset, read_len as usize),
                     ) {
                         let frame = self.map_existing_frame(current_page, frame, area.flags, true);
+                        stats.cache_hits += 1;
+                        stats.cluster_pages_loaded += 1;
                         if first_frame.is_none() {
                             first_frame = Some(frame);
                         }
@@ -167,6 +180,8 @@ impl AddrSpace {
 
                     let (frame, write_addr) =
                         self.alloc_map_zeroed_page(current_page, area.clone(), read_len < 4096);
+                    stats.cache_misses += 1;
+                    stats.cluster_pages_loaded += 1;
 
                     if first_frame.is_none() {
                         first_frame = Some(frame);
@@ -180,11 +195,14 @@ impl AddrSpace {
                     }
                 }
 
-                first_frame.unwrap_or_else(|| {
-                    self.page_table
-                        .translate_page(page)
-                        .expect("file-backed cluster fault target page still unmapped")
-                })
+                AppliedPageCluster {
+                    frame: first_frame.unwrap_or_else(|| {
+                        self.page_table
+                            .translate_page(page)
+                            .expect("file-backed cluster fault target page still unmapped")
+                    }),
+                    file_lazy_stats: stats,
+                }
             },
             Data::Shared {
                 ref frames,
@@ -192,7 +210,10 @@ impl AddrSpace {
             } => {
                 let page_index = (page.start_address().as_u64() - area.start.as_u64()) / 4096;
                 let frame = frames[page_index as usize];
-                self.map_existing_frame(page, frame, area.flags | shared_flags, false)
+                AppliedPageCluster {
+                    frame: self.map_existing_frame(page, frame, area.flags | shared_flags, false),
+                    file_lazy_stats: FileLazyFaultStats::default(),
+                }
             }
         }
     }
@@ -212,7 +233,7 @@ impl AddrSpace {
             Data::File { .. } => {
                 for i in 0..pages {
                     let page = start + i;
-                    let frame = self.apply_page_cluster(page, area.clone(), 1);
+                    let frame = self.apply_page_cluster(page, area.clone(), 1).frame;
                     page_write_bases.push(apply_offset(frame.start_address().as_u64()));
                 }
             }
@@ -273,4 +294,10 @@ impl AddrSpace {
 
         (frame, write_addr)
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct AppliedPageCluster {
+    pub frame: PhysFrame,
+    pub file_lazy_stats: FileLazyFaultStats,
 }

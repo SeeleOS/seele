@@ -1,4 +1,5 @@
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 use xmas_elf::{ElfFile, program::Type};
 
 use crate::{
@@ -42,6 +43,7 @@ pub fn load_elf_lazy(
     let elf = ElfFile::new(elf_bytes).map_err(|_| FSError::Other)?;
     let load_base = choose_load_base_offset(addrspace, &elf);
     let mut interpreter = None;
+    let mut prefault_addrs = Vec::new();
 
     for header in elf.program_iter() {
         match header.get_type().map_err(|_| FSError::Other)? {
@@ -50,6 +52,10 @@ pub fn load_elf_lazy(
                     continue;
                 }
 
+                let flags = header.flags();
+                if flags.is_execute() || !flags.is_write() {
+                    prefault_addrs.push(load_base + header.virtual_addr());
+                }
                 addrspace.register_area(load_segment_to_area(header, load_base, file.clone()));
             }
             Type::Interp => {
@@ -66,5 +72,6 @@ pub fn load_elf_lazy(
         program_header_entry_size: elf.header.pt2.ph_entry_size(),
         interpreter,
         load_base,
+        prefault_addrs,
     })
 }

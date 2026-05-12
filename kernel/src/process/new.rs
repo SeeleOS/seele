@@ -25,6 +25,7 @@ use crate::{
         thread::Thread,
     },
 };
+use x86_64::{VirtAddr, structures::paging::Page};
 
 const DEFAULT_PATH: &str = "PATH=/bin:/usr/bin";
 const DEFAULT_TERM: &str = "TERM=linux";
@@ -173,9 +174,13 @@ fn setup_process_inner(
             let interp_file = open_file(Path::new(interpreter_path))?;
             let interp_headers = read_elf_header(&interp_file)?;
             let interp = load_elf_lazy(addrspace, interp_file, &interp_headers)?;
+            prefault_exec_pages(addrspace, &program, Some(&interp));
             (interp.entry_point, Some(interp.load_base))
         }
-        None => (program.entry_point, None),
+        None => {
+            prefault_exec_pages(addrspace, &program, None);
+            (program.entry_point, None)
+        }
     };
 
     let stack_pages =
@@ -199,6 +204,52 @@ fn setup_process_inner(
         stack_builder.finish().as_u64(),
         ThreadSnapshotType::Thread,
     ))
+}
+
+fn prefault_exec_pages(
+    addrspace: &mut AddrSpace,
+    program: &crate::elfloader::ElfInfo,
+    interpreter: Option<&crate::elfloader::ElfInfo>,
+) {
+    for addr in prefault_targets(program, interpreter) {
+        let virt = VirtAddr::new(addr);
+        let Some(area) = addrspace.get_area(virt).cloned() else {
+            continue;
+        };
+        if !area.lazy {
+            continue;
+        }
+
+        let page = Page::containing_address(virt);
+        match area.data {
+            crate::memory::addrspace::mem_area::Data::File { .. } => {
+                addrspace.apply_page_cluster(page, area, AddrSpace::file_lazy_cluster_pages());
+            }
+            _ => {
+                addrspace.apply_page(page, area);
+            }
+        }
+    }
+}
+
+pub(crate) fn prefault_targets(
+    program: &crate::elfloader::ElfInfo,
+    interpreter: Option<&crate::elfloader::ElfInfo>,
+) -> Vec<u64> {
+    let mut addrs = Vec::new();
+    addrs.extend(program.prefault_addrs.iter().copied());
+    addrs.push(program.entry_point);
+    addrs.push(program.program_header_table);
+
+    if let Some(interpreter) = interpreter {
+        addrs.extend(interpreter.prefault_addrs.iter().copied());
+        addrs.push(interpreter.entry_point);
+        addrs.push(interpreter.program_header_table);
+    }
+
+    addrs.sort_unstable();
+    addrs.dedup();
+    addrs
 }
 
 pub fn setup_process(

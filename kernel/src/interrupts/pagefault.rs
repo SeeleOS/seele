@@ -38,6 +38,7 @@ pub extern "C" fn pagefault_handler(
             && flags.contains(COW_FLAG)
         {
             process.addrspace.replace_cow_page(address);
+            profile::record(ProfileCategory::PageFaultCow, fault_start);
             true
         } else if error_code.contains(PageFaultErrorCode::PROTECTION_VIOLATION) {
             false
@@ -46,13 +47,20 @@ pub extern "C" fn pagefault_handler(
                 Some(area) if area.lazy => {
                     let is_file_backed = matches!(&area.data, Data::File { .. });
                     if is_file_backed {
-                        addrspace.apply_page_cluster(
+                        let applied = addrspace.apply_page_cluster(
                             Page::containing_address(address),
                             area.clone(),
                             AddrSpace::file_lazy_cluster_pages(),
                         );
+                        profile::record(ProfileCategory::PageFaultFileLazy, fault_start);
+                        profile::record_file_lazy_fault(
+                            applied.file_lazy_stats.cluster_pages_loaded,
+                            applied.file_lazy_stats.cache_hits,
+                            applied.file_lazy_stats.cache_misses,
+                        );
                     } else {
                         addrspace.apply_page(Page::containing_address(address), area.clone());
+                        profile::record(ProfileCategory::PageFaultAnonLazy, fault_start);
                     }
                     true
                 }

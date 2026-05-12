@@ -223,6 +223,7 @@ mod tests {
             program_header_entry_size: 56,
             interpreter: None,
             load_base: 0,
+            prefault_addrs: alloc::vec![],
         };
 
         builder.push_aux_entries(&elf, Some(0x7000), 0x8000, 0x9000, 0xa000);
