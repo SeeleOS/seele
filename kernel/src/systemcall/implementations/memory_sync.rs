@@ -298,7 +298,11 @@ fn futex_wait_impl(
 ) -> Result<usize, SyscallError> {
     let key = current_futex_key(arg1);
     let current = get_current_thread();
-    {
+    // Keep the value check and queue publication ordered with wakeups on the
+    // same futex bucket. Without this, a wake can race between the user-space
+    // store and our waiter publication, leaving the thread asleep forever.
+    with_thread_manager(|manager| -> Result<(), SyscallError> {
+        let mut queue = FUTEX_QUEUE.lock();
         let cur_value = u64::from(read_user_u32(arg1)?);
         if cur_value != arg2 {
             return Err(SyscallError::TryAgain);
@@ -312,15 +316,13 @@ fn futex_wait_impl(
         // Block the thread before publishing it in the futex bucket so any
         // racing wake observes a consistent Blocked state after we drop both
         // locks.
-        with_thread_manager(|manager| {
-            let mut queue = FUTEX_QUEUE.lock();
-            manager.block(current.clone(), BlockType::Futex { deadline });
-            queue.entry(key).or_default().push_back(FutexWaiter {
-                thread: current.clone(),
-                bitset,
-            });
+        manager.block(current.clone(), BlockType::Futex { deadline });
+        queue.entry(key).or_default().push_back(FutexWaiter {
+            thread: current.clone(),
+            bitset,
         });
-    }
+        Ok(())
+    })?;
 
     finish_block_current();
 
