@@ -116,7 +116,7 @@ impl QemuRunContext {
 
 fn default_smp() -> String {
     thread::available_parallelism()
-        .map(|count| count.get().min(16).to_string())
+        .map(|count| count.get().min(1).to_string())
         .unwrap_or_else(|_| "1".to_string())
 }
 
