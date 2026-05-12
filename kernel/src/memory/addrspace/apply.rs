@@ -129,7 +129,12 @@ impl AddrSpace {
                 ref file,
                 shared,
             } => unsafe {
-                let use_shared_cache = shared || !area.flags.contains(PageTableFlags::WRITABLE);
+                // Only truly shared file mappings may reuse a cached physical
+                // page. Private ELF PT_LOADs can legally map the same file page
+                // through multiple segment views with different valid byte
+                // ranges, so deduplicating them by file offset can zero or
+                // truncate data that another view still needs.
+                let use_shared_cache = shared;
                 let page_index = (page.start_address().as_u64() - area.start.as_u64()) / 4096;
                 let max_pages =
                     core::cmp::min(cluster_pages, area.pages().saturating_sub(page_index));
