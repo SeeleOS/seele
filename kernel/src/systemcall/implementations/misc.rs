@@ -521,9 +521,7 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
         user_safe::write(parent_tid, &(pid.0 as i32))?;
     }
 
-    let needs_child_tid_write =
-        clone_flags.intersects(CloneFlags::CHILD_SETTID | CloneFlags::CHILD_CLEARTID);
-    if needs_child_tid_write {
+    if clone_flags.contains(CloneFlags::CHILD_SETTID) {
         child_process
             .lock()
             .addrspace
@@ -1495,7 +1493,7 @@ define_syscall!(Clone, |flags: u64,
             user_safe::write(parent_tid, &tid)?;
         }
 
-        if flags.intersects(CloneFlags::CHILD_SETTID | CloneFlags::CHILD_CLEARTID) {
+        if flags.contains(CloneFlags::CHILD_SETTID) {
             user_safe::write(child_tid, &tid)?;
         }
 
