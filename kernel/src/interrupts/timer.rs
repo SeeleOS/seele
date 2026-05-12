@@ -2,7 +2,10 @@ use core::{arch::naked_asm, mem::offset_of};
 
 use crate::{
     interrupts::hardware_interrupt::send_eoi,
-    misc::snapshot::Snapshot,
+    misc::{
+        profile::{self, ProfileCategory},
+        snapshot::Snapshot,
+    },
     smp::gs::GsContext,
     thread::{scheduling::return_to_scheduler, snapshot::ThreadSnapshotType},
 };
@@ -93,13 +96,16 @@ pub extern "C" fn timer_interrupt_handler_wrapper() {
 }
 
 pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
+    let irq_start = profile::scope_start();
     send_eoi();
 
     // Don't preempt kernel mode; it can corrupt in-flight kernel snapshots.
     if (snapshot.cs & 0x3) == 0 {
+        profile::record(ProfileCategory::IrqTimer, irq_start);
         return;
     }
 
+    profile::record(ProfileCategory::IrqTimer, irq_start);
     return_to_scheduler(snapshot, ThreadSnapshotType::Thread);
 
     unreachable!();

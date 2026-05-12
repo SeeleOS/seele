@@ -10,6 +10,7 @@ use crate::{
     keyboard,
     misc::agent_tty_input,
     misc::mouse,
+    misc::profile::{self, ProfileCategory},
     misc::snapshot::Snapshot,
     misc::timer::process_expired_process_timers,
     object::linux_anon::expired_timerfd_poll_objects,
@@ -156,14 +157,24 @@ pub fn return_to_scheduler_no_save() -> ! {
 
 pub fn run() -> ! {
     loop {
+        let scheduler_start = profile::scope_start();
         if should_run_global_scheduler_work() {
+            let timer_work_start = profile::scope_start();
             process_deferred_timer_work();
+            profile::record(ProfileCategory::TimerWork, timer_work_start);
+
+            let net_poll_start = profile::scope_start();
             crate::net::poll();
+            profile::record(ProfileCategory::NetPoll, net_poll_start);
+
+            let other_kernel_start = profile::scope_start();
             keyboard::process_pending_scancodes();
             agent_tty_input::process_pending_input();
             mouse::process_pending_mouse_events();
+            profile::record(ProfileCategory::OtherKernel, other_kernel_start);
         }
 
+        let select_start = profile::scope_start();
         let can_run_ready_threads = can_run_ready_threads_on_current_cpu();
         let next_thread = if can_run_ready_threads {
             with_thread_manager(|manager| {
@@ -176,13 +187,22 @@ pub fn run() -> ! {
         } else {
             with_thread_manager(|manager| manager.pop_local_ready_for_cpu(current_cpu_index()))
         };
+        profile::record(ProfileCategory::SchedulerSelect, select_start);
 
         if let Some(thread) = next_thread {
+            let switch_start = profile::scope_start();
             run_ready_thread(thread);
+            profile::record(ProfileCategory::SchedulerSwitch, switch_start);
+            profile::record(ProfileCategory::Scheduler, scheduler_start);
+            profile::maybe_report();
             continue;
         }
 
+        let idle_start = profile::scope_start();
         sleep_if_idle();
+        profile::record(ProfileCategory::Idle, idle_start);
+        profile::record(ProfileCategory::Scheduler, scheduler_start);
+        profile::maybe_report();
     }
 }
 

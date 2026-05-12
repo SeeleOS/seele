@@ -75,6 +75,10 @@ pub fn unix_timestamp_nanoseconds() -> u64 {
     current.max(0) as u64
 }
 
+pub fn tsc_frequency_hz() -> u64 {
+    TSC_FREQ_HZ.load(Ordering::SeqCst)
+}
+
 pub fn set_unix_timestamp_nanoseconds(unix_time_ns: i64) {
     REALTIME_BASE_NS.store(
         unix_time_ns.saturating_sub(nanoseconds_since_boot() as i64),

@@ -11,7 +11,10 @@ use x86_64::{
 use crate::{
     interrupts::exception_interrupt::handle_usermode_exception,
     memory::addrspace::{AddrSpace, cow::COW_FLAG, mem_area::Data},
-    misc::snapshot::SnapshotWithErrorCode,
+    misc::{
+        profile::{self, ProfileCategory},
+        snapshot::SnapshotWithErrorCode,
+    },
     process::manager::get_current_process,
     signal::Signal,
     smp::gs::GsContext,
@@ -22,6 +25,7 @@ pub extern "C" fn pagefault_handler(
     error_code: PageFaultErrorCode,
     from_user: u64,
 ) {
+    let fault_start = profile::scope_start();
     let address = Cr2::read().unwrap();
 
     let handled = {
@@ -58,8 +62,11 @@ pub extern "C" fn pagefault_handler(
     };
 
     if handled {
+        profile::record(ProfileCategory::PageFault, fault_start);
         return;
     }
+
+    profile::record(ProfileCategory::PageFault, fault_start);
 
     let snapshot = snapshot.as_snapshot();
     if from_user != 0 {

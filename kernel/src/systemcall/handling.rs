@@ -1,7 +1,10 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{
-    misc::snapshot::Snapshot,
+    misc::{
+        profile::{self, ProfileCategory},
+        snapshot::Snapshot,
+    },
     process::manager::get_current_process,
     process::ptrace::{maybe_stop_current_on_syscall_entry, maybe_stop_current_on_syscall_exit},
     signal::process_current_process_signals,
@@ -24,6 +27,7 @@ static FIRST_USER_SYSCALL_LOGGED: AtomicBool = AtomicBool::new(false);
 extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     let snapshot = unsafe { &mut *snapshot_ptr };
     let syscall_no = snapshot.rax;
+    let syscall_start = profile::scope_start();
 
     let thread_ref = get_current_thread();
     let mut thread = thread_ref.lock();
@@ -58,6 +62,9 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     log_syscall_trace_exit(syscall_no, args, result);
 
     snapshot.rax = result;
+
+    let elapsed = profile::record(ProfileCategory::Syscall, syscall_start);
+    profile::record_syscall(syscall_no as usize, elapsed);
 
     with_current_thread(|thread| {
         let fs_base = FsBase::read().as_u64();

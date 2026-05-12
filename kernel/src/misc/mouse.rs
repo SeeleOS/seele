@@ -12,6 +12,7 @@ use crate::{
     },
     impl_cast_function,
     interrupts::hardware_interrupt::send_eoi,
+    misc::profile::{self, ProfileCategory},
     object::{
         FileFlags, Object, device::get_device_ref, error::ObjectError, misc::ObjectResult,
         traits::Readable,
@@ -86,6 +87,7 @@ pub fn process_pending_mouse_events() {
 }
 
 pub extern "C" fn mouse_interrupt_handler() {
+    let irq_start = profile::scope_start();
     let packet = unsafe { Port::new(0x60).read() };
     without_interrupts(|| {
         let mut packets = MOUSE_PACKETS.lock();
@@ -99,6 +101,7 @@ pub extern "C" fn mouse_interrupt_handler() {
     }
     MOUSE_PENDING.store(true, Ordering::Release);
     send_eoi();
+    profile::record(ProfileCategory::IrqMouse, irq_start);
 }
 
 fn drain_output_buffer() -> usize {

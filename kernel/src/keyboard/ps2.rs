@@ -15,7 +15,11 @@ lazy_static! {
         ));
 }
 
-use crate::{interrupts::hardware_interrupt::send_eoi, keyboard::push_scancode};
+use crate::{
+    interrupts::hardware_interrupt::send_eoi,
+    keyboard::push_scancode,
+    misc::profile::{self, ProfileCategory},
+};
 
 pub fn init() {
     let dropped = drain_output_buffer();
@@ -25,10 +29,12 @@ pub fn init() {
 }
 
 pub extern "C" fn keyboard_interrupt_handler() {
+    let irq_start = profile::scope_start();
     let mut status_port: Port<u8> = Port::new(0x64);
     let status = unsafe { status_port.read() };
     if (status & STATUS_OUTPUT_FULL) == 0 || (status & STATUS_AUX_DATA) != 0 {
         send_eoi();
+        profile::record(ProfileCategory::IrqKeyboard, irq_start);
         return;
     }
 
@@ -36,6 +42,7 @@ pub extern "C" fn keyboard_interrupt_handler() {
     let scancode = unsafe { keyboard_port.read() };
     push_scancode(scancode);
     send_eoi();
+    profile::record(ProfileCategory::IrqKeyboard, irq_start);
 }
 
 fn drain_output_buffer() -> usize {

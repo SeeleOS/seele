@@ -39,7 +39,7 @@ pub use misc::testing;
 use crate::boot::BOOTLOADER_CONFIG;
 use crate::filesystem::vfs::VirtualFS;
 use crate::misc::others::enable_sse;
-use crate::misc::{agent_tty_input, framebuffer, logging, mouse, time};
+use crate::misc::{agent_tty_input, framebuffer, logging, mouse, profile, time};
 use crate::process::manager::MANAGER;
 use crate::smp::{init_bsp, release_application_processors, start_application_processors};
 use bootloader_api::BootInfo;
@@ -64,6 +64,7 @@ pub fn init_kernel(boot_info: &'static mut BootInfo) {
     terminal::init();
     logging::init();
     time::init();
+    profile::init();
     enable_sse();
     log::info!("init: extended state enabled");
     drivers::init_early();
