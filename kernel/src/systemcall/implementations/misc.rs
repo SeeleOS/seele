@@ -12,7 +12,6 @@ use crate::memory::{
     user_safe,
 };
 use crate::misc::error::AsSyscallError;
-use crate::misc::systemd_perf::{self, PerfBucket};
 use crate::misc::time::{self, Time as KernelTime};
 use crate::misc::timer::ClockId;
 use crate::misc::{others::protection_to_page_flags, reboot as reboot_state, utsname::UtsName};
@@ -836,18 +835,16 @@ fn linux_clock_now_ns(clock_id: i32) -> Result<i64, SyscallError> {
 }
 
 define_syscall!(ClockGettime, |clock_id: i32, tp: *mut LinuxTimespec| {
-    systemd_perf::profile_current_process(PerfBucket::ClockGettime, || {
-        if tp.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-        let ns = linux_clock_now_ns(clock_id)?;
-        let timespec = LinuxTimespec {
-            tv_sec: ns / 1_000_000_000,
-            tv_nsec: ns % 1_000_000_000,
-        };
-        user_safe::write(tp, &timespec)?;
-        Ok(0)
-    })
+    if tp.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+    let ns = linux_clock_now_ns(clock_id)?;
+    let timespec = LinuxTimespec {
+        tv_sec: ns / 1_000_000_000,
+        tv_nsec: ns % 1_000_000_000,
+    };
+    user_safe::write(tp, &timespec)?;
+    Ok(0)
 });
 
 define_syscall!(ClockSettime, |clock_id: i32, tp: *const LinuxTimespec| {

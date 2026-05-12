@@ -1,14 +1,12 @@
 use alloc::{
     collections::{BTreeMap, vec_deque::VecDeque},
-    format,
-    string::String,
     sync::Arc,
     vec::Vec,
 };
 
 use crate::{
     interrupts::hardware_interrupt::wake_scheduler_cpus,
-    misc::{systemd_perf, time::Time},
+    misc::time::Time,
     object::{
         error::ObjectError,
         misc::{ObjectRef, ObjectResult},
@@ -25,65 +23,6 @@ use crate::{
 use paste::paste;
 // [TODO] make the blocked process wont be pushed onto the queue.
 // they should only be pushed onto the queue with the wake function
-
-fn pollable_object_kind(object: &ObjectRef) -> &'static str {
-    if object.clone().as_netlink_socket().is_ok() {
-        "netlink"
-    } else if object.clone().as_signalfd().is_ok() {
-        "signalfd"
-    } else if object.clone().as_timerfd().is_ok() {
-        "timerfd"
-    } else if object.clone().as_eventfd().is_ok() {
-        "eventfd"
-    } else if object.clone().as_inotify().is_ok() {
-        "inotify"
-    } else if object.clone().as_unix_socket().is_ok() {
-        "unix"
-    } else if object.clone().as_pidfd().is_ok() {
-        "pidfd"
-    } else if object.clone().as_poller().is_ok() {
-        "poller"
-    } else {
-        "other"
-    }
-}
-
-fn poll_event_name(event: PollableEvent) -> &'static str {
-    match event {
-        PollableEvent::CanBeRead => "read",
-        PollableEvent::CanBeWritten => "write",
-        PollableEvent::Error => "error",
-        PollableEvent::Closed => "closed",
-        PollableEvent::ReadClosed => "read-closed",
-        PollableEvent::Other(_) => "other",
-    }
-}
-
-fn log_current_poller_details(poller: &ObjectRef) {
-    let Ok(poller) = poller.clone().as_poller() else {
-        return;
-    };
-
-    let mut counts = BTreeMap::<String, usize>::new();
-    for entry in poller.entries.lock().iter() {
-        let key = format!(
-            "{}:{}",
-            pollable_object_kind(&entry.object),
-            poll_event_name(entry.event)
-        );
-        *counts.entry(key).or_default() += 1;
-    }
-
-    let mut parts = Vec::new();
-    for (key, count) in counts {
-        parts.push(format!("{key}={count}"));
-    }
-
-    if !parts.is_empty() {
-        let detail = format!("poller[{}]", parts.join(","));
-        systemd_perf::log_current_block(&detail);
-    }
-}
 
 #[derive(Clone, Debug)]
 pub enum BlockType {
@@ -391,44 +330,6 @@ fn is_current_thread(thread_ref: &ThreadRef) -> bool {
 }
 
 pub fn prepare_block_current(block_type: BlockType) -> ThreadRef {
-    let block_kind = match &block_type {
-        BlockType::SetTime(_) => "set_time",
-        BlockType::WakeRequired {
-            wake_type: WakeType::IO,
-            ..
-        } => "io",
-        BlockType::WakeRequired {
-            wake_type: WakeType::Poller(_),
-            ..
-        } => "poller",
-        BlockType::WakeRequired {
-            wake_type: WakeType::Pty,
-            ..
-        } => "pty",
-        BlockType::WakeRequired {
-            wake_type: WakeType::Mouse,
-            ..
-        } => "mouse",
-        BlockType::WakeRequired {
-            wake_type: WakeType::Keyboard,
-            ..
-        } => "keyboard",
-        BlockType::WakeRequired {
-            wake_type: WakeType::ProcsesExit,
-            ..
-        } => "process_exit",
-        BlockType::Futex { .. } => "futex_wait",
-        BlockType::Stopped => "stopped",
-    };
-    systemd_perf::log_current_block(block_kind);
-    if let BlockType::WakeRequired {
-        wake_type: WakeType::Poller(poller),
-        ..
-    } = &block_type
-    {
-        log_current_poller_details(poller);
-    }
-
     let current = current_thread_ref();
 
     with_thread_manager(|thread_manager| thread_manager.block(current.clone(), block_type));

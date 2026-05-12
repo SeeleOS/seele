@@ -11,7 +11,6 @@ use crate::{
     filesystem::{info::DirectoryContentInfo, object::FileLikeObject, path::Path},
     memory::protection::Protection,
     memory::user_safe,
-    misc::systemd_perf::{self, PerfBucket},
     object::{
         config::ConfigurateRequest,
         control::control_object,
@@ -403,9 +402,7 @@ define_syscall!(Getdents, |object_index: u64, buf: *mut u8, len: usize| {
 });
 
 define_syscall!(Getdents64, |object_index: u64, buf: *mut u8, len: usize| {
-    systemd_perf::profile_current_process(PerfBucket::Getdents64, || {
-        write_dirents64(object_index, buf, len)
-    })
+    write_dirents64(object_index, buf, len)
 });
 
 define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {

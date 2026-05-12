@@ -17,7 +17,6 @@ use crate::{
         user_safe,
     },
     misc::others::protection_to_page_flags,
-    misc::systemd_perf::{self, PerfBucket},
     misc::time::Time,
     process::manager::get_current_process,
     systemcall::utils::{SyscallError, SyscallImpl},
@@ -616,45 +615,43 @@ define_syscall!(Futex, |arg1: u64,
                         timeout: u64,
                         uaddr2: u64,
                         val3: u64| {
-    systemd_perf::profile_current_process(PerfBucket::Futex, || {
-        let base_op = op & 0x7f;
-        let futex_op = FutexOp::try_from(base_op).map_err(|_| SyscallError::InvalidArguments)?;
+    let base_op = op & 0x7f;
+    let futex_op = FutexOp::try_from(base_op).map_err(|_| SyscallError::InvalidArguments)?;
 
-        match futex_op {
-            FutexOp::Wait => futex_wait_impl(
+    match futex_op {
+        FutexOp::Wait => futex_wait_impl(
+            arg1,
+            arg2,
+            futex_relative_timeout_deadline(timeout)?,
+            FUTEX_BITSET_MATCH_ANY as u32,
+        ),
+        FutexOp::Wake => futex_wake_impl(arg1, arg2),
+        FutexOp::Requeue => futex_requeue_impl(arg1, arg2, timeout, uaddr2, None),
+        FutexOp::CmpRequeue => futex_requeue_impl(arg1, arg2, timeout, uaddr2, Some(val3)),
+        FutexOp::WakeOp => futex_wake_op_impl(arg1, arg2, timeout, uaddr2, val3),
+        FutexOp::LockPi => futex_lock_pi_impl(arg1, timeout, op & FUTEX_CLOCK_REALTIME != 0),
+        FutexOp::UnlockPi => futex_unlock_pi_impl(arg1),
+        FutexOp::TrylockPi => futex_trylock_pi_impl(arg1),
+        FutexOp::WaitBitset => {
+            let bitset = u32::try_from(val3).map_err(|_| SyscallError::InvalidArguments)?;
+            if bitset == 0 {
+                return Err(SyscallError::InvalidArguments);
+            }
+            futex_wait_impl(
                 arg1,
                 arg2,
-                futex_relative_timeout_deadline(timeout)?,
-                FUTEX_BITSET_MATCH_ANY as u32,
-            ),
-            FutexOp::Wake => futex_wake_impl(arg1, arg2),
-            FutexOp::Requeue => futex_requeue_impl(arg1, arg2, timeout, uaddr2, None),
-            FutexOp::CmpRequeue => futex_requeue_impl(arg1, arg2, timeout, uaddr2, Some(val3)),
-            FutexOp::WakeOp => futex_wake_op_impl(arg1, arg2, timeout, uaddr2, val3),
-            FutexOp::LockPi => futex_lock_pi_impl(arg1, timeout, op & FUTEX_CLOCK_REALTIME != 0),
-            FutexOp::UnlockPi => futex_unlock_pi_impl(arg1),
-            FutexOp::TrylockPi => futex_trylock_pi_impl(arg1),
-            FutexOp::WaitBitset => {
-                let bitset = u32::try_from(val3).map_err(|_| SyscallError::InvalidArguments)?;
-                if bitset == 0 {
-                    return Err(SyscallError::InvalidArguments);
-                }
-                futex_wait_impl(
-                    arg1,
-                    arg2,
-                    futex_absolute_timeout_deadline(timeout, op & FUTEX_CLOCK_REALTIME != 0)?,
-                    bitset,
-                )
-            }
-            FutexOp::WakeBitset => {
-                let bitset = u32::try_from(val3).map_err(|_| SyscallError::InvalidArguments)?;
-                if bitset == 0 {
-                    return Err(SyscallError::InvalidArguments);
-                }
-                futex_wake_bitset_impl(arg1, arg2, bitset)
-            }
+                futex_absolute_timeout_deadline(timeout, op & FUTEX_CLOCK_REALTIME != 0)?,
+                bitset,
+            )
         }
-    })
+        FutexOp::WakeBitset => {
+            let bitset = u32::try_from(val3).map_err(|_| SyscallError::InvalidArguments)?;
+            if bitset == 0 {
+                return Err(SyscallError::InvalidArguments);
+            }
+            futex_wake_bitset_impl(arg1, arg2, bitset)
+        }
+    }
 });
 
 define_syscall!(ArchPrctl, |code: u64, addr: u64| {

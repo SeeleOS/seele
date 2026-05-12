@@ -1,18 +1,13 @@
-use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec, vec::Vec};
+use alloc::{sync::Arc, vec, vec::Vec};
 use bitflags::bitflags;
 
 use crate::{
     define_syscall,
     filesystem::object::poll_identity_object,
     memory::user_safe,
-    misc::{
-        error::AsSyscallError,
-        systemd_perf::{self, PerfBucket},
-        time::Time,
-    },
+    misc::{error::AsSyscallError, time::Time},
     object::{Object, error::ObjectError, misc::get_object_current_process},
     polling::{event::PollableEvent, poller::PollerObject},
-    socket::UnixSocketState,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::yielding::{
         BlockType, WakeType, block_current_with_sig_check, cancel_block, finish_block_current,
@@ -104,92 +99,6 @@ pub(in crate::systemcall) fn translate_ready_events(
     translated.bits()
 }
 
-fn pollable_object_kind(object: &Arc<dyn Object>) -> &'static str {
-    if object.clone().as_unix_socket().is_ok() {
-        "unix"
-    } else if object.clone().as_netlink_socket().is_ok() {
-        "netlink"
-    } else if object.clone().as_eventfd().is_ok() {
-        "eventfd"
-    } else if object.clone().as_timerfd().is_ok() {
-        "timerfd"
-    } else if object.clone().as_signalfd().is_ok() {
-        "signalfd"
-    } else if object.clone().as_inotify().is_ok() {
-        "inotify"
-    } else if object.clone().as_pidfd().is_ok() {
-        "pidfd"
-    } else if object.debug_name().contains("DrmCardObject") {
-        "drm"
-    } else if object.debug_name().contains("Pty") {
-        "pty"
-    } else {
-        "other"
-    }
-}
-
-fn poll_event_name(event: PollableEvent) -> &'static str {
-    match event {
-        PollableEvent::CanBeRead => "read",
-        PollableEvent::CanBeWritten => "write",
-        PollableEvent::Error => "error",
-        PollableEvent::Closed => "closed",
-        PollableEvent::ReadClosed => "read-closed",
-        PollableEvent::Other(_) => "other",
-    }
-}
-
-fn unix_socket_name(object: &Arc<dyn Object>) -> Option<String> {
-    let socket = object.clone().as_unix_socket().ok()?;
-    match &*socket.state.lock() {
-        UnixSocketState::Bound { path, .. } => Some(path.clone()),
-        UnixSocketState::Listener(listener) => Some(listener.path.clone()),
-        UnixSocketState::Datagram(datagram) => datagram
-            .local_name
-            .lock()
-            .clone()
-            .or_else(|| datagram.peer_name.lock().clone()),
-        UnixSocketState::Stream(stream) => stream
-            .local_name
-            .lock()
-            .clone()
-            .or_else(|| stream.peer_name.lock().clone()),
-        UnixSocketState::Unbound | UnixSocketState::Closed => None,
-    }
-}
-
-fn poll_object_detail(object: &Arc<dyn Object>) -> String {
-    if let Some(name) = unix_socket_name(object) {
-        return format!("unix({name})");
-    }
-    pollable_object_kind(object).into()
-}
-
-fn log_slow_poll_details(poller: &PollerObject, timeout_ms: i32, nfds: usize, elapsed_ms: u64) {
-    let mut counts = BTreeMap::<String, usize>::new();
-    for entry in poller.entries.lock().iter() {
-        let key = format!(
-            "{}:{}",
-            poll_object_detail(&entry.object),
-            poll_event_name(entry.event)
-        );
-        *counts.entry(key).or_default() += 1;
-    }
-
-    let mut parts = Vec::new();
-    for (key, count) in counts {
-        parts.push(format!("{key}={count}"));
-    }
-
-    crate::s_println!(
-        "kde-perf poll-slow-detail dur={}ms timeout={}ms nfds={} [{}]",
-        elapsed_ms,
-        timeout_ms,
-        nfds,
-        parts.join(",")
-    );
-}
-
 fn count_ready(fds: &[LinuxPollFd]) -> usize {
     fds.iter().filter(|pfd| pfd.revents != 0).count()
 }
@@ -276,96 +185,84 @@ fn sleep_without_fds(timeout_ms: i32) -> Result<(), SyscallError> {
 }
 
 fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallError> {
-    systemd_perf::profile_current_process(PerfBucket::Poll, || {
-        let profiled = systemd_perf::is_current_process_profiled();
-        let wait_start = profiled.then(Time::since_boot);
+    for pfd in fds.iter_mut() {
+        pfd.revents = 0;
+    }
 
-        for pfd in fds.iter_mut() {
-            pfd.revents = 0;
+    if fds.is_empty() {
+        sleep_without_fds(timeout_ms)?;
+        return Ok(0);
+    }
+
+    let poller = PollerObject::new();
+    let mut active = 0usize;
+    let mut invalid = 0usize;
+
+    for (index, pfd) in fds.iter_mut().enumerate() {
+        if pfd.fd < 0 {
+            continue;
         }
+        active += 1;
 
-        if fds.is_empty() {
-            sleep_without_fds(timeout_ms)?;
-            return Ok(0);
-        }
-
-        let poller = PollerObject::new();
-        let mut active = 0usize;
-        let mut invalid = 0usize;
-
-        for (index, pfd) in fds.iter_mut().enumerate() {
-            if pfd.fd < 0 {
-                continue;
-            }
-            active += 1;
-
-            let object = match get_object_current_process(pfd.fd as u64) {
-                Ok(object) => object,
-                Err(err) => {
-                    if matches!(err, ObjectError::DoesNotExist) {
-                        pfd.revents |= PollEvents::POLLNVAL.bits();
-                        invalid += 1;
-                        continue;
-                    }
-                    return Err(err.as_syscall_error());
+        let object = match get_object_current_process(pfd.fd as u64) {
+            Ok(object) => object,
+            Err(err) => {
+                if matches!(err, ObjectError::DoesNotExist) {
+                    pfd.revents |= PollEvents::POLLNVAL.bits();
+                    invalid += 1;
+                    continue;
                 }
-            };
-
-            let poll_object = poll_identity_object(object.clone());
-
-            if poll_object.clone().as_pollable().is_err() {
-                pfd.revents |= ((PollEvents::from_bits_retain(pfd.events))
-                    & (PollEvents::POLLIN
-                        | PollEvents::POLLPRI
-                        | PollEvents::POLLRDNORM
-                        | PollEvents::POLLRDBAND
-                        | PollEvents::POLLOUT
-                        | PollEvents::POLLWRNORM
-                        | PollEvents::POLLWRBAND))
-                    .bits();
-                continue;
+                return Err(err.as_syscall_error());
             }
+        };
 
-            let requested_events = PollEvents::from_bits_retain(pfd.events);
-            for event in kernel_events_for(requested_events).into_iter().flatten() {
-                poller.register_obj(poll_object.clone(), event, index as u64);
-            }
+        let poll_object = poll_identity_object(object.clone());
+
+        if poll_object.clone().as_pollable().is_err() {
+            pfd.revents |= ((PollEvents::from_bits_retain(pfd.events))
+                & (PollEvents::POLLIN
+                    | PollEvents::POLLPRI
+                    | PollEvents::POLLRDNORM
+                    | PollEvents::POLLRDBAND
+                    | PollEvents::POLLOUT
+                    | PollEvents::POLLWRNORM
+                    | PollEvents::POLLWRBAND))
+                .bits();
+            continue;
         }
 
-        if invalid > 0 && invalid == active {
-            return Ok(count_ready(fds));
+        let requested_events = PollEvents::from_bits_retain(pfd.events);
+        for event in kernel_events_for(requested_events).into_iter().flatten() {
+            poller.register_obj(poll_object.clone(), event, index as u64);
         }
+    }
 
-        let already_ready = poller.push_already_ready_events();
-        if count_ready(fds) == 0 && !already_ready {
-            wait_on_poller(poller.clone(), timeout_ms)?;
+    if invalid > 0 && invalid == active {
+        return Ok(count_ready(fds));
+    }
+
+    let already_ready = poller.push_already_ready_events();
+    if count_ready(fds) == 0 && !already_ready {
+        wait_on_poller(poller.clone(), timeout_ms)?;
+    }
+
+    let mut ready_by_index = vec![0; fds.len()];
+    for ready in poller.take_woken_events(fds.len()) {
+        let index = ready.data as usize;
+        if let Some(events) = ready_by_index.get_mut(index) {
+            *events |= ready.ready_bits;
         }
+    }
 
-        if let Some(wait_start) = wait_start {
-            let elapsed_ms = Time::since_boot().sub(wait_start).as_milliseconds();
-            if elapsed_ms >= 250 {
-                log_slow_poll_details(&poller, timeout_ms, fds.len(), elapsed_ms);
-            }
+    for (index, kernel_ready) in ready_by_index.into_iter().enumerate() {
+        if kernel_ready != 0 {
+            let pfd = &mut fds[index];
+            pfd.revents |=
+                translate_ready_events(PollEvents::from_bits_retain(pfd.events), kernel_ready);
         }
+    }
 
-        let mut ready_by_index = vec![0; fds.len()];
-        for ready in poller.take_woken_events(fds.len()) {
-            let index = ready.data as usize;
-            if let Some(events) = ready_by_index.get_mut(index) {
-                *events |= ready.ready_bits;
-            }
-        }
-
-        for (index, kernel_ready) in ready_by_index.into_iter().enumerate() {
-            if kernel_ready != 0 {
-                let pfd = &mut fds[index];
-                pfd.revents |=
-                    translate_ready_events(PollEvents::from_bits_retain(pfd.events), kernel_ready);
-            }
-        }
-
-        Ok(count_ready(fds))
-    })
+    Ok(count_ready(fds))
 }
 
 define_syscall!(Poll, |fds: *mut LinuxPollFd, nfds: usize, timeout: i32| {

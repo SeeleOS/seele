@@ -4,7 +4,6 @@ use crate::{
     filesystem::{errors::FSError, path::Path, vfs_operations::resolve_path_with_final},
     ipc::sysv_shm::detach_all_process_mappings,
     memory::addrspace::AddrSpace,
-    misc::systemd_perf,
     process::{
         Process, manager::wake_vfork_blocker, new::setup_process, new_fd_table,
         object::close_cloexec_fd_entries, ptrace::maybe_stop_current_after_exec,
@@ -176,7 +175,6 @@ fn defer_exec_addrspace_cleanup(_addrspace: AddrSpace) {
 
 pub fn execve(path: Path, args: Vec<String>, env: Vec<String>) -> Result<(), FSError> {
     let (_, resolved_path) = resolve_path_with_final(path, true)?;
-    let exec_path = resolved_path.clone().as_string();
     let current_thread = current_thread();
     let current_thread_id = current_thread.lock().id;
     let current = current_process();
@@ -184,12 +182,6 @@ pub fn execve(path: Path, args: Vec<String>, env: Vec<String>) -> Result<(), FSE
     request_exec_siblings_to_exit(prepared.threads.clone(), current_thread_id);
     wait_for_exec_siblings_to_stop(prepared.threads.clone(), current_thread_id);
     let (snapshot, vfork_blocker) = { current.lock().commit_execve(prepared, current_thread) };
-    {
-        let current = current_process();
-        if let Some(process) = current.try_lock() {
-            systemd_perf::note_execve(&process, &exec_path);
-        }
-    }
     if let Some(thread_id) = vfork_blocker {
         wake_vfork_blocker(thread_id);
     }

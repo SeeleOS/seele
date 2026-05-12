@@ -5,7 +5,6 @@ use x86_64::instructions::interrupts::without_interrupts;
 use crate::{
     filesystem::cgroupfs::remove_pid_cgroup_path,
     ipc::sysv_shm::detach_all_process_mappings,
-    misc::systemd_perf,
     object::linux_anon::wake_pidfd_for_process_with_manager,
     process::{Process, ProcessExitStatus, ProcessRef, misc::ProcessID},
     signal::{Signal, send_signal_to_process},
@@ -92,9 +91,6 @@ pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
     let reparent_target = nearest_live_subreaper(parent).or_else(init_process_ref);
     let parent_death_signals = collect_parent_death_signals_for_children(pid, &process_ref);
     let reparented_children = reparent_children(pid, &process_ref, reparent_target);
-    if let Some(process) = process.try_lock() {
-        systemd_perf::log_and_clear_process_summary(&process, exit_status);
-    }
 
     for (child, signal) in parent_death_signals {
         send_signal_to_process(&child, signal);
