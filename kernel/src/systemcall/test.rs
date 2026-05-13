@@ -6046,6 +6046,34 @@ fn epoll_syscalls_follow_linux_rules() {
     let readable_socket_data = readable_socket_ready.data;
     assert_eq!(readable_socket_events, EPOLLIN | EPOLLOUT);
     assert_eq!(readable_socket_data, 0x55aa);
+    let readable_socket_edge = TestLinuxEpollEvent {
+        events: EPOLLIN | EPOLLOUT | EPOLLHUP | EPOLLRDHUP | EPOLLET,
+        data: 0x77cc,
+    };
+    write_user_value(epoll_events + 576, &readable_socket_edge);
+    expect_ok(
+        SyscallArgs::new([
+            epoll_fd as u64,
+            EPOLL_CTL_MOD,
+            left as u64,
+            epoll_events + 576,
+            0,
+            0,
+        ])
+        .call::<EpollCtl>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([epoll_fd as u64, epoll_events + 640, 4, 0, 0, 0]).call::<EpollWait>(),
+        1,
+    );
+    let readable_socket_edge_ready = read_user_value::<TestLinuxEpollEvent>(epoll_events + 640);
+    assert_eq!(readable_socket_edge_ready.events, EPOLLIN | EPOLLOUT);
+    assert_eq!(readable_socket_edge_ready.data, 0x77cc);
+    expect_ok(
+        SyscallArgs::new([epoll_fd as u64, epoll_events + 704, 4, 0, 0, 0]).call::<EpollWait>(),
+        0,
+    );
     expect_ok(
         SyscallArgs::new([left as u64, epoll_events + 321, 1, 0, 0, 0]).call::<Read>(),
         1,

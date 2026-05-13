@@ -183,6 +183,7 @@ define_syscall!(
                     return Err(SyscallError::BadAddress);
                 }
                 let event = read_epoll_event(event)?;
+                let bits = EpollEvents::from_bits_retain(event.events);
                 for existing in [
                     PollableEvent::CanBeRead,
                     PollableEvent::CanBeWritten,
@@ -198,7 +199,7 @@ define_syscall!(
                 epoll_update_impl(
                     poller,
                     target_object,
-                    EpollEvents::from_bits_retain(event.events),
+                    bits,
                     epoll_event_data_u64(&event),
                 )
             }
