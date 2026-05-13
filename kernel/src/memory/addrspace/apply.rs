@@ -191,7 +191,7 @@ impl AddrSpace {
         };
         let copy_start = profile::scope_start();
 
-        if file_offset % 4096 == 0 && read_len == 4096 {
+        if file_offset.is_multiple_of(4096) && read_len == 4096 {
             let cached = page_cache::read_page(wrapped, identity, file_offset / 4096).ok()?;
             stats.cache_lookup_cycles = cached.lookup_cycles;
             stats.cache_load_cycles = cached.load_cycles;
