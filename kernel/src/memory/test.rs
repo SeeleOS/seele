@@ -1,15 +1,13 @@
+use crate::filesystem::{
+    page_cache,
+    path::Path,
+    vfs::{VirtualFS, WrappedFile},
+    vfs_operations::open_path,
+};
 use crate::memory::{
     addrspace::AddrSpace,
     paging::{BootinfoFrameAllocator, align_down_4k, align_up_4k},
     protection::Protection,
-};
-use crate::{
-    filesystem::{
-        page_cache,
-        path::Path,
-        vfs::{VirtualFS, WrappedFile},
-        vfs_operations::open_path,
-    },
 };
 use alloc::{vec, vec::Vec};
 
@@ -118,7 +116,9 @@ fn file_lazy_copy_preserves_partial_tail_and_zero_fill() {
 }
 
 fn file_lazy_copy_handles_unaligned_offsets_across_pages() {
-    let data = (0..5000).map(|index| (index % 251) as u8).collect::<Vec<_>>();
+    let data = (0..5000)
+        .map(|index| (index % 251) as u8)
+        .collect::<Vec<_>>();
     with_test_cached_file(
         "/tmp/file-lazy-copy-unaligned",
         &data,

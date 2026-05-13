@@ -863,6 +863,14 @@ pub fn expired_timerfd_poll_objects() -> Vec<ObjectRef> {
         .collect()
 }
 
+pub fn next_timerfd_poll_deadline() -> Option<Time> {
+    TIMERFD_REGISTRY
+        .lock()
+        .armed
+        .first_key_value()
+        .map(|((deadline, _), _)| *deadline)
+}
+
 impl Object for TimerFdObject {
     fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
         Ok(*self.flags.lock())

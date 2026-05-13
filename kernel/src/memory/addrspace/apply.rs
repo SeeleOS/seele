@@ -116,10 +116,7 @@ impl AddrSpace {
         frame
     }
 
-    fn readonly_file_page_cache_key(
-        file: FileCacheKey,
-        offset: u64,
-    ) -> Option<FilePageCacheKey> {
+    fn readonly_file_page_cache_key(file: FileCacheKey, offset: u64) -> Option<FilePageCacheKey> {
         Some(FilePageCacheKey {
             device_id: file.device_id,
             inode: file.inode,
@@ -151,12 +148,16 @@ impl AddrSpace {
 
         let frame = Self::alloc_zeroed_frame();
         if read_len != 0 {
-            let page =
-                page_cache::read_page(&resolved.wrapped, resolved.identity, offset / 4096).ok()?;
-            let copy_len = core::cmp::min(read_len, page.valid_len);
+            let cluster =
+                page_cache::read_cluster(&resolved.wrapped, resolved.identity, offset / 4096)
+                    .ok()?;
+            let cluster_offset =
+                ((offset as usize) % (4096 * FILE_LAZY_CLUSTER_PAGES as usize)) & !(4096 - 1);
+            let available = cluster.valid_len.saturating_sub(cluster_offset);
+            let copy_len = core::cmp::min(read_len, available);
             unsafe {
                 ptr::copy_nonoverlapping(
-                    page.data.as_ptr(),
+                    cluster.data.as_ptr().add(cluster_offset),
                     apply_offset(frame.start_address().as_u64()) as *mut u8,
                     copy_len,
                 );
@@ -193,59 +194,26 @@ impl AddrSpace {
             ..Default::default()
         };
         let copy_start = profile::scope_start();
-
-        if file_offset.is_multiple_of(4096) && read_len == 4096 {
-            let cached = page_cache::read_page(wrapped, identity, file_offset / 4096).ok()?;
-            stats.cache_lookup_cycles = cached.lookup_cycles;
-            stats.cache_load_cycles = cached.load_cycles;
-            if cached.was_hit {
-                stats.cache_hits = 1;
-            } else {
-                stats.cache_misses = 1;
-            }
-
-            let copy_len = core::cmp::min(read_len, cached.valid_len);
-            unsafe {
-                ptr::copy_nonoverlapping(cached.data.as_ptr(), dst_ptr, copy_len);
-            }
-            stats.copy_cycles = profile::scope_start().saturating_sub(copy_start);
-            return Some(stats);
+        let page_index = file_offset / 4096;
+        let cached = page_cache::read_cluster(wrapped, identity, page_index).ok()?;
+        stats.cache_lookup_cycles = cached.lookup_cycles;
+        stats.cache_load_cycles = cached.load_cycles;
+        if cached.was_hit {
+            stats.cache_hits = 1;
+        } else {
+            stats.cache_misses = 1;
         }
 
-        let mut copied = 0usize;
-        while copied < read_len {
-            let absolute_offset = file_offset + copied as u64;
-            let page_index = absolute_offset / 4096;
-            let page_offset = (absolute_offset % 4096) as usize;
-            let cached = page_cache::read_page(wrapped, identity, page_index).ok()?;
-            stats.cache_lookup_cycles = stats
-                .cache_lookup_cycles
-                .saturating_add(cached.lookup_cycles);
-            stats.cache_load_cycles = stats.cache_load_cycles.saturating_add(cached.load_cycles);
-            if !cached.was_hit {
-                stats.cache_misses = 1;
-            }
-
-            let available = cached.valid_len.saturating_sub(page_offset);
-            if available == 0 {
-                break;
-            }
-
-            let copy_len = core::cmp::min(available, read_len - copied);
+        let cluster_offset = (file_offset as usize) % (4096 * FILE_LAZY_CLUSTER_PAGES as usize);
+        let available = cached.valid_len.saturating_sub(cluster_offset);
+        let copy_len = core::cmp::min(available, read_len);
+        if copy_len != 0 {
             unsafe {
-                ptr::copy_nonoverlapping(
-                    cached.data[page_offset..].as_ptr(),
-                    dst_ptr.add(copied),
-                    copy_len,
-                );
+                ptr::copy_nonoverlapping(cached.data[cluster_offset..].as_ptr(), dst_ptr, copy_len);
             }
-            copied += copy_len;
         }
 
         stats.copy_cycles = profile::scope_start().saturating_sub(copy_start);
-        if stats.cache_misses == 0 {
-            stats.cache_hits = 1;
-        }
         Some(stats)
     }
 
@@ -258,8 +226,13 @@ impl AddrSpace {
         buffer_len: usize,
     ) -> Option<(Vec<u8>, FileLazyFaultStats)> {
         let mut buffer = vec![0u8; buffer_len];
-        let stats =
-            Self::copy_cached_file_page(wrapped, identity, file_offset, read_len, buffer.as_mut_ptr())?;
+        let stats = Self::copy_cached_file_page(
+            wrapped,
+            identity,
+            file_offset,
+            read_len,
+            buffer.as_mut_ptr(),
+        )?;
         Some((buffer, stats))
     }
 

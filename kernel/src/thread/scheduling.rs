@@ -13,8 +13,8 @@ use crate::{
     misc::profile::{self, ProfileCategory},
     misc::snapshot::Snapshot,
     misc::time::Time,
-    misc::timer::process_expired_process_timers,
-    object::linux_anon::expired_timerfd_poll_objects,
+    misc::timer::{next_process_timer_deadline, process_expired_process_timers},
+    object::linux_anon::{expired_timerfd_poll_objects, next_timerfd_poll_deadline},
     polling::event::PollableEvent,
     signal::process_current_process_signals,
     smp::{
@@ -125,13 +125,74 @@ fn should_run_global_scheduler_work() -> bool {
     crate::smp::with_current_cpu(|cpu| cpu.is_bsp)
 }
 
-fn process_deferred_timer_work() {
-    let timerfd_objects = expired_timerfd_poll_objects();
-    process_expired_process_timers();
+#[derive(Clone, Copy, Debug, Default)]
+struct SchedulerDeferredWork {
+    thread_deadline: Option<Time>,
+    process_timer_deadline: Option<Time>,
+    timerfd_deadline: Option<Time>,
+    pollers_dirty: bool,
+    input_pending: bool,
+}
+
+impl SchedulerDeferredWork {
+    fn next_deadline(self) -> Option<Time> {
+        [
+            self.thread_deadline,
+            self.process_timer_deadline,
+            self.timerfd_deadline,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
+    fn has_due_deadline(self, now: Time) -> bool {
+        self.next_deadline().is_some_and(|deadline| deadline <= now)
+    }
+
+    fn has_any_work(self) -> bool {
+        self.pollers_dirty || self.input_pending || self.next_deadline().is_some()
+    }
+}
+
+fn pending_input_work() -> bool {
+    keyboard::has_pending_scancodes()
+        || agent_tty_input::has_pending_input()
+        || mouse::has_pending_events()
+}
+
+fn scheduler_deferred_work_snapshot() -> SchedulerDeferredWork {
+    let (thread_deadline, pollers_dirty) =
+        with_thread_manager(|manager| (manager.next_timed_deadline(), manager.pollers_dirty()));
+
+    SchedulerDeferredWork {
+        thread_deadline,
+        process_timer_deadline: next_process_timer_deadline(),
+        timerfd_deadline: next_timerfd_poll_deadline(),
+        pollers_dirty,
+        input_pending: pending_input_work(),
+    }
+}
+
+fn process_deferred_timer_work(snapshot: SchedulerDeferredWork) {
+    let now = Time::since_boot();
+    let timerfd_objects = snapshot
+        .timerfd_deadline
+        .is_some_and(|deadline| deadline <= now)
+        .then(expired_timerfd_poll_objects)
+        .unwrap_or_default();
+    if snapshot
+        .process_timer_deadline
+        .is_some_and(|deadline| deadline <= now)
+    {
+        process_expired_process_timers(now);
+    }
 
     with_thread_manager(|manager| {
-        manager.process_timed_out_threads();
-        if manager.has_blocked_pollers() {
+        if manager.has_timed_out_threads_due(now) {
+            manager.process_timed_out_threads();
+        }
+        if snapshot.pollers_dirty && manager.has_blocked_pollers() {
             manager.wake_ready_pollers();
         }
     });
@@ -250,8 +311,11 @@ pub fn run() -> ! {
     loop {
         let scheduler_start = profile::scope_start();
         if should_run_global_scheduler_work() {
+            let deferred_work = scheduler_deferred_work_snapshot();
             let timer_work_start = profile::scope_start();
-            process_deferred_timer_work();
+            if deferred_work.has_due_deadline(Time::since_boot()) || deferred_work.pollers_dirty {
+                process_deferred_timer_work(deferred_work);
+            }
             profile::record(ProfileCategory::TimerWork, timer_work_start);
 
             let net_poll_start = profile::scope_start();
@@ -259,9 +323,11 @@ pub fn run() -> ! {
             profile::record(ProfileCategory::NetPoll, net_poll_start);
 
             let other_kernel_start = profile::scope_start();
-            keyboard::process_pending_scancodes();
-            agent_tty_input::process_pending_input();
-            mouse::process_pending_mouse_events();
+            if deferred_work.input_pending {
+                keyboard::process_pending_scancodes();
+                agent_tty_input::process_pending_input();
+                mouse::process_pending_mouse_events();
+            }
             profile::record(ProfileCategory::OtherKernel, other_kernel_start);
         }
 
@@ -493,9 +559,12 @@ fn after_thread_yield(thread_ref: ThreadRef) {
 fn sleep_if_idle() {
     interrupts::disable();
     let had_resched_request = take_current_cpu_resched_request();
+    let deferred_work = should_run_global_scheduler_work().then(scheduler_deferred_work_snapshot);
 
-    if should_run_global_scheduler_work() {
-        process_deferred_timer_work();
+    if let Some(deferred_work) = deferred_work
+        && (deferred_work.has_due_deadline(Time::since_boot()) || deferred_work.pollers_dirty)
+    {
+        process_deferred_timer_work(deferred_work);
     }
 
     let has_pending_threads = if should_run_global_scheduler_work() {
@@ -504,10 +573,7 @@ fn sleep_if_idle() {
         false
     };
     let has_pending_work = has_pending_threads
-        || (should_run_global_scheduler_work()
-            && (keyboard::has_pending_scancodes()
-                || agent_tty_input::has_pending_input()
-                || mouse::has_pending_events()))
+        || deferred_work.is_some_and(|work| work.input_pending || work.has_any_work())
         || had_resched_request;
 
     if has_pending_work {
@@ -519,7 +585,8 @@ fn sleep_if_idle() {
 
 #[cfg(test)]
 mod tests {
-    use super::{reload_thread_timeslice, take_current_cpu_resched_request};
+    use super::{SchedulerDeferredWork, reload_thread_timeslice, take_current_cpu_resched_request};
+    use crate::misc::time::Time;
     use crate::thread::{scheduling::request_current_cpu_resched, thread::Thread};
 
     crate::test!(
@@ -543,6 +610,22 @@ mod tests {
             request_current_cpu_resched();
             assert!(take_current_cpu_resched_request());
             assert!(!take_current_cpu_resched_request());
+        }
+    );
+
+    crate::test!(
+        scheduler_deferred_work_due_deadline,
+        "scheduler deferred work detects due deadlines",
+        || {
+            let work = SchedulerDeferredWork {
+                thread_deadline: Some(Time::from_nanoseconds(10)),
+                process_timer_deadline: Some(Time::from_nanoseconds(20)),
+                timerfd_deadline: None,
+                pollers_dirty: false,
+                input_pending: false,
+            };
+            assert!(work.has_due_deadline(Time::from_nanoseconds(10)));
+            assert!(!work.has_due_deadline(Time::from_nanoseconds(9)));
         }
     );
 }

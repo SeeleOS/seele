@@ -176,6 +176,15 @@ impl Timer {
             }
         }
     }
+
+    pub fn next_deadline(&self) -> Option<Time> {
+        match self.state {
+            TimerState::Disabled => None,
+            TimerState::OneShot { deadline } | TimerState::Periodic { deadline, .. } => {
+                Some(deadline)
+            }
+        }
+    }
 }
 
 impl Process {
@@ -227,15 +236,43 @@ impl Process {
 
         signals
     }
+
+    pub fn next_timer_deadline(&self) -> Option<Time> {
+        self.timers
+            .iter()
+            .flatten()
+            .filter_map(Timer::next_deadline)
+            .min()
+    }
 }
 
-pub fn process_expired_process_timers() {
+pub fn next_process_timer_deadline() -> Option<Time> {
+    let processes = {
+        let manager = MANAGER.lock();
+        manager.processes.values().cloned().collect::<Vec<_>>()
+    };
+
+    processes
+        .into_iter()
+        .filter_map(|process| process.lock().next_timer_deadline())
+        .min()
+}
+
+pub fn process_expired_process_timers(now: Time) {
     let processes = {
         let manager = MANAGER.lock();
         manager.processes.values().cloned().collect::<Vec<_>>()
     };
 
     for process in processes {
+        let should_process = process
+            .lock()
+            .next_timer_deadline()
+            .is_some_and(|deadline| deadline <= now);
+        if !should_process {
+            continue;
+        }
+
         let signals = process.lock().process_timers();
         for signal in signals {
             send_signal_to_process(&process, signal);

@@ -23,6 +23,7 @@ use crate::{
     thread::{
         ThreadRef, get_current_thread,
         manager::ThreadManager,
+        misc::State,
         with_thread_manager,
         yielding::{BlockType, finish_block_current},
     },
@@ -113,19 +114,45 @@ bitflags! {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 struct FutexKey {
     pid: u64,
     addr: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FutexWaitId {
+    key: FutexKey,
+    waiter_id: u64,
+}
+
 #[derive(Clone)]
 struct FutexWaiter {
+    id: u64,
     thread: ThreadRef,
     bitset: u32,
 }
 
-static FUTEX_QUEUE: Mut<BTreeMap<FutexKey, VecDeque<FutexWaiter>>> = Mut::new(BTreeMap::new());
+#[derive(Default)]
+struct FutexBucket {
+    next_waiter_id: u64,
+    waiters: VecDeque<FutexWaiter>,
+}
+
+impl FutexBucket {
+    fn push_waiter(&mut self, thread: ThreadRef, bitset: u32) -> u64 {
+        let waiter_id = self.next_waiter_id;
+        self.next_waiter_id = self.next_waiter_id.saturating_add(1);
+        self.waiters.push_back(FutexWaiter {
+            id: waiter_id,
+            thread,
+            bitset,
+        });
+        waiter_id
+    }
+}
+
+static FUTEX_QUEUE: Mut<BTreeMap<FutexKey, FutexBucket>> = Mut::new(BTreeMap::new());
 const FUTEX_CLOCK_REALTIME: u64 = 0x100;
 const FUTEX_BITSET_MATCH_ANY: u64 = 0xffff_ffff;
 const FUTEX_OP_OPARG_SHIFT: u32 = 8;
@@ -165,6 +192,49 @@ fn current_futex_key(addr: u64) -> FutexKey {
     FutexKey { pid, addr }
 }
 
+fn queue_waiter_in_locked_queue(
+    queue: &mut BTreeMap<FutexKey, FutexBucket>,
+    key: FutexKey,
+    thread: ThreadRef,
+    bitset: u32,
+) -> FutexWaitId {
+    let bucket = queue.entry(key).or_default();
+    let waiter_id = bucket.push_waiter(thread, bitset);
+    FutexWaitId { key, waiter_id }
+}
+
+fn take_futex_waiters_from_bucket(
+    bucket: &mut FutexBucket,
+    count: usize,
+    wake_mask: Option<u32>,
+) -> Vec<ThreadRef> {
+    let mut woken = Vec::new();
+    let mut scanned = 0;
+    let initial_len = bucket.waiters.len();
+
+    while woken.len() < count && scanned < initial_len {
+        let waiter = bucket
+            .waiters
+            .pop_front()
+            .expect("futex waiter queue length changed during wake");
+        let should_wake = wake_mask.is_none_or(|mask| waiter.bitset & mask != 0);
+        if should_wake {
+            woken.push(waiter.thread);
+        } else {
+            bucket.waiters.push_back(waiter);
+        }
+        scanned += 1;
+    }
+
+    woken
+}
+
+fn bucket_is_empty(queue: &BTreeMap<FutexKey, FutexBucket>, key: FutexKey) -> bool {
+    queue
+        .get(&key)
+        .is_some_and(|bucket| bucket.waiters.is_empty())
+}
+
 pub fn wake_futex_for_process(pid: u64, addr: u64, count: usize) -> usize {
     let threads = take_futex_waiters(pid, addr, count, None);
     let woken = threads.len();
@@ -197,47 +267,27 @@ pub fn wake_futex_for_process_with_manager(
 fn take_futex_waiters(pid: u64, addr: u64, count: usize, wake_mask: Option<u32>) -> Vec<ThreadRef> {
     let key = FutexKey { pid, addr };
     let mut queue = FUTEX_QUEUE.lock();
-    let mut woken = Vec::new();
-    let mut remove_key = false;
+    let woken = queue
+        .get_mut(&key)
+        .map(|bucket| take_futex_waiters_from_bucket(bucket, count, wake_mask))
+        .unwrap_or_default();
 
-    if let Some(queue) = queue.get_mut(&key) {
-        let mut scanned = 0;
-        while woken.len() < count && scanned < queue.len() {
-            let waiter = queue
-                .pop_front()
-                .expect("futex waiter queue length changed during wake");
-            let should_wake = wake_mask.is_none_or(|mask| waiter.bitset & mask != 0);
-            if should_wake {
-                woken.push(waiter.thread);
-            } else {
-                queue.push_back(waiter);
-            }
-            scanned += 1;
-        }
-
-        remove_key = queue.is_empty();
-    }
-
-    if remove_key {
+    if bucket_is_empty(&queue, key) {
         queue.remove(&key);
     }
 
     woken
 }
 
-pub fn remove_futex_waiter(thread_ref: &ThreadRef) {
+pub fn remove_futex_waiter(wait_id: FutexWaitId) {
     let mut queue = FUTEX_QUEUE.lock();
-    let mut empty_keys = Vec::new();
-
-    for (key, waiters) in queue.iter_mut() {
-        waiters.retain(|waiter| !Arc::ptr_eq(&waiter.thread, thread_ref));
-        if waiters.is_empty() {
-            empty_keys.push(*key);
+    if let Some(bucket) = queue.get_mut(&wait_id.key) {
+        bucket
+            .waiters
+            .retain(|waiter| waiter.id != wait_id.waiter_id);
+        if bucket.waiters.is_empty() {
+            queue.remove(&wait_id.key);
         }
-    }
-
-    for key in empty_keys {
-        queue.remove(&key);
     }
 }
 
@@ -315,17 +365,12 @@ fn futex_wait_impl(
         // Block the thread before publishing it in the futex bucket so any
         // racing wake observes a consistent Blocked state after we drop both
         // locks.
-        manager.block(current.clone(), BlockType::Futex { deadline });
-        queue.entry(key).or_default().push_back(FutexWaiter {
-            thread: current.clone(),
-            bitset,
-        });
+        let wait_id = queue_waiter_in_locked_queue(&mut queue, key, current.clone(), bitset);
+        manager.block(current.clone(), BlockType::Futex { deadline, wait_id });
         Ok(())
     })?;
 
     finish_block_current();
-
-    remove_futex_waiter(&current);
 
     if let Some(deadline) = deadline
         && Time::since_boot() >= deadline
@@ -377,34 +422,61 @@ fn futex_requeue_impl(
     let target = FutexKey { pid, addr: uaddr2 };
     let mut queue = FUTEX_QUEUE.lock();
     let mut woken = Vec::new();
-    let mut moved = VecDeque::new();
-    let mut remove_source = false;
+    let mut moved = Vec::new();
 
-    if let Some(waiters) = queue.get_mut(&source) {
+    if let Some(bucket) = queue.get_mut(&source) {
         for _ in 0..wake_count {
-            if let Some(waiter) = waiters.pop_front() {
+            if let Some(waiter) = bucket.waiters.pop_front() {
                 woken.push(waiter.thread);
             } else {
                 break;
             }
         }
         for _ in 0..requeue_count {
-            if let Some(waiter) = waiters.pop_front() {
-                moved.push_back(waiter);
+            if let Some(waiter) = bucket.waiters.pop_front() {
+                moved.push(waiter);
             } else {
                 break;
             }
         }
-        remove_source = waiters.is_empty();
     }
 
-    if remove_source {
+    if bucket_is_empty(&queue, source) {
         queue.remove(&source);
     }
     if !moved.is_empty() {
-        queue.entry(target).or_default().extend(moved);
+        let moved_ids = moved
+            .iter()
+            .map(|waiter| {
+                let wait_id = queue_waiter_in_locked_queue(
+                    &mut queue,
+                    target,
+                    waiter.thread.clone(),
+                    waiter.bitset,
+                );
+                (waiter.thread.clone(), wait_id)
+            })
+            .collect::<Vec<_>>();
+        drop(queue);
+        for (thread, wait_id) in moved_ids {
+            let mut thread = thread.lock();
+            match &mut thread.state {
+                State::Blocking(BlockType::Futex {
+                    wait_id: current_wait_id,
+                    ..
+                })
+                | State::Blocked(BlockType::Futex {
+                    wait_id: current_wait_id,
+                    ..
+                }) => {
+                    *current_wait_id = wait_id;
+                }
+                _ => {}
+            }
+        }
+    } else {
+        drop(queue);
     }
-    drop(queue);
 
     let woke = woken.len();
     with_thread_manager(|manager| {
@@ -531,16 +603,17 @@ fn futex_lock_pi_impl(
 
             with_thread_manager(|manager| {
                 let mut queue = FUTEX_QUEUE.lock();
-                manager.block(current.clone(), BlockType::Futex { deadline });
-                queue.entry(key).or_default().push_back(FutexWaiter {
-                    thread: current.clone(),
-                    bitset: FUTEX_BITSET_MATCH_ANY as u32,
-                });
+                let wait_id = queue_waiter_in_locked_queue(
+                    &mut queue,
+                    key,
+                    current.clone(),
+                    FUTEX_BITSET_MATCH_ANY as u32,
+                );
+                manager.block(current.clone(), BlockType::Futex { deadline, wait_id });
             });
         }
 
         finish_block_current();
-        remove_futex_waiter(&current);
 
         if let Some(deadline) = deadline
             && Time::since_boot() >= deadline
@@ -578,10 +651,9 @@ fn futex_unlock_pi_impl(arg1: u64) -> Result<usize, SyscallError> {
         let mut queue = FUTEX_QUEUE.lock();
         let next = queue
             .get_mut(&key)
-            .and_then(|waiters| waiters.pop_front())
+            .and_then(|bucket| bucket.waiters.pop_front())
             .map(|waiter| waiter.thread);
-        let remove = queue.get(&key).is_some_and(|waiters| waiters.is_empty());
-        if remove {
+        if bucket_is_empty(&queue, key) {
             queue.remove(&key);
         }
         next
@@ -597,7 +669,7 @@ fn futex_unlock_pi_impl(arg1: u64) -> Result<usize, SyscallError> {
             FUTEX_QUEUE
                 .lock()
                 .get(&key)
-                .is_some_and(|waiters| !waiters.is_empty())
+                .is_some_and(|bucket| !bucket.waiters.is_empty())
         };
         let new_value = next_tid | if still_has_waiters { FUTEX_WAITERS } else { 0 };
         write_user_u32(arg1, new_value)?;

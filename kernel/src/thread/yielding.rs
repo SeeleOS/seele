@@ -13,7 +13,7 @@ use crate::{
     },
     polling::event::PollableEvent,
     process::{manager::get_current_process, misc::ProcessID},
-    systemcall::implementations::remove_futex_waiter,
+    systemcall::implementations::{FutexWaitId, remove_futex_waiter},
     thread::{
         ThreadRef,
         manager::ThreadManager,
@@ -37,6 +37,7 @@ pub enum BlockType {
     },
     Futex {
         deadline: Option<Time>,
+        wait_id: FutexWaitId,
     },
     Stopped,
 }
@@ -51,6 +52,7 @@ impl BlockType {
             } => *deadline <= Time::since_boot(),
             BlockType::Futex {
                 deadline: Some(deadline),
+                ..
             } => *deadline <= Time::since_boot(),
             _ => false,
         }
@@ -80,6 +82,7 @@ pub struct BlockedQueues {
     pub mouse: VecDeque<ThreadRef>,
     pub poller: VecDeque<ThreadRef>,
     pub timed: BTreeMap<(Time, ThreadID), ThreadRef>,
+    pub poller_dirty: bool,
 }
 
 impl BlockedQueues {
@@ -116,9 +119,10 @@ fn block_deadline(block_type: &BlockType) -> Option<Time> {
         } => Some(*deadline),
         BlockType::Futex {
             deadline: Some(deadline),
+            ..
         } => Some(*deadline),
         BlockType::WakeRequired { deadline: None, .. }
-        | BlockType::Futex { deadline: None }
+        | BlockType::Futex { deadline: None, .. }
         | BlockType::Stopped => None,
     }
 }
@@ -137,6 +141,18 @@ macro_rules! register_wake_func {
 }
 
 impl ThreadManager {
+    pub fn next_timed_deadline(&self) -> Option<Time> {
+        self.blocked_queues
+            .timed
+            .first_key_value()
+            .map(|((deadline, _), _)| *deadline)
+    }
+
+    pub fn has_timed_out_threads_due(&self, now: Time) -> bool {
+        self.next_timed_deadline()
+            .is_some_and(|deadline| deadline <= now)
+    }
+
     // Process all the blocked thread for timed out ones and wake them
     pub fn process_timed_out_threads(&mut self) {
         let mut to_wake = Vec::new();
@@ -167,18 +183,24 @@ impl ThreadManager {
     }
 
     pub(crate) fn remove_from_blocked_queues(&mut self, thread: &ThreadRef) {
-        remove_futex_waiter(thread);
-        let timed_key = {
+        let (timed_key, futex_wait_id) = {
             let thread = thread.lock();
             match &thread.state {
-                State::Blocking(block_type) | State::Blocked(block_type) => {
-                    block_deadline(block_type).map(|deadline| (deadline, thread.id))
-                }
+                State::Blocking(block_type) | State::Blocked(block_type) => (
+                    block_deadline(block_type).map(|deadline| (deadline, thread.id)),
+                    match block_type {
+                        BlockType::Futex { wait_id, .. } => Some(*wait_id),
+                        _ => None,
+                    },
+                ),
                 State::Ready | State::Running | State::Woken | State::Exiting | State::Zombie => {
-                    None
+                    (None, None)
                 }
             }
         };
+        if let Some(wait_id) = futex_wait_id {
+            remove_futex_waiter(wait_id);
+        }
         if let Some(key) = timed_key {
             self.blocked_queues.timed.remove(&key);
         }
@@ -280,6 +302,7 @@ impl ThreadManager {
 
     pub fn wake_ready_pollers(&mut self) {
         if self.blocked_queues.poller.is_empty() {
+            self.blocked_queues.poller_dirty = false;
             return;
         }
 
@@ -308,6 +331,7 @@ impl ThreadManager {
         for thread in to_wake {
             self.wake(thread);
         }
+        self.blocked_queues.poller_dirty = false;
     }
 
     register_wake_func!(pty);
@@ -318,6 +342,14 @@ impl ThreadManager {
     pub fn has_blocked_pollers(&self) -> bool {
         !self.blocked_queues.poller.is_empty()
     }
+
+    pub fn mark_pollers_dirty(&mut self) {
+        self.blocked_queues.poller_dirty = true;
+    }
+
+    pub fn pollers_dirty(&self) -> bool {
+        self.blocked_queues.poller_dirty
+    }
 }
 
 pub fn wake_pollers_for_object(target_object: ObjectRef, event: PollableEvent) {
@@ -326,7 +358,10 @@ pub fn wake_pollers_for_object(target_object: ObjectRef, event: PollableEvent) {
         return;
     }
 
-    let _ = try_with_thread_manager(|manager| manager.wake_affected_pollers(&affected_pollers));
+    let _ = try_with_thread_manager(|manager| {
+        manager.mark_pollers_dirty();
+        manager.wake_affected_pollers(&affected_pollers);
+    });
 }
 
 pub fn block(thread_ref: ThreadRef, block_type: BlockType) {

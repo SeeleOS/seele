@@ -80,7 +80,11 @@ pub(super) fn lookup_cache_clear(cache: &LookupCache) {
 }
 
 #[cfg(test)]
-pub(super) fn lookup_cache_contains_raw(cache: &LookupCache, parent_inode: u32, name: &str) -> bool {
+pub(super) fn lookup_cache_contains_raw(
+    cache: &LookupCache,
+    parent_inode: u32,
+    name: &str,
+) -> bool {
     cache
         .lock()
         .get(&parent_inode)

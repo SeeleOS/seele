@@ -12,7 +12,9 @@ use lazy_static::lazy_static;
 use crate::filesystem::vfs::{FSResult, WrappedFile};
 
 const PAGE_SIZE: usize = 4096;
-const MAX_CACHED_PAGES: usize = 4096;
+const FILE_CACHE_CLUSTER_PAGES: usize = 16;
+const MAX_CACHED_PAGES: usize = 16_384;
+const MAX_CACHED_CLUSTERS: usize = MAX_CACHED_PAGES / FILE_CACHE_CLUSTER_PAGES;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FileCacheKey {
@@ -36,20 +38,20 @@ impl FileCacheIdentity {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct CachedPageKey {
+struct CachedClusterKey {
     file: FileCacheKey,
-    page_index: u64,
+    cluster_index: u64,
 }
 
 #[derive(Clone, Debug)]
-struct CachedPage {
+struct CachedCluster {
     data: Arc<Vec<u8>>,
     valid_len: usize,
 }
 
 #[derive(Clone, Debug)]
-struct CachedPageEntry {
-    page: CachedPage,
+struct CachedClusterEntry {
+    cluster: CachedCluster,
     referenced: bool,
 }
 
@@ -64,8 +66,8 @@ pub struct CachedPageRead {
 
 #[derive(Debug)]
 struct PageCacheState {
-    entries: BTreeMap<CachedPageKey, CachedPageEntry>,
-    eviction_queue: VecDeque<CachedPageKey>,
+    entries: BTreeMap<CachedClusterKey, CachedClusterEntry>,
+    eviction_queue: VecDeque<CachedClusterKey>,
 }
 
 impl PageCacheState {
@@ -76,7 +78,7 @@ impl PageCacheState {
         }
     }
 
-    fn touch(&mut self, key: CachedPageKey) {
+    fn touch(&mut self, key: CachedClusterKey) {
         if let Some(entry) = self.entries.get_mut(&key) {
             entry.referenced = true;
         }
@@ -99,9 +101,9 @@ impl PageCacheState {
         }
     }
 
-    fn insert(&mut self, key: CachedPageKey, page: CachedPage) {
+    fn insert(&mut self, key: CachedClusterKey, cluster: CachedCluster) {
         if !self.entries.contains_key(&key) {
-            while self.entries.len() >= MAX_CACHED_PAGES {
+            while self.entries.len() >= MAX_CACHED_CLUSTERS {
                 let before = self.entries.len();
                 self.evict_one();
                 if self.entries.len() == before {
@@ -114,8 +116,8 @@ impl PageCacheState {
 
         self.entries.insert(
             key,
-            CachedPageEntry {
-                page,
+            CachedClusterEntry {
+                cluster,
                 referenced: true,
             },
         );
@@ -126,10 +128,18 @@ lazy_static! {
     static ref PAGE_CACHE: Mut<PageCacheState> = Mut::new(PageCacheState::new());
 }
 
-fn load_page(file: &WrappedFile, page_offset: u64, file_size: u64) -> FSResult<CachedPage> {
-    let mut data = vec![0u8; PAGE_SIZE];
-    let remaining = file_size.saturating_sub(page_offset);
-    let target_len = min(PAGE_SIZE, remaining as usize);
+fn cluster_len() -> usize {
+    PAGE_SIZE * FILE_CACHE_CLUSTER_PAGES
+}
+
+fn load_cluster(
+    file: &WrappedFile,
+    cluster_offset: u64,
+    file_size: u64,
+) -> FSResult<CachedCluster> {
+    let mut data = vec![0u8; cluster_len()];
+    let remaining = file_size.saturating_sub(cluster_offset);
+    let target_len = min(cluster_len(), remaining as usize);
     let mut valid_len = 0;
 
     if target_len != 0 {
@@ -137,7 +147,7 @@ fn load_page(file: &WrappedFile, page_offset: u64, file_size: u64) -> FSResult<C
         while valid_len < target_len {
             let read = file.read_at(
                 &mut data[valid_len..target_len],
-                page_offset + valid_len as u64,
+                cluster_offset + valid_len as u64,
             )?;
             if read == 0 {
                 break;
@@ -146,31 +156,48 @@ fn load_page(file: &WrappedFile, page_offset: u64, file_size: u64) -> FSResult<C
         }
     }
 
-    Ok(CachedPage {
+    Ok(CachedCluster {
         data: Arc::new(data),
         valid_len,
     })
 }
 
-fn get_or_load_page(
+#[derive(Clone, Debug)]
+pub struct CachedClusterRead {
+    pub data: Arc<Vec<u8>>,
+    pub valid_len: usize,
+    pub was_hit: bool,
+    pub lookup_cycles: u64,
+    pub load_cycles: u64,
+}
+
+fn cluster_index_for_page(page_index: u64) -> u64 {
+    page_index / FILE_CACHE_CLUSTER_PAGES as u64
+}
+
+fn page_offset_in_cluster(page_index: u64) -> usize {
+    (page_index as usize % FILE_CACHE_CLUSTER_PAGES) * PAGE_SIZE
+}
+
+fn get_or_load_cluster(
     file: &WrappedFile,
     file_key: FileCacheKey,
     page_index: u64,
     file_size: u64,
-) -> FSResult<CachedPageRead> {
-    let key = CachedPageKey {
+) -> FSResult<CachedClusterRead> {
+    let key = CachedClusterKey {
         file: file_key,
-        page_index,
+        cluster_index: cluster_index_for_page(page_index),
     };
     let lookup_start = crate::misc::profile::scope_start();
 
     {
         let mut state = PAGE_CACHE.lock();
-        if let Some(page) = state.entries.get(&key).map(|entry| entry.page.clone()) {
+        if let Some(cluster) = state.entries.get(&key).map(|entry| entry.cluster.clone()) {
             state.touch(key);
-            return Ok(CachedPageRead {
-                data: page.data,
-                valid_len: page.valid_len,
+            return Ok(CachedClusterRead {
+                data: cluster.data,
+                valid_len: cluster.valid_len,
                 was_hit: true,
                 lookup_cycles: crate::misc::profile::scope_start().saturating_sub(lookup_start),
                 load_cycles: 0,
@@ -179,13 +206,17 @@ fn get_or_load_page(
     }
 
     let load_start = crate::misc::profile::scope_start();
-    let page = load_page(file, page_index * PAGE_SIZE as u64, file_size)?;
+    let cluster = load_cluster(
+        file,
+        cluster_index_for_page(page_index) * cluster_len() as u64,
+        file_size,
+    )?;
     let load_cycles = crate::misc::profile::scope_start().saturating_sub(load_start);
 
     let mut state = PAGE_CACHE.lock();
-    if let Some(existing) = state.entries.get(&key).map(|entry| entry.page.clone()) {
+    if let Some(existing) = state.entries.get(&key).map(|entry| entry.cluster.clone()) {
         state.touch(key);
-        return Ok(CachedPageRead {
+        return Ok(CachedClusterRead {
             data: existing.data,
             valid_len: existing.valid_len,
             was_hit: true,
@@ -193,14 +224,27 @@ fn get_or_load_page(
             load_cycles: 0,
         });
     }
-    state.insert(key, page.clone());
-    Ok(CachedPageRead {
-        data: page.data,
-        valid_len: page.valid_len,
+    state.insert(key, cluster.clone());
+    Ok(CachedClusterRead {
+        data: cluster.data,
+        valid_len: cluster.valid_len,
         was_hit: false,
         lookup_cycles: crate::misc::profile::scope_start().saturating_sub(lookup_start),
         load_cycles,
     })
+}
+
+fn read_page_from_cluster(cluster: &CachedClusterRead, page_index: u64) -> CachedPageRead {
+    let page_offset = page_offset_in_cluster(page_index);
+    let available = cluster.valid_len.saturating_sub(page_offset);
+    let valid_len = min(PAGE_SIZE, available);
+    CachedPageRead {
+        data: cluster.data.clone(),
+        valid_len,
+        was_hit: cluster.was_hit,
+        lookup_cycles: cluster.lookup_cycles,
+        load_cycles: cluster.load_cycles,
+    }
 }
 
 pub fn read_page(
@@ -208,7 +252,16 @@ pub fn read_page(
     identity: FileCacheIdentity,
     page_index: u64,
 ) -> FSResult<CachedPageRead> {
-    get_or_load_page(file, identity.file, page_index, identity.size as u64)
+    let cluster = get_or_load_cluster(file, identity.file, page_index, identity.size as u64)?;
+    Ok(read_page_from_cluster(&cluster, page_index))
+}
+
+pub fn read_cluster(
+    file: &WrappedFile,
+    identity: FileCacheIdentity,
+    page_index: u64,
+) -> FSResult<CachedClusterRead> {
+    get_or_load_cluster(file, identity.file, page_index, identity.size as u64)
 }
 
 pub fn invalidate_file(file: FileCacheKey) {
@@ -231,19 +284,17 @@ pub fn reset_for_test() {
 }
 
 #[cfg(test)]
-pub fn insert_for_test(
-    file: FileCacheKey,
-    page_index: u64,
-    fill_byte: u8,
-    referenced: bool,
-) {
-    let key = CachedPageKey { file, page_index };
-    let page = CachedPage {
-        data: Arc::new(vec![fill_byte; PAGE_SIZE]),
-        valid_len: PAGE_SIZE,
+pub fn insert_for_test(file: FileCacheKey, page_index: u64, fill_byte: u8, referenced: bool) {
+    let key = CachedClusterKey {
+        file,
+        cluster_index: cluster_index_for_page(page_index),
+    };
+    let cluster = CachedCluster {
+        data: Arc::new(vec![fill_byte; cluster_len()]),
+        valid_len: cluster_len(),
     };
     let mut state = PAGE_CACHE.lock();
-    state.insert(key, page);
+    state.insert(key, cluster);
     if let Some(entry) = state.entries.get_mut(&key) {
         entry.referenced = referenced;
     }
@@ -251,7 +302,10 @@ pub fn insert_for_test(
 
 #[cfg(test)]
 pub fn contains_for_test(file: FileCacheKey, page_index: u64) -> bool {
-    let key = CachedPageKey { file, page_index };
+    let key = CachedClusterKey {
+        file,
+        cluster_index: cluster_index_for_page(page_index),
+    };
     PAGE_CACHE.lock().entries.contains_key(&key)
 }
 
@@ -276,7 +330,7 @@ pub fn read(
     while total < buffer.len() && current_offset < file_size {
         let page_index = current_offset / PAGE_SIZE as u64;
         let page_offset = (current_offset % PAGE_SIZE as u64) as usize;
-        let page = get_or_load_page(file, identity.file, page_index, file_size)?;
+        let page = read_page(file, identity, page_index)?;
         let available = page.valid_len.saturating_sub(page_offset);
         if available == 0 {
             break;

@@ -96,6 +96,11 @@ crate::test!(
     "page cache second-chance eviction preserves referenced pages",
     page_cache_second_chance_eviction_preserves_referenced_pages
 );
+crate::test!(
+    page_cache_cluster_reuse,
+    "page cache reuses cached cluster across neighboring pages",
+    page_cache_reuses_cached_cluster_for_neighboring_pages
+);
 
 fn path_normalization_handles_absolute_and_relative_components() {
     let normalized = Path::new("/usr//bin/../lib/./").normalize();
@@ -244,20 +249,42 @@ fn page_cache_second_chance_eviction_preserves_referenced_pages() {
 
     page_cache::reset_for_test();
     page_cache::insert_for_test(hot_file, 0, b'h', true);
-    for page_index in 1..4096 {
+    for page_index in (16..(16 * 1024)).step_by(16) {
         page_cache::insert_for_test(cold_file, page_index, b'c', false);
     }
 
     assert!(page_cache::contains_for_test(hot_file, 0));
-    assert!(page_cache::contains_for_test(cold_file, 1));
+    assert!(page_cache::contains_for_test(cold_file, 16));
 
     page_cache::insert_for_test(new_file, 0, b'n', true);
 
     assert!(page_cache::contains_for_test(hot_file, 0));
-    assert!(!page_cache::contains_for_test(cold_file, 1));
+    assert!(!page_cache::contains_for_test(cold_file, 16));
     assert!(page_cache::contains_for_test(new_file, 0));
 
     page_cache::reset_for_test();
+}
+
+fn page_cache_reuses_cached_cluster_for_neighboring_pages() {
+    let path = Path::new("/tmp/page-cache-cluster-test-file");
+    let _ = VirtualFS.lock().delete_file(path.clone());
+    VirtualFS.lock().create_file(path.clone()).unwrap();
+
+    let opened = open_path(path.clone()).unwrap();
+    let contents = (0..(4096 * 2))
+        .map(|index| (index % 251) as u8)
+        .collect::<Vec<_>>();
+    opened.write_exact_at(&contents, 0).unwrap();
+    let (wrapped, identity) = opened.readonly_page_cache_file().unwrap();
+    page_cache::invalidate_file(identity.file);
+
+    let first = page_cache::read_page(&wrapped, identity, 0).unwrap();
+    let second = page_cache::read_page(&wrapped, identity, 1).unwrap();
+    assert!(!first.was_hit);
+    assert!(second.was_hit);
+    assert_eq!(&second.data[4096..4096 + 32], &contents[4096..4096 + 32]);
+
+    let _ = VirtualFS.lock().delete_file(path);
 }
 
 fn staticfs_exposes_metadata_tree_shape_and_readonly_rules() {

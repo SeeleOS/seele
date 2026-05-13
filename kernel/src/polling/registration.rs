@@ -263,7 +263,8 @@ impl PollerObject {
         let mut entries = self.entries.lock();
         for ready in ready_events {
             for entry in entries.iter_mut() {
-                if Arc::ptr_eq(&entry.object, &ready.object) && entry.ready_bits == ready.ready_bits {
+                if Arc::ptr_eq(&entry.object, &ready.object) && entry.ready_bits == ready.ready_bits
+                {
                     entry.delivered_once = true;
                 }
             }
