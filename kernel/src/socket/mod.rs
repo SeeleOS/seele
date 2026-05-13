@@ -10,6 +10,7 @@ mod name;
 mod object;
 mod pair;
 mod registry;
+mod self_ref;
 mod socket_like;
 mod sockopt;
 mod state;
@@ -19,6 +20,7 @@ mod traits_poll;
 mod traits_read;
 mod traits_stat;
 mod traits_write;
+mod wait;
 mod wake;
 
 use crate::process::manager::get_current_process;

@@ -315,7 +315,7 @@ impl ThreadManager {
             }) = &thread.lock().state
             {
                 if let Ok(poller) = poller.clone().as_poller() {
-                    poller.has_woken_events()
+                    poller.push_already_ready_events() || poller.has_woken_events()
                 } else {
                     false
                 }

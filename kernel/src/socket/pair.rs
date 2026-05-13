@@ -35,6 +35,7 @@ impl UnixSocketObject {
                     flags: Mut::new(FileFlags::empty()),
                     pass_cred: Mut::new(false),
                     priority: Mut::new(0),
+                    self_ref: Mut::new(None),
                     creator_cred,
                 });
                 let right = Arc::new(Self {
@@ -43,8 +44,11 @@ impl UnixSocketObject {
                     flags: Mut::new(FileFlags::empty()),
                     pass_cred: Mut::new(false),
                     priority: Mut::new(0),
+                    self_ref: Mut::new(None),
                     creator_cred,
                 });
+                *left.self_ref.lock() = Some(Arc::downgrade(&left));
+                *right.self_ref.lock() = Some(Arc::downgrade(&right));
 
                 *left_stream.owner.lock() = Some(Arc::downgrade(&left));
                 *right_stream.owner.lock() = Some(Arc::downgrade(&right));
@@ -62,6 +66,7 @@ impl UnixSocketObject {
                     flags: Mut::new(FileFlags::empty()),
                     pass_cred: Mut::new(false),
                     priority: Mut::new(0),
+                    self_ref: Mut::new(None),
                     creator_cred,
                 });
                 let right = Arc::new(Self {
@@ -70,8 +75,11 @@ impl UnixSocketObject {
                     flags: Mut::new(FileFlags::empty()),
                     pass_cred: Mut::new(false),
                     priority: Mut::new(0),
+                    self_ref: Mut::new(None),
                     creator_cred,
                 });
+                *left.self_ref.lock() = Some(Arc::downgrade(&left));
+                *right.self_ref.lock() = Some(Arc::downgrade(&right));
 
                 *left_inner.owner.lock() = Some(Arc::downgrade(&left));
                 *right_inner.owner.lock() = Some(Arc::downgrade(&right));

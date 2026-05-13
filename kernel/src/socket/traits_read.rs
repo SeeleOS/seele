@@ -1,15 +1,12 @@
 use alloc::sync::Weak;
 
 use super::{
-    STREAM_RECV_CAPACITY, SocketError, SocketResult, UnixSocketObject, UnixSocketState, wake_io,
-    wake_pollers,
+    STREAM_RECV_CAPACITY, SocketError, SocketResult, UnixSocketObject, UnixSocketState,
+    self_ref::object_ref, wait::wait_for_object_event, wake_io, wake_pollers,
 };
 use crate::{
     object::{error::ObjectError, traits::Readable},
     polling::event::PollableEvent,
-    thread::yielding::{
-        BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
-    },
 };
 
 impl Readable for UnixSocketObject {
@@ -82,15 +79,9 @@ impl UnixSocketObject {
                         return Err(SocketError::TryAgain);
                     }
 
-                    let current = prepare_block_current(BlockType::WakeRequired {
-                        wake_type: WakeType::IO,
-                        deadline: None,
-                    });
-
-                    if !datagram.recv_queue.lock().is_empty() || *datagram.read_shutdown.lock() {
-                        cancel_block(&current);
-                    } else {
-                        finish_block_current();
+                    if let Some(object) = object_ref(&self.self_ref) {
+                        let object_ref = object as crate::object::misc::ObjectRef;
+                        wait_for_object_event(object_ref, PollableEvent::CanBeRead);
                     }
                 }
                 UnixSocketState::Stream(stream) => {
@@ -185,27 +176,9 @@ impl UnixSocketObject {
                         return Err(SocketError::TryAgain);
                     }
 
-                    let current = prepare_block_current(BlockType::WakeRequired {
-                        wake_type: WakeType::IO,
-                        deadline: None,
-                    });
-
-                    let ready_after_register = !stream.recv_buf.lock().is_empty()
-                        || (allow_control_only
-                            && stream.recv_buf.lock().is_empty()
-                            && stream.has_front_rights())
-                        || *stream.peer_write_closed.lock()
-                        || stream
-                            .peer
-                            .lock()
-                            .as_ref()
-                            .and_then(Weak::upgrade)
-                            .is_none();
-
-                    if ready_after_register {
-                        cancel_block(&current);
-                    } else {
-                        finish_block_current();
+                    if let Some(object) = object_ref(&self.self_ref) {
+                        let object_ref = object as crate::object::misc::ObjectRef;
+                        wait_for_object_event(object_ref, PollableEvent::CanBeRead);
                     }
                 }
                 _ => return Err(SocketError::InvalidArguments),

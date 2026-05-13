@@ -23,6 +23,7 @@ impl UnixSocketObject {
             flags: Mut::new(FileFlags::empty()),
             pass_cred: Mut::new(false),
             priority: Mut::new(0),
+            self_ref: Mut::new(None),
             creator_cred: current_socket_peer_cred(),
         }
     }
@@ -44,6 +45,7 @@ impl UnixSocketObject {
         };
 
         let socket = Arc::new(Self::new(kind));
+        *socket.self_ref.lock() = Some(Arc::downgrade(&socket));
         if let UnixSocketState::Datagram(datagram) = &*socket.state.lock() {
             *datagram.owner.lock() = Some(Arc::downgrade(&socket));
         }

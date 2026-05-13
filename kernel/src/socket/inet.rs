@@ -1,4 +1,8 @@
-use alloc::{sync::Arc, vec, vec::Vec};
+use alloc::{
+    sync::{Arc, Weak},
+    vec,
+    vec::Vec,
+};
 use core::{mem, slice};
 
 use crate::memory::utils::Mut;
@@ -13,6 +17,7 @@ use crate::{
         config::ConfigurateRequest,
         error::ObjectError,
         linux_ioctl::{LinuxIoctlOp, socket_raw_ioctl_op},
+        misc::ObjectRef,
         misc::ObjectResult,
         traits::{Configuratable, Readable, Statable, Writable},
     },
@@ -27,7 +32,8 @@ use super::{
     SO_PROTOCOL, SO_RCVBUF, SO_RCVBUFFORCE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_REUSEADDR,
     SO_SNDBUF, SO_SNDBUFFORCE, SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD, SO_TYPE, SOCK_CLOEXEC, SOCK_DGRAM,
     SOCK_NONBLOCK, SOCK_STREAM, SOL_SOCKET, SOL_TCP, SocketError, SocketLike, SocketResult,
-    can_set_socket_priority, socket_timeout_option_len,
+    can_set_socket_priority, self_ref::object_ref, socket_timeout_option_len,
+    wait::wait_for_object_event,
 };
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
@@ -53,6 +59,7 @@ pub struct InetSocketObject {
     state: Mut<InetState>,
     flags: Mut<FileFlags>,
     priority: Mut<i32>,
+    self_ref: Mut<Option<Weak<InetSocketObject>>>,
 }
 
 #[derive(Clone, Copy)]
@@ -107,7 +114,7 @@ impl InetSocketObject {
         };
 
         let handle = net::create_socket(transport).map_err(Self::map_net_error)?;
-        Ok(Arc::new(Self {
+        let socket = Arc::new(Self {
             kind: match transport {
                 TransportKind::Tcp => InetSocketKind::Stream,
                 TransportKind::Udp => InetSocketKind::Datagram,
@@ -122,11 +129,14 @@ impl InetSocketObject {
             }),
             flags: Mut::new(FileFlags::empty()),
             priority: Mut::new(0),
-        }))
+            self_ref: Mut::new(None),
+        });
+        *socket.self_ref.lock() = Some(Arc::downgrade(&socket));
+        Ok(socket)
     }
 
     fn from_accepted(handle: NetSocketHandle, local: InetAddress, peer: InetAddress) -> Arc<Self> {
-        Arc::new(Self {
+        let socket = Arc::new(Self {
             kind: InetSocketKind::Stream,
             state: Mut::new(InetState {
                 handle,
@@ -138,7 +148,10 @@ impl InetSocketObject {
             }),
             flags: Mut::new(FileFlags::empty()),
             priority: Mut::new(0),
-        })
+            self_ref: Mut::new(None),
+        });
+        *socket.self_ref.lock() = Some(Arc::downgrade(&socket));
+        socket
     }
 
     fn map_net_error(err: NetError) -> SocketError {
@@ -213,6 +226,23 @@ impl InetSocketObject {
                 state.read_shutdown || state.handle.udp_can_recv()
             }
             (InetSocketKind::Datagram, InetWaitKind::Connect | InetWaitKind::Accept) => false,
+        }
+    }
+
+    fn readiness_event(kind: InetWaitKind) -> PollableEvent {
+        match kind {
+            InetWaitKind::Accept | InetWaitKind::Recv => PollableEvent::CanBeRead,
+            InetWaitKind::Send => PollableEvent::CanBeWritten,
+            InetWaitKind::Connect => PollableEvent::CanBeWritten,
+        }
+    }
+
+    fn wait_for_event_or_io(&self, kind: InetWaitKind) {
+        if let Some(object) = object_ref(&self.self_ref) {
+            let object_ref = object as ObjectRef;
+            wait_for_object_event(object_ref, Self::readiness_event(kind));
+        } else {
+            self.prepare_wait(kind);
         }
     }
 
@@ -364,7 +394,7 @@ impl InetSocketObject {
                     if self.is_nonblocking() {
                         return Err(SocketError::TryAgain);
                     }
-                    self.prepare_wait(InetWaitKind::Accept);
+                    self.wait_for_event_or_io(InetWaitKind::Accept);
                 }
                 Err(err) => return Err(Self::map_net_error(err)),
             }
@@ -405,7 +435,7 @@ impl InetSocketObject {
                     if self.is_nonblocking() {
                         return Err(SocketError::TryAgain);
                     }
-                    self.prepare_wait(InetWaitKind::Send);
+                    self.wait_for_event_or_io(InetWaitKind::Send);
                 }
                 Err(err) => return Err(Self::map_net_error(err)),
             }
@@ -428,7 +458,7 @@ impl InetSocketObject {
                     if self.is_nonblocking() {
                         return Err(SocketError::TryAgain);
                     }
-                    self.prepare_wait(InetWaitKind::Send);
+                    self.wait_for_event_or_io(InetWaitKind::Send);
                 }
                 Err(err) => return Err(Self::map_net_error(err)),
             }
@@ -463,7 +493,7 @@ impl InetSocketObject {
                     if self.is_nonblocking() {
                         return Err(SocketError::TryAgain);
                     }
-                    self.prepare_wait(InetWaitKind::Recv);
+                    self.wait_for_event_or_io(InetWaitKind::Recv);
                 }
                 Err(err) => return Err(Self::map_net_error(err)),
             }
@@ -483,7 +513,7 @@ impl InetSocketObject {
                     if self.is_nonblocking() {
                         return Err(SocketError::TryAgain);
                     }
-                    self.prepare_wait(InetWaitKind::Recv);
+                    self.wait_for_event_or_io(InetWaitKind::Recv);
                 }
                 Err(err) => return Err(Self::map_net_error(err)),
             }
@@ -604,9 +634,13 @@ impl Pollable for InetSocketObject {
         match self.kind {
             InetSocketKind::Stream => match event {
                 PollableEvent::CanBeRead => {
-                    state.read_shutdown
-                        || state.handle.tcp_can_recv()
-                        || state.handle.tcp_is_closed()
+                    if state.listening {
+                        state.handle.tcp_is_active()
+                    } else {
+                        state.read_shutdown
+                            || state.handle.tcp_can_recv()
+                            || state.handle.tcp_is_closed()
+                    }
                 }
                 PollableEvent::CanBeWritten => {
                     !state.write_shutdown && !state.listening && state.handle.tcp_can_send()

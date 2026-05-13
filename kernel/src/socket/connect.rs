@@ -52,8 +52,10 @@ impl UnixSocketObject {
                     flags: Mut::new(FileFlags::empty()),
                     pass_cred: Mut::new(false),
                     priority: Mut::new(*self.priority.lock()),
+                    self_ref: Mut::new(None),
                     creator_cred: server_cred,
                 });
+                *server_socket.self_ref.lock() = Some(Arc::downgrade(&server_socket));
                 *server_stream.owner.lock() = Some(Arc::downgrade(&server_socket));
                 *client_stream.peer_cred.lock() = server_cred;
                 *server_stream.peer_cred.lock() = client_cred;

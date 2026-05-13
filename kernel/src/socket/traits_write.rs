@@ -4,14 +4,11 @@ use super::{
     DATAGRAM_RECV_CAPACITY, PendingRights, STREAM_RECV_CAPACITY, SocketError, SocketResult,
     UNIX_SOCKET_REGISTRY, UnixDatagramMessage, UnixSocketKind, UnixSocketObject,
     UnixSocketRegistryEntry, UnixSocketRegistryKey, UnixSocketState, current_socket_peer_cred,
-    wake_io, wake_pollers,
+    self_ref::object_ref, wait::wait_for_object_event, wake_io, wake_pollers,
 };
 use crate::{
     object::{error::ObjectError, misc::ObjectRef, traits::Writable},
     polling::event::PollableEvent,
-    thread::yielding::{
-        BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
-    },
 };
 
 impl Writable for UnixSocketObject {
@@ -93,16 +90,9 @@ impl UnixSocketObject {
                     return Err(SocketError::TryAgain);
                 }
 
-                let current = prepare_block_current(BlockType::WakeRequired {
-                    wake_type: WakeType::IO,
-                    deadline: None,
-                });
-                if peer_datagram.recv_queue.lock().len() < DATAGRAM_RECV_CAPACITY
-                    || *peer_datagram.read_shutdown.lock()
-                {
-                    cancel_block(&current);
-                } else {
-                    finish_block_current();
+                if let Some(owner) = peer_datagram.owner.lock().as_ref().and_then(Weak::upgrade) {
+                    let object_ref = owner as crate::object::misc::ObjectRef;
+                    wait_for_object_event(object_ref, PollableEvent::CanBeWritten);
                 }
                 continue;
             }
@@ -229,24 +219,9 @@ impl UnixSocketObject {
                         return Err(SocketError::TryAgain);
                     }
 
-                    let current = prepare_block_current(BlockType::WakeRequired {
-                        wake_type: WakeType::IO,
-                        deadline: None,
-                    });
-
-                    let peer_gone = stream
-                        .peer
-                        .lock()
-                        .as_ref()
-                        .and_then(Weak::upgrade)
-                        .is_none();
-                    let peer_not_reading = *peer.read_shutdown.lock();
-                    let room_available = peer.recv_buf.lock().len() < STREAM_RECV_CAPACITY;
-
-                    if peer_gone || peer_not_reading || room_available {
-                        cancel_block(&current);
-                    } else {
-                        finish_block_current();
+                    if let Some(object) = object_ref(&self.self_ref) {
+                        let object_ref = object as crate::object::misc::ObjectRef;
+                        wait_for_object_event(object_ref, PollableEvent::CanBeWritten);
                     }
                 }
             }

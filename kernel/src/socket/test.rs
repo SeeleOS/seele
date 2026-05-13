@@ -1,3 +1,5 @@
+use alloc::vec;
+
 use crate::{
     net::InetAddress,
     object::{
@@ -58,6 +60,26 @@ crate::test!(
     inet_listener_poll_semantics,
     "inet listener is not spuriously writable while listening",
     inet_listener_poll_semantics_follow_linux_rules
+);
+crate::test!(
+    object_wait_only_wakes_target_listener_readers,
+    "listener wait pollers ignore unrelated socket activity",
+    object_wait_only_wakes_target_listener_readers
+);
+crate::test!(
+    object_wait_only_wakes_target_inet_listener_readers,
+    "inet listener wait pollers ignore unrelated socket activity",
+    object_wait_only_wakes_target_inet_listener_readers
+);
+crate::test!(
+    object_wait_recv_ignores_unrelated_writable_events,
+    "recv wait pollers ignore unrelated writable activity",
+    object_wait_recv_ignores_unrelated_writable_events
+);
+crate::test!(
+    object_wait_send_ignores_unrelated_readable_events,
+    "send wait pollers ignore unrelated readable activity",
+    object_wait_send_ignores_unrelated_readable_events
 );
 
 fn unix_sockaddr_round_trips_path_and_abstract_names() {
@@ -264,4 +286,143 @@ fn inet_listener_poll_semantics_follow_linux_rules() {
     crate::net::poll();
 
     assert!(!listener.is_event_ready(PollableEvent::CanBeWritten));
+}
+
+fn object_wait_only_wakes_target_listener_readers() {
+    let listener = UnixSocketObject::create(crate::socket::AF_UNIX, crate::socket::SOCK_STREAM, 0)
+        .expect("listener socket should be created");
+    listener
+        .bind("\0wait-target-listener".into())
+        .expect("listener should bind");
+    listener.listen(1).expect("listener should listen");
+
+    let other_listener =
+        UnixSocketObject::create(crate::socket::AF_UNIX, crate::socket::SOCK_STREAM, 0)
+            .expect("other listener socket should be created");
+    other_listener
+        .bind("\0wait-other-listener".into())
+        .expect("other listener should bind");
+    other_listener
+        .listen(1)
+        .expect("other listener should listen");
+
+    let wait_poller = PollerObject::new();
+    let listener_object: crate::object::misc::ObjectRef = listener.clone();
+    wait_poller.register_obj(listener_object, PollableEvent::CanBeRead, 0x11);
+
+    let other_client =
+        UnixSocketObject::create(crate::socket::AF_UNIX, crate::socket::SOCK_STREAM, 0)
+            .expect("other client socket should be created");
+    other_client
+        .connect("\0wait-other-listener".into())
+        .expect("unrelated connect should succeed");
+
+    assert!(!wait_poller.has_woken_events());
+
+    let client = UnixSocketObject::create(crate::socket::AF_UNIX, crate::socket::SOCK_STREAM, 0)
+        .expect("client socket should be created");
+    client
+        .connect("\0wait-target-listener".into())
+        .expect("target connect should succeed");
+
+    assert!(wait_poller.has_woken_events());
+    let ready = wait_poller.take_woken_events(1);
+    assert_eq!(ready.len(), 1);
+    assert_eq!(ready[0].data, 0x11);
+    assert_eq!(ready[0].event, PollableEvent::CanBeRead);
+}
+
+fn object_wait_only_wakes_target_inet_listener_readers() {
+    let listener = InetSocketObject::create(AF_INET, crate::socket::SOCK_STREAM, 0)
+        .expect("inet listener should be created");
+    listener
+        .bind(InetAddress::new([127, 0, 0, 1], 22346))
+        .expect("listener should bind");
+    listener.listen(1).expect("listener should listen");
+
+    let other_listener = InetSocketObject::create(AF_INET, crate::socket::SOCK_STREAM, 0)
+        .expect("other inet listener should be created");
+    other_listener
+        .bind(InetAddress::new([127, 0, 0, 1], 22347))
+        .expect("other listener should bind");
+    other_listener
+        .listen(1)
+        .expect("other listener should listen");
+
+    let wait_poller = PollerObject::new();
+    let listener_object: crate::object::misc::ObjectRef = listener.clone();
+    wait_poller.register_obj(listener_object, PollableEvent::CanBeRead, 0x22);
+
+    let other_client = InetSocketObject::create(AF_INET, crate::socket::SOCK_STREAM, 0)
+        .expect("other inet client should be created");
+    other_client
+        .connect(InetAddress::new([127, 0, 0, 1], 22347))
+        .expect("unrelated connect should succeed");
+    for _ in 0..4 {
+        crate::net::poll();
+        assert!(!wait_poller.push_already_ready_events());
+    }
+    assert!(!wait_poller.has_woken_events());
+}
+
+fn object_wait_recv_ignores_unrelated_writable_events() {
+    let (reader, writer) =
+        UnixSocketObject::pair(crate::socket::AF_UNIX, crate::socket::SOCK_STREAM, 0)
+            .expect("unix stream socketpair should be created");
+    let (other_left, _other_right) =
+        UnixSocketObject::pair(crate::socket::AF_UNIX, crate::socket::SOCK_STREAM, 0)
+            .expect("unrelated stream socketpair should be created");
+
+    let wait_poller = PollerObject::new();
+    let reader_object: crate::object::misc::ObjectRef = reader.clone();
+    wait_poller.register_obj(reader_object, PollableEvent::CanBeRead, 0x33);
+
+    assert!(other_left.is_event_ready(PollableEvent::CanBeWritten));
+    let other_object: crate::object::misc::ObjectRef = other_left.clone();
+    crate::thread::yielding::wake_pollers_for_object(other_object, PollableEvent::CanBeWritten);
+    assert!(!wait_poller.has_woken_events());
+
+    writer
+        .write_socket(b"hello")
+        .expect("writer should make reader readable");
+    assert!(wait_poller.has_woken_events());
+    let ready = wait_poller.take_woken_events(1);
+    assert_eq!(ready.len(), 1);
+    assert_eq!(ready[0].data, 0x33);
+    assert_eq!(ready[0].event, PollableEvent::CanBeRead);
+}
+
+fn object_wait_send_ignores_unrelated_readable_events() {
+    let (left, right) =
+        UnixSocketObject::pair(crate::socket::AF_UNIX, crate::socket::SOCK_STREAM, 0)
+            .expect("unix stream socketpair should be created");
+    let (other_left, other_right) =
+        UnixSocketObject::pair(crate::socket::AF_UNIX, crate::socket::SOCK_STREAM, 0)
+            .expect("unrelated stream socketpair should be created");
+
+    let filler = vec![0u8; crate::socket::STREAM_RECV_CAPACITY];
+    left.write_socket(&filler)
+        .expect("initial write should fill peer receive buffer");
+    assert!(!left.is_event_ready(PollableEvent::CanBeWritten));
+
+    let wait_poller = PollerObject::new();
+    let left_object: crate::object::misc::ObjectRef = left.clone();
+    wait_poller.register_obj(left_object, PollableEvent::CanBeWritten, 0x44);
+
+    other_right
+        .write_socket(b"x")
+        .expect("unrelated write should make only the unrelated peer readable");
+    let other_object: crate::object::misc::ObjectRef = other_left.clone();
+    crate::thread::yielding::wake_pollers_for_object(other_object, PollableEvent::CanBeRead);
+    assert!(!wait_poller.has_woken_events());
+
+    let mut one = [0u8; 1];
+    right
+        .read_socket(&mut one)
+        .expect("peer read should free one byte of capacity");
+    assert!(wait_poller.has_woken_events());
+    let ready = wait_poller.take_woken_events(1);
+    assert_eq!(ready.len(), 1);
+    assert_eq!(ready[0].data, 0x44);
+    assert_eq!(ready[0].event, PollableEvent::CanBeWritten);
 }
