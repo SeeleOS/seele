@@ -4,7 +4,7 @@ use conquer_once::spin::OnceCell;
 use smoltcp::{
     iface::{Config, Interface, PollResult, SocketHandle, SocketSet},
     phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken},
-    socket::{tcp, udp},
+    socket::{tcp, tcp::State as TcpState, udp},
     time::Instant,
     wire::{
         EthernetAddress, HardwareAddress, IpAddress, IpCidr, IpEndpoint, IpListenEndpoint,
@@ -470,6 +470,12 @@ pub fn move_primary_device_to_namespace(namespace_inode: u64) -> NetResult<()> {
 }
 
 impl NetSocketHandle {
+    fn tcp_has_pending_accepted_connection(socket: &tcp::Socket<'static>) -> bool {
+        matches!(socket.state(), TcpState::Established | TcpState::CloseWait)
+            && socket.local_endpoint().is_some()
+            && socket.remote_endpoint().is_some()
+    }
+
     pub fn tcp_listen(self, local: InetAddress) -> NetResult<()> {
         manager()
             .lock()
@@ -594,6 +600,17 @@ impl NetSocketHandle {
             })
     }
 
+    pub fn tcp_listener_accept_ready(self) -> bool {
+        manager()
+            .lock()
+            .stacks
+            .get_mut(&self.namespace_inode)
+            .is_some_and(|stack| {
+                let socket = stack.sockets.get::<tcp::Socket<'static>>(self.socket);
+                Self::tcp_has_pending_accepted_connection(socket)
+            })
+    }
+
     pub fn tcp_local_addr(self) -> Option<InetAddress> {
         manager()
             .lock()
@@ -640,11 +657,11 @@ impl NetSocketHandle {
         manager()
             .lock()
             .with_stack_mut(self.namespace_inode, |stack| {
-                let active = {
+                let ready = {
                     let socket = stack.sockets.get::<tcp::Socket<'static>>(self.socket);
-                    socket.is_active()
+                    Self::tcp_has_pending_accepted_connection(socket)
                 };
-                if !active {
+                if !ready {
                     return Err(NetError::TryAgain);
                 }
 

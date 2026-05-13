@@ -62,6 +62,11 @@ crate::test!(
     inet_listener_poll_semantics_follow_linux_rules
 );
 crate::test!(
+    inet_listener_accept_readiness_semantics,
+    "inet listener stays unreadable without pending accepted connections",
+    inet_listener_accept_readiness_semantics_follow_linux_rules
+);
+crate::test!(
     object_wait_only_wakes_target_listener_readers,
     "listener wait pollers ignore unrelated socket activity",
     object_wait_only_wakes_target_listener_readers
@@ -286,6 +291,26 @@ fn inet_listener_poll_semantics_follow_linux_rules() {
     crate::net::poll();
 
     assert!(!listener.is_event_ready(PollableEvent::CanBeWritten));
+}
+
+fn inet_listener_accept_readiness_semantics_follow_linux_rules() {
+    let listener =
+        InetSocketObject::create(AF_INET, crate::socket::SOCK_STREAM, 0)
+            .expect("inet listener should be created");
+    listener
+        .clone()
+        .set_flags(FileFlags::NONBLOCK)
+        .expect("listener should become nonblocking");
+    listener
+        .bind(InetAddress::new([127, 0, 0, 1], 22348))
+        .expect("listener should bind");
+    listener.listen(1).expect("listener should listen");
+
+    assert!(!listener.is_event_ready(PollableEvent::CanBeRead));
+    assert!(matches!(
+        listener.accept(),
+        Err(crate::socket::SocketError::TryAgain)
+    ));
 }
 
 fn object_wait_only_wakes_target_listener_readers() {

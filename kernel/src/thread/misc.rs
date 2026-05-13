@@ -6,6 +6,8 @@ use crate::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BlockedSyscall {
+    Accept,
+    Accept4,
     Wait4,
     Waitid,
     Poll,
@@ -23,6 +25,8 @@ impl BlockedSyscall {
         use crate::systemcall::numbers::SyscallNumber;
 
         match SyscallNumber::from_number(number)? {
+            SyscallNumber::Accept => Some(Self::Accept),
+            SyscallNumber::Accept4 => Some(Self::Accept4),
             SyscallNumber::Wait4 => Some(Self::Wait4),
             SyscallNumber::Waitid => Some(Self::Waitid),
             SyscallNumber::Poll => Some(Self::Poll),
@@ -41,6 +45,8 @@ impl BlockedSyscall {
         use crate::systemcall::numbers::SyscallNumber;
 
         match self {
+            Self::Accept => SyscallNumber::Accept as usize,
+            Self::Accept4 => SyscallNumber::Accept4 as usize,
             Self::Wait4 => SyscallNumber::Wait4 as usize,
             Self::Waitid => SyscallNumber::Waitid as usize,
             Self::Poll => SyscallNumber::Poll as usize,

@@ -107,5 +107,6 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 - `run agent vm` should be treated as directly interactive by default.
 - After you finish using an interactive or background VM, terminate it yourself instead of relying on a default runner timeout to clean it up.
 - When terminating a leftover agent VM, first run `agent-tools/list-agent-vm-processes.sh`, then `kill` the reported runner and QEMU PIDs.
+- Do not rely on guest-side `poweroff` in this environment. If you need to stop the agent VM, inspect it with `agent-tools/list-agent-vm-processes.sh` and `kill` the reported runner and QEMU PIDs from the host side.
 - If `sysroot/` already appears to be mounted, reuse it directly instead of asking for privilege escalation to mount again. Only ask to mount when it is clearly not mounted.
 - When you need to mount `sysroot/`, use `agent-tools/ensure-sysroot-mounted.sh` directly. Run it first, then run the real inspection command separately instead of chaining them together.

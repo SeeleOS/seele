@@ -211,7 +211,7 @@ impl InetSocketObject {
                 state.handle.tcp_is_active() || state.handle.tcp_is_closed()
             }
             (InetSocketKind::Stream, InetWaitKind::Accept) => {
-                state.listening && state.handle.tcp_is_active()
+                state.listening && state.handle.tcp_listener_accept_ready()
             }
             (InetSocketKind::Stream, InetWaitKind::Send) => {
                 state.handle.tcp_can_send() || state.handle.tcp_is_closed()
@@ -635,7 +635,7 @@ impl Pollable for InetSocketObject {
             InetSocketKind::Stream => match event {
                 PollableEvent::CanBeRead => {
                     if state.listening {
-                        state.handle.tcp_is_active()
+                        state.handle.tcp_listener_accept_ready()
                     } else {
                         state.read_shutdown
                             || state.handle.tcp_can_recv()
