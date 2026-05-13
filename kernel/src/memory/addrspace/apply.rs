@@ -1,9 +1,14 @@
 use crate::memory::utils::Mut;
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use core::ptr;
 use x86_64::structures::paging::{FrameAllocator, Page, PageTableFlags, PhysFrame, Size4KiB};
 
 use crate::{
-    filesystem::{object::mount_device_id_for_path, page_cache},
+    filesystem::{
+        object::FileLikeObject,
+        page_cache::{self, FileCacheIdentity, FileCacheKey},
+        vfs::WrappedFile,
+    },
     memory::{
         addrspace::{
             AddrSpace, AllocResult,
@@ -62,6 +67,12 @@ lazy_static! {
         Mut::new(BTreeMap::new());
 }
 
+#[derive(Clone)]
+struct ResolvedFileCache {
+    wrapped: WrappedFile,
+    identity: FileCacheIdentity,
+}
+
 impl AddrSpace {
     fn map_existing_frame(
         &mut self,
@@ -103,38 +114,28 @@ impl AddrSpace {
     }
 
     fn readonly_file_page_cache_key(
-        file: &Arc<crate::filesystem::object::FileLikeObject>,
+        file: FileCacheKey,
         offset: u64,
     ) -> Option<FilePageCacheKey> {
-        let info = file.info().ok()?;
         Some(FilePageCacheKey {
-            device_id: mount_device_id_for_path(&file.path()),
-            inode: info.inode,
+            device_id: file.device_id,
+            inode: file.inode,
             offset,
         })
     }
 
-    fn readonly_file_cache_identity(
-        file: &Arc<crate::filesystem::object::FileLikeObject>,
-    ) -> Option<crate::filesystem::page_cache::FileCacheIdentity> {
-        let (_wrapped, identity) = file.readonly_page_cache_file()?;
-        Some(identity)
-    }
-
-    fn readonly_wrapped_file(
-        file: &Arc<crate::filesystem::object::FileLikeObject>,
-    ) -> Option<crate::filesystem::vfs::WrappedFile> {
-        let (wrapped, _identity) = file.readonly_page_cache_file()?;
-        Some(wrapped)
+    fn resolve_file_cache(file: &Arc<FileLikeObject>) -> Option<ResolvedFileCache> {
+        let (wrapped, identity) = file.readonly_page_cache_file()?;
+        Some(ResolvedFileCache { wrapped, identity })
     }
 
     fn get_or_load_shared_file_frame(
-        file: &Arc<crate::filesystem::object::FileLikeObject>,
+        resolved: &ResolvedFileCache,
         offset: u64,
         read_len: usize,
     ) -> Option<SharedFileFrameLoad> {
         let lookup_start = profile::scope_start();
-        let key = Self::readonly_file_page_cache_key(file, offset)?;
+        let key = Self::readonly_file_page_cache_key(resolved.identity.file, offset)?;
         let mut cache = SHARED_FILE_PAGE_CACHE.lock();
         if let Some(frame) = cache.get(&key).copied() {
             return Some(SharedFileFrameLoad {
@@ -147,17 +148,16 @@ impl AddrSpace {
 
         let frame = Self::alloc_zeroed_frame();
         if read_len != 0 {
-            let identity = Self::readonly_file_cache_identity(file)?;
-            let wrapped = Self::readonly_wrapped_file(file)?;
-            let page = page_cache::read_page(&wrapped, identity, offset / 4096).ok()?;
+            let page =
+                page_cache::read_page(&resolved.wrapped, resolved.identity, offset / 4096).ok()?;
             let copy_len = core::cmp::min(read_len, page.valid_len);
-            let dst = unsafe {
-                core::slice::from_raw_parts_mut(
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    page.data.as_ptr(),
                     apply_offset(frame.start_address().as_u64()) as *mut u8,
                     copy_len,
-                )
-            };
-            dst.copy_from_slice(&page.data[..copy_len]);
+                );
+            }
         }
 
         increase_ref(frame);
@@ -170,11 +170,12 @@ impl AddrSpace {
         })
     }
 
-    fn copy_private_file_page(
-        file: &Arc<crate::filesystem::object::FileLikeObject>,
+    fn copy_cached_file_page(
+        wrapped: &WrappedFile,
+        identity: FileCacheIdentity,
         file_offset: u64,
         read_len: usize,
-        write_addr: u64,
+        dst_ptr: *mut u8,
     ) -> Option<FileLazyFaultStats> {
         if read_len == 0 {
             return Some(FileLazyFaultStats {
@@ -184,20 +185,36 @@ impl AddrSpace {
             });
         }
 
-        let wrapped = Self::readonly_wrapped_file(file)?;
-        let identity = Self::readonly_file_cache_identity(file)?;
-        let mut copied = 0usize;
         let mut stats = FileLazyFaultStats {
             cluster_pages_loaded: 1,
             ..Default::default()
         };
         let copy_start = profile::scope_start();
 
+        if file_offset % 4096 == 0 && read_len == 4096 {
+            let cached = page_cache::read_page(wrapped, identity, file_offset / 4096).ok()?;
+            stats.cache_lookup_cycles = cached.lookup_cycles;
+            stats.cache_load_cycles = cached.load_cycles;
+            if cached.was_hit {
+                stats.cache_hits = 1;
+            } else {
+                stats.cache_misses = 1;
+            }
+
+            let copy_len = core::cmp::min(read_len, cached.valid_len);
+            unsafe {
+                ptr::copy_nonoverlapping(cached.data.as_ptr(), dst_ptr, copy_len);
+            }
+            stats.copy_cycles = profile::scope_start().saturating_sub(copy_start);
+            return Some(stats);
+        }
+
+        let mut copied = 0usize;
         while copied < read_len {
             let absolute_offset = file_offset + copied as u64;
             let page_index = absolute_offset / 4096;
             let page_offset = (absolute_offset % 4096) as usize;
-            let cached = page_cache::read_page(&wrapped, identity, page_index).ok()?;
+            let cached = page_cache::read_page(wrapped, identity, page_index).ok()?;
             stats.cache_lookup_cycles = stats
                 .cache_lookup_cycles
                 .saturating_add(cached.lookup_cycles);
@@ -212,10 +229,13 @@ impl AddrSpace {
             }
 
             let copy_len = core::cmp::min(available, read_len - copied);
-            let dst = unsafe {
-                core::slice::from_raw_parts_mut((write_addr + copied as u64) as *mut u8, copy_len)
-            };
-            dst.copy_from_slice(&cached.data[page_offset..page_offset + copy_len]);
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    cached.data[page_offset..].as_ptr(),
+                    dst_ptr.add(copied),
+                    copy_len,
+                );
+            }
             copied += copy_len;
         }
 
@@ -224,6 +244,20 @@ impl AddrSpace {
             stats.cache_hits = 1;
         }
         Some(stats)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn copy_cached_file_page_for_test(
+        wrapped: &WrappedFile,
+        identity: FileCacheIdentity,
+        file_offset: u64,
+        read_len: usize,
+        buffer_len: usize,
+    ) -> Option<(Vec<u8>, FileLazyFaultStats)> {
+        let mut buffer = vec![0u8; buffer_len];
+        let stats =
+            Self::copy_cached_file_page(wrapped, identity, file_offset, read_len, buffer.as_mut_ptr())?;
+        Some((buffer, stats))
     }
 
     pub fn apply_page(&mut self, page: Page<Size4KiB>, area: MemoryArea) -> PhysFrame {
@@ -247,6 +281,8 @@ impl AddrSpace {
                 ref file,
                 shared,
             } => {
+                let resolved = Self::resolve_file_cache(file)
+                    .expect("file-backed mapping missing readonly page-cache backend");
                 // Only truly shared file mappings may reuse a cached physical
                 // page. Private ELF PT_LOADs can legally map the same file page
                 // through multiple segment views with different valid byte
@@ -275,7 +311,11 @@ impl AddrSpace {
 
                     if let (true, Some(shared_frame)) = (
                         use_shared_cache,
-                        Self::get_or_load_shared_file_frame(file, file_offset, read_len as usize),
+                        Self::get_or_load_shared_file_frame(
+                            &resolved,
+                            file_offset,
+                            read_len as usize,
+                        ),
                     ) {
                         let map_start = profile::scope_start();
                         let frame = self.map_existing_frame(
@@ -311,9 +351,14 @@ impl AddrSpace {
 
                     let read_len = read_len as usize;
                     if read_len != 0 {
-                        let copy_stats =
-                            Self::copy_private_file_page(file, file_offset, read_len, write_addr)
-                                .expect("Failed to lazyload file-backed page through page cache");
+                        let copy_stats = Self::copy_cached_file_page(
+                            &resolved.wrapped,
+                            resolved.identity,
+                            file_offset,
+                            read_len,
+                            write_addr as *mut u8,
+                        )
+                        .expect("Failed to lazyload file-backed page through page cache");
                         stats.cluster_pages_loaded += copy_stats.cluster_pages_loaded - 1;
                         stats.cache_hits += copy_stats.cache_hits;
                         stats.cache_misses += copy_stats.cache_misses;
