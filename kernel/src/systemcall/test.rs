@@ -6068,8 +6068,10 @@ fn epoll_syscalls_follow_linux_rules() {
         1,
     );
     let readable_socket_edge_ready = read_user_value::<TestLinuxEpollEvent>(epoll_events + 640);
-    assert_eq!(readable_socket_edge_ready.events, EPOLLIN | EPOLLOUT);
-    assert_eq!(readable_socket_edge_ready.data, 0x77cc);
+    let readable_socket_edge_events = readable_socket_edge_ready.events;
+    let readable_socket_edge_data = readable_socket_edge_ready.data;
+    assert_eq!(readable_socket_edge_events, EPOLLIN | EPOLLOUT);
+    assert_eq!(readable_socket_edge_data, 0x77cc);
     expect_ok(
         SyscallArgs::new([epoll_fd as u64, epoll_events + 704, 4, 0, 0, 0]).call::<EpollWait>(),
         0,
