@@ -1,3 +1,4 @@
+use crate::memory::utils::Mut;
 use core::any::Any;
 use core::time::Duration;
 
@@ -7,7 +8,6 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use spin::mutex::Mutex;
 
 use ext4plus::{
     self, DirEntryName, Ext4, FileType, FollowSymlinks,
@@ -39,7 +39,7 @@ pub struct Ext4Directory {
     /// Full absolute path within the ext4 filesystem, e.g. `/`, `/usr`.
     path: String,
     fs: Ext4,
-    inode: Mutex<Inode>,
+    inode: Mut<Inode>,
     parent_inode: Option<u32>,
     lookup_cache: LookupCache,
 }
@@ -57,7 +57,7 @@ impl Ext4Directory {
             name,
             path,
             fs,
-            inode: Mutex::new(inode),
+            inode: Mut::new(inode),
             parent_inode,
             lookup_cache,
         }
@@ -111,18 +111,16 @@ impl Ext4Directory {
         let meta = inode.metadata();
 
         if meta.is_dir() {
-            Ok(FileLike::Directory(Arc::new(Mutex::new(
-                Ext4Directory::new(
-                    name,
-                    path,
-                    self.fs.clone(),
-                    inode,
-                    Some(parent_inode),
-                    self.lookup_cache.clone(),
-                ),
-            ))))
+            Ok(FileLike::Directory(Arc::new(Mut::new(Ext4Directory::new(
+                name,
+                path,
+                self.fs.clone(),
+                inode,
+                Some(parent_inode),
+                self.lookup_cache.clone(),
+            )))))
         } else if meta.is_symlink() {
-            Ok(FileLike::Symlink(Arc::new(Mutex::new(Ext4Symlink {
+            Ok(FileLike::Symlink(Arc::new(Mut::new(Ext4Symlink {
                 fs: self.fs.clone(),
                 inode,
                 name,
@@ -130,7 +128,7 @@ impl Ext4Directory {
             }))))
         } else {
             let inner_file = Ext4InnerFile::open_inode(&self.fs, inode).map_err(map_ext4_error)?;
-            Ok(FileLike::File(Arc::new(Mutex::new(Ext4File::new(
+            Ok(FileLike::File(Arc::new(Mut::new(Ext4File::new(
                 name,
                 path,
                 self.fs.clone(),
@@ -323,13 +321,14 @@ impl Directory for Ext4Directory {
 
     fn get(&self, name: &str) -> FSResult<FileLike> {
         let path = self.join_child(name);
-        let (parent_inode, parent) = self.open_parent_dir()?;
+        let parent_inode = self.current_inode();
         let parent_id = parent_inode.index.get();
 
         if let Some(inode) = lookup_cache_get(&self.lookup_cache, &parent_inode, name) {
             return self.file_like_from_inode(name.to_string(), path, parent_id, inode);
         }
 
+        let parent = Dir::open_inode(&self.fs, parent_inode.clone()).map_err(map_ext4_error)?;
         let entry_name = DirEntryName::try_from(name).map_err(|_| FSError::Other)?;
         let inode = parent.get_entry(entry_name).map_err(map_ext4_error)?;
         lookup_cache_insert(&self.lookup_cache, &parent_inode, name, &inode);

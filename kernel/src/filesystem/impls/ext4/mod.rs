@@ -1,5 +1,5 @@
+use crate::memory::utils::Mut;
 use alloc::{collections::btree_map::BTreeMap, string::String, string::ToString, sync::Arc};
-use spin::mutex::Mutex;
 
 use ext4plus::{
     DirEntryName, Ext4, FollowSymlinks,
@@ -24,7 +24,7 @@ pub mod symlink;
 
 const CHMOD_PERMISSION_BITS: u16 = 0o7777;
 const FILE_TYPE_BITS: u16 = 0o170000;
-pub(super) type LookupCache = Arc<Mutex<BTreeMap<(u32, String), Inode>>>;
+pub(super) type LookupCache = Arc<Mut<BTreeMap<u32, BTreeMap<String, Inode>>>>;
 
 pub(super) fn lookup_cache_get(
     cache: &LookupCache,
@@ -33,7 +33,8 @@ pub(super) fn lookup_cache_get(
 ) -> Option<Inode> {
     cache
         .lock()
-        .get(&(parent_inode.index.get(), name.to_string()))
+        .get(&parent_inode.index.get())
+        .and_then(|children| children.get(name))
         .cloned()
 }
 
@@ -54,7 +55,9 @@ pub(super) fn lookup_cache_insert_raw(
 ) {
     cache
         .lock()
-        .insert((parent_inode, name.to_string()), inode.clone());
+        .entry(parent_inode)
+        .or_default()
+        .insert(name.into(), inode.clone());
 }
 
 pub(super) fn lookup_cache_remove(cache: &LookupCache, parent_inode: &Inode, name: &str) {
@@ -62,11 +65,26 @@ pub(super) fn lookup_cache_remove(cache: &LookupCache, parent_inode: &Inode, nam
 }
 
 pub(super) fn lookup_cache_remove_raw(cache: &LookupCache, parent_inode: u32, name: &str) {
-    cache.lock().remove(&(parent_inode, name.to_string()));
+    let mut cache = cache.lock();
+    let Some(children) = cache.get_mut(&parent_inode) else {
+        return;
+    };
+    children.remove(name);
+    if children.is_empty() {
+        cache.remove(&parent_inode);
+    }
 }
 
 pub(super) fn lookup_cache_clear(cache: &LookupCache) {
     cache.lock().clear();
+}
+
+#[cfg(test)]
+pub(super) fn lookup_cache_contains_raw(cache: &LookupCache, parent_inode: u32, name: &str) -> bool {
+    cache
+        .lock()
+        .get(&parent_inode)
+        .is_some_and(|children| children.contains_key(name))
 }
 
 pub(super) fn chmod_path(fs: &Ext4, path: &str, mode: u32) -> FSResult<()> {
@@ -98,7 +116,7 @@ impl EXT4 {
         Self {
             fs,
             root_inode,
-            lookup_cache: Arc::new(Mutex::new(BTreeMap::new())),
+            lookup_cache: Arc::new(Mut::new(BTreeMap::new())),
         }
     }
 
@@ -117,7 +135,7 @@ impl EXT4 {
     }
 
     fn root_dir(&self) -> WrappedDirectory {
-        Arc::new(Mutex::new(Ext4Directory::new(
+        Arc::new(Mut::new(Ext4Directory::new(
             "".to_string(),
             "/".to_string(),
             self.fs.clone(),
