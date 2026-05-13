@@ -1,7 +1,7 @@
 use core::ptr::NonNull;
 
+use crate::memory::utils::Mut;
 use flanterm::sys;
-use spin::Mutex;
 
 use crate::{
     misc::framebuffer::{Canvas, FramebufferPixelFormat, framebuffer_user_controlled},
@@ -20,13 +20,13 @@ pub struct FlantermTerminal {
 }
 
 impl KernelTerminal {
-    pub fn new(canvas: &Mutex<Canvas>) -> Self {
+    pub fn new(canvas: &Mut<Canvas>) -> Self {
         Self(FlantermTerminal::new(canvas))
     }
 }
 
 impl FlantermTerminal {
-    pub fn new(canvas: &Mutex<Canvas>) -> Self {
+    pub fn new(canvas: &Mut<Canvas>) -> Self {
         init_pty_writer();
 
         let (framebuffer, width, height, pitch, red_mask_shift, green_mask_shift, blue_mask_shift) = {

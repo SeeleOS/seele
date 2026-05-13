@@ -1,9 +1,9 @@
+use crate::memory::utils::Mut;
 use alloc::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{Arc, Weak},
     vec::Vec,
 };
-use spin::Mutex;
 
 use crate::{
     object::misc::ObjectRef,
@@ -22,7 +22,7 @@ struct PollRegistry {
 }
 
 lazy_static::lazy_static! {
-    static ref POLL_REGISTRY: Mutex<PollRegistry> = Mutex::new(PollRegistry::default());
+    static ref POLL_REGISTRY: Mut<PollRegistry> = Mut::new(PollRegistry::default());
 }
 
 fn object_key(object: &ObjectRef) -> usize {
@@ -175,6 +175,7 @@ impl PollerObject {
                 PollableEvent::Other(bits) => bits as u32,
             },
             false,
+            false,
         );
     }
 
@@ -185,6 +186,7 @@ impl PollerObject {
         data: u64,
         ready_bits: u32,
         oneshot: bool,
+        edge_triggered: bool,
     ) {
         let mut entries = self.entries.lock();
         let is_new_entry = if let Some(existing) = entries.iter_mut().find(|entry| {
@@ -194,6 +196,8 @@ impl PollerObject {
         }) {
             existing.data = data;
             existing.oneshot = oneshot;
+            existing.edge_triggered = edge_triggered;
+            existing.delivered_once = false;
             existing.enabled = true;
             false
         } else {
@@ -203,6 +207,7 @@ impl PollerObject {
                 data,
                 ready_bits,
                 oneshot,
+                edge_triggered,
             ));
             true
         };
@@ -246,6 +251,21 @@ impl PollerObject {
         for entry in self.entries.lock().iter_mut() {
             if Arc::ptr_eq(&entry.object, object) {
                 entry.enabled = false;
+            }
+        }
+    }
+
+    pub fn mark_delivered_ready_bits(&self, ready_events: &[crate::polling::PollerReadyEvent]) {
+        if ready_events.is_empty() {
+            return;
+        }
+
+        let mut entries = self.entries.lock();
+        for ready in ready_events {
+            for entry in entries.iter_mut() {
+                if Arc::ptr_eq(&entry.object, &ready.object) && entry.ready_bits == ready.ready_bits {
+                    entry.delivered_once = true;
+                }
             }
         }
     }

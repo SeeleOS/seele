@@ -141,13 +141,13 @@ struct PreparedExecve {
     next_fd_table: Vec<Option<crate::process::FdEntry>>,
     next_snapshot: ThreadSnapshot,
     command_line: Vec<String>,
-    threads: Vec<alloc::sync::Weak<spin::Mutex<crate::thread::thread::Thread>>>,
+    threads: Vec<alloc::sync::Weak<crate::memory::utils::Mut<crate::thread::thread::Thread>>>,
     borrowed_addrspace_from_parent: bool,
     parent: Option<crate::process::ProcessRef>,
 }
 
 fn request_exec_siblings_to_exit(
-    threads: Vec<alloc::sync::Weak<spin::Mutex<crate::thread::thread::Thread>>>,
+    threads: Vec<alloc::sync::Weak<crate::memory::utils::Mut<crate::thread::thread::Thread>>>,
     current_thread_id: ThreadID,
 ) {
     with_thread_manager(|manager| {
@@ -156,7 +156,7 @@ fn request_exec_siblings_to_exit(
 }
 
 fn wait_for_exec_siblings_to_stop(
-    threads: Vec<alloc::sync::Weak<spin::Mutex<crate::thread::thread::Thread>>>,
+    threads: Vec<alloc::sync::Weak<crate::memory::utils::Mut<crate::thread::thread::Thread>>>,
     current_thread_id: ThreadID,
 ) {
     while !with_thread_manager(|manager| {

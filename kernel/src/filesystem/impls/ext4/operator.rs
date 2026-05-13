@@ -1,3 +1,4 @@
+use crate::memory::utils::Mut;
 use alloc::{boxed::Box, sync::Arc};
 use core::{
     error::Error,
@@ -5,7 +6,6 @@ use core::{
 };
 
 use ext4plus::{Ext4Read, Ext4Write};
-use spin::mutex::Mutex;
 
 use crate::filesystem::{
     block_device::{BlockDevice, BlockDeviceError},
@@ -13,11 +13,11 @@ use crate::filesystem::{
 };
 
 /// Simple adapter that lets ext4plus read from a generic block device.
-pub struct Ext4BlockOperator(pub Mutex<BlockDeviceOperator>);
+pub struct Ext4BlockOperator(pub Mut<BlockDeviceOperator>);
 
 impl Ext4BlockOperator {
     pub fn new(device: Arc<dyn BlockDevice>) -> Self {
-        Self(Mutex::new(BlockDeviceOperator::new(device)))
+        Self(Mut::new(BlockDeviceOperator::new(device)))
     }
 }
 

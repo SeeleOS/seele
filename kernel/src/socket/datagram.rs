@@ -1,5 +1,5 @@
+use crate::memory::utils::Mut;
 use alloc::{collections::VecDeque, string::String, sync::Weak, vec::Vec};
-use spin::Mutex;
 
 use super::{
     SocketPeerCred, UnixSocketObject, registry::UnixSocketRegistryKey, wake_io, wake_pollers,
@@ -18,33 +18,33 @@ pub struct UnixDatagramMessage {
 
 #[derive(Debug)]
 pub struct UnixDatagramInner {
-    pub recv_queue: Mutex<VecDeque<UnixDatagramMessage>>,
-    pub owner: Mutex<Option<Weak<UnixSocketObject>>>,
-    pub peer: Mutex<Option<Weak<UnixSocketObject>>>,
-    pub local_name: Mutex<Option<String>>,
-    pub local_key: Mutex<Option<UnixSocketRegistryKey>>,
-    pub peer_name: Mutex<Option<String>>,
-    pub peer_key: Mutex<Option<UnixSocketRegistryKey>>,
-    pub peer_cred: Mutex<SocketPeerCred>,
-    pub peer_rights: Mutex<Vec<ObjectRef>>,
-    pub read_shutdown: Mutex<bool>,
-    pub write_shutdown: Mutex<bool>,
+    pub recv_queue: Mut<VecDeque<UnixDatagramMessage>>,
+    pub owner: Mut<Option<Weak<UnixSocketObject>>>,
+    pub peer: Mut<Option<Weak<UnixSocketObject>>>,
+    pub local_name: Mut<Option<String>>,
+    pub local_key: Mut<Option<UnixSocketRegistryKey>>,
+    pub peer_name: Mut<Option<String>>,
+    pub peer_key: Mut<Option<UnixSocketRegistryKey>>,
+    pub peer_cred: Mut<SocketPeerCred>,
+    pub peer_rights: Mut<Vec<ObjectRef>>,
+    pub read_shutdown: Mut<bool>,
+    pub write_shutdown: Mut<bool>,
 }
 
 impl UnixDatagramInner {
     pub fn new() -> Self {
         Self {
-            recv_queue: Mutex::new(VecDeque::new()),
-            owner: Mutex::new(None),
-            peer: Mutex::new(None),
-            local_name: Mutex::new(None),
-            local_key: Mutex::new(None),
-            peer_name: Mutex::new(None),
-            peer_key: Mutex::new(None),
-            peer_cred: Mutex::new(SocketPeerCred::default()),
-            peer_rights: Mutex::new(Vec::new()),
-            read_shutdown: Mutex::new(false),
-            write_shutdown: Mutex::new(false),
+            recv_queue: Mut::new(VecDeque::new()),
+            owner: Mut::new(None),
+            peer: Mut::new(None),
+            local_name: Mut::new(None),
+            local_key: Mut::new(None),
+            peer_name: Mut::new(None),
+            peer_key: Mut::new(None),
+            peer_cred: Mut::new(SocketPeerCred::default()),
+            peer_rights: Mut::new(Vec::new()),
+            read_shutdown: Mut::new(false),
+            write_shutdown: Mut::new(false),
         }
     }
 

@@ -1,4 +1,4 @@
-use spin::Mutex;
+use crate::memory::utils::Mut;
 
 use crate::object::FileFlags;
 
@@ -20,9 +20,9 @@ impl UnixSocketKind {
 #[derive(Debug)]
 pub struct UnixSocketObject {
     pub kind: UnixSocketKind,
-    pub state: Mutex<UnixSocketState>,
-    pub flags: Mutex<FileFlags>,
-    pub pass_cred: Mutex<bool>,
-    pub priority: Mutex<i32>,
+    pub state: Mut<UnixSocketState>,
+    pub flags: Mut<FileFlags>,
+    pub pass_cred: Mut<bool>,
+    pub priority: Mut<i32>,
     pub creator_cred: SocketPeerCred,
 }

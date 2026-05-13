@@ -1,10 +1,10 @@
+use crate::memory::utils::Mut;
 use alloc::{
     collections::{BTreeMap, VecDeque},
     sync::Arc,
     vec,
     vec::Vec,
 };
-use spin::Mutex;
 
 use crate::filesystem::block_device::{BlockDevice, BlockDeviceError, BlockDeviceResult};
 
@@ -40,7 +40,7 @@ pub struct CachedBlockDevice {
     inner: Arc<dyn BlockDevice>,
     max_entries: usize,
     readahead_blocks: usize,
-    state: Mutex<CacheState>,
+    state: Mut<CacheState>,
 }
 
 impl CachedBlockDevice {
@@ -53,7 +53,7 @@ impl CachedBlockDevice {
             inner,
             max_entries: max_entries.max(1),
             readahead_blocks: DEFAULT_READAHEAD_BLOCKS,
-            state: Mutex::new(CacheState::new()),
+            state: Mut::new(CacheState::new()),
         }
     }
 

@@ -1,5 +1,5 @@
+use crate::memory::utils::Mut;
 use alloc::sync::Arc;
-use spin::Mutex;
 
 use crate::filesystem::{
     errors::FSError,
@@ -24,16 +24,16 @@ impl StaticFs {
     fn materialize(&self, node: &'static StaticNode) -> FileLike {
         match node {
             StaticNode::Directory(node) => {
-                FileLike::Directory(Arc::new(Mutex::new(StaticDirectoryHandle::new(node))))
+                FileLike::Directory(Arc::new(Mut::new(StaticDirectoryHandle::new(node))))
             }
             StaticNode::File(node) => {
-                FileLike::File(Arc::new(Mutex::new(StaticFileHandle::new(node))))
+                FileLike::File(Arc::new(Mut::new(StaticFileHandle::new(node))))
             }
             StaticNode::Symlink(node) => {
-                FileLike::Symlink(Arc::new(Mutex::new(StaticSymlinkHandle::new(node))))
+                FileLike::Symlink(Arc::new(Mut::new(StaticSymlinkHandle::new(node))))
             }
             StaticNode::Device(node) => {
-                FileLike::File(Arc::new(Mutex::new(StaticDeviceHandle::new(node))))
+                FileLike::File(Arc::new(Mut::new(StaticDeviceHandle::new(node))))
             }
         }
     }

@@ -1,7 +1,7 @@
+use crate::memory::utils::Mut;
 use alloc::sync::Arc;
 use bootloader_api::info::{MemoryRegion, MemoryRegionKind};
 use conquer_once::spin::OnceCell;
-use spin::Mutex;
 
 use crate::memory::{
     heap::{HEAP_BACKING_RESERVE_SIZE, init_heap},
@@ -45,12 +45,12 @@ pub fn init(physical_memory_offset: u64, memory_regions: &'static [MemoryRegion]
     };
     let frame_allocator = BootinfoFrameAllocator::new(memory_regions, &runtime_cursor);
 
-    let mapper = Arc::new(Mutex::new(mapper));
-    let frame_allocator = Arc::new(Mutex::new(frame_allocator));
+    let mapper = Arc::new(Mut::new(mapper));
+    let frame_allocator = Arc::new(Mut::new(frame_allocator));
 
     MAPPER.get_or_init(|| mapper.clone());
     FRAME_ALLOCATOR.get_or_init(|| frame_allocator.clone());
-    HEAP_BACKING_ALLOCATOR.get_or_init(|| Mutex::new(heap_backing_allocator));
+    HEAP_BACKING_ALLOCATOR.get_or_init(|| Mut::new(heap_backing_allocator));
     PHYSICAL_MEMORY_OFFSET.get_or_init(|| physical_memory_offset);
     MEMORY_REGIONS.get_or_init(|| memory_regions);
     USABLE_MEMORY_BYTES.get_or_init(|| {

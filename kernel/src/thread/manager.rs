@@ -1,10 +1,10 @@
+use crate::memory::utils::Mut;
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
     sync::{Arc, Weak},
     vec::Vec,
 };
 use core::mem;
-use spin::Mutex;
 
 use crate::{
     object::linux_anon::{
@@ -58,7 +58,7 @@ impl ThreadManager {
 
     pub fn spawn(&mut self, thread: Thread) -> ThreadRef {
         let id = thread.id;
-        let thread = Arc::new(Mutex::new(thread));
+        let thread = Arc::new(Mut::new(thread));
 
         self.threads.insert(id, thread.clone());
 
@@ -70,7 +70,7 @@ impl ThreadManager {
 
     pub fn spawn_blocked(&mut self, thread: Thread, block_type: BlockType) -> ThreadRef {
         let id = thread.id;
-        let thread = Arc::new(Mutex::new(thread));
+        let thread = Arc::new(Mut::new(thread));
 
         self.threads.insert(id, thread.clone());
 
@@ -178,7 +178,7 @@ impl ThreadManager {
 
     pub fn exit_thread_list_except(
         &mut self,
-        threads: Vec<Weak<Mutex<Thread>>>,
+        threads: Vec<Weak<Mut<Thread>>>,
         current_id: ThreadID,
     ) -> bool {
         let mut all_stopped = true;

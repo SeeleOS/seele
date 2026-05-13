@@ -81,6 +81,17 @@ pub fn note_user_mode_resume(now_ns: u64) {
     });
 }
 
+fn note_thread_run_start(start_cycles: u64) {
+    crate::smp::with_current_cpu(|cpu| {
+        cpu.thread_run_start_cycles
+            .store(start_cycles, Ordering::Release);
+    });
+}
+
+fn take_thread_run_start() -> u64 {
+    crate::smp::with_current_cpu(|cpu| cpu.thread_run_start_cycles.swap(0, Ordering::AcqRel))
+}
+
 pub fn consume_current_thread_timeslice(now_ns: u64) -> bool {
     let elapsed_ns = crate::smp::with_current_cpu(|cpu| {
         let previous = cpu.last_timer_tick_ns.swap(now_ns, Ordering::AcqRel);
@@ -93,7 +104,10 @@ pub fn consume_current_thread_timeslice(now_ns: u64) -> bool {
 
     let thread_ref = crate::thread::get_current_thread();
     let mut thread = thread_ref.lock();
-    if !matches!(thread.get_appropriate_snapshot().snapshot_type, ThreadSnapshotType::Thread) {
+    if !matches!(
+        thread.get_appropriate_snapshot().snapshot_type,
+        ThreadSnapshotType::Thread
+    ) {
         return false;
     }
 
@@ -267,10 +281,19 @@ pub fn run() -> ! {
         profile::record(ProfileCategory::SchedulerSelect, select_start);
 
         if let Some(thread) = next_thread {
-            let switch_start = profile::scope_start();
-            run_ready_thread(thread);
-            profile::record(ProfileCategory::SchedulerSwitch, switch_start);
-            profile::record(ProfileCategory::SchedulerWork, scheduler_start);
+            let dispatch_start = profile::scope_start();
+            let thread_run_cycles = run_ready_thread(thread);
+            let dispatch_end = profile::scope_start();
+            let total_dispatch_cycles = dispatch_end.saturating_sub(dispatch_start);
+            if thread_run_cycles != 0 {
+                profile::record_cycles(ProfileCategory::ThreadRunWindow, thread_run_cycles);
+            }
+            let scheduler_switch_cycles = total_dispatch_cycles.saturating_sub(thread_run_cycles);
+            profile::record_cycles(ProfileCategory::SchedulerSwitch, scheduler_switch_cycles);
+            let scheduler_work_cycles = dispatch_end
+                .saturating_sub(scheduler_start)
+                .saturating_sub(thread_run_cycles);
+            profile::record_cycles(ProfileCategory::SchedulerWork, scheduler_work_cycles);
             maybe_report_profile();
             continue;
         }
@@ -283,7 +306,8 @@ pub fn run() -> ! {
     }
 }
 
-fn run_ready_thread(thread_ref: ThreadRef) {
+fn run_ready_thread(thread_ref: ThreadRef) -> u64 {
+    let dispatch_prepare_start = profile::scope_start();
     let Some((thread_snapshot, scheduler_snapshot)) = without_interrupts(|| {
         let mut thread = thread_ref.lock();
         if !matches!(thread.state, State::Ready) {
@@ -292,7 +316,10 @@ fn run_ready_thread(thread_ref: ThreadRef) {
 
         let process = thread.parent.clone();
         thread.state = State::Running;
-        if matches!(thread.get_appropriate_snapshot().snapshot_type, ThreadSnapshotType::Thread) {
+        if matches!(
+            thread.get_appropriate_snapshot().snapshot_type,
+            ThreadSnapshotType::Thread
+        ) {
             reload_thread_timeslice(&mut thread);
         }
         set_current_thread(Some(thread_ref.clone()));
@@ -313,14 +340,25 @@ fn run_ready_thread(thread_ref: ThreadRef) {
             &mut thread.scheduler_snapshot as *mut ThreadSnapshot,
         ))
     }) else {
-        return;
+        return 0;
     };
+    profile::record(ProfileCategory::SchedulerDispatch, dispatch_prepare_start);
 
+    note_thread_run_start(profile::scope_start());
     unsafe {
         switch_from_scheduler_to_thread(thread_snapshot, scheduler_snapshot);
     };
+    let thread_run_start = take_thread_run_start();
+    let thread_run_cycles = if thread_run_start == 0 {
+        0
+    } else {
+        profile::scope_start().saturating_sub(thread_run_start)
+    };
 
+    let after_yield_start = profile::scope_start();
     after_thread_yield(thread_ref);
+    profile::record(ProfileCategory::SchedulerAfterYield, after_yield_start);
+    thread_run_cycles
 }
 
 #[unsafe(naked)]

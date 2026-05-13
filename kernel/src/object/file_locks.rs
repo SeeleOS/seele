@@ -1,7 +1,7 @@
 use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec, vec::Vec};
 
+use crate::memory::utils::Mut;
 use lazy_static::lazy_static;
-use spin::Mutex;
 
 use crate::{
     memory::user_safe,
@@ -70,8 +70,7 @@ pub(super) struct ParsedFlockRequest {
 }
 
 lazy_static! {
-    static ref ADVISORY_LOCKS: Mutex<BTreeMap<String, Vec<AdvisoryLock>>> =
-        Mutex::new(BTreeMap::new());
+    static ref ADVISORY_LOCKS: Mut<BTreeMap<String, Vec<AdvisoryLock>>> = Mut::new(BTreeMap::new());
 }
 
 pub(crate) fn fcntl_get_lock(object: &ObjectRef, arg: *mut LinuxFlock, ofd: bool) -> SyscallResult {

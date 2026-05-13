@@ -1,8 +1,8 @@
 #![allow(clippy::module_inception)]
 
+use crate::memory::utils::{Mut, MutGuard};
 use alloc::sync::Arc;
 use conquer_once::spin::OnceCell;
-use spin::{Mutex, MutexGuard};
 use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
@@ -21,12 +21,12 @@ pub mod switch;
 pub mod thread;
 pub mod yielding;
 
-pub static THREAD_MANAGER: OnceCell<Mutex<ThreadManager>> = OnceCell::uninit();
+pub static THREAD_MANAGER: OnceCell<Mut<ThreadManager>> = OnceCell::uninit();
 
 pub fn init() {
     without_interrupts(|| {
         THREAD_MANAGER
-            .get_or_init(|| Mutex::new(ThreadManager::default()))
+            .get_or_init(|| Mut::new(ThreadManager::default()))
             .lock()
             .init();
     });
@@ -48,11 +48,11 @@ pub fn try_with_thread_manager<R>(f: impl FnOnce(&mut ThreadManager) -> R) -> Op
     })
 }
 
-pub fn lock_thread_manager() -> MutexGuard<'static, ThreadManager> {
+pub fn lock_thread_manager() -> MutGuard<'static, ThreadManager> {
     THREAD_MANAGER.get().unwrap().lock()
 }
 
-pub type ThreadRef = Arc<Mutex<Thread>>;
+pub type ThreadRef = Arc<Mut<Thread>>;
 
 pub fn get_current_thread() -> ThreadRef {
     current_thread()

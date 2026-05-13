@@ -1,5 +1,5 @@
+use crate::memory::utils::Mut;
 use alloc::{sync::Arc, vec::Vec};
-use spin::Mutex;
 
 use crate::{
     misc::snapshot::Snapshot,
@@ -86,7 +86,7 @@ impl Default for Thread {
 
 impl Thread {
     pub fn empty() -> ThreadRef {
-        Arc::new(Mutex::new(Thread::default()))
+        Arc::new(Mut::new(Thread::default()))
     }
 }
 

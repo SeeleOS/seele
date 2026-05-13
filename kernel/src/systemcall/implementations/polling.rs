@@ -149,6 +149,7 @@ fn epoll_update_impl(
 ) -> Result<usize, SyscallError> {
     let target_object = poll_identity_object(target_object);
     let oneshot = bits.contains(EpollEvents::ONESHOT);
+    let edge_triggered = bits.contains(EpollEvents::ET);
 
     if target_object.clone().as_pollable().is_err() {
         return Err(SyscallError::PermissionDenied);
@@ -164,6 +165,7 @@ fn epoll_update_impl(
             data,
             ready_bits,
             oneshot,
+            edge_triggered,
         );
     }
 

@@ -118,7 +118,10 @@ pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
     let timeslice_exhausted = consume_current_thread_timeslice(now_ns);
     let should_resched = timeslice_exhausted
         || current_cpu_has_resched_request()
-        || matches!(get_current_thread().lock().state, crate::thread::misc::State::Exiting);
+        || matches!(
+            get_current_thread().lock().state,
+            crate::thread::misc::State::Exiting
+        );
 
     if !should_resched {
         return;

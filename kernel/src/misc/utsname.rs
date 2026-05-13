@@ -1,7 +1,7 @@
-use spin::Mutex;
+use crate::memory::utils::Mut;
 
-static HOSTNAME: Mutex<Option<[u8; 65]>> = Mutex::new(None);
-static DOMAINNAME: Mutex<Option<[u8; 65]>> = Mutex::new(None);
+static HOSTNAME: Mut<Option<[u8; 65]>> = Mut::new(None);
+static DOMAINNAME: Mut<Option<[u8; 65]>> = Mut::new(None);
 
 pub const DEFAULT_SYSNAME: &str = "Seele";
 pub const DEFAULT_RELEASE: &str = "6.12.0-seele";

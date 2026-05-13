@@ -1,8 +1,8 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::ptr::NonNull;
 
+use crate::memory::utils::Mut;
 use conquer_once::spin::OnceCell;
-use spin::Mutex;
 use x86_64::structures::paging::{PageSize, Size4KiB};
 
 use crate::memory::{paging::FRAME_ALLOCATOR, utils::apply_offset};
@@ -11,10 +11,10 @@ const PAGE_SIZE: usize = Size4KiB::SIZE as usize;
 
 type DmaPagePool = BTreeMap<usize, Vec<(u64, usize)>>;
 
-static DMA_PAGE_POOL: OnceCell<Mutex<DmaPagePool>> = OnceCell::uninit();
+static DMA_PAGE_POOL: OnceCell<Mut<DmaPagePool>> = OnceCell::uninit();
 
-fn dma_page_pool() -> &'static Mutex<DmaPagePool> {
-    DMA_PAGE_POOL.get_or_init(|| Mutex::new(BTreeMap::new()))
+fn dma_page_pool() -> &'static Mut<DmaPagePool> {
+    DMA_PAGE_POOL.get_or_init(|| Mut::new(BTreeMap::new()))
 }
 
 pub fn allocate_dma_pages(pages: usize) -> Option<(u64, NonNull<u8>)> {

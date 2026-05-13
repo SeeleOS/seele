@@ -9,7 +9,9 @@ use crate::{
     misc::{mouse::mouse_interrupt_handler, snapshot::Snapshot, time::Time},
     smp::{gs::GsContext, with_current_cpu},
     thread::{
-        scheduling::{note_user_mode_resume, return_to_scheduler, take_current_cpu_resched_request},
+        scheduling::{
+            note_user_mode_resume, return_to_scheduler, take_current_cpu_resched_request,
+        },
         snapshot::ThreadSnapshotType,
     },
 };

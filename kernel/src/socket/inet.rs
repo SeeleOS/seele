@@ -1,7 +1,7 @@
 use alloc::{sync::Arc, vec, vec::Vec};
 use core::{mem, slice};
 
-use spin::Mutex;
+use crate::memory::utils::Mut;
 
 use crate::{
     filesystem::info::LinuxStat,
@@ -50,9 +50,9 @@ struct InetState {
 #[derive(Debug)]
 pub struct InetSocketObject {
     pub kind: InetSocketKind,
-    state: Mutex<InetState>,
-    flags: Mutex<FileFlags>,
-    priority: Mutex<i32>,
+    state: Mut<InetState>,
+    flags: Mut<FileFlags>,
+    priority: Mut<i32>,
 }
 
 #[repr(C)]
@@ -104,7 +104,7 @@ impl InetSocketObject {
                 TransportKind::Tcp => InetSocketKind::Stream,
                 TransportKind::Udp => InetSocketKind::Datagram,
             },
-            state: Mutex::new(InetState {
+            state: Mut::new(InetState {
                 handle,
                 local: None,
                 peer: None,
@@ -112,15 +112,15 @@ impl InetSocketObject {
                 read_shutdown: false,
                 write_shutdown: false,
             }),
-            flags: Mutex::new(FileFlags::empty()),
-            priority: Mutex::new(0),
+            flags: Mut::new(FileFlags::empty()),
+            priority: Mut::new(0),
         }))
     }
 
     fn from_accepted(handle: NetSocketHandle, local: InetAddress, peer: InetAddress) -> Arc<Self> {
         Arc::new(Self {
             kind: InetSocketKind::Stream,
-            state: Mutex::new(InetState {
+            state: Mut::new(InetState {
                 handle,
                 local: Some(local),
                 peer: Some(peer),
@@ -128,8 +128,8 @@ impl InetSocketObject {
                 read_shutdown: false,
                 write_shutdown: false,
             }),
-            flags: Mutex::new(FileFlags::empty()),
-            priority: Mutex::new(0),
+            flags: Mut::new(FileFlags::empty()),
+            priority: Mut::new(0),
         })
     }
 

@@ -1,12 +1,12 @@
+use crate::memory::utils::Mut;
 use pc_keyboard::{KeyEvent, KeyState};
-use spin::Mutex;
 
 use crate::terminal::linux_kd::linux_keycode_from_keycode;
 
 use super::object::{KEYBOARD_EVENT_DEVICE, MOUSE_EVENT_DEVICE};
 
 lazy_static::lazy_static! {
-    static ref PS2_PACKET_DECODER: Mutex<Ps2MouseDecoder> = Mutex::new(Ps2MouseDecoder::default());
+    static ref PS2_PACKET_DECODER: Mut<Ps2MouseDecoder> = Mut::new(Ps2MouseDecoder::default());
 }
 
 pub fn init_mouse_packet_decoder() {

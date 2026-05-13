@@ -1,7 +1,7 @@
+use crate::memory::utils::Mut;
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use core::mem;
 use lazy_static::lazy_static;
-use spin::Mutex;
 use x86_64::{
     VirtAddr,
     structures::paging::{FrameAllocator, FrameDeallocator, PageTableFlags, PhysFrame, Size4KiB},
@@ -33,7 +33,7 @@ const PAGE_SIZE: u64 = 4096;
 const IPC_MODE_MASK: i32 = 0o777;
 
 lazy_static! {
-    static ref SYSV_SHM_STATE: Mutex<SysvShmState> = Mutex::new(SysvShmState::default());
+    static ref SYSV_SHM_STATE: Mut<SysvShmState> = Mut::new(SysvShmState::default());
 }
 
 #[repr(C)]

@@ -5889,6 +5889,7 @@ fn epoll_syscalls_follow_linux_rules() {
     const EPOLLOUT: u32 = 0x004;
     const EPOLLHUP: u32 = 0x010;
     const EPOLLRDHUP: u32 = 0x2000;
+    const EPOLLET: u32 = 0x8000_0000;
     const EPOLLONESHOT: u32 = 0x4000_0000;
     const AF_UNIX: u64 = 1;
     const SOCK_STREAM: u64 = 1;
@@ -5923,6 +5924,36 @@ fn epoll_syscalls_follow_linux_rules() {
     let ready_data = ready.data;
     assert_eq!(ready_events, EPOLLOUT);
     assert_eq!(ready_data, 0xfeed_beef);
+
+    let edge = TestLinuxEpollEvent {
+        events: EPOLLOUT | EPOLLET,
+        data: 0xabcd_1234,
+    };
+    expect_ok(
+        SyscallArgs::new([
+            epoll_fd as u64,
+            EPOLL_CTL_MOD,
+            eventfd as u64,
+            (&edge as *const TestLinuxEpollEvent) as u64,
+            0,
+            0,
+        ])
+        .call::<EpollCtl>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([epoll_fd as u64, epoll_events, 4, 0, 0, 0]).call::<EpollWait>(),
+        1,
+    );
+    let edge_ready = read_user_value::<TestLinuxEpollEvent>(epoll_events);
+    let edge_ready_events = edge_ready.events;
+    let edge_ready_data = edge_ready.data;
+    assert_eq!(edge_ready_events, EPOLLOUT);
+    assert_eq!(edge_ready_data, 0xabcd_1234);
+    expect_ok(
+        SyscallArgs::new([epoll_fd as u64, epoll_events, 4, 0, 0, 0]).call::<EpollWait>(),
+        0,
+    );
 
     let oneshot = TestLinuxEpollEvent {
         events: EPOLLOUT | EPOLLONESHOT,

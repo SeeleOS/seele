@@ -1,3 +1,4 @@
+use crate::memory::utils::Mut;
 use alloc::{collections::btree_map::BTreeMap, vec::Vec};
 use lazy_static::lazy_static;
 use x86_64::instructions::interrupts::without_interrupts;
@@ -18,7 +19,7 @@ use crate::{
 };
 
 lazy_static! {
-    pub static ref MANAGER: spin::Mutex<Manager> = spin::Mutex::new(Manager::default());
+    pub static ref MANAGER: crate::memory::utils::Mut<Manager> = Mut::new(Manager::default());
 }
 
 #[derive(Debug, Default)]

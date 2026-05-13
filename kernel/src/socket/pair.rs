@@ -1,5 +1,5 @@
+use crate::memory::utils::Mut;
 use alloc::sync::Arc;
-use spin::Mutex;
 
 use crate::object::FileFlags;
 
@@ -31,18 +31,18 @@ impl UnixSocketObject {
                 let creator_cred = current_socket_peer_cred();
                 let left = Arc::new(Self {
                     kind,
-                    state: Mutex::new(UnixSocketState::Stream(left_stream.clone())),
-                    flags: Mutex::new(FileFlags::empty()),
-                    pass_cred: Mutex::new(false),
-                    priority: Mutex::new(0),
+                    state: Mut::new(UnixSocketState::Stream(left_stream.clone())),
+                    flags: Mut::new(FileFlags::empty()),
+                    pass_cred: Mut::new(false),
+                    priority: Mut::new(0),
                     creator_cred,
                 });
                 let right = Arc::new(Self {
                     kind,
-                    state: Mutex::new(UnixSocketState::Stream(right_stream.clone())),
-                    flags: Mutex::new(FileFlags::empty()),
-                    pass_cred: Mutex::new(false),
-                    priority: Mutex::new(0),
+                    state: Mut::new(UnixSocketState::Stream(right_stream.clone())),
+                    flags: Mut::new(FileFlags::empty()),
+                    pass_cred: Mut::new(false),
+                    priority: Mut::new(0),
                     creator_cred,
                 });
 
@@ -58,18 +58,18 @@ impl UnixSocketObject {
                 let creator_cred = current_socket_peer_cred();
                 let left = Arc::new(Self {
                     kind: UnixSocketKind::Datagram,
-                    state: Mutex::new(UnixSocketState::Datagram(left_inner.clone())),
-                    flags: Mutex::new(FileFlags::empty()),
-                    pass_cred: Mutex::new(false),
-                    priority: Mutex::new(0),
+                    state: Mut::new(UnixSocketState::Datagram(left_inner.clone())),
+                    flags: Mut::new(FileFlags::empty()),
+                    pass_cred: Mut::new(false),
+                    priority: Mut::new(0),
                     creator_cred,
                 });
                 let right = Arc::new(Self {
                     kind: UnixSocketKind::Datagram,
-                    state: Mutex::new(UnixSocketState::Datagram(right_inner.clone())),
-                    flags: Mutex::new(FileFlags::empty()),
-                    pass_cred: Mutex::new(false),
-                    priority: Mutex::new(0),
+                    state: Mut::new(UnixSocketState::Datagram(right_inner.clone())),
+                    flags: Mut::new(FileFlags::empty()),
+                    pass_cred: Mut::new(false),
+                    priority: Mut::new(0),
                     creator_cred,
                 });
 

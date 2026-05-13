@@ -1,3 +1,4 @@
+use crate::memory::utils::Mut;
 use crate::process::group::ProcessGroupID;
 use crate::process::manager::MANAGER;
 use crate::process::misc::ProcessID;
@@ -28,7 +29,6 @@ use alloc::vec::Vec;
 use bitflags::bitflags;
 use core::mem::size_of;
 use num_enum::TryFromPrimitive;
-use spin::Mutex;
 use strum::IntoEnumIterator;
 
 const SIG_DFL: usize = 0;
@@ -43,7 +43,7 @@ struct LinuxStack {
     ss_size: usize,
 }
 
-static SIGALTSTACK_STATE: Mutex<LinuxStack> = Mutex::new(LinuxStack {
+static SIGALTSTACK_STATE: Mut<LinuxStack> = Mut::new(LinuxStack {
     ss_sp: 0,
     ss_flags: StackFlags::SS_DISABLE.bits(),
     ss_size: 0,

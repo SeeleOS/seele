@@ -1,5 +1,5 @@
+use crate::memory::utils::Mut;
 use alloc::{collections::btree_map::BTreeMap, sync::Arc, vec::Vec};
-use spin::Mutex;
 
 use crate::{
     object::misc::ObjectRef,
@@ -36,7 +36,7 @@ impl PtyRegistry {
         let number = self.next_number;
         self.next_number += 1;
 
-        let shared = Arc::new(Mutex::new(PtyShared::default()));
+        let shared = Arc::new(Mut::new(PtyShared::default()));
         let master = Arc::new(PtyMaster::new(number, shared.clone()));
         let slave = Arc::new(PtySlave::new(number, shared.clone()));
         let master_object: ObjectRef = master.clone();
@@ -62,7 +62,7 @@ impl PtyRegistry {
 }
 
 lazy_static::lazy_static! {
-    static ref PTY_REGISTRY: Mutex<PtyRegistry> = Mutex::new(PtyRegistry::default());
+    static ref PTY_REGISTRY: Mut<PtyRegistry> = Mut::new(PtyRegistry::default());
 }
 
 fn create_registered_pty(locked: bool) -> (u32, ObjectRef, ObjectRef) {

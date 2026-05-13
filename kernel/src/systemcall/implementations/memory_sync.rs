@@ -1,3 +1,4 @@
+use crate::memory::utils::Mut;
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
     sync::Arc,
@@ -5,7 +6,6 @@ use alloc::{
 };
 use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
-use spin::Mutex;
 use x86_64::structures::paging::{PageSize, Size4KiB};
 use x86_64::{VirtAddr, registers::model_specific::FsBase};
 
@@ -125,7 +125,7 @@ struct FutexWaiter {
     bitset: u32,
 }
 
-static FUTEX_QUEUE: Mutex<BTreeMap<FutexKey, VecDeque<FutexWaiter>>> = Mutex::new(BTreeMap::new());
+static FUTEX_QUEUE: Mut<BTreeMap<FutexKey, VecDeque<FutexWaiter>>> = Mut::new(BTreeMap::new());
 const FUTEX_CLOCK_REALTIME: u64 = 0x100;
 const FUTEX_BITSET_MATCH_ANY: u64 = 0xffff_ffff;
 const FUTEX_OP_OPARG_SHIFT: u32 = 8;

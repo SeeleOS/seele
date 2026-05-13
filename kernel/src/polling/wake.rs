@@ -98,7 +98,11 @@ impl PollerObject {
             .entries
             .lock()
             .iter()
-            .filter(|entry| entry.enabled && Self::is_entry_ready(entry))
+            .filter(|entry| {
+                entry.enabled
+                    && (!entry.edge_triggered || !entry.delivered_once)
+                    && Self::is_entry_ready(entry)
+            })
             .map(|entry| {
                 (
                     entry.object.clone(),
@@ -143,6 +147,9 @@ impl PollerObject {
     pub fn take_woken_events(&self, maxevents: usize) -> Vec<PollerReadyEvent> {
         let mut woken_events = self.woken_events.lock();
         let count = woken_events.len().min(maxevents);
-        woken_events.drain(..count).collect()
+        let ready = woken_events.drain(..count).collect::<Vec<_>>();
+        drop(woken_events);
+        self.mark_delivered_ready_bits(&ready);
+        ready
     }
 }

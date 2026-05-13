@@ -1,7 +1,7 @@
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
 
+use crate::memory::utils::Mut;
 use lazy_static::lazy_static;
-use spin::Mutex;
 use x86_64::VirtAddr;
 
 use crate::{
@@ -24,8 +24,8 @@ use crate::{
 use super::{card::CARD0_RDEV, configure, events, state::DrmState, user::current_debug_process};
 
 lazy_static! {
-    pub(super) static ref DRM_STATE: Mutex<DrmState> = Mutex::new(DrmState::new());
-    pub(super) static ref DRM_EVENT_QUEUE: Mutex<VecDeque<u8>> = Mutex::new(VecDeque::new());
+    pub(super) static ref DRM_STATE: Mut<DrmState> = Mut::new(DrmState::new());
+    pub(super) static ref DRM_EVENT_QUEUE: Mut<VecDeque<u8>> = Mut::new(VecDeque::new());
 }
 
 pub(super) const DRM_BUFFER_OFFSET_BASE: u64 = 0x1000_0000;

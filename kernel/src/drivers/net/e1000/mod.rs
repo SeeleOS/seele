@@ -1,7 +1,7 @@
 use alloc::{sync::Arc, vec, vec::Vec};
 use core::{mem::size_of, ptr};
 
-use spin::Mutex;
+use crate::memory::utils::Mut;
 use virtio_drivers::transport::pci::bus::{BarInfo, Command, PciRoot};
 
 use crate::{
@@ -94,7 +94,7 @@ struct E1000State {
 struct E1000Device {
     mmio_base: u64,
     mac: [u8; 6],
-    state: Mutex<E1000State>,
+    state: Mut<E1000State>,
     rx_ring: DmaRegion,
     tx_ring: DmaRegion,
     rx_buffers: Vec<DmaRegion>,
@@ -177,7 +177,7 @@ impl E1000Device {
         let mut device = Self {
             mmio_base,
             mac: [0; 6],
-            state: Mutex::new(E1000State {
+            state: Mut::new(E1000State {
                 rx_next: 0,
                 tx_next: 0,
             }),

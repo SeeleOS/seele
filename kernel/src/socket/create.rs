@@ -1,5 +1,5 @@
+use crate::memory::utils::Mut;
 use alloc::sync::Arc;
-use spin::Mutex;
 
 use crate::object::FileFlags;
 
@@ -19,10 +19,10 @@ impl UnixSocketObject {
         };
         Self {
             kind,
-            state: Mutex::new(state),
-            flags: Mutex::new(FileFlags::empty()),
-            pass_cred: Mutex::new(false),
-            priority: Mutex::new(0),
+            state: Mut::new(state),
+            flags: Mut::new(FileFlags::empty()),
+            pass_cred: Mut::new(false),
+            priority: Mut::new(0),
             creator_cred: current_socket_peer_cred(),
         }
     }

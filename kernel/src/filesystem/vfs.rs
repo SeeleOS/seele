@@ -1,6 +1,6 @@
+use crate::memory::utils::Mut;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::cmp::Reverse;
-use spin::Mutex;
 
 use crate::filesystem::{
     block_device::BlockDevice,
@@ -21,14 +21,14 @@ use lazy_static::lazy_static;
 use crate::drivers::virtio::block::root_device as virtio_root_device;
 
 lazy_static! {
-    pub static ref VirtualFS: Mutex<VFS> = Mutex::new(VFS::new());
+    pub static ref VirtualFS: Mut<VFS> = Mut::new(VFS::new());
 }
 
 pub type FSResult<T> = Result<T, FSError>;
-pub type WrappedDirectory = Arc<Mutex<dyn Directory>>;
-pub type WrappedFile = Arc<Mutex<dyn File>>;
-pub type WrappedSymlink = Arc<Mutex<dyn Symlink>>;
-pub type FileSystemRef = Arc<Mutex<dyn FileSystem>>;
+pub type WrappedDirectory = Arc<Mut<dyn Directory>>;
+pub type WrappedFile = Arc<Mut<dyn File>>;
+pub type WrappedSymlink = Arc<Mut<dyn Symlink>>;
+pub type FileSystemRef = Arc<Mut<dyn FileSystem>>;
 
 pub struct Mount {
     pub path: Path,
@@ -109,7 +109,7 @@ impl VFS {
     }
 
     pub fn mount(&mut self, path: Path, fs: impl FileSystem + 'static) -> FSResult<()> {
-        let fs: FileSystemRef = Arc::new(Mutex::new(fs));
+        let fs: FileSystemRef = Arc::new(Mut::new(fs));
         self.mount_ref(path, fs)
     }
 

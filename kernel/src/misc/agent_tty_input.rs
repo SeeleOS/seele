@@ -1,7 +1,7 @@
 use alloc::collections::vec_deque::VecDeque;
 use core::mem;
 
-use spin::Mutex;
+use crate::memory::utils::Mut;
 use x86_64::instructions::port::Port;
 
 use crate::{keyboard::char_processing::process_char, object::tty_device::get_active_tty};
@@ -23,7 +23,7 @@ impl AgentTtyInput {
     }
 }
 
-static AGENT_TTY_INPUT: Mutex<AgentTtyInput> = Mutex::new(AgentTtyInput {
+static AGENT_TTY_INPUT: Mut<AgentTtyInput> = Mut::new(AgentTtyInput {
     pending_bytes: VecDeque::new(),
 });
 

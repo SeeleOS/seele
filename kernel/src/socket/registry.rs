@@ -1,10 +1,10 @@
+use crate::memory::utils::Mut;
 use alloc::{
     collections::BTreeMap,
     string::String,
     sync::{Arc, Weak},
 };
 use lazy_static::lazy_static;
-use spin::Mutex;
 
 use crate::filesystem::{object::mount_device_id_for_path, path::Path, vfs_operations::open_path};
 
@@ -38,8 +38,8 @@ pub enum UnixSocketRegistryEntry {
 }
 
 lazy_static! {
-    pub static ref UNIX_SOCKET_REGISTRY: Mutex<BTreeMap<UnixSocketRegistryKey, UnixSocketRegistryEntry>> =
-        Mutex::new(BTreeMap::new());
+    pub static ref UNIX_SOCKET_REGISTRY: Mut<BTreeMap<UnixSocketRegistryKey, UnixSocketRegistryEntry>> =
+        Mut::new(BTreeMap::new());
 }
 
 #[cfg(test)]

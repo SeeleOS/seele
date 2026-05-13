@@ -1,6 +1,6 @@
+use crate::memory::utils::Mut;
 use alloc::collections::BTreeMap;
 use conquer_once::spin::OnceCell;
-use spin::Mutex;
 use x86_64::{
     PhysAddr,
     structures::paging::{Mapper, PageSize, PageTableFlags, PhysFrame, Size4KiB},
@@ -18,7 +18,7 @@ struct MmioMapping {
     virt_base: u64,
 }
 
-static MMIO_STATE: OnceCell<Mutex<MmioState>> = OnceCell::uninit();
+static MMIO_STATE: OnceCell<Mut<MmioState>> = OnceCell::uninit();
 
 #[derive(Debug)]
 struct MmioState {
@@ -35,8 +35,8 @@ impl MmioState {
     }
 }
 
-fn state() -> &'static Mutex<MmioState> {
-    MMIO_STATE.get_or_init(|| Mutex::new(MmioState::new()))
+fn state() -> &'static Mut<MmioState> {
+    MMIO_STATE.get_or_init(|| Mut::new(MmioState::new()))
 }
 
 pub fn map_mmio(phys_addr: u64, size: usize) -> u64 {

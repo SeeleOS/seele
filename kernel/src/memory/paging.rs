@@ -1,8 +1,8 @@
+use crate::memory::utils::Mut;
 use alloc::sync::Arc;
 use bootloader_api::info::{MemoryRegion, MemoryRegionKind};
 use buddy_system_allocator::FrameAllocator as BuddyFrameAllocator;
 use conquer_once::spin::OnceCell;
-use spin::Mutex;
 use x86_64::{
     PhysAddr, VirtAddr,
     registers::control::Cr3,
@@ -11,9 +11,9 @@ use x86_64::{
     },
 };
 
-pub static MAPPER: OnceCell<Arc<Mutex<OffsetPageTable<'static>>>> = OnceCell::uninit();
-pub static FRAME_ALLOCATOR: OnceCell<Arc<Mutex<BootinfoFrameAllocator>>> = OnceCell::uninit();
-pub static HEAP_BACKING_ALLOCATOR: OnceCell<Mutex<BootstrapFrameAllocator>> = OnceCell::uninit();
+pub static MAPPER: OnceCell<Arc<Mut<OffsetPageTable<'static>>>> = OnceCell::uninit();
+pub static FRAME_ALLOCATOR: OnceCell<Arc<Mut<BootinfoFrameAllocator>>> = OnceCell::uninit();
+pub static HEAP_BACKING_ALLOCATOR: OnceCell<Mut<BootstrapFrameAllocator>> = OnceCell::uninit();
 const LOWER_MEMORY_END: u64 = 0x10_0000;
 const AP_TRAMPOLINE_END: u64 = 0x9000;
 const FRAME_ALLOCATOR_ORDER: usize = 33;

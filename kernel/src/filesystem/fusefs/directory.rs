@@ -1,7 +1,7 @@
 use core::any::Any;
 
+use crate::memory::utils::Mut;
 use alloc::{string::String, sync::Arc, vec::Vec};
-use spin::Mutex;
 
 use crate::filesystem::{
     errors::FSError,
@@ -67,7 +67,7 @@ impl Directory for FuseDirectory {
 
     fn get(&self, name: &str) -> FSResult<FileLike> {
         if name == "." {
-            return Ok(FileLike::Directory(Arc::new(Mutex::new(Self::new(
+            return Ok(FileLike::Directory(Arc::new(Mut::new(Self::new(
                 self.connection.clone(),
                 self.nodeid,
             )))));
@@ -75,15 +75,15 @@ impl Directory for FuseDirectory {
 
         let entry = self.connection.lookup(self.nodeid, name)?;
         Ok(match attr_file_type(entry.attr) {
-            FileLikeType::Directory => FileLike::Directory(Arc::new(Mutex::new(Self::new(
+            FileLikeType::Directory => FileLike::Directory(Arc::new(Mut::new(Self::new(
                 self.connection.clone(),
                 entry.nodeid,
             )))),
-            FileLikeType::File => FileLike::File(Arc::new(Mutex::new(FuseFile::new(
+            FileLikeType::File => FileLike::File(Arc::new(Mut::new(FuseFile::new(
                 self.connection.clone(),
                 entry.nodeid,
             )))),
-            FileLikeType::Symlink => FileLike::Symlink(Arc::new(Mutex::new(FuseSymlink::new(
+            FileLikeType::Symlink => FileLike::Symlink(Arc::new(Mut::new(FuseSymlink::new(
                 self.connection.clone(),
                 entry.nodeid,
             )))),

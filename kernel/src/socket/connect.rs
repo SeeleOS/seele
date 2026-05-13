@@ -1,8 +1,8 @@
+use crate::memory::utils::Mut;
 use alloc::{
     string::String,
     sync::{Arc, Weak},
 };
-use spin::Mutex;
 
 use super::{
     SocketError, SocketResult, UNIX_SOCKET_REGISTRY, UnixSocketKind, UnixSocketObject,
@@ -48,10 +48,10 @@ impl UnixSocketObject {
                 let kind = self.kind;
                 let server_socket = Arc::new(Self {
                     kind,
-                    state: Mutex::new(UnixSocketState::Stream(server_stream.clone())),
-                    flags: Mutex::new(FileFlags::empty()),
-                    pass_cred: Mutex::new(false),
-                    priority: Mutex::new(*self.priority.lock()),
+                    state: Mut::new(UnixSocketState::Stream(server_stream.clone())),
+                    flags: Mut::new(FileFlags::empty()),
+                    pass_cred: Mut::new(false),
+                    priority: Mut::new(*self.priority.lock()),
                     creator_cred: server_cred,
                 });
                 *server_stream.owner.lock() = Some(Arc::downgrade(&server_socket));

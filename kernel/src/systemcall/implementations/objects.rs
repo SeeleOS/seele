@@ -1,8 +1,8 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use crate::memory::utils::Mut;
 use alloc::{collections::btree_map::BTreeMap, format, string::String, vec, vec::Vec};
 use bitflags::bitflags;
-use spin::Mutex;
 
 use crate::{
     define_syscall,
@@ -30,7 +30,7 @@ use crate::{
     systemcall::utils::{SyscallError, SyscallImpl, SyscallResult},
 };
 
-static DIR_OFFSETS: Mutex<BTreeMap<(ProcessID, u64), usize>> = Mutex::new(BTreeMap::new());
+static DIR_OFFSETS: Mut<BTreeMap<(ProcessID, u64), usize>> = Mut::new(BTreeMap::new());
 static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
 const COPY_CHUNK_SIZE: usize = 16 * 1024;
 const LINEAR_IO_CHUNK_SIZE: usize = 64 * 1024;

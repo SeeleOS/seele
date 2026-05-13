@@ -1,10 +1,10 @@
+use crate::memory::utils::Mut;
 use alloc::{
     string::{String, ToString},
     sync::Arc,
     vec,
     vec::Vec,
 };
-use spin::Mutex;
 
 use crate::{
     elfloader::{load_elf_lazy, read_elf_header},
@@ -77,7 +77,7 @@ impl Process {
         let addrspace = AddrSpace::default();
         let kernel_stack_top = allocate_kernel_stack(16).finish();
 
-        let process_arc = Arc::new(Mutex::new(Process {
+        let process_arc = Arc::new(Mut::new(Process {
             pid,
             addrspace,
             kernel_stack_top,

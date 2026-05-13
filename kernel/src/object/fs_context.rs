@@ -1,7 +1,7 @@
+use crate::memory::utils::Mut;
 use alloc::{collections::BTreeMap, collections::BTreeSet, string::String, sync::Arc};
 use core::fmt::{Debug, Formatter, Result as FmtResult};
 use num_enum::TryFromPrimitive;
-use spin::Mutex;
 
 use crate::{
     filesystem::{info::LinuxStat, tmpfs::TmpFs, vfs::FileSystemRef},
@@ -32,14 +32,14 @@ struct FsContextState {
 
 pub struct FsContextObject {
     fs_type: String,
-    state: Mutex<FsContextState>,
+    state: Mut<FsContextState>,
 }
 
 impl FsContextObject {
     pub fn new(fs_type: String) -> Arc<Self> {
         Arc::new(Self {
             fs_type,
-            state: Mutex::new(FsContextState {
+            state: Mut::new(FsContextState {
                 flags: BTreeSet::new(),
                 strings: BTreeMap::new(),
                 created_fs: None,
@@ -115,8 +115,8 @@ impl FsContextObject {
 
     fn instantiate_filesystem(&self) -> Result<FileSystemRef, SyscallError> {
         match self.fs_type.as_str() {
-            "tmpfs" => Ok(Arc::new(Mutex::new(TmpFs::new()))),
-            "ramfs" => Ok(Arc::new(Mutex::new(TmpFs::ramfs()))),
+            "tmpfs" => Ok(Arc::new(Mut::new(TmpFs::new()))),
+            "ramfs" => Ok(Arc::new(Mut::new(TmpFs::ramfs()))),
             _ => Err(SyscallError::NoSyscall),
         }
     }

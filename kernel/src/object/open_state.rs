@@ -1,16 +1,16 @@
-use spin::Mutex;
+use crate::memory::utils::Mut;
 
 use crate::object::FileFlags;
 
 #[derive(Debug, Default)]
 pub struct OpenState {
-    flags: Mutex<FileFlags>,
+    flags: Mut<FileFlags>,
 }
 
 impl OpenState {
     pub fn new(flags: FileFlags) -> Self {
         Self {
-            flags: Mutex::new(flags),
+            flags: Mut::new(flags),
         }
     }
 

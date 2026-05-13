@@ -1,5 +1,5 @@
+use crate::memory::utils::Mut;
 use alloc::{collections::vec_deque::VecDeque, sync::Arc};
-use spin::Mutex;
 
 use crate::{
     filesystem::info::LinuxStat,
@@ -34,16 +34,16 @@ impl Pollable for PtyMaster {
 #[derive(Debug)]
 pub struct PtyMaster {
     number: u32,
-    shared: Arc<Mutex<PtyShared>>,
-    pub flags: Mutex<FileFlags>,
+    shared: Arc<Mut<PtyShared>>,
+    pub flags: Mut<FileFlags>,
 }
 
 impl PtyMaster {
-    pub fn new(number: u32, shared: Arc<Mutex<PtyShared>>) -> Self {
+    pub fn new(number: u32, shared: Arc<Mut<PtyShared>>) -> Self {
         Self {
             number,
             shared,
-            flags: Mutex::new(FileFlags::default()),
+            flags: Mut::new(FileFlags::default()),
         }
     }
 }

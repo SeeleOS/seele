@@ -1,7 +1,7 @@
+use crate::memory::utils::Mut;
 use alloc::collections::BTreeMap;
 use conquer_once::spin::OnceCell;
 use core::ptr::NonNull;
-use spin::Mutex;
 use virtio_drivers::{BufferDirection, Hal, PhysAddr};
 use x86_64::structures::paging::{PageSize, Size4KiB};
 
@@ -25,10 +25,10 @@ unsafe impl Send for SharedAllocation {}
 
 type SharedAllocationMap = BTreeMap<PhysAddr, SharedAllocation>;
 
-static SHARED_ALLOCATIONS: OnceCell<Mutex<SharedAllocationMap>> = OnceCell::uninit();
+static SHARED_ALLOCATIONS: OnceCell<Mut<SharedAllocationMap>> = OnceCell::uninit();
 
-fn shared_allocations() -> &'static Mutex<SharedAllocationMap> {
-    SHARED_ALLOCATIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
+fn shared_allocations() -> &'static Mut<SharedAllocationMap> {
+    SHARED_ALLOCATIONS.get_or_init(|| Mut::new(BTreeMap::new()))
 }
 
 pub struct KernelHal;

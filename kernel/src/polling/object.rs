@@ -1,8 +1,8 @@
+use crate::memory::utils::Mut;
 use alloc::{
     sync::{Arc, Weak},
     vec::Vec,
 };
-use spin::Mutex;
 
 use crate::{
     impl_cast_function, impl_cast_function_non_trait,
@@ -15,20 +15,20 @@ use crate::{
 #[derive(Debug)]
 pub struct PollerObject {
     // Registered objects that will notify the poller when an event is triggered.
-    pub entries: Mutex<Vec<PollerEntry>>,
+    pub entries: Mut<Vec<PollerEntry>>,
     // Events collected for the next poller_wait call.
-    pub woken_events: Mutex<Vec<PollerReadyEvent>>,
+    pub woken_events: Mut<Vec<PollerReadyEvent>>,
     open_state: OpenState,
-    self_ref: Mutex<Option<Weak<PollerObject>>>,
+    self_ref: Mut<Option<Weak<PollerObject>>>,
 }
 
 impl PollerObject {
     pub fn new() -> Arc<Self> {
         let poller = Arc::new(Self {
-            entries: Mutex::new(Vec::new()),
-            woken_events: Mutex::new(Vec::new()),
+            entries: Mut::new(Vec::new()),
+            woken_events: Mut::new(Vec::new()),
             open_state: OpenState::default(),
-            self_ref: Mutex::new(None),
+            self_ref: Mut::new(None),
         });
         *poller.self_ref.lock() = Some(Arc::downgrade(&poller));
         poller

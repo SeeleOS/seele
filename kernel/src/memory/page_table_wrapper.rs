@@ -1,4 +1,4 @@
-use spin::MutexGuard;
+use crate::memory::utils::MutGuard;
 use x86_64::{
     PhysAddr, VirtAddr,
     registers::control::{Cr3, Cr3Flags},
@@ -47,7 +47,7 @@ impl Default for PageTableWrapped {
 
 impl PageTableWrapped {
     pub fn new_with_frame_allocator(
-        frame_allocator: &mut MutexGuard<BootinfoFrameAllocator>,
+        frame_allocator: &mut MutGuard<BootinfoFrameAllocator>,
     ) -> Self {
         let page_table_frame = frame_allocator.allocate_frame().expect("No more space");
 

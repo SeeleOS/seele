@@ -8,6 +8,8 @@ pub struct PollerEntry {
     pub event: PollableEvent,
     pub ready_bits: u32,
     pub oneshot: bool,
+    pub edge_triggered: bool,
+    pub delivered_once: bool,
     pub enabled: bool,
 }
 
@@ -18,6 +20,7 @@ impl PollerEntry {
         data: u64,
         ready_bits: u32,
         oneshot: bool,
+        edge_triggered: bool,
     ) -> Self {
         Self {
             data,
@@ -25,6 +28,8 @@ impl PollerEntry {
             event,
             ready_bits,
             oneshot,
+            edge_triggered,
+            delivered_once: false,
             enabled: true,
         }
     }

@@ -1,9 +1,9 @@
+use crate::memory::utils::Mut;
 use alloc::{
     collections::VecDeque,
     string::String,
     sync::{Arc, Weak},
 };
-use spin::Mutex;
 
 use super::{
     UnixDatagramInner, UnixSocketObject, UnixStreamInner, registry::UnixSocketRegistryKey,
@@ -27,8 +27,8 @@ pub struct UnixListenerInner {
     pub path: String,
     pub registry_key: UnixSocketRegistryKey,
     pub backlog: usize,
-    pub pending: Mutex<VecDeque<Arc<UnixSocketObject>>>,
-    pub owner: Mutex<Option<Weak<UnixSocketObject>>>,
+    pub pending: Mut<VecDeque<Arc<UnixSocketObject>>>,
+    pub owner: Mut<Option<Weak<UnixSocketObject>>>,
 }
 
 impl UnixListenerInner {
@@ -37,8 +37,8 @@ impl UnixListenerInner {
             path,
             registry_key,
             backlog,
-            pending: Mutex::new(VecDeque::new()),
-            owner: Mutex::new(None),
+            pending: Mut::new(VecDeque::new()),
+            owner: Mut::new(None),
         }
     }
 }

@@ -1,14 +1,14 @@
+use crate::memory::utils::Mut;
 use lazy_static::lazy_static;
 use pc_keyboard::{Keyboard, ScancodeSet1, layouts};
-use spin::Mutex;
 use x86_64::instructions::port::Port;
 
 const STATUS_OUTPUT_FULL: u8 = 1 << 0;
 const STATUS_AUX_DATA: u8 = 1 << 5;
 
 lazy_static! {
-    pub static ref _PS2_KEYBOARD: Mutex<Keyboard<layouts::Us104Key, ScancodeSet1>> =
-        Mutex::new(Keyboard::new(
+    pub static ref _PS2_KEYBOARD: Mut<Keyboard<layouts::Us104Key, ScancodeSet1>> =
+        Mut::new(Keyboard::new(
             ScancodeSet1::new(),
             layouts::Us104Key,
             pc_keyboard::HandleControl::MapLettersToUnicode

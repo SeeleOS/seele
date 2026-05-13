@@ -1,5 +1,6 @@
 use core::any::Any;
 
+use crate::memory::utils::Mut;
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
@@ -8,7 +9,6 @@ use alloc::{
     vec::Vec,
 };
 use lazy_static::lazy_static;
-use spin::Mutex;
 
 use crate::{
     filesystem::{
@@ -193,7 +193,7 @@ impl CgroupState {
 }
 
 lazy_static! {
-    static ref CGROUP_STATE: Mutex<CgroupState> = Mutex::new(CgroupState::new());
+    static ref CGROUP_STATE: Mut<CgroupState> = Mut::new(CgroupState::new());
 }
 
 #[derive(Clone, Copy)]
@@ -596,13 +596,13 @@ impl Directory for CgroupDirectoryHandle {
     fn get(&self, name: &str) -> FSResult<FileLike> {
         let child_path = CgroupState::child_path(&self.path, name);
         if CGROUP_STATE.lock().directories.contains_key(&child_path) {
-            return Ok(FileLike::Directory(Arc::new(Mutex::new(
+            return Ok(FileLike::Directory(Arc::new(Mut::new(
                 CgroupDirectoryHandle::new(child_path),
             ))));
         }
 
         if let Some(kind) = CgroupFileKind::from_name(name) {
-            return Ok(FileLike::File(Arc::new(Mutex::new(CgroupFileHandle::new(
+            return Ok(FileLike::File(Arc::new(Mut::new(CgroupFileHandle::new(
                 self.path.clone(),
                 kind,
             )))));
@@ -741,7 +741,7 @@ impl FileSystem for CgroupFs {
     fn lookup(&self, path: &Path) -> FSResult<FileLike> {
         let absolute = absolute_cgroup_path(path);
         if absolute == "/" {
-            return Ok(FileLike::Directory(Arc::new(Mutex::new(
+            return Ok(FileLike::Directory(Arc::new(Mut::new(
                 CgroupDirectoryHandle::new("/".into()),
             ))));
         }
@@ -756,14 +756,14 @@ impl FileSystem for CgroupFs {
             .to_string();
 
         if CGROUP_STATE.lock().directories.contains_key(&absolute) {
-            return Ok(FileLike::Directory(Arc::new(Mutex::new(
+            return Ok(FileLike::Directory(Arc::new(Mut::new(
                 CgroupDirectoryHandle::new(absolute),
             ))));
         }
 
         let kind = CgroupFileKind::from_name(&name).ok_or(FSError::NotFound)?;
         CGROUP_STATE.lock().directory(&parent)?;
-        Ok(FileLike::File(Arc::new(Mutex::new(CgroupFileHandle::new(
+        Ok(FileLike::File(Arc::new(Mut::new(CgroupFileHandle::new(
             parent, kind,
         )))))
     }

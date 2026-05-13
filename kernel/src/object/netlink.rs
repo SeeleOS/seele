@@ -1,3 +1,4 @@
+use crate::memory::utils::Mut;
 use alloc::{
     collections::VecDeque,
     format,
@@ -7,7 +8,6 @@ use alloc::{
 };
 use core::sync::atomic::{AtomicU64, Ordering};
 use lazy_static::lazy_static;
-use spin::Mutex;
 
 use crate::{
     filesystem::info::LinuxStat,
@@ -82,7 +82,7 @@ static NEXT_UEVENT_SEQNUM: AtomicU64 = AtomicU64::new(1);
 static NEXT_NETLINK_PORT_ID: AtomicU64 = AtomicU64::new(1);
 
 lazy_static! {
-    static ref NETLINK_SOCKETS: Mutex<Vec<Weak<NetlinkSocketObject>>> = Mutex::new(Vec::new());
+    static ref NETLINK_SOCKETS: Mut<Vec<Weak<NetlinkSocketObject>>> = Mut::new(Vec::new());
 }
 
 #[repr(C)]
@@ -146,15 +146,15 @@ struct QueuedNetlinkMessage {
 
 #[derive(Debug)]
 pub struct NetlinkSocketObject {
-    flags: Mutex<FileFlags>,
-    pass_cred: Mutex<bool>,
-    priority: Mutex<i32>,
+    flags: Mut<FileFlags>,
+    pass_cred: Mut<bool>,
+    priority: Mut<i32>,
     socket_type: u64,
     protocol: u64,
-    address: Mutex<NetlinkSocketAddress>,
-    memberships: Mutex<Vec<u32>>,
-    recv_queue: Mutex<VecDeque<QueuedNetlinkMessage>>,
-    self_ref: Mutex<Option<Weak<NetlinkSocketObject>>>,
+    address: Mut<NetlinkSocketAddress>,
+    memberships: Mut<Vec<u32>>,
+    recv_queue: Mut<VecDeque<QueuedNetlinkMessage>>,
+    self_ref: Mut<Option<Weak<NetlinkSocketObject>>>,
 }
 
 impl NetlinkSocketObject {
@@ -207,15 +207,15 @@ impl NetlinkSocketObject {
         }
 
         let socket = Arc::new(Self {
-            flags: Mutex::new(FileFlags::empty()),
-            pass_cred: Mutex::new(false),
-            priority: Mutex::new(0),
+            flags: Mut::new(FileFlags::empty()),
+            pass_cred: Mut::new(false),
+            priority: Mut::new(0),
             socket_type,
             protocol,
-            address: Mutex::new(NetlinkSocketAddress::default()),
-            memberships: Mutex::new(Vec::new()),
-            recv_queue: Mutex::new(VecDeque::new()),
-            self_ref: Mutex::new(None),
+            address: Mut::new(NetlinkSocketAddress::default()),
+            memberships: Mut::new(Vec::new()),
+            recv_queue: Mut::new(VecDeque::new()),
+            self_ref: Mut::new(None),
         });
         *socket.self_ref.lock() = Some(Arc::downgrade(&socket));
         if protocol == NETLINK_KOBJECT_UEVENT {

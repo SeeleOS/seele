@@ -1,10 +1,10 @@
+use crate::memory::utils::Mut;
 use alloc::{
     collections::VecDeque,
     string::String,
     sync::{Arc, Weak},
     vec::Vec,
 };
-use spin::Mutex;
 
 use super::{UnixSocketObject, registry::UnixSocketRegistryKey, wake_io, wake_pollers};
 use crate::{object::misc::ObjectRef, polling::event::PollableEvent};
@@ -26,37 +26,37 @@ pub struct PendingRights {
 
 #[derive(Debug)]
 pub struct UnixStreamInner {
-    pub recv_buf: Mutex<VecDeque<u8>>,
-    pub pending_rights: Mutex<VecDeque<PendingRights>>,
-    pub pending_packets: Mutex<VecDeque<usize>>,
-    pub peer: Mutex<Option<Weak<UnixStreamInner>>>,
-    pub owner: Mutex<Option<Weak<UnixSocketObject>>>,
-    pub peer_cred: Mutex<SocketPeerCred>,
-    pub peer_write_closed: Mutex<bool>,
-    pub peer_closed: Mutex<bool>,
-    pub read_shutdown: Mutex<bool>,
-    pub write_shutdown: Mutex<bool>,
-    pub local_name: Mutex<Option<String>>,
-    pub local_key: Mutex<Option<UnixSocketRegistryKey>>,
-    pub peer_name: Mutex<Option<String>>,
+    pub recv_buf: Mut<VecDeque<u8>>,
+    pub pending_rights: Mut<VecDeque<PendingRights>>,
+    pub pending_packets: Mut<VecDeque<usize>>,
+    pub peer: Mut<Option<Weak<UnixStreamInner>>>,
+    pub owner: Mut<Option<Weak<UnixSocketObject>>>,
+    pub peer_cred: Mut<SocketPeerCred>,
+    pub peer_write_closed: Mut<bool>,
+    pub peer_closed: Mut<bool>,
+    pub read_shutdown: Mut<bool>,
+    pub write_shutdown: Mut<bool>,
+    pub local_name: Mut<Option<String>>,
+    pub local_key: Mut<Option<UnixSocketRegistryKey>>,
+    pub peer_name: Mut<Option<String>>,
 }
 
 impl UnixStreamInner {
     pub fn new() -> Self {
         Self {
-            recv_buf: Mutex::new(VecDeque::new()),
-            pending_rights: Mutex::new(VecDeque::new()),
-            pending_packets: Mutex::new(VecDeque::new()),
-            peer: Mutex::new(None),
-            owner: Mutex::new(None),
-            peer_cred: Mutex::new(SocketPeerCred::default()),
-            peer_write_closed: Mutex::new(false),
-            peer_closed: Mutex::new(false),
-            read_shutdown: Mutex::new(false),
-            write_shutdown: Mutex::new(false),
-            local_name: Mutex::new(None),
-            local_key: Mutex::new(None),
-            peer_name: Mutex::new(None),
+            recv_buf: Mut::new(VecDeque::new()),
+            pending_rights: Mut::new(VecDeque::new()),
+            pending_packets: Mut::new(VecDeque::new()),
+            peer: Mut::new(None),
+            owner: Mut::new(None),
+            peer_cred: Mut::new(SocketPeerCred::default()),
+            peer_write_closed: Mut::new(false),
+            peer_closed: Mut::new(false),
+            read_shutdown: Mut::new(false),
+            write_shutdown: Mut::new(false),
+            local_name: Mut::new(None),
+            local_key: Mut::new(None),
+            peer_name: Mut::new(None),
         }
     }
 

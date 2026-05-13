@@ -1,10 +1,10 @@
+use crate::memory::utils::Mut;
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     string::String,
     sync::Arc,
     vec::Vec,
 };
-use spin::Mutex;
 
 use crate::filesystem::{errors::FSError, path::Path, sparse_file::SparseFileData, vfs::FSResult};
 
@@ -12,7 +12,7 @@ const ROOT_INODE: u64 = 0x7000_0000;
 pub(crate) const DEFAULT_DIR_MODE: u32 = 0o755;
 pub(crate) const DEFAULT_FILE_MODE: u32 = 0o644;
 pub(crate) const S_IFMT: u32 = 0o170000;
-pub(crate) type TmpfsStateRef = Arc<Mutex<TmpfsState>>;
+pub(crate) type TmpfsStateRef = Arc<Mut<TmpfsState>>;
 
 pub(crate) enum TmpNodeKind {
     Directory {

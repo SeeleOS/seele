@@ -1,6 +1,6 @@
+use crate::memory::utils::Mut;
 use num_enum::TryFromPrimitive;
 use pc_keyboard::KeyCode;
-use spin::Mutex;
 
 use crate::{
     memory::user_safe,
@@ -505,7 +505,7 @@ pub fn linux_keycode_from_keycode(key: KeyCode) -> Option<u8> {
 }
 
 pub fn handle_kd_request(
-    state: &Mutex<LinuxConsoleState>,
+    state: &Mut<LinuxConsoleState>,
     request: &ConfigurateRequest,
 ) -> ObjectResult<Option<isize>> {
     match request {

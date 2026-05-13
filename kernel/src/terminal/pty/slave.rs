@@ -1,5 +1,5 @@
+use crate::memory::utils::Mut;
 use alloc::sync::Arc;
-use spin::Mutex;
 
 use crate::{
     filesystem::info::LinuxStat,
@@ -38,18 +38,18 @@ impl Pollable for PtySlave {
 #[derive(Debug)]
 pub struct PtySlave {
     number: u32,
-    shared: Arc<Mutex<PtyShared>>,
-    linux_console: Mutex<LinuxConsoleState>,
-    pub flags: Mutex<FileFlags>,
+    shared: Arc<Mut<PtyShared>>,
+    linux_console: Mut<LinuxConsoleState>,
+    pub flags: Mut<FileFlags>,
 }
 
 impl PtySlave {
-    pub fn new(number: u32, shared: Arc<Mutex<PtyShared>>) -> Self {
+    pub fn new(number: u32, shared: Arc<Mut<PtyShared>>) -> Self {
         Self {
             number,
             shared,
-            linux_console: Mutex::new(LinuxConsoleState::default()),
-            flags: Mutex::new(FileFlags::default()),
+            linux_console: Mut::new(LinuxConsoleState::default()),
+            flags: Mut::new(FileFlags::default()),
         }
     }
 

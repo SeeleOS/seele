@@ -1,5 +1,5 @@
+use crate::memory::utils::Mut;
 use alloc::{string::String, sync::Arc, vec::Vec};
-use spin::Mutex;
 
 use crate::{
     filesystem::{
@@ -26,7 +26,7 @@ pub(super) fn proc_dir(
     inode: u64,
     entries: Vec<DirectoryContentInfo>,
 ) -> FileLike {
-    FileLike::Directory(Arc::new(Mutex::new(ProcDirectory::new(
+    FileLike::Directory(Arc::new(Mut::new(ProcDirectory::new(
         name.into(),
         path.into(),
         inode,
@@ -38,7 +38,7 @@ pub(super) fn proc_dynamic_dir<F>(path: &str, name: &str, inode: u64, entries: F
 where
     F: Fn() -> Vec<DirectoryContentInfo> + Send + Sync + 'static,
 {
-    FileLike::Directory(Arc::new(Mutex::new(ProcDirectory::new_dynamic(
+    FileLike::Directory(Arc::new(Mut::new(ProcDirectory::new_dynamic(
         name.into(),
         path.into(),
         inode,
@@ -50,7 +50,7 @@ pub(super) fn proc_file<F>(name: &str, inode: u64, read: F) -> FileLike
 where
     F: Fn() -> Vec<u8> + Send + Sync + 'static,
 {
-    FileLike::File(Arc::new(Mutex::new(ProcFile::new(
+    FileLike::File(Arc::new(Mut::new(ProcFile::new(
         name.into(),
         inode,
         PROC_FILE_MODE_READONLY,
@@ -64,7 +64,7 @@ where
     F: Fn() -> Vec<u8> + Send + Sync + 'static,
     W: Fn(&[u8]) -> FSResult<usize> + Send + Sync + 'static,
 {
-    FileLike::File(Arc::new(Mutex::new(ProcFile::new(
+    FileLike::File(Arc::new(Mut::new(ProcFile::new(
         name.into(),
         inode,
         PROC_FILE_MODE_READWRITE,
@@ -74,7 +74,7 @@ where
 }
 
 pub(super) fn proc_object_file(name: &str, inode: u64, object: ObjectRef) -> FileLike {
-    FileLike::File(Arc::new(Mutex::new(StaticDeviceHandle::from_object(
+    FileLike::File(Arc::new(Mut::new(StaticDeviceHandle::from_object(
         name.into(),
         inode,
         PROC_FILE_MODE_READONLY,
@@ -84,7 +84,7 @@ pub(super) fn proc_object_file(name: &str, inode: u64, object: ObjectRef) -> Fil
 }
 
 pub(super) fn proc_symlink(name: &str, inode: u64, target: String) -> FileLike {
-    FileLike::Symlink(Arc::new(Mutex::new(ProcSymlink::new(
+    FileLike::Symlink(Arc::new(Mut::new(ProcSymlink::new(
         name.into(),
         inode,
         target,
@@ -95,7 +95,7 @@ pub(super) fn proc_dynamic_symlink<F>(name: &str, inode: u64, target: F) -> File
 where
     F: Fn() -> FSResult<String> + Send + Sync + 'static,
 {
-    FileLike::Symlink(Arc::new(Mutex::new(ProcSymlink::new_dynamic(
+    FileLike::Symlink(Arc::new(Mut::new(ProcSymlink::new_dynamic(
         name.into(),
         inode,
         Arc::new(target),

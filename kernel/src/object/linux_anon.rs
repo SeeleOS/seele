@@ -1,3 +1,4 @@
+use crate::memory::utils::Mut;
 use alloc::{
     collections::BTreeMap,
     sync::{Arc, Weak},
@@ -5,7 +6,6 @@ use alloc::{
 };
 use bitflags::bitflags;
 use core::sync::atomic::{AtomicBool, Ordering};
-use spin::Mutex;
 
 use crate::{
     filesystem::info::LinuxStat,
@@ -65,9 +65,9 @@ struct TimerFdRegistry {
 }
 
 lazy_static::lazy_static! {
-    static ref SIGNALFD_REGISTRY: Mutex<SignalfdRegistry> = Mutex::new(SignalfdRegistry::default());
-    static ref PIDFD_REGISTRY: Mutex<PidFdRegistry> = Mutex::new(PidFdRegistry::default());
-    static ref TIMERFD_REGISTRY: Mutex<TimerFdRegistry> = Mutex::new(TimerFdRegistry::default());
+    static ref SIGNALFD_REGISTRY: Mut<SignalfdRegistry> = Mut::new(SignalfdRegistry::default());
+    static ref PIDFD_REGISTRY: Mut<PidFdRegistry> = Mut::new(PidFdRegistry::default());
+    static ref TIMERFD_REGISTRY: Mut<TimerFdRegistry> = Mut::new(TimerFdRegistry::default());
 }
 
 #[repr(C)]
@@ -99,11 +99,11 @@ struct LinuxSignalfdSiginfo {
 
 #[derive(Debug)]
 pub struct PidFdObject {
-    flags: Mutex<FileFlags>,
+    flags: Mut<FileFlags>,
     pid: u64,
     alive: AtomicBool,
-    process: Mutex<Option<Weak<spin::Mutex<crate::process::Process>>>>,
-    self_ref: Mutex<Option<Weak<PidFdObject>>>,
+    process: Mut<Option<Weak<crate::memory::utils::Mut<crate::process::Process>>>>,
+    self_ref: Mut<Option<Weak<PidFdObject>>>,
 }
 
 impl PidFdObject {
@@ -113,11 +113,11 @@ impl PidFdObject {
             .as_ref()
             .is_some_and(|process| !process.lock().have_exited());
         let pidfd = Arc::new(Self {
-            flags: Mutex::new(FileFlags::empty()),
+            flags: Mut::new(FileFlags::empty()),
             pid,
             alive: AtomicBool::new(alive),
-            process: Mutex::new(process.as_ref().map(Arc::downgrade)),
-            self_ref: Mutex::new(None),
+            process: Mut::new(process.as_ref().map(Arc::downgrade)),
+            self_ref: Mut::new(None),
         });
         *pidfd.self_ref.lock() = Some(Arc::downgrade(&pidfd));
         register_pidfd(pid, &pidfd);
@@ -246,19 +246,19 @@ impl Statable for PidFdObject {
 
 #[derive(Debug)]
 pub struct SignalfdObject {
-    flags: Mutex<FileFlags>,
-    mask: Mutex<u64>,
+    flags: Mut<FileFlags>,
+    mask: Mut<u64>,
     owner_pid: u64,
-    self_ref: Mutex<Option<Weak<SignalfdObject>>>,
+    self_ref: Mut<Option<Weak<SignalfdObject>>>,
 }
 
 impl SignalfdObject {
     pub fn new(owner_pid: u64, mask: u64, flags: SignalfdFlags) -> Arc<Self> {
         let signalfd = Arc::new(Self {
-            flags: Mutex::new(FileFlags::empty()),
-            mask: Mutex::new(mask),
+            flags: Mut::new(FileFlags::empty()),
+            mask: Mut::new(mask),
             owner_pid,
-            self_ref: Mutex::new(None),
+            self_ref: Mut::new(None),
         });
         *signalfd.self_ref.lock() = Some(Arc::downgrade(&signalfd));
         if flags.contains(SignalfdFlags::SFD_NONBLOCK) {
@@ -385,8 +385,8 @@ pub fn wake_signalfd_for_process_with_manager(pid: u64, manager: &mut ThreadMana
 
 #[derive(Debug, Default)]
 pub struct InotifyObject {
-    flags: Mutex<FileFlags>,
-    next_watch: Mutex<i32>,
+    flags: Mut<FileFlags>,
+    next_watch: Mut<i32>,
 }
 
 impl InotifyObject {
@@ -454,19 +454,19 @@ struct EventFdState {
 
 #[derive(Debug)]
 pub struct EventFdObject {
-    flags: Mutex<FileFlags>,
-    state: Mutex<EventFdState>,
+    flags: Mut<FileFlags>,
+    state: Mut<EventFdState>,
     semaphore: bool,
-    self_ref: Mutex<Option<Weak<EventFdObject>>>,
+    self_ref: Mut<Option<Weak<EventFdObject>>>,
 }
 
 impl EventFdObject {
     pub fn new(initial: u64, flags: EventFdFlags) -> Arc<Self> {
         let eventfd = Arc::new(Self {
-            flags: Mutex::new(FileFlags::empty()),
-            state: Mutex::new(EventFdState { counter: initial }),
+            flags: Mut::new(FileFlags::empty()),
+            state: Mut::new(EventFdState { counter: initial }),
             semaphore: flags.contains(EventFdFlags::EFD_SEMAPHORE),
-            self_ref: Mutex::new(None),
+            self_ref: Mut::new(None),
         });
         {
             let mut self_ref = eventfd.self_ref.lock();
@@ -713,17 +713,17 @@ struct TimerFdState {
 
 #[derive(Debug, Default)]
 pub struct TimerFdObject {
-    flags: Mutex<FileFlags>,
-    state: Mutex<TimerFdState>,
-    self_ref: Mutex<Option<Weak<TimerFdObject>>>,
+    flags: Mut<FileFlags>,
+    state: Mut<TimerFdState>,
+    self_ref: Mut<Option<Weak<TimerFdObject>>>,
 }
 
 impl TimerFdObject {
     pub fn new(flags: FileFlags) -> Arc<Self> {
         let timerfd = Arc::new(Self {
-            flags: Mutex::new(flags),
-            state: Mutex::new(TimerFdState::default()),
-            self_ref: Mutex::new(None),
+            flags: Mut::new(flags),
+            state: Mut::new(TimerFdState::default()),
+            self_ref: Mut::new(None),
         });
         *timerfd.self_ref.lock() = Some(Arc::downgrade(&timerfd));
         timerfd

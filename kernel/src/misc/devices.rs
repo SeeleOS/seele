@@ -74,7 +74,7 @@ impl Statable for DevRandom {
 
 #[derive(Debug, Default)]
 pub struct DevKmsg {
-    flags: spin::Mutex<FileFlags>,
+    flags: crate::memory::utils::Mut<FileFlags>,
 }
 
 impl Object for DevKmsg {

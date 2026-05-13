@@ -1,7 +1,7 @@
 use core::str::from_utf8;
 
+use crate::memory::utils::Mut;
 use alloc::{string::String, sync::Arc};
-use spin::Mutex;
 use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
@@ -21,24 +21,24 @@ use super::linux_kd::LinuxConsoleState;
 
 #[derive(Debug)]
 pub struct TerminalObject {
-    pub inner: Arc<Mutex<dyn AbstractTerminal>>,
-    pub termios: Mutex<LinuxTermios2>,
-    pub winsize: Mutex<LinuxWinsize>,
-    pub linux_console: Arc<Mutex<LinuxConsoleState>>,
+    pub inner: Arc<Mut<dyn AbstractTerminal>>,
+    pub termios: Mut<LinuxTermios2>,
+    pub winsize: Mut<LinuxWinsize>,
+    pub linux_console: Arc<Mut<LinuxConsoleState>>,
     open_state: OpenState,
 }
 
 impl TerminalObject {
-    pub fn new(term: Arc<Mutex<dyn AbstractTerminal>>) -> Self {
+    pub fn new(term: Arc<Mut<dyn AbstractTerminal>>) -> Self {
         let window_size = term.lock().size();
         Self {
-            termios: Mutex::new(LinuxTermios2::new_default()),
-            winsize: Mutex::new(LinuxWinsize::from_rows_cols(
+            termios: Mut::new(LinuxTermios2::new_default()),
+            winsize: Mut::new(LinuxWinsize::from_rows_cols(
                 window_size.rows,
                 window_size.cols,
             )),
             inner: term,
-            linux_console: Arc::new(Mutex::new(LinuxConsoleState::default())),
+            linux_console: Arc::new(Mut::new(LinuxConsoleState::default())),
             open_state: OpenState::default(),
         }
     }

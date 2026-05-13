@@ -1,9 +1,9 @@
+use crate::memory::utils::Mut;
 use alloc::{
     collections::{btree_map::BTreeMap, vec_deque::VecDeque},
     sync::Arc,
 };
 use conquer_once::spin::OnceCell;
-use spin::Mutex;
 
 use crate::{
     filesystem::info::LinuxStat,
@@ -33,13 +33,13 @@ use crate::{
 
 pub static CONSOLE_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();
 pub static DEFAULT_TTY: OnceCell<Arc<TtyDevice>> = OnceCell::uninit();
-pub static ACTIVE_VT: OnceCell<Mutex<u32>> = OnceCell::uninit();
-pub static VIRTUAL_TTYS: OnceCell<Mutex<BTreeMap<u32, Arc<TtyDevice>>>> = OnceCell::uninit();
+pub static ACTIVE_VT: OnceCell<Mut<u32>> = OnceCell::uninit();
+pub static VIRTUAL_TTYS: OnceCell<Mut<BTreeMap<u32, Arc<TtyDevice>>>> = OnceCell::uninit();
 pub const MAX_VIRTUAL_TTYS: u32 = 6;
 
 pub fn init_virtual_ttys() {
-    ACTIVE_VT.get_or_init(|| Mutex::new(1));
-    VIRTUAL_TTYS.get_or_init(|| Mutex::new(BTreeMap::new()));
+    ACTIVE_VT.get_or_init(|| Mut::new(1));
+    VIRTUAL_TTYS.get_or_init(|| Mut::new(BTreeMap::new()));
 }
 
 pub fn get_console_tty() -> Arc<TtyDevice> {
@@ -93,41 +93,41 @@ pub fn wake_tty_poller_readable() {
 
 #[derive(Debug)]
 pub struct TtyDevice {
-    terminal: Arc<Mutex<TerminalObject>>,
-    linux_console: Arc<Mutex<LinuxConsoleState>>,
+    terminal: Arc<Mut<TerminalObject>>,
+    linux_console: Arc<Mut<LinuxConsoleState>>,
     virtual_terminal: Option<u32>,
     interactive: bool,
-    output_filter: Mutex<OutputFilter>,
-    keyboard_queue: Mutex<VecDeque<u8>>,
-    terminal_response_queue: Mutex<VecDeque<u8>>,
-    raw_queue: Mutex<VecDeque<u8>>,
-    medium_raw_queue: Mutex<VecDeque<u8>>,
-    line_buffer: Mutex<VecDeque<u8>>,
+    output_filter: Mut<OutputFilter>,
+    keyboard_queue: Mut<VecDeque<u8>>,
+    terminal_response_queue: Mut<VecDeque<u8>>,
+    raw_queue: Mut<VecDeque<u8>>,
+    medium_raw_queue: Mut<VecDeque<u8>>,
+    line_buffer: Mut<VecDeque<u8>>,
     /// The foreground process group currently attached to this tty.
     /// Line-discipline generated signals such as Ctrl+C should be sent here.
-    pub active_group: Mutex<Option<ProcessGroupID>>,
-    pub flags: Mutex<FileFlags>,
+    pub active_group: Mut<Option<ProcessGroupID>>,
+    pub flags: Mut<FileFlags>,
 }
 
 impl TtyDevice {
     pub fn new(
-        terminal: Arc<Mutex<TerminalObject>>,
+        terminal: Arc<Mut<TerminalObject>>,
         interactive: bool,
         virtual_terminal: Option<u32>,
     ) -> Self {
         Self {
             terminal,
-            linux_console: Arc::new(Mutex::new(LinuxConsoleState::default())),
+            linux_console: Arc::new(Mut::new(LinuxConsoleState::default())),
             virtual_terminal,
             interactive,
-            output_filter: Mutex::new(OutputFilter::default()),
-            keyboard_queue: Mutex::new(VecDeque::new()),
-            terminal_response_queue: Mutex::new(VecDeque::new()),
-            raw_queue: Mutex::new(VecDeque::new()),
-            medium_raw_queue: Mutex::new(VecDeque::new()),
-            line_buffer: Mutex::new(VecDeque::new()),
-            active_group: Mutex::new(None),
-            flags: Mutex::new(FileFlags::empty()),
+            output_filter: Mut::new(OutputFilter::default()),
+            keyboard_queue: Mut::new(VecDeque::new()),
+            terminal_response_queue: Mut::new(VecDeque::new()),
+            raw_queue: Mut::new(VecDeque::new()),
+            medium_raw_queue: Mut::new(VecDeque::new()),
+            line_buffer: Mut::new(VecDeque::new()),
+            active_group: Mut::new(None),
+            flags: Mut::new(FileFlags::empty()),
         }
     }
 
@@ -169,7 +169,7 @@ impl TtyDevice {
         self.keyboard_queue.lock().extend(bytes.iter().copied());
     }
 
-    pub fn line_buffer(&self) -> &Mutex<VecDeque<u8>> {
+    pub fn line_buffer(&self) -> &Mut<VecDeque<u8>> {
         &self.line_buffer
     }
 

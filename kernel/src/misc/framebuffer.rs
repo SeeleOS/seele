@@ -1,8 +1,8 @@
+use crate::memory::utils::Mut;
 use alloc::{vec, vec::Vec};
 use bootloader_api::info::{FrameBuffer, PixelFormat};
 use conquer_once::spin::OnceCell;
 use core::sync::atomic::{AtomicBool, Ordering};
-use spin::Mutex;
 use x86_64::{VirtAddr, structures::paging::Translate};
 
 use crate::{memory::paging::MAPPER, terminal::Color};
@@ -29,11 +29,11 @@ pub struct FramebufferInfo {
 
 pub fn init(framebuffer: &'static mut FrameBuffer) {
     log::info!("graphics: init start");
-    FRAME_BUFFER.init_once(|| Mutex::new(Canvas::new(framebuffer)));
+    FRAME_BUFFER.init_once(|| Mut::new(Canvas::new(framebuffer)));
     log::debug!("graphics: terminal configured");
 }
 
-pub static FRAME_BUFFER: OnceCell<Mutex<Canvas>> = OnceCell::uninit();
+pub static FRAME_BUFFER: OnceCell<Mut<Canvas>> = OnceCell::uninit();
 pub static FRAMEBUFFER_USER_CONTROLLED: AtomicBool = AtomicBool::new(false);
 
 pub struct Canvas {

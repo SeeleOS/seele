@@ -1,9 +1,9 @@
+use crate::memory::utils::Mut;
 use alloc::{
     sync::{Arc, Weak},
     vec::Vec,
 };
 use core::fmt;
-use spin::Mutex;
 
 use crate::{
     filesystem::info::LinuxStat,
@@ -35,16 +35,16 @@ use super::{
 
 pub struct EventDeviceHub {
     pub(super) kind: EventDeviceKind,
-    pub(super) state: Mutex<EventDeviceHubState>,
-    pub(super) clients: Mutex<Vec<Weak<EventDeviceClientObject>>>,
+    pub(super) state: Mut<EventDeviceHubState>,
+    pub(super) clients: Mut<Vec<Weak<EventDeviceClientObject>>>,
 }
 
 pub struct EventDeviceClientObject {
     pub(super) hub: Weak<EventDeviceHub>,
     pub(super) client_id: u64,
     pub(super) kind: EventDeviceKind,
-    pub(super) flags: Mutex<FileFlags>,
-    pub(super) state: Mutex<EventDeviceState>,
+    pub(super) flags: Mut<FileFlags>,
+    pub(super) state: Mut<EventDeviceState>,
 }
 
 pub type EventDeviceObject = EventDeviceClientObject;

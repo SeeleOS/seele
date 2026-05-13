@@ -1,5 +1,5 @@
+use crate::memory::utils::Mut;
 use alloc::{format, string::String, sync::Arc, vec::Vec};
-use spin::Mutex;
 
 use crate::filesystem::{
     path::{Path, PathPart},
@@ -58,18 +58,18 @@ pub(crate) fn tmpfs_lookup_path(state: &TmpfsStateRef, path: &str) -> FSResult<F
     };
 
     Ok(match kind {
-        DirectoryContentType::Directory => FileLike::Directory(Arc::new(Mutex::new(
+        DirectoryContentType::Directory => FileLike::Directory(Arc::new(Mut::new(
             TmpfsDirectoryHandle::new(state.clone(), path),
         ))),
         DirectoryContentType::File => {
             state.lock().retain_inode(inode)?;
-            FileLike::File(Arc::new(Mutex::new(TmpfsFileHandle::new(
+            FileLike::File(Arc::new(Mut::new(TmpfsFileHandle::new(
                 state.clone(),
                 path,
                 inode,
             ))))
         }
-        DirectoryContentType::Symlink => FileLike::Symlink(Arc::new(Mutex::new(
+        DirectoryContentType::Symlink => FileLike::Symlink(Arc::new(Mut::new(
             TmpfsSymlinkHandle::new(state.clone(), path),
         ))),
     })
@@ -91,7 +91,7 @@ impl TmpFs {
 
     fn with_variant(variant: TmpFsVariant) -> Self {
         Self {
-            state: Arc::new(Mutex::new(TmpfsState::new())),
+            state: Arc::new(Mut::new(TmpfsState::new())),
             variant,
         }
     }

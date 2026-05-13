@@ -1,14 +1,14 @@
+use crate::memory::utils::Mut;
 use alloc::format;
 use conquer_once::spin::OnceCell;
 use flanterm::sys;
-use spin::Mutex;
 
 use crate::terminal::term_trait::PtyWriter;
 
-static PTY_WRITER: OnceCell<Mutex<Option<PtyWriter>>> = OnceCell::uninit();
+static PTY_WRITER: OnceCell<Mut<Option<PtyWriter>>> = OnceCell::uninit();
 
 pub(super) fn init_pty_writer() {
-    PTY_WRITER.get_or_init(|| Mutex::new(None));
+    PTY_WRITER.get_or_init(|| Mut::new(None));
 }
 
 pub(super) fn set_pty_writer(writer: PtyWriter) {

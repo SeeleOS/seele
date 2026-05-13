@@ -1,10 +1,10 @@
+use crate::memory::utils::Mut;
 use alloc::{
     string::String,
     sync::{Arc, Weak},
     vec::Vec,
 };
 use bitflags::bitflags;
-use spin::Mutex;
 use x86_64::VirtAddr;
 
 use crate::ipc::sysv_shm::ProcessShmMapping;
@@ -35,7 +35,7 @@ pub mod wait;
 #[cfg(test)]
 mod test;
 
-pub type ProcessRef = Arc<Mutex<Process>>;
+pub type ProcessRef = Arc<Mut<Process>>;
 pub use fd_table::{FdTable, clone_fd_table, new_fd_table};
 pub use fs_context::{FsContext, clone_fs_context, new_fs_context};
 
@@ -76,7 +76,7 @@ pub struct Process {
     pub pid: ProcessID,
     pub addrspace: AddrSpace,
     pub kernel_stack_top: VirtAddr,
-    pub threads: Vec<Weak<Mutex<Thread>>>,
+    pub threads: Vec<Weak<Mut<Thread>>>,
     pub fd_table: FdTableRef,
     pub fs_context: FsContextRef,
     pub command_line: Vec<String>,
@@ -231,7 +231,7 @@ impl ProcessExitStatus {
 
 impl Process {
     pub fn empty() -> ProcessRef {
-        Arc::new(Mutex::new(Self::default()))
+        Arc::new(Mut::new(Self::default()))
     }
 
     pub fn stdin_terminal_rdev(&self) -> Option<u64> {

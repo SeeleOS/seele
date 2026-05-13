@@ -1,5 +1,5 @@
+use crate::memory::utils::Mut;
 use alloc::sync::Arc;
-use spin::Mutex;
 
 use crate::{
     filesystem::fusefs::FuseConnection,
@@ -15,14 +15,14 @@ use crate::{
 
 #[derive(Debug)]
 pub struct FuseDevice {
-    flags: Mutex<FileFlags>,
+    flags: Mut<FileFlags>,
     pub connection: Arc<FuseConnection>,
 }
 
 impl FuseDevice {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            flags: Mutex::new(FileFlags::empty()),
+            flags: Mut::new(FileFlags::empty()),
             connection: FuseConnection::new(),
         })
     }

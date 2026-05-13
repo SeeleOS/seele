@@ -1,6 +1,6 @@
+use crate::memory::utils::Mut;
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use core::mem::size_of;
-use spin::Mutex;
 
 use crate::{
     impl_cast_function_non_trait,
@@ -27,7 +27,7 @@ struct BpfMapState {
     key_size: usize,
     value_size: usize,
     max_entries: usize,
-    entries: Mutex<BTreeMap<Vec<u8>, Vec<u8>>>,
+    entries: Mut<BTreeMap<Vec<u8>, Vec<u8>>>,
 }
 
 #[derive(Debug)]
@@ -51,7 +51,7 @@ impl BpfObject {
                 key_size: key_size as usize,
                 value_size: value_size as usize,
                 max_entries: max_entries as usize,
-                entries: Mutex::new(BTreeMap::new()),
+                entries: Mut::new(BTreeMap::new()),
             }),
             open_state: OpenState::default(),
         })

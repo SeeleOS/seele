@@ -1,3 +1,4 @@
+use crate::memory::utils::Mut;
 use alloc::{collections::BTreeMap, sync::Arc, vec, vec::Vec};
 use conquer_once::spin::OnceCell;
 use smoltcp::{
@@ -10,7 +11,6 @@ use smoltcp::{
         Ipv4Address,
     },
 };
-use spin::Mutex;
 
 use crate::{
     misc::time::Time, process::manager::get_current_process, thread::try_with_thread_manager,
@@ -201,10 +201,10 @@ struct NetManager {
     primary_stack_owner: Option<u64>,
 }
 
-static NET_MANAGER: OnceCell<Mutex<NetManager>> = OnceCell::uninit();
+static NET_MANAGER: OnceCell<Mut<NetManager>> = OnceCell::uninit();
 
-fn manager() -> &'static Mutex<NetManager> {
-    NET_MANAGER.get_or_init(|| Mutex::new(NetManager::default()))
+fn manager() -> &'static Mut<NetManager> {
+    NET_MANAGER.get_or_init(|| Mut::new(NetManager::default()))
 }
 
 fn smoltcp_now() -> Instant {

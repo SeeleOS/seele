@@ -1,3 +1,5 @@
+use core::cell::{RefCell, RefMut};
+
 use x86_64::{
     VirtAddr,
     structures::paging::{Page, PageTable, PageTableFlags, page::PageRangeInclusive},
@@ -5,21 +7,40 @@ use x86_64::{
 
 use crate::memory::{PHYSICAL_MEMORY_OFFSET, addrspace::cow::COW_FLAG, paging::MAPPER};
 
-pub struct Locked<A> {
-    inner: spin::Mutex<A>,
+pub type MutGuard<'a, T> = RefMut<'a, T>;
+
+#[derive(Debug)]
+pub struct Mut<T: ?Sized> {
+    inner: RefCell<T>,
 }
 
-impl<A> Locked<A> {
-    pub const fn new(inner: A) -> Self {
-        Locked {
-            inner: spin::Mutex::new(inner),
+impl<T> Mut<T> {
+    pub const fn new(inner: T) -> Self {
+        Self {
+            inner: RefCell::new(inner),
         }
     }
+}
 
-    pub fn lock(&self) -> spin::MutexGuard<'_, A> {
-        self.inner.lock()
+impl<T: Default> Default for Mut<T> {
+    fn default() -> Self {
+        Self::new(T::default())
     }
 }
+
+impl<T: ?Sized> Mut<T> {
+    #[track_caller]
+    pub fn lock(&self) -> MutGuard<'_, T> {
+        self.inner.borrow_mut()
+    }
+}
+
+// Debug-only lock replacement: we intentionally allow global/shared access so
+// RefCell borrow panics expose re-entrant lock paths. This is not a real lock.
+unsafe impl<T: ?Sized + Send> Send for Mut<T> {}
+unsafe impl<T: ?Sized + Send> Sync for Mut<T> {}
+
+pub type Locked<A> = Mut<A>;
 
 /// Copies the memory mapping of the kernel l4 table
 /// into the table of something else (probably table for processes)

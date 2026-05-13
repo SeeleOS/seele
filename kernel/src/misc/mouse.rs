@@ -1,9 +1,9 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use crate::memory::utils::Mut;
 use alloc::{format, string::String, sync::Arc};
 use heapless::Deque;
 use ps2_mouse::Mouse;
-use spin::Mutex;
 use x86_64::{instructions::interrupts::without_interrupts, instructions::port::Port};
 
 use crate::{
@@ -25,7 +25,7 @@ use crate::{
 };
 
 lazy_static::lazy_static! {
-    pub static ref MOUSE_PACKETS: Mutex<Deque<u8, 4096>> = Mutex::new(Deque::new());
+    pub static ref MOUSE_PACKETS: Mut<Deque<u8, 4096>> = Mut::new(Deque::new());
 }
 
 const STATUS_OUTPUT_FULL: u8 = 1 << 0;
@@ -124,7 +124,7 @@ fn drain_output_buffer() -> usize {
 
 #[derive(Debug, Default)]
 pub struct PS2MouseObject {
-    flags: Mutex<FileFlags>,
+    flags: Mut<FileFlags>,
 }
 
 impl Object for PS2MouseObject {

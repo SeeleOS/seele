@@ -1,3 +1,4 @@
+use crate::memory::utils::Mut;
 use alloc::{
     collections::vec_deque::VecDeque,
     sync::{Arc, Weak},
@@ -63,12 +64,12 @@ impl EventDeviceHub {
     pub(super) fn new(kind: EventDeviceKind) -> Self {
         Self {
             kind,
-            state: spin::Mutex::new(EventDeviceHubState {
+            state: Mut::new(EventDeviceHubState {
                 key_state: [0; KEY_BITMAP_BYTES],
                 mouse_buttons: MouseButtons::default(),
                 grab_owner: None,
             }),
-            clients: spin::Mutex::new(Vec::new()),
+            clients: Mut::new(Vec::new()),
         }
     }
 
@@ -195,8 +196,8 @@ impl EventDeviceClientObject {
             },
             client_id: NEXT_EVENT_DEVICE_CLIENT_ID.fetch_add(1, Ordering::Relaxed),
             kind,
-            flags: spin::Mutex::new(FileFlags::empty()),
-            state: spin::Mutex::new(EventDeviceState {
+            flags: Mut::new(FileFlags::empty()),
+            state: Mut::new(EventDeviceState {
                 queue: VecDeque::with_capacity(EVENT_QUEUE_CAPACITY),
                 key_state: snapshot.key_state,
                 clock_id: 1,

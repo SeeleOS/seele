@@ -1,5 +1,5 @@
+use crate::memory::utils::Mut;
 use alloc::collections::vec_deque::VecDeque;
-use spin::Mutex;
 
 use crate::{
     object::{FileFlags, error::ObjectError, misc::ObjectResult},
@@ -29,7 +29,7 @@ pub fn push_to_queue(queue: &mut VecDeque<u8>, buffer: &[u8]) {
 
 pub fn read_or_block<F>(
     buffer: &mut [u8],
-    flags: &Mutex<FileFlags>,
+    flags: &Mut<FileFlags>,
     wake_type: WakeType,
     try_read: F,
 ) -> ObjectResult<usize>

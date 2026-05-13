@@ -1,6 +1,6 @@
+use crate::memory::utils::Mut;
 use alloc::sync::Arc;
 use core::mem;
-use spin::mutex::Mutex;
 
 use crate::{
     ipc::sysv_shm::inherit_forked_mappings,
@@ -35,7 +35,7 @@ impl Process {
             } else {
                 clone_fs_context(&parent_locked.fs_context)
             };
-            let new_process = Arc::new(Mutex::new(Self {
+            let new_process = Arc::new(Mut::new(Self {
                 pid,
                 pending_signals: parent_locked.pending_signals,
                 pending_signal_info: parent_locked.pending_signal_info.clone(),

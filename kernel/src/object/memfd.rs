@@ -3,9 +3,9 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use crate::memory::utils::Mut;
 use alloc::{collections::BTreeMap, string::String, sync::Arc};
 use bitflags::bitflags;
-use spin::Mutex;
 
 use crate::{
     filesystem::{
@@ -59,7 +59,7 @@ struct MemFdFile {
 static NEXT_MEMFD_INODE: AtomicU64 = AtomicU64::new(1);
 
 lazy_static::lazy_static! {
-    static ref MEMFD_REGISTRY: Mutex<MemFdRegistry> = Mutex::new(MemFdRegistry::default());
+    static ref MEMFD_REGISTRY: Mut<MemFdRegistry> = Mut::new(MemFdRegistry::default());
 }
 
 impl MemFdFile {
@@ -234,6 +234,6 @@ pub fn create_memfd_object(path: Path, name: String, allow_sealing: bool) -> Obj
     register_memfd(&path, allow_sealing);
 
     let inode = NEXT_MEMFD_INODE.fetch_add(1, Ordering::Relaxed);
-    let file: WrappedFile = Arc::new(Mutex::new(MemFdFile::new(name, inode, path.clone())));
+    let file: WrappedFile = Arc::new(Mut::new(MemFdFile::new(name, inode, path.clone())));
     Arc::new(FileLikeObject::new(FileLike::File(file), path).expect("memfd must open")) as ObjectRef
 }

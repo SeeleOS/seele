@@ -1,7 +1,7 @@
+use crate::memory::utils::Mut;
 use core::ptr::copy_nonoverlapping;
 
 use alloc::collections::btree_map::BTreeMap;
-use ext4plus::sync::Mutex;
 use x86_64::{
     VirtAddr,
     structures::paging::{
@@ -12,7 +12,7 @@ use x86_64::{
 use crate::memory::{addrspace::AddrSpace, paging::FRAME_ALLOCATOR, utils::apply_offset};
 
 lazy_static::lazy_static! {
-    static ref FRAME_REF_COUNT: Mutex<BTreeMap<u64, usize>> = Mutex::new(BTreeMap::new());
+    static ref FRAME_REF_COUNT: Mut<BTreeMap<u64, usize>> = Mut::new(BTreeMap::new());
 }
 
 pub const COW_FLAG: PageTableFlags = PageTableFlags::BIT_9;

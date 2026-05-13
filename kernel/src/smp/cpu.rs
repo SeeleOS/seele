@@ -44,6 +44,7 @@ pub struct CpuCoreContext {
     pub online: AtomicBool,
     pub need_resched: AtomicBool,
     pub last_timer_tick_ns: AtomicU64,
+    pub thread_run_start_cycles: AtomicU64,
     pub gs_context: GsContext,
     pub local_apic: LocalApic,
     pub scheduler_thread: ThreadRef,
@@ -241,6 +242,7 @@ impl CpuCoreContext {
             online: AtomicBool::new(is_bsp),
             need_resched: AtomicBool::new(false),
             last_timer_tick_ns: AtomicU64::new(0),
+            thread_run_start_cycles: AtomicU64::new(0),
             gs_context: GsContext {
                 kernel_stack_top: gs_stack_top,
                 user_stack_top: 0,

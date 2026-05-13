@@ -1,7 +1,7 @@
 use core::any::Any;
 
+use crate::memory::utils::Mut;
 use alloc::{string::String, sync::Arc};
-use spin::Mutex;
 
 use crate::filesystem::{
     errors::FSError,
@@ -16,7 +16,7 @@ use super::connection::FuseConnection;
 pub struct FuseFile {
     connection: Arc<FuseConnection>,
     nodeid: u64,
-    offset: Mutex<u64>,
+    offset: Mut<u64>,
 }
 
 impl FuseFile {
@@ -24,7 +24,7 @@ impl FuseFile {
         Self {
             connection,
             nodeid,
-            offset: Mutex::new(0),
+            offset: Mut::new(0),
         }
     }
 }

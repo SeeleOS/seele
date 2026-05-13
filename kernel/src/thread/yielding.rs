@@ -15,7 +15,10 @@ use crate::{
     process::{manager::get_current_process, misc::ProcessID},
     systemcall::implementations::remove_futex_waiter,
     thread::{
-        ThreadRef, manager::ThreadManager, misc::State, misc::ThreadID,
+        ThreadRef,
+        manager::ThreadManager,
+        misc::State,
+        misc::ThreadID,
         scheduling::{request_all_cpus_resched, return_to_scheduler_from_current},
         try_with_thread_manager, with_thread_manager,
     },

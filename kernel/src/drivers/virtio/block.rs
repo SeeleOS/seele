@@ -1,6 +1,6 @@
+use crate::memory::utils::Mut;
 use alloc::sync::Arc;
 use conquer_once::spin::OnceCell;
-use spin::Mutex;
 use virtio_drivers::{
     Error as VirtioError,
     device::blk::{SECTOR_SIZE, VirtIOBlk},
@@ -94,7 +94,7 @@ fn is_ext4_candidate(device: &dyn BlockDevice) -> bool {
 }
 
 struct VirtioBlockDevice {
-    inner: Mutex<VirtIOBlk<KernelHal, PciTransport>>,
+    inner: Mut<VirtIOBlk<KernelHal, PciTransport>>,
     capacity: usize,
     readonly: bool,
 }
@@ -155,7 +155,7 @@ impl VirtioBlockDevice {
         let readonly = block.readonly();
 
         Some(Self {
-            inner: Mutex::new(block),
+            inner: Mut::new(block),
             capacity,
             readonly,
         })

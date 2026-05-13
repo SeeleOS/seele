@@ -1,3 +1,4 @@
+use crate::memory::utils::Mut;
 use acpi::sdt::madt::{Madt, MadtEntry};
 use alloc::vec::Vec;
 use core::pin::Pin;
@@ -11,7 +12,7 @@ pub struct Processor {
 }
 
 lazy_static! {
-    static ref PROCESSORS: spin::Mutex<Vec<Processor>> = spin::Mutex::new(Vec::new());
+    static ref PROCESSORS: crate::memory::utils::Mut<Vec<Processor>> = Mut::new(Vec::new());
 }
 
 pub fn register_bsp(apic_id: u32) {

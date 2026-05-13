@@ -1,11 +1,11 @@
+use crate::memory::utils::Mut;
 use alloc::slice;
 use conquer_once::spin::OnceCell;
-use spin::Mutex;
 
 use crate::filesystem::block_device::{BlockDevice, BlockDeviceError, BlockDeviceResult};
 
 #[derive(Debug)]
-pub struct RamDisk(Mutex<&'static mut [u8]>);
+pub struct RamDisk(Mut<&'static mut [u8]>);
 
 #[derive(Debug, Default)]
 pub struct RamDiskHandle;
@@ -17,7 +17,7 @@ pub fn init(addr: u64, len: u64) {
         // The bootloader-provided ramdisk memory remains mapped for the
         // kernel lifetime, so storing a mutable slice here is valid.
         RAMDISK.get_or_init(|| {
-            RamDisk(Mutex::new(slice::from_raw_parts_mut(
+            RamDisk(Mut::new(slice::from_raw_parts_mut(
                 addr as *mut u8,
                 len as usize,
             )))

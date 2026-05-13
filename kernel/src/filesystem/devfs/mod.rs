@@ -1,10 +1,10 @@
+use crate::memory::utils::Mut;
 use alloc::{
     collections::BTreeSet,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
 };
-use spin::Mutex;
 
 use crate::{
     drm::fs::DEV_DRI_NODE,
@@ -351,15 +351,11 @@ fn static_directory_file_like(
     path: String,
     node: &'static StaticDirectoryNode,
 ) -> FileLike {
-    FileLike::Directory(Arc::new(Mutex::new(DevDirectoryHandle {
-        state,
-        path,
-        node,
-    })))
+    FileLike::Directory(Arc::new(Mut::new(DevDirectoryHandle { state, path, node })))
 }
 
 fn pts_directory_file_like() -> FileLike {
-    FileLike::Directory(Arc::new(Mutex::new(DevPtsDirectoryHandle)))
+    FileLike::Directory(Arc::new(Mut::new(DevPtsDirectoryHandle)))
 }
 
 fn pts_inode(number: u32) -> u64 {
@@ -368,7 +364,7 @@ fn pts_inode(number: u32) -> u64 {
 
 fn pts_file_like(number: u32) -> FSResult<FileLike> {
     let object = get_pty_slave(number).ok_or(FSError::NotFound)?;
-    Ok(FileLike::File(Arc::new(Mutex::new(
+    Ok(FileLike::File(Arc::new(Mut::new(
         StaticDeviceHandle::from_object(
             number.to_string(),
             pts_inode(number),
@@ -419,14 +415,14 @@ fn static_node_file_like(
                 static_directory_file_like(state, path, directory)
             }
         }
-        StaticNode::File(file) => FileLike::File(Arc::new(Mutex::new(
+        StaticNode::File(file) => FileLike::File(Arc::new(Mut::new(
             crate::filesystem::staticfs::file::StaticFileHandle::new(file),
         ))),
-        StaticNode::Symlink(symlink) => FileLike::Symlink(Arc::new(Mutex::new(
+        StaticNode::Symlink(symlink) => FileLike::Symlink(Arc::new(Mut::new(
             crate::filesystem::staticfs::symlink::StaticSymlinkHandle::new(symlink),
         ))),
         StaticNode::Device(device) => {
-            FileLike::File(Arc::new(Mutex::new(StaticDeviceHandle::new(device))))
+            FileLike::File(Arc::new(Mut::new(StaticDeviceHandle::new(device))))
         }
     }
 }
@@ -545,7 +541,7 @@ impl Directory for DevDirectoryHandle {
 
 impl DevFs {
     pub fn new() -> Self {
-        let state = Arc::new(Mutex::new(TmpfsState::new()));
+        let state = Arc::new(Mut::new(TmpfsState::new()));
         {
             let mut state_guard = state.lock();
             for path in static_root_paths() {

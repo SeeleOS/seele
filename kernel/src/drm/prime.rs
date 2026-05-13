@@ -1,8 +1,8 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use crate::memory::utils::Mut;
 use alloc::{string::String, sync::Arc};
 use bitflags::bitflags;
-use spin::Mutex;
 use x86_64::{
     VirtAddr,
     structures::paging::{PhysFrame, Size4KiB},
@@ -77,7 +77,7 @@ pub struct DrmPrimeBufferObject {
     buffer: DumbBuffer,
     inode: u64,
     open_state: OpenState,
-    position: Mutex<usize>,
+    position: Mut<usize>,
 }
 
 impl DrmPrimeBufferObject {
@@ -86,7 +86,7 @@ impl DrmPrimeBufferObject {
             buffer,
             inode: NEXT_PRIME_INODE.fetch_add(1, Ordering::Relaxed),
             open_state: OpenState::default(),
-            position: Mutex::new(0),
+            position: Mut::new(0),
         }
     }
 

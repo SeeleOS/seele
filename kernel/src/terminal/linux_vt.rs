@@ -1,4 +1,4 @@
-use spin::Mutex;
+use crate::memory::utils::Mut;
 
 use crate::{
     memory::user_safe,
@@ -12,7 +12,7 @@ use crate::{
 };
 
 pub fn handle_vt_request(
-    state: &Mutex<LinuxConsoleState>,
+    state: &Mut<LinuxConsoleState>,
     request: &ConfigurateRequest,
 ) -> ObjectResult<Option<isize>> {
     match request {

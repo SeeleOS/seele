@@ -10,11 +10,11 @@ pub mod state;
 pub mod term_trait;
 pub mod termios;
 
+use crate::memory::utils::Mut;
 use alloc::{boxed::Box, sync::Arc};
 pub use color::Color;
 pub use flanterm::KernelTerminal;
 pub use macros::term_print;
-use spin::mutex::Mutex;
 
 use crate::{
     misc::framebuffer::FRAME_BUFFER,
@@ -39,11 +39,8 @@ pub fn init() {
 
     log::debug!("graphics: terminal ready");
 
-    let default_terminal = DEFAULT_TERMINAL.get_or_init(|| {
-        Arc::new(Mutex::new(TerminalObject::new(Arc::new(Mutex::new(
-            terminal,
-        )))))
-    });
+    let default_terminal = DEFAULT_TERMINAL
+        .get_or_init(|| Arc::new(Mut::new(TerminalObject::new(Arc::new(Mut::new(terminal))))));
 
     init_virtual_ttys();
 

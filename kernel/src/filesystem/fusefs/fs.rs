@@ -1,5 +1,5 @@
+use crate::memory::utils::Mut;
 use alloc::sync::Arc;
-use spin::Mutex;
 
 use crate::filesystem::{
     errors::FSError,
@@ -53,14 +53,15 @@ impl FileSystem for FuseFs {
     fn lookup(&self, path: &Path) -> FSResult<FileLike> {
         let (nodeid, kind) = self.resolve_path(path)?;
         Ok(match kind {
-            FileLikeType::Directory => FileLike::Directory(Arc::new(Mutex::new(
-                FuseDirectory::new(self.connection.clone(), nodeid),
-            ))),
-            FileLikeType::File => FileLike::File(Arc::new(Mutex::new(FuseFile::new(
+            FileLikeType::Directory => FileLike::Directory(Arc::new(Mut::new(FuseDirectory::new(
                 self.connection.clone(),
                 nodeid,
             )))),
-            FileLikeType::Symlink => FileLike::Symlink(Arc::new(Mutex::new(FuseSymlink::new(
+            FileLikeType::File => FileLike::File(Arc::new(Mut::new(FuseFile::new(
+                self.connection.clone(),
+                nodeid,
+            )))),
+            FileLikeType::Symlink => FileLike::Symlink(Arc::new(Mut::new(FuseSymlink::new(
                 self.connection.clone(),
                 nodeid,
             )))),

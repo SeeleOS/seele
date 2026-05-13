@@ -1,9 +1,9 @@
+use crate::memory::utils::Mut;
 use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc, vec, vec::Vec};
 use bitflags::bitflags;
 use core::sync::atomic::{AtomicI32, Ordering};
 use lazy_static::lazy_static;
 use num_enum::TryFromPrimitive;
-use spin::Mutex;
 use x86_64::VirtAddr;
 
 use crate::memory::{
@@ -213,7 +213,7 @@ static NEXT_SESSION_KEYRING_ID: AtomicI32 = AtomicI32::new(1);
 static NEXT_KEY_SERIAL: AtomicI32 = AtomicI32::new(1024);
 
 lazy_static! {
-    static ref KEY_REGISTRY: Mutex<BTreeMap<i32, KeyEntry>> = Mutex::new(BTreeMap::new());
+    static ref KEY_REGISTRY: Mut<BTreeMap<i32, KeyEntry>> = Mut::new(BTreeMap::new());
 }
 
 #[derive(Clone, Debug, Default)]

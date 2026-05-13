@@ -1,10 +1,10 @@
+use crate::memory::utils::Mut;
 use alloc::{
     collections::{BTreeMap, vec_deque::VecDeque},
     string::String,
     sync::Arc,
     vec::Vec,
 };
-use spin::Mutex;
 
 use crate::{
     filesystem::{
@@ -71,13 +71,13 @@ struct FuseConnectionState {
 
 #[derive(Debug)]
 pub struct FuseConnection {
-    state: Mutex<FuseConnectionState>,
+    state: Mut<FuseConnectionState>,
 }
 
 impl FuseConnection {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            state: Mutex::new(FuseConnectionState {
+            state: Mut::new(FuseConnectionState {
                 mounted: false,
                 init_unique: None,
                 init_complete: false,

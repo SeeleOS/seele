@@ -1,5 +1,5 @@
+use crate::memory::utils::Mut;
 use alloc::{collections::VecDeque, string::String, sync::Arc, vec::Vec};
-use spin::Mutex;
 
 use crate::{
     object::{
@@ -179,14 +179,14 @@ impl AbstractTerminal for TestTerminal {
     fn clear(&mut self) {}
 }
 
-fn make_terminal_object(rows: usize, cols: usize) -> Arc<Mutex<TerminalObject>> {
-    Arc::new(Mutex::new(TerminalObject::new(Arc::new(Mutex::new(
+fn make_terminal_object(rows: usize, cols: usize) -> Arc<Mut<TerminalObject>> {
+    Arc::new(Mut::new(TerminalObject::new(Arc::new(Mut::new(
         TestTerminal { rows, cols },
     )))))
 }
 
 fn make_pty_pair() -> (Arc<PtyMaster>, Arc<PtySlave>) {
-    let shared = Arc::new(Mutex::new(PtyShared::default()));
+    let shared = Arc::new(Mut::new(PtyShared::default()));
     let master = Arc::new(PtyMaster::new(7, shared.clone()));
     let slave = Arc::new(PtySlave::new(7, shared.clone()));
     let master_ref: ObjectRef = master.clone();
@@ -401,7 +401,7 @@ fn terminal_and_tty_ioctls_follow_linux_rules() {
         .unwrap();
     assert_eq!(roundtrip.c_lflag, 0);
 
-    let state = Mutex::new(LinuxConsoleState::default());
+    let state = Mut::new(LinuxConsoleState::default());
     let mut mode = LinuxVtMode::default();
     assert_eq!(
         handle_vt_request(&state, &ConfigurateRequest::LinuxVtGetMode(&mut mode))

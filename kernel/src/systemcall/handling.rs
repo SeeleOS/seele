@@ -17,7 +17,9 @@ use crate::{
     thread::{
         get_current_thread,
         misc::{BlockedSyscall, State, with_current_thread},
-        scheduling::{enable_ap_task_scheduling, note_user_mode_resume, return_to_scheduler_no_save},
+        scheduling::{
+            enable_ap_task_scheduling, note_user_mode_resume, return_to_scheduler_no_save,
+        },
     },
 };
 use x86_64::registers::model_specific::FsBase;
@@ -29,6 +31,7 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     let snapshot = unsafe { &mut *snapshot_ptr };
     let syscall_no = snapshot.rax;
     let syscall_start = profile::scope_start();
+    let entry_start = syscall_start;
 
     let thread_ref = get_current_thread();
     let mut thread = thread_ref.lock();
@@ -44,7 +47,9 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     thread.blocked_syscall_started_at = None;
     thread.blocked_syscall_cycles = 0;
     drop(thread);
+    let entry_cycles = profile::scope_start().saturating_sub(entry_start);
 
+    let body_start = profile::scope_start();
     maybe_stop_current_on_syscall_entry();
 
     let args = [
@@ -66,7 +71,9 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     log_syscall_trace_exit(syscall_no, args, result);
 
     snapshot.rax = result;
+    let body_end = profile::scope_start();
 
+    let exit_start = profile::scope_start();
     let blocked_cycles = {
         let mut thread = thread_ref.lock();
         if thread.blocked_syscall_started_at.is_some() {
@@ -78,6 +85,13 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     let cpu_cycles = elapsed.saturating_sub(blocked_cycles);
     profile::record_cycles(ProfileCategory::SyscallCpu, cpu_cycles);
     profile::record_syscall_cpu(syscall_no as usize, cpu_cycles);
+    profile::record_cycles(ProfileCategory::SyscallEntry, entry_cycles);
+    profile::record_cycles(
+        ProfileCategory::SyscallBody,
+        body_end
+            .saturating_sub(body_start)
+            .saturating_sub(blocked_cycles),
+    );
 
     with_current_thread(|thread| {
         let fs_base = FsBase::read().as_u64();
@@ -95,6 +109,7 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     maybe_stop_current_on_syscall_exit();
 
     if matches!(get_current_thread().lock().state, State::Exiting) {
+        profile::record(ProfileCategory::SyscallExit, exit_start);
         return_to_scheduler_no_save();
     }
 
@@ -103,10 +118,12 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
         crate::thread::with_thread_manager(|manager| manager.cleanup_exited_threads());
         // Its fine to no_save becuase we've already saved everything manually
         // And returned the value (snapshot.rax = result)
+        profile::record(ProfileCategory::SyscallExit, exit_start);
         return_to_scheduler_no_save();
     }
 
     note_user_mode_resume(Time::since_boot().as_nanoseconds());
+    profile::record(ProfileCategory::SyscallExit, exit_start);
 }
 
 fn syscall_handler_unwrapped(
