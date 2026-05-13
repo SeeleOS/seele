@@ -298,12 +298,12 @@ define_syscall!(Waitid, |id_type: i32,
     let result = wait_for_child_exit(target_process, wait_behavior)?;
 
     if !info_ptr.is_null() {
-        let info = if let Some(result) = result {
+        let info = if let Some(result) = &result {
             match result {
                 WaitOutcome::Exited(_, pid, exit_status) => SigInfo::for_waitid(
                     Signal::SIGCHLD,
                     exit_status.waitid_code(),
-                    pid as i32,
+                    *pid as i32,
                     exit_status.waitid_status(),
                 ),
                 WaitOutcome::Stopped(_, pid, wait_event) => SigInfo::for_waitid(
@@ -313,7 +313,7 @@ define_syscall!(Waitid, |id_type: i32,
                     } else {
                         CLD_STOPPED
                     },
-                    pid as i32,
+                    *pid as i32,
                     (wait_event.wait_status() >> 8) & 0xff,
                 ),
             }
