@@ -23,6 +23,9 @@ use crate::{
 };
 use lazy_static::lazy_static;
 
+#[cfg(test)]
+use alloc::vec;
+
 const FILE_LAZY_CLUSTER_PAGES: u64 = 16;
 
 #[derive(Clone, Copy, Debug, Default)]

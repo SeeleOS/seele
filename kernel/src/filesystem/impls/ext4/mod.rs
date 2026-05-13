@@ -350,3 +350,36 @@ unsafe impl Sync for Ext4File {}
 unsafe impl Send for Ext4File {}
 unsafe impl Send for Ext4Directory {}
 unsafe impl Sync for Ext4Directory {}
+
+#[cfg(test)]
+crate::test!(
+    ext4_lookup_cache_nested_structure,
+    "ext4 lookup cache nested structure preserves lookup semantics",
+    ext4_lookup_cache_nested_structure_preserves_lookup_semantics
+);
+
+#[cfg(test)]
+fn ext4_lookup_cache_nested_structure_preserves_lookup_semantics() {
+    let cache: LookupCache = Arc::new(Mut::new(BTreeMap::new()));
+    let root = crate::filesystem::vfs::VirtualFS
+        .lock()
+        .resolve_dir(crate::filesystem::path::Path::new("/"))
+        .unwrap();
+    let root = root.lock();
+    let ext4_root = root.as_any().downcast_ref::<Ext4Directory>().unwrap();
+    let inode_a = ext4_root.inode();
+    let inode_b = ext4_root.inode();
+
+    lookup_cache_insert_raw(&cache, 7, "alpha", &inode_a);
+    lookup_cache_insert_raw(&cache, 7, "beta", &inode_b);
+
+    assert!(lookup_cache_contains_raw(&cache, 7, "alpha"));
+    assert!(lookup_cache_contains_raw(&cache, 7, "beta"));
+
+    lookup_cache_remove_raw(&cache, 7, "alpha");
+    assert!(!lookup_cache_contains_raw(&cache, 7, "alpha"));
+    assert!(lookup_cache_contains_raw(&cache, 7, "beta"));
+
+    lookup_cache_clear(&cache);
+    assert!(!lookup_cache_contains_raw(&cache, 7, "beta"));
+}

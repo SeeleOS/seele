@@ -1,4 +1,4 @@
-use alloc::{format, sync::Arc, vec, vec::Vec};
+use alloc::{format, vec, vec::Vec};
 use core::str;
 
 use crate::filesystem::info::DirectoryContentInfo;
@@ -7,11 +7,6 @@ use crate::filesystem::{
     absolute_path::AbsolutePath,
     devfs::DevFs,
     errors::FSError,
-    impls::ext4::{
-        directory::Ext4Directory,
-        LookupCache, lookup_cache_clear, lookup_cache_contains_raw, lookup_cache_insert_raw,
-        lookup_cache_remove_raw,
-    },
     info::{FileLikeInfo, LinuxStat, UnixPermission},
     page_cache,
     path::{Path, PathPart},
@@ -28,10 +23,8 @@ use crate::filesystem::{
     vfs_traits::{FileLikeType, MountFlags},
 };
 use crate::misc::utsname::{current_domainname, current_hostname, set_domainname, set_hostname};
-use crate::memory::utils::Mut;
 use crate::object::tty_device::{get_active_vt, set_active_vt};
 use crate::process::manager::get_current_process;
-use alloc::collections::btree_map::BTreeMap;
 
 crate::test!(
     path_normalization_cases,
@@ -102,11 +95,6 @@ crate::test!(
     page_cache_second_chance_eviction,
     "page cache second-chance eviction preserves referenced pages",
     page_cache_second_chance_eviction_preserves_referenced_pages
-);
-crate::test!(
-    ext4_lookup_cache_nested_structure,
-    "ext4 lookup cache nested structure preserves lookup semantics",
-    ext4_lookup_cache_nested_structure_preserves_lookup_semantics
 );
 
 fn path_normalization_handles_absolute_and_relative_components() {
@@ -270,28 +258,6 @@ fn page_cache_second_chance_eviction_preserves_referenced_pages() {
     assert!(page_cache::contains_for_test(new_file, 0));
 
     page_cache::reset_for_test();
-}
-
-fn ext4_lookup_cache_nested_structure_preserves_lookup_semantics() {
-    let cache: LookupCache = Arc::new(Mut::new(BTreeMap::new()));
-    let root = VirtualFS.lock().resolve_dir(Path::new("/")).unwrap();
-    let root = root.lock();
-    let ext4_root = root.as_any().downcast_ref::<Ext4Directory>().unwrap();
-    let inode_a = ext4_root.inode();
-    let inode_b = ext4_root.inode();
-
-    lookup_cache_insert_raw(&cache, 7, "alpha", &inode_a);
-    lookup_cache_insert_raw(&cache, 7, "beta", &inode_b);
-
-    assert!(lookup_cache_contains_raw(&cache, 7, "alpha"));
-    assert!(lookup_cache_contains_raw(&cache, 7, "beta"));
-
-    lookup_cache_remove_raw(&cache, 7, "alpha");
-    assert!(!lookup_cache_contains_raw(&cache, 7, "alpha"));
-    assert!(lookup_cache_contains_raw(&cache, 7, "beta"));
-
-    lookup_cache_clear(&cache);
-    assert!(!lookup_cache_contains_raw(&cache, 7, "beta"));
 }
 
 fn staticfs_exposes_metadata_tree_shape_and_readonly_rules() {

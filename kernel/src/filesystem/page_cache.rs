@@ -243,8 +243,10 @@ pub fn insert_for_test(
         valid_len: PAGE_SIZE,
     };
     let mut state = PAGE_CACHE.lock();
-    state.entries.insert(key, CachedPageEntry { page, referenced });
-    state.eviction_queue.push_back(key);
+    state.insert(key, page);
+    if let Some(entry) = state.entries.get_mut(&key) {
+        entry.referenced = referenced;
+    }
 }
 
 #[cfg(test)]
