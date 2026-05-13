@@ -158,9 +158,12 @@ impl UnixSocketObject {
                         return Ok(0);
                     }
 
-                    let stream = match &*self.state.lock() {
-                        UnixSocketState::Stream(stream) => stream.clone(),
-                        _ => return Err(SocketError::InvalidArguments),
+                    let stream = {
+                        let state = self.state.lock();
+                        match &*state {
+                            UnixSocketState::Stream(stream) => stream.clone(),
+                            _ => return Err(SocketError::InvalidArguments),
+                        }
                     };
 
                     if *stream.write_shutdown.lock() {

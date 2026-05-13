@@ -55,8 +55,17 @@ impl UnixSocketObject {
     ) -> SocketResult<usize> {
         let nonblocking = force_nonblocking || self.is_nonblocking();
         loop {
-            match &*self.state.lock() {
-                UnixSocketState::Datagram(datagram) => {
+            let state = {
+                let state = self.state.lock();
+                match &*state {
+                    UnixSocketState::Datagram(datagram) => Some((None, Some(datagram.clone()))),
+                    UnixSocketState::Stream(stream) => Some((Some(stream.clone()), None)),
+                    _ => None,
+                }
+            };
+
+            match state {
+                Some((None, Some(datagram))) => {
                     if *datagram.read_shutdown.lock() {
                         return Ok(0);
                     }
@@ -84,7 +93,7 @@ impl UnixSocketObject {
                         wait_for_object_event(object_ref, PollableEvent::CanBeRead);
                     }
                 }
-                UnixSocketState::Stream(stream) => {
+                Some((Some(stream), None)) => {
                     if *stream.read_shutdown.lock() {
                         return Ok(0);
                     }
