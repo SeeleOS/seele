@@ -54,6 +54,11 @@ crate::test!(
     "unix listener connect wakes pollers without self-deadlocking on the pending queue",
     unix_listener_connect_wakes_poller_without_self_deadlock
 );
+crate::test!(
+    inet_listener_poll_semantics,
+    "inet listener is not spuriously writable while listening",
+    inet_listener_poll_semantics_follow_linux_rules
+);
 
 fn unix_sockaddr_round_trips_path_and_abstract_names() {
     let pathname = serialize_unix_addr(Some("/tmp/socket"));
@@ -238,4 +243,25 @@ fn unix_listener_connect_wakes_poller_without_self_deadlock() {
     assert_eq!(ready.len(), 1);
     assert_eq!(ready[0].data, 0x44);
     assert_eq!(ready[0].event, PollableEvent::CanBeRead);
+}
+
+fn inet_listener_poll_semantics_follow_linux_rules() {
+    let listener = InetSocketObject::create(AF_INET, crate::socket::SOCK_STREAM, 0)
+        .expect("inet listener should be created");
+    listener
+        .bind(InetAddress::new([127, 0, 0, 1], 22345))
+        .expect("listener should bind");
+    listener.listen(1).expect("listener should listen");
+
+    assert!(!listener.is_event_ready(PollableEvent::CanBeWritten));
+
+    let client = InetSocketObject::create(AF_INET, crate::socket::SOCK_STREAM, 0)
+        .expect("inet client should be created");
+    client
+        .connect(InetAddress::new([127, 0, 0, 1], 22345))
+        .expect("client connect should succeed");
+
+    crate::net::poll();
+
+    assert!(!listener.is_event_ready(PollableEvent::CanBeWritten));
 }

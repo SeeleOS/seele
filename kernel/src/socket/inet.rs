@@ -55,6 +55,14 @@ pub struct InetSocketObject {
     priority: Mut<i32>,
 }
 
+#[derive(Clone, Copy)]
+enum InetWaitKind {
+    Connect,
+    Accept,
+    Send,
+    Recv,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct LinuxSockAddrIn {
@@ -169,30 +177,42 @@ impl InetSocketObject {
         .to_vec()
     }
 
-    fn prepare_wait(&self) {
+    fn prepare_wait(&self, kind: InetWaitKind) {
         let current = prepare_block_current(BlockType::WakeRequired {
             wake_type: WakeType::IO,
             deadline: None,
         });
 
         net::poll();
-        if self.is_ready_for_io() {
+        if self.is_ready_for_io(kind) {
             cancel_block(&current);
         } else {
             finish_block_current();
         }
     }
 
-    fn is_ready_for_io(&self) -> bool {
-        match self.kind {
-            InetSocketKind::Stream => {
-                let handle = self.current_handle();
-                handle.tcp_can_recv() || handle.tcp_can_send() || handle.tcp_is_closed()
+    fn is_ready_for_io(&self, kind: InetWaitKind) -> bool {
+        let state = self.state.lock();
+        match (self.kind, kind) {
+            (InetSocketKind::Stream, InetWaitKind::Connect) => {
+                state.handle.tcp_is_active() || state.handle.tcp_is_closed()
             }
-            InetSocketKind::Datagram => {
-                let handle = self.current_handle();
-                handle.udp_can_recv() || handle.udp_can_send()
+            (InetSocketKind::Stream, InetWaitKind::Accept) => {
+                state.listening && state.handle.tcp_is_active()
             }
+            (InetSocketKind::Stream, InetWaitKind::Send) => {
+                state.handle.tcp_can_send() || state.handle.tcp_is_closed()
+            }
+            (InetSocketKind::Stream, InetWaitKind::Recv) => {
+                state.read_shutdown || state.handle.tcp_can_recv() || state.handle.tcp_is_closed()
+            }
+            (InetSocketKind::Datagram, InetWaitKind::Send) => {
+                !state.write_shutdown && state.handle.udp_can_send()
+            }
+            (InetSocketKind::Datagram, InetWaitKind::Recv) => {
+                state.read_shutdown || state.handle.udp_can_recv()
+            }
+            (InetSocketKind::Datagram, InetWaitKind::Connect | InetWaitKind::Accept) => false,
         }
     }
 
@@ -302,7 +322,7 @@ impl InetSocketObject {
             if handle.tcp_is_closed() {
                 return Err(SocketError::ConnectionRefused);
             }
-            self.prepare_wait();
+            self.prepare_wait(InetWaitKind::Connect);
         }
     }
 
@@ -344,7 +364,7 @@ impl InetSocketObject {
                     if self.is_nonblocking() {
                         return Err(SocketError::TryAgain);
                     }
-                    self.prepare_wait();
+                    self.prepare_wait(InetWaitKind::Accept);
                 }
                 Err(err) => return Err(Self::map_net_error(err)),
             }
@@ -385,7 +405,7 @@ impl InetSocketObject {
                     if self.is_nonblocking() {
                         return Err(SocketError::TryAgain);
                     }
-                    self.prepare_wait();
+                    self.prepare_wait(InetWaitKind::Send);
                 }
                 Err(err) => return Err(Self::map_net_error(err)),
             }
@@ -408,7 +428,7 @@ impl InetSocketObject {
                     if self.is_nonblocking() {
                         return Err(SocketError::TryAgain);
                     }
-                    self.prepare_wait();
+                    self.prepare_wait(InetWaitKind::Send);
                 }
                 Err(err) => return Err(Self::map_net_error(err)),
             }
@@ -443,7 +463,7 @@ impl InetSocketObject {
                     if self.is_nonblocking() {
                         return Err(SocketError::TryAgain);
                     }
-                    self.prepare_wait();
+                    self.prepare_wait(InetWaitKind::Recv);
                 }
                 Err(err) => return Err(Self::map_net_error(err)),
             }
@@ -463,7 +483,7 @@ impl InetSocketObject {
                     if self.is_nonblocking() {
                         return Err(SocketError::TryAgain);
                     }
-                    self.prepare_wait();
+                    self.prepare_wait(InetWaitKind::Recv);
                 }
                 Err(err) => return Err(Self::map_net_error(err)),
             }
