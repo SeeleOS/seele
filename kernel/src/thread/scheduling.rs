@@ -150,8 +150,12 @@ impl SchedulerDeferredWork {
         self.next_deadline().is_some_and(|deadline| deadline <= now)
     }
 
-    fn has_any_work(self) -> bool {
-        self.pollers_dirty || self.input_pending || self.next_deadline().is_some()
+    fn has_background_reason_to_spin(self) -> bool {
+        self.pollers_dirty || self.input_pending
+    }
+
+    fn should_keep_cpu_awake(self, now: Time) -> bool {
+        self.has_due_deadline(now) || self.has_background_reason_to_spin()
     }
 }
 
@@ -560,9 +564,10 @@ fn sleep_if_idle() {
     interrupts::disable();
     let had_resched_request = take_current_cpu_resched_request();
     let deferred_work = should_run_global_scheduler_work().then(scheduler_deferred_work_snapshot);
+    let now = Time::since_boot();
 
     if let Some(deferred_work) = deferred_work
-        && (deferred_work.has_due_deadline(Time::since_boot()) || deferred_work.pollers_dirty)
+        && (deferred_work.has_due_deadline(now) || deferred_work.pollers_dirty)
     {
         process_deferred_timer_work(deferred_work);
     }
@@ -573,7 +578,7 @@ fn sleep_if_idle() {
         false
     };
     let has_pending_work = has_pending_threads
-        || deferred_work.is_some_and(|work| work.input_pending || work.has_any_work())
+        || deferred_work.is_some_and(|work| work.should_keep_cpu_awake(now))
         || had_resched_request;
 
     if has_pending_work {
@@ -626,6 +631,47 @@ mod tests {
             };
             assert!(work.has_due_deadline(Time::from_nanoseconds(10)));
             assert!(!work.has_due_deadline(Time::from_nanoseconds(9)));
+        }
+    );
+
+    crate::test!(
+        scheduler_deferred_work_future_deadline_does_not_block_idle,
+        "scheduler deferred work ignores future deadlines for idle gating",
+        || {
+            let work = SchedulerDeferredWork {
+                thread_deadline: Some(Time::from_nanoseconds(10)),
+                process_timer_deadline: None,
+                timerfd_deadline: None,
+                pollers_dirty: false,
+                input_pending: false,
+            };
+
+            assert!(!work.should_keep_cpu_awake(Time::from_nanoseconds(9)));
+            assert!(work.should_keep_cpu_awake(Time::from_nanoseconds(10)));
+        }
+    );
+
+    crate::test!(
+        scheduler_deferred_work_background_reasons_keep_cpu_awake,
+        "scheduler deferred work still spins for pollers and input",
+        || {
+            let dirty_pollers = SchedulerDeferredWork {
+                thread_deadline: Some(Time::from_nanoseconds(100)),
+                process_timer_deadline: None,
+                timerfd_deadline: None,
+                pollers_dirty: true,
+                input_pending: false,
+            };
+            let pending_input = SchedulerDeferredWork {
+                thread_deadline: None,
+                process_timer_deadline: None,
+                timerfd_deadline: None,
+                pollers_dirty: false,
+                input_pending: true,
+            };
+
+            assert!(dirty_pollers.should_keep_cpu_awake(Time::from_nanoseconds(1)));
+            assert!(pending_input.should_keep_cpu_awake(Time::from_nanoseconds(1)));
         }
     );
 }
