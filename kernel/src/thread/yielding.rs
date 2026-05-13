@@ -16,7 +16,8 @@ use crate::{
     systemcall::implementations::remove_futex_waiter,
     thread::{
         ThreadRef, manager::ThreadManager, misc::State, misc::ThreadID,
-        scheduling::return_to_scheduler_from_current, try_with_thread_manager, with_thread_manager,
+        scheduling::{request_all_cpus_resched, return_to_scheduler_from_current},
+        try_with_thread_manager, with_thread_manager,
     },
 };
 
@@ -219,6 +220,7 @@ impl ThreadManager {
                 locked_thread.state = State::Ready;
                 drop(locked_thread);
                 self.push_ready_balanced(thread);
+                request_all_cpus_resched();
                 wake_scheduler_cpus();
             }
             _ => {}

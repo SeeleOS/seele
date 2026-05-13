@@ -16,6 +16,7 @@ use crate::{
     thread::{
         ThreadRef,
         misc::{State, ThreadID},
+        scheduling::request_all_cpus_resched,
         snapshot::ThreadSnapshotType,
         thread::Thread,
         yielding::{BlockType, BlockedQueues},
@@ -195,6 +196,7 @@ impl ThreadManager {
                 State::Zombie => {}
                 State::Running => {
                     thread_lock.state = State::Exiting;
+                    request_all_cpus_resched();
                     all_stopped = false;
                 }
                 State::Exiting => {

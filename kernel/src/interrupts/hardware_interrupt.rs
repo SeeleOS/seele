@@ -6,8 +6,12 @@ use x86_64::{VirtAddr, structures::idt::InterruptDescriptorTable};
 use crate::{
     interrupts::timer::timer_interrupt_handler_wrapper,
     keyboard::ps2::keyboard_interrupt_handler,
-    misc::{mouse::mouse_interrupt_handler, snapshot::Snapshot},
+    misc::{mouse::mouse_interrupt_handler, snapshot::Snapshot, time::Time},
     smp::{gs::GsContext, with_current_cpu},
+    thread::{
+        scheduling::{note_user_mode_resume, return_to_scheduler, take_current_cpu_resched_request},
+        snapshot::ThreadSnapshotType,
+    },
 };
 
 pub const PIC_1_OFFSET: u8 = 32;
@@ -64,6 +68,18 @@ pub fn init_hardware_interrupts(idt: &mut InterruptDescriptorTable) {
 
 extern "C" fn scheduler_wake_interrupt_handler() {
     send_eoi();
+    crate::misc::profile::increment_resched_ipi_wakeups();
+}
+
+extern "C" fn scheduler_wake_interrupt_handler_user(snapshot: &mut Snapshot) {
+    send_eoi();
+    crate::misc::profile::increment_resched_ipi_wakeups();
+
+    if !take_current_cpu_resched_request() {
+        return;
+    }
+
+    return_to_scheduler(snapshot, ThreadSnapshotType::Thread);
 }
 
 macro_rules! define_user_safe_irq_wrapper {
@@ -107,6 +123,10 @@ macro_rules! define_user_safe_irq_wrapper {
                 "0:",
                 "call {handler}",
                 "test qword ptr [rsp + {CS_OFF}], 0x3",
+                "jz 8f",
+                "call {note_resume}",
+                "8:",
+                "test qword ptr [rsp + {CS_OFF}], 0x3",
                 "jz 3f",
                 "mov r8, qword ptr gs:[{ACTIVE_EXT_STATE_OFF}]",
                 "test r8, r8",
@@ -140,6 +160,7 @@ macro_rules! define_user_safe_irq_wrapper {
                 "pop rax",
                 "iretq",
                 handler = sym $handler,
+                note_resume = sym note_user_mode_resume_now,
                 CS_OFF = const offset_of!(Snapshot, cs),
                 ACTIVE_EXT_STATE_OFF = const offset_of!(GsContext, active_user_extended_state),
                 ACTIVE_EXT_STATE_SAVED_OFF =
@@ -152,9 +173,99 @@ macro_rules! define_user_safe_irq_wrapper {
     };
 }
 
+extern "C" fn note_user_mode_resume_now() {
+    note_user_mode_resume(Time::since_boot().as_nanoseconds());
+}
+
 define_user_safe_irq_wrapper!(keyboard_interrupt_wrapper, keyboard_interrupt_handler);
 define_user_safe_irq_wrapper!(mouse_interrupt_wrapper, mouse_interrupt_handler);
-define_user_safe_irq_wrapper!(
-    scheduler_wake_interrupt_wrapper,
-    scheduler_wake_interrupt_handler
-);
+
+#[unsafe(naked)]
+extern "C" fn scheduler_wake_interrupt_wrapper() {
+    naked_asm!(
+        "push rax",
+        "push rcx",
+        "push rdx",
+        "push rbx",
+        "push rbp",
+        "push rsi",
+        "push rdi",
+        "push r8",
+        "push r9",
+        "push r10",
+        "push r11",
+        "push r12",
+        "push r13",
+        "push r14",
+        "push r15",
+        "test qword ptr [rsp + {CS_OFF}], 0x3",
+        "jz 0f",
+        "swapgs",
+        "mov r8, qword ptr gs:[{ACTIVE_EXT_STATE_OFF}]",
+        "test r8, r8",
+        "jz 0f",
+        "cmp qword ptr gs:[{ACTIVE_EXT_STATE_SAVED_OFF}], 0",
+        "jne 0f",
+        "cmp qword ptr gs:[{USES_XSAVE_OFF}], 0",
+        "je 1f",
+        "mov eax, dword ptr gs:[{XCR0_LOW_OFF}]",
+        "mov edx, dword ptr gs:[{XCR0_HIGH_OFF}]",
+        "xsave64 [r8]",
+        "jmp 2f",
+        "1:",
+        "fxsave64 [r8]",
+        "2:",
+        "mov qword ptr gs:[{ACTIVE_EXT_STATE_SAVED_OFF}], 1",
+        "0:",
+        "test qword ptr [rsp + {CS_OFF}], 0x3",
+        "jz 3f",
+        "mov rdi, rsp",
+        "call {handler_user}",
+        "jmp 4f",
+        "3:",
+        "call {handler_kernel}",
+        "4:",
+        "test qword ptr [rsp + {CS_OFF}], 0x3",
+        "jz 5f",
+        "mov r8, qword ptr gs:[{ACTIVE_EXT_STATE_OFF}]",
+        "test r8, r8",
+        "jz 6f",
+        "cmp qword ptr gs:[{USES_XSAVE_OFF}], 0",
+        "je 7f",
+        "mov eax, dword ptr gs:[{XCR0_LOW_OFF}]",
+        "mov edx, dword ptr gs:[{XCR0_HIGH_OFF}]",
+        "xrstor64 [r8]",
+        "jmp 6f",
+        "7:",
+        "fxrstor64 [r8]",
+        "6:",
+        "mov qword ptr gs:[{ACTIVE_EXT_STATE_SAVED_OFF}], 0",
+        "swapgs",
+        "5:",
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop r11",
+        "pop r10",
+        "pop r9",
+        "pop r8",
+        "pop rdi",
+        "pop rsi",
+        "pop rbp",
+        "pop rbx",
+        "pop rdx",
+        "pop rcx",
+        "pop rax",
+        "iretq",
+        handler_user = sym scheduler_wake_interrupt_handler_user,
+        handler_kernel = sym scheduler_wake_interrupt_handler,
+        CS_OFF = const offset_of!(Snapshot, cs),
+        ACTIVE_EXT_STATE_OFF = const offset_of!(GsContext, active_user_extended_state),
+        ACTIVE_EXT_STATE_SAVED_OFF =
+            const offset_of!(GsContext, active_user_extended_state_saved),
+        USES_XSAVE_OFF = const offset_of!(GsContext, extended_state_uses_xsave),
+        XCR0_LOW_OFF = const offset_of!(GsContext, extended_state_xcr0),
+        XCR0_HIGH_OFF = const offset_of!(GsContext, extended_state_xcr0) + 4,
+    )
+}

@@ -206,6 +206,9 @@ struct ProfileState {
 }
 
 static PROFILE_STATE: OnceCell<ProfileState> = OnceCell::uninit();
+static TIMER_INTERRUPTS: AtomicU64 = AtomicU64::new(0);
+static TIMER_PREEMPTIONS: AtomicU64 = AtomicU64::new(0);
+static RESCHED_IPI_WAKEUPS: AtomicU64 = AtomicU64::new(0);
 
 pub fn init() {
     let cpu_count = topology::processors().len().max(1);
@@ -241,6 +244,18 @@ pub fn record_syscall_cpu(syscall_no: usize, cycles: u64) {
 
 pub fn record_syscall_blocked(syscall_no: usize, cycles: u64) {
     record_syscall_counter(syscall_no, cycles, |cpu| &cpu.syscall_blocked);
+}
+
+pub fn increment_timer_interrupts() {
+    TIMER_INTERRUPTS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn increment_timer_preemptions() {
+    TIMER_PREEMPTIONS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn increment_resched_ipi_wakeups() {
+    RESCHED_IPI_WAKEUPS.fetch_add(1, Ordering::Relaxed);
 }
 
 fn record_syscall_counter(
@@ -357,6 +372,9 @@ fn report_window(window_ns: u64) {
     let tsc_hz = tsc_frequency_hz().max(1);
     let window_ms = window_ns / 1_000_000;
     let cpu_count = topology::processors().len().max(1);
+    let timer_interrupts = TIMER_INTERRUPTS.swap(0, Ordering::AcqRel);
+    let timer_preemptions = TIMER_PREEMPTIONS.swap(0, Ordering::AcqRel);
+    let resched_ipi_wakeups = RESCHED_IPI_WAKEUPS.swap(0, Ordering::AcqRel);
 
     s_println!(
         "PROFILE {}s window_ms={} cpus={} cpu_time_ms={} blocked_time_ms={}",
@@ -365,6 +383,12 @@ fn report_window(window_ns: u64) {
         cpu_count,
         cycles_to_milliseconds(total_cycles, tsc_hz),
         cycles_to_milliseconds(total_blocked_cycles, tsc_hz)
+    );
+    s_println!(
+        "SCHED_EVENTS timer_interrupts={} timer_preemptions={} resched_ipi_wakeups={}",
+        timer_interrupts,
+        timer_preemptions,
+        resched_ipi_wakeups
     );
     s_println!("CATEGORIES");
 

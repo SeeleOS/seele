@@ -1,6 +1,6 @@
 use alloc::boxed::Box;
 use core::arch::x86_64::__cpuid;
-use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 
 use x2apic::lapic::LocalApic;
 use x86_64::{
@@ -42,6 +42,8 @@ pub struct CpuCoreContext {
     pub apic_id: u32,
     pub is_bsp: bool,
     pub online: AtomicBool,
+    pub need_resched: AtomicBool,
+    pub last_timer_tick_ns: AtomicU64,
     pub gs_context: GsContext,
     pub local_apic: LocalApic,
     pub scheduler_thread: ThreadRef,
@@ -237,6 +239,8 @@ impl CpuCoreContext {
             apic_id,
             is_bsp,
             online: AtomicBool::new(is_bsp),
+            need_resched: AtomicBool::new(false),
+            last_timer_tick_ns: AtomicU64::new(0),
             gs_context: GsContext {
                 kernel_stack_top: gs_stack_top,
                 user_stack_top: 0,

@@ -12,11 +12,15 @@ use crate::{
     misc::mouse,
     misc::profile::{self, ProfileCategory},
     misc::snapshot::Snapshot,
+    misc::time::Time,
     misc::timer::process_expired_process_timers,
     object::linux_anon::expired_timerfd_poll_objects,
     polling::event::PollableEvent,
     signal::process_current_process_signals,
-    smp::{current_cpu_index, set_current_kernel_stack, set_current_process, set_current_thread},
+    smp::{
+        current_apic_id, current_cpu_index, set_current_kernel_stack, set_current_process,
+        set_current_thread,
+    },
     thread::{
         ThreadRef,
         extended_state::{
@@ -25,14 +29,77 @@ use crate::{
         misc::State,
         scheduler_thread,
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
+        thread::DEFAULT_USER_TIMESLICE_NS,
         with_thread_manager,
     },
 };
 
 static AP_TASK_SCHEDULING_ENABLED: AtomicBool = AtomicBool::new(false);
 static PROFILE_REPORT_TICK: AtomicU32 = AtomicU32::new(0);
+
 pub fn enable_ap_task_scheduling() {
     AP_TASK_SCHEDULING_ENABLED.store(true, Ordering::Release);
+}
+
+pub fn request_current_cpu_resched() {
+    crate::smp::with_current_cpu(|cpu| {
+        cpu.need_resched.store(true, Ordering::Release);
+    });
+}
+
+pub fn request_remote_resched(apic_id: u32) {
+    crate::smp::with_cpu_by_apic_id(apic_id, |cpu| {
+        cpu.need_resched.store(true, Ordering::Release);
+    });
+}
+
+pub fn request_all_cpus_resched() {
+    for processor in crate::smp::topology::processors() {
+        if processor.apic_id == current_apic_id() {
+            request_current_cpu_resched();
+        } else {
+            request_remote_resched(processor.apic_id);
+        }
+    }
+}
+
+pub fn take_current_cpu_resched_request() -> bool {
+    crate::smp::with_current_cpu(|cpu| cpu.need_resched.swap(false, Ordering::AcqRel))
+}
+
+pub fn current_cpu_has_resched_request() -> bool {
+    crate::smp::with_current_cpu(|cpu| cpu.need_resched.load(Ordering::Acquire))
+}
+
+pub fn reload_thread_timeslice(thread: &mut crate::thread::thread::Thread) {
+    thread.timeslice_remaining_ns = DEFAULT_USER_TIMESLICE_NS;
+}
+
+pub fn note_user_mode_resume(now_ns: u64) {
+    crate::smp::with_current_cpu(|cpu| {
+        cpu.last_timer_tick_ns.store(now_ns, Ordering::Release);
+    });
+}
+
+pub fn consume_current_thread_timeslice(now_ns: u64) -> bool {
+    let elapsed_ns = crate::smp::with_current_cpu(|cpu| {
+        let previous = cpu.last_timer_tick_ns.swap(now_ns, Ordering::AcqRel);
+        now_ns.saturating_sub(previous)
+    });
+
+    if elapsed_ns == 0 {
+        return false;
+    }
+
+    let thread_ref = crate::thread::get_current_thread();
+    let mut thread = thread_ref.lock();
+    if !matches!(thread.get_appropriate_snapshot().snapshot_type, ThreadSnapshotType::Thread) {
+        return false;
+    }
+
+    let exhausted = elapsed_ns >= thread.timeslice_remaining_ns;
+    thread.timeslice_remaining_ns = thread.timeslice_remaining_ns.saturating_sub(elapsed_ns);
+    exhausted
 }
 
 fn can_run_ready_threads_on_current_cpu() -> bool {
@@ -225,9 +292,16 @@ fn run_ready_thread(thread_ref: ThreadRef) {
 
         let process = thread.parent.clone();
         thread.state = State::Running;
+        if matches!(thread.get_appropriate_snapshot().snapshot_type, ThreadSnapshotType::Thread) {
+            reload_thread_timeslice(&mut thread);
+        }
         set_current_thread(Some(thread_ref.clone()));
         update_active_user_extended_state_ptr_for_thread(&mut thread);
         set_current_kernel_stack(thread.kernel_stack_top);
+        crate::smp::with_current_cpu(|cpu| {
+            cpu.need_resched.store(false, Ordering::Release);
+        });
+        note_user_mode_resume(Time::since_boot().as_nanoseconds());
 
         // The process object can keep the same Arc while execve replaces its
         // address space, so each CPU must refresh CR3 before resuming it.
@@ -380,6 +454,7 @@ fn after_thread_yield(thread_ref: ThreadRef) {
 
 fn sleep_if_idle() {
     interrupts::disable();
+    let had_resched_request = take_current_cpu_resched_request();
 
     if should_run_global_scheduler_work() {
         process_deferred_timer_work();
@@ -394,11 +469,42 @@ fn sleep_if_idle() {
         || (should_run_global_scheduler_work()
             && (keyboard::has_pending_scancodes()
                 || agent_tty_input::has_pending_input()
-                || mouse::has_pending_events()));
+                || mouse::has_pending_events()))
+        || had_resched_request;
 
     if has_pending_work {
         interrupts::enable();
     } else {
         enable_and_hlt();
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{reload_thread_timeslice, take_current_cpu_resched_request};
+    use crate::thread::{scheduling::request_current_cpu_resched, thread::Thread};
+
+    crate::test!(
+        reload_thread_timeslice_resets_default_budget,
+        "reload thread timeslice resets default budget",
+        || {
+            let mut thread = Thread::default();
+            thread.timeslice_remaining_ns = 1;
+            reload_thread_timeslice(&mut thread);
+            assert_eq!(
+                thread.timeslice_remaining_ns,
+                crate::thread::thread::DEFAULT_USER_TIMESLICE_NS
+            );
+        }
+    );
+
+    crate::test!(
+        current_cpu_resched_request_is_one_shot,
+        "current cpu resched request is one shot",
+        || {
+            request_current_cpu_resched();
+            assert!(take_current_cpu_resched_request());
+            assert!(!take_current_cpu_resched_request());
+        }
+    );
 }

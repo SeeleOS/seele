@@ -13,6 +13,8 @@ use crate::{
     },
 };
 
+pub const DEFAULT_USER_TIMESLICE_NS: u64 = 4_000_000;
+
 #[derive(Debug)]
 pub struct Thread {
     pub parent: ProcessRef,
@@ -43,6 +45,7 @@ pub struct Thread {
     pub blocked_syscall_started_at: Option<u64>,
     pub blocked_syscall_cycles: u64,
     pub name: [u8; 16],
+    pub timeslice_remaining_ns: u64,
 
     pub sig_handler_snapshot: ThreadSnapshot,
 }
@@ -76,6 +79,7 @@ impl Default for Thread {
             blocked_syscall_started_at: None,
             blocked_syscall_cycles: 0,
             name: [0; 16],
+            timeslice_remaining_ns: DEFAULT_USER_TIMESLICE_NS,
         }
     }
 }

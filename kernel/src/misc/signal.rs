@@ -7,6 +7,7 @@ use crate::{
         extended_state::update_active_user_extended_state_ptr_for_thread,
         get_current_thread,
         misc::{SnapshotState, State, with_current_thread},
+        scheduling::request_all_cpus_resched,
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
         thread::Thread,
         yielding::BlockType,
@@ -442,6 +443,7 @@ fn queue_signal(process: &ProcessRef, signal: Signal, siginfo: Option<SigInfo>) 
                 process.pid.0
             };
             wake_signalfd_for_process(pid);
+            request_all_cpus_resched();
             wake_process_threads(process, false);
         }
     }
@@ -472,6 +474,7 @@ fn queue_signal_to_thread(thread: &ThreadRef, signal: Signal, siginfo: Option<Si
 
     let pid = parent.lock().pid.0;
     wake_signalfd_for_process(pid);
+    request_all_cpus_resched();
     wake_specific_thread(thread);
 }
 

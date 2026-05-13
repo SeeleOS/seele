@@ -5,9 +5,16 @@ use crate::{
     misc::{
         profile::{self, ProfileCategory},
         snapshot::Snapshot,
+        time::Time,
     },
     smp::gs::GsContext,
-    thread::{scheduling::return_to_scheduler, snapshot::ThreadSnapshotType},
+    thread::{
+        get_current_thread,
+        scheduling::{
+            consume_current_thread_timeslice, current_cpu_has_resched_request, return_to_scheduler,
+        },
+        snapshot::ThreadSnapshotType,
+    },
 };
 
 #[unsafe(naked)]
@@ -97,6 +104,7 @@ pub extern "C" fn timer_interrupt_handler_wrapper() {
 
 pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
     let irq_start = profile::scope_start();
+    profile::increment_timer_interrupts();
     send_eoi();
 
     // Don't preempt kernel mode; it can corrupt in-flight kernel snapshots.
@@ -106,6 +114,20 @@ pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
     }
 
     profile::record(ProfileCategory::IrqTimer, irq_start);
+    let now_ns = Time::since_boot().as_nanoseconds();
+    let timeslice_exhausted = consume_current_thread_timeslice(now_ns);
+    let should_resched = timeslice_exhausted
+        || current_cpu_has_resched_request()
+        || matches!(get_current_thread().lock().state, crate::thread::misc::State::Exiting);
+
+    if !should_resched {
+        return;
+    }
+
+    if timeslice_exhausted {
+        profile::increment_timer_preemptions();
+    }
+
     return_to_scheduler(snapshot, ThreadSnapshotType::Thread);
 
     unreachable!();
