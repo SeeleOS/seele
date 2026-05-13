@@ -34,19 +34,27 @@ pub extern "C" fn pagefault_handler(
         let process_ref = get_current_process();
         let mut process = process_ref.lock();
         let addrspace = &mut process.addrspace;
+        let lookup_start = profile::scope_start();
 
         if error_code.contains(PageFaultErrorCode::CAUSED_BY_WRITE)
             && let TranslateResult::Mapped { flags, .. } = addrspace.page_table.translate(address)
             && flags.contains(COW_FLAG)
         {
+            profile::record(ProfileCategory::PageFaultLookup, lookup_start);
+            let resolve_start = profile::scope_start();
             process.addrspace.replace_cow_page(address);
-            profile::record(ProfileCategory::PageFaultCow, fault_start);
+            profile::record(ProfileCategory::PageFaultResolve, resolve_start);
+            profile::record(ProfileCategory::PageFaultCow, resolve_start);
             true
         } else if error_code.contains(PageFaultErrorCode::PROTECTION_VIOLATION) {
+            profile::record(ProfileCategory::PageFaultLookup, lookup_start);
             false
         } else {
-            match addrspace.get_area(address).cloned() {
+            let area = addrspace.get_area(address).cloned();
+            profile::record(ProfileCategory::PageFaultLookup, lookup_start);
+            match area {
                 Some(area) if area.lazy => {
+                    let resolve_start = profile::scope_start();
                     let is_file_backed = matches!(&area.data, Data::File { .. });
                     if is_file_backed {
                         let applied = addrspace.apply_page_cluster(
@@ -54,15 +62,37 @@ pub extern "C" fn pagefault_handler(
                             area.clone(),
                             AddrSpace::file_lazy_cluster_pages(),
                         );
-                        profile::record(ProfileCategory::PageFaultFileLazy, fault_start);
-                        profile::record_file_lazy_fault(
-                            applied.file_lazy_stats.cluster_pages_loaded,
-                            applied.file_lazy_stats.cache_hits,
-                            applied.file_lazy_stats.cache_misses,
+                        profile::record(ProfileCategory::PageFaultResolve, resolve_start);
+                        profile::record(ProfileCategory::PageFaultFileLazy, resolve_start);
+                        profile::record_cycles(
+                            ProfileCategory::PageFaultFileLazyCacheLookup,
+                            applied.file_lazy_stats.cache_lookup_cycles,
                         );
+                        profile::record_cycles(
+                            ProfileCategory::PageFaultFileLazyCacheLoad,
+                            applied.file_lazy_stats.cache_load_cycles,
+                        );
+                        profile::record_cycles(
+                            ProfileCategory::PageFaultFileLazyMap,
+                            applied.file_lazy_stats.map_cycles,
+                        );
+                        profile::record_cycles(
+                            ProfileCategory::PageFaultFileLazyCopy,
+                            applied.file_lazy_stats.copy_cycles,
+                        );
+                        profile::record_file_lazy_fault(profile::FileLazyFaultRecord {
+                            cluster_pages_loaded: applied.file_lazy_stats.cluster_pages_loaded,
+                            cache_hits: applied.file_lazy_stats.cache_hits,
+                            cache_misses: applied.file_lazy_stats.cache_misses,
+                            cache_lookup_cycles: applied.file_lazy_stats.cache_lookup_cycles,
+                            cache_load_cycles: applied.file_lazy_stats.cache_load_cycles,
+                            map_cycles: applied.file_lazy_stats.map_cycles,
+                            copy_cycles: applied.file_lazy_stats.copy_cycles,
+                        });
                     } else {
                         addrspace.apply_page(Page::containing_address(address), area.clone());
-                        profile::record(ProfileCategory::PageFaultAnonLazy, fault_start);
+                        profile::record(ProfileCategory::PageFaultResolve, resolve_start);
+                        profile::record(ProfileCategory::PageFaultAnonLazy, resolve_start);
                     }
                     true
                 }

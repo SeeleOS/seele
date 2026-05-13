@@ -147,7 +147,7 @@ impl OpenedFileObject {
     }
 
     pub fn read_at(&self, buf: &mut [u8], offset: u64) -> FSResult<usize> {
-        if let Some((file, identity)) = self.page_cache_file() {
+        if let Some((file, identity)) = self.readonly_page_cache_file() {
             return page_cache::read(&file, identity, buf, offset);
         }
 
@@ -315,7 +315,7 @@ impl OpenedFileObject {
         self.page_cache_file_key()
     }
 
-    fn page_cache_file(&self) -> Option<(WrappedFile, FileCacheIdentity)> {
+    pub(crate) fn readonly_page_cache_file(&self) -> Option<(WrappedFile, FileCacheIdentity)> {
         let key = self.page_cache_file_key()?;
         let OpenBackend::RegularFile(file) = &self.backend else {
             return None;

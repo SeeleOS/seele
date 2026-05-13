@@ -1,9 +1,9 @@
+use crate::memory::utils::Mut;
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
-use spin::Mutex;
 use x86_64::structures::paging::{FrameAllocator, Page, PageTableFlags, PhysFrame, Size4KiB};
 
 use crate::{
-    filesystem::object::mount_device_id_for_path,
+    filesystem::{object::mount_device_id_for_path, page_cache},
     memory::{
         addrspace::{
             AddrSpace, AllocResult,
@@ -13,6 +13,7 @@ use crate::{
         paging::FRAME_ALLOCATOR,
         utils::apply_offset,
     },
+    misc::profile,
     misc::stack_builder::StackBuilder,
 };
 use lazy_static::lazy_static;
@@ -24,6 +25,29 @@ pub struct FileLazyFaultStats {
     pub cluster_pages_loaded: u64,
     pub cache_hits: u64,
     pub cache_misses: u64,
+    pub cache_lookup_cycles: u64,
+    pub cache_load_cycles: u64,
+    pub map_cycles: u64,
+    pub copy_cycles: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SharedFileFrameLoad {
+    frame: PhysFrame,
+    was_hit: bool,
+    lookup_cycles: u64,
+    load_cycles: u64,
+}
+
+impl Default for SharedFileFrameLoad {
+    fn default() -> Self {
+        Self {
+            frame: PhysFrame::from_start_address(x86_64::PhysAddr::new(0)).unwrap(),
+            was_hit: false,
+            lookup_cycles: 0,
+            load_cycles: 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -34,8 +58,8 @@ struct FilePageCacheKey {
 }
 
 lazy_static! {
-    static ref SHARED_FILE_PAGE_CACHE: Mutex<BTreeMap<FilePageCacheKey, PhysFrame>> =
-        Mutex::new(BTreeMap::new());
+    static ref SHARED_FILE_PAGE_CACHE: Mut<BTreeMap<FilePageCacheKey, PhysFrame>> =
+        Mut::new(BTreeMap::new());
 }
 
 impl AddrSpace {
@@ -90,32 +114,116 @@ impl AddrSpace {
         })
     }
 
+    fn readonly_file_cache_identity(
+        file: &Arc<crate::filesystem::object::FileLikeObject>,
+    ) -> Option<crate::filesystem::page_cache::FileCacheIdentity> {
+        let (_wrapped, identity) = file.readonly_page_cache_file()?;
+        Some(identity)
+    }
+
+    fn readonly_wrapped_file(
+        file: &Arc<crate::filesystem::object::FileLikeObject>,
+    ) -> Option<crate::filesystem::vfs::WrappedFile> {
+        let (wrapped, _identity) = file.readonly_page_cache_file()?;
+        Some(wrapped)
+    }
+
     fn get_or_load_shared_file_frame(
         file: &Arc<crate::filesystem::object::FileLikeObject>,
         offset: u64,
         read_len: usize,
-    ) -> Option<PhysFrame> {
+    ) -> Option<SharedFileFrameLoad> {
+        let lookup_start = profile::scope_start();
         let key = Self::readonly_file_page_cache_key(file, offset)?;
         let mut cache = SHARED_FILE_PAGE_CACHE.lock();
         if let Some(frame) = cache.get(&key).copied() {
-            return Some(frame);
+            return Some(SharedFileFrameLoad {
+                frame,
+                was_hit: true,
+                lookup_cycles: profile::scope_start().saturating_sub(lookup_start),
+                ..Default::default()
+            });
         }
 
         let frame = Self::alloc_zeroed_frame();
         if read_len != 0 {
+            let identity = Self::readonly_file_cache_identity(file)?;
+            let wrapped = Self::readonly_wrapped_file(file)?;
+            let page = page_cache::read_page(&wrapped, identity, offset / 4096).ok()?;
+            let copy_len = core::cmp::min(read_len, page.valid_len);
             let dst = unsafe {
                 core::slice::from_raw_parts_mut(
                     apply_offset(frame.start_address().as_u64()) as *mut u8,
-                    read_len,
+                    copy_len,
                 )
             };
-            file.read_exact_at(dst, offset)
-                .expect("Failed to lazyload readonly file-backed page");
+            dst.copy_from_slice(&page.data[..copy_len]);
         }
 
         increase_ref(frame);
         cache.insert(key, frame);
-        Some(frame)
+        Some(SharedFileFrameLoad {
+            frame,
+            was_hit: false,
+            lookup_cycles: profile::scope_start().saturating_sub(lookup_start),
+            load_cycles: 0,
+        })
+    }
+
+    fn copy_private_file_page(
+        file: &Arc<crate::filesystem::object::FileLikeObject>,
+        file_offset: u64,
+        read_len: usize,
+        write_addr: u64,
+    ) -> Option<FileLazyFaultStats> {
+        if read_len == 0 {
+            return Some(FileLazyFaultStats {
+                cluster_pages_loaded: 1,
+                cache_hits: 1,
+                ..Default::default()
+            });
+        }
+
+        let wrapped = Self::readonly_wrapped_file(file)?;
+        let identity = Self::readonly_file_cache_identity(file)?;
+        let mut copied = 0usize;
+        let mut stats = FileLazyFaultStats {
+            cluster_pages_loaded: 1,
+            ..Default::default()
+        };
+        let copy_start = profile::scope_start();
+
+        while copied < read_len {
+            let absolute_offset = file_offset + copied as u64;
+            let page_index = absolute_offset / 4096;
+            let page_offset = (absolute_offset % 4096) as usize;
+            let cached = page_cache::read_page(&wrapped, identity, page_index).ok()?;
+            stats.cache_lookup_cycles = stats
+                .cache_lookup_cycles
+                .saturating_add(cached.lookup_cycles);
+            stats.cache_load_cycles = stats.cache_load_cycles.saturating_add(cached.load_cycles);
+            if !cached.was_hit {
+                stats.cache_misses = 1;
+            }
+
+            let available = cached.valid_len.saturating_sub(page_offset);
+            if available == 0 {
+                break;
+            }
+
+            let copy_len = core::cmp::min(available, read_len - copied);
+            let dst = unsafe {
+                core::slice::from_raw_parts_mut((write_addr + copied as u64) as *mut u8, copy_len)
+            };
+            dst.copy_from_slice(&cached.data[page_offset..page_offset + copy_len]);
+            copied += copy_len;
+        }
+
+        stats.copy_cycles = profile::scope_start().saturating_sub(copy_start);
+        if stats.cache_misses == 0 {
+            stats.cache_hits = 1;
+        }
+        Some(stats)
     }
 
     pub fn apply_page(&mut self, page: Page<Size4KiB>, area: MemoryArea) -> PhysFrame {
@@ -138,7 +246,7 @@ impl AddrSpace {
                 file_bytes,
                 ref file,
                 shared,
-            } => unsafe {
+            } => {
                 // Only truly shared file mappings may reuse a cached physical
                 // page. Private ELF PT_LOADs can legally map the same file page
                 // through multiple segment views with different valid byte
@@ -165,12 +273,25 @@ impl AddrSpace {
                     let read_len = core::cmp::min(4096, file_bytes.saturating_sub(page_offset));
                     let file_offset = offset + page_offset;
 
-                    if let (true, Some(frame)) = (
+                    if let (true, Some(shared_frame)) = (
                         use_shared_cache,
                         Self::get_or_load_shared_file_frame(file, file_offset, read_len as usize),
                     ) {
-                        let frame = self.map_existing_frame(current_page, frame, area.flags, true);
-                        stats.cache_hits += 1;
+                        let map_start = profile::scope_start();
+                        let frame = self.map_existing_frame(
+                            current_page,
+                            shared_frame.frame,
+                            area.flags,
+                            true,
+                        );
+                        stats.cache_lookup_cycles += shared_frame.lookup_cycles;
+                        stats.cache_load_cycles += shared_frame.load_cycles;
+                        if shared_frame.was_hit {
+                            stats.cache_hits += 1;
+                        } else {
+                            stats.cache_misses += 1;
+                        }
+                        stats.map_cycles += profile::scope_start().saturating_sub(map_start);
                         stats.cluster_pages_loaded += 1;
                         if first_frame.is_none() {
                             first_frame = Some(frame);
@@ -178,9 +299,10 @@ impl AddrSpace {
                         continue;
                     }
 
+                    let map_start = profile::scope_start();
                     let (frame, write_addr) =
                         self.alloc_map_zeroed_page(current_page, area.clone(), read_len < 4096);
-                    stats.cache_misses += 1;
+                    stats.map_cycles += profile::scope_start().saturating_sub(map_start);
                     stats.cluster_pages_loaded += 1;
 
                     if first_frame.is_none() {
@@ -189,9 +311,17 @@ impl AddrSpace {
 
                     let read_len = read_len as usize;
                     if read_len != 0 {
-                        let dst = core::slice::from_raw_parts_mut(write_addr as *mut u8, read_len);
-                        file.read_exact_at(dst, file_offset)
-                            .expect("Failed to lazyload file-backed page");
+                        let copy_stats =
+                            Self::copy_private_file_page(file, file_offset, read_len, write_addr)
+                                .expect("Failed to lazyload file-backed page through page cache");
+                        stats.cluster_pages_loaded += copy_stats.cluster_pages_loaded - 1;
+                        stats.cache_hits += copy_stats.cache_hits;
+                        stats.cache_misses += copy_stats.cache_misses;
+                        stats.cache_lookup_cycles += copy_stats.cache_lookup_cycles;
+                        stats.cache_load_cycles += copy_stats.cache_load_cycles;
+                        stats.copy_cycles += copy_stats.copy_cycles;
+                    } else {
+                        stats.cache_hits += 1;
                     }
                 }
 
@@ -203,7 +333,7 @@ impl AddrSpace {
                     }),
                     file_lazy_stats: stats,
                 }
-            },
+            }
             Data::Shared {
                 ref frames,
                 flags: shared_flags,

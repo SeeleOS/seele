@@ -6,8 +6,8 @@ use alloc::{
 };
 use core::cmp::min;
 
+use crate::memory::utils::Mut;
 use lazy_static::lazy_static;
-use spin::Mutex;
 
 use crate::filesystem::vfs::{FSResult, WrappedFile};
 
@@ -47,6 +47,15 @@ struct CachedPage {
     valid_len: usize,
 }
 
+#[derive(Clone, Debug)]
+pub struct CachedPageRead {
+    pub data: Arc<Vec<u8>>,
+    pub valid_len: usize,
+    pub was_hit: bool,
+    pub lookup_cycles: u64,
+    pub load_cycles: u64,
+}
+
 #[derive(Debug)]
 struct PageCacheState {
     entries: BTreeMap<CachedPageKey, CachedPage>,
@@ -82,7 +91,7 @@ impl PageCacheState {
 }
 
 lazy_static! {
-    static ref PAGE_CACHE: Mutex<PageCacheState> = Mutex::new(PageCacheState::new());
+    static ref PAGE_CACHE: Mut<PageCacheState> = Mut::new(PageCacheState::new());
 }
 
 fn load_page(file: &WrappedFile, page_offset: u64, file_size: u64) -> FSResult<CachedPage> {
@@ -116,29 +125,58 @@ fn get_or_load_page(
     file_key: FileCacheKey,
     page_index: u64,
     file_size: u64,
-) -> FSResult<CachedPage> {
+) -> FSResult<CachedPageRead> {
     let key = CachedPageKey {
         file: file_key,
         page_index,
     };
+    let lookup_start = crate::misc::profile::scope_start();
 
     {
         let mut state = PAGE_CACHE.lock();
         if let Some(page) = state.entries.get(&key).cloned() {
             state.touch(key);
-            return Ok(page);
+            return Ok(CachedPageRead {
+                data: page.data,
+                valid_len: page.valid_len,
+                was_hit: true,
+                lookup_cycles: crate::misc::profile::scope_start().saturating_sub(lookup_start),
+                load_cycles: 0,
+            });
         }
     }
 
+    let load_start = crate::misc::profile::scope_start();
     let page = load_page(file, page_index * PAGE_SIZE as u64, file_size)?;
+    let load_cycles = crate::misc::profile::scope_start().saturating_sub(load_start);
 
     let mut state = PAGE_CACHE.lock();
     if let Some(existing) = state.entries.get(&key).cloned() {
         state.touch(key);
-        return Ok(existing);
+        return Ok(CachedPageRead {
+            data: existing.data,
+            valid_len: existing.valid_len,
+            was_hit: true,
+            lookup_cycles: crate::misc::profile::scope_start().saturating_sub(lookup_start),
+            load_cycles: 0,
+        });
     }
     state.insert(key, page.clone());
-    Ok(page)
+    Ok(CachedPageRead {
+        data: page.data,
+        valid_len: page.valid_len,
+        was_hit: false,
+        lookup_cycles: crate::misc::profile::scope_start().saturating_sub(lookup_start),
+        load_cycles,
+    })
+}
+
+pub fn read_page(
+    file: &WrappedFile,
+    identity: FileCacheIdentity,
+    page_index: u64,
+) -> FSResult<CachedPageRead> {
+    get_or_load_page(file, identity.file, page_index, identity.size as u64)
 }
 
 pub fn invalidate_file(file: FileCacheKey) {

@@ -8,6 +8,7 @@ use crate::filesystem::{
     devfs::DevFs,
     errors::FSError,
     info::{FileLikeInfo, LinuxStat, UnixPermission},
+    page_cache,
     path::{Path, PathPart},
     procfs::ProcFs,
     sparse_file::SparseFileData,
@@ -17,6 +18,8 @@ use crate::filesystem::{
     },
     sysfs::SysFs,
     tmpfs::TmpfsState,
+    vfs::VirtualFS,
+    vfs_operations::open_path,
     vfs_traits::{FileLikeType, MountFlags},
 };
 use crate::misc::utsname::{current_domainname, current_hostname, set_domainname, set_hostname};
@@ -82,6 +85,11 @@ crate::test!(
     sysfs_dynamic_nodes_and_uevent_payloads,
     "sysfs exposes dynamic tty state readonly nodes and stable uevent payloads",
     sysfs_exposes_dynamic_tty_state_readonly_nodes_and_stable_uevent_payloads
+);
+crate::test!(
+    page_cache_reuses_cached_file_pages,
+    "page cache reuses cached file pages for repeated reads",
+    page_cache_reuses_cached_file_pages_for_repeated_reads
 );
 
 fn path_normalization_handles_absolute_and_relative_components() {
@@ -194,6 +202,25 @@ fn mount_flags_render_stable_proc_option_strings() {
 
 fn static_test_file_bytes() -> Vec<u8> {
     b"hello".to_vec()
+}
+
+fn page_cache_reuses_cached_file_pages_for_repeated_reads() {
+    let path = Path::new("/tmp/page-cache-test-file");
+    let _ = VirtualFS.lock().delete_file(path.clone());
+    VirtualFS.lock().create_file(path.clone()).unwrap();
+
+    let opened = open_path(path.clone()).unwrap();
+    opened.write_exact_at(b"cache me", 0).unwrap();
+    let (wrapped, identity) = opened.readonly_page_cache_file().unwrap();
+    page_cache::invalidate_file(identity.file);
+
+    let first = page_cache::read_page(&wrapped, identity, 0).unwrap();
+    let second = page_cache::read_page(&wrapped, identity, 0).unwrap();
+    assert!(!first.was_hit);
+    assert!(second.was_hit);
+    assert_eq!(&second.data[..8], b"cache me");
+
+    let _ = VirtualFS.lock().delete_file(path);
 }
 
 fn staticfs_exposes_metadata_tree_shape_and_readonly_rules() {

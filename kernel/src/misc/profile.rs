@@ -20,40 +20,124 @@ const REPORT_INTERVAL_SECONDS: u64 = 5;
 const TOP_CATEGORY_COUNT: usize = 10;
 const TOP_SYSCALL_COUNT: usize = 8;
 const MAX_SYSCALLS: usize = 1500;
-const PROFILE_CATEGORY_COUNT: usize = 15;
+const PROFILE_CATEGORY_COUNT: usize = 27;
+const HOT_SYSCALL_PHASE_COUNT: usize = 9;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ProfileCategory {
     SchedulerWork = 0,
-    SchedulerSelect = 1,
-    SchedulerSwitch = 2,
-    TimerWork = 3,
-    NetPoll = 4,
-    SyscallCpu = 5,
-    PageFault = 6,
-    PageFaultFileLazy = 7,
-    PageFaultAnonLazy = 8,
-    PageFaultCow = 9,
-    IrqTimer = 10,
-    IrqKeyboard = 11,
-    IrqMouse = 12,
-    Idle = 13,
-    OtherKernel = 14,
+    TimerWork = 1,
+    NetPoll = 2,
+    SyscallCpu = 3,
+    PageFault = 4,
+    IrqTimer = 5,
+    IrqKeyboard = 6,
+    IrqMouse = 7,
+    Idle = 8,
+    OtherKernel = 9,
+    SchedulerSelect = 10,
+    SchedulerSwitch = 11,
+    SchedulerDispatch = 12,
+    SchedulerAfterYield = 13,
+    ThreadRunWindow = 14,
+    SyscallEntry = 15,
+    SyscallBody = 16,
+    SyscallExit = 17,
+    PageFaultLookup = 18,
+    PageFaultResolve = 19,
+    PageFaultFileLazy = 20,
+    PageFaultAnonLazy = 21,
+    PageFaultCow = 22,
+    PageFaultFileLazyCacheLookup = 23,
+    PageFaultFileLazyCacheLoad = 24,
+    PageFaultFileLazyMap = 25,
+    PageFaultFileLazyCopy = 26,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum HotSyscallPhase {
+    OpenAtPathResolve = 0,
+    OpenAtFinalOpen = 1,
+    OpenAtPostOpen = 2,
+    OpenAtCreateRetry = 3,
+    NewfstatatPathResolve = 4,
+    NewfstatatOpenStat = 5,
+    StatxPathResolve = 6,
+    StatxOpenStat = 7,
+    StatxMountInfo = 8,
+}
+
+impl HotSyscallPhase {
+    const ALL: [Self; HOT_SYSCALL_PHASE_COUNT] = [
+        Self::OpenAtPathResolve,
+        Self::OpenAtFinalOpen,
+        Self::OpenAtPostOpen,
+        Self::OpenAtCreateRetry,
+        Self::NewfstatatPathResolve,
+        Self::NewfstatatOpenStat,
+        Self::StatxPathResolve,
+        Self::StatxOpenStat,
+        Self::StatxMountInfo,
+    ];
+
+    fn as_index(self) -> usize {
+        self as usize
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::OpenAtPathResolve => "openat_resolve",
+            Self::OpenAtFinalOpen => "openat_open",
+            Self::OpenAtPostOpen => "openat_post_open",
+            Self::OpenAtCreateRetry => "openat_create_retry",
+            Self::NewfstatatPathResolve => "newfstatat_resolve",
+            Self::NewfstatatOpenStat => "newfstatat_open_stat",
+            Self::StatxPathResolve => "statx_resolve",
+            Self::StatxOpenStat => "statx_open_stat",
+            Self::StatxMountInfo => "statx_mount_info",
+        }
+    }
 }
 
 impl ProfileCategory {
     const ALL: [Self; PROFILE_CATEGORY_COUNT] = [
         Self::SchedulerWork,
-        Self::SchedulerSelect,
-        Self::SchedulerSwitch,
         Self::TimerWork,
         Self::NetPoll,
         Self::SyscallCpu,
         Self::PageFault,
+        Self::IrqTimer,
+        Self::IrqKeyboard,
+        Self::IrqMouse,
+        Self::Idle,
+        Self::OtherKernel,
+        Self::SchedulerSelect,
+        Self::SchedulerSwitch,
+        Self::SchedulerDispatch,
+        Self::SchedulerAfterYield,
+        Self::ThreadRunWindow,
+        Self::SyscallEntry,
+        Self::SyscallBody,
+        Self::SyscallExit,
+        Self::PageFaultLookup,
+        Self::PageFaultResolve,
         Self::PageFaultFileLazy,
         Self::PageFaultAnonLazy,
         Self::PageFaultCow,
+        Self::PageFaultFileLazyCacheLookup,
+        Self::PageFaultFileLazyCacheLoad,
+        Self::PageFaultFileLazyMap,
+        Self::PageFaultFileLazyCopy,
+    ];
+
+    const PRIMARY: [Self; 10] = [
+        Self::SchedulerWork,
+        Self::TimerWork,
+        Self::NetPoll,
+        Self::SyscallCpu,
+        Self::PageFault,
         Self::IrqTimer,
         Self::IrqKeyboard,
         Self::IrqMouse,
@@ -68,20 +152,32 @@ impl ProfileCategory {
     fn name(self) -> &'static str {
         match self {
             Self::SchedulerWork => "scheduler_work",
-            Self::SchedulerSelect => "sched_select",
-            Self::SchedulerSwitch => "sched_switch",
             Self::TimerWork => "timer_work",
             Self::NetPoll => "net_poll",
             Self::SyscallCpu => "syscall_cpu",
             Self::PageFault => "page_fault",
-            Self::PageFaultFileLazy => "pf_file_lazy",
-            Self::PageFaultAnonLazy => "pf_anon_lazy",
-            Self::PageFaultCow => "pf_cow",
             Self::IrqTimer => "irq_timer",
             Self::IrqKeyboard => "irq_keyboard",
             Self::IrqMouse => "irq_mouse",
             Self::Idle => "idle",
             Self::OtherKernel => "other_kernel",
+            Self::SchedulerSelect => "sched_select",
+            Self::SchedulerSwitch => "sched_switch",
+            Self::SchedulerDispatch => "sched_dispatch",
+            Self::SchedulerAfterYield => "sched_after_yield",
+            Self::ThreadRunWindow => "thread_run_window",
+            Self::SyscallEntry => "syscall_entry",
+            Self::SyscallBody => "syscall_body",
+            Self::SyscallExit => "syscall_exit",
+            Self::PageFaultLookup => "pf_lookup",
+            Self::PageFaultResolve => "pf_resolve",
+            Self::PageFaultFileLazy => "pf_file_lazy",
+            Self::PageFaultAnonLazy => "pf_anon_lazy",
+            Self::PageFaultCow => "pf_cow",
+            Self::PageFaultFileLazyCacheLookup => "pf_file_cache_lookup",
+            Self::PageFaultFileLazyCacheLoad => "pf_file_cache_load",
+            Self::PageFaultFileLazyMap => "pf_file_map",
+            Self::PageFaultFileLazyCopy => "pf_file_copy",
         }
     }
 }
@@ -142,15 +238,29 @@ struct FileLazyFaultCounters {
     cluster_pages_loaded: AtomicU64,
     cache_hits: AtomicU64,
     cache_misses: AtomicU64,
+    cache_lookup_cycles: AtomicU64,
+    cache_load_cycles: AtomicU64,
+    map_cycles: AtomicU64,
+    copy_cycles: AtomicU64,
 }
 
 impl FileLazyFaultCounters {
-    fn record(&self, cluster_pages_loaded: u64, cache_hits: u64, cache_misses: u64) {
+    fn record(&self, stats: FileLazyFaultRecord) {
         self.faults.fetch_add(1, Ordering::Relaxed);
         self.cluster_pages_loaded
-            .fetch_add(cluster_pages_loaded, Ordering::Relaxed);
-        self.cache_hits.fetch_add(cache_hits, Ordering::Relaxed);
-        self.cache_misses.fetch_add(cache_misses, Ordering::Relaxed);
+            .fetch_add(stats.cluster_pages_loaded, Ordering::Relaxed);
+        self.cache_hits
+            .fetch_add(stats.cache_hits, Ordering::Relaxed);
+        self.cache_misses
+            .fetch_add(stats.cache_misses, Ordering::Relaxed);
+        self.cache_lookup_cycles
+            .fetch_add(stats.cache_lookup_cycles, Ordering::Relaxed);
+        self.cache_load_cycles
+            .fetch_add(stats.cache_load_cycles, Ordering::Relaxed);
+        self.map_cycles
+            .fetch_add(stats.map_cycles, Ordering::Relaxed);
+        self.copy_cycles
+            .fetch_add(stats.copy_cycles, Ordering::Relaxed);
     }
 
     fn snapshot_and_reset(&self) -> FileLazyFaultSnapshot {
@@ -159,8 +269,23 @@ impl FileLazyFaultCounters {
             cluster_pages_loaded: self.cluster_pages_loaded.swap(0, Ordering::AcqRel),
             cache_hits: self.cache_hits.swap(0, Ordering::AcqRel),
             cache_misses: self.cache_misses.swap(0, Ordering::AcqRel),
+            cache_lookup_cycles: self.cache_lookup_cycles.swap(0, Ordering::AcqRel),
+            cache_load_cycles: self.cache_load_cycles.swap(0, Ordering::AcqRel),
+            map_cycles: self.map_cycles.swap(0, Ordering::AcqRel),
+            copy_cycles: self.copy_cycles.swap(0, Ordering::AcqRel),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FileLazyFaultRecord {
+    pub cluster_pages_loaded: u64,
+    pub cache_hits: u64,
+    pub cache_misses: u64,
+    pub cache_lookup_cycles: u64,
+    pub cache_load_cycles: u64,
+    pub map_cycles: u64,
+    pub copy_cycles: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -169,6 +294,10 @@ struct FileLazyFaultSnapshot {
     cluster_pages_loaded: u64,
     cache_hits: u64,
     cache_misses: u64,
+    cache_lookup_cycles: u64,
+    cache_load_cycles: u64,
+    map_cycles: u64,
+    copy_cycles: u64,
 }
 
 impl core::ops::AddAssign for FileLazyFaultSnapshot {
@@ -179,6 +308,12 @@ impl core::ops::AddAssign for FileLazyFaultSnapshot {
             .saturating_add(rhs.cluster_pages_loaded);
         self.cache_hits = self.cache_hits.saturating_add(rhs.cache_hits);
         self.cache_misses = self.cache_misses.saturating_add(rhs.cache_misses);
+        self.cache_lookup_cycles = self
+            .cache_lookup_cycles
+            .saturating_add(rhs.cache_lookup_cycles);
+        self.cache_load_cycles = self.cache_load_cycles.saturating_add(rhs.cache_load_cycles);
+        self.map_cycles = self.map_cycles.saturating_add(rhs.map_cycles);
+        self.copy_cycles = self.copy_cycles.saturating_add(rhs.copy_cycles);
     }
 }
 
@@ -186,6 +321,7 @@ struct CpuProfileData {
     categories: [ProfileCounters; PROFILE_CATEGORY_COUNT],
     syscall_cpu: [ProfileCounters; MAX_SYSCALLS],
     syscall_blocked: [ProfileCounters; MAX_SYSCALLS],
+    hot_syscall_phases: [ProfileCounters; HOT_SYSCALL_PHASE_COUNT],
     file_lazy_faults: FileLazyFaultCounters,
 }
 
@@ -195,6 +331,7 @@ impl Default for CpuProfileData {
             categories: array::from_fn(|_| ProfileCounters::default()),
             syscall_cpu: array::from_fn(|_| ProfileCounters::default()),
             syscall_blocked: array::from_fn(|_| ProfileCounters::default()),
+            hot_syscall_phases: array::from_fn(|_| ProfileCounters::default()),
             file_lazy_faults: FileLazyFaultCounters::default(),
         }
     }
@@ -246,6 +383,14 @@ pub fn record_syscall_blocked(syscall_no: usize, cycles: u64) {
     record_syscall_counter(syscall_no, cycles, |cpu| &cpu.syscall_blocked);
 }
 
+pub fn record_hot_syscall_phase(phase: HotSyscallPhase, cycles: u64) {
+    if cycles == 0 {
+        return;
+    }
+
+    with_cpu_profile_data(|cpu| cpu.hot_syscall_phases[phase.as_index()].record(cycles));
+}
+
 pub fn increment_timer_interrupts() {
     TIMER_INTERRUPTS.fetch_add(1, Ordering::Relaxed);
 }
@@ -295,10 +440,9 @@ pub fn finish_blocked_syscall(thread: &mut Thread) {
     }
 }
 
-pub fn record_file_lazy_fault(cluster_pages_loaded: u64, cache_hits: u64, cache_misses: u64) {
+pub fn record_file_lazy_fault(stats: FileLazyFaultRecord) {
     with_cpu_profile_data(|cpu| {
-        cpu.file_lazy_faults
-            .record(cluster_pages_loaded, cache_hits, cache_misses);
+        cpu.file_lazy_faults.record(stats);
     });
 }
 
@@ -336,6 +480,7 @@ fn report_window(window_ns: u64) {
     let mut category_totals = [ProfileSnapshot::default(); PROFILE_CATEGORY_COUNT];
     let mut syscall_cpu_totals = [ProfileSnapshot::default(); MAX_SYSCALLS];
     let mut syscall_blocked_totals = [ProfileSnapshot::default(); MAX_SYSCALLS];
+    let mut hot_syscall_phase_totals = [ProfileSnapshot::default(); HOT_SYSCALL_PHASE_COUNT];
     let mut file_lazy_faults = FileLazyFaultSnapshot::default();
 
     for cpu in &state.cpu_data {
@@ -352,12 +497,17 @@ fn report_window(window_ns: u64) {
             syscall_blocked_totals[index] += entry.snapshot_and_reset();
         }
 
+        for phase in HotSyscallPhase::ALL {
+            hot_syscall_phase_totals[phase.as_index()] +=
+                cpu.hot_syscall_phases[phase.as_index()].snapshot_and_reset();
+        }
+
         file_lazy_faults += cpu.file_lazy_faults.snapshot_and_reset();
     }
 
-    let total_cycles: u64 = category_totals
+    let total_cycles: u64 = ProfileCategory::PRIMARY
         .iter()
-        .map(|entry| entry.total_cycles)
+        .map(|category| category_totals[category.as_index()].total_cycles)
         .fold(0, u64::saturating_add);
 
     let total_blocked_cycles: u64 = syscall_blocked_totals
@@ -392,7 +542,7 @@ fn report_window(window_ns: u64) {
     );
     s_println!("CATEGORIES");
 
-    let mut top_categories: Vec<(ProfileCategory, ProfileSnapshot)> = ProfileCategory::ALL
+    let mut top_categories: Vec<(ProfileCategory, ProfileSnapshot)> = ProfileCategory::PRIMARY
         .into_iter()
         .map(|category| (category, category_totals[category.as_index()]))
         .filter(|(_, snapshot)| snapshot.calls != 0)
@@ -423,14 +573,97 @@ fn report_window(window_ns: u64) {
         tsc_hz,
         false,
     );
+    report_hot_syscall_phases(&hot_syscall_phase_totals, tsc_hz);
+
+    report_category_breakdown(
+        "SCHEDULER_BREAKDOWN",
+        &category_totals,
+        tsc_hz,
+        &[
+            ProfileCategory::SchedulerWork,
+            ProfileCategory::SchedulerSelect,
+            ProfileCategory::SchedulerSwitch,
+            ProfileCategory::SchedulerDispatch,
+            ProfileCategory::SchedulerAfterYield,
+            ProfileCategory::ThreadRunWindow,
+        ],
+    );
+    report_category_breakdown(
+        "SYSCALL_BREAKDOWN",
+        &category_totals,
+        tsc_hz,
+        &[
+            ProfileCategory::SyscallCpu,
+            ProfileCategory::SyscallEntry,
+            ProfileCategory::SyscallBody,
+            ProfileCategory::SyscallExit,
+        ],
+    );
+    report_category_breakdown(
+        "PAGE_FAULT_BREAKDOWN",
+        &category_totals,
+        tsc_hz,
+        &[
+            ProfileCategory::PageFault,
+            ProfileCategory::PageFaultLookup,
+            ProfileCategory::PageFaultResolve,
+            ProfileCategory::PageFaultFileLazy,
+            ProfileCategory::PageFaultAnonLazy,
+            ProfileCategory::PageFaultCow,
+        ],
+    );
+    report_category_breakdown(
+        "FILE_LAZY_BREAKDOWN",
+        &category_totals,
+        tsc_hz,
+        &[
+            ProfileCategory::PageFaultFileLazy,
+            ProfileCategory::PageFaultFileLazyCacheLookup,
+            ProfileCategory::PageFaultFileLazyCacheLoad,
+            ProfileCategory::PageFaultFileLazyMap,
+            ProfileCategory::PageFaultFileLazyCopy,
+        ],
+    );
 
     if file_lazy_faults.faults != 0 {
         s_println!(
-            "FILE_LAZY_FAULTS faults={} cluster_pages_loaded={} cache_hit={} cache_miss={}",
+            "FILE_LAZY_FAULTS faults={} cluster_pages_loaded={} page_cache_hits={} page_cache_misses={} cache_lookup_ms={} cache_load_ms={} copy_ms={} map_ms={}",
             file_lazy_faults.faults,
             file_lazy_faults.cluster_pages_loaded,
             file_lazy_faults.cache_hits,
-            file_lazy_faults.cache_misses
+            file_lazy_faults.cache_misses,
+            cycles_to_milliseconds(file_lazy_faults.cache_lookup_cycles, tsc_hz),
+            cycles_to_milliseconds(file_lazy_faults.cache_load_cycles, tsc_hz),
+            cycles_to_milliseconds(file_lazy_faults.copy_cycles, tsc_hz),
+            cycles_to_milliseconds(file_lazy_faults.map_cycles, tsc_hz),
+        );
+    }
+}
+
+fn report_category_breakdown(
+    title: &str,
+    totals: &[ProfileSnapshot; PROFILE_CATEGORY_COUNT],
+    tsc_hz: u64,
+    categories: &[ProfileCategory],
+) {
+    let entries: Vec<(ProfileCategory, ProfileSnapshot)> = categories
+        .iter()
+        .copied()
+        .map(|category| (category, totals[category.as_index()]))
+        .filter(|(_, snapshot)| snapshot.calls != 0 || snapshot.total_cycles != 0)
+        .collect();
+    if entries.is_empty() {
+        return;
+    }
+
+    s_println!("{title}");
+    for (category, snapshot) in entries {
+        s_println!(
+            "  {:<20} calls={} cpu_time_ms={} max_cpu_us={}",
+            category.name(),
+            snapshot.calls,
+            cycles_to_milliseconds(snapshot.total_cycles, tsc_hz),
+            cycles_to_microseconds(snapshot.max_cycles, tsc_hz),
         );
     }
 }
@@ -464,6 +697,28 @@ fn report_syscalls(title: &str, totals: &[ProfileSnapshot; MAX_SYSCALLS], tsc_hz
                 cycles_to_microseconds(snapshot.max_cycles, tsc_hz),
             );
         }
+    }
+}
+
+fn report_hot_syscall_phases(totals: &[ProfileSnapshot; HOT_SYSCALL_PHASE_COUNT], tsc_hz: u64) {
+    let entries: Vec<(HotSyscallPhase, ProfileSnapshot)> = HotSyscallPhase::ALL
+        .into_iter()
+        .map(|phase| (phase, totals[phase.as_index()]))
+        .filter(|(_, snapshot)| snapshot.calls != 0 || snapshot.total_cycles != 0)
+        .collect();
+    if entries.is_empty() {
+        return;
+    }
+
+    s_println!("HOT SYSCALL PHASES");
+    for (phase, snapshot) in entries {
+        s_println!(
+            "  {:<22} calls={} cpu_time_ms={} max_cpu_us={}",
+            phase.name(),
+            snapshot.calls,
+            cycles_to_milliseconds(snapshot.total_cycles, tsc_hz),
+            cycles_to_microseconds(snapshot.max_cycles, tsc_hz),
+        );
     }
 }
 
