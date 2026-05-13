@@ -91,6 +91,11 @@ crate::test!(
     "page cache reuses cached file pages for repeated reads",
     page_cache_reuses_cached_file_pages_for_repeated_reads
 );
+crate::test!(
+    page_cache_second_chance_eviction,
+    "page cache second-chance eviction preserves referenced pages",
+    page_cache_second_chance_eviction_preserves_referenced_pages
+);
 
 fn path_normalization_handles_absolute_and_relative_components() {
     let normalized = Path::new("/usr//bin/../lib/./").normalize();
@@ -221,6 +226,38 @@ fn page_cache_reuses_cached_file_pages_for_repeated_reads() {
     assert_eq!(&second.data[..8], b"cache me");
 
     let _ = VirtualFS.lock().delete_file(path);
+}
+
+fn page_cache_second_chance_eviction_preserves_referenced_pages() {
+    let hot_file = page_cache::FileCacheKey {
+        device_id: 1,
+        inode: 1,
+    };
+    let cold_file = page_cache::FileCacheKey {
+        device_id: 1,
+        inode: 2,
+    };
+    let new_file = page_cache::FileCacheKey {
+        device_id: 1,
+        inode: 3,
+    };
+
+    page_cache::reset_for_test();
+    page_cache::insert_for_test(hot_file, 0, b'h', true);
+    for page_index in 1..4096 {
+        page_cache::insert_for_test(cold_file, page_index, b'c', false);
+    }
+
+    assert!(page_cache::contains_for_test(hot_file, 0));
+    assert!(page_cache::contains_for_test(cold_file, 1));
+
+    page_cache::insert_for_test(new_file, 0, b'n', true);
+
+    assert!(page_cache::contains_for_test(hot_file, 0));
+    assert!(!page_cache::contains_for_test(cold_file, 1));
+    assert!(page_cache::contains_for_test(new_file, 0));
+
+    page_cache::reset_for_test();
 }
 
 fn staticfs_exposes_metadata_tree_shape_and_readonly_rules() {

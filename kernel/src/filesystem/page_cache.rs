@@ -48,6 +48,12 @@ struct CachedPage {
 }
 
 #[derive(Clone, Debug)]
+struct CachedPageEntry {
+    page: CachedPage,
+    referenced: bool,
+}
+
+#[derive(Clone, Debug)]
 pub struct CachedPageRead {
     pub data: Arc<Vec<u8>>,
     pub valid_len: usize,
@@ -58,35 +64,61 @@ pub struct CachedPageRead {
 
 #[derive(Debug)]
 struct PageCacheState {
-    entries: BTreeMap<CachedPageKey, CachedPage>,
-    lru: VecDeque<CachedPageKey>,
+    entries: BTreeMap<CachedPageKey, CachedPageEntry>,
+    eviction_queue: VecDeque<CachedPageKey>,
 }
 
 impl PageCacheState {
     fn new() -> Self {
         Self {
             entries: BTreeMap::new(),
-            lru: VecDeque::new(),
+            eviction_queue: VecDeque::new(),
         }
     }
 
     fn touch(&mut self, key: CachedPageKey) {
-        self.lru.retain(|candidate| *candidate != key);
-        self.lru.push_back(key);
+        if let Some(entry) = self.entries.get_mut(&key) {
+            entry.referenced = true;
+        }
+    }
+
+    fn evict_one(&mut self) {
+        while let Some(candidate) = self.eviction_queue.pop_front() {
+            let Some(entry) = self.entries.get_mut(&candidate) else {
+                continue;
+            };
+
+            if entry.referenced {
+                entry.referenced = false;
+                self.eviction_queue.push_back(candidate);
+                continue;
+            }
+
+            self.entries.remove(&candidate);
+            return;
+        }
     }
 
     fn insert(&mut self, key: CachedPageKey, page: CachedPage) {
         if !self.entries.contains_key(&key) {
             while self.entries.len() >= MAX_CACHED_PAGES {
-                let Some(evicted) = self.lru.pop_front() else {
+                let before = self.entries.len();
+                self.evict_one();
+                if self.entries.len() == before {
                     break;
-                };
-                self.entries.remove(&evicted);
+                }
             }
+
+            self.eviction_queue.push_back(key);
         }
 
-        self.entries.insert(key, page);
-        self.touch(key);
+        self.entries.insert(
+            key,
+            CachedPageEntry {
+                page,
+                referenced: true,
+            },
+        );
     }
 }
 
@@ -134,7 +166,7 @@ fn get_or_load_page(
 
     {
         let mut state = PAGE_CACHE.lock();
-        if let Some(page) = state.entries.get(&key).cloned() {
+        if let Some(page) = state.entries.get(&key).map(|entry| entry.page.clone()) {
             state.touch(key);
             return Ok(CachedPageRead {
                 data: page.data,
@@ -151,7 +183,7 @@ fn get_or_load_page(
     let load_cycles = crate::misc::profile::scope_start().saturating_sub(load_start);
 
     let mut state = PAGE_CACHE.lock();
-    if let Some(existing) = state.entries.get(&key).cloned() {
+    if let Some(existing) = state.entries.get(&key).map(|entry| entry.page.clone()) {
         state.touch(key);
         return Ok(CachedPageRead {
             data: existing.data,
@@ -191,7 +223,34 @@ pub fn invalidate_file(file: FileCacheKey) {
     for key in keys {
         state.entries.remove(&key);
     }
-    state.lru.retain(|key| key.file != file);
+}
+
+#[cfg(test)]
+pub fn reset_for_test() {
+    *PAGE_CACHE.lock() = PageCacheState::new();
+}
+
+#[cfg(test)]
+pub fn insert_for_test(
+    file: FileCacheKey,
+    page_index: u64,
+    fill_byte: u8,
+    referenced: bool,
+) {
+    let key = CachedPageKey { file, page_index };
+    let page = CachedPage {
+        data: Arc::new(vec![fill_byte; PAGE_SIZE]),
+        valid_len: PAGE_SIZE,
+    };
+    let mut state = PAGE_CACHE.lock();
+    state.entries.insert(key, CachedPageEntry { page, referenced });
+    state.eviction_queue.push_back(key);
+}
+
+#[cfg(test)]
+pub fn contains_for_test(file: FileCacheKey, page_index: u64) -> bool {
+    let key = CachedPageKey { file, page_index };
+    PAGE_CACHE.lock().entries.contains_key(&key)
 }
 
 pub fn read(
