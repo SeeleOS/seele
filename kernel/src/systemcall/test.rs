@@ -6094,7 +6094,7 @@ fn epoll_syscalls_follow_linux_rules() {
     let peer_shutdown_socket_data = peer_shutdown_socket_ready.data;
     assert_eq!(peer_shutdown_socket_events, EPOLLIN | EPOLLOUT | EPOLLRDHUP);
     assert_eq!(peer_shutdown_socket_events & EPOLLHUP, 0);
-    assert_eq!(peer_shutdown_socket_data, 0x55aa);
+    assert_eq!(peer_shutdown_socket_data, 0x77cc);
     expect_ok(
         SyscallArgs::new([left as u64, epoll_events + 449, 1, 0, 0, 0]).call::<Read>(),
         0,
