@@ -18,6 +18,7 @@ use crate::{
         traits::Readable,
     },
     polling::{event::PollableEvent, object::Pollable},
+    thread::scheduling::request_current_cpu_resched,
     thread::yielding::{
         BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
         wake_pollers_for_object,
@@ -100,6 +101,7 @@ pub extern "C" fn mouse_interrupt_handler() {
         MOUSE_EVDEV_PENDING.store(true, Ordering::Release);
     }
     MOUSE_PENDING.store(true, Ordering::Release);
+    request_current_cpu_resched();
     send_eoi();
     profile::record(ProfileCategory::IrqMouse, irq_start);
 }

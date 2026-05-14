@@ -1,4 +1,7 @@
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::{
+    mem,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use crate::memory::utils::Mut;
 use alloc::{collections::btree_map::BTreeMap, format, string::String, vec, vec::Vec};
@@ -11,6 +14,7 @@ use crate::{
     filesystem::{info::DirectoryContentInfo, object::FileLikeObject, path::Path},
     memory::protection::Protection,
     memory::user_safe,
+    misc::profile::{self, HotSyscallPhase},
     object::{
         config::ConfigurateRequest,
         control::control_object,
@@ -28,6 +32,7 @@ use crate::{
     },
     socket::{InetSocketKind, UnixSocketKind},
     systemcall::utils::{SyscallError, SyscallImpl, SyscallResult},
+    thread::get_current_thread,
 };
 
 static DIR_OFFSETS: Mut<BTreeMap<(ProcessID, u64), usize>> = Mut::new(BTreeMap::new());
@@ -205,6 +210,24 @@ fn write_object_at_offset(object: &ObjectRef, buffer: &[u8], offset: i64) -> Sys
     Ok(written)
 }
 
+fn readable_object_phase(object: &ObjectRef) -> HotSyscallPhase {
+    if object.clone().as_tty_device().is_ok() {
+        HotSyscallPhase::ReadReadableTty
+    } else if object.clone().as_pty_slave().is_ok() {
+        HotSyscallPhase::ReadReadablePtySlave
+    } else if object.clone().as_unix_socket().is_ok() {
+        HotSyscallPhase::ReadReadableUnixSocket
+    } else if object.clone().as_inet_socket().is_ok() {
+        HotSyscallPhase::ReadReadableInetSocket
+    } else if object.clone().as_netlink_socket().is_ok() {
+        HotSyscallPhase::ReadReadableNetlinkSocket
+    } else if object.clone().as_fuse_device().is_ok() {
+        HotSyscallPhase::ReadReadableFuseDevice
+    } else {
+        HotSyscallPhase::ReadReadableOther
+    }
+}
+
 fn copy_between_objects_with_offsets(
     input: ObjectRef,
     input_offset: Option<*mut i64>,
@@ -267,6 +290,7 @@ fn copy_between_objects_with_offsets(
 
 fn read_file_like_in_chunks(
     file: &FileLikeObject,
+    buffer: &mut Vec<u8>,
     buf_ptr: *mut u8,
     len: usize,
 ) -> SyscallResult<usize> {
@@ -274,7 +298,10 @@ fn read_file_like_in_chunks(
         return Ok(0);
     }
 
-    let mut buffer = vec![0; len.min(LINEAR_IO_CHUNK_SIZE)];
+    let scratch_len = len.min(LINEAR_IO_CHUNK_SIZE);
+    if buffer.len() < scratch_len {
+        buffer.resize(scratch_len, 0);
+    }
     let mut total = 0usize;
 
     while total < len {
@@ -406,18 +433,64 @@ define_syscall!(Getdents64, |object_index: u64, buf: *mut u8, len: usize| {
 });
 
 define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
+    let thread_ref = get_current_thread();
+    let mut buffer = {
+        let mut thread = thread_ref.lock();
+        mem::take(&mut thread.io_buffer)
+    };
+
     if let Ok(file) = object.clone().as_file_like() {
-        return read_file_like_in_chunks(&file, buf_ptr, len);
+        let start = profile::scope_start();
+        let result = read_file_like_in_chunks(&file, &mut buffer, buf_ptr, len);
+        profile::record_hot_syscall_phase(
+            HotSyscallPhase::ReadFileLike,
+            profile::scope_start().saturating_sub(start),
+        );
+        {
+            let mut thread = thread_ref.lock();
+            thread.io_buffer = buffer;
+        }
+        return result;
     }
 
-    let mut buffer = vec![0; len];
-    let read = object.clone().as_readable()?.read(&mut buffer)?;
-    if read > 0 {
-        log_display_pipe_bytes("read", &object, &buffer[..read]);
-        log_user_manager_socket_bytes("read", &object, &buffer[..read]);
-        user_safe::write_buffer(buf_ptr, &buffer[..read])?;
+    if buffer.len() < len {
+        buffer.resize(len, 0);
     }
-    Ok(read)
+    let readable_phase = readable_object_phase(&object);
+    let readable_start = profile::scope_start();
+    let result = object.clone().as_readable()?.read(&mut buffer[..len]);
+    let readable_cycles = profile::scope_start().saturating_sub(readable_start);
+    let syscall_blocked_cycles = {
+        let thread = thread_ref.lock();
+        thread.blocked_syscall_cycles
+    };
+    let active_readable_cycles = readable_cycles.saturating_sub(syscall_blocked_cycles);
+    profile::record_hot_syscall_phase(HotSyscallPhase::ReadReadable, active_readable_cycles);
+    profile::record_hot_syscall_phase(readable_phase, active_readable_cycles);
+
+    let result = match result {
+        Ok(read) => {
+            if read > 0 {
+                log_display_pipe_bytes("read", &object, &buffer[..read]);
+                log_user_manager_socket_bytes("read", &object, &buffer[..read]);
+                let copy_start = profile::scope_start();
+                user_safe::write_buffer(buf_ptr, &buffer[..read])?;
+                profile::record_hot_syscall_phase(
+                    HotSyscallPhase::ReadCopyToUser,
+                    profile::scope_start().saturating_sub(copy_start),
+                );
+            }
+            Ok(read)
+        }
+        Err(err) => Err(err.into()),
+    };
+
+    {
+        let mut thread = thread_ref.lock();
+        thread.io_buffer = buffer;
+    }
+
+    result
 });
 
 define_syscall!(Write, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
@@ -560,12 +633,23 @@ define_syscall!(Flock, |object: ObjectRef, operation: i32| {
 });
 
 fn flush_process_file_mappings() -> SyscallResult {
+    let process_lock_start = profile::scope_start();
     let process = get_current_process();
     let mut process = process.lock();
+    profile::record_hot_syscall_phase(
+        HotSyscallPhase::FsyncProcessLock,
+        profile::scope_start().saturating_sub(process_lock_start),
+    );
+
+    let flush_start = profile::scope_start();
     process
         .addrspace
         .flush_all_file_mappings()
         .map_err(SyscallError::from)?;
+    profile::record_hot_syscall_phase(
+        HotSyscallPhase::FsyncFlushMappings,
+        profile::scope_start().saturating_sub(flush_start),
+    );
     Ok(0)
 }
 

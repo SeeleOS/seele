@@ -55,7 +55,7 @@ fn block_on_poller(poller: Arc<PollerObject>, timeout: Option<Time>) -> Result<(
         return Err(SyscallError::Interrupted);
     }
 
-    let poller_ref: Arc<dyn Object> = poller;
+    let poller_ref: Arc<dyn Object> = poller.clone();
     let current = prepare_block_current(BlockType::WakeRequired {
         wake_type: WakeType::Poller(poller_ref),
         deadline: timeout,

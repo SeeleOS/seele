@@ -4,16 +4,23 @@ use super::{
     SocketError, SocketResult, UNIX_SOCKET_REGISTRY, UnixListenerInner, UnixSocketKind,
     UnixSocketObject, UnixSocketRegistryEntry, UnixSocketRegistryKey, UnixSocketState,
 };
-use crate::filesystem::{errors::FSError, path::Path, vfs::VirtualFS, vfs_operations::open_path};
+use crate::filesystem::{errors::FSError, path::Path, vfs::VirtualFS};
 
 const S_IFSOCK: u32 = 0o140000;
 const UNIX_SOCKET_PATH_MODE: u32 = S_IFSOCK | 0o777;
 
 fn create_socket_path(path: &str) -> Result<(), FSError> {
-    VirtualFS.lock().create_file(Path::new(path))?;
-    open_path(Path::new(path))?
-        .chmod(UNIX_SOCKET_PATH_MODE)
-        .map_err(|_| FSError::Other)?;
+    let path = Path::new(path);
+    {
+        let mut vfs = VirtualFS.lock();
+        vfs.create_file(path.clone())?;
+    }
+    {
+        let opened = VirtualFS.lock().open(path)?;
+        opened
+            .chmod(UNIX_SOCKET_PATH_MODE)
+            .map_err(|_| FSError::Other)?;
+    }
     Ok(())
 }
 

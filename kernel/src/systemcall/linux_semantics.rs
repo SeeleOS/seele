@@ -222,6 +222,7 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         CloseRange => "close_range_syscalls_follow_linux_rules",
         RtSigsuspend => "sleep_and_signal_mask_syscalls_follow_linux_rules",
         EpollPwait2 => "epoll_pwait2_syscalls_follow_linux_timeout_rules",
+        QuotactlFd => "quotactl_fd_syscalls_follow_linux_rules",
         Poll => "poll_and_ppoll_syscalls_follow_linux_rules",
         Ppoll => "poll_and_ppoll_syscalls_follow_linux_rules",
         TimerCreate => "posix_timer_syscalls_follow_linux_rules",

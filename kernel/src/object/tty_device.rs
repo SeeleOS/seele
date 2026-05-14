@@ -10,6 +10,7 @@ use crate::{
     impl_cast_function,
     memory::user_safe,
     misc::framebuffer::{FRAME_BUFFER, framebuffer_set_user_controlled},
+    misc::profile::{self, HotSyscallPhase},
     object::{
         FileFlags, Object,
         config::ConfigurateRequest,
@@ -89,6 +90,16 @@ pub fn find_unused_virtual_tty() -> Option<u32> {
 pub fn wake_tty_poller_readable() {
     let tty: ObjectRef = get_active_tty();
     wake_pollers_for_object(tty, PollableEvent::CanBeRead);
+}
+
+fn tty_copy_from_queue(queue: &mut VecDeque<u8>, buffer: &mut [u8]) -> usize {
+    let start = profile::scope_start();
+    let read = copy_from_queue(queue, buffer);
+    profile::record_hot_syscall_phase(
+        HotSyscallPhase::TtyReadCopy,
+        profile::scope_start().saturating_sub(start),
+    );
+    read
 }
 
 #[derive(Debug)]
@@ -301,22 +312,22 @@ impl Readable for TtyDevice {
         read_or_block_with_flags(buffer, flags, WakeType::Keyboard, |buffer| {
             let mut response_queue = self.terminal_response_queue.lock();
             if !response_queue.is_empty() {
-                return Some(copy_from_queue(&mut response_queue, buffer));
+                return Some(tty_copy_from_queue(&mut response_queue, buffer));
             }
             drop(response_queue);
 
             match self.keyboard_mode() {
                 KeyboardMode::Raw | KeyboardMode::Off => {
                     let mut queue = self.raw_queue.lock();
-                    (!queue.is_empty()).then(|| copy_from_queue(&mut queue, buffer))
+                    (!queue.is_empty()).then(|| tty_copy_from_queue(&mut queue, buffer))
                 }
                 KeyboardMode::MediumRaw => {
                     let mut queue = self.medium_raw_queue.lock();
-                    (!queue.is_empty()).then(|| copy_from_queue(&mut queue, buffer))
+                    (!queue.is_empty()).then(|| tty_copy_from_queue(&mut queue, buffer))
                 }
                 KeyboardMode::Xlate | KeyboardMode::Unicode => {
                     let mut queue = self.keyboard_queue.lock();
-                    (!queue.is_empty()).then(|| copy_from_queue(&mut queue, buffer))
+                    (!queue.is_empty()).then(|| tty_copy_from_queue(&mut queue, buffer))
                 }
             }
         })

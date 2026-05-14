@@ -257,5 +257,6 @@ define_syscall_table!(
     Setpriority,
     EpollPwait2,
     MountSetattr,
+    QuotactlFd,
     Fchmodat2,
 );

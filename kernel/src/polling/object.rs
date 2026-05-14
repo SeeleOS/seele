@@ -16,6 +16,8 @@ use crate::{
 pub struct PollerObject {
     // Registered objects that will notify the poller when an event is triggered.
     pub entries: Mut<Vec<PollerEntry>>,
+    // Objects registered with this epoll instance, even when no concrete interest entry exists yet.
+    pub registered_objects: Mut<Vec<ObjectRef>>,
     // Events collected for the next poller_wait call.
     pub woken_events: Mut<Vec<PollerReadyEvent>>,
     open_state: OpenState,
@@ -26,6 +28,7 @@ impl PollerObject {
     pub fn new() -> Arc<Self> {
         let poller = Arc::new(Self {
             entries: Mut::new(Vec::new()),
+            registered_objects: Mut::new(Vec::new()),
             woken_events: Mut::new(Vec::new()),
             open_state: OpenState::default(),
             self_ref: Mut::new(None),

@@ -36,11 +36,13 @@ pub struct Mount {
     pub source_path: Path,
     pub flags: MountFlags,
     pub device_id: u64,
+    pub mount_id: u64,
 }
 
 pub struct VFS {
     pub(super) mounts: Vec<Mount>,
     next_mount_device_id: u64,
+    next_mount_id: u64,
 }
 
 impl VFS {
@@ -78,6 +80,7 @@ impl VFS {
         Self {
             mounts: Vec::new(),
             next_mount_device_id: 1,
+            next_mount_id: 1,
         }
     }
 
@@ -139,6 +142,16 @@ impl VFS {
                 self.next_mount_device_id += 1;
                 device_id
             });
+        let mount_id = self
+            .mounts
+            .iter()
+            .find(|mount| mount.path == normalized_path)
+            .map(|mount| mount.mount_id)
+            .unwrap_or_else(|| {
+                let mount_id = self.next_mount_id;
+                self.next_mount_id += 1;
+                mount_id
+            });
         self.mounts
             .retain(|mount| mount.path.clone().as_string() != normalized_path_string);
         self.mounts.push(Mount {
@@ -147,6 +160,7 @@ impl VFS {
             source_path: source_path.normalize(),
             flags,
             device_id,
+            mount_id,
         });
         self.mounts
             .sort_by_key(|mount| Reverse(mount.path.clone().as_string().len()));
@@ -165,6 +179,7 @@ impl VFS {
                 source_path: mount.source_path.clone(),
                 flags: mount.flags,
                 device_id: mount.device_id,
+                mount_id: mount.mount_id,
             })
             .collect::<Vec<_>>();
 
@@ -247,13 +262,7 @@ impl VFS {
     }
 
     pub fn mount_metadata(&self, path: Path) -> FSResult<(Path, FileSystemRef, Path, MountFlags)> {
-        let mount_path = self.mount_path(path)?;
-        let mount_path_string = mount_path.clone().as_string();
-        let mount = self
-            .mounts
-            .iter()
-            .find(|mount| mount.path.clone().as_string() == mount_path_string)
-            .ok_or(FSError::NotFound)?;
+        let (mount, _) = self.find_mount(&self.normalize_path(path))?;
         Ok((
             mount.path.clone(),
             mount.fs.clone(),
@@ -263,13 +272,22 @@ impl VFS {
     }
 
     pub fn mount_device_id(&self, path: Path) -> FSResult<u64> {
-        let mount_path = self.mount_path(path)?;
-        let mount_path_string = mount_path.clone().as_string();
-        self.mounts
-            .iter()
-            .find(|mount| mount.path.clone().as_string() == mount_path_string)
-            .map(|mount| mount.device_id)
-            .ok_or(FSError::NotFound)
+        let (mount, _) = self.find_mount(&self.normalize_path(path))?;
+        Ok(mount.device_id)
+    }
+
+    pub fn mount_path_and_ids(&self, path: Path) -> FSResult<(Path, u64, u64)> {
+        let (mount, _) = self.find_mount(&self.normalize_path(path))?;
+        Ok((mount.path.clone(), mount.device_id, mount.mount_id))
+    }
+
+    pub fn mount_id(&self, path: Path) -> FSResult<u64> {
+        let (mount, _) = self.find_mount(&self.normalize_path(path))?;
+        Ok(mount.mount_id)
+    }
+
+    pub fn mount_count(&self) -> usize {
+        self.mounts.len()
     }
 
     pub fn mount_snapshots(&self) -> Vec<(Path, FileSystemRef, Path, MountFlags)> {

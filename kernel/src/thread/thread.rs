@@ -44,6 +44,7 @@ pub struct Thread {
     pub active_syscall_profile: Option<BlockedSyscall>,
     pub blocked_syscall_started_at: Option<u64>,
     pub blocked_syscall_cycles: u64,
+    pub io_buffer: Vec<u8>,
     pub name: [u8; 16],
     pub timeslice_remaining_ns: u64,
 
@@ -78,6 +79,7 @@ impl Default for Thread {
             active_syscall_profile: None,
             blocked_syscall_started_at: None,
             blocked_syscall_cycles: 0,
+            io_buffer: Vec::new(),
             name: [0; 16],
             timeslice_remaining_ns: DEFAULT_USER_TIMESLICE_NS,
         }

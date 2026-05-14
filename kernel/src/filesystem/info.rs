@@ -17,6 +17,7 @@ pub struct FileLikeInfo {
     pub inode: u64,
     pub uid: u32,
     pub gid: u32,
+    pub rdev: u64,
     pub file_like_type: FileLikeType,
     pub permission: UnixPermission,
 }
@@ -122,6 +123,7 @@ impl FileLikeInfo {
             inode: 0,
             uid: 0,
             gid: 0,
+            rdev: 0,
             file_like_type,
             permission,
         }
@@ -135,6 +137,11 @@ impl FileLikeInfo {
 
     pub fn with_inode(mut self, inode: u64) -> Self {
         self.inode = inode;
+        self
+    }
+
+    pub fn with_rdev(mut self, rdev: u64) -> Self {
+        self.rdev = rdev;
         self
     }
 

@@ -40,6 +40,10 @@ impl StaticFs {
 }
 
 impl FileSystem for StaticFs {
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
     fn init(&mut self) -> FSResult<()> {
         Ok(())
     }

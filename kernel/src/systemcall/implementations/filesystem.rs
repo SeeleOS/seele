@@ -5,15 +5,15 @@ use crate::{
         errors::FSError,
         fusefs::FuseFs,
         info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
-        object::{mount_device_id_for_path, FileLikeObject},
+        object::{FileLikeObject, mount_device_id_for_path},
         path::Path,
         tmpfs::TmpFs,
         vfs::VirtualFS,
         vfs_operations::{
             file_info_path, open_path, open_path_nofollow, resolve_dir_path,
-            resolve_path_with_final,
+            resolve_path_info_with_final,
         },
-        vfs_traits::{DirectoryContentType, FileLike, FileLikeType, MountFlags},
+        vfs_traits::{DirectoryContentType, FileLikeType, MountFlags},
     },
     memory::user_safe,
     misc::{
@@ -22,13 +22,13 @@ use crate::{
         profile::{self, HotSyscallPhase},
     },
     object::{
+        FileFlags,
         error::ObjectError,
         fs_context::{FsConfigCommand, FsContextObject},
-        misc::{get_object_current_process, ObjectRef},
+        misc::{ObjectRef, get_object_current_process},
         traits::Statable,
-        FileFlags,
     },
-    process::{manager::get_current_process, FdFlags},
+    process::{FdFlags, manager::get_current_process},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
 use alloc::{format, string::String, sync::Arc, vec::Vec};
@@ -293,6 +293,15 @@ struct PathLookup {
     mount_root: bool,
 }
 
+#[derive(Clone, Copy)]
+struct PathLookupPhases {
+    resolve: HotSyscallPhase,
+    empty_path: HotSyscallPhase,
+    resolve_final: HotSyscallPhase,
+    build_stat: HotSyscallPhase,
+    mount_info: HotSyscallPhase,
+}
+
 fn parse_fuse_mount_options(data: Option<&str>) -> Result<FuseMountOptions, SyscallError> {
     let mut options = FuseMountOptions::default();
     let Some(data) = data else {
@@ -424,32 +433,18 @@ fn proc_self_fd_object(path: &Path) -> Result<Option<ObjectRef>, SyscallError> {
 }
 
 fn linux_stat_from_file_like_info(info: FileLikeInfo, path: &Path) -> LinuxStat {
+    let rdev = info.rdev;
     let mut stat = info.as_linux();
     stat.st_dev = mount_device_id_for_path(path);
+    stat.st_rdev = rdev;
     stat
-}
-
-fn linux_stat_from_file_like(file_like: &FileLike, path: &Path) -> Result<LinuxStat, SyscallError> {
-    let info = file_like.info().map_err(SyscallError::from)?;
-    let mut stat = linux_stat_from_file_like_info(info, path);
-
-    if let FileLike::File(file) = file_like {
-        let file = file.lock();
-        if let Some(device) = file
-            .as_any()
-            .downcast_ref::<crate::filesystem::staticfs::device::StaticDeviceHandle>()
-        {
-            stat.st_rdev = device.rdev().unwrap_or(0);
-        }
-    }
-
-    Ok(stat)
 }
 
 fn mount_info_from_path(path: &Path) -> Result<(u64, bool), SyscallError> {
     let normalized = path.normalize();
-    let mount_path = { VirtualFS.lock().mount_path(normalized.clone())? };
-    Ok((mount_id_for_path(&normalized)?, normalized == mount_path))
+    let vfs = VirtualFS.lock();
+    let (mount_path, _, mount_id) = vfs.mount_path_and_ids(normalized.clone())?;
+    Ok((mount_id, normalized == mount_path))
 }
 
 fn mount_info_from_object(object: &ObjectRef) -> Result<(u64, bool), SyscallError> {
@@ -461,17 +456,28 @@ fn lookup_path_metadata(
     path_str: &str,
     nofollow: bool,
     allow_empty_path: bool,
-    resolve_phase: HotSyscallPhase,
-    open_stat_phase: HotSyscallPhase,
+    phases: PathLookupPhases,
 ) -> Result<PathLookup, SyscallError> {
     if path_str.is_empty() && allow_empty_path {
-        let open_stat_start = profile::scope_start();
+        let empty_path_start = profile::scope_start();
         let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
+        profile::record_hot_syscall_phase(
+            phases.empty_path,
+            profile::scope_start().saturating_sub(empty_path_start),
+        );
+
+        let build_stat_start = profile::scope_start();
         let stat = object.clone().as_statable()?.stat();
+        profile::record_hot_syscall_phase(
+            phases.build_stat,
+            profile::scope_start().saturating_sub(build_stat_start),
+        );
+
+        let mount_info_start = profile::scope_start();
         let (mount_id, mount_root) = mount_info_from_object(&object)?;
         profile::record_hot_syscall_phase(
-            open_stat_phase,
-            profile::scope_start().saturating_sub(open_stat_start),
+            phases.mount_info,
+            profile::scope_start().saturating_sub(mount_info_start),
         );
         return Ok(PathLookup {
             stat,
@@ -483,18 +489,30 @@ fn lookup_path_metadata(
     let resolve_start = profile::scope_start();
     let normalized_path = resolve_path_at(dirfd, path_str)?.normalize();
     profile::record_hot_syscall_phase(
-        resolve_phase,
+        phases.resolve,
         profile::scope_start().saturating_sub(resolve_start),
     );
 
-    let open_stat_start = profile::scope_start();
-    let (file_like, resolved_path): (_, Path) =
-        resolve_path_with_final(normalized_path.clone(), !nofollow)?;
-    let stat = linux_stat_from_file_like(&file_like, &resolved_path)?;
+    let resolve_final_start = profile::scope_start();
+    let (info, resolved_path): (_, Path) =
+        resolve_path_info_with_final(normalized_path.clone(), !nofollow)?;
+    profile::record_hot_syscall_phase(
+        phases.resolve_final,
+        profile::scope_start().saturating_sub(resolve_final_start),
+    );
+
+    let build_stat_start = profile::scope_start();
+    let stat = linux_stat_from_file_like_info(info, &resolved_path);
+    profile::record_hot_syscall_phase(
+        phases.build_stat,
+        profile::scope_start().saturating_sub(build_stat_start),
+    );
+
+    let mount_info_start = profile::scope_start();
     let (mount_id, mount_root) = mount_info_from_path(&resolved_path)?;
     profile::record_hot_syscall_phase(
-        open_stat_phase,
-        profile::scope_start().saturating_sub(open_stat_start),
+        phases.mount_info,
+        profile::scope_start().saturating_sub(mount_info_start),
     );
 
     Ok(PathLookup {
@@ -687,22 +705,7 @@ fn filesystem_magic_for_path(path: &Path) -> Result<i64, SyscallError> {
 }
 
 fn mount_id_for_path(path: &Path) -> Result<u64, SyscallError> {
-    let (mount_path, mut mounts) = {
-        let vfs = VirtualFS.lock();
-        let mount_path = vfs.mount_path(path.clone())?;
-        let mounts = vfs
-            .mount_snapshots()
-            .into_iter()
-            .map(|(path, _, _, _)| path)
-            .collect::<Vec<_>>();
-        (mount_path, mounts)
-    };
-    mounts.sort_by_key(|path| (path.parts.len(), path.clone().as_string().len()));
-    Ok(mounts
-        .iter()
-        .position(|path| *path == mount_path)
-        .map(|index| index as u64 + 1)
-        .unwrap_or(1))
+    Ok(VirtualFS.lock().mount_path_and_ids(path.clone())?.2)
 }
 
 fn mount_id_for_file_like(file_like: &FileLikeObject) -> Result<u64, SyscallError> {
@@ -716,7 +719,7 @@ fn pseudo_mount_id(magic: i64) -> Option<u64> {
         _ => return None,
     };
 
-    let mount_count = VirtualFS.lock().mount_snapshots().len() as u64;
+    let mount_count = VirtualFS.lock().mount_count() as u64;
     Some(mount_count + 1 + offset)
 }
 
@@ -732,7 +735,7 @@ fn mount_id_for_object(object: &ObjectRef) -> Result<u64, SyscallError> {
 fn mount_root_for_object(object: &ObjectRef) -> Result<bool, SyscallError> {
     if let Ok(file_like) = object.clone().as_file_like() {
         let path = file_like.path().normalize();
-        let mount_path = { VirtualFS.lock().mount_path(path.clone())? };
+        let mount_path = { VirtualFS.lock().mount_path_and_ids(path.clone())?.0 };
         return Ok(path == mount_path);
     }
 
@@ -1025,7 +1028,7 @@ define_syscall!(OpenAt, |dirfd: i32,
         let open_start = profile::scope_start();
         let open_result = open_path(path.clone());
         profile::record_hot_syscall_phase(
-            HotSyscallPhase::OpenAtFinalOpen,
+            HotSyscallPhase::OpenAtInitialOpen,
             profile::scope_start().saturating_sub(open_start),
         );
         match open_result {
@@ -1035,36 +1038,50 @@ define_syscall!(OpenAt, |dirfd: i32,
                 }
                 Arc::new(file)
             }
-            Err(FSError::NotFound) => match proc_self_fd_object(&path) {
-                Ok(Some(object)) => object,
-                Ok(None) if create => {
-                    create_file_unlocked(path.clone())?;
-                    let retry_start = profile::scope_start();
-                    let reopen_result = open_path(path.clone());
-                    profile::record_hot_syscall_phase(
-                        HotSyscallPhase::OpenAtCreateRetry,
-                        profile::scope_start().saturating_sub(retry_start),
-                    );
-                    match reopen_result {
-                        Ok(file) => {
-                            if create_mode != 0 {
-                                file.chmod(create_mode)?;
-                            }
-                            Arc::new(file)
-                        }
-                        Err(err) => return Err(SyscallError::from(err)),
+            Err(FSError::NotFound) => {
+                let proc_self_fd_start = profile::scope_start();
+                match proc_self_fd_object(&path) {
+                    Ok(Some(object)) => {
+                        profile::record_hot_syscall_phase(
+                            HotSyscallPhase::OpenAtProcSelfFd,
+                            profile::scope_start().saturating_sub(proc_self_fd_start),
+                        );
+                        object
                     }
+                    Ok(None) if create => {
+                        let create_start = profile::scope_start();
+                        create_file_unlocked(path.clone())?;
+                        profile::record_hot_syscall_phase(
+                            HotSyscallPhase::OpenAtCreateFile,
+                            profile::scope_start().saturating_sub(create_start),
+                        );
+                        let retry_start = profile::scope_start();
+                        let reopen_result = open_path(path.clone());
+                        profile::record_hot_syscall_phase(
+                            HotSyscallPhase::OpenAtCreateReopen,
+                            profile::scope_start().saturating_sub(retry_start),
+                        );
+                        match reopen_result {
+                            Ok(file) => {
+                                if create_mode != 0 {
+                                    file.chmod(create_mode)?;
+                                }
+                                Arc::new(file)
+                            }
+                            Err(err) => return Err(SyscallError::from(err)),
+                        }
+                    }
+                    Ok(None) => return Err(SyscallError::FileNotFound),
+                    Err(err) => return Err(err),
                 }
-                Ok(None) => return Err(SyscallError::FileNotFound),
-                Err(err) => return Err(err),
-            },
+            }
             Err(err) => return Err(SyscallError::from(err)),
         }
     } else {
         let open_start = profile::scope_start();
         let open_result = open_path_nofollow(path.clone());
         profile::record_hot_syscall_phase(
-            HotSyscallPhase::OpenAtFinalOpen,
+            HotSyscallPhase::OpenAtInitialOpen,
             profile::scope_start().saturating_sub(open_start),
         );
         match open_result {
@@ -1075,11 +1092,16 @@ define_syscall!(OpenAt, |dirfd: i32,
                 Arc::new(file)
             }
             Err(FSError::NotFound) if create => {
+                let create_start = profile::scope_start();
                 create_file_unlocked(path.clone())?;
+                profile::record_hot_syscall_phase(
+                    HotSyscallPhase::OpenAtCreateFile,
+                    profile::scope_start().saturating_sub(create_start),
+                );
                 let retry_start = profile::scope_start();
                 let reopen_result = open_path(path.clone());
                 profile::record_hot_syscall_phase(
-                    HotSyscallPhase::OpenAtCreateRetry,
+                    HotSyscallPhase::OpenAtCreateReopen,
                     profile::scope_start().saturating_sub(retry_start),
                 );
                 match reopen_result {
@@ -1096,15 +1118,28 @@ define_syscall!(OpenAt, |dirfd: i32,
         }
     };
 
-    let post_open_start = profile::scope_start();
+    let info_start = profile::scope_start();
     let info = object.clone().as_file_like()?.info()?;
+    profile::record_hot_syscall_phase(
+        HotSyscallPhase::OpenAtInfo,
+        profile::scope_start().saturating_sub(info_start),
+    );
     if nofollow && !path_only && matches!(info.file_like_type, FileLikeType::Symlink) {
+        profile::record_hot_syscall_phase(HotSyscallPhase::OpenAtNofollowCheck, 1);
         return Err(SyscallError::TooManySymbolicLinks);
     }
+    if nofollow && !path_only {
+        profile::record_hot_syscall_phase(HotSyscallPhase::OpenAtNofollowCheck, 1);
+    }
     if directory_only && !matches!(info.file_like_type, FileLikeType::Directory) {
+        profile::record_hot_syscall_phase(HotSyscallPhase::OpenAtDirectoryCheck, 1);
         return Err(SyscallError::NotADirectory);
     }
+    if directory_only {
+        profile::record_hot_syscall_phase(HotSyscallPhase::OpenAtDirectoryCheck, 1);
+    }
     if flags.contains(OpenFlags::TRUNC) && !path_only {
+        let truncate_start = profile::scope_start();
         let file_like = object.clone().as_file_like()?;
         if file_like.is_device_backed() {
             // Linux ignores O_TRUNC on device nodes such as /dev/null.
@@ -1116,11 +1151,11 @@ define_syscall!(OpenAt, |dirfd: i32,
                 FileLikeType::Symlink => {}
             }
         }
+        profile::record_hot_syscall_phase(
+            HotSyscallPhase::OpenAtTruncate,
+            profile::scope_start().saturating_sub(truncate_start),
+        );
     }
-    profile::record_hot_syscall_phase(
-        HotSyscallPhase::OpenAtPostOpen,
-        profile::scope_start().saturating_sub(post_open_start),
-    );
     let mut file_flags = FileFlags::empty();
     if flags.contains(OpenFlags::APPEND) {
         file_flags.insert(FileFlags::APPEND);
@@ -1129,10 +1164,15 @@ define_syscall!(OpenAt, |dirfd: i32,
         file_flags.insert(FileFlags::NONBLOCK);
     }
     if !file_flags.is_empty() {
+        let set_flags_start = profile::scope_start();
         match object.clone().set_flags(file_flags) {
             Ok(()) | Err(ObjectError::Unimplemented) => {}
             Err(err) => return Err(err.into()),
         }
+        profile::record_hot_syscall_phase(
+            HotSyscallPhase::OpenAtSetFlags,
+            profile::scope_start().saturating_sub(set_flags_start),
+        );
     }
 
     let fd_flags = if flags.contains(OpenFlags::CLOEXEC) {
@@ -1140,9 +1180,15 @@ define_syscall!(OpenAt, |dirfd: i32,
     } else {
         FdFlags::empty()
     };
-    Ok(current_process
+    let install_fd_start = profile::scope_start();
+    let fd = current_process
         .lock()
-        .push_object_with_flags(object, fd_flags))
+        .push_object_with_flags(object, fd_flags);
+    profile::record_hot_syscall_phase(
+        HotSyscallPhase::OpenAtInstallFd,
+        profile::scope_start().saturating_sub(install_fd_start),
+    );
+    Ok(fd)
 });
 
 define_syscall!(Open, |path: CString, flags: OpenFlags, mode: u32| {
@@ -1365,11 +1411,21 @@ define_syscall!(Newfstatat, |dirfd: i32,
         &path_str,
         flags.contains(AtFlags::SYMLINK_NOFOLLOW),
         flags.contains(AtFlags::EMPTY_PATH),
-        HotSyscallPhase::NewfstatatPathResolve,
-        HotSyscallPhase::NewfstatatOpenStat,
+        PathLookupPhases {
+            resolve: HotSyscallPhase::NewfstatatPathResolve,
+            empty_path: HotSyscallPhase::NewfstatatEmptyPath,
+            resolve_final: HotSyscallPhase::NewfstatatResolveFinal,
+            build_stat: HotSyscallPhase::NewfstatatBuildStat,
+            mount_info: HotSyscallPhase::NewfstatatMountInfo,
+        },
     )?;
 
+    let write_user_start = profile::scope_start();
     user_safe::write(linux_stat_ptr, &lookup.stat)?;
+    profile::record_hot_syscall_phase(
+        HotSyscallPhase::NewfstatatWriteUser,
+        profile::scope_start().saturating_sub(write_user_start),
+    );
     Ok(0)
 });
 
@@ -1406,18 +1462,19 @@ define_syscall!(Statx, |dirfd: i32,
         &path_str,
         flags.contains(AtFlags::SYMLINK_NOFOLLOW),
         flags.contains(AtFlags::EMPTY_PATH),
-        HotSyscallPhase::StatxPathResolve,
-        HotSyscallPhase::StatxOpenStat,
+        PathLookupPhases {
+            resolve: HotSyscallPhase::StatxPathResolve,
+            empty_path: HotSyscallPhase::StatxEmptyPath,
+            resolve_final: HotSyscallPhase::StatxResolveFinal,
+            build_stat: HotSyscallPhase::StatxBuildStat,
+            mount_info: HotSyscallPhase::StatxMountInfo,
+        },
     )?;
-    let mount_info_start = profile::scope_start();
     let stat = lookup.stat;
     let mount_id = lookup.mount_id;
     let mount_root = lookup.mount_root;
-    profile::record_hot_syscall_phase(
-        HotSyscallPhase::StatxMountInfo,
-        profile::scope_start().saturating_sub(mount_info_start),
-    );
 
+    let pack_output_start = profile::scope_start();
     let statx = LinuxStatx {
         stx_mask: STATX_BASIC_STATS | STATX_MNT_ID,
         stx_blksize: stat.st_blksize as u32,
@@ -1452,7 +1509,17 @@ define_syscall!(Statx, |dirfd: i32,
         stx_attributes_mask: STATX_ATTR_MOUNT_ROOT,
         ..Default::default()
     };
+    profile::record_hot_syscall_phase(
+        HotSyscallPhase::StatxPackOutput,
+        profile::scope_start().saturating_sub(pack_output_start),
+    );
+
+    let write_user_start = profile::scope_start();
     user_safe::write(statx_ptr, &statx)?;
+    profile::record_hot_syscall_phase(
+        HotSyscallPhase::StatxWriteUser,
+        profile::scope_start().saturating_sub(write_user_start),
+    );
 
     Ok(0)
 });

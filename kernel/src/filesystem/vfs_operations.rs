@@ -63,14 +63,16 @@ impl VFS {
         let normalized = self.normalize_path(path);
         log::trace!("vfs: open {}", normalized.clone().as_string());
         let (file, resolved_path) = self.resolve_with_path(normalized)?;
-        OpenedFileObject::new(file, resolved_path)
+        let mount_device_id = self.mount_device_id(resolved_path.clone())?;
+        OpenedFileObject::new_with_mount_device_id(file, resolved_path, mount_device_id)
     }
 
     pub fn open_nofollow(&mut self, path: Path) -> FSResult<OpenedFileObject> {
         let normalized = self.normalize_path(path);
         log::trace!("vfs: open_nofollow {}", normalized.clone().as_string());
         let (file, resolved_path) = self.resolve_nofollow_with_path(normalized)?;
-        OpenedFileObject::new(file, resolved_path)
+        let mount_device_id = self.mount_device_id(resolved_path.clone())?;
+        OpenedFileObject::new_with_mount_device_id(file, resolved_path, mount_device_id)
     }
 
     pub fn file_info(&mut self, path: Path) -> FSResult<FileLikeInfo> {
@@ -244,6 +246,14 @@ pub fn resolve_path_with_final(
     follow_final_symlink: bool,
 ) -> FSResult<(FileLike, Path)> {
     resolve::resolve_path(path.normalize(), follow_final_symlink)
+}
+
+pub fn resolve_path_info_with_final(
+    path: Path,
+    follow_final_symlink: bool,
+) -> FSResult<(FileLikeInfo, Path)> {
+    let (file, resolved_path) = resolve::resolve_path(path.normalize(), follow_final_symlink)?;
+    Ok((file.info()?, resolved_path))
 }
 
 pub fn file_info_path(path: Path) -> FSResult<FileLikeInfo> {

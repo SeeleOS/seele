@@ -8,8 +8,8 @@ use crate::filesystem::{
 };
 
 use super::{
-    TmpFsVariant, TmpNodeKind, TmpfsDirectoryHandle, TmpfsFileHandle, TmpfsState, TmpfsStateRef,
-    TmpfsSymlinkHandle,
+    TmpFsVariant, TmpNodeKind, TmpfsDirectoryHandle, TmpfsFileHandle, TmpfsQuota, TmpfsState,
+    TmpfsStateRef, TmpfsSymlinkHandle,
 };
 
 pub(crate) fn relative_components(path: &Path) -> Vec<String> {
@@ -95,6 +95,14 @@ impl TmpFs {
             variant,
         }
     }
+
+    pub(crate) fn quota(&self, quota_type: u32, id: u32) -> Option<TmpfsQuota> {
+        self.state.lock().quota(quota_type, id)
+    }
+
+    pub(crate) fn set_quota(&self, quota_type: u32, id: u32, quota: TmpfsQuota) -> bool {
+        self.state.lock().set_quota(quota_type, id, quota)
+    }
 }
 
 impl Default for TmpFs {
@@ -104,6 +112,10 @@ impl Default for TmpFs {
 }
 
 impl FileSystem for TmpFs {
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
     fn init(&mut self) -> FSResult<()> {
         Ok(())
     }

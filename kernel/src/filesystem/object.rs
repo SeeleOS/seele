@@ -15,7 +15,7 @@ use crate::{
         },
         vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
         vfs_operations::{open_path, resolve_dir_path, resolve_file_path},
-        vfs_traits::{FileLike, FileLikeType, Whence},
+        vfs_traits::{File as VfsFile, FileLike, FileLikeType, Whence},
     },
     impl_cast_function, impl_cast_function_non_trait,
     memory::{addrspace::mem_area::Data, protection::Protection},
@@ -35,6 +35,7 @@ pub struct OpenedFileObject {
     backend: OpenBackend,
     open_state: OpenState,
     path: Path,
+    mount_device_id: u64,
 }
 
 pub type FileLikeObject = OpenedFileObject;
@@ -68,18 +69,26 @@ fn device_rdev_for_file(file: &WrappedFile) -> Option<u64> {
 }
 
 pub(crate) fn mount_device_id_for_path(path: &Path) -> u64 {
-    let Ok(device_id) = VirtualFS.lock().mount_device_id(path.clone()) else {
+    let Ok((_, device_id, _)) = VirtualFS.lock().mount_path_and_ids(path.clone()) else {
         return 1;
     };
     device_id
 }
 
-fn stat_with_mount_device_id(mut stat: LinuxStat, path: &Path) -> LinuxStat {
-    stat.st_dev = mount_device_id_for_path(path);
+fn stat_with_mount_device_id(mut stat: LinuxStat, mount_device_id: u64) -> LinuxStat {
+    stat.st_dev = mount_device_id;
     stat
 }
 
 impl OpenBackend {
+    fn from_wrapped_file(file: WrappedFile) -> FSResult<Self> {
+        if let Some(object) = device_object_for_file(&file)? {
+            Ok(Self::Device { file, object })
+        } else {
+            Ok(Self::RegularFile(file))
+        }
+    }
+
     fn symlink_target_from_path(path: &Path, target: &str) -> Path {
         let target_path = Path::new(target);
         if target_path.is_absolute() {
@@ -96,13 +105,7 @@ impl OpenBackend {
 
     fn from_file_like(file: FileLike, path: &Path) -> FSResult<Self> {
         match file {
-            FileLike::File(file) => {
-                if let Some(object) = device_object_for_file(&file)? {
-                    Ok(Self::Device { file, object })
-                } else {
-                    Ok(Self::RegularFile(file))
-                }
-            }
+            FileLike::File(file) => Self::from_wrapped_file(file),
             FileLike::Directory(dir) => Ok(Self::Directory(dir)),
             FileLike::Symlink(symlink) => {
                 let symlink = symlink.lock();
@@ -126,12 +129,48 @@ impl OpenBackend {
 }
 
 impl OpenedFileObject {
-    pub fn new(file: FileLike, path: Path) -> FSResult<Self> {
-        Ok(Self {
-            backend: OpenBackend::from_file_like(file, &path)?,
+    fn from_backend(path: Path, backend: OpenBackend, mount_device_id: u64) -> Self {
+        Self {
+            backend,
             open_state: OpenState::default(),
             path,
-        })
+            mount_device_id,
+        }
+    }
+
+    pub(crate) fn write_all_to_cursor(
+        file: &mut dyn VfsFile,
+        buf: &[u8],
+        offset: u64,
+    ) -> FSResult<usize> {
+        file.seek(offset as i64, Whence::Start)?;
+
+        let mut written = 0usize;
+        while written < buf.len() {
+            let count = file.write(&buf[written..])?;
+            if count == 0 {
+                return Err(FSError::Other);
+            }
+            written += count;
+        }
+
+        Ok(written)
+    }
+
+    pub(crate) fn new_with_mount_device_id(
+        file: FileLike,
+        path: Path,
+        mount_device_id: u64,
+    ) -> FSResult<Self> {
+        Ok(Self::from_backend(
+            path.clone(),
+            OpenBackend::from_file_like(file, &path)?,
+            mount_device_id,
+        ))
+    }
+
+    pub fn new(file: FileLike, path: Path) -> FSResult<Self> {
+        Self::new_with_mount_device_id(file, path.clone(), mount_device_id_for_path(&path))
     }
 
     pub fn path(&self) -> Path {
@@ -193,24 +232,7 @@ impl OpenedFileObject {
     }
 
     pub fn write_at(&self, buf: &[u8], offset: u64) -> FSResult<usize> {
-        self.invalidate_page_cache();
-        let file = self.resolve_file()?;
-        let mut file = file.lock();
-        let current = file.seek(0, Whence::Current)? as i64;
-        file.seek(offset as i64, Whence::Start)?;
-
-        let mut written = 0usize;
-        while written < buf.len() {
-            let count = file.write(&buf[written..])?;
-            if count == 0 {
-                let _ = file.seek(current, Whence::Start);
-                return Err(FSError::Other);
-            }
-            written += count;
-        }
-
-        let _ = file.seek(current, Whence::Start);
-        Ok(written)
+        self.with_file_write_cursor(true, |file| Self::write_all_to_cursor(file, buf, offset))
     }
 
     pub fn write_exact_at(&self, buf: &[u8], offset: u64) -> FSResult<usize> {
@@ -290,7 +312,24 @@ impl OpenedFileObject {
         self.device_object().is_some()
     }
 
-    fn page_cache_file_key(&self) -> Option<FileCacheKey> {
+    pub(crate) fn with_file_write_cursor<R>(
+        &self,
+        invalidate_cache: bool,
+        f: impl FnOnce(&mut dyn VfsFile) -> FSResult<R>,
+    ) -> FSResult<R> {
+        if invalidate_cache {
+            self.invalidate_page_cache();
+        }
+
+        let file = self.resolve_file()?;
+        let mut file = file.lock();
+        let current = file.seek(0, Whence::Current)? as i64;
+        let result = f(&mut *file);
+        let _ = file.seek(current, Whence::Start);
+        result
+    }
+
+    fn page_cache_identity(&self) -> Option<FileCacheIdentity> {
         let OpenBackend::RegularFile(file) = &self.backend else {
             return None;
         };
@@ -305,31 +344,27 @@ impl OpenedFileObject {
             return None;
         }
 
-        Some(FileCacheKey {
-            device_id: mount_device_id_for_path(&self.path),
-            inode: info.inode,
-        })
-    }
-
-    pub(crate) fn mapping_identity(&self) -> Option<FileCacheKey> {
-        self.page_cache_file_key()
-    }
-
-    pub(crate) fn readonly_page_cache_file(&self) -> Option<(WrappedFile, FileCacheIdentity)> {
-        let key = self.page_cache_file_key()?;
-        let OpenBackend::RegularFile(file) = &self.backend else {
-            return None;
-        };
-        let size = file.lock().info().ok()?.size;
-        Some((
-            file.clone(),
-            FileCacheIdentity::new(key.device_id, key.inode, size),
+        Some(FileCacheIdentity::new(
+            self.mount_device_id,
+            info.inode,
+            info.size,
         ))
     }
 
+    pub(crate) fn mapping_identity(&self) -> Option<FileCacheKey> {
+        Some(self.page_cache_identity()?.file)
+    }
+
+    pub(crate) fn readonly_page_cache_file(&self) -> Option<(WrappedFile, FileCacheIdentity)> {
+        let OpenBackend::RegularFile(file) = &self.backend else {
+            return None;
+        };
+        Some((file.clone(), self.page_cache_identity()?))
+    }
+
     fn invalidate_page_cache(&self) {
-        if let Some(key) = self.page_cache_file_key() {
-            page_cache::invalidate_file(key);
+        if let Some(identity) = self.page_cache_identity() {
+            page_cache::invalidate_file(identity.file);
         }
     }
 
@@ -496,12 +531,12 @@ impl Statable for OpenedFileObject {
             } else if let Ok(statable) = device.as_statable() {
                 stat.st_rdev = statable.stat().st_rdev;
             }
-            return stat_with_mount_device_id(stat, &self.path);
+            return stat_with_mount_device_id(stat, self.mount_device_id);
         }
 
         stat_with_mount_device_id(
             self.info().map(FileLikeInfo::as_linux).unwrap_or_default(),
-            &self.path,
+            self.mount_device_id,
         )
     }
 }

@@ -57,6 +57,11 @@ crate::test!(
     unix_listener_connect_wakes_poller_without_self_deadlock
 );
 crate::test!(
+    unix_pathname_socket_bind_connect,
+    "unix pathname sockets bind and connect without reborrowing vfs",
+    unix_pathname_sockets_bind_and_connect_without_reborrowing_vfs
+);
+crate::test!(
     inet_listener_poll_semantics,
     "inet listener is not spuriously writable while listening",
     inet_listener_poll_semantics_follow_linux_rules
@@ -272,6 +277,24 @@ fn unix_listener_connect_wakes_poller_without_self_deadlock() {
     assert_eq!(ready[0].event, PollableEvent::CanBeRead);
 }
 
+fn unix_pathname_sockets_bind_and_connect_without_reborrowing_vfs() {
+    let path = "/tmp/unix-pathname-socket-reborrow";
+    let _ = crate::filesystem::vfs::VirtualFS
+        .lock()
+        .delete_file(crate::filesystem::path::Path::new(path));
+
+    let listener = UnixSocketObject::create(crate::socket::AF_UNIX, crate::socket::SOCK_STREAM, 0)
+        .expect("listener socket should be created");
+    listener.bind(path.into()).expect("listener should bind");
+    listener.listen(1).expect("listener should listen");
+
+    let client = UnixSocketObject::create(crate::socket::AF_UNIX, crate::socket::SOCK_STREAM, 0)
+        .expect("client socket should be created");
+    client
+        .connect(path.into())
+        .expect("pathname connect should succeed");
+}
+
 fn inet_listener_poll_semantics_follow_linux_rules() {
     let listener = InetSocketObject::create(AF_INET, crate::socket::SOCK_STREAM, 0)
         .expect("inet listener should be created");
@@ -294,9 +317,8 @@ fn inet_listener_poll_semantics_follow_linux_rules() {
 }
 
 fn inet_listener_accept_readiness_semantics_follow_linux_rules() {
-    let listener =
-        InetSocketObject::create(AF_INET, crate::socket::SOCK_STREAM, 0)
-            .expect("inet listener should be created");
+    let listener = InetSocketObject::create(AF_INET, crate::socket::SOCK_STREAM, 0)
+        .expect("inet listener should be created");
     listener
         .clone()
         .set_flags(FileFlags::NONBLOCK)

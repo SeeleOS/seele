@@ -1,11 +1,11 @@
 use alloc::string::String;
 use core::any::Any;
 
-use ext4plus::{Ext4, FollowSymlinks, file::File as Ext4InnerFile, inode::Inode, path::Path};
+use ext4plus::{Ext4, file, inode::Inode};
 
 use crate::filesystem::{
     errors::FSError,
-    impls::ext4::{LookupCache, chmod_path, lookup_cache_insert_raw},
+    impls::ext4::{LookupCache, chmod_inode, lookup_cache_insert_raw},
     info::{FileLikeInfo, UnixPermission},
     vfs::FSResult,
     vfs_traits::{File, FileLikeType, Whence},
@@ -13,9 +13,9 @@ use crate::filesystem::{
 
 pub struct Ext4File {
     name: String,
-    path: String,
     fs: Ext4,
-    inner: Ext4InnerFile,
+    inode: Inode,
+    position: u64,
     parent_inode: u32,
     lookup_cache: LookupCache,
 }
@@ -23,29 +23,28 @@ pub struct Ext4File {
 impl Ext4File {
     pub fn new(
         name: String,
-        path: String,
         fs: Ext4,
-        inner: Ext4InnerFile,
+        inode: Inode,
         parent_inode: u32,
         lookup_cache: LookupCache,
     ) -> Self {
         Self {
             name,
-            path,
             fs,
-            inner,
+            inode,
+            position: 0,
             parent_inode,
             lookup_cache,
         }
     }
 
     fn size(&self) -> Result<usize, FSError> {
-        let meta = self.inner.inode().metadata();
+        let meta = self.inode.metadata();
         Ok(usize::try_from(meta.len()).unwrap())
     }
 
     pub fn inode(&self) -> Inode {
-        self.inner.inode().clone()
+        self.inode.clone()
     }
 
     fn update_lookup_cache(&self) {
@@ -53,7 +52,7 @@ impl Ext4File {
             &self.lookup_cache,
             self.parent_inode,
             &self.name,
-            self.inner.inode(),
+            &self.inode,
         );
     }
 }
@@ -64,17 +63,22 @@ impl File for Ext4File {
     }
 
     fn read(&mut self, buffer: &mut [u8]) -> FSResult<usize> {
-        self.inner.read_bytes(buffer).map_err(Into::into)
+        let read =
+            file::read_at(&self.fs, &self.inode, buffer, self.position).map_err(FSError::from)?;
+        self.position = self.position.saturating_add(read as u64);
+        Ok(read)
     }
 
     fn write(&mut self, buffer: &[u8]) -> FSResult<usize> {
-        let written = self.inner.write_bytes(buffer).map_err(FSError::from)?;
+        let written = file::write_at(&self.fs, &mut self.inode, buffer, self.position)
+            .map_err(FSError::from)?;
+        self.position = self.position.saturating_add(written as u64);
         self.update_lookup_cache();
         Ok(written)
     }
 
     fn read_at(&mut self, buffer: &mut [u8], offset: u64) -> FSResult<usize> {
-        self.inner.read_bytes_at(buffer, offset).map_err(Into::into)
+        file::read_at(&self.fs, &self.inode, buffer, offset).map_err(Into::into)
     }
 
     fn info(&mut self) -> FSResult<FileLikeInfo> {
@@ -82,18 +86,18 @@ impl File for Ext4File {
         Ok(FileLikeInfo::new(
             self.name.clone(),
             size,
-            UnixPermission(self.inner.inode().mode().bits() as u32),
+            UnixPermission(self.inode.mode().bits() as u32),
             FileLikeType::File,
         )
-        .with_owner(self.inner.inode().uid(), self.inner.inode().gid())
-        .with_inode(self.inner.inode().index.get().into()))
+        .with_owner(self.inode.uid(), self.inode.gid())
+        .with_inode(self.inode.index.get().into()))
     }
 
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {
-        let len = self.inner.inode().size_in_bytes() as i64;
+        let len = self.inode.size_in_bytes() as i64;
         let pos = match seek_type {
             Whence::Start => offset,
-            Whence::Current => self.inner.position() as i64 + offset,
+            Whence::Current => self.position as i64 + offset,
             Whence::End => len + offset,
             Whence::Data => {
                 if offset < 0 || offset >= len {
@@ -109,13 +113,14 @@ impl File for Ext4File {
             }
         };
 
-        let _ = self.inner.seek_to(pos as u64);
+        self.position = pos as u64;
 
-        Ok(self.inner.position() as usize)
+        Ok(self.position as usize)
     }
 
     fn truncate(&mut self, length: u64) -> FSResult<()> {
-        self.inner.truncate(length).map_err(FSError::from)?;
+        file::truncate(&self.fs, &mut self.inode, length).map_err(FSError::from)?;
+        self.position = self.position.min(length);
         self.update_lookup_cache();
         Ok(())
     }
@@ -126,19 +131,16 @@ impl File for Ext4File {
         }
 
         let end = offset.checked_add(len).ok_or(FSError::Other)?;
-        if end > self.inner.inode().size_in_bytes() {
-            self.inner.truncate(end).map_err(FSError::from)?;
+        if end > self.inode.size_in_bytes() {
+            file::truncate(&self.fs, &mut self.inode, end).map_err(FSError::from)?;
             self.update_lookup_cache();
         }
         Ok(())
     }
 
     fn chmod(&self, mode: u32) -> FSResult<()> {
-        chmod_path(&self.fs, &self.path, mode)?;
-        let inode = self
-            .fs
-            .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
-            .map_err(FSError::from)?;
+        let mut inode = self.inode.clone();
+        chmod_inode(&self.fs, &mut inode, mode)?;
         lookup_cache_insert_raw(&self.lookup_cache, self.parent_inode, &self.name, &inode);
         Ok(())
     }

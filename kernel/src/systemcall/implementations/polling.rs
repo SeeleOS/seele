@@ -176,9 +176,33 @@ define_syscall!(
     EpollCtl,
     |poller: ObjectRef, op: u64, target_object: ObjectRef, event: *const LinuxEpollEvent| {
         let target_object = poll_identity_object(target_object);
+        let poller = poller.as_poller()?;
+        let is_registered = poller.has_registration(&target_object);
 
         match EpollCtlOp::try_from(op).map_err(|_| SyscallError::InvalidArguments)? {
-            EpollCtlOp::Add | EpollCtlOp::Mod => {
+            EpollCtlOp::Add => {
+                if is_registered {
+                    return Err(SyscallError::FileAlreadyExists);
+                }
+                if event.is_null() {
+                    return Err(SyscallError::BadAddress);
+                }
+                let event = read_epoll_event(event)?;
+                let bits = EpollEvents::from_bits_retain(event.events);
+                poller.remember_registration(&target_object);
+                epoll_update_impl(
+                    poller
+                        .self_object()
+                        .expect("poller should have self object"),
+                    target_object,
+                    bits,
+                    epoll_event_data_u64(&event),
+                )
+            }
+            EpollCtlOp::Mod => {
+                if !is_registered {
+                    return Err(SyscallError::FileNotFound);
+                }
                 if event.is_null() {
                     return Err(SyscallError::BadAddress);
                 }
@@ -191,31 +215,23 @@ define_syscall!(
                     PollableEvent::Closed,
                     PollableEvent::ReadClosed,
                 ] {
-                    poller
-                        .clone()
-                        .as_poller()?
-                        .unregister_obj(target_object.clone(), existing);
+                    poller.unregister_obj(target_object.clone(), existing);
                 }
+                poller.remember_registration(&target_object);
                 epoll_update_impl(
-                    poller,
+                    poller
+                        .self_object()
+                        .expect("poller should have self object"),
                     target_object,
                     bits,
                     epoll_event_data_u64(&event),
                 )
             }
             EpollCtlOp::Del => {
-                for existing in [
-                    PollableEvent::CanBeRead,
-                    PollableEvent::CanBeWritten,
-                    PollableEvent::Error,
-                    PollableEvent::Closed,
-                    PollableEvent::ReadClosed,
-                ] {
-                    poller
-                        .clone()
-                        .as_poller()?
-                        .unregister_obj(target_object.clone(), existing);
+                if !is_registered {
+                    return Err(SyscallError::FileNotFound);
                 }
+                poller.unregister_object(target_object);
                 Ok(0)
             }
         }

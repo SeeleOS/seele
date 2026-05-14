@@ -14,12 +14,10 @@ use crate::{
     misc::{
         profile::{self, ProfileCategory},
         snapshot::SnapshotWithErrorCode,
-        time::Time,
     },
     process::manager::get_current_process,
     signal::Signal,
     smp::gs::GsContext,
-    thread::scheduling::note_user_mode_resume,
 };
 
 pub extern "C" fn pagefault_handler(
@@ -103,9 +101,6 @@ pub extern "C" fn pagefault_handler(
 
     if handled {
         profile::record(ProfileCategory::PageFault, fault_start);
-        if from_user != 0 {
-            note_user_mode_resume(Time::since_boot().as_nanoseconds());
-        }
         return;
     }
 

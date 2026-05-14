@@ -562,6 +562,10 @@ impl Default for DevFs {
 }
 
 impl FileSystem for DevFs {
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
     fn init(&mut self) -> FSResult<()> {
         Ok(())
     }

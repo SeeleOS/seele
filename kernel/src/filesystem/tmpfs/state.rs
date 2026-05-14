@@ -13,6 +13,18 @@ pub(crate) const DEFAULT_DIR_MODE: u32 = 0o755;
 pub(crate) const DEFAULT_FILE_MODE: u32 = 0o644;
 pub(crate) const S_IFMT: u32 = 0o170000;
 pub(crate) type TmpfsStateRef = Arc<Mut<TmpfsState>>;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TmpfsQuota {
+    pub(crate) block_hardlimit: u64,
+    pub(crate) block_softlimit: u64,
+    pub(crate) inode_hardlimit: u64,
+    pub(crate) inode_softlimit: u64,
+    pub(crate) current_space: u64,
+    pub(crate) current_inodes: u64,
+    pub(crate) block_time: u64,
+    pub(crate) inode_time: u64,
+    pub(crate) valid: u32,
+}
 
 pub(crate) enum TmpNodeKind {
     Directory {
@@ -39,6 +51,9 @@ pub(crate) struct TmpfsState {
     next_inode: u64,
     paths: BTreeMap<String, u64>,
     nodes: BTreeMap<u64, TmpNode>,
+    user_quotas: BTreeMap<u32, TmpfsQuota>,
+    group_quotas: BTreeMap<u32, TmpfsQuota>,
+    project_quotas: BTreeMap<u32, TmpfsQuota>,
 }
 
 impl TmpfsState {
@@ -62,6 +77,9 @@ impl TmpfsState {
             next_inode: ROOT_INODE + 1,
             paths,
             nodes,
+            user_quotas: BTreeMap::new(),
+            group_quotas: BTreeMap::new(),
+            project_quotas: BTreeMap::new(),
         }
     }
 
@@ -216,6 +234,36 @@ impl TmpfsState {
             self.nodes.remove(&inode);
         }
         Ok(())
+    }
+
+    pub(crate) fn quota(&self, quota_type: u32, id: u32) -> Option<TmpfsQuota> {
+        self.quota_map(quota_type)?.get(&id).copied()
+    }
+
+    pub(crate) fn set_quota(&mut self, quota_type: u32, id: u32, quota: TmpfsQuota) -> bool {
+        let Some(map) = self.quota_map_mut(quota_type) else {
+            return false;
+        };
+        map.insert(id, quota);
+        true
+    }
+
+    fn quota_map(&self, quota_type: u32) -> Option<&BTreeMap<u32, TmpfsQuota>> {
+        match quota_type {
+            0 => Some(&self.user_quotas),
+            1 => Some(&self.group_quotas),
+            2 => Some(&self.project_quotas),
+            _ => None,
+        }
+    }
+
+    fn quota_map_mut(&mut self, quota_type: u32) -> Option<&mut BTreeMap<u32, TmpfsQuota>> {
+        match quota_type {
+            0 => Some(&mut self.user_quotas),
+            1 => Some(&mut self.group_quotas),
+            2 => Some(&mut self.project_quotas),
+            _ => None,
+        }
     }
 
     fn split_path(path: &str) -> FSResult<(String, String)> {

@@ -161,6 +161,29 @@ pub fn notify_pollers(object: ObjectRef, event: PollableEvent) -> Vec<ObjectRef>
 }
 
 impl PollerObject {
+    pub fn has_registration(&self, object: &ObjectRef) -> bool {
+        self.registered_objects
+            .lock()
+            .iter()
+            .any(|registered| Arc::ptr_eq(registered, object))
+    }
+
+    pub fn remember_registration(&self, object: &ObjectRef) {
+        let mut registered = self.registered_objects.lock();
+        if !registered
+            .iter()
+            .any(|existing| Arc::ptr_eq(existing, object))
+        {
+            registered.push(object.clone());
+        }
+    }
+
+    pub fn forget_registration(&self, object: &ObjectRef) {
+        self.registered_objects
+            .lock()
+            .retain(|registered| !Arc::ptr_eq(registered, object));
+    }
+
     pub fn register_obj(&self, object: ObjectRef, event: PollableEvent, data: u64) {
         self.register_obj_with_ready_bits(
             object,
@@ -245,6 +268,22 @@ impl PollerObject {
         self.woken_events
             .lock()
             .retain(|ready| !Arc::ptr_eq(&ready.object, &object));
+    }
+
+    pub fn unregister_object(&self, object: ObjectRef) {
+        let events: Vec<_> = self
+            .entries
+            .lock()
+            .iter()
+            .filter(|entry| Arc::ptr_eq(&entry.object, &object))
+            .map(|entry| entry.event)
+            .collect();
+
+        for event in events {
+            self.unregister_obj(object.clone(), event);
+        }
+
+        self.forget_registration(&object);
     }
 
     pub fn disable_oneshot_entries(&self, object: &ObjectRef) {

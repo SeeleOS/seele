@@ -676,6 +676,10 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
 }
 
 impl FileSystem for ProcFs {
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
     fn init(&mut self) -> FSResult<()> {
         Ok(())
     }

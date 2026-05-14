@@ -6,12 +6,10 @@ use x86_64::{VirtAddr, structures::idt::InterruptDescriptorTable};
 use crate::{
     interrupts::timer::timer_interrupt_handler_wrapper,
     keyboard::ps2::keyboard_interrupt_handler,
-    misc::{mouse::mouse_interrupt_handler, snapshot::Snapshot, time::Time},
+    misc::{mouse::mouse_interrupt_handler, snapshot::Snapshot},
     smp::{gs::GsContext, with_current_cpu},
     thread::{
-        scheduling::{
-            note_user_mode_resume, return_to_scheduler, take_current_cpu_resched_request,
-        },
+        scheduling::{return_to_scheduler, take_current_cpu_resched_request},
         snapshot::ThreadSnapshotType,
     },
 };
@@ -126,7 +124,6 @@ macro_rules! define_user_safe_irq_wrapper {
                 "call {handler}",
                 "test qword ptr [rsp + {CS_OFF}], 0x3",
                 "jz 8f",
-                "call {note_resume}",
                 "8:",
                 "test qword ptr [rsp + {CS_OFF}], 0x3",
                 "jz 3f",
@@ -162,7 +159,6 @@ macro_rules! define_user_safe_irq_wrapper {
                 "pop rax",
                 "iretq",
                 handler = sym $handler,
-                note_resume = sym note_user_mode_resume_now,
                 CS_OFF = const offset_of!(Snapshot, cs),
                 ACTIVE_EXT_STATE_OFF = const offset_of!(GsContext, active_user_extended_state),
                 ACTIVE_EXT_STATE_SAVED_OFF =
@@ -173,10 +169,6 @@ macro_rules! define_user_safe_irq_wrapper {
             )
         }
     };
-}
-
-extern "C" fn note_user_mode_resume_now() {
-    note_user_mode_resume(Time::since_boot().as_nanoseconds());
 }
 
 define_user_safe_irq_wrapper!(keyboard_interrupt_wrapper, keyboard_interrupt_handler);

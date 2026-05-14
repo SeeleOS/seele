@@ -19,7 +19,11 @@ use crate::{
         protection::Protection,
         utils::apply_offset,
     },
-    misc::{others::protection_to_page_flags, stack_builder::StackBuilder},
+    misc::{
+        others::protection_to_page_flags,
+        profile::{self, HotSyscallPhase},
+        stack_builder::StackBuilder,
+    },
 };
 
 pub mod allocate;
@@ -80,6 +84,7 @@ impl AddrSpace {
             return Ok(());
         }
 
+        let write_area_start = profile::scope_start();
         let write_start = core::cmp::max(start, area.start);
         let write_end = core::cmp::min(end, area.end);
         if write_start >= write_end {
@@ -87,6 +92,14 @@ impl AddrSpace {
         }
 
         let mapping_identity = file.mapping_identity();
+        if let Some(key) = mapping_identity {
+            crate::filesystem::page_cache::invalidate_file(FileCacheKey {
+                device_id: key.device_id,
+                inode: key.inode,
+            });
+        }
+
+        let mut page_writes = Vec::new();
         let first_page = Page::<Size4KiB>::containing_address(write_start);
         let last_page = Page::<Size4KiB>::containing_address(write_end - 1u64);
 
@@ -102,19 +115,80 @@ impl AddrSpace {
             }
 
             let write_len = core::cmp::min(4096, (*file_bytes - page_offset) as usize);
-            let src = unsafe {
-                core::slice::from_raw_parts(apply_offset(phys.as_u64()) as *const u8, write_len)
-            };
-            file.write_exact_at(src, *offset + page_offset)?;
-
-            if let Some(key) = mapping_identity {
-                let page_key = FileCacheKey {
-                    device_id: key.device_id,
-                    inode: key.inode,
-                };
-                crate::filesystem::page_cache::invalidate_file(page_key);
-            }
+            page_writes.push((
+                apply_offset(phys.as_u64()),
+                *offset + page_offset,
+                write_len,
+            ));
         }
+
+        file.with_file_write_cursor(false, |writer| {
+            let mut chunk_buffer = Vec::new();
+            let mut chunk_start = 0u64;
+            let mut chunk_end = 0u64;
+
+            let flush_chunk = |writer: &mut dyn crate::filesystem::vfs_traits::File,
+                               chunk_buffer: &mut Vec<u8>,
+                               chunk_start: u64,
+                               _chunk_end: u64|
+             -> Result<(), crate::filesystem::errors::FSError> {
+                if chunk_buffer.is_empty() {
+                    return Ok(());
+                }
+
+                let write_file_start = profile::scope_start();
+                use crate::filesystem::vfs_traits::Whence;
+                writer.seek(chunk_start as i64, Whence::Start)?;
+
+                let mut written = 0usize;
+                while written < chunk_buffer.len() {
+                    let count = writer.write(&chunk_buffer[written..])?;
+                    if count == 0 {
+                        return Err(crate::filesystem::errors::FSError::Other);
+                    }
+                    written += count;
+                }
+
+                profile::record_hot_syscall_phase(
+                    HotSyscallPhase::FsyncWriteFile,
+                    profile::scope_start().saturating_sub(write_file_start),
+                );
+                chunk_buffer.clear();
+                Ok(())
+            };
+
+            for (phys_addr, file_offset, write_len) in &page_writes {
+                let write_page_start = profile::scope_start();
+                let src =
+                    unsafe { core::slice::from_raw_parts(*phys_addr as *const u8, *write_len) };
+                if !chunk_buffer.is_empty() && chunk_end != *file_offset {
+                    flush_chunk(writer, &mut chunk_buffer, chunk_start, chunk_end)?;
+                }
+                if chunk_buffer.is_empty() {
+                    chunk_start = *file_offset;
+                }
+                chunk_buffer.extend_from_slice(src);
+                chunk_end = *file_offset + *write_len as u64;
+                profile::record_hot_syscall_phase(
+                    HotSyscallPhase::FsyncWritePage,
+                    profile::scope_start().saturating_sub(write_page_start),
+                );
+            }
+            flush_chunk(writer, &mut chunk_buffer, chunk_start, chunk_end)?;
+            Ok(())
+        })?;
+
+        if page_writes.is_empty() {
+            profile::record_hot_syscall_phase(
+                HotSyscallPhase::FsyncWriteArea,
+                profile::scope_start().saturating_sub(write_area_start),
+            );
+        }
+
+        profile::record_hot_syscall_phase(
+            HotSyscallPhase::FsyncWriteArea,
+            profile::scope_start().saturating_sub(write_area_start),
+        );
 
         Ok(())
     }
@@ -144,12 +218,17 @@ impl AddrSpace {
     }
 
     pub fn flush_all_file_mappings(&mut self) -> Result<(), crate::filesystem::errors::FSError> {
+        let collect_areas_start = profile::scope_start();
         let areas = self
             .memory_areas
             .iter()
             .filter(|area| area.is_user())
             .cloned()
             .collect::<Vec<_>>();
+        profile::record_hot_syscall_phase(
+            HotSyscallPhase::FsyncCollectAreas,
+            profile::scope_start().saturating_sub(collect_areas_start),
+        );
 
         for area in &areas {
             self.write_back_area_range(area, area.start, area.end)?;

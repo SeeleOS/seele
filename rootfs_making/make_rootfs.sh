@@ -66,6 +66,7 @@ ARCH_PACKAGES=(
     xorg-fonts-misc
 )
 AUR_PACKAGES=(
+	unixbench
 )
 
 cleanup() {

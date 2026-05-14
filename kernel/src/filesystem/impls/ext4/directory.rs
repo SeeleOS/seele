@@ -10,18 +10,17 @@ use alloc::{
 };
 
 use ext4plus::{
-    self, DirEntryName, Ext4, FileType, FollowSymlinks,
+    self, DirEntryName, Ext4, FileType,
     dir::Dir,
     error::Ext4Error,
-    file::File as Ext4InnerFile,
     inode::{Inode, InodeCreationOptions, InodeFlags, InodeMode},
-    path::{Path, PathBuf as Ext4PathBuf},
+    path::PathBuf as Ext4PathBuf,
 };
 
 use crate::filesystem::{
     errors::FSError,
     impls::ext4::{
-        LookupCache, chmod_path, file::Ext4File, lookup_cache_clear, lookup_cache_get,
+        LookupCache, chmod_inode, file::Ext4File, lookup_cache_clear, lookup_cache_get,
         lookup_cache_insert, lookup_cache_insert_raw, lookup_cache_remove, symlink::Ext4Symlink,
     },
     info::{DirectoryContentInfo, FileLikeInfo, UnixPermission},
@@ -31,6 +30,87 @@ use crate::filesystem::{
 
 fn map_ext4_error(err: Ext4Error) -> FSError {
     FSError::from(err)
+}
+
+#[derive(Clone)]
+pub(crate) struct Ext4Lookup {
+    pub(crate) name: String,
+    pub(crate) inode: Inode,
+    pub(crate) file_like_type: FileLikeType,
+    pub(crate) parent_inode: u32,
+    pub(crate) fs: Ext4,
+    pub(crate) lookup_cache: LookupCache,
+}
+
+impl Ext4Lookup {
+    pub(crate) fn info(&self) -> FileLikeInfo {
+        file_like_info_from_inode(self.name.clone(), self.file_like_type.clone(), &self.inode)
+    }
+}
+
+fn file_like_type_from_inode(inode: &Inode) -> FileLikeType {
+    let meta = inode.metadata();
+    if meta.is_dir() {
+        FileLikeType::Directory
+    } else if meta.is_symlink() {
+        FileLikeType::Symlink
+    } else {
+        FileLikeType::File
+    }
+}
+
+fn file_like_info_from_inode(
+    name: String,
+    file_like_type: FileLikeType,
+    inode: &Inode,
+) -> FileLikeInfo {
+    let permission = if matches!(file_like_type, FileLikeType::Symlink) {
+        UnixPermission::symlink()
+    } else {
+        UnixPermission(inode.mode().bits().into())
+    };
+
+    FileLikeInfo::new(
+        name,
+        inode.metadata().len() as usize,
+        permission,
+        file_like_type,
+    )
+    .with_owner(inode.uid(), inode.gid())
+    .with_inode(inode.index.get().into())
+}
+
+pub(crate) fn lookup_child(
+    fs: &Ext4,
+    parent_inode: &Inode,
+    lookup_cache: &LookupCache,
+    name: &str,
+) -> FSResult<Ext4Lookup> {
+    let parent_id = parent_inode.index.get();
+
+    if let Some(inode) = lookup_cache_get(lookup_cache, parent_inode, name) {
+        return Ok(Ext4Lookup {
+            name: name.to_string(),
+            inode: inode.clone(),
+            file_like_type: file_like_type_from_inode(&inode),
+            parent_inode: parent_id,
+            fs: fs.clone(),
+            lookup_cache: lookup_cache.clone(),
+        });
+    }
+
+    let parent = Dir::open_inode(fs, parent_inode.clone()).map_err(map_ext4_error)?;
+    let entry_name = DirEntryName::try_from(name).map_err(|_| FSError::Other)?;
+    let inode = parent.get_entry(entry_name).map_err(map_ext4_error)?;
+    lookup_cache_insert(lookup_cache, parent_inode, name, &inode);
+    Ok(Ext4Lookup {
+        name: name.to_string(),
+        inode: inode.clone(),
+        file_like_type: file_like_type_from_inode(&inode),
+        parent_inode: parent_id,
+        fs: fs.clone(),
+        lookup_cache: lookup_cache.clone(),
+    })
 }
 
 pub struct Ext4Directory {
@@ -71,24 +151,17 @@ impl Ext4Directory {
         }
     }
 
-    pub fn path(&self) -> &str {
-        &self.path
-    }
-
-    pub fn fs(&self) -> &Ext4 {
-        &self.fs
-    }
-
-    pub fn inode(&self) -> Inode {
-        self.current_inode()
-    }
-
     pub fn clear_lookup_cache(&self) {
         lookup_cache_clear(&self.lookup_cache);
     }
 
     fn current_inode(&self) -> Inode {
         self.inode.lock().clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inode(&self) -> Inode {
+        self.current_inode()
     }
 
     fn update_cached_inode(&self, inode: Inode) {
@@ -101,42 +174,37 @@ impl Ext4Directory {
         Ok((parent_inode, parent))
     }
 
-    fn file_like_from_inode(
-        &self,
-        name: String,
-        path: String,
-        parent_inode: u32,
-        inode: Inode,
-    ) -> FSResult<FileLike> {
-        let meta = inode.metadata();
-
-        if meta.is_dir() {
-            Ok(FileLike::Directory(Arc::new(Mut::new(Ext4Directory::new(
-                name,
-                path,
-                self.fs.clone(),
-                inode,
-                Some(parent_inode),
-                self.lookup_cache.clone(),
-            )))))
-        } else if meta.is_symlink() {
-            Ok(FileLike::Symlink(Arc::new(Mut::new(Ext4Symlink {
-                fs: self.fs.clone(),
-                inode,
-                name,
+    fn file_like_from_lookup(&self, lookup: Ext4Lookup) -> FSResult<FileLike> {
+        match lookup.file_like_type {
+            FileLikeType::Directory => {
+                let path = self.join_child(&lookup.name);
+                Ok(FileLike::Directory(Arc::new(Mut::new(Ext4Directory::new(
+                    lookup.name,
+                    path,
+                    lookup.fs,
+                    lookup.inode,
+                    Some(lookup.parent_inode),
+                    lookup.lookup_cache,
+                )))))
+            }
+            FileLikeType::Symlink => Ok(FileLike::Symlink(Arc::new(Mut::new(Ext4Symlink {
+                fs: lookup.fs,
+                inode: lookup.inode,
+                name: lookup.name,
                 parent_path: self.path.clone(),
-            }))))
-        } else {
-            let inner_file = Ext4InnerFile::open_inode(&self.fs, inode).map_err(map_ext4_error)?;
-            Ok(FileLike::File(Arc::new(Mut::new(Ext4File::new(
-                name,
-                path,
-                self.fs.clone(),
-                inner_file,
-                parent_inode,
-                self.lookup_cache.clone(),
-            )))))
+            })))),
+            FileLikeType::File => Ok(FileLike::File(Arc::new(Mut::new(Ext4File::new(
+                lookup.name,
+                lookup.fs,
+                lookup.inode,
+                lookup.parent_inode,
+                lookup.lookup_cache,
+            ))))),
         }
+    }
+
+    pub(crate) fn lookup_child(&self, name: &str) -> FSResult<Ext4Lookup> {
+        lookup_child(&self.fs, &self.current_inode(), &self.lookup_cache, name)
     }
 }
 
@@ -320,27 +388,16 @@ impl Directory for Ext4Directory {
     }
 
     fn get(&self, name: &str) -> FSResult<FileLike> {
-        let path = self.join_child(name);
-        let parent_inode = self.current_inode();
-        let parent_id = parent_inode.index.get();
+        self.file_like_from_lookup(self.lookup_child(name)?)
+    }
 
-        if let Some(inode) = lookup_cache_get(&self.lookup_cache, &parent_inode, name) {
-            return self.file_like_from_inode(name.to_string(), path, parent_id, inode);
-        }
-
-        let parent = Dir::open_inode(&self.fs, parent_inode.clone()).map_err(map_ext4_error)?;
-        let entry_name = DirEntryName::try_from(name).map_err(|_| FSError::Other)?;
-        let inode = parent.get_entry(entry_name).map_err(map_ext4_error)?;
-        lookup_cache_insert(&self.lookup_cache, &parent_inode, name, &inode);
-        self.file_like_from_inode(name.to_string(), path, parent_id, inode)
+    fn get_info(&self, name: &str) -> FSResult<FileLikeInfo> {
+        Ok(self.lookup_child(name)?.info())
     }
 
     fn chmod(&self, mode: u32) -> FSResult<()> {
-        chmod_path(&self.fs, &self.path, mode)?;
-        let inode = self
-            .fs
-            .path_to_inode(Path::new(&self.path), FollowSymlinks::All)
-            .map_err(map_ext4_error)?;
+        let mut inode = self.current_inode();
+        chmod_inode(&self.fs, &mut inode, mode)?;
         self.update_cached_inode(inode);
         if let Some(parent_inode) = self.parent_inode {
             lookup_cache_insert_raw(

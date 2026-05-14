@@ -46,6 +46,10 @@ impl FuseFs {
 }
 
 impl FileSystem for FuseFs {
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
     fn init(&mut self) -> FSResult<()> {
         self.connection.mount_ready()
     }

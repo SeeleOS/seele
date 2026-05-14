@@ -63,7 +63,8 @@ impl File for StaticDeviceHandle {
             UnixPermission(self.mode),
             FileLikeType::File,
         )
-        .with_inode(self.inode))
+        .with_inode(self.inode)
+        .with_rdev(self.rdev.unwrap_or(0)))
     }
 
     fn read_at(&mut self, buffer: &mut [u8], _offset: u64) -> FSResult<usize> {

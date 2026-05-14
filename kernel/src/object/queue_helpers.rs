@@ -2,6 +2,7 @@ use crate::memory::utils::Mut;
 use alloc::collections::vec_deque::VecDeque;
 
 use crate::{
+    misc::profile::{self, HotSyscallPhase},
     object::{FileFlags, error::ObjectError, misc::ObjectResult},
     thread::yielding::{
         BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
@@ -49,9 +50,18 @@ where
     F: FnMut(&mut [u8]) -> Option<usize>,
 {
     loop {
+        let try_read_start = profile::scope_start();
         if let Some(read_chars) = try_read(buffer) {
+            profile::record_hot_syscall_phase(
+                HotSyscallPhase::ReadTryRead,
+                profile::scope_start().saturating_sub(try_read_start),
+            );
             return Ok(read_chars);
         }
+        profile::record_hot_syscall_phase(
+            HotSyscallPhase::ReadTryRead,
+            profile::scope_start().saturating_sub(try_read_start),
+        );
 
         if flags.contains(FileFlags::NONBLOCK) {
             return Err(ObjectError::TryAgain);
@@ -65,15 +75,29 @@ where
             return Err(ObjectError::Interrupted);
         }
 
+        let prepare_start = profile::scope_start();
         let current = prepare_block_current(BlockType::WakeRequired {
             wake_type: wake_type.clone(),
             deadline: None,
         });
+        profile::record_hot_syscall_phase(
+            HotSyscallPhase::ReadBlockPrepare,
+            profile::scope_start().saturating_sub(prepare_start),
+        );
 
+        let retry_start = profile::scope_start();
         if let Some(read_chars) = try_read(buffer) {
+            profile::record_hot_syscall_phase(
+                HotSyscallPhase::ReadBlockRetry,
+                profile::scope_start().saturating_sub(retry_start),
+            );
             cancel_block(&current);
             return Ok(read_chars);
         }
+        profile::record_hot_syscall_phase(
+            HotSyscallPhase::ReadBlockRetry,
+            profile::scope_start().saturating_sub(retry_start),
+        );
 
         finish_block_current();
 

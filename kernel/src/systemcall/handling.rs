@@ -4,7 +4,6 @@ use crate::{
     misc::{
         profile::{self, ProfileCategory},
         snapshot::Snapshot,
-        time::Time,
     },
     process::manager::get_current_process,
     process::ptrace::{maybe_stop_current_on_syscall_entry, maybe_stop_current_on_syscall_exit},
@@ -17,9 +16,7 @@ use crate::{
     thread::{
         get_current_thread,
         misc::{BlockedSyscall, State, with_current_thread},
-        scheduling::{
-            enable_ap_task_scheduling, note_user_mode_resume, return_to_scheduler_no_save,
-        },
+        scheduling::{enable_ap_task_scheduling, return_to_scheduler_no_save},
     },
 };
 use x86_64::registers::model_specific::FsBase;
@@ -122,7 +119,6 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
         return_to_scheduler_no_save();
     }
 
-    note_user_mode_resume(Time::since_boot().as_nanoseconds());
     profile::record(ProfileCategory::SyscallExit, exit_start);
 }
 

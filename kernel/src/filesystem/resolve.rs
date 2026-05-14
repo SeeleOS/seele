@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use crate::filesystem::{
     errors::FSError,
     path::{Path, PathPart},
-    vfs::{FSResult, FileSystemRef, Mount, VirtualFS, VFS},
+    vfs::{FSResult, FileSystemRef, Mount, VFS, VirtualFS},
     vfs_traits::FileLike,
 };
 

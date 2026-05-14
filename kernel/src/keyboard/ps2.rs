@@ -19,6 +19,7 @@ use crate::{
     interrupts::hardware_interrupt::send_eoi,
     keyboard::push_scancode,
     misc::profile::{self, ProfileCategory},
+    thread::scheduling::request_current_cpu_resched,
 };
 
 pub fn init() {
@@ -41,6 +42,7 @@ pub extern "C" fn keyboard_interrupt_handler() {
     let mut keyboard_port = Port::new(0x60);
     let scancode = unsafe { keyboard_port.read() };
     push_scancode(scancode);
+    request_current_cpu_resched();
     send_eoi();
     profile::record(ProfileCategory::IrqKeyboard, irq_start);
 }

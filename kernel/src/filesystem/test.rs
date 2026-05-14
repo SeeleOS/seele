@@ -1,4 +1,4 @@
-use alloc::{format, vec, vec::Vec};
+use alloc::{format, sync::Arc, vec, vec::Vec};
 use core::str;
 
 use crate::filesystem::info::DirectoryContentInfo;
@@ -100,6 +100,11 @@ crate::test!(
     page_cache_cluster_reuse,
     "page cache reuses cached cluster across neighboring pages",
     page_cache_reuses_cached_cluster_for_neighboring_pages
+);
+crate::test!(
+    vfs_open_without_reborrowing_virtualfs,
+    "vfs open returns opened files without reborrowing the global virtualfs refcell",
+    vfs_open_returns_opened_files_without_reborrowing_virtualfs
 );
 
 fn path_normalization_handles_absolute_and_relative_components() {
@@ -214,12 +219,16 @@ fn static_test_file_bytes() -> Vec<u8> {
     b"hello".to_vec()
 }
 
+fn ext4_test_path(name: &str) -> Path {
+    Path::new(&format!("/{}", name))
+}
+
 fn page_cache_reuses_cached_file_pages_for_repeated_reads() {
-    let path = Path::new("/tmp/page-cache-test-file");
+    let path = ext4_test_path("page-cache-test-file");
     let _ = VirtualFS.lock().delete_file(path.clone());
     VirtualFS.lock().create_file(path.clone()).unwrap();
 
-    let opened = open_path(path.clone()).unwrap();
+    let opened = Arc::new(open_path(path.clone()).unwrap());
     opened.write_exact_at(b"cache me", 0).unwrap();
     let (wrapped, identity) = opened.readonly_page_cache_file().unwrap();
     page_cache::invalidate_file(identity.file);
@@ -229,6 +238,25 @@ fn page_cache_reuses_cached_file_pages_for_repeated_reads() {
     assert!(!first.was_hit);
     assert!(second.was_hit);
     assert_eq!(&second.data[..8], b"cache me");
+
+    let _ = VirtualFS.lock().delete_file(path);
+}
+
+fn vfs_open_returns_opened_files_without_reborrowing_virtualfs() {
+    let path = Path::new("/tmp/vfs-open-no-reborrow");
+    let _ = VirtualFS.lock().delete_file(path.clone());
+    VirtualFS.lock().create_file(path.clone()).unwrap();
+
+    let opened = VirtualFS
+        .lock()
+        .open(path.clone())
+        .expect("opening through the locked VFS should not reborrow VirtualFS");
+    opened.write_exact_at(b"ok", 0).unwrap();
+
+    let reopened = open_path(path.clone()).unwrap();
+    let mut buf = [0u8; 2];
+    reopened.read_exact_at(&mut buf, 0).unwrap();
+    assert_eq!(&buf, b"ok");
 
     let _ = VirtualFS.lock().delete_file(path);
 }
@@ -266,7 +294,7 @@ fn page_cache_second_chance_eviction_preserves_referenced_pages() {
 }
 
 fn page_cache_reuses_cached_cluster_for_neighboring_pages() {
-    let path = Path::new("/tmp/page-cache-cluster-test-file");
+    let path = ext4_test_path("page-cache-cluster-test-file");
     let _ = VirtualFS.lock().delete_file(path.clone());
     VirtualFS.lock().create_file(path.clone()).unwrap();
 

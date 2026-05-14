@@ -6,7 +6,8 @@ use alloc::{
 };
 use lazy_static::lazy_static;
 
-use crate::filesystem::{object::mount_device_id_for_path, path::Path, vfs_operations::open_path};
+use crate::filesystem::{path::Path, vfs_operations::open_path};
+use crate::object::traits::Statable;
 
 use super::{UnixListenerInner, UnixSocketObject};
 
@@ -23,10 +24,10 @@ impl UnixSocketRegistryKey {
         }
 
         let opened = open_path(Path::new(path)).ok()?;
-        let info = opened.info().ok()?;
+        let stat = opened.stat();
         Some(Self::Path {
-            mount_device_id: mount_device_id_for_path(&opened.path()),
-            inode: info.inode,
+            mount_device_id: stat.st_dev,
+            inode: stat.st_ino,
         })
     }
 }

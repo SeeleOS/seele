@@ -535,6 +535,10 @@ impl Default for SysFs {
 }
 
 impl FileSystem for SysFs {
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
     fn init(&mut self) -> FSResult<()> {
         self.inner.init()
     }

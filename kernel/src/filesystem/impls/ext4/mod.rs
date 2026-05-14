@@ -24,7 +24,7 @@ pub mod symlink;
 
 const CHMOD_PERMISSION_BITS: u16 = 0o7777;
 const FILE_TYPE_BITS: u16 = 0o170000;
-pub(super) type LookupCache = Arc<Mut<BTreeMap<u32, BTreeMap<String, Inode>>>>;
+pub(crate) type LookupCache = Arc<Mut<BTreeMap<u32, BTreeMap<String, Inode>>>>;
 
 pub(super) fn lookup_cache_get(
     cache: &LookupCache,
@@ -91,12 +91,9 @@ pub(super) fn lookup_cache_contains_raw(
         .is_some_and(|children| children.contains_key(name))
 }
 
-pub(super) fn chmod_path(fs: &Ext4, path: &str, mode: u32) -> FSResult<()> {
+pub(super) fn chmod_inode(fs: &Ext4, inode: &mut Inode, mode: u32) -> FSResult<()> {
     let requested_bits = (mode as u16) & CHMOD_PERMISSION_BITS;
     let requested_mode = InodeMode::from_bits(requested_bits).ok_or(FSError::Other)?;
-    let mut inode = fs
-        .path_to_inode(Ext4Path::new(path), FollowSymlinks::All)
-        .map_err(FSError::from)?;
     let merged_bits = (inode.mode().bits() & FILE_TYPE_BITS) | requested_mode.bits();
     let merged_mode = InodeMode::from_bits(merged_bits).ok_or(FSError::Other)?;
     inode.set_mode(merged_mode).map_err(FSError::from)?;
@@ -151,6 +148,10 @@ impl EXT4 {
 }
 
 impl FileSystem for EXT4 {
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
     fn init(&mut self) -> FSResult<()> {
         Ok(())
     }

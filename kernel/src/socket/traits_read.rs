@@ -5,6 +5,7 @@ use super::{
     self_ref::object_ref, wait::wait_for_object_event, wake_io, wake_pollers,
 };
 use crate::{
+    misc::profile::{self, HotSyscallPhase},
     object::{error::ObjectError, traits::Readable},
     polling::event::PollableEvent,
 };
@@ -70,6 +71,7 @@ impl UnixSocketObject {
                         return Ok(0);
                     }
 
+                    let phase_start = profile::scope_start();
                     let message = if peek {
                         datagram.recv_queue.lock().front().cloned()
                     } else {
@@ -81,8 +83,16 @@ impl UnixSocketObject {
                         *datagram.peer_rights.lock() = message.rights;
                         let read = buffer.len().min(message.data.len());
                         buffer[..read].copy_from_slice(&message.data[..read]);
+                        profile::record_hot_syscall_phase(
+                            HotSyscallPhase::ReadUnixDatagram,
+                            profile::scope_start().saturating_sub(phase_start),
+                        );
                         return Ok(read);
                     }
+                    profile::record_hot_syscall_phase(
+                        HotSyscallPhase::ReadUnixDatagram,
+                        profile::scope_start().saturating_sub(phase_start),
+                    );
 
                     if nonblocking {
                         return Err(SocketError::TryAgain);
@@ -103,14 +113,20 @@ impl UnixSocketObject {
                         if let Some(packet_len) = packet_len {
                             let mut recv_buf = stream.recv_buf.lock();
                             if peek {
+                                let phase_start = profile::scope_start();
                                 let read = buffer.len().min(packet_len);
                                 for (dst, src) in buffer.iter_mut().zip(recv_buf.iter().take(read))
                                 {
                                     *dst = *src;
                                 }
+                                profile::record_hot_syscall_phase(
+                                    HotSyscallPhase::ReadUnixSeqpacketPeek,
+                                    profile::scope_start().saturating_sub(phase_start),
+                                );
                                 return Ok(read);
                             }
 
+                            let phase_start = profile::scope_start();
                             let was_full = recv_buf.len() >= STREAM_RECV_CAPACITY;
                             let read = buffer.len().min(packet_len);
                             for (index, byte) in recv_buf.drain(..packet_len).enumerate() {
@@ -131,6 +147,10 @@ impl UnixSocketObject {
                                 }
                                 wake_io();
                             }
+                            profile::record_hot_syscall_phase(
+                                HotSyscallPhase::ReadUnixSeqpacketDrain,
+                                profile::scope_start().saturating_sub(phase_start),
+                            );
                             return Ok(read);
                         }
                     }
@@ -141,13 +161,19 @@ impl UnixSocketObject {
                     }
                     if !recv_buf.is_empty() {
                         if peek {
+                            let phase_start = profile::scope_start();
                             let read = buffer.len().min(recv_buf.len());
                             for (dst, src) in buffer.iter_mut().zip(recv_buf.iter().take(read)) {
                                 *dst = *src;
                             }
+                            profile::record_hot_syscall_phase(
+                                HotSyscallPhase::ReadUnixStreamPeek,
+                                profile::scope_start().saturating_sub(phase_start),
+                            );
                             return Ok(read);
                         }
 
+                        let phase_start = profile::scope_start();
                         let was_full = recv_buf.len() >= STREAM_RECV_CAPACITY;
                         let mut read = 0;
                         while read < buffer.len() {
@@ -168,6 +194,10 @@ impl UnixSocketObject {
                             }
                             wake_io();
                         }
+                        profile::record_hot_syscall_phase(
+                            HotSyscallPhase::ReadUnixStreamDrain,
+                            profile::scope_start().saturating_sub(phase_start),
+                        );
                         return Ok(read);
                     }
                     drop(recv_buf);

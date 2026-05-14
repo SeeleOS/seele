@@ -97,6 +97,9 @@ pub trait Directory: Send + Sync {
     }
     fn delete(&self, name: &str) -> FSResult<()>;
     fn get(&self, name: &str) -> FSResult<FileLike>;
+    fn get_info(&self, name: &str) -> FSResult<FileLikeInfo> {
+        self.get(name)?.info()
+    }
     fn chmod(&self, _mode: u32) -> FSResult<()> {
         Err(FSError::Readonly)
     }
@@ -121,6 +124,7 @@ pub enum DirectoryContentType {
 }
 
 pub trait FileSystem: Send + Sync {
+    fn as_any(&self) -> &dyn Any;
     fn init(&mut self) -> FSResult<()>;
     fn lookup(&self, path: &Path) -> FSResult<FileLike>;
     fn rename(&self, old_path: &Path, new_path: &Path) -> FSResult<()>;

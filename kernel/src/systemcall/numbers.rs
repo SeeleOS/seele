@@ -239,6 +239,7 @@ pub enum SyscallNumber {
     Faccessat2 = 439,
     EpollPwait2 = 441,
     MountSetattr = 442,
+    QuotactlFd = 443,
     Fchmodat2 = 452,
 }
 
