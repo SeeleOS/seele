@@ -15,6 +15,7 @@ use smoltcp::{
 use crate::{
     misc::time::Time, process::manager::get_current_process, thread::try_with_thread_manager,
 };
+use thiserror::Error;
 
 pub mod namespace;
 use namespace::NetNamespace;
@@ -31,14 +32,21 @@ const STATIC_IPV4_PREFIX_LEN: u8 = 24;
 const LOOPBACK_IFINDEX: i32 = 1;
 const PRIMARY_IFINDEX: i32 = 2;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 pub enum NetError {
+    #[error("operation would block")]
     TryAgain,
+    #[error("invalid network arguments")]
     InvalidArguments,
+    #[error("network socket not connected")]
     NotConnected,
+    #[error("address already in use")]
     AddressInUse,
+    #[error("connection refused")]
     ConnectionRefused,
+    #[error("broken pipe")]
     BrokenPipe,
+    #[error("network device unavailable")]
     NoDevice,
 }
 

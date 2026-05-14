@@ -624,6 +624,7 @@ name = "kernel"
 version = "0.1.0"
 dependencies = [
  "acpi",
+ "anyhow",
  "ap-startup",
  "bitflags 2.11.1",
  "bootloader_api",
@@ -649,6 +650,7 @@ dependencies = [
  "smoltcp",
  "spin 0.10.0",
  "strum",
+ "thiserror",
  "uart_16550",
  "virtio-drivers",
  "volatile 0.6.1",
@@ -1014,6 +1016,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 name = "seeleos-runner"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bootloader",
  "libc",
  "ovmf-prebuilt",

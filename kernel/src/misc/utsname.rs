@@ -1,4 +1,5 @@
 use crate::memory::utils::Mut;
+use thiserror::Error;
 
 static HOSTNAME: Mut<Option<[u8; 65]>> = Mut::new(None);
 static DOMAINNAME: Mut<Option<[u8; 65]>> = Mut::new(None);
@@ -8,8 +9,9 @@ pub const DEFAULT_RELEASE: &str = "6.12.0-seele";
 pub const DEFAULT_VERSION: &str = "#1 Seele";
 pub const DEFAULT_MACHINE: &str = "x86_64";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 pub enum SetHostnameError {
+    #[error("hostname contains invalid bytes or exceeds 64 bytes")]
     Invalid,
 }
 

@@ -2,8 +2,8 @@ use crate::memory::utils::Mut;
 use alloc::{boxed::Box, sync::Arc};
 use core::{
     error::Error,
-    fmt::{Display, Formatter, Result as FmtResult},
 };
+use thiserror::Error;
 
 use ext4plus::{Ext4Read, Ext4Write};
 
@@ -24,16 +24,9 @@ impl Ext4BlockOperator {
 /// Backwards-compatible alias for the old initrd-backed ext4 path.
 pub type Ext4RamDiskOperator = Ext4BlockOperator;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("ext4 block IO error: {0}")]
 struct Ext4BlockIoError(BlockDeviceError);
-
-impl Display for Ext4BlockIoError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "ext4 block IO error: {:?}", self.0)
-    }
-}
-
-impl Error for Ext4BlockIoError {}
 
 impl From<BlockDeviceError> for Ext4BlockIoError {
     fn from(err: BlockDeviceError) -> Self {

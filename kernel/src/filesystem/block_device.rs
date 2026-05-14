@@ -1,4 +1,5 @@
 use fatfs::IoError;
+use thiserror::Error;
 
 use crate::misc::error::AsSyscallError;
 use crate::systemcall::utils::SyscallError;
@@ -6,11 +7,15 @@ use crate::systemcall::utils::SyscallError;
 pub mod cache;
 pub mod initrd;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Error)]
 pub enum BlockDeviceError {
+    #[error("block device is read-only")]
     Readonly,
+    #[error("block device access was out of bounds")]
     OutOfBounds,
+    #[error("block device buffer was too small")]
     BufferTooSmall,
+    #[error("block device I/O failed")]
     Other,
 }
 

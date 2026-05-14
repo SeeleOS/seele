@@ -1,3 +1,6 @@
+use anyhow::Error as AnyError;
+use thiserror::Error;
+
 use crate::{
     filesystem::{block_device::BlockDeviceError, errors::FSError},
     object::error::ObjectError,
@@ -5,13 +8,21 @@ use crate::{
 };
 
 pub type KernelResult<T> = Result<T, KernelError>;
+pub type InternalResult<T> = Result<T, AnyError>;
 
+#[derive(Debug, Error)]
 pub enum KernelError {
+    #[error(transparent)]
     FileSystem(FSError),
+    #[error(transparent)]
     BlockDevice(BlockDeviceError),
+    #[error(transparent)]
     Object(ObjectError),
 
+    #[error("invalid string")]
     InvalidString,
+    #[error(transparent)]
+    Internal(AnyError),
 }
 
 macro_rules! register_error {
@@ -34,6 +45,18 @@ register_error!(FSError, FileSystem);
 register_error!(BlockDeviceError, BlockDevice);
 register_error!(ObjectError, Object);
 
+impl From<AnyError> for KernelError {
+    fn from(err: AnyError) -> Self {
+        Self::Internal(err)
+    }
+}
+
+impl From<AnyError> for SyscallError {
+    fn from(_err: AnyError) -> Self {
+        SyscallError::IOError
+    }
+}
+
 pub trait AsSyscallError {
     fn as_syscall_error(&self) -> SyscallError;
 }
@@ -45,6 +68,7 @@ impl KernelError {
             Self::BlockDevice(err) => err.as_syscall_error(),
             Self::Object(err) => err.as_syscall_error(),
             Self::InvalidString => SyscallError::InvalidArguments,
+            Self::Internal(_) => SyscallError::IOError,
         }
     }
 }
@@ -75,6 +99,10 @@ mod tests {
         assert_eq!(
             KernelError::InvalidString.as_syscall_error(),
             SyscallError::InvalidArguments
+        );
+        assert_eq!(
+            KernelError::Internal(anyhow::anyhow!("boom")).as_syscall_error(),
+            SyscallError::IOError
         );
         assert_eq!(
             FSError::NotFound.as_syscall_error(),

@@ -1,6 +1,7 @@
 #[path = "utils.rs"]
 mod utils;
 
+use anyhow::{Context, Result};
 use std::{env, time::Duration};
 use std::{fs, path::Path, process::exit};
 
@@ -17,10 +18,20 @@ const USERSPACE_STARTUP_PATTERNS: &[&str] = &[
 
 struct IntegrationCase {
     name: &'static str,
-    run: fn() -> i32,
+    run: fn() -> Result<i32>,
 }
 
 fn main() {
+    match real_main() {
+        Ok(code) => exit(code),
+        Err(err) => {
+            eprintln!("{err:?}");
+            exit(1);
+        }
+    }
+}
+
+fn real_main() -> Result<i32> {
     let cases = [
         IntegrationCase {
             name: "kernel test images",
@@ -38,71 +49,75 @@ fn main() {
 
     for case in cases {
         eprintln!("running integration test: {}", case.name);
-        let exit_code = (case.run)();
+        let exit_code = (case.run)()?;
 
         if exit_code != 0 {
-            exit(exit_code);
+            return Ok(exit_code);
         }
     }
 
-    exit(0);
+    Ok(0)
 }
 
-fn run_kernel_test_images() -> i32 {
+fn run_kernel_test_images() -> Result<i32> {
     for kernel_test in
-        utils::build_kernel_with_mode(utils::BuildMode::IntegrationTests(KERNEL_TEST_IMAGES))
+        utils::build_kernel_with_mode(utils::BuildMode::IntegrationTests(KERNEL_TEST_IMAGES))?
     {
         eprintln!("running integration test: {}", kernel_test.display());
-        let uefi_path = utils::create_uefi_image(&kernel_test);
-        let exit_code = utils::run_qemu_test(&uefi_path);
-        let _ = fs::remove_file(&uefi_path);
+        let uefi_path = utils::create_uefi_image(&kernel_test)?;
+        let exit_code = utils::run_qemu_test(&uefi_path)?;
+        fs::remove_file(&uefi_path)
+            .with_context(|| format!("failed to remove UEFI image {}", uefi_path.display()))?;
 
         if exit_code != 0 {
-            return exit_code;
+            return Ok(exit_code);
         }
     }
 
-    0
+    Ok(0)
 }
 
-fn run_userspace_boot() -> i32 {
-    let kernel_paths = utils::build_kernel();
+fn run_userspace_boot() -> Result<i32> {
+    let kernel_paths = utils::build_kernel()?;
     let kernel_path = kernel_paths
         .first()
         .map(Path::new)
-        .expect("kernel executable missing");
-    let uefi_path = utils::create_uefi_image(kernel_path);
+        .context("kernel executable missing")?;
+    let uefi_path = utils::create_uefi_image(kernel_path)?;
     let options = utils::RunOptions::for_agent_run_without_timeout();
     let exit_code = utils::run_qemu_until_serial_condition(
         &uefi_path,
         &options,
         qemu_test_timeout(),
         userspace_startup_observed,
-    );
+    )?;
     if exit_code == 0 {
         eprintln!("integration test userspace_boot: startup signal observed");
     } else {
         eprintln!("integration test userspace_boot: startup signal not observed");
     }
-    let _ = fs::remove_file(&uefi_path);
-    exit_code
+    fs::remove_file(&uefi_path)
+        .with_context(|| format!("failed to remove UEFI image {}", uefi_path.display()))?;
+    Ok(exit_code)
 }
 
-fn run_panic_handler_smoke() -> i32 {
+fn run_panic_handler_smoke() -> Result<i32> {
     for kernel_test in
-        utils::build_kernel_with_mode(utils::BuildMode::IntegrationTests(PANIC_HANDLER_SMOKE))
+        utils::build_kernel_with_mode(utils::BuildMode::IntegrationTests(PANIC_HANDLER_SMOKE))?
     {
         eprintln!("running integration test: {}", kernel_test.display());
-        let uefi_path = utils::create_uefi_image(&kernel_test);
-        let exit_code = utils::run_qemu_expect_serial_failure(&uefi_path, PANIC_HANDLER_PATTERN, 1);
-        let _ = fs::remove_file(&uefi_path);
+        let uefi_path = utils::create_uefi_image(&kernel_test)?;
+        let exit_code =
+            utils::run_qemu_expect_serial_failure(&uefi_path, PANIC_HANDLER_PATTERN, 1)?;
+        fs::remove_file(&uefi_path)
+            .with_context(|| format!("failed to remove UEFI image {}", uefi_path.display()))?;
 
         if exit_code != 0 {
-            return exit_code;
+            return Ok(exit_code);
         }
     }
 
-    0
+    Ok(0)
 }
 
 fn userspace_startup_observed(output: &str) -> bool {

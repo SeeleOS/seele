@@ -1,25 +1,42 @@
+use thiserror::Error;
+
 use crate::{
     filesystem::block_device::BlockDeviceError, misc::error::AsSyscallError,
     systemcall::utils::SyscallError,
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Error)]
 pub enum FSError {
+    #[error("file not found")]
     NotFound,
+    #[error("not a directory")]
     NotADirectory,
+    #[error("not a file")]
     NotAFile,
+    #[error("not a symlink")]
     NotASymlink,
+    #[error("file already exists")]
     AlreadyExists,
+    #[error("resource busy")]
     Busy,
+    #[error("directory not empty")]
     DirectoryNotEmpty,
+    #[error("no space left on device")]
     NoSpace,
+    #[error("illegal seek")]
     IllegalSeek,
+    #[error("access denied")]
     AccessDenied,
+    #[error("path too long")]
     PathTooLong,
+    #[error("too many symlinks")]
     TooManySymlinks,
+    #[error("filesystem is read-only")]
     Readonly,
+    #[error("filesystem I/O failed")]
     Other,
-    StorageDeviceError(BlockDeviceError),
+    #[error(transparent)]
+    StorageDeviceError(#[from] BlockDeviceError),
 }
 
 impl AsSyscallError for FSError {

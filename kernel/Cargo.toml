@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = { version = "1", default-features = false }
 ps2-mouse = "0.1"
 x86_64 = "0.15.4"
 xmas-elf = "0.8.0"
@@ -30,6 +31,7 @@ uart_16550 = "0.6.0"
 qemu-exit = "3.0.2"
 log = "0.4"
 bitflags = "2.9.1"
+thiserror = { version = "2", default-features = false }
 # You can also access strum_macros exports directly through strum using the "derive" feature
 strum = { version = "0.28", default-features = false, features = ["derive"] }
 

@@ -15,6 +15,7 @@ use crate::filesystem::{
     vfs::{FSResult, WrappedDirectory},
     vfs_traits::{FileLike, FileSystem},
 };
+use anyhow::{Context, Result};
 
 pub mod directory;
 pub mod error;
@@ -110,15 +111,15 @@ pub struct EXT4 {
 }
 
 impl EXT4 {
-    pub fn new(fs: Ext4) -> Self {
+    pub fn new(fs: Ext4) -> Result<Self> {
         let root_inode = fs
             .path_to_inode(Ext4Path::new("/"), FollowSymlinks::All)
-            .expect("ext4 root inode must exist");
-        Self {
+            .context("ext4 root inode must exist")?;
+        Ok(Self {
             fs,
             root_inode,
             lookup_cache: Arc::new(Mut::new(BTreeMap::new())),
-        }
+        })
     }
 
     fn follow_intermediate_symlinks(&self, mut current: FileLike) -> FSResult<FileLike> {

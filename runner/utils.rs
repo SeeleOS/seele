@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use anyhow::{Context, Result, bail};
 use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
 use serde_json::Value;
 use std::{
@@ -120,15 +121,15 @@ fn default_smp() -> String {
         .unwrap_or_else(|_| "1".to_string())
 }
 
-pub fn build_kernel() -> Vec<PathBuf> {
+pub fn build_kernel() -> Result<Vec<PathBuf>> {
     build_kernel_with_mode(BuildMode::Run)
 }
 
-pub fn build_kernel_tests() -> Vec<PathBuf> {
+pub fn build_kernel_tests() -> Result<Vec<PathBuf>> {
     build_kernel_with_mode(BuildMode::UnitTest)
 }
 
-pub fn build_kernel_with_mode(mode: BuildMode) -> Vec<PathBuf> {
+pub fn build_kernel_with_mode(mode: BuildMode) -> Result<Vec<PathBuf>> {
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let mut command = Command::new(cargo);
     command.arg(match mode {
@@ -175,31 +176,30 @@ pub fn build_kernel_with_mode(mode: BuildMode) -> Vec<PathBuf> {
     command.stdout(Stdio::piped());
     command.stderr(Stdio::inherit());
 
-    let mut child = command.spawn().expect("failed to start cargo");
-    let stdout = child.stdout.take().expect("missing cargo stdout");
+    let mut child = command.spawn().context("failed to start cargo")?;
+    let stdout = child.stdout.take().context("missing cargo stdout")?;
     let reader = BufReader::new(stdout);
     let mut executables = Vec::new();
 
     for line in reader.lines() {
-        let line = line.expect("failed to read cargo output");
+        let line = line.context("failed to read cargo output")?;
         if let Some(path) = handle_cargo_message(&line, &mode) {
             executables.push(path);
         }
     }
 
-    let status = child.wait().expect("failed to wait on cargo");
+    let status = child.wait().context("failed to wait on cargo")?;
     if !status.success() {
-        std::process::exit(status.code().unwrap_or(1));
+        bail!("cargo command failed with status {}", status);
     }
 
-    assert!(
-        !executables.is_empty(),
-        "kernel executable missing from cargo output"
-    );
-    executables
+    if executables.is_empty() {
+        bail!("kernel executable missing from cargo output");
+    }
+    Ok(executables)
 }
 
-pub fn create_uefi_image(kernel_path: &Path) -> PathBuf {
+pub fn create_uefi_image(kernel_path: &Path) -> Result<PathBuf> {
     let image_path = kernel_path.with_extension("img");
     let _ = fs::remove_file(&image_path);
 
@@ -209,15 +209,15 @@ pub fn create_uefi_image(kernel_path: &Path) -> PathBuf {
     bootloader::UefiBoot::new(kernel_path)
         .set_boot_config(&config)
         .create_disk_image(&image_path)
-        .expect("failed to create UEFI disk image");
-    image_path
+        .with_context(|| format!("failed to create UEFI image for {}", kernel_path.display()))?;
+    Ok(image_path)
 }
 
-pub fn run_qemu(uefi_path: &Path, options: &RunOptions) -> i32 {
+pub fn run_qemu(uefi_path: &Path, options: &RunOptions) -> Result<i32> {
     run_qemu_inner(uefi_path, options)
 }
 
-pub fn run_qemu_test(uefi_path: &Path) -> i32 {
+pub fn run_qemu_test(uefi_path: &Path) -> Result<i32> {
     run_qemu_inner(uefi_path, &RunOptions::for_tests())
 }
 
@@ -225,11 +225,11 @@ pub fn run_qemu_expect_serial_failure(
     uefi_path: &Path,
     serial_pattern: &str,
     expected_exit_code: i32,
-) -> i32 {
+) -> Result<i32> {
     let options = RunOptions::for_tests();
     let context = QemuRunContext::new(&options);
-    let mut cmd = build_qemu_command(uefi_path, &options, &context);
-    let mut child = cmd.spawn().expect("failed to start qemu-system-x86_64");
+    let mut cmd = build_qemu_command(uefi_path, &options, &context)?;
+    let mut child = cmd.spawn().context("failed to start qemu-system-x86_64")?;
     let background_done = Arc::new(AtomicBool::new(false));
     let serial_log_thread = {
         let serial_log = context.serial_log.clone();
@@ -242,7 +242,7 @@ pub fn run_qemu_expect_serial_failure(
         thread::spawn(move || forward_terminal_input(&tty_input_socket, &done))
     };
 
-    let status = child.wait().expect("failed to wait on qemu");
+    let status = child.wait().context("failed to wait on qemu")?;
     background_done.store(true, Ordering::Release);
     let _ = serial_log_thread.join();
     let _ = tty_input_thread.join();
@@ -253,7 +253,7 @@ pub fn run_qemu_expect_serial_failure(
         35 => 1,
         _ => {
             if let Some(path) = &context.debug_log {
-                report_qemu_fault(path);
+                report_qemu_fault(path)?;
             }
             2
         }
@@ -263,7 +263,7 @@ pub fn run_qemu_expect_serial_failure(
         eprintln!("expected serial pattern not observed: {serial_pattern}");
         cleanup_qemu_context(&context);
         cleanup_qemu_debug_log(&context);
-        return 1;
+        return Ok(1);
     }
 
     if actual_exit_code != expected_exit_code {
@@ -272,18 +272,18 @@ pub fn run_qemu_expect_serial_failure(
         );
         cleanup_qemu_context(&context);
         cleanup_qemu_debug_log(&context);
-        return 1;
+        return Ok(1);
     }
 
     cleanup_qemu_context(&context);
     cleanup_qemu_debug_log(&context);
-    0
+    Ok(0)
 }
 
-fn run_qemu_inner(uefi_path: &Path, options: &RunOptions) -> i32 {
+fn run_qemu_inner(uefi_path: &Path, options: &RunOptions) -> Result<i32> {
     let context = QemuRunContext::new(options);
-    let mut cmd = build_qemu_command(uefi_path, options, &context);
-    let mut child = cmd.spawn().expect("failed to start qemu-system-x86_64");
+    let mut cmd = build_qemu_command(uefi_path, options, &context)?;
+    let mut child = cmd.spawn().context("failed to start qemu-system-x86_64")?;
     let background_done = Arc::new(AtomicBool::new(false));
     let serial_log_thread = {
         let serial_log = context.serial_log.clone();
@@ -295,7 +295,7 @@ fn run_qemu_inner(uefi_path: &Path, options: &RunOptions) -> i32 {
         let done = background_done.clone();
         thread::spawn(move || forward_terminal_input(&tty_input_socket, &done))
     };
-    let status = child.wait().expect("failed to wait on qemu");
+    let status = child.wait().context("failed to wait on qemu")?;
     background_done.store(true, Ordering::Release);
     let _ = serial_log_thread.join();
     let _ = tty_input_thread.join();
@@ -305,13 +305,13 @@ fn run_qemu_inner(uefi_path: &Path, options: &RunOptions) -> i32 {
         35 => 1,
         _ => {
             if let Some(path) = &context.debug_log {
-                report_qemu_fault(path);
+                report_qemu_fault(path)?;
             }
             2
         }
     };
     cleanup_qemu_debug_log(&context);
-    exit_code
+    Ok(exit_code)
 }
 
 pub fn run_qemu_until_serial_condition(
@@ -319,10 +319,10 @@ pub fn run_qemu_until_serial_condition(
     options: &RunOptions,
     timeout: Duration,
     mut condition: impl FnMut(&str) -> bool,
-) -> i32 {
+) -> Result<i32> {
     let context = QemuRunContext::new(options);
-    let mut cmd = build_qemu_command(uefi_path, options, &context);
-    let mut child = cmd.spawn().expect("failed to start qemu-system-x86_64");
+    let mut cmd = build_qemu_command(uefi_path, options, &context)?;
+    let mut child = cmd.spawn().context("failed to start qemu-system-x86_64")?;
     let background_done = Arc::new(AtomicBool::new(false));
     let tty_input_thread = {
         let tty_input_socket = context.tty_input_socket.clone();
@@ -354,7 +354,7 @@ pub fn run_qemu_until_serial_condition(
             Ok(Some(status)) => {
                 eprintln!("qemu exited before serial condition was observed");
                 if let Some(path) = &context.debug_log {
-                    report_qemu_fault(path);
+                    report_qemu_fault(path)?;
                 }
                 break status.code().unwrap_or(1).max(1);
             }
@@ -381,10 +381,14 @@ pub fn run_qemu_until_serial_condition(
     let _ = tty_input_thread.join();
     cleanup_qemu_context(&context);
     cleanup_qemu_debug_log(&context);
-    exit_code
+    Ok(exit_code)
 }
 
-fn build_qemu_command(uefi_path: &Path, options: &RunOptions, context: &QemuRunContext) -> Command {
+fn build_qemu_command(
+    uefi_path: &Path,
+    options: &RunOptions,
+    context: &QemuRunContext,
+) -> Result<Command> {
     let root_disk = env::var_os("SEELE_ROOT_DISK")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("disk.img"));
@@ -444,7 +448,7 @@ fn build_qemu_command(uefi_path: &Path, options: &RunOptions, context: &QemuRunC
     }
 
     let prebuilt =
-        Prebuilt::fetch(Source::LATEST, "target/ovmf").expect("failed to update prebuilt");
+        Prebuilt::fetch(Source::LATEST, "target/ovmf").context("failed to update prebuilt OVMF")?;
     let code = prebuilt.get_file(Arch::X64, FileType::Code);
     let vars = prebuilt.get_file(Arch::X64, FileType::Vars);
 
@@ -479,7 +483,7 @@ fn build_qemu_command(uefi_path: &Path, options: &RunOptions, context: &QemuRunC
         vars.display()
     ));
 
-    cmd
+    Ok(cmd)
 }
 
 fn cleanup_qemu_context(context: &QemuRunContext) {
@@ -721,12 +725,12 @@ impl Drop for TerminalInputModeGuard {
     }
 }
 
-fn report_qemu_fault(debug_log: &Path) {
-    let Ok(contents) = fs::read_to_string(debug_log) else {
-        return;
-    };
+fn report_qemu_fault(debug_log: &Path) -> Result<()> {
+    let contents = fs::read_to_string(debug_log)
+        .with_context(|| format!("failed to read qemu debug log {}", debug_log.display()))?;
 
     if contents.contains("Triple fault") {
         eprintln!("qemu: detected triple fault");
     }
+    Ok(())
 }

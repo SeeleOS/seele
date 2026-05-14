@@ -1,19 +1,34 @@
+use thiserror::Error;
+
 use crate::{misc::error::AsSyscallError, systemcall::utils::SyscallError};
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum SocketError {
+    #[error("operation would block")]
     TryAgain,
+    #[error("invalid socket arguments")]
     InvalidArguments,
+    #[error("socket operation not supported")]
     OperationNotSupported,
+    #[error("address family not supported")]
     AddressFamilyNotSupported,
+    #[error("protocol not supported")]
     ProtocolNotSupported,
+    #[error("address already in use")]
     AddressInUse,
+    #[error("address not available")]
     AddressNotAvailable,
+    #[error("network is down")]
     NetworkDown,
+    #[error("permission denied")]
     PermissionDenied,
+    #[error("socket is already connected")]
     IsConnected,
+    #[error("socket is not connected")]
     NotConnected,
+    #[error("connection refused")]
     ConnectionRefused,
+    #[error("broken pipe")]
     BrokenPipe,
 }
 

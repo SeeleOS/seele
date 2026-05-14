@@ -28,6 +28,7 @@ panic = "abort"
 panic = "abort"
 
 [dependencies]
+anyhow = "1"
 bootloader = { version = "0.11", default-features = false, features = ["uefi"] }
 libc = "0.2"
 ovmf-prebuilt = "0.2"

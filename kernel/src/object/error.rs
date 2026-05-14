@@ -1,34 +1,36 @@
+use thiserror::Error;
+
 use crate::socket::SocketError;
 use crate::{
     filesystem::errors::FSError, misc::error::AsSyscallError, systemcall::utils::SyscallError,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ObjectError {
+    #[error("object does not exist")]
     DoesNotExist,
+    #[error("bad address")]
     BadAddress,
+    #[error("operation interrupted")]
     Interrupted,
+    #[error("operation would block")]
     TryAgain,
+    #[error("resource busy")]
     Busy,
+    #[error("device revoked")]
     DeviceRevoked,
+    #[error("invalid object request")]
     InvalidRequest,
+    #[error("invalid object arguments")]
     InvalidArguments,
+    #[error("operation not implemented")]
     Unimplemented,
-    SocketError(SocketError),
-    FSError(FSError),
+    #[error(transparent)]
+    SocketError(#[from] SocketError),
+    #[error(transparent)]
+    FSError(#[from] FSError),
+    #[error("object I/O failed")]
     Other,
-}
-
-impl From<FSError> for ObjectError {
-    fn from(value: FSError) -> Self {
-        Self::FSError(value)
-    }
-}
-
-impl From<SocketError> for ObjectError {
-    fn from(value: SocketError) -> Self {
-        Self::SocketError(value)
-    }
 }
 
 impl AsSyscallError for ObjectError {
