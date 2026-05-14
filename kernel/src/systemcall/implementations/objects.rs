@@ -20,7 +20,7 @@ use crate::{
         control::control_object,
         device::get_device,
         file_locks::flock_lock,
-        linux_ioctl::{LinuxIoctlOp, socket_raw_ioctl_op},
+        linux_ioctl::{LinuxIoctlOp, LinuxIoctlTarget, socket_raw_ioctl_op},
         memfd::create_memfd_object,
         misc::{ObjectRef, get_object_current_process},
         traits::Readable,
@@ -117,6 +117,35 @@ fn log_display_write_dispatch(_op: &str, _object: &ObjectRef, _len: usize) {}
 fn log_x_chain_write_bytes(_bytes: &[u8]) {}
 
 fn log_user_manager_socket_bytes(_op: &str, _object: &ObjectRef, _bytes: &[u8]) {}
+
+fn ioctl_target_for_object(object: &ObjectRef) -> Option<LinuxIoctlTarget> {
+    if object.clone().as_drm_prime_buffer().is_ok() {
+        Some(LinuxIoctlTarget::DrmPrime)
+    } else if object.clone().as_netlink_socket().is_ok() {
+        Some(LinuxIoctlTarget::NetlinkSocket)
+    } else if object.clone().as_inet_socket().is_ok() {
+        Some(LinuxIoctlTarget::InetSocket)
+    } else if object.clone().as_unix_socket().is_ok() {
+        Some(LinuxIoctlTarget::UnixSocket)
+    } else if object.clone().as_pty_slave().is_ok() {
+        Some(LinuxIoctlTarget::PtySlave)
+    } else if object.clone().as_tty_device().is_ok() {
+        Some(LinuxIoctlTarget::TtyDevice)
+    } else {
+        match object.debug_name() {
+            "seele_os_linux::misc::fb_object::FramebufferObject" => {
+                Some(LinuxIoctlTarget::Framebuffer)
+            }
+            "seele_os_linux::terminal::object::TerminalObject" => Some(LinuxIoctlTarget::Terminal),
+            "seele_os_linux::terminal::pty::master::PtyMaster" => Some(LinuxIoctlTarget::PtyMaster),
+            "seele_os_linux::drm::object::DrmCardObject" => Some(LinuxIoctlTarget::DrmCard),
+            "seele_os_linux::evdev::object::EventDeviceClientObject" => {
+                Some(LinuxIoctlTarget::EvdevClient)
+            }
+            _ => None,
+        }
+    }
+}
 
 fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult {
     if buf.is_null() {
@@ -611,7 +640,18 @@ define_syscall!(Close, |object_num: usize| {
 define_syscall!(Ioctl, |fd: usize, request: u64, request_ptr: u64| {
     let object = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
     let config_request = ConfigurateRequest::new(request, request_ptr)?;
+    let ioctl_op = config_request.kind();
+    let ioctl_target = ioctl_target_for_object(&object);
+    let ioctl_start = profile::scope_start();
     let res = object.as_configuratable()?.configure(config_request);
+    let ioctl_cycles = profile::scope_start().saturating_sub(ioctl_start);
+
+    if let Some(op) = ioctl_op {
+        profile::record_ioctl_op(op, ioctl_cycles);
+    }
+    if let Some(target) = ioctl_target {
+        profile::record_ioctl_target(target, ioctl_cycles);
+    }
 
     if matches!(socket_raw_ioctl_op(request), Some(LinuxIoctlOp::RawFioclex)) && res.is_ok() {
         let process_ref = get_current_process();

@@ -10,6 +10,7 @@ use crate::{
         get_cycles, serial_print::SERIAL_PORT, time::NANOSECONDS_PER_SECOND, time::Time,
         time::tsc_frequency_hz,
     },
+    object::linux_ioctl::{LinuxIoctlOp, LinuxIoctlTarget},
     s_println,
     smp::{current_cpu_index, topology},
     thread::thread::Thread,
@@ -19,9 +20,12 @@ use conquer_once::spin::OnceCell;
 const REPORT_INTERVAL_SECONDS: u64 = 5;
 const TOP_CATEGORY_COUNT: usize = 10;
 const TOP_SYSCALL_COUNT: usize = 8;
+const TOP_IOCTL_COUNT: usize = 8;
 const MAX_SYSCALLS: usize = 1500;
 const PROFILE_CATEGORY_COUNT: usize = 27;
 const HOT_SYSCALL_PHASE_COUNT: usize = 54;
+const IOCTL_OP_COUNT: usize = 93;
+const IOCTL_TARGET_COUNT: usize = 11;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -233,6 +237,128 @@ impl HotSyscallPhase {
             Self::ReadUnixWaitPrepareBlock => "read_unix_wait_prepare_block",
             Self::ReadUnixWaitRecheck => "read_unix_wait_recheck",
         }
+    }
+}
+
+impl LinuxIoctlOp {
+    const ALL: [Self; IOCTL_OP_COUNT] = [
+        Self::FbGetVariableScreenInfo,
+        Self::FbPutVariableScreenInfo,
+        Self::FbGetFixedScreenInfo,
+        Self::FbGetColorMap,
+        Self::FbPutColorMap,
+        Self::FbPanDisplay,
+        Self::FbBlank,
+        Self::LinuxTcGets,
+        Self::LinuxTcSets,
+        Self::LinuxTcFlush,
+        Self::LinuxTcGets2,
+        Self::LinuxTcSets2,
+        Self::LinuxTiocnxcl,
+        Self::LinuxTiocsctty,
+        Self::LinuxTiocgPgrp,
+        Self::LinuxTiocnotty,
+        Self::LinuxTiocspgrp,
+        Self::LinuxTiocoutq,
+        Self::LinuxTiocgwinsz,
+        Self::LinuxTiocswinsz,
+        Self::LinuxTiocgptn,
+        Self::LinuxTiocsptlck,
+        Self::LinuxTiocgptpeer,
+        Self::LinuxTiocvhangup,
+        Self::LinuxKdGetKeyboardMode,
+        Self::LinuxKdSetKeyboardMode,
+        Self::LinuxKdGetKeyboardType,
+        Self::LinuxKdGetKeyboardEntry,
+        Self::LinuxKdGetDisplayMode,
+        Self::LinuxKdSetDisplayMode,
+        Self::LinuxKdSignalAccept,
+        Self::LinuxVtOpenQuery,
+        Self::LinuxVtGetMode,
+        Self::LinuxVtGetState,
+        Self::LinuxVtSetMode,
+        Self::LinuxVtActivate,
+        Self::LinuxVtWaitActive,
+        Self::LinuxVtRelDisp,
+        Self::DrmVersion,
+        Self::DrmGetUnique,
+        Self::DrmGetMagic,
+        Self::DrmGetCap,
+        Self::DrmWaitVblank,
+        Self::DrmSetUnique,
+        Self::DrmAuthMagic,
+        Self::DrmSetClientCap,
+        Self::DrmSetMaster,
+        Self::DrmDropMaster,
+        Self::DrmModeGetResources,
+        Self::DrmModeGetCrtc,
+        Self::DrmModeSetCrtc,
+        Self::DrmModeCursor,
+        Self::DrmModeCursor2,
+        Self::DrmModeGetGamma,
+        Self::DrmModeSetGamma,
+        Self::DrmModeGetEncoder,
+        Self::DrmModeGetConnector,
+        Self::DrmModeGetProperty,
+        Self::DrmModeObjGetProperties,
+        Self::DrmModeGetPlaneResources,
+        Self::DrmModeGetPlane,
+        Self::DrmModeListLessees,
+        Self::DrmModeAddFb,
+        Self::DrmModeAddFb2,
+        Self::DrmModeRemoveFb,
+        Self::DrmModePageFlip,
+        Self::DrmModeDirtyFb,
+        Self::DrmModeCreateDumb,
+        Self::DrmModeMapDumb,
+        Self::DrmModeDestroyDumb,
+        Self::DrmGemClose,
+        Self::DrmPrimeHandleToFd,
+        Self::DrmPrimeFdToHandle,
+        Self::RawFionbio,
+        Self::RawFioclex,
+        Self::DmaBufSync,
+        Self::DmaBufExportSyncFile,
+        Self::DmaBufImportSyncFile,
+        Self::EvdevGetVersion,
+        Self::EvdevGetId,
+        Self::EvdevGetRepeat,
+        Self::EvdevGetName,
+        Self::EvdevGetPhys,
+        Self::EvdevGetUniq,
+        Self::EvdevGetProp,
+        Self::EvdevGetKey,
+        Self::EvdevGetLed,
+        Self::EvdevGetSnd,
+        Self::EvdevGetSw,
+        Self::EvdevGetBit,
+        Self::EvdevGrab,
+        Self::EvdevRevoke,
+        Self::EvdevSetClockId,
+    ];
+
+    fn as_index(self) -> usize {
+        self as usize
+    }
+}
+
+impl LinuxIoctlTarget {
+    const ALL: [Self; IOCTL_TARGET_COUNT] = [
+        Self::Framebuffer,
+        Self::Terminal,
+        Self::TtyDevice,
+        Self::PtyMaster,
+        Self::PtySlave,
+        Self::DrmCard,
+        Self::DrmPrime,
+        Self::EvdevClient,
+        Self::UnixSocket,
+        Self::InetSocket,
+        Self::NetlinkSocket,
+    ];
+
+    fn as_index(self) -> usize {
+        self as usize
     }
 }
 
@@ -456,6 +582,8 @@ struct CpuProfileData {
     categories: [ProfileCounters; PROFILE_CATEGORY_COUNT],
     syscall_cpu: [ProfileCounters; MAX_SYSCALLS],
     syscall_blocked: [ProfileCounters; MAX_SYSCALLS],
+    ioctl_ops: [ProfileCounters; IOCTL_OP_COUNT],
+    ioctl_targets: [ProfileCounters; IOCTL_TARGET_COUNT],
     hot_syscall_phases: [ProfileCounters; HOT_SYSCALL_PHASE_COUNT],
     file_lazy_faults: FileLazyFaultCounters,
 }
@@ -466,6 +594,8 @@ impl Default for CpuProfileData {
             categories: array::from_fn(|_| ProfileCounters::default()),
             syscall_cpu: array::from_fn(|_| ProfileCounters::default()),
             syscall_blocked: array::from_fn(|_| ProfileCounters::default()),
+            ioctl_ops: array::from_fn(|_| ProfileCounters::default()),
+            ioctl_targets: array::from_fn(|_| ProfileCounters::default()),
             hot_syscall_phases: array::from_fn(|_| ProfileCounters::default()),
             file_lazy_faults: FileLazyFaultCounters::default(),
         }
@@ -524,6 +654,22 @@ pub fn record_hot_syscall_phase(phase: HotSyscallPhase, cycles: u64) {
     }
 
     with_cpu_profile_data(|cpu| cpu.hot_syscall_phases[phase.as_index()].record(cycles));
+}
+
+pub fn record_ioctl_op(op: LinuxIoctlOp, cycles: u64) {
+    if cycles == 0 {
+        return;
+    }
+
+    with_cpu_profile_data(|cpu| cpu.ioctl_ops[op.as_index()].record(cycles));
+}
+
+pub fn record_ioctl_target(target: LinuxIoctlTarget, cycles: u64) {
+    if cycles == 0 {
+        return;
+    }
+
+    with_cpu_profile_data(|cpu| cpu.ioctl_targets[target.as_index()].record(cycles));
 }
 
 pub fn increment_timer_interrupts() {
@@ -615,6 +761,8 @@ fn report_window(window_ns: u64) {
     let mut category_totals = [ProfileSnapshot::default(); PROFILE_CATEGORY_COUNT];
     let mut syscall_cpu_totals = [ProfileSnapshot::default(); MAX_SYSCALLS];
     let mut syscall_blocked_totals = [ProfileSnapshot::default(); MAX_SYSCALLS];
+    let mut ioctl_op_totals = [ProfileSnapshot::default(); IOCTL_OP_COUNT];
+    let mut ioctl_target_totals = [ProfileSnapshot::default(); IOCTL_TARGET_COUNT];
     let mut hot_syscall_phase_totals = [ProfileSnapshot::default(); HOT_SYSCALL_PHASE_COUNT];
     let mut file_lazy_faults = FileLazyFaultSnapshot::default();
 
@@ -630,6 +778,15 @@ fn report_window(window_ns: u64) {
 
         for (index, entry) in cpu.syscall_blocked.iter().enumerate() {
             syscall_blocked_totals[index] += entry.snapshot_and_reset();
+        }
+
+        for op in LinuxIoctlOp::ALL {
+            ioctl_op_totals[op.as_index()] += cpu.ioctl_ops[op.as_index()].snapshot_and_reset();
+        }
+
+        for target in LinuxIoctlTarget::ALL {
+            ioctl_target_totals[target.as_index()] +=
+                cpu.ioctl_targets[target.as_index()].snapshot_and_reset();
         }
 
         for phase in HotSyscallPhase::ALL {
@@ -708,6 +865,8 @@ fn report_window(window_ns: u64) {
         tsc_hz,
         false,
     );
+    report_ioctl_ops(&ioctl_op_totals, tsc_hz);
+    report_ioctl_targets(&ioctl_target_totals, tsc_hz);
     report_hot_syscall_phases(&hot_syscall_phase_totals, tsc_hz);
 
     report_category_breakdown(
@@ -850,6 +1009,52 @@ fn report_hot_syscall_phases(totals: &[ProfileSnapshot; HOT_SYSCALL_PHASE_COUNT]
         s_println!(
             "  {:<22} calls={} cpu_time_ms={} max_cpu_us={}",
             phase.name(),
+            snapshot.calls,
+            cycles_to_milliseconds(snapshot.total_cycles, tsc_hz),
+            cycles_to_microseconds(snapshot.max_cycles, tsc_hz),
+        );
+    }
+}
+
+fn report_ioctl_ops(totals: &[ProfileSnapshot; IOCTL_OP_COUNT], tsc_hz: u64) {
+    let mut entries: Vec<(LinuxIoctlOp, ProfileSnapshot)> = LinuxIoctlOp::ALL
+        .into_iter()
+        .map(|op| (op, totals[op.as_index()]))
+        .filter(|(_, snapshot)| snapshot.calls != 0)
+        .collect();
+    if entries.is_empty() {
+        return;
+    }
+
+    entries.sort_by_key(|entry| Reverse(entry.1.total_cycles));
+    s_println!("TOP IOCTL REQUESTS");
+    for (op, snapshot) in entries.into_iter().take(TOP_IOCTL_COUNT) {
+        s_println!(
+            "  {:<22} calls={} cpu_time_ms={} max_cpu_us={}",
+            format!("{op:?}"),
+            snapshot.calls,
+            cycles_to_milliseconds(snapshot.total_cycles, tsc_hz),
+            cycles_to_microseconds(snapshot.max_cycles, tsc_hz),
+        );
+    }
+}
+
+fn report_ioctl_targets(totals: &[ProfileSnapshot; IOCTL_TARGET_COUNT], tsc_hz: u64) {
+    let mut entries: Vec<(LinuxIoctlTarget, ProfileSnapshot)> = LinuxIoctlTarget::ALL
+        .into_iter()
+        .map(|target| (target, totals[target.as_index()]))
+        .filter(|(_, snapshot)| snapshot.calls != 0)
+        .collect();
+    if entries.is_empty() {
+        return;
+    }
+
+    entries.sort_by_key(|entry| Reverse(entry.1.total_cycles));
+    s_println!("TOP IOCTL TARGETS");
+    for (target, snapshot) in entries.into_iter().take(TOP_IOCTL_COUNT) {
+        s_println!(
+            "  {:<22} calls={} cpu_time_ms={} max_cpu_us={}",
+            format!("{target:?}"),
             snapshot.calls,
             cycles_to_milliseconds(snapshot.total_cycles, tsc_hz),
             cycles_to_microseconds(snapshot.max_cycles, tsc_hz),
