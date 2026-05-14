@@ -1,9 +1,9 @@
-use alloc::{string::String, vec::Vec};
+use alloc::vec::Vec;
 
 use crate::filesystem::{
     errors::FSError,
     path::{Path, PathPart},
-    vfs::{FSResult, FileSystemRef, Mount, VFS, VirtualFS},
+    vfs::{FSResult, FileSystemRef, Mount, VirtualFS, VFS},
     vfs_traits::FileLike,
 };
 
@@ -17,40 +17,23 @@ impl VFS {
     }
 
     fn append_component(base: &Path, component: &str) -> Path {
-        if base.clone().as_string() == "/" {
-            return Path::new(&alloc::format!("/{component}"));
-        }
-
-        let mut path = base.clone().as_string();
-        if !path.ends_with('/') {
-            path.push('/');
-        }
-        path.push_str(component);
-        Path::new(&path).normalize()
+        base.join_component(component)
     }
 
-    fn rewrite_symlink_target(current: &Path, target: Path, remainder: &[String]) -> Path {
+    fn rewrite_symlink_target(current: &Path, target: Path, remainder: &[&str]) -> Path {
         let target = if target.is_absolute() {
             target
         } else {
-            let mut combined = current.parent().unwrap_or_default().as_string();
-            if !combined.ends_with('/') {
-                combined.push('/');
-            }
-            combined.push_str(&target.as_string());
-            Path::new(&combined)
+            current.parent().unwrap_or_default().join_path(&target)
         }
         .normalize();
 
-        let mut combined = target.as_string();
+        let mut combined = target;
         for component in remainder {
-            if !combined.ends_with('/') {
-                combined.push('/');
-            }
-            combined.push_str(component);
+            combined = combined.join_component(component);
         }
 
-        Path::new(&combined).normalize()
+        combined.normalize()
     }
 
     fn resolve_internal(
@@ -70,10 +53,10 @@ impl VFS {
                 .parts
                 .iter()
                 .filter_map(|part| match part {
-                    PathPart::Normal(component) => Some(component.clone()),
+                    PathPart::Normal(component) => Some(component.as_str()),
                     _ => None,
                 })
-                .collect::<Vec<_>>();
+                .collect::<alloc::vec::Vec<_>>();
 
             if components.is_empty() {
                 return Ok((self.resolve_raw(Path::new("/"))?, Path::new("/")));
@@ -237,10 +220,10 @@ fn resolve_with_mounts(
             .parts
             .iter()
             .filter_map(|part| match part {
-                PathPart::Normal(component) => Some(component.clone()),
+                PathPart::Normal(component) => Some(component.as_str()),
                 _ => None,
             })
-            .collect::<Vec<_>>();
+            .collect::<alloc::vec::Vec<_>>();
 
         if components.is_empty() {
             return Ok((
@@ -321,14 +304,5 @@ fn resolve_with_mounts(
 }
 
 fn join_mount_source(source: &Path, suffix: &Path) -> Path {
-    let mut path = source.normalize().as_string();
-    for part in suffix.normalize().parts {
-        if let PathPart::Normal(component) = part {
-            if !path.ends_with('/') {
-                path.push('/');
-            }
-            path.push_str(&component);
-        }
-    }
-    Path::new(&path).normalize()
+    source.join_path(suffix)
 }

@@ -126,6 +126,36 @@ impl Path {
         })
     }
 
+    pub fn join_component(&self, component: &str) -> Self {
+        let mut path = self.normalize();
+        path.parts.push(PathPart::Normal(component.into()));
+        path.ends_with_slash = false;
+        path
+    }
+
+    pub fn join_path(&self, suffix: &Self) -> Self {
+        let mut path = self.normalize();
+        let is_absolute = path.is_absolute();
+        let suffix = suffix.normalize();
+
+        for part in suffix.parts {
+            match part {
+                PathPart::Root | PathPart::CurrentDir => {}
+                PathPart::Normal(component) => path.parts.push(PathPart::Normal(component)),
+                PathPart::ParentDir => match path.parts.last() {
+                    Some(PathPart::Normal(_)) => {
+                        path.parts.pop();
+                    }
+                    Some(PathPart::Root) | None if is_absolute => {}
+                    _ => path.parts.push(PathPart::ParentDir),
+                },
+            }
+        }
+
+        path.ends_with_slash = suffix.ends_with_slash;
+        path
+    }
+
     pub fn starts_with(&self, prefix: &Self) -> bool {
         let path = self.normalize();
         let prefix = prefix.normalize();
