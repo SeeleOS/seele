@@ -17,7 +17,7 @@ heapless = "0.9"
 volatile = "0.6.1"
 x86_rtc = "0.1"
 x2apic = "0.5"
-ext4plus = { path = "../third_party/ext4plus", features = ["sync"] }
+ext4plus = { git = "https://github.com/SeeleOS/ext4plus", features = ["sync"] }
 owo-colors = { version = "4.3", default-features = false }
 flanterm = "0.0.2"
 elfloader = { git = "https://github.com/SeeleOS/rust-elfloader" }
