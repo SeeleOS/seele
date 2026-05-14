@@ -538,6 +538,30 @@ fn create_file_unlocked(path: Path) -> Result<(), SyscallError> {
         .map_err(SyscallError::from)
 }
 
+fn profile_mkdir_common(dirfd: i32, path: &str, mode: u32) -> Result<(), SyscallError> {
+    let resolve_start = profile::scope_start();
+    let path = resolve_path_at(dirfd, path)?;
+    profile::record_hot_syscall_phase(
+        HotSyscallPhase::MkdirPathResolve,
+        profile::scope_start().saturating_sub(resolve_start),
+    );
+
+    let create_start = profile::scope_start();
+    VirtualFS.lock().create_dir_with_mode(path, Some(mode))?;
+    profile::record_hot_syscall_phase(
+        HotSyscallPhase::MkdirCreateDir,
+        profile::scope_start().saturating_sub(create_start),
+    );
+
+    let apply_mode_start = profile::scope_start();
+    let _ = mode;
+    profile::record_hot_syscall_phase(
+        HotSyscallPhase::MkdirApplyMode,
+        profile::scope_start().saturating_sub(apply_mode_start),
+    );
+    Ok(())
+}
+
 fn is_api_mount_path(path: &Path) -> bool {
     path.clone()
         .as_string()
@@ -1026,7 +1050,12 @@ define_syscall!(OpenAt, |dirfd: i32,
     );
     let object = if !nofollow {
         let open_start = profile::scope_start();
+        let open_vfs_start = profile::scope_start();
         let open_result = open_path(path.clone());
+        profile::record_hot_syscall_phase(
+            HotSyscallPhase::OpenAtInitialOpenVfs,
+            profile::scope_start().saturating_sub(open_vfs_start),
+        );
         profile::record_hot_syscall_phase(
             HotSyscallPhase::OpenAtInitialOpen,
             profile::scope_start().saturating_sub(open_start),
@@ -1079,7 +1108,12 @@ define_syscall!(OpenAt, |dirfd: i32,
         }
     } else {
         let open_start = profile::scope_start();
+        let open_vfs_start = profile::scope_start();
         let open_result = open_path_nofollow(path.clone());
+        profile::record_hot_syscall_phase(
+            HotSyscallPhase::OpenAtInitialOpenVfs,
+            profile::scope_start().saturating_sub(open_vfs_start),
+        );
         profile::record_hot_syscall_phase(
             HotSyscallPhase::OpenAtInitialOpen,
             profile::scope_start().saturating_sub(open_start),
@@ -1119,7 +1153,18 @@ define_syscall!(OpenAt, |dirfd: i32,
     };
 
     let info_start = profile::scope_start();
-    let info = object.clone().as_file_like()?.info()?;
+    let object_start = profile::scope_start();
+    let file_like = object.clone().as_file_like()?;
+    profile::record_hot_syscall_phase(
+        HotSyscallPhase::OpenAtInitialOpenObject,
+        profile::scope_start().saturating_sub(object_start),
+    );
+    let stat_start = profile::scope_start();
+    let info = file_like.info()?;
+    profile::record_hot_syscall_phase(
+        HotSyscallPhase::OpenAtInitialOpenStat,
+        profile::scope_start().saturating_sub(stat_start),
+    );
     profile::record_hot_syscall_phase(
         HotSyscallPhase::OpenAtInfo,
         profile::scope_start().saturating_sub(info_start),
@@ -1712,13 +1757,8 @@ define_syscall!(SymlinkAt, |target: CString,
 
 define_syscall!(MkdirAt, |dirfd: i32, path: CString, mode: u32| {
     let path = path_from_raw(path)?;
-    let path = resolve_path_at(dirfd, &path)?;
     let mode = mode & !S_IFMT;
-    VirtualFS
-        .lock()
-        .create_dir_with_mode(path, Some(mode))
-        .map_err(SyscallError::from)?;
-
+    profile_mkdir_common(dirfd, &path, mode)?;
     Ok(0)
 });
 
@@ -1742,9 +1782,8 @@ define_syscall!(Mknodat, |dirfd: i32,
 
 define_syscall!(Mkdir, |path: CString, mode: u32| {
     let path = path_from_raw(path)?;
-    let path = resolve_path_at(AT_FDCWD, &path)?;
     let mode = mode & !S_IFMT;
-    VirtualFS.lock().create_dir_with_mode(path, Some(mode))?;
+    profile_mkdir_common(AT_FDCWD, &path, mode)?;
     Ok(0)
 });
 

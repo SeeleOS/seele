@@ -1,5 +1,6 @@
 use crate::memory::utils::Mut;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use anyhow::Context;
 use core::cmp::Reverse;
 
 use crate::filesystem::{
@@ -19,6 +20,7 @@ use ext4plus::Ext4 as Ext4Inner;
 use lazy_static::lazy_static;
 
 use crate::drivers::virtio::block::root_device as virtio_root_device;
+use crate::misc::error::KernelError;
 
 lazy_static! {
     pub static ref VirtualFS: Mut<VFS> = Mut::new(VFS::new());
@@ -92,9 +94,21 @@ impl VFS {
         log::info!("vfs: loading ext4 from root block device");
         let reader = Ext4BlockOperator::new(block_device.clone());
         let writer = Ext4BlockOperator::new(block_device);
-        let ext4 = Ext4Inner::load_with_writer(Box::new(reader), Some(Box::new(writer))).unwrap();
+        let ext4 = Ext4Inner::load_with_writer(Box::new(reader), Some(Box::new(writer)))
+            .context("failed to load root ext4 filesystem")
+            .map_err(|err| {
+                let err = KernelError::from(err);
+                log::error!("vfs: {err:?}");
+                FSError::Other
+            })?;
         log::info!("vfs: ext4 loaded");
-        self.mount(Path::new("/"), EXT4::new(ext4))?;
+        let ext4 = EXT4::new(ext4)
+            .map_err(|err| {
+                let err = KernelError::from(err);
+                log::error!("vfs: {err:?}");
+                FSError::Other
+            })?;
+        self.mount(Path::new("/"), ext4)?;
         self.mount(Path::new("/tmp"), TmpFs::new())?;
         self.mount(Path::new("/run"), TmpFs::new())?;
         self.mount(Path::new("/dev"), DevFs::new())?;
@@ -290,7 +304,7 @@ impl VFS {
         self.mounts.len()
     }
 
-    pub fn mount_snapshots(&self) -> Vec<(Path, FileSystemRef, Path, MountFlags)> {
+    pub fn mount_snapshots(&self) -> Vec<(Path, FileSystemRef, Path, MountFlags, u64)> {
         self.mounts
             .iter()
             .map(|mount| {
@@ -299,6 +313,7 @@ impl VFS {
                     mount.fs.clone(),
                     mount.source_path.clone(),
                     mount.flags,
+                    mount.device_id,
                 )
             })
             .collect()

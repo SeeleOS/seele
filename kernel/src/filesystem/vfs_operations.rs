@@ -230,15 +230,17 @@ pub fn read_all(path: Path) -> FSResult<Vec<u8>> {
 pub fn open_path(path: Path) -> FSResult<OpenedFileObject> {
     let normalized = path.normalize();
     log::trace!("vfs: open {}", normalized.clone().as_string());
-    let (file, resolved_path) = resolve::resolve_path(normalized, true)?;
-    OpenedFileObject::new(file, resolved_path)
+    let (file, resolved_path, mount_device_id) =
+        resolve::resolve_path_with_mount_device_id(normalized, true)?;
+    OpenedFileObject::new_with_mount_device_id(file, resolved_path, mount_device_id)
 }
 
 pub fn open_path_nofollow(path: Path) -> FSResult<OpenedFileObject> {
     let normalized = path.normalize();
     log::trace!("vfs: open_nofollow {}", normalized.clone().as_string());
-    let (file, resolved_path) = resolve::resolve_path(normalized, false)?;
-    OpenedFileObject::new(file, resolved_path)
+    let (file, resolved_path, mount_device_id) =
+        resolve::resolve_path_with_mount_device_id(normalized, false)?;
+    OpenedFileObject::new_with_mount_device_id(file, resolved_path, mount_device_id)
 }
 
 pub fn resolve_path_with_final(

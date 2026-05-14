@@ -18,7 +18,7 @@ use crate::{
         paging::FRAME_ALLOCATOR,
         utils::apply_offset,
     },
-    misc::profile,
+    misc::profile::{self, HotSyscallPhase},
     misc::stack_builder::StackBuilder,
 };
 use lazy_static::lazy_static;
@@ -208,9 +208,26 @@ impl AddrSpace {
         let available = cached.valid_len.saturating_sub(cluster_offset);
         let copy_len = core::cmp::min(available, read_len);
         if copy_len != 0 {
+            let memcpy_start = profile::scope_start();
             unsafe {
                 ptr::copy_nonoverlapping(cached.data[cluster_offset..].as_ptr(), dst_ptr, copy_len);
             }
+            profile::record_hot_syscall_phase(
+                HotSyscallPhase::PfFileCopyMemcpy,
+                profile::scope_start().saturating_sub(memcpy_start),
+            );
+        }
+
+        let zero_fill_len = read_len.saturating_sub(copy_len);
+        if zero_fill_len != 0 {
+            let zero_fill_start = profile::scope_start();
+            unsafe {
+                ptr::write_bytes(dst_ptr.add(copy_len), 0, zero_fill_len);
+            }
+            profile::record_hot_syscall_phase(
+                HotSyscallPhase::PfFileCopyZeroFill,
+                profile::scope_start().saturating_sub(zero_fill_start),
+            );
         }
 
         stats.copy_cycles = profile::scope_start().saturating_sub(copy_start);
@@ -293,6 +310,7 @@ impl AddrSpace {
                             read_len as usize,
                         ),
                     ) {
+                        let shared_ref_start = profile::scope_start();
                         let map_start = profile::scope_start();
                         let frame = self.map_existing_frame(
                             current_page,
@@ -307,6 +325,10 @@ impl AddrSpace {
                         } else {
                             stats.cache_misses += 1;
                         }
+                        profile::record_hot_syscall_phase(
+                            HotSyscallPhase::PfFileCopySharedRef,
+                            profile::scope_start().saturating_sub(shared_ref_start),
+                        );
                         stats.map_cycles += profile::scope_start().saturating_sub(map_start);
                         stats.cluster_pages_loaded += 1;
                         if first_frame.is_none() {
@@ -318,6 +340,10 @@ impl AddrSpace {
                     let map_start = profile::scope_start();
                     let (frame, write_addr) =
                         self.alloc_map_zeroed_page(current_page, area.clone(), read_len < 4096);
+                    profile::record_hot_syscall_phase(
+                        HotSyscallPhase::PfFileCopyFrameMap,
+                        profile::scope_start().saturating_sub(map_start),
+                    );
                     stats.map_cycles += profile::scope_start().saturating_sub(map_start);
                     stats.cluster_pages_loaded += 1;
 
@@ -327,6 +353,7 @@ impl AddrSpace {
 
                     let read_len = read_len as usize;
                     if read_len != 0 {
+                        let cache_read_start = profile::scope_start();
                         let copy_stats = Self::copy_cached_file_page(
                             &resolved.wrapped,
                             resolved.identity,
@@ -335,6 +362,10 @@ impl AddrSpace {
                             write_addr as *mut u8,
                         )
                         .expect("Failed to lazyload file-backed page through page cache");
+                        profile::record_hot_syscall_phase(
+                            HotSyscallPhase::PfFileCopyCacheRead,
+                            profile::scope_start().saturating_sub(cache_read_start),
+                        );
                         stats.cluster_pages_loaded += copy_stats.cluster_pages_loaded - 1;
                         stats.cache_hits += copy_stats.cache_hits;
                         stats.cache_misses += copy_stats.cache_misses;
