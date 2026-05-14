@@ -119,6 +119,26 @@ impl Canvas {
         self.fb.copy_from_slice(&self.buffer);
     }
 
+    pub fn present_user_controlled_region(
+        &mut self,
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+    ) {
+        if width == 0 || height == 0 {
+            return;
+        }
+
+        let bytes_per_pixel = self.info.bytes_per_pixel;
+        let stride_bytes = self.info.stride * bytes_per_pixel;
+        for row in y..y.saturating_add(height) {
+            let row_start = row * stride_bytes + x * bytes_per_pixel;
+            let row_end = row_start + width * bytes_per_pixel;
+            self.fb[row_start..row_end].copy_from_slice(&self.buffer[row_start..row_end]);
+        }
+    }
+
     pub fn fb_info(&self) -> FramebufferInfo {
         let phys_addr = MAPPER
             .get()

@@ -8,7 +8,7 @@ use crate::{
 };
 
 use super::{
-    framebuffer::refresh_current_scanout,
+    framebuffer::{refresh_current_scanout, refresh_cursor_move},
     object::DRM_STATE,
     state::CursorState,
     user::{current_debug_process, read_user},
@@ -83,6 +83,7 @@ fn apply_cursor_update(request: CursorRequest) -> ObjectResult<isize> {
         );
     }
 
+    let mut moved_cursor = None;
     {
         let mut state = DRM_STATE.lock();
         if request.flags & DRM_MODE_CURSOR_BO != 0 {
@@ -122,9 +123,18 @@ fn apply_cursor_update(request: CursorRequest) -> ObjectResult<isize> {
         if request.flags & DRM_MODE_CURSOR_MOVE != 0
             && let Some(cursor) = state.cursor.as_mut()
         {
+            let previous_cursor = cursor.clone();
             cursor.x = request.x;
             cursor.y = request.y;
+            moved_cursor = Some((previous_cursor, cursor.clone()));
         }
+    }
+
+    if request.flags == DRM_MODE_CURSOR_MOVE
+        && let Some((previous_cursor, current_cursor)) = moved_cursor
+    {
+        refresh_cursor_move(&previous_cursor, &current_cursor)?;
+        return Ok(0);
     }
 
     refresh_current_scanout()?;
