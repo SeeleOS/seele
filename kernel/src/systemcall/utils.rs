@@ -72,6 +72,8 @@ pub fn invalid_syscall_flag_error<T>(raw: u64) -> SyscallError {
     SyscallError::InvalidArguments
 }
 
+const TRACE_COMM: &str = "nautilus";
+
 pub fn log_unsupported_syscall_result(syscall_no: isize, args: [u64; 6], err: SyscallError) {
     if !matches!(err, SyscallError::NoSyscall) {
         return;
@@ -104,18 +106,8 @@ pub fn log_unsupported_syscall_result(syscall_no: isize, args: [u64; 6], err: Sy
     });
 }
 
-#[allow(unreachable_code)]
-fn should_trace_syscall(_syscall_no: isize, _comm: &str) -> bool {
-    return false;
-    let trace_comm = matches!(_comm, "kwin_wayland");
-    if !trace_comm {
-        return false;
-    }
-
-    matches!(
-        SyscallNumber::from_number(_syscall_no as usize),
-        Some(SyscallNumber::Mmap)
-    )
+fn should_trace_syscall(comm: &str) -> bool {
+    comm == TRACE_COMM
 }
 
 pub fn log_syscall_trace_enter(syscall_no: isize, args: [u64; 6]) {
@@ -126,7 +118,7 @@ pub fn log_syscall_trace_enter(syscall_no: isize, args: [u64; 6]) {
             .first()
             .and_then(|command| command.rsplit('/').next())
             .unwrap_or("?");
-        if !should_trace_syscall(syscall_no, comm) {
+        if !should_trace_syscall(comm) {
             return;
         }
 
@@ -157,7 +149,7 @@ pub fn log_syscall_trace_exit(syscall_no: isize, args: [u64; 6], result: isize) 
             .first()
             .and_then(|command| command.rsplit('/').next())
             .unwrap_or("?");
-        if !should_trace_syscall(syscall_no, comm) {
+        if !should_trace_syscall(comm) {
             return;
         }
 
