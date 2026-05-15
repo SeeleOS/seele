@@ -8,7 +8,7 @@ This report is for diagnosis only. It does not propose or apply a fix.
 
 1. Ensure `sysroot` is not mounted while the VM is running.
 2. Ensure no leftover runner or QEMU process remains.
-3. Start `agent-tools/run-agent-vm.sh`.
+3. Start `cargo xrun -- --agent`.
 4. Wait for `Seele login:`, log in as `root`.
 5. Run `gcc --version` in a fresh VM.
 6. Run `rustc --version` in a fresh VM.

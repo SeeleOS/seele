@@ -16,8 +16,8 @@ use crate::{
     misc::timer::{next_process_timer_deadline, process_expired_process_timers},
     object::linux_anon::{expired_timerfd_poll_objects, next_timerfd_poll_deadline},
     polling::event::PollableEvent,
-    signal::process_current_process_signals,
     s_print,
+    signal::process_current_process_signals,
     smp::{
         current_apic_id, current_cpu_index, set_current_kernel_stack, set_current_process,
         set_current_thread,

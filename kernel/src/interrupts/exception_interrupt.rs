@@ -16,8 +16,8 @@ use crate::{
         ProcessExitStatus,
         manager::{get_current_process, terminate_process},
     },
-    signal::{Signal, process_current_process_signals, send_signal_to_process},
     s_print,
+    signal::{Signal, process_current_process_signals, send_signal_to_process},
     smp::gs::GsContext,
     thread::{misc::with_current_thread, scheduling::return_to_scheduler_no_save},
 };

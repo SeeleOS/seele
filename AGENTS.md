@@ -2,23 +2,24 @@
 
 ## Build, Test, and Development Commands
 
-- `agent-tools/run-agent-vm.sh`: headless VM run with serial output; use this for runtime verification.
-- `agent-tools/run-tests.sh`: build and run kernel unit tests in QEMU.
+- `cargo xrun`: launch the VM; use `cargo xrun -- --agent` for headless serial-driven verification.
+- `cargo xtest`: build and run kernel unit tests in QEMU.
+- `cargo xintegration-test`: run integration test coverage.
 - `cargo fmt --all`: format Rust code before submitting changes.
-- `rootfs_making/make_disk.sh`: build or refresh `disk.img` and the guest root filesystem contents.
+- `cargo xrootfs`: build or refresh `disk.img` and the guest root filesystem contents.
+- `cargo xrootfs-override`: rebuild `disk.img` from scratch.
+- `cargo xsysroot-mount`: mount `sysroot/` from `disk.img` when needed for inspection.
+- `cargo xvm-ps`: list current runner and QEMU processes before cleanup.
 - If a required tool is missing for this repository workflow, add it to the `flake.nix` dev shell instead of treating it as a one-off host prerequisite.
-- When launching the VM during agent work, use a checked-in `.sh` wrapper script instead of invoking the VM command directly. Put any needed log redirection inside the wrapper rather than on the outer command line.
-- When using the checked-in VM wrapper, run it directly (for example `agent-tools/run-agent-vm.sh`). Do not wrap it with `bash`, and do not override its default log file path unless explicitly requested.
-- `agent-tools/run-agent-vm.sh` should not impose a default timeout. If a timeout is needed for a specific debugging pass, set it explicitly and shut the VM down yourself when finished.
 - When polling a background VM terminal, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
-- After finishing VM-based testing, shut the VM down and verify there is no leftover background runner or QEMU process before moving on.
-- To inspect the current agent VM and runner processes before shutdown, use `agent-tools/list-agent-vm-processes.sh`. If it shows a leftover VM or runner, kill those PIDs explicitly.
-- Do not assume `sysroot/` is mounted or synchronized with `disk.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the VM wrapper when in doubt.
-- If you need `sysroot/` mounted, run `agent-tools/ensure-sysroot-mounted.sh` as a separate step first. Do not chain the mount step together with the real inspection command.
-- After `agent-tools/ensure-sysroot-mounted.sh`, if you only need to read files from `sysroot/`, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
+- After finishing VM-based testing, shut the VM down and verify there is no leftover runner or QEMU process before moving on.
+- To inspect the current agent VM and runner processes before shutdown, use `cargo xvm-ps`. If it shows a leftover VM or runner, kill those PIDs explicitly.
+- Do not assume `sysroot/` is mounted or synchronized with `disk.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the xtask VM flow when in doubt.
+- If you need `sysroot/` mounted, run `cargo xsysroot-mount` as a separate step first. Do not chain the mount step together with the real inspection command.
+- After `cargo xsysroot-mount`, if you only need to read files from `sysroot/`, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
 - If the sandbox, `no_new_privileges`, missing mounts, or network restrictions block a necessary command, ask the user for privilege escalation or the required access instead of silently giving up on that path.
 
-After finishing a change, run `agent-tools/run-tests.sh` and `agent-tools/run-agent-vm.sh` to test the kernel unit tests and VM. If either test fails, keep fixing the issue before considering the work done. If you are validating a shell or userspace fix, prefer the `--agent` path so serial logs are captured automatically.
+After finishing a change, run `cargo xtest` and `cargo xrun -- --agent` to test the kernel unit tests and VM. If either test fails, keep fixing the issue before considering the work done. If you are validating a shell or userspace fix, prefer the `--agent` path so serial logs are captured automatically.
 
 ## Coding Style & Naming Conventions
 
@@ -45,10 +46,10 @@ There is no large standalone test suite yet; verification is primarily compile c
 - IMPORTANT: Do not treat ledger coverage, one happy-path call, or return-value-only assertions as sufficient ABI coverage. When adding or changing syscall, ioctl, device, filesystem, socket, terminal, memory-mapping, or graphics behavior, tests must exercise the full externally visible side effects and realistic edge cases for that ABI: mutated kernel state, data copied to or from user buffers, fd/object flags, queues and wakeups, mapped-memory visibility, framebuffer/device contents, partial/truncated buffers, invalid pointers, invalid flags, boundary sizes, repeated calls, and error ordering where Linux defines it.
 - This kernel targets Linux binary compatibility. Syscall tests and other ABI-facing tests must use Linux semantics as the only oracle, not the current implementation behavior. Validate x86_64 Linux syscall ABI return values, errno values, struct layouts, flag combinations, state side effects, and Linux-specific edge cases. If implementation behavior disagrees with Linux semantics, fix the kernel implementation instead of relaxing tests to accept the wrong behavior.
 - Run `cargo check --manifest-path kernel/Cargo.toml` for all kernel changes.
-- Run `agent-tools/run-tests.sh` for kernel unit-test coverage.
+- Run `cargo xtest` for kernel unit-test coverage.
 - Treat compiler warnings as failures. Do not leave any `cargo check` warnings in the tree.
 - After finishing code changes, run `cargo clippy` and address its findings before considering the work complete.
-- Run `agent-tools/run-agent-vm.sh` for syscall, process, terminal, or userspace changes.
+- Run `cargo xrun -- --agent` for syscall, process, terminal, or userspace changes.
 - Add focused unit tests only when the target module already uses them.
 
 ## Debugging Guidance
@@ -73,7 +74,7 @@ Do not use `strace` inside the VM for guest userspace debugging in this reposito
 
 ## Repository Layout Notes
 
-- `rootfs_making/` contains the disk image construction script and the flat set of guest rootfs overlay/config files that `make_disk.sh` installs into `sysroot/`.
+- `rootfs_making/` contains the disk image construction script and the flat set of guest rootfs overlay/config files that `cargo xrootfs` installs into `sysroot/`.
 
 ## Commit & Pull Request Guidelines
 
@@ -85,7 +86,6 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 - IMPORTANT: once a discrete feature or fix is verified, commit it immediately instead of waiting for the rest of the work to finish.
 - IMPORTANT: before committing, review the current `git diff` against `AGENTS.md`, then split and commit by feature/fix.
 - Do not let multiple unrelated runtime experiments, partial fixes, or cleanup work accumulate in one uncommitted batch.
-
 - Keep commit titles concise and action-oriented.
 - One logical change per commit when practical.
 - After completing a discrete feature or fix and verifying it, make a git commit for that completed work instead of leaving it uncommitted.
@@ -97,16 +97,16 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 ## Collaboration Notes
 
 - If the user provides a workflow or debugging suggestion that is broadly useful for future work in this repository, add it to `AGENTS.md` when appropriate instead of treating it as a one-off remark.
-- When debugging interactive login issues where the user needs to type a username or password manually, run `nix develop -c cargo run` in the foreground instead of the `--agent` path and let the user provide the login input.
+- When debugging interactive login issues where the user needs to type a username or password manually, run `nix develop -c cargo xrun` in the foreground instead of the `--agent` path and let the user provide the login input.
 - When a background VM terminal is available, interact with it directly for guest input, including login credentials and shell commands.
-- In `agent-tools/run-agent-vm.sh --agent`, treat the runner's stdin/background terminal as already forwarded to the guest tty by default. For interactive guest input, type into that terminal directly instead of reaching for any separate socket transport.
-- When starting `agent-tools/run-agent-vm.sh`, note the printed `background terminal input path:` line and keep the same long-lived exec session open. Poll that session briefly until the guest prompt appears, then send login credentials and shell commands back through that same background terminal/stdin path instead of inventing a separate interaction method mid-debug.
+- In `cargo xrun -- --agent`, treat the runner's stdin/background terminal as already forwarded to the guest tty by default. For interactive guest input, type into that terminal directly instead of reaching for any separate socket transport.
+- When starting `cargo xrun -- --agent`, note the printed `background terminal input path:` line and keep the same long-lived exec session open. Poll that session briefly until the guest prompt appears, then send login credentials and shell commands back through that same background terminal/stdin path instead of inventing a separate interaction method mid-debug.
 - When a background VM terminal is available, do not focus on manually poking the tty socket itself. Treat that socket as the runner's internal transport and interact through the background terminal path directly.
 - When a background VM terminal is available, do not invent a separate tty-socket workflow or ad-hoc input path. Use the background terminal interaction path directly.
 - If interacting through the background VM terminal appears to produce no reaction, do not assume the background terminal path itself is broken. Treat kernel deadlock, echo being disabled, or the foreground being owned by another program as the primary explanations to check first.
-- `run agent vm` should be treated as directly interactive by default.
+- `cargo xrun -- --agent` should be treated as directly interactive by default.
 - After you finish using an interactive or background VM, terminate it yourself instead of relying on a default runner timeout to clean it up.
-- When terminating a leftover agent VM, first run `agent-tools/list-agent-vm-processes.sh`, then `kill` the reported runner and QEMU PIDs.
-- Do not rely on guest-side `poweroff` in this environment. If you need to stop the agent VM, inspect it with `agent-tools/list-agent-vm-processes.sh` and `kill` the reported runner and QEMU PIDs from the host side.
+- When terminating a leftover agent VM, first run `cargo xvm-ps`, then `kill` the reported runner and QEMU PIDs.
+- Do not rely on guest-side `poweroff` in this environment. If you need to stop the agent VM, inspect it with `cargo xvm-ps` and `kill` the reported runner and QEMU PIDs from the host side.
 - If `sysroot/` already appears to be mounted, reuse it directly instead of asking for privilege escalation to mount again. Only ask to mount when it is clearly not mounted.
-- When you need to mount `sysroot/`, use `agent-tools/ensure-sysroot-mounted.sh` directly. Run it first, then run the real inspection command separately instead of chaining them together.
+- When you need to mount `sysroot/`, use `cargo xsysroot-mount` directly. Run it first, then run the real inspection command separately instead of chaining them together.

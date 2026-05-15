@@ -102,12 +102,11 @@ impl VFS {
                 FSError::Other
             })?;
         log::info!("vfs: ext4 loaded");
-        let ext4 = EXT4::new(ext4)
-            .map_err(|err| {
-                let err = KernelError::from(err);
-                log::error!("vfs: {err:?}");
-                FSError::Other
-            })?;
+        let ext4 = EXT4::new(ext4).map_err(|err| {
+            let err = KernelError::from(err);
+            log::error!("vfs: {err:?}");
+            FSError::Other
+        })?;
         self.mount(Path::new("/"), ext4)?;
         self.mount(Path::new("/tmp"), TmpFs::new())?;
         self.mount(Path::new("/run"), TmpFs::new())?;

@@ -1,8 +1,6 @@
 use crate::memory::utils::Mut;
 use alloc::{boxed::Box, sync::Arc};
-use core::{
-    error::Error,
-};
+use core::error::Error;
 use thiserror::Error;
 
 use ext4plus::{Ext4Read, Ext4Write};

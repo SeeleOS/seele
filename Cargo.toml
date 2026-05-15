@@ -1,35 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["kernel"]
+members = ["kernel", "xtask"]
 exclude = ["toolchain/rust"]
-
-[package]
-name = "seeleos-runner"
-version = "0.1.0"
-edition = "2024"
-default-run = "seeleos-runner"
-
-[[bin]]
-name = "seeleos-runner"
-path = "runner/bin.rs"
-
-[[bin]]
-name = "seeleos-runner-test"
-path = "runner/test.rs"
-
-[[bin]]
-name = "seeleos-runner-integration-test"
-path = "runner/integration_test.rs"
 
 [profile.dev]
 panic = "abort"
 
 [profile.release]
 panic = "abort"
-
-[dependencies]
-anyhow = "1"
-bootloader = { version = "0.11", default-features = false, features = ["uefi"] }
-libc = "0.2"
-ovmf-prebuilt = "0.2"
-serde_json = "1.0"

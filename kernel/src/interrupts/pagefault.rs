@@ -1,5 +1,5 @@
-use core::{arch::naked_asm, mem::offset_of};
 use core::sync::atomic::{AtomicUsize, Ordering};
+use core::{arch::naked_asm, mem::offset_of};
 
 use x86_64::{
     registers::control::Cr2,

@@ -2,15 +2,18 @@
 bindeps = true
 
 [alias]
-rr = "run --release"
-rt = "run --bin seeleos-runner-test"
+xrun = "run -p xtask -- run"
+xtest = "run -p xtask -- test"
+"xintegration-test" = "run -p xtask -- integration-test"
+xrootfs = "run -p xtask -- rootfs-build"
+"xrootfs-override" = "run -p xtask -- rootfs-build --override"
+"xsysroot-mount" = "run -p xtask -- sysroot-mount"
+"xvm-ps" = "run -p xtask -- vm-ps"
 
 [target.x86_64-seele]
 rustflags = [
-  # relibc 的库搜索路径（-lc/-lm/-lpthread/-lrt）
   "-C", "link-arg=-L/home/elysia/coding-project/elysia-os/relibc-seele/target/x86_64-seele/release",
   "-C", "link-arg=-lm",
-  # 显式把 ELF 入口设为 relibc crt0 里的 `_start`
   "-C", "link-arg=-e",
   "-C", "link-arg=_start",
 ]

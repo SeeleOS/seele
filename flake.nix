@@ -28,6 +28,7 @@
           e2fsprogs
           git
           pacman
+          procps
           qemu
           util-linux
           toolchain
@@ -61,10 +62,10 @@
             fi
 
             if [ "$needs_rootfs_init" -eq 1 ]; then
-              ./rootfs_making/make_rootfs.sh
+              cargo xrootfs
             fi
 
-            exec cargo run -- "$@"
+            exec cargo xrun "$@"
           '';
         };
 

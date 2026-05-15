@@ -35,13 +35,13 @@ EOF
 
 ## Run directly
 
-From the repository root, you can build and boot the OS directly with:
+From the repository root:
 
 ```sh
 nix run
 ```
 
-This uses the Rust toolchain pinned in [rust-toolchain.toml](/home/elysia/coding-project/seele-os-linux/rust-toolchain.toml) through the flake, builds the runner and kernel, and launches QEMU.
+This enters the flake environment, initializes the rootfs if needed, and runs `cargo xrun`.
 
 ## Enter the dev shell
 
@@ -61,32 +61,56 @@ cd toolchain
 cd ..
 ```
 
-## Populate the sysroot
-
-Install at least the packages you want inside the disk image:
-
-```sh
-cd packages
-cargo run install busybox
-cargo run install bash
-cargo run install tinycc
-cd ..
-```
-
-This writes into the mounted `sysroot` directory backed by `disk.img`.
-
 ## Build and run with Cargo
 
 From the repository root:
 
 ```sh
-cargo run
+cargo xrun
 ```
 
-This builds the kernel, creates a bootable image, and launches QEMU.
+Run the headless agent path with serial log capture:
+
+```sh
+cargo xrun -- --agent
+```
+
+## Rootfs and disk image
+
+Build or refresh `disk.img` and the guest root filesystem:
+
+```sh
+cargo xrootfs
+```
+
+Force rebuilding the disk image from scratch:
+
+```sh
+cargo xrootfs-override
+```
+
+Mount `sysroot/` from `disk.img` when needed:
+
+```sh
+cargo xsysroot-mount
+```
+
+## Tests
+
+Run kernel unit tests in QEMU:
+
+```sh
+cargo xtest
+```
+
+Run integration tests:
+
+```sh
+cargo xintegration-test
+```
 
 ## Notes
 
-- `cargo run` unmounts `sysroot` before building.
-- The runner uses UEFI QEMU boot by default.
+- `cargo xrun` is the main local workflow entrypoint.
+- `nix run` uses the same xtask-based flow.
 - If `/dev/kvm` exists, QEMU will use KVM automatically.

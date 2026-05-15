@@ -256,12 +256,12 @@ fn resolve_with_mounts(
             let is_final = index + 1 == components.len();
             let next_path = VFS::append_component(&current_path, component);
 
-                let next = match current {
-                    FileLike::Directory(dir) => {
-                        let (mount_path, _, _, _) = find_mount_in_snapshots(&next_path, mounts)?;
-                        if mount_path == next_path {
-                            resolve_raw_with_mounts(next_path.clone(), mounts)?
-                        } else {
+            let next = match current {
+                FileLike::Directory(dir) => {
+                    let (mount_path, _, _, _) = find_mount_in_snapshots(&next_path, mounts)?;
+                    if mount_path == next_path {
+                        resolve_raw_with_mounts(next_path.clone(), mounts)?
+                    } else {
                         dir.lock().get(component)?
                     }
                 }
