@@ -159,10 +159,7 @@ fn dqblk_from_tmpfs_quota(quota: TmpfsQuota) -> LinuxDqblk {
     }
 }
 
-fn apply_dqblk_update(
-    current: TmpfsQuota,
-    update: LinuxDqblk,
-) -> TmpfsQuota {
+fn apply_dqblk_update(current: TmpfsQuota, update: LinuxDqblk) -> TmpfsQuota {
     let mut next = current;
     if (update.dqb_valid & QIF_BLIMITS) != 0 {
         next.block_hardlimit = update.dqb_bhardlimit;

@@ -17,6 +17,7 @@ use crate::{
         manager::{get_current_process, terminate_process},
     },
     signal::{Signal, process_current_process_signals, send_signal_to_process},
+    s_print,
     smp::gs::GsContext,
     thread::{misc::with_current_thread, scheduling::return_to_scheduler_no_save},
 };
@@ -56,6 +57,7 @@ extern "C" fn invalid_opcode_handler(snapshot: &Snapshot, from_user: u64) -> ! {
 }
 
 extern "C" fn gp_handler(snapshot: &SnapshotWithErrorCode, _err_code: u64, from_user: u64) -> ! {
+    s_print!("G");
     let snapshot = snapshot.as_snapshot();
     if from_user != 0 {
         handle_usermode_exception(&snapshot, Signal::SIGSEGV);
@@ -68,6 +70,7 @@ extern "x86-interrupt" fn double_fault_handler(
     _stack_frame: InterruptStackFrame,
     err_code: u64,
 ) -> ! {
+    s_print!("D");
     interrupts::disable();
     panic!(
         "Double fault:\n\n{:#?}\nError code: {err_code}",

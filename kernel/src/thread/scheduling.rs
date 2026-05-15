@@ -17,6 +17,7 @@ use crate::{
     object::linux_anon::{expired_timerfd_poll_objects, next_timerfd_poll_deadline},
     polling::event::PollableEvent,
     signal::process_current_process_signals,
+    s_print,
     smp::{
         current_apic_id, current_cpu_index, set_current_kernel_stack, set_current_process,
         set_current_thread,
@@ -212,6 +213,7 @@ fn maybe_report_profile() {
 }
 
 pub fn return_to_scheduler(snapshot: &mut Snapshot, snapshot_type: ThreadSnapshotType) {
+    s_print!("S");
     let current_ref = crate::thread::get_current_thread();
     let mut current = current_ref.lock();
     let thread_snapshot = current.get_appropriate_snapshot() as *mut ThreadSnapshot;
@@ -299,6 +301,7 @@ extern "C" fn return_to_scheduler_from_current_inner(snapshot_ptr: *mut Snapshot
 }
 
 pub fn return_to_scheduler_no_save() -> ! {
+    s_print!("N");
     log::trace!("return_to_scheduler_no_save");
     let current_ref = crate::thread::get_current_thread();
     let mut current = current_ref.lock();
