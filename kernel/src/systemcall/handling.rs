@@ -7,7 +7,6 @@ use crate::{
     },
     process::manager::get_current_process,
     process::ptrace::{maybe_stop_current_on_syscall_entry, maybe_stop_current_on_syscall_exit},
-    s_print,
     signal::process_current_process_signals,
     systemcall::table::SYSCALL_TABLE,
     systemcall::utils::{
@@ -27,7 +26,6 @@ static FIRST_USER_SYSCALL_LOGGED: AtomicBool = AtomicBool::new(false);
 #[unsafe(no_mangle)]
 extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     let snapshot = unsafe { &mut *snapshot_ptr };
-    s_print!("[");
     let syscall_no = snapshot.rax;
     let syscall_start = profile::scope_start();
     let entry_start = syscall_start;
@@ -70,7 +68,6 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     log_syscall_trace_exit(syscall_no, args, result);
 
     snapshot.rax = result;
-    s_print!("]");
     let body_end = profile::scope_start();
 
     let exit_start = profile::scope_start();

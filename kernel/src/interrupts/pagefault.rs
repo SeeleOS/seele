@@ -1,4 +1,3 @@
-use core::sync::atomic::{AtomicUsize, Ordering};
 use core::{arch::naked_asm, mem::offset_of};
 
 use x86_64::{
@@ -17,21 +16,15 @@ use crate::{
         snapshot::SnapshotWithErrorCode,
     },
     process::manager::get_current_process,
-    s_print,
     signal::Signal,
     smp::gs::GsContext,
 };
-
-static PAGEFAULT_TRACE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 pub extern "C" fn pagefault_handler(
     snapshot: &mut SnapshotWithErrorCode,
     error_code: PageFaultErrorCode,
     from_user: u64,
 ) {
-    if PAGEFAULT_TRACE_COUNTER.fetch_add(1, Ordering::Relaxed) & 0xff == 0 {
-        s_print!("P");
-    }
     let fault_start = profile::scope_start();
     let address = Cr2::read().unwrap();
 

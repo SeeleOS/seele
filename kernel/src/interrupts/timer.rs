@@ -7,7 +7,6 @@ use crate::{
         snapshot::Snapshot,
         time::Time,
     },
-    s_print,
     smp::gs::GsContext,
     thread::{
         get_current_thread,
@@ -106,7 +105,6 @@ pub extern "C" fn timer_interrupt_handler_wrapper() {
 pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
     let irq_start = profile::scope_start();
     profile::increment_timer_interrupts();
-    s_print!("t");
     send_eoi();
 
     // Don't preempt kernel mode; it can corrupt in-flight kernel snapshots.
