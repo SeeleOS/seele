@@ -67,7 +67,8 @@ pub(super) fn handle_ioctl(
             if arg == 0 {
                 return Err(ObjectError::BadAddress);
             }
-            let clock_id = unsafe { *(arg as *const i32) };
+            let clock_id =
+                user_safe::read(arg as *const i32).map_err(|_| ObjectError::BadAddress)?;
             client.state.lock().clock_id = clock_id;
             Ok(0)
         }

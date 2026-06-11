@@ -11,7 +11,7 @@ use crate::{
         vfs::VirtualFS,
         vfs_operations::{
             file_info_path, open_path, open_path_nofollow, resolve_dir_path,
-            resolve_path_info_with_final,
+            resolve_path_with_mount_info,
         },
         vfs_traits::{DirectoryContentType, FileLikeType, MountFlags},
     },
@@ -325,6 +325,10 @@ fn parse_fuse_mount_options(data: Option<&str>) -> Result<FuseMountOptions, Sysc
 }
 
 fn resolve_path_at(dirfd: i32, path_str: &str) -> Result<Path, SyscallError> {
+    if path_str.is_empty() {
+        return Err(SyscallError::FileNotFound);
+    }
+
     let path = Path::new(path_str);
     let process = get_current_process();
     let fs_context = process.lock().fs_context.lock().clone();
@@ -440,13 +444,6 @@ fn linux_stat_from_file_like_info(info: FileLikeInfo, path: &Path) -> LinuxStat 
     stat
 }
 
-fn mount_info_from_path(path: &Path) -> Result<(u64, bool), SyscallError> {
-    let normalized = path.normalize();
-    let vfs = VirtualFS.lock();
-    let (mount_path, _, mount_id) = vfs.mount_path_and_ids(normalized.clone())?;
-    Ok((mount_id, normalized == mount_path))
-}
-
 fn mount_info_from_object(object: &ObjectRef) -> Result<(u64, bool), SyscallError> {
     Ok((mount_id_for_object(object)?, mount_root_for_object(object)?))
 }
@@ -494,8 +491,8 @@ fn lookup_path_metadata(
     );
 
     let resolve_final_start = profile::scope_start();
-    let (info, resolved_path): (_, Path) =
-        resolve_path_info_with_final(normalized_path.clone(), !nofollow)?;
+    let (info, resolved_path, mount_id, mount_root) =
+        resolve_path_with_mount_info(normalized_path, !nofollow)?;
     profile::record_hot_syscall_phase(
         phases.resolve_final,
         profile::scope_start().saturating_sub(resolve_final_start),
@@ -506,13 +503,6 @@ fn lookup_path_metadata(
     profile::record_hot_syscall_phase(
         phases.build_stat,
         profile::scope_start().saturating_sub(build_stat_start),
-    );
-
-    let mount_info_start = profile::scope_start();
-    let (mount_id, mount_root) = mount_info_from_path(&resolved_path)?;
-    profile::record_hot_syscall_phase(
-        phases.mount_info,
-        profile::scope_start().saturating_sub(mount_info_start),
     );
 
     Ok(PathLookup {
@@ -728,12 +718,8 @@ fn filesystem_magic_for_path(path: &Path) -> Result<i64, SyscallError> {
     Ok(fs.lock().magic())
 }
 
-fn mount_id_for_path(path: &Path) -> Result<u64, SyscallError> {
-    Ok(VirtualFS.lock().mount_path_and_ids(path.clone())?.2)
-}
-
 fn mount_id_for_file_like(file_like: &FileLikeObject) -> Result<u64, SyscallError> {
-    mount_id_for_path(&file_like.path())
+    Ok(file_like.mount_id())
 }
 
 fn pseudo_mount_id(magic: i64) -> Option<u64> {
@@ -758,9 +744,7 @@ fn mount_id_for_object(object: &ObjectRef) -> Result<u64, SyscallError> {
 
 fn mount_root_for_object(object: &ObjectRef) -> Result<bool, SyscallError> {
     if let Ok(file_like) = object.clone().as_file_like() {
-        let path = file_like.path().normalize();
-        let mount_path = { VirtualFS.lock().mount_path_and_ids(path.clone())?.0 };
-        return Ok(path == mount_path);
+        return Ok(file_like.mount_root());
     }
 
     let magic = filesystem_magic_for_object(object)?;
@@ -778,7 +762,7 @@ fn stat_mount_id_at(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<u64, S
     }
 
     let path = resolve_path_at(dirfd, path_str)?;
-    mount_id_for_path(&path)
+    Ok(VirtualFS.lock().mount_id(path)?)
 }
 
 #[repr(C)]

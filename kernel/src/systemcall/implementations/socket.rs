@@ -19,12 +19,6 @@ use alloc::{string::String, vec, vec::Vec};
 use core::{mem, slice};
 
 #[repr(C)]
-struct LinuxSockAddrUn {
-    sun_family: u16,
-    sun_path: [u8; 108],
-}
-
-#[repr(C)]
 struct LinuxSockAddrNl {
     nl_family: u16,
     nl_pad: u16,
@@ -120,12 +114,19 @@ fn encode_control_message(cmsg_type: i32, payload: &[u8]) -> Vec<u8> {
 fn rights_control_bytes_for_read(
     ready_rights: Vec<Vec<ObjectRef>>,
     cloexec: bool,
+    control_capacity: usize,
 ) -> Result<Vec<u8>, SyscallError> {
     if ready_rights.is_empty() {
         return Ok(Vec::new());
     }
 
     let total_rights: usize = ready_rights.iter().map(Vec::len).sum();
+    let payload_len = total_rights * mem::size_of::<i32>();
+    let required_len = cmsg_align(mem::size_of::<LinuxCmsgHdr>()) + cmsg_align(payload_len);
+    if control_capacity < required_len {
+        return Ok(Vec::new());
+    }
+
     let current_process = get_current_process();
     let mut current = current_process.lock();
     let fd_flags = if cloexec {
@@ -149,6 +150,7 @@ fn stream_rights_control_bytes_for_read(
     bytes_read: usize,
     peek: bool,
     cloexec: bool,
+    control_capacity: usize,
 ) -> Result<Vec<u8>, SyscallError> {
     let UnixSocketState::Stream(stream) = &*socket.state.lock() else {
         return Ok(Vec::new());
@@ -160,27 +162,28 @@ fn stream_rights_control_bytes_for_read(
         stream.take_ready_rights(bytes_read)
     };
 
-    rights_control_bytes_for_read(ready_rights, cloexec)
+    rights_control_bytes_for_read(ready_rights, cloexec, control_capacity)
 }
 
 fn datagram_rights_control_bytes_for_read(
     socket: &UnixSocketObject,
     peek: bool,
     cloexec: bool,
+    control_capacity: usize,
 ) -> Result<Vec<u8>, SyscallError> {
     let UnixSocketState::Datagram(datagram) = &*socket.state.lock() else {
         return Ok(Vec::new());
     };
 
-    let rights = if peek {
-        datagram.peer_rights.lock().clone()
-    } else {
-        core::mem::take(&mut *datagram.peer_rights.lock())
-    };
+    let rights = datagram.peer_rights.lock().clone();
     if rights.is_empty() {
         return Ok(Vec::new());
     }
-    rights_control_bytes_for_read(vec![rights], cloexec)
+    let control = rights_control_bytes_for_read(vec![rights], cloexec, control_capacity)?;
+    if !peek && !control.is_empty() {
+        datagram.peer_rights.lock().clear();
+    }
+    Ok(control)
 }
 
 fn unix_socket_control_bytes(
@@ -188,11 +191,13 @@ fn unix_socket_control_bytes(
     bytes_read: usize,
     peek: bool,
     recv_flags: u64,
+    control_capacity: usize,
 ) -> Result<Vec<u8>, SyscallError> {
     let cloexec = (recv_flags & MSG_CMSG_CLOEXEC) != 0;
-    let mut control = stream_rights_control_bytes_for_read(socket, bytes_read, peek, cloexec)?;
+    let mut control =
+        stream_rights_control_bytes_for_read(socket, bytes_read, peek, cloexec, control_capacity)?;
     if control.is_empty() {
-        control = datagram_rights_control_bytes_for_read(socket, peek, cloexec)?;
+        control = datagram_rights_control_bytes_for_read(socket, peek, cloexec, control_capacity)?;
     }
     if !*socket.pass_cred.lock() {
         return Ok(control);
@@ -282,29 +287,33 @@ fn socket_address_from_raw(
     address: *const u8,
     address_len: u32,
 ) -> Result<SocketAddress, SyscallError> {
-    if address.is_null() || address_len < 2 {
-        return Err(SyscallError::BadAddress);
+    let bytes = socket_address_bytes(address, address_len)?;
+    socket_address_from_bytes(&bytes)
+}
+
+fn socket_address_from_bytes(address: &[u8]) -> Result<SocketAddress, SyscallError> {
+    if address.len() < 2 {
+        return Err(SyscallError::InvalidArguments);
     }
-    let family = unsafe { *(address as *const u16) };
+
+    let family = u16::from_ne_bytes(address[..2].try_into().unwrap());
     if family == AF_UNIX as u16 {
-        let addr = unsafe { &*(address as *const LinuxSockAddrUn) };
-        let path_len = (address_len as usize)
-            .saturating_sub(2)
-            .min(addr.sun_path.len());
+        let path = &address[2..];
+        let path_len = path.len().min(108);
         if path_len == 0 {
             return Err(SyscallError::InvalidArguments);
         }
 
-        if addr.sun_path[0] == 0 {
+        if path[0] == 0 {
             if path_len <= 1 {
                 return Err(SyscallError::InvalidArguments);
             }
             return Ok(SocketAddress::Unix(
-                String::from_utf8_lossy(&addr.sun_path[..path_len]).into_owned(),
+                String::from_utf8_lossy(&path[..path_len]).into_owned(),
             ));
         }
 
-        let len = addr.sun_path[..path_len]
+        let len = path[..path_len]
             .iter()
             .position(|&b| b == 0)
             .unwrap_or(path_len);
@@ -312,30 +321,29 @@ fn socket_address_from_raw(
             return Err(SyscallError::InvalidArguments);
         }
         return Ok(SocketAddress::Unix(
-            String::from_utf8_lossy(&addr.sun_path[..len]).into_owned(),
+            String::from_utf8_lossy(&path[..len]).into_owned(),
         ));
     }
 
     if family == AF_INET as u16 {
-        if (address_len as usize) < mem::size_of::<LinuxSockAddrIn>() {
+        if address.len() < mem::size_of::<LinuxSockAddrIn>() {
             return Err(SyscallError::InvalidArguments);
         }
-        let addr = unsafe { &*(address as *const LinuxSockAddrIn) };
+        let port = u16::from_ne_bytes(address[2..4].try_into().unwrap());
+        let addr = [address[4], address[5], address[6], address[7]];
         return Ok(SocketAddress::Inet(InetAddress::new(
-            addr.sin_addr,
-            u16::from_be(addr.sin_port),
+            addr,
+            u16::from_be(port),
         )));
     }
 
     if family == AF_NETLINK as u16 {
-        if (address_len as usize) < core::mem::size_of::<LinuxSockAddrNl>() {
+        if address.len() < mem::size_of::<LinuxSockAddrNl>() {
             return Err(SyscallError::InvalidArguments);
         }
-        let addr = unsafe { &*(address as *const LinuxSockAddrNl) };
-        return Ok(SocketAddress::Netlink(NetlinkSocketAddress {
-            pid: addr.nl_pid,
-            groups: addr.nl_groups,
-        }));
+        let pid = u32::from_ne_bytes(address[4..8].try_into().unwrap());
+        let groups = u32::from_ne_bytes(address[8..12].try_into().unwrap());
+        return Ok(SocketAddress::Netlink(NetlinkSocketAddress { pid, groups }));
     }
 
     Err(SyscallError::AddressFamilyNotSupported)
@@ -775,7 +783,7 @@ fn sendmsg_impl(
         let buffer = copy_iovecs_from_user(&iovs)?;
         let written = if let Some(path) = target_path.as_deref() {
             socket
-                .write_socket_to_path_with_rights(&buffer, path, rights)
+                .write_socket_to_path_with_rights(&buffer, path, dontwait, rights)
                 .map_err(ObjectError::from)?
         } else {
             socket
@@ -1109,7 +1117,7 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
             || socket.kind != UnixSocketKind::Stream
             || unix_stream_has_front_rights(&socket)
         {
-            unix_socket_control_bytes(&socket, total_read, peek, flags)?
+            unix_socket_control_bytes(&socket, total_read, peek, flags, msg.msg_controllen)?
         } else {
             Vec::new()
         };

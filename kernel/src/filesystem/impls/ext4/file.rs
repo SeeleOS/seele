@@ -113,6 +113,9 @@ impl File for Ext4File {
             }
         };
 
+        if pos < 0 {
+            return Err(FSError::InvalidArguments);
+        }
         self.position = pos as u64;
 
         Ok(self.position as usize)

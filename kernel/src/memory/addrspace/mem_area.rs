@@ -4,7 +4,7 @@ use x86_64::{
     structures::paging::{Page, PageTableFlags, PhysFrame, Size4KiB, page::PageRange},
 };
 
-use crate::{filesystem::object::FileLikeObject, memory::addrspace::KERNEL_MEM_START};
+use crate::{filesystem::object::FileLikeObject, memory::addrspace::USER_MEM_END};
 
 #[derive(Clone, Debug)]
 pub struct MemoryArea {
@@ -75,6 +75,6 @@ impl MemoryArea {
     }
 
     pub fn is_user(&self) -> bool {
-        self.start.as_u64() < KERNEL_MEM_START
+        self.start.as_u64() < USER_MEM_END && self.end.as_u64() <= USER_MEM_END
     }
 }

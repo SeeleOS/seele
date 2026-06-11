@@ -206,7 +206,11 @@ impl BlockDevice for VirtioBlockDevice {
         if !buffer.len().is_multiple_of(SECTOR_SIZE) {
             return Err(BlockDeviceError::BufferTooSmall);
         }
-        if start + (buffer.len() / SECTOR_SIZE) > self.capacity {
+        let blocks = buffer.len() / SECTOR_SIZE;
+        if start
+            .checked_add(blocks)
+            .is_none_or(|end| end > self.capacity)
+        {
             return Err(BlockDeviceError::OutOfBounds);
         }
 
@@ -244,7 +248,11 @@ impl BlockDevice for VirtioBlockDevice {
         if !buffer.len().is_multiple_of(SECTOR_SIZE) {
             return Err(BlockDeviceError::BufferTooSmall);
         }
-        if start + (buffer.len() / SECTOR_SIZE) > self.capacity {
+        let blocks = buffer.len() / SECTOR_SIZE;
+        if start
+            .checked_add(blocks)
+            .is_none_or(|end| end > self.capacity)
+        {
             return Err(BlockDeviceError::OutOfBounds);
         }
 

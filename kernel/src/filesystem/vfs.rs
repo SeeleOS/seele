@@ -303,7 +303,7 @@ impl VFS {
         self.mounts.len()
     }
 
-    pub fn mount_snapshots(&self) -> Vec<(Path, FileSystemRef, Path, MountFlags, u64)> {
+    pub fn mount_snapshots(&self) -> Vec<(Path, FileSystemRef, Path, MountFlags, u64, u64)> {
         self.mounts
             .iter()
             .map(|mount| {
@@ -313,6 +313,7 @@ impl VFS {
                     mount.source_path.clone(),
                     mount.flags,
                     mount.device_id,
+                    mount.mount_id,
                 )
             })
             .collect()

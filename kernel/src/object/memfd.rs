@@ -141,7 +141,10 @@ impl File for MemFdFile {
                 len
             }
         };
-        self.offset = next.max(0) as usize;
+        if next < 0 {
+            return Err(FSError::InvalidArguments);
+        }
+        self.offset = next as usize;
         Ok(self.offset)
     }
 

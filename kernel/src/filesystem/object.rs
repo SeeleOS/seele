@@ -36,6 +36,8 @@ pub struct OpenedFileObject {
     open_state: OpenState,
     path: Path,
     mount_device_id: u64,
+    mount_id: u64,
+    mount_root: bool,
 }
 
 pub type FileLikeObject = OpenedFileObject;
@@ -129,12 +131,20 @@ impl OpenBackend {
 }
 
 impl OpenedFileObject {
-    fn from_backend(path: Path, backend: OpenBackend, mount_device_id: u64) -> Self {
+    fn from_backend(
+        path: Path,
+        backend: OpenBackend,
+        mount_device_id: u64,
+        mount_id: u64,
+        mount_root: bool,
+    ) -> Self {
         Self {
             backend,
             open_state: OpenState::default(),
             path,
             mount_device_id,
+            mount_id,
+            mount_root,
         }
     }
 
@@ -161,20 +171,39 @@ impl OpenedFileObject {
         file: FileLike,
         path: Path,
         mount_device_id: u64,
+        mount_id: u64,
+        mount_root: bool,
     ) -> FSResult<Self> {
         Ok(Self::from_backend(
             path.clone(),
             OpenBackend::from_file_like(file, &path)?,
             mount_device_id,
+            mount_id,
+            mount_root,
         ))
     }
 
     pub fn new(file: FileLike, path: Path) -> FSResult<Self> {
-        Self::new_with_mount_device_id(file, path.clone(), mount_device_id_for_path(&path))
+        let mount_device_id = mount_device_id_for_path(&path);
+        Ok(Self::from_backend(
+            path.clone(),
+            OpenBackend::from_file_like(file, &path)?,
+            mount_device_id,
+            1,
+            false,
+        ))
     }
 
     pub fn path(&self) -> Path {
         self.path.clone()
+    }
+
+    pub fn mount_id(&self) -> u64 {
+        self.mount_id
+    }
+
+    pub fn mount_root(&self) -> bool {
+        self.mount_root
     }
 
     pub fn info(&self) -> FSResult<FileLikeInfo> {

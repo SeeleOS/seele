@@ -25,6 +25,8 @@ pub enum FSError {
     NoSpace,
     #[error("illegal seek")]
     IllegalSeek,
+    #[error("invalid arguments")]
+    InvalidArguments,
     #[error("access denied")]
     AccessDenied,
     #[error("path too long")]
@@ -51,6 +53,7 @@ impl AsSyscallError for FSError {
             Self::DirectoryNotEmpty => SyscallError::DirectoryNotEmpty,
             Self::NoSpace => SyscallError::NoSpaceLeft,
             Self::IllegalSeek => SyscallError::IllegalSeek,
+            Self::InvalidArguments => SyscallError::InvalidArguments,
             Self::AccessDenied => SyscallError::AccessDenied,
             Self::PathTooLong => SyscallError::PathTooLong,
             Self::TooManySymlinks => SyscallError::TooManySymbolicLinks,

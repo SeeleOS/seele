@@ -117,18 +117,19 @@ impl UnixSocketObject {
         &self,
         buffer: &[u8],
         path: &str,
+        force_nonblocking: bool,
         rights: Vec<ObjectRef>,
     ) -> SocketResult<usize> {
         match self.kind {
             UnixSocketKind::Datagram => {
-                self.write_datagram_socket(buffer, Some(path), false, rights)
+                self.write_datagram_socket(buffer, Some(path), force_nonblocking, rights)
             }
             UnixSocketKind::Stream | UnixSocketKind::SeqPacket => self.write_socket(buffer),
         }
     }
 
     pub fn write_socket_to_path(&self, buffer: &[u8], path: &str) -> SocketResult<usize> {
-        self.write_socket_to_path_with_rights(buffer, path, Vec::new())
+        self.write_socket_to_path_with_rights(buffer, path, false, Vec::new())
     }
 
     pub fn write_socket(&self, buffer: &[u8]) -> SocketResult<usize> {

@@ -1,4 +1,3 @@
-use crate::memory::utils::Mut;
 use crate::process::group::ProcessGroupID;
 use crate::process::manager::MANAGER;
 use crate::process::misc::ProcessID;
@@ -8,6 +7,7 @@ use crate::thread::extended_state::update_active_user_extended_state_ptr_for_thr
 use crate::thread::get_current_thread;
 use crate::thread::misc::{SnapshotState, ThreadID};
 use crate::thread::scheduling::return_to_scheduler_no_save;
+use crate::thread::thread::LinuxStack;
 use crate::thread::yielding::{BlockType, WakeType, block_current_with_sig_check};
 use crate::{
     define_syscall,
@@ -34,20 +34,6 @@ use strum::IntoEnumIterator;
 const SIG_DFL: usize = 0;
 const SIG_IGN: usize = 1;
 const MINSIGSTKSZ: usize = 2048;
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct LinuxStack {
-    ss_sp: u64,
-    ss_flags: i32,
-    ss_size: usize,
-}
-
-static SIGALTSTACK_STATE: Mut<LinuxStack> = Mut::new(LinuxStack {
-    ss_sp: 0,
-    ss_flags: StackFlags::SS_DISABLE.bits(),
-    ss_size: 0,
-});
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -294,10 +280,11 @@ define_syscall!(
 define_syscall!(
     Sigaltstack,
     |new_stack: *const LinuxStack, old_stack: *mut LinuxStack| {
-        let mut state = SIGALTSTACK_STATE.lock();
+        let current_thread = get_current_thread();
+        let mut thread = current_thread.lock();
 
         if !old_stack.is_null() {
-            user_safe::write(old_stack, &*state)?;
+            user_safe::write(old_stack, &thread.sigaltstack)?;
         }
 
         if new_stack.is_null() {
@@ -312,7 +299,7 @@ define_syscall!(
         }
 
         if new_flags.contains(StackFlags::SS_DISABLE) {
-            *state = LinuxStack {
+            thread.sigaltstack = LinuxStack {
                 ss_sp: 0,
                 ss_flags: StackFlags::SS_DISABLE.bits(),
                 ss_size: 0,
@@ -327,7 +314,7 @@ define_syscall!(
             return Err(SyscallError::NoMemory);
         }
 
-        *state = LinuxStack {
+        thread.sigaltstack = LinuxStack {
             ss_sp: new_stack.ss_sp,
             ss_flags: new_flags.bits(),
             ss_size: new_stack.ss_size,

@@ -221,7 +221,10 @@ impl Seekable for DrmPrimeBufferObject {
                 len
             }
         };
-        *position = next.max(0) as usize;
+        if next < 0 {
+            return Err(ObjectError::InvalidArguments);
+        }
+        *position = next as usize;
         if let Some((pid, comm)) = current_debug_process() {
             crate::s_println!(
                 "drm prime seek comm={} pid={} whence={:?} offset={} result={}",

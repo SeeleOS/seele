@@ -13,11 +13,25 @@ use crate::{
 };
 
 impl AddrSpace {
+    #[cfg(test)]
+    fn can_use_kernel_test_pointer(addr: u64) -> bool {
+        !Self::is_user_addr(VirtAddr::new(addr))
+    }
+
     fn ensure_user_page_readable(&mut self, addr: VirtAddr) -> bool {
+        if !Self::is_user_addr(addr) {
+            return false;
+        }
         match self.page_table.translate(addr) {
-            TranslateResult::Mapped { .. } => true,
+            TranslateResult::Mapped { flags, .. } => {
+                flags.contains(PageTableFlags::USER_ACCESSIBLE)
+            }
             _ => match self.get_area(addr).cloned() {
-                Some(area) if area.lazy => {
+                Some(area)
+                    if area.lazy
+                        && area.is_user()
+                        && area.flags.contains(PageTableFlags::USER_ACCESSIBLE) =>
+                {
                     let page = Page::<Size4KiB>::containing_address(addr);
                     let is_file_backed = matches!(area.data, Data::File { .. });
                     if is_file_backed {
@@ -25,7 +39,11 @@ impl AddrSpace {
                     } else {
                         self.apply_page(page, area);
                     }
-                    true
+                    matches!(
+                        self.page_table.translate(addr),
+                        TranslateResult::Mapped { flags, .. }
+                            if flags.contains(PageTableFlags::USER_ACCESSIBLE)
+                    )
                 }
                 _ => false,
             },
@@ -33,8 +51,14 @@ impl AddrSpace {
     }
 
     fn ensure_user_page_writable(&mut self, addr: VirtAddr) -> bool {
+        if !Self::is_user_addr(addr) {
+            return false;
+        }
         match self.page_table.translate(addr) {
             TranslateResult::Mapped { flags, .. } => {
+                if !flags.contains(PageTableFlags::USER_ACCESSIBLE) {
+                    return false;
+                }
                 if flags.contains(COW_FLAG) {
                     self.replace_cow_page(addr);
                     true
@@ -43,7 +67,12 @@ impl AddrSpace {
                 }
             }
             _ => match self.get_area(addr).cloned() {
-                Some(area) if area.lazy && area.flags.contains(PageTableFlags::WRITABLE) => {
+                Some(area)
+                    if area.lazy
+                        && area.is_user()
+                        && area.flags.contains(PageTableFlags::USER_ACCESSIBLE)
+                        && area.flags.contains(PageTableFlags::WRITABLE) =>
+                {
                     let page = Page::<Size4KiB>::containing_address(addr);
                     let is_file_backed = matches!(area.data, Data::File { .. });
                     if is_file_backed {
@@ -51,7 +80,12 @@ impl AddrSpace {
                     } else {
                         self.apply_page(page, area);
                     }
-                    true
+                    matches!(
+                        self.page_table.translate(addr),
+                        TranslateResult::Mapped { flags, .. }
+                            if flags.contains(PageTableFlags::USER_ACCESSIBLE)
+                                && flags.contains(PageTableFlags::WRITABLE)
+                    )
                 }
                 _ => false,
             },
@@ -60,6 +94,14 @@ impl AddrSpace {
 
     fn write_bytes(&mut self, mut addr: u64, mut src: &[u8]) -> SyscallResult<()> {
         while !src.is_empty() {
+            #[cfg(test)]
+            if Self::can_use_kernel_test_pointer(addr) {
+                unsafe {
+                    copy_nonoverlapping(src.as_ptr(), addr as *mut u8, src.len());
+                }
+                return Ok(());
+            }
+
             let virt = VirtAddr::new(addr);
             if !self.ensure_user_page_writable(virt) {
                 return Err(SyscallError::BadAddress);
@@ -86,6 +128,14 @@ impl AddrSpace {
 
     fn read_bytes(&mut self, mut addr: u64, mut dst: &mut [u8]) -> SyscallResult<()> {
         while !dst.is_empty() {
+            #[cfg(test)]
+            if Self::can_use_kernel_test_pointer(addr) {
+                unsafe {
+                    copy_nonoverlapping(addr as *const u8, dst.as_mut_ptr(), dst.len());
+                }
+                return Ok(());
+            }
+
             let virt = VirtAddr::new(addr);
             if !self.ensure_user_page_readable(virt) {
                 return Err(SyscallError::BadAddress);

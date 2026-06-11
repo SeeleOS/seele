@@ -38,6 +38,7 @@ pub mod user;
 pub const LAZY_MAP: bool = true;
 
 pub const USER_MEM_START: u64 = 0x0000_0000_c000_0000;
+pub const USER_MEM_END: u64 = 0x0000_8000_0000_0000;
 pub const KERNEL_MEM_START: u64 = 0xFFFF_9000_1000_0000;
 
 static KERNEL_MEM: AtomicU64 = AtomicU64::new(KERNEL_MEM_START);
@@ -65,6 +66,21 @@ impl Default for AddrSpace {
 }
 
 impl AddrSpace {
+    pub fn is_user_addr(addr: VirtAddr) -> bool {
+        addr.as_u64() < USER_MEM_END
+    }
+
+    pub fn checked_user_range(start: u64, len: u64) -> Option<(VirtAddr, VirtAddr)> {
+        if len == 0 {
+            return None;
+        }
+        let end = start.checked_add(len)?;
+        if end > USER_MEM_END {
+            return None;
+        }
+        Some((VirtAddr::new(start), VirtAddr::new(end)))
+    }
+
     fn write_back_area_range(
         &mut self,
         area: &MemoryArea,

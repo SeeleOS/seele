@@ -227,7 +227,7 @@ fn sorted_mounts() -> Vec<(String, FileSystemRef, String, MountFlags)> {
         .lock()
         .mount_snapshots()
         .into_iter()
-        .map(|(path, fs, source_path, flags, _device_id)| {
+        .map(|(path, fs, source_path, flags, _device_id, _mount_id)| {
             (path.as_string(), fs, source_path.as_string(), flags)
         })
         .collect::<Vec<_>>();

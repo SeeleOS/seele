@@ -12,6 +12,7 @@ use x86_64::{VirtAddr, registers::model_specific::FsBase};
 use crate::{
     define_syscall,
     memory::{
+        addrspace::AddrSpace,
         addrspace::mem_area::{Data, MemoryArea},
         protection::Protection,
         user_safe,
@@ -768,6 +769,16 @@ fn mmap_shared(flags: MmapFlags) -> Result<bool, SyscallError> {
     }
 }
 
+fn checked_user_mapping(addr: u64, pages: u64) -> Result<(VirtAddr, VirtAddr), SyscallError> {
+    if addr == 0 || !addr.is_multiple_of(Size4KiB::SIZE) {
+        return Err(SyscallError::InvalidArguments);
+    }
+    let len = pages
+        .checked_mul(Size4KiB::SIZE)
+        .ok_or(SyscallError::InvalidArguments)?;
+    AddrSpace::checked_user_range(addr, len).ok_or(SyscallError::InvalidArguments)
+}
+
 fn resized_file_mapping(
     file: Arc<crate::filesystem::object::FileLikeObject>,
     offset: u64,
@@ -790,13 +801,12 @@ define_syscall!(Mmap, |addr: u64,
     let pages = len.div_ceil(4096);
     let fixed = flags.intersects(MmapFlags::FIXED | MmapFlags::FIXED_NOREPLACE);
     let shared = mmap_shared(flags)?;
-    let start = VirtAddr::new(addr);
-    let end = start + pages * 4096;
 
     if fixed {
-        if addr == 0 || !offset.is_multiple_of(4096) {
+        if !offset.is_multiple_of(4096) {
             return Err(SyscallError::InvalidArguments);
         }
+        let (start, end) = checked_user_mapping(addr, pages)?;
 
         let file_mapping = if flags.contains(MmapFlags::ANONYMOUS) {
             None

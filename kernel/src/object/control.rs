@@ -1,7 +1,6 @@
 use crate::object::FileFlags;
 use crate::{
     object::{
-        error::ObjectError,
         file_locks::{LinuxFlock, fcntl_get_lock, fcntl_set_lock},
         memfd::{memfd_add_seals, memfd_get_seals},
         misc::{ObjectRef, get_object_current_process},
@@ -73,10 +72,6 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
             }
             match object.set_flags(flags) {
                 Ok(()) => Ok(0),
-                Err(ObjectError::Unimplemented) => {
-                    log_fcntl_noop_success(FcntlCmd::SetFl, fd, arg, "object.set_flags");
-                    Ok(0)
-                }
                 Err(err) => Err(err.into()),
             }
         }
@@ -91,10 +86,6 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
                         linux_flags |= FileStatusFlags::O_NONBLOCK.bits() as usize;
                     }
                     linux_flags
-                }
-                Err(ObjectError::Unimplemented) => {
-                    log_fcntl_noop_success(FcntlCmd::GetFl, fd, arg, "object.get_flags");
-                    0
                 }
                 Err(err) => return Err(err.into()),
             };
@@ -148,14 +139,4 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
                 .ok_or(SyscallError::InvalidArguments)
         }
     }
-}
-
-fn log_fcntl_noop_success(command: FcntlCmd, fd: u64, arg: u64, reason: &str) {
-    crate::s_println!(
-        "dangerous noop success fcntl cmd={:?} fd={} arg={:#x} reason={}",
-        command,
-        fd,
-        arg,
-        reason
-    );
 }

@@ -72,8 +72,6 @@ pub fn invalid_syscall_flag_error<T>(raw: u64) -> SyscallError {
     SyscallError::InvalidArguments
 }
 
-const TRACE_COMM: &str = "nautilus";
-
 pub fn log_unsupported_syscall_result(syscall_no: isize, args: [u64; 6], err: SyscallError) {
     if !matches!(err, SyscallError::NoSyscall) {
         return;
@@ -106,72 +104,9 @@ pub fn log_unsupported_syscall_result(syscall_no: isize, args: [u64; 6], err: Sy
     });
 }
 
-fn should_trace_syscall(comm: &str) -> bool {
-    comm == TRACE_COMM
-}
+pub fn log_syscall_trace_enter(_syscall_no: isize, _args: [u64; 6]) {}
 
-pub fn log_syscall_trace_enter(syscall_no: isize, args: [u64; 6]) {
-    with_current_process(|process| {
-        let tid = get_current_thread().lock().id.0;
-        let comm = process
-            .command_line
-            .first()
-            .and_then(|command| command.rsplit('/').next())
-            .unwrap_or("?");
-        if !should_trace_syscall(comm) {
-            return;
-        }
-
-        let syscall_name = SyscallNumber::from_number(syscall_no as usize)
-            .map(|number| format!("{number:?}"))
-            .unwrap_or_else(|| format!("nr={syscall_no}"));
-        crate::s_println!(
-            "syscall trace enter comm={} pid={} tid={} name={} a1={:#x} a2={:#x} a3={:#x} a4={:#x} a5={:#x} a6={:#x}",
-            comm,
-            process.pid.0,
-            tid,
-            syscall_name,
-            args[0],
-            args[1],
-            args[2],
-            args[3],
-            args[4],
-            args[5]
-        );
-    });
-}
-
-pub fn log_syscall_trace_exit(syscall_no: isize, args: [u64; 6], result: isize) {
-    with_current_process(|process| {
-        let tid = get_current_thread().lock().id.0;
-        let comm = process
-            .command_line
-            .first()
-            .and_then(|command| command.rsplit('/').next())
-            .unwrap_or("?");
-        if !should_trace_syscall(comm) {
-            return;
-        }
-
-        let syscall_name = SyscallNumber::from_number(syscall_no as usize)
-            .map(|number| format!("{number:?}"))
-            .unwrap_or_else(|| format!("nr={syscall_no}"));
-        crate::s_println!(
-            "syscall trace exit comm={} pid={} tid={} name={} ret={} a1={:#x} a2={:#x} a3={:#x} a4={:#x} a5={:#x} a6={:#x}",
-            comm,
-            process.pid.0,
-            tid,
-            syscall_name,
-            result,
-            args[0],
-            args[1],
-            args[2],
-            args[3],
-            args[4],
-            args[5]
-        );
-    });
-}
+pub fn log_syscall_trace_exit(_syscall_no: isize, _args: [u64; 6], _result: isize) {}
 
 impl From<isize> for SyscallError {
     fn from(value: isize) -> Self {

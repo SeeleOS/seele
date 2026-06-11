@@ -15,6 +15,24 @@ use crate::{
 
 pub const DEFAULT_USER_TIMESLICE_NS: u64 = 4_000_000;
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct LinuxStack {
+    pub ss_sp: u64,
+    pub ss_flags: i32,
+    pub ss_size: usize,
+}
+
+impl Default for LinuxStack {
+    fn default() -> Self {
+        Self {
+            ss_sp: 0,
+            ss_flags: 2,
+            ss_size: 0,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Thread {
     pub parent: ProcessRef,
@@ -47,6 +65,7 @@ pub struct Thread {
     pub io_buffer: Vec<u8>,
     pub name: [u8; 16],
     pub timeslice_remaining_ns: u64,
+    pub sigaltstack: LinuxStack,
 
     pub sig_handler_snapshot: ThreadSnapshot,
 }
@@ -82,6 +101,7 @@ impl Default for Thread {
             io_buffer: Vec::new(),
             name: [0; 16],
             timeslice_remaining_ns: DEFAULT_USER_TIMESLICE_NS,
+            sigaltstack: LinuxStack::default(),
         }
     }
 }

@@ -316,6 +316,17 @@ impl NetworkDevice for E1000Device {
         }
 
         let length = usize::from(desc.length);
+        if length > self.rx_buffers[index].len() {
+            log::warn!("e1000: dropping oversized rx descriptor length={length}");
+            unsafe {
+                let desc_ptr = self.rx_ring.as_mut_ptr::<RxDescriptor>().add(index);
+                (*desc_ptr).status = 0;
+                (*desc_ptr).length = 0;
+            }
+            self.write_reg(REG_RDT, index as u32);
+            state.rx_next = (state.rx_next + 1) % RX_DESC_COUNT;
+            return None;
+        }
         let mut frame = vec![0; length];
         frame.copy_from_slice(&self.rx_buffers[index].as_slice()[..length]);
 

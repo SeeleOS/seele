@@ -18,11 +18,15 @@ use crate::filesystem::{
 };
 
 impl VFS {
-    pub(crate) fn resolve_parent(&self, path: Path) -> FSResult<(WrappedDirectory, String)> {
-        let normalized = self.normalize_path(path);
+    fn resolve_parent_normalized(&self, normalized: Path) -> FSResult<(WrappedDirectory, String)> {
         let name = normalized.file_name().ok_or(FSError::NotFound)?;
         let parent = normalized.parent().ok_or(FSError::NotFound)?;
         Ok((self.resolve_dir(parent)?, name))
+    }
+
+    pub(crate) fn resolve_parent(&self, path: Path) -> FSResult<(WrappedDirectory, String)> {
+        let normalized = self.normalize_path(path);
+        self.resolve_parent_normalized(normalized)
     }
 
     pub fn create_file(&mut self, path: Path) -> FSResult<()> {
@@ -31,7 +35,7 @@ impl VFS {
             return Err(FSError::NotADirectory);
         }
 
-        let (parent_dir, name) = self.resolve_parent(path)?;
+        let (parent_dir, name) = self.resolve_parent_normalized(normalized)?;
 
         parent_dir
             .clone()
@@ -44,7 +48,8 @@ impl VFS {
     }
 
     pub fn create_dir_with_mode(&mut self, path: Path, mode: Option<u32>) -> FSResult<()> {
-        let (parent_dir, name) = self.resolve_parent(path)?;
+        let normalized = self.normalize_path(path);
+        let (parent_dir, name) = self.resolve_parent_normalized(normalized)?;
 
         let mut info = DirectoryContentInfo::new(name, DirectoryContentType::Directory);
         if let Some(mode) = mode {
@@ -55,7 +60,8 @@ impl VFS {
     }
 
     pub fn create_symlink(&mut self, path: Path, target: &str) -> FSResult<()> {
-        let (parent_dir, name) = self.resolve_parent(path)?;
+        let normalized = self.normalize_path(path);
+        let (parent_dir, name) = self.resolve_parent_normalized(normalized)?;
         parent_dir.lock().create_symlink(&name, target)
     }
 
@@ -63,16 +69,32 @@ impl VFS {
         let normalized = self.normalize_path(path);
         log::trace!("vfs: open {}", normalized.clone().as_string());
         let (file, resolved_path) = self.resolve_with_path(normalized)?;
-        let mount_device_id = self.mount_device_id(resolved_path.clone())?;
-        OpenedFileObject::new_with_mount_device_id(file, resolved_path, mount_device_id)
+        let (mount_path, mount_device_id, mount_id) =
+            self.mount_path_and_ids(resolved_path.clone())?;
+        let mount_root = resolved_path == mount_path;
+        OpenedFileObject::new_with_mount_device_id(
+            file,
+            resolved_path,
+            mount_device_id,
+            mount_id,
+            mount_root,
+        )
     }
 
     pub fn open_nofollow(&mut self, path: Path) -> FSResult<OpenedFileObject> {
         let normalized = self.normalize_path(path);
         log::trace!("vfs: open_nofollow {}", normalized.clone().as_string());
         let (file, resolved_path) = self.resolve_nofollow_with_path(normalized)?;
-        let mount_device_id = self.mount_device_id(resolved_path.clone())?;
-        OpenedFileObject::new_with_mount_device_id(file, resolved_path, mount_device_id)
+        let (mount_path, mount_device_id, mount_id) =
+            self.mount_path_and_ids(resolved_path.clone())?;
+        let mount_root = resolved_path == mount_path;
+        OpenedFileObject::new_with_mount_device_id(
+            file,
+            resolved_path,
+            mount_device_id,
+            mount_id,
+            mount_root,
+        )
     }
 
     pub fn file_info(&mut self, path: Path) -> FSResult<FileLikeInfo> {
@@ -82,7 +104,8 @@ impl VFS {
     }
 
     pub fn delete_file(&mut self, path: Path) -> FSResult<()> {
-        let (dir, name) = self.resolve_parent(path)?;
+        let normalized = self.normalize_path(path);
+        let (dir, name) = self.resolve_parent_normalized(normalized)?;
         dir.lock().delete(&name)?;
 
         Ok(())
@@ -230,17 +253,41 @@ pub fn read_all(path: Path) -> FSResult<Vec<u8>> {
 pub fn open_path(path: Path) -> FSResult<OpenedFileObject> {
     let normalized = path.normalize();
     log::trace!("vfs: open {}", normalized.clone().as_string());
-    let (file, resolved_path, mount_device_id) =
-        resolve::resolve_path_with_mount_device_id(normalized, true)?;
-    OpenedFileObject::new_with_mount_device_id(file, resolved_path, mount_device_id)
+    let (file, resolved_path, mount_id, mount_root) =
+        resolve::resolve_path_with_mount_info(normalized, true)?;
+    let mount_device_id = resolve::resolve_path_with_mount_device_id(resolved_path.clone(), true)?.2;
+    OpenedFileObject::new_with_mount_device_id(
+        file,
+        resolved_path,
+        mount_device_id,
+        mount_id,
+        mount_root,
+    )
 }
 
 pub fn open_path_nofollow(path: Path) -> FSResult<OpenedFileObject> {
     let normalized = path.normalize();
     log::trace!("vfs: open_nofollow {}", normalized.clone().as_string());
-    let (file, resolved_path, mount_device_id) =
-        resolve::resolve_path_with_mount_device_id(normalized, false)?;
-    OpenedFileObject::new_with_mount_device_id(file, resolved_path, mount_device_id)
+    let (file, resolved_path, mount_id, mount_root) =
+        resolve::resolve_path_with_mount_info(normalized, false)?;
+    let mount_device_id =
+        resolve::resolve_path_with_mount_device_id(resolved_path.clone(), false)?.2;
+    OpenedFileObject::new_with_mount_device_id(
+        file,
+        resolved_path,
+        mount_device_id,
+        mount_id,
+        mount_root,
+    )
+}
+
+pub fn resolve_path_with_mount_info(
+    path: Path,
+    follow_final_symlink: bool,
+) -> FSResult<(FileLikeInfo, Path, u64, bool)> {
+    let (file, resolved_path, mount_id, mount_root) =
+        resolve::resolve_path_with_mount_info(path, follow_final_symlink)?;
+    Ok((file.info()?, resolved_path, mount_id, mount_root))
 }
 
 pub fn resolve_path_with_final(

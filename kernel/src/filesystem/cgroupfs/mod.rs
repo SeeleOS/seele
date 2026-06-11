@@ -708,9 +708,11 @@ impl File for CgroupFileHandle {
                 }
                 len
             }
+        };
+        if next < 0 {
+            return Err(FSError::InvalidArguments);
         }
-        .max(0) as usize;
-        self.offset = next;
+        self.offset = next as usize;
         Ok(self.offset)
     }
 

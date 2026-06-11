@@ -17,8 +17,10 @@ use crate::{
     thread::{
         extended_state::update_active_user_extended_state_ptr_for_thread,
         misc::{SnapshotState, ThreadID},
+        scheduling::return_to_scheduler_from_current,
         snapshot::ThreadSnapshot,
         stack::allocate_kernel_stack,
+        thread::LinuxStack,
         with_thread_manager,
     },
 };
@@ -108,6 +110,7 @@ impl Process {
         thread_locked.kernel_stack_top = self.kernel_stack_top.as_u64();
         thread_locked.snapshot_state = SnapshotState::Normal;
         thread_locked.sig_handler_snapshot = ThreadSnapshot::default();
+        thread_locked.sigaltstack = LinuxStack::default();
         thread_locked.saved_blocked_signals.clear();
         thread_locked.clear_child_tid = 0;
         thread_locked.robust_list_head = 0;
@@ -162,7 +165,7 @@ fn wait_for_exec_siblings_to_stop(
     while !with_thread_manager(|manager| {
         manager.exit_thread_list_except(threads.clone(), current_thread_id)
     }) {
-        core::hint::spin_loop();
+        return_to_scheduler_from_current();
     }
 }
 
