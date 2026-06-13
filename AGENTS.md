@@ -57,10 +57,9 @@ There is no large standalone test suite yet; verification is primarily compile c
 
 ## Debugging Guidance
 
-IMPORTANT: When debugging third-party userspace components such as Weston, Xorg, libudev, or libinput, do not rely on staring at binaries or disassembly unless there is no better option. Prefer reading the corresponding source code first.
-IMPORTANT: When debugging Weston specifically, inspect the local Weston source tree first and treat binary inspection or disassembly as a last resort only after the source path has been exhausted.
-If the relevant source tree is not already present locally, clone it directly into a clearly named local directory such as `third_party/`, then use that local checkout as the primary reference during debugging.
-When debugging third-party source code in this repository workflow, do not use web search as the primary way to inspect source. Clone the upstream repository into a local `third_party/` directory and use that local checkout instead.
+IMPORTANT: When debugging third-party userspace components such as Weston, Xorg, libudev, libinput, KDE, Qt, or SQLite, do not rely on staring at binaries or disassembly unless there is no better option. Prefer reading the corresponding source code first.
+IMPORTANT: When debugging third-party source code in this repository workflow, inspect the official upstream GitHub repository first and treat binary inspection or disassembly as a last resort only after the source path has been exhausted.
+If GitHub is unavailable, or if you need a local checkout for broad `rg` searches, clone the relevant upstream repository into a clearly named local directory such as `third_party/`, then use that local checkout as a secondary reference.
 If you need syscall-level debugging, temporarily enable `should_log` in `kernel/src/systemcall/handling.rs` manually, and turn it back off before finishing the task.
 When syscall logging is needed to chase userspace failures, prefer filtering the log to syscalls that return a specific errno of interest such as `BadAddress` instead of logging every syscall entry/exit. This keeps `mmap`, `read`, `write`, `poll`, and `futex` noise from hiding the actual signal.
 If the system appears to stop responding, consider early that a syscall may have entered the kernel and never returned. Use enter/exit syscall logs to verify this explicitly instead of assuming the last logged successful syscall was the true point of failure.
