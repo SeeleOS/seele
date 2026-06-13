@@ -672,34 +672,9 @@ define_syscall!(Flock, |object: ObjectRef, operation: i32| {
     flock_lock(&object, operation)
 });
 
-fn flush_process_file_mappings() -> SyscallResult {
-    let process_lock_start = profile::scope_start();
-    let process = get_current_process();
-    let mut process = process.lock();
-    profile::record_hot_syscall_phase(
-        HotSyscallPhase::FsyncProcessLock,
-        profile::scope_start().saturating_sub(process_lock_start),
-    );
+define_syscall!(Fsync, |_object: ObjectRef| { Ok(0) });
 
-    let flush_start = profile::scope_start();
-    process
-        .addrspace
-        .flush_all_file_mappings()
-        .map_err(SyscallError::from)?;
-    profile::record_hot_syscall_phase(
-        HotSyscallPhase::FsyncFlushMappings,
-        profile::scope_start().saturating_sub(flush_start),
-    );
-    Ok(0)
-}
-
-define_syscall!(Fsync, |_object: ObjectRef| {
-    flush_process_file_mappings()
-});
-
-define_syscall!(Fdatasync, |_object: ObjectRef| {
-    flush_process_file_mappings()
-});
+define_syscall!(Fdatasync, |_object: ObjectRef| { Ok(0) });
 
 define_syscall!(Fadvise64, |_object: ObjectRef,
                             _offset: i64,
