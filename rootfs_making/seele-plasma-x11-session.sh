@@ -32,24 +32,20 @@ export KDE_FULL_SESSION=true
 export KDE_SESSION_VERSION=6
 export QT_QPA_PLATFORM=xcb
 export QT_XCB_NO_MITSHM=1
+export QT_QUICK_BACKEND=software
+export QT_NO_XDG_DESKTOP_PORTAL=1
+export LIBGL_ALWAYS_SOFTWARE=1
+export GTK_USE_PORTAL=0
+export GIO_USE_VFS=local
 export KWIN_COMPOSE=N
 
 unset WAYLAND_DISPLAY
 
-log "starting kwin_x11 display=${DISPLAY:-unset} bus=${DBUS_SESSION_BUS_ADDRESS:-unset}"
-/usr/bin/kwin_x11 --replace >>"${log_file}" 2>&1 &
-kwin_pid=$!
+mkdir -p "${XDG_CONFIG_HOME:-/root/.config}"
+cat >"${XDG_CONFIG_HOME:-/root/.config}/startkderc" <<'EOF'
+[General]
+systemdBoot=false
+EOF
 
-sleep 2
-
-log "starting plasmashell"
-/usr/bin/plasmashell --no-respawn >>"${log_file}" 2>&1 &
-shell_pid=$!
-
-wait "${shell_pid}"
-shell_status=$?
-log "plasmashell exited status=${shell_status}"
-
-kill "${kwin_pid}" >/dev/null 2>&1 || true
-wait "${kwin_pid}" >/dev/null 2>&1 || true
-exit "${shell_status}"
+log "exec startplasma-x11"
+exec /usr/bin/startplasma-x11 >>"${log_file}" 2>&1

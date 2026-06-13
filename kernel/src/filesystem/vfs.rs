@@ -111,6 +111,7 @@ impl VFS {
         self.mount(Path::new("/tmp"), TmpFs::new())?;
         self.mount(Path::new("/run"), TmpFs::new())?;
         self.mount(Path::new("/dev"), DevFs::new())?;
+        self.mount(Path::new("/dev/shm"), TmpFs::new())?;
         self.mount(Path::new("/proc"), ProcFs::new())?;
         self.mount(Path::new("/sys"), SysFs::new())?;
         self.mount(Path::new("/sys/fs/cgroup"), CgroupFs::new())?;

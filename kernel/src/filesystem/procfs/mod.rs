@@ -41,7 +41,9 @@ use root::{
     PROC_CMDLINE_INODE, PROC_DEVICES_INODE, PROC_MEMINFO_INODE, PROC_MOUNTS_INODE,
     PROC_PRESSURE_CPU_INODE, PROC_PRESSURE_INODE, PROC_PRESSURE_IO_INODE,
     PROC_PRESSURE_MEMORY_INODE, PROC_ROOT_INODE, PROC_SELF_INODE, PROC_STAT_INODE,
-    PROC_SYS_FS_FILE_MAX_INODE, PROC_SYS_FS_INODE, PROC_SYS_FS_NR_OPEN_INODE, PROC_SYS_INODE,
+    PROC_SYS_FS_FILE_MAX_INODE, PROC_SYS_FS_INODE, PROC_SYS_FS_INOTIFY_INODE,
+    PROC_SYS_FS_INOTIFY_MAX_QUEUED_EVENTS_INODE, PROC_SYS_FS_INOTIFY_MAX_USER_INSTANCES_INODE,
+    PROC_SYS_FS_INOTIFY_MAX_USER_WATCHES_INODE, PROC_SYS_FS_NR_OPEN_INODE, PROC_SYS_INODE,
     PROC_SYS_KERNEL_CAP_LAST_CAP_INODE, PROC_SYS_KERNEL_DOMAINNAME_INODE,
     PROC_SYS_KERNEL_HOSTNAME_INODE, PROC_SYS_KERNEL_INODE, PROC_SYS_KERNEL_NGROUPS_MAX_INODE,
     PROC_SYS_KERNEL_OSRELEASE_INODE, PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE,
@@ -53,9 +55,17 @@ use root::{
 };
 
 const DEFAULT_FILE_MAX: u64 = 1_048_576;
+const DEFAULT_INOTIFY_MAX_QUEUED_EVENTS: u64 = 16_384;
+const DEFAULT_INOTIFY_MAX_USER_INSTANCES: u64 = 128;
+const DEFAULT_INOTIFY_MAX_USER_WATCHES: u64 = 524_288;
 const DEFAULT_NR_OPEN: u64 = 1_048_576;
 
 static PROC_FILE_MAX: AtomicU64 = AtomicU64::new(DEFAULT_FILE_MAX);
+static PROC_INOTIFY_MAX_QUEUED_EVENTS: AtomicU64 =
+    AtomicU64::new(DEFAULT_INOTIFY_MAX_QUEUED_EVENTS);
+static PROC_INOTIFY_MAX_USER_INSTANCES: AtomicU64 =
+    AtomicU64::new(DEFAULT_INOTIFY_MAX_USER_INSTANCES);
+static PROC_INOTIFY_MAX_USER_WATCHES: AtomicU64 = AtomicU64::new(DEFAULT_INOTIFY_MAX_USER_WATCHES);
 static PROC_NR_OPEN: AtomicU64 = AtomicU64::new(DEFAULT_NR_OPEN);
 
 fn proc_pid_namespace_file(
@@ -151,7 +161,16 @@ fn proc_trim_sysctl_string(buffer: &[u8]) -> FSResult<&str> {
 fn proc_fs_entries() -> Vec<DirectoryContentInfo> {
     vec![
         DirectoryContentInfo::new("file-max".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("inotify".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("nr_open".into(), DirectoryContentType::File),
+    ]
+}
+
+fn proc_fs_inotify_entries() -> Vec<DirectoryContentInfo> {
+    vec![
+        DirectoryContentInfo::new("max_queued_events".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("max_user_instances".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("max_user_watches".into(), DirectoryContentType::File),
     ]
 }
 
@@ -261,6 +280,12 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             PROC_SYS_FS_INODE,
             proc_fs_entries(),
         )),
+        ["sys", "fs", "inotify"] => Ok(proc_dir(
+            "/sys/fs/inotify",
+            "inotify",
+            PROC_SYS_FS_INOTIFY_INODE,
+            proc_fs_inotify_entries(),
+        )),
         ["sys", "kernel"] => Ok(proc_dir(
             "/sys/kernel",
             "kernel",
@@ -315,6 +340,24 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             PROC_SYS_FS_FILE_MAX_INODE,
             || proc_sysctl_value_bytes(&PROC_FILE_MAX),
             |buffer| proc_write_sysctl_u64(&PROC_FILE_MAX, buffer),
+        )),
+        ["sys", "fs", "inotify", "max_queued_events"] => Ok(proc_rw_file(
+            "max_queued_events",
+            PROC_SYS_FS_INOTIFY_MAX_QUEUED_EVENTS_INODE,
+            || proc_sysctl_value_bytes(&PROC_INOTIFY_MAX_QUEUED_EVENTS),
+            |buffer| proc_write_sysctl_u64(&PROC_INOTIFY_MAX_QUEUED_EVENTS, buffer),
+        )),
+        ["sys", "fs", "inotify", "max_user_instances"] => Ok(proc_rw_file(
+            "max_user_instances",
+            PROC_SYS_FS_INOTIFY_MAX_USER_INSTANCES_INODE,
+            || proc_sysctl_value_bytes(&PROC_INOTIFY_MAX_USER_INSTANCES),
+            |buffer| proc_write_sysctl_u64(&PROC_INOTIFY_MAX_USER_INSTANCES, buffer),
+        )),
+        ["sys", "fs", "inotify", "max_user_watches"] => Ok(proc_rw_file(
+            "max_user_watches",
+            PROC_SYS_FS_INOTIFY_MAX_USER_WATCHES_INODE,
+            || proc_sysctl_value_bytes(&PROC_INOTIFY_MAX_USER_WATCHES),
+            |buffer| proc_write_sysctl_u64(&PROC_INOTIFY_MAX_USER_WATCHES, buffer),
         )),
         ["sys", "fs", "nr_open"] => Ok(proc_rw_file(
             "nr_open",
@@ -719,8 +762,8 @@ impl FileSystem for ProcFs {
 #[cfg(test)]
 mod tests {
     use super::{
-        proc_c_string_bytes, proc_fs_entries, proc_pressure_bytes, proc_sys_entries,
-        proc_sysctl_value_bytes, proc_trim_sysctl_string, proc_write_domainname,
+        proc_c_string_bytes, proc_fs_entries, proc_fs_inotify_entries, proc_pressure_bytes,
+        proc_sys_entries, proc_sysctl_value_bytes, proc_trim_sysctl_string, proc_write_domainname,
         proc_write_hostname, proc_write_pressure, proc_write_sysctl_u64,
     };
     use crate::filesystem::errors::FSError;
@@ -764,9 +807,16 @@ mod tests {
 
     fn procfs_static_entry_builders_expose_stable_names() {
         let fs_entries = proc_fs_entries();
-        assert_eq!(fs_entries.len(), 2);
+        assert_eq!(fs_entries.len(), 3);
         assert_eq!(fs_entries[0].name, "file-max");
-        assert_eq!(fs_entries[1].name, "nr_open");
+        assert_eq!(fs_entries[1].name, "inotify");
+        assert_eq!(fs_entries[2].name, "nr_open");
+
+        let inotify_entries = proc_fs_inotify_entries();
+        assert_eq!(inotify_entries.len(), 3);
+        assert_eq!(inotify_entries[0].name, "max_queued_events");
+        assert_eq!(inotify_entries[1].name, "max_user_instances");
+        assert_eq!(inotify_entries[2].name, "max_user_watches");
 
         let sys_entries = proc_sys_entries();
         assert_eq!(sys_entries.len(), 2);

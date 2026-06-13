@@ -250,6 +250,17 @@ install_sysroot_file "${ROOTFS_MAKING_DIR}/getty-tty1-autologin.conf" "${SYSROOT
 install_sysroot_file "${ROOTFS_MAKING_DIR}/startplasma-x11-tty.sh" "${SYSROOT_DIR}/usr/bin/startplasma-x11-tty"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/seele-plasma-x11-session.sh" "${SYSROOT_DIR}/usr/bin/seele-plasma-x11-session"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/startplasma-wayland-tty.sh" "${SYSROOT_DIR}/usr/bin/startplasma-wayland-tty"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/org.kde.kglobalaccel.service" "${SYSROOT_DIR}/usr/share/dbus-1/services/org.kde.kglobalaccel.service"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/plasma-desktop-defaults" "${SYSROOT_DIR}/usr/share/plasma/shells/org.kde.plasma.desktop/contents/defaults"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/plasma-default-panel-layout.js" "${SYSROOT_DIR}/usr/share/plasma/layout-templates/org.kde.plasma.desktop.defaultPanel/contents/layout.js"
+
+sudo rm -f \
+    "${SYSROOT_DIR}/usr/share/dbus-1/services/org.kde.KSplash.service" \
+    "${SYSROOT_DIR}/usr/share/dbus-1/services/org.freedesktop.portal.Desktop.service" \
+    "${SYSROOT_DIR}/usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.cosmic.service" \
+    "${SYSROOT_DIR}/usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.gtk.service" \
+    "${SYSROOT_DIR}/usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.kde.service" \
+    "${SYSROOT_DIR}/usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.kwallet.service"
 
 sudo rm -f \
     "${SYSROOT_DIR}/root/.config/kdeglobals" \
@@ -273,6 +284,13 @@ sudo rm -rf \
     "${SYSROOT_DIR}/root/.cache/plasmashell" \
     "${SYSROOT_DIR}/root/.local/share/kactivitymanagerd" \
     "${SYSROOT_DIR}/root/.local/share/klipper"
+
+sudo install -d -m 0700 \
+    "${SYSROOT_DIR}/root/.cache" \
+    "${SYSROOT_DIR}/root/.config" \
+    "${SYSROOT_DIR}/root/.local/share" \
+    "${SYSROOT_DIR}/root/.local/state"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/ksplashrc" "${SYSROOT_DIR}/root/.config/ksplashrc"
 
 for package in "${AUR_PACKAGES[@]}"; do
     install_aur_package "${package}"

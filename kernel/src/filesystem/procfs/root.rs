@@ -28,15 +28,19 @@ pub(super) const PROC_PRESSURE_MEMORY_INODE: u64 = 0x300c;
 pub(super) const PROC_SYS_FS_INODE: u64 = 0x300d;
 pub(super) const PROC_SYS_FS_FILE_MAX_INODE: u64 = 0x300e;
 pub(super) const PROC_SYS_FS_NR_OPEN_INODE: u64 = 0x300f;
-pub(super) const PROC_SYS_KERNEL_INODE: u64 = 0x3010;
-pub(super) const PROC_SYS_KERNEL_RANDOM_INODE: u64 = 0x3011;
-pub(super) const PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE: u64 = 0x3012;
-pub(super) const PROC_SYS_KERNEL_HOSTNAME_INODE: u64 = 0x3013;
-pub(super) const PROC_SYS_KERNEL_DOMAINNAME_INODE: u64 = 0x3014;
-pub(super) const PROC_SYS_KERNEL_OSRELEASE_INODE: u64 = 0x3015;
-pub(super) const PROC_SYS_KERNEL_RANDOM_UUID_INODE: u64 = 0x3016;
-pub(super) const PROC_SYS_KERNEL_NGROUPS_MAX_INODE: u64 = 0x3017;
-pub(super) const PROC_SYS_KERNEL_CAP_LAST_CAP_INODE: u64 = 0x3018;
+pub(super) const PROC_SYS_FS_INOTIFY_INODE: u64 = 0x3010;
+pub(super) const PROC_SYS_FS_INOTIFY_MAX_QUEUED_EVENTS_INODE: u64 = 0x3011;
+pub(super) const PROC_SYS_FS_INOTIFY_MAX_USER_INSTANCES_INODE: u64 = 0x3012;
+pub(super) const PROC_SYS_FS_INOTIFY_MAX_USER_WATCHES_INODE: u64 = 0x3013;
+pub(super) const PROC_SYS_KERNEL_INODE: u64 = 0x3014;
+pub(super) const PROC_SYS_KERNEL_RANDOM_INODE: u64 = 0x3015;
+pub(super) const PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE: u64 = 0x3016;
+pub(super) const PROC_SYS_KERNEL_HOSTNAME_INODE: u64 = 0x3017;
+pub(super) const PROC_SYS_KERNEL_DOMAINNAME_INODE: u64 = 0x3018;
+pub(super) const PROC_SYS_KERNEL_OSRELEASE_INODE: u64 = 0x3019;
+pub(super) const PROC_SYS_KERNEL_RANDOM_UUID_INODE: u64 = 0x301a;
+pub(super) const PROC_SYS_KERNEL_NGROUPS_MAX_INODE: u64 = 0x301b;
+pub(super) const PROC_SYS_KERNEL_CAP_LAST_CAP_INODE: u64 = 0x301c;
 
 static PROC_UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -332,6 +336,7 @@ mod tests {
         assert!(mounts.contains("proc /proc proc "));
         assert!(mounts.contains("sysfs /sys sysfs "));
         assert!(mounts.contains("devtmpfs /dev devtmpfs "));
+        assert!(mounts.contains("tmpfs /dev/shm tmpfs "));
 
         let mountinfo = alloc::string::String::from_utf8(proc_mountinfo_bytes()).unwrap();
         assert!(mountinfo.contains(" / / "));
@@ -339,6 +344,8 @@ mod tests {
         assert!(mountinfo.contains(" - proc proc "));
         assert!(mountinfo.contains(" - sysfs sysfs "));
         assert!(mountinfo.contains(" - devtmpfs devtmpfs "));
+        assert!(mountinfo.contains(" /dev/shm "));
+        assert!(mountinfo.contains(" - tmpfs tmpfs "));
     }
 }
 
