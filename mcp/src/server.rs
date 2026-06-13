@@ -182,6 +182,11 @@ impl SeeleMcp {
     async fn run_xrootfs(&self) -> CallToolResult {
         json_result(self.session.run_cargo_alias("xrootfs").await).await
     }
+
+    #[tool(description = "Ensure sysroot/ is mounted from disk.img through cargo xsysroot-mount")]
+    async fn ensure_sysroot_mounted(&self) -> CallToolResult {
+        json_result(self.session.run_cargo_alias("xsysroot-mount").await).await
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
