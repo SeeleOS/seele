@@ -7,5 +7,6 @@ pub enum QemuExitCode {
 }
 
 pub fn debug_exit(code: QemuExitCode) {
-    X86::new(0xf4, 1).exit(code as u32);
+    // The xtask QEMU runner configures the x86 ISA debug-exit device at this port.
+    unsafe { X86::new(0xf4, 1) }.exit(code as u32);
 }

@@ -124,6 +124,7 @@ pub fn to_escape_sequence(key: KeyCode) -> &'static [u8] {
         KeyCode::WWWHome => b"",
         KeyCode::PowerOnTestOk => b"",
         KeyCode::TooManyKeys => b"",
+        KeyCode::Unknown => b"",
         KeyCode::RControl2 => b"",
         KeyCode::RAlt2 => b"",
     }
