@@ -10208,6 +10208,22 @@ fn memory_mapping_syscalls_follow_linux_rules() {
         SyscallError::OperationNotSupported,
     );
 
+    let (forked_process, _) = Process::fork(process.clone());
+    process
+        .lock()
+        .addrspace
+        .write_buffer((file_map_addr + 8) as *mut u8, b"shared")
+        .unwrap();
+    assert_eq!(
+        forked_process
+            .lock()
+            .addrspace
+            .read_buffer((file_map_addr + 8) as *const u8, 6)
+            .expect("forked child should read the shared mapping"),
+        b"shared",
+        "MAP_SHARED file mappings must remain shared after fork instead of becoming COW"
+    );
+
     expect_ok(
         SyscallArgs::new([file_map_addr, 4096, 0, 0, 0, 0]).call::<Munmap>(),
         0,

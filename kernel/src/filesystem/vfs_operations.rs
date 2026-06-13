@@ -255,7 +255,8 @@ pub fn open_path(path: Path) -> FSResult<OpenedFileObject> {
     log::trace!("vfs: open {}", normalized.clone().as_string());
     let (file, resolved_path, mount_id, mount_root) =
         resolve::resolve_path_with_mount_info(normalized, true)?;
-    let mount_device_id = resolve::resolve_path_with_mount_device_id(resolved_path.clone(), true)?.2;
+    let mount_device_id =
+        resolve::resolve_path_with_mount_device_id(resolved_path.clone(), true)?.2;
     OpenedFileObject::new_with_mount_device_id(
         file,
         resolved_path,

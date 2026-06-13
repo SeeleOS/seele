@@ -4,7 +4,10 @@ use x86_64::{
 };
 
 use crate::memory::{
-    addrspace::cow::{increase_ref, increase_ref_by, is_ref_counted},
+    addrspace::{
+        cow::{increase_ref, increase_ref_by, is_ref_counted},
+        mem_area::Data,
+    },
     page_table_wrapper::PageTableWrapped,
     paging::FRAME_ALLOCATOR,
     utils::as_cow_flags,
@@ -28,6 +31,7 @@ impl AddrSpace {
                 continue;
             }
 
+            let is_shared_file_mapping = matches!(area.data, Data::File { shared: true, .. });
             let start = Page::<Size4KiB>::containing_address(area.start);
             let end = Page::<Size4KiB>::containing_address(area.end - 1u64);
             let pages = Page::<Size4KiB>::range_inclusive(start, end);
@@ -43,7 +47,9 @@ impl AddrSpace {
                 {
                     unsafe {
                         let already_ref_counted = is_ref_counted(frame);
-                        let new_flags = if flags.contains(PageTableFlags::WRITABLE) {
+                        let new_flags = if flags.contains(PageTableFlags::WRITABLE)
+                            && !is_shared_file_mapping
+                        {
                             old_page_table
                                 .update_flags(page, as_cow_flags(flags))
                                 .unwrap()
