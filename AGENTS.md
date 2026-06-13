@@ -10,8 +10,9 @@
 - `cargo xrootfs-override`: rebuild `disk.img` from scratch.
 - `cargo xsysroot-mount`: mount `sysroot/` from `disk.img` when needed for inspection.
 - `cargo xvm-ps`: list current runner and QEMU processes before cleanup.
+- `seele` MCP server: when available, prefer its `agent_start`, `agent_status`, `agent_serial_tail`, `agent_screenshot`, QMP input, and cleanup tools for VM-driven agent workflows instead of hand-rolled QMP or terminal-socket scripts.
 - If a required tool is missing for this repository workflow, add it to the `flake.nix` dev shell instead of treating it as a one-off host prerequisite.
-- When polling a background VM terminal, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
+- When polling VM state or serial output, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
 - After finishing VM-based testing, shut the VM down and verify there is no leftover runner or QEMU process before moving on.
 - To inspect the current agent VM and runner processes before shutdown, use `cargo xvm-ps`. If it shows a leftover VM or runner, kill those PIDs explicitly.
 - Do not assume `sysroot/` is mounted or synchronized with `disk.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the xtask VM flow when in doubt.
@@ -19,7 +20,7 @@
 - After `cargo xsysroot-mount`, if you only need to read files from `sysroot/`, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
 - If the sandbox, `no_new_privileges`, missing mounts, or network restrictions block a necessary command, ask the user for privilege escalation or the required access instead of silently giving up on that path.
 
-After finishing a change, run `cargo xtest` and `cargo xrun -- --agent` to test the kernel unit tests and VM. If either test fails, keep fixing the issue before considering the work done. If you are validating a shell or userspace fix, prefer the `--agent` path so serial logs are captured automatically.
+After finishing a change, run `cargo xtest` and `cargo xrun -- --agent` to test the kernel unit tests and VM. If the `seele` MCP server is available, use it for additional VM status, serial, screenshot, and QMP input smoke checks. If any required test fails, keep fixing the issue before considering the work done. If you are validating a shell or userspace fix, prefer serial logs captured through the xtask/MCP agent path.
 
 ## Coding Style & Naming Conventions
 
@@ -50,6 +51,7 @@ There is no large standalone test suite yet; verification is primarily compile c
 - Treat compiler warnings as failures. Do not leave any `cargo check` warnings in the tree.
 - After finishing code changes, run `cargo clippy` and address its findings before considering the work complete.
 - Run `cargo xrun -- --agent` for syscall, process, terminal, or userspace changes.
+- When validating MCP-driven VM behavior, verify QMP connectivity, serial log output, and screenshot capture when relevant, then stop the VM through the MCP cleanup/stop tool or by killing the reported runner and QEMU PIDs.
 - Add focused unit tests only when the target module already uses them.
 
 ## Debugging Guidance
@@ -98,16 +100,13 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 
 - Speak with the user in Chinese.
 - If the user provides a workflow or debugging suggestion that is broadly useful for future work in this repository, add it to `AGENTS.md` when appropriate instead of treating it as a one-off remark.
-- When debugging interactive login issues where the user needs to type a username or password manually, run `nix develop -c cargo xrun` in the foreground instead of the `--agent` path and let the user provide the login input.
-- When a background VM terminal is available, interact with it directly for guest input, including login credentials and shell commands.
-- In `cargo xrun -- --agent`, treat the runner's stdin/background terminal as already forwarded to the guest tty by default. For interactive guest input, type into that terminal directly instead of reaching for any separate socket transport.
-- When starting `cargo xrun -- --agent`, note the printed `background terminal input path:` line and keep the same long-lived exec session open. Poll that session briefly until the guest prompt appears, then send login credentials and shell commands back through that same background terminal/stdin path instead of inventing a separate interaction method mid-debug.
-- When a background VM terminal is available, do not focus on manually poking the tty socket itself. Treat that socket as the runner's internal transport and interact through the background terminal path directly.
-- When a background VM terminal is available, do not invent a separate tty-socket workflow or ad-hoc input path. Use the background terminal interaction path directly.
-- If interacting through the background VM terminal appears to produce no reaction, do not assume the background terminal path itself is broken. Treat kernel deadlock, echo being disabled, or the foreground being owned by another program as the primary explanations to check first.
-- `cargo xrun -- --agent` should be treated as directly interactive by default.
-- After you finish using an interactive or background VM, terminate it yourself instead of relying on a default runner timeout to clean it up.
-- When terminating a leftover agent VM, first run `cargo xvm-ps`, then `kill` the reported runner and QEMU PIDs.
-- Do not rely on guest-side `poweroff` in this environment. If you need to stop the agent VM, inspect it with `cargo xvm-ps` and `kill` the reported runner and QEMU PIDs from the host side.
+- For Codex-driven VM interaction, prefer the `seele` MCP server when it is available. Use `agent_start` to launch the VM, `agent_status` to confirm the runner/QEMU/QMP state, `agent_serial_tail` for boot logs, `agent_screenshot` for the display, and the QMP key/mouse tools for guest input.
+- Do not reintroduce the old background terminal input workflow. `cargo xrun -- --agent` no longer prints or uses a `background terminal input path`, `/tmp/seele-agent-tty.sock`, `SEELE_AGENT_TTY_SOCKET`, or a second guest serial port for stdin forwarding.
+- For manual fallback when MCP is unavailable, use `cargo xrun -- --agent` for serial-driven boot verification and `cargo xvm-ps` plus host-side `kill` for cleanup. Do not invent a tty-socket or ad-hoc input path.
+- When debugging interactive login issues where the user needs to type a username or password manually, run `nix develop -c cargo xrun` in the foreground and let the user provide the login input, or use MCP QMP input if the login can be driven programmatically.
+- If QMP input appears to produce no reaction, treat kernel deadlock, echo being disabled, or the foreground being owned by another program as primary explanations to check before blaming the MCP transport.
+- After you finish using an MCP, interactive, or agent VM, terminate it yourself instead of relying on a default runner timeout to clean it up.
+- When terminating a leftover agent VM, first run `cargo xvm-ps`, then `kill` the reported runner and QEMU PIDs. If the VM was started by the `seele` MCP server, prefer `agent_stop` or `agent_cleanup` first.
+- Do not rely on guest-side `poweroff` in this environment. If you need to stop the agent VM, inspect it with `cargo xvm-ps` and `kill` the reported runner and QEMU PIDs from the host side, or use MCP cleanup for MCP-managed sessions.
 - If `sysroot/` already appears to be mounted, reuse it directly instead of asking for privilege escalation to mount again. Only ask to mount when it is clearly not mounted.
 - When you need to mount `sysroot/`, use `cargo xsysroot-mount` directly. Run it first, then run the real inspection command separately instead of chaining them together.
