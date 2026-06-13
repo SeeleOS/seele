@@ -10222,6 +10222,32 @@ fn memory_mapping_syscalls_follow_linux_rules() {
         4,
     );
     assert_user_bytes(page + 384, b"tail");
+
+    let second_file_map_addr = SyscallArgs::new([
+        0,
+        8192,
+        (Protection::READ | Protection::WRITE).bits() as u64,
+        MAP_SHARED,
+        fd as u64,
+        0,
+    ])
+    .call::<Mmap>()
+    .expect("second file mmap should succeed") as u64;
+    process
+        .lock()
+        .addrspace
+        .write_buffer((file_map_addr + 16) as *mut u8, b"live")
+        .unwrap();
+    assert_eq!(
+        process
+            .lock()
+            .addrspace
+            .read_buffer((second_file_map_addr + 16) as *const u8, 4)
+            .expect("second MAP_SHARED mapping should read first mapping writes"),
+        b"live",
+        "independent MAP_SHARED mappings of the same file page must share writes before msync"
+    );
+
     expect_errno(
         SyscallArgs::new([file_map_addr + 1, 4096, MS_SYNC, 0, 0, 0]).call::<Msync>(),
         SyscallError::InvalidArguments,
@@ -10251,6 +10277,10 @@ fn memory_mapping_syscalls_follow_linux_rules() {
         "MAP_SHARED file mappings must remain shared after fork instead of becoming COW"
     );
 
+    expect_ok(
+        SyscallArgs::new([second_file_map_addr, 8192, 0, 0, 0, 0]).call::<Munmap>(),
+        0,
+    );
     expect_ok(
         SyscallArgs::new([file_map_addr, 8192, 0, 0, 0, 0]).call::<Munmap>(),
         0,
