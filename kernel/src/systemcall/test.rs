@@ -3779,6 +3779,25 @@ fn filesystem_rename_syscalls_follow_linux_rules() {
         ));
     }
 
+    VirtualFS
+        .lock()
+        .create_file(Path::new("/tmp/syscall-rename-test/src"))
+        .unwrap();
+    write_user_cstr(user_page, b"/tmp/syscall-rename-test/src\0");
+    write_user_cstr(user_page + 128, b"/tmp/syscall-rename-test/dst\0");
+    expect_ok(
+        SyscallArgs::new([user_page, user_page + 128, 0, 0, 0, 0]).call::<Rename>(),
+        0,
+    );
+    {
+        let mut vfs = VirtualFS.lock();
+        assert!(vfs.open(Path::new("/tmp/syscall-rename-test/dst")).is_ok());
+        assert!(matches!(
+            vfs.open(Path::new("/tmp/syscall-rename-test/src")),
+            Err(crate::filesystem::errors::FSError::NotFound)
+        ));
+    }
+
     expect_ok(
         SyscallArgs::new([user_page + 128, user_page + 128, 0, 0, 0, 0]).call::<Rename>(),
         0,
