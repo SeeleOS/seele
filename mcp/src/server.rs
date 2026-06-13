@@ -5,7 +5,7 @@ use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
-    schemars, tool, tool_router,
+    schemars, tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
 use serde_json::to_string_pretty;
@@ -142,6 +142,7 @@ impl SeeleMcp {
     }
 }
 
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for SeeleMcp {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
