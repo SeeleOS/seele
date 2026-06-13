@@ -8,8 +8,8 @@ use std::{
 };
 use tokio::{
     fs,
-    io::{AsyncBufReadExt, BufReader},
-    process::{Child, Command},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    process::{Child, ChildStdin, ChildStdout, Command},
     sync::Mutex,
     time::{Duration, timeout},
 };
@@ -43,7 +43,16 @@ pub struct SessionMetadata {
 struct SessionState {
     child: Option<Child>,
     metadata: Option<SessionMetadata>,
+    gdb: Option<GdbState>,
     last_exit: Option<i32>,
+}
+
+#[derive(Debug)]
+struct GdbState {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+    port: u16,
 }
 
 #[derive(Debug)]
@@ -79,6 +88,53 @@ impl AgentSession {
     }
 
     pub async fn start(&self) -> Result<SessionMetadata> {
+        self.start_with_env([]).await
+    }
+
+    pub async fn debug_start(&self, port: Option<u16>) -> Result<DebugStartStatus> {
+        let port = port.unwrap_or(1234);
+        let metadata = self
+            .start_with_env([
+                ("SEELE_QEMU_GDB".to_string(), format!("tcp::{port}")),
+                ("SEELE_QEMU_WAIT_GDB".to_string(), "1".to_string()),
+            ])
+            .await?;
+        let result = async {
+            let mut gdb = self.spawn_gdb(port).await?;
+            let startup_output = read_gdb_until_prompt(&mut gdb.stdout, Duration::from_secs(10))
+                .await
+                .context("timed out waiting for initial gdb prompt")?;
+            write_gdb_command(&mut gdb.stdin, &format!("target remote :{port}")).await?;
+            let connect_output = read_gdb_until_prompt(&mut gdb.stdout, Duration::from_secs(20))
+                .await
+                .context("timed out waiting for gdb target remote")?;
+            Ok((gdb, startup_output, connect_output))
+        }
+        .await;
+        let (gdb, startup_output, connect_output) = match result {
+            Ok(result) => result,
+            Err(err) => {
+                let mut state = self.state.lock().await;
+                let _ = stop_state(&mut state).await;
+                return Err(err);
+            }
+        };
+
+        let mut state = self.state.lock().await;
+        state.gdb = Some(gdb);
+
+        Ok(DebugStartStatus {
+            metadata,
+            gdb_port: port,
+            startup_output: truncate_log(&startup_output),
+            connect_output: truncate_log(&connect_output),
+        })
+    }
+
+    async fn start_with_env<I>(&self, envs: I) -> Result<SessionMetadata>
+    where
+        I: IntoIterator<Item = (String, String)>,
+    {
         let mut state = self.state.lock().await;
         refresh_child_state(&mut state).await;
         if state.child.is_some() {
@@ -88,7 +144,8 @@ impl AgentSession {
         let _ = fs::remove_file(&self.qmp_socket).await;
         let _ = fs::remove_file(&self.serial_log).await;
 
-        let mut child = Command::new("cargo")
+        let mut command = Command::new("cargo");
+        command
             .arg("run")
             .arg("-p")
             .arg("xtask")
@@ -97,9 +154,11 @@ impl AgentSession {
             .current_dir(&self.repo)
             .env("SEELE_QMP_SOCKET", &self.qmp_socket)
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .context("failed to start xtask mcp-run")?;
+            .stderr(Stdio::null());
+        for (key, value) in envs {
+            command.env(key, value);
+        }
+        let mut child = command.spawn().context("failed to start xtask mcp-run")?;
 
         let stdout = child
             .stdout
@@ -123,6 +182,39 @@ impl AgentSession {
         state.metadata = Some(metadata.clone());
         state.last_exit = None;
         Ok(metadata)
+    }
+
+    async fn spawn_gdb(&self, port: u16) -> Result<GdbState> {
+        let kernel = self
+            .repo
+            .join("target")
+            .join("x86_64-unknown-none")
+            .join("debug")
+            .join("kernel");
+        let gdb_bin = env::var_os("SEELE_GDB")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("gdb"));
+        let mut child = Command::new(&gdb_bin)
+            .arg("-q")
+            .arg(&kernel)
+            .arg("-ex")
+            .arg("set pagination off")
+            .arg("-ex")
+            .arg("set confirm off")
+            .current_dir(&self.repo)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("failed to start gdb at {}", gdb_bin.display()))?;
+        let stdin = child.stdin.take().context("gdb stdin was not piped")?;
+        let stdout = child.stdout.take().context("gdb stdout was not piped")?;
+        Ok(GdbState {
+            child,
+            stdin,
+            stdout: BufReader::new(stdout),
+            port,
+        })
     }
 
     pub async fn stop(&self) -> Result<SessionStatus> {
@@ -169,6 +261,51 @@ impl AgentSession {
         })
     }
 
+    pub async fn debug_status(&self) -> Result<DebugStatus> {
+        let mut state = self.state.lock().await;
+        refresh_child_state(&mut state).await;
+        refresh_gdb_state(&mut state).await;
+        Ok(DebugStatus {
+            vm_running: state.child.is_some(),
+            gdb_running: state.gdb.is_some(),
+            gdb_port: state.gdb.as_ref().map(|gdb| gdb.port),
+            metadata: state.metadata.clone(),
+            last_exit: state.last_exit,
+        })
+    }
+
+    pub async fn debug_command(
+        &self,
+        command: &str,
+        timeout_ms: Option<u64>,
+    ) -> Result<GdbCommandOutput> {
+        let mut state = self.state.lock().await;
+        refresh_gdb_state(&mut state).await;
+        let gdb = state.gdb.as_mut().context("gdb session is not running")?;
+        write_gdb_command(&mut gdb.stdin, command).await?;
+        let timeout_duration = Duration::from_millis(timeout_ms.unwrap_or(5_000));
+        match read_gdb_until_prompt(&mut gdb.stdout, timeout_duration).await {
+            Ok(output) => Ok(GdbCommandOutput {
+                timed_out: false,
+                output: truncate_log(&output),
+            }),
+            Err(err) if err.is::<tokio::time::error::Elapsed>() => Ok(GdbCommandOutput {
+                timed_out: true,
+                output: String::new(),
+            }),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub async fn debug_stop(&self) -> Result<SessionStatus> {
+        let mut state = self.state.lock().await;
+        stop_gdb_state(&mut state).await?;
+        stop_state(&mut state).await?;
+        drop(state);
+        let _ = fs::remove_file(&self.qmp_socket).await;
+        self.status().await
+    }
+
     pub async fn serial_tail(&self, lines: Option<usize>, bytes: Option<usize>) -> Result<String> {
         let status = self.status().await?;
         let data = fs::read(&status.serial_log).await.with_context(|| {
@@ -206,6 +343,29 @@ pub struct CommandOutput {
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DebugStartStatus {
+    pub metadata: SessionMetadata,
+    pub gdb_port: u16,
+    pub startup_output: String,
+    pub connect_output: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DebugStatus {
+    pub vm_running: bool,
+    pub gdb_running: bool,
+    pub gdb_port: Option<u16>,
+    pub metadata: Option<SessionMetadata>,
+    pub last_exit: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GdbCommandOutput {
+    pub timed_out: bool,
+    pub output: String,
 }
 
 fn parse_metadata(
@@ -253,7 +413,17 @@ async fn refresh_child_state(state: &mut SessionState) {
     }
 }
 
+async fn refresh_gdb_state(state: &mut SessionState) {
+    let Some(gdb) = state.gdb.as_mut() else {
+        return;
+    };
+    if matches!(gdb.child.try_wait(), Ok(Some(_))) {
+        state.gdb = None;
+    }
+}
+
 async fn stop_state(state: &mut SessionState) -> Result<()> {
+    stop_gdb_state(state).await?;
     if let Some(qemu_pid) = state
         .metadata
         .as_ref()
@@ -271,6 +441,51 @@ async fn stop_state(state: &mut SessionState) -> Result<()> {
     }
     state.child = None;
     Ok(())
+}
+
+async fn stop_gdb_state(state: &mut SessionState) -> Result<()> {
+    if let Some(mut gdb) = state.gdb.take() {
+        let _ = write_gdb_command(&mut gdb.stdin, "quit").await;
+        let _ = gdb.child.kill().await;
+        let _ = gdb.child.wait().await;
+    }
+    Ok(())
+}
+
+async fn write_gdb_command(stdin: &mut ChildStdin, command: &str) -> Result<()> {
+    stdin
+        .write_all(command.as_bytes())
+        .await
+        .context("failed to write gdb command")?;
+    stdin
+        .write_all(b"\n")
+        .await
+        .context("failed to write gdb newline")?;
+    stdin.flush().await.context("failed to flush gdb stdin")
+}
+
+async fn read_gdb_until_prompt(
+    stdout: &mut BufReader<ChildStdout>,
+    timeout_duration: Duration,
+) -> Result<String> {
+    timeout(timeout_duration, async {
+        let mut output = Vec::new();
+        let mut byte = [0_u8; 1];
+        loop {
+            let read = stdout
+                .read(&mut byte)
+                .await
+                .context("failed to read gdb output")?;
+            if read == 0 {
+                bail!("gdb exited before prompt");
+            }
+            output.push(byte[0]);
+            if output.ends_with(b"(gdb) ") || output.ends_with(b"(gdb)") {
+                return Ok(String::from_utf8_lossy(&output).into_owned());
+            }
+        }
+    })
+    .await?
 }
 
 fn truncate_log(text: &str) -> String {

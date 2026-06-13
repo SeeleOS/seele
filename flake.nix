@@ -26,6 +26,7 @@
           bash
           coreutils
           e2fsprogs
+          gdb
           git
           pacman
           procps
@@ -37,6 +38,7 @@
         devPackages = with pkgs; [
           arch-install-scripts
           e2fsprogs
+          gdb
           git
           pacman
           procps

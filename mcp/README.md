@@ -11,6 +11,9 @@
 - `agent_send_key`, `agent_type_text`: send keyboard input through QMP. Text input is ASCII-only.
 - `agent_mouse_move`, `agent_mouse_click`: send absolute pointer and button events through QMP.
 - `agent_stop`, `agent_cleanup`: terminate the MCP-managed VM and remove QMP socket state.
+- `debug_start`: start the VM paused at QEMU's GDB stub and attach `gdb` to the kernel ELF.
+- `debug_command`: run a command in the active GDB session and return output up to the next prompt.
+- `debug_status`, `debug_stop`: inspect or stop the active GDB-backed VM session.
 - `run_xtest`, `run_xintegration_test`, `run_xrootfs`: run the existing cargo aliases and return truncated logs.
 
 ## Local Run

@@ -54,6 +54,17 @@ pub struct MouseClickRequest {
     pub button: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DebugStartRequest {
+    pub port: Option<u16>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DebugCommandRequest {
+    pub command: String,
+    pub timeout_ms: Option<u64>,
+}
+
 #[tool_router]
 impl SeeleMcp {
     #[tool(description = "Start the Seele OS agent VM session through xtask mcp-run")]
@@ -124,6 +135,37 @@ impl SeeleMcp {
     #[tool(description = "Clean up the MCP-managed Seele OS VM session")]
     async fn agent_cleanup(&self) -> CallToolResult {
         json_result(self.session.cleanup().await).await
+    }
+
+    #[tool(description = "Start a Seele OS VM paused at QEMU's GDB stub and attach gdb")]
+    async fn debug_start(
+        &self,
+        Parameters(request): Parameters<DebugStartRequest>,
+    ) -> CallToolResult {
+        json_result(self.session.debug_start(request.port).await).await
+    }
+
+    #[tool(description = "Run a command in the active Seele OS gdb session")]
+    async fn debug_command(
+        &self,
+        Parameters(request): Parameters<DebugCommandRequest>,
+    ) -> CallToolResult {
+        json_result(
+            self.session
+                .debug_command(&request.command, request.timeout_ms)
+                .await,
+        )
+        .await
+    }
+
+    #[tool(description = "Report the active Seele OS gdb debugging session status")]
+    async fn debug_status(&self) -> CallToolResult {
+        json_result(self.session.debug_status().await).await
+    }
+
+    #[tool(description = "Stop the active Seele OS gdb session and VM")]
+    async fn debug_stop(&self) -> CallToolResult {
+        json_result(self.session.debug_stop().await).await
     }
 
     #[tool(description = "Run cargo xtest for Seele OS")]
