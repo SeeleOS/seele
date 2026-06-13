@@ -1,5 +1,10 @@
 use crate::memory::utils::Mut;
-use alloc::{collections::btree_map::BTreeMap, string::String, string::ToString, sync::Arc};
+use alloc::{
+    collections::{BTreeMap, VecDeque},
+    string::String,
+    string::ToString,
+    sync::Arc,
+};
 
 use ext4plus::{
     DirEntryName, Ext4, FollowSymlinks,
@@ -25,18 +30,64 @@ pub mod symlink;
 
 const CHMOD_PERMISSION_BITS: u16 = 0o7777;
 const FILE_TYPE_BITS: u16 = 0o170000;
-pub(crate) type LookupCache = Arc<Mut<BTreeMap<u32, BTreeMap<String, Inode>>>>;
+const MAX_LOOKUP_CACHE_ENTRIES: usize = 16_384;
+pub(crate) type LookupCache = Arc<Mut<LookupCacheState>>;
+
+#[derive(Debug, Default)]
+pub struct LookupCacheState {
+    entries: BTreeMap<u32, BTreeMap<String, Inode>>,
+    order: VecDeque<(u32, String)>,
+}
+
+impl LookupCacheState {
+    fn get(&self, parent_inode: u32, name: &str) -> Option<Inode> {
+        self.entries
+            .get(&parent_inode)
+            .and_then(|children| children.get(name))
+            .cloned()
+    }
+
+    fn insert(&mut self, parent_inode: u32, name: &str, inode: &Inode) {
+        let children = self.entries.entry(parent_inode).or_default();
+        let is_new = !children.contains_key(name);
+        children.insert(name.into(), inode.clone());
+        if is_new {
+            self.order.push_back((parent_inode, name.into()));
+        }
+        self.evict_to_limit();
+    }
+
+    fn remove(&mut self, parent_inode: u32, name: &str) {
+        let Some(children) = self.entries.get_mut(&parent_inode) else {
+            return;
+        };
+        children.remove(name);
+        if children.is_empty() {
+            self.entries.remove(&parent_inode);
+        }
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.order.clear();
+    }
+
+    fn evict_to_limit(&mut self) {
+        while self.order.len() > MAX_LOOKUP_CACHE_ENTRIES {
+            let Some((parent_inode, name)) = self.order.pop_front() else {
+                return;
+            };
+            self.remove(parent_inode, &name);
+        }
+    }
+}
 
 pub(super) fn lookup_cache_get(
     cache: &LookupCache,
     parent_inode: &Inode,
     name: &str,
 ) -> Option<Inode> {
-    cache
-        .lock()
-        .get(&parent_inode.index.get())
-        .and_then(|children| children.get(name))
-        .cloned()
+    cache.lock().get(parent_inode.index.get(), name)
 }
 
 pub(super) fn lookup_cache_insert(
@@ -54,11 +105,7 @@ pub(super) fn lookup_cache_insert_raw(
     name: &str,
     inode: &Inode,
 ) {
-    cache
-        .lock()
-        .entry(parent_inode)
-        .or_default()
-        .insert(name.into(), inode.clone());
+    cache.lock().insert(parent_inode, name, inode);
 }
 
 pub(super) fn lookup_cache_remove(cache: &LookupCache, parent_inode: &Inode, name: &str) {
@@ -66,14 +113,7 @@ pub(super) fn lookup_cache_remove(cache: &LookupCache, parent_inode: &Inode, nam
 }
 
 pub(super) fn lookup_cache_remove_raw(cache: &LookupCache, parent_inode: u32, name: &str) {
-    let mut cache = cache.lock();
-    let Some(children) = cache.get_mut(&parent_inode) else {
-        return;
-    };
-    children.remove(name);
-    if children.is_empty() {
-        cache.remove(&parent_inode);
-    }
+    cache.lock().remove(parent_inode, name);
 }
 
 pub(super) fn lookup_cache_clear(cache: &LookupCache) {
@@ -86,10 +126,7 @@ pub(super) fn lookup_cache_contains_raw(
     parent_inode: u32,
     name: &str,
 ) -> bool {
-    cache
-        .lock()
-        .get(&parent_inode)
-        .is_some_and(|children| children.contains_key(name))
+    cache.lock().get(parent_inode, name).is_some()
 }
 
 pub(super) fn chmod_inode(fs: &Ext4, inode: &mut Inode, mode: u32) -> FSResult<()> {
@@ -118,7 +155,7 @@ impl EXT4 {
         Ok(Self {
             fs,
             root_inode,
-            lookup_cache: Arc::new(Mut::new(BTreeMap::new())),
+            lookup_cache: Arc::new(Mut::new(LookupCacheState::default())),
         })
     }
 
@@ -365,8 +402,15 @@ crate::test!(
 );
 
 #[cfg(test)]
+crate::test!(
+    ext4_lookup_cache_limits_entries,
+    "ext4 lookup cache evicts old entries at its size limit",
+    ext4_lookup_cache_evicts_old_entries_at_its_size_limit
+);
+
+#[cfg(test)]
 fn ext4_lookup_cache_nested_structure_preserves_lookup_semantics() {
-    let cache: LookupCache = Arc::new(Mut::new(BTreeMap::new()));
+    let cache: LookupCache = Arc::new(Mut::new(LookupCacheState::default()));
     let root = crate::filesystem::vfs::VirtualFS
         .lock()
         .resolve_dir(crate::filesystem::path::Path::new("/"))
@@ -388,4 +432,27 @@ fn ext4_lookup_cache_nested_structure_preserves_lookup_semantics() {
 
     lookup_cache_clear(&cache);
     assert!(!lookup_cache_contains_raw(&cache, 7, "beta"));
+}
+
+#[cfg(test)]
+fn ext4_lookup_cache_evicts_old_entries_at_its_size_limit() {
+    let cache: LookupCache = Arc::new(Mut::new(LookupCacheState::default()));
+    let root = crate::filesystem::vfs::VirtualFS
+        .lock()
+        .resolve_dir(crate::filesystem::path::Path::new("/"))
+        .unwrap();
+    let root = root.lock();
+    let ext4_root = root.as_any().downcast_ref::<Ext4Directory>().unwrap();
+    let inode = ext4_root.inode();
+
+    for index in 0..=MAX_LOOKUP_CACHE_ENTRIES {
+        lookup_cache_insert_raw(&cache, 7, &alloc::format!("entry-{index}"), &inode);
+    }
+
+    assert!(!lookup_cache_contains_raw(&cache, 7, "entry-0"));
+    assert!(lookup_cache_contains_raw(
+        &cache,
+        7,
+        &alloc::format!("entry-{MAX_LOOKUP_CACHE_ENTRIES}")
+    ));
 }

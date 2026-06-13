@@ -8,7 +8,7 @@ use alloc::{
 
 use crate::filesystem::block_device::{BlockDevice, BlockDeviceError, BlockDeviceResult};
 
-const DEFAULT_CACHE_ENTRIES: usize = 16_384;
+const DEFAULT_CACHE_ENTRIES: usize = 4_096;
 const DEFAULT_READAHEAD_BLOCKS: usize = 128;
 
 #[derive(Debug)]
