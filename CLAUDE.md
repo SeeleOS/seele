@@ -10,7 +10,7 @@ Seele OS is an x86_64 operating system kernel written in `no_std` Rust targeting
 
 ```sh
 cargo xrun                  # build and boot in QEMU
-cargo xrun -- --agent       # headless boot; serial logs captured automatically
+cargo xrun -- --agent       # manual fallback headless boot; serial logs captured automatically
 cargo xtest                 # kernel unit tests in QEMU
 cargo xintegration-test     # integration tests
 cargo xrootfs               # build/refresh disk.img and rootfs
@@ -22,14 +22,26 @@ cargo check --manifest-path kernel/Cargo.toml   # fast type-check kernel only
 cargo clippy                # lint; treat all warnings as failures
 ```
 
+When the `seele` MCP server is available, prefer it for agent VM workflows:
+
+```text
+run_xtest                   # wrapper for cargo xtest
+agent_start                 # build and launch the agent VM
+agent_status                # inspect runner/QEMU/QMP state
+agent_serial_tail           # read recent serial logs
+agent_screenshot            # capture display through QMP screendump
+agent_send_key/type_text    # drive guest input through QMP
+agent_stop or agent_cleanup # stop the VM and remove QMP socket state
+```
+
 The `xtask/` crate implements every `cargo x*` subcommand. The local Rust toolchain is named `seele`; install it from `toolchain/install.rs` before building outside Nix. `nix develop` / `nix run` set up the full reproducible environment.
 
-After any change: run `cargo xtest`, then `cargo xrun -- --agent`. Both must pass before the work is done.
+After any change: prefer the MCP workflow (`run_xtest`, then `agent_start`/status/serial/screenshot/stop). If MCP is unavailable, run `cargo xtest`, then `cargo xrun -- --agent`. The VM must boot cleanly before the work is done.
 
 ## Kernel Architecture
 
 The kernel initializes in `kernel/src/lib.rs::init_kernel()` in this order:
-boot → memory → SMP BSP → framebuffer/terminal/logging → early drivers → VFS → syscall MSRs → ACPI → thread/process manager → keyboard/agent-tty → interrupts → network → late drivers → APs released → scheduler loop.
+boot → memory → SMP BSP → framebuffer/terminal/logging → early drivers → VFS → syscall MSRs → ACPI → thread/process manager → keyboard → interrupts → network → late drivers → APs released → scheduler loop.
 
 ### Module Map
 
@@ -51,6 +63,7 @@ boot → memory → SMP BSP → framebuffer/terminal/logging → early drivers �
 | `kernel/src/ipc/` | IPC primitives |
 | `kernel/src/terminal/` | In-kernel framebuffer terminal (flanterm) |
 | `xtask/src/` | All `cargo x*` subcommands: VM launch, rootfs build, test runner |
+| `mcp/src/` | Seele MCP server: agent VM lifecycle, QMP screenshot/input, serial tail, and test wrappers |
 
 ### Syscall Path
 

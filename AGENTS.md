@@ -2,7 +2,7 @@
 
 ## Build, Test, and Development Commands
 
-- `cargo xrun`: launch the VM; use `cargo xrun -- --agent` for headless serial-driven verification.
+- `cargo xrun`: launch the VM manually; use `cargo xrun -- --agent` as the serial-driven fallback when the `seele` MCP server is unavailable.
 - `cargo xtest`: build and run kernel unit tests in QEMU.
 - `cargo xintegration-test`: run integration test coverage.
 - `cargo fmt --all`: format Rust code before submitting changes.
@@ -20,7 +20,7 @@
 - After `cargo xsysroot-mount`, if you only need to read files from `sysroot/`, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
 - If the sandbox, `no_new_privileges`, missing mounts, or network restrictions block a necessary command, ask the user for privilege escalation or the required access instead of silently giving up on that path.
 
-After finishing a change, run `cargo xtest` and `cargo xrun -- --agent` to test the kernel unit tests and VM. If the `seele` MCP server is available, use it for additional VM status, serial, screenshot, and QMP input smoke checks. If any required test fails, keep fixing the issue before considering the work done. If you are validating a shell or userspace fix, prefer serial logs captured through the xtask/MCP agent path.
+After finishing a change, prefer the `seele` MCP workflow when available: run `run_xtest`, then use `agent_start`, `agent_status`, `agent_serial_tail`, and `agent_screenshot` for VM smoke coverage, followed by `agent_stop` or `agent_cleanup`. If MCP is unavailable, run `cargo xtest` and `cargo xrun -- --agent` manually. If any required test fails, keep fixing the issue before considering the work done.
 
 ## Coding Style & Naming Conventions
 
@@ -50,7 +50,7 @@ There is no large standalone test suite yet; verification is primarily compile c
 - Run `cargo xtest` for kernel unit-test coverage.
 - Treat compiler warnings as failures. Do not leave any `cargo check` warnings in the tree.
 - After finishing code changes, run `cargo clippy` and address its findings before considering the work complete.
-- Run `cargo xrun -- --agent` for syscall, process, terminal, or userspace changes.
+- For syscall, process, terminal, or userspace changes, prefer the MCP agent VM path when available. Use `cargo xrun -- --agent` as the manual fallback.
 - When validating MCP-driven VM behavior, verify QMP connectivity, serial log output, and screenshot capture when relevant, then stop the VM through the MCP cleanup/stop tool or by killing the reported runner and QEMU PIDs.
 - Add focused unit tests only when the target module already uses them.
 

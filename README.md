@@ -75,6 +75,26 @@ Run the headless agent path with serial log capture:
 cargo xrun -- --agent
 ```
 
+## Agent MCP workflow
+
+For Codex-driven work, prefer the Seele MCP server over manual QEMU control when it is registered in your MCP configuration. The dev shell provides a `seele-mcp` command:
+
+```sh
+nix develop -c seele-mcp
+```
+
+The MCP server exposes tools for the full agent loop:
+
+- `run_xtest`: run kernel unit tests through the existing cargo alias.
+- `agent_start`: build and launch the agent VM through `xtask mcp-run`.
+- `agent_status`: report runner/QEMU PIDs, QMP connectivity, and serial log location.
+- `agent_serial_tail`: read recent serial output.
+- `agent_screenshot`: capture the display through QMP `screendump`.
+- `agent_send_key`, `agent_type_text`, `agent_mouse_move`, `agent_mouse_click`: drive guest input through QMP.
+- `agent_stop` and `agent_cleanup`: stop MCP-managed runner/QEMU processes and clean QMP socket state.
+
+Manual `cargo xrun` and `cargo xrun -- --agent` remain useful for local foreground runs and fallback verification when MCP is unavailable.
+
 ## Rootfs and disk image
 
 Build or refresh `disk.img` and the guest root filesystem:
