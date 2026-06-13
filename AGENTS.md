@@ -96,6 +96,7 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 
 ## Collaboration Notes
 
+- Speak with the user in Chinese.
 - If the user provides a workflow or debugging suggestion that is broadly useful for future work in this repository, add it to `AGENTS.md` when appropriate instead of treating it as a one-off remark.
 - When debugging interactive login issues where the user needs to type a username or password manually, run `nix develop -c cargo xrun` in the foreground instead of the `--agent` path and let the user provide the login input.
 - When a background VM terminal is available, interact with it directly for guest input, including login credentials and shell commands.
