@@ -10160,7 +10160,7 @@ fn memory_mapping_syscalls_follow_linux_rules() {
     );
     let file_map_addr = SyscallArgs::new([
         0,
-        4096,
+        8192,
         (Protection::READ | Protection::WRITE).bits() as u64,
         MAP_SHARED,
         fd as u64,
@@ -10195,6 +10195,33 @@ fn memory_mapping_syscalls_follow_linux_rules() {
         SyscallArgs::new([file_map_addr, 0, 0, 0, 0, 0]).call::<Msync>(),
         0,
     );
+    expect_ok(
+        SyscallArgs::new([fd as u64, 8192, 0, 0, 0, 0]).call::<Ftruncate>(),
+        0,
+    );
+    process
+        .lock()
+        .addrspace
+        .write_buffer((file_map_addr + 4096) as *mut u8, b"tail")
+        .unwrap();
+    expect_ok(
+        SyscallArgs::new([file_map_addr, 8192, MS_SYNC, 0, 0, 0]).call::<Msync>(),
+        0,
+    );
+    expect_ok(
+        SyscallArgs::new([fd as u64, 4096, 0, 0, 0, 0]).call::<Lseek>(),
+        4096,
+    );
+    process
+        .lock()
+        .addrspace
+        .write_buffer((page + 384) as *mut u8, &[0; 4])
+        .unwrap();
+    expect_ok(
+        SyscallArgs::new([fd as u64, page + 384, 4, 0, 0, 0]).call::<Read>(),
+        4,
+    );
+    assert_user_bytes(page + 384, b"tail");
     expect_errno(
         SyscallArgs::new([file_map_addr + 1, 4096, MS_SYNC, 0, 0, 0]).call::<Msync>(),
         SyscallError::InvalidArguments,
@@ -10225,7 +10252,7 @@ fn memory_mapping_syscalls_follow_linux_rules() {
     );
 
     expect_ok(
-        SyscallArgs::new([file_map_addr, 4096, 0, 0, 0, 0]).call::<Munmap>(),
+        SyscallArgs::new([file_map_addr, 8192, 0, 0, 0, 0]).call::<Munmap>(),
         0,
     );
     expect_ok(

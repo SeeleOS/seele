@@ -107,6 +107,11 @@ impl AddrSpace {
             return Ok(());
         }
 
+        let current_file_bytes = file
+            .info()
+            .map(|info| (info.size as u64).saturating_sub(*offset))
+            .unwrap_or(*file_bytes)
+            .max(*file_bytes);
         let mapping_identity = file.mapping_identity();
         if let Some(key) = mapping_identity {
             crate::filesystem::page_cache::invalidate_file(FileCacheKey {
@@ -126,11 +131,11 @@ impl AddrSpace {
             };
 
             let page_offset = page_addr.as_u64() - area.start.as_u64();
-            if page_offset >= *file_bytes {
+            if page_offset >= current_file_bytes {
                 continue;
             }
 
-            let write_len = core::cmp::min(4096, (*file_bytes - page_offset) as usize);
+            let write_len = core::cmp::min(4096, (current_file_bytes - page_offset) as usize);
             page_writes.push((
                 apply_offset(phys.as_u64()),
                 *offset + page_offset,
