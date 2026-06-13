@@ -124,7 +124,7 @@ install_repo_packages() {
         return
     fi
 
-    arch_chroot /usr/bin/pacman --noconfirm -Sy --needed "${ARCH_PACKAGES[@]}"
+    arch_chroot /usr/bin/pacman --noconfirm -Syu --needed "${ARCH_PACKAGES[@]}"
 }
 
 ensure_aur_builder() {
