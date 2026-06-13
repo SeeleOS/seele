@@ -245,7 +245,19 @@ install_sysroot_file "${ROOTFS_MAKING_DIR}/60-flatpak-system-only" "${SYSROOT_DI
 install_sysroot_file "${ROOTFS_MAKING_DIR}/plasma-kglobalaccel.service.d/10-x11-only.conf" "${SYSROOT_DIR}/usr/lib/systemd/user/plasma-kglobalaccel.service.d/10-x11-only.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/Xsetup" "${SYSROOT_DIR}/usr/share/sddm/scripts/Xsetup"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/root/.xinitrc"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/root-bash-profile" "${SYSROOT_DIR}/root/.bash_profile"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/getty-tty1-autologin.conf" "${SYSROOT_DIR}/etc/systemd/system/getty@tty1.service.d/autologin.conf"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/startplasma-x11-tty.sh" "${SYSROOT_DIR}/usr/bin/startplasma-x11-tty"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/startplasma-wayland-tty.sh" "${SYSROOT_DIR}/usr/bin/startplasma-wayland-tty"
+
+sudo rm -f \
+    "${SYSROOT_DIR}/root/.config/kdeglobals" \
+    "${SYSROOT_DIR}/root/.config/kdedefaults/kdeglobals" \
+    "${SYSROOT_DIR}/root/.config/kdedefaults/plasmarc" \
+    "${SYSROOT_DIR}/root/.config/kdedefaults/kcminputrc" \
+    "${SYSROOT_DIR}/root/.config/kdedefaults/kwinrc" \
+    "${SYSROOT_DIR}/root/.config/kdedefaults/ksplashrc" \
+    "${SYSROOT_DIR}/root/.config/plasma-localerc"
 
 for package in "${AUR_PACKAGES[@]}"; do
     install_aur_package "${package}"

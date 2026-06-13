@@ -14,9 +14,9 @@ emit_log "root-bash-profile enter tty=${tty_path} pid=$$"
 
 if [ "${SEELE_PLASMA_AUTOSTARTED:-0}" != "1" ] && [ "$(tty 2>/dev/null)" = "/dev/tty1" ]; then
     export SEELE_PLASMA_AUTOSTARTED=1
-    emit_log "root-bash-profile start plasma tty=${tty_path} pid=$$"
+    emit_log "root-bash-profile start plasma x11 tty=${tty_path} pid=$$"
     echo "AUTOPLASMA: start" >/dev/kmsg
-    /usr/bin/startplasma-wayland-tty
+    /usr/bin/startplasma-x11-tty
     status=$?
     emit_log "root-bash-profile plasma exit status=${status} tty=${tty_path} pid=$$"
     echo "AUTOPLASMA: exit ${status}" >/dev/kmsg
