@@ -12,6 +12,7 @@
 - `cargo xvm-ps`: list current runner and QEMU processes before cleanup.
 - `seele` MCP server: when available, prefer its `agent_start`, `agent_status`, `agent_serial_tail`, `agent_screenshot`, QMP input, and cleanup tools for VM-driven agent workflows instead of hand-rolled QMP or terminal-socket scripts.
 - If a required tool is missing for this repository workflow, add it to the `flake.nix` dev shell instead of treating it as a one-off host prerequisite.
+- When adding new tooling for builds, tests, MCP workflows, debugging, image conversion, or VM automation, prefer adding it to the appropriate `flake.nix` dev shell or runtime input instead of relying on whatever happens to be installed on the host `PATH`.
 - When polling VM state or serial output, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
 - After finishing VM-based testing, shut the VM down and verify there is no leftover runner or QEMU process before moving on.
 - To inspect the current agent VM and runner processes before shutdown, use `cargo xvm-ps`. If it shows a leftover VM or runner, kill those PIDs explicitly.
