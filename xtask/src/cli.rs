@@ -4,6 +4,7 @@ use std::{env, time::Duration};
 
 pub enum Command {
     Run(RunOptions),
+    McpRun,
     Test,
     IntegrationTest,
     Rootfs(RootfsCommand),
@@ -23,6 +24,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command> {
 
     match command.as_str() {
         "run" => parse_run(args),
+        "mcp-run" => Ok(Command::McpRun),
         "test" => Ok(Command::Test),
         "integration-test" => Ok(Command::IntegrationTest),
         "rootfs-build" => parse_rootfs_build(args),

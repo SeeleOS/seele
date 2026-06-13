@@ -1,10 +1,10 @@
-use crate::terminal::{
-    cleanup_socket, drain_serial_log, forward_terminal_input, stream_serial_log,
-};
+use crate::terminal::{cleanup_socket, drain_serial_log, stream_serial_log};
 use anyhow::{Context, Result};
 use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
+use serde_json::json;
 use std::{
     env, fs,
+    io::Write,
     path::{Path, PathBuf},
     process::Command,
     sync::{
@@ -29,7 +29,7 @@ pub struct RunOptions {
 
 struct QemuRunContext {
     serial_log: PathBuf,
-    tty_input_socket: PathBuf,
+    qmp_socket: PathBuf,
     debug_log: Option<PathBuf>,
     keep_debug_log: bool,
 }
@@ -80,9 +80,9 @@ impl QemuRunContext {
         } else {
             "seele-serial.log"
         });
-        let tty_input_socket = env::var_os("SEELE_AGENT_TTY_SOCKET")
+        let qmp_socket = env::var_os("SEELE_QMP_SOCKET")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/tmp/seele-agent-tty.sock"));
+            .unwrap_or_else(|| PathBuf::from("/tmp/seele-agent-qmp.sock"));
         let keep_debug_log = options.qemu_debug_log.is_some();
         let debug_log = options.qemu_debug_log.clone().or_else(|| {
             options
@@ -92,7 +92,7 @@ impl QemuRunContext {
 
         Self {
             serial_log,
-            tty_input_socket,
+            qmp_socket,
             debug_log,
             keep_debug_log,
         }
@@ -136,16 +136,10 @@ pub fn run_qemu_expect_serial_failure(
         let done = background_done.clone();
         thread::spawn(move || stream_serial_log(&serial_log, &done))
     };
-    let tty_input_thread = {
-        let tty_input_socket = context.tty_input_socket.clone();
-        let done = background_done.clone();
-        thread::spawn(move || forward_terminal_input(&tty_input_socket, &done))
-    };
 
     let status = child.wait().context("failed to wait on qemu")?;
     background_done.store(true, Ordering::Release);
     let _ = serial_log_thread.join();
-    let _ = tty_input_thread.join();
 
     let serial_output = fs::read_to_string(&context.serial_log).unwrap_or_default();
     let actual_exit_code = decode_qemu_exit_code(status.code(), &context)?;
@@ -178,12 +172,6 @@ pub fn run_qemu_until_serial_condition(
     let context = QemuRunContext::new(options);
     let mut cmd = build_qemu_command(uefi_path, options, &context)?;
     let mut child = cmd.spawn().context("failed to start qemu-system-x86_64")?;
-    let background_done = Arc::new(AtomicBool::new(false));
-    let tty_input_thread = {
-        let tty_input_socket = context.tty_input_socket.clone();
-        let done = background_done.clone();
-        thread::spawn(move || forward_terminal_input(&tty_input_socket, &done))
-    };
     let deadline = Instant::now() + timeout;
     let mut offset = 0;
     let mut serial_log = None;
@@ -231,8 +219,6 @@ pub fn run_qemu_until_serial_condition(
         thread::sleep(Duration::from_millis(10));
     };
 
-    background_done.store(true, Ordering::Release);
-    let _ = tty_input_thread.join();
     cleanup_qemu_context(&context);
     cleanup_qemu_debug_log(&context);
     Ok(exit_code)
@@ -248,15 +234,29 @@ fn run_qemu_inner(uefi_path: &Path, options: &RunOptions) -> Result<i32> {
         let done = background_done.clone();
         thread::spawn(move || stream_serial_log(&serial_log, &done))
     };
-    let tty_input_thread = {
-        let tty_input_socket = context.tty_input_socket.clone();
-        let done = background_done.clone();
-        thread::spawn(move || forward_terminal_input(&tty_input_socket, &done))
-    };
     let status = child.wait().context("failed to wait on qemu")?;
     background_done.store(true, Ordering::Release);
     let _ = serial_log_thread.join();
-    let _ = tty_input_thread.join();
+    cleanup_qemu_context(&context);
+    let exit_code = decode_qemu_exit_code(status.code(), &context)?;
+    cleanup_qemu_debug_log(&context);
+    Ok(exit_code)
+}
+
+pub fn run_qemu_mcp(uefi_path: &Path, options: &RunOptions) -> Result<i32> {
+    let context = QemuRunContext::new(options);
+    let mut cmd = build_qemu_command(uefi_path, options, &context)?;
+    let mut child = cmd.spawn().context("failed to start qemu-system-x86_64")?;
+    let metadata = json!({
+        "runner_pid": std::process::id(),
+        "qemu_pid": child.id(),
+        "serial_log": context.serial_log,
+        "qmp_socket": context.qmp_socket,
+        "uefi_image": uefi_path,
+    });
+    println!("{metadata}");
+    let _ = std::io::stdout().flush();
+    let status = child.wait().context("failed to wait on qemu")?;
     cleanup_qemu_context(&context);
     let exit_code = decode_qemu_exit_code(status.code(), &context)?;
     cleanup_qemu_debug_log(&context);
@@ -306,17 +306,13 @@ fn build_qemu_command(
     let _ = fs::remove_file(&context.serial_log);
     cmd.arg("-serial")
         .arg(format!("file:{}", context.serial_log.display()));
-    if let Some(parent) = context.tty_input_socket.parent() {
+    if let Some(parent) = context.qmp_socket.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    cleanup_socket(&context.tty_input_socket);
-    eprintln!(
-        "background terminal input path: {}",
-        context.tty_input_socket.display()
-    );
-    cmd.arg("-serial").arg(format!(
+    cleanup_socket(&context.qmp_socket);
+    cmd.arg("-qmp").arg(format!(
         "unix:{},server=on,wait=off",
-        context.tty_input_socket.display()
+        context.qmp_socket.display()
     ));
     cmd.arg("-monitor").arg("none");
     cmd.arg("-device")
@@ -384,7 +380,7 @@ fn build_qemu_command(
 
 fn cleanup_qemu_context(context: &QemuRunContext) {
     let _ = fs::remove_file(&context.serial_log);
-    cleanup_socket(&context.tty_input_socket);
+    cleanup_socket(&context.qmp_socket);
 }
 
 fn cleanup_qemu_debug_log(context: &QemuRunContext) {

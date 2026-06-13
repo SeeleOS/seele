@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["kernel", "xtask"]
+members = ["kernel", "xtask", "mcp"]
 exclude = ["toolchain/rust"]
 
 [profile.dev]

@@ -10,8 +10,8 @@ use crate::{
     cargo_build::{BuildMode, build_kernel, build_kernel_tests, build_kernel_with_mode},
     cli::{Command, RootfsCommand},
     qemu::{
-        RunOptions, create_uefi_image, run_qemu, run_qemu_expect_serial_failure, run_qemu_test,
-        run_qemu_until_serial_condition,
+        RunOptions, create_uefi_image, run_qemu, run_qemu_expect_serial_failure, run_qemu_mcp,
+        run_qemu_test, run_qemu_until_serial_condition,
     },
 };
 use anyhow::{Context, Result};
@@ -40,6 +40,7 @@ fn main() {
 fn real_main() -> Result<i32> {
     match cli::parse(env::args().skip(1))? {
         Command::Run(options) => run(options),
+        Command::McpRun => mcp_run(),
         Command::Test => test(),
         Command::IntegrationTest => integration_test(),
         Command::Rootfs(RootfsCommand::Build { override_disk }) => rootfs::build(override_disk),
@@ -57,6 +58,18 @@ fn run(options: RunOptions) -> Result<i32> {
     let exit_code = run_qemu(&uefi_path, &options)?;
     fs::remove_file(&uefi_path)
         .with_context(|| format!("failed to remove UEFI image {}", uefi_path.display()))?;
+    Ok(exit_code)
+}
+
+fn mcp_run() -> Result<i32> {
+    let kernel = build_kernel()?
+        .into_iter()
+        .next()
+        .context("kernel binary missing")?;
+    let uefi_path = create_uefi_image(&kernel)?;
+    let options = RunOptions::for_agent_run_without_timeout();
+    let exit_code = run_qemu_mcp(&uefi_path, &options)?;
+    let _ = fs::remove_file(&uefi_path);
     Ok(exit_code)
 }
 

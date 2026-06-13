@@ -8,7 +8,6 @@ use x86_64::instructions::interrupts::{self, enable_and_hlt, without_interrupts}
 
 use crate::{
     keyboard,
-    misc::agent_tty_input,
     misc::mouse,
     misc::profile::{self, ProfileCategory},
     misc::snapshot::Snapshot,
@@ -160,9 +159,7 @@ impl SchedulerDeferredWork {
 }
 
 fn pending_input_work() -> bool {
-    keyboard::has_pending_scancodes()
-        || agent_tty_input::has_pending_input()
-        || mouse::has_pending_events()
+    keyboard::has_pending_scancodes() || mouse::has_pending_events()
 }
 
 fn scheduler_deferred_work_snapshot() -> SchedulerDeferredWork {
@@ -329,7 +326,6 @@ pub fn run() -> ! {
             let other_kernel_start = profile::scope_start();
             if deferred_work.input_pending {
                 keyboard::process_pending_scancodes();
-                agent_tty_input::process_pending_input();
                 mouse::process_pending_mouse_events();
             }
             profile::record(ProfileCategory::OtherKernel, other_kernel_start);

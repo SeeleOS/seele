@@ -45,6 +45,22 @@
           toolchain
         ];
 
+        seeleMcp = pkgs.writeShellApplication {
+          name = "seele-mcp";
+          runtimeInputs = devPackages;
+          text = ''
+            set -eu
+
+            repo_root="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || ${pkgs.coreutils}/bin/pwd -P)"
+            cd "$repo_root"
+
+            export SEELE_REPO="''${SEELE_REPO:-$repo_root}"
+            export SEELE_QMP_SOCKET="''${SEELE_QMP_SOCKET:-/tmp/seele-agent-qmp.sock}"
+
+            exec cargo run -p seele-mcp -- "$@"
+          '';
+        };
+
         runApp = pkgs.writeShellApplication {
           name = "seele-run";
           runtimeInputs = runPackages;
@@ -70,11 +86,12 @@
         };
 
         defaultDevShell = pkgs.mkShell {
-          packages = devPackages;
+          packages = devPackages ++ [ seeleMcp ];
         };
       in
       {
         packages.default = runApp;
+        packages.seele-mcp = seeleMcp;
         apps.default = {
           type = "app";
           program = "${runApp}/bin/seele-run";

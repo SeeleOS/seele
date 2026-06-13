@@ -1,6 +1,5 @@
 use x86_64::instructions::hlt;
 
-pub mod agent_tty_input;
 pub mod auxv;
 pub mod c_types;
 pub mod debug_exit;

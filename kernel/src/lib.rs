@@ -39,7 +39,7 @@ pub use misc::testing;
 use crate::boot::BOOTLOADER_CONFIG;
 use crate::filesystem::vfs::VirtualFS;
 use crate::misc::others::enable_sse;
-use crate::misc::{agent_tty_input, framebuffer, logging, mouse, profile, time};
+use crate::misc::{framebuffer, logging, mouse, profile, time};
 use crate::process::manager::MANAGER;
 use crate::smp::{init_bsp, release_application_processors, start_application_processors};
 use bootloader_api::BootInfo;
@@ -83,12 +83,6 @@ pub fn init_kernel(boot_info: &'static mut BootInfo) {
     log::info!("init: multitasking ready");
     keyboard::init();
     log::info!("init: keyboard ready");
-    let agent_tty_ready = agent_tty_input::init();
-    if agent_tty_ready {
-        log::info!("init: agent background terminal input ready");
-    } else {
-        log::info!("init: agent background terminal input unavailable");
-    }
     interrupts::init();
     log::info!("init: interrupts ready");
     net::init();
