@@ -64,5 +64,5 @@ export KDE_FULL_SESSION=true
 unset WAYLAND_DISPLAY
 unset XAUTHORITY
 
-log "exec startx /usr/bin/startplasma-x11 -- :0 vt${XDG_VTNR} -nolisten tcp"
-exec /usr/bin/startx /usr/bin/startplasma-x11 -- :0 "vt${XDG_VTNR}" -nolisten tcp
+log "exec startx /usr/bin/seele-plasma-x11-session -- :0 vt${XDG_VTNR} -nolisten tcp"
+exec /usr/bin/startx /usr/bin/seele-plasma-x11-session -- :0 "vt${XDG_VTNR}" -nolisten tcp

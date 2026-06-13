@@ -248,6 +248,7 @@ install_sysroot_file "${ROOTFS_MAKING_DIR}/xinitrc" "${SYSROOT_DIR}/root/.xinitr
 install_sysroot_file "${ROOTFS_MAKING_DIR}/root-bash-profile" "${SYSROOT_DIR}/root/.bash_profile"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/getty-tty1-autologin.conf" "${SYSROOT_DIR}/etc/systemd/system/getty@tty1.service.d/autologin.conf"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/startplasma-x11-tty.sh" "${SYSROOT_DIR}/usr/bin/startplasma-x11-tty"
+install_sysroot_file "${ROOTFS_MAKING_DIR}/seele-plasma-x11-session.sh" "${SYSROOT_DIR}/usr/bin/seele-plasma-x11-session"
 install_sysroot_file "${ROOTFS_MAKING_DIR}/startplasma-wayland-tty.sh" "${SYSROOT_DIR}/usr/bin/startplasma-wayland-tty"
 
 sudo rm -f \
