@@ -195,7 +195,7 @@ static DEV_PTS_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
 static DEV_SHM_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     name: "shm",
     inode: 0x100d,
-    mode: 0o040777,
+    mode: 0o041777,
     entries: &[],
 });
 

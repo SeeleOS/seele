@@ -47,12 +47,26 @@ fi
 
 rm -f \
     /root/.config/kdeglobals \
+    /root/.config/kglobalshortcutsrc \
     /root/.config/kdedefaults/kdeglobals \
     /root/.config/kdedefaults/plasmarc \
     /root/.config/kdedefaults/kcminputrc \
     /root/.config/kdedefaults/kwinrc \
     /root/.config/kdedefaults/ksplashrc \
-    /root/.config/plasma-localerc
+    /root/.config/kwinoutputconfig.json \
+    /root/.config/kwinrc \
+    /root/.config/kwinrc.lock \
+    /root/.config/plasma-localerc \
+    /root/.config/plasma-org.kde.plasma.desktop-appletsrc \
+    /root/.config/plasmashellrc \
+    /root/.local/state/kactivitymanagerdstaterc \
+    /root/.local/state/plasmashellstaterc
+
+rm -rf \
+    /root/.cache/kwin \
+    /root/.cache/plasmashell \
+    /root/.local/share/kactivitymanagerd \
+    /root/.local/share/klipper
 
 export XDG_RUNTIME_DIR="${runtime_dir}"
 export XDG_SESSION_TYPE=x11

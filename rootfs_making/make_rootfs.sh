@@ -253,12 +253,26 @@ install_sysroot_file "${ROOTFS_MAKING_DIR}/startplasma-wayland-tty.sh" "${SYSROO
 
 sudo rm -f \
     "${SYSROOT_DIR}/root/.config/kdeglobals" \
+    "${SYSROOT_DIR}/root/.config/kglobalshortcutsrc" \
     "${SYSROOT_DIR}/root/.config/kdedefaults/kdeglobals" \
     "${SYSROOT_DIR}/root/.config/kdedefaults/plasmarc" \
     "${SYSROOT_DIR}/root/.config/kdedefaults/kcminputrc" \
     "${SYSROOT_DIR}/root/.config/kdedefaults/kwinrc" \
     "${SYSROOT_DIR}/root/.config/kdedefaults/ksplashrc" \
-    "${SYSROOT_DIR}/root/.config/plasma-localerc"
+    "${SYSROOT_DIR}/root/.config/kwinoutputconfig.json" \
+    "${SYSROOT_DIR}/root/.config/kwinrc" \
+    "${SYSROOT_DIR}/root/.config/kwinrc.lock" \
+    "${SYSROOT_DIR}/root/.config/plasma-localerc" \
+    "${SYSROOT_DIR}/root/.config/plasma-org.kde.plasma.desktop-appletsrc" \
+    "${SYSROOT_DIR}/root/.config/plasmashellrc" \
+    "${SYSROOT_DIR}/root/.local/state/kactivitymanagerdstaterc" \
+    "${SYSROOT_DIR}/root/.local/state/plasmashellstaterc"
+
+sudo rm -rf \
+    "${SYSROOT_DIR}/root/.cache/kwin" \
+    "${SYSROOT_DIR}/root/.cache/plasmashell" \
+    "${SYSROOT_DIR}/root/.local/share/kactivitymanagerd" \
+    "${SYSROOT_DIR}/root/.local/share/klipper"
 
 for package in "${AUR_PACKAGES[@]}"; do
     install_aur_package "${package}"
