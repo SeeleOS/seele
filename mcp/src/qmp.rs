@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
-use image::ImageFormat;
+use image::{ImageBuffer, ImageFormat, Rgb};
 use serde_json::{Value, json};
-use std::{io::Cursor, path::Path};
+use std::{fs, io::Cursor, path::Path};
 use tempfile::NamedTempFile;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -13,12 +13,77 @@ pub async fn screendump_png(socket: &Path) -> Result<Vec<u8>> {
     let ppm_path = ppm.path().to_path_buf();
     execute(socket, "screendump", Some(json!({ "filename": ppm_path }))).await?;
 
-    let image = image::open(&ppm_path).context("failed to decode QMP screendump")?;
+    let image = decode_ppm_screendump(&ppm_path)?;
     let mut png = Cursor::new(Vec::new());
     image
         .write_to(&mut png, ImageFormat::Png)
         .context("failed to encode PNG")?;
     Ok(png.into_inner())
+}
+
+fn decode_ppm_screendump(path: &Path) -> Result<ImageBuffer<Rgb<u8>, Vec<u8>>> {
+    let data = fs::read(path)
+        .with_context(|| format!("failed to read QMP screendump {}", path.display()))?;
+    let mut offset = 0;
+    let magic = read_ppm_token(&data, &mut offset).context("missing PPM magic")?;
+    if magic != b"P6" {
+        bail!(
+            "unsupported QMP screendump format: {}",
+            String::from_utf8_lossy(&magic)
+        );
+    }
+    let width = parse_ppm_u32(&read_ppm_token(&data, &mut offset).context("missing PPM width")?)?;
+    let height = parse_ppm_u32(&read_ppm_token(&data, &mut offset).context("missing PPM height")?)?;
+    let max_value =
+        parse_ppm_u32(&read_ppm_token(&data, &mut offset).context("missing PPM max value")?)?;
+    if max_value != 255 {
+        bail!("unsupported QMP screendump max value: {max_value}");
+    }
+    let expected_len = width as usize * height as usize * 3;
+    let pixels = data
+        .get(offset..offset + expected_len)
+        .with_context(|| {
+            format!(
+                "truncated QMP screendump: expected {expected_len} bytes of pixel data after PPM header"
+            )
+        })?
+        .to_vec();
+    ImageBuffer::from_raw(width, height, pixels)
+        .context("failed to build image from QMP screendump")
+}
+
+fn read_ppm_token(data: &[u8], offset: &mut usize) -> Option<Vec<u8>> {
+    loop {
+        while *offset < data.len() && data[*offset].is_ascii_whitespace() {
+            *offset += 1;
+        }
+        if *offset >= data.len() || data[*offset] != b'#' {
+            break;
+        }
+        while *offset < data.len() && data[*offset] != b'\n' {
+            *offset += 1;
+        }
+    }
+
+    let start = *offset;
+    while *offset < data.len() && !data[*offset].is_ascii_whitespace() {
+        *offset += 1;
+    }
+    if start == *offset {
+        return None;
+    }
+    let token = data[start..*offset].to_vec();
+    if *offset < data.len() && data[*offset].is_ascii_whitespace() {
+        *offset += 1;
+    }
+    Some(token)
+}
+
+fn parse_ppm_u32(token: &[u8]) -> Result<u32> {
+    let token = std::str::from_utf8(token).context("PPM header contains non-UTF-8 token")?;
+    token
+        .parse()
+        .with_context(|| format!("invalid PPM integer: {token}"))
 }
 
 pub async fn send_key(socket: &Path, keys: &[String]) -> Result<()> {
@@ -79,6 +144,13 @@ pub async fn type_text(socket: &Path, text: &str) -> Result<()> {
 }
 
 pub async fn mouse_move(socket: &Path, x: i64, y: i64) -> Result<()> {
+    if mouse_move_absolute(socket, x, y).await.is_ok() {
+        return Ok(());
+    }
+    mouse_move_relative(socket, x, y).await
+}
+
+async fn mouse_move_absolute(socket: &Path, x: i64, y: i64) -> Result<()> {
     execute(
         socket,
         "input-send-event",
@@ -91,6 +163,30 @@ pub async fn mouse_move(socket: &Path, x: i64, y: i64) -> Result<()> {
                 }
             }, {
                 "type": "abs",
+                "data": {
+                    "axis": "y",
+                    "value": y
+                }
+            }]
+        })),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn mouse_move_relative(socket: &Path, x: i64, y: i64) -> Result<()> {
+    execute(
+        socket,
+        "input-send-event",
+        Some(json!({
+            "events": [{
+                "type": "rel",
+                "data": {
+                    "axis": "x",
+                    "value": x
+                }
+            }, {
+                "type": "rel",
                 "data": {
                     "axis": "y",
                     "value": y
@@ -309,5 +405,18 @@ mod tests {
         assert_eq!(ascii_key(b'a').unwrap().qcode, "a");
         assert!(ascii_key(b'A').unwrap().shift);
         assert_eq!(ascii_key(b'\n').unwrap().qcode, "ret");
+    }
+
+    #[test]
+    fn decodes_qmp_ppm_screendump() {
+        let ppm = tempfile::NamedTempFile::new().unwrap();
+        fs::write(ppm.path(), b"P6\n2 1\n255\n\xff\x00\x00\x00\xff\x00").unwrap();
+
+        let image = decode_ppm_screendump(ppm.path()).unwrap();
+
+        assert_eq!(image.width(), 2);
+        assert_eq!(image.height(), 1);
+        assert_eq!(image.get_pixel(0, 0), &Rgb([255, 0, 0]));
+        assert_eq!(image.get_pixel(1, 0), &Rgb([0, 255, 0]));
     }
 }

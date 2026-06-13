@@ -317,6 +317,8 @@ fn build_qemu_command(
     cmd.arg("-monitor").arg("none");
     cmd.arg("-device")
         .arg("isa-debug-exit,iobase=0xf4,iosize=0x04");
+    cmd.arg("-device").arg("qemu-xhci");
+    cmd.arg("-device").arg("usb-tablet");
 
     if let Some(endpoint) = &options.qemu_gdb {
         eprintln!("qemu gdb stub: {endpoint}");
