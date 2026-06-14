@@ -195,7 +195,7 @@ mod tests {
         let page_bases = pages
             .iter_mut()
             .map(|page| page.as_mut_ptr() as u64)
-            .collect::<alloc::vec::Vec<_>>();
+            .collect::<Vec<_>>();
         let top = 0x20_000u64;
         let mut builder = StackBuilder::new(top, page_bases);
 
@@ -213,7 +213,7 @@ mod tests {
         let page_bases = pages
             .iter_mut()
             .map(|page| page.as_mut_ptr() as u64)
-            .collect::<alloc::vec::Vec<_>>();
+            .collect::<Vec<_>>();
         let top = 0x30_000u64;
         let mut builder = StackBuilder::new(top, page_bases);
         let elf = ElfInfo {

@@ -2,7 +2,11 @@ use bitflags::bitflags;
 
 use crate::{
     object::linux_ioctl::LinuxIoctlOp,
-    object::{FileFlags, ObjectResult, error::ObjectError},
+    object::{
+        FileFlags, ObjectResult,
+        error::ObjectError,
+        linux_ioctl::{evdev_raw_ioctl_op, ioctl_nr, ioctl_size},
+    },
     process::FdFlags,
 };
 
@@ -109,7 +113,53 @@ pub enum ConfigurateRequest {
     DrmGemClose(*mut DrmGemClose),
     DrmPrimeHandleToFd(*mut DrmPrimeHandle),
     DrmPrimeFdToHandle(*mut DrmPrimeHandle),
-    RawIoctl { request: u64, arg: u64 },
+    EvdevGetVersion(*mut i32),
+    EvdevGetId(*mut u8),
+    EvdevGetRepeat(*mut [u32; 2]),
+    EvdevGetName {
+        ptr: *mut u8,
+        len: usize,
+    },
+    EvdevGetPhys {
+        ptr: *mut u8,
+        len: usize,
+    },
+    EvdevGetUniq {
+        ptr: *mut u8,
+        len: usize,
+    },
+    EvdevGetProp {
+        ptr: *mut u8,
+        len: usize,
+    },
+    EvdevGetKey {
+        ptr: *mut u8,
+        len: usize,
+    },
+    EvdevGetLed {
+        ptr: *mut u8,
+        len: usize,
+    },
+    EvdevGetSnd {
+        ptr: *mut u8,
+        len: usize,
+    },
+    EvdevGetSw {
+        ptr: *mut u8,
+        len: usize,
+    },
+    EvdevGetBit {
+        event_type: u8,
+        ptr: *mut u8,
+        len: usize,
+    },
+    EvdevGrab(u64),
+    EvdevRevoke(u64),
+    EvdevSetClockId(*const i32),
+    RawIoctl {
+        request: u64,
+        arg: u64,
+    },
 }
 
 impl ConfigurateRequest {
@@ -188,6 +238,21 @@ impl ConfigurateRequest {
             Self::DrmGemClose(_) => "DrmGemClose",
             Self::DrmPrimeHandleToFd(_) => "DrmPrimeHandleToFd",
             Self::DrmPrimeFdToHandle(_) => "DrmPrimeFdToHandle",
+            Self::EvdevGetVersion(_) => "EvdevGetVersion",
+            Self::EvdevGetId(_) => "EvdevGetId",
+            Self::EvdevGetRepeat(_) => "EvdevGetRepeat",
+            Self::EvdevGetName { .. } => "EvdevGetName",
+            Self::EvdevGetPhys { .. } => "EvdevGetPhys",
+            Self::EvdevGetUniq { .. } => "EvdevGetUniq",
+            Self::EvdevGetProp { .. } => "EvdevGetProp",
+            Self::EvdevGetKey { .. } => "EvdevGetKey",
+            Self::EvdevGetLed { .. } => "EvdevGetLed",
+            Self::EvdevGetSnd { .. } => "EvdevGetSnd",
+            Self::EvdevGetSw { .. } => "EvdevGetSw",
+            Self::EvdevGetBit { .. } => "EvdevGetBit",
+            Self::EvdevGrab(_) => "EvdevGrab",
+            Self::EvdevRevoke(_) => "EvdevRevoke",
+            Self::EvdevSetClockId(_) => "EvdevSetClockId",
             Self::RawIoctl { .. } => "RawIoctl",
         }
     }
@@ -267,6 +332,21 @@ impl ConfigurateRequest {
             Self::DrmGemClose(_) => LinuxIoctlOp::DrmGemClose,
             Self::DrmPrimeHandleToFd(_) => LinuxIoctlOp::DrmPrimeHandleToFd,
             Self::DrmPrimeFdToHandle(_) => LinuxIoctlOp::DrmPrimeFdToHandle,
+            Self::EvdevGetVersion(_) => LinuxIoctlOp::EvdevGetVersion,
+            Self::EvdevGetId(_) => LinuxIoctlOp::EvdevGetId,
+            Self::EvdevGetRepeat(_) => LinuxIoctlOp::EvdevGetRepeat,
+            Self::EvdevGetName { .. } => LinuxIoctlOp::EvdevGetName,
+            Self::EvdevGetPhys { .. } => LinuxIoctlOp::EvdevGetPhys,
+            Self::EvdevGetUniq { .. } => LinuxIoctlOp::EvdevGetUniq,
+            Self::EvdevGetProp { .. } => LinuxIoctlOp::EvdevGetProp,
+            Self::EvdevGetKey { .. } => LinuxIoctlOp::EvdevGetKey,
+            Self::EvdevGetLed { .. } => LinuxIoctlOp::EvdevGetLed,
+            Self::EvdevGetSnd { .. } => LinuxIoctlOp::EvdevGetSnd,
+            Self::EvdevGetSw { .. } => LinuxIoctlOp::EvdevGetSw,
+            Self::EvdevGetBit { .. } => LinuxIoctlOp::EvdevGetBit,
+            Self::EvdevGrab(_) => LinuxIoctlOp::EvdevGrab,
+            Self::EvdevRevoke(_) => LinuxIoctlOp::EvdevRevoke,
+            Self::EvdevSetClockId(_) => LinuxIoctlOp::EvdevSetClockId,
             Self::RawIoctl { .. } => return None,
         })
     }
@@ -519,6 +599,55 @@ impl ConfigurateRequest {
             0x5606 => Self::LinuxVtActivate(ptr as u32),
             0x5607 => Self::LinuxVtWaitActive(ptr as u32),
             0x5605 => Self::LinuxVtRelDisp(ptr as u32),
+            request if evdev_raw_ioctl_op(request).is_some() => {
+                let len = ioctl_size(request);
+                match ioctl_nr(request) {
+                    0x01 => Self::EvdevGetVersion(ptr as *mut i32),
+                    0x02 => Self::EvdevGetId(ptr as *mut u8),
+                    0x03 => Self::EvdevGetRepeat(ptr as *mut [u32; 2]),
+                    0x06 => Self::EvdevGetName {
+                        ptr: ptr as *mut u8,
+                        len,
+                    },
+                    0x07 => Self::EvdevGetPhys {
+                        ptr: ptr as *mut u8,
+                        len,
+                    },
+                    0x08 => Self::EvdevGetUniq {
+                        ptr: ptr as *mut u8,
+                        len,
+                    },
+                    0x09 => Self::EvdevGetProp {
+                        ptr: ptr as *mut u8,
+                        len,
+                    },
+                    0x18 => Self::EvdevGetKey {
+                        ptr: ptr as *mut u8,
+                        len,
+                    },
+                    0x19 => Self::EvdevGetLed {
+                        ptr: ptr as *mut u8,
+                        len,
+                    },
+                    0x1a => Self::EvdevGetSnd {
+                        ptr: ptr as *mut u8,
+                        len,
+                    },
+                    0x1b => Self::EvdevGetSw {
+                        ptr: ptr as *mut u8,
+                        len,
+                    },
+                    0x20..=0x3f => Self::EvdevGetBit {
+                        event_type: (ioctl_nr(request) - 0x20) as u8,
+                        ptr: ptr as *mut u8,
+                        len,
+                    },
+                    0x90 => Self::EvdevGrab(ptr),
+                    0x91 => Self::EvdevRevoke(ptr),
+                    0xa0 => Self::EvdevSetClockId(ptr as *const i32),
+                    _ => unreachable!(),
+                }
+            }
             _ => Self::RawIoctl { request, arg: ptr },
         })
     }

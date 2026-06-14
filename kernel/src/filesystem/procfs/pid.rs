@@ -545,7 +545,7 @@ mod tests {
         object::linux_anon::{EventFdFlags, EventFdObject},
         process::{FdFlags, Process, manager::MANAGER, misc::ProcessID},
     };
-    use alloc::format;
+    use alloc::{format, string::String, vec::Vec};
 
     crate::test!(
         procfs_pid_format_helpers,
@@ -584,16 +584,16 @@ mod tests {
             pid_ns_entries()
                 .into_iter()
                 .map(|entry| entry.name)
-                .collect::<alloc::vec::Vec<_>>(),
+                .collect::<Vec<_>>(),
             alloc::vec!["cgroup", "ipc", "mnt", "net", "pid", "time", "user", "uts"]
         );
         let names = pid_dir_entries()
             .into_iter()
             .map(|entry| entry.name)
-            .collect::<alloc::vec::Vec<_>>();
-        assert!(names.contains(&alloc::string::String::from("comm")));
-        assert!(names.contains(&alloc::string::String::from("mountinfo")));
-        assert!(names.contains(&alloc::string::String::from("fdinfo")));
+            .collect::<Vec<_>>();
+        assert!(names.contains(&String::from("comm")));
+        assert!(names.contains(&String::from("mountinfo")));
+        assert!(names.contains(&String::from("fdinfo")));
     }
 
     fn procfs_pid_helpers_render_linux_style_content_and_update_writable_controls() {
@@ -601,10 +601,8 @@ mod tests {
         let pid = {
             let mut process_locked = process.lock();
             process_locked.pid = ProcessID::new();
-            process_locked.command_line = alloc::vec![
-                alloc::string::String::from("/bin/test-proc"),
-                alloc::string::String::from("--flag")
-            ];
+            process_locked.command_line =
+                alloc::vec![String::from("/bin/test-proc"), String::from("--flag")];
             process_locked.real_uid = 1000;
             process_locked.effective_uid = 1001;
             process_locked.saved_uid = 1002;
@@ -630,14 +628,14 @@ mod tests {
         assert_eq!(cmdline, b"/bin/test-proc\0--flag\0");
         assert_eq!(proc_pid_comm_bytes(pid).unwrap(), b"test-proc\n");
 
-        let status = alloc::string::String::from_utf8(proc_pid_status_bytes(pid).unwrap()).unwrap();
+        let status = String::from_utf8(proc_pid_status_bytes(pid).unwrap()).unwrap();
         assert!(status.contains("Name:\t"));
         assert!(status.contains("Pid:\t"));
         assert!(status.contains("Uid:\t1000\t1001\t1002\t1003\n"));
         assert!(status.contains("Gid:\t2000\t2001\t2002\t2003\n"));
         assert!(status.contains("Groups:\t10 20\n"));
 
-        let stat = alloc::string::String::from_utf8(proc_pid_stat_bytes(pid).unwrap()).unwrap();
+        let stat = String::from_utf8(proc_pid_stat_bytes(pid).unwrap()).unwrap();
         assert!(stat.starts_with(&format!("{} (", pid.0)));
         assert!(stat.contains(" 55 77 "));
 
@@ -648,7 +646,7 @@ mod tests {
         assert_eq!(proc_pid_setgroups_bytes(pid).unwrap(), b"allow\n");
         assert_eq!(proc_pid_oom_score_adj_bytes(pid).unwrap(), b"0\n");
         assert!(
-            alloc::string::String::from_utf8(proc_pid_cgroup_bytes(pid))
+            String::from_utf8(proc_pid_cgroup_bytes(pid))
                 .unwrap()
                 .starts_with("0::/")
         );
@@ -674,8 +672,7 @@ mod tests {
             fd_target(pid, "0").unwrap(),
             "anon_inode:[kernel::object::linux_anon::EventFdObject]"
         );
-        let fdinfo =
-            alloc::string::String::from_utf8(proc_pid_fdinfo_bytes(pid, 0).unwrap()).unwrap();
+        let fdinfo = String::from_utf8(proc_pid_fdinfo_bytes(pid, 0).unwrap()).unwrap();
         assert!(fdinfo.contains("pos:\t0\n"));
         assert!(fdinfo.contains("flags:\t0\n"));
         assert!(fdinfo.contains("mnt_id:\t0\n"));

@@ -5,7 +5,6 @@ use core::{
 
 use crate::memory::utils::Mut;
 use alloc::{collections::btree_map::BTreeMap, format, string::String, vec, vec::Vec};
-use bitflags::bitflags;
 
 use crate::{
     define_syscall,
@@ -30,27 +29,16 @@ use crate::{
         manager::get_current_process,
         misc::{ProcessID, with_current_process},
     },
-    socket::{InetSocketKind, UnixSocketKind},
     systemcall::utils::{SyscallError, SyscallImpl, SyscallResult},
     thread::get_current_thread,
 };
+
+use super::{CloseRangeFlags, DupFlags, FallocateFlags, MemfdFlags};
 
 static DIR_OFFSETS: Mut<BTreeMap<(ProcessID, u64), usize>> = Mut::new(BTreeMap::new());
 static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
 const COPY_CHUNK_SIZE: usize = 16 * 1024;
 const LINEAR_IO_CHUNK_SIZE: usize = 64 * 1024;
-
-bitflags! {
-    #[derive(Clone, Copy, Debug)]
-    pub struct FallocateFlags: i32 {
-        const FALLOC_FL_KEEP_SIZE = 0x01;
-        const FALLOC_FL_PUNCH_HOLE = 0x02;
-        const FALLOC_FL_COLLAPSE_RANGE = 0x08;
-        const FALLOC_FL_ZERO_RANGE = 0x10;
-        const FALLOC_FL_INSERT_RANGE = 0x20;
-        const FALLOC_FL_UNSHARE_RANGE = 0x40;
-    }
-}
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -107,17 +95,6 @@ fn fallback_dirent_inode(info: &DirectoryContentInfo, offset: usize) -> u64 {
     hash.max(1)
 }
 
-fn log_sddm_dirents(_object_index: u64, _obj: &FileLikeObject, _contents: &[DirectoryContentInfo]) {
-}
-
-fn log_display_pipe_bytes(_op: &str, _object: &ObjectRef, _bytes: &[u8]) {}
-
-fn log_display_write_dispatch(_op: &str, _object: &ObjectRef, _len: usize) {}
-
-fn log_x_chain_write_bytes(_bytes: &[u8]) {}
-
-fn log_user_manager_socket_bytes(_op: &str, _object: &ObjectRef, _bytes: &[u8]) {}
-
 fn ioctl_target_for_object(object: &ObjectRef) -> Option<LinuxIoctlTarget> {
     if object.clone().as_drm_prime_buffer().is_ok() {
         Some(LinuxIoctlTarget::DrmPrime)
@@ -154,7 +131,6 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
 
     let obj = get_object_current_process(object_index)?.as_file_like()?;
     let contents = obj.directory_contents().map_err(SyscallError::from)?;
-    log_sddm_dirents(object_index, &obj, &contents);
     let current_pid = get_current_process().lock().pid;
     let mut offsets = DIR_OFFSETS.lock();
     let offset_entry = offsets.entry((current_pid, object_index)).or_insert(0usize);
@@ -365,10 +341,6 @@ fn write_object_in_chunks(
     while total < len {
         let chunk_len = (len - total).min(LINEAR_IO_CHUNK_SIZE);
         let bytes = user_safe::read_buffer(unsafe { buf_ptr.add(total) }, chunk_len)?;
-        log_display_write_dispatch("write", object, bytes.len());
-        log_display_pipe_bytes("write", object, &bytes);
-        log_x_chain_write_bytes(&bytes);
-        log_user_manager_socket_bytes("write", object, &bytes);
         let written = writable.write(&bytes)?;
         total += written;
         if written < chunk_len {
@@ -500,8 +472,6 @@ define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
     let result = match result {
         Ok(read) => {
             if read > 0 {
-                log_display_pipe_bytes("read", &object, &buffer[..read]);
-                log_user_manager_socket_bytes("read", &object, &buffer[..read]);
                 let copy_start = profile::scope_start();
                 user_safe::write_buffer(buf_ptr, &buffer[..read])?;
                 profile::record_hot_syscall_phase(
@@ -528,10 +498,6 @@ define_syscall!(Write, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
     }
 
     let bytes = user_safe::read_buffer(buf_ptr.cast_const(), len)?;
-    log_display_write_dispatch("write", &object, bytes.len());
-    log_display_pipe_bytes("write", &object, &bytes);
-    log_x_chain_write_bytes(&bytes);
-    log_user_manager_socket_bytes("write", &object, &bytes);
     Ok(object.as_writable()?.write(&bytes)?)
 });
 
@@ -547,30 +513,8 @@ define_syscall!(Writev, |object: ObjectRef,
     }
 
     let iovs = read_iovecs(iov_ptr, iovcnt)?;
-    let preserve_datagram_boundary = object
-        .clone()
-        .as_unix_socket()
-        .map(|socket| {
-            matches!(
-                socket.kind,
-                UnixSocketKind::Datagram | UnixSocketKind::SeqPacket
-            )
-        })
-        .or_else(|_| {
-            object
-                .clone()
-                .as_inet_socket()
-                .map(|socket| socket.kind == InetSocketKind::Datagram)
-        })
-        .unwrap_or(false);
     let writable = object.clone().as_writable()?;
     let buffer = copy_iovecs(&iovs)?;
-    if preserve_datagram_boundary || !buffer.is_empty() {
-        log_display_write_dispatch("writev", &object, buffer.len());
-        log_display_pipe_bytes("writev", &object, &buffer);
-        log_x_chain_write_bytes(&buffer);
-        log_user_manager_socket_bytes("writev", &object, &buffer);
-    }
     Ok(writable.write(&buffer)?)
 });
 
@@ -740,15 +684,7 @@ define_syscall!(Dup2, |source_fd: usize, dest: usize| {
         .map_err(Into::into)
 });
 
-bitflags! {
-    #[derive(Clone, Copy, Debug)]
-    struct DupFlags: i32 {
-        const O_CLOEXEC = 0o2_000_000;
-    }
-}
-
-define_syscall!(Dup3, |source_fd: usize, dest: usize, flags: i32| {
-    let flags = DupFlags::from_bits(flags).ok_or(SyscallError::InvalidArguments)?;
+define_syscall!(Dup3, |source_fd: usize, dest: usize, flags: DupFlags| {
     if source_fd == dest {
         return Err(SyscallError::InvalidArguments);
     }
@@ -765,45 +701,35 @@ define_syscall!(Dup3, |source_fd: usize, dest: usize, flags: i32| {
         .map_err(Into::into)
 });
 
-bitflags! {
-    #[derive(Clone, Copy, Debug)]
-    struct CloseRangeFlags: u32 {
-        const CLOSE_RANGE_UNSHARE = 0x2;
-        const CLOSE_RANGE_CLOEXEC = 0x4;
-    }
-}
-
-define_syscall!(CloseRange, |first: usize, last: usize, flags: u32| {
-    let raw_flags = flags;
-    let flags = CloseRangeFlags::from_bits(flags).ok_or_else(|| {
-        crate::s_println!("unsupported close_range flags raw={:#x}", raw_flags);
-        SyscallError::InvalidArguments
-    })?;
-    if first > last {
-        return Err(SyscallError::InvalidArguments);
-    }
-
-    let process_ref = get_current_process();
-    let mut process = process_ref.lock();
-    let fd_table_len = process.fd_table.lock().len();
-    if first >= fd_table_len {
-        return Ok(0);
-    }
-
-    let end = last.min(fd_table_len.saturating_sub(1));
-    for fd in first..=end {
-        if process.fd_table.lock()[fd].is_none() {
-            continue;
+define_syscall!(
+    CloseRange,
+    |first: usize, last: usize, flags: CloseRangeFlags| {
+        if first > last {
+            return Err(SyscallError::InvalidArguments);
         }
-        if flags.contains(CloseRangeFlags::CLOSE_RANGE_CLOEXEC) {
-            process.set_fd_flags(fd, FdFlags::CLOEXEC)?;
-        } else {
-            process.clear_fd_slot(fd)?;
-        }
-    }
 
-    Ok(0)
-});
+        let process_ref = get_current_process();
+        let mut process = process_ref.lock();
+        let fd_table_len = process.fd_table.lock().len();
+        if first >= fd_table_len {
+            return Ok(0);
+        }
+
+        let end = last.min(fd_table_len.saturating_sub(1));
+        for fd in first..=end {
+            if process.fd_table.lock()[fd].is_none() {
+                continue;
+            }
+            if flags.contains(CloseRangeFlags::CLOSE_RANGE_CLOEXEC) {
+                process.set_fd_flags(fd, FdFlags::CLOEXEC)?;
+            } else {
+                process.clear_fd_slot(fd)?;
+            }
+        }
+
+        Ok(0)
+    }
+);
 
 define_syscall!(OpenDevice, |name: String| {
     with_current_process(|process| {
@@ -814,22 +740,7 @@ define_syscall!(OpenDevice, |name: String| {
     })
 });
 
-bitflags! {
-    #[derive(Clone, Copy, Debug)]
-    struct MemfdFlags: u32 {
-        const MFD_CLOEXEC = 0x0001;
-        const MFD_ALLOW_SEALING = 0x0002;
-        const MFD_NOEXEC_SEAL = 0x0008;
-        const MFD_EXEC = 0x0010;
-    }
-}
-
-define_syscall!(MemfdCreate, |name: String, flags: u32| {
-    let raw_flags = flags;
-    let flags = MemfdFlags::from_bits(flags).ok_or_else(|| {
-        crate::s_println!("unsupported memfd_create flags raw={:#x}", raw_flags);
-        SyscallError::InvalidArguments
-    })?;
+define_syscall!(MemfdCreate, |name: String, flags: MemfdFlags| {
     if flags.contains(MemfdFlags::MFD_NOEXEC_SEAL) && flags.contains(MemfdFlags::MFD_EXEC) {
         return Err(SyscallError::InvalidArguments);
     }

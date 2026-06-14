@@ -247,7 +247,10 @@ mod tests {
         proc_ngroups_max_bytes, proc_pressure_entries, proc_root_entries,
     };
     use crate::process::manager::get_current_process;
-    use alloc::string::ToString;
+    use alloc::{
+        string::{String, ToString},
+        vec::Vec,
+    };
 
     crate::test!(
         procfs_root_uuid_layout,
@@ -289,7 +292,7 @@ mod tests {
             kernel_entries
                 .into_iter()
                 .map(|entry| entry.name)
-                .collect::<alloc::vec::Vec<_>>(),
+                .collect::<Vec<_>>(),
             alloc::vec![
                 "hostname",
                 "domainname",
@@ -304,7 +307,7 @@ mod tests {
             random_entries
                 .into_iter()
                 .map(|entry| entry.name)
-                .collect::<alloc::vec::Vec<_>>(),
+                .collect::<Vec<_>>(),
             alloc::vec!["boot_id", "uuid"]
         );
         let pressure_entries = proc_pressure_entries();
@@ -312,7 +315,7 @@ mod tests {
             pressure_entries
                 .into_iter()
                 .map(|entry| entry.name)
-                .collect::<alloc::vec::Vec<_>>(),
+                .collect::<Vec<_>>(),
             alloc::vec!["cpu", "io", "memory"]
         );
     }
@@ -328,17 +331,17 @@ mod tests {
         let root_entries = proc_root_entries()
             .into_iter()
             .map(|entry| entry.name)
-            .collect::<alloc::vec::Vec<_>>();
+            .collect::<Vec<_>>();
         assert!(root_entries.contains(&current_pid));
-        assert!(root_entries.contains(&alloc::string::String::from("self")));
+        assert!(root_entries.contains(&String::from("self")));
 
-        let mounts = alloc::string::String::from_utf8(proc_mounts_bytes()).unwrap();
+        let mounts = String::from_utf8(proc_mounts_bytes()).unwrap();
         assert!(mounts.contains("proc /proc proc "));
         assert!(mounts.contains("sysfs /sys sysfs "));
         assert!(mounts.contains("devtmpfs /dev devtmpfs "));
         assert!(mounts.contains("tmpfs /dev/shm tmpfs "));
 
-        let mountinfo = alloc::string::String::from_utf8(proc_mountinfo_bytes()).unwrap();
+        let mountinfo = String::from_utf8(proc_mountinfo_bytes()).unwrap();
         assert!(mountinfo.contains(" / / "));
         assert!(mountinfo.contains(" /proc "));
         assert!(mountinfo.contains(" - proc proc "));

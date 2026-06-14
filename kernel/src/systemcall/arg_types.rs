@@ -23,11 +23,11 @@ use crate::{
     },
     signal::{Signal, Signals},
     systemcall::implementations::{
-        AtFlags, ClockNanosleepFlags, EpollCreateFlags, FallocateFlags, FsMountFlags, FsOpenFlags,
-        GetRandomFlags, InotifyInitFlags, LinuxIoprioWho, LinuxSchedPolicy, MmapFlags,
-        MoveMountFlags, MremapFlags, MsyncFlags, OpenFlags, OpenTreeFlags, PipeFlags, PollEvents,
-        RseqFlags, SetnsFlags, TimerFdFlags, TimerSetTimeFlags, UmountFlags, Wait4Options,
-        WaitidOptions, XattrFlags,
+        AtFlags, ClockNanosleepFlags, CloseRangeFlags, DupFlags, EpollCreateFlags, FallocateFlags,
+        FsMountFlags, FsOpenFlags, GetRandomFlags, InotifyInitFlags, LinuxIoprioWho,
+        LinuxSchedPolicy, MemfdFlags, MmapFlags, MoveMountFlags, MremapFlags, MsyncFlags,
+        OpenFlags, OpenTreeFlags, PipeFlags, PollEvents, RseqFlags, SetnsFlags, TimerFdFlags,
+        TimerSetTimeFlags, UmountFlags, Wait4Options, WaitidOptions, XattrFlags,
     },
     systemcall::utils::{SyscallError, SyscallResult, invalid_syscall_flag_error},
 };
@@ -193,6 +193,12 @@ add_syscall_arg_flags_type!(
     i32,
     WaitidOptions,
     i32,
+    DupFlags,
+    i32,
+    CloseRangeFlags,
+    u32,
+    MemfdFlags,
+    u32,
 );
 
 add_syscall_arg_flags_retain_type!(

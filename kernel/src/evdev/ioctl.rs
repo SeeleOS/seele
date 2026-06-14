@@ -2,73 +2,85 @@ use alloc::{vec, vec::Vec};
 
 use crate::{
     memory::user_safe,
-    object::{
-        error::ObjectError,
-        linux_ioctl::{EVDEV_IOCTL_TYPE, evdev_raw_ioctl_op, ioctl_nr, ioctl_size, ioctl_type},
-        misc::ObjectResult,
-    },
+    object::{config::ConfigurateRequest, error::ObjectError, misc::ObjectResult},
 };
 
 use super::{device_info::LinuxInputId, object::EventDeviceClientObject};
 
 const EV_VERSION: i32 = 0x01_00_01;
 
+pub(super) fn is_evdev_ioctl(request: &ConfigurateRequest) -> bool {
+    matches!(
+        request,
+        ConfigurateRequest::EvdevGetVersion(_)
+            | ConfigurateRequest::EvdevGetId(_)
+            | ConfigurateRequest::EvdevGetRepeat(_)
+            | ConfigurateRequest::EvdevGetName { .. }
+            | ConfigurateRequest::EvdevGetPhys { .. }
+            | ConfigurateRequest::EvdevGetUniq { .. }
+            | ConfigurateRequest::EvdevGetProp { .. }
+            | ConfigurateRequest::EvdevGetKey { .. }
+            | ConfigurateRequest::EvdevGetLed { .. }
+            | ConfigurateRequest::EvdevGetSnd { .. }
+            | ConfigurateRequest::EvdevGetSw { .. }
+            | ConfigurateRequest::EvdevGetBit { .. }
+            | ConfigurateRequest::EvdevGrab(_)
+            | ConfigurateRequest::EvdevRevoke(_)
+            | ConfigurateRequest::EvdevSetClockId(_)
+    )
+}
+
 pub(super) fn handle_ioctl(
     client: &EventDeviceClientObject,
-    request: u64,
-    arg: u64,
+    request: ConfigurateRequest,
 ) -> ObjectResult<isize> {
-    if ioctl_type(request) != EVDEV_IOCTL_TYPE {
-        return Err(ObjectError::InvalidRequest);
-    }
-
-    let nr = ioctl_nr(request);
-    let size = ioctl_size(request);
     let kind = client.kind;
 
-    if evdev_raw_ioctl_op(request).is_none() {
-        return Err(ObjectError::InvalidRequest);
-    }
-
-    match nr {
-        0x01 => {
-            user_safe::write(arg as *mut i32, &EV_VERSION).map_err(|_| ObjectError::BadAddress)?;
+    match request {
+        ConfigurateRequest::EvdevGetVersion(ptr) => {
+            user_safe::write(ptr, &EV_VERSION).map_err(|_| ObjectError::BadAddress)?;
             Ok(0)
         }
-        0x02 => {
+        ConfigurateRequest::EvdevGetId(ptr) => {
             let id = kind.input_id();
-            user_safe::write(arg as *mut LinuxInputId, &id).map_err(|_| ObjectError::BadAddress)?;
+            user_safe::write(ptr as *mut LinuxInputId, &id).map_err(|_| ObjectError::BadAddress)?;
             Ok(0)
         }
-        0x03 => {
+        ConfigurateRequest::EvdevGetRepeat(ptr) => {
             let rep = [250u32, 33u32];
-            user_safe::write(arg as *mut [u32; 2], &rep).map_err(|_| ObjectError::BadAddress)?;
+            user_safe::write(ptr, &rep).map_err(|_| ObjectError::BadAddress)?;
             Ok(0)
         }
-        0x06 => write_bytes_ioctl(arg, size, kind.name().as_bytes()),
-        0x07 => write_bytes_ioctl(arg, size, kind.phys().as_bytes()),
-        0x08 => write_bytes_ioctl(arg, size, &[]),
-        0x09 => {
+        ConfigurateRequest::EvdevGetName { ptr, len } => {
+            write_bytes_ioctl(ptr, len, kind.name().as_bytes())
+        }
+        ConfigurateRequest::EvdevGetPhys { ptr, len } => {
+            write_bytes_ioctl(ptr, len, kind.phys().as_bytes())
+        }
+        ConfigurateRequest::EvdevGetUniq { ptr, len } => write_bytes_ioctl(ptr, len, &[]),
+        ConfigurateRequest::EvdevGetProp { ptr, len } => {
             let props = kind.supports_properties();
-            write_fixed_sized_ioctl(arg, size, &props)
+            write_fixed_sized_ioctl(ptr, len, &props)
         }
-        0x18 => {
+        ConfigurateRequest::EvdevGetKey { ptr, len } => {
             let state = client.state.lock();
-            write_fixed_sized_ioctl(arg, size, &state.key_state)
+            write_fixed_sized_ioctl(ptr, len, &state.key_state)
         }
-        0x19..=0x1b => write_fixed_sized_ioctl(arg, size, &[]),
-        0x20..=0x3f => {
-            let bits = kind.supported_event_bits((nr - 0x20) as u8);
-            write_fixed_sized_ioctl(arg, size, &bits)
+        ConfigurateRequest::EvdevGetLed { ptr, len }
+        | ConfigurateRequest::EvdevGetSnd { ptr, len }
+        | ConfigurateRequest::EvdevGetSw { ptr, len } => write_fixed_sized_ioctl(ptr, len, &[]),
+        ConfigurateRequest::EvdevGetBit {
+            event_type,
+            ptr,
+            len,
+        } => {
+            let bits = kind.supported_event_bits(event_type);
+            write_fixed_sized_ioctl(ptr, len, &bits)
         }
-        0x90 => handle_grab_ioctl(client, arg),
-        0x91 => handle_revoke_ioctl(client, arg),
-        0xa0 => {
-            if arg == 0 {
-                return Err(ObjectError::BadAddress);
-            }
-            let clock_id =
-                user_safe::read(arg as *const i32).map_err(|_| ObjectError::BadAddress)?;
+        ConfigurateRequest::EvdevGrab(value) => handle_grab_ioctl(client, value),
+        ConfigurateRequest::EvdevRevoke(value) => handle_revoke_ioctl(client, value),
+        ConfigurateRequest::EvdevSetClockId(ptr) => {
+            let clock_id = user_safe::read(ptr).map_err(|_| ObjectError::BadAddress)?;
             client.state.lock().clock_id = clock_id;
             Ok(0)
         }
@@ -116,25 +128,22 @@ fn handle_revoke_ioctl(client: &EventDeviceClientObject, arg: u64) -> ObjectResu
     Ok(0)
 }
 
-fn write_bytes_ioctl(arg: u64, size: usize, bytes: &[u8]) -> ObjectResult<isize> {
+fn write_bytes_ioctl(ptr: *mut u8, size: usize, bytes: &[u8]) -> ObjectResult<isize> {
     let mut data = Vec::with_capacity(bytes.len() + 1);
     data.extend_from_slice(bytes);
     data.push(0);
-    write_fixed_sized_ioctl(arg, size, &data)
+    write_fixed_sized_ioctl(ptr, size, &data)
 }
 
-fn write_fixed_sized_ioctl(arg: u64, size: usize, source: &[u8]) -> ObjectResult<isize> {
+fn write_fixed_sized_ioctl(ptr: *mut u8, size: usize, source: &[u8]) -> ObjectResult<isize> {
     if size == 0 {
         return Ok(0);
-    }
-    if arg == 0 {
-        return Err(ObjectError::BadAddress);
     }
 
     let mut out = vec![0u8; size];
     let copy_len = out.len().min(source.len());
     out[..copy_len].copy_from_slice(&source[..copy_len]);
-    user_safe::write(arg as *mut u8, &out[..]).map_err(|_| ObjectError::BadAddress)?;
+    user_safe::write(ptr, &out[..]).map_err(|_| ObjectError::BadAddress)?;
     Ok(0)
 }
 
@@ -173,21 +182,24 @@ mod tests {
     fn evdev_ioctl_fixed_sized_writes_copy_truncate_and_reject_null_pointers() {
         let mut out = [0xaau8; 6];
         assert_eq!(
-            write_fixed_sized_ioctl(out.as_mut_ptr() as u64, out.len(), &[1, 2, 3]).unwrap(),
+            write_fixed_sized_ioctl(out.as_mut_ptr(), out.len(), &[1, 2, 3]).unwrap(),
             0
         );
         assert_eq!(out, [1, 2, 3, 0, 0, 0]);
 
         let mut short = [0xaau8; 2];
         assert_eq!(
-            write_fixed_sized_ioctl(short.as_mut_ptr() as u64, short.len(), &[9, 8, 7]).unwrap(),
+            write_fixed_sized_ioctl(short.as_mut_ptr(), short.len(), &[9, 8, 7]).unwrap(),
             0
         );
         assert_eq!(short, [9, 8]);
 
-        assert_eq!(write_fixed_sized_ioctl(0, 0, &[1]).unwrap(), 0);
+        assert_eq!(
+            write_fixed_sized_ioctl(core::ptr::null_mut(), 0, &[1]).unwrap(),
+            0
+        );
         assert!(matches!(
-            write_fixed_sized_ioctl(0, 2, &[1]),
+            write_fixed_sized_ioctl(core::ptr::null_mut(), 2, &[1]),
             Err(ObjectError::BadAddress)
         ));
     }
@@ -195,23 +207,23 @@ mod tests {
     fn evdev_ioctl_string_writes_append_nul_and_truncate_predictably() {
         let mut out = [0xaau8; 8];
         assert_eq!(
-            write_bytes_ioctl(out.as_mut_ptr() as u64, out.len(), b"mouse").unwrap(),
+            write_bytes_ioctl(out.as_mut_ptr(), out.len(), b"mouse").unwrap(),
             0
         );
         assert_eq!(&out, b"mouse\0\0\0");
 
         let mut short = [0xaau8; 4];
         assert_eq!(
-            write_bytes_ioctl(short.as_mut_ptr() as u64, short.len(), b"keyboard").unwrap(),
+            write_bytes_ioctl(short.as_mut_ptr(), short.len(), b"keyboard").unwrap(),
             0
         );
         assert_eq!(&short, b"keyb");
 
         let mut empty = vec![0xaa; 3];
         assert_eq!(
-            write_bytes_ioctl(empty.as_mut_ptr() as u64, empty.len(), b"").unwrap(),
+            write_bytes_ioctl(empty.as_mut_ptr(), empty.len(), b"").unwrap(),
             0
         );
-        assert_eq!(empty, vec![0, 0xaa, 0xaa]);
+        assert_eq!(empty, vec![0, 0, 0]);
     }
 }

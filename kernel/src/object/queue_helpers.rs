@@ -114,6 +114,7 @@ where
 #[cfg(test)]
 mod tests {
     use alloc::collections::vec_deque::VecDeque;
+    use alloc::vec::Vec;
 
     use super::{copy_from_queue, push_to_queue};
 
@@ -135,15 +136,12 @@ mod tests {
 
         assert_eq!(read, 3);
         assert_eq!(buffer, [1, 2, 3]);
-        assert_eq!(queue.into_iter().collect::<alloc::vec::Vec<_>>(), [4]);
+        assert_eq!(queue.into_iter().collect::<Vec<_>>(), [4]);
     }
 
     fn queue_helpers_append_bytes_in_order() {
         let mut queue = VecDeque::from([7u8]);
         push_to_queue(&mut queue, &[8, 9, 10]);
-        assert_eq!(
-            queue.into_iter().collect::<alloc::vec::Vec<_>>(),
-            [7, 8, 9, 10]
-        );
+        assert_eq!(queue.into_iter().collect::<Vec<_>>(), [7, 8, 9, 10]);
     }
 }

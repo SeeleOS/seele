@@ -29,7 +29,7 @@ use crate::{
 
 use super::{
     device_info::EventDeviceKind,
-    ioctl::handle_ioctl,
+    ioctl::{handle_ioctl, is_evdev_ioctl},
     queue::{EventDeviceHubState, EventDeviceState, INPUT_EVENT_SIZE},
 };
 
@@ -226,9 +226,10 @@ impl Configuratable for EventDeviceClientObject {
             return Err(ObjectError::DeviceRevoked);
         }
 
-        match request {
-            ConfigurateRequest::RawIoctl { request, arg } => handle_ioctl(self, request, arg),
-            _ => Err(ObjectError::InvalidRequest),
+        if is_evdev_ioctl(&request) {
+            handle_ioctl(self, request)
+        } else {
+            Err(ObjectError::InvalidRequest)
         }
     }
 }

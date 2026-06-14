@@ -1,4 +1,4 @@
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 
 #[derive(Clone, Debug)]
 pub struct ElfInfo {
@@ -8,5 +8,5 @@ pub struct ElfInfo {
     pub program_header_entry_size: u16,
     pub interpreter: Option<String>,
     pub load_base: u64,
-    pub prefault_addrs: alloc::vec::Vec<u64>,
+    pub prefault_addrs: Vec<u64>,
 }

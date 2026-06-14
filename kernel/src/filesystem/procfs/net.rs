@@ -114,6 +114,7 @@ fn proc_hex_ipv4(addr: [u8; 4]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{ipv4_and, prefix_mask, proc_hex_ipv4, proc_net_entries, proc_net_if_inet6_bytes};
+    use alloc::vec::Vec;
 
     crate::test!(
         procfs_net_helpers,
@@ -141,7 +142,7 @@ mod tests {
             proc_net_entries()
                 .into_iter()
                 .map(|entry| entry.name)
-                .collect::<alloc::vec::Vec<_>>(),
+                .collect::<Vec<_>>(),
             alloc::vec!["dev", "route", "if_inet6"]
         );
         assert_eq!(

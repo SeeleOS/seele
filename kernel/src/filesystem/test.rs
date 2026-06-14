@@ -1,4 +1,4 @@
-use alloc::{format, sync::Arc, vec, vec::Vec};
+use alloc::{format, string::String, sync::Arc, vec, vec::Vec};
 use core::str;
 
 use crate::filesystem::info::DirectoryContentInfo;
@@ -809,7 +809,7 @@ fn sysfs_exposes_dynamic_tty_state_readonly_nodes_and_stable_uevent_payloads() {
     );
 }
 
-fn c_string_field_to_string(field: [u8; 65]) -> alloc::string::String {
+fn c_string_field_to_string(field: [u8; 65]) -> String {
     let len = field
         .iter()
         .position(|&byte| byte == 0)

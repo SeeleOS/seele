@@ -581,6 +581,7 @@ mod tests {
     use crate::object::netlink::{NetlinkSocketAddress, NetlinkSocketObject};
     use crate::object::traits::Readable;
     use crate::socket::{NETLINK_ADD_MEMBERSHIP, NETLINK_KOBJECT_UEVENT, SOCK_DGRAM, SOL_NETLINK};
+    use alloc::vec::Vec;
 
     crate::test!(
         sysfs_uevent_payloads,
@@ -634,7 +635,7 @@ mod tests {
             .split(|byte| *byte == 0)
             .filter(|part| !part.is_empty())
             .map(|part| core::str::from_utf8(part).unwrap())
-            .collect::<alloc::vec::Vec<_>>();
+            .collect::<Vec<_>>();
 
         assert_eq!(parts[0], "add@/devices/platform");
         assert!(parts.contains(&"ACTION=add"));
