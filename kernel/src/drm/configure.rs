@@ -55,18 +55,7 @@ pub(super) fn handle_configure(request: ConfigurateRequest) -> ObjectResult<isiz
         ConfigurateRequest::DrmGemClose(ptr) => buffer_handlers::handle_gem_close(ptr),
         ConfigurateRequest::DrmPrimeHandleToFd(ptr) => prime::handle_prime_handle_to_fd(ptr),
         ConfigurateRequest::DrmPrimeFdToHandle(ptr) => prime::handle_prime_fd_to_handle(ptr),
-        ConfigurateRequest::RawIoctl { request, arg } => {
-            if let Some((pid, comm)) = super::user::current_debug_process() {
-                crate::s_println!(
-                    "drm raw ioctl comm={} pid={} request={:#x} arg={:#x}",
-                    comm,
-                    pid,
-                    request,
-                    arg
-                );
-            }
-            Err(ObjectError::InvalidRequest)
-        }
+        ConfigurateRequest::RawIoctl { .. } => Err(ObjectError::InvalidRequest),
         _ => Err(ObjectError::InvalidRequest),
     }
 }

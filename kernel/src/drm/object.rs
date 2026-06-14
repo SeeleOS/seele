@@ -21,7 +21,7 @@ use crate::{
     thread::yielding::WakeType,
 };
 
-use super::{card::CARD0_RDEV, configure, events, state::DrmState, user::current_debug_process};
+use super::{card::CARD0_RDEV, configure, events, state::DrmState};
 
 lazy_static! {
     pub(super) static ref DRM_STATE: Mut<DrmState> = Mut::new(DrmState::new());
@@ -77,25 +77,6 @@ impl MemoryMappable for DrmCardObject {
                 },
             )
         });
-        if let Some((pid, comm)) = current_debug_process() {
-            crate::s_println!(
-                "drm card mmap comm={} pid={} offset={:#x} pages={} start_frame={:#x} shared_flags={:#x} protection={:#x} user_addr={:#x}",
-                comm,
-                pid,
-                offset,
-                pages,
-                DRM_STATE
-                    .lock()
-                    .dumb_buffer_for_mapping(offset, 1)?
-                    .0
-                    .first()
-                    .map(|frame| frame.start_address().as_u64())
-                    .unwrap_or(0),
-                shared_flags.bits(),
-                protection.bits(),
-                mapped.as_u64()
-            );
-        }
         Ok(mapped)
     }
 }

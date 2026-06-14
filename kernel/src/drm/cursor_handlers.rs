@@ -11,7 +11,7 @@ use super::{
     framebuffer::{refresh_current_scanout, refresh_cursor_move},
     object::DRM_STATE,
     state::CursorState,
-    user::{current_debug_process, read_user},
+    user::read_user,
 };
 
 pub(super) fn handle_mode_cursor(ptr: *mut DrmModeCursor) -> ObjectResult<isize> {
@@ -65,22 +65,6 @@ fn apply_cursor_update(request: CursorRequest) -> ObjectResult<isize> {
     }
     if request.hot_x < 0 || request.hot_y < 0 {
         return Err(ObjectError::InvalidArguments);
-    }
-
-    if let Some((pid, comm)) = current_debug_process() {
-        crate::s_println!(
-            "drm cursor comm={} pid={} flags={:#x} handle={} pos=({}, {}) size={}x{} hot=({}, {})",
-            comm,
-            pid,
-            request.flags,
-            request.handle,
-            request.x,
-            request.y,
-            request.width,
-            request.height,
-            request.hot_x,
-            request.hot_y
-        );
     }
 
     let mut moved_cursor = None;

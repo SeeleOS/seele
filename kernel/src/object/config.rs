@@ -1,11 +1,12 @@
 use bitflags::bitflags;
 
 use crate::{
+    drm::prime::{DmaBufExportSyncFile, DmaBufImportSyncFile, DmaBufSync},
     object::linux_ioctl::LinuxIoctlOp,
     object::{
         FileFlags, ObjectResult,
         error::ObjectError,
-        linux_ioctl::{evdev_raw_ioctl_op, ioctl_nr, ioctl_size},
+        linux_ioctl::{drm_prime_raw_ioctl_op, evdev_raw_ioctl_op, ioctl_nr, ioctl_size},
     },
     process::FdFlags,
 };
@@ -113,6 +114,9 @@ pub enum ConfigurateRequest {
     DrmGemClose(*mut DrmGemClose),
     DrmPrimeHandleToFd(*mut DrmPrimeHandle),
     DrmPrimeFdToHandle(*mut DrmPrimeHandle),
+    DmaBufSync(*mut DmaBufSync),
+    DmaBufExportSyncFile(*mut DmaBufExportSyncFile),
+    DmaBufImportSyncFile(*mut DmaBufImportSyncFile),
     EvdevGetVersion(*mut i32),
     EvdevGetId(*mut u8),
     EvdevGetRepeat(*mut [u32; 2]),
@@ -238,6 +242,9 @@ impl ConfigurateRequest {
             Self::DrmGemClose(_) => "DrmGemClose",
             Self::DrmPrimeHandleToFd(_) => "DrmPrimeHandleToFd",
             Self::DrmPrimeFdToHandle(_) => "DrmPrimeFdToHandle",
+            Self::DmaBufSync(_) => "DmaBufSync",
+            Self::DmaBufExportSyncFile(_) => "DmaBufExportSyncFile",
+            Self::DmaBufImportSyncFile(_) => "DmaBufImportSyncFile",
             Self::EvdevGetVersion(_) => "EvdevGetVersion",
             Self::EvdevGetId(_) => "EvdevGetId",
             Self::EvdevGetRepeat(_) => "EvdevGetRepeat",
@@ -332,6 +339,9 @@ impl ConfigurateRequest {
             Self::DrmGemClose(_) => LinuxIoctlOp::DrmGemClose,
             Self::DrmPrimeHandleToFd(_) => LinuxIoctlOp::DrmPrimeHandleToFd,
             Self::DrmPrimeFdToHandle(_) => LinuxIoctlOp::DrmPrimeFdToHandle,
+            Self::DmaBufSync(_) => LinuxIoctlOp::DmaBufSync,
+            Self::DmaBufExportSyncFile(_) => LinuxIoctlOp::DmaBufExportSyncFile,
+            Self::DmaBufImportSyncFile(_) => LinuxIoctlOp::DmaBufImportSyncFile,
             Self::EvdevGetVersion(_) => LinuxIoctlOp::EvdevGetVersion,
             Self::EvdevGetId(_) => LinuxIoctlOp::EvdevGetId,
             Self::EvdevGetRepeat(_) => LinuxIoctlOp::EvdevGetRepeat,
@@ -648,6 +658,12 @@ impl ConfigurateRequest {
                     _ => unreachable!(),
                 }
             }
+            request if drm_prime_raw_ioctl_op(request).is_some() => match ioctl_nr(request) {
+                0 => Self::DmaBufSync(ptr as *mut DmaBufSync),
+                2 => Self::DmaBufExportSyncFile(ptr as *mut DmaBufExportSyncFile),
+                3 => Self::DmaBufImportSyncFile(ptr as *mut DmaBufImportSyncFile),
+                _ => unreachable!(),
+            },
             _ => Self::RawIoctl { request, arg: ptr },
         })
     }

@@ -33,9 +33,7 @@ use crate::{
     },
     misc::framebuffer::FRAME_BUFFER,
     object::{
-        config::ConfigurateRequest,
-        error::ObjectError,
-        linux_ioctl::{DMABUF_IOCTL_TYPE, ioctl_request},
+        config::ConfigurateRequest, error::ObjectError, linux_ioctl::ioctl_request,
         traits::Configuratable,
     },
     process::manager::get_current_process,
@@ -821,59 +819,46 @@ fn drm_card_ioctls_follow_linux_rules() {
         .unwrap();
     let prime = prime_object.as_drm_prime_buffer().unwrap();
 
-    let mut sync = [0u64; 1];
-    sync[0] = 1;
+    let mut sync = crate::drm::prime::DmaBufSync { flags: 1 };
     assert_eq!(
         prime
-            .configure(ConfigurateRequest::RawIoctl {
-                request: ioctl_request(0, DMABUF_IOCTL_TYPE, 0, 8),
-                arg: sync.as_mut_ptr() as u64,
-            })
+            .configure(ConfigurateRequest::DmaBufSync(&mut sync))
             .unwrap(),
         0
     );
-    sync[0] = 0;
+    sync.flags = 0;
     assert!(matches!(
-        prime.configure(ConfigurateRequest::RawIoctl {
-            request: ioctl_request(0, DMABUF_IOCTL_TYPE, 0, 8),
-            arg: sync.as_mut_ptr() as u64,
-        }),
+        prime.configure(ConfigurateRequest::DmaBufSync(&mut sync)),
         Err(ObjectError::InvalidArguments)
     ));
 
-    let mut export_sync = [1u32, u32::MAX];
+    let mut export_sync = crate::drm::prime::DmaBufExportSyncFile { flags: 1, fd: -1 };
     assert_eq!(
         prime
-            .configure(ConfigurateRequest::RawIoctl {
-                request: ioctl_request(0, DMABUF_IOCTL_TYPE, 2, 8),
-                arg: export_sync.as_mut_ptr() as u64,
-            })
+            .configure(ConfigurateRequest::DmaBufExportSyncFile(&mut export_sync))
             .unwrap(),
         0
     );
-    assert_ne!(export_sync[1] as i32, -1);
-    let mut import_sync = [1u32, export_sync[1]];
+    assert_ne!(export_sync.fd, -1);
+    let mut import_sync = crate::drm::prime::DmaBufImportSyncFile {
+        flags: 1,
+        fd: export_sync.fd,
+    };
     assert_eq!(
         prime
-            .configure(ConfigurateRequest::RawIoctl {
-                request: ioctl_request(0, DMABUF_IOCTL_TYPE, 3, 8),
-                arg: import_sync.as_mut_ptr() as u64,
-            })
+            .configure(ConfigurateRequest::DmaBufImportSyncFile(&mut import_sync))
             .unwrap(),
         0
     );
-    import_sync[1] = u32::MAX;
+    import_sync.fd = -1;
     assert!(matches!(
-        prime.configure(ConfigurateRequest::RawIoctl {
-            request: ioctl_request(0, DMABUF_IOCTL_TYPE, 3, 8),
-            arg: import_sync.as_mut_ptr() as u64,
-        }),
+        prime.configure(ConfigurateRequest::DmaBufImportSyncFile(&mut import_sync)),
         Err(ObjectError::DoesNotExist)
     ));
     assert!(matches!(
         prime.configure(ConfigurateRequest::RawIoctl {
             request: ioctl_request(0, b'x', 0, 8),
-            arg: sync.as_mut_ptr() as u64,
+            arg: (&mut sync as *mut _) as u64,
         }),
         Err(ObjectError::InvalidRequest)
     ));

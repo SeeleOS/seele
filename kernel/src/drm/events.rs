@@ -8,23 +8,10 @@ use crate::{
     thread::{with_thread_manager, yielding::wake_pollers_for_object},
 };
 
-use super::{
-    object::{DRM_EVENT_QUEUE, DRM_STATE},
-    user::current_debug_process,
-};
+use super::object::{DRM_EVENT_QUEUE, DRM_STATE};
 
 pub(super) fn queue_page_flip_event(user_data: u64, crtc_id: u32) {
     let sequence = next_vblank_sequence();
-    if let Some((pid, comm)) = current_debug_process() {
-        crate::s_println!(
-            "drm queue page_flip event comm={} pid={} crtc_id={} user_data={:#x} sequence={}",
-            comm,
-            pid,
-            crtc_id,
-            user_data,
-            sequence
-        );
-    }
     queue_vblank_event(user_data, crtc_id, DRM_EVENT_FLIP_COMPLETE, sequence);
 }
 
@@ -88,14 +75,5 @@ pub(super) fn try_read_drm_events(buffer: &mut [u8]) -> Option<usize> {
     let events_to_copy = core::cmp::min(buffer.len() / event_size, queue.len() / event_size);
     let bytes_to_copy = events_to_copy * event_size;
     let copied = copy_from_queue(&mut queue, &mut buffer[..bytes_to_copy]);
-    if let Some((pid, comm)) = current_debug_process() {
-        crate::s_println!(
-            "drm read events comm={} pid={} bytes={} remaining={}",
-            comm,
-            pid,
-            copied,
-            queue.len()
-        );
-    }
     Some(copied)
 }

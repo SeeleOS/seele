@@ -20,9 +20,6 @@ use crate::{
         config::ConfigurateRequest,
         error::ObjectError,
         linux_anon::{EventFdFlags, EventFdObject},
-        linux_ioctl::{
-            DMABUF_IOCTL_TYPE, drm_prime_raw_ioctl_op, ioctl_nr, ioctl_size, ioctl_type,
-        },
         misc::{ObjectRef, ObjectResult, get_object_current_process},
         open_state::OpenState,
         traits::{Configuratable, MemoryMappable, Seekable, Statable},
@@ -30,20 +27,9 @@ use crate::{
     process::{FdFlags, manager::get_current_process, misc::with_current_process},
 };
 
-use super::{
-    client::DrmPrimeHandle,
-    object::DRM_STATE,
-    state::DumbBuffer,
-    user::{current_debug_process, read_user},
-};
+use super::{client::DrmPrimeHandle, object::DRM_STATE, state::DumbBuffer, user::read_user};
 
 static NEXT_PRIME_INODE: AtomicU64 = AtomicU64::new(1);
-const IOC_DIRBITS: u64 = 2;
-const IOC_SIZEBITS: u64 = 14;
-const IOC_DIRMASK: u64 = (1 << IOC_DIRBITS) - 1;
-const IOC_SIZESHIFT: u64 = 16;
-const IOC_DIRSHIFT: u64 = IOC_SIZESHIFT + IOC_SIZEBITS;
-
 bitflags! {
     #[derive(Clone, Copy, Debug)]
     struct DrmPrimeHandleFlags: u32 {
@@ -54,22 +40,22 @@ bitflags! {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-struct DmaBufSync {
-    flags: u64,
+pub struct DmaBufSync {
+    pub flags: u64,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-struct DmaBufExportSyncFile {
-    flags: u32,
-    fd: i32,
+pub struct DmaBufExportSyncFile {
+    pub flags: u32,
+    pub fd: i32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-struct DmaBufImportSyncFile {
-    flags: u32,
-    fd: i32,
+pub struct DmaBufImportSyncFile {
+    pub flags: u32,
+    pub fd: i32,
 }
 
 #[derive(Debug)]
@@ -115,18 +101,14 @@ impl Object for DrmPrimeBufferObject {
 impl Configuratable for DrmPrimeBufferObject {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
         match request {
-            ConfigurateRequest::RawIoctl { request, arg } => handle_dmabuf_ioctl(request, arg),
-            other => {
-                if let Some((pid, comm)) = current_debug_process() {
-                    crate::s_println!(
-                        "drm prime unexpected typed ioctl comm={} pid={} request={}",
-                        comm,
-                        pid,
-                        prime_config_request_name(&other)
-                    );
-                }
-                Err(ObjectError::InvalidRequest)
+            ConfigurateRequest::DmaBufSync(ptr) => handle_dmabuf_sync_ioctl(ptr),
+            ConfigurateRequest::DmaBufExportSyncFile(ptr) => {
+                handle_dmabuf_export_sync_file_ioctl(ptr)
             }
+            ConfigurateRequest::DmaBufImportSyncFile(ptr) => {
+                handle_dmabuf_import_sync_file_ioctl(ptr)
+            }
+            _ => Err(ObjectError::InvalidRequest),
         }
     }
 }
@@ -138,18 +120,6 @@ impl MemoryMappable for DrmPrimeBufferObject {
         pages: u64,
         protection: Protection,
     ) -> ObjectResult<VirtAddr> {
-        if let Some((pid, comm)) = current_debug_process() {
-            crate::s_println!(
-                "drm prime mmap comm={} pid={} offset={:#x} pages={} size={:#x} start_frame={:#x} shared_flags={:#x}",
-                comm,
-                pid,
-                offset,
-                pages,
-                self.buffer.aligned_size(),
-                self.buffer.start_frame_addr(),
-                self.buffer.shared_flags.bits()
-            );
-        }
         if pages == 0 || !offset.is_multiple_of(4096) {
             return Err(ObjectError::InvalidArguments);
         }
@@ -225,29 +195,14 @@ impl Seekable for DrmPrimeBufferObject {
             return Err(ObjectError::InvalidArguments);
         }
         *position = next as usize;
-        if let Some((pid, comm)) = current_debug_process() {
-            crate::s_println!(
-                "drm prime seek comm={} pid={} whence={:?} offset={} result={}",
-                comm,
-                pid,
-                seek_type,
-                offset,
-                *position
-            );
-        }
         Ok(*position)
     }
 }
 
 pub(super) fn handle_prime_handle_to_fd(ptr: *mut DrmPrimeHandle) -> ObjectResult<isize> {
     let mut request = read_user(ptr)?;
-    let flags = DrmPrimeHandleFlags::from_bits(request.flags).ok_or_else(|| {
-        crate::s_println!(
-            "unsupported drm prime handle flags raw={:#x}",
-            request.flags
-        );
-        ObjectError::InvalidArguments
-    })?;
+    let flags =
+        DrmPrimeHandleFlags::from_bits(request.flags).ok_or(ObjectError::InvalidArguments)?;
     let buffer = DRM_STATE.lock().get_user_handle(request.handle)?.clone();
     let object: ObjectRef = Arc::new(DrmPrimeBufferObject::new(buffer.clone()));
     let fd_flags = if flags.contains(DrmPrimeHandleFlags::CLOEXEC) {
@@ -259,94 +214,18 @@ pub(super) fn handle_prime_handle_to_fd(ptr: *mut DrmPrimeHandle) -> ObjectResul
         .lock()
         .push_object_with_flags(object, fd_flags);
     request.fd = i32::try_from(fd).map_err(|_| ObjectError::Other)?;
-    if let Some((pid, comm)) = current_debug_process() {
-        crate::s_println!(
-            "drm prime_handle_to_fd comm={} pid={} handle={} flags={:#x} fd={} start_frame={:#x} map_offset={:#x}",
-            comm,
-            pid,
-            request.handle,
-            request.flags,
-            request.fd,
-            buffer.start_frame_addr(),
-            buffer.map_offset
-        );
-    }
     user_safe::write(ptr, &request).map_err(|_| ObjectError::BadAddress)?;
     Ok(0)
 }
 
-fn ioc_dir(request: u64) -> u64 {
-    (request >> IOC_DIRSHIFT) & IOC_DIRMASK
-}
-
-fn dma_buf_ioctl_name(request: u64) -> &'static str {
-    if ioctl_type(request) != DMABUF_IOCTL_TYPE {
-        return "non-dmabuf";
-    }
-    match ioctl_nr(request) {
-        0 => "DMA_BUF_IOCTL_SYNC",
-        1 => "DMA_BUF_SET_NAME",
-        2 => "DMA_BUF_IOCTL_EXPORT_SYNC_FILE",
-        3 => "DMA_BUF_IOCTL_IMPORT_SYNC_FILE",
-        _ => "unknown-dmabuf",
-    }
-}
-
-fn handle_dmabuf_ioctl(request: u64, arg: u64) -> ObjectResult<isize> {
-    if ioctl_type(request) != DMABUF_IOCTL_TYPE {
-        if let Some((pid, comm)) = current_debug_process() {
-            crate::s_println!(
-                "drm prime raw ioctl comm={} pid={} request={:#x} type={:#x} nr={:#x} dir={:#x} size={} name={} arg={:#x}",
-                comm,
-                pid,
-                request,
-                ioctl_type(request),
-                ioctl_nr(request),
-                ioc_dir(request),
-                ioctl_size(request),
-                dma_buf_ioctl_name(request),
-                arg
-            );
-        }
-        return Err(ObjectError::InvalidRequest);
-    }
-
-    match drm_prime_raw_ioctl_op(request) {
-        Some(crate::object::linux_ioctl::LinuxIoctlOp::DmaBufSync) => handle_dmabuf_sync_ioctl(arg),
-        Some(crate::object::linux_ioctl::LinuxIoctlOp::DmaBufExportSyncFile) => {
-            handle_dmabuf_export_sync_file_ioctl(arg)
-        }
-        Some(crate::object::linux_ioctl::LinuxIoctlOp::DmaBufImportSyncFile) => {
-            handle_dmabuf_import_sync_file_ioctl(arg)
-        }
-        _ => {
-            if let Some((pid, comm)) = current_debug_process() {
-                crate::s_println!(
-                    "drm prime raw ioctl comm={} pid={} request={:#x} type={:#x} nr={:#x} dir={:#x} size={} name={} arg={:#x}",
-                    comm,
-                    pid,
-                    request,
-                    ioctl_type(request),
-                    ioctl_nr(request),
-                    ioc_dir(request),
-                    ioctl_size(request),
-                    dma_buf_ioctl_name(request),
-                    arg
-                );
-            }
-            Err(ObjectError::InvalidRequest)
-        }
-    }
-}
-
-fn handle_dmabuf_sync_ioctl(arg: u64) -> ObjectResult<isize> {
+fn handle_dmabuf_sync_ioctl(ptr: *mut DmaBufSync) -> ObjectResult<isize> {
     const DMA_BUF_SYNC_READ: u64 = 1 << 0;
     const DMA_BUF_SYNC_WRITE: u64 = 2;
     const DMA_BUF_SYNC_END: u64 = 1 << 2;
     const DMA_BUF_SYNC_VALID_FLAGS_MASK: u64 =
         DMA_BUF_SYNC_READ | DMA_BUF_SYNC_WRITE | DMA_BUF_SYNC_END;
 
-    let sync = read_user(arg as *mut DmaBufSync)?;
+    let sync = read_user(ptr)?;
     if sync.flags & !DMA_BUF_SYNC_VALID_FLAGS_MASK != 0 {
         return Err(ObjectError::InvalidArguments);
     }
@@ -356,11 +235,11 @@ fn handle_dmabuf_sync_ioctl(arg: u64) -> ObjectResult<isize> {
     Ok(0)
 }
 
-fn handle_dmabuf_export_sync_file_ioctl(arg: u64) -> ObjectResult<isize> {
+fn handle_dmabuf_export_sync_file_ioctl(ptr: *mut DmaBufExportSyncFile) -> ObjectResult<isize> {
     const DMA_BUF_SYNC_READ: u32 = 1 << 0;
     const DMA_BUF_SYNC_WRITE: u32 = 2;
 
-    let mut sync_file = read_user(arg as *mut DmaBufExportSyncFile)?;
+    let mut sync_file = read_user(ptr)?;
     if sync_file.flags & !(DMA_BUF_SYNC_READ | DMA_BUF_SYNC_WRITE) != 0 {
         return Err(ObjectError::InvalidArguments);
     }
@@ -373,26 +252,16 @@ fn handle_dmabuf_export_sync_file_ioctl(arg: u64) -> ObjectResult<isize> {
         FdFlags::empty(),
     );
     sync_file.fd = i32::try_from(fd).map_err(|_| ObjectError::Other)?;
-    user_safe::write(arg as *mut DmaBufExportSyncFile, &sync_file)
-        .map_err(|_| ObjectError::BadAddress)?;
+    user_safe::write(ptr, &sync_file).map_err(|_| ObjectError::BadAddress)?;
 
-    if let Some((pid, comm)) = current_debug_process() {
-        crate::s_println!(
-            "drm prime export sync file comm={} pid={} flags={:#x} fd={}",
-            comm,
-            pid,
-            sync_file.flags,
-            sync_file.fd
-        );
-    }
     Ok(0)
 }
 
-fn handle_dmabuf_import_sync_file_ioctl(arg: u64) -> ObjectResult<isize> {
+fn handle_dmabuf_import_sync_file_ioctl(ptr: *mut DmaBufImportSyncFile) -> ObjectResult<isize> {
     const DMA_BUF_SYNC_READ: u32 = 1 << 0;
     const DMA_BUF_SYNC_WRITE: u32 = 2;
 
-    let sync_file = read_user(arg as *mut DmaBufImportSyncFile)?;
+    let sync_file = read_user(ptr)?;
     if sync_file.flags & !(DMA_BUF_SYNC_READ | DMA_BUF_SYNC_WRITE) != 0 {
         return Err(ObjectError::InvalidArguments);
     }
@@ -403,20 +272,7 @@ fn handle_dmabuf_import_sync_file_ioctl(arg: u64) -> ObjectResult<isize> {
     let _ =
         get_object_current_process(sync_file.fd as u64).map_err(|_| ObjectError::DoesNotExist)?;
 
-    if let Some((pid, comm)) = current_debug_process() {
-        crate::s_println!(
-            "drm prime import sync file comm={} pid={} flags={:#x} fd={}",
-            comm,
-            pid,
-            sync_file.flags,
-            sync_file.fd
-        );
-    }
     Ok(0)
-}
-
-fn prime_config_request_name(request: &ConfigurateRequest) -> &'static str {
-    request.name()
 }
 
 pub(super) fn handle_prime_fd_to_handle(ptr: *mut DrmPrimeHandle) -> ObjectResult<isize> {
@@ -432,36 +288,24 @@ pub(super) fn handle_prime_fd_to_handle(ptr: *mut DrmPrimeHandle) -> ObjectResul
         .map_err(|_| ObjectError::InvalidArguments)?;
     let exported = prime.exported_buffer();
     request.handle = DRM_STATE.lock().import_prime_buffer(exported)?;
-    if let Some((pid, comm)) = current_debug_process() {
-        crate::s_println!(
-            "drm prime_fd_to_handle comm={} pid={} fd={} handle={} start_frame={:#x} map_offset={:#x} scanout_backed={}",
-            comm,
-            pid,
-            request.fd,
-            request.handle,
-            exported.start_frame_addr(),
-            exported.map_offset,
-            exported.scanout_backed
-        );
-    }
     user_safe::write(ptr, &request).map_err(|_| ObjectError::BadAddress)?;
     Ok(0)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{DrmPrimeHandleFlags, dma_buf_ioctl_name, ioc_dir};
-    use crate::object::linux_ioctl::{ioctl_nr, ioctl_request, ioctl_size, ioctl_type};
+    use super::DrmPrimeHandleFlags;
+    use crate::object::{config::ConfigurateRequest, linux_ioctl::ioctl_request};
 
     crate::test!(
         drm_prime_dmabuf_ioctl_decode,
-        "drm prime dmabuf ioctl decode reports stable type nr dir size and names",
-        drm_prime_dmabuf_ioctl_decode_reports_stable_type_nr_dir_size_and_names
+        "drm prime dmabuf ioctl decode routes dmabuf requests to typed configurate requests",
+        drm_prime_dmabuf_ioctl_decode_routes_dmabuf_requests_to_typed_configurate_requests
     );
     crate::test!(
         drm_prime_ioctl_name_fallbacks,
-        "drm prime dmabuf ioctl naming rejects non-dmabuf and unknown requests",
-        drm_prime_dmabuf_ioctl_naming_rejects_non_dmabuf_and_unknown_requests
+        "drm prime dmabuf ioctl decode leaves non-dmabuf and unknown requests raw",
+        drm_prime_dmabuf_ioctl_decode_leaves_non_dmabuf_and_unknown_requests_raw
     );
     crate::test!(
         drm_prime_handle_flag_bits,
@@ -469,28 +313,35 @@ mod tests {
         drm_prime_handle_flags_expose_linux_rdwr_and_cloexec_bits
     );
 
-    fn drm_prime_dmabuf_ioctl_decode_reports_stable_type_nr_dir_size_and_names() {
-        let request = ioctl_request(3, b'b', 2, 8);
-        assert_eq!(ioctl_type(request), b'b');
-        assert_eq!(ioctl_nr(request), 2);
-        assert_eq!(ioctl_size(request), 8);
-        assert_eq!(ioc_dir(request), 3);
-        assert_eq!(
-            dma_buf_ioctl_name(request),
-            "DMA_BUF_IOCTL_EXPORT_SYNC_FILE"
-        );
+    fn drm_prime_dmabuf_ioctl_decode_routes_dmabuf_requests_to_typed_configurate_requests() {
+        assert!(matches!(
+            ConfigurateRequest::new(ioctl_request(0, b'b', 0, 8), 0x1000).unwrap(),
+            ConfigurateRequest::DmaBufSync(ptr) if ptr as usize == 0x1000
+        ));
+        assert!(matches!(
+            ConfigurateRequest::new(ioctl_request(0, b'b', 2, 8), 0x2000).unwrap(),
+            ConfigurateRequest::DmaBufExportSyncFile(ptr) if ptr as usize == 0x2000
+        ));
+        assert!(matches!(
+            ConfigurateRequest::new(ioctl_request(0, b'b', 3, 8), 0x3000).unwrap(),
+            ConfigurateRequest::DmaBufImportSyncFile(ptr) if ptr as usize == 0x3000
+        ));
     }
 
-    fn drm_prime_dmabuf_ioctl_naming_rejects_non_dmabuf_and_unknown_requests() {
+    fn drm_prime_dmabuf_ioctl_decode_leaves_non_dmabuf_and_unknown_requests_raw() {
         let non_dmabuf = ioctl_request(0, b'x', 0, 0);
         let unknown_dmabuf = ioctl_request(0, b'b', 9, 0);
 
-        assert_eq!(dma_buf_ioctl_name(non_dmabuf), "non-dmabuf");
-        assert_eq!(dma_buf_ioctl_name(unknown_dmabuf), "unknown-dmabuf");
-        assert_eq!(
-            dma_buf_ioctl_name(ioctl_request(1, b'b', 3, 8)),
-            "DMA_BUF_IOCTL_IMPORT_SYNC_FILE"
-        );
+        assert!(matches!(
+            ConfigurateRequest::new(non_dmabuf, 0x4000).unwrap(),
+            ConfigurateRequest::RawIoctl { request, arg }
+                if request == non_dmabuf && arg == 0x4000
+        ));
+        assert!(matches!(
+            ConfigurateRequest::new(unknown_dmabuf, 0x5000).unwrap(),
+            ConfigurateRequest::RawIoctl { request, arg }
+                if request == unknown_dmabuf && arg == 0x5000
+        ));
     }
 
     fn drm_prime_handle_flags_expose_linux_rdwr_and_cloexec_bits() {
