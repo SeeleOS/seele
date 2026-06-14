@@ -12,13 +12,10 @@ use crate::memory::{
     user_safe,
 };
 use crate::misc::error::AsSyscallError;
-use crate::misc::time::{self, Time as KernelTime};
-use crate::misc::timer::ClockId;
+use crate::misc::time::Time as KernelTime;
 use crate::misc::{others::protection_to_page_flags, reboot as reboot_state, utsname::UtsName};
 use crate::net::namespace::NetNamespace;
-use crate::object::linux_anon::{
-    EventFdFlags, EventFdObject, InotifyObject, PidFdObject, TimerFdObject, wake_linux_io_waiters,
-};
+use crate::object::linux_anon::{EventFdFlags, EventFdObject, InotifyObject, PidFdObject};
 use crate::object::misc::get_object_current_process;
 use crate::object::{FileFlags, Object, misc::ObjectRef};
 use crate::process::{
@@ -169,29 +166,6 @@ bitflags! {
     pub(crate) struct InotifyInitFlags: i32 {
         const IN_NONBLOCK = 0o4_000;
         const IN_CLOEXEC = 0o2_000_000;
-    }
-}
-
-bitflags! {
-    #[derive(Clone, Copy, Debug)]
-    pub(crate) struct TimerFdFlags: i32 {
-        const TFD_NONBLOCK = 0o4_000;
-        const TFD_CLOEXEC = 0o2_000_000;
-    }
-}
-
-bitflags! {
-    #[derive(Clone, Copy, Debug)]
-    pub(crate) struct TimerSetTimeFlags: i32 {
-        const TFD_TIMER_ABSTIME = 1;
-        const TFD_TIMER_CANCEL_ON_SET = 2;
-    }
-}
-
-bitflags! {
-    #[derive(Clone, Copy, Debug)]
-    pub(crate) struct ClockNanosleepFlags: i32 {
-        const TIMER_ABSTIME = 1;
     }
 }
 
@@ -607,13 +581,6 @@ struct LinuxRusage {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct LinuxTimezone {
-    tz_minuteswest: i32,
-    tz_dsttime: i32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
 struct LinuxSchedParam {
     sched_priority: i32,
 }
@@ -715,32 +682,6 @@ impl LinuxSchedPolicy {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct LinuxSysinfo {
-    uptime: i64,
-    loads: [u64; 3],
-    totalram: u64,
-    freeram: u64,
-    sharedram: u64,
-    bufferram: u64,
-    totalswap: u64,
-    freeswap: u64,
-    procs: u16,
-    _pad: u16,
-    totalhigh: u64,
-    freehigh: u64,
-    mem_unit: u32,
-    _f: [i8; 0],
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct LinuxItimerval {
-    it_interval: LinuxTimeval,
-    it_value: LinuxTimeval,
-}
-
-#[repr(C)]
 #[derive(Clone, Copy)]
 struct LinuxRseq {
     cpu_id_start: u32,
@@ -771,112 +712,6 @@ fn write_rseq_area(rseq_ptr: *mut LinuxRseq, registered: bool) -> Result<(), Sys
     user_safe::write(rseq_ptr, &rseq)?;
     Ok(())
 }
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct LinuxTimespec {
-    tv_sec: i64,
-    tv_nsec: i64,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct LinuxItimerspec {
-    it_interval: LinuxTimespec,
-    it_value: LinuxTimespec,
-}
-
-fn linux_timespec_to_ns(timespec: LinuxTimespec) -> Result<u64, SyscallError> {
-    if timespec.tv_sec < 0 || timespec.tv_nsec < 0 || timespec.tv_nsec >= 1_000_000_000 {
-        return Err(SyscallError::InvalidArguments);
-    }
-
-    Ok((timespec.tv_sec as u64)
-        .saturating_mul(1_000_000_000)
-        .saturating_add(timespec.tv_nsec as u64))
-}
-
-fn ns_to_linux_timespec(ns: u64) -> LinuxTimespec {
-    LinuxTimespec {
-        tv_sec: (ns / 1_000_000_000) as i64,
-        tv_nsec: (ns % 1_000_000_000) as i64,
-    }
-}
-
-fn linux_timespec_to_realtime_ns(timespec: LinuxTimespec) -> Result<i64, SyscallError> {
-    if timespec.tv_sec < 0 || !(0..1_000_000_000).contains(&timespec.tv_nsec) {
-        return Err(SyscallError::InvalidArguments);
-    }
-
-    Ok(timespec
-        .tv_sec
-        .saturating_mul(1_000_000_000)
-        .saturating_add(timespec.tv_nsec))
-}
-
-fn linux_timeval_to_realtime_ns(timeval: LinuxTimeval) -> Result<i64, SyscallError> {
-    if timeval.tv_sec < 0 || !(0..1_000_000).contains(&timeval.tv_usec) {
-        return Err(SyscallError::InvalidArguments);
-    }
-
-    Ok(timeval
-        .tv_sec
-        .saturating_mul(1_000_000_000)
-        .saturating_add(timeval.tv_usec.saturating_mul(1_000)))
-}
-
-fn linux_clock_now_ns(clock_id: i32) -> Result<i64, SyscallError> {
-    match clock_id {
-        0 | 5 | 8 | 11 => Ok(KernelTime::current().as_nanoseconds() as i64),
-        1 | 4 | 6 | 7 | 9 => Ok(KernelTime::since_boot().as_nanoseconds() as i64),
-        2 | 3 => Ok(0),
-        _ => Err(SyscallError::InvalidArguments),
-    }
-}
-
-define_syscall!(ClockGettime, |clock_id: i32, tp: *mut LinuxTimespec| {
-    if tp.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-    let ns = linux_clock_now_ns(clock_id)?;
-    let timespec = LinuxTimespec {
-        tv_sec: ns / 1_000_000_000,
-        tv_nsec: ns % 1_000_000_000,
-    };
-    user_safe::write(tp, &timespec)?;
-    Ok(0)
-});
-
-define_syscall!(ClockSettime, |clock_id: i32, tp: *const LinuxTimespec| {
-    if tp.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-
-    if !matches!(clock_id, 0 | 8) {
-        return Err(SyscallError::InvalidArguments);
-    }
-
-    let timespec = user_safe::read(tp)?;
-    time::set_unix_timestamp_nanoseconds(linux_timespec_to_realtime_ns(timespec)?);
-
-    Ok(0)
-});
-
-define_syscall!(ClockGetres, |clock_id: i32, tp: *mut LinuxTimespec| {
-    let _ = linux_clock_now_ns(clock_id)?;
-
-    if tp.is_null() {
-        return Ok(0);
-    }
-
-    let timespec = LinuxTimespec {
-        tv_sec: 0,
-        tv_nsec: 1,
-    };
-    user_safe::write(tp, &timespec)?;
-
-    Ok(0)
-});
 
 define_syscall!(Capget, |header: *mut LinuxCapHeader,
                          data: *mut LinuxCapData| {
@@ -978,125 +813,6 @@ define_syscall!(InotifyRmWatch, |object: ObjectRef, _wd: i32| {
     Ok(0)
 });
 
-define_syscall!(TimerfdCreate, |clock_id: i32, flags: TimerFdFlags| {
-    if !matches!(clock_id, 0 | 1) {
-        return Err(SyscallError::InvalidArguments);
-    }
-
-    let file_flags = if flags.contains(TimerFdFlags::TFD_NONBLOCK) {
-        FileFlags::NONBLOCK
-    } else {
-        FileFlags::empty()
-    };
-    let object = TimerFdObject::new(file_flags);
-    let fd_flags = if flags.contains(TimerFdFlags::TFD_CLOEXEC) {
-        FdFlags::CLOEXEC
-    } else {
-        FdFlags::empty()
-    };
-    let fd = get_current_process()
-        .lock()
-        .push_object_with_flags(object, fd_flags);
-    Ok(fd)
-});
-
-define_syscall!(
-    TimerfdSettime,
-    |object: ObjectRef,
-     flags: TimerSetTimeFlags,
-     new_value: *const LinuxItimerspec,
-     old_value: *mut LinuxItimerspec| {
-        if new_value.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-
-        let timerfd = object.as_timerfd()?;
-        let now = KernelTime::since_boot();
-        let (old_deadline, old_interval_ns) = timerfd.current_timer();
-        if !old_value.is_null() {
-            let remaining_ns = old_deadline
-                .map(|deadline| deadline.sub(now).as_nanoseconds())
-                .unwrap_or(0);
-            let old_spec = LinuxItimerspec {
-                it_interval: ns_to_linux_timespec(old_interval_ns),
-                it_value: ns_to_linux_timespec(remaining_ns),
-            };
-            user_safe::write(old_value, &old_spec)?;
-        }
-
-        let new_spec = user_safe::read(new_value)?;
-        let value_ns = linux_timespec_to_ns(new_spec.it_value)?;
-        let interval_ns = linux_timespec_to_ns(new_spec.it_interval)?;
-        let deadline = if value_ns == 0 {
-            None
-        } else if flags.contains(TimerSetTimeFlags::TFD_TIMER_ABSTIME) {
-            Some(KernelTime::from_nanoseconds(value_ns))
-        } else {
-            Some(now.add_ns(value_ns))
-        };
-        timerfd.set_timer(deadline, interval_ns);
-        wake_linux_io_waiters();
-        if timerfd.is_read_ready() {
-            timerfd.wake_waiters();
-        }
-
-        Ok(0)
-    }
-);
-
-define_syscall!(
-    TimerfdGettime,
-    |object: ObjectRef, curr_value: *mut LinuxItimerspec| {
-        if curr_value.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-
-        let timerfd = object.as_timerfd()?;
-        let now = KernelTime::since_boot();
-        let (deadline, interval_ns) = timerfd.current_timer();
-        let remaining_ns = deadline
-            .map(|deadline| deadline.sub(now).as_nanoseconds())
-            .unwrap_or(0);
-
-        let spec = LinuxItimerspec {
-            it_interval: ns_to_linux_timespec(interval_ns),
-            it_value: ns_to_linux_timespec(remaining_ns),
-        };
-        user_safe::write(curr_value, &spec)?;
-
-        Ok(0)
-    }
-);
-
-define_syscall!(TimeSinceBoot, {
-    Ok(KernelTime::since_boot().as_nanoseconds() as usize)
-});
-
-define_syscall!(
-    Gettimeofday,
-    |tv: *mut LinuxTimeval, tz: *mut LinuxTimezone| {
-        if !tv.is_null() {
-            let now_ns = KernelTime::current().as_nanoseconds() as i64;
-            let timeval = LinuxTimeval {
-                tv_sec: now_ns / 1_000_000_000,
-                tv_usec: (now_ns % 1_000_000_000) / 1_000,
-            };
-            user_safe::write(tv, &timeval)?;
-        }
-
-        if !tz.is_null() {
-            let (tz_minuteswest, tz_dsttime) = time::timezone();
-            let timezone = LinuxTimezone {
-                tz_minuteswest,
-                tz_dsttime,
-            };
-            user_safe::write(tz, &timezone)?;
-        }
-
-        Ok(0)
-    }
-);
-
 define_syscall!(Getrusage, |who: i32, usage: *mut LinuxRusage| {
     let _ = LinuxRusageWho::try_from(who).map_err(|_| SyscallError::InvalidArguments)?;
     if usage.is_null() {
@@ -1106,23 +822,6 @@ define_syscall!(Getrusage, |who: i32, usage: *mut LinuxRusage| {
     user_safe::write(usage, &LinuxRusage::default())?;
     Ok(0)
 });
-
-define_syscall!(
-    Settimeofday,
-    |tv: *const LinuxTimeval, tz: *const LinuxTimezone| {
-        if !tv.is_null() {
-            let timeval = user_safe::read(tv)?;
-            time::set_unix_timestamp_nanoseconds(linux_timeval_to_realtime_ns(timeval)?);
-        }
-
-        if !tz.is_null() {
-            let timezone = user_safe::read(tz)?;
-            time::set_timezone(timezone.tz_minuteswest, timezone.tz_dsttime);
-        }
-
-        Ok(0)
-    }
-);
 
 define_syscall!(Umask, |mask: u32| {
     let process = get_current_process();
@@ -1238,53 +937,7 @@ define_syscall!(Pause, {
     }
 });
 
-define_syscall!(
-    Nanosleep,
-    |req: *const LinuxTimespec, rem: *mut LinuxTimespec| {
-        if req.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-        let requested = user_safe::read(req)?;
-        if requested.tv_sec < 0 || requested.tv_nsec < 0 || requested.tv_nsec >= 1_000_000_000 {
-            return Err(SyscallError::InvalidArguments);
-        }
-        let nanoseconds = (requested.tv_sec as u64) * 1_000_000_000 + (requested.tv_nsec as u64);
-        let time = KernelTime::since_boot().add_ns(nanoseconds);
-
-        if time > KernelTime::since_boot() {
-            block_current_with_sig_check(BlockType::SetTime(time))?;
-        }
-
-        if !rem.is_null() {
-            let remaining = LinuxTimespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            };
-            user_safe::write(rem, &remaining)?;
-        }
-
-        Ok(0)
-    }
-);
-
 define_syscall!(Alarm, |_seconds: u32| { Ok(0) });
-
-define_syscall!(
-    Setitimer,
-    |which: i32, new_value: *const LinuxItimerval, old_value: *mut LinuxItimerval| {
-        if !(0..=2).contains(&which) {
-            return Err(SyscallError::InvalidArguments);
-        }
-        if new_value.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-        let _ = user_safe::read(new_value)?;
-        if !old_value.is_null() {
-            user_safe::write(old_value, &LinuxItimerval::default())?;
-        }
-        Ok(0)
-    }
-);
 
 define_syscall!(RtSigsuspend, |mask: *const u64, sigset_size: usize| {
     if sigset_size != 8 {
@@ -1316,58 +969,6 @@ define_syscall!(RtSigsuspend, |mask: *const u64, sigset_size: usize| {
         }
     }
 });
-
-define_syscall!(
-    ClockNanosleep,
-    |clock_id: i32,
-     flags: ClockNanosleepFlags,
-     req: *const LinuxTimespec,
-     rem: *mut LinuxTimespec| {
-        if req.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-
-        let requested = user_safe::read(req)?;
-        if requested.tv_sec < 0 || requested.tv_nsec < 0 || requested.tv_nsec >= 1_000_000_000 {
-            return Err(SyscallError::InvalidArguments);
-        }
-
-        let clock =
-            ClockId::try_from(clock_id as u64).map_err(|_| SyscallError::InvalidArguments)?;
-        let requested_ns =
-            (requested.tv_sec as u64).saturating_mul(1_000_000_000) + (requested.tv_nsec as u64);
-
-        let deadline = if flags.contains(ClockNanosleepFlags::TIMER_ABSTIME) {
-            match clock {
-                ClockId::Realtime => {
-                    let now_realtime = KernelTime::current();
-                    let now_boot = KernelTime::since_boot();
-                    now_boot.add_ns(requested_ns.saturating_sub(now_realtime.as_nanoseconds()))
-                }
-                ClockId::SinceBoot => KernelTime::from_nanoseconds(requested_ns),
-            }
-        } else {
-            // Blocked-thread timeouts are evaluated against since_boot.
-            // Relative sleeps are duration-based, so normalize them onto
-            // that clock domain even for CLOCK_REALTIME.
-            KernelTime::since_boot().add_ns(requested_ns)
-        };
-
-        if deadline > KernelTime::since_boot() {
-            block_current_with_sig_check(BlockType::SetTime(deadline))?;
-        }
-
-        if !flags.contains(ClockNanosleepFlags::TIMER_ABSTIME) && !rem.is_null() {
-            let remaining = LinuxTimespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            };
-            user_safe::write(rem, &remaining)?;
-        }
-
-        Ok(0)
-    }
-);
 
 define_syscall!(Unshare, |flags: u64| {
     let unsupported = flags
@@ -1907,28 +1508,6 @@ define_syscall!(Setfsgid, |gid: u32| {
 
 define_syscall!(Vhangup, { Ok(0) });
 
-define_syscall!(Time, |time_ptr: *mut i64| {
-    let seconds = (KernelTime::current().as_nanoseconds() / 1_000_000_000) as i64;
-    if !time_ptr.is_null() {
-        user_safe::write(time_ptr, &seconds)?;
-    }
-    Ok(seconds as usize)
-});
-
-define_syscall!(Sysinfo, |info_ptr: *mut LinuxSysinfo| {
-    let uptime = (KernelTime::since_boot().as_nanoseconds() / 1_000_000_000) as i64;
-    let info = LinuxSysinfo {
-        uptime,
-        totalram: 4 * 1024 * 1024 * 1024,
-        freeram: 2 * 1024 * 1024 * 1024,
-        procs: 1,
-        mem_unit: 1,
-        ..Default::default()
-    };
-    user_safe::write(info_ptr, &info)?;
-    Ok(0)
-});
-
 define_syscall!(
     SchedSetaffinity,
     |pid: i32, cpusetsize: usize, mask_ptr: *const u8| {
@@ -1963,22 +1542,6 @@ define_syscall!(
         Ok(core::mem::size_of::<usize>())
     }
 );
-
-define_syscall!(SchedRrGetInterval, |pid: i32, tp: *mut LinuxTimespec| {
-    if pid < 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
-    if tp.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-
-    let timespec = LinuxTimespec {
-        tv_sec: 0,
-        tv_nsec: 100_000_000,
-    };
-    user_safe::write(tp, &timespec)?;
-    Ok(0)
-});
 
 define_syscall!(Setrlimit, |resource: i32, rlimit: u64| {
     let resource =

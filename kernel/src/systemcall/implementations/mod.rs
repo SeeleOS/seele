@@ -14,6 +14,7 @@ mod select;
 mod signal;
 mod socket;
 mod sysv_shm;
+mod time;
 mod timer;
 
 #[cfg(test)]
@@ -42,4 +43,5 @@ pub use select::*;
 pub use signal::*;
 pub use socket::*;
 pub use sysv_shm::*;
+pub use time::*;
 pub use timer::*;
