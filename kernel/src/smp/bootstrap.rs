@@ -18,7 +18,7 @@ use crate::{
         paging::{FRAME_ALLOCATOR, MAPPER},
         utils::page_range_from_addr,
     },
-    misc::{others::enable_sse, time::Time},
+    misc::{others::enable_sse, profile, time::Time},
     smp::{
         cpu::{CpuCoreContext, register_application_processor},
         current_apic_id_raw, set_current_thread, topology, wait_for_cpu_online,
@@ -58,6 +58,7 @@ pub fn start_application_processors() {
     for processor in processors {
         register_application_processor(processor.index, processor.apic_id);
     }
+    profile::ensure_cpu_slots(topology::processors().len());
     if let Some(thread_manager) = thread::THREAD_MANAGER.get() {
         thread_manager
             .lock()

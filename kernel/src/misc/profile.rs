@@ -6,6 +6,7 @@ use core::{
 };
 
 use crate::{
+    memory::utils::Mut,
     misc::{
         get_cycles, serial_print::SERIAL_PORT, time::NANOSECONDS_PER_SECOND, time::Time,
         time::tsc_frequency_hz,
@@ -642,7 +643,7 @@ impl Default for CpuProfileData {
 }
 
 struct ProfileState {
-    cpu_data: Vec<CpuProfileData>,
+    cpu_data: Mut<Vec<CpuProfileData>>,
     last_report_ns: AtomicU64,
 }
 
@@ -655,10 +656,18 @@ pub fn init() {
     let cpu_count = topology::processors().len().max(1);
     PROFILE_STATE
         .try_init_once(|| ProfileState {
-            cpu_data: (0..cpu_count).map(|_| CpuProfileData::default()).collect(),
+            cpu_data: Mut::new((0..cpu_count).map(|_| CpuProfileData::default()).collect()),
             last_report_ns: AtomicU64::new(Time::since_boot().as_nanoseconds()),
         })
         .expect("profiling initialized twice");
+}
+
+pub fn ensure_cpu_slots(cpu_count: usize) {
+    let state = PROFILE_STATE.get().expect("profiling not initialized");
+    state
+        .cpu_data
+        .lock()
+        .resize_with(cpu_count.max(1), CpuProfileData::default);
 }
 
 pub fn scope_start() -> u64 {
@@ -805,7 +814,8 @@ fn report_window(window_ns: u64) {
     let mut hot_syscall_phase_totals = [ProfileSnapshot::default(); HOT_SYSCALL_PHASE_COUNT];
     let mut file_lazy_faults = FileLazyFaultSnapshot::default();
 
-    for cpu in &state.cpu_data {
+    let cpu_data = state.cpu_data.lock();
+    for cpu in cpu_data.iter() {
         for category in ProfileCategory::ALL {
             category_totals[category.as_index()] +=
                 cpu.categories[category.as_index()].snapshot_and_reset();
@@ -1104,8 +1114,8 @@ fn report_ioctl_targets(totals: &[ProfileSnapshot; IOCTL_TARGET_COUNT], tsc_hz: 
 fn with_cpu_profile_data<R>(f: impl FnOnce(&CpuProfileData) -> R) -> R {
     let state = PROFILE_STATE.get().expect("profiling not initialized");
     let index = current_cpu_index();
-    let cpu = state
-        .cpu_data
+    let cpu_data = state.cpu_data.lock();
+    let cpu = cpu_data
         .get(index)
         .unwrap_or_else(|| panic!("missing profiling slot for cpu {index}"));
     f(cpu)

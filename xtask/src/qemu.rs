@@ -42,7 +42,7 @@ impl RunOptions {
             machine: env::var("SEELE_QEMU_MACHINE").unwrap_or_else(|_| "q35".to_string()),
             cpu_model: env::var("SEELE_QEMU_CPU")
                 .unwrap_or_else(|_| "host,+hypervisor,+kvmclock,+kvmclock-stable-bit".to_string()),
-            smp: env::var("SEELE_QEMU_SMP").unwrap_or_else(|_| default_smp()),
+            smp: default_smp(),
             qemu_gdb: env::var("SEELE_QEMU_GDB").ok(),
             wait_for_gdb: env::var_os("SEELE_QEMU_WAIT_GDB").is_some(),
             qemu_debug_log: env::var_os("SEELE_QEMU_DEBUG_LOG").map(PathBuf::from),
@@ -57,7 +57,7 @@ impl RunOptions {
             machine: env::var("SEELE_QEMU_MACHINE").unwrap_or_else(|_| "q35".to_string()),
             cpu_model: env::var("SEELE_QEMU_CPU")
                 .unwrap_or_else(|_| "host,+hypervisor,+kvmclock,+kvmclock-stable-bit".to_string()),
-            smp: env::var("SEELE_QEMU_SMP").unwrap_or_else(|_| "1".to_string()),
+            smp: default_smp(),
             qemu_gdb: env::var("SEELE_QEMU_GDB").ok(),
             wait_for_gdb: env::var_os("SEELE_QEMU_WAIT_GDB").is_some(),
             qemu_debug_log: env::var_os("SEELE_QEMU_DEBUG_LOG").map(PathBuf::from),
@@ -395,7 +395,7 @@ fn cleanup_qemu_debug_log(context: &QemuRunContext) {
 
 fn default_smp() -> String {
     thread::available_parallelism()
-        .map(|count| count.get().min(1).to_string())
+        .map(|count| count.get().to_string())
         .unwrap_or_else(|_| "1".to_string())
 }
 
