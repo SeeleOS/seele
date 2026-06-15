@@ -1,7 +1,6 @@
 use crate::memory::utils::Mut;
 use alloc::{
     collections::VecDeque,
-    format,
     sync::{Arc, Weak},
     vec,
     vec::Vec,
@@ -13,14 +12,13 @@ use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function, impl_cast_function_non_trait,
     memory::user_safe,
-    net,
     object::{
         FileFlags, Object,
         config::ConfigurateRequest,
         error::ObjectError,
         linux_anon::wake_linux_io_waiters,
         linux_ioctl::{LinuxIoctlOp, socket_raw_ioctl_op},
-        misc::{ObjectRef, ObjectResult, get_object_current_process},
+        misc::{ObjectRef, ObjectResult},
         traits::{Configuratable, Readable, Statable},
     },
     polling::{event::PollableEvent, object::Pollable},
@@ -40,59 +38,59 @@ use crate::{
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
 const S_IFSOCK: u32 = 0o140000;
-const AF_INET: u8 = 2;
-const ARPHRD_ETHER: u16 = 1;
-const ARPHRD_LOOPBACK: u16 = 772;
-const IFA_ADDRESS: u16 = 1;
-const IFA_LOCAL: u16 = 2;
-const IFA_LABEL: u16 = 3;
-const IFA_FLAGS: u16 = 8;
-const IFA_F_PERMANENT: u8 = 0x80;
-const IFF_UP: u32 = 1 << 0;
-const IFF_BROADCAST: u32 = 1 << 1;
-const IFF_LOOPBACK: u32 = 1 << 3;
-const IFF_RUNNING: u32 = 1 << 6;
-const IFF_MULTICAST: u32 = 1 << 12;
-const IFF_LOWER_UP: u32 = 1 << 16;
-const IFLA_ADDRESS: u16 = 1;
-const IFLA_BROADCAST: u16 = 2;
-const IFLA_IFNAME: u16 = 3;
-const IFLA_MTU: u16 = 4;
-const IFLA_QDISC: u16 = 6;
-const IFLA_TXQLEN: u16 = 13;
-const IFLA_OPERSTATE: u16 = 16;
-const IFLA_LINKMODE: u16 = 17;
-const IFLA_NET_NS_FD: u16 = 28;
-const IFLA_NUM_TX_QUEUES: u16 = 31;
-const IFLA_NUM_RX_QUEUES: u16 = 32;
-const IFLA_ALT_IFNAME: u16 = 53;
-const IFLA_PERM_ADDRESS: u16 = 54;
+pub(super) const AF_INET: u8 = 2;
+pub(super) const ARPHRD_ETHER: u16 = 1;
+pub(super) const ARPHRD_LOOPBACK: u16 = 772;
+pub(super) const IFA_ADDRESS: u16 = 1;
+pub(super) const IFA_LOCAL: u16 = 2;
+pub(super) const IFA_LABEL: u16 = 3;
+pub(super) const IFA_FLAGS: u16 = 8;
+pub(super) const IFA_F_PERMANENT: u8 = 0x80;
+pub(super) const IFF_UP: u32 = 1 << 0;
+pub(super) const IFF_BROADCAST: u32 = 1 << 1;
+pub(super) const IFF_LOOPBACK: u32 = 1 << 3;
+pub(super) const IFF_RUNNING: u32 = 1 << 6;
+pub(super) const IFF_MULTICAST: u32 = 1 << 12;
+pub(super) const IFF_LOWER_UP: u32 = 1 << 16;
+pub(super) const IFLA_ADDRESS: u16 = 1;
+pub(super) const IFLA_BROADCAST: u16 = 2;
+pub(super) const IFLA_IFNAME: u16 = 3;
+pub(super) const IFLA_MTU: u16 = 4;
+pub(super) const IFLA_QDISC: u16 = 6;
+pub(super) const IFLA_TXQLEN: u16 = 13;
+pub(super) const IFLA_OPERSTATE: u16 = 16;
+pub(super) const IFLA_LINKMODE: u16 = 17;
+pub(super) const IFLA_NET_NS_FD: u16 = 28;
+pub(super) const IFLA_NUM_TX_QUEUES: u16 = 31;
+pub(super) const IFLA_NUM_RX_QUEUES: u16 = 32;
+pub(super) const IFLA_ALT_IFNAME: u16 = 53;
+pub(super) const IFLA_PERM_ADDRESS: u16 = 54;
 const NLMSG_ERROR: u16 = 0x2;
-const NLMSG_DONE: u16 = 0x3;
-const NLM_F_MULTI: u16 = 0x2;
-const NLM_F_DUMP: u16 = 0x300;
-const RTM_NEWLINK: u16 = 16;
-const RTM_GETLINK: u16 = 18;
-const RTM_NEWADDR: u16 = 20;
-const RTM_GETADDR: u16 = 22;
-const RT_SCOPE_UNIVERSE: u8 = 0;
-const RT_SCOPE_HOST: u8 = 254;
-const IF_OPER_UP: u8 = 6;
-static NEXT_UEVENT_SEQNUM: AtomicU64 = AtomicU64::new(1);
+pub(super) const NLMSG_DONE: u16 = 0x3;
+pub(super) const NLM_F_MULTI: u16 = 0x2;
+pub(super) const NLM_F_DUMP: u16 = 0x300;
+pub(super) const RTM_NEWLINK: u16 = 16;
+pub(super) const RTM_GETLINK: u16 = 18;
+pub(super) const RTM_NEWADDR: u16 = 20;
+pub(super) const RTM_GETADDR: u16 = 22;
+pub(super) const RT_SCOPE_UNIVERSE: u8 = 0;
+pub(super) const RT_SCOPE_HOST: u8 = 254;
+pub(super) const IF_OPER_UP: u8 = 6;
 static NEXT_NETLINK_PORT_ID: AtomicU64 = AtomicU64::new(1);
 
 lazy_static! {
-    static ref NETLINK_SOCKETS: Mut<Vec<Weak<NetlinkSocketObject>>> = Mut::new(Vec::new());
+    pub(super) static ref NETLINK_SOCKETS: Mut<Vec<Weak<NetlinkSocketObject>>> =
+        Mut::new(Vec::new());
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct NetlinkMessageHeader {
-    nlmsg_len: u32,
-    nlmsg_type: u16,
-    nlmsg_flags: u16,
-    nlmsg_seq: u32,
-    nlmsg_pid: u32,
+pub(super) struct NetlinkMessageHeader {
+    pub(super) nlmsg_len: u32,
+    pub(super) nlmsg_type: u16,
+    pub(super) nlmsg_flags: u16,
+    pub(super) nlmsg_seq: u32,
+    pub(super) nlmsg_pid: u32,
 }
 
 #[repr(C)]
@@ -104,30 +102,30 @@ struct NetlinkErrorMessage {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct IfInfoMessage {
-    ifi_family: u8,
-    ifi_pad: u8,
-    ifi_type: u16,
-    ifi_index: i32,
-    ifi_flags: u32,
-    ifi_change: u32,
+pub(super) struct IfInfoMessage {
+    pub(super) ifi_family: u8,
+    pub(super) ifi_pad: u8,
+    pub(super) ifi_type: u16,
+    pub(super) ifi_index: i32,
+    pub(super) ifi_flags: u32,
+    pub(super) ifi_change: u32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct IfAddrMessage {
-    ifa_family: u8,
-    ifa_prefixlen: u8,
-    ifa_flags: u8,
-    ifa_scope: u8,
-    ifa_index: u32,
+pub(super) struct IfAddrMessage {
+    pub(super) ifa_family: u8,
+    pub(super) ifa_prefixlen: u8,
+    pub(super) ifa_flags: u8,
+    pub(super) ifa_scope: u8,
+    pub(super) ifa_index: u32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct RouteAttributeHeader {
-    rta_len: u16,
-    rta_type: u16,
+pub(super) struct RouteAttributeHeader {
+    pub(super) rta_len: u16,
+    pub(super) rta_type: u16,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -232,7 +230,7 @@ impl NetlinkSocketObject {
             .map(|socket| socket as ObjectRef)
     }
 
-    fn wake_read_waiters(&self) {
+    pub(super) fn wake_read_waiters(&self) {
         wake_linux_io_waiters();
         let Some(object) = self.self_object() else {
             return;
@@ -240,11 +238,11 @@ impl NetlinkSocketObject {
         crate::thread::yielding::wake_pollers_for_object(object, PollableEvent::CanBeRead);
     }
 
-    fn queue_message(&self, message: Vec<u8>) {
+    pub(super) fn queue_message(&self, message: Vec<u8>) {
         self.queue_message_with_source(message, NetlinkSocketAddress::default(), 0, 0);
     }
 
-    fn queue_message_with_source(
+    pub(super) fn queue_message_with_source(
         &self,
         message: Vec<u8>,
         source: NetlinkSocketAddress,
@@ -283,6 +281,10 @@ impl NetlinkSocketObject {
         *self.pass_cred.lock()
     }
 
+    pub(super) fn protocol(&self) -> u64 {
+        self.protocol
+    }
+
     pub fn peek_message_len(&self) -> Option<usize> {
         self.recv_queue
             .lock()
@@ -317,7 +319,7 @@ impl NetlinkSocketObject {
         ))
     }
 
-    fn receives_group(&self, group: u32) -> bool {
+    pub(super) fn receives_group(&self, group: u32) -> bool {
         let address_groups = self.address.lock().groups;
         if (address_groups & group) != 0 {
             return true;
@@ -326,7 +328,7 @@ impl NetlinkSocketObject {
         self.memberships.lock().contains(&group)
     }
 
-    fn local_address(&self) -> NetlinkSocketAddress {
+    pub(super) fn local_address(&self) -> NetlinkSocketAddress {
         let mut address = self.address.lock();
         if address.pid == 0 {
             address.pid = NEXT_NETLINK_PORT_ID.fetch_add(1, Ordering::Relaxed) as u32;
@@ -555,427 +557,6 @@ impl NetlinkSocketObject {
         Ok(vec![0; expected_len])
     }
 
-    fn handle_route_messages(&self, mut message: &[u8]) {
-        while let Some((header, payload, consumed)) = self.request_header_and_payload(message) {
-            let reply_pid = self.local_address().pid;
-
-            match header.nlmsg_type {
-                RTM_NEWLINK => self.handle_new_link(header, payload),
-                RTM_GETLINK => self.handle_get_link(header, payload, reply_pid),
-                RTM_GETADDR => self.handle_get_addr(header, payload, reply_pid),
-                _ => self.enqueue_error_response(header, 0),
-            }
-
-            if consumed >= message.len() {
-                break;
-            }
-            message = &message[consumed..];
-        }
-    }
-
-    fn request_header_and_payload<'a>(
-        &self,
-        message: &'a [u8],
-    ) -> Option<(NetlinkMessageHeader, &'a [u8], usize)> {
-        if message.len() < core::mem::size_of::<NetlinkMessageHeader>() {
-            return None;
-        }
-
-        let header =
-            unsafe { core::ptr::read_unaligned(message.as_ptr().cast::<NetlinkMessageHeader>()) };
-        let message_len = usize::try_from(header.nlmsg_len).ok()?;
-        if message_len < core::mem::size_of::<NetlinkMessageHeader>() {
-            return None;
-        }
-        let consumed = Self::align_to_4(message_len).min(message.len());
-        if message_len > consumed {
-            return None;
-        }
-
-        Some((
-            header,
-            &message[core::mem::size_of::<NetlinkMessageHeader>()..message_len],
-            consumed,
-        ))
-    }
-
-    fn handle_get_link(&self, header: NetlinkMessageHeader, payload: &[u8], reply_pid: u32) {
-        let request = Self::read_struct_prefix::<IfInfoMessage>(payload).unwrap_or(IfInfoMessage {
-            ifi_family: 0,
-            ifi_pad: 0,
-            ifi_type: 0,
-            ifi_index: 0,
-            ifi_flags: 0,
-            ifi_change: 0,
-        });
-        let attrs_offset = core::mem::size_of::<IfInfoMessage>().min(payload.len());
-        let request_name = Self::find_attribute(payload, attrs_offset, IFLA_IFNAME)
-            .and_then(Self::parse_netlink_string);
-        let request_alt_name = Self::find_attribute(payload, attrs_offset, IFLA_ALT_IFNAME)
-            .and_then(Self::parse_netlink_string);
-        let dump = (header.nlmsg_flags & NLM_F_DUMP) != 0;
-
-        let mut matched = Vec::new();
-        for interface in net::interfaces() {
-            if request.ifi_index > 0 && interface.index != request.ifi_index {
-                continue;
-            }
-            if request_name.is_some_and(|name| interface.name != name) {
-                continue;
-            }
-            if request_alt_name.is_some() {
-                continue;
-            }
-            matched.push(interface);
-        }
-
-        let should_dump = dump
-            || (request.ifi_index == 0 && request_name.is_none() && request_alt_name.is_none());
-        if should_dump {
-            for interface in matched {
-                self.queue_message(Self::encode_link_message(
-                    header, interface, true, reply_pid,
-                ));
-            }
-            self.queue_message(Self::encode_done_message(header.nlmsg_seq, reply_pid));
-            return;
-        }
-
-        if let Some(interface) = matched.into_iter().next() {
-            self.queue_message(Self::encode_link_message(
-                header, interface, false, reply_pid,
-            ));
-        } else {
-            self.enqueue_error_response(header, -19);
-        }
-    }
-
-    fn handle_new_link(&self, header: NetlinkMessageHeader, payload: &[u8]) {
-        let request = Self::read_struct_prefix::<IfInfoMessage>(payload).unwrap_or(IfInfoMessage {
-            ifi_family: 0,
-            ifi_pad: 0,
-            ifi_type: 0,
-            ifi_index: 0,
-            ifi_flags: 0,
-            ifi_change: 0,
-        });
-        let attrs_offset = core::mem::size_of::<IfInfoMessage>().min(payload.len());
-        let request_name = Self::find_attribute(payload, attrs_offset, IFLA_IFNAME)
-            .and_then(Self::parse_netlink_string);
-        let request_alt_name = Self::find_attribute(payload, attrs_offset, IFLA_ALT_IFNAME)
-            .and_then(Self::parse_netlink_string);
-        if request_alt_name.is_some() {
-            self.enqueue_error_response(header, -22);
-            return;
-        }
-
-        let interfaces = net::interfaces();
-        let requested_interface = interfaces.iter().copied().find(|interface| {
-            (request.ifi_index <= 0 || interface.index == request.ifi_index)
-                && request_name.is_none_or(|name| interface.name == name)
-        });
-
-        let Some(namespace_fd) = Self::find_attribute(payload, attrs_offset, IFLA_NET_NS_FD)
-            .and_then(Self::parse_i32_attribute)
-        else {
-            if requested_interface.is_some() {
-                self.enqueue_ack_from_header(header);
-            } else {
-                self.enqueue_error_response(header, -19);
-            }
-            return;
-        };
-        if namespace_fd < 0 {
-            self.enqueue_error_response(header, -22);
-            return;
-        }
-
-        let Some(interface) = interfaces.into_iter().find(|interface| !interface.loopback) else {
-            self.enqueue_error_response(header, -19);
-            return;
-        };
-        if request.ifi_index > 0 && interface.index != request.ifi_index {
-            self.enqueue_error_response(header, -19);
-            return;
-        }
-        if request_name.is_some_and(|name| interface.name != name) {
-            self.enqueue_error_response(header, -19);
-            return;
-        }
-
-        let Ok(namespace_object) = get_object_current_process(namespace_fd as u64) else {
-            self.enqueue_error_response(header, -22);
-            return;
-        };
-        let Ok(namespace) = namespace_object.as_net_namespace() else {
-            self.enqueue_error_response(header, -22);
-            return;
-        };
-
-        match net::move_primary_device_to_namespace(namespace.inode()) {
-            Ok(()) => self.enqueue_ack_from_header(header),
-            Err(net::NetError::NoDevice) => self.enqueue_error_response(header, -19),
-            Err(net::NetError::InvalidArguments) => self.enqueue_error_response(header, -22),
-            Err(net::NetError::TryAgain) => self.enqueue_error_response(header, -11),
-            Err(net::NetError::NotConnected) => self.enqueue_error_response(header, -107),
-            Err(net::NetError::AddressInUse) => self.enqueue_error_response(header, -98),
-            Err(net::NetError::ConnectionRefused) => self.enqueue_error_response(header, -111),
-            Err(net::NetError::BrokenPipe) => self.enqueue_error_response(header, -32),
-        }
-    }
-
-    fn handle_get_addr(&self, header: NetlinkMessageHeader, payload: &[u8], reply_pid: u32) {
-        let request = Self::read_struct_prefix::<IfAddrMessage>(payload).unwrap_or(IfAddrMessage {
-            ifa_family: 0,
-            ifa_prefixlen: 0,
-            ifa_flags: 0,
-            ifa_scope: 0,
-            ifa_index: 0,
-        });
-        let dump = (header.nlmsg_flags & NLM_F_DUMP) != 0;
-        let request_index = i32::try_from(request.ifa_index).unwrap_or(0);
-
-        let mut matched = Vec::new();
-        for interface in net::interfaces() {
-            let Some((addr, prefix_len)) = interface.ipv4 else {
-                continue;
-            };
-            if request.ifa_family != 0 && request.ifa_family != AF_INET {
-                continue;
-            }
-            if request_index > 0 && interface.index != request_index {
-                continue;
-            }
-            matched.push((interface, addr, prefix_len));
-        }
-
-        let should_dump = dump || request_index == 0;
-        if should_dump {
-            for (interface, addr, prefix_len) in matched {
-                self.queue_message(Self::encode_addr_message(
-                    header, interface, addr, prefix_len, true, reply_pid,
-                ));
-            }
-            self.queue_message(Self::encode_done_message(header.nlmsg_seq, reply_pid));
-            return;
-        }
-
-        if let Some((interface, addr, prefix_len)) = matched.into_iter().next() {
-            self.queue_message(Self::encode_addr_message(
-                header, interface, addr, prefix_len, false, reply_pid,
-            ));
-        } else {
-            self.enqueue_error_response(header, 0);
-        }
-    }
-
-    fn encode_link_message(
-        request: NetlinkMessageHeader,
-        interface: net::NetworkInterfaceInfo,
-        multipart: bool,
-        reply_pid: u32,
-    ) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        Self::append_struct(
-            &mut bytes,
-            &NetlinkMessageHeader {
-                nlmsg_len: 0,
-                nlmsg_type: RTM_NEWLINK,
-                nlmsg_flags: if multipart { NLM_F_MULTI } else { 0 },
-                nlmsg_seq: request.nlmsg_seq,
-                nlmsg_pid: reply_pid,
-            },
-        );
-        Self::append_struct(
-            &mut bytes,
-            &IfInfoMessage {
-                ifi_family: 0,
-                ifi_pad: 0,
-                ifi_type: if interface.loopback {
-                    ARPHRD_LOOPBACK
-                } else {
-                    ARPHRD_ETHER
-                },
-                ifi_index: interface.index,
-                ifi_flags: if interface.loopback {
-                    IFF_UP | IFF_LOOPBACK | IFF_RUNNING | IFF_LOWER_UP
-                } else {
-                    IFF_UP | IFF_BROADCAST | IFF_RUNNING | IFF_MULTICAST | IFF_LOWER_UP
-                },
-                ifi_change: u32::MAX,
-            },
-        );
-        Self::append_string_attribute(&mut bytes, IFLA_IFNAME, interface.name);
-        Self::append_attribute(&mut bytes, IFLA_ADDRESS, &interface.mac);
-        Self::append_attribute(&mut bytes, IFLA_PERM_ADDRESS, &interface.mac);
-        if !interface.loopback {
-            Self::append_attribute(&mut bytes, IFLA_BROADCAST, &[0xff; 6]);
-        }
-        Self::append_u32_attribute(&mut bytes, IFLA_MTU, interface.mtu);
-        Self::append_string_attribute(
-            &mut bytes,
-            IFLA_QDISC,
-            if interface.loopback {
-                "noqueue"
-            } else {
-                "fq_codel"
-            },
-        );
-        Self::append_u32_attribute(&mut bytes, IFLA_TXQLEN, 1_000);
-        Self::append_u8_attribute(&mut bytes, IFLA_OPERSTATE, IF_OPER_UP);
-        Self::append_u8_attribute(&mut bytes, IFLA_LINKMODE, 0);
-        Self::append_u32_attribute(&mut bytes, IFLA_NUM_TX_QUEUES, 1);
-        Self::append_u32_attribute(&mut bytes, IFLA_NUM_RX_QUEUES, 1);
-        Self::finalize_message_length(&mut bytes);
-        bytes
-    }
-
-    fn encode_addr_message(
-        request: NetlinkMessageHeader,
-        interface: net::NetworkInterfaceInfo,
-        addr: [u8; 4],
-        prefix_len: u8,
-        multipart: bool,
-        reply_pid: u32,
-    ) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        Self::append_struct(
-            &mut bytes,
-            &NetlinkMessageHeader {
-                nlmsg_len: 0,
-                nlmsg_type: RTM_NEWADDR,
-                nlmsg_flags: if multipart { NLM_F_MULTI } else { 0 },
-                nlmsg_seq: request.nlmsg_seq,
-                nlmsg_pid: reply_pid,
-            },
-        );
-        Self::append_struct(
-            &mut bytes,
-            &IfAddrMessage {
-                ifa_family: AF_INET,
-                ifa_prefixlen: prefix_len,
-                ifa_flags: IFA_F_PERMANENT,
-                ifa_scope: if interface.loopback {
-                    RT_SCOPE_HOST
-                } else {
-                    RT_SCOPE_UNIVERSE
-                },
-                ifa_index: interface.index as u32,
-            },
-        );
-        Self::append_attribute(&mut bytes, IFA_ADDRESS, &addr);
-        Self::append_attribute(&mut bytes, IFA_LOCAL, &addr);
-        Self::append_string_attribute(&mut bytes, IFA_LABEL, interface.name);
-        Self::append_u32_attribute(&mut bytes, IFA_FLAGS, u32::from(IFA_F_PERMANENT));
-        Self::finalize_message_length(&mut bytes);
-        bytes
-    }
-
-    fn encode_done_message(seq: u32, reply_pid: u32) -> Vec<u8> {
-        let header = NetlinkMessageHeader {
-            nlmsg_len: core::mem::size_of::<NetlinkMessageHeader>() as u32,
-            nlmsg_type: NLMSG_DONE,
-            nlmsg_flags: NLM_F_MULTI,
-            nlmsg_seq: seq,
-            nlmsg_pid: reply_pid,
-        };
-        let mut bytes = Vec::new();
-        Self::append_struct(&mut bytes, &header);
-        bytes
-    }
-
-    fn append_attribute(bytes: &mut Vec<u8>, attr_type: u16, payload: &[u8]) {
-        let attr_len = core::mem::size_of::<RouteAttributeHeader>() + payload.len();
-        let header = RouteAttributeHeader {
-            rta_len: attr_len as u16,
-            rta_type: attr_type,
-        };
-        Self::append_struct(bytes, &header);
-        bytes.extend_from_slice(payload);
-        while !bytes.len().is_multiple_of(4) {
-            bytes.push(0);
-        }
-    }
-
-    fn append_string_attribute(bytes: &mut Vec<u8>, attr_type: u16, value: &str) {
-        let mut payload = value.as_bytes().to_vec();
-        payload.push(0);
-        Self::append_attribute(bytes, attr_type, &payload);
-    }
-
-    fn append_u8_attribute(bytes: &mut Vec<u8>, attr_type: u16, value: u8) {
-        Self::append_attribute(bytes, attr_type, &[value]);
-    }
-
-    fn append_u32_attribute(bytes: &mut Vec<u8>, attr_type: u16, value: u32) {
-        Self::append_attribute(bytes, attr_type, &value.to_ne_bytes());
-    }
-
-    fn append_struct<T>(bytes: &mut Vec<u8>, value: &T) {
-        bytes.extend_from_slice(unsafe {
-            core::slice::from_raw_parts((value as *const T).cast::<u8>(), core::mem::size_of::<T>())
-        });
-    }
-
-    fn finalize_message_length(bytes: &mut [u8]) {
-        let header = NetlinkMessageHeader {
-            nlmsg_len: bytes.len() as u32,
-            nlmsg_type: u16::from_ne_bytes([bytes[4], bytes[5]]),
-            nlmsg_flags: u16::from_ne_bytes([bytes[6], bytes[7]]),
-            nlmsg_seq: u32::from_ne_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]),
-            nlmsg_pid: u32::from_ne_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]),
-        };
-        bytes[..core::mem::size_of::<NetlinkMessageHeader>()].copy_from_slice(unsafe {
-            core::slice::from_raw_parts(
-                (&header as *const NetlinkMessageHeader).cast::<u8>(),
-                core::mem::size_of::<NetlinkMessageHeader>(),
-            )
-        });
-    }
-
-    fn find_attribute(payload: &[u8], mut offset: usize, attr_type: u16) -> Option<&[u8]> {
-        while offset + core::mem::size_of::<RouteAttributeHeader>() <= payload.len() {
-            let header = unsafe {
-                core::ptr::read_unaligned(payload[offset..].as_ptr().cast::<RouteAttributeHeader>())
-            };
-            let attr_len = usize::from(header.rta_len);
-            if attr_len < core::mem::size_of::<RouteAttributeHeader>() {
-                return None;
-            }
-            let attr_end = offset.checked_add(attr_len)?;
-            if attr_end > payload.len() {
-                return None;
-            }
-            if header.rta_type == attr_type {
-                return Some(
-                    &payload[offset + core::mem::size_of::<RouteAttributeHeader>()..attr_end],
-                );
-            }
-            offset = Self::align_to_4(attr_end);
-        }
-        None
-    }
-
-    fn parse_netlink_string(bytes: &[u8]) -> Option<&str> {
-        let bytes = bytes.strip_suffix(&[0]).unwrap_or(bytes);
-        core::str::from_utf8(bytes).ok()
-    }
-
-    fn parse_i32_attribute(bytes: &[u8]) -> Option<i32> {
-        Some(i32::from_ne_bytes(bytes.get(..4)?.try_into().ok()?))
-    }
-
-    fn read_struct_prefix<T: Copy>(bytes: &[u8]) -> Option<T> {
-        if bytes.len() < core::mem::size_of::<T>() {
-            return None;
-        }
-        Some(unsafe { core::ptr::read_unaligned(bytes.as_ptr().cast::<T>()) })
-    }
-
-    fn align_to_4(value: usize) -> usize {
-        (value + 3) & !3
-    }
-
     fn enqueue_ack(&self, message: &[u8]) {
         if message.len() < core::mem::size_of::<NetlinkMessageHeader>() {
             return;
@@ -986,11 +567,11 @@ impl NetlinkSocketObject {
         self.enqueue_ack_from_header(header);
     }
 
-    fn enqueue_ack_from_header(&self, header: NetlinkMessageHeader) {
+    pub(super) fn enqueue_ack_from_header(&self, header: NetlinkMessageHeader) {
         self.enqueue_error_response(header, 0);
     }
 
-    fn enqueue_error_response(&self, header: NetlinkMessageHeader, error: i32) {
+    pub(super) fn enqueue_error_response(&self, header: NetlinkMessageHeader, error: i32) {
         let reply_len = core::mem::size_of::<NetlinkMessageHeader>()
             + core::mem::size_of::<NetlinkErrorMessage>();
         let reply_header = NetlinkMessageHeader {
@@ -1020,50 +601,6 @@ impl NetlinkSocketObject {
 
     fn is_nonblocking(&self) -> bool {
         self.flags.lock().contains(FileFlags::NONBLOCK)
-    }
-}
-
-pub fn broadcast_kobject_uevent(action: &str, devpath: &str, extra_env: &[u8]) {
-    let seqnum = NEXT_UEVENT_SEQNUM.fetch_add(1, Ordering::Relaxed);
-    let mut message =
-        format!("{action}@{devpath}\0ACTION={action}\0DEVPATH={devpath}\0").into_bytes();
-    for line in extra_env
-        .split(|byte| *byte == b'\n')
-        .filter(|line| !line.is_empty())
-    {
-        if line.starts_with(b"ACTION=")
-            || line.starts_with(b"DEVPATH=")
-            || line.starts_with(b"SEQNUM=")
-        {
-            continue;
-        }
-        message.extend_from_slice(line);
-        message.push(0);
-    }
-    message.extend_from_slice(format!("SEQNUM={seqnum}\0").as_bytes());
-
-    let mut sockets = NETLINK_SOCKETS.lock();
-    let mut delivered_sockets = Vec::new();
-    let mut total = 0usize;
-    sockets.retain(|socket| {
-        let Some(socket) = socket.upgrade() else {
-            return false;
-        };
-        total += 1;
-        if socket.protocol == NETLINK_KOBJECT_UEVENT && socket.receives_group(1) {
-            socket.queue_message_with_source(
-                message.clone(),
-                NetlinkSocketAddress { pid: 0, groups: 1 },
-                0,
-                0,
-            );
-            delivered_sockets.push(socket);
-        }
-        true
-    });
-    drop(sockets);
-    for socket in delivered_sockets {
-        socket.wake_read_waiters();
     }
 }
 
