@@ -23,416 +23,76 @@ const TOP_CATEGORY_COUNT: usize = 10;
 const TOP_SYSCALL_COUNT: usize = 8;
 const TOP_IOCTL_COUNT: usize = 8;
 const MAX_SYSCALLS: usize = 1500;
-const PROFILE_CATEGORY_COUNT: usize = 27;
-const HOT_SYSCALL_PHASE_COUNT: usize = 67;
-const IOCTL_OP_COUNT: usize = 93;
-const IOCTL_TARGET_COUNT: usize = 11;
+const PROFILE_CATEGORY_COUNT: usize = ProfileCategory::COUNT;
+const HOT_SYSCALL_PHASE_COUNT: usize = HotSyscallPhase::COUNT;
+const IOCTL_OP_COUNT: usize = LinuxIoctlOp::COUNT;
+const IOCTL_TARGET_COUNT: usize = LinuxIoctlTarget::COUNT;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum ProfileCategory {
-    SchedulerWork = 0,
-    TimerWork = 1,
-    NetPoll = 2,
-    SyscallCpu = 3,
-    PageFault = 4,
-    IrqTimer = 5,
-    IrqKeyboard = 6,
-    IrqMouse = 7,
-    Idle = 8,
-    OtherKernel = 9,
-    SchedulerSelect = 10,
-    SchedulerSwitch = 11,
-    SchedulerDispatch = 12,
-    SchedulerAfterYield = 13,
-    ThreadRunWindow = 14,
-    SyscallEntry = 15,
-    SyscallBody = 16,
-    SyscallExit = 17,
-    PageFaultLookup = 18,
-    PageFaultResolve = 19,
-    PageFaultFileLazy = 20,
-    PageFaultAnonLazy = 21,
-    PageFaultCow = 22,
-    PageFaultFileLazyCacheLookup = 23,
-    PageFaultFileLazyCacheLoad = 24,
-    PageFaultFileLazyMap = 25,
-    PageFaultFileLazyCopy = 26,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum HotSyscallPhase {
-    OpenAtPathResolve = 0,
-    OpenAtInitialOpen = 1,
-    OpenAtInitialOpenVfs = 2,
-    OpenAtInitialOpenObject = 3,
-    OpenAtInitialOpenStat = 4,
-    OpenAtProcSelfFd = 5,
-    OpenAtCreateFile = 6,
-    OpenAtCreateReopen = 7,
-    OpenAtInfo = 8,
-    OpenAtNofollowCheck = 9,
-    OpenAtDirectoryCheck = 10,
-    OpenAtTruncate = 11,
-    OpenAtSetFlags = 12,
-    OpenAtInstallFd = 13,
-    MkdirPathResolve = 14,
-    MkdirCreateDir = 15,
-    MkdirApplyMode = 16,
-    NewfstatatPathResolve = 17,
-    NewfstatatEmptyPath = 18,
-    NewfstatatResolveFinal = 19,
-    NewfstatatBuildStat = 20,
-    NewfstatatMountInfo = 21,
-    NewfstatatWriteUser = 22,
-    StatxPathResolve = 23,
-    StatxEmptyPath = 24,
-    StatxResolveFinal = 25,
-    StatxBuildStat = 26,
-    StatxMountInfo = 27,
-    StatxPackOutput = 28,
-    StatxWriteUser = 29,
-    FsyncProcessLock = 30,
-    FsyncFlushMappings = 31,
-    FsyncCollectAreas = 32,
-    FsyncWriteArea = 33,
-    FsyncWritePage = 34,
-    FsyncWriteFile = 35,
-    ReadFileLike = 36,
-    ReadReadable = 37,
-    ReadCopyToUser = 38,
-    ReadTryRead = 39,
-    ReadBlockPrepare = 40,
-    ReadBlockRetry = 41,
-    TtyReadCopy = 42,
-    ReadReadableTty = 43,
-    ReadReadablePtySlave = 44,
-    ReadReadableUnixSocket = 45,
-    ReadReadableInetSocket = 46,
-    ReadReadableNetlinkSocket = 47,
-    ReadReadableFuseDevice = 48,
-    ReadReadableOther = 49,
-    ReadUnixDatagram = 50,
-    ReadUnixSeqpacketPeek = 51,
-    ReadUnixSeqpacketDrain = 52,
-    ReadUnixStreamPeek = 53,
-    ReadUnixStreamDrain = 54,
-    ReadUnixWaitReadable = 55,
-    ReadUnixWaitRegister = 56,
-    ReadUnixWaitFastpath = 57,
-    ReadUnixWaitPrepareBlock = 58,
-    ReadUnixWaitRecheck = 59,
-    PfFileCopyCacheRead = 60,
-    PfFileCopyMemcpy = 61,
-    PfFileCopyZeroFill = 62,
-    PfFileCopyFrameMap = 63,
-    PfFileCopyClusterMap = 64,
-    PfFileCopySharedRef = 65,
-    PfFileCopyCacheInsert = 66,
-}
-
-impl HotSyscallPhase {
-    const ALL: [Self; HOT_SYSCALL_PHASE_COUNT] = [
-        Self::OpenAtPathResolve,
-        Self::OpenAtInitialOpen,
-        Self::OpenAtInitialOpenVfs,
-        Self::OpenAtInitialOpenObject,
-        Self::OpenAtInitialOpenStat,
-        Self::OpenAtProcSelfFd,
-        Self::OpenAtCreateFile,
-        Self::OpenAtCreateReopen,
-        Self::OpenAtInfo,
-        Self::OpenAtNofollowCheck,
-        Self::OpenAtDirectoryCheck,
-        Self::OpenAtTruncate,
-        Self::OpenAtSetFlags,
-        Self::OpenAtInstallFd,
-        Self::MkdirPathResolve,
-        Self::MkdirCreateDir,
-        Self::MkdirApplyMode,
-        Self::NewfstatatPathResolve,
-        Self::NewfstatatEmptyPath,
-        Self::NewfstatatResolveFinal,
-        Self::NewfstatatBuildStat,
-        Self::NewfstatatMountInfo,
-        Self::NewfstatatWriteUser,
-        Self::StatxPathResolve,
-        Self::StatxEmptyPath,
-        Self::StatxResolveFinal,
-        Self::StatxBuildStat,
-        Self::StatxMountInfo,
-        Self::StatxPackOutput,
-        Self::StatxWriteUser,
-        Self::FsyncProcessLock,
-        Self::FsyncFlushMappings,
-        Self::FsyncCollectAreas,
-        Self::FsyncWriteArea,
-        Self::FsyncWritePage,
-        Self::FsyncWriteFile,
-        Self::ReadFileLike,
-        Self::ReadReadable,
-        Self::ReadCopyToUser,
-        Self::ReadTryRead,
-        Self::ReadBlockPrepare,
-        Self::ReadBlockRetry,
-        Self::TtyReadCopy,
-        Self::ReadReadableTty,
-        Self::ReadReadablePtySlave,
-        Self::ReadReadableUnixSocket,
-        Self::ReadReadableInetSocket,
-        Self::ReadReadableNetlinkSocket,
-        Self::ReadReadableFuseDevice,
-        Self::ReadReadableOther,
-        Self::ReadUnixDatagram,
-        Self::ReadUnixSeqpacketPeek,
-        Self::ReadUnixSeqpacketDrain,
-        Self::ReadUnixStreamPeek,
-        Self::ReadUnixStreamDrain,
-        Self::ReadUnixWaitReadable,
-        Self::ReadUnixWaitRegister,
-        Self::ReadUnixWaitFastpath,
-        Self::ReadUnixWaitPrepareBlock,
-        Self::ReadUnixWaitRecheck,
-        Self::PfFileCopyCacheRead,
-        Self::PfFileCopyMemcpy,
-        Self::PfFileCopyZeroFill,
-        Self::PfFileCopyFrameMap,
-        Self::PfFileCopyClusterMap,
-        Self::PfFileCopySharedRef,
-        Self::PfFileCopyCacheInsert,
-    ];
-
-    fn as_index(self) -> usize {
-        self as usize
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            Self::OpenAtPathResolve => "openat_resolve",
-            Self::OpenAtInitialOpen => "openat_initial_open",
-            Self::OpenAtInitialOpenVfs => "openat_open_vfs",
-            Self::OpenAtInitialOpenObject => "openat_open_object",
-            Self::OpenAtInitialOpenStat => "openat_open_stat",
-            Self::OpenAtProcSelfFd => "openat_proc_self_fd",
-            Self::OpenAtCreateFile => "openat_create_file",
-            Self::OpenAtCreateReopen => "openat_create_reopen",
-            Self::OpenAtInfo => "openat_info",
-            Self::OpenAtNofollowCheck => "openat_nofollow_check",
-            Self::OpenAtDirectoryCheck => "openat_directory_check",
-            Self::OpenAtTruncate => "openat_truncate",
-            Self::OpenAtSetFlags => "openat_set_flags",
-            Self::OpenAtInstallFd => "openat_install_fd",
-            Self::MkdirPathResolve => "mkdir_resolve",
-            Self::MkdirCreateDir => "mkdir_create_dir",
-            Self::MkdirApplyMode => "mkdir_apply_mode",
-            Self::NewfstatatPathResolve => "newfstatat_resolve",
-            Self::NewfstatatEmptyPath => "newfstatat_empty_path",
-            Self::NewfstatatResolveFinal => "newfstatat_resolve_final",
-            Self::NewfstatatBuildStat => "newfstatat_build_stat",
-            Self::NewfstatatMountInfo => "newfstatat_mount_info",
-            Self::NewfstatatWriteUser => "newfstatat_write_user",
-            Self::StatxPathResolve => "statx_resolve",
-            Self::StatxEmptyPath => "statx_empty_path",
-            Self::StatxResolveFinal => "statx_resolve_final",
-            Self::StatxBuildStat => "statx_build_stat",
-            Self::StatxMountInfo => "statx_mount_info",
-            Self::StatxPackOutput => "statx_pack_output",
-            Self::StatxWriteUser => "statx_write_user",
-            Self::FsyncProcessLock => "fsync_process_lock",
-            Self::FsyncFlushMappings => "fsync_flush_mappings",
-            Self::FsyncCollectAreas => "fsync_collect_areas",
-            Self::FsyncWriteArea => "fsync_write_area",
-            Self::FsyncWritePage => "fsync_write_page",
-            Self::FsyncWriteFile => "fsync_write_file",
-            Self::ReadFileLike => "read_file_like",
-            Self::ReadReadable => "read_readable",
-            Self::ReadCopyToUser => "read_copy_to_user",
-            Self::ReadTryRead => "read_try_read",
-            Self::ReadBlockPrepare => "read_block_prepare",
-            Self::ReadBlockRetry => "read_block_retry",
-            Self::TtyReadCopy => "tty_read_copy",
-            Self::ReadReadableTty => "read_tty",
-            Self::ReadReadablePtySlave => "read_pty_slave",
-            Self::ReadReadableUnixSocket => "read_unix_socket",
-            Self::ReadReadableInetSocket => "read_inet_socket",
-            Self::ReadReadableNetlinkSocket => "read_netlink_socket",
-            Self::ReadReadableFuseDevice => "read_fuse_device",
-            Self::ReadReadableOther => "read_other_readable",
-            Self::ReadUnixDatagram => "read_unix_datagram",
-            Self::ReadUnixSeqpacketPeek => "read_unix_seqpacket_peek",
-            Self::ReadUnixSeqpacketDrain => "read_unix_seqpacket_drain",
-            Self::ReadUnixStreamPeek => "read_unix_stream_peek",
-            Self::ReadUnixStreamDrain => "read_unix_stream_drain",
-            Self::ReadUnixWaitReadable => "read_unix_wait_readable",
-            Self::ReadUnixWaitRegister => "read_unix_wait_register",
-            Self::ReadUnixWaitFastpath => "read_unix_wait_fastpath",
-            Self::ReadUnixWaitPrepareBlock => "read_unix_wait_prepare_block",
-            Self::ReadUnixWaitRecheck => "read_unix_wait_recheck",
-            Self::PfFileCopyCacheRead => "pf_file_copy_cache_read",
-            Self::PfFileCopyMemcpy => "pf_file_copy_memcpy",
-            Self::PfFileCopyZeroFill => "pf_file_copy_zero_fill",
-            Self::PfFileCopyFrameMap => "pf_file_copy_frame_map",
-            Self::PfFileCopyClusterMap => "pf_file_copy_cluster_map",
-            Self::PfFileCopySharedRef => "pf_file_copy_shared_ref",
-            Self::PfFileCopyCacheInsert => "pf_file_copy_cache_insert",
+macro_rules! define_profile_enum {
+    (
+        $vis:vis enum $name:ident {
+            $($variant:ident => $label:literal),+ $(,)?
         }
-    }
+    ) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        #[repr(u8)]
+        $vis enum $name {
+            $($variant,)+
+        }
+
+        impl $name {
+            const COUNT: usize = <[()]>::len(&[$(define_profile_enum!(@unit $variant)),+]);
+            const ALL: [Self; Self::COUNT] = [$(Self::$variant,)+];
+
+            fn as_index(self) -> usize {
+                self as usize
+            }
+
+            fn name(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $label,)+
+                }
+            }
+        }
+    };
+    (@unit $variant:ident) => {
+        ()
+    };
 }
 
-impl LinuxIoctlOp {
-    const ALL: [Self; IOCTL_OP_COUNT] = [
-        Self::FbGetVariableScreenInfo,
-        Self::FbPutVariableScreenInfo,
-        Self::FbGetFixedScreenInfo,
-        Self::FbGetColorMap,
-        Self::FbPutColorMap,
-        Self::FbPanDisplay,
-        Self::FbBlank,
-        Self::LinuxTcGets,
-        Self::LinuxTcSets,
-        Self::LinuxTcFlush,
-        Self::LinuxTcGets2,
-        Self::LinuxTcSets2,
-        Self::LinuxTiocnxcl,
-        Self::LinuxTiocsctty,
-        Self::LinuxTiocgPgrp,
-        Self::LinuxTiocnotty,
-        Self::LinuxTiocspgrp,
-        Self::LinuxTiocoutq,
-        Self::LinuxTiocgwinsz,
-        Self::LinuxTiocswinsz,
-        Self::LinuxTiocgptn,
-        Self::LinuxTiocsptlck,
-        Self::LinuxTiocgptpeer,
-        Self::LinuxTiocvhangup,
-        Self::LinuxKdGetKeyboardMode,
-        Self::LinuxKdSetKeyboardMode,
-        Self::LinuxKdGetKeyboardType,
-        Self::LinuxKdGetKeyboardEntry,
-        Self::LinuxKdGetDisplayMode,
-        Self::LinuxKdSetDisplayMode,
-        Self::LinuxKdSignalAccept,
-        Self::LinuxVtOpenQuery,
-        Self::LinuxVtGetMode,
-        Self::LinuxVtGetState,
-        Self::LinuxVtSetMode,
-        Self::LinuxVtActivate,
-        Self::LinuxVtWaitActive,
-        Self::LinuxVtRelDisp,
-        Self::DrmVersion,
-        Self::DrmGetUnique,
-        Self::DrmGetMagic,
-        Self::DrmGetCap,
-        Self::DrmWaitVblank,
-        Self::DrmSetUnique,
-        Self::DrmAuthMagic,
-        Self::DrmSetClientCap,
-        Self::DrmSetMaster,
-        Self::DrmDropMaster,
-        Self::DrmModeGetResources,
-        Self::DrmModeGetCrtc,
-        Self::DrmModeSetCrtc,
-        Self::DrmModeCursor,
-        Self::DrmModeCursor2,
-        Self::DrmModeGetGamma,
-        Self::DrmModeSetGamma,
-        Self::DrmModeGetEncoder,
-        Self::DrmModeGetConnector,
-        Self::DrmModeGetProperty,
-        Self::DrmModeObjGetProperties,
-        Self::DrmModeGetPlaneResources,
-        Self::DrmModeGetPlane,
-        Self::DrmModeListLessees,
-        Self::DrmModeAddFb,
-        Self::DrmModeAddFb2,
-        Self::DrmModeRemoveFb,
-        Self::DrmModePageFlip,
-        Self::DrmModeDirtyFb,
-        Self::DrmModeCreateDumb,
-        Self::DrmModeMapDumb,
-        Self::DrmModeDestroyDumb,
-        Self::DrmGemClose,
-        Self::DrmPrimeHandleToFd,
-        Self::DrmPrimeFdToHandle,
-        Self::RawFionbio,
-        Self::RawFioclex,
-        Self::DmaBufSync,
-        Self::DmaBufExportSyncFile,
-        Self::DmaBufImportSyncFile,
-        Self::EvdevGetVersion,
-        Self::EvdevGetId,
-        Self::EvdevGetRepeat,
-        Self::EvdevGetName,
-        Self::EvdevGetPhys,
-        Self::EvdevGetUniq,
-        Self::EvdevGetProp,
-        Self::EvdevGetKey,
-        Self::EvdevGetLed,
-        Self::EvdevGetSnd,
-        Self::EvdevGetSw,
-        Self::EvdevGetBit,
-        Self::EvdevGrab,
-        Self::EvdevRevoke,
-        Self::EvdevSetClockId,
-    ];
-
-    fn as_index(self) -> usize {
-        self as usize
-    }
-}
-
-impl LinuxIoctlTarget {
-    const ALL: [Self; IOCTL_TARGET_COUNT] = [
-        Self::Framebuffer,
-        Self::Terminal,
-        Self::TtyDevice,
-        Self::PtyMaster,
-        Self::PtySlave,
-        Self::DrmCard,
-        Self::DrmPrime,
-        Self::EvdevClient,
-        Self::UnixSocket,
-        Self::InetSocket,
-        Self::NetlinkSocket,
-    ];
-
-    fn as_index(self) -> usize {
-        self as usize
+define_profile_enum! {
+    pub enum ProfileCategory {
+        SchedulerWork => "scheduler_work",
+        TimerWork => "timer_work",
+        NetPoll => "net_poll",
+        SyscallCpu => "syscall_cpu",
+        PageFault => "page_fault",
+        IrqTimer => "irq_timer",
+        IrqKeyboard => "irq_keyboard",
+        IrqMouse => "irq_mouse",
+        Idle => "idle",
+        OtherKernel => "other_kernel",
+        SchedulerSelect => "sched_select",
+        SchedulerSwitch => "sched_switch",
+        SchedulerDispatch => "sched_dispatch",
+        SchedulerAfterYield => "sched_after_yield",
+        ThreadRunWindow => "thread_run_window",
+        SyscallEntry => "syscall_entry",
+        SyscallBody => "syscall_body",
+        SyscallExit => "syscall_exit",
+        PageFaultLookup => "pf_lookup",
+        PageFaultResolve => "pf_resolve",
+        PageFaultFileLazy => "pf_file_lazy",
+        PageFaultAnonLazy => "pf_anon_lazy",
+        PageFaultCow => "pf_cow",
+        PageFaultFileLazyCacheLookup => "pf_file_cache_lookup",
+        PageFaultFileLazyCacheLoad => "pf_file_cache_load",
+        PageFaultFileLazyMap => "pf_file_map",
+        PageFaultFileLazyCopy => "pf_file_copy",
     }
 }
 
 impl ProfileCategory {
-    const ALL: [Self; PROFILE_CATEGORY_COUNT] = [
-        Self::SchedulerWork,
-        Self::TimerWork,
-        Self::NetPoll,
-        Self::SyscallCpu,
-        Self::PageFault,
-        Self::IrqTimer,
-        Self::IrqKeyboard,
-        Self::IrqMouse,
-        Self::Idle,
-        Self::OtherKernel,
-        Self::SchedulerSelect,
-        Self::SchedulerSwitch,
-        Self::SchedulerDispatch,
-        Self::SchedulerAfterYield,
-        Self::ThreadRunWindow,
-        Self::SyscallEntry,
-        Self::SyscallBody,
-        Self::SyscallExit,
-        Self::PageFaultLookup,
-        Self::PageFaultResolve,
-        Self::PageFaultFileLazy,
-        Self::PageFaultAnonLazy,
-        Self::PageFaultCow,
-        Self::PageFaultFileLazyCacheLookup,
-        Self::PageFaultFileLazyCacheLoad,
-        Self::PageFaultFileLazyMap,
-        Self::PageFaultFileLazyCopy,
-    ];
-
     const PRIMARY: [Self; 10] = [
         Self::SchedulerWork,
         Self::TimerWork,
@@ -445,41 +105,77 @@ impl ProfileCategory {
         Self::Idle,
         Self::OtherKernel,
     ];
+}
 
-    fn as_index(self) -> usize {
-        self as usize
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            Self::SchedulerWork => "scheduler_work",
-            Self::TimerWork => "timer_work",
-            Self::NetPoll => "net_poll",
-            Self::SyscallCpu => "syscall_cpu",
-            Self::PageFault => "page_fault",
-            Self::IrqTimer => "irq_timer",
-            Self::IrqKeyboard => "irq_keyboard",
-            Self::IrqMouse => "irq_mouse",
-            Self::Idle => "idle",
-            Self::OtherKernel => "other_kernel",
-            Self::SchedulerSelect => "sched_select",
-            Self::SchedulerSwitch => "sched_switch",
-            Self::SchedulerDispatch => "sched_dispatch",
-            Self::SchedulerAfterYield => "sched_after_yield",
-            Self::ThreadRunWindow => "thread_run_window",
-            Self::SyscallEntry => "syscall_entry",
-            Self::SyscallBody => "syscall_body",
-            Self::SyscallExit => "syscall_exit",
-            Self::PageFaultLookup => "pf_lookup",
-            Self::PageFaultResolve => "pf_resolve",
-            Self::PageFaultFileLazy => "pf_file_lazy",
-            Self::PageFaultAnonLazy => "pf_anon_lazy",
-            Self::PageFaultCow => "pf_cow",
-            Self::PageFaultFileLazyCacheLookup => "pf_file_cache_lookup",
-            Self::PageFaultFileLazyCacheLoad => "pf_file_cache_load",
-            Self::PageFaultFileLazyMap => "pf_file_map",
-            Self::PageFaultFileLazyCopy => "pf_file_copy",
-        }
+define_profile_enum! {
+    pub enum HotSyscallPhase {
+        OpenAtPathResolve => "openat_resolve",
+        OpenAtInitialOpen => "openat_initial_open",
+        OpenAtInitialOpenVfs => "openat_open_vfs",
+        OpenAtInitialOpenObject => "openat_open_object",
+        OpenAtInitialOpenStat => "openat_open_stat",
+        OpenAtProcSelfFd => "openat_proc_self_fd",
+        OpenAtCreateFile => "openat_create_file",
+        OpenAtCreateReopen => "openat_create_reopen",
+        OpenAtInfo => "openat_info",
+        OpenAtNofollowCheck => "openat_nofollow_check",
+        OpenAtDirectoryCheck => "openat_directory_check",
+        OpenAtTruncate => "openat_truncate",
+        OpenAtSetFlags => "openat_set_flags",
+        OpenAtInstallFd => "openat_install_fd",
+        MkdirPathResolve => "mkdir_resolve",
+        MkdirCreateDir => "mkdir_create_dir",
+        MkdirApplyMode => "mkdir_apply_mode",
+        NewfstatatPathResolve => "newfstatat_resolve",
+        NewfstatatEmptyPath => "newfstatat_empty_path",
+        NewfstatatResolveFinal => "newfstatat_resolve_final",
+        NewfstatatBuildStat => "newfstatat_build_stat",
+        NewfstatatMountInfo => "newfstatat_mount_info",
+        NewfstatatWriteUser => "newfstatat_write_user",
+        StatxPathResolve => "statx_resolve",
+        StatxEmptyPath => "statx_empty_path",
+        StatxResolveFinal => "statx_resolve_final",
+        StatxBuildStat => "statx_build_stat",
+        StatxMountInfo => "statx_mount_info",
+        StatxPackOutput => "statx_pack_output",
+        StatxWriteUser => "statx_write_user",
+        FsyncProcessLock => "fsync_process_lock",
+        FsyncFlushMappings => "fsync_flush_mappings",
+        FsyncCollectAreas => "fsync_collect_areas",
+        FsyncWriteArea => "fsync_write_area",
+        FsyncWritePage => "fsync_write_page",
+        FsyncWriteFile => "fsync_write_file",
+        ReadFileLike => "read_file_like",
+        ReadReadable => "read_readable",
+        ReadCopyToUser => "read_copy_to_user",
+        ReadTryRead => "read_try_read",
+        ReadBlockPrepare => "read_block_prepare",
+        ReadBlockRetry => "read_block_retry",
+        TtyReadCopy => "tty_read_copy",
+        ReadReadableTty => "read_tty",
+        ReadReadablePtySlave => "read_pty_slave",
+        ReadReadableUnixSocket => "read_unix_socket",
+        ReadReadableInetSocket => "read_inet_socket",
+        ReadReadableNetlinkSocket => "read_netlink_socket",
+        ReadReadableFuseDevice => "read_fuse_device",
+        ReadReadableOther => "read_other_readable",
+        ReadUnixDatagram => "read_unix_datagram",
+        ReadUnixSeqpacketPeek => "read_unix_seqpacket_peek",
+        ReadUnixSeqpacketDrain => "read_unix_seqpacket_drain",
+        ReadUnixStreamPeek => "read_unix_stream_peek",
+        ReadUnixStreamDrain => "read_unix_stream_drain",
+        ReadUnixWaitReadable => "read_unix_wait_readable",
+        ReadUnixWaitRegister => "read_unix_wait_register",
+        ReadUnixWaitFastpath => "read_unix_wait_fastpath",
+        ReadUnixWaitPrepareBlock => "read_unix_wait_prepare_block",
+        ReadUnixWaitRecheck => "read_unix_wait_recheck",
+        PfFileCopyCacheRead => "pf_file_copy_cache_read",
+        PfFileCopyMemcpy => "pf_file_copy_memcpy",
+        PfFileCopyZeroFill => "pf_file_copy_zero_fill",
+        PfFileCopyFrameMap => "pf_file_copy_frame_map",
+        PfFileCopyClusterMap => "pf_file_copy_cluster_map",
+        PfFileCopySharedRef => "pf_file_copy_shared_ref",
+        PfFileCopyCacheInsert => "pf_file_copy_cache_insert",
     }
 }
 
@@ -829,11 +525,11 @@ fn report_window(window_ns: u64) {
             syscall_blocked_totals[index] += entry.snapshot_and_reset();
         }
 
-        for op in LinuxIoctlOp::ALL {
+        for op in LinuxIoctlOp::ALL.iter().copied() {
             ioctl_op_totals[op.as_index()] += cpu.ioctl_ops[op.as_index()].snapshot_and_reset();
         }
 
-        for target in LinuxIoctlTarget::ALL {
+        for target in LinuxIoctlTarget::ALL.iter().copied() {
             ioctl_target_totals[target.as_index()] +=
                 cpu.ioctl_targets[target.as_index()].snapshot_and_reset();
         }
@@ -1067,7 +763,8 @@ fn report_hot_syscall_phases(totals: &[ProfileSnapshot; HOT_SYSCALL_PHASE_COUNT]
 
 fn report_ioctl_ops(totals: &[ProfileSnapshot; IOCTL_OP_COUNT], tsc_hz: u64) {
     let mut entries: Vec<(LinuxIoctlOp, ProfileSnapshot)> = LinuxIoctlOp::ALL
-        .into_iter()
+        .iter()
+        .copied()
         .map(|op| (op, totals[op.as_index()]))
         .filter(|(_, snapshot)| snapshot.calls != 0)
         .collect();
@@ -1090,7 +787,8 @@ fn report_ioctl_ops(totals: &[ProfileSnapshot; IOCTL_OP_COUNT], tsc_hz: u64) {
 
 fn report_ioctl_targets(totals: &[ProfileSnapshot; IOCTL_TARGET_COUNT], tsc_hz: u64) {
     let mut entries: Vec<(LinuxIoctlTarget, ProfileSnapshot)> = LinuxIoctlTarget::ALL
-        .into_iter()
+        .iter()
+        .copied()
         .map(|target| (target, totals[target.as_index()]))
         .filter(|(_, snapshot)| snapshot.calls != 0)
         .collect();
