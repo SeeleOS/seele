@@ -15,11 +15,11 @@ use crate::{
     filesystem::object::FileLikeObject,
     net::namespace::NetNamespace,
     object::{
+        anon::{EventFdObject, InotifyObject, PidFdObject, SignalfdObject, TimerFdObject},
         bpf::BpfObject,
         error::ObjectError,
         fs_context::FsContextObject,
         fuse_device::FuseDevice,
-        linux_anon::{EventFdObject, InotifyObject, PidFdObject, SignalfdObject, TimerFdObject},
         misc::ObjectResult,
         netlink::NetlinkSocketObject,
         traits::{Configuratable, MemoryMappable, Readable, Seekable, Statable, Writable},
@@ -31,6 +31,7 @@ use crate::{
     terminal::pty::slave::PtySlave,
 };
 
+pub mod anon;
 pub mod bpf;
 pub mod config;
 pub mod control;

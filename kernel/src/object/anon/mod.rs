@@ -1,0 +1,918 @@
+use crate::memory::utils::Mut;
+use alloc::{
+    collections::BTreeMap,
+    sync::{Arc, Weak},
+    vec::Vec,
+};
+use bitflags::bitflags;
+use core::sync::atomic::{AtomicBool, Ordering};
+
+use crate::{
+    filesystem::info::LinuxStat,
+    impl_cast_function, impl_cast_function_non_trait,
+    misc::time::Time,
+    object::{
+        FileFlags, Object,
+        error::ObjectError,
+        misc::{ObjectRef, ObjectResult},
+        traits::{Readable, Statable, Writable},
+    },
+    polling::{event::PollableEvent, object::Pollable},
+    process::{manager::MANAGER, misc::ProcessID},
+    signal::{PendingSignalInfo, Signal, Signals},
+    thread::{
+        manager::ThreadManager,
+        yielding::{
+            BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
+            wake_pollers_for_object,
+        },
+    },
+};
+use strum::IntoEnumIterator;
+
+const EVENTFD_COUNTER_MAX: u64 = u64::MAX - 1;
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    pub struct EventFdFlags: i32 {
+        const EFD_SEMAPHORE = 0x1;
+        const EFD_NONBLOCK = 0o4_000;
+        const EFD_CLOEXEC = 0o2_000_000;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    pub struct SignalfdFlags: i32 {
+        const SFD_NONBLOCK = 0o4_000;
+        const SFD_CLOEXEC = 0o2_000_000;
+    }
+}
+
+struct WatcherRegistry<T> {
+    watchers: BTreeMap<u64, Vec<Weak<T>>>,
+}
+
+impl<T> Default for WatcherRegistry<T> {
+    fn default() -> Self {
+        Self {
+            watchers: BTreeMap::new(),
+        }
+    }
+}
+
+impl<T> WatcherRegistry<T> {
+    fn register(&mut self, key: u64, object: &Arc<T>) {
+        let watchers = self.watchers.entry(key).or_default();
+        watchers.retain(|watcher| watcher.strong_count() > 0);
+        watchers.push(Arc::downgrade(object));
+    }
+
+    fn live_watchers(&mut self, key: u64) -> Vec<Arc<T>> {
+        let Some(watchers) = self.watchers.get_mut(&key) else {
+            return Vec::new();
+        };
+
+        let mut strong = Vec::new();
+        watchers.retain(|watcher| {
+            if let Some(object) = watcher.upgrade() {
+                strong.push(object);
+                true
+            } else {
+                false
+            }
+        });
+        strong
+    }
+}
+
+#[derive(Default)]
+struct TimerFdRegistry {
+    armed: BTreeMap<(Time, usize), Weak<TimerFdObject>>,
+}
+
+lazy_static::lazy_static! {
+    static ref SIGNALFD_REGISTRY: Mut<WatcherRegistry<SignalfdObject>> = Mut::new(WatcherRegistry::default());
+    static ref PIDFD_REGISTRY: Mut<WatcherRegistry<PidFdObject>> = Mut::new(WatcherRegistry::default());
+    static ref TIMERFD_REGISTRY: Mut<TimerFdRegistry> = Mut::new(TimerFdRegistry::default());
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxSignalfdSiginfo {
+    ssi_signo: u32,
+    ssi_errno: i32,
+    ssi_code: i32,
+    ssi_pid: u32,
+    ssi_uid: u32,
+    ssi_fd: i32,
+    ssi_tid: u32,
+    ssi_band: u32,
+    ssi_overrun: u32,
+    ssi_trapno: u32,
+    ssi_status: i32,
+    ssi_int: i32,
+    ssi_ptr: u64,
+    ssi_utime: u64,
+    ssi_stime: u64,
+    ssi_addr: u64,
+    ssi_addr_lsb: u16,
+    __pad2: u16,
+    ssi_syscall: i32,
+    ssi_call_addr: u64,
+    ssi_arch: u32,
+    __pad: [u8; 28],
+}
+
+#[derive(Debug)]
+pub struct PidFdObject {
+    flags: Mut<FileFlags>,
+    pid: u64,
+    alive: AtomicBool,
+    process: Mut<Option<Weak<crate::memory::utils::Mut<crate::process::Process>>>>,
+    self_ref: Mut<Option<Weak<PidFdObject>>>,
+}
+
+impl PidFdObject {
+    pub fn new(pid: u64) -> Arc<Self> {
+        let process = MANAGER.lock().processes.get(&ProcessID(pid)).cloned();
+        let alive = process
+            .as_ref()
+            .is_some_and(|process| !process.lock().have_exited());
+        let pidfd = Arc::new(Self {
+            flags: Mut::new(FileFlags::empty()),
+            pid,
+            alive: AtomicBool::new(alive),
+            process: Mut::new(process.as_ref().map(Arc::downgrade)),
+            self_ref: Mut::new(None),
+        });
+        *pidfd.self_ref.lock() = Some(Arc::downgrade(&pidfd));
+        register_pidfd(pid, &pidfd);
+        pidfd
+    }
+
+    pub fn pid(&self) -> u64 {
+        self.pid
+    }
+
+    fn self_object(&self) -> Option<ObjectRef> {
+        self.self_ref
+            .lock()
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .map(|object| object as ObjectRef)
+    }
+
+    fn is_alive(&self) -> bool {
+        if !self.alive.load(Ordering::Acquire) {
+            return false;
+        }
+
+        let Some(process) = self.process.lock().as_ref().and_then(Weak::upgrade) else {
+            self.alive.store(false, Ordering::Release);
+            return false;
+        };
+
+        let alive = !process.lock().have_exited();
+        if !alive {
+            self.alive.store(false, Ordering::Release);
+        }
+        alive
+    }
+
+    fn mark_exited(&self) {
+        self.alive.store(false, Ordering::Release);
+    }
+
+    fn wake_waiters_with_manager(&self, manager: &mut ThreadManager) {
+        manager.wake_io();
+    }
+}
+
+fn register_pidfd(pid: u64, pidfd: &Arc<PidFdObject>) {
+    PIDFD_REGISTRY.lock().register(pid, pidfd);
+}
+
+fn pidfds_for_process(pid: u64) -> Vec<Arc<PidFdObject>> {
+    PIDFD_REGISTRY.lock().live_watchers(pid)
+}
+
+pub fn wake_pidfd_for_process_with_manager(pid: u64, manager: &mut ThreadManager) {
+    for pidfd in pidfds_for_process(pid) {
+        pidfd.mark_exited();
+        pidfd.wake_waiters_with_manager(manager);
+    }
+}
+
+pub fn wake_pidfd_for_process(pid: u64) {
+    let watchers = pidfds_for_process(pid);
+    if watchers.is_empty() {
+        return;
+    }
+
+    let mut poller_objects = Vec::new();
+    crate::thread::with_thread_manager(|manager| {
+        for pidfd in &watchers {
+            pidfd.mark_exited();
+            pidfd.wake_waiters_with_manager(manager);
+            if let Some(object) = pidfd.self_object() {
+                poller_objects.push(object);
+            }
+        }
+    });
+    for object in poller_objects {
+        wake_pollers_for_object(object, PollableEvent::CanBeRead);
+    }
+}
+
+impl Object for PidFdObject {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(*self.flags.lock())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        *self.flags.lock() = flags;
+        Ok(())
+    }
+
+    impl_cast_function!("pollable", Pollable);
+    impl_cast_function!("statable", Statable);
+    impl_cast_function_non_trait!("pidfd", PidFdObject);
+}
+
+impl Pollable for PidFdObject {
+    fn is_event_ready(&self, event: PollableEvent) -> bool {
+        matches!(event, PollableEvent::CanBeRead) && !self.is_alive()
+    }
+}
+
+impl Statable for PidFdObject {
+    fn stat(&self) -> LinuxStat {
+        LinuxStat::char_device(0o600)
+    }
+}
+
+#[derive(Debug)]
+pub struct SignalfdObject {
+    flags: Mut<FileFlags>,
+    mask: Mut<u64>,
+    owner_pid: u64,
+    self_ref: Mut<Option<Weak<SignalfdObject>>>,
+}
+
+impl SignalfdObject {
+    pub fn new(owner_pid: u64, mask: u64, flags: SignalfdFlags) -> Arc<Self> {
+        let signalfd = Arc::new(Self {
+            flags: Mut::new(FileFlags::empty()),
+            mask: Mut::new(mask),
+            owner_pid,
+            self_ref: Mut::new(None),
+        });
+        *signalfd.self_ref.lock() = Some(Arc::downgrade(&signalfd));
+        if flags.contains(SignalfdFlags::SFD_NONBLOCK) {
+            let _ = signalfd.clone().set_flags(FileFlags::NONBLOCK);
+        }
+        register_signalfd(owner_pid, &signalfd);
+        signalfd
+    }
+
+    pub fn set_mask(&self, mask: u64) {
+        *self.mask.lock() = mask;
+    }
+
+    fn self_object(&self) -> Option<ObjectRef> {
+        self.self_ref
+            .lock()
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .map(|object| object as ObjectRef)
+    }
+
+    fn owner_pending_signals(&self) -> Signals {
+        MANAGER
+            .lock()
+            .processes
+            .values()
+            .find_map(|process| {
+                let process = process.lock();
+                (process.pid.0 == self.owner_pid).then_some(process.pending_signals)
+            })
+            .unwrap_or_default()
+    }
+
+    fn next_ready_signal(&self) -> Option<Signal> {
+        let ready_mask = self.owner_pending_signals().bits() & *self.mask.lock();
+        Signal::iter().find(|signal| (ready_mask & Signals::from(*signal).bits()) != 0)
+    }
+
+    fn take_next_signal(&self) -> Option<PendingSignalInfo> {
+        let manager = MANAGER.lock();
+        let process = manager
+            .processes
+            .values()
+            .find(|process| process.lock().pid.0 == self.owner_pid)?
+            .clone();
+        let mut process = process.lock();
+        let ready_mask = process.pending_signals.bits() & *self.mask.lock();
+        let signal =
+            Signal::iter().find(|signal| (ready_mask & Signals::from(*signal).bits()) != 0)?;
+        process.pending_signals.remove(Signals::from(signal));
+        Some(
+            process.pending_signal_info[signal.index()]
+                .take()
+                .unwrap_or_else(|| PendingSignalInfo::for_signal(signal)),
+        )
+    }
+
+    fn wake_waiters(&self) {
+        crate::thread::with_thread_manager(|manager| {
+            manager.wake_io();
+        });
+        if let Some(object) = self.self_object() {
+            wake_pollers_for_object(object, PollableEvent::CanBeRead);
+        }
+    }
+}
+
+fn register_signalfd(pid: u64, signalfd: &Arc<SignalfdObject>) {
+    SIGNALFD_REGISTRY.lock().register(pid, signalfd);
+}
+
+pub fn wake_signalfd_for_process(pid: u64) {
+    let watchers = SIGNALFD_REGISTRY.lock().live_watchers(pid);
+
+    for signalfd in watchers {
+        if signalfd.next_ready_signal().is_some() {
+            signalfd.wake_waiters();
+        }
+    }
+}
+
+pub fn wake_signalfd_for_process_with_manager(pid: u64, manager: &mut ThreadManager) {
+    let watchers = SIGNALFD_REGISTRY.lock().live_watchers(pid);
+
+    for _ in watchers {
+        manager.wake_io();
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct InotifyObject {
+    flags: Mut<FileFlags>,
+    next_watch: Mut<i32>,
+}
+
+impl InotifyObject {
+    pub fn add_watch(&self) -> i32 {
+        let mut next_watch = self.next_watch.lock();
+        *next_watch += 1;
+        *next_watch
+    }
+}
+
+impl Object for InotifyObject {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(*self.flags.lock())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        *self.flags.lock() = flags;
+        Ok(())
+    }
+
+    impl_cast_function!("readable", Readable);
+    impl_cast_function!("pollable", Pollable);
+    impl_cast_function!("statable", Statable);
+    impl_cast_function_non_trait!("inotify", InotifyObject);
+}
+
+impl Pollable for InotifyObject {
+    fn is_event_ready(&self, _event: PollableEvent) -> bool {
+        false
+    }
+}
+
+impl Readable for InotifyObject {
+    fn read(&self, _buffer: &mut [u8]) -> ObjectResult<usize> {
+        if self.flags.lock().contains(FileFlags::NONBLOCK) {
+            return Err(ObjectError::TryAgain);
+        }
+
+        loop {
+            let current = prepare_block_current(BlockType::WakeRequired {
+                wake_type: WakeType::IO,
+                deadline: None,
+            });
+
+            if self.flags.lock().contains(FileFlags::NONBLOCK) {
+                cancel_block(&current);
+                return Err(ObjectError::TryAgain);
+            }
+
+            finish_block_current();
+        }
+    }
+}
+
+impl Statable for InotifyObject {
+    fn stat(&self) -> LinuxStat {
+        LinuxStat::char_device(0o600)
+    }
+}
+
+#[derive(Debug)]
+struct EventFdState {
+    counter: u64,
+}
+
+#[derive(Debug)]
+pub struct EventFdObject {
+    flags: Mut<FileFlags>,
+    state: Mut<EventFdState>,
+    semaphore: bool,
+    self_ref: Mut<Option<Weak<EventFdObject>>>,
+}
+
+impl EventFdObject {
+    pub fn new(initial: u64, flags: EventFdFlags) -> Arc<Self> {
+        let eventfd = Arc::new(Self {
+            flags: Mut::new(FileFlags::empty()),
+            state: Mut::new(EventFdState { counter: initial }),
+            semaphore: flags.contains(EventFdFlags::EFD_SEMAPHORE),
+            self_ref: Mut::new(None),
+        });
+        {
+            let mut self_ref = eventfd.self_ref.lock();
+            *self_ref = Some(Arc::downgrade(&eventfd));
+        }
+        if flags.contains(EventFdFlags::EFD_NONBLOCK) {
+            let _ = eventfd.clone().set_flags(FileFlags::NONBLOCK);
+        }
+        eventfd
+    }
+
+    fn self_object(&self) -> Option<ObjectRef> {
+        self.self_ref
+            .lock()
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .map(|object| object as ObjectRef)
+    }
+
+    fn is_read_ready(&self) -> bool {
+        self.state.lock().counter > 0
+    }
+
+    fn is_write_ready(&self) -> bool {
+        self.state.lock().counter < EVENTFD_COUNTER_MAX
+    }
+
+    fn wake_waiters(&self, event: PollableEvent) {
+        crate::thread::with_thread_manager(|manager| {
+            manager.wake_io();
+        });
+        if let Some(object) = self.self_object() {
+            wake_pollers_for_object(object, event);
+        }
+    }
+}
+
+impl Object for EventFdObject {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(*self.flags.lock())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        *self.flags.lock() = flags;
+        Ok(())
+    }
+
+    impl_cast_function!("readable", Readable);
+    impl_cast_function!("writable", Writable);
+    impl_cast_function!("pollable", Pollable);
+    impl_cast_function!("statable", Statable);
+    impl_cast_function_non_trait!("eventfd", EventFdObject);
+}
+
+impl Pollable for EventFdObject {
+    fn is_event_ready(&self, event: PollableEvent) -> bool {
+        match event {
+            PollableEvent::CanBeRead => self.is_read_ready(),
+            PollableEvent::CanBeWritten => self.is_write_ready(),
+            _ => false,
+        }
+    }
+}
+
+impl Readable for EventFdObject {
+    fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
+        if buffer.len() < core::mem::size_of::<u64>() {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        loop {
+            let value = {
+                let mut state = self.state.lock();
+                if state.counter == 0 {
+                    None
+                } else if self.semaphore {
+                    state.counter -= 1;
+                    Some(1u64)
+                } else {
+                    let value = state.counter;
+                    state.counter = 0;
+                    Some(value)
+                }
+            };
+
+            if let Some(value) = value {
+                buffer[..8].copy_from_slice(&value.to_ne_bytes());
+                self.wake_waiters(PollableEvent::CanBeWritten);
+                return Ok(8);
+            }
+
+            if self.flags.lock().contains(FileFlags::NONBLOCK) {
+                return Err(ObjectError::TryAgain);
+            }
+
+            let current = prepare_block_current(BlockType::WakeRequired {
+                wake_type: WakeType::IO,
+                deadline: None,
+            });
+
+            if self.is_read_ready() {
+                cancel_block(&current);
+                continue;
+            }
+
+            finish_block_current();
+        }
+    }
+}
+
+impl Writable for EventFdObject {
+    fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
+        if buffer.len() < core::mem::size_of::<u64>() {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        let value = u64::from_ne_bytes(buffer[..8].try_into().unwrap());
+        if value == u64::MAX {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        loop {
+            let wrote = {
+                let mut state = self.state.lock();
+                if value <= EVENTFD_COUNTER_MAX.saturating_sub(state.counter) {
+                    state.counter += value;
+                    true
+                } else {
+                    false
+                }
+            };
+
+            if wrote {
+                self.wake_waiters(PollableEvent::CanBeRead);
+                return Ok(8);
+            }
+
+            if self.flags.lock().contains(FileFlags::NONBLOCK) {
+                return Err(ObjectError::TryAgain);
+            }
+
+            let current = prepare_block_current(BlockType::WakeRequired {
+                wake_type: WakeType::IO,
+                deadline: None,
+            });
+
+            if self.is_write_ready() {
+                cancel_block(&current);
+                continue;
+            }
+
+            finish_block_current();
+        }
+    }
+}
+
+impl Statable for EventFdObject {
+    fn stat(&self) -> LinuxStat {
+        LinuxStat::char_device(0o600)
+    }
+}
+
+impl Object for SignalfdObject {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(*self.flags.lock())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        *self.flags.lock() = flags;
+        Ok(())
+    }
+
+    impl_cast_function!("readable", Readable);
+    impl_cast_function!("pollable", Pollable);
+    impl_cast_function!("statable", Statable);
+    impl_cast_function_non_trait!("signalfd", SignalfdObject);
+}
+
+impl Pollable for SignalfdObject {
+    fn is_event_ready(&self, event: PollableEvent) -> bool {
+        matches!(event, PollableEvent::CanBeRead) && self.next_ready_signal().is_some()
+    }
+}
+
+impl Readable for SignalfdObject {
+    fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
+        if buffer.len() < core::mem::size_of::<LinuxSignalfdSiginfo>() {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        loop {
+            if let Some(siginfo) = self.take_next_signal() {
+                let info = LinuxSignalfdSiginfo {
+                    ssi_signo: siginfo.si_signo as u32,
+                    ssi_errno: siginfo.si_errno,
+                    ssi_code: siginfo.si_code,
+                    ssi_pid: siginfo.si_pid as u32,
+                    ssi_uid: siginfo.si_uid,
+                    ssi_int: siginfo.si_value as i32,
+                    ssi_ptr: siginfo.si_value,
+                    ..Default::default()
+                };
+                let raw = unsafe {
+                    core::slice::from_raw_parts(
+                        (&info as *const LinuxSignalfdSiginfo).cast::<u8>(),
+                        core::mem::size_of::<LinuxSignalfdSiginfo>(),
+                    )
+                };
+                buffer[..raw.len()].copy_from_slice(raw);
+                return Ok(raw.len());
+            }
+
+            if self.flags.lock().contains(FileFlags::NONBLOCK) {
+                return Err(ObjectError::TryAgain);
+            }
+
+            let current = prepare_block_current(BlockType::WakeRequired {
+                wake_type: WakeType::IO,
+                deadline: None,
+            });
+
+            if self.next_ready_signal().is_some() {
+                cancel_block(&current);
+                continue;
+            }
+
+            finish_block_current();
+        }
+    }
+}
+
+impl Statable for SignalfdObject {
+    fn stat(&self) -> LinuxStat {
+        LinuxStat::char_device(0o600)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct TimerFdState {
+    deadline: Option<Time>,
+    interval_ns: u64,
+    expirations: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct TimerFdObject {
+    flags: Mut<FileFlags>,
+    state: Mut<TimerFdState>,
+    self_ref: Mut<Option<Weak<TimerFdObject>>>,
+}
+
+impl TimerFdObject {
+    pub fn new(flags: FileFlags) -> Arc<Self> {
+        let timerfd = Arc::new(Self {
+            flags: Mut::new(flags),
+            state: Mut::new(TimerFdState::default()),
+            self_ref: Mut::new(None),
+        });
+        *timerfd.self_ref.lock() = Some(Arc::downgrade(&timerfd));
+        timerfd
+    }
+
+    pub fn set_timer(&self, deadline: Option<Time>, interval_ns: u64) {
+        let mut state = self.state.lock();
+        let previous_deadline = state.deadline;
+        state.deadline = deadline;
+        state.interval_ns = interval_ns;
+        state.expirations = 0;
+        drop(state);
+        self.update_registry(previous_deadline, deadline);
+    }
+
+    pub fn current_timer(&self) -> (Option<Time>, u64) {
+        let state = self.state.lock();
+        (state.deadline, state.interval_ns)
+    }
+
+    fn refresh(state: &mut TimerFdState) {
+        let Some(mut deadline) = state.deadline else {
+            return;
+        };
+
+        let now = Time::since_boot();
+        if deadline > now {
+            return;
+        }
+
+        if state.interval_ns == 0 {
+            state.expirations = state.expirations.saturating_add(1);
+            state.deadline = None;
+            return;
+        }
+
+        let elapsed = now.sub(deadline).as_nanoseconds();
+        let periods = elapsed / state.interval_ns;
+        let expirations = periods.saturating_add(1);
+        state.expirations = state.expirations.saturating_add(expirations);
+        deadline = deadline.add_ns(expirations.saturating_mul(state.interval_ns));
+        state.deadline = Some(deadline);
+    }
+
+    fn refresh_state(&self) -> TimerFdState {
+        let (previous_deadline, state) = {
+            let mut state = self.state.lock();
+            let previous_deadline = state.deadline;
+            Self::refresh(&mut state);
+            (previous_deadline, *state)
+        };
+        self.update_registry(previous_deadline, state.deadline);
+        state
+    }
+
+    pub fn is_read_ready(&self) -> bool {
+        self.refresh_state().expirations > 0
+    }
+
+    fn self_object(&self) -> Option<ObjectRef> {
+        self.self_ref
+            .lock()
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .map(|object| object as ObjectRef)
+    }
+
+    fn self_timerfd(&self) -> Option<Arc<Self>> {
+        self.self_ref.lock().as_ref().and_then(Weak::upgrade)
+    }
+
+    fn update_registry(&self, previous_deadline: Option<Time>, new_deadline: Option<Time>) {
+        if previous_deadline == new_deadline {
+            return;
+        }
+
+        let Some(timerfd) = self.self_timerfd() else {
+            return;
+        };
+        update_timerfd_deadline(&timerfd, previous_deadline, new_deadline);
+    }
+
+    pub fn wake_waiters(&self) {
+        if let Some(object) = self.self_object() {
+            wake_pollers_for_object(object, PollableEvent::CanBeRead);
+        }
+    }
+}
+
+fn timerfd_key(timerfd: &Arc<TimerFdObject>) -> usize {
+    Arc::as_ptr(timerfd) as usize
+}
+
+fn update_timerfd_deadline(
+    timerfd: &Arc<TimerFdObject>,
+    previous_deadline: Option<Time>,
+    new_deadline: Option<Time>,
+) {
+    let mut registry = TIMERFD_REGISTRY.lock();
+    let key = timerfd_key(timerfd);
+
+    if let Some(previous_deadline) = previous_deadline {
+        registry.armed.remove(&(previous_deadline, key));
+    }
+
+    if let Some(new_deadline) = new_deadline {
+        registry
+            .armed
+            .insert((new_deadline, key), Arc::downgrade(timerfd));
+    }
+}
+
+fn expired_timerfds(now: Time) -> Vec<Arc<TimerFdObject>> {
+    let mut registry = TIMERFD_REGISTRY.lock();
+    let mut strong = Vec::new();
+    while let Some((&(deadline, _), _)) = registry.armed.first_key_value() {
+        if deadline > now {
+            break;
+        }
+
+        let Some((_, watcher)) = registry.armed.pop_first() else {
+            break;
+        };
+
+        if let Some(timerfd) = watcher.upgrade() {
+            strong.push(timerfd);
+        }
+    }
+    strong
+}
+
+pub fn expired_timerfd_poll_objects() -> Vec<ObjectRef> {
+    expired_timerfds(Time::since_boot())
+        .into_iter()
+        .filter(|timerfd| timerfd.is_read_ready())
+        .filter_map(|timerfd| timerfd.self_object())
+        .collect()
+}
+
+pub fn next_timerfd_poll_deadline() -> Option<Time> {
+    TIMERFD_REGISTRY
+        .lock()
+        .armed
+        .first_key_value()
+        .map(|((deadline, _), _)| *deadline)
+}
+
+impl Object for TimerFdObject {
+    fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
+        Ok(*self.flags.lock())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
+        *self.flags.lock() = flags;
+        Ok(())
+    }
+
+    impl_cast_function!("readable", Readable);
+    impl_cast_function!("pollable", Pollable);
+    impl_cast_function!("statable", Statable);
+    impl_cast_function_non_trait!("timerfd", TimerFdObject);
+}
+
+impl Pollable for TimerFdObject {
+    fn is_event_ready(&self, event: PollableEvent) -> bool {
+        matches!(event, PollableEvent::CanBeRead) && self.is_read_ready()
+    }
+}
+
+impl Readable for TimerFdObject {
+    fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
+        if buffer.len() < core::mem::size_of::<u64>() {
+            return Err(ObjectError::InvalidArguments);
+        }
+
+        loop {
+            let state = self.refresh_state();
+            if state.expirations > 0 {
+                let expirations = {
+                    let mut state = self.state.lock();
+                    let expirations = state.expirations;
+                    state.expirations = 0;
+                    expirations
+                };
+
+                buffer[..8].copy_from_slice(&expirations.to_ne_bytes());
+                return Ok(8);
+            }
+
+            let deadline = state.deadline;
+
+            if self.flags.lock().contains(FileFlags::NONBLOCK) {
+                return Err(ObjectError::TryAgain);
+            }
+
+            let current = prepare_block_current(BlockType::WakeRequired {
+                wake_type: WakeType::IO,
+                deadline,
+            });
+
+            if self.is_read_ready() {
+                cancel_block(&current);
+                continue;
+            }
+
+            finish_block_current();
+        }
+    }
+}
+
+impl Statable for TimerFdObject {
+    fn stat(&self) -> LinuxStat {
+        LinuxStat::char_device(0o600)
+    }
+}
+
+pub fn wake_linux_io_waiters() {
+    crate::thread::with_thread_manager(|manager| manager.wake_io());
+}
