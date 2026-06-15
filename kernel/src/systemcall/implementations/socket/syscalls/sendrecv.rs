@@ -1,231 +1,5 @@
 use super::*;
 
-define_syscall!(Socket, |domain: u64, kind: u64, protocol: u64| {
-    let socket: ObjectRef = if domain == AF_NETLINK {
-        NetlinkSocketObject::create(kind, protocol).map_err(ObjectError::from)?
-    } else if domain == AF_INET {
-        InetSocketObject::create(domain, kind, protocol).map_err(ObjectError::from)?
-    } else {
-        UnixSocketObject::create(domain, kind, protocol).map_err(ObjectError::from)?
-    };
-    if (kind & SOCK_NONBLOCK) != 0 {
-        let _ = socket.clone().set_flags(FileFlags::NONBLOCK);
-    }
-    let fd_flags = if (kind & SOCK_CLOEXEC) != 0 {
-        FdFlags::CLOEXEC
-    } else {
-        FdFlags::empty()
-    };
-    let fd = get_current_process()
-        .lock()
-        .push_object_with_flags(socket, fd_flags);
-    Ok(fd)
-});
-
-define_syscall!(Socketpair, |domain: u64,
-                             kind: u64,
-                             protocol: u64,
-                             fds: *mut i32| {
-    let (left, right) =
-        UnixSocketObject::pair(domain, kind, protocol).map_err(ObjectError::from)?;
-    let (left_fd, right_fd) = {
-        let process = get_current_process();
-        let mut process = process.lock();
-        let fd_flags = if (kind & SOCK_CLOEXEC) != 0 {
-            FdFlags::CLOEXEC
-        } else {
-            FdFlags::empty()
-        };
-        let left_fd = process.push_object_with_flags(left, fd_flags);
-        let right_fd = process.push_object_with_flags(right, fd_flags);
-        (left_fd, right_fd)
-    };
-
-    let fds_out = [
-        i32::try_from(left_fd).map_err(|_| SyscallError::TooManyOpenFilesProcess)?,
-        i32::try_from(right_fd).map_err(|_| SyscallError::TooManyOpenFilesProcess)?,
-    ];
-    user_safe::write(fds, &fds_out)?;
-
-    Ok(0)
-});
-
-define_syscall!(Bind, |socket: ObjectRef,
-                       address: *const u8,
-                       address_len: u32| {
-    let address = socket_address_bytes(address, address_len)?;
-    socket
-        .clone()
-        .as_socket_like()?
-        .bind_bytes(&address)
-        .map_err(ObjectError::from)
-        .map_err(SyscallError::from)?;
-    Ok(0)
-});
-
-define_syscall!(Listen, |socket: ObjectRef, backlog: usize| {
-    socket
-        .clone()
-        .as_socket_like()?
-        .listen(backlog)
-        .map_err(ObjectError::from)
-        .map_err(SyscallError::from)?;
-    Ok(0)
-});
-
-define_syscall!(Connect, |socket: ObjectRef,
-                          address: *const u8,
-                          address_len: u32| {
-    let address = socket_address_bytes(address, address_len)?;
-    socket
-        .clone()
-        .as_socket_like()?
-        .connect_bytes(&address)
-        .map_err(ObjectError::from)
-        .map_err(SyscallError::from)?;
-    Ok(0)
-});
-
-define_syscall!(Accept, |socket: ObjectRef,
-                         address: *mut u8,
-                         address_len_ptr: *mut u32| {
-    if !address.is_null() && address_len_ptr.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-    let fd = accept_socket(socket, 0)?;
-    if !address_len_ptr.is_null() {
-        let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
-        let name = accepted
-            .as_socket_like()?
-            .getpeername_bytes()
-            .map_err(ObjectError::from)?;
-        write_socket_name(address, address_len_ptr, &name)?;
-    }
-    Ok(fd)
-});
-
-define_syscall!(Accept4, |socket: ObjectRef,
-                          address: *mut u8,
-                          address_len_ptr: *mut u32,
-                          flags: u32| {
-    if !address.is_null() && address_len_ptr.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-    let fd = accept_socket(socket, flags)?;
-    if !address_len_ptr.is_null() {
-        let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
-        let name = accepted
-            .as_socket_like()?
-            .getpeername_bytes()
-            .map_err(ObjectError::from)?;
-        write_socket_name(address, address_len_ptr, &name)?;
-    }
-    Ok(fd)
-});
-
-define_syscall!(Sendto, |socket: ObjectRef,
-                         buffer: *const u8,
-                         len: usize,
-                         _flags: u64,
-                         address: *const u8,
-                         address_len: u32| {
-    if len > 0 && buffer.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-
-    let user_buffer = if len == 0 {
-        Vec::new()
-    } else {
-        user_safe::read_buffer(buffer, len)?
-    };
-    let address = (!address.is_null())
-        .then(|| socket_address_bytes(address, address_len))
-        .transpose()?;
-    let written = socket
-        .as_socket_like()?
-        .sendto(user_buffer.as_slice(), address.as_deref())
-        .map_err(ObjectError::from)?;
-
-    Ok(written)
-});
-
-define_syscall!(
-    Recvfrom,
-    |socket: ObjectRef,
-     buffer: *mut u8,
-     len: usize,
-     flags: u64,
-     address: *mut u8,
-     address_len_ptr: *mut u32| {
-        if len > 0 && buffer.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-
-        if let Ok(socket) = socket.clone().as_netlink_socket()
-            && (flags & (MSG_PEEK | MSG_TRUNC)) != 0
-        {
-            let peek = (flags & MSG_PEEK) != 0;
-            let report_trunc = (flags & MSG_TRUNC) != 0;
-            let message_len = socket.peek_message_len().ok_or(SyscallError::TryAgain)?;
-            let mut data = vec![0; len];
-            let (copied, full_len, source, _, _) = socket
-                .recv_message(&mut data, peek)
-                .map_err(SyscallError::from)?;
-
-            if copied > 0 {
-                user_safe::write(buffer, &data[..copied])?;
-            }
-
-            if !address.is_null() {
-                if address_len_ptr.is_null() {
-                    return Err(SyscallError::BadAddress);
-                }
-                let name = LinuxSockAddrNl {
-                    nl_family: AF_NETLINK as u16,
-                    nl_pad: 0,
-                    nl_pid: source.pid,
-                    nl_groups: source.groups,
-                };
-                let requested_len = user_safe::read(address_len_ptr)? as usize;
-                let name_bytes = unsafe {
-                    core::slice::from_raw_parts(
-                        (&name as *const LinuxSockAddrNl).cast::<u8>(),
-                        core::mem::size_of::<LinuxSockAddrNl>(),
-                    )
-                };
-                let copy_len = requested_len.min(name_bytes.len());
-                if copy_len > 0 {
-                    user_safe::write(address, &name_bytes[..copy_len])?;
-                }
-                user_safe::write(address_len_ptr, &(name_bytes.len() as u32))?;
-            }
-
-            return Ok(if report_trunc || len == 0 {
-                full_len.max(message_len)
-            } else {
-                copied
-            });
-        }
-
-        let mut data = vec![0; len];
-        let (read, source) = socket
-            .clone()
-            .as_socket_like()?
-            .recvfrom(&mut data)
-            .map_err(ObjectError::from)?;
-
-        if read > 0 {
-            user_safe::write(buffer, &data[..read])?;
-        }
-
-        if !address.is_null() {
-            write_socket_name(address, address_len_ptr, &source.unwrap_or_default())?;
-        }
-
-        Ok(read)
-    }
-);
-
 fn sendmsg_rights(msg: &relibc_msg_hdr) -> Result<Vec<ObjectRef>, SyscallError> {
     if msg.msg_controllen == 0 {
         return Ok(Vec::new());
@@ -385,6 +159,109 @@ fn sendmsg_impl(
         .map_err(Into::into)
 }
 
+define_syscall!(Sendto, |socket: ObjectRef,
+                         buffer: *const u8,
+                         len: usize,
+                         _flags: u64,
+                         address: *const u8,
+                         address_len: u32| {
+    if len > 0 && buffer.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let user_buffer = if len == 0 {
+        Vec::new()
+    } else {
+        user_safe::read_buffer(buffer, len)?
+    };
+    let address = (!address.is_null())
+        .then(|| socket_address_bytes(address, address_len))
+        .transpose()?;
+    let written = socket
+        .as_socket_like()?
+        .sendto(user_buffer.as_slice(), address.as_deref())
+        .map_err(ObjectError::from)?;
+
+    Ok(written)
+});
+
+define_syscall!(
+    Recvfrom,
+    |socket: ObjectRef,
+     buffer: *mut u8,
+     len: usize,
+     flags: u64,
+     address: *mut u8,
+     address_len_ptr: *mut u32| {
+        if len > 0 && buffer.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+
+        if let Ok(socket) = socket.clone().as_netlink_socket()
+            && (flags & (MSG_PEEK | MSG_TRUNC)) != 0
+        {
+            let peek = (flags & MSG_PEEK) != 0;
+            let report_trunc = (flags & MSG_TRUNC) != 0;
+            let message_len = socket.peek_message_len().ok_or(SyscallError::TryAgain)?;
+            let mut data = vec![0; len];
+            let (copied, full_len, source, _, _) = socket
+                .recv_message(&mut data, peek)
+                .map_err(SyscallError::from)?;
+
+            if copied > 0 {
+                user_safe::write(buffer, &data[..copied])?;
+            }
+
+            if !address.is_null() {
+                if address_len_ptr.is_null() {
+                    return Err(SyscallError::BadAddress);
+                }
+                let name = LinuxSockAddrNl {
+                    nl_family: AF_NETLINK as u16,
+                    nl_pad: 0,
+                    nl_pid: source.pid,
+                    nl_groups: source.groups,
+                };
+                let requested_len = user_safe::read(address_len_ptr)? as usize;
+                let name_bytes = unsafe {
+                    core::slice::from_raw_parts(
+                        (&name as *const LinuxSockAddrNl).cast::<u8>(),
+                        core::mem::size_of::<LinuxSockAddrNl>(),
+                    )
+                };
+                let copy_len = requested_len.min(name_bytes.len());
+                if copy_len > 0 {
+                    user_safe::write(address, &name_bytes[..copy_len])?;
+                }
+                user_safe::write(address_len_ptr, &(name_bytes.len() as u32))?;
+            }
+
+            return Ok(if report_trunc || len == 0 {
+                full_len.max(message_len)
+            } else {
+                copied
+            });
+        }
+
+        let mut data = vec![0; len];
+        let (read, source) = socket
+            .clone()
+            .as_socket_like()?
+            .recvfrom(&mut data)
+            .map_err(ObjectError::from)?;
+
+        if read > 0 {
+            user_safe::write(buffer, &data[..read])?;
+        }
+
+        if !address.is_null() {
+            write_socket_name(address, address_len_ptr, &source.unwrap_or_default())?;
+        }
+
+        Ok(read)
+    }
+);
+
 define_syscall!(Sendmsg, |socket: ObjectRef,
                           msg: *const relibc_msg_hdr,
                           flags: u64| {
@@ -423,97 +300,6 @@ define_syscall!(Sendmmsg, |socket: ObjectRef,
 
     Ok(sent)
 });
-
-define_syscall!(Setsockopt, |socket: ObjectRef,
-                             level: i32,
-                             option_name: i32,
-                             option_value: *const u8,
-                             option_len: u32| {
-    if option_len > 0 && option_value.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-
-    let option_value = if option_len == 0 {
-        Vec::new()
-    } else {
-        user_safe::read_buffer(option_value, option_len as usize)?
-    };
-    socket
-        .as_socket_like()?
-        .setsockopt(level as u64, option_name as u64, option_value.as_slice())
-        .map_err(ObjectError::from)?;
-
-    Ok(0)
-});
-
-define_syscall!(
-    Getsockopt,
-    |socket: ObjectRef,
-     level: i32,
-     option_name: i32,
-     option_value: *mut u8,
-     option_len_ptr: *mut u32| {
-        if option_len_ptr.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-
-        let option_len = user_safe::read(option_len_ptr)? as usize;
-        let value = socket
-            .as_socket_like()?
-            .getsockopt(level as u64, option_name as u64, option_len)
-            .map_err(ObjectError::from)?;
-
-        if option_value.is_null() {
-            if option_len != 0 && !value.is_empty() {
-                return Err(SyscallError::BadAddress);
-            }
-        } else if !value.is_empty() {
-            let copy_len = option_len.min(value.len());
-            user_safe::write(option_value, &value[..copy_len])?;
-        }
-
-        if option_value.is_null() && option_len == 0 {
-            user_safe::write(option_len_ptr, &(value.len() as u32))?;
-            return Ok(0);
-        }
-
-        if option_value.is_null() && value.is_empty() {
-            user_safe::write(option_len_ptr, &(value.len() as u32))?;
-            return Ok(0);
-        }
-
-        if option_value.is_null() && option_len != 0 {
-            return Err(SyscallError::BadAddress);
-        }
-        user_safe::write(option_len_ptr, &(value.len() as u32))?;
-
-        Ok(0)
-    }
-);
-
-define_syscall!(
-    Getsockname,
-    |socket: ObjectRef, address: *mut u8, address_len_ptr: *mut u32| {
-        let name = socket
-            .as_socket_like()?
-            .getsockname_bytes()
-            .map_err(ObjectError::from)?;
-        write_socket_name(address, address_len_ptr, &name)?;
-        Ok(0)
-    }
-);
-
-define_syscall!(
-    Getpeername,
-    |socket: ObjectRef, address: *mut u8, address_len_ptr: *mut u32| {
-        let name = socket
-            .as_socket_like()?
-            .getpeername_bytes()
-            .map_err(ObjectError::from)?;
-        write_socket_name(address, address_len_ptr, &name)?;
-        Ok(0)
-    }
-);
 
 define_syscall!(Recvmsg, |socket: ObjectRef,
                           msg: *mut relibc_msg_hdr,
@@ -724,12 +510,4 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
         user_safe::write(msg_ptr, &msg)?;
     }
     result
-});
-
-define_syscall!(Shutdown, |socket: ObjectRef, how: u64| {
-    socket
-        .as_socket_like()?
-        .shutdown(how)
-        .map_err(ObjectError::from)?;
-    Ok(0)
 });

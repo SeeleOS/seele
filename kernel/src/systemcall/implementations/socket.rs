@@ -1,5 +1,4 @@
 use crate::{
-    define_syscall,
     memory::user_safe,
     net::InetAddress,
     object::netlink::{NetlinkSocketAddress, NetlinkSocketObject},
@@ -10,10 +9,10 @@ use crate::{
     },
     process::{FdFlags, manager::get_current_process},
     socket::{
-        AF_INET, AF_NETLINK, AF_UNIX, InetSocketObject, SOCK_CLOEXEC, SOCK_NONBLOCK, SOL_SOCKET,
-        UnixSocketKind, UnixSocketObject, UnixSocketState,
+        AF_INET, AF_NETLINK, AF_UNIX, SOCK_CLOEXEC, SOCK_NONBLOCK, SOL_SOCKET, UnixSocketKind,
+        UnixSocketObject, UnixSocketState,
     },
-    systemcall::utils::{SyscallError, SyscallImpl},
+    systemcall::utils::SyscallError,
 };
 use alloc::{string::String, vec, vec::Vec};
 use core::{mem, slice};
