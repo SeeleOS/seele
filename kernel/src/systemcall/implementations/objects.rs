@@ -819,13 +819,13 @@ define_syscall!(Pwrite64, |object: ObjectRef,
 #[cfg(test)]
 mod tests {
     use crate::{
-        object::{FileFlags, config::LinuxTermios},
+        object::{FileFlags, config::LinuxTermios, misc::get_object_current_process},
         process::FdFlags,
         systemcall::{
-            implementations::{CloseRange, CreatePty, Ioctl, SchedSetscheduler, Socket},
+            implementations::{CloseRange, CreatePty, Eventfd, Ioctl, SchedSetscheduler, Socket},
             test::{
-                TestLinuxSchedParam, assert_fd_flags, assert_object_flags,
-                close_range_syscalls_follow_linux_rules, close_test_fd, expect_fd,
+                TestLinuxSchedParam, assert_fd_flags, assert_object_flags, close_test_fd,
+                expect_fd, occupied_fd_count,
             },
             test_helpers::{
                 SyscallArgs, allocate_user_test_page, assert_linux_layout, expect_errno, expect_ok,
@@ -845,6 +845,51 @@ mod tests {
         "ioctl and sched_setscheduler follow linux rules",
         object_control_syscalls_follow_linux_rules
     );
+
+    fn close_range_syscalls_follow_linux_rules() {
+        const CLOSE_RANGE_CLOEXEC: u64 = 0x4;
+
+        let base_count = occupied_fd_count();
+        let fd0 = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+        let fd1 = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+        let fd2 = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+        let fd3 = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+
+        expect_ok(
+            SyscallArgs::new([fd1 as u64, fd2 as u64, CLOSE_RANGE_CLOEXEC, 0, 0, 0])
+                .call::<CloseRange>(),
+            0,
+        );
+        assert_fd_flags(fd0, FdFlags::empty());
+        assert_fd_flags(fd1, FdFlags::CLOEXEC);
+        assert_fd_flags(fd2, FdFlags::CLOEXEC);
+        assert_fd_flags(fd3, FdFlags::empty());
+        assert_eq!(occupied_fd_count(), base_count + 4);
+
+        expect_ok(
+            SyscallArgs::new([fd1 as u64, fd2 as u64, 0, 0, 0, 0]).call::<CloseRange>(),
+            0,
+        );
+        assert!(get_object_current_process(fd1 as u64).is_err());
+        assert!(get_object_current_process(fd2 as u64).is_err());
+        assert_eq!(occupied_fd_count(), base_count + 2);
+
+        expect_errno(
+            SyscallArgs::new([fd0 as u64, fd3 as u64, 1, 0, 0, 0]).call::<CloseRange>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([fd3 as u64, fd0 as u64, 0, 0, 0, 0]).call::<CloseRange>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_ok(
+            SyscallArgs::new([4096, 8192, 0, 0, 0, 0]).call::<CloseRange>(),
+            0,
+        );
+
+        close_test_fd(fd0);
+        close_test_fd(fd3);
+    }
 
     fn object_control_syscalls_follow_linux_rules() {
         const TCGETS: u64 = 0x5401;
