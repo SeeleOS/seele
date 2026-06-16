@@ -124,11 +124,7 @@ mod tests {
         signal::Signal,
         systemcall::{
             implementations::{Eventfd, Poll, Ppoll},
-            test::{
-                TestLinuxPollFd, TestLinuxTimespec, close_test_fd, expect_fd,
-                poll_helpers_translate_linux_events_to_kernel_readiness,
-                poll_timeout_helpers_reject_invalid_timespecs_and_saturate,
-            },
+            test::{TestLinuxPollFd, TestLinuxTimespec, close_test_fd, expect_fd},
             test_helpers::{
                 SyscallArgs, allocate_user_test_page, assert_linux_layout, expect_errno, expect_ok,
                 read_user_value, write_user_value,
@@ -247,6 +243,63 @@ mod tests {
         );
 
         close_test_fd(eventfd);
+    }
+
+    fn poll_helpers_translate_linux_events_to_kernel_readiness() {
+        let events = kernel_events_for(PollEvents::POLLIN | PollEvents::POLLOUT);
+
+        assert_eq!(events[0], Some(PollableEvent::CanBeRead));
+        assert_eq!(events[1], Some(PollableEvent::CanBeWritten));
+        assert_eq!(events[2], Some(PollableEvent::Error));
+        assert_eq!(events[3], Some(PollableEvent::Closed));
+        assert_eq!(events[4], Some(PollableEvent::ReadClosed));
+
+        let translated = translate_ready_events(
+            PollEvents::POLLIN
+                | PollEvents::POLLRDNORM
+                | PollEvents::POLLHUP
+                | PollEvents::POLLRDHUP,
+            (PollEvents::POLLIN | PollEvents::POLLHUP | PollEvents::POLLRDHUP).bits() as u32,
+        );
+        let translated = PollEvents::from_bits_retain(translated);
+        assert!(translated.contains(PollEvents::POLLIN));
+        assert!(translated.contains(PollEvents::POLLRDNORM));
+        assert!(translated.contains(PollEvents::POLLHUP));
+        assert!(translated.contains(PollEvents::POLLRDHUP));
+        assert!(!translated.contains(PollEvents::POLLOUT));
+    }
+
+    fn poll_timeout_helpers_reject_invalid_timespecs_and_saturate() {
+        assert_eq!(
+            saturating_timeout_ms(&Timespec {
+                tv_sec: 1,
+                tv_nsec: 999_999_999,
+            })
+            .unwrap(),
+            1999
+        );
+        assert_eq!(
+            saturating_timeout_ms(&Timespec {
+                tv_sec: i64::MAX,
+                tv_nsec: 0,
+            })
+            .unwrap(),
+            i32::MAX
+        );
+        assert!(matches!(
+            saturating_timeout_ms(&Timespec {
+                tv_sec: -1,
+                tv_nsec: 0,
+            }),
+            Err(SyscallError::InvalidArguments)
+        ));
+        assert!(matches!(
+            saturating_timeout_ms(&Timespec {
+                tv_sec: 0,
+                tv_nsec: 1_000_000_000,
+            }),
+            Err(SyscallError::InvalidArguments)
+        ));
     }
 }
 
