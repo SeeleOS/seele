@@ -510,36 +510,38 @@ fn report_window(window_ns: u64) {
     let mut hot_syscall_phase_totals = [ProfileSnapshot::default(); HOT_SYSCALL_PHASE_COUNT];
     let mut file_lazy_faults = FileLazyFaultSnapshot::default();
 
-    let cpu_data = state.cpu_data.lock();
-    for cpu in cpu_data.iter() {
-        for category in ProfileCategory::ALL {
-            category_totals[category.as_index()] +=
-                cpu.categories[category.as_index()].snapshot_and_reset();
-        }
+    {
+        let cpu_data = state.cpu_data.lock();
+        for cpu in cpu_data.iter() {
+            for category in ProfileCategory::ALL {
+                category_totals[category.as_index()] +=
+                    cpu.categories[category.as_index()].snapshot_and_reset();
+            }
 
-        for (index, entry) in cpu.syscall_cpu.iter().enumerate() {
-            syscall_cpu_totals[index] += entry.snapshot_and_reset();
-        }
+            for (index, entry) in cpu.syscall_cpu.iter().enumerate() {
+                syscall_cpu_totals[index] += entry.snapshot_and_reset();
+            }
 
-        for (index, entry) in cpu.syscall_blocked.iter().enumerate() {
-            syscall_blocked_totals[index] += entry.snapshot_and_reset();
-        }
+            for (index, entry) in cpu.syscall_blocked.iter().enumerate() {
+                syscall_blocked_totals[index] += entry.snapshot_and_reset();
+            }
 
-        for op in LinuxIoctlOp::ALL.iter().copied() {
-            ioctl_op_totals[op.as_index()] += cpu.ioctl_ops[op.as_index()].snapshot_and_reset();
-        }
+            for op in LinuxIoctlOp::ALL.iter().copied() {
+                ioctl_op_totals[op.as_index()] += cpu.ioctl_ops[op.as_index()].snapshot_and_reset();
+            }
 
-        for target in LinuxIoctlTarget::ALL.iter().copied() {
-            ioctl_target_totals[target.as_index()] +=
-                cpu.ioctl_targets[target.as_index()].snapshot_and_reset();
-        }
+            for target in LinuxIoctlTarget::ALL.iter().copied() {
+                ioctl_target_totals[target.as_index()] +=
+                    cpu.ioctl_targets[target.as_index()].snapshot_and_reset();
+            }
 
-        for phase in HotSyscallPhase::ALL {
-            hot_syscall_phase_totals[phase.as_index()] +=
-                cpu.hot_syscall_phases[phase.as_index()].snapshot_and_reset();
-        }
+            for phase in HotSyscallPhase::ALL {
+                hot_syscall_phase_totals[phase.as_index()] +=
+                    cpu.hot_syscall_phases[phase.as_index()].snapshot_and_reset();
+            }
 
-        file_lazy_faults += cpu.file_lazy_faults.snapshot_and_reset();
+            file_lazy_faults += cpu.file_lazy_faults.snapshot_and_reset();
+        }
     }
 
     let total_cycles: u64 = ProfileCategory::PRIMARY
