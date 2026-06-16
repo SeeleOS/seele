@@ -1120,13 +1120,22 @@ define_syscall!(Mincore, |addr: VirtAddr, len: usize, vec: *mut u8| {
 
 #[cfg(test)]
 mod tests {
-    use crate::systemcall::{
-        implementations::Futex,
-        test::{TestLinuxTimespec, memory_mapping_syscalls_follow_linux_rules},
-        test_helpers::{
-            SyscallArgs, allocate_user_test_page, expect_errno, expect_ok, write_user_value,
+    use crate::{
+        filesystem::{path::Path, vfs::VirtualFS},
+        process::Process,
+        systemcall::{
+            implementations::{
+                Brk, Ftruncate, Futex, Lseek, Mincore, Mlock, Mmap, Mprotect, Mremap, Msync,
+                Munlock, Munmap, OpenAt, Read, Write, filesystem::OpenFlags,
+            },
+            test::TestLinuxTimespec,
+            test_helpers::{
+                SyscallArgs, allocate_user_test_page, assert_user_bytes, close_test_fd,
+                expect_errno, expect_fd, expect_ok, read_user_value, write_user_cstr,
+                write_user_value,
+            },
+            utils::SyscallError,
         },
-        utils::SyscallError,
     };
 
     crate::test!(
@@ -1194,6 +1203,368 @@ mod tests {
             SyscallArgs::new([0, FUTEX_WAKE, 1, 0, 0, 0]).call::<Futex>(),
             SyscallError::BadAddress,
         );
+    }
+
+    fn memory_mapping_syscalls_follow_linux_rules() {
+        const MAP_SHARED: u64 = 0x01;
+        const MAP_PRIVATE: u64 = 0x02;
+        const MAP_ANONYMOUS: u64 = 0x20;
+        const MAP_FIXED_NOREPLACE: u64 = 0x100000;
+        const MREMAP_MAYMOVE: u64 = 0x1;
+        const MS_ASYNC: u64 = 0x1;
+        const MS_INVALIDATE: u64 = 0x2;
+        const MS_SYNC: u64 = 0x4;
+        const AT_FDCWD: u64 = (-100i32) as u64;
+
+        let process = get_current_process();
+        let original_break = process.lock().program_break;
+        let current_break = SyscallArgs::new([0, 0, 0, 0, 0, 0])
+            .call::<Brk>()
+            .expect("brk query should succeed") as u64;
+        let grown_break = current_break + 5000;
+        expect_ok(
+            SyscallArgs::new([grown_break, 0, 0, 0, 0, 0]).call::<Brk>(),
+            grown_break as usize,
+        );
+        assert_eq!(process.lock().program_break, grown_break);
+        let brk_area = process
+            .lock()
+            .addrspace
+            .get_area(x86_64::VirtAddr::new(current_break.div_ceil(4096) * 4096))
+            .cloned()
+            .expect("brk growth should create mapped area");
+        assert!(matches!(brk_area.data, Data::Normal));
+        expect_ok(
+            SyscallArgs::new([current_break, 0, 0, 0, 0, 0]).call::<Brk>(),
+            current_break as usize,
+        );
+        process.lock().program_break = original_break;
+
+        let anon_addr = SyscallArgs::new([
+            0,
+            8192,
+            (Protection::READ | Protection::WRITE).bits() as u64,
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            u64::MAX,
+            0,
+        ])
+        .call::<Mmap>()
+        .expect("anon mmap should succeed") as u64;
+        let anon_area = process
+            .lock()
+            .addrspace
+            .get_area(x86_64::VirtAddr::new(anon_addr))
+            .cloned()
+            .expect("anon mmap should register area");
+        assert!(matches!(anon_area.data, Data::Normal));
+        assert_eq!(
+            SyscallArgs::new([anon_addr, 4096, 0, 0, 0, 0]).call::<Mlock>(),
+            Ok(0),
+            "mlock should succeed on initial anonymous mapping"
+        );
+        expect_ok(
+            SyscallArgs::new([anon_addr, 4096, 0, 0, 0, 0]).call::<Munlock>(),
+            0,
+        );
+        process
+            .lock()
+            .addrspace
+            .write_buffer(anon_addr as *mut u8, b"mmap")
+            .unwrap();
+        assert_user_bytes(anon_addr, b"mmap");
+        expect_errno(
+            SyscallArgs::new([
+                0,
+                0,
+                Protection::READ.bits() as u64,
+                MAP_PRIVATE | MAP_ANONYMOUS,
+                u64::MAX,
+                0,
+            ])
+            .call::<Mmap>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([
+                0x2000,
+                4096,
+                Protection::READ.bits() as u64,
+                MAP_PRIVATE | MAP_ANONYMOUS,
+                u64::MAX,
+                0,
+            ])
+            .call::<Mmap>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([
+                anon_addr,
+                4096,
+                Protection::READ.bits() as u64,
+                MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
+                u64::MAX,
+                0,
+            ])
+            .call::<Mmap>(),
+            SyscallError::FileAlreadyExists,
+        );
+
+        expect_ok(
+            SyscallArgs::new([anon_addr, 4096, Protection::READ.bits() as u64, 0, 0, 0])
+                .call::<Mprotect>(),
+            0,
+        );
+        let readonly_area = process
+            .lock()
+            .addrspace
+            .get_area(x86_64::VirtAddr::new(anon_addr))
+            .cloned()
+            .expect("mprotect should keep mapping");
+        assert!(
+            !readonly_area
+                .flags
+                .contains(x86_64::structures::paging::PageTableFlags::WRITABLE)
+        );
+
+        let remapped_addr = SyscallArgs::new([anon_addr, 4096, 8192, MREMAP_MAYMOVE, 0, 0])
+            .call::<Mremap>()
+            .expect("mremap should succeed") as u64;
+        assert_user_bytes(remapped_addr, b"mmap");
+        assert!(
+            process
+                .lock()
+                .addrspace
+                .get_area(x86_64::VirtAddr::new(anon_addr))
+                .is_none()
+        );
+        expect_errno(
+            SyscallArgs::new([remapped_addr, 4096, 12288, 0, 0, 0]).call::<Mremap>(),
+            SyscallError::NoMemory,
+        );
+        expect_ok(
+            SyscallArgs::new([anon_addr, 0, 0, 0, 0, 0]).call::<Mlock>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([anon_addr, 0, 0, 0, 0, 0]).call::<Munlock>(),
+            0,
+        );
+        assert_eq!(
+            SyscallArgs::new([remapped_addr + 1, 4095, 0, 0, 0, 0]).call::<Mlock>(),
+            Ok(0),
+            "mlock should succeed on unaligned remapped address"
+        );
+        expect_ok(
+            SyscallArgs::new([remapped_addr + 1, 4095, 0, 0, 0, 0]).call::<Munlock>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([anon_addr, 4096, 0, 0, 0, 0]).call::<Mlock>(),
+            SyscallError::NoMemory,
+        );
+        expect_errno(
+            SyscallArgs::new([anon_addr, 4096, 0, 0, 0, 0]).call::<Munlock>(),
+            SyscallError::NoMemory,
+        );
+        expect_errno(
+            SyscallArgs::new([0x2000_0000, 4096, 0, 0, 0, 0]).call::<Mlock>(),
+            SyscallError::NoMemory,
+        );
+        expect_errno(
+            SyscallArgs::new([0x2000_0000, 4096, 0, 0, 0, 0]).call::<Munlock>(),
+            SyscallError::NoMemory,
+        );
+        let old_memlock_limit = process.lock().rlimit_memlock_cur;
+        process.lock().rlimit_memlock_cur = 0;
+        expect_errno(
+            SyscallArgs::new([remapped_addr, 4096, 0, 0, 0, 0]).call::<Mlock>(),
+            SyscallError::NoMemory,
+        );
+        process.lock().rlimit_memlock_cur = old_memlock_limit;
+
+        let mincore_vec = allocate_user_test_page();
+        expect_ok(
+            SyscallArgs::new([remapped_addr, 4096, mincore_vec, 0, 0, 0]).call::<Mincore>(),
+            0,
+        );
+        assert_ne!(read_user_value::<u8>(mincore_vec), 0);
+        expect_errno(
+            SyscallArgs::new([remapped_addr + 1, 4096, mincore_vec, 0, 0, 0]).call::<Mincore>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([remapped_addr, 4096, 0, 0, 0, 0]).call::<Mincore>(),
+            SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([0x2000_0000, 4096, mincore_vec, 0, 0, 0]).call::<Mincore>(),
+            SyscallError::NoMemory,
+        );
+
+        let page = allocate_user_test_page();
+        write_user_cstr(page, b"/tmp/syscall-mmap-file-test\0");
+        let fd = expect_fd(
+            SyscallArgs::new([
+                AT_FDCWD,
+                page,
+                (OpenFlags::CREAT | OpenFlags::TRUNC).bits() as u64,
+                0o600,
+                0,
+                0,
+            ])
+            .call::<OpenAt>(),
+        );
+        process
+            .lock()
+            .addrspace
+            .write_buffer((page + 128) as *mut u8, b"abcdef")
+            .unwrap();
+        expect_ok(
+            SyscallArgs::new([fd as u64, page + 128, 6, 0, 0, 0]).call::<Write>(),
+            6,
+        );
+        let file_map_addr = SyscallArgs::new([
+            0,
+            8192,
+            (Protection::READ | Protection::WRITE).bits() as u64,
+            MAP_SHARED,
+            fd as u64,
+            0,
+        ])
+        .call::<Mmap>()
+        .expect("file mmap should succeed") as u64;
+        process
+            .lock()
+            .addrspace
+            .write_buffer(file_map_addr as *mut u8, b"XYZ")
+            .unwrap();
+        expect_ok(
+            SyscallArgs::new([file_map_addr, 4096, MS_SYNC, 0, 0, 0]).call::<Msync>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Lseek>(),
+            0,
+        );
+        process
+            .lock()
+            .addrspace
+            .write_buffer((page + 256) as *mut u8, &[0; 6])
+            .unwrap();
+        expect_ok(
+            SyscallArgs::new([fd as u64, page + 256, 6, 0, 0, 0]).call::<Read>(),
+            6,
+        );
+        assert_user_bytes(page + 256, b"XYZdef");
+        expect_ok(
+            SyscallArgs::new([file_map_addr, 0, 0, 0, 0, 0]).call::<Msync>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([fd as u64, 8192, 0, 0, 0, 0]).call::<Ftruncate>(),
+            0,
+        );
+        process
+            .lock()
+            .addrspace
+            .write_buffer((file_map_addr + 4096) as *mut u8, b"tail")
+            .unwrap();
+        expect_ok(
+            SyscallArgs::new([file_map_addr, 8192, MS_SYNC, 0, 0, 0]).call::<Msync>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([fd as u64, 4096, 0, 0, 0, 0]).call::<Lseek>(),
+            4096,
+        );
+        process
+            .lock()
+            .addrspace
+            .write_buffer((page + 384) as *mut u8, &[0; 4])
+            .unwrap();
+        expect_ok(
+            SyscallArgs::new([fd as u64, page + 384, 4, 0, 0, 0]).call::<Read>(),
+            4,
+        );
+        assert_user_bytes(page + 384, b"tail");
+
+        let second_file_map_addr = SyscallArgs::new([
+            0,
+            8192,
+            (Protection::READ | Protection::WRITE).bits() as u64,
+            MAP_SHARED,
+            fd as u64,
+            0,
+        ])
+        .call::<Mmap>()
+        .expect("second file mmap should succeed") as u64;
+        process
+            .lock()
+            .addrspace
+            .write_buffer((file_map_addr + 16) as *mut u8, b"live")
+            .unwrap();
+        assert_eq!(
+            process
+                .lock()
+                .addrspace
+                .read_buffer((second_file_map_addr + 16) as *const u8, 4)
+                .expect("second MAP_SHARED mapping should read first mapping writes"),
+            b"live",
+            "independent MAP_SHARED mappings of the same file page must share writes before msync"
+        );
+
+        expect_errno(
+            SyscallArgs::new([file_map_addr + 1, 4096, MS_SYNC, 0, 0, 0]).call::<Msync>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([file_map_addr, 4096, MS_ASYNC | MS_SYNC, 0, 0, 0]).call::<Msync>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([file_map_addr, 4096, MS_INVALIDATE, 0, 0, 0]).call::<Msync>(),
+            SyscallError::OperationNotSupported,
+        );
+
+        let (forked_process, _) = Process::fork(process.clone());
+        process
+            .lock()
+            .addrspace
+            .write_buffer((file_map_addr + 8) as *mut u8, b"shared")
+            .unwrap();
+        assert_eq!(
+            forked_process
+                .lock()
+                .addrspace
+                .read_buffer((file_map_addr + 8) as *const u8, 6)
+                .expect("forked child should read the shared mapping"),
+            b"shared",
+            "MAP_SHARED file mappings must remain shared after fork instead of becoming COW"
+        );
+
+        expect_ok(
+            SyscallArgs::new([second_file_map_addr, 8192, 0, 0, 0, 0]).call::<Munmap>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([file_map_addr, 8192, 0, 0, 0, 0]).call::<Munmap>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([remapped_addr, 8192, 0, 0, 0, 0]).call::<Munmap>(),
+            0,
+        );
+        assert!(
+            process
+                .lock()
+                .addrspace
+                .get_area(x86_64::VirtAddr::new(remapped_addr))
+                .is_none()
+        );
+        close_test_fd(fd);
+        let _ = VirtualFS
+            .lock()
+            .delete_file(Path::new("/tmp/syscall-mmap-file-test"));
     }
 
     fn typed_syscall_args_convert_flags_and_enums_at_boundary() {
