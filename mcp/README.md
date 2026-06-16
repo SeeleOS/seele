@@ -34,6 +34,6 @@ After changing MCP or VM launch behavior:
 3. Check boot output with `agent_serial_tail`.
 4. Capture a non-empty screenshot with `agent_screenshot`.
 5. Stop the VM with `agent_stop` or `agent_cleanup`.
-6. Run `cargo xvm-ps` and verify no runner/QEMU process remains.
+6. Confirm `agent_status` reports no managed runner/QEMU process.
 
-If the MCP server is unavailable, use `cargo xrun -- --agent` and `cargo xvm-ps` as the fallback path.
+If the MCP server is unavailable, use `cargo xrun -- --agent` as the fallback path and clean up the reported runner/QEMU processes from the host.

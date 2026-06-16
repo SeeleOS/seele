@@ -3,7 +3,6 @@ mod cli;
 mod rootfs;
 mod run;
 mod sysroot;
-mod vm;
 
 use anyhow::Result;
 use cli::Command;
@@ -28,6 +27,5 @@ fn real_main() -> Result<i32> {
         Command::IntegrationTest => check::integration(),
         Command::RootfsBuild(args) => rootfs::rootfs(args),
         Command::SysrootMount(args) => sysroot::sysroot(args),
-        Command::VmPs(args) => vm::vm(args),
     }
 }

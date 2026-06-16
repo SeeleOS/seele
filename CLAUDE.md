@@ -16,7 +16,6 @@ cargo xintegration-test     # integration tests
 cargo xrootfs               # build/refresh disk.img and rootfs
 cargo xrootfs-override      # rebuild disk.img from scratch
 cargo xsysroot-mount        # mount sysroot/ from disk.img
-cargo xvm-ps                # list live runner and QEMU processes
 cargo fmt --all             # format
 cargo check --manifest-path kernel/Cargo.toml   # fast type-check kernel only
 cargo clippy                # lint; treat all warnings as failures
