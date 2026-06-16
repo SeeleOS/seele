@@ -57,6 +57,7 @@ There is no large standalone test suite yet; verification is primarily compile c
 - Run `cargo xtest` for kernel unit-test coverage.
 - Treat compiler warnings as failures. Do not leave any `cargo check` warnings in the tree.
 - After finishing code changes, run `cargo clippy` and address its findings before considering the work complete.
+- Put focused Rust unit tests in the same file as the code they cover, inside a local `#[cfg(test)] mod tests {}` block. Do not create separate `test.rs` files for new code unless the existing module already uses that layout or the tests must span multiple files.
 - For syscall, process, terminal, or userspace changes, prefer the MCP agent VM path when available. Use `cargo xrun -- --agent` as the manual fallback.
 - When validating MCP-driven VM behavior, verify QMP connectivity, serial log output, and screenshot capture when relevant, then stop the VM through the MCP cleanup/stop tool or by killing the reported runner and QEMU PIDs.
 - Add focused unit tests only when the target module already uses them.
