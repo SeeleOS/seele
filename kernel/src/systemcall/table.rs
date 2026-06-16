@@ -43,6 +43,7 @@ define_syscall_table!(
     Ioctl,
     Pread64,
     Pwrite64,
+    Readv,
     Writev,
     Access,
     Pipe,

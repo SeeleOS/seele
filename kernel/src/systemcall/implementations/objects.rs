@@ -65,6 +65,13 @@ fn copy_iovecs(iovs: &[LinuxIovec]) -> Result<Vec<u8>, SyscallError> {
     Ok(buffer)
 }
 
+fn iovec_total_len(iovs: &[LinuxIovec]) -> Result<usize, SyscallError> {
+    iovs.iter().try_fold(0usize, |acc, iov| {
+        acc.checked_add(iov.iov_len)
+            .ok_or(SyscallError::InvalidArguments)
+    })
+}
+
 fn read_iovecs(iov_ptr: *const LinuxIovec, iovcnt: i32) -> Result<Vec<LinuxIovec>, SyscallError> {
     if iovcnt <= 0 {
         return Ok(Vec::new());
@@ -78,6 +85,27 @@ fn read_iovecs(iov_ptr: *const LinuxIovec, iovcnt: i32) -> Result<Vec<LinuxIovec
         iovs.push(user_safe::read(unsafe { iov_ptr.add(index) })?);
     }
     Ok(iovs)
+}
+
+fn write_iovecs(iovs: &[LinuxIovec], buffer: &[u8]) -> Result<(), SyscallError> {
+    let mut copied = 0usize;
+    for iov in iovs {
+        if copied == buffer.len() {
+            break;
+        }
+        if iov.iov_len == 0 {
+            continue;
+        }
+        if iov.iov_base.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+
+        let remaining = buffer.len() - copied;
+        let copy_len = iov.iov_len.min(remaining);
+        user_safe::write_buffer(iov.iov_base.cast_mut(), &buffer[copied..copied + copy_len])?;
+        copied += copy_len;
+    }
+    Ok(())
 }
 
 fn fallback_dirent_inode(info: &DirectoryContentInfo, offset: usize) -> u64 {
@@ -499,6 +527,46 @@ define_syscall!(Write, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
 
     let bytes = user_safe::read_buffer(buf_ptr.cast_const(), len)?;
     Ok(object.as_writable()?.write(&bytes)?)
+});
+
+define_syscall!(Readv, |object: ObjectRef,
+                        iov_ptr: *const LinuxIovec,
+                        iovcnt: i32| {
+    if iovcnt < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    if iovcnt > 0 && iov_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let iovs = read_iovecs(iov_ptr, iovcnt)?;
+    let total_len = iovec_total_len(&iovs)?;
+    if total_len == 0 {
+        return Ok(0);
+    }
+
+    let mut buffer = vec![0; total_len];
+    let read = if let Ok(file) = object.clone().as_file_like() {
+        let mut total = 0usize;
+        while total < total_len {
+            let remaining = total_len - total;
+            let count = file.read(&mut buffer[total..])?;
+            if count == 0 {
+                break;
+            }
+            total += count;
+            if count < remaining {
+                break;
+            }
+        }
+        total
+    } else {
+        object.as_readable()?.read(&mut buffer)?
+    };
+
+    write_iovecs(&iovs, &buffer[..read])?;
+    Ok(read)
 });
 
 define_syscall!(Writev, |object: ObjectRef,

@@ -157,6 +157,7 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Write => "filesystem_io_syscalls_follow_linux_rules",
         Pread64 => "filesystem_io_syscalls_follow_linux_rules",
         Pwrite64 => "filesystem_io_syscalls_follow_linux_rules",
+        Readv => "filesystem_io_syscalls_follow_linux_rules",
         Rename => "filesystem_rename_syscalls_follow_linux_rules",
         RenameAt => "filesystem_rename_syscalls_follow_linux_rules",
         RenameAt2 => "filesystem_rename_syscalls_follow_linux_rules",

@@ -23,6 +23,7 @@ pub enum SyscallNumber {
     Ioctl = 16,
     Pread64 = 17,
     Pwrite64 = 18,
+    Readv = 19,
     Writev = 20,
     Access = 21,
     Pipe = 22,

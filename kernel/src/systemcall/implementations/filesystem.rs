@@ -1002,6 +1002,70 @@ mod tests {
         );
         assert_user_bytes(user_page + 128, b"abcdef");
 
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct TestLinuxIovec {
+            iov_base: *const u8,
+            iov_len: usize,
+        }
+
+        expect_ok(
+            SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Lseek>(),
+            0,
+        );
+        get_current_process()
+            .lock()
+            .addrspace
+            .write_buffer((user_page + 768) as *mut u8, &[0; 6])
+            .unwrap();
+        write_user_value(
+            user_page + 896,
+            &[
+                TestLinuxIovec {
+                    iov_base: (user_page + 768) as *const u8,
+                    iov_len: 2,
+                },
+                TestLinuxIovec {
+                    iov_base: (user_page + 770) as *const u8,
+                    iov_len: 4,
+                },
+            ],
+        );
+        expect_ok(
+            SyscallArgs::new([fd as u64, user_page + 896, 2, 0, 0, 0]).call::<Readv>(),
+            6,
+        );
+        assert_user_bytes(user_page + 768, b"abcdef");
+        expect_ok(
+            SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Lseek>(),
+            0,
+        );
+        write_user_value(
+            user_page + 960,
+            &[
+                TestLinuxIovec {
+                    iov_base: (user_page + 832) as *const u8,
+                    iov_len: 0,
+                },
+                TestLinuxIovec {
+                    iov_base: core::ptr::null(),
+                    iov_len: 1,
+                },
+            ],
+        );
+        expect_errno(
+            SyscallArgs::new([fd as u64, user_page + 960, 2, 0, 0, 0]).call::<Readv>(),
+            SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([fd as u64, 0, 1, 0, 0, 0]).call::<Readv>(),
+            SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([fd as u64, user_page + 896, u64::MAX, 0, 0, 0]).call::<Readv>(),
+            SyscallError::InvalidArguments,
+        );
+
         get_current_process()
             .lock()
             .addrspace
