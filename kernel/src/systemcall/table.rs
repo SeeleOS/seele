@@ -27,6 +27,7 @@ define_syscall_table!(
     Open,
     Close,
     Stat,
+    Lstat,
     Poll,
     Fstat,
     Lseek,

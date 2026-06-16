@@ -4,7 +4,10 @@ mod mount;
 
 use anyhow::{Context, Result, bail};
 use clap::Args;
-use std::{env, fs, path::PathBuf};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 use xshell::Shell;
 
 use self::{
@@ -39,8 +42,29 @@ pub fn build_rootfs(args: BuildRootfsArgs) -> Result<i32> {
     let _mount = MountedSysroot { path: &sysroot };
     write_repositories(&sh, &repo_root, &sysroot)?;
     install_packages(&sh, &sysroot)?;
+    create_mount_points(&sysroot)?;
 
     Ok(0)
+}
+
+fn create_mount_points(sysroot: &Path) -> Result<()> {
+    for path in [
+        "dev",
+        "dev/pts",
+        "dev/shm",
+        "proc",
+        "run",
+        "sys",
+        "sys/fs",
+        "sys/fs/cgroup",
+        "tmp",
+        "var/log",
+        "var/tmp",
+    ] {
+        fs::create_dir_all(sysroot.join(path))
+            .with_context(|| format!("failed to create rootfs mount point {path}"))?;
+    }
+    Ok(())
 }
 
 impl BuildRootfsArgs {

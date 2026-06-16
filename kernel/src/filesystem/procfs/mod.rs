@@ -47,8 +47,8 @@ use pid::{
 };
 use pid_paths::lookup_proc_pid_path;
 use root::{
-    PROC_CMDLINE_INODE, PROC_DEVICES_INODE, PROC_MEMINFO_INODE, PROC_MOUNTS_INODE,
-    PROC_PRESSURE_CPU_INODE, PROC_PRESSURE_INODE, PROC_PRESSURE_IO_INODE,
+    PROC_CMDLINE_INODE, PROC_DEVICES_INODE, PROC_FILESYSTEMS_INODE, PROC_MEMINFO_INODE,
+    PROC_MOUNTS_INODE, PROC_PRESSURE_CPU_INODE, PROC_PRESSURE_INODE, PROC_PRESSURE_IO_INODE,
     PROC_PRESSURE_MEMORY_INODE, PROC_ROOT_INODE, PROC_SELF_INODE, PROC_STAT_INODE,
     PROC_SYS_FS_FILE_MAX_INODE, PROC_SYS_FS_INODE, PROC_SYS_FS_INOTIFY_INODE,
     PROC_SYS_FS_INOTIFY_MAX_QUEUED_EVENTS_INODE, PROC_SYS_FS_INOTIFY_MAX_USER_INSTANCES_INODE,
@@ -57,10 +57,10 @@ use root::{
     PROC_SYS_KERNEL_HOSTNAME_INODE, PROC_SYS_KERNEL_INODE, PROC_SYS_KERNEL_NGROUPS_MAX_INODE,
     PROC_SYS_KERNEL_OSRELEASE_INODE, PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE,
     PROC_SYS_KERNEL_RANDOM_INODE, PROC_SYS_KERNEL_RANDOM_UUID_INODE, PROC_UPTIME_INODE,
-    proc_boot_id_bytes, proc_cap_last_cap_bytes, proc_devices_bytes, proc_kernel_cmdline_bytes,
-    proc_kernel_entries, proc_kernel_random_entries, proc_mountinfo_bytes, proc_mounts_bytes,
-    proc_ngroups_max_bytes, proc_pressure_entries, proc_random_uuid_bytes, proc_root_entries,
-    proc_stat_bytes, proc_uptime_bytes,
+    proc_boot_id_bytes, proc_cap_last_cap_bytes, proc_devices_bytes, proc_filesystems_bytes,
+    proc_kernel_cmdline_bytes, proc_kernel_entries, proc_kernel_random_entries,
+    proc_mountinfo_bytes, proc_mounts_bytes, proc_ngroups_max_bytes, proc_pressure_entries,
+    proc_random_uuid_bytes, proc_root_entries, proc_stat_bytes, proc_uptime_bytes,
 };
 use self_paths::{lookup_proc_self_path, proc_pid_namespace_file};
 use sysctl::*;

@@ -328,6 +328,8 @@ pub struct DevFs {
     state: TmpfsStateRef,
 }
 
+pub struct DevPtsFs;
+
 struct DevDirectoryHandle {
     state: TmpfsStateRef,
     path: String,
@@ -561,6 +563,18 @@ impl Default for DevFs {
     }
 }
 
+impl DevPtsFs {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for DevPtsFs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileSystem for DevFs {
     fn as_any(&self) -> &dyn core::any::Any {
         self
@@ -628,6 +642,60 @@ impl FileSystem for DevFs {
 
     fn default_mount_flags(&self, _path: &Path) -> crate::filesystem::vfs_traits::MountFlags {
         crate::filesystem::vfs_traits::MountFlags::MS_NOSUID
+            | crate::filesystem::vfs_traits::MountFlags::MS_RELATIME
+    }
+}
+
+impl FileSystem for DevPtsFs {
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
+    fn init(&mut self) -> FSResult<()> {
+        Ok(())
+    }
+
+    fn lookup(&self, path: &Path) -> FSResult<FileLike> {
+        let normalized = path.normalize();
+        let components = normalized
+            .parts
+            .iter()
+            .filter_map(|part| match part {
+                PathPart::Normal(name) => Some(name.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        match components.as_slice() {
+            [] => Ok(pts_directory_file_like()),
+            [number] => pts_file_like(number.parse::<u32>().map_err(|_| FSError::NotFound)?),
+            _ => Err(FSError::NotFound),
+        }
+    }
+
+    fn rename(&self, _old_path: &Path, _new_path: &Path) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+
+    fn link(&self, _old_path: &Path, _new_path: &Path) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+
+    fn name(&self) -> &'static str {
+        "devpts"
+    }
+
+    fn magic(&self) -> i64 {
+        0x1cd1
+    }
+
+    fn mount_source(&self) -> &'static str {
+        "devpts"
+    }
+
+    fn default_mount_flags(&self, _path: &Path) -> crate::filesystem::vfs_traits::MountFlags {
+        crate::filesystem::vfs_traits::MountFlags::MS_NOSUID
+            | crate::filesystem::vfs_traits::MountFlags::MS_NOEXEC
             | crate::filesystem::vfs_traits::MountFlags::MS_RELATIME
     }
 }

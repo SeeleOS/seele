@@ -40,6 +40,15 @@ pub use misc::testing;
 #[cfg(test)]
 use crate::boot::BOOTLOADER_CONFIG;
 use crate::filesystem::vfs::VirtualFS;
+#[cfg(test)]
+use crate::filesystem::{
+    cgroupfs::CgroupFs,
+    devfs::{DevFs, DevPtsFs},
+    path::Path,
+    procfs::ProcFs,
+    sysfs::SysFs,
+    tmpfs::TmpFs,
+};
 use crate::misc::others::enable_sse;
 use crate::misc::{framebuffer, logging, mouse, profile, time};
 use crate::process::manager::MANAGER;
@@ -54,8 +63,30 @@ entry_point!(test_kernel_main, config = &BOOTLOADER_CONFIG);
 #[cfg(test)]
 fn test_kernel_main(boot_info: &'static mut BootInfo) -> ! {
     init_kernel(boot_info);
+    init_test_filesystems();
     test_main();
     unreachable!("test_main returned");
+}
+
+#[cfg(test)]
+fn init_test_filesystems() {
+    let mut vfs = VirtualFS.lock();
+    vfs.mount(Path::new("/tmp"), TmpFs::new())
+        .expect("failed to mount test tmpfs");
+    vfs.mount(Path::new("/run"), TmpFs::new())
+        .expect("failed to mount test runfs");
+    vfs.mount(Path::new("/proc"), ProcFs::new())
+        .expect("failed to mount test procfs");
+    vfs.mount(Path::new("/sys"), SysFs::new())
+        .expect("failed to mount test sysfs");
+    vfs.mount(Path::new("/sys/fs/cgroup"), CgroupFs::new())
+        .expect("failed to mount test cgroupfs");
+    vfs.mount(Path::new("/dev"), DevFs::new())
+        .expect("failed to mount test devfs");
+    vfs.mount(Path::new("/dev/pts"), DevPtsFs::new())
+        .expect("failed to mount test devpts");
+    vfs.mount(Path::new("/dev/shm"), TmpFs::new())
+        .expect("failed to mount test shmfs");
 }
 
 pub fn init_kernel(boot_info: &'static mut BootInfo) {

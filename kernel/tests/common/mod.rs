@@ -32,6 +32,49 @@ macro_rules! integration_test_entry {
 
         fn integration_kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
             kernel::init_kernel(boot_info);
+            {
+                let mut vfs = kernel::filesystem::vfs::VirtualFS.lock();
+                vfs.mount(
+                    kernel::filesystem::path::Path::new("/tmp"),
+                    kernel::filesystem::tmpfs::TmpFs::new(),
+                )
+                .expect("failed to mount test tmpfs");
+                vfs.mount(
+                    kernel::filesystem::path::Path::new("/run"),
+                    kernel::filesystem::tmpfs::TmpFs::new(),
+                )
+                .expect("failed to mount test runfs");
+                vfs.mount(
+                    kernel::filesystem::path::Path::new("/proc"),
+                    kernel::filesystem::procfs::ProcFs::new(),
+                )
+                .expect("failed to mount test procfs");
+                vfs.mount(
+                    kernel::filesystem::path::Path::new("/sys"),
+                    kernel::filesystem::sysfs::SysFs::new(),
+                )
+                .expect("failed to mount test sysfs");
+                vfs.mount(
+                    kernel::filesystem::path::Path::new("/sys/fs/cgroup"),
+                    kernel::filesystem::cgroupfs::CgroupFs::new(),
+                )
+                .expect("failed to mount test cgroupfs");
+                vfs.mount(
+                    kernel::filesystem::path::Path::new("/dev"),
+                    kernel::filesystem::devfs::DevFs::new(),
+                )
+                .expect("failed to mount test devfs");
+                vfs.mount(
+                    kernel::filesystem::path::Path::new("/dev/pts"),
+                    kernel::filesystem::devfs::DevPtsFs::new(),
+                )
+                .expect("failed to mount test devpts");
+                vfs.mount(
+                    kernel::filesystem::path::Path::new("/dev/shm"),
+                    kernel::filesystem::tmpfs::TmpFs::new(),
+                )
+                .expect("failed to mount test shmfs");
+            }
             $main();
             $crate::common::pass();
         }

@@ -41,6 +41,7 @@ pub(super) const PROC_SYS_KERNEL_OSRELEASE_INODE: u64 = 0x3019;
 pub(super) const PROC_SYS_KERNEL_RANDOM_UUID_INODE: u64 = 0x301a;
 pub(super) const PROC_SYS_KERNEL_NGROUPS_MAX_INODE: u64 = 0x301b;
 pub(super) const PROC_SYS_KERNEL_CAP_LAST_CAP_INODE: u64 = 0x301c;
+pub(super) const PROC_FILESYSTEMS_INODE: u64 = 0x301d;
 
 static PROC_UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -52,6 +53,7 @@ pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
     let mut entries = vec![
         DirectoryContentInfo::new("cmdline".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("devices".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("filesystems".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("meminfo".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("mounts".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("net".into(), DirectoryContentType::Directory),
@@ -91,6 +93,23 @@ pub(super) fn proc_devices_bytes() -> Vec<u8> {
         "\n",
         "Block devices:\n",
         "  7 loop\n",
+    )
+    .as_bytes()
+    .to_vec()
+}
+
+pub(super) fn proc_filesystems_bytes() -> Vec<u8> {
+    concat!(
+        "nodev\tproc\n",
+        "nodev\tsysfs\n",
+        "nodev\tdevtmpfs\n",
+        "nodev\tdevpts\n",
+        "nodev\ttmpfs\n",
+        "nodev\tcgroup2\n",
+        "nodev\tbpf\n",
+        "nodev\tpstore\n",
+        "nodev\tsecurityfs\n",
+        "\text4\n",
     )
     .as_bytes()
     .to_vec()
@@ -242,8 +261,8 @@ fn sorted_mounts() -> Vec<(String, FileSystemRef, String, MountFlags)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        generate_uuid, proc_boot_id_bytes, proc_cap_last_cap_bytes, proc_kernel_entries,
-        proc_kernel_random_entries, proc_mountinfo_bytes, proc_mounts_bytes,
+        generate_uuid, proc_boot_id_bytes, proc_cap_last_cap_bytes, proc_filesystems_bytes,
+        proc_kernel_entries, proc_kernel_random_entries, proc_mountinfo_bytes, proc_mounts_bytes,
         proc_ngroups_max_bytes, proc_pressure_entries, proc_root_entries,
     };
     use crate::process::manager::get_current_process;
@@ -327,6 +346,7 @@ mod tests {
     }
 
     fn procfs_root_includes_current_pid_and_stable_mount_renderings() {
+        let mounts = String::from_utf8(proc_mounts_bytes()).unwrap();
         let current_pid = get_current_process().lock().pid.0.to_string();
         let root_entries = proc_root_entries()
             .into_iter()
@@ -334,12 +354,16 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(root_entries.contains(&current_pid));
         assert!(root_entries.contains(&String::from("self")));
-
-        let mounts = String::from_utf8(proc_mounts_bytes()).unwrap();
         assert!(mounts.contains("proc /proc proc "));
         assert!(mounts.contains("sysfs /sys sysfs "));
         assert!(mounts.contains("devtmpfs /dev devtmpfs "));
         assert!(mounts.contains("tmpfs /dev/shm tmpfs "));
+
+        assert!(
+            String::from_utf8(proc_filesystems_bytes())
+                .unwrap()
+                .contains("proc")
+        );
 
         let mountinfo = String::from_utf8(proc_mountinfo_bytes()).unwrap();
         assert!(mountinfo.contains(" / / "));

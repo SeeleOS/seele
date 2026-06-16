@@ -15,6 +15,20 @@ pub(super) fn is_supported_api_mount(fstype: &str) -> bool {
     )
 }
 
+pub(super) fn create_api_filesystem(fstype: &str) -> Result<FileSystemRef, SyscallError> {
+    let fs: FileSystemRef = match fstype {
+        "proc" => Arc::new(Mut::new(ProcFs::new())),
+        "sysfs" => Arc::new(Mut::new(SysFs::new())),
+        "devtmpfs" => Arc::new(Mut::new(DevFs::new())),
+        "tmpfs" => Arc::new(Mut::new(TmpFs::new())),
+        "devpts" => Arc::new(Mut::new(DevPtsFs::new())),
+        "cgroup2" => Arc::new(Mut::new(CgroupFs::new())),
+        "bpf" | "pstore" | "securityfs" => Arc::new(Mut::new(TmpFs::new())),
+        _ => return Err(SyscallError::NoDevice),
+    };
+    Ok(fs)
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct FuseMountOptions {
     pub(super) fd: Option<u64>,

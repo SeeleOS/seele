@@ -148,6 +148,7 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Fstat => "filesystem_fd_state_syscalls_follow_linux_rules",
         Lseek => "filesystem_fd_state_syscalls_follow_linux_rules",
         Stat => "filesystem_metadata_syscalls_follow_linux_rules",
+        Lstat => "filesystem_metadata_syscalls_follow_linux_rules",
         Chmod => "filesystem_metadata_syscalls_follow_linux_rules",
         Fchmod => "filesystem_metadata_syscalls_follow_linux_rules",
         Newfstatat => "filesystem_metadata_syscalls_follow_linux_rules",

@@ -2,20 +2,24 @@ use crate::{
     define_syscall,
     filesystem::{
         absolute_path::AbsolutePath,
+        cgroupfs::CgroupFs,
+        devfs::{DevFs, DevPtsFs},
         errors::FSError,
         fusefs::FuseFs,
         info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
         object::{FileLikeObject, mount_device_id_for_path},
         path::Path,
+        procfs::ProcFs,
+        sysfs::SysFs,
         tmpfs::TmpFs,
-        vfs::VirtualFS,
+        vfs::{FileSystemRef, VirtualFS},
         vfs_operations::{
             file_info_path, open_path, open_path_nofollow, resolve_dir_path,
             resolve_path_with_mount_info,
         },
         vfs_traits::{DirectoryContentType, FileLikeType, MountFlags},
     },
-    memory::user_safe,
+    memory::{user_safe, utils::Mut},
     misc::{
         c_types::CString,
         others::KernelFrom,
@@ -879,6 +883,14 @@ mod tests {
         assert_eq!(followed_stat.st_mode & 0o170000, 0o100000);
         assert_eq!(followed_stat.st_mode & 0o777, 0o700);
 
+        expect_ok(
+            SyscallArgs::new([user_page, stat_ptr as u64, 0, 0, 0, 0]).call::<Lstat>(),
+            0,
+        );
+        let lstat_link_stat = read_user_value::<LinuxStat>(stat_ptr as u64);
+        assert_eq!(lstat_link_stat.st_mode & 0o170000, 0o120000);
+        assert_eq!(lstat_link_stat.st_ino, symlink_stat.st_ino);
+
         write_user_cstr(user_page, b"/tmp/syscall-metadata-test/file\0");
         expect_ok(
             SyscallArgs::new([user_page, stat_ptr as u64, 0, 0, 0, 0]).call::<Stat>(),
@@ -892,14 +904,26 @@ mod tests {
             SyscallArgs::new([0, stat_ptr as u64, 0, 0, 0, 0]).call::<Stat>(),
             SyscallError::BadAddress,
         );
+        expect_errno(
+            SyscallArgs::new([0, stat_ptr as u64, 0, 0, 0, 0]).call::<Lstat>(),
+            SyscallError::BadAddress,
+        );
         write_user_cstr(user_page + 256, b"\0");
         expect_errno(
             SyscallArgs::new([user_page + 256, stat_ptr as u64, 0, 0, 0, 0]).call::<Stat>(),
             SyscallError::FileNotFound,
         );
+        expect_errno(
+            SyscallArgs::new([user_page + 256, stat_ptr as u64, 0, 0, 0, 0]).call::<Lstat>(),
+            SyscallError::FileNotFound,
+        );
         write_user_cstr(user_page + 320, b"/tmp/syscall-metadata-test/missing\0");
         expect_errno(
             SyscallArgs::new([user_page + 320, stat_ptr as u64, 0, 0, 0, 0]).call::<Stat>(),
+            SyscallError::FileNotFound,
+        );
+        expect_errno(
+            SyscallArgs::new([user_page + 320, stat_ptr as u64, 0, 0, 0, 0]).call::<Lstat>(),
             SyscallError::FileNotFound,
         );
 

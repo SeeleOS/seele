@@ -10,6 +10,7 @@ pub enum SyscallNumber {
     Stat = 4,
     Poll = 7,
     Fstat = 5,
+    Lstat = 6,
     Lseek = 8,
     Mmap = 9,
     Mprotect = 10,
