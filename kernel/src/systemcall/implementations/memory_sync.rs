@@ -1120,7 +1120,14 @@ define_syscall!(Mincore, |addr: VirtAddr, len: usize, vec: *mut u8| {
 
 #[cfg(test)]
 mod tests {
-    use crate::systemcall::test::*;
+    use crate::systemcall::{
+        implementations::Futex,
+        test::{TestLinuxTimespec, memory_mapping_syscalls_follow_linux_rules},
+        test_helpers::{
+            SyscallArgs, allocate_user_test_page, expect_errno, expect_ok, write_user_value,
+        },
+        utils::SyscallError,
+    };
 
     crate::test!(
         futex_syscalls,
@@ -1132,4 +1139,98 @@ mod tests {
         "brk mmap mprotect munmap mremap msync and mincore follow linux rules",
         memory_mapping_syscalls_follow_linux_rules
     );
+
+    fn futex_syscalls_follow_linux_rules() {
+        const FUTEX_WAIT: u64 = 0;
+        const FUTEX_WAKE: u64 = 1;
+        const FUTEX_WAIT_BITSET: u64 = 9;
+        const FUTEX_WAKE_BITSET: u64 = 10;
+
+        let page = allocate_user_test_page();
+        write_user_value(page + 384, &7u32);
+        expect_errno(
+            SyscallArgs::new([page + 384, FUTEX_WAIT, 8, 0, 0, 0]).call::<Futex>(),
+            SyscallError::TryAgain,
+        );
+        write_user_value(
+            page + 392,
+            &TestLinuxTimespec {
+                tv_sec: 0,
+                tv_nsec: 1_000_000_000,
+            },
+        );
+        expect_errno(
+            SyscallArgs::new([page + 384, FUTEX_WAIT, 7, page + 392, 0, 0]).call::<Futex>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_ok(
+            SyscallArgs::new([page + 384, FUTEX_WAKE, 3, 0, 0, 0]).call::<Futex>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([page + 384, FUTEX_WAIT_BITSET, 7, 0, 0, 0]).call::<Futex>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([page + 384, FUTEX_WAKE_BITSET, 1, 0, 0, 0]).call::<Futex>(),
+            SyscallError::InvalidArguments,
+        );
+        write_user_value(
+            page + 392,
+            &TestLinuxTimespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            },
+        );
+        expect_errno(
+            SyscallArgs::new([page + 384, FUTEX_WAIT_BITSET, 7, page + 392, 0, 1]).call::<Futex>(),
+            SyscallError::TimedOut,
+        );
+        expect_ok(
+            SyscallArgs::new([page + 384, FUTEX_WAKE_BITSET, 1, 0, 0, 1]).call::<Futex>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([0, FUTEX_WAKE, 1, 0, 0, 0]).call::<Futex>(),
+            SyscallError::BadAddress,
+        );
+    }
+
+    fn typed_syscall_args_convert_flags_and_enums_at_boundary() {
+        assert_eq!(<u32 as SyscallArg>::from_u64(u64::MAX).unwrap(), u32::MAX);
+        assert!(<bool as SyscallArg>::from_u64(2).unwrap());
+        assert_eq!(
+            <Signal as SyscallArg>::from_u64(Signal::SIGTERM as u64).unwrap(),
+            Signal::SIGTERM
+        );
+        assert!(matches!(
+            <Signal as SyscallArg>::from_u64(0),
+            Err(SyscallError::InvalidArguments)
+        ));
+        assert_eq!(
+            <ClockId as SyscallArg>::from_u64(ClockId::Realtime as u64).unwrap(),
+            ClockId::Realtime
+        );
+        assert_eq!(
+            <Protection as SyscallArg>::from_u64((Protection::READ | Protection::WRITE).bits())
+                .unwrap()
+                .bits(),
+            (Protection::READ | Protection::WRITE).bits()
+        );
+        assert_eq!(
+            <Signals as SyscallArg>::from_u64(Signal::SIGINT.mask())
+                .unwrap()
+                .bits(),
+            Signals::SIGINT.bits()
+        );
+        assert_eq!(
+            <OpenFlags as SyscallArg>::from_u64(
+                (OpenFlags::CLOEXEC | OpenFlags::NONBLOCK).bits() as u64
+            )
+            .unwrap()
+            .bits(),
+            (OpenFlags::CLOEXEC | OpenFlags::NONBLOCK).bits()
+        );
+        assert!(<PollEvents as SyscallArg>::from_u64(PollEvents::POLLIN.bits() as u64).is_ok());
+    }
 }
