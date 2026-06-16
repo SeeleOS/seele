@@ -1,11 +1,11 @@
 mod apk;
-mod command;
 mod disk;
 mod mount;
 
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use std::{env, fs, path::PathBuf};
+use xshell::Shell;
 
 use self::{
     apk::{install_packages, write_repositories},
@@ -24,21 +24,21 @@ pub struct BuildRootfsArgs {
 
 pub fn build_rootfs(args: BuildRootfsArgs) -> Result<i32> {
     let repo_root = repo_root()?;
-    env::set_current_dir(&repo_root)
-        .with_context(|| format!("failed to enter {}", repo_root.display()))?;
+    let mut sh = Shell::new()?;
+    sh.set_current_dir(&repo_root);
 
     let disk = repo_root.join("disk.img");
     let sysroot = repo_root.join("sysroot");
     fs::create_dir_all(&sysroot)
         .with_context(|| format!("failed to create {}", sysroot.display()))?;
 
-    unmount_if_mounted(&sysroot)?;
-    prepare_disk(&disk, args.override_disk()?)?;
-    mount_disk(&disk, &sysroot)?;
+    unmount_if_mounted(&sh, &sysroot)?;
+    prepare_disk(&sh, &disk, args.override_disk()?)?;
+    mount_disk(&sh, &disk, &sysroot)?;
 
     let _mount = MountedSysroot { path: &sysroot };
-    write_repositories(&repo_root, &sysroot)?;
-    install_packages(&sysroot)?;
+    write_repositories(&sh, &repo_root, &sysroot)?;
+    install_packages(&sh, &sysroot)?;
 
     Ok(0)
 }

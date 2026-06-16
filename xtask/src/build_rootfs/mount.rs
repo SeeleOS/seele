@@ -1,30 +1,21 @@
-use crate::build_rootfs::command::run;
-use anyhow::{Context, Result};
-use std::{path::Path, process::Command};
+use anyhow::Result;
+use std::path::Path;
+use xshell::{Shell, cmd};
 
-pub fn mount_disk(disk: &Path, sysroot: &Path) -> Result<()> {
-    run(Command::new("sudo")
-        .arg("mount")
-        .arg("-o")
-        .arg("loop")
-        .arg(disk)
-        .arg(sysroot))
+pub fn mount_disk(sh: &Shell, disk: &Path, sysroot: &Path) -> Result<()> {
+    cmd!(sh, "sudo mount -o loop {disk} {sysroot}").run()?;
+    Ok(())
 }
 
-pub fn unmount_if_mounted(sysroot: &Path) -> Result<()> {
-    if is_mountpoint(sysroot)? {
-        run(Command::new("sudo").arg("umount").arg("-l").arg(sysroot))?;
+pub fn unmount_if_mounted(sh: &Shell, sysroot: &Path) -> Result<()> {
+    if is_mountpoint(sh, sysroot)? {
+        cmd!(sh, "sudo umount -l {sysroot}").run()?;
     }
     Ok(())
 }
 
-fn is_mountpoint(path: &Path) -> Result<bool> {
-    let status = Command::new("mountpoint")
-        .arg("-q")
-        .arg(path)
-        .status()
-        .with_context(|| format!("failed to inspect mountpoint {}", path.display()))?;
-    Ok(status.success())
+fn is_mountpoint(sh: &Shell, path: &Path) -> Result<bool> {
+    Ok(cmd!(sh, "mountpoint -q {path}").run().is_ok())
 }
 
 pub struct MountedSysroot<'a> {
@@ -33,12 +24,11 @@ pub struct MountedSysroot<'a> {
 
 impl Drop for MountedSysroot<'_> {
     fn drop(&mut self) {
-        if is_mountpoint(self.path).unwrap_or(false) {
-            let _ = Command::new("sudo")
-                .arg("umount")
-                .arg("-l")
-                .arg(self.path)
-                .status();
+        let path = self.path;
+        if let Ok(sh) = Shell::new()
+            && is_mountpoint(&sh, path).unwrap_or(false)
+        {
+            let _ = cmd!(sh, "sudo umount -l {path}").run();
         }
     }
 }

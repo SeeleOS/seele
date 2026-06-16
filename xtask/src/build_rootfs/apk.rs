@@ -1,6 +1,6 @@
-use crate::build_rootfs::command::run;
 use anyhow::{Context, Result};
-use std::{fs, path::Path, process::Command};
+use std::{fs, path::Path};
+use xshell::{Shell, cmd};
 
 const ALPINE_BRANCH: &str = "v3.24";
 const ALPINE_MIRROR: &str = "https://dl-cdn.alpinelinux.org/alpine";
@@ -24,7 +24,7 @@ const ALPINE_PACKAGES: &[&str] = &[
     "cargo",
 ];
 
-pub fn write_repositories(repo_root: &Path, sysroot: &Path) -> Result<()> {
+pub fn write_repositories(sh: &Shell, repo_root: &Path, sysroot: &Path) -> Result<()> {
     let repositories = format!(
         "{mirror}/{branch}/main\n{mirror}/{branch}/community\n",
         mirror = ALPINE_MIRROR,
@@ -35,27 +35,16 @@ pub fn write_repositories(repo_root: &Path, sysroot: &Path) -> Result<()> {
         .with_context(|| format!("failed to write {}", temp_file.display()))?;
 
     let target = sysroot.join("etc/apk/repositories");
-    let install_result = run(Command::new("sudo")
-        .arg("install")
-        .arg("-D")
-        .arg("-m")
-        .arg("0644")
-        .arg(&temp_file)
-        .arg(&target));
+    cmd!(sh, "sudo install -D -m 0644 {temp_file} {target}").run()?;
     fs::remove_file(&temp_file).ok();
-    install_result
+    Ok(())
 }
 
-pub fn install_packages(sysroot: &Path) -> Result<()> {
-    let mut command = Command::new("sudo");
-    command
-        .arg("apk")
-        .arg("--root")
-        .arg(sysroot)
-        .arg("--initdb")
-        .arg("--update-cache")
-        .arg("--allow-untrusted")
-        .arg("add")
-        .args(ALPINE_PACKAGES);
-    run(&mut command)
+pub fn install_packages(sh: &Shell, sysroot: &Path) -> Result<()> {
+    cmd!(
+        sh,
+        "sudo apk --root {sysroot} --initdb --update-cache --allow-untrusted add {ALPINE_PACKAGES...}"
+    )
+    .run()?;
+    Ok(())
 }
