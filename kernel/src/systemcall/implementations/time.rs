@@ -453,21 +453,21 @@ define_syscall!(SchedRrGetInterval, |pid: i32, tp: *mut LinuxTimespec| {
 
 #[cfg(test)]
 mod tests {
-    use crate::systemcall::test::clock_and_affinity_syscalls_follow_linux_pointer_rules;
     use crate::{
         object::{FileFlags, misc::get_object_current_process},
         process::FdFlags,
         systemcall::{
             implementations::{
-                ClockGetres, Eventfd, TimerfdCreate, TimerfdGettime, TimerfdSettime,
+                ClockGetres, ClockGettime, ClockNanosleep, ClockSettime, Eventfd, SchedGetaffinity,
+                SchedSetaffinity, TimerfdCreate, TimerfdGettime, TimerfdSettime,
             },
             test::{
                 TestLinuxItimerspec, TestLinuxTimespec, assert_fd_flags, assert_object_flags,
                 close_test_fd, expect_fd,
             },
             test_helpers::{
-                SyscallArgs, allocate_user_test_page, expect_errno, expect_ok, read_user_value,
-                write_user_value,
+                SyscallArgs, allocate_user_test_page, assert_user_bytes, expect_errno, expect_ok,
+                read_user_value, write_user_value,
             },
             utils::SyscallError,
         },
@@ -501,6 +501,148 @@ mod tests {
         expect_errno(
             SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<ClockGetres>(),
             SyscallError::InvalidArguments,
+        );
+    }
+
+    fn clock_and_affinity_syscalls_follow_linux_pointer_rules() {
+        const CLOCK_REALTIME: u64 = 0;
+        const CLOCK_MONOTONIC: u64 = 1;
+        const TIMER_ABSTIME: u64 = 1;
+
+        let clock_page = allocate_user_test_page();
+        expect_ok(
+            SyscallArgs::new([CLOCK_REALTIME, clock_page, 0, 0, 0, 0]).call::<ClockGettime>(),
+            0,
+        );
+        let realtime = read_user_value::<TestLinuxTimespec>(clock_page);
+        assert!(realtime.tv_sec >= 0);
+        assert!((0..1_000_000_000).contains(&realtime.tv_nsec));
+        expect_ok(
+            SyscallArgs::new([CLOCK_MONOTONIC, clock_page, 0, 0, 0, 0]).call::<ClockGettime>(),
+            0,
+        );
+        let monotonic = read_user_value::<TestLinuxTimespec>(clock_page);
+        assert!(monotonic.tv_sec >= 0);
+        assert!((0..1_000_000_000).contains(&monotonic.tv_nsec));
+        expect_errno(
+            SyscallArgs::new([99, clock_page, 0, 0, 0, 0]).call::<ClockGettime>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([CLOCK_REALTIME, 0, 0, 0, 0, 0]).call::<ClockGettime>(),
+            SyscallError::BadAddress,
+        );
+
+        write_user_value(
+            clock_page,
+            &TestLinuxTimespec {
+                tv_sec: -1,
+                tv_nsec: 0,
+            },
+        );
+        expect_errno(
+            SyscallArgs::new([CLOCK_REALTIME, clock_page, 0, 0, 0, 0]).call::<ClockSettime>(),
+            SyscallError::InvalidArguments,
+        );
+        write_user_value(
+            clock_page,
+            &TestLinuxTimespec {
+                tv_sec: 0,
+                tv_nsec: 1_000_000_000,
+            },
+        );
+        expect_errno(
+            SyscallArgs::new([CLOCK_REALTIME, clock_page, 0, 0, 0, 0]).call::<ClockSettime>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([CLOCK_MONOTONIC, clock_page, 0, 0, 0, 0]).call::<ClockSettime>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([CLOCK_REALTIME, 0, 0, 0, 0, 0]).call::<ClockSettime>(),
+            SyscallError::BadAddress,
+        );
+
+        write_user_value(
+            clock_page,
+            &TestLinuxTimespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            },
+        );
+        expect_ok(
+            SyscallArgs::new([CLOCK_MONOTONIC, TIMER_ABSTIME, clock_page, 0, 0, 0])
+                .call::<ClockNanosleep>(),
+            0,
+        );
+        write_user_value(
+            clock_page,
+            &TestLinuxTimespec {
+                tv_sec: 0,
+                tv_nsec: 1_000_000_000,
+            },
+        );
+        expect_errno(
+            SyscallArgs::new([CLOCK_MONOTONIC, 0, clock_page, 0, 0, 0]).call::<ClockNanosleep>(),
+            SyscallError::InvalidArguments,
+        );
+        write_user_value(
+            clock_page,
+            &TestLinuxTimespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            },
+        );
+        expect_ok(
+            SyscallArgs::new([CLOCK_MONOTONIC, TIMER_ABSTIME, clock_page, 0, 0, 0])
+                .call::<ClockNanosleep>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([99, 0, clock_page, 0, 0, 0]).call::<ClockNanosleep>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([CLOCK_MONOTONIC, 0, 0, 0, 0, 0]).call::<ClockNanosleep>(),
+            SyscallError::BadAddress,
+        );
+
+        let mask_page = allocate_user_test_page();
+        write_user_value(mask_page, &[1u8, 0, 0, 0, 0, 0, 0, 0]);
+        expect_ok(
+            SyscallArgs::new([0, 8, mask_page, 0, 0, 0]).call::<SchedSetaffinity>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([u64::MAX, 8, mask_page, 0, 0, 0]).call::<SchedSetaffinity>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([0, 0, mask_page, 0, 0, 0]).call::<SchedSetaffinity>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([0, 8, 0, 0, 0, 0]).call::<SchedSetaffinity>(),
+            SyscallError::BadAddress,
+        );
+
+        expect_ok(
+            SyscallArgs::new([0, 8, mask_page, 0, 0, 0]).call::<SchedGetaffinity>(),
+            8,
+        );
+        assert_user_bytes(mask_page, &[1, 0, 0, 0, 0, 0, 0, 0]);
+        expect_errno(
+            SyscallArgs::new([u64::MAX, 8, mask_page, 0, 0, 0]).call::<SchedGetaffinity>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([0, 4, mask_page, 0, 0, 0]).call::<SchedGetaffinity>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([0, 8, 0, 0, 0, 0]).call::<SchedGetaffinity>(),
+            SyscallError::BadAddress,
         );
     }
 
