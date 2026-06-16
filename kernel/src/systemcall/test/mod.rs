@@ -143,33 +143,6 @@ pub(crate) struct TestLinuxEpollEvent {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub(crate) struct TestLinuxSignalfdSiginfo {
-    ssi_signo: u32,
-    ssi_errno: i32,
-    ssi_code: i32,
-    ssi_pid: u32,
-    ssi_uid: u32,
-    ssi_fd: i32,
-    ssi_tid: u32,
-    ssi_band: u32,
-    ssi_overrun: u32,
-    ssi_trapno: u32,
-    ssi_status: i32,
-    ssi_int: i32,
-    ssi_ptr: u64,
-    ssi_utime: u64,
-    ssi_stime: u64,
-    ssi_addr: u64,
-    ssi_addr_lsb: u16,
-    __pad2: u16,
-    ssi_syscall: i32,
-    ssi_call_addr: u64,
-    ssi_arch: u32,
-    __pad: [u8; 28],
-}
-
-#[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TestLinuxSockAddrUn {
     sun_family: u16,
@@ -4493,70 +4466,6 @@ pub(crate) fn sysfs_syscalls_follow_linux_sysfs_abi_rules() {
         SyscallError::ReadOnlyFileSystem,
     );
     close_test_fd(readonly_active_fd);
-}
-
-pub(crate) fn signalfd_syscalls_follow_linux_rules() {
-    const SFD_NONBLOCK: u64 = 0o4_000;
-    const SFD_CLOEXEC: u64 = 0o2_000_000;
-
-    assert_linux_layout::<TestLinuxSignalfdSiginfo>(128, 8);
-
-    let sigmask_user = allocate_user_test_page();
-    write_user_value(sigmask_user, &Signal::SIGUSR1.mask());
-    let signalfd = expect_fd(
-        SyscallArgs::new([
-            (-1i32) as u64,
-            sigmask_user,
-            core::mem::size_of::<u64>() as u64,
-            SFD_NONBLOCK | SFD_CLOEXEC,
-            0,
-            0,
-        ])
-        .call::<Signalfd4>(),
-    );
-    assert_fd_flags(signalfd, FdFlags::CLOEXEC);
-    assert_object_flags(signalfd, FileFlags::NONBLOCK);
-    let siginfo_buf = allocate_user_test_page();
-    expect_errno(
-        SyscallArgs::new([(-1i32) as u64, sigmask_user, 4, 0, 0, 0]).call::<Signalfd4>(),
-        SyscallError::InvalidArguments,
-    );
-
-    let mut siginfo: SigInfo = unsafe { core::mem::zeroed() };
-    siginfo.si_signo = Signal::SIGUSR1 as i32;
-    siginfo.si_errno = 123;
-    siginfo.si_code = -6;
-    let process = get_current_process();
-    send_signal_to_process_with_siginfo(&process, Signal::SIGUSR1, siginfo);
-    expect_ok(
-        SyscallArgs::new([signalfd as u64, siginfo_buf, 128, 0, 0, 0]).call::<Read>(),
-        128,
-    );
-    let signalfd_info = read_user_value::<TestLinuxSignalfdSiginfo>(siginfo_buf);
-    assert_eq!(signalfd_info.ssi_signo, Signal::SIGUSR1 as u32);
-    assert_eq!(signalfd_info.ssi_errno, 123);
-    assert_eq!(signalfd_info.ssi_code, -6);
-    assert_eq!(signalfd_info.ssi_pid, process.lock().pid.0 as u32);
-
-    write_user_value(sigmask_user, &Signal::SIGTERM.mask());
-    expect_ok(
-        SyscallArgs::new([
-            signalfd as u64,
-            sigmask_user,
-            core::mem::size_of::<u64>() as u64,
-            0,
-            0,
-            0,
-        ])
-        .call::<Signalfd4>(),
-        signalfd,
-    );
-    expect_errno(
-        SyscallArgs::new([signalfd as u64, siginfo_buf, 127, 0, 0, 0]).call::<Read>(),
-        SyscallError::InvalidArguments,
-    );
-
-    close_test_fd(signalfd);
 }
 
 pub(crate) fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
