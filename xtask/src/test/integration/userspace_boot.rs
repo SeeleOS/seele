@@ -1,28 +1,23 @@
-use super::IntegrationTest;
+use super::{IntegrationTest, IntegrationTestResult};
 use crate::run::{
     build::build_kernel,
-    qemu::{RunOptions, create_uefi_image, run_qemu_until_serial_condition},
+    qemu::{RunOptions, create_uefi_image, run_qemu_until_serial_condition_capture},
 };
 use anyhow::{Context, Result};
 use std::{env, fs, path::Path, time::Duration};
 
 pub const USERSPACE_BOOT: UserspaceBoot = UserspaceBoot;
 
-const USERSPACE_STARTUP_PATTERNS: &[&str] = &[
-    "Welcome to Arch Linux",
-    "Reached target",
-    "login",
-    "systemd",
-];
+const USERSPACE_STARTUP_PATTERNS: &[&str] = &["Welcome to Alpine Linux", "OpenRC", "login"];
 
 pub struct UserspaceBoot;
 
 impl IntegrationTest for UserspaceBoot {
-    fn name(&self) -> &'static str {
-        "userspace_boot"
+    fn test_count(&self) -> usize {
+        1
     }
 
-    fn run(&self) -> Result<i32> {
+    fn run(&self) -> Result<Vec<IntegrationTestResult>> {
         let kernel_paths = build_kernel()?;
         let kernel_path = kernel_paths
             .first()
@@ -30,20 +25,20 @@ impl IntegrationTest for UserspaceBoot {
             .context("kernel executable missing")?;
         let uefi_path = create_uefi_image(kernel_path)?;
         let options = RunOptions::for_agent_run_without_timeout();
-        let exit_code = run_qemu_until_serial_condition(
+        let result = run_qemu_until_serial_condition_capture(
             &uefi_path,
             &options,
             qemu_test_timeout(),
             userspace_startup_observed,
         )?;
-        if exit_code == 0 {
-            eprintln!("integration test userspace_boot: startup signal observed");
-        } else {
-            eprintln!("integration test userspace_boot: startup signal not observed");
-        }
         fs::remove_file(&uefi_path)
             .with_context(|| format!("failed to remove UEFI image {}", uefi_path.display()))?;
-        Ok(exit_code)
+        Ok(vec![IntegrationTestResult {
+            name: "integration::userspace_boot".to_string(),
+            exit_code: result.exit_code,
+            failure: result.failure,
+            output: result.serial_output,
+        }])
     }
 }
 

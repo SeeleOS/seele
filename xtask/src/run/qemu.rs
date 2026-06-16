@@ -27,6 +27,12 @@ pub struct RunOptions {
     qemu_debugcon: Option<PathBuf>,
 }
 
+pub struct QemuTestResult {
+    pub exit_code: i32,
+    pub serial_output: String,
+    pub failure: Option<String>,
+}
+
 struct QemuRunContext {
     serial_log: PathBuf,
     qmp_socket: PathBuf,
@@ -114,61 +120,65 @@ pub fn create_uefi_image(kernel_path: &Path) -> Result<PathBuf> {
 }
 
 pub fn run_qemu(uefi_path: &Path, options: &RunOptions) -> Result<i32> {
-    run_qemu_inner(uefi_path, options)
+    Ok(run_qemu_inner_capture(uefi_path, options, true)?.exit_code)
 }
 
-pub fn run_qemu_test(uefi_path: &Path) -> Result<i32> {
-    run_qemu_inner(uefi_path, &RunOptions::for_tests())
+pub fn run_qemu_test_capture(uefi_path: &Path) -> Result<QemuTestResult> {
+    run_qemu_inner_capture(uefi_path, &RunOptions::for_tests(), false)
 }
 
-pub fn run_qemu_expect_serial_failure(
+pub fn run_qemu_expect_serial_failure_capture(
     uefi_path: &Path,
     serial_pattern: &str,
     expected_exit_code: i32,
-) -> Result<i32> {
+) -> Result<QemuTestResult> {
     let options = RunOptions::for_tests();
     let context = QemuRunContext::new(&options);
     let mut cmd = build_qemu_command(uefi_path, &options, &context)?;
     let mut child = cmd.spawn().context("failed to start qemu-system-x86_64")?;
-    let background_done = Arc::new(AtomicBool::new(false));
-    let serial_log_thread = {
-        let serial_log = context.serial_log.clone();
-        let done = background_done.clone();
-        thread::spawn(move || stream_serial_log(&serial_log, &done))
-    };
 
     let status = child.wait().context("failed to wait on qemu")?;
-    background_done.store(true, Ordering::Release);
-    let _ = serial_log_thread.join();
 
     let serial_output = fs::read_to_string(&context.serial_log).unwrap_or_default();
     let actual_exit_code = decode_qemu_exit_code(status.code(), &context)?;
     if !serial_output.contains(serial_pattern) {
-        eprintln!("expected serial pattern not observed: {serial_pattern}");
+        let failure = format!("expected serial pattern not observed: {serial_pattern}");
         cleanup_qemu_context(&context);
         cleanup_qemu_debug_log(&context);
-        return Ok(1);
+        return Ok(QemuTestResult {
+            exit_code: 1,
+            serial_output,
+            failure: Some(failure),
+        });
     }
     if actual_exit_code != expected_exit_code {
-        eprintln!(
+        let failure = format!(
             "unexpected qemu exit code: expected {expected_exit_code}, got {actual_exit_code}"
         );
         cleanup_qemu_context(&context);
         cleanup_qemu_debug_log(&context);
-        return Ok(1);
+        return Ok(QemuTestResult {
+            exit_code: 1,
+            serial_output,
+            failure: Some(failure),
+        });
     }
 
     cleanup_qemu_context(&context);
     cleanup_qemu_debug_log(&context);
-    Ok(0)
+    Ok(QemuTestResult {
+        exit_code: 0,
+        serial_output,
+        failure: None,
+    })
 }
 
-pub fn run_qemu_until_serial_condition(
+pub fn run_qemu_until_serial_condition_capture(
     uefi_path: &Path,
     options: &RunOptions,
     timeout: Duration,
     mut condition: impl FnMut(&str) -> bool,
-) -> Result<i32> {
+) -> Result<QemuTestResult> {
     let context = QemuRunContext::new(options);
     let mut cmd = build_qemu_command(uefi_path, options, &context)?;
     let mut child = cmd.spawn().context("failed to start qemu-system-x86_64")?;
@@ -177,7 +187,7 @@ pub fn run_qemu_until_serial_condition(
     let mut serial_log = None;
     let mut captured = String::new();
 
-    let exit_code = loop {
+    let (exit_code, failure) = loop {
         if serial_log.is_none()
             && let Ok(opened) = fs::File::open(&context.serial_log)
         {
@@ -188,32 +198,35 @@ pub fn run_qemu_until_serial_condition(
             if condition(&captured) {
                 let _ = child.kill();
                 let _ = child.wait();
-                break 0;
+                break (0, None);
             }
         }
 
         match child.try_wait() {
             Ok(Some(status)) => {
-                eprintln!("qemu exited before serial condition was observed");
                 if let Some(path) = &context.debug_log {
                     report_qemu_fault(path)?;
                 }
-                break status.code().unwrap_or(1).max(1);
+                break (
+                    status.code().unwrap_or(1).max(1),
+                    Some("qemu exited before serial condition was observed".to_string()),
+                );
             }
             Ok(None) => {}
             Err(err) => {
-                eprintln!("failed to poll qemu: {err}");
                 let _ = child.kill();
                 let _ = child.wait();
-                break 1;
+                break (1, Some(format!("failed to poll qemu: {err}")));
             }
         }
 
         if Instant::now() >= deadline {
-            eprintln!("timed out waiting for serial condition");
             let _ = child.kill();
             let _ = child.wait();
-            break 1;
+            break (
+                1,
+                Some("timed out waiting for serial condition".to_string()),
+            );
         }
 
         thread::sleep(Duration::from_millis(10));
@@ -221,26 +234,41 @@ pub fn run_qemu_until_serial_condition(
 
     cleanup_qemu_context(&context);
     cleanup_qemu_debug_log(&context);
-    Ok(exit_code)
+    Ok(QemuTestResult {
+        exit_code,
+        serial_output: captured,
+        failure,
+    })
 }
 
-fn run_qemu_inner(uefi_path: &Path, options: &RunOptions) -> Result<i32> {
+fn run_qemu_inner_capture(
+    uefi_path: &Path,
+    options: &RunOptions,
+    stream_output: bool,
+) -> Result<QemuTestResult> {
     let context = QemuRunContext::new(options);
     let mut cmd = build_qemu_command(uefi_path, options, &context)?;
     let mut child = cmd.spawn().context("failed to start qemu-system-x86_64")?;
     let background_done = Arc::new(AtomicBool::new(false));
-    let serial_log_thread = {
+    let serial_log_thread = stream_output.then(|| {
         let serial_log = context.serial_log.clone();
         let done = background_done.clone();
         thread::spawn(move || stream_serial_log(&serial_log, &done))
-    };
+    });
     let status = child.wait().context("failed to wait on qemu")?;
     background_done.store(true, Ordering::Release);
-    let _ = serial_log_thread.join();
+    if let Some(serial_log_thread) = serial_log_thread {
+        let _ = serial_log_thread.join();
+    }
+    let serial_output = fs::read_to_string(&context.serial_log).unwrap_or_default();
     cleanup_qemu_context(&context);
     let exit_code = decode_qemu_exit_code(status.code(), &context)?;
     cleanup_qemu_debug_log(&context);
-    Ok(exit_code)
+    Ok(QemuTestResult {
+        exit_code,
+        serial_output,
+        failure: (exit_code != 0).then(|| format!("qemu exited with code {exit_code}")),
+    })
 }
 
 pub fn run_qemu_mcp(uefi_path: &Path, options: &RunOptions) -> Result<i32> {

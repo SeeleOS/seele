@@ -3,7 +3,7 @@ bindeps = true
 
 [alias]
 xrun = "run -p xtask -- run"
-xtest = "run -p xtask -- test"
+xtest = "run -q -p xtask -- test"
 xbuild-rootfs = "run -p xtask -- build-rootfs"
 
 [target.x86_64-seele]

@@ -31,7 +31,12 @@ pub fn stream_serial_log(serial_log: &Path, done: &AtomicBool) {
         }
 
         let drained = match file.as_mut() {
-            Some(file) => drain_serial_log(file, &mut offset).len(),
+            Some(file) => {
+                let output = drain_serial_log(file, &mut offset);
+                print!("{output}");
+                let _ = io::stdout().flush();
+                output.len()
+            }
             None => 0,
         };
         if done.load(Ordering::Acquire) && drained == 0 {
@@ -54,8 +59,6 @@ pub fn drain_serial_log(file: &mut fs::File, offset: &mut u64) -> String {
             Ok(read) => {
                 *offset += read as u64;
                 let chunk = String::from_utf8_lossy(&buffer[..read]);
-                print!("{chunk}");
-                let _ = io::stdout().flush();
                 output.push_str(&chunk);
             }
             Err(_) => break,

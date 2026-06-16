@@ -1,7 +1,7 @@
-use super::IntegrationTest;
+use super::{IntegrationTest, IntegrationTestResult};
 use crate::run::{
     build::{BuildMode, build_kernel_with_mode},
-    qemu::{create_uefi_image, run_qemu_expect_serial_failure},
+    qemu::{create_uefi_image, run_qemu_expect_serial_failure_capture},
 };
 use anyhow::{Context, Result};
 use std::fs;
@@ -14,22 +14,26 @@ const PANIC_HANDLER_PATTERN: &str = "panic handler smoke";
 pub struct PanicHandlerSmoke;
 
 impl IntegrationTest for PanicHandlerSmoke {
-    fn name(&self) -> &'static str {
-        "panic_handler_smoke"
+    fn test_count(&self) -> usize {
+        PANIC_HANDLER_IMAGE.len()
     }
 
-    fn run(&self) -> Result<i32> {
+    fn run(&self) -> Result<Vec<IntegrationTestResult>> {
+        let mut results = Vec::new();
         for kernel_test in build_kernel_with_mode(BuildMode::IntegrationTests(PANIC_HANDLER_IMAGE))?
         {
-            eprintln!("running integration test: {}", kernel_test.display());
             let uefi_path = create_uefi_image(&kernel_test)?;
-            let exit_code = run_qemu_expect_serial_failure(&uefi_path, PANIC_HANDLER_PATTERN, 1)?;
+            let result =
+                run_qemu_expect_serial_failure_capture(&uefi_path, PANIC_HANDLER_PATTERN, 1)?;
             fs::remove_file(&uefi_path)
                 .with_context(|| format!("failed to remove UEFI image {}", uefi_path.display()))?;
-            if exit_code != 0 {
-                return Ok(exit_code);
-            }
+            results.push(IntegrationTestResult {
+                name: "integration::panic_handler_smoke".to_string(),
+                exit_code: result.exit_code,
+                failure: result.failure,
+                output: result.serial_output,
+            });
         }
-        Ok(0)
+        Ok(results)
     }
 }
