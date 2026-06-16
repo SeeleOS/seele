@@ -9,6 +9,7 @@ extern crate alloc;
 #[cfg(test)]
 use bootloader_api::entry_point;
 pub const NAME: &str = "Seele";
+pub const SMP_ENABLED: bool = false;
 
 pub mod acpi;
 pub mod boot;

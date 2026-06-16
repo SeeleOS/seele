@@ -32,6 +32,15 @@ const AP_WAKE_SPINS: usize = 10_000_000;
 static AP_SCHEDULER_ENTRY_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 pub fn start_application_processors() {
+    if !crate::SMP_ENABLED {
+        log::info!("smp: disabled");
+        profile::ensure_cpu_slots(1);
+        if let Some(thread_manager) = thread::THREAD_MANAGER.get() {
+            thread_manager.lock().resize_ready_queues(1);
+        }
+        return;
+    }
+
     AP_SCHEDULER_ENTRY_COUNT.store(0, Ordering::Release);
 
     let discover_start = Time::since_boot();
@@ -73,6 +82,10 @@ pub fn start_application_processors() {
 }
 
 pub fn release_application_processors() {
+    if !crate::SMP_ENABLED {
+        return;
+    }
+
     let processors = topology::application_processors();
     let release_start = Time::since_boot();
 

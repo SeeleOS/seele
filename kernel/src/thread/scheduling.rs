@@ -47,12 +47,21 @@ pub fn request_current_cpu_resched() {
 }
 
 pub fn request_remote_resched(apic_id: u32) {
+    if !crate::SMP_ENABLED {
+        return;
+    }
+
     crate::smp::with_cpu_by_apic_id(apic_id, |cpu| {
         cpu.need_resched.store(true, Ordering::Release);
     });
 }
 
 pub fn request_all_cpus_resched() {
+    if !crate::SMP_ENABLED {
+        request_current_cpu_resched();
+        return;
+    }
+
     for processor in crate::smp::topology::processors() {
         if processor.apic_id == current_apic_id() {
             request_current_cpu_resched();

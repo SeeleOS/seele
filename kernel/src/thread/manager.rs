@@ -41,7 +41,12 @@ pub struct ThreadManager {
 
 impl ThreadManager {
     pub fn init(&mut self) {
-        self.resize_ready_queues(crate::smp::topology::processors().len().max(1));
+        let cpu_count = if crate::SMP_ENABLED {
+            crate::smp::topology::processors().len()
+        } else {
+            1
+        };
+        self.resize_ready_queues(cpu_count);
     }
 
     pub fn resize_ready_queues(&mut self, cpu_count: usize) {
