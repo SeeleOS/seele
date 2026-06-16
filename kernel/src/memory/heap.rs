@@ -1,6 +1,6 @@
 use buddy_system_allocator::{Heap, LockedHeapWithRescue};
 use core::{
-    alloc::Layout,
+    alloc::{GlobalAlloc, Layout},
     sync::atomic::{AtomicUsize, Ordering},
 };
 use x86_64::structures::paging::{
@@ -80,6 +80,19 @@ fn grow_heap(heap: &mut Heap<32>, layout: &Layout) {
         heap.add_to_heap(grow_start, grow_start + grow_bytes);
     }
     HEAP_MAPPED_BYTES.store(mapped + grow_bytes, Ordering::Release);
+}
+
+pub fn allocate(layout: Layout) -> *mut u8 {
+    unsafe { HEAP_ALLOCATOR.alloc(layout) }
+}
+
+/// # Safety
+///
+/// `ptr` must have been allocated by `allocate` with the same `layout`.
+pub unsafe fn deallocate(ptr: *mut u8, layout: Layout) {
+    unsafe {
+        HEAP_ALLOCATOR.dealloc(ptr, layout);
+    }
 }
 
 fn map_heap_range(
