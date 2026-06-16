@@ -26,8 +26,21 @@ pub fn run() -> Result<i32> {
                 }
             }
             break;
+        } else {
+            print_unit_output(&result.serial_output);
         }
     }
 
     Ok(exit_code)
+}
+
+fn print_unit_output(serial_output: &str) {
+    let Some((_, test_output)) = serial_output.split_once("Running ") else {
+        return;
+    };
+
+    eprint!("Running {test_output}");
+    if !test_output.ends_with('\n') {
+        eprintln!();
+    }
 }
