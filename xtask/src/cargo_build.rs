@@ -4,8 +4,9 @@ use std::{
     env,
     io::{BufRead, BufReader},
     path::PathBuf,
-    process::{Command, Stdio},
+    process::Stdio,
 };
+use xshell::{Shell, cmd};
 
 pub enum BuildMode {
     Run,
@@ -22,49 +23,18 @@ pub fn build_kernel_tests() -> Result<Vec<PathBuf>> {
 }
 
 pub fn build_kernel_with_mode(mode: BuildMode) -> Result<Vec<PathBuf>> {
+    let sh = Shell::new()?;
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-    let mut command = Command::new(cargo);
-    command.arg(match mode {
-        BuildMode::Run => "build",
-        BuildMode::UnitTest | BuildMode::IntegrationTests(_) => "test",
-    });
-    command.args(["-p", "kernel", "--target", "x86_64-unknown-none"]);
-
-    if !cfg!(debug_assertions) {
-        command.arg("--release");
-    }
+    let cargo_args = cargo_args(&mode);
+    let mut command = cmd!(sh, "{cargo} {cargo_args...}").to_command();
 
     match mode {
-        BuildMode::Run => {
-            command.args(["--bin", "kernel"]);
-        }
-        BuildMode::UnitTest => {
-            command.args([
-                "--lib",
-                "-Z",
-                "build-std=core,alloc",
-                "-Z",
-                "panic-abort-tests",
-                "--no-run",
-            ]);
+        BuildMode::UnitTest | BuildMode::IntegrationTests(_) => {
             command.env("RUSTFLAGS", append_rustflags());
         }
-        BuildMode::IntegrationTests(tests) => {
-            for test in tests {
-                command.args(["--test", test]);
-            }
-            command.args([
-                "-Z",
-                "build-std=core,alloc",
-                "-Z",
-                "panic-abort-tests",
-                "--no-run",
-            ]);
-            command.env("RUSTFLAGS", append_rustflags());
-        }
+        BuildMode::Run => {}
     }
 
-    command.arg("--message-format=json-render-diagnostics");
     command.stdout(Stdio::piped());
     command.stderr(Stdio::inherit());
 
@@ -74,7 +44,7 @@ pub fn build_kernel_with_mode(mode: BuildMode) -> Result<Vec<PathBuf>> {
     let mut executables = Vec::new();
 
     for line in reader.lines() {
-        let line = line.context("failed to read cargo output")?;
+        let line: String = line.context("failed to read cargo output")?;
         if let Some(path) = handle_cargo_message(&line, &mode) {
             executables.push(path);
         }
@@ -88,6 +58,59 @@ pub fn build_kernel_with_mode(mode: BuildMode) -> Result<Vec<PathBuf>> {
         bail!("kernel executable missing from cargo output");
     }
     Ok(executables)
+}
+
+fn cargo_args(mode: &BuildMode) -> Vec<String> {
+    let mut args = Vec::new();
+    args.push(
+        match mode {
+            BuildMode::Run => "build",
+            BuildMode::UnitTest | BuildMode::IntegrationTests(_) => "test",
+        }
+        .to_string(),
+    );
+    args.extend(["-p", "kernel", "--target", "x86_64-unknown-none"].map(str::to_string));
+
+    if !cfg!(debug_assertions) {
+        args.push("--release".to_string());
+    }
+
+    match mode {
+        BuildMode::Run => {
+            args.extend(["--bin", "kernel"].map(str::to_string));
+        }
+        BuildMode::UnitTest => {
+            args.extend(
+                [
+                    "--lib",
+                    "-Z",
+                    "build-std=core,alloc",
+                    "-Z",
+                    "panic-abort-tests",
+                    "--no-run",
+                ]
+                .map(str::to_string),
+            );
+        }
+        BuildMode::IntegrationTests(tests) => {
+            for test in *tests {
+                args.extend(["--test".to_string(), test.to_string()]);
+            }
+            args.extend(
+                [
+                    "-Z",
+                    "build-std=core,alloc",
+                    "-Z",
+                    "panic-abort-tests",
+                    "--no-run",
+                ]
+                .map(str::to_string),
+            );
+        }
+    }
+
+    args.push("--message-format=json-render-diagnostics".to_string());
+    args
 }
 
 fn handle_cargo_message(line: &str, mode: &BuildMode) -> Option<PathBuf> {

@@ -8,7 +8,7 @@ mod vm;
 
 use crate::{
     cargo_build::{BuildMode, build_kernel, build_kernel_tests, build_kernel_with_mode},
-    cli::{Command, RootfsCommand},
+    cli::Command,
     qemu::{
         RunOptions, create_uefi_image, run_qemu, run_qemu_expect_serial_failure, run_qemu_mcp,
         run_qemu_test, run_qemu_until_serial_condition,
@@ -38,12 +38,12 @@ fn main() {
 }
 
 fn real_main() -> Result<i32> {
-    match cli::parse(env::args().skip(1))? {
-        Command::Run(options) => run(options),
+    match cli::parse().command {
+        Command::Run(args) => run(args.into_options()),
         Command::McpRun => mcp_run(),
         Command::Test => test(),
         Command::IntegrationTest => integration_test(),
-        Command::Rootfs(RootfsCommand::Build { override_disk }) => rootfs::build(override_disk),
+        Command::RootfsBuild(args) => rootfs::build(args.r#override),
         Command::SysrootMount => sysroot::mount(),
         Command::VmPs => vm::ps(),
     }

@@ -1,60 +1,48 @@
 use crate::qemu::RunOptions;
-use anyhow::{Result, bail};
-use std::{env, time::Duration};
+use anyhow::Result;
+use clap::{Args, Parser, Subcommand};
+use std::{env, path::PathBuf, time::Duration};
 
+#[derive(Debug, Parser)]
+#[command(version, about = "Seele OS development tasks")]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Command,
+}
+
+#[derive(Debug, Subcommand)]
 pub enum Command {
-    Run(RunOptions),
+    Run(RunArgs),
     McpRun,
     Test,
     IntegrationTest,
-    Rootfs(RootfsCommand),
+    RootfsBuild(RootfsBuildArgs),
     SysrootMount,
     VmPs,
 }
 
-pub enum RootfsCommand {
-    Build { override_disk: bool },
+#[derive(Debug, Args)]
+pub struct RunArgs {
+    #[arg(long)]
+    pub agent: bool,
 }
 
-pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command> {
-    let mut args = args.into_iter();
-    let Some(command) = args.next() else {
-        bail!("missing xtask command");
-    };
-
-    match command.as_str() {
-        "run" => parse_run(args),
-        "mcp-run" => Ok(Command::McpRun),
-        "test" => Ok(Command::Test),
-        "integration-test" => Ok(Command::IntegrationTest),
-        "rootfs-build" => parse_rootfs_build(args),
-        "sysroot-mount" => Ok(Command::SysrootMount),
-        "vm-ps" => Ok(Command::VmPs),
-        _ => bail!("unknown xtask command: {command}"),
-    }
+#[derive(Debug, Args)]
+pub struct RootfsBuildArgs {
+    #[arg(long)]
+    pub r#override: bool,
 }
 
-fn parse_run(args: impl IntoIterator<Item = String>) -> Result<Command> {
-    let mut options = RunOptions::from_env();
-    for arg in args {
-        match arg.as_str() {
-            "--" => {}
-            "--agent" => options.agent_mode = true,
-            other => bail!("unknown run argument: {other}"),
-        }
-    }
-    Ok(Command::Run(options))
+pub fn parse() -> Cli {
+    Cli::parse()
 }
 
-fn parse_rootfs_build(args: impl IntoIterator<Item = String>) -> Result<Command> {
-    let mut override_disk = false;
-    for arg in args {
-        match arg.as_str() {
-            "--override" => override_disk = true,
-            other => bail!("unknown rootfs-build argument: {other}"),
-        }
+impl RunArgs {
+    pub fn into_options(self) -> RunOptions {
+        let mut options = RunOptions::from_env();
+        options.agent_mode = self.agent;
+        options
     }
-    Ok(Command::Rootfs(RootfsCommand::Build { override_disk }))
 }
 
 pub fn parse_duration(value: &str) -> Option<Duration> {
@@ -74,6 +62,6 @@ pub fn parse_duration(value: &str) -> Option<Duration> {
     value.parse::<u64>().ok().map(Duration::from_secs)
 }
 
-pub fn repo_root() -> Result<std::path::PathBuf> {
+pub fn repo_root() -> Result<PathBuf> {
     Ok(env::current_dir()?)
 }

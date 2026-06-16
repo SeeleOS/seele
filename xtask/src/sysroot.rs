@@ -1,29 +1,22 @@
 use crate::cli::repo_root;
-use anyhow::{Result, bail};
-use std::process::Command;
+use anyhow::Result;
+use xshell::{Shell, cmd};
 
 pub fn mount() -> Result<i32> {
+    let sh = Shell::new()?;
     let repo_root = repo_root()?;
     let sysroot = repo_root.join("sysroot");
     let disk = repo_root.join("disk.img");
 
-    let status = Command::new("mountpoint")
-        .arg("-q")
-        .arg(&sysroot)
-        .status()?;
-    if status.success() {
+    if cmd!(sh, "mountpoint -q {sysroot}")
+        .ignore_status()
+        .output()?
+        .status
+        .success()
+    {
         return Ok(0);
     }
 
-    let status = Command::new("sudo")
-        .arg("mount")
-        .arg("-o")
-        .arg("loop")
-        .arg(&disk)
-        .arg(&sysroot)
-        .status()?;
-    if !status.success() {
-        bail!("failed to mount sysroot from {}", disk.display());
-    }
+    cmd!(sh, "sudo mount -o loop {disk} {sysroot}").run()?;
     Ok(0)
 }
