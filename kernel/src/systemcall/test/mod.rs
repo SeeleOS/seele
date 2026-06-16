@@ -473,8 +473,8 @@ struct TestLinuxRusage {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestLinuxSchedParam {
-    sched_priority: i32,
+pub(crate) struct TestLinuxSchedParam {
+    pub(crate) sched_priority: i32,
 }
 
 #[repr(C)]
@@ -7119,130 +7119,6 @@ pub(crate) fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
         .remove(&ProcessID(queued_pid as u64));
     MANAGER.lock().processes.remove(&ProcessID(peer_pid as u64));
     crate::thread::get_current_thread().lock().blocked_signals = saved_mask;
-}
-
-pub(crate) fn object_control_syscalls_follow_linux_rules() {
-    const TCGETS: u64 = 0x5401;
-    const TIOCSPTLCK: u64 = 0x4004_5431;
-    const TIOCGPTN: u64 = 0x8004_5430;
-    const TIOCOUTQ: u64 = 0x5411;
-    const FIONBIO: u64 = 0x5421;
-    const FIOCLEX: u64 = 0x5451;
-    const SOCK_STREAM: u64 = 1;
-    const SOCK_RAW: u64 = 3;
-    const AF_UNIX: u64 = 1;
-    const AF_NETLINK: u64 = 16;
-    const NETLINK_ROUTE: u64 = 0;
-    const SCHED_OTHER: u64 = 0;
-    const SCHED_FIFO: u64 = 1;
-
-    assert_linux_layout::<LinuxTermios>(36, 4);
-    assert_linux_layout::<TestLinuxSchedParam>(4, 4);
-
-    let page = allocate_user_test_page();
-    let [master_fd, slave_fd] = {
-        write_user_value(page + 896, &0i32);
-        write_user_value(page + 900, &0i32);
-        expect_ok(
-            SyscallArgs::new([page + 896, page + 900, 0, 0, 0, 0]).call::<CreatePty>(),
-            0,
-        );
-        [
-            read_user_value::<i32>(page + 896) as usize,
-            read_user_value::<i32>(page + 900) as usize,
-        ]
-    };
-
-    expect_ok(
-        SyscallArgs::new([slave_fd as u64, TCGETS, page, 0, 0, 0]).call::<Ioctl>(),
-        0,
-    );
-    let termios = read_user_value::<LinuxTermios>(page);
-    assert_eq!(termios.c_cc.len(), 19);
-
-    write_user_value(page + 128, &1i32);
-    expect_ok(
-        SyscallArgs::new([master_fd as u64, TIOCSPTLCK, page + 128, 0, 0, 0]).call::<Ioctl>(),
-        0,
-    );
-    expect_errno(
-        SyscallArgs::new([master_fd as u64, TIOCSPTLCK, 1, 0, 0, 0]).call::<Ioctl>(),
-        SyscallError::BadAddress,
-    );
-    expect_errno(
-        SyscallArgs::new([usize::MAX as u64, TCGETS, page, 0, 0, 0]).call::<Ioctl>(),
-        SyscallError::BadFileDescriptor,
-    );
-
-    let unix_socket =
-        expect_fd(SyscallArgs::new([AF_UNIX, SOCK_STREAM, 0, 0, 0, 0]).call::<Socket>());
-    assert_fd_flags(unix_socket, FdFlags::empty());
-    write_user_value(page + 384, &1i32);
-    expect_ok(
-        SyscallArgs::new([unix_socket as u64, FIONBIO, page + 384, 0, 0, 0]).call::<Ioctl>(),
-        0,
-    );
-    assert_object_flags(unix_socket, FileFlags::NONBLOCK);
-    expect_ok(
-        SyscallArgs::new([unix_socket as u64, FIOCLEX, 0, 0, 0, 0]).call::<Ioctl>(),
-        0,
-    );
-    assert_fd_flags(unix_socket, FdFlags::CLOEXEC);
-    expect_errno(
-        SyscallArgs::new([unix_socket as u64, FIONBIO, 1, 0, 0, 0]).call::<Ioctl>(),
-        SyscallError::BadAddress,
-    );
-    expect_ok(
-        SyscallArgs::new([unix_socket as u64, TIOCOUTQ, page + 392, 0, 0, 0]).call::<Ioctl>(),
-        0,
-    );
-    assert_eq!(read_user_value::<i32>(page + 392), 0);
-    expect_errno(
-        SyscallArgs::new([unix_socket as u64, TIOCGPTN, page + 392, 0, 0, 0]).call::<Ioctl>(),
-        SyscallError::InappropriateIoctl,
-    );
-
-    let netlink_socket = expect_fd(
-        SyscallArgs::new([AF_NETLINK, SOCK_RAW, NETLINK_ROUTE, 0, 0, 0]).call::<Socket>(),
-    );
-    expect_ok(
-        SyscallArgs::new([netlink_socket as u64, FIOCLEX, 0, 0, 0, 0]).call::<Ioctl>(),
-        0,
-    );
-    assert_fd_flags(netlink_socket, FdFlags::CLOEXEC);
-    close_test_fd(netlink_socket);
-    close_test_fd(unix_socket);
-
-    write_user_value(page + 256, &TestLinuxSchedParam { sched_priority: 0 });
-    expect_ok(
-        SyscallArgs::new([0, SCHED_OTHER, page + 256, 0, 0, 0]).call::<SchedSetscheduler>(),
-        0,
-    );
-    write_user_value(page + 260, &TestLinuxSchedParam { sched_priority: 1 });
-    expect_ok(
-        SyscallArgs::new([0, SCHED_FIFO, page + 260, 0, 0, 0]).call::<SchedSetscheduler>(),
-        0,
-    );
-    write_user_value(page + 264, &TestLinuxSchedParam { sched_priority: 0 });
-    expect_errno(
-        SyscallArgs::new([0, SCHED_FIFO, page + 264, 0, 0, 0]).call::<SchedSetscheduler>(),
-        SyscallError::InvalidArguments,
-    );
-    expect_errno(
-        SyscallArgs::new([u64::MAX, SCHED_OTHER, page + 256, 0, 0, 0]).call::<SchedSetscheduler>(),
-        SyscallError::InvalidArguments,
-    );
-    expect_errno(
-        SyscallArgs::new([0, SCHED_OTHER, 0, 0, 0, 0]).call::<SchedSetscheduler>(),
-        SyscallError::BadAddress,
-    );
-    expect_errno(
-        SyscallArgs::new([0, 99, page + 256, 0, 0, 0]).call::<SchedSetscheduler>(),
-        SyscallError::InvalidArguments,
-    );
-
-    close_test_fd(master_fd);
-    close_test_fd(slave_fd);
 }
 
 pub(crate) fn ptrace_syscalls_follow_linux_rules() {
