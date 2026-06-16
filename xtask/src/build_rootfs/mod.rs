@@ -55,7 +55,6 @@ pub fn build_rootfs(args: BuildRootfsArgs) -> Result<i32> {
     let _mount = MountedSysroot { path: &sysroot };
     write_repositories(&repo_root, &sysroot)?;
     install_packages(&sysroot)?;
-    prepare_openrc(&sysroot)?;
 
     Ok(0)
 }
@@ -153,20 +152,6 @@ fn install_packages(sysroot: &Path) -> Result<()> {
         .arg("add")
         .args(ALPINE_PACKAGES);
     run(&mut command)
-}
-
-fn prepare_openrc(sysroot: &Path) -> Result<()> {
-    let run_openrc = sysroot.join("run/openrc");
-    run(Command::new("sudo")
-        .arg("install")
-        .arg("-d")
-        .arg("-m")
-        .arg("0755")
-        .arg(&run_openrc))?;
-    run(Command::new("sudo")
-        .arg("touch")
-        .arg(run_openrc.join("softlevel")))?;
-    Ok(())
 }
 
 fn run(command: &mut Command) -> Result<()> {
