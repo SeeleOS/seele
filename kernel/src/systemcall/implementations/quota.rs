@@ -242,11 +242,186 @@ define_syscall!(QuotactlFd, |fd: u64, cmd: u32, id: u32, addr: *mut u8| {
 
 #[cfg(test)]
 mod tests {
-    use crate::systemcall::test::*;
+    use crate::{
+        filesystem::{path::Path, vfs::VirtualFS},
+        systemcall::{
+            implementations::{OpenAt, OpenFlags, QuotactlFd},
+            test::{close_test_fd, expect_fd, write_user_cstr},
+            test_helpers::{
+                SyscallArgs, allocate_user_test_page, expect_errno, expect_ok, read_user_value,
+                write_user_value,
+            },
+            utils::SyscallError,
+        },
+    };
 
     crate::test!(
         quotactl_fd_syscalls,
         "quotactl_fd syscalls follow linux rules",
         quotactl_fd_syscalls_follow_linux_rules
     );
+
+    fn quotactl_fd_syscalls_follow_linux_rules() {
+        const AT_FDCWD: u64 = (-100i32) as u64;
+        const USRQUOTA: u64 = 0;
+        const Q_GETFMT: u64 = 0x800004;
+        const Q_GETINFO: u64 = 0x800005;
+        const Q_GETQUOTA: u64 = 0x800007;
+        const Q_SETQUOTA: u64 = 0x800008;
+        const Q_GETNEXTQUOTA: u64 = 0x800009;
+        const QIF_BLIMITS: u32 = 1 << 0;
+        const QCMD_SHIFT: u64 = 8;
+
+        #[repr(C)]
+        #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+        struct TestLinuxDqblk {
+            dqb_bhardlimit: u64,
+            dqb_bsoftlimit: u64,
+            dqb_curspace: u64,
+            dqb_ihardlimit: u64,
+            dqb_isoftlimit: u64,
+            dqb_curinodes: u64,
+            dqb_btime: u64,
+            dqb_itime: u64,
+            dqb_valid: u32,
+            dqb_padding: u32,
+        }
+
+        #[repr(C)]
+        #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+        struct TestLinuxDqinfo {
+            dqi_bgrace: u64,
+            dqi_igrace: u64,
+            dqi_flags: u32,
+            dqi_valid: u32,
+        }
+
+        #[repr(C)]
+        #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+        struct TestLinuxNextDqblk {
+            dqb_bhardlimit: u64,
+            dqb_bsoftlimit: u64,
+            dqb_curspace: u64,
+            dqb_ihardlimit: u64,
+            dqb_isoftlimit: u64,
+            dqb_curinodes: u64,
+            dqb_btime: u64,
+            dqb_itime: u64,
+            dqb_valid: u32,
+            dqb_padding: u32,
+            dqb_id: u32,
+            dqb_spare: u32,
+        }
+
+        let page = allocate_user_test_page();
+        write_user_cstr(page, b"/tmp/syscall-quotactl-fd-test\0");
+        write_user_cstr(page + 128, b"/\0");
+
+        let _ = VirtualFS
+            .lock()
+            .delete_file(Path::new("/tmp/syscall-quotactl-fd-test"));
+        VirtualFS
+            .lock()
+            .create_dir(Path::new("/tmp/syscall-quotactl-fd-test"))
+            .unwrap();
+
+        let tmpfd = expect_fd(
+            SyscallArgs::new([AT_FDCWD, page, OpenFlags::DIRECTORY.bits() as u64, 0, 0, 0])
+                .call::<OpenAt>(),
+        );
+        let rootfd = expect_fd(
+            SyscallArgs::new([
+                AT_FDCWD,
+                page + 128,
+                OpenFlags::DIRECTORY.bits() as u64,
+                0,
+                0,
+                0,
+            ])
+            .call::<OpenAt>(),
+        );
+
+        let uid = 1000u64;
+        let getquota_cmd = (Q_GETQUOTA << QCMD_SHIFT) | USRQUOTA;
+        let setquota_cmd = (Q_SETQUOTA << QCMD_SHIFT) | USRQUOTA;
+        let getfmt_cmd = (Q_GETFMT << QCMD_SHIFT) | USRQUOTA;
+        let getinfo_cmd = (Q_GETINFO << QCMD_SHIFT) | USRQUOTA;
+        let getnextquota_cmd = (Q_GETNEXTQUOTA << QCMD_SHIFT) | USRQUOTA;
+
+        expect_errno(
+            SyscallArgs::new([tmpfd as u64, getquota_cmd, uid, page + 256, 0, 0])
+                .call::<QuotactlFd>(),
+            SyscallError::NoProcess,
+        );
+        expect_errno(
+            SyscallArgs::new([rootfd as u64, getquota_cmd, uid, page + 256, 0, 0])
+                .call::<QuotactlFd>(),
+            SyscallError::NoData,
+        );
+
+        write_user_value(
+            page + 256,
+            &TestLinuxDqblk {
+                dqb_bhardlimit: 123,
+                dqb_bsoftlimit: 77,
+                dqb_valid: QIF_BLIMITS,
+                ..Default::default()
+            },
+        );
+        expect_ok(
+            SyscallArgs::new([tmpfd as u64, setquota_cmd, uid, page + 256, 0, 0])
+                .call::<QuotactlFd>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([tmpfd as u64, getquota_cmd, uid, page + 320, 0, 0])
+                .call::<QuotactlFd>(),
+            0,
+        );
+        let dqblk = read_user_value::<TestLinuxDqblk>(page + 320);
+        assert_eq!(dqblk.dqb_bhardlimit, 123);
+        assert_eq!(dqblk.dqb_bsoftlimit, 77);
+        assert_eq!(dqblk.dqb_valid & QIF_BLIMITS, QIF_BLIMITS);
+
+        expect_ok(
+            SyscallArgs::new([tmpfd as u64, getfmt_cmd, 0, page + 400, 0, 0]).call::<QuotactlFd>(),
+            0,
+        );
+        assert_eq!(read_user_value::<u32>(page + 400), 2);
+
+        expect_ok(
+            SyscallArgs::new([tmpfd as u64, getinfo_cmd, 0, page + 448, 0, 0]).call::<QuotactlFd>(),
+            0,
+        );
+        assert_eq!(
+            read_user_value::<TestLinuxDqinfo>(page + 448),
+            TestLinuxDqinfo::default()
+        );
+
+        expect_ok(
+            SyscallArgs::new([tmpfd as u64, getnextquota_cmd, uid, page + 512, 0, 0])
+                .call::<QuotactlFd>(),
+            0,
+        );
+        let next = read_user_value::<TestLinuxNextDqblk>(page + 512);
+        assert_eq!(next.dqb_id as u64, uid);
+        assert_eq!(next.dqb_bhardlimit, 123);
+        assert_eq!(next.dqb_bsoftlimit, 77);
+
+        expect_errno(
+            SyscallArgs::new([tmpfd as u64, getfmt_cmd, 0, 0, 0, 0]).call::<QuotactlFd>(),
+            SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([tmpfd as u64, 0xdead_beef, uid, page + 256, 0, 0])
+                .call::<QuotactlFd>(),
+            SyscallError::InvalidArguments,
+        );
+
+        close_test_fd(rootfd);
+        close_test_fd(tmpfd);
+        let _ = VirtualFS
+            .lock()
+            .delete_file(Path::new("/tmp/syscall-quotactl-fd-test"));
+    }
 }
