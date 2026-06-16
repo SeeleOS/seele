@@ -6,8 +6,6 @@
 
 extern crate alloc;
 
-#[cfg(test)]
-use bootloader_api::entry_point;
 pub const NAME: &str = "Seele";
 pub const SMP_ENABLED: bool = false;
 
@@ -37,8 +35,6 @@ pub use misc::signal;
 #[cfg(test)]
 pub use misc::testing;
 
-#[cfg(test)]
-use crate::boot::BOOTLOADER_CONFIG;
 use crate::filesystem::vfs::VirtualFS;
 #[cfg(test)]
 use crate::filesystem::{
@@ -53,16 +49,35 @@ use crate::misc::others::enable_sse;
 use crate::misc::{framebuffer, logging, mouse, profile, time};
 use crate::process::manager::MANAGER;
 use crate::smp::{init_bsp, release_application_processors, start_application_processors};
-use bootloader_api::BootInfo;
 #[cfg(test)]
 use core::panic::PanicInfo;
+#[cfg(test)]
+use limine::{
+    BaseRevision,
+    request::{EntryPointRequest, RequestsEndMarker, RequestsStartMarker},
+};
 
 #[cfg(test)]
-entry_point!(test_kernel_main, config = &BOOTLOADER_CONFIG);
-
+#[used]
+#[unsafe(link_section = ".requests_start_marker")]
+static REQUESTS_START: RequestsStartMarker = RequestsStartMarker::new();
 #[cfg(test)]
-fn test_kernel_main(boot_info: &'static mut BootInfo) -> ! {
-    init_kernel(boot_info);
+#[used]
+#[unsafe(link_section = ".requests")]
+static BASE_REVISION: BaseRevision = BaseRevision::new();
+#[cfg(test)]
+#[used]
+#[unsafe(link_section = ".requests")]
+static ENTRY_POINT_REQUEST: EntryPointRequest = EntryPointRequest::new().with_entry_point(kmain);
+#[cfg(test)]
+#[used]
+#[unsafe(link_section = ".requests_end_marker")]
+static REQUESTS_END: RequestsEndMarker = RequestsEndMarker::new();
+#[cfg(test)]
+#[unsafe(no_mangle)]
+extern "C" fn kmain() -> ! {
+    assert!(BASE_REVISION.is_supported());
+    init_kernel();
     init_test_filesystems();
     test_main();
     unreachable!("test_main returned");
@@ -89,8 +104,8 @@ fn init_test_filesystems() {
         .expect("failed to mount test shmfs");
 }
 
-pub fn init_kernel(boot_info: &'static mut BootInfo) {
-    boot::init(boot_info);
+pub fn init_kernel() {
+    boot::init();
     memory::init(boot::physical_memory_offset(), boot::memory_map());
     init_bsp();
     framebuffer::init(boot::framebuffer());
@@ -131,8 +146,8 @@ pub fn init_kernel(boot_info: &'static mut BootInfo) {
     release_application_processors();
 }
 
-pub fn init(boot_info: &'static mut BootInfo) -> ! {
-    init_kernel(boot_info);
+pub fn init() -> ! {
+    init_kernel();
     thread::scheduling::run();
 }
 

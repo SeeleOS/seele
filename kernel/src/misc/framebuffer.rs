@@ -1,8 +1,8 @@
 use crate::memory::utils::Mut;
 use alloc::{vec, vec::Vec};
-use bootloader_api::info::{FrameBuffer, PixelFormat};
 use conquer_once::spin::OnceCell;
 use core::sync::atomic::{AtomicBool, Ordering};
+use limine::framebuffer::{Framebuffer, MemoryModel};
 use x86_64::{VirtAddr, structures::paging::Translate};
 
 use crate::{memory::paging::MAPPER, terminal::Color};
@@ -27,7 +27,7 @@ pub struct FramebufferInfo {
     pub pixel_format: FramebufferPixelFormat,
 }
 
-pub fn init(framebuffer: &'static mut FrameBuffer) {
+pub fn init(framebuffer: Framebuffer<'static>) {
     log::info!("graphics: init start");
     FRAME_BUFFER.init_once(|| Mut::new(Canvas::new(framebuffer)));
     log::debug!("graphics: terminal configured");
@@ -46,22 +46,34 @@ pub struct Canvas {
 }
 
 impl Canvas {
-    pub fn new(frame_buffer: &'static mut FrameBuffer) -> Self {
-        let bootloader_info = frame_buffer.info();
+    pub fn new(frame_buffer: Framebuffer<'static>) -> Self {
+        assert!(
+            frame_buffer.memory_model() == MemoryModel::RGB,
+            "unsupported limine framebuffer memory model"
+        );
+        let bytes_per_pixel = (frame_buffer.bpp() / 8) as usize;
+        assert!(
+            bytes_per_pixel >= 3,
+            "unsupported limine framebuffer bits per pixel"
+        );
         let info = FramebufferInfo {
             phys_addr: 0,
-            width: bootloader_info.width,
-            height: bootloader_info.height,
-            stride: bootloader_info.stride,
-            bytes_per_pixel: bootloader_info.bytes_per_pixel,
-            byte_len: bootloader_info.byte_len,
-            pixel_format: match bootloader_info.pixel_format {
-                PixelFormat::Rgb => FramebufferPixelFormat::Rgb,
-                PixelFormat::Bgr => FramebufferPixelFormat::Bgr,
-                format => panic!("unsupported bootloader framebuffer format: {format:?}"),
+            width: frame_buffer.width() as usize,
+            height: frame_buffer.height() as usize,
+            stride: (frame_buffer.pitch() as usize) / bytes_per_pixel,
+            bytes_per_pixel,
+            byte_len: (frame_buffer.pitch() * frame_buffer.height()) as usize,
+            pixel_format: match (
+                frame_buffer.red_mask_shift(),
+                frame_buffer.green_mask_shift(),
+                frame_buffer.blue_mask_shift(),
+            ) {
+                (0, 8, 16) => FramebufferPixelFormat::Rgb,
+                (16, 8, 0) => FramebufferPixelFormat::Bgr,
+                _ => panic!("unsupported limine framebuffer channel layout"),
             },
         };
-        let fb = frame_buffer.buffer_mut();
+        let fb = unsafe { core::slice::from_raw_parts_mut(frame_buffer.addr(), info.byte_len) };
 
         fb.fill(0);
 

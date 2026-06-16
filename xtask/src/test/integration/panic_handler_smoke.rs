@@ -1,7 +1,8 @@
 use super::{IntegrationTest, IntegrationTestResult};
 use crate::run::{
     build::{BuildMode, build_kernel_with_mode},
-    qemu::{create_uefi_image, run_qemu_expect_serial_failure_capture},
+    build_iso::create_boot_iso,
+    qemu::run_qemu_expect_serial_failure_capture,
 };
 use anyhow::{Context, Result};
 use std::fs;
@@ -24,11 +25,11 @@ impl IntegrationTest for PanicHandlerSmoke {
                 .into_iter()
                 .next()
         {
-            let uefi_path = create_uefi_image(&kernel_test)?;
+            let iso_path = create_boot_iso(&kernel_test)?;
             let result =
-                run_qemu_expect_serial_failure_capture(&uefi_path, PANIC_HANDLER_PATTERN, 1)?;
-            fs::remove_file(&uefi_path)
-                .with_context(|| format!("failed to remove UEFI image {}", uefi_path.display()))?;
+                run_qemu_expect_serial_failure_capture(&iso_path, PANIC_HANDLER_PATTERN, 1)?;
+            fs::remove_file(&iso_path)
+                .with_context(|| format!("failed to remove ISO image {}", iso_path.display()))?;
             Ok(IntegrationTestResult {
                 exit_code: result.exit_code,
                 failure: result.failure,

@@ -2,10 +2,8 @@
 #![no_main]
 #![feature(abi_x86_interrupt)]
 
-use bootloader_api::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use kernel::{
-    boot::BOOTLOADER_CONFIG,
     init_kernel,
     misc::{
         debug_exit::{QemuExitCode, debug_exit},
@@ -13,11 +11,31 @@ use kernel::{
     },
     s_println,
 };
+use limine::{
+    BaseRevision,
+    request::{EntryPointRequest, RequestsEndMarker, RequestsStartMarker},
+};
 
-entry_point!(stack_overflow_kernel_main, config = &BOOTLOADER_CONFIG);
+#[used]
+#[unsafe(link_section = ".requests_start_marker")]
+static REQUESTS_START: RequestsStartMarker = RequestsStartMarker::new();
 
-fn stack_overflow_kernel_main(boot_info: &'static mut BootInfo) -> ! {
-    init_kernel(boot_info);
+#[used]
+#[unsafe(link_section = ".requests")]
+static BASE_REVISION: BaseRevision = BaseRevision::new();
+
+#[used]
+#[unsafe(link_section = ".requests")]
+static ENTRY_POINT_REQUEST: EntryPointRequest = EntryPointRequest::new().with_entry_point(kmain);
+
+#[used]
+#[unsafe(link_section = ".requests_end_marker")]
+static REQUESTS_END: RequestsEndMarker = RequestsEndMarker::new();
+
+#[unsafe(no_mangle)]
+extern "C" fn kmain() -> ! {
+    assert!(BASE_REVISION.is_supported());
+    init_kernel();
     stack_overflow();
     debug_exit(QemuExitCode::Failed);
     hlt_loop();

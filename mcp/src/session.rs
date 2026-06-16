@@ -36,7 +36,7 @@ pub struct SessionMetadata {
     pub qemu_pid: Option<u32>,
     pub qmp_socket: PathBuf,
     pub serial_log: PathBuf,
-    pub uefi_image: Option<PathBuf>,
+    pub iso_image: Option<PathBuf>,
 }
 
 #[derive(Debug, Default)]
@@ -431,8 +431,8 @@ fn parse_metadata(
             .and_then(Value::as_str)
             .map(PathBuf::from)
             .unwrap_or_else(|| default_serial_log.to_path_buf()),
-        uefi_image: value
-            .get("uefi_image")
+        iso_image: value
+            .get("iso_image")
             .and_then(Value::as_str)
             .map(PathBuf::from),
     })

@@ -25,13 +25,29 @@ pub fn handle_panic(info: &PanicInfo) -> ! {
 
 macro_rules! integration_test_entry {
     ($main:path) => {
-        bootloader_api::entry_point!(
-            integration_kernel_main,
-            config = &kernel::boot::BOOTLOADER_CONFIG
-        );
+        #[used]
+        #[unsafe(link_section = ".requests_start_marker")]
+        static REQUESTS_START: limine::request::RequestsStartMarker =
+            limine::request::RequestsStartMarker::new();
 
-        fn integration_kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
-            kernel::init_kernel(boot_info);
+        #[used]
+        #[unsafe(link_section = ".requests")]
+        static BASE_REVISION: limine::BaseRevision = limine::BaseRevision::new();
+
+        #[used]
+        #[unsafe(link_section = ".requests")]
+        static ENTRY_POINT_REQUEST: limine::request::EntryPointRequest =
+            limine::request::EntryPointRequest::new().with_entry_point(kmain);
+
+        #[used]
+        #[unsafe(link_section = ".requests_end_marker")]
+        static REQUESTS_END: limine::request::RequestsEndMarker =
+            limine::request::RequestsEndMarker::new();
+
+        #[unsafe(no_mangle)]
+        extern "C" fn kmain() -> ! {
+            assert!(BASE_REVISION.is_supported());
+            kernel::init_kernel();
             {
                 let mut vfs = kernel::filesystem::vfs::VirtualFS.lock();
                 vfs.mount(

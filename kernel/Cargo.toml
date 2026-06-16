@@ -10,7 +10,7 @@ x86_64 = "0.15.4"
 xmas-elf = "0.10.0"
 acpi = "6.1"
 ap-startup = "0.3"
-bootloader_api = "0.11"
+limine = "0.5"
 pci_types = "0.10"
 virtio-drivers = "0.13.0"
 smoltcp = { version = "0.13", default-features = false, features = ["alloc", "log", "medium-ethernet", "proto-ipv4", "socket-tcp", "socket-udp"] }
@@ -48,6 +48,9 @@ features = ["alloc"]
 [dependencies.num_enum]
 version = "0.7.5"
 default-features = false
+
+[build-dependencies]
+cargo-emit = "0.2.1"
 
 [[test]]
 name = "boot"

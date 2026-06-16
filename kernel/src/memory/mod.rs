@@ -1,8 +1,8 @@
 use crate::memory::utils::Mut;
 use alloc::sync::Arc;
-use bootloader_api::info::{MemoryRegion, MemoryRegionKind};
 use conquer_once::spin::OnceCell;
 
+use crate::boot::{MemoryRegion, MemoryRegionKind};
 use crate::memory::{
     heap::{HEAP_BACKING_RESERVE_SIZE, init_heap},
     paging::{

@@ -1,6 +1,5 @@
 use crate::memory::utils::Mut;
 use alloc::sync::Arc;
-use bootloader_api::info::{MemoryRegion, MemoryRegionKind};
 use buddy_system_allocator::FrameAllocator as BuddyFrameAllocator;
 use conquer_once::spin::OnceCell;
 use x86_64::{
@@ -10,6 +9,8 @@ use x86_64::{
         FrameAllocator, FrameDeallocator, OffsetPageTable, PageSize, PageTable, PhysFrame, Size4KiB,
     },
 };
+
+use crate::boot::{MemoryRegion, MemoryRegionKind};
 
 pub static MAPPER: OnceCell<Arc<Mut<OffsetPageTable<'static>>>> = OnceCell::uninit();
 pub static FRAME_ALLOCATOR: OnceCell<Arc<Mut<BootinfoFrameAllocator>>> = OnceCell::uninit();

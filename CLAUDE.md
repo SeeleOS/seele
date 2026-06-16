@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Seele OS is an x86_64 operating system kernel written in `no_std` Rust targeting Linux binary compatibility — it runs unmodified Linux ELF binaries. The kernel boots via `bootloader_api`, runs in QEMU (with KVM if `/dev/kvm` exists), and mounts an Alpine Linux guest rootfs from `disk.img`. The rootfs uses OpenRC for `/sbin/init` and is built by `xtask` through `apk`.
+Seele OS is an x86_64 operating system kernel written in `no_std` Rust targeting Linux binary compatibility — it runs unmodified Linux ELF binaries. The kernel boots via Limine, runs in QEMU (with KVM if `/dev/kvm` exists), and mounts an Alpine Linux guest rootfs from `disk.img`. The rootfs uses OpenRC for `/sbin/init` and is built by `xtask` through `apk`.
 
 ## Commands
 

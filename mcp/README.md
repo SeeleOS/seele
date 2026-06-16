@@ -4,7 +4,7 @@
 
 ## Tools
 
-- `agent_start`: run `cargo run -p xtask -- mcp-run`, build the kernel, create the UEFI image, launch QEMU, and capture machine-readable metadata.
+- `agent_start`: run `cargo run -p xtask -- mcp-run`, build the kernel, create the Limine ISO, launch QEMU, and capture machine-readable metadata.
 - `agent_status`: report runner/QEMU PIDs, QMP socket path/connectivity, serial log path, and last exit status.
 - `agent_serial_tail`: return the latest serial log lines or bytes.
 - `agent_screenshot`: use QMP `screendump`, convert PPM to PNG, and return image content.

@@ -1014,7 +1014,13 @@ fn assert_visible_bgr_pixel(x: usize, y: usize, bgra: [u8; 4]) {
     let framebuffer = FRAME_BUFFER.get().unwrap().lock();
     assert_eq!(framebuffer.info.bytes_per_pixel, 4);
     let offset = (y * framebuffer.info.stride + x) * framebuffer.info.bytes_per_pixel;
-    assert_eq!(&framebuffer.fb[offset..offset + 4], &bgra);
+    let expected = match framebuffer.info.pixel_format {
+        crate::misc::framebuffer::FramebufferPixelFormat::Rgb => {
+            [bgra[2], bgra[1], bgra[0], bgra[3]]
+        }
+        crate::misc::framebuffer::FramebufferPixelFormat::Bgr => bgra,
+    };
+    assert_eq!(&framebuffer.fb[offset..offset + 4], &expected);
 }
 
 fn pop_drm_event() -> DrmEventVblank {

@@ -28,6 +28,9 @@
           e2fsprogs
           gdb
           git
+          libisoburn
+          limine
+          mtools
           procps
           qemu
           util-linux
@@ -39,6 +42,9 @@
           e2fsprogs
           gdb
           git
+          libisoburn
+          limine
+          mtools
           procps
           qemu
           util-linux

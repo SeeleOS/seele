@@ -30,13 +30,6 @@ pub fn build_kernel_with_mode(mode: BuildMode) -> Result<Vec<PathBuf>> {
     let cargo_args = cargo_args(&mode);
     let mut command = cmd!(sh, "{cargo} {cargo_args...}").to_command();
 
-    match mode {
-        BuildMode::UnitTest | BuildMode::IntegrationTests(_) => {
-            command.env("RUSTFLAGS", append_rustflags());
-        }
-        BuildMode::Run => {}
-    }
-
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
 
@@ -183,13 +176,5 @@ fn handle_cargo_message(line: &str, mode: &BuildMode) -> Option<PathBuf> {
                 .map(PathBuf::from)
         }
         _ => None,
-    }
-}
-
-fn append_rustflags() -> String {
-    let extra = "-Zunstable-options";
-    match env::var("RUSTFLAGS") {
-        Ok(existing) if !existing.trim().is_empty() => format!("{existing} {extra}"),
-        _ => extra.to_string(),
     }
 }

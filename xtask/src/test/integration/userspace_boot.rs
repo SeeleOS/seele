@@ -1,7 +1,8 @@
 use super::{IntegrationTest, IntegrationTestResult};
 use crate::run::{
     build::build_kernel,
-    qemu::{RunOptions, create_uefi_image, run_qemu_until_serial_condition_capture},
+    build_iso::create_boot_iso,
+    qemu::{RunOptions, run_qemu_until_serial_condition_capture},
 };
 use anyhow::{Context, Result};
 use std::{env, fs, path::Path, time::Duration};
@@ -21,16 +22,16 @@ impl IntegrationTest for UserspaceBoot {
             .first()
             .map(Path::new)
             .context("kernel executable missing")?;
-        let uefi_path = create_uefi_image(kernel_path)?;
+        let iso_path = create_boot_iso(kernel_path)?;
         let options = RunOptions::for_agent_run_without_timeout();
         let result = run_qemu_until_serial_condition_capture(
-            &uefi_path,
+            &iso_path,
             &options,
             qemu_test_timeout(),
             userspace_startup_observed,
         )?;
-        fs::remove_file(&uefi_path)
-            .with_context(|| format!("failed to remove UEFI image {}", uefi_path.display()))?;
+        fs::remove_file(&iso_path)
+            .with_context(|| format!("failed to remove ISO image {}", iso_path.display()))?;
         Ok(IntegrationTestResult {
             exit_code: result.exit_code,
             failure: result.failure,

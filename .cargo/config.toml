@@ -1,21 +1,13 @@
 [unstable]
 bindeps = true
+unstable-options = true
+
+[target.x86_64-unknown-none]
+rustflags = [
+  "-C", "relocation-model=static",
+]
 
 [alias]
 xrun = "run -p xtask -- run"
 xtest = "run -q -p xtask -- test"
 xbuild-rootfs = "run -p xtask -- build-rootfs"
-
-[target.x86_64-seele]
-rustflags = [
-  "-C", "link-arg=-L/home/elysia/coding-project/elysia-os/relibc-seele/target/x86_64-seele/release",
-  "-C", "link-arg=-lm",
-  "-C", "link-arg=-e",
-  "-C", "link-arg=_start",
-]
-
-[target.x86_64-unknown-none]
-rustflags = [
-  "-C", "relocation-model=pic",
-  "-C", "link-arg=-pie",
-]

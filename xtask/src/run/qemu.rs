@@ -105,36 +105,22 @@ impl QemuRunContext {
     }
 }
 
-pub fn create_uefi_image(kernel_path: &Path) -> Result<PathBuf> {
-    let image_path = kernel_path.with_extension("img");
-    let _ = fs::remove_file(&image_path);
-
-    let mut config = bootloader::BootConfig::default();
-    config.frame_buffer_logging = false;
-
-    bootloader::UefiBoot::new(kernel_path)
-        .set_boot_config(&config)
-        .create_disk_image(&image_path)
-        .with_context(|| format!("failed to create UEFI image for {}", kernel_path.display()))?;
-    Ok(image_path)
+pub fn run_qemu(iso_path: &Path, options: &RunOptions) -> Result<i32> {
+    Ok(run_qemu_inner_capture(iso_path, options, true)?.exit_code)
 }
 
-pub fn run_qemu(uefi_path: &Path, options: &RunOptions) -> Result<i32> {
-    Ok(run_qemu_inner_capture(uefi_path, options, true)?.exit_code)
-}
-
-pub fn run_qemu_test_capture(uefi_path: &Path) -> Result<QemuTestResult> {
-    run_qemu_inner_capture(uefi_path, &RunOptions::for_tests(), false)
+pub fn run_qemu_test_capture(iso_path: &Path) -> Result<QemuTestResult> {
+    run_qemu_inner_capture(iso_path, &RunOptions::for_tests(), false)
 }
 
 pub fn run_qemu_expect_serial_failure_capture(
-    uefi_path: &Path,
+    iso_path: &Path,
     serial_pattern: &str,
     expected_exit_code: i32,
 ) -> Result<QemuTestResult> {
     let options = RunOptions::for_tests();
     let context = QemuRunContext::new(&options);
-    let mut cmd = build_qemu_command(uefi_path, &options, &context)?;
+    let mut cmd = build_qemu_command(iso_path, &options, &context)?;
     let mut child = cmd.spawn().context("failed to start qemu-system-x86_64")?;
 
     let status = child.wait().context("failed to wait on qemu")?;
@@ -174,13 +160,13 @@ pub fn run_qemu_expect_serial_failure_capture(
 }
 
 pub fn run_qemu_until_serial_condition_capture(
-    uefi_path: &Path,
+    iso_path: &Path,
     options: &RunOptions,
     timeout: Duration,
     mut condition: impl FnMut(&str) -> bool,
 ) -> Result<QemuTestResult> {
     let context = QemuRunContext::new(options);
-    let mut cmd = build_qemu_command(uefi_path, options, &context)?;
+    let mut cmd = build_qemu_command(iso_path, options, &context)?;
     let mut child = cmd.spawn().context("failed to start qemu-system-x86_64")?;
     let deadline = Instant::now() + timeout;
     let mut offset = 0;
@@ -242,12 +228,12 @@ pub fn run_qemu_until_serial_condition_capture(
 }
 
 fn run_qemu_inner_capture(
-    uefi_path: &Path,
+    iso_path: &Path,
     options: &RunOptions,
     stream_output: bool,
 ) -> Result<QemuTestResult> {
     let context = QemuRunContext::new(options);
-    let mut cmd = build_qemu_command(uefi_path, options, &context)?;
+    let mut cmd = build_qemu_command(iso_path, options, &context)?;
     let mut child = cmd.spawn().context("failed to start qemu-system-x86_64")?;
     let background_done = Arc::new(AtomicBool::new(false));
     let serial_log_thread = stream_output.then(|| {
@@ -271,16 +257,16 @@ fn run_qemu_inner_capture(
     })
 }
 
-pub fn run_qemu_mcp(uefi_path: &Path, options: &RunOptions) -> Result<i32> {
+pub fn run_qemu_mcp(iso_path: &Path, options: &RunOptions) -> Result<i32> {
     let context = QemuRunContext::new(options);
-    let mut cmd = build_qemu_command(uefi_path, options, &context)?;
+    let mut cmd = build_qemu_command(iso_path, options, &context)?;
     let mut child = cmd.spawn().context("failed to start qemu-system-x86_64")?;
     let metadata = json!({
         "runner_pid": std::process::id(),
         "qemu_pid": child.id(),
         "serial_log": context.serial_log,
         "qmp_socket": context.qmp_socket,
-        "uefi_image": uefi_path,
+        "iso_image": iso_path,
     });
     println!("{metadata}");
     let _ = std::io::stdout().flush();
@@ -305,7 +291,7 @@ fn decode_qemu_exit_code(code: Option<i32>, context: &QemuRunContext) -> Result<
 }
 
 fn build_qemu_command(
-    uefi_path: &Path,
+    iso_path: &Path,
     options: &RunOptions,
     context: &QemuRunContext,
 ) -> Result<Command> {
@@ -369,17 +355,7 @@ fn build_qemu_command(
         eprintln!("warning: /dev/kvm not found, falling back to software emulation");
     }
 
-    let prebuilt =
-        Prebuilt::fetch(Source::LATEST, "target/ovmf").context("failed to update prebuilt OVMF")?;
-    let code = prebuilt.get_file(Arch::X64, FileType::Code);
-    let vars = prebuilt.get_file(Arch::X64, FileType::Vars);
-
-    cmd.arg("-drive").arg(format!(
-        "if=none,format=raw,file={},id=bootdisk",
-        uefi_path.display()
-    ));
-    cmd.arg("-device")
-        .arg("virtio-blk-pci,drive=bootdisk,disable-legacy=on,disable-modern=off");
+    cmd.arg("-cdrom").arg(iso_path);
     if root_disk.exists() {
         cmd.arg("-drive").arg(format!(
             "if=none,format=raw,file={},id=rootdisk",
@@ -391,6 +367,12 @@ fn build_qemu_command(
     cmd.arg("-netdev").arg("user,id=net0");
     cmd.arg("-device")
         .arg("e1000,netdev=net0,mac=52:54:00:12:34:56");
+
+    let prebuilt =
+        Prebuilt::fetch(Source::LATEST, "target/ovmf").context("failed to update prebuilt OVMF")?;
+    let code = prebuilt.get_file(Arch::X64, FileType::Code);
+    let vars = prebuilt.get_file(Arch::X64, FileType::Vars);
+
     cmd.arg("-drive").arg(format!(
         "if=pflash,format=raw,unit=0,file={},readonly=on",
         code.display()

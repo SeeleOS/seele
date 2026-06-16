@@ -1,4 +1,5 @@
 pub mod build;
+pub mod build_iso;
 pub mod qemu;
 mod terminal;
 
@@ -8,7 +9,8 @@ use std::fs;
 
 use self::{
     build::build_kernel,
-    qemu::{RunOptions, create_uefi_image, run_qemu, run_qemu_mcp},
+    build_iso::create_boot_iso,
+    qemu::{RunOptions, run_qemu, run_qemu_mcp},
 };
 
 #[derive(Debug, Args)]
@@ -34,10 +36,10 @@ pub fn mcp_run() -> Result<i32> {
         .into_iter()
         .next()
         .context("kernel binary missing")?;
-    let uefi_path = create_uefi_image(&kernel)?;
+    let iso_path = create_boot_iso(&kernel)?;
     let options = RunOptions::for_agent_run_without_timeout();
-    let exit_code = run_qemu_mcp(&uefi_path, &options)?;
-    let _ = fs::remove_file(&uefi_path);
+    let exit_code = run_qemu_mcp(&iso_path, &options)?;
+    let _ = fs::remove_file(&iso_path);
     Ok(exit_code)
 }
 
@@ -46,9 +48,9 @@ fn run_kernel(options: RunOptions) -> Result<i32> {
         .into_iter()
         .next()
         .context("kernel binary missing")?;
-    let uefi_path = create_uefi_image(&kernel)?;
-    let exit_code = run_qemu(&uefi_path, &options)?;
-    fs::remove_file(&uefi_path)
-        .with_context(|| format!("failed to remove UEFI image {}", uefi_path.display()))?;
+    let iso_path = create_boot_iso(&kernel)?;
+    let exit_code = run_qemu(&iso_path, &options)?;
+    fs::remove_file(&iso_path)
+        .with_context(|| format!("failed to remove ISO image {}", iso_path.display()))?;
     Ok(exit_code)
 }

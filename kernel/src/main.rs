@@ -4,17 +4,35 @@
 #![reexport_test_harness_main = "test_main"]
 #![test_runner(kernel::testing::run_tests)]
 
-extern crate alloc;
-
-use bootloader_api::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 
-use kernel::{boot::BOOTLOADER_CONFIG, init};
+extern crate alloc;
 
-entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
+use limine::{
+    BaseRevision,
+    request::{EntryPointRequest, RequestsEndMarker, RequestsStartMarker},
+};
 
-fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
-    init(boot_info);
+#[used]
+#[unsafe(link_section = ".requests_start_marker")]
+static REQUESTS_START: RequestsStartMarker = RequestsStartMarker::new();
+
+#[used]
+#[unsafe(link_section = ".requests")]
+static BASE_REVISION: BaseRevision = BaseRevision::new();
+
+#[used]
+#[unsafe(link_section = ".requests")]
+static ENTRY_POINT_REQUEST: EntryPointRequest = EntryPointRequest::new().with_entry_point(kmain);
+
+#[used]
+#[unsafe(link_section = ".requests_end_marker")]
+static REQUESTS_END: RequestsEndMarker = RequestsEndMarker::new();
+
+#[unsafe(no_mangle)]
+extern "C" fn kmain() -> ! {
+    assert!(BASE_REVISION.is_supported());
+    kernel::init();
 }
 
 #[cfg(test)]
