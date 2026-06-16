@@ -5,12 +5,11 @@ mod userspace_boot;
 use anyhow::Result;
 
 trait IntegrationTest {
-    fn test_count(&self) -> usize;
-    fn run(&self) -> Result<Vec<IntegrationTestResult>>;
+    fn name(&self) -> &'static str;
+    fn run(&self) -> Result<IntegrationTestResult>;
 }
 
 pub struct IntegrationTestResult {
-    pub name: String,
     pub exit_code: i32,
     pub failure: Option<String>,
     pub output: String,
@@ -19,31 +18,28 @@ pub struct IntegrationTestResult {
 pub fn run() -> Result<i32> {
     let tests = integration_tests();
     eprintln!();
-    let test_count = tests.iter().map(|test| test.test_count()).sum::<usize>();
-    eprintln!("running {test_count} integration tests");
+    eprintln!("running {} integration tests", tests.len());
 
     for test in tests {
-        let results = test.run()?;
-        for result in results {
-            eprint!("test {} ... ", result.name);
-            if result.exit_code == 0 {
-                eprintln!("ok");
-            } else {
-                eprintln!("FAILED");
-                report_failure(&result);
-                return Ok(result.exit_code);
-            }
+        let result = test.run()?;
+        eprint!("test {} ... ", test.name());
+        if result.exit_code == 0 {
+            eprintln!("ok");
+        } else {
+            eprintln!("FAILED");
+            report_failure(test.name(), &result);
+            return Ok(result.exit_code);
         }
     }
 
     Ok(0)
 }
 
-fn report_failure(result: &IntegrationTestResult) {
+fn report_failure(name: &str, result: &IntegrationTestResult) {
     eprintln!();
     eprintln!("failures:");
     eprintln!();
-    eprintln!("---- {} stdout ----", result.name);
+    eprintln!("---- {name} stdout ----");
     if let Some(failure) = &result.failure {
         eprintln!("{failure}");
     }

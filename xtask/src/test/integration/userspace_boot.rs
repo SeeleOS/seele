@@ -13,11 +13,11 @@ const USERSPACE_STARTUP_PATTERNS: &[&str] = &["Welcome to Alpine Linux", "OpenRC
 pub struct UserspaceBoot;
 
 impl IntegrationTest for UserspaceBoot {
-    fn test_count(&self) -> usize {
-        1
+    fn name(&self) -> &'static str {
+        "integration::userspace_boot"
     }
 
-    fn run(&self) -> Result<Vec<IntegrationTestResult>> {
+    fn run(&self) -> Result<IntegrationTestResult> {
         let kernel_paths = build_kernel()?;
         let kernel_path = kernel_paths
             .first()
@@ -33,12 +33,11 @@ impl IntegrationTest for UserspaceBoot {
         )?;
         fs::remove_file(&uefi_path)
             .with_context(|| format!("failed to remove UEFI image {}", uefi_path.display()))?;
-        Ok(vec![IntegrationTestResult {
-            name: "integration::userspace_boot".to_string(),
+        Ok(IntegrationTestResult {
             exit_code: result.exit_code,
             failure: result.failure,
             output: result.serial_output,
-        }])
+        })
     }
 }
 
