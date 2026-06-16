@@ -560,9 +560,9 @@ struct TestLinuxSigAction {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestLinuxSigSetArg {
-    sigmask: u64,
-    sigsetsize: usize,
+pub(crate) struct TestLinuxSigSetArg {
+    pub(crate) sigmask: u64,
+    pub(crate) sigsetsize: usize,
 }
 
 #[repr(C)]
@@ -8674,132 +8674,6 @@ pub(crate) fn poll_timeout_helpers_reject_invalid_timespecs_and_saturate() {
         }),
         Err(SyscallError::InvalidArguments)
     ));
-}
-
-pub(crate) fn select_fdset_helpers_count_clear_test_and_set_words() {
-    assert_eq!(fdset_words(0), 0);
-    assert_eq!(fdset_words(1), 1);
-    assert_eq!(fdset_words(65), 2);
-
-    let mut words = [0u64; 2];
-    unsafe {
-        fdset_insert(words.as_mut_ptr(), 0);
-        fdset_insert(words.as_mut_ptr(), 64);
-        assert!(fdset_contains(words.as_ptr(), 0));
-        assert!(fdset_contains(words.as_ptr(), 64));
-        assert!(!fdset_contains(words.as_ptr(), 63));
-        clear_fdset(words.as_mut_ptr(), 65);
-    }
-
-    assert_eq!(words, [0, 0]);
-}
-
-pub(crate) fn select_timeout_helpers_validate_null_zero_and_invalid_timespecs() {
-    assert!(timeout_to_deadline(core::ptr::null()).unwrap().is_none());
-    assert!(!timeout_is_zero(core::ptr::null()));
-
-    let zero = SelectTimespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    assert!(timeout_is_zero(&zero));
-    assert!(timeout_to_deadline(&zero).unwrap().is_some());
-
-    let invalid = SelectTimespec {
-        tv_sec: 0,
-        tv_nsec: 1_000_000_000,
-    };
-    assert!(matches!(
-        timeout_to_deadline(&invalid),
-        Err(SyscallError::InvalidArguments)
-    ));
-}
-
-pub(crate) fn pselect6_syscalls_follow_linux_rules() {
-    let page = allocate_user_test_page();
-    let thread = crate::thread::get_current_thread();
-    let saved_mask = thread.lock().blocked_signals;
-
-    write_user_value(
-        page,
-        &TestLinuxTimespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        },
-    );
-    let new_mask = Signal::SIGUSR1.mask();
-    write_user_value(page + 32, &new_mask);
-    write_user_value(
-        page + 64,
-        &TestLinuxSigSetArg {
-            sigmask: page + 32,
-            sigsetsize: 8,
-        },
-    );
-    expect_ok(
-        SyscallArgs::new([0, 0, 0, 0, page, page + 64]).call::<Pselect6>(),
-        0,
-    );
-    assert_eq!(thread.lock().blocked_signals.bits(), saved_mask.bits());
-
-    let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
-    let readfds = [0u64; 1];
-    let mut writefds = [0u64; 1];
-    unsafe {
-        fdset_insert(writefds.as_mut_ptr(), eventfd);
-    }
-    write_user_value(page + 96, &readfds);
-    write_user_value(page + 104, &writefds);
-    write_user_value(page + 112, &[0u64; 1]);
-    expect_ok(
-        SyscallArgs::new([eventfd as u64 + 1, page + 96, page + 104, page + 112, 0, 0])
-            .call::<Pselect6>(),
-        1,
-    );
-    assert_eq!(read_user_value::<u64>(page + 96), 0);
-    assert_eq!(read_user_value::<u64>(page + 104), 1u64 << eventfd);
-    assert_eq!(read_user_value::<u64>(page + 112), 0);
-
-    write_user_value(
-        page + 120,
-        &TestLinuxSigSetArg {
-            sigmask: page + 32,
-            sigsetsize: 4,
-        },
-    );
-    expect_errno(
-        SyscallArgs::new([0, 0, 0, 0, 0, page + 120]).call::<Pselect6>(),
-        SyscallError::InvalidArguments,
-    );
-    write_user_value(
-        page + 120,
-        &TestLinuxSigSetArg {
-            sigmask: 1,
-            sigsetsize: 8,
-        },
-    );
-    expect_errno(
-        SyscallArgs::new([0, 0, 0, 0, 0, page + 120]).call::<Pselect6>(),
-        SyscallError::BadAddress,
-    );
-    expect_errno(
-        SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<Pselect6>(),
-        SyscallError::InvalidArguments,
-    );
-    write_user_value(
-        page,
-        &TestLinuxTimespec {
-            tv_sec: 0,
-            tv_nsec: 1_000_000_000,
-        },
-    );
-    expect_errno(
-        SyscallArgs::new([0, 0, 0, 0, page, 0]).call::<Pselect6>(),
-        SyscallError::InvalidArguments,
-    );
-
-    close_test_fd(eventfd);
-    crate::thread::get_current_thread().lock().blocked_signals = saved_mask;
 }
 
 pub(crate) fn memory_mapping_syscalls_follow_linux_rules() {
