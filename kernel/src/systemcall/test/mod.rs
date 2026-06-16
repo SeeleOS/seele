@@ -215,12 +215,14 @@ crate::test!(
 pub(crate) fn syscall_number_lookup_matches_x86_64_abi_values() {
     assert_eq!(SyscallNumber::from_number(0), Some(SyscallNumber::Read));
     assert_eq!(SyscallNumber::from_number(1), Some(SyscallNumber::Write));
+    assert_eq!(SyscallNumber::from_number(4), Some(SyscallNumber::Stat));
     assert_eq!(SyscallNumber::from_number(257), Some(SyscallNumber::OpenAt));
     assert_eq!(SyscallNumber::from_number(999), None);
 }
 
 fn syscall_table_contains_registered_and_rejects_unknown_numbers() {
     assert!(SYSCALL_TABLE[SyscallNumber::Read as usize].is_some());
+    assert!(SYSCALL_TABLE[SyscallNumber::Stat as usize].is_some());
     assert!(SYSCALL_TABLE[SyscallNumber::OpenAt as usize].is_some());
     assert!(SYSCALL_TABLE[999].is_none());
 }

@@ -7,6 +7,7 @@ pub enum SyscallNumber {
     Write = 1,
     Open = 2,
     Close = 3,
+    Stat = 4,
     Poll = 7,
     Fstat = 5,
     Lseek = 8,

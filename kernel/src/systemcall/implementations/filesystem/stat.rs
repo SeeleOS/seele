@@ -7,6 +7,31 @@ define_syscall!(Fstat, |fd: u64, linux_stat_ptr: *mut LinuxStat| {
     Ok(0)
 });
 
+define_syscall!(Stat, |path: CString, linux_stat_ptr: *mut LinuxStat| {
+    let path_str = path_from_raw(path)?;
+    let lookup = lookup_path_metadata(
+        AT_FDCWD,
+        &path_str,
+        false,
+        false,
+        PathLookupPhases {
+            resolve: HotSyscallPhase::NewfstatatPathResolve,
+            empty_path: HotSyscallPhase::NewfstatatEmptyPath,
+            resolve_final: HotSyscallPhase::NewfstatatResolveFinal,
+            build_stat: HotSyscallPhase::NewfstatatBuildStat,
+            mount_info: HotSyscallPhase::NewfstatatMountInfo,
+        },
+    )?;
+
+    let write_user_start = profile::scope_start();
+    user_safe::write(linux_stat_ptr, &lookup.stat)?;
+    profile::record_hot_syscall_phase(
+        HotSyscallPhase::NewfstatatWriteUser,
+        profile::scope_start().saturating_sub(write_user_start),
+    );
+    Ok(0)
+});
+
 define_syscall!(Fchmod, |fd: u64, mode: u32| {
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
     let mode = mode & !S_IFMT;

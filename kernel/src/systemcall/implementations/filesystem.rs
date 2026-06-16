@@ -879,6 +879,30 @@ mod tests {
         assert_eq!(followed_stat.st_mode & 0o170000, 0o100000);
         assert_eq!(followed_stat.st_mode & 0o777, 0o700);
 
+        write_user_cstr(user_page, b"/tmp/syscall-metadata-test/file\0");
+        expect_ok(
+            SyscallArgs::new([user_page, stat_ptr as u64, 0, 0, 0, 0]).call::<Stat>(),
+            0,
+        );
+        let stat_stat = read_user_value::<LinuxStat>(stat_ptr as u64);
+        assert_eq!(stat_stat.st_mode & 0o170000, 0o100000);
+        assert_eq!(stat_stat.st_mode & 0o777, 0o700);
+        assert_eq!(stat_stat.st_ino, followed_stat.st_ino);
+        expect_errno(
+            SyscallArgs::new([0, stat_ptr as u64, 0, 0, 0, 0]).call::<Stat>(),
+            SyscallError::BadAddress,
+        );
+        write_user_cstr(user_page + 256, b"\0");
+        expect_errno(
+            SyscallArgs::new([user_page + 256, stat_ptr as u64, 0, 0, 0, 0]).call::<Stat>(),
+            SyscallError::NotFound,
+        );
+        write_user_cstr(user_page + 320, b"/tmp/syscall-metadata-test/missing\0");
+        expect_errno(
+            SyscallArgs::new([user_page + 320, stat_ptr as u64, 0, 0, 0, 0]).call::<Stat>(),
+            SyscallError::NotFound,
+        );
+
         expect_ok(
             SyscallArgs::new([
                 file_fd as u64,
