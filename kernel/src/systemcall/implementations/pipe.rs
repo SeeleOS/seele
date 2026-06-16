@@ -62,3 +62,14 @@ define_syscall!(Pipe, |fds: *mut i32| {
 define_syscall!(Pipe2, |fds: *mut i32, flags: PipeFlags| {
     create_pipe(fds, flags)
 });
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        pipe_and_dup_syscalls,
+        "pipe and dup syscalls follow linux fd rules",
+        pipe_and_dup_syscalls_follow_linux_fd_rules
+    );
+}

@@ -450,3 +450,14 @@ define_syscall!(SchedRrGetInterval, |pid: i32, tp: *mut LinuxTimespec| {
     user_safe::write(tp, &timespec)?;
     Ok(0)
 });
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        timerfd_syscalls,
+        "timerfd syscalls follow linux flag and timer rules",
+        timerfd_syscalls_follow_linux_flag_and_timer_rules
+    );
+}

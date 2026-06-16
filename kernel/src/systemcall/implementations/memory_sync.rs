@@ -1117,3 +1117,19 @@ define_syscall!(Mincore, |addr: VirtAddr, len: usize, vec: *mut u8| {
     user_safe::write_buffer(vec, &residency)?;
     Ok(0)
 });
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        futex_syscalls,
+        "futex syscalls follow linux rules",
+        futex_syscalls_follow_linux_rules
+    );
+    crate::test!(
+        memory_mapping_syscalls,
+        "brk mmap mprotect munmap mremap msync and mincore follow linux rules",
+        memory_mapping_syscalls_follow_linux_rules
+    );
+}

@@ -54,3 +54,19 @@ define_syscall!(InotifyRmWatch, |object: ObjectRef, _wd: i32| {
     let _ = object.as_inotify()?;
     Ok(0)
 });
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        eventfd_syscalls,
+        "eventfd syscalls follow linux flag rules",
+        eventfd_syscalls_follow_linux_flag_rules
+    );
+    crate::test!(
+        inotify_init_syscalls,
+        "inotify init syscalls follow linux flag rules",
+        inotify_init_syscalls_follow_linux_flag_rules
+    );
+}

@@ -58,3 +58,14 @@ define_syscall!(Keyctl, |cmd: u64,
         Err(_) => Err(SyscallError::NoSyscall),
     }
 });
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        key_and_bpf_syscalls,
+        "add_key keyctl and bpf follow linux rules",
+        key_and_bpf_syscalls_follow_linux_rules
+    );
+}

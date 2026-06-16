@@ -61,6 +61,17 @@ define_syscall!(
     }
 );
 
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        posix_timer_syscalls,
+        "posix timer syscalls follow linux rules",
+        posix_timer_syscalls_follow_linux_rules
+    );
+}
+
 define_syscall!(TimerDelete, |id: usize| {
     with_current_process(|process| process.delete_timer(id))?;
     Ok(0)

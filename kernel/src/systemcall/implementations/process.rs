@@ -417,3 +417,29 @@ define_syscall!(Setsid, {
     current.controlling_terminal = None;
     Ok(pid as usize)
 });
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        pidfd_and_waitid_syscalls,
+        "pidfd_open and waitid follow linux process rules",
+        pidfd_and_waitid_syscalls_follow_linux_rules
+    );
+    crate::test!(
+        execve_syscalls,
+        "execve syscall semantics follow linux rules",
+        execve_syscalls_follow_linux_rules
+    );
+    crate::test!(
+        exit_thread_semantics,
+        "exit helper semantics follow linux rules",
+        exit_thread_semantics_follow_linux_rules
+    );
+    crate::test!(
+        exit_group_semantics,
+        "exit_group helper semantics follow linux rules",
+        exit_group_semantics_follow_linux_rules
+    );
+}

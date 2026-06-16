@@ -30,3 +30,14 @@ define_syscall!(Shmdt, |shmaddr: *const u8| {
     let mut process = process.lock();
     sysv_shm::shmdt(&mut process, shmaddr)
 });
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        sysv_shm_syscalls,
+        "sysv shm syscalls follow linux rules",
+        sysv_shm_syscalls_follow_linux_rules
+    );
+}

@@ -304,3 +304,19 @@ define_syscall!(Kcmp, |pid1: i32,
         }
     }
 });
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        namespace_and_kcmp_syscalls,
+        "namespace and kcmp syscalls follow linux rules",
+        namespace_and_kcmp_syscalls_follow_linux_rules
+    );
+    crate::test!(
+        clone_and_fork_syscalls,
+        "clone fork and clone3 syscalls follow linux rules",
+        clone_and_fork_syscalls_follow_linux_rules
+    );
+}

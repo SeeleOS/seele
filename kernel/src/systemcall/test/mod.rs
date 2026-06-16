@@ -330,39 +330,9 @@ crate::test!(
     clock_and_affinity_syscalls_follow_linux_pointer_rules
 );
 crate::test!(
-    eventfd_syscalls,
-    "eventfd syscalls follow linux flag rules",
-    eventfd_syscalls_follow_linux_flag_rules
-);
-crate::test!(
-    inotify_init_syscalls,
-    "inotify init syscalls follow linux flag rules",
-    inotify_init_syscalls_follow_linux_flag_rules
-);
-crate::test!(
-    timerfd_syscalls,
-    "timerfd syscalls follow linux flag and timer rules",
-    timerfd_syscalls_follow_linux_flag_and_timer_rules
-);
-crate::test!(
-    posix_timer_syscalls,
-    "posix timer syscalls follow linux rules",
-    posix_timer_syscalls_follow_linux_rules
-);
-crate::test!(
-    pipe_and_dup_syscalls,
-    "pipe and dup syscalls follow linux fd rules",
-    pipe_and_dup_syscalls_follow_linux_fd_rules
-);
-crate::test!(
     signalfd_syscalls,
     "signalfd syscalls follow linux rules",
     signalfd_syscalls_follow_linux_rules
-);
-crate::test!(
-    namespace_and_kcmp_syscalls,
-    "namespace and kcmp syscalls follow linux rules",
-    namespace_and_kcmp_syscalls_follow_linux_rules
 );
 crate::test!(
     close_range_syscalls,
@@ -373,11 +343,6 @@ crate::test!(
     quotactl_fd_syscalls,
     "quotactl_fd syscalls follow linux rules",
     quotactl_fd_syscalls_follow_linux_rules
-);
-crate::test!(
-    pidfd_and_waitid_syscalls,
-    "pidfd_open and waitid follow linux process rules",
-    pidfd_and_waitid_syscalls_follow_linux_rules
 );
 crate::test!(
     sleep_and_signal_mask_syscalls,
@@ -405,49 +370,9 @@ crate::test!(
     process_and_signal_transition_helpers_follow_linux_rules
 );
 crate::test!(
-    clone_and_fork_syscalls,
-    "clone fork and clone3 syscalls follow linux rules",
-    clone_and_fork_syscalls_follow_linux_rules
-);
-crate::test!(
-    futex_syscalls,
-    "futex syscalls follow linux rules",
-    futex_syscalls_follow_linux_rules
-);
-crate::test!(
-    execve_syscalls,
-    "execve syscall semantics follow linux rules",
-    execve_syscalls_follow_linux_rules
-);
-crate::test!(
-    exit_thread_semantics,
-    "exit helper semantics follow linux rules",
-    exit_thread_semantics_follow_linux_rules
-);
-crate::test!(
-    exit_group_semantics,
-    "exit_group helper semantics follow linux rules",
-    exit_group_semantics_follow_linux_rules
-);
-crate::test!(
     typed_syscall_arg_conversion,
     "typed syscall args convert flags and enums at boundary",
     typed_syscall_args_convert_flags_and_enums_at_boundary
-);
-crate::test!(
-    memory_mapping_syscalls,
-    "brk mmap mprotect munmap mremap msync and mincore follow linux rules",
-    memory_mapping_syscalls_follow_linux_rules
-);
-crate::test!(
-    sysv_shm_syscalls,
-    "sysv shm syscalls follow linux rules",
-    sysv_shm_syscalls_follow_linux_rules
-);
-crate::test!(
-    key_and_bpf_syscalls,
-    "add_key keyctl and bpf follow linux rules",
-    key_and_bpf_syscalls_follow_linux_rules
 );
 
 pub(crate) fn syscall_number_lookup_matches_x86_64_abi_values() {
@@ -2292,7 +2217,7 @@ pub(crate) fn getdents_names(
     parse_dirent_names(page + offset, bytes)
 }
 
-fn eventfd_syscalls_follow_linux_flag_rules() {
+pub(crate) fn eventfd_syscalls_follow_linux_flag_rules() {
     const EFD_SEMAPHORE: u64 = 0x1;
     const EFD_NONBLOCK: u64 = 0o4_000;
     const EFD_CLOEXEC: u64 = 0o2_000_000;
@@ -2321,7 +2246,7 @@ fn eventfd_syscalls_follow_linux_flag_rules() {
     );
 }
 
-fn inotify_init_syscalls_follow_linux_flag_rules() {
+pub(crate) fn inotify_init_syscalls_follow_linux_flag_rules() {
     const IN_NONBLOCK: u64 = 0o4_000;
     const IN_CLOEXEC: u64 = 0o2_000_000;
 
@@ -2348,7 +2273,7 @@ fn inotify_init_syscalls_follow_linux_flag_rules() {
     );
 }
 
-fn timerfd_syscalls_follow_linux_flag_and_timer_rules() {
+pub(crate) fn timerfd_syscalls_follow_linux_flag_and_timer_rules() {
     const TFD_NONBLOCK: u64 = 0o4_000;
     const TFD_CLOEXEC: u64 = 0o2_000_000;
     const CLOCK_REALTIME: u64 = 0;
@@ -2432,7 +2357,7 @@ fn timerfd_syscalls_follow_linux_flag_and_timer_rules() {
     close_test_fd(timerfd);
 }
 
-fn posix_timer_syscalls_follow_linux_rules() {
+pub(crate) fn posix_timer_syscalls_follow_linux_rules() {
     const CLOCK_REALTIME: u64 = 0;
     const TIMER_ABSTIME: u64 = 1;
     const SIGEV_NONE: u8 = 0;
@@ -2607,7 +2532,7 @@ fn posix_timer_syscalls_follow_linux_rules() {
     let _ = SIGEV_NONE;
 }
 
-fn pipe_and_dup_syscalls_follow_linux_fd_rules() {
+pub(crate) fn pipe_and_dup_syscalls_follow_linux_fd_rules() {
     const O_NONBLOCK: u64 = 0o4_000;
     const O_CLOEXEC: u64 = 0o2_000_000;
 
@@ -7354,7 +7279,7 @@ pub(crate) fn socket_message_syscalls_follow_linux_rules() {
     close_test_fd(listener);
 }
 
-fn namespace_and_kcmp_syscalls_follow_linux_rules() {
+pub(crate) fn namespace_and_kcmp_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const CLONE_NEWNET: u64 = 0x4000_0000;
 
@@ -7713,7 +7638,7 @@ fn quotactl_fd_syscalls_follow_linux_rules() {
         .delete_file(Path::new("/tmp/syscall-quotactl-fd-test"));
 }
 
-fn pidfd_and_waitid_syscalls_follow_linux_rules() {
+pub(crate) fn pidfd_and_waitid_syscalls_follow_linux_rules() {
     const P_PID: u64 = 1;
     const P_PIDFD: u64 = 3;
     const EPOLL_CTL_ADD: u64 = 1;
@@ -9263,7 +9188,7 @@ fn process_and_signal_transition_helpers_follow_linux_rules() {
     }
 }
 
-fn clone_and_fork_syscalls_follow_linux_rules() {
+pub(crate) fn clone_and_fork_syscalls_follow_linux_rules() {
     const SIGCHLD: u64 = 17;
     const CLONE_VM: u64 = 0x0000_0100;
     const CLONE_FS: u64 = 0x0000_0200;
@@ -9434,7 +9359,7 @@ fn clone_and_fork_syscalls_follow_linux_rules() {
     thread_manager.cleanup_exited_threads();
 }
 
-fn futex_syscalls_follow_linux_rules() {
+pub(crate) fn futex_syscalls_follow_linux_rules() {
     const FUTEX_WAIT: u64 = 0;
     const FUTEX_WAKE: u64 = 1;
     const FUTEX_WAIT_BITSET: u64 = 9;
@@ -9490,7 +9415,7 @@ fn futex_syscalls_follow_linux_rules() {
     );
 }
 
-fn execve_syscalls_follow_linux_rules() {
+pub(crate) fn execve_syscalls_follow_linux_rules() {
     let page = allocate_user_test_page();
 
     expect_errno(
@@ -9508,7 +9433,7 @@ fn execve_syscalls_follow_linux_rules() {
     );
 }
 
-fn exit_thread_semantics_follow_linux_rules() {
+pub(crate) fn exit_thread_semantics_follow_linux_rules() {
     let saved_process_ref = get_current_process();
     let page = allocate_user_test_page();
 
@@ -9536,7 +9461,7 @@ fn exit_thread_semantics_follow_linux_rules() {
     MANAGER.lock().processes.remove(&helper_pid);
 }
 
-fn exit_group_semantics_follow_linux_rules() {
+pub(crate) fn exit_group_semantics_follow_linux_rules() {
     let exit_group_process = Process::empty();
     exit_group_process.lock().pid = ProcessID::new();
     let terminated_threads = exit_group_process
@@ -9779,7 +9704,7 @@ pub(crate) fn pselect6_syscalls_follow_linux_rules() {
     crate::thread::get_current_thread().lock().blocked_signals = saved_mask;
 }
 
-fn memory_mapping_syscalls_follow_linux_rules() {
+pub(crate) fn memory_mapping_syscalls_follow_linux_rules() {
     const MAP_SHARED: u64 = 0x01;
     const MAP_PRIVATE: u64 = 0x02;
     const MAP_ANONYMOUS: u64 = 0x20;
@@ -10141,7 +10066,7 @@ fn memory_mapping_syscalls_follow_linux_rules() {
         .delete_file(Path::new("/tmp/syscall-mmap-file-test"));
 }
 
-fn sysv_shm_syscalls_follow_linux_rules() {
+pub(crate) fn sysv_shm_syscalls_follow_linux_rules() {
     const IPC_PRIVATE: u64 = 0;
     const IPC_CREAT: u64 = 0o1000;
     const IPC_EXCL: u64 = 0o2000;
@@ -10251,7 +10176,7 @@ fn sysv_shm_syscalls_follow_linux_rules() {
     );
 }
 
-fn key_and_bpf_syscalls_follow_linux_rules() {
+pub(crate) fn key_and_bpf_syscalls_follow_linux_rules() {
     const KEY_SPEC_SESSION_KEYRING: u64 = (-3i32) as u64;
     const KEY_SPEC_USER_KEYRING: u64 = (-4i32) as u64;
     const BPF_MAP_CREATE: u64 = 0;
