@@ -12,8 +12,8 @@ Seele OS is an x86_64 operating system kernel written in `no_std` Rust targeting
 cargo xrun                  # build and boot in QEMU
 cargo xrun -- --agent       # manual fallback headless boot; serial logs captured automatically
 cargo xtest                 # kernel and integration tests in QEMU
-cargo xrootfs               # build/refresh disk.img and rootfs
-cargo xrootfs-override      # rebuild disk.img from scratch
+cargo xbuild-rootfs         # build/refresh disk.img and rootfs
+cargo xbuild-rootfs -- --override  # rebuild disk.img from scratch
 cargo fmt --all             # format
 cargo check --manifest-path kernel/Cargo.toml   # fast type-check kernel only
 cargo clippy                # lint; treat all warnings as failures

@@ -100,13 +100,13 @@ Manual `cargo xrun` and `cargo xrun -- --agent` remain useful for local foregrou
 Build or refresh `disk.img` and the guest root filesystem:
 
 ```sh
-cargo xrootfs
+cargo xbuild-rootfs
 ```
 
 Force rebuilding the disk image from scratch:
 
 ```sh
-cargo xrootfs-override
+cargo xbuild-rootfs -- --override
 ```
 
 Mount `sysroot/` from `disk.img` through the MCP `ensure_sysroot_mounted` tool when needed.

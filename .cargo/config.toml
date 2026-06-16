@@ -4,8 +4,7 @@ bindeps = true
 [alias]
 xrun = "run -p xtask -- run"
 xtest = "run -p xtask -- test"
-xrootfs = "run -p xtask -- rootfs-build"
-"xrootfs-override" = "run -p xtask -- rootfs-build --override"
+xbuild-rootfs = "run -p xtask -- build-rootfs"
 
 [target.x86_64-seele]
 rustflags = [

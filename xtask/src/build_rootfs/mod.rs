@@ -4,12 +4,12 @@ use std::{env, path::PathBuf};
 use xshell::{Shell, cmd};
 
 #[derive(Debug, Args)]
-pub struct RootfsArgs {
+pub struct BuildRootfsArgs {
     #[arg(long)]
     pub r#override: bool,
 }
 
-pub fn rootfs(args: RootfsArgs) -> Result<i32> {
+pub fn build_rootfs(args: BuildRootfsArgs) -> Result<i32> {
     let sh = Shell::new()?;
     let repo_root = repo_root()?;
     let script = repo_root.join("rootfs_making/make_rootfs.sh");
