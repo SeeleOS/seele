@@ -1,10 +1,10 @@
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub(super) struct LinuxInputId {
-    pub(super) bustype: u16,
-    pub(super) vendor: u16,
-    pub(super) product: u16,
-    pub(super) version: u16,
+pub struct LinuxInputId {
+    pub bustype: u16,
+    pub vendor: u16,
+    pub product: u16,
+    pub version: u16,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

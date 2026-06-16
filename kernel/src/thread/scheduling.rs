@@ -337,6 +337,7 @@ pub fn run() -> ! {
                 keyboard::process_pending_scancodes();
                 mouse::process_pending_mouse_events();
             }
+            crate::drm::poll_scanout_refresh(Time::since_boot());
             profile::record(ProfileCategory::OtherKernel, other_kernel_start);
         }
 

@@ -21,7 +21,6 @@ struct Rect {
 
 #[derive(Clone, Copy)]
 struct ScanoutCopyContext {
-    src_pixel_format: u32,
     dst_pixel_format: FramebufferPixelFormat,
     src_pitch: usize,
     dst_stride_bytes: usize,
@@ -169,6 +168,7 @@ pub(super) fn blit_dumb_buffer_to_scanout(
     let src = unsafe { slice::from_raw_parts(src_start as *const u8, src_bytes) };
 
     let mut canvas = FRAME_BUFFER.get().unwrap().lock();
+    let _pixel_format = framebuffer.pixel_format;
     let width = min(framebuffer.width as usize, canvas.info.width);
     let height = min(framebuffer.height as usize, canvas.info.height);
     let dst_bytes_per_pixel = canvas.info.bytes_per_pixel;
@@ -176,7 +176,6 @@ pub(super) fn blit_dumb_buffer_to_scanout(
     let dst_pixel_format = canvas.info.pixel_format;
     let src_pitch = framebuffer.pitch as usize;
     let copy_context = ScanoutCopyContext {
-        src_pixel_format: framebuffer.pixel_format,
         dst_pixel_format,
         src_pitch,
         dst_stride_bytes,
@@ -216,7 +215,6 @@ fn redraw_scanout_region(
     let dst_pixel_format = canvas.info.pixel_format;
     let src_pitch = framebuffer.pitch as usize;
     let copy_context = ScanoutCopyContext {
-        src_pixel_format: framebuffer.pixel_format,
         dst_pixel_format,
         src_pitch,
         dst_stride_bytes,
@@ -272,11 +270,7 @@ fn copy_scanout_row(
         let blue = src_px[0];
         let green = src_px[1];
         let red = src_px[2];
-        let alpha = if context.src_pixel_format == DRM_FORMAT_ARGB8888 {
-            src_px[3]
-        } else {
-            0xff
-        };
+        let alpha = 0xff;
 
         match context.dst_pixel_format {
             FramebufferPixelFormat::Rgb => {
