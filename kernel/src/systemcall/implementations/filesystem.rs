@@ -131,11 +131,6 @@ mod tests {
         filesystem_xattr_syscalls_follow_linux_rules
     );
     crate::test!(
-        memfd_and_inotify_watch_syscalls,
-        "memfd and inotify watch syscalls follow linux rules",
-        memfd_and_inotify_watch_syscalls_follow_linux_rules
-    );
-    crate::test!(
         filesystem_statx_syscalls,
         "statx follows linux rules",
         filesystem_statx_syscalls_follow_linux_rules

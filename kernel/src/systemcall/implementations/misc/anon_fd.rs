@@ -61,9 +61,14 @@ mod tests {
         object::{FileFlags, misc::get_object_current_process},
         process::FdFlags,
         systemcall::{
-            implementations::{Eventfd, Eventfd2, InotifyInit, InotifyInit1},
-            test::{assert_fd_flags, assert_object_flags, close_test_fd, expect_fd},
-            test_helpers::{SyscallArgs, expect_errno},
+            implementations::{
+                Eventfd, Eventfd2, Fcntl, InotifyAddWatch, InotifyInit, InotifyInit1,
+                InotifyRmWatch, MemfdCreate,
+            },
+            test::{
+                assert_fd_flags, assert_object_flags, close_test_fd, expect_fd, write_user_cstr,
+            },
+            test_helpers::{SyscallArgs, allocate_user_test_page, expect_errno, expect_ok},
             utils::SyscallError,
         },
     };
@@ -77,6 +82,12 @@ mod tests {
         inotify_init_syscalls,
         "inotify init syscalls follow linux flag rules",
         inotify_init_syscalls_follow_linux_flag_rules
+    );
+
+    crate::test!(
+        memfd_and_inotify_watch_syscalls,
+        "memfd and inotify watch syscalls follow linux rules",
+        memfd_and_inotify_watch_syscalls_follow_linux_rules
     );
 
     fn eventfd_syscalls_follow_linux_flag_rules() {
@@ -133,5 +144,79 @@ mod tests {
             SyscallArgs::new([0x8000_0000, 0, 0, 0, 0, 0]).call::<InotifyInit1>(),
             SyscallError::InvalidArguments,
         );
+    }
+
+    fn memfd_and_inotify_watch_syscalls_follow_linux_rules() {
+        const MFD_CLOEXEC: u64 = 0x0001;
+        const MFD_ALLOW_SEALING: u64 = 0x0002;
+        const MFD_NOEXEC_SEAL: u64 = 0x0008;
+        const MFD_EXEC: u64 = 0x0010;
+
+        let user_page = allocate_user_test_page();
+        write_user_cstr(user_page, b"demo/memfd\0");
+        let memfd = expect_fd(
+            SyscallArgs::new([user_page, MFD_CLOEXEC | MFD_ALLOW_SEALING, 0, 0, 0, 0])
+                .call::<MemfdCreate>(),
+        );
+        assert_fd_flags(memfd, FdFlags::CLOEXEC);
+        let memfd_stat = get_object_current_process(memfd as u64)
+            .unwrap()
+            .as_statable()
+            .unwrap()
+            .stat();
+        assert_eq!(memfd_stat.st_mode & 0o170000, 0o100000);
+        assert_eq!(memfd_stat.st_mode & 0o777, 0o600);
+
+        expect_ok(
+            SyscallArgs::new([memfd as u64, 1034, 0, 0, 0, 0]).call::<Fcntl>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([memfd as u64, 1033, 0x0002, 0, 0, 0]).call::<Fcntl>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([memfd as u64, 1034, 0, 0, 0, 0]).call::<Fcntl>(),
+            0x0002,
+        );
+
+        expect_errno(
+            SyscallArgs::new([user_page, 0x4, 0, 0, 0, 0]).call::<MemfdCreate>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([user_page, MFD_NOEXEC_SEAL | MFD_EXEC, 0, 0, 0, 0])
+                .call::<MemfdCreate>(),
+            SyscallError::InvalidArguments,
+        );
+
+        let inotify = expect_fd(SyscallArgs::none().call::<InotifyInit>());
+        write_user_cstr(user_page + 128, b"/tmp\0");
+        let wd1 = SyscallArgs::new([inotify as u64, user_page + 128, 0xffff_ffff, 0, 0, 0])
+            .call::<InotifyAddWatch>()
+            .expect("inotify_add_watch should succeed");
+        let wd2 = SyscallArgs::new([inotify as u64, user_page + 128, 0, 0, 0, 0])
+            .call::<InotifyAddWatch>()
+            .expect("second watch should succeed");
+        assert!(wd2 > wd1);
+        expect_ok(
+            SyscallArgs::new([inotify as u64, wd1 as u64, 0, 0, 0, 0]).call::<InotifyRmWatch>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([inotify as u64, wd2 as u64, 0, 0, 0, 0]).call::<InotifyRmWatch>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([memfd as u64, user_page + 128, 0, 0, 0, 0]).call::<InotifyAddWatch>(),
+            SyscallError::BadFileDescriptor,
+        );
+        expect_errno(
+            SyscallArgs::new([memfd as u64, 1, 0, 0, 0, 0]).call::<InotifyRmWatch>(),
+            SyscallError::BadFileDescriptor,
+        );
+
+        close_test_fd(inotify);
+        close_test_fd(memfd);
     }
 }
