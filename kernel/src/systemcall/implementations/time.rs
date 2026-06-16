@@ -453,7 +453,26 @@ define_syscall!(SchedRrGetInterval, |pid: i32, tp: *mut LinuxTimespec| {
 
 #[cfg(test)]
 mod tests {
-    use crate::systemcall::test::*;
+    use crate::systemcall::test::{
+        clock_and_affinity_syscalls_follow_linux_pointer_rules,
+        clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids,
+    };
+    use crate::{
+        object::{FileFlags, misc::get_object_current_process},
+        process::FdFlags,
+        systemcall::{
+            implementations::{Eventfd, TimerfdCreate, TimerfdGettime, TimerfdSettime},
+            test::{
+                TestLinuxItimerspec, TestLinuxTimespec, assert_fd_flags, assert_object_flags,
+                close_test_fd, expect_fd,
+            },
+            test_helpers::{
+                SyscallArgs, allocate_user_test_page, expect_errno, expect_ok, read_user_value,
+                write_user_value,
+            },
+            utils::SyscallError,
+        },
+    };
 
     crate::test!(
         clock_getres_syscall,
@@ -470,4 +489,88 @@ mod tests {
         "timerfd syscalls follow linux flag and timer rules",
         timerfd_syscalls_follow_linux_flag_and_timer_rules
     );
+
+    fn timerfd_syscalls_follow_linux_flag_and_timer_rules() {
+        const TFD_NONBLOCK: u64 = 0o4_000;
+        const TFD_CLOEXEC: u64 = 0o2_000_000;
+        const CLOCK_REALTIME: u64 = 0;
+        const CLOCK_MONOTONIC: u64 = 1;
+
+        let timerfd = expect_fd(
+            SyscallArgs::new([CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC, 0, 0, 0, 0])
+                .call::<TimerfdCreate>(),
+        );
+        assert!(
+            get_object_current_process(timerfd as u64)
+                .expect("timerfd should resolve")
+                .as_timerfd()
+                .is_ok()
+        );
+        assert_fd_flags(timerfd, FdFlags::CLOEXEC);
+        assert_object_flags(timerfd, FileFlags::NONBLOCK);
+        expect_errno(
+            SyscallArgs::new([99, 0, 0, 0, 0, 0]).call::<TimerfdCreate>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([CLOCK_REALTIME, 0x8000_0000, 0, 0, 0, 0]).call::<TimerfdCreate>(),
+            SyscallError::InvalidArguments,
+        );
+
+        let spec_page = allocate_user_test_page();
+        expect_ok(
+            SyscallArgs::new([timerfd as u64, spec_page, 0, 0, 0, 0]).call::<TimerfdGettime>(),
+            0,
+        );
+        let spec = read_user_value::<TestLinuxItimerspec>(spec_page);
+        assert_eq!(spec.it_interval.tv_sec, 0);
+        assert_eq!(spec.it_interval.tv_nsec, 0);
+        assert_eq!(spec.it_value.tv_sec, 0);
+        assert_eq!(spec.it_value.tv_nsec, 0);
+        expect_errno(
+            SyscallArgs::new([timerfd as u64, 0, 0, 0, 0, 0]).call::<TimerfdGettime>(),
+            SyscallError::BadAddress,
+        );
+
+        write_user_value(spec_page, &TestLinuxItimerspec::default());
+        expect_ok(
+            SyscallArgs::new([timerfd as u64, 0, spec_page, spec_page + 64, 0, 0])
+                .call::<TimerfdSettime>(),
+            0,
+        );
+        let old_spec = read_user_value::<TestLinuxItimerspec>(spec_page + 64);
+        assert_eq!(old_spec.it_interval.tv_sec, 0);
+        assert_eq!(old_spec.it_interval.tv_nsec, 0);
+        assert_eq!(old_spec.it_value.tv_sec, 0);
+        assert_eq!(old_spec.it_value.tv_nsec, 0);
+        expect_errno(
+            SyscallArgs::new([timerfd as u64, 0, 0, 0, 0, 0]).call::<TimerfdSettime>(),
+            SyscallError::BadAddress,
+        );
+        write_user_value(
+            spec_page,
+            &TestLinuxItimerspec {
+                it_value: TestLinuxTimespec {
+                    tv_sec: 0,
+                    tv_nsec: 1_000_000_000,
+                },
+                ..Default::default()
+            },
+        );
+        expect_errno(
+            SyscallArgs::new([timerfd as u64, 0, spec_page, 0, 0, 0]).call::<TimerfdSettime>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([u64::MAX, spec_page, 0, 0, 0, 0]).call::<TimerfdGettime>(),
+            SyscallError::BadFileDescriptor,
+        );
+        let non_timerfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+        expect_errno(
+            SyscallArgs::new([non_timerfd as u64, 0, spec_page, 0, 0, 0]).call::<TimerfdSettime>(),
+            SyscallError::BadFileDescriptor,
+        );
+        close_test_fd(non_timerfd);
+        close_test_fd(timerfd);
+    }
 }

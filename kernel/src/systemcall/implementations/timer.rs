@@ -63,13 +63,206 @@ define_syscall!(
 
 #[cfg(test)]
 mod tests {
-    use crate::systemcall::test::*;
+    use crate::{
+        signal::Signal,
+        systemcall::{
+            implementations::{
+                TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime,
+            },
+            test::{TestLinuxItimerspec, TestLinuxTimespec, allocate_large_user_test_region},
+            test_helpers::{
+                SyscallArgs, assert_linux_layout, expect_errno, expect_ok, read_user_value,
+                write_user_value,
+            },
+            utils::SyscallError,
+        },
+    };
 
     crate::test!(
         posix_timer_syscalls,
         "posix timer syscalls follow linux rules",
         posix_timer_syscalls_follow_linux_rules
     );
+
+    fn posix_timer_syscalls_follow_linux_rules() {
+        const CLOCK_REALTIME: u64 = 0;
+        const TIMER_ABSTIME: u64 = 1;
+        const SIGEV_NONE: u8 = 0;
+        const SIGEV_SIGNAL: u8 = 1;
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct TestLinuxSigevent {
+            notify_type: u8,
+            signal: Signal,
+        }
+
+        assert_linux_layout::<TestLinuxItimerspec>(32, 8);
+
+        let page = allocate_large_user_test_region(4);
+        write_user_value(
+            page,
+            &TestLinuxSigevent {
+                notify_type: SIGEV_SIGNAL,
+                signal: Signal::SIGUSR1,
+            },
+        );
+
+        expect_errno(
+            SyscallArgs::new([CLOCK_REALTIME, page, 0, 0, 0, 0]).call::<TimerCreate>(),
+            SyscallError::BadAddress,
+        );
+
+        expect_errno(
+            SyscallArgs::new([99, page, page + 64, 0, 0, 0]).call::<TimerCreate>(),
+            SyscallError::InvalidArguments,
+        );
+
+        let timer_id_page = page + 64;
+        expect_ok(
+            SyscallArgs::new([CLOCK_REALTIME, page, timer_id_page, 0, 0, 0]).call::<TimerCreate>(),
+            0,
+        );
+        let signal_timer_id = read_user_value::<usize>(timer_id_page);
+
+        expect_ok(
+            SyscallArgs::new([CLOCK_REALTIME, 0, timer_id_page + 8, 0, 0, 0]).call::<TimerCreate>(),
+            0,
+        );
+        let default_timer_id = read_user_value::<usize>(timer_id_page + 8);
+        assert_ne!(signal_timer_id, default_timer_id);
+
+        expect_ok(
+            SyscallArgs::new([signal_timer_id as u64, page + 128, 0, 0, 0, 0])
+                .call::<TimerGettime>(),
+            0,
+        );
+        let initial = read_user_value::<TestLinuxItimerspec>(page + 128);
+        assert_eq!(initial.it_value.tv_sec, 0);
+        assert_eq!(initial.it_value.tv_nsec, 0);
+        assert_eq!(initial.it_interval.tv_sec, 0);
+        assert_eq!(initial.it_interval.tv_nsec, 0);
+
+        write_user_value(
+            page + 192,
+            &TestLinuxItimerspec {
+                it_interval: TestLinuxTimespec {
+                    tv_sec: 2,
+                    tv_nsec: 3,
+                },
+                it_value: TestLinuxTimespec {
+                    tv_sec: 4,
+                    tv_nsec: 5,
+                },
+            },
+        );
+        expect_ok(
+            SyscallArgs::new([signal_timer_id as u64, 0, page + 192, page + 256, 0, 0])
+                .call::<TimerSettime>(),
+            0,
+        );
+        let old_spec = read_user_value::<TestLinuxItimerspec>(page + 256);
+        assert_eq!(old_spec.it_value.tv_sec, 0);
+        assert_eq!(old_spec.it_value.tv_nsec, 0);
+        assert_eq!(old_spec.it_interval.tv_sec, 0);
+        assert_eq!(old_spec.it_interval.tv_nsec, 0);
+
+        expect_ok(
+            SyscallArgs::new([signal_timer_id as u64, page + 320, 0, 0, 0, 0])
+                .call::<TimerGettime>(),
+            0,
+        );
+        let armed = read_user_value::<TestLinuxItimerspec>(page + 320);
+        assert_eq!(armed.it_interval.tv_sec, 2);
+        assert_eq!(armed.it_interval.tv_nsec, 3);
+        assert!(armed.it_value.tv_sec <= 4);
+        assert!(armed.it_value.tv_nsec < 1_000_000_000);
+
+        write_user_value(
+            page + 384,
+            &TestLinuxItimerspec {
+                it_interval: TestLinuxTimespec::default(),
+                it_value: TestLinuxTimespec::default(),
+            },
+        );
+        expect_ok(
+            SyscallArgs::new([signal_timer_id as u64, TIMER_ABSTIME, page + 384, 0, 0, 0])
+                .call::<TimerSettime>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([signal_timer_id as u64, page + 448, 0, 0, 0, 0])
+                .call::<TimerGettime>(),
+            0,
+        );
+        let disarmed = read_user_value::<TestLinuxItimerspec>(page + 448);
+        assert_eq!(disarmed.it_value.tv_sec, 0);
+        assert_eq!(disarmed.it_value.tv_nsec, 0);
+        assert_eq!(disarmed.it_interval.tv_sec, 0);
+        assert_eq!(disarmed.it_interval.tv_nsec, 0);
+
+        expect_ok(
+            SyscallArgs::new([signal_timer_id as u64, 0, 0, 0, 0, 0]).call::<TimerGetoverrun>(),
+            0,
+        );
+
+        expect_errno(
+            SyscallArgs::new([signal_timer_id as u64, 0, 0, 0, 0, 0]).call::<TimerSettime>(),
+            SyscallError::BadAddress,
+        );
+        write_user_value(
+            page + 512,
+            &TestLinuxItimerspec {
+                it_value: TestLinuxTimespec {
+                    tv_sec: 0,
+                    tv_nsec: 1_000_000_000,
+                },
+                ..Default::default()
+            },
+        );
+        expect_errno(
+            SyscallArgs::new([signal_timer_id as u64, 0, page + 512, 0, 0, 0])
+                .call::<TimerSettime>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([signal_timer_id as u64, 0, 0, 0, 0, 0]).call::<TimerGettime>(),
+            SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([signal_timer_id as u64, 0, 1, 0, 0, 0]).call::<TimerSettime>(),
+            SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([usize::MAX as u64, 0, 0, 0, 0, 0]).call::<TimerDelete>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([usize::MAX as u64, 0, 0, 0, 0, 0]).call::<TimerGetoverrun>(),
+            SyscallError::InvalidArguments,
+        );
+
+        expect_ok(
+            SyscallArgs::new([default_timer_id as u64, 0, 0, 0, 0, 0]).call::<TimerDelete>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([default_timer_id as u64, page + 640, 0, 0, 0, 0])
+                .call::<TimerGettime>(),
+            SyscallError::InvalidArguments,
+        );
+
+        expect_ok(
+            SyscallArgs::new([signal_timer_id as u64, 0, 0, 0, 0, 0]).call::<TimerDelete>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([signal_timer_id as u64, 0, 0, 0, 0, 0]).call::<TimerGetoverrun>(),
+            SyscallError::InvalidArguments,
+        );
+
+        let _ = SIGEV_NONE;
+    }
 }
 
 define_syscall!(TimerDelete, |id: usize| {
