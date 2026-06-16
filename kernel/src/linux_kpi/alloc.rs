@@ -119,12 +119,12 @@ mod tests {
     use super::*;
 
     crate::test!(
-        linux_api_alloc_symbols,
-        "linux api allocation symbols follow basic kmalloc semantics",
-        linux_api_allocation_symbols_follow_basic_kmalloc_semantics
+        linux_kpi_alloc_symbols,
+        "linux kpi allocation symbols follow basic kmalloc semantics",
+        linux_kpi_allocation_symbols_follow_basic_kmalloc_semantics
     );
 
-    fn linux_api_allocation_symbols_follow_basic_kmalloc_semantics() {
+    fn linux_kpi_allocation_symbols_follow_basic_kmalloc_semantics() {
         let ptr = linux_kmalloc(16, 0);
         assert!(!ptr.is_null());
         unsafe {

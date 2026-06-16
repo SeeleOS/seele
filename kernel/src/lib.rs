@@ -20,7 +20,7 @@ pub mod filesystem;
 pub mod interrupts;
 pub mod ipc;
 pub mod keyboard;
-pub mod linux_api;
+pub mod linux_kpi;
 pub mod memory;
 pub mod misc;
 pub mod net;

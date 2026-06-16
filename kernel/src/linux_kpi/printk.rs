@@ -22,7 +22,7 @@ pub fn linux_print_cstr(prefix: &str, message: *const c_char) -> i32 {
 #[macro_export]
 macro_rules! linux_printk {
     ($($arg:tt)*) => {
-        $crate::linux_api::linux_print(format_args!($($arg)*))
+        $crate::linux_kpi::linux_print(format_args!($($arg)*))
     };
 }
 
@@ -53,13 +53,13 @@ mod tests {
     use super::*;
 
     crate::test!(
-        linux_api_print_symbols,
-        "linux api print symbols accept c strings and null pointers",
-        linux_api_print_symbols_accept_c_strings_and_null_pointers
+        linux_kpi_print_symbols,
+        "linux kpi print symbols accept c strings and null pointers",
+        linux_kpi_print_symbols_accept_c_strings_and_null_pointers
     );
 
-    fn linux_api_print_symbols_accept_c_strings_and_null_pointers() {
-        static MESSAGE: &[u8] = b"linux api test\0";
+    fn linux_kpi_print_symbols_accept_c_strings_and_null_pointers() {
+        static MESSAGE: &[u8] = b"linux kpi test\0";
         assert_eq!(printk(MESSAGE.as_ptr().cast::<c_char>()), 0);
         assert_eq!(pr_info(MESSAGE.as_ptr().cast::<c_char>()), 0);
         assert_eq!(pr_warn(MESSAGE.as_ptr().cast::<c_char>()), 0);
