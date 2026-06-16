@@ -4,21 +4,18 @@
 
 - `cargo xrun`: launch the VM manually; use `cargo xrun -- --agent` as the serial-driven fallback when the `seele` MCP server is unavailable.
 - `cargo xtest`: build and run kernel unit tests in QEMU.
-- `cargo xintegration-test`: run integration test coverage.
+- `cargo xbuild-rootfs`: build or refresh `disk.img` and the guest root filesystem contents.
+- `cargo xbuild-rootfs -- --override-disk`: rebuild `disk.img` from scratch.
 - `cargo fmt --all`: format Rust code before submitting changes.
-- `cargo xrootfs`: build or refresh `disk.img` and the guest root filesystem contents.
-- `cargo xrootfs-override`: rebuild `disk.img` from scratch.
-- `cargo xsysroot-mount`: mount `sysroot/` from `disk.img` when needed for inspection.
-- `cargo xvm-ps`: list current runner and QEMU processes before cleanup.
 - `seele` MCP server: when available, prefer its `agent_start`, `agent_status`, `agent_serial_tail`, `agent_screenshot`, QMP input, and cleanup tools for VM-driven agent workflows instead of hand-rolled QMP or terminal-socket scripts.
 - If a required tool is missing for this repository workflow, add it to the `flake.nix` dev shell instead of treating it as a one-off host prerequisite.
 - When adding new tooling for builds, tests, MCP workflows, debugging, image conversion, or VM automation, prefer adding it to the appropriate `flake.nix` dev shell or runtime input instead of relying on whatever happens to be installed on the host `PATH`.
 - When polling VM state or serial output, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
 - After finishing VM-based testing, shut the VM down and verify there is no leftover runner or QEMU process before moving on.
-- To inspect the current agent VM and runner processes before shutdown, use `cargo xvm-ps`. If it shows a leftover VM or runner, kill those PIDs explicitly.
+- To inspect the current agent VM and runner processes before shutdown, prefer `agent_status` for MCP-managed sessions; otherwise inspect host runner/QEMU processes directly and kill leftover PIDs explicitly.
 - Do not assume `sysroot/` is mounted or synchronized with `disk.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the xtask VM flow when in doubt.
-- If you need `sysroot/` mounted, run `cargo xsysroot-mount` as a separate step first. Do not chain the mount step together with the real inspection command.
-- After `cargo xsysroot-mount`, if you only need to read files from `sysroot/`, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
+- If you need `sysroot/` mounted, prefer the MCP `ensure_sysroot_mounted` tool; for manual fallback, check `mountpoint -q sysroot` and mount `disk.img` to `sysroot/` as a separate step first. Do not chain the mount step together with the real inspection command.
+- After mounting `sysroot/`, if you only need to read files from it, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
 - If the sandbox, `no_new_privileges`, missing mounts, or network restrictions block a necessary command, ask the user for privilege escalation or the required access instead of silently giving up on that path.
 
 After finishing a change, prefer the `seele` MCP workflow when available: run `run_xtest`, then use `agent_start`, `agent_status`, `agent_serial_tail`, and `agent_screenshot` for VM smoke coverage, followed by `agent_stop` or `agent_cleanup`. If MCP is unavailable, run `cargo xtest` and `cargo xrun -- --agent` manually. If any required test fails, keep fixing the issue before considering the work done.
@@ -83,7 +80,7 @@ Do not use `strace` inside the VM for guest userspace debugging in this reposito
 
 ## Repository Layout Notes
 
-- `rootfs_making/` contains the disk image construction script and the flat set of guest rootfs overlay/config files that `cargo xrootfs` installs into `sysroot/`.
+- `xtask/src/build_rootfs/` contains the disk image and guest rootfs construction workflow used by `cargo xbuild-rootfs`.
 
 ## Review Terminology
 
@@ -127,11 +124,11 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 - If the user provides a workflow or debugging suggestion that is broadly useful for future work in this repository, add it to `AGENTS.md` when appropriate instead of treating it as a one-off remark.
 - For Codex-driven VM interaction, prefer the `seele` MCP server when it is available. Use `agent_start` to launch the VM, `agent_status` to confirm the runner/QEMU/QMP state, `agent_serial_tail` for boot logs, `agent_screenshot` for the display, and the QMP key/mouse tools for guest input.
 - Do not reintroduce the old background terminal input workflow. `cargo xrun -- --agent` no longer prints or uses a `background terminal input path`, `/tmp/seele-agent-tty.sock`, `SEELE_AGENT_TTY_SOCKET`, or a second guest serial port for stdin forwarding.
-- For manual fallback when MCP is unavailable, use `cargo xrun -- --agent` for serial-driven boot verification and `cargo xvm-ps` plus host-side `kill` for cleanup. Do not invent a tty-socket or ad-hoc input path.
+- For manual fallback when MCP is unavailable, use `cargo xrun -- --agent` for serial-driven boot verification and host-side process inspection plus `kill` for cleanup. Do not invent a tty-socket or ad-hoc input path.
 - When debugging interactive login issues where the user needs to type a username or password manually, run `nix develop -c cargo xrun` in the foreground and let the user provide the login input, or use MCP QMP input if the login can be driven programmatically.
 - If QMP input appears to produce no reaction, treat kernel deadlock, echo being disabled, or the foreground being owned by another program as primary explanations to check before blaming the MCP transport.
 - After you finish using an MCP, interactive, or agent VM, terminate it yourself instead of relying on a default runner timeout to clean it up.
-- When terminating a leftover agent VM, first run `cargo xvm-ps`, then `kill` the reported runner and QEMU PIDs. If the VM was started by the `seele` MCP server, prefer `agent_stop` or `agent_cleanup` first.
-- Do not rely on guest-side `poweroff` in this environment. If you need to stop the agent VM, inspect it with `cargo xvm-ps` and `kill` the reported runner and QEMU PIDs from the host side, or use MCP cleanup for MCP-managed sessions.
+- When terminating a leftover agent VM, first inspect the current runner and QEMU processes, then `kill` the reported runner and QEMU PIDs. If the VM was started by the `seele` MCP server, prefer `agent_stop` or `agent_cleanup` first.
+- Do not rely on guest-side `poweroff` in this environment. If you need to stop the agent VM, inspect runner and QEMU PIDs from the host side and kill them, or use MCP cleanup for MCP-managed sessions.
 - If `sysroot/` already appears to be mounted, reuse it directly instead of asking for privilege escalation to mount again. Only ask to mount when it is clearly not mounted.
-- When you need to mount `sysroot/`, use `cargo xsysroot-mount` directly. Run it first, then run the real inspection command separately instead of chaining them together.
+- When you need to mount `sysroot/`, prefer MCP `ensure_sysroot_mounted`; for manual fallback, inspect `mountpoint -q sysroot` and mount `disk.img` to `sysroot/` separately before the real inspection command.
