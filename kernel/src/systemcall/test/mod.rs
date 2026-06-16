@@ -130,9 +130,9 @@ pub(crate) struct TestLinuxFileHandle {
 #[derive(Clone, Copy, Default)]
 #[allow(dead_code)]
 pub(crate) struct TestLinuxPollFd {
-    fd: i32,
-    events: i16,
-    revents: i16,
+    pub(crate) fd: i32,
+    pub(crate) events: i16,
+    pub(crate) revents: i16,
 }
 
 #[repr(C, packed)]
@@ -4774,101 +4774,6 @@ pub(crate) fn sysfs_syscalls_follow_linux_sysfs_abi_rules() {
         SyscallError::ReadOnlyFileSystem,
     );
     close_test_fd(readonly_active_fd);
-}
-
-#[allow(dead_code)]
-pub(crate) fn poll_and_ppoll_syscalls_follow_linux_rules() {
-    const POLLIN: i16 = 0x001;
-    const POLLOUT: i16 = 0x004;
-    const POLLNVAL: i16 = 0x020;
-
-    assert_linux_layout::<TestLinuxPollFd>(8, 4);
-
-    let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
-    let poll_page = allocate_user_test_page();
-    write_user_value(
-        poll_page,
-        &[
-            TestLinuxPollFd {
-                fd: eventfd as i32,
-                events: POLLOUT,
-                revents: 0,
-            },
-            TestLinuxPollFd {
-                fd: 4096,
-                events: POLLIN,
-                revents: 0,
-            },
-        ],
-    );
-    expect_ok(
-        SyscallArgs::new([poll_page, 2, 0, 0, 0, 0]).call::<Poll>(),
-        2,
-    );
-    let pollfds = read_user_value::<[TestLinuxPollFd; 2]>(poll_page);
-    assert_eq!(pollfds[0].revents & POLLOUT, POLLOUT);
-    assert_eq!(pollfds[1].revents & POLLNVAL, POLLNVAL);
-
-    write_user_value(
-        poll_page,
-        &[TestLinuxPollFd {
-            fd: eventfd as i32,
-            events: POLLIN,
-            revents: 123,
-        }],
-    );
-    expect_ok(
-        SyscallArgs::new([poll_page, 1, 0, 0, 0, 0]).call::<Poll>(),
-        0,
-    );
-    assert_eq!(read_user_value::<TestLinuxPollFd>(poll_page).revents, 0);
-
-    let ppoll_timeout = TestLinuxTimespec {
-        tv_sec: 0,
-        tv_nsec: 1_000_000,
-    };
-    write_user_value(
-        poll_page,
-        &[TestLinuxPollFd {
-            fd: eventfd as i32,
-            events: POLLOUT,
-            revents: 0,
-        }],
-    );
-    write_user_value(poll_page + 128, &ppoll_timeout);
-    let ppoll_result = SyscallArgs::new([poll_page, 1, poll_page + 128, 0, 0, 0]).call::<Ppoll>();
-    expect_ok(ppoll_result, 1);
-    assert_eq!(
-        read_user_value::<TestLinuxPollFd>(poll_page).revents & POLLOUT,
-        POLLOUT
-    );
-    let sigmask: u64 = Signal::SIGUSR1.mask();
-    write_user_value(poll_page + 192, &sigmask);
-    expect_errno(
-        SyscallArgs::new([poll_page, 1, poll_page + 128, poll_page + 192, 4, 0]).call::<Ppoll>(),
-        SyscallError::InvalidArguments,
-    );
-    write_user_value(
-        poll_page + 128,
-        &TestLinuxTimespec {
-            tv_sec: 0,
-            tv_nsec: 1_000_000_000,
-        },
-    );
-    expect_errno(
-        SyscallArgs::new([poll_page, 1, poll_page + 128, 0, 0, 0]).call::<Ppoll>(),
-        SyscallError::InvalidArguments,
-    );
-    expect_errno(
-        SyscallArgs::new([0, 1, 0, 0, 0, 0]).call::<Poll>(),
-        SyscallError::BadAddress,
-    );
-    expect_errno(
-        SyscallArgs::new([0, 1, 0, 0, 0, 0]).call::<Ppoll>(),
-        SyscallError::BadAddress,
-    );
-
-    close_test_fd(eventfd);
 }
 
 pub(crate) fn epoll_syscalls_follow_linux_rules() {
