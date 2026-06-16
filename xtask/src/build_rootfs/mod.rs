@@ -1,33 +1,17 @@
+mod apk;
+mod command;
+mod disk;
+mod mount;
+
 use anyhow::{Context, Result, bail};
 use clap::Args;
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{env, fs, path::PathBuf};
 
-const DISK_SIZE: &str = "10G";
-const ALPINE_BRANCH: &str = "v3.24";
-const ALPINE_MIRROR: &str = "https://dl-cdn.alpinelinux.org/alpine";
-const ALPINE_PACKAGES: &[&str] = &[
-    "alpine-keys",
-    "alpine-base",
-    "openrc",
-    "busybox",
-    "bash",
-    "coreutils",
-    "util-linux",
-    "procps",
-    "iproute2",
-    "curl",
-    "gcc",
-    "musl-dev",
-    "make",
-    "pkgconf",
-    "git",
-    "rust",
-    "cargo",
-];
+use self::{
+    apk::{install_packages, write_repositories},
+    disk::prepare_disk,
+    mount::{MountedSysroot, mount_disk, unmount_if_mounted},
+};
 
 #[derive(Debug, Args)]
 pub struct BuildRootfsArgs {
@@ -76,107 +60,4 @@ impl BuildRootfsArgs {
 
 fn repo_root() -> Result<PathBuf> {
     Ok(env::current_dir()?)
-}
-
-fn prepare_disk(disk: &Path, override_disk: bool) -> Result<()> {
-    if disk.exists() && !override_disk {
-        println!("reusing existing disk image: {}", disk.display());
-        return Ok(());
-    }
-
-    if disk.exists() {
-        fs::remove_file(disk).with_context(|| format!("failed to remove {}", disk.display()))?;
-    }
-
-    run(Command::new("truncate").arg("-s").arg(DISK_SIZE).arg(disk))?;
-    run(Command::new("mkfs.ext4").arg("-F").arg(disk))?;
-    Ok(())
-}
-
-fn mount_disk(disk: &Path, sysroot: &Path) -> Result<()> {
-    run(Command::new("sudo")
-        .arg("mount")
-        .arg("-o")
-        .arg("loop")
-        .arg(disk)
-        .arg(sysroot))
-}
-
-fn unmount_if_mounted(sysroot: &Path) -> Result<()> {
-    if is_mountpoint(sysroot)? {
-        run(Command::new("sudo").arg("umount").arg("-l").arg(sysroot))?;
-    }
-    Ok(())
-}
-
-fn is_mountpoint(path: &Path) -> Result<bool> {
-    let status = Command::new("mountpoint")
-        .arg("-q")
-        .arg(path)
-        .status()
-        .with_context(|| format!("failed to inspect mountpoint {}", path.display()))?;
-    Ok(status.success())
-}
-
-fn write_repositories(repo_root: &Path, sysroot: &Path) -> Result<()> {
-    let repositories = format!(
-        "{mirror}/{branch}/main\n{mirror}/{branch}/community\n",
-        mirror = ALPINE_MIRROR,
-        branch = ALPINE_BRANCH,
-    );
-    let temp_file = repo_root.join(".seele-apk-repositories");
-    fs::write(&temp_file, repositories)
-        .with_context(|| format!("failed to write {}", temp_file.display()))?;
-
-    let target = sysroot.join("etc/apk/repositories");
-    let install_result = run(Command::new("sudo")
-        .arg("install")
-        .arg("-D")
-        .arg("-m")
-        .arg("0644")
-        .arg(&temp_file)
-        .arg(&target));
-    fs::remove_file(&temp_file).ok();
-    install_result
-}
-
-fn install_packages(sysroot: &Path) -> Result<()> {
-    let mut command = Command::new("sudo");
-    command
-        .arg("apk")
-        .arg("--root")
-        .arg(sysroot)
-        .arg("--initdb")
-        .arg("--update-cache")
-        .arg("--allow-untrusted")
-        .arg("add")
-        .args(ALPINE_PACKAGES);
-    run(&mut command)
-}
-
-fn run(command: &mut Command) -> Result<()> {
-    println!("running: {command:?}");
-    let status = command
-        .status()
-        .with_context(|| format!("failed to spawn {command:?}"))?;
-    if !status.success() {
-        bail!("{command:?} exited with {status}");
-    }
-    Ok(())
-}
-
-struct MountedSysroot<'a> {
-    path: &'a Path,
-}
-
-impl Drop for MountedSysroot<'_> {
-    fn drop(&mut self) {
-        if is_mountpoint(self.path).unwrap_or(false) {
-            let _ = Command::new("sudo")
-                .arg("umount")
-                .arg("-l")
-                .arg(self.path)
-                .status();
-        }
-    }
 }
