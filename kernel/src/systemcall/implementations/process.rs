@@ -421,7 +421,12 @@ define_syscall!(Setsid, {
 #[cfg(test)]
 mod tests {
     use crate::{
-        process::{group::ProcessGroupID, manager::get_current_process},
+        process::{
+            Process, ProcessExitStatus,
+            group::ProcessGroupID,
+            manager::{MANAGER, get_current_process},
+            misc::ProcessID,
+        },
         systemcall::{
             implementations::{Getpgid, Getpgrp, Getpid, Getppid, Setpgid},
             test::{
@@ -432,6 +437,7 @@ mod tests {
             test_helpers::{SyscallArgs, expect_errno, expect_ok},
             utils::SyscallError,
         },
+        thread::THREAD_MANAGER,
     };
 
     crate::test!(
@@ -510,5 +516,64 @@ mod tests {
             let mut process = process.lock();
             process.group_id = old_group;
         }
+    }
+
+    fn execve_syscalls_follow_linux_rules() {
+        let page = allocate_user_test_page();
+
+        expect_errno(
+            SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Execve>(),
+            SyscallError::BadAddress,
+        );
+        write_user_cstr(page + 512, b"/does-not-exist\0");
+        let argv = [page + 512, 0];
+        let envp = [0u64];
+        write_user_value(page + 640, &argv);
+        write_user_value(page + 704, &envp);
+        expect_errno(
+            SyscallArgs::new([page + 512, page + 640, page + 704, 0, 0, 0]).call::<Execve>(),
+            SyscallError::FileNotFound,
+        );
+    }
+
+    fn exit_thread_semantics_follow_linux_rules() {
+        let saved_process_ref = get_current_process();
+        let page = allocate_user_test_page();
+
+        write_user_value(page + 448, &99i32);
+        let (helper_process, helper_thread) = Process::fork(saved_process_ref.clone());
+        let helper_pid = helper_process.lock().pid;
+        MANAGER
+            .lock()
+            .processes
+            .insert(helper_pid, helper_process.clone());
+        helper_thread.lock().clear_child_tid = page + 448;
+        helper_process.lock().exit_status = Some(ProcessExitStatus::Exited(12));
+        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+        thread_manager.mark_thread_exited(helper_thread.clone());
+        thread_manager.cleanup_exited_threads();
+        drop(thread_manager);
+        assert_eq!(
+            helper_process
+                .lock()
+                .addrspace
+                .read::<i32>((page + 448) as *const i32)
+                .expect("child clear_child_tid should be zeroed"),
+            0
+        );
+        MANAGER.lock().processes.remove(&helper_pid);
+    }
+
+    fn exit_group_semantics_follow_linux_rules() {
+        let exit_group_process = Process::empty();
+        exit_group_process.lock().pid = ProcessID::new();
+        let terminated_threads = exit_group_process
+            .lock()
+            .terminate_inner(ProcessExitStatus::from_exit_code(23));
+        assert_eq!(
+            exit_group_process.lock().exit_status,
+            Some(ProcessExitStatus::Exited(23))
+        );
+        assert!(terminated_threads.is_empty());
     }
 }
