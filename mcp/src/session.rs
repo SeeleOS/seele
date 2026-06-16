@@ -410,6 +410,7 @@ async fn refresh_child_state(state: &mut SessionState) {
     if let Ok(Some(status)) = child.try_wait() {
         state.last_exit = status.code();
         state.child = None;
+        state.metadata = None;
     }
 }
 
@@ -440,6 +441,7 @@ async fn stop_state(state: &mut SessionState) -> Result<()> {
         state.last_exit = status.and_then(|status| status.code());
     }
     state.child = None;
+    state.metadata = None;
     Ok(())
 }
 
