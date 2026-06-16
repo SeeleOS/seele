@@ -366,11 +366,195 @@ define_syscall!(Ptrace, |request: u64, pid: i32, addr: u64, data: u64| {
 
 #[cfg(test)]
 mod tests {
-    use crate::systemcall::test::*;
+    use crate::{
+        process::{Process, manager::MANAGER, misc::ProcessID},
+        signal::{SigInfo, Signal},
+        systemcall::{
+            implementations::Ptrace,
+            numbers::SyscallNumber,
+            test::expect_fd,
+            test_helpers::{
+                SyscallArgs, allocate_user_test_page, expect_errno, expect_ok, read_user_value,
+                write_user_value,
+            },
+            utils::SyscallError,
+        },
+    };
 
     crate::test!(
         ptrace_syscalls,
         "ptrace syscalls follow linux rules",
         ptrace_syscalls_follow_linux_rules
     );
+
+    fn ptrace_syscalls_follow_linux_rules() {
+        const PTRACE_TRACEME: u64 = 0;
+        const PTRACE_SETOPTIONS: u64 = 0x4200;
+        const PTRACE_GETEVENTMSG: u64 = 0x4201;
+        const PTRACE_GETSIGINFO: u64 = 0x4202;
+        const PTRACE_GETREGSET: u64 = 0x4204;
+        const PTRACE_SEIZE: u64 = 0x4206;
+        const PTRACE_GET_SYSCALL_INFO: u64 = 0x420e;
+        const PTRACE_CONT: u64 = 7;
+        const NT_PRSTATUS: u64 = 1;
+
+        #[repr(C)]
+        #[derive(Clone, Copy, Default)]
+        struct TestLinuxIovec {
+            iov_base: *mut u8,
+            iov_len: usize,
+        }
+
+        let current = get_current_process();
+        let tracer_pid = current.lock().pid;
+        let original_parent = current.lock().parent.clone();
+        let original_ptrace = current.lock().ptrace;
+        let parent = Process::empty();
+        parent.lock().pid = ProcessID::new();
+        current.lock().parent = Some(parent.clone());
+
+        expect_ok(
+            SyscallArgs::new([PTRACE_TRACEME, 0, 0, 0, 0, 0]).call::<Ptrace>(),
+            0,
+        );
+        assert_eq!(current.lock().ptrace.tracer, Some(parent.lock().pid));
+        expect_errno(
+            SyscallArgs::new([PTRACE_TRACEME, 0, 0, 0, 0, 0]).call::<Ptrace>(),
+            SyscallError::PermissionDenied,
+        );
+
+        let traced = Process::empty();
+        let traced_pid = {
+            let mut traced_locked = traced.lock();
+            traced_locked.pid = ProcessID::new();
+            traced_locked.parent = Some(current.clone());
+            traced_locked.ptrace.tracer = Some(tracer_pid);
+            traced_locked.ptrace.resume_mode = crate::process::ptrace::PtraceResumeMode::Stopped;
+            traced_locked.ptrace.last_stop_status = ((Signal::SIGTRAP as i32) << 8) | 0x7f;
+            traced_locked.wait_event = Some(crate::process::wait::ProcessWaitEvent::Stopped {
+                status: (((Signal::SIGTRAP as i32) << 8) | 0x7f),
+                ptrace: true,
+            });
+            traced_locked.pid.0
+        };
+        let traced_thread = crate::thread::thread::Thread::empty();
+        {
+            let mut thread = traced_thread.lock();
+            thread.parent = traced.clone();
+            thread.last_syscall_no = SyscallNumber::Read as u64;
+            thread.last_user_snapshot.rax = -38;
+            thread.last_user_snapshot.rip = 0x1234;
+            thread.last_user_snapshot.rsp = 0x5678;
+        }
+        traced
+            .lock()
+            .threads
+            .push(alloc::sync::Arc::downgrade(&traced_thread));
+        MANAGER
+            .lock()
+            .processes
+            .insert(ProcessID(traced_pid), traced.clone());
+        crate::thread::THREAD_MANAGER
+            .get()
+            .unwrap()
+            .lock()
+            .threads
+            .insert(traced_thread.lock().id, traced_thread.clone());
+
+        let page = allocate_user_test_page();
+        expect_ok(
+            SyscallArgs::new([PTRACE_SETOPTIONS, traced_pid, 0, 1, 0, 0]).call::<Ptrace>(),
+            0,
+        );
+        assert_eq!(traced.lock().ptrace.options, 1);
+
+        expect_ok(
+            SyscallArgs::new([PTRACE_GETEVENTMSG, traced_pid, 0, page, 0, 0]).call::<Ptrace>(),
+            0,
+        );
+        assert_eq!(read_user_value::<usize>(page), 0);
+
+        expect_ok(
+            SyscallArgs::new([PTRACE_GETSIGINFO, traced_pid, 0, page + 64, 0, 0]).call::<Ptrace>(),
+            0,
+        );
+        let siginfo = read_user_value::<SigInfo>(page + 64);
+        assert_eq!(siginfo.si_signo, Signal::SIGTRAP as i32);
+
+        let iov = TestLinuxIovec {
+            iov_base: (page + 256) as *mut u8,
+            iov_len: 216,
+        };
+        write_user_value(page + 192, &iov);
+        expect_ok(
+            SyscallArgs::new([PTRACE_GETREGSET, traced_pid, NT_PRSTATUS, page + 192, 0, 0])
+                .call::<Ptrace>(),
+            0,
+        );
+        assert_eq!(read_user_value::<TestLinuxIovec>(page + 192).iov_len, 216);
+
+        traced.lock().ptrace.last_stop_kind = crate::process::ptrace::PtraceStopKind::SyscallExit;
+        let copied = expect_fd(Ok(SyscallArgs::new([
+            PTRACE_GET_SYSCALL_INFO,
+            traced_pid,
+            88,
+            page + 512,
+            0,
+            0,
+        ])
+        .call::<Ptrace>()
+        .expect("ptrace get syscall info should succeed")));
+        assert_eq!(copied, 88);
+
+        expect_ok(
+            SyscallArgs::new([PTRACE_CONT, traced_pid, 0, 0, 0, 0]).call::<Ptrace>(),
+            0,
+        );
+        assert_eq!(
+            traced.lock().ptrace.resume_mode,
+            crate::process::ptrace::PtraceResumeMode::Continue
+        );
+
+        let seize_target = Process::empty();
+        let seize_pid = {
+            let mut process = seize_target.lock();
+            process.pid = ProcessID::new();
+            process.pid.0 as i32
+        };
+        MANAGER
+            .lock()
+            .processes
+            .insert(ProcessID(seize_pid as u64), seize_target.clone());
+        expect_ok(
+            SyscallArgs::new([PTRACE_SEIZE, seize_pid as u64, 0, 0, 0, 0]).call::<Ptrace>(),
+            0,
+        );
+        assert_eq!(seize_target.lock().ptrace.tracer, Some(tracer_pid));
+        expect_errno(
+            SyscallArgs::new([PTRACE_CONT, seize_pid as u64, 0, 1, 0, 0]).call::<Ptrace>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([PTRACE_GETREGSET, traced_pid, 2, page + 192, 0, 0]).call::<Ptrace>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([9999, traced_pid, 0, 0, 0, 0]).call::<Ptrace>(),
+            SyscallError::InvalidArguments,
+        );
+
+        current.lock().parent = original_parent;
+        current.lock().ptrace = original_ptrace;
+        MANAGER.lock().processes.remove(&ProcessID(traced_pid));
+        MANAGER
+            .lock()
+            .processes
+            .remove(&ProcessID(seize_pid as u64));
+        crate::thread::THREAD_MANAGER
+            .get()
+            .unwrap()
+            .lock()
+            .threads
+            .remove(&traced_thread.lock().id);
+    }
 }
