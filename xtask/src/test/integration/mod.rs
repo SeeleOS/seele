@@ -3,6 +3,7 @@ mod panic_handler_smoke;
 mod userspace_boot;
 
 use anyhow::Result;
+use owo_colors::OwoColorize;
 
 trait IntegrationTest {
     fn name(&self) -> &'static str;
@@ -24,9 +25,9 @@ pub fn run() -> Result<i32> {
         let result = test.run()?;
         eprint!("test {} ... ", test.name());
         if result.exit_code == 0 {
-            eprintln!("ok");
+            eprintln!("{}", "ok".green().bold());
         } else {
-            eprintln!("FAILED");
+            eprintln!("{}", "FAILED".red().bold());
             report_failure(test.name(), &result);
             return Ok(result.exit_code);
         }
@@ -37,7 +38,7 @@ pub fn run() -> Result<i32> {
 
 fn report_failure(name: &str, result: &IntegrationTestResult) {
     eprintln!();
-    eprintln!("failures:");
+    eprintln!("{}", "failures:".red().bold());
     eprintln!();
     eprintln!("---- {name} stdout ----");
     if let Some(failure) = &result.failure {

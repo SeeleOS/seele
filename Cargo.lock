@@ -2369,6 +2369,7 @@ dependencies = [
  "bootloader",
  "clap",
  "ovmf-prebuilt",
+ "owo-colors",
  "serde_json",
  "xshell",
 ]
