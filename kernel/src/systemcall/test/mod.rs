@@ -652,53 +652,6 @@ struct TestLinuxRlimit64 {
     rlim_max: u64,
 }
 
-pub(crate) fn process_identity_syscalls_match_current_linux_task_state() {
-    let (pid, ppid, group_id) = {
-        let process = get_current_process();
-        let process = process.lock();
-        (
-            process.pid.0 as usize,
-            process
-                .parent
-                .as_ref()
-                .map(|parent| parent.lock().pid.0 as usize)
-                .unwrap_or(0),
-            process.group_id.0 as usize,
-        )
-    };
-
-    expect_ok(SyscallArgs::none().call::<Getpid>(), pid);
-    expect_ok(SyscallArgs::none().call::<Getppid>(), ppid);
-    expect_ok(SyscallArgs::none().call::<Getpgrp>(), group_id);
-}
-
-pub(crate) fn process_group_syscalls_follow_linux_pid_zero_and_esrch_rules() {
-    let process = get_current_process();
-    let old_group = {
-        let process = process.lock();
-        process.group_id
-    };
-
-    expect_ok(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Setpgid>(), 0);
-    {
-        let process = process.lock();
-        assert_eq!(process.group_id, ProcessGroupID::from_leader(process.pid));
-    }
-    expect_ok(
-        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Getpgid>(),
-        get_current_process().lock().group_id.0 as usize,
-    );
-    expect_errno(
-        SyscallArgs::new([u64::from(u32::MAX), 0, 0, 0, 0, 0]).call::<Getpgid>(),
-        SyscallError::NoProcess,
-    );
-
-    {
-        let mut process = process.lock();
-        process.group_id = old_group;
-    }
-}
-
 pub(crate) fn clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids() {
     expect_ok(
         SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<ClockGetres>(),
@@ -712,77 +665,6 @@ pub(crate) fn clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_i
         SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<ClockGetres>(),
         SyscallError::InvalidArguments,
     );
-}
-
-pub(crate) fn scheduler_priority_and_io_permission_syscalls_validate_linux_arguments() {
-    expect_ok(SyscallArgs::none().call::<SchedYield>(), 0);
-    expect_ok(SyscallArgs::new([0, 4096, 0, 0, 0, 0]).call::<Madvise>(), 0);
-    expect_ok(
-        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Getpriority>(),
-        0,
-    );
-    expect_ok(
-        SyscallArgs::new([0, 0, 10, 0, 0, 0]).call::<Setpriority>(),
-        0,
-    );
-
-    expect_ok(
-        SyscallArgs::new([1, 0, (2u64 << 13) | 4, 0, 0, 0]).call::<IoprioSet>(),
-        0,
-    );
-    expect_ok(
-        SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<IoprioGet>(),
-        2usize << 13,
-    );
-    expect_errno(
-        SyscallArgs::new([1, u64::MAX, 0, 0, 0, 0]).call::<IoprioGet>(),
-        SyscallError::InvalidArguments,
-    );
-    expect_errno(
-        SyscallArgs::new([1, 0, (2u64 << 13) | 8, 0, 0, 0]).call::<IoprioSet>(),
-        SyscallError::InvalidArguments,
-    );
-    expect_errno(
-        SyscallArgs::new([99, 0, 0, 0, 0, 0]).call::<IoprioGet>(),
-        SyscallError::InvalidArguments,
-    );
-
-    expect_ok(
-        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<SchedGetscheduler>(),
-        0,
-    );
-    expect_errno(
-        SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<SchedGetscheduler>(),
-        SyscallError::InvalidArguments,
-    );
-    expect_ok(
-        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<SchedGetPriorityMin>(),
-        0,
-    );
-    expect_ok(
-        SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<SchedGetPriorityMin>(),
-        1,
-    );
-    expect_ok(
-        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<SchedGetPriorityMax>(),
-        0,
-    );
-    expect_ok(
-        SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<SchedGetPriorityMax>(),
-        99,
-    );
-    expect_errno(
-        SyscallArgs::new([99, 0, 0, 0, 0, 0]).call::<SchedGetPriorityMax>(),
-        SyscallError::InvalidArguments,
-    );
-
-    expect_ok(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Iopl>(), 0);
-    expect_ok(SyscallArgs::new([3, 0, 0, 0, 0, 0]).call::<Iopl>(), 0);
-    expect_errno(
-        SyscallArgs::new([4, 0, 0, 0, 0, 0]).call::<Iopl>(),
-        SyscallError::InvalidArguments,
-    );
-    expect_ok(SyscallArgs::new([0, 1, 1, 0, 0, 0]).call::<Ioperm>(), 0);
 }
 
 pub(crate) fn process_session_and_prctl_syscalls_follow_linux_state_rules() {

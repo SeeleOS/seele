@@ -420,7 +420,19 @@ define_syscall!(Setsid, {
 
 #[cfg(test)]
 mod tests {
-    use crate::systemcall::test::*;
+    use crate::{
+        process::{group::ProcessGroupID, manager::get_current_process},
+        systemcall::{
+            implementations::{Getpgid, Getpgrp, Getpid, Getppid, Setpgid},
+            test::{
+                execve_syscalls_follow_linux_rules, exit_group_semantics_follow_linux_rules,
+                exit_thread_semantics_follow_linux_rules,
+                pidfd_and_waitid_syscalls_follow_linux_rules,
+            },
+            test_helpers::{SyscallArgs, expect_errno, expect_ok},
+            utils::SyscallError,
+        },
+    };
 
     crate::test!(
         process_identity_syscalls,
@@ -452,4 +464,51 @@ mod tests {
         "exit_group helper semantics follow linux rules",
         exit_group_semantics_follow_linux_rules
     );
+
+    fn process_identity_syscalls_match_current_linux_task_state() {
+        let (pid, ppid, group_id) = {
+            let process = get_current_process();
+            let process = process.lock();
+            (
+                process.pid.0 as usize,
+                process
+                    .parent
+                    .as_ref()
+                    .map(|parent| parent.lock().pid.0 as usize)
+                    .unwrap_or(0),
+                process.group_id.0 as usize,
+            )
+        };
+
+        expect_ok(SyscallArgs::none().call::<Getpid>(), pid);
+        expect_ok(SyscallArgs::none().call::<Getppid>(), ppid);
+        expect_ok(SyscallArgs::none().call::<Getpgrp>(), group_id);
+    }
+
+    fn process_group_syscalls_follow_linux_pid_zero_and_esrch_rules() {
+        let process = get_current_process();
+        let old_group = {
+            let process = process.lock();
+            process.group_id
+        };
+
+        expect_ok(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Setpgid>(), 0);
+        {
+            let process = process.lock();
+            assert_eq!(process.group_id, ProcessGroupID::from_leader(process.pid));
+        }
+        expect_ok(
+            SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Getpgid>(),
+            get_current_process().lock().group_id.0 as usize,
+        );
+        expect_errno(
+            SyscallArgs::new([u64::from(u32::MAX), 0, 0, 0, 0, 0]).call::<Getpgid>(),
+            SyscallError::NoProcess,
+        );
+
+        {
+            let mut process = process.lock();
+            process.group_id = old_group;
+        }
+    }
 }

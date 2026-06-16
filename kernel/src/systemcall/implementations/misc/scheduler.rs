@@ -73,13 +73,91 @@ define_syscall!(
 
 #[cfg(test)]
 mod tests {
-    use crate::systemcall::test::*;
+    use crate::systemcall::{
+        implementations::{
+            Getpriority, Ioperm, Iopl, IoprioGet, IoprioSet, Madvise, SchedGetPriorityMax,
+            SchedGetPriorityMin, SchedGetscheduler, SchedYield, Setpriority,
+        },
+        test_helpers::{SyscallArgs, expect_errno, expect_ok},
+        utils::SyscallError,
+    };
 
     crate::test!(
         scheduler_priority_and_io_permission_syscalls,
         "scheduler priority and io permission syscalls validate linux arguments",
         scheduler_priority_and_io_permission_syscalls_validate_linux_arguments
     );
+
+    fn scheduler_priority_and_io_permission_syscalls_validate_linux_arguments() {
+        expect_ok(SyscallArgs::none().call::<SchedYield>(), 0);
+        expect_ok(SyscallArgs::new([0, 4096, 0, 0, 0, 0]).call::<Madvise>(), 0);
+        expect_ok(
+            SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Getpriority>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([0, 0, 10, 0, 0, 0]).call::<Setpriority>(),
+            0,
+        );
+
+        expect_ok(
+            SyscallArgs::new([1, 0, (2u64 << 13) | 4, 0, 0, 0]).call::<IoprioSet>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<IoprioGet>(),
+            2usize << 13,
+        );
+        expect_errno(
+            SyscallArgs::new([1, u64::MAX, 0, 0, 0, 0]).call::<IoprioGet>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([1, 0, (2u64 << 13) | 8, 0, 0, 0]).call::<IoprioSet>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([99, 0, 0, 0, 0, 0]).call::<IoprioGet>(),
+            SyscallError::InvalidArguments,
+        );
+
+        expect_ok(
+            SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<SchedGetscheduler>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<SchedGetscheduler>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_ok(
+            SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<SchedGetPriorityMin>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<SchedGetPriorityMin>(),
+            1,
+        );
+        expect_ok(
+            SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<SchedGetPriorityMax>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<SchedGetPriorityMax>(),
+            99,
+        );
+        expect_errno(
+            SyscallArgs::new([99, 0, 0, 0, 0, 0]).call::<SchedGetPriorityMax>(),
+            SyscallError::InvalidArguments,
+        );
+
+        expect_ok(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Iopl>(), 0);
+        expect_ok(SyscallArgs::new([3, 0, 0, 0, 0, 0]).call::<Iopl>(), 0);
+        expect_errno(
+            SyscallArgs::new([4, 0, 0, 0, 0, 0]).call::<Iopl>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_ok(SyscallArgs::new([0, 1, 1, 0, 0, 0]).call::<Ioperm>(), 0);
+    }
 }
 
 define_syscall!(SchedGetscheduler, |pid: i32| {
