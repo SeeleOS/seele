@@ -148,3 +148,19 @@ define_syscall!(
         Ok(len)
     }
 );
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        misc_state_syscalls,
+        "misc state syscalls follow linux pointer and state rules",
+        misc_state_syscalls_follow_linux_pointer_and_state_rules
+    );
+    crate::test!(
+        uname_reboot_and_rlimit_syscalls,
+        "uname reboot and rlimit syscalls follow linux abi rules",
+        uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules
+    );
+}

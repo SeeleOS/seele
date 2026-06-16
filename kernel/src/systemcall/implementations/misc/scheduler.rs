@@ -71,6 +71,17 @@ define_syscall!(
     }
 );
 
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        scheduler_priority_and_io_permission_syscalls,
+        "scheduler priority and io permission syscalls validate linux arguments",
+        scheduler_priority_and_io_permission_syscalls_validate_linux_arguments
+    );
+}
+
 define_syscall!(SchedGetscheduler, |pid: i32| {
     if pid < 0 {
         return Err(SyscallError::InvalidArguments);

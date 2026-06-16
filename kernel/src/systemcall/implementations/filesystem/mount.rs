@@ -402,3 +402,14 @@ define_syscall!(
         Ok(0)
     }
 );
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        mount_api_syscalls,
+        "mount and new mount api syscalls follow linux rules",
+        mount_api_syscalls_follow_linux_rules
+    );
+}

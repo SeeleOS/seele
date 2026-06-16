@@ -815,3 +815,19 @@ define_syscall!(Pwrite64, |object: ObjectRef,
 
     pwrite_object_in_chunks(&object, buf_ptr, len, offset)
 });
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        close_range_syscalls,
+        "close_range follows linux fd rules",
+        close_range_syscalls_follow_linux_rules
+    );
+    crate::test!(
+        object_control_syscalls,
+        "ioctl and sched_setscheduler follow linux rules",
+        object_control_syscalls_follow_linux_rules
+    );
+}

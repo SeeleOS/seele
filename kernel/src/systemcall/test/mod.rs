@@ -270,106 +270,6 @@ crate::test!(
     syscall_test_helpers_assert_linux_errno_return_and_layout_expectations
 );
 crate::test!(
-    process_identity_syscalls,
-    "process identity syscalls match current linux task state",
-    process_identity_syscalls_match_current_linux_task_state
-);
-crate::test!(
-    process_group_syscalls,
-    "process group syscalls follow linux pid zero and esrch rules",
-    process_group_syscalls_follow_linux_pid_zero_and_esrch_rules
-);
-crate::test!(
-    credential_getter_syscalls,
-    "credential getters return current linux ids",
-    credential_getters_return_current_linux_ids
-);
-crate::test!(
-    credential_setter_syscalls,
-    "credential setters update linux real effective saved and fs ids",
-    credential_setters_update_linux_real_effective_saved_and_fs_ids
-);
-crate::test!(
-    fsuid_fsgid_syscalls,
-    "fsuid and fsgid syscalls return previous ids and update state",
-    fsuid_fsgid_syscalls_return_previous_ids_and_update_state
-);
-crate::test!(
-    group_syscalls,
-    "group syscalls validate linux size rules",
-    group_syscalls_validate_linux_size_rules
-);
-crate::test!(
-    clock_getres_syscall,
-    "clock_getres accepts null for valid clocks and rejects bad clock ids",
-    clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids
-);
-crate::test!(
-    scheduler_priority_and_io_permission_syscalls,
-    "scheduler priority and io permission syscalls validate linux arguments",
-    scheduler_priority_and_io_permission_syscalls_validate_linux_arguments
-);
-crate::test!(
-    process_session_and_prctl_syscalls,
-    "process session and prctl syscalls follow linux state rules",
-    process_session_and_prctl_syscalls_follow_linux_state_rules
-);
-crate::test!(
-    misc_state_syscalls,
-    "misc state syscalls follow linux pointer and state rules",
-    misc_state_syscalls_follow_linux_pointer_and_state_rules
-);
-crate::test!(
-    uname_reboot_and_rlimit_syscalls,
-    "uname reboot and rlimit syscalls follow linux abi rules",
-    uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules
-);
-crate::test!(
-    clock_and_affinity_syscalls,
-    "clock and affinity syscalls follow linux pointer rules",
-    clock_and_affinity_syscalls_follow_linux_pointer_rules
-);
-crate::test!(
-    signalfd_syscalls,
-    "signalfd syscalls follow linux rules",
-    signalfd_syscalls_follow_linux_rules
-);
-crate::test!(
-    close_range_syscalls,
-    "close_range follows linux fd rules",
-    close_range_syscalls_follow_linux_rules
-);
-crate::test!(
-    quotactl_fd_syscalls,
-    "quotactl_fd syscalls follow linux rules",
-    quotactl_fd_syscalls_follow_linux_rules
-);
-crate::test!(
-    sleep_and_signal_mask_syscalls,
-    "nanosleep setitimer and rt_sigsuspend follow linux rules",
-    sleep_and_signal_mask_syscalls_follow_linux_rules
-);
-crate::test!(
-    object_control_syscalls,
-    "ioctl and sched_setscheduler follow linux rules",
-    object_control_syscalls_follow_linux_rules
-);
-crate::test!(
-    ptrace_syscalls,
-    "ptrace syscalls follow linux rules",
-    ptrace_syscalls_follow_linux_rules
-);
-crate::test!(
-    mount_api_syscalls,
-    "mount and new mount api syscalls follow linux rules",
-    mount_api_syscalls_follow_linux_rules
-);
-crate::test!(
-    process_and_signal_transition_helpers,
-    "signal return and process transition helpers follow linux rules",
-    process_and_signal_transition_helpers_follow_linux_rules
-);
-crate::test!(
     typed_syscall_arg_conversion,
     "typed syscall args convert flags and enums at boundary",
     typed_syscall_args_convert_flags_and_enums_at_boundary
@@ -752,7 +652,7 @@ struct TestLinuxRlimit64 {
     rlim_max: u64,
 }
 
-fn process_identity_syscalls_match_current_linux_task_state() {
+pub(crate) fn process_identity_syscalls_match_current_linux_task_state() {
     let (pid, ppid, group_id) = {
         let process = get_current_process();
         let process = process.lock();
@@ -772,7 +672,7 @@ fn process_identity_syscalls_match_current_linux_task_state() {
     expect_ok(SyscallArgs::none().call::<Getpgrp>(), group_id);
 }
 
-fn process_group_syscalls_follow_linux_pid_zero_and_esrch_rules() {
+pub(crate) fn process_group_syscalls_follow_linux_pid_zero_and_esrch_rules() {
     let process = get_current_process();
     let old_group = {
         let process = process.lock();
@@ -799,7 +699,7 @@ fn process_group_syscalls_follow_linux_pid_zero_and_esrch_rules() {
     }
 }
 
-fn credential_getters_return_current_linux_ids() {
+pub(crate) fn credential_getters_return_current_linux_ids() {
     let process = get_current_process();
     let mut process = process.lock();
     let saved = CredentialSnapshot::save(&process);
@@ -817,7 +717,7 @@ fn credential_getters_return_current_linux_ids() {
     saved.restore();
 }
 
-fn credential_setters_update_linux_real_effective_saved_and_fs_ids() {
+pub(crate) fn credential_setters_update_linux_real_effective_saved_and_fs_ids() {
     let saved = CredentialSnapshot::save_current();
 
     expect_ok(SyscallArgs::new([42, 0, 0, 0, 0, 0]).call::<Setuid>(), 0);
@@ -895,7 +795,7 @@ fn credential_setters_update_linux_real_effective_saved_and_fs_ids() {
     saved.restore();
 }
 
-fn fsuid_fsgid_syscalls_return_previous_ids_and_update_state() {
+pub(crate) fn fsuid_fsgid_syscalls_return_previous_ids_and_update_state() {
     let saved = CredentialSnapshot::save_current();
 
     {
@@ -923,7 +823,7 @@ fn fsuid_fsgid_syscalls_return_previous_ids_and_update_state() {
     saved.restore();
 }
 
-fn group_syscalls_validate_linux_size_rules() {
+pub(crate) fn group_syscalls_validate_linux_size_rules() {
     let process = get_current_process();
     let saved_groups = process.lock().supplementary_groups.clone();
     let groups = [10u32, 20u32, 30u32];
@@ -952,7 +852,7 @@ fn group_syscalls_validate_linux_size_rules() {
     process.lock().supplementary_groups = saved_groups;
 }
 
-fn clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids() {
+pub(crate) fn clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids() {
     expect_ok(
         SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<ClockGetres>(),
         0,
@@ -967,7 +867,7 @@ fn clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids() {
     );
 }
 
-fn scheduler_priority_and_io_permission_syscalls_validate_linux_arguments() {
+pub(crate) fn scheduler_priority_and_io_permission_syscalls_validate_linux_arguments() {
     expect_ok(SyscallArgs::none().call::<SchedYield>(), 0);
     expect_ok(SyscallArgs::new([0, 4096, 0, 0, 0, 0]).call::<Madvise>(), 0);
     expect_ok(
@@ -1038,7 +938,7 @@ fn scheduler_priority_and_io_permission_syscalls_validate_linux_arguments() {
     expect_ok(SyscallArgs::new([0, 1, 1, 0, 0, 0]).call::<Ioperm>(), 0);
 }
 
-fn process_session_and_prctl_syscalls_follow_linux_state_rules() {
+pub(crate) fn process_session_and_prctl_syscalls_follow_linux_state_rules() {
     let saved = CredentialSnapshot::save_current();
     let process = get_current_process();
     let (
@@ -1391,7 +1291,7 @@ fn process_session_and_prctl_syscalls_follow_linux_state_rules() {
     saved.restore();
 }
 
-fn misc_state_syscalls_follow_linux_pointer_and_state_rules() {
+pub(crate) fn misc_state_syscalls_follow_linux_pointer_and_state_rules() {
     assert_linux_layout::<TestLinuxCapHeader>(8, 4);
     assert_linux_layout::<TestLinuxCapData>(12, 4);
     assert_linux_layout::<TestLinuxTimeval>(16, 8);
@@ -1729,7 +1629,7 @@ fn misc_state_syscalls_follow_linux_pointer_and_state_rules() {
     saved.restore();
 }
 
-fn uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules() {
+pub(crate) fn uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules() {
     assert_linux_layout::<TestUtsName>(390, 1);
     assert_linux_layout::<TestLinuxTimespec>(16, 8);
     assert_linux_layout::<TestLinuxRlimit64>(16, 8);
@@ -1950,7 +1850,7 @@ fn uname_reboot_and_rlimit_syscalls_follow_linux_abi_rules() {
     crate::misc::reboot::set_ctrl_alt_del_enabled(old_cad);
 }
 
-fn clock_and_affinity_syscalls_follow_linux_pointer_rules() {
+pub(crate) fn clock_and_affinity_syscalls_follow_linux_pointer_rules() {
     const CLOCK_REALTIME: u64 = 0;
     const CLOCK_MONOTONIC: u64 = 1;
     const TIMER_ABSTIME: u64 = 1;
@@ -5997,7 +5897,7 @@ pub(crate) fn epoll_syscalls_follow_linux_rules() {
     close_test_fd(eventfd);
 }
 
-fn signalfd_syscalls_follow_linux_rules() {
+pub(crate) fn signalfd_syscalls_follow_linux_rules() {
     const SFD_NONBLOCK: u64 = 0o4_000;
     const SFD_CLOEXEC: u64 = 0o2_000_000;
 
@@ -7434,7 +7334,7 @@ pub(crate) fn namespace_and_kcmp_syscalls_follow_linux_rules() {
     get_current_process().lock().net_namespace = saved_namespace;
 }
 
-fn close_range_syscalls_follow_linux_rules() {
+pub(crate) fn close_range_syscalls_follow_linux_rules() {
     const CLOSE_RANGE_CLOEXEC: u64 = 0x4;
 
     let base_count = occupied_fd_count();
@@ -7479,7 +7379,7 @@ fn close_range_syscalls_follow_linux_rules() {
     close_test_fd(fd3);
 }
 
-fn quotactl_fd_syscalls_follow_linux_rules() {
+pub(crate) fn quotactl_fd_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const USRQUOTA: u64 = 0;
     const Q_GETFMT: u64 = 0x800004;
@@ -8037,7 +7937,7 @@ pub(crate) fn pidfd_and_waitid_syscalls_follow_linux_rules() {
     close_test_fd(child_pidfd);
 }
 
-fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
+pub(crate) fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
     const SIG_BLOCK: u64 = 0;
     const SIG_UNBLOCK: u64 = 1;
     const SIG_SETMASK: u64 = 2;
@@ -8688,7 +8588,7 @@ pub(crate) fn epoll_pwait2_syscalls_follow_linux_rules() {
     close_test_fd(eventfd);
 }
 
-fn object_control_syscalls_follow_linux_rules() {
+pub(crate) fn object_control_syscalls_follow_linux_rules() {
     const TCGETS: u64 = 0x5401;
     const TIOCSPTLCK: u64 = 0x4004_5431;
     const TIOCGPTN: u64 = 0x8004_5430;
@@ -8812,7 +8712,7 @@ fn object_control_syscalls_follow_linux_rules() {
     close_test_fd(slave_fd);
 }
 
-fn ptrace_syscalls_follow_linux_rules() {
+pub(crate) fn ptrace_syscalls_follow_linux_rules() {
     const PTRACE_TRACEME: u64 = 0;
     const PTRACE_SETOPTIONS: u64 = 0x4200;
     const PTRACE_GETEVENTMSG: u64 = 0x4201;
@@ -8983,7 +8883,7 @@ fn ptrace_syscalls_follow_linux_rules() {
         .remove(&traced_thread.lock().id);
 }
 
-fn mount_api_syscalls_follow_linux_rules() {
+pub(crate) fn mount_api_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const AT_RECURSIVE: u64 = 0x8000;
     const OPEN_TREE_CLOEXEC: u64 = 0x0008_0000;
@@ -9162,7 +9062,7 @@ fn mount_api_syscalls_follow_linux_rules() {
         .delete_file(Path::new("/tmp/syscall-mount-test"));
 }
 
-fn process_and_signal_transition_helpers_follow_linux_rules() {
+pub(crate) fn process_and_signal_transition_helpers_follow_linux_rules() {
     let thread = crate::thread::get_current_thread();
     {
         let mut thread = thread.lock();

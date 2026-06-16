@@ -599,3 +599,24 @@ define_syscall!(SendSignalToAll, |signal: Signal| {
 
     Ok(0)
 });
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        signalfd_syscalls,
+        "signalfd syscalls follow linux rules",
+        signalfd_syscalls_follow_linux_rules
+    );
+    crate::test!(
+        sleep_and_signal_mask_syscalls,
+        "nanosleep setitimer and rt_sigsuspend follow linux rules",
+        sleep_and_signal_mask_syscalls_follow_linux_rules
+    );
+    crate::test!(
+        process_and_signal_transition_helpers,
+        "signal return and process transition helpers follow linux rules",
+        process_and_signal_transition_helpers_follow_linux_rules
+    );
+}

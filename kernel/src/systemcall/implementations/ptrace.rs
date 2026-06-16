@@ -363,3 +363,14 @@ define_syscall!(Ptrace, |request: u64, pid: i32, addr: u64, data: u64| {
         _ => Err(SyscallError::InvalidArguments),
     }
 });
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        ptrace_syscalls,
+        "ptrace syscalls follow linux rules",
+        ptrace_syscalls_follow_linux_rules
+    );
+}

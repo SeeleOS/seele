@@ -423,6 +423,16 @@ mod tests {
     use crate::systemcall::test::*;
 
     crate::test!(
+        process_identity_syscalls,
+        "process identity syscalls match current linux task state",
+        process_identity_syscalls_match_current_linux_task_state
+    );
+    crate::test!(
+        process_group_syscalls,
+        "process group syscalls follow linux pid zero and esrch rules",
+        process_group_syscalls_follow_linux_pid_zero_and_esrch_rules
+    );
+    crate::test!(
         pidfd_and_waitid_syscalls,
         "pidfd_open and waitid follow linux process rules",
         pidfd_and_waitid_syscalls_follow_linux_rules

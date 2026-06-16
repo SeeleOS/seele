@@ -180,3 +180,29 @@ define_syscall!(Setfsgid, |gid: u32| {
 });
 
 define_syscall!(Vhangup, { Ok(0) });
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        credential_getter_syscalls,
+        "credential getters return current linux ids",
+        credential_getters_return_current_linux_ids
+    );
+    crate::test!(
+        credential_setter_syscalls,
+        "credential setters update linux real effective saved and fs ids",
+        credential_setters_update_linux_real_effective_saved_and_fs_ids
+    );
+    crate::test!(
+        fsuid_fsgid_syscalls,
+        "fsuid and fsgid syscalls return previous ids and update state",
+        fsuid_fsgid_syscalls_return_previous_ids_and_update_state
+    );
+    crate::test!(
+        group_syscalls,
+        "group syscalls validate linux size rules",
+        group_syscalls_validate_linux_size_rules
+    );
+}

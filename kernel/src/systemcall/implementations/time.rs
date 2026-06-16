@@ -456,6 +456,16 @@ mod tests {
     use crate::systemcall::test::*;
 
     crate::test!(
+        clock_getres_syscall,
+        "clock_getres accepts null for valid clocks and rejects bad clock ids",
+        clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids
+    );
+    crate::test!(
+        clock_and_affinity_syscalls,
+        "clock and affinity syscalls follow linux pointer rules",
+        clock_and_affinity_syscalls_follow_linux_pointer_rules
+    );
+    crate::test!(
         timerfd_syscalls,
         "timerfd syscalls follow linux flag and timer rules",
         timerfd_syscalls_follow_linux_flag_and_timer_rules

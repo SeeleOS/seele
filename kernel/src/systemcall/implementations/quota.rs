@@ -239,3 +239,14 @@ define_syscall!(QuotactlFd, |fd: u64, cmd: u32, id: u32, addr: *mut u8| {
         }
     }
 });
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        quotactl_fd_syscalls,
+        "quotactl_fd syscalls follow linux rules",
+        quotactl_fd_syscalls_follow_linux_rules
+    );
+}

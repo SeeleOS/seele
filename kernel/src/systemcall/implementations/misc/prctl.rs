@@ -166,3 +166,14 @@ fn current_thread_name() -> [u8; 16] {
     name[..copy_len].copy_from_slice(&bytes[..copy_len]);
     name
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        process_session_and_prctl_syscalls,
+        "process session and prctl syscalls follow linux state rules",
+        process_session_and_prctl_syscalls_follow_linux_state_rules
+    );
+}
