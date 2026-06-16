@@ -1,8 +1,12 @@
-use crate::cli::repo_root;
 use anyhow::Result;
+use clap::Args;
+use std::{env, path::PathBuf};
 use xshell::{Shell, cmd};
 
-pub fn mount() -> Result<i32> {
+#[derive(Debug, Args)]
+pub struct SysrootArgs {}
+
+pub fn sysroot(_args: SysrootArgs) -> Result<i32> {
     let sh = Shell::new()?;
     let repo_root = repo_root()?;
     let sysroot = repo_root.join("sysroot");
@@ -19,4 +23,8 @@ pub fn mount() -> Result<i32> {
 
     cmd!(sh, "sudo mount -o loop {disk} {sysroot}").run()?;
     Ok(0)
+}
+
+fn repo_root() -> Result<PathBuf> {
+    Ok(env::current_dir()?)
 }

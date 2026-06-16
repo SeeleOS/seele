@@ -1,7 +1,11 @@
 use anyhow::{Result, bail};
+use clap::Args;
 use xshell::{Shell, cmd};
 
-pub fn ps() -> Result<i32> {
+#[derive(Debug, Args)]
+pub struct VmArgs {}
+
+pub fn vm(_args: VmArgs) -> Result<i32> {
     let sh = Shell::new()?;
     let output = cmd!(sh, "ps -efww").read()?;
     if output.is_empty() {

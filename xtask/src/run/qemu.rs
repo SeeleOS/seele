@@ -1,4 +1,4 @@
-use crate::terminal::{cleanup_socket, drain_serial_log, stream_serial_log};
+use super::terminal::{cleanup_socket, drain_serial_log, stream_serial_log};
 use anyhow::{Context, Result};
 use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
 use serde_json::json;
