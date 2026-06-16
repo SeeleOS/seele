@@ -22,13 +22,12 @@
         toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
         runPackages = with pkgs; [
-          arch-install-scripts
+          apk-tools
           bash
           coreutils
           e2fsprogs
           gdb
           git
-          pacman
           procps
           qemu
           util-linux
@@ -36,11 +35,10 @@
         ];
 
         devPackages = with pkgs; [
-          arch-install-scripts
+          apk-tools
           e2fsprogs
           gdb
           git
-          pacman
           procps
           qemu
           util-linux
@@ -75,12 +73,12 @@
             needs_rootfs_init=0
             if [ ! -f disk.img ]; then
               needs_rootfs_init=1
-            elif ! ${pkgs.util-linux}/bin/mountpoint -q sysroot 2>/dev/null && [ ! -e sysroot/bin/bash ]; then
+            elif ! ${pkgs.util-linux}/bin/mountpoint -q sysroot 2>/dev/null && [ ! -e sysroot/sbin/init ]; then
               needs_rootfs_init=1
             fi
 
             if [ "$needs_rootfs_init" -eq 1 ]; then
-              cargo xrootfs
+              cargo xbuild-rootfs
             fi
 
             exec cargo xrun "$@"

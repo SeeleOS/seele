@@ -103,6 +103,8 @@ Build or refresh `disk.img` and the guest root filesystem:
 cargo xbuild-rootfs
 ```
 
+The rootfs is Alpine Linux based, uses OpenRC for `/sbin/init`, and installs a small base development package set through `apk`.
+
 Force rebuilding the disk image from scratch:
 
 ```sh

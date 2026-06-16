@@ -1,4 +1,0 @@
-#!/bin/sh
-
-xrandr --output Virtual-1 --mode 1280x800 >/dev/null 2>&1 || true
-xsetroot -solid "#146b3a" >/dev/null 2>&1 || true
