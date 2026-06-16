@@ -1,4 +1,4 @@
-use spin::{Mutex, MutexGuard, Spin};
+use core::cell::{RefCell, RefMut};
 use x86_64::{
     VirtAddr,
     structures::paging::{Page, PageTable, PageTableFlags, page::PageRangeInclusive},
@@ -6,17 +6,17 @@ use x86_64::{
 
 use crate::memory::{PHYSICAL_MEMORY_OFFSET, addrspace::cow::COW_FLAG, paging::MAPPER};
 
-pub type MutGuard<'a, T> = MutexGuard<'a, T, Spin>;
+pub type MutGuard<'a, T> = RefMut<'a, T>;
 
 #[derive(Debug)]
 pub struct Mut<T: ?Sized> {
-    inner: Mutex<T>,
+    inner: RefCell<T>,
 }
 
 impl<T> Mut<T> {
     pub const fn new(inner: T) -> Self {
         Self {
-            inner: Mutex::new(inner),
+            inner: RefCell::new(inner),
         }
     }
 }
@@ -30,7 +30,7 @@ impl<T: Default> Default for Mut<T> {
 impl<T: ?Sized> Mut<T> {
     #[track_caller]
     pub fn lock(&self) -> MutGuard<'_, T> {
-        self.inner.lock()
+        self.inner.borrow_mut()
     }
 }
 
