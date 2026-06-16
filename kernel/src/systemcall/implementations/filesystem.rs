@@ -895,12 +895,12 @@ mod tests {
         write_user_cstr(user_page + 256, b"\0");
         expect_errno(
             SyscallArgs::new([user_page + 256, stat_ptr as u64, 0, 0, 0, 0]).call::<Stat>(),
-            SyscallError::NotFound,
+            SyscallError::FileNotFound,
         );
         write_user_cstr(user_page + 320, b"/tmp/syscall-metadata-test/missing\0");
         expect_errno(
             SyscallArgs::new([user_page + 320, stat_ptr as u64, 0, 0, 0, 0]).call::<Stat>(),
-            SyscallError::NotFound,
+            SyscallError::FileNotFound,
         );
 
         expect_ok(
