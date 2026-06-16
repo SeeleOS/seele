@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-use crate::{check::CheckArgs, rootfs::RootfsArgs, run::RunArgs, sysroot::SysrootArgs};
+use crate::{rootfs::RootfsArgs, run::RunArgs};
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Seele OS development tasks")]
@@ -12,12 +12,9 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Run(RunArgs),
-    Check(CheckArgs),
     McpRun,
     Test,
-    IntegrationTest,
     RootfsBuild(RootfsArgs),
-    SysrootMount(SysrootArgs),
 }
 
 pub fn parse() -> Cli {

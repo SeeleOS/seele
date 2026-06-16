@@ -336,6 +336,41 @@ impl AgentSession {
             stderr: truncate_log(String::from_utf8_lossy(&output.stderr).as_ref()),
         })
     }
+
+    pub async fn ensure_sysroot_mounted(&self) -> Result<CommandOutput> {
+        let sysroot = self.repo.join("sysroot");
+        let disk = self.repo.join("disk.img");
+
+        let mountpoint = Command::new("mountpoint")
+            .arg("-q")
+            .arg(&sysroot)
+            .output()
+            .await
+            .with_context(|| format!("failed to inspect mountpoint {}", sysroot.display()))?;
+        if mountpoint.status.success() {
+            return Ok(CommandOutput {
+                exit_code: 0,
+                stdout: String::new(),
+                stderr: String::new(),
+            });
+        }
+
+        let output = Command::new("sudo")
+            .arg("mount")
+            .arg("-o")
+            .arg("loop")
+            .arg(&disk)
+            .arg(&sysroot)
+            .current_dir(&self.repo)
+            .output()
+            .await
+            .with_context(|| format!("failed to mount sysroot from {}", disk.display()))?;
+        Ok(CommandOutput {
+            exit_code: output.status.code().unwrap_or(1),
+            stdout: truncate_log(String::from_utf8_lossy(&output.stdout).as_ref()),
+            stderr: truncate_log(String::from_utf8_lossy(&output.stderr).as_ref()),
+        })
+    }
 }
 
 #[derive(Debug, Serialize)]

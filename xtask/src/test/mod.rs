@@ -6,7 +6,6 @@ use crate::run::{
     },
 };
 use anyhow::{Context, Result};
-use clap::{Args, ValueEnum};
 use std::{env, fs, path::Path, time::Duration};
 
 const KERNEL_TEST_IMAGES: &[&str] = &["boot", "interrupt_breakpoint", "memory", "syscall", "vfs"];
@@ -19,34 +18,15 @@ const USERSPACE_STARTUP_PATTERNS: &[&str] = &[
     "systemd",
 ];
 
-#[derive(Debug, Args)]
-pub struct CheckArgs {
-    #[arg(value_enum, default_value_t = CheckTarget::All)]
-    pub target: CheckTarget,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum CheckTarget {
-    All,
-    Unit,
-    Integration,
-}
-
-pub fn check(args: CheckArgs) -> Result<i32> {
-    match args.target {
-        CheckTarget::Unit => unit(),
-        CheckTarget::Integration => integration(),
-        CheckTarget::All => {
-            let unit_exit = unit()?;
-            if unit_exit != 0 {
-                return Ok(unit_exit);
-            }
-            integration()
-        }
+pub fn test() -> Result<i32> {
+    let unit_exit = unit()?;
+    if unit_exit != 0 {
+        return Ok(unit_exit);
     }
+    integration()
 }
 
-pub fn unit() -> Result<i32> {
+fn unit() -> Result<i32> {
     let mut exit_code = 0;
 
     for kernel_test in build_kernel_tests()? {
@@ -63,7 +43,7 @@ pub fn unit() -> Result<i32> {
     Ok(exit_code)
 }
 
-pub fn integration() -> Result<i32> {
+fn integration() -> Result<i32> {
     for case in [
         (
             "kernel test images",

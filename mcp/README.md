@@ -14,8 +14,8 @@
 - `debug_start`: start the VM paused at QEMU's GDB stub and attach `gdb` to the kernel ELF.
 - `debug_command`: run a command in the active GDB session and return output up to the next prompt.
 - `debug_status`, `debug_stop`: inspect or stop the active GDB-backed VM session.
-- `run_xtest`, `run_xintegration_test`, `run_xrootfs`: run the existing cargo aliases and return truncated logs.
-- `ensure_sysroot_mounted`: run `cargo xsysroot-mount`, leaving an already mounted `sysroot/` unchanged.
+- `run_xtest`, `run_xrootfs`: run the existing cargo aliases and return truncated logs.
+- `ensure_sysroot_mounted`: mount `sysroot/` from `disk.img`, leaving an already mounted `sysroot/` unchanged.
 
 ## Local Run
 

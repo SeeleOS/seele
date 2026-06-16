@@ -11,11 +11,9 @@ Seele OS is an x86_64 operating system kernel written in `no_std` Rust targeting
 ```sh
 cargo xrun                  # build and boot in QEMU
 cargo xrun -- --agent       # manual fallback headless boot; serial logs captured automatically
-cargo xtest                 # kernel unit tests in QEMU
-cargo xintegration-test     # integration tests
+cargo xtest                 # kernel and integration tests in QEMU
 cargo xrootfs               # build/refresh disk.img and rootfs
 cargo xrootfs-override      # rebuild disk.img from scratch
-cargo xsysroot-mount        # mount sysroot/ from disk.img
 cargo fmt --all             # format
 cargo check --manifest-path kernel/Cargo.toml   # fast type-check kernel only
 cargo clippy                # lint; treat all warnings as failures
@@ -25,6 +23,7 @@ When the `seele` MCP server is available, prefer it for agent VM workflows:
 
 ```text
 run_xtest                   # wrapper for cargo xtest
+ensure_sysroot_mounted      # mount sysroot/ from disk.img when needed
 agent_start                 # build and launch the agent VM
 agent_status                # inspect runner/QEMU/QMP state
 agent_serial_tail           # read recent serial logs

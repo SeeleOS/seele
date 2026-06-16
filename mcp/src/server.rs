@@ -173,19 +173,14 @@ impl SeeleMcp {
         json_result(self.session.run_cargo_alias("xtest").await).await
     }
 
-    #[tool(description = "Run cargo xintegration-test for Seele OS")]
-    async fn run_xintegration_test(&self) -> CallToolResult {
-        json_result(self.session.run_cargo_alias("xintegration-test").await).await
-    }
-
     #[tool(description = "Run cargo xrootfs for Seele OS")]
     async fn run_xrootfs(&self) -> CallToolResult {
         json_result(self.session.run_cargo_alias("xrootfs").await).await
     }
 
-    #[tool(description = "Ensure sysroot/ is mounted from disk.img through cargo xsysroot-mount")]
+    #[tool(description = "Ensure sysroot/ is mounted from disk.img")]
     async fn ensure_sysroot_mounted(&self) -> CallToolResult {
-        json_result(self.session.run_cargo_alias("xsysroot-mount").await).await
+        json_result(self.session.ensure_sysroot_mounted().await).await
     }
 }
 

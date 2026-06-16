@@ -109,24 +109,14 @@ Force rebuilding the disk image from scratch:
 cargo xrootfs-override
 ```
 
-Mount `sysroot/` from `disk.img` when needed:
-
-```sh
-cargo xsysroot-mount
-```
+Mount `sysroot/` from `disk.img` through the MCP `ensure_sysroot_mounted` tool when needed.
 
 ## Tests
 
-Run kernel unit tests in QEMU:
+Run kernel and integration coverage in QEMU:
 
 ```sh
 cargo xtest
-```
-
-Run integration tests:
-
-```sh
-cargo xintegration-test
 ```
 
 ## Notes
