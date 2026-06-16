@@ -26,6 +26,7 @@ After finishing a change, prefer the `seele` MCP workflow when available: run `r
 ## Coding Style & Naming Conventions
 
 - Prefer `enum` and `bitflags` over integer `const` groups when values are a closed set.
+- Prefer modern Rust and the latest stable idioms; use nightly-only features when they materially improve correctness, clarity, or maintainability.
 - When a Linux flag set is already modeled as a `bitflags` type, do not duplicate the same bits as separate local `const`s. Reuse the `bitflags` type directly and prefer Linux ABI names such as `MS_*`, `O_*`, or `MAP_*` on the flags themselves.
 - Match Linux naming where the kernel exposes Linux ABI behavior.
 - Do not write fully qualified type paths inline such as `alloc::string::String`. If a common type is used, import it at the top of the file and use the short name in code.
@@ -85,7 +86,7 @@ Do not use `strace` inside the VM for guest userspace debugging in this reposito
 
 ## Review Terminology
 
-When doing a code review for this repository, use these review skills together unless the user explicitly narrows the scope: `$review-agents-md-adherence`, `$review-maintainability`, and `$review-simplicity`.
+When doing a code review for this repository, use these review skills together unless the user explicitly narrows the scope: `review-agents-md-adherence`, `review-maintainability`, and `review-simplicity`.
 
 When the user asks to review "屎山代码" or "史山代码", interpret that as a maintainability and architecture review focused on these failure modes:
 
