@@ -8,8 +8,6 @@ use std::{env, fs, path::Path, time::Duration};
 
 pub const USERSPACE_BOOT: UserspaceBoot = UserspaceBoot;
 
-const USERSPACE_STARTUP_PATTERNS: &[&str] = &["Welcome to Alpine Linux", "OpenRC", "login"];
-
 pub struct UserspaceBoot;
 
 impl IntegrationTest for UserspaceBoot {
@@ -42,9 +40,12 @@ impl IntegrationTest for UserspaceBoot {
 }
 
 fn userspace_startup_observed(output: &str) -> bool {
-    USERSPACE_STARTUP_PATTERNS
-        .iter()
-        .any(|pattern| output.contains(pattern))
+    output.lines().any(is_shell_prompt_line)
+}
+
+fn is_shell_prompt_line(line: &str) -> bool {
+    let line = line.trim_end_matches('\r');
+    (line.contains("bash-") || line.contains("root@")) && line.contains("# ")
 }
 
 fn qemu_test_timeout() -> Duration {
