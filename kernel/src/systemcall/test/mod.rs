@@ -652,21 +652,6 @@ struct TestLinuxRlimit64 {
     rlim_max: u64,
 }
 
-pub(crate) fn clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids() {
-    expect_ok(
-        SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<ClockGetres>(),
-        0,
-    );
-    expect_ok(
-        SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<ClockGetres>(),
-        0,
-    );
-    expect_errno(
-        SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<ClockGetres>(),
-        SyscallError::InvalidArguments,
-    );
-}
-
 pub(crate) fn process_session_and_prctl_syscalls_follow_linux_state_rules() {
     let saved = CredentialSnapshot::save_current();
     let process = get_current_process();

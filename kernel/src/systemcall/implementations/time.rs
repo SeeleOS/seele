@@ -453,15 +453,14 @@ define_syscall!(SchedRrGetInterval, |pid: i32, tp: *mut LinuxTimespec| {
 
 #[cfg(test)]
 mod tests {
-    use crate::systemcall::test::{
-        clock_and_affinity_syscalls_follow_linux_pointer_rules,
-        clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids,
-    };
+    use crate::systemcall::test::clock_and_affinity_syscalls_follow_linux_pointer_rules;
     use crate::{
         object::{FileFlags, misc::get_object_current_process},
         process::FdFlags,
         systemcall::{
-            implementations::{Eventfd, TimerfdCreate, TimerfdGettime, TimerfdSettime},
+            implementations::{
+                ClockGetres, Eventfd, TimerfdCreate, TimerfdGettime, TimerfdSettime,
+            },
             test::{
                 TestLinuxItimerspec, TestLinuxTimespec, assert_fd_flags, assert_object_flags,
                 close_test_fd, expect_fd,
@@ -489,6 +488,21 @@ mod tests {
         "timerfd syscalls follow linux flag and timer rules",
         timerfd_syscalls_follow_linux_flag_and_timer_rules
     );
+
+    fn clock_getres_accepts_null_for_valid_clocks_and_rejects_bad_clock_ids() {
+        expect_ok(
+            SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<ClockGetres>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<ClockGetres>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<ClockGetres>(),
+            SyscallError::InvalidArguments,
+        );
+    }
 
     fn timerfd_syscalls_follow_linux_flag_and_timer_rules() {
         const TFD_NONBLOCK: u64 = 0o4_000;
