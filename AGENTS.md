@@ -34,6 +34,11 @@ After finishing a change, prefer the `seele` MCP workflow when available: run `r
 - When a file grows to cover multiple distinct responsibilities, split it by behavior instead of keeping one catch-all module. Prefer small neighboring modules such as `state.rs`, `events.rs`, `ioctl_display.rs`, or `ioctl_buffer.rs` over monoliths or generic `abi.rs` buckets. DRM-style ABI constants and structs should live next to the subsystem they serve, not in one shared dump file. File size should preferably stay under 200 lines, but it is acceptable to exceed that when the alternative would make the structure worse.
 - When there is a clearly better structural solution, prefer it over local patching. In particular, favor changes that remove repetitive boilerplate, unify error handling, and let call sites use direct propagation such as `?` instead of open-coded checks.
 - When an existing library or crate feature can cleanly replace handwritten repetitive decoding or boilerplate, prefer using it over custom open-coded conversion logic.
+- Prefer existing crates over reinventing well-covered functionality locally.
+- Prefer `Into` conversions over `From` at call sites. If inference makes the code unclear, use an explicit target type with `let value: Target = source.into();` or `into::<Target>()`.
+- Avoid turbofish syntax when a clear local type annotation lets the compiler infer the generic type naturally.
+- Prefer macro-based abstractions when they remove meaningful repetition without hiding important control flow or making diagnostics worse.
+- Prefer chain-style Rust APIs when they stay readable and do not obscure error handling or ownership.
 - Do not take shortcuts just to get something running quickly. In particular, avoid adding stubs, temporary shortcuts, or ad-hoc special cases merely to make a feature appear to work.
 - If a debug-only stub is temporarily unavoidable, mark it explicitly with `todo!()` or `unimplemented!()`. If it cannot use either, add a clear `TODO` comment stating that it is a temporary debug stub and not a real implementation.
 - For syscall handlers, do not take a user pointer as `u64` and then immediately cast it to `*const T` or `*mut T` in the body. Make the syscall argument itself a properly typed pointer and add or reuse the `SyscallArg` conversion in `kernel/src/systemcall/arg_types.rs`.
@@ -77,6 +82,24 @@ Do not use `strace` inside the VM for guest userspace debugging in this reposito
 ## Repository Layout Notes
 
 - `rootfs_making/` contains the disk image construction script and the flat set of guest rootfs overlay/config files that `cargo xrootfs` installs into `sysroot/`.
+
+## Review Terminology
+
+When doing a code review for this repository, use these review skills together unless the user explicitly narrows the scope: `$review-agents-md-adherence`, `$review-maintainability`, and `$review-simplicity`.
+
+When the user asks to review "屎山代码" or "史山代码", interpret that as a maintainability and architecture review focused on these failure modes:
+
+- 结构混乱：模块边界不清，一个文件或函数承担太多职责。
+- 依赖纠缠：改 A 会莫名影响 B，调用链和状态流很难追。
+- 重复逻辑多：同一套判断、转换、错误处理复制很多份，修 bug 容易漏。
+- 隐式行为多：靠全局状态、副作用、魔法数字、特殊约定工作。
+- 命名差：变量、函数、模块名无法表达真实意图。
+- 抽象不对：要么没有抽象，到处复制；要么过度抽象，读代码像解谜。
+- 错误处理随意：吞错误、乱返回默认值、panic/unwrap 滥用，失败路径没人懂。
+- 测试薄弱：只有 happy path，边界条件、错误语义、状态副作用没覆盖。
+- 临时补丁长期化：TODO、hack、stub、特殊 case 留在主路径里。
+- 格式和风格不一致：不同人、不同时间写出来的代码像几个项目拼在一起。
+- 改动成本高：一个小需求需要碰很多地方，而且没人敢确定影响范围。
 
 ## Commit & Pull Request Guidelines
 
