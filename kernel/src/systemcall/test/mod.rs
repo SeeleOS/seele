@@ -75,7 +75,7 @@ use crate::{
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-struct LinuxDirent64Header {
+pub(crate) struct LinuxDirent64Header {
     d_ino: u64,
     d_off: i64,
     d_reclen: u16,
@@ -84,7 +84,7 @@ struct LinuxDirent64Header {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestLinuxStatxTimestamp {
+pub(crate) struct TestLinuxStatxTimestamp {
     tv_sec: i64,
     tv_nsec: u32,
     __reserved: i32,
@@ -92,7 +92,7 @@ struct TestLinuxStatxTimestamp {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestLinuxStatx {
+pub(crate) struct TestLinuxStatx {
     stx_mask: u32,
     stx_blksize: u32,
     stx_attributes: u64,
@@ -121,7 +121,7 @@ struct TestLinuxStatx {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestLinuxFileHandle {
+pub(crate) struct TestLinuxFileHandle {
     handle_bytes: u32,
     handle_type: i32,
 }
@@ -129,7 +129,7 @@ struct TestLinuxFileHandle {
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 #[allow(dead_code)]
-struct TestLinuxPollFd {
+pub(crate) struct TestLinuxPollFd {
     fd: i32,
     events: i16,
     revents: i16,
@@ -137,14 +137,14 @@ struct TestLinuxPollFd {
 
 #[repr(C, packed)]
 #[derive(Clone, Copy, Default)]
-struct TestLinuxEpollEvent {
+pub(crate) struct TestLinuxEpollEvent {
     events: u32,
     data: u64,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestLinuxSignalfdSiginfo {
+pub(crate) struct TestLinuxSignalfdSiginfo {
     ssi_signo: u32,
     ssi_errno: i32,
     ssi_code: i32,
@@ -171,7 +171,7 @@ struct TestLinuxSignalfdSiginfo {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct TestLinuxSockAddrUn {
+pub(crate) struct TestLinuxSockAddrUn {
     sun_family: u16,
     sun_path: [u8; 108],
 }
@@ -187,7 +187,7 @@ impl Default for TestLinuxSockAddrUn {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
-struct TestLinuxSockAddrIn {
+pub(crate) struct TestLinuxSockAddrIn {
     sin_family: u16,
     sin_port: u16,
     sin_addr: [u8; 4],
@@ -196,14 +196,14 @@ struct TestLinuxSockAddrIn {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestRelibcIovec {
+pub(crate) struct TestRelibcIovec {
     iov_base: *mut u8,
     iov_len: usize,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestRelibcMsgHdr {
+pub(crate) struct TestRelibcMsgHdr {
     msg_name: *mut u8,
     msg_namelen: u32,
     msg_iov: *mut TestRelibcIovec,
@@ -215,7 +215,7 @@ struct TestRelibcMsgHdr {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestRelibcMmsghdr {
+pub(crate) struct TestRelibcMmsghdr {
     msg_hdr: TestRelibcMsgHdr,
     msg_len: u32,
 }
@@ -230,7 +230,7 @@ struct TestLinuxCmsgHdr {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestLinuxUcred {
+pub(crate) struct TestLinuxUcred {
     pid: i32,
     uid: u32,
     gid: u32,
@@ -238,7 +238,7 @@ struct TestLinuxUcred {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestRightsControlMessage {
+pub(crate) struct TestRightsControlMessage {
     header: TestLinuxCmsgHdr,
     fd: i32,
     pad: i32,
@@ -353,136 +353,6 @@ crate::test!(
     pipe_and_dup_syscalls,
     "pipe and dup syscalls follow linux fd rules",
     pipe_and_dup_syscalls_follow_linux_fd_rules
-);
-crate::test!(
-    filesystem_path_state_syscalls,
-    "filesystem path state syscalls follow linux rules",
-    filesystem_path_state_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_create_link_syscalls,
-    "filesystem create link syscalls follow linux rules",
-    filesystem_create_link_syscalls_follow_linux_rules
-);
-crate::test!(
-    opened_file_object_stat_mount_device_id,
-    "opened file object stat keeps mount device id without reborrowing vfs",
-    opened_file_object_stat_keeps_mount_device_id_without_reborrowing_vfs
-);
-crate::test!(
-    filesystem_fd_state_syscalls,
-    "filesystem fd state syscalls follow linux rules",
-    filesystem_fd_state_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_metadata_syscalls,
-    "filesystem metadata syscalls follow linux rules",
-    filesystem_metadata_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_io_syscalls,
-    "filesystem io syscalls follow linux rules",
-    filesystem_io_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_rename_syscalls,
-    "filesystem rename syscalls follow linux rules",
-    filesystem_rename_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_getdents_syscalls,
-    "filesystem getdents syscalls follow linux rules",
-    filesystem_getdents_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_file_object_syscalls,
-    "filesystem file object syscalls follow linux rules",
-    filesystem_file_object_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_file_metadata_syscalls,
-    "filesystem file metadata syscalls follow linux rules",
-    filesystem_file_metadata_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_xattr_syscalls,
-    "filesystem xattr syscalls follow linux rules",
-    filesystem_xattr_syscalls_follow_linux_rules
-);
-crate::test!(
-    memfd_and_inotify_watch_syscalls,
-    "memfd and inotify watch syscalls follow linux rules",
-    memfd_and_inotify_watch_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_statx_syscalls,
-    "statx follows linux rules",
-    filesystem_statx_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_name_to_handle_short_buffer_syscalls,
-    "name_to_handle_at short buffer follows linux rules",
-    filesystem_name_to_handle_short_buffer_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_name_to_handle_success_syscalls,
-    "name_to_handle_at success path follows linux rules",
-    filesystem_name_to_handle_success_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_name_to_handle_null_handle_syscalls,
-    "name_to_handle_at null handle follows linux rules",
-    filesystem_name_to_handle_null_handle_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_name_to_handle_null_mount_id_syscalls,
-    "name_to_handle_at null mount id follows linux rules",
-    filesystem_name_to_handle_null_mount_id_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_name_to_handle_bad_flag_syscalls,
-    "name_to_handle_at invalid flag follows linux rules",
-    filesystem_name_to_handle_bad_flag_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_utimensat_success_syscalls,
-    "utimensat success paths follow linux rules",
-    filesystem_utimensat_success_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_utimensat_negative_nsec_syscalls,
-    "utimensat rejects invalid nanoseconds like linux",
-    filesystem_utimensat_negative_nsec_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_utimensat_null_path_empty_path_syscalls,
-    "utimensat rejects null path with empty_path like linux",
-    filesystem_utimensat_null_path_empty_path_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_utimensat_empty_path_without_flag_syscalls,
-    "utimensat rejects empty path without empty_path like linux",
-    filesystem_utimensat_empty_path_without_flag_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_utimensat_at_fdcwd_null_path_syscalls,
-    "utimensat rejects at_fdcwd with null path like linux",
-    filesystem_utimensat_at_fdcwd_null_path_syscalls_follow_linux_rules
-);
-crate::test!(
-    filesystem_utimensat_invalid_flag_syscalls,
-    "utimensat rejects invalid flags like linux",
-    filesystem_utimensat_invalid_flag_syscalls_follow_linux_rules
-);
-crate::test!(
-    procfs_syscalls,
-    "procfs syscall paths follow linux proc abi rules",
-    procfs_syscalls_follow_linux_proc_abi_rules
-);
-crate::test!(
-    sysfs_syscalls,
-    "sysfs syscall paths follow linux sysfs abi rules",
-    sysfs_syscalls_follow_linux_sysfs_abi_rules
 );
 crate::test!(
     poll_and_ppoll_syscalls,
@@ -635,7 +505,7 @@ crate::test!(
     key_and_bpf_syscalls_follow_linux_rules
 );
 
-fn syscall_number_lookup_matches_x86_64_abi_values() {
+pub(crate) fn syscall_number_lookup_matches_x86_64_abi_values() {
     assert_eq!(SyscallNumber::from_number(0), Some(SyscallNumber::Read));
     assert_eq!(SyscallNumber::from_number(1), Some(SyscallNumber::Write));
     assert_eq!(SyscallNumber::from_number(257), Some(SyscallNumber::OpenAt));
@@ -2352,18 +2222,18 @@ fn clock_and_affinity_syscalls_follow_linux_pointer_rules() {
     );
 }
 
-fn close_test_fd(fd: usize) {
+pub(crate) fn close_test_fd(fd: usize) {
     expect_ok(
         SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Close>(),
         0,
     );
 }
 
-fn expect_fd(result: Result<usize, SyscallError>) -> usize {
+pub(crate) fn expect_fd(result: Result<usize, SyscallError>) -> usize {
     result.expect("syscall should create a file descriptor")
 }
 
-fn assert_fd_flags(fd: usize, expected: FdFlags) {
+pub(crate) fn assert_fd_flags(fd: usize, expected: FdFlags) {
     let fd_table = get_current_process().lock().fd_table.clone();
     let fd_table = fd_table.lock();
     let flags = fd_table
@@ -2374,7 +2244,7 @@ fn assert_fd_flags(fd: usize, expected: FdFlags) {
     assert_eq!(flags, expected);
 }
 
-fn assert_object_flags(fd: usize, expected: FileFlags) {
+pub(crate) fn assert_object_flags(fd: usize, expected: FileFlags) {
     let flags = get_object_current_process(fd as u64)
         .expect("test fd should resolve")
         .get_flags()
@@ -2382,18 +2252,18 @@ fn assert_object_flags(fd: usize, expected: FileFlags) {
     assert_eq!(flags, expected);
 }
 
-fn assert_same_object(left_fd: usize, right_fd: usize) {
+pub(crate) fn assert_same_object(left_fd: usize, right_fd: usize) {
     let left = get_object_current_process(left_fd as u64).expect("left fd should resolve");
     let right = get_object_current_process(right_fd as u64).expect("right fd should resolve");
     assert!(alloc::sync::Arc::ptr_eq(&left, &right));
 }
 
-fn occupied_fd_count() -> usize {
+pub(crate) fn occupied_fd_count() -> usize {
     let fd_table = get_current_process().lock().fd_table.clone();
     fd_table.lock().iter().flatten().count()
 }
 
-fn write_user_cstr(addr: u64, value: &[u8]) {
+pub(crate) fn write_user_cstr(addr: u64, value: &[u8]) {
     assert_eq!(value.last(), Some(&0));
     get_current_process()
         .lock()
@@ -2402,13 +2272,13 @@ fn write_user_cstr(addr: u64, value: &[u8]) {
         .expect("test user c string should be writable");
 }
 
-fn allocate_large_user_test_region(pages: u64) -> u64 {
+pub(crate) fn allocate_large_user_test_region(pages: u64) -> u64 {
     let process = get_current_process();
     let mut process = process.lock();
     process.addrspace.allocate_user(pages).0.as_u64()
 }
 
-fn read_user_bytes(addr: u64, len: usize) -> Vec<u8> {
+pub(crate) fn read_user_bytes(addr: u64, len: usize) -> Vec<u8> {
     get_current_process()
         .lock()
         .addrspace
@@ -2416,7 +2286,7 @@ fn read_user_bytes(addr: u64, len: usize) -> Vec<u8> {
         .expect("test user address should be readable")
 }
 
-fn read_file_via_fd(fd: usize, page: u64, offset: u64, max_len: usize) -> Vec<u8> {
+pub(crate) fn read_file_via_fd(fd: usize, page: u64, offset: u64, max_len: usize) -> Vec<u8> {
     expect_ok(
         SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Lseek>(),
         0,
@@ -2427,11 +2297,11 @@ fn read_file_via_fd(fd: usize, page: u64, offset: u64, max_len: usize) -> Vec<u8
     read_user_bytes(page + offset, read)
 }
 
-fn openat_fd(dirfd: u64, path_addr: u64, flags: OpenFlags) -> usize {
+pub(crate) fn openat_fd(dirfd: u64, path_addr: u64, flags: OpenFlags) -> usize {
     expect_fd(SyscallArgs::new([dirfd, path_addr, flags.bits() as u64, 0, 0, 0]).call::<OpenAt>())
 }
 
-fn readlink_bytes(dirfd: u64, path_addr: u64, buf_addr: u64, buf_len: usize) -> Vec<u8> {
+pub(crate) fn readlink_bytes(dirfd: u64, path_addr: u64, buf_addr: u64, buf_len: usize) -> Vec<u8> {
     let read = if dirfd == (-1i32) as u64 {
         SyscallArgs::new([path_addr, buf_addr, buf_len as u64, 0, 0, 0])
             .call::<Readlink>()
@@ -2444,7 +2314,7 @@ fn readlink_bytes(dirfd: u64, path_addr: u64, buf_addr: u64, buf_len: usize) -> 
     read_user_bytes(buf_addr, read)
 }
 
-fn parse_dirent_names(addr: u64, bytes: usize) -> Vec<(String, u8)> {
+pub(crate) fn parse_dirent_names(addr: u64, bytes: usize) -> Vec<(String, u8)> {
     let mut offset = 0usize;
     let mut names = Vec::new();
     while offset < bytes {
@@ -2465,7 +2335,12 @@ fn parse_dirent_names(addr: u64, bytes: usize) -> Vec<(String, u8)> {
     names
 }
 
-fn getdents_names(fd: usize, page: u64, offset: u64, capacity: usize) -> Vec<(String, u8)> {
+pub(crate) fn getdents_names(
+    fd: usize,
+    page: u64,
+    offset: u64,
+    capacity: usize,
+) -> Vec<(String, u8)> {
     let bytes = SyscallArgs::new([fd as u64, page + offset, capacity as u64, 0, 0, 0])
         .call::<crate::systemcall::implementations::Getdents64>()
         .expect("getdents64 should succeed");
@@ -2893,7 +2768,7 @@ fn pipe_and_dup_syscalls_follow_linux_fd_rules() {
     close_test_fd(read_fd);
 }
 
-fn filesystem_path_state_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_path_state_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const AT_EMPTY_PATH: u64 = 0x1000;
     const AT_EACCESS: u64 = 0x200;
@@ -3076,7 +2951,7 @@ fn filesystem_path_state_syscalls_follow_linux_rules() {
     let _ = VirtualFS.lock().delete_file(base_path);
 }
 
-fn filesystem_create_link_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_create_link_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const AT_EMPTY_PATH: u64 = 0x1000;
     const AT_REMOVEDIR: u64 = 0x200;
@@ -3269,7 +3144,7 @@ fn filesystem_create_link_syscalls_follow_linux_rules() {
     }
 }
 
-fn opened_file_object_stat_keeps_mount_device_id_without_reborrowing_vfs() {
+pub(crate) fn opened_file_object_stat_keeps_mount_device_id_without_reborrowing_vfs() {
     let base_path = Path::new("/tmp/opened-file-object-stat-test");
     let file_path = Path::new("/tmp/opened-file-object-stat-test/file");
     let _ = VirtualFS.lock().delete_file(file_path.clone());
@@ -3290,7 +3165,7 @@ fn opened_file_object_stat_keeps_mount_device_id_without_reborrowing_vfs() {
     let _ = VirtualFS.lock().delete_file(base_path);
 }
 
-fn filesystem_fd_state_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_fd_state_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const O_RDONLY: u64 = 0;
     const O_WRONLY: u64 = 1;
@@ -3426,7 +3301,7 @@ fn filesystem_fd_state_syscalls_follow_linux_rules() {
     }
 }
 
-fn filesystem_metadata_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_metadata_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const AT_SYMLINK_NOFOLLOW: u64 = 0x100;
     const AT_EMPTY_PATH: u64 = 0x1000;
@@ -3604,7 +3479,7 @@ fn filesystem_metadata_syscalls_follow_linux_rules() {
     }
 }
 
-fn filesystem_io_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_io_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
 
     let base_path = Path::new("/tmp/syscall-io-test");
@@ -3734,7 +3609,7 @@ fn filesystem_io_syscalls_follow_linux_rules() {
     }
 }
 
-fn filesystem_rename_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_rename_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
 
     let base_path = Path::new("/tmp/syscall-rename-test");
@@ -3866,7 +3741,7 @@ fn filesystem_rename_syscalls_follow_linux_rules() {
     }
 }
 
-fn filesystem_getdents_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_getdents_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const DT_DIR: u8 = 4;
     const DT_REG: u8 = 8;
@@ -3981,7 +3856,7 @@ fn filesystem_getdents_syscalls_follow_linux_rules() {
     }
 }
 
-fn filesystem_file_object_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_file_object_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const O_APPEND: u64 = 0o2_000;
     const SEEK_CUR: u64 = 1;
@@ -4454,7 +4329,7 @@ fn filesystem_file_object_syscalls_follow_linux_rules() {
     }
 }
 
-fn filesystem_file_metadata_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_file_metadata_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const AT_SYMLINK_NOFOLLOW: u64 = 0x100;
     const TMPFS_MAGIC: i64 = 0x0102_1994;
@@ -4584,7 +4459,7 @@ fn filesystem_file_metadata_syscalls_follow_linux_rules() {
     }
 }
 
-fn filesystem_xattr_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_xattr_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const XATTR_CREATE: u64 = 0x1;
     const XATTR_REPLACE: u64 = 0x2;
@@ -4744,7 +4619,7 @@ fn filesystem_xattr_syscalls_follow_linux_rules() {
     }
 }
 
-fn memfd_and_inotify_watch_syscalls_follow_linux_rules() {
+pub(crate) fn memfd_and_inotify_watch_syscalls_follow_linux_rules() {
     const MFD_CLOEXEC: u64 = 0x0001;
     const MFD_ALLOW_SEALING: u64 = 0x0002;
     const MFD_NOEXEC_SEAL: u64 = 0x0008;
@@ -4817,7 +4692,7 @@ fn memfd_and_inotify_watch_syscalls_follow_linux_rules() {
     close_test_fd(memfd);
 }
 
-fn filesystem_statx_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_statx_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const AT_EMPTY_PATH: u64 = 0x1000;
     const AT_SYMLINK_NOFOLLOW: u64 = 0x100;
@@ -4970,7 +4845,7 @@ fn filesystem_statx_syscalls_follow_linux_rules() {
     }
 }
 
-fn filesystem_name_to_handle_short_buffer_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_name_to_handle_short_buffer_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
 
     let base_path = Path::new("/tmp/syscall-name-handle-test");
@@ -5013,7 +4888,7 @@ fn filesystem_name_to_handle_short_buffer_syscalls_follow_linux_rules() {
     }
 }
 
-fn filesystem_name_to_handle_success_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_name_to_handle_success_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
 
     let base_path = Path::new("/tmp/syscall-name-handle-test");
@@ -5068,7 +4943,7 @@ fn filesystem_name_to_handle_success_syscalls_follow_linux_rules() {
     }
 }
 
-fn filesystem_name_to_handle_null_handle_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_name_to_handle_null_handle_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
 
     let base_path = Path::new("/tmp/syscall-name-handle-test");
@@ -5105,7 +4980,7 @@ fn filesystem_name_to_handle_null_handle_syscalls_follow_linux_rules() {
     }
 }
 
-fn filesystem_name_to_handle_null_mount_id_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_name_to_handle_null_mount_id_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
 
     let base_path = Path::new("/tmp/syscall-name-handle-test");
@@ -5142,7 +5017,7 @@ fn filesystem_name_to_handle_null_mount_id_syscalls_follow_linux_rules() {
     }
 }
 
-fn filesystem_name_to_handle_bad_flag_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_name_to_handle_bad_flag_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
 
     let base_path = Path::new("/tmp/syscall-name-handle-test");
@@ -5187,7 +5062,7 @@ fn filesystem_name_to_handle_bad_flag_syscalls_follow_linux_rules() {
     }
 }
 
-fn filesystem_utimensat_success_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_utimensat_success_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const AT_EMPTY_PATH: u64 = 0x1000;
     const UTIME_OMIT: i64 = 0x3fff_ffff;
@@ -5250,7 +5125,7 @@ fn filesystem_utimensat_success_syscalls_follow_linux_rules() {
     }
 }
 
-fn prepare_utimensat_test_file() -> (usize, [u64; 2]) {
+pub(crate) fn prepare_utimensat_test_file() -> (usize, [u64; 2]) {
     const AT_FDCWD: u64 = (-100i32) as u64;
 
     let base_path = Path::new("/tmp/syscall-utimensat-test");
@@ -5285,7 +5160,7 @@ fn prepare_utimensat_test_file() -> (usize, [u64; 2]) {
     (file_fd, [user_page, user_page + 640])
 }
 
-fn cleanup_utimensat_test_file(file_fd: usize) {
+pub(crate) fn cleanup_utimensat_test_file(file_fd: usize) {
     let cleanup_paths = [
         "/tmp/syscall-utimensat-test/file",
         "/tmp/syscall-utimensat-test",
@@ -5296,7 +5171,7 @@ fn cleanup_utimensat_test_file(file_fd: usize) {
     }
 }
 
-fn filesystem_utimensat_negative_nsec_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_utimensat_negative_nsec_syscalls_follow_linux_rules() {
     let (file_fd, pages) = prepare_utimensat_test_file();
     let [user_page, times_page] = pages;
 
@@ -5314,7 +5189,7 @@ fn filesystem_utimensat_negative_nsec_syscalls_follow_linux_rules() {
     cleanup_utimensat_test_file(file_fd);
 }
 
-fn filesystem_utimensat_null_path_empty_path_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_utimensat_null_path_empty_path_syscalls_follow_linux_rules() {
     const AT_EMPTY_PATH: u64 = 0x1000;
 
     let (file_fd, [_user_page, times_page]) = prepare_utimensat_test_file();
@@ -5327,7 +5202,7 @@ fn filesystem_utimensat_null_path_empty_path_syscalls_follow_linux_rules() {
     cleanup_utimensat_test_file(file_fd);
 }
 
-fn filesystem_utimensat_empty_path_without_flag_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_utimensat_empty_path_without_flag_syscalls_follow_linux_rules() {
     let (file_fd, pages) = prepare_utimensat_test_file();
     let [_user_page, times_page] = pages;
 
@@ -5341,7 +5216,7 @@ fn filesystem_utimensat_empty_path_without_flag_syscalls_follow_linux_rules() {
     cleanup_utimensat_test_file(file_fd);
 }
 
-fn filesystem_utimensat_at_fdcwd_null_path_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_utimensat_at_fdcwd_null_path_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
 
     let (file_fd, [_user_page, times_page]) = prepare_utimensat_test_file();
@@ -5354,7 +5229,7 @@ fn filesystem_utimensat_at_fdcwd_null_path_syscalls_follow_linux_rules() {
     cleanup_utimensat_test_file(file_fd);
 }
 
-fn filesystem_utimensat_invalid_flag_syscalls_follow_linux_rules() {
+pub(crate) fn filesystem_utimensat_invalid_flag_syscalls_follow_linux_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
 
     let (file_fd, [user_page, times_page]) = prepare_utimensat_test_file();
@@ -5367,7 +5242,7 @@ fn filesystem_utimensat_invalid_flag_syscalls_follow_linux_rules() {
     cleanup_utimensat_test_file(file_fd);
 }
 
-fn procfs_syscalls_follow_linux_proc_abi_rules() {
+pub(crate) fn procfs_syscalls_follow_linux_proc_abi_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const O_WRONLY: u64 = 1;
     const O_DIRECTORY: u64 = 0o200000;
@@ -5635,7 +5510,7 @@ fn procfs_syscalls_follow_linux_proc_abi_rules() {
     );
 }
 
-fn sysfs_syscalls_follow_linux_sysfs_abi_rules() {
+pub(crate) fn sysfs_syscalls_follow_linux_sysfs_abi_rules() {
     const AT_FDCWD: u64 = (-100i32) as u64;
     const O_WRONLY: u64 = 1;
     const O_DIRECTORY: u64 = 0o200000;

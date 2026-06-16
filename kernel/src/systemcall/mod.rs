@@ -28,7 +28,7 @@ pub mod test_helpers;
 pub mod utils;
 
 #[cfg(test)]
-mod test;
+pub(crate) mod test;
 
 pub fn init() {
     without_interrupts(|| {
