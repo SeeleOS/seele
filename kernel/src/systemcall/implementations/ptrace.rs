@@ -366,6 +366,7 @@ define_syscall!(Ptrace, |request: u64, pid: i32, addr: u64, data: u64| {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{
         process::{Process, manager::MANAGER, misc::ProcessID},
         signal::{SigInfo, Signal},

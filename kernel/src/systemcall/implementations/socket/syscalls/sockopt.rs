@@ -93,6 +93,11 @@ define_syscall!(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::systemcall::implementations::{
+        Getpeername, Getsockname, Getsockopt, Poll, Read, Setsockopt, Shutdown, Socket, Socketpair,
+        Write,
+    };
     use crate::systemcall::test::*;
 
     crate::test!(

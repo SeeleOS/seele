@@ -1120,19 +1120,25 @@ define_syscall!(Mincore, |addr: VirtAddr, len: usize, vec: *mut u8| {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{
         filesystem::{path::Path, vfs::VirtualFS},
+        memory::protection::Protection,
+        misc::timer::ClockId,
         process::Process,
+        signal::{Signal, Signals},
         systemcall::{
+            arg_types::SyscallArg,
             implementations::{
                 Brk, Ftruncate, Futex, Lseek, Mincore, Mlock, Mmap, Mprotect, Mremap, Msync,
-                Munlock, Munmap, OpenAt, Read, Write, filesystem::OpenFlags,
+                Munlock, Munmap, OpenAt, PollEvents, Read, Write, filesystem::OpenFlags,
             },
-            test::TestLinuxTimespec,
+            test::{
+                TestLinuxTimespec, assert_user_bytes, close_test_fd, expect_errno, expect_fd,
+                expect_ok, write_user_cstr,
+            },
             test_helpers::{
-                SyscallArgs, allocate_user_test_page, assert_user_bytes, close_test_fd,
-                expect_errno, expect_fd, expect_ok, read_user_value, write_user_cstr,
-                write_user_value,
+                SyscallArgs, allocate_user_test_page, read_user_value, write_user_value,
             },
             utils::SyscallError,
         },
@@ -1147,6 +1153,11 @@ mod tests {
         memory_mapping_syscalls,
         "brk mmap mprotect munmap mremap msync and mincore follow linux rules",
         memory_mapping_syscalls_follow_linux_rules
+    );
+    crate::test!(
+        typed_syscall_args,
+        "typed syscall args convert flags and enums at boundary",
+        typed_syscall_args_convert_flags_and_enums_at_boundary
     );
 
     fn futex_syscalls_follow_linux_rules() {

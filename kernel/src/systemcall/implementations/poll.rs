@@ -120,10 +120,12 @@ fn write_pollfds_revents(fds: *mut LinuxPollFd, local: &[LinuxPollFd]) -> Result
 
 #[cfg(test)]
 mod tests {
+    use super::{Timespec, kernel_events_for, saturating_timeout_ms, translate_ready_events};
     use crate::{
+        polling::event::PollableEvent,
         signal::Signal,
         systemcall::{
-            implementations::{Eventfd, Poll, Ppoll},
+            implementations::{Eventfd, Poll, PollEvents, Ppoll},
             test::{TestLinuxPollFd, TestLinuxTimespec, close_test_fd, expect_fd},
             test_helpers::{
                 SyscallArgs, allocate_user_test_page, assert_linux_layout, expect_errno, expect_ok,

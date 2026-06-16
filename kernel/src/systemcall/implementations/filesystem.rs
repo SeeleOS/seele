@@ -73,7 +73,10 @@ pub use xattr::*;
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::systemcall::implementations::{Close, Lseek, Read};
     use crate::systemcall::test::*;
+    use alloc::{string::ToString, vec};
 
     crate::test!(
         filesystem_path_state_syscalls,
@@ -2690,7 +2693,7 @@ mod tests {
         let fd_target = readlink_bytes((-1i32) as u64, page + 3840, page + 4096, 128);
         assert_eq!(
             core::str::from_utf8(&fd_target).unwrap(),
-            "anon_inode:[kernel::object::linux_anon::EventFdObject]"
+            "anon_inode:[kernel::object::anon::eventfd::EventFdObject]"
         );
         let fdinfo_fd = openat_fd(AT_FDCWD, page + 3968, OpenFlags::empty());
         let fdinfo = read_file_via_fd(fdinfo_fd, page, 4224, 256);

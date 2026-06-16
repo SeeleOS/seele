@@ -407,7 +407,7 @@ define_syscall!(
 mod tests {
     use crate::{
         filesystem::{path::Path, vfs::VirtualFS},
-        object::misc::get_object_current_process,
+        object::{misc::get_object_current_process, traits::Statable},
         process::FdFlags,
         systemcall::{
             implementations::{

@@ -436,7 +436,7 @@ mod tests {
     use crate::{
         signal::Signal,
         systemcall::{
-            implementations::{Eventfd, Pselect6},
+            implementations::{Eventfd, Pselect6, SelectTimespec},
             test::{TestLinuxSigSetArg, TestLinuxTimespec, close_test_fd, expect_fd},
             test_helpers::{
                 SyscallArgs, allocate_user_test_page, expect_errno, expect_ok, read_user_value,

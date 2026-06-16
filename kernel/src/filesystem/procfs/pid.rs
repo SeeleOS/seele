@@ -670,7 +670,7 @@ mod tests {
 
         assert_eq!(
             fd_target(pid, "0").unwrap(),
-            "anon_inode:[kernel::object::linux_anon::EventFdObject]"
+            "anon_inode:[kernel::object::anon::eventfd::EventFdObject]"
         );
         let fdinfo = String::from_utf8(proc_pid_fdinfo_bytes(pid, 0).unwrap()).unwrap();
         assert!(fdinfo.contains("pos:\t0\n"));

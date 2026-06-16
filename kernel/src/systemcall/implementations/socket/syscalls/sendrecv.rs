@@ -514,6 +514,11 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::systemcall::implementations::{
+        Accept, Bind, Connect, Eventfd, Listen, Recvfrom, Recvmsg, Sendmmsg, Sendmsg, Sendto,
+        Setsockopt, Socket, Socketpair, Write,
+    };
     use crate::systemcall::test::*;
 
     crate::test!(

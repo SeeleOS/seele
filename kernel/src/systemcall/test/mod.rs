@@ -1,19 +1,22 @@
+#![allow(unused_imports)]
 use alloc::{
-    format,
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
 
-use crate::{
-    filesystem::info::LinuxStat,
+use crate::systemcall::implementations::{
+    Close, Getdents64, Lseek, OpenAt, OpenFlags, Read, Readlink, ReadlinkAt,
+};
+
+pub(crate) use crate::systemcall::implementations::*;
+pub(crate) use crate::{
     filesystem::{
-        absolute_path::AbsolutePath, object::mount_device_id_for_path, path::Path, vfs::VirtualFS,
+        absolute_path::AbsolutePath, info::LinuxStat, object::mount_device_id_for_path, path::Path,
+        vfs::VirtualFS,
     },
-    ipc::sysv_shm::LinuxShmidDs,
     memory::{addrspace::mem_area::Data, protection::Protection},
-    misc::{signal::send_signal_to_process_with_siginfo, timer::ClockId},
-    object::{FileFlags, config::LinuxTermios, misc::get_object_current_process, traits::Statable},
+    misc::timer::ClockId,
+    object::{FileFlags, misc::get_object_current_process, traits::Statable},
     polling::{event::PollableEvent, object::Pollable},
     process::{
         ControllingTerminal, FdFlags, Process, ProcessExitStatus,
@@ -22,42 +25,8 @@ use crate::{
         misc::ProcessID,
     },
     signal::{SigInfo, Signal, Signals},
-    smp::set_current_process,
     systemcall::{
         arg_types::SyscallArg,
-        implementations::{
-            Accept, Accept4, Access, AddKey, Alarm, ArchPrctl, Bind, Bpf, Brk, Capget, Capset,
-            Chdir, Chroot, ClockGetres, ClockGettime, ClockNanosleep, ClockSettime, Clone, Clone3,
-            Close, CloseRange, Connect, CopyFileRange, CreatePty, Dup, Dup2, Dup3, EpollCreate1,
-            EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Eventfd2, Execve, Faccessat,
-            Faccessat2, Fadvise64, Fallocate, Fchdir, Fchmod, Fchmodat, Fchown, Fchownat, Fcntl,
-            Fdatasync, Fgetxattr, Flistxattr, Flock, Fremovexattr, Fsconfig, Fsetxattr, Fsmount,
-            Fsopen, Fstat, Fstatfs, Fsync, Ftruncate, Futex, Getcwd, Getegid, Geteuid, Getgid,
-            Getgroups, Getpeername, Getpgid, Getpgrp, Getpid, Getppid, Getpriority, Getrandom,
-            Getresgid, Getresuid, Getrusage, Getsid, Getsockname, Getsockopt, Gettid, Gettimeofday,
-            Getuid, Getxattr, InotifyAddWatch, InotifyInit, InotifyInit1, InotifyRmWatch, Ioctl,
-            Ioperm, Iopl, IoprioGet, IoprioSet, Kcmp, Keyctl, Kill, Lgetxattr, Link, LinkAt,
-            Listen, Listxattr, Llistxattr, Lremovexattr, Lseek, Lsetxattr, Madvise, MemfdCreate,
-            Mincore, Mkdir, MkdirAt, Mknodat, Mlock, Mmap, Mount, MountSetattr, MoveMount,
-            Mprotect, Mremap, Msync, Munlock, Munmap, NameToHandleAt, Nanosleep, Newfstatat, Open,
-            OpenAt, OpenFlags, OpenTree, Pause, PidfdOpen, PidfdSendSignal, Pipe, Pipe2, Poll,
-            PollEvents, PollTimespec, Ppoll, Prctl, Pread64, Prlimit64, Pselect6, Ptrace, Pwrite64,
-            QuotactlFd, Read, Readlink, ReadlinkAt, Reboot, Recvfrom, Recvmsg, Removexattr, Rename,
-            RenameAt, RenameAt2, Rmdir, Rseq, RtSigaction, RtSigpending, RtSigprocmask,
-            RtSigqueueinfo, RtSigsuspend, RtSigtimedwait, SchedGetPriorityMax, SchedGetPriorityMin,
-            SchedGetaffinity, SchedGetparam, SchedGetscheduler, SchedRrGetInterval,
-            SchedSetaffinity, SchedSetparam, SchedSetscheduler, SchedYield, SelectTimespec,
-            Sendfile, Sendmmsg, Sendmsg, Sendto, SetRobustList, SetTidAddress, Setfsgid, Setfsuid,
-            Setgid, Setgroups, Sethostname, Setitimer, Setns, Setpgid, Setpriority, Setregid,
-            Setresgid, Setresuid, Setreuid, Setrlimit, Setsid, Setsockopt, Settimeofday, Setuid,
-            Setxattr, Shmat, Shmctl, Shmdt, Shmget, Shutdown, Sigaltstack, Signalfd4, Socket,
-            Socketpair, Splice, Statfs, Statx, Symlink, SymlinkAt, Sync, Sysinfo, Tgkill, Time,
-            TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime, TimerfdCreate,
-            TimerfdGettime, TimerfdSettime, Umask, Umount2, Uname, Unlink, UnlinkAt, Unshare,
-            Utimensat, Vhangup, Wait4, Waitid, Write, Writev, clear_fdset, fdset_contains,
-            fdset_insert, fdset_words, kernel_events_for, saturating_timeout_ms, timeout_is_zero,
-            timeout_to_deadline, translate_ready_events,
-        },
         linux_semantics::{
             KNOWN_LINUX_SYSCALL_COVERAGE_GAPS, LINUX_SYSCALL_SEMANTICS_COVERAGE,
             LinuxSyscallTestKind,
@@ -70,60 +39,60 @@ use crate::{
         },
         utils::SyscallError,
     },
-    thread::{THREAD_MANAGER, extended_state::active_user_extended_state_ptr},
 };
+pub(crate) use alloc::{format, vec};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct LinuxDirent64Header {
-    d_ino: u64,
-    d_off: i64,
-    d_reclen: u16,
-    d_type: u8,
+    pub(crate) d_ino: u64,
+    pub(crate) d_off: i64,
+    pub(crate) d_reclen: u16,
+    pub(crate) d_type: u8,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub(crate) struct TestLinuxStatxTimestamp {
-    tv_sec: i64,
-    tv_nsec: u32,
-    __reserved: i32,
+    pub(crate) tv_sec: i64,
+    pub(crate) tv_nsec: u32,
+    pub(crate) __reserved: i32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub(crate) struct TestLinuxStatx {
-    stx_mask: u32,
-    stx_blksize: u32,
-    stx_attributes: u64,
-    stx_nlink: u32,
-    stx_uid: u32,
-    stx_gid: u32,
-    stx_mode: u16,
-    __spare0: u16,
-    stx_ino: u64,
-    stx_size: u64,
-    stx_blocks: u64,
-    stx_attributes_mask: u64,
-    stx_atime: TestLinuxStatxTimestamp,
-    stx_btime: TestLinuxStatxTimestamp,
-    stx_ctime: TestLinuxStatxTimestamp,
-    stx_mtime: TestLinuxStatxTimestamp,
-    stx_rdev_major: u32,
-    stx_rdev_minor: u32,
-    stx_dev_major: u32,
-    stx_dev_minor: u32,
-    stx_mnt_id: u64,
-    stx_dio_mem_align: u32,
-    stx_dio_offset_align: u32,
-    __spare3: [u64; 12],
+    pub(crate) stx_mask: u32,
+    pub(crate) stx_blksize: u32,
+    pub(crate) stx_attributes: u64,
+    pub(crate) stx_nlink: u32,
+    pub(crate) stx_uid: u32,
+    pub(crate) stx_gid: u32,
+    pub(crate) stx_mode: u16,
+    pub(crate) __spare0: u16,
+    pub(crate) stx_ino: u64,
+    pub(crate) stx_size: u64,
+    pub(crate) stx_blocks: u64,
+    pub(crate) stx_attributes_mask: u64,
+    pub(crate) stx_atime: TestLinuxStatxTimestamp,
+    pub(crate) stx_btime: TestLinuxStatxTimestamp,
+    pub(crate) stx_ctime: TestLinuxStatxTimestamp,
+    pub(crate) stx_mtime: TestLinuxStatxTimestamp,
+    pub(crate) stx_rdev_major: u32,
+    pub(crate) stx_rdev_minor: u32,
+    pub(crate) stx_dev_major: u32,
+    pub(crate) stx_dev_minor: u32,
+    pub(crate) stx_mnt_id: u64,
+    pub(crate) stx_dio_mem_align: u32,
+    pub(crate) stx_dio_offset_align: u32,
+    pub(crate) __spare3: [u64; 12],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub(crate) struct TestLinuxFileHandle {
-    handle_bytes: u32,
-    handle_type: i32,
+    pub(crate) handle_bytes: u32,
+    pub(crate) handle_type: i32,
 }
 
 #[repr(C)]
@@ -145,8 +114,8 @@ pub(crate) struct TestLinuxEpollEvent {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TestLinuxSockAddrUn {
-    sun_family: u16,
-    sun_path: [u8; 108],
+    pub(crate) sun_family: u16,
+    pub(crate) sun_path: [u8; 108],
 }
 
 impl Default for TestLinuxSockAddrUn {
@@ -161,60 +130,60 @@ impl Default for TestLinuxSockAddrUn {
 #[repr(C)]
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub(crate) struct TestLinuxSockAddrIn {
-    sin_family: u16,
-    sin_port: u16,
-    sin_addr: [u8; 4],
-    sin_zero: [u8; 8],
+    pub(crate) sin_family: u16,
+    pub(crate) sin_port: u16,
+    pub(crate) sin_addr: [u8; 4],
+    pub(crate) sin_zero: [u8; 8],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub(crate) struct TestRelibcIovec {
-    iov_base: *mut u8,
-    iov_len: usize,
+    pub(crate) iov_base: *mut u8,
+    pub(crate) iov_len: usize,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub(crate) struct TestRelibcMsgHdr {
-    msg_name: *mut u8,
-    msg_namelen: u32,
-    msg_iov: *mut TestRelibcIovec,
-    msg_iovlen: usize,
-    msg_control: *mut u8,
-    msg_controllen: usize,
-    msg_flags: i32,
+    pub(crate) msg_name: *mut u8,
+    pub(crate) msg_namelen: u32,
+    pub(crate) msg_iov: *mut TestRelibcIovec,
+    pub(crate) msg_iovlen: usize,
+    pub(crate) msg_control: *mut u8,
+    pub(crate) msg_controllen: usize,
+    pub(crate) msg_flags: i32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub(crate) struct TestRelibcMmsghdr {
-    msg_hdr: TestRelibcMsgHdr,
-    msg_len: u32,
+    pub(crate) msg_hdr: TestRelibcMsgHdr,
+    pub(crate) msg_len: u32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestLinuxCmsgHdr {
-    cmsg_len: usize,
-    cmsg_level: i32,
-    cmsg_type: i32,
+pub(crate) struct TestLinuxCmsgHdr {
+    pub(crate) cmsg_len: usize,
+    pub(crate) cmsg_level: i32,
+    pub(crate) cmsg_type: i32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub(crate) struct TestLinuxUcred {
-    pid: i32,
-    uid: u32,
-    gid: u32,
+    pub(crate) pid: i32,
+    pub(crate) uid: u32,
+    pub(crate) gid: u32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub(crate) struct TestRightsControlMessage {
-    header: TestLinuxCmsgHdr,
-    fd: i32,
-    pad: i32,
+    pub(crate) header: TestLinuxCmsgHdr,
+    pub(crate) fd: i32,
+    pub(crate) pad: i32,
 }
 
 crate::test!(
@@ -241,11 +210,6 @@ crate::test!(
     syscall_test_helpers,
     "syscall test helpers assert linux errno return and layout expectations",
     syscall_test_helpers_assert_linux_errno_return_and_layout_expectations
-);
-crate::test!(
-    typed_syscall_arg_conversion,
-    "typed syscall args convert flags and enums at boundary",
-    typed_syscall_args_convert_flags_and_enums_at_boundary
 );
 
 pub(crate) fn syscall_number_lookup_matches_x86_64_abi_values() {
@@ -340,22 +304,22 @@ fn syscall_test_helpers_assert_linux_errno_return_and_layout_expectations() {
     assert_linux_layout::<u64>(8, 8);
 }
 
-struct CredentialSnapshot {
-    real_uid: u32,
-    effective_uid: u32,
-    saved_uid: u32,
-    fs_uid: u32,
-    real_gid: u32,
-    effective_gid: u32,
-    saved_gid: u32,
-    fs_gid: u32,
-    capability_effective: [u32; 2],
-    capability_permitted: [u32; 2],
-    capability_inheritable: [u32; 2],
+pub(crate) struct CredentialSnapshot {
+    pub(crate) real_uid: u32,
+    pub(crate) effective_uid: u32,
+    pub(crate) saved_uid: u32,
+    pub(crate) fs_uid: u32,
+    pub(crate) real_gid: u32,
+    pub(crate) effective_gid: u32,
+    pub(crate) saved_gid: u32,
+    pub(crate) fs_gid: u32,
+    pub(crate) capability_effective: [u32; 2],
+    pub(crate) capability_permitted: [u32; 2],
+    pub(crate) capability_inheritable: [u32; 2],
 }
 
 impl CredentialSnapshot {
-    fn save(process: &Process) -> Self {
+    pub(crate) fn save(process: &Process) -> Self {
         Self {
             real_uid: process.real_uid,
             effective_uid: process.effective_uid,
@@ -371,13 +335,13 @@ impl CredentialSnapshot {
         }
     }
 
-    fn save_current() -> Self {
+    pub(crate) fn save_current() -> Self {
         let process = get_current_process();
         let process = process.lock();
         Self::save(&process)
     }
 
-    fn restore(self) {
+    pub(crate) fn restore(self) {
         let process = get_current_process();
         let mut process = process.lock();
         process.real_uid = self.real_uid;
@@ -396,17 +360,17 @@ impl CredentialSnapshot {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestLinuxCapHeader {
-    version: u32,
-    pid: i32,
+pub(crate) struct TestLinuxCapHeader {
+    pub(crate) version: u32,
+    pub(crate) pid: i32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestLinuxCapData {
-    effective: u32,
-    permitted: u32,
-    inheritable: u32,
+pub(crate) struct TestLinuxCapData {
+    pub(crate) effective: u32,
+    pub(crate) permitted: u32,
+    pub(crate) inheritable: u32,
 }
 
 #[repr(C)]
@@ -418,9 +382,9 @@ pub(crate) struct TestLinuxTimeval {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestLinuxTimezone {
-    tz_minuteswest: i32,
-    tz_dsttime: i32,
+pub(crate) struct TestLinuxTimezone {
+    pub(crate) tz_minuteswest: i32,
+    pub(crate) tz_dsttime: i32,
 }
 
 #[repr(C)]
@@ -452,43 +416,59 @@ pub(crate) struct TestLinuxSchedParam {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestLinuxSysinfo {
-    uptime: i64,
-    loads: [u64; 3],
-    totalram: u64,
-    freeram: u64,
-    sharedram: u64,
-    bufferram: u64,
-    totalswap: u64,
-    freeswap: u64,
-    procs: u16,
-    _pad: u16,
-    totalhigh: u64,
-    freehigh: u64,
-    mem_unit: u32,
-    _f: [i8; 0],
+pub(crate) struct TestLinuxSysinfo {
+    pub(crate) uptime: i64,
+    pub(crate) loads: [u64; 3],
+    pub(crate) totalram: u64,
+    pub(crate) freeram: u64,
+    pub(crate) sharedram: u64,
+    pub(crate) bufferram: u64,
+    pub(crate) totalswap: u64,
+    pub(crate) freeswap: u64,
+    pub(crate) procs: u16,
+    pub(crate) _pad: u16,
+    pub(crate) totalhigh: u64,
+    pub(crate) freehigh: u64,
+    pub(crate) mem_unit: u32,
+    pub(crate) _f: [i8; 0],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestLinuxRseq {
-    cpu_id_start: u32,
-    cpu_id: u32,
-    rseq_cs: u64,
-    flags: u32,
-    _padding: u32,
-    _padding2: u64,
+pub(crate) struct TestLinuxRseq {
+    pub(crate) cpu_id_start: u32,
+    pub(crate) cpu_id: u32,
+    pub(crate) rseq_cs: u64,
+    pub(crate) flags: u32,
+    pub(crate) _padding: u32,
+    pub(crate) _padding2: u64,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct TestUtsName {
-    sysname: [u8; 65],
-    nodename: [u8; 65],
-    release: [u8; 65],
-    version: [u8; 65],
-    machine: [u8; 65],
-    domainname: [u8; 65],
+pub(crate) struct TestUtsName {
+    pub(crate) sysname: [u8; 65],
+    pub(crate) nodename: [u8; 65],
+    pub(crate) release: [u8; 65],
+    pub(crate) version: [u8; 65],
+    pub(crate) machine: [u8; 65],
+    pub(crate) domainname: [u8; 65],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub(crate) struct TestLinuxCloneArgs {
+    pub(crate) flags: u64,
+    pub(crate) pidfd: u64,
+    pub(crate) child_tid: u64,
+    pub(crate) parent_tid: u64,
+    pub(crate) exit_signal: u64,
+    pub(crate) stack: u64,
+    pub(crate) stack_size: u64,
+    pub(crate) tls: u64,
+    pub(crate) set_tid: u64,
+    pub(crate) set_tid_size: u64,
+    pub(crate) cgroup: u64,
 }
 
 #[repr(C)]
@@ -554,9 +534,9 @@ pub(crate) struct TestWaitidSigInfo {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct TestLinuxRlimit64 {
-    rlim_cur: u64,
-    rlim_max: u64,
+pub(crate) struct TestLinuxRlimit64 {
+    pub(crate) rlim_cur: u64,
+    pub(crate) rlim_max: u64,
 }
 
 pub(crate) fn close_test_fd(fd: usize) {

@@ -614,7 +614,6 @@ mod tests {
         systemcall::test::{
             TestLinuxItimerval, TestLinuxSigAction, TestLinuxStack, TestLinuxTimespec,
             TestWaitidSigInfo, assert_fd_flags, assert_object_flags, close_test_fd, expect_fd,
-            sleep_and_signal_mask_syscalls_follow_linux_rules,
         },
         systemcall::test_helpers::{
             SyscallArgs, allocate_user_test_page, assert_linux_layout, expect_errno, expect_ok,
@@ -628,7 +627,7 @@ mod tests {
             },
             utils::SyscallError,
         },
-        thread::{extended_state::active_user_extended_state_ptr, get_current_thread},
+        thread::extended_state::active_user_extended_state_ptr,
     };
 
     #[repr(C)]

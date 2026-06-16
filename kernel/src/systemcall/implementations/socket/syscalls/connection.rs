@@ -133,6 +133,8 @@ define_syscall!(Shutdown, |socket: ObjectRef, how: u64| {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::systemcall::implementations::{Accept4, Bind, Connect, Listen, Socket};
     use crate::systemcall::test::*;
 
     crate::test!(
