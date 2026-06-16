@@ -440,6 +440,22 @@ mod tests {
         thread::THREAD_MANAGER,
     };
 
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct TestLinuxCloneArgs {
+        flags: u64,
+        pidfd: u64,
+        child_tid: u64,
+        parent_tid: u64,
+        exit_signal: u64,
+        stack: u64,
+        stack_size: u64,
+        tls: u64,
+        set_tid: u64,
+        set_tid_size: u64,
+        cgroup: u64,
+    }
+
     crate::test!(
         process_identity_syscalls,
         "process identity syscalls match current linux task state",
@@ -575,5 +591,180 @@ mod tests {
             Some(ProcessExitStatus::Exited(23))
         );
         assert!(terminated_threads.is_empty());
+    }
+
+    fn clone_and_fork_syscalls_follow_linux_rules() {
+        const SIGCHLD: u64 = 17;
+        const CLONE_VM: u64 = 0x0000_0100;
+        const CLONE_FS: u64 = 0x0000_0200;
+        const CLONE_FILES: u64 = 0x0000_0400;
+        const CLONE_SIGHAND: u64 = 0x0000_0800;
+        const CLONE_PIDFD: u64 = 0x0000_1000;
+        const CLONE_VFORK: u64 = 0x0000_4000;
+        const CLONE_THREAD: u64 = 0x0001_0000;
+        const CLONE_PARENT_SETTID: u64 = 0x0010_0000;
+        const CLONE_CHILD_CLEARTID: u64 = 0x0020_0000;
+        const CLONE_CHILD_SETTID: u64 = 0x0100_0000;
+
+        assert_linux_layout::<TestLinuxCloneArgs>(88, 8);
+
+        let page = allocate_user_test_page();
+
+        write_user_value(page, &0i32);
+        write_user_value(page + 8, &0i32);
+        expect_errno(
+            SyscallArgs::new([
+                CLONE_PIDFD
+                    | CLONE_PARENT_SETTID
+                    | CLONE_CHILD_SETTID
+                    | CLONE_CHILD_CLEARTID
+                    | SIGCHLD,
+                0,
+                page,
+                page + 8,
+                0,
+                0,
+            ])
+            .call::<Clone>(),
+            SyscallError::NoSyscall,
+        );
+
+        expect_errno(
+            SyscallArgs::new([CLONE_VFORK | SIGCHLD, 0, 0, 0, 0, 0]).call::<Clone>(),
+            SyscallError::NoSyscall,
+        );
+        expect_errno(
+            SyscallArgs::new([CLONE_VM | SIGCHLD, 0, 0, 0, 0, 0]).call::<Clone>(),
+            SyscallError::NoSyscall,
+        );
+        expect_errno(
+            SyscallArgs::new([CLONE_PIDFD | SIGCHLD, 0, 0, 0, 0, 0]).call::<Clone>(),
+            SyscallError::BadAddress,
+        );
+
+        expect_errno(
+            SyscallArgs::new([
+                CLONE_THREAD | CLONE_VM | CLONE_FS | CLONE_FILES,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ])
+            .call::<Clone>(),
+            SyscallError::NoSyscall,
+        );
+
+        write_user_value(
+            page + 256,
+            &TestLinuxCloneArgs {
+                set_tid: 1,
+                ..Default::default()
+            },
+        );
+        expect_errno(
+            SyscallArgs::new([
+                page + 256,
+                core::mem::size_of::<TestLinuxCloneArgs>() as u64,
+                0,
+                0,
+                0,
+                0,
+            ])
+            .call::<Clone3>(),
+            SyscallError::NoSyscall,
+        );
+        expect_errno(
+            SyscallArgs::new([
+                0,
+                core::mem::size_of::<TestLinuxCloneArgs>() as u64,
+                0,
+                0,
+                0,
+                0,
+            ])
+            .call::<Clone3>(),
+            SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([page + 256, 8, 0, 0, 0, 0]).call::<Clone3>(),
+            SyscallError::InvalidArguments,
+        );
+
+        write_user_value(
+            page + 288,
+            &TestLinuxCloneArgs {
+                flags: CLONE_PIDFD | CLONE_PARENT_SETTID,
+                pidfd: page + 320,
+                parent_tid: page + 320,
+                exit_signal: SIGCHLD,
+                ..Default::default()
+            },
+        );
+        expect_errno(
+            SyscallArgs::new([
+                page + 288,
+                core::mem::size_of::<TestLinuxCloneArgs>() as u64,
+                0,
+                0,
+                0,
+                0,
+            ])
+            .call::<Clone3>(),
+            SyscallError::NoSyscall,
+        );
+
+        write_user_value(
+            page + 384,
+            &TestLinuxCloneArgs {
+                flags: CLONE_PIDFD,
+                exit_signal: SIGCHLD,
+                ..Default::default()
+            },
+        );
+        expect_errno(
+            SyscallArgs::new([
+                page + 384,
+                core::mem::size_of::<TestLinuxCloneArgs>() as u64,
+                0,
+                0,
+                0,
+                0,
+            ])
+            .call::<Clone3>(),
+            SyscallError::InvalidArguments,
+        );
+
+        write_user_value(page + 416, &0i32);
+        let thread_tid = SyscallArgs::new([
+            CLONE_THREAD | CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_CHILD_CLEARTID,
+            0,
+            0,
+            page + 416,
+            0,
+            0,
+        ])
+        .call::<Clone>()
+        .expect("clone thread with child_cleartid should succeed");
+        assert_eq!(
+            read_user_value::<i32>(page + 416),
+            0,
+            "CLONE_CHILD_CLEARTID must not write the child tid at creation time"
+        );
+        assert!(thread_tid > 0);
+
+        let process = get_current_process();
+        let spawned = {
+            let process = process.lock();
+            process
+                .threads
+                .iter()
+                .filter_map(|thread| thread.upgrade())
+                .find(|thread| thread.lock().id.0 == thread_tid as u64)
+                .expect("spawned clone thread should be registered")
+        };
+        let mut thread_manager = THREAD_MANAGER.get().unwrap().lock();
+        thread_manager.mark_thread_exited(spawned);
+        thread_manager.cleanup_exited_threads();
     }
 }
