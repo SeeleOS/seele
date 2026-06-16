@@ -534,6 +534,409 @@ mod tests {
         }
     }
 
+    fn pidfd_and_waitid_syscalls_follow_linux_rules() {
+        const P_PID: u64 = 1;
+        const P_PIDFD: u64 = 3;
+        const EPOLL_CTL_ADD: u64 = 1;
+        const EPOLLIN: u32 = 0x001;
+        const POLLIN: i16 = 0x001;
+        const POLLHUP: i16 = 0x010;
+        const WNOHANG: u64 = 1;
+        const WUNTRACED: u64 = 2;
+        const WSTOPPED: u64 = 2;
+        const WEXITED: u64 = 4;
+        const WBAD: u64 = 0x20;
+        const __WCLONE: u64 = 0x8000_0000;
+        const WNOWAIT: u64 = 0x0100_0000;
+        const CLD_EXITED: i32 = 1;
+        const SI_QUEUE: i32 = -1;
+        const STOP_STATUS: i32 = 0x7f;
+
+        assert_linux_layout::<TestWaitidSigInfo>(128, 8);
+        assert_linux_layout::<TestLinuxRusage>(144, 8);
+
+        let current = get_current_process();
+
+        let child = Process::empty();
+        let child_pid = {
+            let mut child = child.lock();
+            child.pid = ProcessID::new();
+            child.parent = Some(current.clone());
+            child.group_id = current.lock().group_id;
+            child.pid.0
+        };
+        MANAGER
+            .lock()
+            .processes
+            .insert(ProcessID(child_pid), child.clone());
+
+        let child_pidfd =
+            expect_fd(SyscallArgs::new([child_pid, 0, 0, 0, 0, 0]).call::<PidfdOpen>());
+        assert_fd_flags(child_pidfd, FdFlags::CLOEXEC);
+        assert!(
+            get_object_current_process(child_pidfd as u64)
+                .expect("pidfd should resolve")
+                .as_pidfd()
+                .is_ok()
+        );
+        expect_errno(
+            SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<PidfdOpen>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([child_pid, 1, 0, 0, 0, 0]).call::<PidfdOpen>(),
+            SyscallError::InvalidArguments,
+        );
+        let info_page = allocate_user_test_page();
+        let poll_page = info_page + 512;
+        write_user_value(
+            poll_page,
+            &[TestLinuxPollFd {
+                fd: child_pidfd as i32,
+                events: POLLIN | POLLHUP,
+                revents: -1,
+            }],
+        );
+        expect_ok(
+            SyscallArgs::new([poll_page, 1, 0, 0, 0, 0]).call::<Poll>(),
+            0,
+        );
+        assert_eq!(read_user_value::<TestLinuxPollFd>(poll_page).revents, 0);
+        let child_pidfd_object = get_object_current_process(child_pidfd as u64)
+            .expect("pidfd should resolve")
+            .as_pidfd()
+            .expect("pidfd fd should point at a pidfd object");
+        assert!(!child_pidfd_object.is_event_ready(PollableEvent::CanBeRead));
+
+        child.lock().exit_status = Some(ProcessExitStatus::Exited(7));
+        write_user_value(
+            poll_page,
+            &[TestLinuxPollFd {
+                fd: child_pidfd as i32,
+                events: POLLIN | POLLHUP,
+                revents: 0,
+            }],
+        );
+        expect_ok(
+            SyscallArgs::new([poll_page, 1, 0, 0, 0, 0]).call::<Poll>(),
+            1,
+        );
+        let pidfd_poll = read_user_value::<TestLinuxPollFd>(poll_page);
+        assert_eq!(pidfd_poll.revents & POLLIN, POLLIN);
+        assert_eq!(pidfd_poll.revents & POLLHUP, 0);
+        assert!(child_pidfd_object.is_event_ready(PollableEvent::CanBeRead));
+
+        let pidfd_epoll = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<EpollCreate1>());
+        let pidfd_event = TestLinuxEpollEvent {
+            events: EPOLLIN,
+            data: 0x7069_6466,
+        };
+        write_user_value(info_page + 640, &pidfd_event);
+        expect_ok(
+            SyscallArgs::new([
+                pidfd_epoll as u64,
+                EPOLL_CTL_ADD,
+                child_pidfd as u64,
+                info_page + 640,
+                0,
+                0,
+            ])
+            .call::<EpollCtl>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([pidfd_epoll as u64, info_page + 704, 1, 0, 0, 0]).call::<EpollWait>(),
+            1,
+        );
+        let pidfd_ready = read_user_value::<TestLinuxEpollEvent>(info_page + 704);
+        let pidfd_ready_events = pidfd_ready.events;
+        let pidfd_ready_data = pidfd_ready.data;
+        assert_eq!(pidfd_ready_events & EPOLLIN, EPOLLIN);
+        assert_eq!(pidfd_ready_data, 0x7069_6466);
+        close_test_fd(pidfd_epoll);
+
+        expect_ok(
+            SyscallArgs::new([
+                P_PIDFD,
+                child_pidfd as u64,
+                info_page,
+                WEXITED | WNOWAIT,
+                0,
+                0,
+            ])
+            .call::<Waitid>(),
+            0,
+        );
+        let info = read_user_value::<TestWaitidSigInfo>(info_page);
+        assert_eq!(info.si_signo, Signal::SIGCHLD as i32);
+        assert_eq!(info.si_code, CLD_EXITED);
+        assert_eq!(info.si_pid, child_pid as i32);
+        assert_eq!(info.si_status, 7);
+        assert!(MANAGER.lock().processes.contains_key(&ProcessID(child_pid)));
+
+        let current_pid = get_current_process().lock().pid.0 as i32;
+        let current_uid = get_current_process().lock().real_uid;
+        let mut queued_siginfo =
+            SigInfo::for_process_signal(Signal::SIGUSR1, current_pid, current_uid);
+        queued_siginfo.si_code = SI_QUEUE;
+        write_user_value(info_page + 128, &queued_siginfo);
+        expect_ok(
+            SyscallArgs::new([
+                child_pidfd as u64,
+                Signal::SIGUSR1 as u64,
+                info_page + 128,
+                0,
+                0,
+                0,
+            ])
+            .call::<PidfdSendSignal>(),
+            0,
+        );
+        {
+            let child = child.lock();
+            assert!(
+                child
+                    .pending_signals
+                    .contains(Signals::from(Signal::SIGUSR1))
+            );
+            let pending = child.pending_signal_info[Signal::SIGUSR1.index()]
+                .expect("siginfo should be stored for pidfd_send_signal");
+            assert_eq!(pending.si_signo, Signal::SIGUSR1 as i32);
+            assert_eq!(pending.si_code, SI_QUEUE);
+            assert_eq!(pending.si_pid, current_pid);
+            assert_eq!(pending.si_uid, current_uid);
+        }
+        expect_ok(
+            SyscallArgs::new([child_pidfd as u64, 0, 0, 0, 0, 0]).call::<PidfdSendSignal>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([child_pidfd as u64, 0, info_page + 128, 0, 0, 0])
+                .call::<PidfdSendSignal>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([
+                child_pidfd as u64,
+                Signal::SIGUSR1 as u64,
+                info_page + 128,
+                1,
+                0,
+                0,
+            ])
+            .call::<PidfdSendSignal>(),
+            SyscallError::InvalidArguments,
+        );
+
+        expect_ok(
+            SyscallArgs::new([P_PID, child_pid, info_page, WEXITED | WNOHANG, 0, 0])
+                .call::<Waitid>(),
+            0,
+        );
+        assert!(!MANAGER.lock().processes.contains_key(&ProcessID(child_pid)));
+
+        write_user_value(info_page + 256, &0x55aa55aai32);
+        write_user_value(info_page + 320, &[0xa5u8; 144]);
+
+        let wait4_child = Process::empty();
+        let wait4_child_pid = {
+            let mut child = wait4_child.lock();
+            child.pid = ProcessID::new();
+            child.parent = Some(current.clone());
+            child.group_id = current.lock().group_id;
+            child.exit_status = Some(ProcessExitStatus::Exited(9));
+            child.pid.0
+        };
+        MANAGER
+            .lock()
+            .processes
+            .insert(ProcessID(wait4_child_pid), wait4_child.clone());
+        expect_ok(
+            SyscallArgs::new([
+                wait4_child_pid,
+                info_page + 256,
+                WNOHANG | __WCLONE,
+                info_page + 320,
+                0,
+                0,
+            ])
+            .call::<Wait4>(),
+            wait4_child_pid as usize,
+        );
+        assert_eq!(read_user_value::<i32>(info_page + 256), 9 << 8);
+        assert_eq!(
+            read_user_value::<TestLinuxRusage>(info_page + 320).ru_maxrss,
+            0
+        );
+        assert!(
+            !MANAGER
+                .lock()
+                .processes
+                .contains_key(&ProcessID(wait4_child_pid))
+        );
+
+        let wait4_preserve_child = Process::empty();
+        let wait4_preserve_child_pid = {
+            let mut child = wait4_preserve_child.lock();
+            child.pid = ProcessID::new();
+            child.parent = Some(current.clone());
+            child.group_id = current.lock().group_id;
+            child.exit_status = Some(ProcessExitStatus::Exited(11));
+            child.pid.0
+        };
+        MANAGER.lock().processes.insert(
+            ProcessID(wait4_preserve_child_pid),
+            wait4_preserve_child.clone(),
+        );
+        expect_ok(
+            SyscallArgs::new([wait4_preserve_child_pid, 0, WNOHANG, 0, 0, 0]).call::<Wait4>(),
+            wait4_preserve_child_pid as usize,
+        );
+        assert!(
+            !MANAGER
+                .lock()
+                .processes
+                .contains_key(&ProcessID(wait4_preserve_child_pid))
+        );
+
+        let stopped_child = Process::empty();
+        let stopped_child_pid = {
+            let mut child = stopped_child.lock();
+            child.pid = ProcessID::new();
+            child.parent = Some(current.clone());
+            child.group_id = current.lock().group_id;
+            child.wait_event = Some(crate::process::wait::ProcessWaitEvent::Stopped {
+                status: STOP_STATUS,
+                ptrace: false,
+            });
+            child.threads.push(alloc::sync::Arc::downgrade(
+                &crate::thread::thread::Thread::empty(),
+            ));
+            child.pid.0
+        };
+        MANAGER
+            .lock()
+            .processes
+            .insert(ProcessID(stopped_child_pid), stopped_child.clone());
+
+        expect_ok(
+            SyscallArgs::new([stopped_child_pid, info_page + 256, WNOHANG, 0, 0, 0])
+                .call::<Wait4>(),
+            0,
+        );
+        assert_eq!(read_user_value::<i32>(info_page + 256), 9 << 8);
+        assert!(stopped_child.lock().wait_event.is_some());
+
+        expect_ok(
+            SyscallArgs::new([
+                stopped_child_pid,
+                info_page + 256,
+                WNOHANG | WUNTRACED,
+                info_page + 320,
+                0,
+                0,
+            ])
+            .call::<Wait4>(),
+            stopped_child_pid as usize,
+        );
+        assert_eq!(read_user_value::<i32>(info_page + 256), STOP_STATUS);
+        assert_eq!(
+            read_user_value::<TestLinuxRusage>(info_page + 320).ru_nivcsw,
+            0
+        );
+        assert!(stopped_child.lock().wait_event.is_none());
+
+        let stopped_child_wnowait = Process::empty();
+        let stopped_child_wnowait_pid = {
+            let mut child = stopped_child_wnowait.lock();
+            child.pid = ProcessID::new();
+            child.parent = Some(current.clone());
+            child.group_id = current.lock().group_id;
+            child.wait_event = Some(crate::process::wait::ProcessWaitEvent::Stopped {
+                status: STOP_STATUS,
+                ptrace: false,
+            });
+            child.threads.push(alloc::sync::Arc::downgrade(
+                &crate::thread::thread::Thread::empty(),
+            ));
+            child.pid.0
+        };
+        MANAGER.lock().processes.insert(
+            ProcessID(stopped_child_wnowait_pid),
+            stopped_child_wnowait.clone(),
+        );
+        expect_ok(
+            SyscallArgs::new([
+                P_PID,
+                stopped_child_wnowait_pid,
+                info_page,
+                WEXITED | WNOWAIT | WSTOPPED,
+                0,
+                0,
+            ])
+            .call::<Waitid>(),
+            0,
+        );
+        assert_eq!(read_user_value::<TestWaitidSigInfo>(info_page).si_code, 5);
+        assert!(stopped_child_wnowait.lock().wait_event.is_some());
+        expect_ok(
+            SyscallArgs::new([
+                stopped_child_wnowait_pid,
+                info_page + 256,
+                WNOHANG | WUNTRACED,
+                0,
+                0,
+                0,
+            ])
+            .call::<Wait4>(),
+            stopped_child_wnowait_pid as usize,
+        );
+        assert_eq!(read_user_value::<i32>(info_page + 256), STOP_STATUS);
+        assert!(stopped_child_wnowait.lock().wait_event.is_none());
+
+        let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+        expect_errno(
+            SyscallArgs::new([99, 0, 0, WEXITED, 0, 0]).call::<Waitid>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([P_PID, current_pid as u64, 0, WNOHANG, 0, 0]).call::<Waitid>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([P_PIDFD, eventfd as u64, 0, WEXITED, 0, 0]).call::<Waitid>(),
+            SyscallError::BadFileDescriptor,
+        );
+        expect_errno(
+            SyscallArgs::new([P_PID, child_pid, 0, WEXITED, 0, 0]).call::<Waitid>(),
+            SyscallError::NoChildProcesses,
+        );
+        expect_errno(
+            SyscallArgs::new([current_pid as u64, 0, WBAD, 0, 0, 0]).call::<Wait4>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([i32::MIN as u32 as u64, 0, WNOHANG, 0, 0, 0]).call::<Wait4>(),
+            SyscallError::NoProcess,
+        );
+        expect_errno(
+            SyscallArgs::new([(current_pid + 10_000) as u64, 0, WNOHANG, 0, 0, 0]).call::<Wait4>(),
+            SyscallError::NoChildProcesses,
+        );
+
+        MANAGER.lock().processes.remove(&ProcessID(child_pid));
+        MANAGER
+            .lock()
+            .processes
+            .remove(&ProcessID(stopped_child_pid));
+        MANAGER
+            .lock()
+            .processes
+            .remove(&ProcessID(stopped_child_wnowait_pid));
+        close_test_fd(eventfd);
+        close_test_fd(child_pidfd);
+    }
+
     fn execve_syscalls_follow_linux_rules() {
         let page = allocate_user_test_page();
 
