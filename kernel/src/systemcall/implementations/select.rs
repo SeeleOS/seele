@@ -429,3 +429,24 @@ define_syscall!(
         result
     }
 );
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        select_fdset_helpers,
+        "select fdset helpers count clear test and set words",
+        select_fdset_helpers_count_clear_test_and_set_words
+    );
+    crate::test!(
+        select_timeout_validation,
+        "select timeout helpers validate null zero and invalid timespecs",
+        select_timeout_helpers_validate_null_zero_and_invalid_timespecs
+    );
+    crate::test!(
+        pselect6_syscalls,
+        "pselect6 follows linux rules",
+        pselect6_syscalls_follow_linux_rules
+    );
+}

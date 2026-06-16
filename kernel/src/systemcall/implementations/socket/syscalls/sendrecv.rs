@@ -511,3 +511,14 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
     }
     result
 });
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        socket_message_syscalls,
+        "accept sendto recvfrom sendmsg sendmmsg and recvmsg follow linux socket rules",
+        socket_message_syscalls_follow_linux_rules
+    );
+}

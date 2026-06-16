@@ -90,3 +90,14 @@ define_syscall!(
         Ok(0)
     }
 );
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        socket_name_and_shutdown_syscalls,
+        "socketpair shutdown getsockname and getpeername follow linux rules",
+        socket_name_and_shutdown_syscalls_follow_linux_rules
+    );
+}

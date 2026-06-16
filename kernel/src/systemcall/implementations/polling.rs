@@ -341,3 +341,19 @@ define_syscall!(
         epoll_wait_impl(poller, events_ptr, maxevents, timeout)
     }
 );
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        epoll_syscalls,
+        "epoll syscalls follow linux rules",
+        epoll_syscalls_follow_linux_rules
+    );
+    crate::test!(
+        epoll_pwait2_syscalls,
+        "epoll_pwait2 follows linux timeout rules",
+        epoll_pwait2_syscalls_follow_linux_rules
+    );
+}

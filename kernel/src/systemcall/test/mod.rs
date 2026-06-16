@@ -355,34 +355,9 @@ crate::test!(
     pipe_and_dup_syscalls_follow_linux_fd_rules
 );
 crate::test!(
-    poll_and_ppoll_syscalls,
-    "poll and ppoll follow linux rules",
-    poll_and_ppoll_syscalls_follow_linux_rules
-);
-crate::test!(
-    epoll_syscalls,
-    "epoll syscalls follow linux rules",
-    epoll_syscalls_follow_linux_rules
-);
-crate::test!(
     signalfd_syscalls,
     "signalfd syscalls follow linux rules",
     signalfd_syscalls_follow_linux_rules
-);
-crate::test!(
-    socket_name_and_shutdown_syscalls,
-    "socketpair shutdown getsockname and getpeername follow linux rules",
-    socket_name_and_shutdown_syscalls_follow_linux_rules
-);
-crate::test!(
-    socket_bind_connect_accept_syscalls,
-    "bind listen connect and accept4 follow linux socket rules",
-    socket_bind_connect_accept_syscalls_follow_linux_rules
-);
-crate::test!(
-    socket_message_syscalls,
-    "accept sendto recvfrom sendmsg sendmmsg and recvmsg follow linux socket rules",
-    socket_message_syscalls_follow_linux_rules
 );
 crate::test!(
     namespace_and_kcmp_syscalls,
@@ -408,11 +383,6 @@ crate::test!(
     sleep_and_signal_mask_syscalls,
     "nanosleep setitimer and rt_sigsuspend follow linux rules",
     sleep_and_signal_mask_syscalls_follow_linux_rules
-);
-crate::test!(
-    epoll_pwait2_syscalls,
-    "epoll_pwait2 follows linux timeout rules",
-    epoll_pwait2_syscalls_follow_linux_rules
 );
 crate::test!(
     object_control_syscalls,
@@ -463,31 +433,6 @@ crate::test!(
     typed_syscall_arg_conversion,
     "typed syscall args convert flags and enums at boundary",
     typed_syscall_args_convert_flags_and_enums_at_boundary
-);
-crate::test!(
-    poll_event_translation,
-    "poll helpers translate linux events to kernel readiness",
-    poll_helpers_translate_linux_events_to_kernel_readiness
-);
-crate::test!(
-    poll_timeout_validation,
-    "poll timeout helpers reject invalid timespecs and saturate",
-    poll_timeout_helpers_reject_invalid_timespecs_and_saturate
-);
-crate::test!(
-    select_fdset_helpers,
-    "select fdset helpers count clear test and set words",
-    select_fdset_helpers_count_clear_test_and_set_words
-);
-crate::test!(
-    select_timeout_validation,
-    "select timeout helpers validate null zero and invalid timespecs",
-    select_timeout_helpers_validate_null_zero_and_invalid_timespecs
-);
-crate::test!(
-    pselect6_syscalls,
-    "pselect6 follows linux rules",
-    pselect6_syscalls_follow_linux_rules
 );
 crate::test!(
     memory_mapping_syscalls,
@@ -5714,7 +5659,7 @@ pub(crate) fn sysfs_syscalls_follow_linux_sysfs_abi_rules() {
 }
 
 #[allow(dead_code)]
-fn poll_and_ppoll_syscalls_follow_linux_rules() {
+pub(crate) fn poll_and_ppoll_syscalls_follow_linux_rules() {
     const POLLIN: i16 = 0x001;
     const POLLOUT: i16 = 0x004;
     const POLLNVAL: i16 = 0x020;
@@ -5808,7 +5753,7 @@ fn poll_and_ppoll_syscalls_follow_linux_rules() {
     close_test_fd(eventfd);
 }
 
-fn epoll_syscalls_follow_linux_rules() {
+pub(crate) fn epoll_syscalls_follow_linux_rules() {
     const EPOLL_CTL_ADD: u64 = 1;
     const EPOLL_CTL_MOD: u64 = 3;
     const EPOLL_CTL_DEL: u64 = 2;
@@ -6191,7 +6136,7 @@ fn signalfd_syscalls_follow_linux_rules() {
     close_test_fd(signalfd);
 }
 
-fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
+pub(crate) fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     const AF_INET: u64 = 2;
     const AF_NETLINK: u64 = 16;
     const AF_UNIX: u64 = 1;
@@ -6894,7 +6839,7 @@ fn socket_name_and_shutdown_syscalls_follow_linux_rules() {
     close_test_fd(left_fd);
 }
 
-fn socket_bind_connect_accept_syscalls_follow_linux_rules() {
+pub(crate) fn socket_bind_connect_accept_syscalls_follow_linux_rules() {
     const AF_INET: u64 = 2;
     const AF_UNIX: u64 = 1;
     const SOCK_STREAM: u64 = 1;
@@ -7043,7 +6988,7 @@ fn socket_bind_connect_accept_syscalls_follow_linux_rules() {
     close_test_fd(server);
 }
 
-fn socket_message_syscalls_follow_linux_rules() {
+pub(crate) fn socket_message_syscalls_follow_linux_rules() {
     const AF_UNIX: u64 = 1;
     const SOCK_STREAM: u64 = 1;
     const SOCK_DGRAM: u64 = 2;
@@ -8754,7 +8699,7 @@ fn sleep_and_signal_mask_syscalls_follow_linux_rules() {
     crate::thread::get_current_thread().lock().blocked_signals = saved_mask;
 }
 
-fn epoll_pwait2_syscalls_follow_linux_rules() {
+pub(crate) fn epoll_pwait2_syscalls_follow_linux_rules() {
     const EPOLLOUT: u32 = 0x004;
 
     let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
@@ -9642,7 +9587,7 @@ fn typed_syscall_args_convert_flags_and_enums_at_boundary() {
     assert!(<PollEvents as SyscallArg>::from_u64(PollEvents::POLLIN.bits() as u64).is_ok());
 }
 
-fn poll_helpers_translate_linux_events_to_kernel_readiness() {
+pub(crate) fn poll_helpers_translate_linux_events_to_kernel_readiness() {
     let events = kernel_events_for(PollEvents::POLLIN | PollEvents::POLLOUT);
 
     assert_eq!(
@@ -9675,7 +9620,7 @@ fn poll_helpers_translate_linux_events_to_kernel_readiness() {
     assert!(!translated.contains(PollEvents::POLLOUT));
 }
 
-fn poll_timeout_helpers_reject_invalid_timespecs_and_saturate() {
+pub(crate) fn poll_timeout_helpers_reject_invalid_timespecs_and_saturate() {
     assert_eq!(
         saturating_timeout_ms(&PollTimespec {
             tv_sec: 1,
@@ -9708,7 +9653,7 @@ fn poll_timeout_helpers_reject_invalid_timespecs_and_saturate() {
     ));
 }
 
-fn select_fdset_helpers_count_clear_test_and_set_words() {
+pub(crate) fn select_fdset_helpers_count_clear_test_and_set_words() {
     assert_eq!(fdset_words(0), 0);
     assert_eq!(fdset_words(1), 1);
     assert_eq!(fdset_words(65), 2);
@@ -9726,7 +9671,7 @@ fn select_fdset_helpers_count_clear_test_and_set_words() {
     assert_eq!(words, [0, 0]);
 }
 
-fn select_timeout_helpers_validate_null_zero_and_invalid_timespecs() {
+pub(crate) fn select_timeout_helpers_validate_null_zero_and_invalid_timespecs() {
     assert!(timeout_to_deadline(core::ptr::null()).unwrap().is_none());
     assert!(!timeout_is_zero(core::ptr::null()));
 
@@ -9747,7 +9692,7 @@ fn select_timeout_helpers_validate_null_zero_and_invalid_timespecs() {
     ));
 }
 
-fn pselect6_syscalls_follow_linux_rules() {
+pub(crate) fn pselect6_syscalls_follow_linux_rules() {
     let page = allocate_user_test_page();
     let thread = crate::thread::get_current_thread();
     let saved_mask = thread.lock().blocked_signals;

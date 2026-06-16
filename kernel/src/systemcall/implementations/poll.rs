@@ -118,6 +118,27 @@ fn write_pollfds_revents(fds: *mut LinuxPollFd, local: &[LinuxPollFd]) -> Result
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        poll_and_ppoll_syscalls,
+        "poll and ppoll follow linux rules",
+        poll_and_ppoll_syscalls_follow_linux_rules
+    );
+    crate::test!(
+        poll_event_translation,
+        "poll helpers translate linux events to kernel readiness",
+        poll_helpers_translate_linux_events_to_kernel_readiness
+    );
+    crate::test!(
+        poll_timeout_validation,
+        "poll timeout helpers reject invalid timespecs and saturate",
+        poll_timeout_helpers_reject_invalid_timespecs_and_saturate
+    );
+}
+
 pub(in crate::systemcall) fn saturating_timeout_ms(
     timeout: &Timespec,
 ) -> Result<i32, SyscallError> {

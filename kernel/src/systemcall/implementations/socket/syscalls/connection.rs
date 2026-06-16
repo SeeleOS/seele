@@ -130,3 +130,14 @@ define_syscall!(Shutdown, |socket: ObjectRef, how: u64| {
         .map_err(ObjectError::from)?;
     Ok(0)
 });
+
+#[cfg(test)]
+mod tests {
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        socket_bind_connect_accept_syscalls,
+        "bind listen connect and accept4 follow linux socket rules",
+        socket_bind_connect_accept_syscalls_follow_linux_rules
+    );
+}
