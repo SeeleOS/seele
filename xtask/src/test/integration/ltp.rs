@@ -18,7 +18,6 @@ pub const LTP: Ltp = Ltp;
 const REPORT_BEGIN: &str = "__SEELE_LTP_JSON_BEGIN__";
 const REPORT_END: &str = "__SEELE_LTP_JSON_END__";
 const EXIT_PREFIX: &str = "__SEELE_LTP_EXIT__:";
-const DEFAULT_PATTERN: &str = "^(getpid01|getpid02|brk01|access01|open01|close01|read01|write01)$";
 
 pub struct Ltp;
 
@@ -37,11 +36,10 @@ impl IntegrationTest for Ltp {
         let mut command_sent = false;
         let options = RunOptions::for_agent_run_without_timeout();
         let timeout = ltp_timeout();
-        let command = ltp_command();
         let result = run_qemu_interactive_capture(&iso_path, &options, timeout, |output| {
             if !command_sent && guest_ready(output) {
                 command_sent = true;
-                if let Err(err) = qmp_type_text(&qmp_socket_path(), &command) {
+                if let Err(err) = qmp_type_text(&qmp_socket_path(), "root\nseele-run-ltp\n") {
                     eprintln!("failed to send LTP command through QMP: {err:?}");
                 }
             }
@@ -102,14 +100,6 @@ fn guest_ready(output: &str) -> bool {
         line.ends_with("Seele login:")
             || ((line.contains("bash-") || line.contains("root@")) && line.contains("# "))
     })
-}
-
-fn ltp_command() -> String {
-    let pattern = env::var("SEELE_LTP_PATTERN").unwrap_or_else(|_| DEFAULT_PATTERN.to_string());
-    let suite = env::var("SEELE_LTP_SUITE").unwrap_or_else(|_| "syscalls".to_string());
-    format!(
-        "root\nmkdir -p /tmp/seele-ltp && LTPROOT=/usr/share LTP_COLORIZE_OUTPUT=0 kirk --no-colors --run-suite {suite} --run-pattern '{pattern}' --workers 1 --json-report /tmp/seele-ltp/report.json; status=$?; echo {REPORT_BEGIN}; python -m json.tool /tmp/seele-ltp/report.json 2>/dev/null || cat /tmp/seele-ltp/report.json 2>/dev/null; echo {REPORT_END}; echo {EXIT_PREFIX}$status\n"
-    )
 }
 
 fn ltp_timeout() -> Duration {

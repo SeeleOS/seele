@@ -104,39 +104,16 @@ fn prepare_package_checkout(
     let package_dir = build_root.join(package);
     let aur_url = format!("https://aur.archlinux.org/{package}.git");
 
-    if !package_dir.exists() {
-        run_xshell_command(
-            "build-rootfs",
-            sh,
-            cmd!(sh, "git clone {aur_url} {package_dir}"),
-            output_mode,
-        )?;
-        return Ok(package_dir);
-    }
-
-    if !package_dir.join(".git").is_dir() {
-        bail!(
-            "AUR build directory exists but is not a git checkout: {}",
-            package_dir.display()
-        );
-    }
-
     run_xshell_command(
         "build-rootfs",
         sh,
-        cmd!(sh, "git -C {package_dir} fetch --all --prune"),
+        cmd!(sh, "rm -rf {package_dir}"),
         output_mode,
     )?;
     run_xshell_command(
         "build-rootfs",
         sh,
-        cmd!(sh, "git -C {package_dir} reset --hard origin/master"),
-        output_mode,
-    )?;
-    run_xshell_command(
-        "build-rootfs",
-        sh,
-        cmd!(sh, "git -C {package_dir} clean -fdx"),
+        cmd!(sh, "git clone {aur_url} {package_dir}"),
         output_mode,
     )?;
     Ok(package_dir)
