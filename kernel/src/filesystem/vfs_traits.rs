@@ -19,7 +19,10 @@ bitflags! {
         const MS_NOSUID = 2;
         const MS_NODEV = 4;
         const MS_NOEXEC = 8;
+        const MS_NOATIME = 1024;
+        const MS_NODIRATIME = 2048;
         const MS_RELATIME = 1 << 21;
+        const MS_STRICTATIME = 1 << 24;
     }
 }
 
@@ -40,8 +43,17 @@ impl MountFlags {
         if self.contains(Self::MS_NOEXEC) {
             options.push("noexec");
         }
+        if self.contains(Self::MS_NOATIME) {
+            options.push("noatime");
+        }
+        if self.contains(Self::MS_NODIRATIME) {
+            options.push("nodiratime");
+        }
         if self.contains(Self::MS_RELATIME) {
             options.push("relatime");
+        }
+        if self.contains(Self::MS_STRICTATIME) {
+            options.push("strictatime");
         }
         options.join(",")
     }

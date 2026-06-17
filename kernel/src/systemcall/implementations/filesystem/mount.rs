@@ -496,6 +496,8 @@ mod tests {
         write_user_cstr(page + 448, b"mode=700\0");
         write_user_cstr(page + 512, b"mode\0");
         write_user_cstr(page + 576, b"755\0");
+        write_user_cstr(page + 640, b"source\0");
+        write_user_cstr(page + 832, b"tmpfs\0");
         write_user_cstr(page + 704, b"\0");
         write_user_cstr(page + 896, b"/tmp/syscall-mount-test/proc\0");
         write_user_cstr(page + 1024, b"/tmp/syscall-mount-test/sys\0");
@@ -584,6 +586,72 @@ mod tests {
         let moved_stat = moved_root.stat();
         assert_eq!(moved_stat.st_mode & 0o777, 0o755);
 
+        let proc_fsfd = expect_fd(SyscallArgs::new([page + 1536, 0, 0, 0, 0, 0]).call::<Fsopen>());
+        expect_ok(
+            SyscallArgs::new([proc_fsfd as u64, FSCONFIG_CMD_CREATE, 0, 0, 0, 0])
+                .call::<Fsconfig>(),
+            0,
+        );
+        let proc_mount_fd =
+            expect_fd(SyscallArgs::new([proc_fsfd as u64, 0, 0, 0, 0, 0]).call::<Fsmount>());
+        expect_ok(
+            SyscallArgs::new([
+                proc_mount_fd as u64,
+                page + 704,
+                AT_FDCWD,
+                page + 896,
+                MOVE_MOUNT_F_EMPTY_PATH,
+                0,
+            ])
+            .call::<MoveMount>(),
+            0,
+        );
+
+        let tmpfs_fsfd = expect_fd(SyscallArgs::new([page + 384, 0, 0, 0, 0, 0]).call::<Fsopen>());
+        expect_ok(
+            SyscallArgs::new([
+                tmpfs_fsfd as u64,
+                FSCONFIG_SET_STRING,
+                page + 512,
+                page + 576,
+                0,
+                0,
+            ])
+            .call::<Fsconfig>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([
+                tmpfs_fsfd as u64,
+                FSCONFIG_SET_STRING,
+                page + 640,
+                page + 832,
+                0,
+                0,
+            ])
+            .call::<Fsconfig>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([tmpfs_fsfd as u64, FSCONFIG_CMD_CREATE, 0, 0, 0, 0])
+                .call::<Fsconfig>(),
+            0,
+        );
+        let tmpfs_mount_fd =
+            expect_fd(SyscallArgs::new([tmpfs_fsfd as u64, 0, 0, 0, 0, 0]).call::<Fsmount>());
+        expect_ok(
+            SyscallArgs::new([
+                tmpfs_mount_fd as u64,
+                page + 704,
+                AT_FDCWD,
+                page + 128,
+                MOVE_MOUNT_F_EMPTY_PATH,
+                0,
+            ])
+            .call::<MoveMount>(),
+            0,
+        );
+
         expect_ok(
             SyscallArgs::new([0, page + 896, page + 1536, 0, 0, 0]).call::<Mount>(),
             0,
@@ -663,6 +731,10 @@ mod tests {
         );
 
         close_test_fd(tree_fd);
+        close_test_fd(tmpfs_mount_fd);
+        close_test_fd(tmpfs_fsfd);
+        close_test_fd(proc_mount_fd);
+        close_test_fd(proc_fsfd);
         close_test_fd(mount_fd);
         close_test_fd(fsfd);
         for path in [

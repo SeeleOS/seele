@@ -98,7 +98,8 @@ pub(super) fn mount_attr_flag_update(
 ) -> Result<(MountFlags, MountFlags), SyscallError> {
     let supported_basic =
         MOUNT_ATTR_RDONLY | MOUNT_ATTR_NOSUID | MOUNT_ATTR_NODEV | MOUNT_ATTR_NOEXEC;
-    let supported_set = supported_basic | MOUNT_ATTR_NOATIME | MOUNT_ATTR_STRICTATIME;
+    let supported_set =
+        supported_basic | MOUNT_ATTR_NOATIME | MOUNT_ATTR_STRICTATIME | MOUNT_ATTR_NODIRATIME;
     let supported_clr = supported_basic | MOUNT_ATTR__ATIME;
 
     if attr.propagation != 0 {
@@ -110,10 +111,7 @@ pub(super) fn mount_attr_flag_update(
     if attr.attr_clr & !supported_clr != 0 {
         return Err(SyscallError::OperationNotSupported);
     }
-    if attr.attr_set & (MOUNT_ATTR_NODIRATIME | MOUNT_ATTR_IDMAP | MOUNT_ATTR_NOSYMFOLLOW) != 0 {
-        return Err(SyscallError::OperationNotSupported);
-    }
-    if (attr.attr_set & MOUNT_ATTR__ATIME) != 0 {
+    if attr.attr_set & (MOUNT_ATTR_IDMAP | MOUNT_ATTR_NOSYMFOLLOW) != 0 {
         return Err(SyscallError::OperationNotSupported);
     }
 
@@ -127,7 +125,19 @@ pub(super) fn mount_attr_flag_update(
 
     if attr.attr_clr & MOUNT_ATTR__ATIME != 0 {
         flags.insert(MountFlags::MS_RELATIME);
-        mask.insert(MountFlags::MS_RELATIME);
+        mask.insert(MountFlags::MS_NOATIME | MountFlags::MS_RELATIME | MountFlags::MS_STRICTATIME);
+    }
+    if attr.attr_set & MOUNT_ATTR_NOATIME != 0 {
+        flags.insert(MountFlags::MS_NOATIME);
+        mask.insert(MountFlags::MS_NOATIME | MountFlags::MS_RELATIME | MountFlags::MS_STRICTATIME);
+    }
+    if attr.attr_set & MOUNT_ATTR_STRICTATIME != 0 {
+        flags.insert(MountFlags::MS_STRICTATIME);
+        mask.insert(MountFlags::MS_NOATIME | MountFlags::MS_RELATIME | MountFlags::MS_STRICTATIME);
+    }
+    if attr.attr_set & MOUNT_ATTR_NODIRATIME != 0 {
+        flags.insert(MountFlags::MS_NODIRATIME);
+        mask.insert(MountFlags::MS_NODIRATIME);
     }
 
     Ok((flags, mask))

@@ -4,7 +4,15 @@ use core::fmt::{Debug, Formatter, Result as FmtResult};
 use num_enum::TryFromPrimitive;
 
 use crate::{
-    filesystem::{info::LinuxStat, tmpfs::TmpFs, vfs::FileSystemRef},
+    filesystem::{
+        cgroupfs::CgroupFs,
+        devfs::{DevFs, DevPtsFs},
+        info::LinuxStat,
+        procfs::ProcFs,
+        sysfs::SysFs,
+        tmpfs::TmpFs,
+        vfs::FileSystemRef,
+    },
     impl_cast_function, impl_cast_function_non_trait,
     object::{FileFlags, Object, misc::ObjectResult, traits::Statable},
     systemcall::utils::SyscallError,
@@ -115,6 +123,11 @@ impl FsContextObject {
 
     fn instantiate_filesystem(&self) -> Result<FileSystemRef, SyscallError> {
         match self.fs_type.as_str() {
+            "proc" => Ok(Arc::new(Mut::new(ProcFs::new()))),
+            "sysfs" => Ok(Arc::new(Mut::new(SysFs::new()))),
+            "devtmpfs" => Ok(Arc::new(Mut::new(DevFs::new()))),
+            "devpts" => Ok(Arc::new(Mut::new(DevPtsFs::new()))),
+            "cgroup2" => Ok(Arc::new(Mut::new(CgroupFs::new()))),
             "tmpfs" => Ok(Arc::new(Mut::new(TmpFs::new()))),
             "ramfs" => Ok(Arc::new(Mut::new(TmpFs::ramfs()))),
             _ => Err(SyscallError::NoSyscall),
@@ -130,6 +143,9 @@ impl FsContextObject {
     }
 
     fn string_supported(&self, key: &str) -> bool {
+        if key == "source" {
+            return true;
+        }
         match self.fs_type.as_str() {
             "tmpfs" => matches!(
                 key,
