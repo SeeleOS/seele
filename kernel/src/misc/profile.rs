@@ -566,7 +566,7 @@ fn report_window(window_ns: u64) {
     let resched_ipi_wakeups = RESCHED_IPI_WAKEUPS.swap(0, Ordering::AcqRel);
 
     s_println!(
-        "PROFILE {}s window_ms={} cpus={} cpu_time_ms={} blocked_time_ms={}",
+        "{{\"event\":\"profile_window\",\"window_seconds\":{},\"window_ms\":{},\"cpus\":{},\"cpu_time_ms\":{},\"blocked_time_ms\":{}}}",
         REPORT_INTERVAL_SECONDS,
         window_ms,
         cpu_count,
@@ -574,12 +574,11 @@ fn report_window(window_ns: u64) {
         cycles_to_milliseconds(total_blocked_cycles, tsc_hz)
     );
     s_println!(
-        "SCHED_EVENTS timer_interrupts={} timer_preemptions={} resched_ipi_wakeups={}",
+        "{{\"event\":\"profile_sched_events\",\"timer_interrupts\":{},\"timer_preemptions\":{},\"resched_ipi_wakeups\":{}}}",
         timer_interrupts,
         timer_preemptions,
         resched_ipi_wakeups
     );
-    s_println!("CATEGORIES");
 
     let mut top_categories: Vec<(ProfileCategory, ProfileSnapshot)> = ProfileCategory::PRIMARY
         .into_iter()
@@ -595,23 +594,17 @@ fn report_window(window_ns: u64) {
             .checked_div(total_cycles)
             .unwrap_or(0);
         s_println!(
-            "  {:<16} {:>3}.{:02}% calls={} cpu_time_ms={} max_cpu_us={}",
+            "{{\"event\":\"profile_category\",\"category\":\"{}\",\"percent_basis_points\":{},\"calls\":{},\"cpu_time_ms\":{},\"max_cpu_us\":{}}}",
             category.name(),
-            percent / 100,
-            percent % 100,
+            percent,
             snapshot.calls,
             cycles_to_milliseconds(snapshot.total_cycles, tsc_hz),
             cycles_to_microseconds(snapshot.max_cycles, tsc_hz),
         );
     }
 
-    report_syscalls("TOP CPU SYSCALLS", &syscall_cpu_totals, tsc_hz, true);
-    report_syscalls(
-        "TOP BLOCKED SYSCALLS",
-        &syscall_blocked_totals,
-        tsc_hz,
-        false,
-    );
+    report_syscalls("cpu", &syscall_cpu_totals, tsc_hz, true);
+    report_syscalls("blocked", &syscall_blocked_totals, tsc_hz, false);
     report_ioctl_ops(&ioctl_op_totals, tsc_hz);
     report_ioctl_targets(&ioctl_target_totals, tsc_hz);
     report_hot_syscall_phases(&hot_syscall_phase_totals, tsc_hz);
@@ -668,7 +661,7 @@ fn report_window(window_ns: u64) {
 
     if file_lazy_faults.faults != 0 {
         s_println!(
-            "FILE_LAZY_FAULTS faults={} cluster_pages_loaded={} page_cache_hits={} page_cache_misses={} cache_lookup_ms={} cache_load_ms={} copy_ms={} map_ms={}",
+            "{{\"event\":\"profile_file_lazy_faults\",\"faults\":{},\"cluster_pages_loaded\":{},\"page_cache_hits\":{},\"page_cache_misses\":{},\"cache_lookup_ms\":{},\"cache_load_ms\":{},\"copy_ms\":{},\"map_ms\":{}}}",
             file_lazy_faults.faults,
             file_lazy_faults.cluster_pages_loaded,
             file_lazy_faults.cache_hits,
@@ -682,7 +675,7 @@ fn report_window(window_ns: u64) {
 }
 
 fn report_category_breakdown(
-    title: &str,
+    name: &str,
     totals: &[ProfileSnapshot; PROFILE_CATEGORY_COUNT],
     tsc_hz: u64,
     categories: &[ProfileCategory],
@@ -697,10 +690,10 @@ fn report_category_breakdown(
         return;
     }
 
-    s_println!("{title}");
     for (category, snapshot) in entries {
         s_println!(
-            "  {:<20} calls={} cpu_time_ms={} max_cpu_us={}",
+            "{{\"event\":\"profile_category_breakdown\",\"breakdown\":\"{}\",\"category\":\"{}\",\"calls\":{},\"cpu_time_ms\":{},\"max_cpu_us\":{}}}",
+            name,
             category.name(),
             snapshot.calls,
             cycles_to_milliseconds(snapshot.total_cycles, tsc_hz),
@@ -709,8 +702,7 @@ fn report_category_breakdown(
     }
 }
 
-fn report_syscalls(title: &str, totals: &[ProfileSnapshot; MAX_SYSCALLS], tsc_hz: u64, cpu: bool) {
-    s_println!("{title}");
+fn report_syscalls(kind: &str, totals: &[ProfileSnapshot; MAX_SYSCALLS], tsc_hz: u64, cpu: bool) {
     let mut top_syscalls: Vec<(usize, ProfileSnapshot)> = totals
         .iter()
         .copied()
@@ -723,7 +715,9 @@ fn report_syscalls(title: &str, totals: &[ProfileSnapshot; MAX_SYSCALLS], tsc_hz
         let label = syscall_name(syscall_no);
         if cpu {
             s_println!(
-                "  {:<18} calls={} cpu_time_ms={} max_cpu_us={}",
+                "{{\"event\":\"profile_syscall\",\"kind\":\"{}\",\"syscall_no\":{},\"syscall\":\"{}\",\"calls\":{},\"cpu_time_ms\":{},\"max_cpu_us\":{}}}",
+                kind,
+                syscall_no,
                 label,
                 snapshot.calls,
                 cycles_to_milliseconds(snapshot.total_cycles, tsc_hz),
@@ -731,7 +725,9 @@ fn report_syscalls(title: &str, totals: &[ProfileSnapshot; MAX_SYSCALLS], tsc_hz
             );
         } else {
             s_println!(
-                "  {:<18} calls={} blocked_time_ms={} max_blocked_us={}",
+                "{{\"event\":\"profile_syscall\",\"kind\":\"{}\",\"syscall_no\":{},\"syscall\":\"{}\",\"calls\":{},\"blocked_time_ms\":{},\"max_blocked_us\":{}}}",
+                kind,
+                syscall_no,
                 label,
                 snapshot.calls,
                 cycles_to_milliseconds(snapshot.total_cycles, tsc_hz),
@@ -751,10 +747,9 @@ fn report_hot_syscall_phases(totals: &[ProfileSnapshot; HOT_SYSCALL_PHASE_COUNT]
         return;
     }
 
-    s_println!("HOT SYSCALL PHASES");
     for (phase, snapshot) in entries {
         s_println!(
-            "  {:<22} calls={} cpu_time_ms={} max_cpu_us={}",
+            "{{\"event\":\"profile_hot_syscall_phase\",\"phase\":\"{}\",\"calls\":{},\"cpu_time_ms\":{},\"max_cpu_us\":{}}}",
             phase.name(),
             snapshot.calls,
             cycles_to_milliseconds(snapshot.total_cycles, tsc_hz),
@@ -775,10 +770,9 @@ fn report_ioctl_ops(totals: &[ProfileSnapshot; IOCTL_OP_COUNT], tsc_hz: u64) {
     }
 
     entries.sort_by_key(|entry| Reverse(entry.1.total_cycles));
-    s_println!("TOP IOCTL REQUESTS");
     for (op, snapshot) in entries.into_iter().take(TOP_IOCTL_COUNT) {
         s_println!(
-            "  {:<22} calls={} cpu_time_ms={} max_cpu_us={}",
+            "{{\"event\":\"profile_ioctl_op\",\"op\":\"{}\",\"calls\":{},\"cpu_time_ms\":{},\"max_cpu_us\":{}}}",
             format!("{op:?}"),
             snapshot.calls,
             cycles_to_milliseconds(snapshot.total_cycles, tsc_hz),
@@ -799,10 +793,9 @@ fn report_ioctl_targets(totals: &[ProfileSnapshot; IOCTL_TARGET_COUNT], tsc_hz: 
     }
 
     entries.sort_by_key(|entry| Reverse(entry.1.total_cycles));
-    s_println!("TOP IOCTL TARGETS");
     for (target, snapshot) in entries.into_iter().take(TOP_IOCTL_COUNT) {
         s_println!(
-            "  {:<22} calls={} cpu_time_ms={} max_cpu_us={}",
+            "{{\"event\":\"profile_ioctl_target\",\"target\":\"{}\",\"calls\":{},\"cpu_time_ms\":{},\"max_cpu_us\":{}}}",
             format!("{target:?}"),
             snapshot.calls,
             cycles_to_milliseconds(snapshot.total_cycles, tsc_hz),
