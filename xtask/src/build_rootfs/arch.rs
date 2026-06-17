@@ -6,6 +6,7 @@ use crate::json_output::{OutputMode, run_xshell_command};
 
 const ARCH_PACKAGES: &[&str] = &[
     "base",
+    "base-devel",
     "systemd",
     "iptables",
     "busybox",
@@ -30,6 +31,20 @@ const ARCH_PACKAGES: &[&str] = &[
     "pkgconf",
     "git",
     "rust",
+    "pacman",
+    "fakeroot",
+    "autoconf",
+    "automake",
+    "acl",
+    "gawk",
+    "libcap",
+    "perl",
+    "numactl",
+    "libaio",
+    "libmnl",
+    "python",
+    "openssl",
+    "libtirpc",
 ];
 
 const PACMAN_CONF: &str = r#"
@@ -52,17 +67,35 @@ Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
 Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch
 "#;
 
+pub struct PacmanConfig {
+    path: std::path::PathBuf,
+}
+
+impl PacmanConfig {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for PacmanConfig {
+    fn drop(&mut self) {
+        fs::remove_file(&self.path).ok();
+    }
+}
+
+pub fn create_pacman_config(repo_root: &Path) -> Result<PacmanConfig> {
+    let path = repo_root.join(".seele-pacman.conf");
+    fs::write(&path, PACMAN_CONF.trim_start())
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(PacmanConfig { path })
+}
+
 pub fn install_packages(
     sh: &Shell,
-    repo_root: &Path,
+    pacman_conf: &Path,
     rootfs_mount: &Path,
     output_mode: OutputMode,
 ) -> Result<()> {
-    let pacman_conf = repo_root.join(".seele-pacman.conf");
-    fs::write(&pacman_conf, PACMAN_CONF.trim_start())
-        .with_context(|| format!("failed to write {}", pacman_conf.display()))?;
-    let _pacman_conf = TempFile { path: &pacman_conf };
-
     run_xshell_command(
         "build-rootfs",
         sh,
@@ -87,14 +120,4 @@ pub fn set_empty_root_password(
         output_mode,
     )?;
     Ok(())
-}
-
-struct TempFile<'a> {
-    path: &'a Path,
-}
-
-impl Drop for TempFile<'_> {
-    fn drop(&mut self) {
-        fs::remove_file(self.path).ok();
-    }
 }
