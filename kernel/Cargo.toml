@@ -3,6 +3,10 @@ name = "kernel"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+profiling = []
+
 [dependencies]
 anyhow = { version = "1", default-features = false }
 ps2-mouse = "0.1"

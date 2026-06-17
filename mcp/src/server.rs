@@ -65,11 +65,21 @@ pub struct DebugCommandRequest {
     pub timeout_ms: Option<u64>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct StartRequest {
+    pub enable_profiling: Option<bool>,
+}
+
 #[tool_router]
 impl SeeleMcp {
     #[tool(description = "Start the Seele OS VM session through xtask mcp-run")]
-    async fn start(&self) -> CallToolResult {
-        json_result(self.session.start().await).await
+    async fn start(&self, Parameters(request): Parameters<StartRequest>) -> CallToolResult {
+        json_result(
+            self.session
+                .start(request.enable_profiling.unwrap_or(false))
+                .await,
+        )
+        .await
     }
 
     #[tool(description = "Stop the Seele OS VM session managed by this MCP server")]

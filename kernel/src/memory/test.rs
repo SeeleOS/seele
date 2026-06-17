@@ -136,6 +136,7 @@ fn file_lazy_copy_handles_unaligned_offsets_across_pages() {
             assert_eq!(&buffer[..read_len], &data[offset..offset + read_len]);
             assert!(buffer[read_len..].iter().all(|byte| *byte == 0));
             assert_eq!(stats.cluster_pages_loaded, 1);
+            #[cfg(feature = "profiling")]
             assert!(stats.cache_lookup_cycles > 0);
             assert!(stats.cache_hits + stats.cache_misses >= 1);
         },

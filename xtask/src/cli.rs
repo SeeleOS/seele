@@ -1,6 +1,9 @@
 use clap::{Args, Parser, Subcommand};
 
-use crate::{build_rootfs::BuildRootfsArgs, run::RunArgs};
+use crate::{
+    build_rootfs::BuildRootfsArgs,
+    run::{McpRunArgs, RunArgs},
+};
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Seele OS development tasks")]
@@ -12,7 +15,7 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Run(RunArgs),
-    McpRun(JsonOutputArgs),
+    McpRun(McpRunArgs),
     Test(JsonOutputArgs),
     BuildRootfs(BuildRootfsArgs),
 }

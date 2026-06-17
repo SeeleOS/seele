@@ -17,18 +17,35 @@ pub enum BuildMode {
     IntegrationTests(&'static [&'static str]),
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BuildOptions {
+    pub enable_profiling: bool,
+}
+
 pub fn build_kernel(output_mode: OutputMode) -> Result<Vec<PathBuf>> {
-    build_kernel_with_mode(BuildMode::Run, output_mode)
+    build_kernel_with_options(BuildMode::Run, output_mode, BuildOptions::default())
+}
+
+pub fn build_kernel_with_options(
+    mode: BuildMode,
+    output_mode: OutputMode,
+    options: BuildOptions,
+) -> Result<Vec<PathBuf>> {
+    build_kernel_with_mode(mode, output_mode, options)
 }
 
 pub fn build_kernel_tests(output_mode: OutputMode) -> Result<Vec<PathBuf>> {
-    build_kernel_with_mode(BuildMode::UnitTest, output_mode)
+    build_kernel_with_mode(BuildMode::UnitTest, output_mode, BuildOptions::default())
 }
 
-pub fn build_kernel_with_mode(mode: BuildMode, output_mode: OutputMode) -> Result<Vec<PathBuf>> {
+pub fn build_kernel_with_mode(
+    mode: BuildMode,
+    output_mode: OutputMode,
+    options: BuildOptions,
+) -> Result<Vec<PathBuf>> {
     let sh = Shell::new()?;
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-    let cargo_args = cargo_args(&mode);
+    let cargo_args = cargo_args(&mode, options);
     let mut command = cmd!(sh, "{cargo} {cargo_args...}").to_command();
 
     command.stdout(Stdio::piped());
@@ -84,7 +101,7 @@ pub fn build_kernel_with_mode(mode: BuildMode, output_mode: OutputMode) -> Resul
     Ok(executables)
 }
 
-fn cargo_args(mode: &BuildMode) -> Vec<String> {
+fn cargo_args(mode: &BuildMode, options: BuildOptions) -> Vec<String> {
     let mut args = Vec::new();
     args.push(
         match mode {
@@ -97,6 +114,9 @@ fn cargo_args(mode: &BuildMode) -> Vec<String> {
 
     if !cfg!(debug_assertions) {
         args.push("--release".to_string());
+    }
+    if options.enable_profiling {
+        args.extend(["--features", "profiling"].map(str::to_string));
     }
 
     match mode {

@@ -87,17 +87,20 @@ impl AgentSession {
         &self.qmp_socket
     }
 
-    pub async fn start(&self) -> Result<SessionMetadata> {
-        self.start_with_env([]).await
+    pub async fn start(&self, enable_profiling: bool) -> Result<SessionMetadata> {
+        self.start_with_env([], enable_profiling).await
     }
 
     pub async fn debug_start(&self, port: Option<u16>) -> Result<DebugStartStatus> {
         let port = port.unwrap_or(1234);
         let metadata = self
-            .start_with_env([
-                ("SEELE_QEMU_GDB".to_string(), format!("tcp::{port}")),
-                ("SEELE_QEMU_WAIT_GDB".to_string(), "1".to_string()),
-            ])
+            .start_with_env(
+                [
+                    ("SEELE_QEMU_GDB".to_string(), format!("tcp::{port}")),
+                    ("SEELE_QEMU_WAIT_GDB".to_string(), "1".to_string()),
+                ],
+                false,
+            )
             .await?;
         let result = async {
             let mut gdb = self.spawn_gdb(port).await?;
@@ -131,7 +134,7 @@ impl AgentSession {
         })
     }
 
-    async fn start_with_env<I>(&self, envs: I) -> Result<SessionMetadata>
+    async fn start_with_env<I>(&self, envs: I, enable_profiling: bool) -> Result<SessionMetadata>
     where
         I: IntoIterator<Item = (String, String)>,
     {
@@ -152,7 +155,11 @@ impl AgentSession {
             .arg("xtask")
             .arg("--")
             .arg("mcp-run")
-            .arg("--json-output")
+            .arg("--json-output");
+        if enable_profiling {
+            command.arg("--enable-profiling");
+        }
+        command
             .current_dir(&self.repo)
             .env("SEELE_QMP_SOCKET", &self.qmp_socket)
             .stdout(Stdio::piped())

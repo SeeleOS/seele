@@ -1,7 +1,7 @@
 use super::{IntegrationTest, IntegrationTestResult};
 use crate::json_output::OutputMode;
 use crate::run::{
-    build::{BuildMode, build_kernel_with_mode},
+    build::{BuildMode, BuildOptions, build_kernel_with_mode},
     build_iso::create_boot_iso,
     qemu::run_qemu_expect_serial_failure_capture,
 };
@@ -24,6 +24,7 @@ impl IntegrationTest for PanicHandlerSmoke {
         if let Some(kernel_test) = build_kernel_with_mode(
             BuildMode::IntegrationTests(PANIC_HANDLER_IMAGE),
             output_mode,
+            BuildOptions::default(),
         )?
         .into_iter()
         .next()
