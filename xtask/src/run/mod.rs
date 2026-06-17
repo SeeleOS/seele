@@ -12,6 +12,7 @@ use self::{
     build_iso::create_boot_iso,
     qemu::{RunOptions, run_qemu, run_qemu_mcp},
 };
+use crate::json_output::{JsonEvent, OutputMode, emit, remove_file};
 
 #[derive(Debug, Args)]
 pub struct RunArgs {
@@ -31,20 +32,30 @@ pub fn run(args: RunArgs) -> Result<i32> {
     run_kernel(args.into_options())
 }
 
-pub fn mcp_run() -> Result<i32> {
-    let kernel = build_kernel()?
+pub fn mcp_run(output_mode: OutputMode) -> Result<i32> {
+    if output_mode.is_json() {
+        emit(&JsonEvent::started("mcp-run"))?;
+    }
+    let kernel = build_kernel(output_mode)?
         .into_iter()
         .next()
         .context("kernel binary missing")?;
     let iso_path = create_boot_iso(&kernel)?;
     let options = RunOptions::for_agent_run_without_timeout();
-    let exit_code = run_qemu_mcp(&iso_path, &options)?;
-    let _ = fs::remove_file(&iso_path);
+    let exit_code = run_qemu_mcp(&iso_path, &options, output_mode)?;
+    remove_file(&iso_path, output_mode)?;
+    if output_mode.is_json() {
+        emit(&JsonEvent::finished(
+            "mcp-run",
+            exit_code,
+            if exit_code == 0 { "ok" } else { "failed" },
+        ))?;
+    }
     Ok(exit_code)
 }
 
 fn run_kernel(options: RunOptions) -> Result<i32> {
-    let kernel = build_kernel()?
+    let kernel = build_kernel(OutputMode::Human)?
         .into_iter()
         .next()
         .context("kernel binary missing")?;

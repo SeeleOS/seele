@@ -1,4 +1,5 @@
 use super::{IntegrationTest, IntegrationTestResult};
+use crate::json_output::OutputMode;
 use crate::run::{
     build::{BuildMode, build_kernel_with_mode},
     build_iso::create_boot_iso,
@@ -19,11 +20,13 @@ impl IntegrationTest for PanicHandlerSmoke {
         "integration::panic_handler_smoke"
     }
 
-    fn run(&self) -> Result<IntegrationTestResult> {
-        if let Some(kernel_test) =
-            build_kernel_with_mode(BuildMode::IntegrationTests(PANIC_HANDLER_IMAGE))?
-                .into_iter()
-                .next()
+    fn run(&self, output_mode: OutputMode) -> Result<IntegrationTestResult> {
+        if let Some(kernel_test) = build_kernel_with_mode(
+            BuildMode::IntegrationTests(PANIC_HANDLER_IMAGE),
+            output_mode,
+        )?
+        .into_iter()
+        .next()
         {
             let iso_path = create_boot_iso(&kernel_test)?;
             let result =

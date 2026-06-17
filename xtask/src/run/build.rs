@@ -1,3 +1,4 @@
+use crate::json_output::OutputMode;
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::{
@@ -16,15 +17,15 @@ pub enum BuildMode {
     IntegrationTests(&'static [&'static str]),
 }
 
-pub fn build_kernel() -> Result<Vec<PathBuf>> {
-    build_kernel_with_mode(BuildMode::Run)
+pub fn build_kernel(output_mode: OutputMode) -> Result<Vec<PathBuf>> {
+    build_kernel_with_mode(BuildMode::Run, output_mode)
 }
 
-pub fn build_kernel_tests() -> Result<Vec<PathBuf>> {
-    build_kernel_with_mode(BuildMode::UnitTest)
+pub fn build_kernel_tests(output_mode: OutputMode) -> Result<Vec<PathBuf>> {
+    build_kernel_with_mode(BuildMode::UnitTest, output_mode)
 }
 
-pub fn build_kernel_with_mode(mode: BuildMode) -> Result<Vec<PathBuf>> {
+pub fn build_kernel_with_mode(mode: BuildMode, output_mode: OutputMode) -> Result<Vec<PathBuf>> {
     let sh = Shell::new()?;
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let cargo_args = cargo_args(&mode);
@@ -62,7 +63,7 @@ pub fn build_kernel_with_mode(mode: BuildMode) -> Result<Vec<PathBuf>> {
 
     for line in reader.lines() {
         let line: String = line.context("failed to read cargo output")?;
-        if let Some(path) = handle_cargo_message(&line, &mode) {
+        if let Some(path) = handle_cargo_message(&line, &mode, output_mode) {
             executables.push(path);
         }
     }
@@ -136,11 +137,15 @@ fn cargo_args(mode: &BuildMode) -> Vec<String> {
     args
 }
 
-fn handle_cargo_message(line: &str, mode: &BuildMode) -> Option<PathBuf> {
+fn handle_cargo_message(line: &str, mode: &BuildMode, output_mode: OutputMode) -> Option<PathBuf> {
     let value: Value = match serde_json::from_str(line) {
         Ok(value) => value,
         Err(_) => {
-            println!("{line}");
+            if output_mode.is_json() {
+                eprintln!("{line}");
+            } else {
+                println!("{line}");
+            }
             return None;
         }
     };
@@ -148,7 +153,11 @@ fn handle_cargo_message(line: &str, mode: &BuildMode) -> Option<PathBuf> {
     match value.get("reason").and_then(Value::as_str) {
         Some("compiler-message") => {
             if let Some(rendered) = value["message"]["rendered"].as_str() {
-                print!("{rendered}");
+                if output_mode.is_json() {
+                    eprint!("{rendered}");
+                } else {
+                    print!("{rendered}");
+                }
             }
             None
         }

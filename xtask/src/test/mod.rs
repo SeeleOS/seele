@@ -3,10 +3,31 @@ mod unit;
 
 use anyhow::Result;
 
-pub fn test() -> Result<i32> {
-    let unit_exit = unit::run()?;
+use crate::json_output::{JsonEvent, OutputMode, emit};
+
+pub fn test(output_mode: OutputMode) -> Result<i32> {
+    if output_mode.is_json() {
+        emit(&JsonEvent::started("test"))?;
+    }
+
+    let unit_exit = unit::run(output_mode)?;
     if unit_exit != 0 {
+        if output_mode.is_json() {
+            emit(&JsonEvent::finished("test", unit_exit, "failed"))?;
+        }
         return Ok(unit_exit);
     }
-    integration::run()
+    let integration_exit = integration::run(output_mode)?;
+    if output_mode.is_json() {
+        emit(&JsonEvent::finished(
+            "test",
+            integration_exit,
+            if integration_exit == 0 {
+                "ok"
+            } else {
+                "failed"
+            },
+        ))?;
+    }
+    Ok(integration_exit)
 }

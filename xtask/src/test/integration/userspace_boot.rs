@@ -1,4 +1,5 @@
 use super::{IntegrationTest, IntegrationTestResult};
+use crate::json_output::OutputMode;
 use crate::run::{
     build::build_kernel,
     build_iso::create_boot_iso,
@@ -16,8 +17,8 @@ impl IntegrationTest for UserspaceBoot {
         "integration::userspace_boot"
     }
 
-    fn run(&self) -> Result<IntegrationTestResult> {
-        let kernel_paths = build_kernel()?;
+    fn run(&self, output_mode: OutputMode) -> Result<IntegrationTestResult> {
+        let kernel_paths = build_kernel(output_mode)?;
         let kernel_path = kernel_paths
             .first()
             .map(Path::new)
@@ -41,12 +42,20 @@ impl IntegrationTest for UserspaceBoot {
 }
 
 fn userspace_startup_observed(output: &str) -> bool {
-    output.lines().any(is_shell_prompt_line)
+    output.lines().any(is_userspace_ready_line)
+}
+
+fn is_userspace_ready_line(line: &str) -> bool {
+    let line = line.trim_end_matches('\r');
+    is_shell_prompt_line(line) || is_login_prompt_line(line)
 }
 
 fn is_shell_prompt_line(line: &str) -> bool {
-    let line = line.trim_end_matches('\r');
     (line.contains("bash-") || line.contains("root@")) && line.contains("# ")
+}
+
+fn is_login_prompt_line(line: &str) -> bool {
+    line.trim_end().ends_with("Seele login:")
 }
 
 fn qemu_test_timeout() -> Duration {

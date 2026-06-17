@@ -5,9 +5,11 @@ mod userspace_boot;
 use anyhow::Result;
 use owo_colors::OwoColorize;
 
+use crate::json_output::{JsonEvent, OutputMode, emit};
+
 trait IntegrationTest {
     fn name(&self) -> &'static str;
-    fn run(&self) -> Result<IntegrationTestResult>;
+    fn run(&self, output_mode: OutputMode) -> Result<IntegrationTestResult>;
 }
 
 pub struct IntegrationTestResult {
@@ -16,19 +18,63 @@ pub struct IntegrationTestResult {
     pub output: String,
 }
 
-pub fn run() -> Result<i32> {
+pub fn run(output_mode: OutputMode) -> Result<i32> {
     let tests = integration_tests();
-    eprintln!();
-    eprintln!("running {} integration tests", tests.len());
+    if output_mode.is_json() {
+        emit(&JsonEvent::progress(
+            "test",
+            "integration",
+            "running integration tests",
+        ))?;
+    } else {
+        eprintln!();
+        eprintln!("running {} integration tests", tests.len());
+    }
 
     for test in tests {
-        let result = test.run()?;
-        eprint!("test {} ... ", test.name());
+        if output_mode.is_json() {
+            emit(&JsonEvent::test(
+                "test",
+                test.name(),
+                "running",
+                "integration test started",
+            ))?;
+        }
+        let result = test.run(output_mode)?;
         if result.exit_code == 0 {
-            eprintln!("{}", "ok".green().bold());
+            if output_mode.is_json() {
+                emit(&JsonEvent::test(
+                    "test",
+                    test.name(),
+                    "ok",
+                    "integration test passed",
+                ))?;
+            } else {
+                eprint!("test {} ... ", test.name());
+                eprintln!("{}", "ok".green().bold());
+            }
         } else {
-            eprintln!("{}", "FAILED".red().bold());
-            report_failure(test.name(), &result);
+            if output_mode.is_json() {
+                if let Some(failure) = &result.failure {
+                    emit(&JsonEvent::log("test", "stderr", failure))?;
+                }
+                if !result.output.is_empty() {
+                    emit(&JsonEvent::log("test", "serial", &result.output))?;
+                }
+                emit(&JsonEvent::test(
+                    "test",
+                    test.name(),
+                    "failed",
+                    result
+                        .failure
+                        .as_deref()
+                        .unwrap_or("integration test failed"),
+                ))?;
+            } else {
+                eprint!("test {} ... ", test.name());
+                eprintln!("{}", "FAILED".red().bold());
+                report_failure(test.name(), &result);
+            }
             return Ok(result.exit_code);
         }
     }

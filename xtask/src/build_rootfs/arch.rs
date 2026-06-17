@@ -1,0 +1,98 @@
+use anyhow::{Context, Result};
+use std::{fs, path::Path};
+use xshell::{Shell, cmd};
+
+use crate::json_output::{OutputMode, run_xshell_command};
+
+const ARCH_PACKAGES: &[&str] = &[
+    "base",
+    "systemd",
+    "iptables",
+    "busybox",
+    "fish",
+    "yazi",
+    "clang",
+    "vim",
+    "nvim",
+    "weston",
+    "hyprland",
+    "bash",
+    "coreutils",
+    "util-linux",
+    "procps",
+    "iproute2",
+    "curl",
+    "gcc",
+    "glibc",
+    "make",
+    "pkgconf",
+    "git",
+    "rust",
+];
+
+const PACMAN_CONF: &str = r#"
+[options]
+Architecture = auto
+SigLevel = Never
+LocalFileSigLevel = Optional
+ParallelDownloads = 5
+
+[core]
+Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
+Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch
+
+[extra]
+Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
+Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch
+
+[multilib]
+Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
+Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch
+"#;
+
+pub fn install_packages(
+    sh: &Shell,
+    repo_root: &Path,
+    rootfs_mount: &Path,
+    output_mode: OutputMode,
+) -> Result<()> {
+    let pacman_conf = repo_root.join(".seele-pacman.conf");
+    fs::write(&pacman_conf, PACMAN_CONF.trim_start())
+        .with_context(|| format!("failed to write {}", pacman_conf.display()))?;
+    let _pacman_conf = TempFile { path: &pacman_conf };
+
+    run_xshell_command(
+        "build-rootfs",
+        sh,
+        cmd!(
+            sh,
+            "sudo pacstrap -C {pacman_conf} -K -M {rootfs_mount} {ARCH_PACKAGES...}"
+        ),
+        output_mode,
+    )?;
+    Ok(())
+}
+
+pub fn set_empty_root_password(
+    sh: &Shell,
+    rootfs_mount: &Path,
+    output_mode: OutputMode,
+) -> Result<()> {
+    run_xshell_command(
+        "build-rootfs",
+        sh,
+        cmd!(sh, "sudo chroot {rootfs_mount} /usr/bin/passwd -d root"),
+        output_mode,
+    )?;
+    Ok(())
+}
+
+struct TempFile<'a> {
+    path: &'a Path,
+}
+
+impl Drop for TempFile<'_> {
+    fn drop(&mut self) {
+        fs::remove_file(self.path).ok();
+    }
+}

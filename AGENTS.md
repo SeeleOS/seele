@@ -4,21 +4,22 @@
 
 - `cargo xrun`: launch the VM manually; use `cargo xrun -- --agent` as the serial-driven fallback when the `seele` MCP server is unavailable.
 - `cargo xtest`: build and run kernel unit tests in QEMU.
-- `cargo xbuild-rootfs`: build or refresh `disk.img` and the guest root filesystem contents.
-- `cargo xbuild-rootfs -- --override-disk`: rebuild `disk.img` from scratch.
+- `cargo xbuild-rootfs`: build or refresh `target/rootfs.img` and the guest root filesystem contents.
+- `cargo xbuild-rootfs -- --override-rootfs`: rebuild `target/rootfs.img` from scratch.
 - `cargo fmt --all`: format Rust code before submitting changes.
-- `seele` MCP server: when available, prefer its `agent_start`, `agent_status`, `agent_serial_tail`, `agent_screenshot`, QMP input, and cleanup tools for VM-driven agent workflows instead of hand-rolled QMP or terminal-socket scripts.
+- Prefer the `seele` MCP server for VM, serial, screenshot, input, and cleanup workflows. Do not run ad-hoc bare host commands for those tasks when MCP is available.
+- `seele` MCP server: when available, prefer its `start`, `status`, `serial_tail`, `screenshot`, QMP input, and cleanup tools for VM-driven VM workflows instead of hand-rolled QMP or terminal-socket scripts.
 - If a required tool is missing for this repository workflow, add it to the `flake.nix` dev shell instead of treating it as a one-off host prerequisite.
 - When adding new tooling for builds, tests, MCP workflows, debugging, image conversion, or VM automation, prefer adding it to the appropriate `flake.nix` dev shell or runtime input instead of relying on whatever happens to be installed on the host `PATH`.
 - When polling VM state or serial output, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
 - After finishing VM-based testing, shut the VM down and verify there is no leftover runner or QEMU process before moving on.
-- To inspect the current agent VM and runner processes before shutdown, prefer `agent_status` for MCP-managed sessions; otherwise inspect host runner/QEMU processes directly and kill leftover PIDs explicitly.
-- Do not assume `sysroot/` is mounted or synchronized with `disk.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the xtask VM flow when in doubt.
-- If you need `sysroot/` mounted, prefer the MCP `ensure_sysroot_mounted` tool; for manual fallback, check `mountpoint -q sysroot` and mount `disk.img` to `sysroot/` as a separate step first. Do not chain the mount step together with the real inspection command.
-- After mounting `sysroot/`, if you only need to read files from it, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
+- To inspect the current VM and runner processes before shutdown, prefer `status` for MCP-managed sessions; otherwise inspect host runner/QEMU processes directly and kill leftover PIDs explicitly.
+- Do not assume `target/rootfs_mnt/` is mounted or synchronized with `target/rootfs.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the xtask VM flow when in doubt.
+- If you need `target/rootfs_mnt/` mounted, prefer the MCP `ensure_rootfs_mounted` tool; for manual fallback, check `mountpoint -q target/rootfs_mnt` and mount `target/rootfs.img` to `target/rootfs_mnt/` as a separate step first. Do not chain the mount step together with the real inspection command.
+- After mounting `target/rootfs_mnt/`, if you only need to read files from it, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
 - If the sandbox, `no_new_privileges`, missing mounts, or network restrictions block a necessary command, ask the user for privilege escalation or the required access instead of silently giving up on that path.
 
-After finishing a change, prefer the `seele` MCP workflow when available: run `run_xtest`, then use `agent_start`, `agent_status`, `agent_serial_tail`, and `agent_screenshot` for VM smoke coverage, followed by `agent_stop` or `agent_cleanup`. If MCP is unavailable, run `cargo xtest` and `cargo xrun -- --agent` manually. If any required test fails, keep fixing the issue before considering the work done.
+After finishing a change, prefer the `seele` MCP workflow when available: run `run_tests`, then use `start`, `status`, `serial_tail`, and `screenshot` for VM smoke coverage, followed by `stop` or `cleanup`. If MCP is unavailable, run `cargo xtest` and `cargo xrun -- --agent` manually. If any required test fails, keep fixing the issue before considering the work done.
 
 ## Coding Style & Naming Conventions
 
@@ -56,7 +57,7 @@ There is no large standalone test suite yet; verification is primarily compile c
 - Treat compiler warnings as failures. Do not leave any `cargo check` warnings in the tree.
 - After finishing code changes, run `cargo clippy` and address its findings before considering the work complete.
 - Put focused Rust unit tests in the same file as the code they cover, inside a local `#[cfg(test)] mod tests {}` block. Do not create separate `test.rs` files for new code unless the existing module already uses that layout or the tests must span multiple files.
-- For syscall, process, terminal, or userspace changes, prefer the MCP agent VM path when available. Use `cargo xrun -- --agent` as the manual fallback.
+- For syscall, process, terminal, or userspace changes, prefer the MCP VM path when available. Use `cargo xrun -- --agent` as the manual fallback.
 - When validating MCP-driven VM behavior, verify QMP connectivity, serial log output, and screenshot capture when relevant, then stop the VM through the MCP cleanup/stop tool or by killing the reported runner and QEMU PIDs.
 - Add focused unit tests only when the target module already uses them.
 
@@ -65,6 +66,7 @@ There is no large standalone test suite yet; verification is primarily compile c
 IMPORTANT: When debugging third-party userspace components such as Weston, Xorg, libudev, libinput, KDE, Qt, or SQLite, do not rely on staring at binaries or disassembly unless there is no better option. Prefer reading the corresponding source code first.
 IMPORTANT: When debugging third-party source code in this repository workflow, inspect the official upstream GitHub repository first and treat binary inspection or disassembly as a last resort only after the source path has been exhausted.
 If GitHub is unavailable, or if you need a local checkout for broad `rg` searches, clone the relevant upstream repository into a clearly named local directory such as `third_party/`, then use that local checkout as a secondary reference.
+Do not clone upstream source when MCP or direct fetch access is available; prefer reading it through MCP/fetch first and only clone as a last resort when those paths are blocked.
 If you need syscall-level debugging, temporarily enable `should_log` in `kernel/src/systemcall/handling.rs` manually, and turn it back off before finishing the task.
 When syscall logging is needed to chase userspace failures, prefer filtering the log to syscalls that return a specific errno of interest such as `BadAddress` instead of logging every syscall entry/exit. This keeps `mmap`, `read`, `write`, `poll`, and `futex` noise from hiding the actual signal.
 If the system appears to stop responding, consider early that a syscall may have entered the kernel and never returned. Use enter/exit syscall logs to verify this explicitly instead of assuming the last logged successful syscall was the true point of failure.
@@ -81,7 +83,7 @@ Do not use `strace` inside the VM for guest userspace debugging in this reposito
 
 ## Repository Layout Notes
 
-- `xtask/src/build_rootfs/` contains the disk image and guest rootfs construction workflow used by `cargo xbuild-rootfs`.
+- `xtask/src/build_rootfs/` contains the rootfs image and guest rootfs construction workflow used by `cargo xbuild-rootfs`.
 
 ## Review Terminology
 
@@ -123,13 +125,14 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 
 - Speak with the user in Chinese.
 - If the user provides a workflow or debugging suggestion that is broadly useful for future work in this repository, add it to `AGENTS.md` when appropriate instead of treating it as a one-off remark.
-- For Codex-driven VM interaction, prefer the `seele` MCP server when it is available. Use `agent_start` to launch the VM, `agent_status` to confirm the runner/QEMU/QMP state, `agent_serial_tail` for boot logs, `agent_screenshot` for the display, and the QMP key/mouse tools for guest input.
+- For Codex-driven VM interaction, prefer the `seele` MCP server when it is available. Use `start` to launch the VM, `status` to confirm the runner/QEMU/QMP state, `serial_tail` for boot logs, `screenshot` for the display, and the QMP key/mouse tools for guest input.
+- When MCP is available, do not replace these workflows with ad-hoc bare shell commands; use the MCP tools first and only fall back to manual commands when MCP is unavailable.
 - Do not reintroduce the old background terminal input workflow. `cargo xrun -- --agent` no longer prints or uses a `background terminal input path`, `/tmp/seele-agent-tty.sock`, `SEELE_AGENT_TTY_SOCKET`, or a second guest serial port for stdin forwarding.
 - For manual fallback when MCP is unavailable, use `cargo xrun -- --agent` for serial-driven boot verification and host-side process inspection plus `kill` for cleanup. Do not invent a tty-socket or ad-hoc input path.
 - When debugging interactive login issues where the user needs to type a username or password manually, run `nix develop -c cargo xrun` in the foreground and let the user provide the login input, or use MCP QMP input if the login can be driven programmatically.
 - If QMP input appears to produce no reaction, treat kernel deadlock, echo being disabled, or the foreground being owned by another program as primary explanations to check before blaming the MCP transport.
-- After you finish using an MCP, interactive, or agent VM, terminate it yourself instead of relying on a default runner timeout to clean it up.
-- When terminating a leftover agent VM, first inspect the current runner and QEMU processes, then `kill` the reported runner and QEMU PIDs. If the VM was started by the `seele` MCP server, prefer `agent_stop` or `agent_cleanup` first.
-- Do not rely on guest-side `poweroff` in this environment. If you need to stop the agent VM, inspect runner and QEMU PIDs from the host side and kill them, or use MCP cleanup for MCP-managed sessions.
-- If `sysroot/` already appears to be mounted, reuse it directly instead of asking for privilege escalation to mount again. Only ask to mount when it is clearly not mounted.
-- When you need to mount `sysroot/`, prefer MCP `ensure_sysroot_mounted`; for manual fallback, inspect `mountpoint -q sysroot` and mount `disk.img` to `sysroot/` separately before the real inspection command.
+- After you finish using an MCP, interactive, or VM, terminate it yourself instead of relying on a default runner timeout to clean it up.
+- When terminating a leftover VM, first inspect the current runner and QEMU processes, then `kill` the reported runner and QEMU PIDs. If the VM was started by the `seele` MCP server, prefer `stop` or `cleanup` first.
+- Do not rely on guest-side `poweroff` in this environment. If you need to stop the VM, inspect runner and QEMU PIDs from the host side and kill them, or use MCP cleanup for MCP-managed sessions.
+- If `target/rootfs_mnt/` already appears to be mounted, reuse it directly instead of asking for privilege escalation to mount again. Only ask to mount when it is clearly not mounted.
+- When you need to mount `target/rootfs_mnt/`, prefer MCP `ensure_rootfs_mounted`; for manual fallback, inspect `mountpoint -q target/rootfs_mnt` and mount `target/rootfs.img` to `target/rootfs_mnt/` separately before the real inspection command.

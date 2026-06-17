@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Seele OS is an x86_64 operating system kernel written in `no_std` Rust targeting Linux binary compatibility — it runs unmodified Linux ELF binaries. The kernel boots via Limine, runs in QEMU (with KVM if `/dev/kvm` exists), and mounts an Alpine Linux guest rootfs from `disk.img`. The rootfs uses OpenRC for `/sbin/init` and is built by `xtask` through `apk`.
+Seele OS is an x86_64 operating system kernel written in `no_std` Rust targeting Linux binary compatibility — it runs unmodified Linux ELF binaries. The kernel boots via Limine, runs in QEMU (with KVM if `/dev/kvm` exists), and mounts an Arch Linux guest rootfs from `target/rootfs.img`. The rootfs installs a small base development package set through `xtask` and `pacstrap`.
 
 ## Commands
 
@@ -12,29 +12,29 @@ Seele OS is an x86_64 operating system kernel written in `no_std` Rust targeting
 cargo xrun                  # build and boot in QEMU
 cargo xrun -- --agent       # manual fallback headless boot; serial logs captured automatically
 cargo xtest                 # kernel and integration tests in QEMU
-cargo xbuild-rootfs         # build/refresh disk.img and rootfs
-cargo xbuild-rootfs -- --override  # rebuild disk.img from scratch
+cargo xbuild-rootfs         # build/refresh target/rootfs.img and rootfs
+cargo xbuild-rootfs -- --override  # rebuild target/rootfs.img from scratch
 cargo fmt --all             # format
 cargo check --manifest-path kernel/Cargo.toml   # fast type-check kernel only
 cargo clippy                # lint; treat all warnings as failures
 ```
 
-When the `seele` MCP server is available, prefer it for agent VM workflows:
+When the `seele` MCP server is available, prefer it for VM workflows:
 
 ```text
-run_xtest                   # wrapper for cargo xtest
-ensure_sysroot_mounted      # mount sysroot/ from disk.img when needed
-agent_start                 # build and launch the agent VM
-agent_status                # inspect runner/QEMU/QMP state
-agent_serial_tail           # read recent serial logs
-agent_screenshot            # capture display through QMP screendump
-agent_send_key/type_text    # drive guest input through QMP
-agent_stop or agent_cleanup # stop the VM and remove QMP socket state
+run_tests                   # wrapper for cargo xtest
+ensure_rootfs_mounted      # mount target/rootfs_mnt/ from target/rootfs.img when needed
+start                 # build and launch the VM
+status                # inspect runner/QEMU/QMP state
+serial_tail           # read recent serial logs
+screenshot            # capture display through QMP screendump
+send_key/type_text    # drive guest input through QMP
+stop or cleanup # stop the VM and remove QMP socket state
 ```
 
 The `xtask/` crate implements every `cargo x*` subcommand. The local Rust toolchain is named `seele`; install it from `toolchain/install.rs` before building outside Nix. `nix develop` / `nix run` set up the full reproducible environment.
 
-After any change: prefer the MCP workflow (`run_xtest`, then `agent_start`/status/serial/screenshot/stop). If MCP is unavailable, run `cargo xtest`, then `cargo xrun -- --agent`. The VM must boot cleanly before the work is done.
+After any change: prefer the MCP workflow (`run_tests`, then `start`/status/serial/screenshot/stop). If MCP is unavailable, run `cargo xtest`, then `cargo xrun -- --agent`. The VM must boot cleanly before the work is done.
 
 ## Kernel Architecture
 
@@ -61,7 +61,7 @@ boot → memory → SMP BSP → framebuffer/terminal/logging → early drivers �
 | `kernel/src/ipc/` | IPC primitives |
 | `kernel/src/terminal/` | In-kernel framebuffer terminal (flanterm) |
 | `xtask/src/` | All `cargo x*` subcommands: VM launch, rootfs build, test runner |
-| `mcp/src/` | Seele MCP server: agent VM lifecycle, QMP screenshot/input, serial tail, and test wrappers |
+| `mcp/src/` | Seele MCP server: VM lifecycle, QMP screenshot/input, serial tail, and test wrappers |
 
 ### Syscall Path
 

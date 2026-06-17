@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 use crate::{build_rootfs::BuildRootfsArgs, run::RunArgs};
 
@@ -12,11 +12,17 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Run(RunArgs),
-    McpRun,
-    Test,
+    McpRun(JsonOutputArgs),
+    Test(JsonOutputArgs),
     BuildRootfs(BuildRootfsArgs),
 }
 
 pub fn parse() -> Cli {
     Cli::parse()
+}
+
+#[derive(Debug, Args)]
+pub struct JsonOutputArgs {
+    #[arg(long)]
+    pub json_output: bool,
 }

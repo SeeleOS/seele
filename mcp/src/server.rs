@@ -67,23 +67,23 @@ pub struct DebugCommandRequest {
 
 #[tool_router]
 impl SeeleMcp {
-    #[tool(description = "Start the Seele OS agent VM session through xtask mcp-run")]
-    async fn agent_start(&self) -> CallToolResult {
+    #[tool(description = "Start the Seele OS VM session through xtask mcp-run")]
+    async fn start(&self) -> CallToolResult {
         json_result(self.session.start().await).await
     }
 
-    #[tool(description = "Stop the Seele OS agent VM session managed by this MCP server")]
-    async fn agent_stop(&self) -> CallToolResult {
+    #[tool(description = "Stop the Seele OS VM session managed by this MCP server")]
+    async fn stop(&self) -> CallToolResult {
         json_result(self.session.stop().await).await
     }
 
     #[tool(description = "Report Seele OS VM process, serial log, and QMP socket status")]
-    async fn agent_status(&self) -> CallToolResult {
+    async fn status(&self) -> CallToolResult {
         json_result(self.session.status().await).await
     }
 
-    #[tool(description = "Return the tail of the Seele OS agent serial log")]
-    async fn agent_serial_tail(
+    #[tool(description = "Return the tail of the Seele OS serial log")]
+    async fn serial_tail(
         &self,
         Parameters(request): Parameters<SerialTailRequest>,
     ) -> CallToolResult {
@@ -91,7 +91,7 @@ impl SeeleMcp {
     }
 
     #[tool(description = "Capture a Seele OS VM screenshot through QMP screendump")]
-    async fn agent_screenshot(&self) -> CallToolResult {
+    async fn screenshot(&self) -> CallToolResult {
         match qmp::screendump_png(self.session.qmp_socket()).await {
             Ok(png) => {
                 CallToolResult::success(vec![Content::image(STANDARD.encode(png), "image/png")])
@@ -101,23 +101,17 @@ impl SeeleMcp {
     }
 
     #[tool(description = "Send a QMP keyboard key or key combination to the VM")]
-    async fn agent_send_key(
-        &self,
-        Parameters(request): Parameters<SendKeyRequest>,
-    ) -> CallToolResult {
+    async fn send_key(&self, Parameters(request): Parameters<SendKeyRequest>) -> CallToolResult {
         unit_result(qmp::send_key(self.session.qmp_socket(), &request.keys).await)
     }
 
     #[tool(description = "Type ASCII text into the VM through QMP keyboard events")]
-    async fn agent_type_text(
-        &self,
-        Parameters(request): Parameters<TypeTextRequest>,
-    ) -> CallToolResult {
+    async fn type_text(&self, Parameters(request): Parameters<TypeTextRequest>) -> CallToolResult {
         unit_result(qmp::type_text(self.session.qmp_socket(), &request.text).await)
     }
 
     #[tool(description = "Move the VM absolute pointer through QMP")]
-    async fn agent_mouse_move(
+    async fn mouse_move(
         &self,
         Parameters(request): Parameters<MouseMoveRequest>,
     ) -> CallToolResult {
@@ -125,7 +119,7 @@ impl SeeleMcp {
     }
 
     #[tool(description = "Click a VM mouse button through QMP")]
-    async fn agent_mouse_click(
+    async fn mouse_click(
         &self,
         Parameters(request): Parameters<MouseClickRequest>,
     ) -> CallToolResult {
@@ -133,7 +127,7 @@ impl SeeleMcp {
     }
 
     #[tool(description = "Clean up the MCP-managed Seele OS VM session")]
-    async fn agent_cleanup(&self) -> CallToolResult {
+    async fn cleanup(&self) -> CallToolResult {
         json_result(self.session.cleanup().await).await
     }
 
@@ -169,18 +163,18 @@ impl SeeleMcp {
     }
 
     #[tool(description = "Run cargo xtest for Seele OS")]
-    async fn run_xtest(&self) -> CallToolResult {
+    async fn run_tests(&self) -> CallToolResult {
         json_result(self.session.run_cargo_alias("xtest").await).await
     }
 
     #[tool(description = "Run cargo xbuild-rootfs for Seele OS")]
-    async fn run_xbuild_rootfs(&self) -> CallToolResult {
+    async fn build_rootfs(&self) -> CallToolResult {
         json_result(self.session.run_cargo_alias("xbuild-rootfs").await).await
     }
 
-    #[tool(description = "Ensure sysroot/ is mounted from disk.img")]
-    async fn ensure_sysroot_mounted(&self) -> CallToolResult {
-        json_result(self.session.ensure_sysroot_mounted().await).await
+    #[tool(description = "Ensure rootfs_mnt/ is mounted from rootfs.img")]
+    async fn ensure_rootfs_mounted(&self) -> CallToolResult {
+        json_result(self.session.ensure_rootfs_mounted().await).await
     }
 }
 
@@ -188,7 +182,7 @@ impl SeeleMcp {
 impl ServerHandler for SeeleMcp {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions("Seele OS agent workflow server")
+            .with_instructions("Seele OS VM workflow server")
     }
 }
 

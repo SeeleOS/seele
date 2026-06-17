@@ -130,7 +130,7 @@ pub async fn send_key(socket: &Path, keys: &[String]) -> Result<()> {
 
 pub async fn type_text(socket: &Path, text: &str) -> Result<()> {
     if !text.is_ascii() {
-        bail!("agent_type_text only supports ASCII text");
+        bail!("type_text only supports ASCII text");
     }
     for byte in text.bytes() {
         let key = ascii_key(byte)?;

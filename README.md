@@ -8,7 +8,7 @@ Minimal build instructions.
 - `git`
 - `nix` with flakes enabled
 - `qemu-system-x86_64`
-- `sudo` access for mounting/unmounting `disk.img`
+- `sudo` access for mounting/unmounting `target/rootfs.img`
 
 Clone submodules first:
 
@@ -83,35 +83,35 @@ For Codex-driven work, prefer the Seele MCP server over manual QEMU control when
 nix develop -c seele-mcp
 ```
 
-The MCP server exposes tools for the full agent loop:
+The MCP server exposes tools for the full VM loop:
 
-- `run_xtest`: run kernel unit tests through the existing cargo alias.
-- `agent_start`: build and launch the agent VM through `xtask mcp-run`.
-- `agent_status`: report runner/QEMU PIDs, QMP connectivity, and serial log location.
-- `agent_serial_tail`: read recent serial output.
-- `agent_screenshot`: capture the display through QMP `screendump`.
-- `agent_send_key`, `agent_type_text`, `agent_mouse_move`, `agent_mouse_click`: drive guest input through QMP.
-- `agent_stop` and `agent_cleanup`: stop MCP-managed runner/QEMU processes and clean QMP socket state.
+- `run_tests`: run kernel unit tests through the existing cargo alias.
+- `start`: build and launch the VM through `xtask mcp-run`.
+- `status`: report runner/QEMU PIDs, QMP connectivity, and serial log location.
+- `serial_tail`: read recent serial output.
+- `screenshot`: capture the display through QMP `screendump`.
+- `send_key`, `type_text`, `mouse_move`, `mouse_click`: drive guest input through QMP.
+- `stop` and `cleanup`: stop MCP-managed runner/QEMU processes and clean QMP socket state.
 
 Manual `cargo xrun` and `cargo xrun -- --agent` remain useful for local foreground runs and fallback verification when MCP is unavailable.
 
-## Rootfs and disk image
+## Rootfs and rootfs image
 
-Build or refresh `disk.img` and the guest root filesystem:
+Build or refresh `target/rootfs.img` and the guest root filesystem:
 
 ```sh
 cargo xbuild-rootfs
 ```
 
-The rootfs is Alpine Linux based, uses OpenRC for `/sbin/init`, and installs a small base development package set through `apk`.
+The rootfs is Arch Linux based and installs a small base development package set through `pacstrap`.
 
-Force rebuilding the disk image from scratch:
+Force rebuilding the rootfs image from scratch:
 
 ```sh
 cargo xbuild-rootfs -- --override
 ```
 
-Mount `sysroot/` from `disk.img` through the MCP `ensure_sysroot_mounted` tool when needed.
+Mount `target/rootfs_mnt/` from `target/rootfs.img` through the MCP `ensure_rootfs_mounted` tool when needed.
 
 ## Tests
 

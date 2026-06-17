@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     env,
@@ -138,7 +138,7 @@ impl AgentSession {
         let mut state = self.state.lock().await;
         refresh_child_state(&mut state).await;
         if state.child.is_some() {
-            bail!("agent session is already running");
+            bail!("VM session is already running");
         }
 
         let _ = fs::remove_file(&self.qmp_socket).await;
@@ -147,10 +147,12 @@ impl AgentSession {
         let mut command = Command::new("cargo");
         command
             .arg("run")
+            .arg("--quiet")
             .arg("-p")
             .arg("xtask")
             .arg("--")
             .arg("mcp-run")
+            .arg("--json-output")
             .current_dir(&self.repo)
             .env("SEELE_QMP_SOCKET", &self.qmp_socket)
             .stdout(Stdio::piped())
@@ -164,20 +166,12 @@ impl AgentSession {
             .stdout
             .take()
             .context("xtask mcp-run stdout was not piped")?;
-        let mut line = String::new();
-        let read = timeout(
+        let metadata = timeout(
             Duration::from_secs(120),
-            BufReader::new(stdout).read_line(&mut line),
+            read_metadata_event(stdout, child.id(), &self.qmp_socket, &self.serial_log),
         )
         .await
-        .context("timed out waiting for xtask mcp metadata")?
-        .context("failed to read xtask mcp metadata")?;
-        if read == 0 {
-            let status = child.wait().await.ok();
-            bail!("xtask mcp-run exited before metadata: {status:?}");
-        }
-
-        let metadata = parse_metadata(line.trim(), child.id(), &self.qmp_socket, &self.serial_log)?;
+        .context("timed out waiting for xtask mcp metadata")??;
         state.child = Some(child);
         state.metadata = Some(metadata.clone());
         state.last_exit = None;
@@ -324,34 +318,49 @@ impl AgentSession {
     }
 
     pub async fn run_cargo_alias(&self, alias: &str) -> Result<CommandOutput> {
+        let command = match alias {
+            "xtest" => "test",
+            "xbuild-rootfs" => "build-rootfs",
+            _ => bail!("unsupported MCP cargo alias: {alias}"),
+        };
         let output = Command::new("cargo")
-            .arg(alias)
+            .arg("run")
+            .arg("--quiet")
+            .arg("-p")
+            .arg("xtask")
+            .arg("--")
+            .arg(command)
+            .arg("--json-output")
             .current_dir(&self.repo)
             .output()
             .await
-            .with_context(|| format!("failed to run cargo {alias}"))?;
+            .with_context(|| format!("failed to run xtask {command}"))?;
+        let events = parse_xtask_events(String::from_utf8_lossy(&output.stdout).as_ref());
         Ok(CommandOutput {
             exit_code: output.status.code().unwrap_or(1),
-            stdout: truncate_log(String::from_utf8_lossy(&output.stdout).as_ref()),
+            stdout: summarize_xtask_events(&events),
             stderr: truncate_log(String::from_utf8_lossy(&output.stderr).as_ref()),
+            events,
         })
     }
 
-    pub async fn ensure_sysroot_mounted(&self) -> Result<CommandOutput> {
-        let sysroot = self.repo.join("sysroot");
-        let disk = self.repo.join("disk.img");
+    pub async fn ensure_rootfs_mounted(&self) -> Result<CommandOutput> {
+        let target = self.repo.join("target");
+        let rootfs_mount = target.join("rootfs_mnt");
+        let rootfs_image = target.join("rootfs.img");
 
         let mountpoint = Command::new("mountpoint")
             .arg("-q")
-            .arg(&sysroot)
+            .arg(&rootfs_mount)
             .output()
             .await
-            .with_context(|| format!("failed to inspect mountpoint {}", sysroot.display()))?;
+            .with_context(|| format!("failed to inspect mountpoint {}", rootfs_mount.display()))?;
         if mountpoint.status.success() {
             return Ok(CommandOutput {
                 exit_code: 0,
                 stdout: String::new(),
                 stderr: String::new(),
+                events: Vec::new(),
             });
         }
 
@@ -359,17 +368,55 @@ impl AgentSession {
             .arg("mount")
             .arg("-o")
             .arg("loop")
-            .arg(&disk)
-            .arg(&sysroot)
+            .arg(&rootfs_image)
+            .arg(&rootfs_mount)
             .current_dir(&self.repo)
             .output()
             .await
-            .with_context(|| format!("failed to mount sysroot from {}", disk.display()))?;
+            .with_context(|| format!("failed to mount rootfs from {}", rootfs_image.display()))?;
         Ok(CommandOutput {
             exit_code: output.status.code().unwrap_or(1),
             stdout: truncate_log(String::from_utf8_lossy(&output.stdout).as_ref()),
             stderr: truncate_log(String::from_utf8_lossy(&output.stderr).as_ref()),
+            events: Vec::new(),
         })
+    }
+}
+
+async fn read_metadata_event(
+    stdout: ChildStdout,
+    child_id: Option<u32>,
+    default_qmp_socket: &Path,
+    default_serial_log: &Path,
+) -> Result<SessionMetadata> {
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let read = reader
+            .read_line(&mut line)
+            .await
+            .context("failed to read xtask mcp metadata")?;
+        if read == 0 {
+            bail!("xtask mcp-run exited before metadata");
+        }
+        let Ok(event) = serde_json::from_str::<XtaskEvent>(line.trim()) else {
+            continue;
+        };
+        if event.event == "metadata" {
+            let value = event
+                .metadata
+                .context("xtask metadata event missing metadata")?;
+            let metadata =
+                parse_metadata_value(&value, child_id, default_qmp_socket, default_serial_log)?;
+            tokio::spawn(async move {
+                let mut line = String::new();
+                while matches!(reader.read_line(&mut line).await, Ok(read) if read != 0) {
+                    line.clear();
+                }
+            });
+            return Ok(metadata);
+        }
     }
 }
 
@@ -378,6 +425,21 @@ pub struct CommandOutput {
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,
+    pub events: Vec<XtaskEvent>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct XtaskEvent {
+    pub event: String,
+    pub command: Option<String>,
+    pub name: Option<String>,
+    pub status: Option<String>,
+    pub step: Option<String>,
+    pub stream: Option<String>,
+    pub message: Option<String>,
+    pub output: Option<String>,
+    pub exit_code: Option<i32>,
+    pub metadata: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -403,14 +465,12 @@ pub struct GdbCommandOutput {
     pub output: String,
 }
 
-fn parse_metadata(
-    line: &str,
+fn parse_metadata_value(
+    value: &Value,
     child_id: Option<u32>,
     default_qmp_socket: &Path,
     default_serial_log: &Path,
 ) -> Result<SessionMetadata> {
-    let value: Value =
-        serde_json::from_str(line).with_context(|| format!("invalid xtask metadata: {line}"))?;
     Ok(SessionMetadata {
         runner_pid: value
             .get("runner_pid")
@@ -436,6 +496,60 @@ fn parse_metadata(
             .and_then(Value::as_str)
             .map(PathBuf::from),
     })
+}
+
+fn parse_xtask_events(output: &str) -> Vec<XtaskEvent> {
+    output
+        .lines()
+        .filter_map(|line| serde_json::from_str::<XtaskEvent>(line).ok())
+        .map(|mut event| {
+            if let Some(output) = &event.output {
+                event.output = Some(truncate_log(output));
+            }
+            event
+        })
+        .collect()
+}
+
+fn summarize_xtask_events(events: &[XtaskEvent]) -> String {
+    let mut lines = Vec::new();
+    for event in events {
+        match event.event.as_str() {
+            "started" => {
+                if let Some(command) = &event.command {
+                    lines.push(format!("started {command}"));
+                }
+            }
+            "progress" => {
+                let step = event.step.as_deref().unwrap_or("progress");
+                let message = event.message.as_deref().unwrap_or_default();
+                lines.push(format!("{step}: {message}"));
+            }
+            "test" => {
+                let name = event.name.as_deref().unwrap_or("test");
+                let status = event.status.as_deref().unwrap_or("unknown");
+                let message = event.message.as_deref().unwrap_or_default();
+                if message.is_empty() {
+                    lines.push(format!("test {name}: {status}"));
+                } else {
+                    lines.push(format!("test {name}: {status} - {message}"));
+                }
+            }
+            "log" => {
+                if let Some(output) = &event.output {
+                    lines.push(truncate_log(output));
+                }
+            }
+            "finished" => {
+                let command = event.command.as_deref().unwrap_or("command");
+                let status = event.status.as_deref().unwrap_or("unknown");
+                let exit_code = event.exit_code.unwrap_or_default();
+                lines.push(format!("finished {command}: {status} (exit {exit_code})"));
+            }
+            _ => {}
+        }
+    }
+    truncate_log(&lines.join("\n"))
 }
 
 async fn refresh_child_state(state: &mut SessionState) {
@@ -540,8 +654,9 @@ mod tests {
 
     #[test]
     fn parse_metadata_uses_defaults() {
-        let metadata = parse_metadata(
-            r#"{"runner_pid":42,"qemu_pid":99}"#,
+        let value = serde_json::json!({"runner_pid":42,"qemu_pid":99});
+        let metadata = parse_metadata_value(
+            &value,
             None,
             Path::new("/tmp/qmp.sock"),
             Path::new("/tmp/serial.log"),

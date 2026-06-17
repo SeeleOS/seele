@@ -1,4 +1,5 @@
 use super::terminal::{cleanup_socket, drain_serial_log, stream_serial_log};
+use crate::json_output::{JsonEvent, OutputMode, emit};
 use anyhow::{Context, Result};
 use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
 use serde_json::json;
@@ -109,8 +110,8 @@ pub fn run_qemu(iso_path: &Path, options: &RunOptions) -> Result<i32> {
     Ok(run_qemu_inner_capture(iso_path, options, true)?.exit_code)
 }
 
-pub fn run_qemu_test_capture(iso_path: &Path) -> Result<QemuTestResult> {
-    run_qemu_inner_capture(iso_path, &RunOptions::for_tests(), false)
+pub fn run_qemu_test_capture(iso_path: &Path, output_mode: OutputMode) -> Result<QemuTestResult> {
+    run_qemu_inner_capture(iso_path, &RunOptions::for_tests(), !output_mode.is_json())
 }
 
 pub fn run_qemu_expect_serial_failure_capture(
@@ -180,7 +181,12 @@ pub fn run_qemu_until_serial_condition_capture(
             serial_log = Some(opened);
         }
         if let Some(file) = serial_log.as_mut() {
-            captured.push_str(&drain_serial_log(file, &mut offset));
+            let output = drain_serial_log(file, &mut offset);
+            if !output.is_empty() {
+                print!("{output}");
+                let _ = std::io::stdout().flush();
+                captured.push_str(&output);
+            }
             if condition(&captured) {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -257,7 +263,7 @@ fn run_qemu_inner_capture(
     })
 }
 
-pub fn run_qemu_mcp(iso_path: &Path, options: &RunOptions) -> Result<i32> {
+pub fn run_qemu_mcp(iso_path: &Path, options: &RunOptions, output_mode: OutputMode) -> Result<i32> {
     let context = QemuRunContext::new(options);
     let mut cmd = build_qemu_command(iso_path, options, &context)?;
     let mut child = cmd.spawn().context("failed to start qemu-system-x86_64")?;
@@ -268,7 +274,11 @@ pub fn run_qemu_mcp(iso_path: &Path, options: &RunOptions) -> Result<i32> {
         "qmp_socket": context.qmp_socket,
         "iso_image": iso_path,
     });
-    println!("{metadata}");
+    if output_mode.is_json() {
+        emit(&JsonEvent::metadata("mcp-run", metadata))?;
+    } else {
+        println!("{metadata}");
+    }
     let _ = std::io::stdout().flush();
     let status = child.wait().context("failed to wait on qemu")?;
     cleanup_qemu_context(&context);
@@ -295,12 +305,13 @@ fn build_qemu_command(
     options: &RunOptions,
     context: &QemuRunContext,
 ) -> Result<Command> {
-    let root_disk = env::var_os("SEELE_ROOT_DISK")
+    let rootfs_image = env::var_os("SEELE_ROOTFS_IMAGE")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("..")
-                .join("disk.img")
+                .join("target")
+                .join("rootfs.img")
         });
     let mut cmd = if options.agent_mode {
         if let Some(timeout) = &options.agent_timeout {
@@ -356,10 +367,10 @@ fn build_qemu_command(
     }
 
     cmd.arg("-cdrom").arg(iso_path);
-    if root_disk.exists() {
+    if rootfs_image.exists() {
         cmd.arg("-drive").arg(format!(
             "if=none,format=raw,file={},id=rootdisk",
-            root_disk.display()
+            rootfs_image.display()
         ));
         cmd.arg("-device")
             .arg("virtio-blk-pci,drive=rootdisk,disable-legacy=on,disable-modern=off");
