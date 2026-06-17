@@ -330,14 +330,30 @@ impl AgentSession {
             "xbuild-rootfs" => "build-rootfs",
             _ => bail!("unsupported MCP cargo alias: {alias}"),
         };
-        let output = Command::new("cargo")
+        self.run_xtask_command(command, []).await
+    }
+
+    pub async fn run_xtest(&self, test: Option<&str>) -> Result<CommandOutput> {
+        self.run_xtask_command("test", test.into_iter()).await
+    }
+
+    async fn run_xtask_command<'a, I>(&self, command: &str, args: I) -> Result<CommandOutput>
+    where
+        I: IntoIterator<Item = &'a str>,
+    {
+        let mut command_process = Command::new("cargo");
+        command_process
             .arg("run")
             .arg("--quiet")
             .arg("-p")
             .arg("xtask")
             .arg("--")
             .arg(command)
-            .arg("--json-output")
+            .arg("--json-output");
+        for arg in args {
+            command_process.arg(arg);
+        }
+        let output = command_process
             .current_dir(&self.repo)
             .output()
             .await

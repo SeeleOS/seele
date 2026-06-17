@@ -28,4 +28,6 @@ pub fn parse() -> Cli {
 pub struct JsonOutputArgs {
     #[arg(long)]
     pub json_output: bool,
+
+    pub test: Option<String>,
 }

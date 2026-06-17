@@ -70,6 +70,11 @@ pub struct StartRequest {
     pub enable_profiling: Option<bool>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RunTestsRequest {
+    pub test: Option<String>,
+}
+
 #[tool_router]
 impl SeeleMcp {
     #[tool(description = "Start the Seele OS VM session through xtask mcp-run")]
@@ -172,9 +177,9 @@ impl SeeleMcp {
         json_result(self.session.debug_stop().await).await
     }
 
-    #[tool(description = "Run cargo xtest for Seele OS")]
-    async fn run_tests(&self) -> CallToolResult {
-        json_result(self.session.run_cargo_alias("xtest").await).await
+    #[tool(description = "Run cargo xtest for Seele OS. Optionally pass a test name filter.")]
+    async fn run_tests(&self, Parameters(request): Parameters<RunTestsRequest>) -> CallToolResult {
+        json_result(self.session.run_xtest(request.test.as_deref()).await).await
     }
 
     #[tool(description = "Run cargo xbuild-rootfs for Seele OS")]

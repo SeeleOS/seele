@@ -29,7 +29,7 @@ fn real_main() -> Result<i32> {
     match cli::parse().command {
         Command::Run(args) => run(args),
         Command::McpRun(args) => mcp_run(args),
-        Command::Test(args) => test(output_mode(args.json_output)),
+        Command::Test(args) => test(output_mode(args.json_output), args.test.as_deref()),
         Command::BuildRootfs(args) => build_rootfs(args),
     }
 }

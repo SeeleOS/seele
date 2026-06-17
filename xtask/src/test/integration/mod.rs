@@ -19,8 +19,20 @@ pub struct IntegrationTestResult {
     pub output: String,
 }
 
-pub fn run(output_mode: OutputMode) -> Result<i32> {
-    let tests = integration_tests();
+pub fn run(output_mode: OutputMode, test_filter: Option<&str>) -> Result<i32> {
+    let tests = integration_tests(test_filter);
+    let Some(tests) = tests else {
+        let message = format!(
+            "no integration test matched filter {:?}",
+            test_filter.unwrap_or("")
+        );
+        if output_mode.is_json() {
+            emit(&JsonEvent::log("test", "stderr", &message))?;
+        } else {
+            eprintln!("{message}");
+        }
+        return Ok(1);
+    };
     if output_mode.is_json() {
         emit(&JsonEvent::progress(
             "test",
@@ -100,11 +112,23 @@ fn report_failure(name: &str, result: &IntegrationTestResult) {
     eprintln!();
 }
 
-fn integration_tests() -> [&'static dyn IntegrationTest; 4] {
-    [
-        &kernel_images::KERNEL_IMAGES,
-        &userspace_boot::USERSPACE_BOOT,
-        &ltp::LTP,
-        &panic_handler_smoke::PANIC_HANDLER_SMOKE,
-    ]
+fn integration_tests(test_filter: Option<&str>) -> Option<Vec<&'static dyn IntegrationTest>> {
+    let tests = [
+        &kernel_images::KERNEL_IMAGES as &dyn IntegrationTest,
+        &userspace_boot::USERSPACE_BOOT as &dyn IntegrationTest,
+        &ltp::LTP as &dyn IntegrationTest,
+        &panic_handler_smoke::PANIC_HANDLER_SMOKE as &dyn IntegrationTest,
+    ];
+    let filtered = match test_filter {
+        Some(filter) => tests
+            .into_iter()
+            .filter(|test| test.name().contains(filter))
+            .collect::<Vec<_>>(),
+        None => tests.into_iter().collect::<Vec<_>>(),
+    };
+    if filtered.is_empty() {
+        None
+    } else {
+        Some(filtered)
+    }
 }
