@@ -1,4 +1,5 @@
 /target
+/.seele-pacman.conf
 /.codex
 /old
 /AGENTS.md
