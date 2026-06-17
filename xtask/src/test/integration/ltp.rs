@@ -33,15 +33,12 @@ impl IntegrationTest for Ltp {
             .map(Path::new)
             .context("kernel executable missing")?;
         let iso_path = create_boot_iso(kernel_path)?;
-        let mut command_sent = false;
+        let mut login_state = LoginState::AwaitLogin;
         let options = RunOptions::for_agent_run_without_timeout();
         let timeout = ltp_timeout();
         let result = run_qemu_interactive_capture(&iso_path, &options, timeout, |output| {
-            if !command_sent && guest_ready(output) {
-                command_sent = true;
-                if let Err(err) = qmp_type_text(&qmp_socket_path(), "root\nseele-run-ltp\n") {
-                    eprintln!("failed to send LTP command through QMP: {err:?}");
-                }
+            if let Err(err) = advance_login(&mut login_state, output) {
+                eprintln!("failed to drive LTP login through QMP: {err:?}");
             }
             output.contains(REPORT_END) && output.contains(EXIT_PREFIX)
         })?;
@@ -94,11 +91,53 @@ fn qmp_socket_path() -> std::path::PathBuf {
         .unwrap_or_else(|| "/tmp/seele-agent-qmp.sock".into())
 }
 
-fn guest_ready(output: &str) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoginState {
+    AwaitLogin,
+    AwaitPasswordOrShell,
+    AwaitShell,
+    CommandSent,
+}
+
+fn advance_login(state: &mut LoginState, output: &str) -> Result<()> {
+    match *state {
+        LoginState::AwaitLogin if login_prompt_observed(output) => {
+            qmp_type_text(&qmp_socket_path(), "root\n")?;
+            *state = LoginState::AwaitPasswordOrShell;
+        }
+        LoginState::AwaitPasswordOrShell if password_prompt_observed(output) => {
+            qmp_type_text(&qmp_socket_path(), "\n")?;
+            *state = LoginState::AwaitShell;
+        }
+        LoginState::AwaitPasswordOrShell | LoginState::AwaitShell
+            if shell_prompt_observed(output) =>
+        {
+            qmp_type_text(&qmp_socket_path(), "seele-run-ltp\n")?;
+            *state = LoginState::CommandSent;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn login_prompt_observed(output: &str) -> bool {
     output.lines().any(|line| {
         let line = line.trim_end_matches('\r').trim_end();
         line.ends_with("Seele login:")
-            || ((line.contains("bash-") || line.contains("root@")) && line.contains("# "))
+    })
+}
+
+fn password_prompt_observed(output: &str) -> bool {
+    output.lines().any(|line| {
+        let line = line.trim_end_matches('\r').trim_end();
+        line.ends_with("Password:")
+    })
+}
+
+fn shell_prompt_observed(output: &str) -> bool {
+    output.lines().any(|line| {
+        let line = line.trim_end_matches('\r');
+        (line.contains("bash-") || line.contains("root@")) && line.contains("# ")
     })
 }
 
@@ -277,5 +316,20 @@ mod tests {
         assert_eq!(result_status(&failed), "failed");
         assert_eq!(result_status(&broken), "broken");
         assert_eq!(result_status(&skipped), "skipped");
+    }
+
+    #[test]
+    fn observes_login_prompt_without_treating_it_as_shell() {
+        let output = "\r\nArch Linux 0.0.1 (tty1)\r\n\r\nSeele login: ";
+
+        assert!(login_prompt_observed(output));
+        assert!(!shell_prompt_observed(output));
+    }
+
+    #[test]
+    fn observes_shell_prompt_after_login() {
+        assert!(shell_prompt_observed("root@Seele ~ # "));
+        assert!(shell_prompt_observed("bash-5.2# "));
+        assert!(!login_prompt_observed("root@Seele ~ # "));
     }
 }
