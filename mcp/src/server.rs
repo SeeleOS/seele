@@ -81,6 +81,11 @@ pub struct BuildRootfsRequest {
     pub override_rootfs: Option<bool>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CommandStatusRequest {
+    pub id: u64,
+}
+
 #[tool_router]
 impl SeeleMcp {
     #[tool(description = "Start the Seele OS VM session through xtask mcp-run")]
@@ -183,22 +188,32 @@ impl SeeleMcp {
         json_result(self.session.debug_stop().await).await
     }
 
-    #[tool(description = "Run cargo xtest for Seele OS. Optionally pass a test name filter.")]
+    #[tool(
+        description = "Start cargo xtest for Seele OS as a background MCP job. Optionally pass a test name filter."
+    )]
     async fn run_tests(&self, Parameters(request): Parameters<RunTestsRequest>) -> CallToolResult {
-        json_result(self.session.run_xtest(request.test.as_deref()).await).await
+        json_result(self.session.start_xtest(request.test.as_deref()).await).await
     }
 
-    #[tool(description = "Run cargo xbuild-rootfs for Seele OS")]
+    #[tool(description = "Start cargo xbuild-rootfs for Seele OS as a background MCP job")]
     async fn build_rootfs(
         &self,
         Parameters(request): Parameters<BuildRootfsRequest>,
     ) -> CallToolResult {
         json_result(
             self.session
-                .run_build_rootfs(request.timeout_ms, request.override_rootfs.unwrap_or(false))
+                .start_build_rootfs(request.timeout_ms, request.override_rootfs.unwrap_or(false))
                 .await,
         )
         .await
+    }
+
+    #[tool(description = "Report a background MCP xtask job status and output when finished")]
+    async fn command_status(
+        &self,
+        Parameters(request): Parameters<CommandStatusRequest>,
+    ) -> CallToolResult {
+        json_result(self.session.command_status(request.id).await).await
     }
 
     #[tool(description = "Ensure rootfs_mnt/ is mounted from rootfs.img")]

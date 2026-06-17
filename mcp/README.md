@@ -14,7 +14,8 @@
 - `debug_start`: start the VM paused at QEMU's GDB stub and attach `gdb` to the kernel ELF.
 - `debug_command`: run a command in the active GDB session and return output up to the next prompt.
 - `debug_status`, `debug_stop`: inspect or stop the active GDB-backed VM session.
-- `run_tests`, `build_rootfs`: run the existing cargo aliases and return truncated logs.
+- `run_tests`, `build_rootfs`: start the existing cargo aliases as background jobs and return a job id plus status path.
+- `command_status`: poll a background job and return the truncated logs/events once it finishes.
 - `ensure_rootfs_mounted`: mount `target/rootfs_mnt/` from `target/rootfs.img`, leaving an already mounted `target/rootfs_mnt/` unchanged.
 
 ## Local Run
@@ -36,4 +37,4 @@ After changing MCP or VM launch behavior:
 5. Stop the VM with `stop` or `cleanup`.
 6. Confirm `status` is idle and no session metadata remains.
 
-If the MCP server is unavailable, use `cargo xrun -- --agent` as the fallback path and clean up the reported runner/QEMU processes from the host.
+For long-running `run_tests` or `build_rootfs` work, call the tool once, then poll `command_status` with the returned id. This avoids blocking the MCP request itself for the entire rootfs build or integration test run.
