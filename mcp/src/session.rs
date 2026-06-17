@@ -12,13 +12,15 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, ChildStdout, Command},
     sync::Mutex,
-    time::{Duration, timeout},
+    time::{Duration, Instant, timeout},
 };
 
 const DEFAULT_REPO: &str = "/home/elysia/coding-project/seele-os-linux";
 const DEFAULT_QMP_SOCKET: &str = "/tmp/seele-agent-qmp.sock";
 const DEFAULT_SERIAL_LOG: &str = "/tmp/seele-agent-serial.log";
 const DEFAULT_COMMAND_LOG_DIR: &str = "/tmp/seele-agent-xtask";
+const LOG_LIMIT: usize = 64 * 1024;
+const COMMAND_STATUS_REFRESH: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SessionStatus {
@@ -334,16 +336,32 @@ impl AgentSession {
     }
 
     pub async fn start_xtest(&self, test: Option<&str>) -> Result<CommandHandle> {
-        self.start_xtask_command("test", test.into_iter(), None)
-            .await
+        self.start_xtask_command(
+            "test",
+            test.into_iter().map(|value| value.to_string()).collect(),
+            None,
+        )
+        .await
     }
 
     pub async fn start_build_rootfs(
         &self,
         timeout_ms: Option<u64>,
         override_rootfs: bool,
+        rebuild_aur: bool,
+        rebuild_aur_packages: &[String],
     ) -> Result<CommandHandle> {
-        let args = override_rootfs.then_some("--override-rootfs");
+        let mut args = Vec::new();
+        if override_rootfs {
+            args.push("--override-rootfs".to_string());
+        }
+        if rebuild_aur {
+            args.push("--rebuild-aur".to_string());
+        }
+        for package in rebuild_aur_packages {
+            args.push("--rebuild-aur-package".to_string());
+            args.push(package.clone());
+        }
         self.start_xtask_command("build-rootfs", args, timeout_ms)
             .await
     }
@@ -353,35 +371,61 @@ impl AgentSession {
         let data = fs::read(&path)
             .await
             .with_context(|| format!("failed to read command status {}", path.display()))?;
-        let status: CommandStatus = serde_json::from_slice(&data)
+        let mut status: CommandStatus = serde_json::from_slice(&data)
             .with_context(|| format!("failed to parse command status {}", path.display()))?;
+        if !status.finished {
+            if let Some(stdout_path) = &status.stdout_path {
+                status.stdout = read_trailing_text(stdout_path, status.stdout_limit).await?;
+            }
+            if let Some(stderr_path) = &status.stderr_path {
+                status.stderr = read_trailing_text(stderr_path, status.stderr_limit).await?;
+            }
+        }
         Ok(status)
     }
 
-    async fn start_xtask_command<'a, I>(
+    pub async fn command_wait(&self, id: u64, timeout_ms: Option<u64>) -> Result<CommandStatus> {
+        let deadline =
+            timeout_ms.map(|timeout_ms| Instant::now() + Duration::from_millis(timeout_ms));
+        loop {
+            let status = self.command_status(id).await?;
+            if status.finished {
+                return Ok(status);
+            }
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                bail!("timed out waiting for command {id}");
+            }
+            tokio::time::sleep(COMMAND_STATUS_REFRESH).await;
+        }
+    }
+
+    async fn start_xtask_command(
         &self,
         command: &str,
-        args: I,
+        args: Vec<String>,
         timeout_ms: Option<u64>,
-    ) -> Result<CommandHandle>
-    where
-        I: IntoIterator<Item = &'a str>,
-    {
+    ) -> Result<CommandHandle> {
         fs::create_dir_all(&self.command_log_dir)
             .await
             .with_context(|| format!("failed to create {}", self.command_log_dir.display()))?;
         let id = self.next_command_id.fetch_add(1, Ordering::Relaxed);
         let log_path = self.command_log_dir.join(format!("{id}.json"));
-        let args = args.into_iter().map(str::to_string).collect::<Vec<_>>();
+        let stdout = command_log_path(&self.command_log_dir, id, "stdout");
+        let stderr = command_log_path(&self.command_log_dir, id, "stderr");
         let initial_status = CommandStatus {
             id,
             command: command.to_string(),
+            pid: None,
             finished: false,
             timed_out: false,
             timeout_ms,
             exit_code: 0,
             stdout: String::new(),
             stderr: String::new(),
+            stdout_limit: Some(LOG_LIMIT),
+            stderr_limit: Some(LOG_LIMIT),
+            stdout_path: Some(stdout.clone()),
+            stderr_path: Some(stderr.clone()),
             events: Vec::new(),
         };
         fs::write(&log_path, serde_json::to_vec_pretty(&initial_status)?)
@@ -392,8 +436,19 @@ impl AgentSession {
         let log_path_for_task = log_path.clone();
         let command_name = command.to_string();
         tokio::spawn(async move {
-            let output = run_xtask_process(&repo, &command_name, &args, timeout_ms).await;
-            let status = command_status_from_output(id, &command_name, timeout_ms, output);
+            let output = run_xtask_process(RunCommandRequest {
+                id,
+                repo: &repo,
+                command: &command_name,
+                args: &args,
+                timeout_ms,
+                status_path: &log_path_for_task,
+                stdout_path: &stdout,
+                stderr_path: &stderr,
+            })
+            .await;
+            let status =
+                command_status_from_output(id, &command_name, timeout_ms, &stdout, &stderr, output);
             let Ok(encoded) = serde_json::to_vec_pretty(&status) else {
                 return;
             };
@@ -445,24 +500,55 @@ impl AgentSession {
             events: Vec::new(),
         })
     }
+
+    pub async fn unmount_rootfs(&self) -> Result<CommandOutput> {
+        let rootfs_mount = self.repo.join("target").join("rootfs_mnt");
+
+        let mountpoint = Command::new("mountpoint")
+            .arg("-q")
+            .arg(&rootfs_mount)
+            .output()
+            .await
+            .with_context(|| format!("failed to inspect mountpoint {}", rootfs_mount.display()))?;
+        if !mountpoint.status.success() {
+            return Ok(CommandOutput {
+                exit_code: 0,
+                stdout: String::new(),
+                stderr: String::new(),
+                events: Vec::new(),
+            });
+        }
+
+        let output = Command::new("sudo")
+            .arg("umount")
+            .arg("-l")
+            .arg(&rootfs_mount)
+            .current_dir(&self.repo)
+            .output()
+            .await
+            .with_context(|| format!("failed to unmount {}", rootfs_mount.display()))?;
+        Ok(CommandOutput {
+            exit_code: output.status.code().unwrap_or(1),
+            stdout: truncate_log(String::from_utf8_lossy(&output.stdout).as_ref()),
+            stderr: truncate_log(String::from_utf8_lossy(&output.stderr).as_ref()),
+            events: Vec::new(),
+        })
+    }
 }
 
-async fn run_xtask_process(
-    repo: &Path,
-    command: &str,
-    args: &[String],
+struct RunCommandRequest<'a> {
+    id: u64,
+    repo: &'a Path,
+    command: &'a str,
+    args: &'a [String],
     timeout_ms: Option<u64>,
-) -> Result<CommandProcessOutput> {
-    let stdout = tempfile::NamedTempFile::new()
-        .context("failed to create xtask stdout log")?
-        .into_temp_path()
-        .keep()
-        .context("failed to persist xtask stdout log")?;
-    let stderr = tempfile::NamedTempFile::new()
-        .context("failed to create xtask stderr log")?
-        .into_temp_path()
-        .keep()
-        .context("failed to persist xtask stderr log")?;
+    status_path: &'a Path,
+    stdout_path: &'a Path,
+    stderr_path: &'a Path,
+}
+
+async fn run_xtask_process(request: RunCommandRequest<'_>) -> Result<CommandProcessOutput> {
+    let command_name = request.command.to_string();
     let mut command_process = Command::new("cargo");
     command_process
         .arg("run")
@@ -470,74 +556,108 @@ async fn run_xtask_process(
         .arg("-p")
         .arg("xtask")
         .arg("--")
-        .arg(command)
+        .arg(request.command)
         .arg("--json-output");
-    for arg in args {
+    for arg in request.args {
         command_process.arg(arg);
     }
     command_process
-        .current_dir(repo)
-        .stdout(Stdio::from(std::fs::File::create(&stdout).with_context(
-            || format!("failed to open {}", stdout.display()),
-        )?))
-        .stderr(Stdio::from(std::fs::File::create(&stderr).with_context(
-            || format!("failed to open {}", stderr.display()),
-        )?))
-        .env("SEELE_MCP_COMMAND_STDOUT", &stdout)
-        .env("SEELE_MCP_COMMAND_STDERR", &stderr);
+        .current_dir(request.repo)
+        .stdout(Stdio::from(
+            std::fs::File::create(request.stdout_path)
+                .with_context(|| format!("failed to open {}", request.stdout_path.display()))?,
+        ))
+        .stderr(Stdio::from(
+            std::fs::File::create(request.stderr_path)
+                .with_context(|| format!("failed to open {}", request.stderr_path.display()))?,
+        ))
+        .env("SEELE_MCP_COMMAND_STDOUT", request.stdout_path)
+        .env("SEELE_MCP_COMMAND_STDERR", request.stderr_path);
     let child = command_process
         .spawn()
-        .with_context(|| format!("failed to start xtask {command}"))?;
-    wait_for_command_output(child, stdout, stderr, timeout_ms)
+        .with_context(|| format!("failed to start xtask {}", request.command))?;
+    wait_for_command_output(request, child)
         .await
-        .with_context(|| format!("failed to wait for xtask {command}"))
+        .with_context(|| format!("failed to wait for xtask {command_name}"))
 }
 
 async fn wait_for_command_output(
+    request: RunCommandRequest<'_>,
     mut child: Child,
-    stdout: PathBuf,
-    stderr: PathBuf,
-    timeout_ms: Option<u64>,
 ) -> Result<CommandProcessOutput> {
-    let (status, timed_out) = if let Some(timeout_ms) = timeout_ms {
-        match timeout(Duration::from_millis(timeout_ms), child.wait()).await {
-            Ok(status) => (status.context("failed to wait for xtask child")?, false),
-            Err(_) => {
-                let _ = child.kill().await;
-                let status = child
-                    .wait()
-                    .await
-                    .context("failed to wait for timed-out xtask child")?;
-                (status, true)
-            }
+    let pid = child.id();
+    let deadline = request
+        .timeout_ms
+        .map(|timeout_ms| Instant::now() + Duration::from_millis(timeout_ms));
+    let (status, timed_out) = loop {
+        if let Some(status) = child.try_wait().context("failed to poll xtask child")? {
+            break (status, false);
         }
-    } else {
-        (
-            child
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            let _ = child.kill().await;
+            let status = child
                 .wait()
                 .await
-                .context("failed to wait for xtask child")?,
-            false,
-        )
+                .context("failed to wait for timed-out xtask child")?;
+            break (status, true);
+        }
+        write_running_command_status(&request, pid).await?;
+        tokio::time::sleep(COMMAND_STATUS_REFRESH).await;
     };
-    let stdout = fs::read(&stdout)
+    write_running_command_status(&request, pid).await?;
+    let stdout = fs::read(request.stdout_path)
         .await
-        .with_context(|| format!("failed to read {}", stdout.display()))?;
-    let stderr = fs::read(&stderr)
+        .with_context(|| format!("failed to read {}", request.stdout_path.display()))?;
+    let stderr = fs::read(request.stderr_path)
         .await
-        .with_context(|| format!("failed to read {}", stderr.display()))?;
+        .with_context(|| format!("failed to read {}", request.stderr_path.display()))?;
     Ok(CommandProcessOutput {
         status,
         stdout,
         stderr,
         timed_out,
+        pid,
     })
+}
+
+async fn write_running_command_status(
+    request: &RunCommandRequest<'_>,
+    pid: Option<u32>,
+) -> Result<()> {
+    let stdout_text = read_trailing_text(request.stdout_path, Some(LOG_LIMIT)).await?;
+    let events = parse_xtask_events(&stdout_text);
+    let status = CommandStatus {
+        id: request.id,
+        command: request.command.to_string(),
+        pid,
+        finished: false,
+        timed_out: false,
+        timeout_ms: request.timeout_ms,
+        exit_code: 0,
+        stdout: live_stdout_summary(&stdout_text, &events),
+        stderr: read_trailing_text(request.stderr_path, Some(LOG_LIMIT)).await?,
+        stdout_limit: Some(LOG_LIMIT),
+        stderr_limit: Some(LOG_LIMIT),
+        stdout_path: Some(request.stdout_path.to_path_buf()),
+        stderr_path: Some(request.stderr_path.to_path_buf()),
+        events,
+    };
+    fs::write(request.status_path, serde_json::to_vec_pretty(&status)?)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to write command status {}",
+                request.status_path.display()
+            )
+        })
 }
 
 fn command_status_from_output(
     id: u64,
     command: &str,
     timeout_ms: Option<u64>,
+    stdout_path: &Path,
+    stderr_path: &Path,
     output: Result<CommandProcessOutput>,
 ) -> CommandStatus {
     match output {
@@ -546,26 +666,68 @@ fn command_status_from_output(
             CommandStatus {
                 id,
                 command: command.to_string(),
+                pid: output.pid,
                 finished: true,
                 timed_out: output.timed_out,
                 timeout_ms,
                 exit_code: output.status.code().unwrap_or(1),
-                stdout: summarize_xtask_events(&events),
+                stdout: final_stdout_summary(&events, &output.stdout),
                 stderr: truncate_log(String::from_utf8_lossy(&output.stderr).as_ref()),
+                stdout_limit: Some(LOG_LIMIT),
+                stderr_limit: Some(LOG_LIMIT),
+                stdout_path: Some(stdout_path.to_path_buf()),
+                stderr_path: Some(stderr_path.to_path_buf()),
                 events,
             }
         }
         Err(err) => CommandStatus {
             id,
             command: command.to_string(),
+            pid: None,
             finished: true,
             timed_out: err.to_string().contains("timed out running xtask"),
             timeout_ms,
             exit_code: 1,
             stdout: String::new(),
             stderr: truncate_log(&err.to_string()),
+            stdout_limit: Some(LOG_LIMIT),
+            stderr_limit: Some(LOG_LIMIT),
+            stdout_path: Some(stdout_path.to_path_buf()),
+            stderr_path: Some(stderr_path.to_path_buf()),
             events: Vec::new(),
         },
+    }
+}
+
+fn command_log_path(command_log_dir: &Path, id: u64, stream: &str) -> PathBuf {
+    command_log_dir.join(format!("{id}.{stream}.log"))
+}
+
+async fn read_trailing_text(path: &Path, limit: Option<usize>) -> Result<String> {
+    match fs::read(path).await {
+        Ok(data) => {
+            let limit = limit.unwrap_or(LOG_LIMIT);
+            let start = data.len().saturating_sub(limit);
+            Ok(String::from_utf8_lossy(&data[start..]).into_owned())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
+    }
+}
+
+fn final_stdout_summary(events: &[XtaskEvent], stdout: &[u8]) -> String {
+    if events.is_empty() {
+        truncate_log(String::from_utf8_lossy(stdout).as_ref())
+    } else {
+        summarize_xtask_events(events)
+    }
+}
+
+fn live_stdout_summary(stdout: &str, events: &[XtaskEvent]) -> String {
+    if events.is_empty() {
+        stdout.to_string()
+    } else {
+        summarize_xtask_events(events)
     }
 }
 
@@ -574,6 +736,7 @@ struct CommandProcessOutput {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
     timed_out: bool,
+    pid: Option<u32>,
 }
 
 async fn read_metadata_event(
@@ -625,12 +788,17 @@ pub struct CommandHandle {
 pub struct CommandStatus {
     pub id: u64,
     pub command: String,
+    pub pid: Option<u32>,
     pub finished: bool,
     pub timed_out: bool,
     pub timeout_ms: Option<u64>,
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,
+    pub stdout_limit: Option<usize>,
+    pub stderr_limit: Option<usize>,
+    pub stdout_path: Option<PathBuf>,
+    pub stderr_path: Option<PathBuf>,
     pub events: Vec<XtaskEvent>,
 }
 

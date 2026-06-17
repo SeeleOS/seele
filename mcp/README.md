@@ -15,7 +15,8 @@
 - `debug_command`: run a command in the active GDB session and return output up to the next prompt.
 - `debug_status`, `debug_stop`: inspect or stop the active GDB-backed VM session.
 - `run_tests`, `build_rootfs`: start the existing cargo aliases as background jobs and return a job id plus status path.
-- `command_status`: poll a background job and return the truncated logs/events once it finishes.
+- `command_status`: poll a background job and return its pid, live truncated stdout/stderr tails, parsed JSON events when available, and final exit status.
+- `command_wait`: block until a background job finishes, then return its final status.
 - `ensure_rootfs_mounted`: mount `target/rootfs_mnt/` from `target/rootfs.img`, leaving an already mounted `target/rootfs_mnt/` unchanged.
 
 ## Local Run
@@ -37,4 +38,4 @@ After changing MCP or VM launch behavior:
 5. Stop the VM with `stop` or `cleanup`.
 6. Confirm `status` is idle and no session metadata remains.
 
-For long-running `run_tests` or `build_rootfs` work, call the tool once, then poll `command_status` with the returned id. This avoids blocking the MCP request itself for the entire rootfs build or integration test run.
+For long-running `run_tests` or `build_rootfs` work, call the tool once, then either `command_wait` on the returned id or use `command_status` for live tails. Running jobs refresh their status about once per second and include `stdout_path`/`stderr_path` for direct log inspection when the summarized tail is not enough.

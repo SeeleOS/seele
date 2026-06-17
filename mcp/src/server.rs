@@ -79,11 +79,19 @@ pub struct RunTestsRequest {
 pub struct BuildRootfsRequest {
     pub timeout_ms: Option<u64>,
     pub override_rootfs: Option<bool>,
+    pub rebuild_aur: Option<bool>,
+    pub rebuild_aur_packages: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CommandStatusRequest {
     pub id: u64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CommandWaitRequest {
+    pub id: u64,
+    pub timeout_ms: Option<u64>,
 }
 
 #[tool_router]
@@ -202,7 +210,12 @@ impl SeeleMcp {
     ) -> CallToolResult {
         json_result(
             self.session
-                .start_build_rootfs(request.timeout_ms, request.override_rootfs.unwrap_or(false))
+                .start_build_rootfs(
+                    request.timeout_ms,
+                    request.override_rootfs.unwrap_or(false),
+                    request.rebuild_aur.unwrap_or(false),
+                    request.rebuild_aur_packages.as_deref().unwrap_or(&[]),
+                )
                 .await,
         )
         .await
@@ -216,9 +229,27 @@ impl SeeleMcp {
         json_result(self.session.command_status(request.id).await).await
     }
 
+    #[tool(description = "Wait for a background MCP xtask job to finish and return final status")]
+    async fn command_wait(
+        &self,
+        Parameters(request): Parameters<CommandWaitRequest>,
+    ) -> CallToolResult {
+        json_result(
+            self.session
+                .command_wait(request.id, request.timeout_ms)
+                .await,
+        )
+        .await
+    }
+
     #[tool(description = "Ensure rootfs_mnt/ is mounted from rootfs.img")]
     async fn ensure_rootfs_mounted(&self) -> CallToolResult {
         json_result(self.session.ensure_rootfs_mounted().await).await
+    }
+
+    #[tool(description = "Unmount rootfs_mnt/ if it is currently mounted")]
+    async fn unmount_rootfs(&self) -> CallToolResult {
+        json_result(self.session.unmount_rootfs().await).await
     }
 }
 
