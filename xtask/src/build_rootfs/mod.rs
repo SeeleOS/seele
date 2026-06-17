@@ -1,5 +1,6 @@
 mod arch;
 mod aur;
+mod kirk;
 mod mount;
 mod rootfs_image;
 
@@ -16,6 +17,7 @@ use crate::json_output::{JsonEvent, OutputMode, emit};
 use self::{
     arch::{create_pacman_config, install_packages, set_empty_root_password},
     aur::install_aur_packages,
+    kirk::install_kirk,
     mount::{MountedRootfs, mount_rootfs_image, unmount_if_mounted},
     rootfs_image::prepare_rootfs_image,
 };
@@ -99,6 +101,14 @@ pub fn build_rootfs(args: BuildRootfsArgs) -> Result<i32> {
         &rootfs_mount,
         output_mode,
     )?;
+    if output_mode.is_json() {
+        emit(&JsonEvent::progress(
+            "build-rootfs",
+            "kirk",
+            "installing kirk test runner",
+        ))?;
+    }
+    install_kirk(&sh, &repo_root, &rootfs_mount, output_mode)?;
     if output_mode.is_json() {
         emit(&JsonEvent::progress(
             "build-rootfs",

@@ -34,10 +34,10 @@ pub struct QemuTestResult {
     pub failure: Option<String>,
 }
 
-struct QemuRunContext {
-    serial_log: PathBuf,
+pub(super) struct QemuRunContext {
+    pub(super) serial_log: PathBuf,
     qmp_socket: PathBuf,
-    debug_log: Option<PathBuf>,
+    pub(super) debug_log: Option<PathBuf>,
     keep_debug_log: bool,
 }
 
@@ -81,7 +81,7 @@ impl RunOptions {
 }
 
 impl QemuRunContext {
-    fn new(options: &RunOptions) -> Self {
+    pub(super) fn new(options: &RunOptions) -> Self {
         let serial_log = env::temp_dir().join(if options.agent_mode {
             "seele-agent-serial.log"
         } else {
@@ -300,7 +300,7 @@ fn decode_qemu_exit_code(code: Option<i32>, context: &QemuRunContext) -> Result<
     })
 }
 
-fn build_qemu_command(
+pub(super) fn build_qemu_command(
     iso_path: &Path,
     options: &RunOptions,
     context: &QemuRunContext,
@@ -401,12 +401,12 @@ fn build_qemu_command(
     Ok(cmd)
 }
 
-fn cleanup_qemu_context(context: &QemuRunContext) {
+pub(super) fn cleanup_qemu_context(context: &QemuRunContext) {
     let _ = fs::remove_file(&context.serial_log);
     cleanup_socket(&context.qmp_socket);
 }
 
-fn cleanup_qemu_debug_log(context: &QemuRunContext) {
+pub(super) fn cleanup_qemu_debug_log(context: &QemuRunContext) {
     if !context.keep_debug_log
         && let Some(path) = &context.debug_log
     {
@@ -420,7 +420,7 @@ fn default_smp() -> String {
         .unwrap_or_else(|_| "1".to_string())
 }
 
-fn report_qemu_fault(debug_log: &Path) -> Result<()> {
+pub(super) fn report_qemu_fault(debug_log: &Path) -> Result<()> {
     let contents = fs::read_to_string(debug_log)
         .with_context(|| format!("failed to read qemu debug log {}", debug_log.display()))?;
     if contents.contains("Triple fault") {

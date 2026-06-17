@@ -1,5 +1,6 @@
 pub mod build;
 pub mod build_iso;
+pub mod interaction;
 pub mod qemu;
 mod terminal;
 

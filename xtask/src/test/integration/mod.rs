@@ -1,4 +1,5 @@
 mod kernel_images;
+mod ltp;
 mod panic_handler_smoke;
 mod userspace_boot;
 
@@ -99,10 +100,11 @@ fn report_failure(name: &str, result: &IntegrationTestResult) {
     eprintln!();
 }
 
-fn integration_tests() -> [&'static dyn IntegrationTest; 3] {
+fn integration_tests() -> [&'static dyn IntegrationTest; 4] {
     [
         &kernel_images::KERNEL_IMAGES,
         &userspace_boot::USERSPACE_BOOT,
+        &ltp::LTP,
         &panic_handler_smoke::PANIC_HANDLER_SMOKE,
     ]
 }
