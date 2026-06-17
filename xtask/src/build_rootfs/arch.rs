@@ -19,6 +19,8 @@ const ARCH_PACKAGES: &[&str] = &[
     "bash",
     "coreutils",
     "util-linux",
+    "fastfetch",
+    "alacritty",
     "procps",
     "iproute2",
     "curl",
