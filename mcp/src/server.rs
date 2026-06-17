@@ -75,6 +75,12 @@ pub struct RunTestsRequest {
     pub test: Option<String>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct BuildRootfsRequest {
+    pub timeout_ms: Option<u64>,
+    pub override_rootfs: Option<bool>,
+}
+
 #[tool_router]
 impl SeeleMcp {
     #[tool(description = "Start the Seele OS VM session through xtask mcp-run")]
@@ -183,8 +189,16 @@ impl SeeleMcp {
     }
 
     #[tool(description = "Run cargo xbuild-rootfs for Seele OS")]
-    async fn build_rootfs(&self) -> CallToolResult {
-        json_result(self.session.run_cargo_alias("xbuild-rootfs").await).await
+    async fn build_rootfs(
+        &self,
+        Parameters(request): Parameters<BuildRootfsRequest>,
+    ) -> CallToolResult {
+        json_result(
+            self.session
+                .run_build_rootfs(request.timeout_ms, request.override_rootfs.unwrap_or(false))
+                .await,
+        )
+        .await
     }
 
     #[tool(description = "Ensure rootfs_mnt/ is mounted from rootfs.img")]

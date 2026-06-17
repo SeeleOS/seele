@@ -324,20 +324,26 @@ impl AgentSession {
         }
     }
 
-    pub async fn run_cargo_alias(&self, alias: &str) -> Result<CommandOutput> {
-        let command = match alias {
-            "xtest" => "test",
-            "xbuild-rootfs" => "build-rootfs",
-            _ => bail!("unsupported MCP cargo alias: {alias}"),
-        };
-        self.run_xtask_command(command, []).await
-    }
-
     pub async fn run_xtest(&self, test: Option<&str>) -> Result<CommandOutput> {
-        self.run_xtask_command("test", test.into_iter()).await
+        self.run_xtask_command("test", test.into_iter(), None).await
     }
 
-    async fn run_xtask_command<'a, I>(&self, command: &str, args: I) -> Result<CommandOutput>
+    pub async fn run_build_rootfs(
+        &self,
+        timeout_ms: Option<u64>,
+        override_rootfs: bool,
+    ) -> Result<CommandOutput> {
+        let args = override_rootfs.then_some("--override-rootfs");
+        self.run_xtask_command("build-rootfs", args, timeout_ms)
+            .await
+    }
+
+    async fn run_xtask_command<'a, I>(
+        &self,
+        command: &str,
+        args: I,
+        timeout_ms: Option<u64>,
+    ) -> Result<CommandOutput>
     where
         I: IntoIterator<Item = &'a str>,
     {
@@ -353,11 +359,15 @@ impl AgentSession {
         for arg in args {
             command_process.arg(arg);
         }
-        let output = command_process
-            .current_dir(&self.repo)
-            .output()
-            .await
-            .with_context(|| format!("failed to run xtask {command}"))?;
+        let output_future = command_process.current_dir(&self.repo).output();
+        let output = if let Some(timeout_ms) = timeout_ms {
+            timeout(Duration::from_millis(timeout_ms), output_future)
+                .await
+                .with_context(|| format!("timed out running xtask {command}"))?
+        } else {
+            output_future.await
+        }
+        .with_context(|| format!("failed to run xtask {command}"))?;
         let events = parse_xtask_events(String::from_utf8_lossy(&output.stdout).as_ref());
         Ok(CommandOutput {
             exit_code: output.status.code().unwrap_or(1),
