@@ -5,8 +5,6 @@ static HOSTNAME: Mut<Option<[u8; 65]>> = Mut::new(None);
 static DOMAINNAME: Mut<Option<[u8; 65]>> = Mut::new(None);
 
 pub const DEFAULT_SYSNAME: &str = "Seele";
-pub const DEFAULT_RELEASE: &str = "6.12.0-seele";
-pub const DEFAULT_VERSION: &str = "#1 Seele";
 pub const DEFAULT_MACHINE: &str = "x86_64";
 
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
@@ -103,9 +101,10 @@ fn write_c_field(dst: &mut [u8], src: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_MACHINE, DEFAULT_RELEASE, DEFAULT_SYSNAME, DEFAULT_VERSION, SetHostnameError,
-        UtsName, current_domainname, current_hostname, set_domainname, set_hostname,
+        DEFAULT_MACHINE, DEFAULT_SYSNAME, SetHostnameError, UtsName, current_domainname,
+        current_hostname, set_domainname, set_hostname,
     };
+    use crate::{KERNEL_RELEASE, KERNEL_VERSION};
 
     crate::test!(
         utsname_default_layout,
@@ -121,14 +120,14 @@ mod tests {
     fn utsname_constructor_writes_c_string_fields_with_trailing_zeros() {
         let uts = UtsName::new(
             DEFAULT_SYSNAME,
-            DEFAULT_RELEASE,
-            DEFAULT_VERSION,
+            KERNEL_RELEASE,
+            KERNEL_VERSION,
             DEFAULT_MACHINE,
         );
 
         assert_eq!(&uts.sysname[..5], b"Seele");
-        assert_eq!(&uts.release[..12], b"6.12.0-seele");
-        assert_eq!(&uts.version[..8], b"#1 Seele");
+        assert_eq!(&uts.release[..5], b"0.0.1");
+        assert_eq!(&uts.version[..5], b"0.0.1");
         assert_eq!(&uts.machine[..6], b"x86_64");
         assert_eq!(uts.sysname[5], 0);
     }

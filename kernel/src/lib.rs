@@ -7,6 +7,8 @@
 extern crate alloc;
 
 pub const NAME: &str = "Seele";
+pub const KERNEL_RELEASE: &str = "0.0.1";
+pub const KERNEL_VERSION: &str = "0.0.1";
 pub const SMP_ENABLED: bool = false;
 
 pub mod acpi;

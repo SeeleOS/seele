@@ -67,8 +67,8 @@ define_syscall!(Uname, |info: *mut UtsName| {
     }
     let mut uts = UtsName::new(
         crate::misc::utsname::DEFAULT_SYSNAME,
-        crate::misc::utsname::DEFAULT_RELEASE,
-        crate::misc::utsname::DEFAULT_VERSION,
+        crate::KERNEL_RELEASE,
+        crate::KERNEL_VERSION,
         crate::misc::utsname::DEFAULT_MACHINE,
     );
     uts.nodename = crate::misc::utsname::current_hostname(NAME);

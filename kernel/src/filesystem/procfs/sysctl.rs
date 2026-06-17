@@ -24,7 +24,7 @@ pub(super) fn proc_domainname_bytes() -> Vec<u8> {
 }
 
 pub(super) fn proc_osrelease_bytes() -> Vec<u8> {
-    format!("{}\n", crate::misc::utsname::DEFAULT_RELEASE).into_bytes()
+    format!("{}\n", crate::KERNEL_RELEASE).into_bytes()
 }
 
 pub(super) fn proc_meminfo_bytes() -> Vec<u8> {

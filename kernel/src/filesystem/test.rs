@@ -594,7 +594,10 @@ fn procfs_exposes_stable_static_directories_files_and_mount_flags() {
     let mut file = osrelease.lock();
     let mut bytes = [0; 32];
     let read = file.read(&mut bytes).unwrap();
-    assert_eq!(str::from_utf8(&bytes[..read]).unwrap(), "6.12.0-seele\n");
+    assert_eq!(
+        str::from_utf8(&bytes[..read]).unwrap(),
+        alloc::format!("{}\n", crate::KERNEL_RELEASE)
+    );
 }
 
 fn procfs_exposes_dynamic_pid_entries_symlinks_and_writable_control_nodes() {

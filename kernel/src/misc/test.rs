@@ -1,4 +1,5 @@
 use crate::{
+    KERNEL_RELEASE, KERNEL_VERSION,
     misc::fb_object::FramebufferObject,
     misc::{
         auxv::AuxType,
@@ -10,7 +11,7 @@ use crate::{
         signal::{PendingSignalInfo, SI_QUEUE, SigInfo, Signal, Signals},
         time::Time,
         timer::{Sigevent, TimerMode, TimerNotify, TimerNotifyMethod, TimerSpec, TimerState},
-        utsname::{DEFAULT_MACHINE, DEFAULT_RELEASE, DEFAULT_SYSNAME, DEFAULT_VERSION, UtsName},
+        utsname::{DEFAULT_MACHINE, DEFAULT_SYSNAME, UtsName},
     },
     object::{config::ConfigurateRequest, error::ObjectError, traits::Configuratable},
     process::ProcessExitStatus,
@@ -135,8 +136,8 @@ fn process_exit_status_exports_wait_encodings() {
 fn misc_pure_layout_constants_and_kernel_error_mapping_stay_stable() {
     let uts = UtsName::new(
         DEFAULT_SYSNAME,
-        DEFAULT_RELEASE,
-        DEFAULT_VERSION,
+        KERNEL_RELEASE,
+        KERNEL_VERSION,
         DEFAULT_MACHINE,
     );
     assert_eq!(core::mem::size_of::<UtsName>(), 390);
