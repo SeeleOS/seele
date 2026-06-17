@@ -37,7 +37,7 @@ pub fn install_kirk(
         run_xshell_command(
             "build-rootfs",
             sh,
-            cmd!(sh, "git -C {kirk_checkout} reset --hard origin/master"),
+            cmd!(sh, "git -C {kirk_checkout} reset --hard FETCH_HEAD"),
             output_mode,
         )
         .context("failed to reset kirk checkout")?;

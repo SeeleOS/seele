@@ -16,7 +16,7 @@ use crate::json_output::{JsonEvent, OutputMode, emit};
 
 use self::{
     arch::{create_pacman_config, install_packages, set_empty_root_password},
-    aur::install_aur_packages,
+    aur::{install_aur_packages, validate_rebuild_packages},
     kirk::install_kirk,
     mount::{MountedRootfs, mount_rootfs_image, unmount_if_mounted},
     rootfs_image::prepare_rootfs_image,
@@ -26,6 +26,12 @@ use self::{
 pub struct BuildRootfsArgs {
     #[arg(long)]
     pub override_rootfs: bool,
+
+    #[arg(long)]
+    pub rebuild_aur: bool,
+
+    #[arg(long = "rebuild-aur-package")]
+    pub rebuild_aur_packages: Vec<String>,
 
     #[arg(long)]
     pub json_output: bool,
@@ -99,6 +105,7 @@ pub fn build_rootfs(args: BuildRootfsArgs) -> Result<i32> {
         &repo_root,
         pacman_conf.path(),
         &rootfs_mount,
+        args.rebuild_aur()?,
         output_mode,
     )?;
     if output_mode.is_json() {
@@ -171,15 +178,57 @@ impl BuildRootfsArgs {
     fn override_rootfs(&self) -> Result<bool> {
         let mut override_rootfs = self.override_rootfs;
 
-        for arg in &self.passthrough {
+        let mut passthrough = self.passthrough.iter();
+        while let Some(arg) = passthrough.next() {
             match arg.as_str() {
                 "--override" | "--override-rootfs" => override_rootfs = true,
+                "--rebuild-aur" => {}
+                "--rebuild-aur-package" => {
+                    if passthrough.next().is_none() {
+                        bail!("missing package name for --rebuild-aur-package");
+                    }
+                }
                 _ => bail!("unknown argument: {arg}"),
             }
         }
 
         Ok(override_rootfs)
     }
+
+    fn rebuild_aur(&self) -> Result<RebuildAur> {
+        let mut rebuild_aur = self.rebuild_aur;
+        let mut rebuild_aur_packages = self.rebuild_aur_packages.clone();
+
+        let mut passthrough = self.passthrough.iter();
+        while let Some(arg) = passthrough.next() {
+            match arg.as_str() {
+                "--rebuild-aur" => rebuild_aur = true,
+                "--rebuild-aur-package" => {
+                    let Some(package) = passthrough.next() else {
+                        bail!("missing package name for --rebuild-aur-package");
+                    };
+                    rebuild_aur_packages.push(package.clone());
+                }
+                "--override" | "--override-rootfs" => {}
+                _ => bail!("unknown argument: {arg}"),
+            }
+        }
+
+        rebuild_aur_packages.sort();
+        rebuild_aur_packages.dedup();
+        validate_rebuild_packages(&rebuild_aur_packages)?;
+
+        Ok(RebuildAur {
+            all: rebuild_aur,
+            packages: rebuild_aur_packages,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RebuildAur {
+    pub all: bool,
+    pub packages: Vec<String>,
 }
 
 fn repo_root() -> Result<PathBuf> {

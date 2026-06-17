@@ -6,50 +6,271 @@ use std::{
 };
 use xshell::{Shell, cmd};
 
+use super::RebuildAur;
 use crate::json_output::{JsonEvent, OutputMode, emit, run_xshell_command};
 
-const AUR_PACKAGES: &[&str] = &["linux-test-project-git"];
+pub const AUR_PACKAGES: &[&str] = &["linux-test-project-git"];
 const BUILD_USER: &str = "seelebuild";
 const GUEST_BUILD_ROOT: &str = "/var/tmp/seele-aur-build";
+const ROOTFS_CACHE_DIR: &str = "rootfs-cache/aur";
 
 pub fn install_aur_packages(
     sh: &Shell,
     repo_root: &Path,
     pacman_conf: &Path,
     rootfs_mount: &Path,
+    rebuild_aur: RebuildAur,
     output_mode: OutputMode,
 ) -> Result<()> {
     let build_root = repo_root.join("target").join("aur-build");
+    let cache_root = repo_root.join("target").join(ROOTFS_CACHE_DIR);
     fs::create_dir_all(&build_root)
         .with_context(|| format!("failed to create {}", build_root.display()))?;
+    fs::create_dir_all(&cache_root)
+        .with_context(|| format!("failed to create {}", cache_root.display()))?;
+
     install_pacman_config(rootfs_mount, pacman_conf, output_mode)?;
     let build_user_uid = ensure_build_user(rootfs_mount, output_mode)?;
+    let context = AurInstallContext {
+        sh,
+        rootfs_mount,
+        build_root: &build_root,
+        cache_root: &cache_root,
+        build_user_uid,
+        output_mode,
+    };
 
     for package in AUR_PACKAGES {
-        if output_mode.is_json() {
-            emit(&JsonEvent::progress(
-                "build-rootfs",
-                "aur",
-                &format!("building AUR package {package}"),
-            ))?;
-        } else {
-            eprintln!("building AUR package {package}");
-        }
-
-        let package_dir = prepare_package_checkout(sh, &build_root, package, output_mode)?;
-        let guest_package_dir = sync_package_to_rootfs(
-            sh,
-            rootfs_mount,
-            &package_dir,
-            package,
-            build_user_uid,
-            output_mode,
-        )?;
-        build_package_in_rootfs(rootfs_mount, &guest_package_dir, output_mode)?;
-        install_built_package_in_rootfs(rootfs_mount, &guest_package_dir, output_mode)?;
+        ensure_cached_package(&context, package, &rebuild_aur)?;
     }
 
     Ok(())
+}
+
+pub fn validate_rebuild_packages(packages: &[String]) -> Result<()> {
+    for package in packages {
+        if !AUR_PACKAGES.contains(&package.as_str()) {
+            bail!("unknown AUR package for rebuild: {package}");
+        }
+    }
+    Ok(())
+}
+
+fn ensure_cached_package(
+    context: &AurInstallContext<'_>,
+    package: &str,
+    rebuild_aur: &RebuildAur,
+) -> Result<()> {
+    let package_cache = context.cache_root.join(package);
+    let package_rebuild =
+        rebuild_aur.all || rebuild_aur.packages.iter().any(|name| name == package);
+    let cache_hit = !package_rebuild && cached_package_exists(&package_cache)?;
+
+    if cache_hit {
+        emit_cache_event(
+            context.output_mode,
+            package,
+            "aur-cache-hit",
+            "using cached AUR package",
+        )?;
+        install_cached_package(
+            context.sh,
+            context.rootfs_mount,
+            &package_cache,
+            package,
+            context.output_mode,
+        )?;
+        return Ok(());
+    }
+
+    emit_cache_event(
+        context.output_mode,
+        package,
+        "aur-cache-miss",
+        "building AUR package cache",
+    )?;
+    let package_dir =
+        prepare_package_checkout(context.sh, context.build_root, package, context.output_mode)?;
+    let guest_package_dir = sync_package_to_rootfs(
+        context.sh,
+        context.rootfs_mount,
+        &package_dir,
+        package,
+        context.build_user_uid,
+        context.output_mode,
+    )?;
+    emit_cache_event(
+        context.output_mode,
+        package,
+        "aur-build",
+        "running makepkg in rootfs",
+    )?;
+    build_package_in_rootfs(
+        context.rootfs_mount,
+        &guest_package_dir,
+        context.output_mode,
+    )?;
+    refresh_package_cache(
+        context.sh,
+        context.rootfs_mount,
+        &package_cache,
+        &guest_package_dir,
+        package,
+        context.output_mode,
+    )?;
+    emit_cache_event(
+        context.output_mode,
+        package,
+        "aur-install",
+        "installing cached AUR package",
+    )?;
+    install_cached_package(
+        context.sh,
+        context.rootfs_mount,
+        &package_cache,
+        package,
+        context.output_mode,
+    )?;
+
+    if context.output_mode.is_json() {
+        emit(&JsonEvent::progress(
+            "build-rootfs",
+            "aur-cache",
+            &format!("cached AUR package {package}"),
+        ))?;
+    }
+    Ok(())
+}
+
+struct AurInstallContext<'a> {
+    sh: &'a Shell,
+    rootfs_mount: &'a Path,
+    build_root: &'a Path,
+    cache_root: &'a Path,
+    build_user_uid: u32,
+    output_mode: OutputMode,
+}
+
+fn emit_cache_event(
+    output_mode: OutputMode,
+    package: &str,
+    step: &'static str,
+    message: &'static str,
+) -> Result<()> {
+    if output_mode.is_json() {
+        emit(&JsonEvent::progress(
+            "build-rootfs",
+            step,
+            &format!("{package}: {message}"),
+        ))?;
+    } else {
+        eprintln!("{package}: {message}");
+    }
+    Ok(())
+}
+
+fn cached_package_exists(package_cache: &Path) -> Result<bool> {
+    let entries = match fs::read_dir(package_cache) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => {
+            return Err(err).with_context(|| {
+                format!(
+                    "failed to read cached package dir {}",
+                    package_cache.display()
+                )
+            });
+        }
+    };
+
+    for entry in entries {
+        let entry = entry
+            .with_context(|| format!("failed to read entry in {}", package_cache.display()))?;
+        let path = entry.path();
+        if is_package_artifact(&path) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn refresh_package_cache(
+    sh: &Shell,
+    rootfs_mount: &Path,
+    package_cache: &Path,
+    guest_package_dir: &str,
+    package: &str,
+    output_mode: OutputMode,
+) -> Result<()> {
+    let host_cache_dir = package_cache;
+    run_xshell_command(
+        "build-rootfs",
+        sh,
+        cmd!(sh, "sudo rm -rf {host_cache_dir}"),
+        output_mode,
+    )?;
+    run_xshell_command(
+        "build-rootfs",
+        sh,
+        cmd!(sh, "sudo mkdir -p {host_cache_dir}"),
+        output_mode,
+    )?;
+
+    let host_package_dir = rootfs_mount.join(guest_package_dir.trim_start_matches('/'));
+    let built_packages = package_artifacts(&host_package_dir)?;
+    if built_packages.is_empty() {
+        bail!("AUR package {package} did not produce a non-debug package artifact");
+    }
+    for built_package in built_packages {
+        run_xshell_command(
+            "build-rootfs",
+            sh,
+            cmd!(sh, "sudo cp -a {built_package} {host_cache_dir}"),
+            output_mode,
+        )?;
+    }
+    Ok(())
+}
+
+fn install_cached_package(
+    sh: &Shell,
+    rootfs_mount: &Path,
+    package_cache: &Path,
+    package: &str,
+    output_mode: OutputMode,
+) -> Result<()> {
+    let guest_cache_path = format!("/tmp/seele-aur-cache/{package}");
+    let host_cache_path = rootfs_mount.join(guest_cache_path.trim_start_matches('/'));
+    let cached_packages = package_artifacts(package_cache)?;
+    if cached_packages.is_empty() {
+        bail!("AUR package cache for {package} is empty");
+    }
+    run_xshell_command(
+        "build-rootfs",
+        sh,
+        cmd!(sh, "sudo rm -rf {host_cache_path}"),
+        output_mode,
+    )?;
+    run_xshell_command(
+        "build-rootfs",
+        sh,
+        cmd!(sh, "sudo mkdir -p {host_cache_path}"),
+        output_mode,
+    )?;
+    for cached_package in cached_packages {
+        run_xshell_command(
+            "build-rootfs",
+            sh,
+            cmd!(sh, "sudo cp -a {cached_package} {host_cache_path}"),
+            output_mode,
+        )?;
+    }
+    run_chroot_shell(
+        rootfs_mount,
+        &format!("pacman --noconfirm --needed -U {guest_cache_path}/*.pkg.tar.*"),
+        output_mode,
+    )
+    .with_context(|| format!("failed to install cached AUR package {package}"))
 }
 
 fn ensure_build_user(rootfs_mount: &Path, output_mode: OutputMode) -> Result<u32> {
@@ -174,19 +395,6 @@ fn build_package_in_rootfs(
     .with_context(|| format!("failed to build AUR package in guest path {guest_package_dir}"))
 }
 
-fn install_built_package_in_rootfs(
-    rootfs_mount: &Path,
-    guest_package_dir: &str,
-    output_mode: OutputMode,
-) -> Result<()> {
-    run_chroot_shell(
-        rootfs_mount,
-        &format!("cd {guest_package_dir} && pacman --noconfirm --needed -U ./*.pkg.tar.*"),
-        output_mode,
-    )
-    .with_context(|| format!("failed to install AUR package from guest path {guest_package_dir}"))
-}
-
 fn run_chroot_shell(rootfs_mount: &Path, script: &str, output_mode: OutputMode) -> Result<()> {
     let mut command = Command::new("sudo");
     command
@@ -260,4 +468,29 @@ fn run_chroot_output(rootfs_mount: &Path, script: &str, output_mode: OutputMode)
         bail!("command failed with status {}", output.status);
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn is_package_artifact(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.contains(".pkg.tar.") && !name.contains("-debug-"))
+}
+
+fn package_artifacts(dir: &Path) -> Result<Vec<PathBuf>> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err).with_context(|| format!("failed to read {}", dir.display())),
+    };
+    let mut packages = Vec::new();
+    for entry in entries {
+        let path = entry
+            .with_context(|| format!("failed to read entry in {}", dir.display()))?
+            .path();
+        if is_package_artifact(&path) {
+            packages.push(path);
+        }
+    }
+    packages.sort();
+    Ok(packages)
 }
