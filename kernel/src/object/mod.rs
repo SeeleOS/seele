@@ -47,6 +47,7 @@ pub mod memfd;
 pub mod misc;
 pub mod netlink;
 pub mod open_state;
+pub mod pipe;
 pub mod queue_helpers;
 pub mod traits;
 pub mod tty_device;

@@ -1,9 +1,8 @@
 use crate::{
     define_syscall,
     memory::user_safe,
-    object::error::ObjectError,
+    object::{FileFlags, pipe::PipeEndpoint},
     process::{FdFlags, manager::get_current_process},
-    socket::{AF_UNIX, SOCK_NONBLOCK, SOCK_STREAM, UnixSocketObject},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
 use bitflags::bitflags;
@@ -21,17 +20,12 @@ fn create_pipe(fds: *mut i32, flags: PipeFlags) -> Result<usize, SyscallError> {
         return Err(SyscallError::BadAddress);
     }
 
-    let kind = SOCK_STREAM
-        | if flags.contains(PipeFlags::O_NONBLOCK) {
-            SOCK_NONBLOCK
-        } else {
-            0
-        };
-    let (read_end, write_end) =
-        UnixSocketObject::pair(AF_UNIX, kind, 0).map_err(ObjectError::from)?;
-
-    read_end.shutdown(1).map_err(ObjectError::from)?;
-    write_end.shutdown(0).map_err(ObjectError::from)?;
+    let object_flags = if flags.contains(PipeFlags::O_NONBLOCK) {
+        FileFlags::NONBLOCK
+    } else {
+        FileFlags::empty()
+    };
+    let (read_end, write_end) = PipeEndpoint::pair(object_flags);
 
     let process = get_current_process();
     let (read_fd, write_fd) = {
@@ -66,16 +60,18 @@ define_syscall!(Pipe2, |fds: *mut i32, flags: PipeFlags| {
 #[cfg(test)]
 mod tests {
     use crate::{
-        object::{FileFlags, misc::get_object_current_process},
+        memory::user_safe,
+        object::FileFlags,
         process::FdFlags,
         systemcall::{
-            implementations::{Dup, Dup2, Dup3, Pipe, Pipe2},
+            implementations::{Close, Dup, Dup2, Dup3, Pipe, Pipe2, Read, Write},
             test::{
                 assert_fd_flags, assert_object_flags, assert_same_object, close_test_fd, expect_fd,
                 occupied_fd_count,
             },
             test_helpers::{
                 SyscallArgs, allocate_user_test_page, expect_errno, expect_ok, read_user_value,
+                write_user_value,
             },
             utils::SyscallError,
         },
@@ -105,22 +101,27 @@ mod tests {
         let read_fd = pipe_fds[0] as usize;
         let write_fd = pipe_fds[1] as usize;
         assert_ne!(read_fd, write_fd);
-        assert!(
-            get_object_current_process(read_fd as u64)
-                .expect("pipe read fd should resolve")
-                .as_unix_socket()
-                .is_ok()
-        );
-        assert!(
-            get_object_current_process(write_fd as u64)
-                .expect("pipe write fd should resolve")
-                .as_unix_socket()
-                .is_ok()
-        );
         assert_fd_flags(read_fd, FdFlags::empty());
         assert_fd_flags(write_fd, FdFlags::empty());
         assert_object_flags(read_fd, FileFlags::empty());
         assert_object_flags(write_fd, FileFlags::empty());
+
+        user_safe::write_buffer(fd_page as *mut u8, b"abc")
+            .expect("test buffer should be writable");
+        expect_ok(
+            SyscallArgs::new([write_fd as u64, fd_page, 3, 0, 0, 0]).call::<Write>(),
+            3,
+        );
+        user_safe::write_buffer(fd_page as *mut u8, &[0; 3])
+            .expect("test buffer should be writable");
+        expect_ok(
+            SyscallArgs::new([read_fd as u64, fd_page, 3, 0, 0, 0]).call::<Read>(),
+            3,
+        );
+        assert_eq!(
+            user_safe::read_buffer(fd_page as *const u8, 3).unwrap(),
+            b"abc"
+        );
 
         expect_ok(
             SyscallArgs::new([fd_page, O_NONBLOCK | O_CLOEXEC, 0, 0, 0, 0]).call::<Pipe2>(),
@@ -193,6 +194,22 @@ mod tests {
         close_test_fd(pipe2_write_fd);
         close_test_fd(pipe2_read_fd);
         close_test_fd(write_fd);
+        expect_ok(
+            SyscallArgs::new([read_fd as u64, fd_page, 1, 0, 0, 0]).call::<Read>(),
+            0,
+        );
         close_test_fd(read_fd);
+
+        expect_ok(SyscallArgs::new([fd_page, 0, 0, 0, 0, 0]).call::<Pipe>(), 0);
+        let pipe_fds = read_user_value::<[i32; 2]>(fd_page);
+        let read_fd = pipe_fds[0] as usize;
+        let write_fd = pipe_fds[1] as usize;
+        close_test_fd(read_fd);
+        write_user_value(fd_page, &1u8);
+        expect_errno(
+            SyscallArgs::new([write_fd as u64, fd_page, 1, 0, 0, 0]).call::<Write>(),
+            SyscallError::BrokenPipe,
+        );
+        close_test_fd(write_fd);
     }
 }

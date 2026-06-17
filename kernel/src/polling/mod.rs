@@ -39,12 +39,14 @@ pub mod object;
 pub mod poller;
 mod ready;
 mod registration;
+mod wait;
 mod wake;
 
 pub use entry::PollerEntry;
 pub use object::PollerObject;
 pub use ready::PollerReadyEvent;
 pub use registration::notify_pollers;
+pub use wait::wait_for_object_event;
 
 #[cfg(test)]
 mod test;
