@@ -6,11 +6,11 @@ mod userspace_boot;
 use anyhow::Result;
 use owo_colors::OwoColorize;
 
-use crate::json_output::{JsonEvent, OutputMode, emit};
+use crate::reporter::{TestStatus, WorkflowReporter, log_event, progress, test_event};
 
 trait IntegrationTest {
     fn name(&self) -> &'static str;
-    fn run(&self, output_mode: OutputMode) -> Result<IntegrationTestResult>;
+    fn run(&self, reporter: &dyn WorkflowReporter) -> Result<IntegrationTestResult>;
 }
 
 pub struct IntegrationTestResult {
@@ -19,71 +19,64 @@ pub struct IntegrationTestResult {
     pub output: String,
 }
 
-pub fn run(output_mode: OutputMode, test_filter: Option<&str>) -> Result<i32> {
+pub fn run(reporter: &dyn WorkflowReporter, test_filter: Option<&str>) -> Result<i32> {
     let tests = integration_tests(test_filter);
     let Some(tests) = tests else {
         let message = format!(
             "no integration test matched filter {:?}",
             test_filter.unwrap_or("")
         );
-        if output_mode.is_json() {
-            emit(&JsonEvent::log("test", "stderr", &message))?;
-        } else {
+        log_event(reporter, "test", "stderr", &message)?;
+        if !reporter.capture_subprocess_output() {
             eprintln!("{message}");
         }
         return Ok(1);
     };
-    if output_mode.is_json() {
-        emit(&JsonEvent::progress(
-            "test",
-            "integration",
-            "running integration tests",
-        ))?;
-    } else {
+    progress(reporter, "test", "integration", "running integration tests")?;
+    if !reporter.capture_subprocess_output() {
         eprintln!();
         eprintln!("running {} integration tests", tests.len());
     }
 
     for test in tests {
-        if output_mode.is_json() {
-            emit(&JsonEvent::test(
+        test_event(
+            reporter,
+            "test",
+            test.name(),
+            TestStatus::Running,
+            "integration test started",
+        )?;
+        let result = test.run(reporter)?;
+        if result.exit_code == 0 {
+            test_event(
+                reporter,
                 "test",
                 test.name(),
-                "running",
-                "integration test started",
-            ))?;
-        }
-        let result = test.run(output_mode)?;
-        if result.exit_code == 0 {
-            if output_mode.is_json() {
-                emit(&JsonEvent::test(
-                    "test",
-                    test.name(),
-                    "ok",
-                    "integration test passed",
-                ))?;
-            } else {
+                TestStatus::Ok,
+                "integration test passed",
+            )?;
+            if !reporter.capture_subprocess_output() {
                 eprint!("test {} ... ", test.name());
                 eprintln!("{}", "ok".green().bold());
             }
         } else {
-            if output_mode.is_json() {
-                if let Some(failure) = &result.failure {
-                    emit(&JsonEvent::log("test", "stderr", failure))?;
-                }
-                if !result.output.is_empty() {
-                    emit(&JsonEvent::log("test", "serial", &result.output))?;
-                }
-                emit(&JsonEvent::test(
-                    "test",
-                    test.name(),
-                    "failed",
-                    result
-                        .failure
-                        .as_deref()
-                        .unwrap_or("integration test failed"),
-                ))?;
-            } else {
+            if let Some(failure) = &result.failure {
+                log_event(reporter, "test", "stderr", failure)?;
+            }
+            if !result.output.is_empty() {
+                log_event(reporter, "test", "serial", &result.output)?;
+            }
+            test_event(
+                reporter,
+                "test",
+                test.name(),
+                TestStatus::Failed,
+                result
+                    .failure
+                    .as_deref()
+                    .unwrap_or("integration test failed"),
+            )?;
+            if !reporter.capture_subprocess_output() {
                 eprint!("test {} ... ", test.name());
                 eprintln!("{}", "FAILED".red().bold());
                 report_failure(test.name(), &result);

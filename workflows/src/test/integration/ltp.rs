@@ -1,6 +1,6 @@
 use super::{IntegrationTest, IntegrationTestResult};
 use crate::{
-    json_output::{JsonEvent, OutputMode, emit},
+    reporter::{TestStatus, WorkflowReporter, log_event, metadata_event, test_event},
     run::{
         build::build_kernel,
         build_iso::create_boot_iso,
@@ -26,8 +26,8 @@ impl IntegrationTest for Ltp {
         "integration::ltp"
     }
 
-    fn run(&self, output_mode: OutputMode) -> Result<IntegrationTestResult> {
-        let kernel_paths = build_kernel(output_mode)?;
+    fn run(&self, reporter: &dyn WorkflowReporter) -> Result<IntegrationTestResult> {
+        let kernel_paths = build_kernel(reporter)?;
         let kernel_path = kernel_paths
             .first()
             .map(Path::new)
@@ -74,7 +74,7 @@ impl IntegrationTest for Ltp {
             }
         });
         if let Some(report) = report {
-            emit_ltp_json_events(output_mode, &report)?;
+            emit_ltp_json_events(reporter, &report)?;
         }
 
         Ok(IntegrationTestResult {
@@ -175,30 +175,28 @@ fn extract_ltp_report(output: &str) -> Option<LtpReport> {
     serde_json::from_str(json).ok()
 }
 
-fn emit_ltp_json_events(output_mode: OutputMode, report: &LtpReport) -> Result<()> {
-    if !output_mode.is_json() {
-        return Ok(());
-    }
-
+fn emit_ltp_json_events(reporter: &dyn WorkflowReporter, report: &LtpReport) -> Result<()> {
     let summary = report.summary();
     for result in &report.results {
         let name = result.test.name.as_deref().unwrap_or("ltp::unknown");
         let status = result_status(result);
-        emit(&JsonEvent::test(
+        test_event(
+            reporter,
             "test",
             &format!("ltp::{name}"),
             status,
-            status,
-        ))?;
-        if matches!(status, "failed" | "broken")
+            status.as_str(),
+        )?;
+        if matches!(status, TestStatus::Failed | TestStatus::Broken)
             && let Some(stdout) = &result.stdout
             && !stdout.is_empty()
         {
-            emit(&JsonEvent::log("test", "ltp", stdout))?;
+            log_event(reporter, "test", "ltp", stdout)?;
         }
     }
 
-    emit(&JsonEvent::metadata(
+    metadata_event(
+        reporter,
         "test",
         json!({
             "ltp": {
@@ -210,19 +208,19 @@ fn emit_ltp_json_events(output_mode: OutputMode, report: &LtpReport) -> Result<(
                 "warnings": summary.warnings,
             }
         }),
-    ))?;
+    )?;
     Ok(())
 }
 
-fn result_status(result: &LtpTestResult) -> &'static str {
+fn result_status(result: &LtpTestResult) -> TestStatus {
     if result.failed > 0 {
-        "failed"
+        TestStatus::Failed
     } else if result.broken > 0 {
-        "broken"
+        TestStatus::Broken
     } else if result.skipped > 0 {
-        "skipped"
+        TestStatus::Skipped
     } else {
-        "ok"
+        TestStatus::Ok
     }
 }
 

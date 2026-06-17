@@ -1,5 +1,5 @@
 use super::{IntegrationTest, IntegrationTestResult};
-use crate::json_output::OutputMode;
+use crate::reporter::WorkflowReporter;
 use crate::run::{
     build::{BuildMode, BuildOptions, build_kernel_with_mode},
     build_iso::create_boot_iso,
@@ -19,14 +19,14 @@ impl IntegrationTest for KernelImages {
         "integration::kernel_images"
     }
 
-    fn run(&self, output_mode: OutputMode) -> Result<IntegrationTestResult> {
+    fn run(&self, reporter: &dyn WorkflowReporter) -> Result<IntegrationTestResult> {
         for kernel_test in build_kernel_with_mode(
             BuildMode::IntegrationTests(KERNEL_TEST_IMAGES),
-            output_mode,
+            reporter,
             BuildOptions::default(),
         )? {
             let iso_path = create_boot_iso(&kernel_test)?;
-            let result = run_qemu_test_capture(&iso_path, output_mode)?;
+            let result = run_qemu_test_capture(&iso_path, reporter)?;
             fs::remove_file(&iso_path)
                 .with_context(|| format!("failed to remove ISO image {}", iso_path.display()))?;
             if result.exit_code != 0 {

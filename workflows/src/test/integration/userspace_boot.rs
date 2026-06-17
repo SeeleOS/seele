@@ -1,5 +1,5 @@
 use super::{IntegrationTest, IntegrationTestResult};
-use crate::json_output::OutputMode;
+use crate::reporter::WorkflowReporter;
 use crate::run::{
     build::build_kernel,
     build_iso::create_boot_iso,
@@ -17,8 +17,8 @@ impl IntegrationTest for UserspaceBoot {
         "integration::userspace_boot"
     }
 
-    fn run(&self, output_mode: OutputMode) -> Result<IntegrationTestResult> {
-        let kernel_paths = build_kernel(output_mode)?;
+    fn run(&self, reporter: &dyn WorkflowReporter) -> Result<IntegrationTestResult> {
+        let kernel_paths = build_kernel(reporter)?;
         let kernel_path = kernel_paths
             .first()
             .map(Path::new)

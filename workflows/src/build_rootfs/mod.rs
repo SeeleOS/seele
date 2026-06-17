@@ -5,14 +5,15 @@ mod mount;
 mod rootfs_image;
 
 use anyhow::{Context, Result, bail};
-use clap::Args;
 use std::{
     env, fs,
     path::{Path, PathBuf},
 };
 use xshell::Shell;
 
-use crate::json_output::{JsonEvent, OutputMode, emit};
+use crate::reporter::{
+    FinishStatus, WorkflowReporter, finished, progress, run_xshell_command, started,
+};
 
 use self::{
     arch::{create_pacman_config, install_packages, set_empty_root_password},
@@ -22,30 +23,16 @@ use self::{
     rootfs_image::prepare_rootfs_image,
 };
 
-#[derive(Debug, Args)]
-pub struct BuildRootfsArgs {
-    #[arg(long)]
+#[derive(Debug, Default, Clone)]
+pub struct BuildRootfsConfig {
     pub override_rootfs: bool,
-
-    #[arg(long)]
     pub rebuild_aur: bool,
-
-    #[arg(long = "rebuild-aur-package")]
     pub rebuild_aur_packages: Vec<String>,
-
-    #[arg(long)]
-    pub json_output: bool,
-
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
     pub passthrough: Vec<String>,
 }
 
-pub fn build_rootfs(args: BuildRootfsArgs) -> Result<i32> {
-    let output_mode = args.output_mode();
-    if output_mode.is_json() {
-        emit(&JsonEvent::started("build-rootfs"))?;
-    }
-
+pub fn build_rootfs(config: BuildRootfsConfig, reporter: &dyn WorkflowReporter) -> Result<i32> {
+    started(reporter, "build-rootfs")?;
     let repo_root = repo_root()?;
     let mut sh = Shell::new()?;
     sh.set_current_dir(&repo_root);
@@ -53,93 +40,73 @@ pub fn build_rootfs(args: BuildRootfsArgs) -> Result<i32> {
     let target = target_dir(&repo_root);
     let rootfs_image = target.join("rootfs.img");
     let rootfs_mount = target.join("rootfs_mnt");
-    if output_mode.is_json() {
-        emit(&JsonEvent::progress(
-            "build-rootfs",
-            "paths",
-            "resolved rootfs image and mount point",
-        ))?;
-    }
+    progress(
+        reporter,
+        "build-rootfs",
+        "paths",
+        "resolved rootfs image and mount point",
+    )?;
     fs::create_dir_all(&rootfs_mount)
         .with_context(|| format!("failed to create {}", rootfs_mount.display()))?;
 
-    if output_mode.is_json() {
-        emit(&JsonEvent::progress(
-            "build-rootfs",
-            "mount",
-            "ensuring rootfs mount point is not mounted",
-        ))?;
-    }
-    unmount_if_mounted(&sh, &rootfs_mount, output_mode)?;
-    prepare_rootfs_image(&sh, &rootfs_image, args.override_rootfs()?, output_mode)?;
-    if output_mode.is_json() {
-        emit(&JsonEvent::progress(
-            "build-rootfs",
-            "mount",
-            "mounting rootfs image",
-        ))?;
-    }
-    mount_rootfs_image(&sh, &rootfs_image, &rootfs_mount, output_mode)?;
+    progress(
+        reporter,
+        "build-rootfs",
+        "mount",
+        "ensuring rootfs mount point is not mounted",
+    )?;
+    unmount_if_mounted(&sh, &rootfs_mount, reporter)?;
+    prepare_rootfs_image(&sh, &rootfs_image, config.override_rootfs()?, reporter)?;
+    progress(reporter, "build-rootfs", "mount", "mounting rootfs image")?;
+    mount_rootfs_image(&sh, &rootfs_image, &rootfs_mount, reporter)?;
 
     let _mount = MountedRootfs {
         path: &rootfs_mount,
     };
-    if output_mode.is_json() {
-        emit(&JsonEvent::progress(
-            "build-rootfs",
-            "arch",
-            "installing rootfs packages",
-        ))?;
-    }
+    progress(
+        reporter,
+        "build-rootfs",
+        "arch",
+        "installing rootfs packages",
+    )?;
     let pacman_conf = create_pacman_config(&repo_root)?;
-    install_packages(&sh, pacman_conf.path(), &rootfs_mount, output_mode)?;
-    if output_mode.is_json() {
-        emit(&JsonEvent::progress(
-            "build-rootfs",
-            "arch",
-            "installing AUR packages",
-        ))?;
-    }
+    install_packages(&sh, pacman_conf.path(), &rootfs_mount, reporter)?;
+    progress(reporter, "build-rootfs", "arch", "installing AUR packages")?;
     install_aur_packages(
         &sh,
         &repo_root,
         pacman_conf.path(),
         &rootfs_mount,
-        args.rebuild_aur()?,
-        output_mode,
+        config.rebuild_aur()?,
+        reporter,
     )?;
-    if output_mode.is_json() {
-        emit(&JsonEvent::progress(
-            "build-rootfs",
-            "kirk",
-            "installing kirk test runner",
-        ))?;
-    }
-    install_kirk(&sh, &repo_root, &rootfs_mount, output_mode)?;
-    if output_mode.is_json() {
-        emit(&JsonEvent::progress(
-            "build-rootfs",
-            "arch",
-            "setting empty root password",
-        ))?;
-    }
-    set_empty_root_password(&sh, &rootfs_mount, output_mode)?;
-    if output_mode.is_json() {
-        emit(&JsonEvent::progress(
-            "build-rootfs",
-            "mount-points",
-            "creating rootfs mount points",
-        ))?;
-    }
-    create_mount_points(&rootfs_mount, output_mode)?;
+    progress(
+        reporter,
+        "build-rootfs",
+        "kirk",
+        "installing kirk test runner",
+    )?;
+    install_kirk(&sh, &repo_root, &rootfs_mount, reporter)?;
+    progress(
+        reporter,
+        "build-rootfs",
+        "arch",
+        "setting empty root password",
+    )?;
+    set_empty_root_password(&sh, &rootfs_mount, reporter)?;
+    progress(
+        reporter,
+        "build-rootfs",
+        "mount-points",
+        "creating rootfs mount points",
+    )?;
+    create_mount_points(&rootfs_mount, reporter)?;
 
-    if output_mode.is_json() {
-        emit(&JsonEvent::finished("build-rootfs", 0, "ok"))?;
-    }
+    finished(reporter, "build-rootfs", 0, FinishStatus::Ok)?;
     Ok(0)
 }
 
-fn create_mount_points(rootfs_mount: &Path, output_mode: OutputMode) -> Result<()> {
+fn create_mount_points(rootfs_mount: &Path, reporter: &dyn WorkflowReporter) -> Result<()> {
     let sh = Shell::new()?;
     for path in [
         "dev",
@@ -155,26 +122,18 @@ fn create_mount_points(rootfs_mount: &Path, output_mode: OutputMode) -> Result<(
         "var/tmp",
     ] {
         let full_path = rootfs_mount.join(path);
-        crate::json_output::run_xshell_command(
+        run_xshell_command(
             "build-rootfs",
             &sh,
             xshell::cmd!(sh, "sudo mkdir -p {full_path}"),
-            output_mode,
+            reporter,
         )
         .with_context(|| format!("failed to create rootfs mount point {path}"))?;
     }
     Ok(())
 }
 
-impl BuildRootfsArgs {
-    fn output_mode(&self) -> OutputMode {
-        if self.json_output {
-            OutputMode::Json
-        } else {
-            OutputMode::Human
-        }
-    }
-
+impl BuildRootfsConfig {
     fn override_rootfs(&self) -> Result<bool> {
         let mut override_rootfs = self.override_rootfs;
 

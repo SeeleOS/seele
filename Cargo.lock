@@ -1441,10 +1441,23 @@ dependencies = [
  "image",
  "rmcp",
  "schemars",
+ "seele-workflows",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "seele-workflows"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ovmf-prebuilt",
+ "owo-colors",
+ "serde",
+ "serde_json",
+ "xshell",
 ]
 
 [[package]]
@@ -2313,11 +2326,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "ovmf-prebuilt",
- "owo-colors",
- "serde",
- "serde_json",
- "xshell",
+ "seele-workflows",
 ]
 
 [[package]]

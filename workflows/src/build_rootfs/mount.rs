@@ -2,30 +2,34 @@ use anyhow::Result;
 use std::path::Path;
 use xshell::{Shell, cmd};
 
-use crate::json_output::{OutputMode, run_xshell_command};
+use crate::reporter::{WorkflowReporter, run_xshell_command};
 
 pub fn mount_rootfs_image(
     sh: &Shell,
     image: &Path,
     rootfs_mount: &Path,
-    output_mode: OutputMode,
+    reporter: &dyn WorkflowReporter,
 ) -> Result<()> {
     run_xshell_command(
         "build-rootfs",
         sh,
         cmd!(sh, "sudo mount -o loop {image} {rootfs_mount}"),
-        output_mode,
+        reporter,
     )?;
     Ok(())
 }
 
-pub fn unmount_if_mounted(sh: &Shell, rootfs_mount: &Path, output_mode: OutputMode) -> Result<()> {
+pub fn unmount_if_mounted(
+    sh: &Shell,
+    rootfs_mount: &Path,
+    reporter: &dyn WorkflowReporter,
+) -> Result<()> {
     if is_mountpoint(sh, rootfs_mount)? {
         run_xshell_command(
             "build-rootfs",
             sh,
             cmd!(sh, "sudo umount -l {rootfs_mount}"),
-            output_mode,
+            reporter,
         )?;
     }
     Ok(())

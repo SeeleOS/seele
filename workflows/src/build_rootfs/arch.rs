@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::{fs, path::Path};
 use xshell::{Shell, cmd};
 
-use crate::json_output::{OutputMode, run_xshell_command};
+use crate::reporter::{WorkflowReporter, run_xshell_command};
 
 const ARCH_PACKAGES: &[&str] = &[
     "base",
@@ -94,7 +94,7 @@ pub fn install_packages(
     sh: &Shell,
     pacman_conf: &Path,
     rootfs_mount: &Path,
-    output_mode: OutputMode,
+    reporter: &dyn WorkflowReporter,
 ) -> Result<()> {
     run_xshell_command(
         "build-rootfs",
@@ -103,7 +103,7 @@ pub fn install_packages(
             sh,
             "sudo pacstrap -C {pacman_conf} -K -M {rootfs_mount} {ARCH_PACKAGES...}"
         ),
-        output_mode,
+        reporter,
     )?;
     Ok(())
 }
@@ -111,7 +111,7 @@ pub fn install_packages(
 pub fn set_empty_root_password(
     sh: &Shell,
     rootfs_mount: &Path,
-    output_mode: OutputMode,
+    reporter: &dyn WorkflowReporter,
 ) -> Result<()> {
     run_xshell_command(
         "build-rootfs",
@@ -120,7 +120,7 @@ pub fn set_empty_root_password(
             sh,
             "printf 'root:\\n' | sudo chroot {rootfs_mount} /usr/bin/chpasswd -e"
         ),
-        output_mode,
+        reporter,
     )?;
     Ok(())
 }

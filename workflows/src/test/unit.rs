@@ -4,52 +4,51 @@ use crate::run::{
 use anyhow::{Context, Result};
 use std::fs;
 
-use crate::json_output::{JsonEvent, OutputMode, emit, remove_file};
+use crate::reporter::{TestStatus, WorkflowReporter, log_event, remove_file, test_event};
 
-pub fn run(output_mode: OutputMode) -> Result<i32> {
+pub fn run(reporter: &dyn WorkflowReporter) -> Result<i32> {
     let mut exit_code = 0;
 
-    for kernel_test in build_kernel_tests(output_mode)? {
+    for kernel_test in build_kernel_tests(reporter)? {
         let test_name = kernel_test
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("kernel unit tests");
-        if output_mode.is_json() {
-            emit(&JsonEvent::test(
-                "test",
-                test_name,
-                "running",
-                "kernel unit test image started",
-            ))?;
-        }
+        test_event(
+            reporter,
+            "test",
+            test_name,
+            TestStatus::Running,
+            "kernel unit test image started",
+        )?;
         let iso_path = create_boot_iso(&kernel_test)?;
-        let result = run_qemu_test_capture(&iso_path, output_mode)?;
+        let result = run_qemu_test_capture(&iso_path, reporter)?;
         exit_code = result.exit_code;
-        if output_mode.is_json() {
-            remove_file(&iso_path, output_mode)?;
+        if reporter.capture_subprocess_output() {
+            remove_file(&iso_path, reporter)?;
         } else {
             fs::remove_file(&iso_path)
                 .with_context(|| format!("failed to remove ISO image {}", iso_path.display()))?;
         }
 
         if exit_code != 0 {
-            if output_mode.is_json() {
-                if let Some(failure) = &result.failure {
-                    emit(&JsonEvent::log("test", "stderr", failure))?;
-                }
-                if !result.serial_output.is_empty() {
-                    emit(&JsonEvent::log("test", "serial", &result.serial_output))?;
-                }
-                emit(&JsonEvent::test(
-                    "test",
-                    test_name,
-                    "failed",
-                    result
-                        .failure
-                        .as_deref()
-                        .unwrap_or("kernel unit test failed"),
-                ))?;
-            } else {
+            if let Some(failure) = &result.failure {
+                log_event(reporter, "test", "stderr", failure)?;
+            }
+            if !result.serial_output.is_empty() {
+                log_event(reporter, "test", "serial", &result.serial_output)?;
+            }
+            test_event(
+                reporter,
+                "test",
+                test_name,
+                TestStatus::Failed,
+                result
+                    .failure
+                    .as_deref()
+                    .unwrap_or("kernel unit test failed"),
+            )?;
+            if !reporter.capture_subprocess_output() {
                 if let Some(failure) = result.failure {
                     eprintln!("{failure}");
                 }
@@ -61,17 +60,18 @@ pub fn run(output_mode: OutputMode) -> Result<i32> {
                 }
             }
             break;
-        } else if output_mode.is_json() {
+        } else {
             let output = unit_output(&result.serial_output);
             if !output.is_empty() {
-                emit(&JsonEvent::log("test", "serial", output))?;
+                log_event(reporter, "test", "serial", output)?;
             }
-            emit(&JsonEvent::test(
+            test_event(
+                reporter,
                 "test",
                 test_name,
-                "ok",
+                TestStatus::Ok,
                 "kernel unit test image passed",
-            ))?;
+            )?;
         }
     }
 

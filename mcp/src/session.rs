@@ -1,6 +1,10 @@
 use anyhow::{Context, Result, bail};
+use seele_workflows::{
+    build_rootfs::{BuildRootfsConfig, build_rootfs},
+    reporter::{EventCollector, WorkflowEvent},
+    test::test as run_workflow_tests,
+};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::{
     env,
     path::{Path, PathBuf},
@@ -9,7 +13,7 @@ use std::{
 };
 use tokio::{
     fs,
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, ChildStdout, Command},
     sync::Mutex,
     time::{Duration, Instant, timeout},
@@ -165,31 +169,27 @@ impl AgentSession {
             .arg("-p")
             .arg("xtask")
             .arg("--")
-            .arg("mcp-run")
-            .arg("--json-output");
+            .arg("mcp-run");
         if enable_profiling {
             command.arg("--enable-profiling");
         }
         command
             .current_dir(&self.repo)
             .env("SEELE_QMP_SOCKET", &self.qmp_socket)
-            .stdout(Stdio::piped())
+            .env("SEELE_SERIAL_LOG", &self.serial_log)
+            .stdout(Stdio::null())
             .stderr(Stdio::null());
         for (key, value) in envs {
             command.env(key, value);
         }
-        let mut child = command.spawn().context("failed to start xtask mcp-run")?;
-
-        let stdout = child
-            .stdout
-            .take()
-            .context("xtask mcp-run stdout was not piped")?;
-        let metadata = timeout(
-            Duration::from_secs(120),
-            read_metadata_event(stdout, child.id(), &self.qmp_socket, &self.serial_log),
-        )
-        .await
-        .context("timed out waiting for xtask mcp metadata")??;
+        let child = command.spawn().context("failed to start xtask mcp-run")?;
+        let metadata = SessionMetadata {
+            runner_pid: child.id().context("xtask mcp-run pid missing")?,
+            qemu_pid: None,
+            qmp_socket: self.qmp_socket.clone(),
+            serial_log: self.serial_log.clone(),
+            iso_image: None,
+        };
         state.child = Some(child);
         state.metadata = Some(metadata.clone());
         state.last_exit = None;
@@ -336,9 +336,10 @@ impl AgentSession {
     }
 
     pub async fn start_xtest(&self, test: Option<&str>) -> Result<CommandHandle> {
-        self.start_xtask_command(
-            "test",
-            test.into_iter().map(|value| value.to_string()).collect(),
+        self.start_workflow_command(
+            WorkflowJob::Test {
+                test: test.map(str::to_string),
+            },
             None,
         )
         .await
@@ -351,19 +352,18 @@ impl AgentSession {
         rebuild_aur: bool,
         rebuild_aur_packages: &[String],
     ) -> Result<CommandHandle> {
-        let mut args = Vec::new();
-        if override_rootfs {
-            args.push("--override-rootfs".to_string());
-        }
-        if rebuild_aur {
-            args.push("--rebuild-aur".to_string());
-        }
-        for package in rebuild_aur_packages {
-            args.push("--rebuild-aur-package".to_string());
-            args.push(package.clone());
-        }
-        self.start_xtask_command("build-rootfs", args, timeout_ms)
-            .await
+        self.start_workflow_command(
+            WorkflowJob::BuildRootfs {
+                config: BuildRootfsConfig {
+                    override_rootfs,
+                    rebuild_aur,
+                    rebuild_aur_packages: rebuild_aur_packages.to_vec(),
+                    passthrough: Vec::new(),
+                },
+            },
+            timeout_ms,
+        )
+        .await
     }
 
     pub async fn command_status(&self, id: u64) -> Result<CommandStatus> {
@@ -371,17 +371,8 @@ impl AgentSession {
         let data = fs::read(&path)
             .await
             .with_context(|| format!("failed to read command status {}", path.display()))?;
-        let mut status: CommandStatus = serde_json::from_slice(&data)
-            .with_context(|| format!("failed to parse command status {}", path.display()))?;
-        if !status.finished {
-            if let Some(stdout_path) = &status.stdout_path {
-                status.stdout = read_trailing_text(stdout_path, status.stdout_limit).await?;
-            }
-            if let Some(stderr_path) = &status.stderr_path {
-                status.stderr = read_trailing_text(stderr_path, status.stderr_limit).await?;
-            }
-        }
-        Ok(status)
+        serde_json::from_slice(&data)
+            .with_context(|| format!("failed to parse command status {}", path.display()))
     }
 
     pub async fn command_wait(&self, id: u64, timeout_ms: Option<u64>) -> Result<CommandStatus> {
@@ -399,10 +390,9 @@ impl AgentSession {
         }
     }
 
-    async fn start_xtask_command(
+    async fn start_workflow_command(
         &self,
-        command: &str,
-        args: Vec<String>,
+        job: WorkflowJob,
         timeout_ms: Option<u64>,
     ) -> Result<CommandHandle> {
         fs::create_dir_all(&self.command_log_dir)
@@ -410,11 +400,10 @@ impl AgentSession {
             .with_context(|| format!("failed to create {}", self.command_log_dir.display()))?;
         let id = self.next_command_id.fetch_add(1, Ordering::Relaxed);
         let log_path = self.command_log_dir.join(format!("{id}.json"));
-        let stdout = command_log_path(&self.command_log_dir, id, "stdout");
-        let stderr = command_log_path(&self.command_log_dir, id, "stderr");
+        let command = job.command_name().to_string();
         let initial_status = CommandStatus {
             id,
-            command: command.to_string(),
+            command: command.clone(),
             pid: None,
             finished: false,
             timed_out: false,
@@ -424,40 +413,23 @@ impl AgentSession {
             stderr: String::new(),
             stdout_limit: Some(LOG_LIMIT),
             stderr_limit: Some(LOG_LIMIT),
-            stdout_path: Some(stdout.clone()),
-            stderr_path: Some(stderr.clone()),
+            stdout_path: None,
+            stderr_path: None,
             events: Vec::new(),
         };
         fs::write(&log_path, serde_json::to_vec_pretty(&initial_status)?)
             .await
             .with_context(|| format!("failed to write command status {}", log_path.display()))?;
 
-        let repo = self.repo.clone();
         let log_path_for_task = log_path.clone();
-        let command_name = command.to_string();
+        let command_for_task = command.clone();
         tokio::spawn(async move {
-            let output = run_xtask_process(RunCommandRequest {
-                id,
-                repo: &repo,
-                command: &command_name,
-                args: &args,
-                timeout_ms,
-                status_path: &log_path_for_task,
-                stdout_path: &stdout,
-                stderr_path: &stderr,
-            })
-            .await;
-            let status =
-                command_status_from_output(id, &command_name, timeout_ms, &stdout, &stderr, output);
-            let Ok(encoded) = serde_json::to_vec_pretty(&status) else {
-                return;
-            };
-            let _ = fs::write(log_path_for_task, encoded).await;
+            run_workflow_job(id, command_for_task, timeout_ms, log_path_for_task, job).await;
         });
 
         Ok(CommandHandle {
             id,
-            command: command.to_string(),
+            command,
             timeout_ms,
             status_path: log_path,
         })
@@ -536,246 +508,6 @@ impl AgentSession {
     }
 }
 
-struct RunCommandRequest<'a> {
-    id: u64,
-    repo: &'a Path,
-    command: &'a str,
-    args: &'a [String],
-    timeout_ms: Option<u64>,
-    status_path: &'a Path,
-    stdout_path: &'a Path,
-    stderr_path: &'a Path,
-}
-
-async fn run_xtask_process(request: RunCommandRequest<'_>) -> Result<CommandProcessOutput> {
-    let command_name = request.command.to_string();
-    let mut command_process = Command::new("cargo");
-    command_process
-        .arg("run")
-        .arg("--quiet")
-        .arg("-p")
-        .arg("xtask")
-        .arg("--")
-        .arg(request.command)
-        .arg("--json-output");
-    for arg in request.args {
-        command_process.arg(arg);
-    }
-    command_process
-        .current_dir(request.repo)
-        .stdout(Stdio::from(
-            std::fs::File::create(request.stdout_path)
-                .with_context(|| format!("failed to open {}", request.stdout_path.display()))?,
-        ))
-        .stderr(Stdio::from(
-            std::fs::File::create(request.stderr_path)
-                .with_context(|| format!("failed to open {}", request.stderr_path.display()))?,
-        ))
-        .env("SEELE_MCP_COMMAND_STDOUT", request.stdout_path)
-        .env("SEELE_MCP_COMMAND_STDERR", request.stderr_path);
-    let child = command_process
-        .spawn()
-        .with_context(|| format!("failed to start xtask {}", request.command))?;
-    wait_for_command_output(request, child)
-        .await
-        .with_context(|| format!("failed to wait for xtask {command_name}"))
-}
-
-async fn wait_for_command_output(
-    request: RunCommandRequest<'_>,
-    mut child: Child,
-) -> Result<CommandProcessOutput> {
-    let pid = child.id();
-    let deadline = request
-        .timeout_ms
-        .map(|timeout_ms| Instant::now() + Duration::from_millis(timeout_ms));
-    let (status, timed_out) = loop {
-        if let Some(status) = child.try_wait().context("failed to poll xtask child")? {
-            break (status, false);
-        }
-        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-            let _ = child.kill().await;
-            let status = child
-                .wait()
-                .await
-                .context("failed to wait for timed-out xtask child")?;
-            break (status, true);
-        }
-        write_running_command_status(&request, pid).await?;
-        tokio::time::sleep(COMMAND_STATUS_REFRESH).await;
-    };
-    write_running_command_status(&request, pid).await?;
-    let stdout = fs::read(request.stdout_path)
-        .await
-        .with_context(|| format!("failed to read {}", request.stdout_path.display()))?;
-    let stderr = fs::read(request.stderr_path)
-        .await
-        .with_context(|| format!("failed to read {}", request.stderr_path.display()))?;
-    Ok(CommandProcessOutput {
-        status,
-        stdout,
-        stderr,
-        timed_out,
-        pid,
-    })
-}
-
-async fn write_running_command_status(
-    request: &RunCommandRequest<'_>,
-    pid: Option<u32>,
-) -> Result<()> {
-    let stdout_text = read_trailing_text(request.stdout_path, Some(LOG_LIMIT)).await?;
-    let events = parse_xtask_events(&stdout_text);
-    let status = CommandStatus {
-        id: request.id,
-        command: request.command.to_string(),
-        pid,
-        finished: false,
-        timed_out: false,
-        timeout_ms: request.timeout_ms,
-        exit_code: 0,
-        stdout: live_stdout_summary(&stdout_text, &events),
-        stderr: read_trailing_text(request.stderr_path, Some(LOG_LIMIT)).await?,
-        stdout_limit: Some(LOG_LIMIT),
-        stderr_limit: Some(LOG_LIMIT),
-        stdout_path: Some(request.stdout_path.to_path_buf()),
-        stderr_path: Some(request.stderr_path.to_path_buf()),
-        events,
-    };
-    fs::write(request.status_path, serde_json::to_vec_pretty(&status)?)
-        .await
-        .with_context(|| {
-            format!(
-                "failed to write command status {}",
-                request.status_path.display()
-            )
-        })
-}
-
-fn command_status_from_output(
-    id: u64,
-    command: &str,
-    timeout_ms: Option<u64>,
-    stdout_path: &Path,
-    stderr_path: &Path,
-    output: Result<CommandProcessOutput>,
-) -> CommandStatus {
-    match output {
-        Ok(output) => {
-            let events = parse_xtask_events(String::from_utf8_lossy(&output.stdout).as_ref());
-            CommandStatus {
-                id,
-                command: command.to_string(),
-                pid: output.pid,
-                finished: true,
-                timed_out: output.timed_out,
-                timeout_ms,
-                exit_code: output.status.code().unwrap_or(1),
-                stdout: final_stdout_summary(&events, &output.stdout),
-                stderr: truncate_log(String::from_utf8_lossy(&output.stderr).as_ref()),
-                stdout_limit: Some(LOG_LIMIT),
-                stderr_limit: Some(LOG_LIMIT),
-                stdout_path: Some(stdout_path.to_path_buf()),
-                stderr_path: Some(stderr_path.to_path_buf()),
-                events,
-            }
-        }
-        Err(err) => CommandStatus {
-            id,
-            command: command.to_string(),
-            pid: None,
-            finished: true,
-            timed_out: err.to_string().contains("timed out running xtask"),
-            timeout_ms,
-            exit_code: 1,
-            stdout: String::new(),
-            stderr: truncate_log(&err.to_string()),
-            stdout_limit: Some(LOG_LIMIT),
-            stderr_limit: Some(LOG_LIMIT),
-            stdout_path: Some(stdout_path.to_path_buf()),
-            stderr_path: Some(stderr_path.to_path_buf()),
-            events: Vec::new(),
-        },
-    }
-}
-
-fn command_log_path(command_log_dir: &Path, id: u64, stream: &str) -> PathBuf {
-    command_log_dir.join(format!("{id}.{stream}.log"))
-}
-
-async fn read_trailing_text(path: &Path, limit: Option<usize>) -> Result<String> {
-    match fs::read(path).await {
-        Ok(data) => {
-            let limit = limit.unwrap_or(LOG_LIMIT);
-            let start = data.len().saturating_sub(limit);
-            Ok(String::from_utf8_lossy(&data[start..]).into_owned())
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
-    }
-}
-
-fn final_stdout_summary(events: &[XtaskEvent], stdout: &[u8]) -> String {
-    if events.is_empty() {
-        truncate_log(String::from_utf8_lossy(stdout).as_ref())
-    } else {
-        summarize_xtask_events(events)
-    }
-}
-
-fn live_stdout_summary(stdout: &str, events: &[XtaskEvent]) -> String {
-    if events.is_empty() {
-        stdout.to_string()
-    } else {
-        summarize_xtask_events(events)
-    }
-}
-
-struct CommandProcessOutput {
-    status: std::process::ExitStatus,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-    timed_out: bool,
-    pid: Option<u32>,
-}
-
-async fn read_metadata_event(
-    stdout: ChildStdout,
-    child_id: Option<u32>,
-    default_qmp_socket: &Path,
-    default_serial_log: &Path,
-) -> Result<SessionMetadata> {
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    loop {
-        line.clear();
-        let read = reader
-            .read_line(&mut line)
-            .await
-            .context("failed to read xtask mcp metadata")?;
-        if read == 0 {
-            bail!("xtask mcp-run exited before metadata");
-        }
-        let Ok(event) = serde_json::from_str::<XtaskEvent>(line.trim()) else {
-            continue;
-        };
-        if event.event == "metadata" {
-            let value = event
-                .metadata
-                .context("xtask metadata event missing metadata")?;
-            let metadata =
-                parse_metadata_value(&value, child_id, default_qmp_socket, default_serial_log)?;
-            tokio::spawn(async move {
-                let mut line = String::new();
-                while matches!(reader.read_line(&mut line).await, Ok(read) if read != 0) {
-                    line.clear();
-                }
-            });
-            return Ok(metadata);
-        }
-    }
-}
-
 #[derive(Debug, Serialize)]
 pub struct CommandHandle {
     pub id: u64,
@@ -799,7 +531,7 @@ pub struct CommandStatus {
     pub stderr_limit: Option<usize>,
     pub stdout_path: Option<PathBuf>,
     pub stderr_path: Option<PathBuf>,
-    pub events: Vec<XtaskEvent>,
+    pub events: Vec<WorkflowEvent>,
 }
 
 #[derive(Debug, Serialize)]
@@ -807,21 +539,7 @@ pub struct CommandOutput {
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,
-    pub events: Vec<XtaskEvent>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct XtaskEvent {
-    pub event: String,
-    pub command: Option<String>,
-    pub name: Option<String>,
-    pub status: Option<String>,
-    pub step: Option<String>,
-    pub stream: Option<String>,
-    pub message: Option<String>,
-    pub output: Option<String>,
-    pub exit_code: Option<i32>,
-    pub metadata: Option<Value>,
+    pub events: Vec<WorkflowEvent>,
 }
 
 #[derive(Debug, Serialize)]
@@ -847,88 +565,238 @@ pub struct GdbCommandOutput {
     pub output: String,
 }
 
-fn parse_metadata_value(
-    value: &Value,
-    child_id: Option<u32>,
-    default_qmp_socket: &Path,
-    default_serial_log: &Path,
-) -> Result<SessionMetadata> {
-    Ok(SessionMetadata {
-        runner_pid: value
-            .get("runner_pid")
-            .and_then(Value::as_u64)
-            .or(child_id.map(u64::from))
-            .context("xtask metadata missing runner_pid")? as u32,
-        qemu_pid: value
-            .get("qemu_pid")
-            .and_then(Value::as_u64)
-            .map(|pid| pid as u32),
-        qmp_socket: value
-            .get("qmp_socket")
-            .and_then(Value::as_str)
-            .map(PathBuf::from)
-            .unwrap_or_else(|| default_qmp_socket.to_path_buf()),
-        serial_log: value
-            .get("serial_log")
-            .and_then(Value::as_str)
-            .map(PathBuf::from)
-            .unwrap_or_else(|| default_serial_log.to_path_buf()),
-        iso_image: value
-            .get("iso_image")
-            .and_then(Value::as_str)
-            .map(PathBuf::from),
-    })
+#[derive(Debug)]
+enum WorkflowJob {
+    Test { test: Option<String> },
+    BuildRootfs { config: BuildRootfsConfig },
 }
 
-fn parse_xtask_events(output: &str) -> Vec<XtaskEvent> {
-    output
-        .lines()
-        .filter_map(|line| serde_json::from_str::<XtaskEvent>(line).ok())
-        .map(|mut event| {
-            if let Some(output) = &event.output {
-                event.output = Some(truncate_log(output));
-            }
-            event
+impl WorkflowJob {
+    fn command_name(&self) -> &'static str {
+        match self {
+            Self::Test { .. } => "test",
+            Self::BuildRootfs { .. } => "build-rootfs",
+        }
+    }
+}
+
+async fn run_workflow_job(
+    id: u64,
+    command: String,
+    timeout_ms: Option<u64>,
+    status_path: PathBuf,
+    job: WorkflowJob,
+) {
+    let collector = EventCollector::default();
+    let started = std::time::Instant::now();
+    let handle = tokio::task::spawn_blocking({
+        let collector = collector.clone();
+        move || match job {
+            WorkflowJob::Test { test } => run_workflow_tests(&collector, test.as_deref()),
+            WorkflowJob::BuildRootfs { config } => build_rootfs(config, &collector),
+        }
+    });
+
+    let timed_out = false;
+    let exit_code = loop {
+        if let Some(limit_ms) = timeout_ms
+            && started.elapsed() >= Duration::from_millis(limit_ms)
+        {
+            handle.abort();
+            let events = collector.events();
+            let stdout = summarize_workflow_events(&events);
+            let status = command_status_from_parts(
+                id,
+                &command,
+                None,
+                true,
+                true,
+                timeout_ms,
+                1,
+                events,
+                stdout,
+                format!("timed out waiting for command {id}"),
+            );
+            let _ = write_command_status(&status_path, &status).await;
+            return;
+        }
+
+        if handle.is_finished() {
+            break match handle.await {
+                Ok(Ok(code)) => code,
+                Ok(Err(err)) => {
+                    let status = status_from_error(
+                        id,
+                        &command,
+                        timeout_ms,
+                        timed_out,
+                        collector.events(),
+                        err,
+                    );
+                    let _ = write_command_status(&status_path, &status).await;
+                    return;
+                }
+                Err(err) => {
+                    let status = command_status_from_parts(
+                        id,
+                        &command,
+                        None,
+                        true,
+                        timed_out,
+                        timeout_ms,
+                        1,
+                        collector.events(),
+                        String::new(),
+                        truncate_log(&err.to_string()),
+                    );
+                    let _ = write_command_status(&status_path, &status).await;
+                    return;
+                }
+            };
+        }
+
+        let events = collector.events();
+        let stdout = summarize_workflow_events(&events);
+        let status = command_status_from_parts(
+            id,
+            &command,
+            None,
+            false,
+            false,
+            timeout_ms,
+            0,
+            events,
+            stdout,
+            String::new(),
+        );
+        let _ = write_command_status(&status_path, &status).await;
+        tokio::time::sleep(COMMAND_STATUS_REFRESH).await;
+    };
+
+    let events = collector.events();
+    let stdout = summarize_workflow_events(&events);
+    let status = command_status_from_parts(
+        id,
+        &command,
+        None,
+        true,
+        timed_out,
+        timeout_ms,
+        exit_code,
+        events,
+        stdout,
+        String::new(),
+    );
+    let _ = write_command_status(&status_path, &status).await;
+}
+
+async fn write_command_status(path: &Path, status: &CommandStatus) -> Result<()> {
+    fs::write(path, serde_json::to_vec_pretty(status)?)
+        .await
+        .with_context(|| format!("failed to write command status {}", path.display()))
+}
+
+fn status_from_error(
+    id: u64,
+    command: &str,
+    timeout_ms: Option<u64>,
+    timed_out: bool,
+    events: Vec<WorkflowEvent>,
+    err: anyhow::Error,
+) -> CommandStatus {
+    command_status_from_parts(
+        id,
+        command,
+        None,
+        true,
+        timed_out,
+        timeout_ms,
+        1,
+        events,
+        String::new(),
+        truncate_log(&err.to_string()),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn command_status_from_parts(
+    id: u64,
+    command: &str,
+    pid: Option<u32>,
+    finished: bool,
+    timed_out: bool,
+    timeout_ms: Option<u64>,
+    exit_code: i32,
+    events: Vec<WorkflowEvent>,
+    stdout: String,
+    stderr: String,
+) -> CommandStatus {
+    CommandStatus {
+        id,
+        command: command.to_string(),
+        pid,
+        finished,
+        timed_out,
+        timeout_ms,
+        exit_code,
+        stdout: truncate_log(&stdout),
+        stderr: truncate_log(&stderr),
+        stdout_limit: Some(LOG_LIMIT),
+        stderr_limit: Some(LOG_LIMIT),
+        stdout_path: None,
+        stderr_path: None,
+        events: truncate_workflow_events(events),
+    }
+}
+
+fn truncate_workflow_events(events: Vec<WorkflowEvent>) -> Vec<WorkflowEvent> {
+    events
+        .into_iter()
+        .map(|event| match event {
+            WorkflowEvent::Log {
+                command,
+                stream,
+                output,
+            } => WorkflowEvent::Log {
+                command,
+                stream,
+                output: truncate_log(&output),
+            },
+            other => other,
         })
         .collect()
 }
 
-fn summarize_xtask_events(events: &[XtaskEvent]) -> String {
+fn summarize_workflow_events(events: &[WorkflowEvent]) -> String {
     let mut lines = Vec::new();
     for event in events {
-        match event.event.as_str() {
-            "started" => {
-                if let Some(command) = &event.command {
-                    lines.push(format!("started {command}"));
-                }
-            }
-            "progress" => {
-                let step = event.step.as_deref().unwrap_or("progress");
-                let message = event.message.as_deref().unwrap_or_default();
+        match event {
+            WorkflowEvent::Started { command } => lines.push(format!("started {command}")),
+            WorkflowEvent::Progress { step, message, .. } => {
                 lines.push(format!("{step}: {message}"));
             }
-            "test" => {
-                let name = event.name.as_deref().unwrap_or("test");
-                let status = event.status.as_deref().unwrap_or("unknown");
-                let message = event.message.as_deref().unwrap_or_default();
+            WorkflowEvent::Test {
+                name,
+                status,
+                message,
+                ..
+            } => {
                 if message.is_empty() {
-                    lines.push(format!("test {name}: {status}"));
+                    lines.push(format!("test {name}: {}", status.as_str()));
                 } else {
-                    lines.push(format!("test {name}: {status} - {message}"));
+                    lines.push(format!("test {name}: {} - {message}", status.as_str()));
                 }
             }
-            "log" => {
-                if let Some(output) = &event.output {
-                    lines.push(truncate_log(output));
-                }
-            }
-            "finished" => {
-                let command = event.command.as_deref().unwrap_or("command");
-                let status = event.status.as_deref().unwrap_or("unknown");
-                let exit_code = event.exit_code.unwrap_or_default();
-                lines.push(format!("finished {command}: {status} (exit {exit_code})"));
-            }
-            _ => {}
+            WorkflowEvent::Log { output, .. } => lines.push(truncate_log(output)),
+            WorkflowEvent::Metadata { metadata, .. } => lines.push(metadata.to_string()),
+            WorkflowEvent::Finished {
+                command,
+                exit_code,
+                status,
+            } => lines.push(format!(
+                "finished {command}: {} (exit {exit_code})",
+                status.as_str()
+            )),
         }
     }
     truncate_log(&lines.join("\n"))

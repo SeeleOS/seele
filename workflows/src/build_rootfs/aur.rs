@@ -7,7 +7,7 @@ use std::{
 use xshell::{Shell, cmd};
 
 use super::RebuildAur;
-use crate::json_output::{JsonEvent, OutputMode, emit, run_xshell_command};
+use crate::reporter::{WorkflowReporter, log_event, progress, run_xshell_command};
 
 pub const AUR_PACKAGES: &[&str] = &["linux-test-project-git"];
 const BUILD_USER: &str = "seelebuild";
@@ -20,7 +20,7 @@ pub fn install_aur_packages(
     pacman_conf: &Path,
     rootfs_mount: &Path,
     rebuild_aur: RebuildAur,
-    output_mode: OutputMode,
+    reporter: &dyn WorkflowReporter,
 ) -> Result<()> {
     let build_root = repo_root.join("target").join("aur-build");
     let cache_root = repo_root.join("target").join(ROOTFS_CACHE_DIR);
@@ -29,15 +29,15 @@ pub fn install_aur_packages(
     fs::create_dir_all(&cache_root)
         .with_context(|| format!("failed to create {}", cache_root.display()))?;
 
-    install_pacman_config(rootfs_mount, pacman_conf, output_mode)?;
-    let build_user_uid = ensure_build_user(rootfs_mount, output_mode)?;
+    install_pacman_config(rootfs_mount, pacman_conf, reporter)?;
+    let build_user_uid = ensure_build_user(rootfs_mount, reporter)?;
     let context = AurInstallContext {
         sh,
         rootfs_mount,
         build_root: &build_root,
         cache_root: &cache_root,
         build_user_uid,
-        output_mode,
+        reporter,
     };
 
     for package in AUR_PACKAGES {
@@ -68,7 +68,7 @@ fn ensure_cached_package(
 
     if cache_hit {
         emit_cache_event(
-            context.output_mode,
+            context.reporter,
             package,
             "aur-cache-hit",
             "using cached AUR package",
@@ -78,48 +78,44 @@ fn ensure_cached_package(
             context.rootfs_mount,
             &package_cache,
             package,
-            context.output_mode,
+            context.reporter,
         )?;
         return Ok(());
     }
 
     emit_cache_event(
-        context.output_mode,
+        context.reporter,
         package,
         "aur-cache-miss",
         "building AUR package cache",
     )?;
     let package_dir =
-        prepare_package_checkout(context.sh, context.build_root, package, context.output_mode)?;
+        prepare_package_checkout(context.sh, context.build_root, package, context.reporter)?;
     let guest_package_dir = sync_package_to_rootfs(
         context.sh,
         context.rootfs_mount,
         &package_dir,
         package,
         context.build_user_uid,
-        context.output_mode,
+        context.reporter,
     )?;
     emit_cache_event(
-        context.output_mode,
+        context.reporter,
         package,
         "aur-build",
         "running makepkg in rootfs",
     )?;
-    build_package_in_rootfs(
-        context.rootfs_mount,
-        &guest_package_dir,
-        context.output_mode,
-    )?;
+    build_package_in_rootfs(context.rootfs_mount, &guest_package_dir, context.reporter)?;
     refresh_package_cache(
         context.sh,
         context.rootfs_mount,
         &package_cache,
         &guest_package_dir,
         package,
-        context.output_mode,
+        context.reporter,
     )?;
     emit_cache_event(
-        context.output_mode,
+        context.reporter,
         package,
         "aur-install",
         "installing cached AUR package",
@@ -129,16 +125,15 @@ fn ensure_cached_package(
         context.rootfs_mount,
         &package_cache,
         package,
-        context.output_mode,
+        context.reporter,
     )?;
 
-    if context.output_mode.is_json() {
-        emit(&JsonEvent::progress(
-            "build-rootfs",
-            "aur-cache",
-            &format!("cached AUR package {package}"),
-        ))?;
-    }
+    progress(
+        context.reporter,
+        "build-rootfs",
+        "aur-cache",
+        &format!("cached AUR package {package}"),
+    )?;
     Ok(())
 }
 
@@ -148,25 +143,21 @@ struct AurInstallContext<'a> {
     build_root: &'a Path,
     cache_root: &'a Path,
     build_user_uid: u32,
-    output_mode: OutputMode,
+    reporter: &'a dyn WorkflowReporter,
 }
 
 fn emit_cache_event(
-    output_mode: OutputMode,
+    reporter: &dyn WorkflowReporter,
     package: &str,
     step: &'static str,
     message: &'static str,
 ) -> Result<()> {
-    if output_mode.is_json() {
-        emit(&JsonEvent::progress(
-            "build-rootfs",
-            step,
-            &format!("{package}: {message}"),
-        ))?;
-    } else {
-        eprintln!("{package}: {message}");
-    }
-    Ok(())
+    progress(
+        reporter,
+        "build-rootfs",
+        step,
+        &format!("{package}: {message}"),
+    )
 }
 
 fn cached_package_exists(package_cache: &Path) -> Result<bool> {
@@ -200,20 +191,20 @@ fn refresh_package_cache(
     package_cache: &Path,
     guest_package_dir: &str,
     package: &str,
-    output_mode: OutputMode,
+    reporter: &dyn WorkflowReporter,
 ) -> Result<()> {
     let host_cache_dir = package_cache;
     run_xshell_command(
         "build-rootfs",
         sh,
         cmd!(sh, "sudo rm -rf {host_cache_dir}"),
-        output_mode,
+        reporter,
     )?;
     run_xshell_command(
         "build-rootfs",
         sh,
         cmd!(sh, "sudo mkdir -p {host_cache_dir}"),
-        output_mode,
+        reporter,
     )?;
 
     let host_package_dir = rootfs_mount.join(guest_package_dir.trim_start_matches('/'));
@@ -226,7 +217,7 @@ fn refresh_package_cache(
             "build-rootfs",
             sh,
             cmd!(sh, "sudo cp -a {built_package} {host_cache_dir}"),
-            output_mode,
+            reporter,
         )?;
     }
     Ok(())
@@ -237,7 +228,7 @@ fn install_cached_package(
     rootfs_mount: &Path,
     package_cache: &Path,
     package: &str,
-    output_mode: OutputMode,
+    reporter: &dyn WorkflowReporter,
 ) -> Result<()> {
     let guest_cache_path = format!("/tmp/seele-aur-cache/{package}");
     let host_cache_path = rootfs_mount.join(guest_cache_path.trim_start_matches('/'));
@@ -249,48 +240,48 @@ fn install_cached_package(
         "build-rootfs",
         sh,
         cmd!(sh, "sudo rm -rf {host_cache_path}"),
-        output_mode,
+        reporter,
     )?;
     run_xshell_command(
         "build-rootfs",
         sh,
         cmd!(sh, "sudo mkdir -p {host_cache_path}"),
-        output_mode,
+        reporter,
     )?;
     for cached_package in cached_packages {
         run_xshell_command(
             "build-rootfs",
             sh,
             cmd!(sh, "sudo cp -a {cached_package} {host_cache_path}"),
-            output_mode,
+            reporter,
         )?;
     }
     run_chroot_shell(
         rootfs_mount,
         &format!("pacman --noconfirm --needed -U {guest_cache_path}/*.pkg.tar.*"),
-        output_mode,
+        reporter,
     )
     .with_context(|| format!("failed to install cached AUR package {package}"))
 }
 
-fn ensure_build_user(rootfs_mount: &Path, output_mode: OutputMode) -> Result<u32> {
+fn ensure_build_user(rootfs_mount: &Path, reporter: &dyn WorkflowReporter) -> Result<u32> {
     let user_exists =
-        run_chroot_shell(rootfs_mount, &format!("id -u {BUILD_USER}"), output_mode).is_ok();
+        run_chroot_shell(rootfs_mount, &format!("id -u {BUILD_USER}"), reporter).is_ok();
     if user_exists {
-        return get_build_user_uid(rootfs_mount, output_mode);
+        return get_build_user_uid(rootfs_mount, reporter);
     }
 
     run_chroot_shell(
         rootfs_mount,
         &format!("useradd -m -s /bin/bash {BUILD_USER}"),
-        output_mode,
+        reporter,
     )
     .context("failed to create AUR build user")?;
-    get_build_user_uid(rootfs_mount, output_mode)
+    get_build_user_uid(rootfs_mount, reporter)
 }
 
-fn get_build_user_uid(rootfs_mount: &Path, output_mode: OutputMode) -> Result<u32> {
-    let output = run_chroot_output(rootfs_mount, &format!("id -u {BUILD_USER}"), output_mode)?;
+fn get_build_user_uid(rootfs_mount: &Path, reporter: &dyn WorkflowReporter) -> Result<u32> {
+    let output = run_chroot_output(rootfs_mount, &format!("id -u {BUILD_USER}"), reporter)?;
     let uid = output
         .trim()
         .parse()
@@ -301,7 +292,7 @@ fn get_build_user_uid(rootfs_mount: &Path, output_mode: OutputMode) -> Result<u3
 fn install_pacman_config(
     rootfs_mount: &Path,
     pacman_conf: &Path,
-    output_mode: OutputMode,
+    reporter: &dyn WorkflowReporter,
 ) -> Result<()> {
     let rootfs_pacman_conf = rootfs_mount.join("etc").join("pacman.conf");
     run_command(
@@ -311,7 +302,7 @@ fn install_pacman_config(
             .arg("-Dm644")
             .arg(pacman_conf)
             .arg(&rootfs_pacman_conf),
-        output_mode,
+        reporter,
     )
     .context("failed to install pacman config into rootfs")
 }
@@ -320,7 +311,7 @@ fn prepare_package_checkout(
     sh: &Shell,
     build_root: &Path,
     package: &str,
-    output_mode: OutputMode,
+    reporter: &dyn WorkflowReporter,
 ) -> Result<PathBuf> {
     let package_dir = build_root.join(package);
     let aur_url = format!("https://aur.archlinux.org/{package}.git");
@@ -329,13 +320,13 @@ fn prepare_package_checkout(
         "build-rootfs",
         sh,
         cmd!(sh, "rm -rf {package_dir}"),
-        output_mode,
+        reporter,
     )?;
     run_xshell_command(
         "build-rootfs",
         sh,
         cmd!(sh, "git clone {aur_url} {package_dir}"),
-        output_mode,
+        reporter,
     )?;
     Ok(package_dir)
 }
@@ -346,7 +337,7 @@ fn sync_package_to_rootfs(
     package_dir: &Path,
     package: &str,
     build_user_uid: u32,
-    output_mode: OutputMode,
+    reporter: &dyn WorkflowReporter,
 ) -> Result<String> {
     let host_build_root = rootfs_mount.join(GUEST_BUILD_ROOT.trim_start_matches('/'));
     let host_package_dir = host_build_root.join(package);
@@ -354,19 +345,19 @@ fn sync_package_to_rootfs(
         "build-rootfs",
         sh,
         cmd!(sh, "sudo rm -rf {host_package_dir}"),
-        output_mode,
+        reporter,
     )?;
     run_xshell_command(
         "build-rootfs",
         sh,
         cmd!(sh, "sudo mkdir -p {host_build_root}"),
-        output_mode,
+        reporter,
     )?;
     run_xshell_command(
         "build-rootfs",
         sh,
         cmd!(sh, "sudo cp -a {package_dir} {host_build_root}"),
-        output_mode,
+        reporter,
     )?;
     run_xshell_command(
         "build-rootfs",
@@ -375,7 +366,7 @@ fn sync_package_to_rootfs(
             let owner = format!("{build_user_uid}:{build_user_uid}");
             cmd!(sh, "sudo chown -R {owner} {host_package_dir}")
         },
-        output_mode,
+        reporter,
     )?;
     Ok(format!("{GUEST_BUILD_ROOT}/{package}"))
 }
@@ -383,19 +374,23 @@ fn sync_package_to_rootfs(
 fn build_package_in_rootfs(
     rootfs_mount: &Path,
     guest_package_dir: &str,
-    output_mode: OutputMode,
+    reporter: &dyn WorkflowReporter,
 ) -> Result<()> {
     run_chroot_shell(
         rootfs_mount,
         &format!(
             "cd {guest_package_dir} && runuser -u {BUILD_USER} -- makepkg --syncdeps --noconfirm --needed --cleanbuild --force --nocheck"
         ),
-        output_mode,
+        reporter,
     )
     .with_context(|| format!("failed to build AUR package in guest path {guest_package_dir}"))
 }
 
-fn run_chroot_shell(rootfs_mount: &Path, script: &str, output_mode: OutputMode) -> Result<()> {
+fn run_chroot_shell(
+    rootfs_mount: &Path,
+    script: &str,
+    reporter: &dyn WorkflowReporter,
+) -> Result<()> {
     let mut command = Command::new("sudo");
     command
         .arg("arch-chroot")
@@ -403,11 +398,15 @@ fn run_chroot_shell(rootfs_mount: &Path, script: &str, output_mode: OutputMode) 
         .arg("/usr/bin/bash")
         .arg("-lc")
         .arg(script);
-    run_command("build-rootfs", &mut command, output_mode)
+    run_command("build-rootfs", &mut command, reporter)
 }
 
-fn run_command(command_name: &str, command: &mut Command, output_mode: OutputMode) -> Result<()> {
-    if !output_mode.is_json() {
+fn run_command(
+    command_name: &str,
+    command: &mut Command,
+    reporter: &dyn WorkflowReporter,
+) -> Result<()> {
+    if !reporter.capture_subprocess_output() {
         let status = command.status().context("failed to run command")?;
         if !status.success() {
             bail!("command failed with status {status}");
@@ -422,11 +421,11 @@ fn run_command(command_name: &str, command: &mut Command, output_mode: OutputMod
         .context("failed to run command")?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     if !stdout.is_empty() {
-        emit(&JsonEvent::log(command_name, "stdout", &stdout))?;
+        log_event(reporter, command_name, "stdout", &stdout)?;
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !stderr.is_empty() {
-        emit(&JsonEvent::log(command_name, "stderr", &stderr))?;
+        log_event(reporter, command_name, "stderr", &stderr)?;
     }
     if !output.status.success() {
         bail!("command failed with status {}", output.status);
@@ -434,7 +433,11 @@ fn run_command(command_name: &str, command: &mut Command, output_mode: OutputMod
     Ok(())
 }
 
-fn run_chroot_output(rootfs_mount: &Path, script: &str, output_mode: OutputMode) -> Result<String> {
+fn run_chroot_output(
+    rootfs_mount: &Path,
+    script: &str,
+    reporter: &dyn WorkflowReporter,
+) -> Result<String> {
     let mut command = Command::new("sudo");
     command
         .arg("arch-chroot")
@@ -443,7 +446,7 @@ fn run_chroot_output(rootfs_mount: &Path, script: &str, output_mode: OutputMode)
         .arg("-lc")
         .arg(script);
 
-    if !output_mode.is_json() {
+    if !reporter.capture_subprocess_output() {
         let output = command.output().context("failed to run command")?;
         if !output.status.success() {
             bail!("command failed with status {}", output.status);
@@ -458,11 +461,11 @@ fn run_chroot_output(rootfs_mount: &Path, script: &str, output_mode: OutputMode)
         .context("failed to run command")?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     if !stdout.is_empty() {
-        emit(&JsonEvent::log("build-rootfs", "stdout", &stdout))?;
+        log_event(reporter, "build-rootfs", "stdout", &stdout)?;
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !stderr.is_empty() {
-        emit(&JsonEvent::log("build-rootfs", "stderr", &stderr))?;
+        log_event(reporter, "build-rootfs", "stderr", &stderr)?;
     }
     if !output.status.success() {
         bail!("command failed with status {}", output.status);

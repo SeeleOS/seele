@@ -4,7 +4,7 @@
 
 ## Tools
 
-- `start`: run `cargo run -p xtask -- mcp-run`, build the kernel, create the Limine ISO, launch QEMU, and capture machine-readable metadata.
+- `start`: run `cargo run -p xtask -- mcp-run`, build the kernel, create the Limine ISO, launch QEMU, and track the MCP-managed runner, QMP socket, and serial log.
 - `status`: report runner/QEMU PIDs, QMP socket path/connectivity, serial log path, and last exit status.
 - `serial_tail`: return the latest serial log lines or bytes.
 - `screenshot`: use QMP `screendump`, convert PPM to PNG, and return image content.
@@ -14,8 +14,8 @@
 - `debug_start`: start the VM paused at QEMU's GDB stub and attach `gdb` to the kernel ELF.
 - `debug_command`: run a command in the active GDB session and return output up to the next prompt.
 - `debug_status`, `debug_stop`: inspect or stop the active GDB-backed VM session.
-- `run_tests`, `build_rootfs`: start the existing cargo aliases as background jobs and return a job id plus status path.
-- `command_status`: poll a background job and return its pid, live truncated stdout/stderr tails, parsed JSON events when available, and final exit status.
+- `run_tests`, `build_rootfs`: start shared `seele-workflows` jobs in the MCP process and return a job id plus status path.
+- `command_status`: poll a background job and return its structured workflow events, summarized output, and final exit status.
 - `command_wait`: block until a background job finishes, then return its final status.
 - `ensure_rootfs_mounted`: mount `target/rootfs_mnt/` from `target/rootfs.img`, leaving an already mounted `target/rootfs_mnt/` unchanged.
 
@@ -38,4 +38,4 @@ After changing MCP or VM launch behavior:
 5. Stop the VM with `stop` or `cleanup`.
 6. Confirm `status` is idle and no session metadata remains.
 
-For long-running `run_tests` or `build_rootfs` work, call the tool once, then either `command_wait` on the returned id or use `command_status` for live tails. Running jobs refresh their status about once per second and include `stdout_path`/`stderr_path` for direct log inspection when the summarized tail is not enough.
+For long-running `run_tests` or `build_rootfs` work, call the tool once, then either `command_wait` on the returned id or use `command_status` for live structured workflow events. Running jobs refresh their status about once per second.

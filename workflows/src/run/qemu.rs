@@ -1,5 +1,5 @@
 use super::terminal::{cleanup_socket, drain_serial_log, stream_serial_log};
-use crate::json_output::{JsonEvent, OutputMode, emit};
+use crate::reporter::{WorkflowReporter, metadata_event};
 use anyhow::{Context, Result};
 use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
 use serde_json::json;
@@ -110,8 +110,15 @@ pub fn run_qemu(iso_path: &Path, options: &RunOptions) -> Result<i32> {
     Ok(run_qemu_inner_capture(iso_path, options, true)?.exit_code)
 }
 
-pub fn run_qemu_test_capture(iso_path: &Path, output_mode: OutputMode) -> Result<QemuTestResult> {
-    run_qemu_inner_capture(iso_path, &RunOptions::for_tests(), !output_mode.is_json())
+pub fn run_qemu_test_capture(
+    iso_path: &Path,
+    reporter: &dyn WorkflowReporter,
+) -> Result<QemuTestResult> {
+    run_qemu_inner_capture(
+        iso_path,
+        &RunOptions::for_tests(),
+        !reporter.capture_subprocess_output(),
+    )
 }
 
 pub fn run_qemu_expect_serial_failure_capture(
@@ -263,7 +270,11 @@ fn run_qemu_inner_capture(
     })
 }
 
-pub fn run_qemu_mcp(iso_path: &Path, options: &RunOptions, output_mode: OutputMode) -> Result<i32> {
+pub fn run_qemu_mcp(
+    iso_path: &Path,
+    options: &RunOptions,
+    reporter: &dyn WorkflowReporter,
+) -> Result<i32> {
     let context = QemuRunContext::new(options);
     let mut cmd = build_qemu_command(iso_path, options, &context)?;
     let mut child = cmd.spawn().context("failed to start qemu-system-x86_64")?;
@@ -274,11 +285,7 @@ pub fn run_qemu_mcp(iso_path: &Path, options: &RunOptions, output_mode: OutputMo
         "qmp_socket": context.qmp_socket,
         "iso_image": iso_path,
     });
-    if output_mode.is_json() {
-        emit(&JsonEvent::metadata("mcp-run", metadata))?;
-    } else {
-        println!("{metadata}");
-    }
+    metadata_event(reporter, "mcp-run", metadata)?;
     let _ = std::io::stdout().flush();
     let status = child.wait().context("failed to wait on qemu")?;
     cleanup_qemu_context(&context);

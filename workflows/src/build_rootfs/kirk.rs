@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::{fs, path::Path};
 use xshell::{Shell, cmd};
 
-use crate::json_output::{OutputMode, run_xshell_command};
+use crate::reporter::{WorkflowReporter, run_xshell_command};
 
 const KIRK_URL: &str = "https://github.com/linux-test-project/kirk";
 
@@ -10,7 +10,7 @@ pub fn install_kirk(
     sh: &Shell,
     repo_root: &Path,
     rootfs_mount: &Path,
-    output_mode: OutputMode,
+    reporter: &dyn WorkflowReporter,
 ) -> Result<()> {
     let kirk_checkout = repo_root.join("target").join("kirk");
     let host_kirk_dir = rootfs_mount.join("opt").join("kirk");
@@ -23,7 +23,7 @@ pub fn install_kirk(
             "build-rootfs",
             sh,
             cmd!(sh, "git clone --depth 1 {KIRK_URL} {kirk_checkout}"),
-            output_mode,
+            reporter,
         )
         .context("failed to clone kirk")?;
     } else {
@@ -31,21 +31,21 @@ pub fn install_kirk(
             "build-rootfs",
             sh,
             cmd!(sh, "git -C {kirk_checkout} fetch --depth 1 origin master"),
-            output_mode,
+            reporter,
         )
         .context("failed to update kirk checkout")?;
         run_xshell_command(
             "build-rootfs",
             sh,
             cmd!(sh, "git -C {kirk_checkout} reset --hard FETCH_HEAD"),
-            output_mode,
+            reporter,
         )
         .context("failed to reset kirk checkout")?;
         run_xshell_command(
             "build-rootfs",
             sh,
             cmd!(sh, "git -C {kirk_checkout} clean -fdx"),
-            output_mode,
+            reporter,
         )
         .context("failed to clean kirk checkout")?;
     }
@@ -54,19 +54,19 @@ pub fn install_kirk(
         "build-rootfs",
         sh,
         cmd!(sh, "sudo rm -rf {host_kirk_dir}"),
-        output_mode,
+        reporter,
     )?;
     run_xshell_command(
         "build-rootfs",
         sh,
         cmd!(sh, "sudo mkdir -p {host_kirk_dir}"),
-        output_mode,
+        reporter,
     )?;
     run_xshell_command(
         "build-rootfs",
         sh,
         cmd!(sh, "sudo cp -a {kirk_checkout}/. {host_kirk_dir}"),
-        output_mode,
+        reporter,
     )?;
     run_xshell_command(
         "build-rootfs",
@@ -75,14 +75,14 @@ pub fn install_kirk(
             sh,
             "sudo install -Dm755 {host_kirk_dir}/kirk {host_kirk_bin}"
         ),
-        output_mode,
+        reporter,
     )?;
     fs::write(&ltp_runner, LTP_RUNNER).context("failed to write LTP runner script")?;
     run_xshell_command(
         "build-rootfs",
         sh,
         cmd!(sh, "sudo install -Dm755 {ltp_runner} {host_ltp_runner}"),
-        output_mode,
+        reporter,
     )?;
     Ok(())
 }

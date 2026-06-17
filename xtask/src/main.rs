@@ -1,19 +1,14 @@
-mod build_rootfs;
 mod cli;
-mod json_output;
-mod run;
-mod test;
 
 use anyhow::Result;
-use cli::Command;
-use std::process::exit;
-
-use crate::{
-    build_rootfs::build_rootfs,
-    json_output::OutputMode,
-    run::{mcp_run, run},
+use cli::{BuildRootfsArgs, Command, McpRunArgs, RunArgs};
+use seele_workflows::{
+    build_rootfs::{BuildRootfsConfig, build_rootfs},
+    reporter::HumanReporter,
+    run::{McpRunConfig, RunArgs as WorkflowRunArgs, mcp_run, run},
     test::test,
 };
+use std::process::exit;
 
 fn main() {
     match real_main() {
@@ -26,18 +21,30 @@ fn main() {
 }
 
 fn real_main() -> Result<i32> {
+    let reporter = HumanReporter;
     match cli::parse().command {
-        Command::Run(args) => run(args),
-        Command::McpRun(args) => mcp_run(args),
-        Command::Test(args) => test(output_mode(args.json_output), args.test.as_deref()),
-        Command::BuildRootfs(args) => build_rootfs(args),
+        Command::Run(args) => run(run_args(args)),
+        Command::McpRun(args) => mcp_run(mcp_run_config(args), &reporter),
+        Command::Test(args) => test(&reporter, args.test.as_deref()),
+        Command::BuildRootfs(args) => build_rootfs(build_rootfs_config(args), &reporter),
     }
 }
 
-fn output_mode(json_output: bool) -> OutputMode {
-    if json_output {
-        OutputMode::Json
-    } else {
-        OutputMode::Human
+fn run_args(args: RunArgs) -> WorkflowRunArgs {
+    WorkflowRunArgs { agent: args.agent }
+}
+
+fn mcp_run_config(args: McpRunArgs) -> McpRunConfig {
+    McpRunConfig {
+        enable_profiling: args.enable_profiling,
+    }
+}
+
+fn build_rootfs_config(args: BuildRootfsArgs) -> BuildRootfsConfig {
+    BuildRootfsConfig {
+        override_rootfs: args.override_rootfs,
+        rebuild_aur: args.rebuild_aur,
+        rebuild_aur_packages: args.rebuild_aur_packages,
+        passthrough: args.passthrough,
     }
 }

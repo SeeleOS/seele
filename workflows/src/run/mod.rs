@@ -5,7 +5,6 @@ pub mod qemu;
 mod terminal;
 
 use anyhow::{Context, Result};
-use clap::Args;
 use std::fs;
 
 use self::{
@@ -13,20 +12,17 @@ use self::{
     build_iso::create_boot_iso,
     qemu::{RunOptions, run_qemu, run_qemu_mcp},
 };
-use crate::json_output::{JsonEvent, OutputMode, emit, remove_file};
+use crate::reporter::{
+    FinishStatus, HumanReporter, WorkflowReporter, finished, remove_file, started,
+};
 
-#[derive(Debug, Args)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct RunArgs {
-    #[arg(long)]
     pub agent: bool,
 }
 
-#[derive(Debug, Args)]
-pub struct McpRunArgs {
-    #[arg(long)]
-    pub json_output: bool,
-
-    #[arg(long)]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct McpRunConfig {
     pub enable_profiling: bool,
 }
 
@@ -42,20 +38,13 @@ pub fn run(args: RunArgs) -> Result<i32> {
     run_kernel(args.into_options())
 }
 
-pub fn mcp_run(args: McpRunArgs) -> Result<i32> {
-    let output_mode = if args.json_output {
-        OutputMode::Json
-    } else {
-        OutputMode::Human
-    };
-    if output_mode.is_json() {
-        emit(&JsonEvent::started("mcp-run"))?;
-    }
+pub fn mcp_run(config: McpRunConfig, reporter: &dyn WorkflowReporter) -> Result<i32> {
+    started(reporter, "mcp-run")?;
     let kernel = build_kernel_with_options(
         BuildMode::Run,
-        output_mode,
+        reporter,
         BuildOptions {
-            enable_profiling: args.enable_profiling,
+            enable_profiling: config.enable_profiling,
         },
     )?
     .into_iter()
@@ -63,20 +52,20 @@ pub fn mcp_run(args: McpRunArgs) -> Result<i32> {
     .context("kernel binary missing")?;
     let iso_path = create_boot_iso(&kernel)?;
     let options = RunOptions::for_agent_run_without_timeout();
-    let exit_code = run_qemu_mcp(&iso_path, &options, output_mode)?;
-    remove_file(&iso_path, output_mode)?;
-    if output_mode.is_json() {
-        emit(&JsonEvent::finished(
-            "mcp-run",
-            exit_code,
-            if exit_code == 0 { "ok" } else { "failed" },
-        ))?;
-    }
+    let exit_code = run_qemu_mcp(&iso_path, &options, reporter)?;
+    remove_file(&iso_path, reporter)?;
+    finished(
+        reporter,
+        "mcp-run",
+        exit_code,
+        FinishStatus::from_exit_code(exit_code),
+    )?;
     Ok(exit_code)
 }
 
 fn run_kernel(options: RunOptions) -> Result<i32> {
-    let kernel = build_kernel(OutputMode::Human)?
+    let reporter = HumanReporter;
+    let kernel = build_kernel(&reporter)?
         .into_iter()
         .next()
         .context("kernel binary missing")?;

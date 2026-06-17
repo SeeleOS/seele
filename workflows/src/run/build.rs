@@ -1,4 +1,4 @@
-use crate::json_output::OutputMode;
+use crate::reporter::{WorkflowReporter, log_event};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::{
@@ -22,25 +22,25 @@ pub struct BuildOptions {
     pub enable_profiling: bool,
 }
 
-pub fn build_kernel(output_mode: OutputMode) -> Result<Vec<PathBuf>> {
-    build_kernel_with_options(BuildMode::Run, output_mode, BuildOptions::default())
+pub fn build_kernel(reporter: &dyn WorkflowReporter) -> Result<Vec<PathBuf>> {
+    build_kernel_with_options(BuildMode::Run, reporter, BuildOptions::default())
 }
 
 pub fn build_kernel_with_options(
     mode: BuildMode,
-    output_mode: OutputMode,
+    reporter: &dyn WorkflowReporter,
     options: BuildOptions,
 ) -> Result<Vec<PathBuf>> {
-    build_kernel_with_mode(mode, output_mode, options)
+    build_kernel_with_mode(mode, reporter, options)
 }
 
-pub fn build_kernel_tests(output_mode: OutputMode) -> Result<Vec<PathBuf>> {
-    build_kernel_with_mode(BuildMode::UnitTest, output_mode, BuildOptions::default())
+pub fn build_kernel_tests(reporter: &dyn WorkflowReporter) -> Result<Vec<PathBuf>> {
+    build_kernel_with_mode(BuildMode::UnitTest, reporter, BuildOptions::default())
 }
 
 pub fn build_kernel_with_mode(
     mode: BuildMode,
-    output_mode: OutputMode,
+    reporter: &dyn WorkflowReporter,
     options: BuildOptions,
 ) -> Result<Vec<PathBuf>> {
     let sh = Shell::new()?;
@@ -80,7 +80,7 @@ pub fn build_kernel_with_mode(
 
     for line in reader.lines() {
         let line: String = line.context("failed to read cargo output")?;
-        if let Some(path) = handle_cargo_message(&line, &mode, output_mode) {
+        if let Some(path) = handle_cargo_message(&line, &mode, reporter) {
             executables.push(path);
         }
     }
@@ -157,15 +157,15 @@ fn cargo_args(mode: &BuildMode, options: BuildOptions) -> Vec<String> {
     args
 }
 
-fn handle_cargo_message(line: &str, mode: &BuildMode, output_mode: OutputMode) -> Option<PathBuf> {
+fn handle_cargo_message(
+    line: &str,
+    mode: &BuildMode,
+    reporter: &dyn WorkflowReporter,
+) -> Option<PathBuf> {
     let value: Value = match serde_json::from_str(line) {
         Ok(value) => value,
         Err(_) => {
-            if output_mode.is_json() {
-                eprintln!("{line}");
-            } else {
-                println!("{line}");
-            }
+            let _ = log_event(reporter, "build", "stdout", &format!("{line}\n"));
             return None;
         }
     };
@@ -173,11 +173,7 @@ fn handle_cargo_message(line: &str, mode: &BuildMode, output_mode: OutputMode) -
     match value.get("reason").and_then(Value::as_str) {
         Some("compiler-message") => {
             if let Some(rendered) = value["message"]["rendered"].as_str() {
-                if output_mode.is_json() {
-                    eprint!("{rendered}");
-                } else {
-                    print!("{rendered}");
-                }
+                let _ = log_event(reporter, "build", "stderr", rendered);
             }
             None
         }
