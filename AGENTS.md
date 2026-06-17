@@ -2,13 +2,11 @@
 
 ## Build, Test, and Development Commands
 
-- `cargo xrun`: launch the VM manually; use `cargo xrun -- --agent` as the serial-driven fallback when the `seele` MCP server is unavailable.
-- `cargo xtest`: build and run kernel unit tests in QEMU.
-- `cargo xbuild-rootfs`: build or refresh `target/rootfs.img` and the guest root filesystem contents.
-- `cargo xbuild-rootfs -- --override-rootfs`: rebuild `target/rootfs.img` from scratch.
+- `cargo xrun`, `cargo xtest`, `cargo xbuild-rootfs`, and related build/test commands are MCP-driven workflows in this repository. Do not run them directly on the host shell when MCP is available.
+- If MCP does not yet expose the needed action, extend the `seele` MCP server first instead of inventing a one-off host command path.
 - `cargo fmt --all`: format Rust code before submitting changes.
-- Prefer the `seele` MCP server for VM, serial, screenshot, input, and cleanup workflows. Do not run ad-hoc bare host commands for those tasks when MCP is available.
-- `seele` MCP server: when available, prefer its `start`, `status`, `serial_tail`, `screenshot`, QMP input, and cleanup tools for VM-driven VM workflows instead of hand-rolled QMP or terminal-socket scripts.
+- Prefer the `seele` MCP server for VM, serial, screenshot, input, cleanup, build, and test workflows. Do not run ad-hoc bare host commands for those tasks when MCP is available.
+- `seele` MCP server: when available, prefer its `start`, `status`, `serial_tail`, `screenshot`, QMP input, cleanup, and test/build tools instead of hand-rolled QMP, terminal-socket scripts, or direct host cargo invocations.
 - If a required tool is missing for this repository workflow, add it to the `flake.nix` dev shell instead of treating it as a one-off host prerequisite.
 - When adding new tooling for builds, tests, MCP workflows, debugging, image conversion, or VM automation, prefer adding it to the appropriate `flake.nix` dev shell or runtime input instead of relying on whatever happens to be installed on the host `PATH`.
 - When polling VM state or serial output, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
@@ -19,7 +17,7 @@
 - After mounting `target/rootfs_mnt/`, if you only need to read files from it, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
 - If the sandbox, `no_new_privileges`, missing mounts, or network restrictions block a necessary command, ask the user for privilege escalation or the required access instead of silently giving up on that path.
 
-After finishing a change, prefer the `seele` MCP workflow when available: run `run_tests`, then use `start`, `status`, `serial_tail`, and `screenshot` for VM smoke coverage, followed by `stop` or `cleanup`. If MCP is unavailable, run `cargo xtest` and `cargo xrun -- --agent` manually. If any required test fails, keep fixing the issue before considering the work done.
+After finishing a change, prefer the `seele` MCP workflow when available: run `run_tests`, then use `start`, `status`, `serial_tail`, and `screenshot` for VM smoke coverage, followed by `stop` or `cleanup`. If MCP is missing a required capability, add that capability to MCP rather than falling back to direct host project commands. If any required test fails, keep fixing the issue before considering the work done.
 
 ## Coding Style & Naming Conventions
 
@@ -57,7 +55,7 @@ There is no large standalone test suite yet; verification is primarily compile c
 - Treat compiler warnings as failures. Do not leave any `cargo check` warnings in the tree.
 - After finishing code changes, run `cargo clippy` and address its findings before considering the work complete.
 - Put focused Rust unit tests in the same file as the code they cover, inside a local `#[cfg(test)] mod tests {}` block. Do not create separate `test.rs` files for new code unless the existing module already uses that layout or the tests must span multiple files.
-- For syscall, process, terminal, or userspace changes, prefer the MCP VM path when available. Use `cargo xrun -- --agent` as the manual fallback.
+- For syscall, process, terminal, or userspace changes, prefer the MCP VM path when available. Do not use `cargo xrun -- --agent` as a manual fallback; add the missing MCP capability instead.
 - When validating MCP-driven VM behavior, verify QMP connectivity, serial log output, and screenshot capture when relevant, then stop the VM through the MCP cleanup/stop tool or by killing the reported runner and QEMU PIDs.
 - Add focused unit tests only when the target module already uses them.
 
@@ -128,7 +126,7 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 - For Codex-driven VM interaction, prefer the `seele` MCP server when it is available. Use `start` to launch the VM, `status` to confirm the runner/QEMU/QMP state, `serial_tail` for boot logs, `screenshot` for the display, and the QMP key/mouse tools for guest input.
 - When MCP is available, do not replace these workflows with ad-hoc bare shell commands; use the MCP tools first and only fall back to manual commands when MCP is unavailable.
 - Do not reintroduce the old background terminal input workflow. `cargo xrun -- --agent` no longer prints or uses a `background terminal input path`, `/tmp/seele-agent-tty.sock`, `SEELE_AGENT_TTY_SOCKET`, or a second guest serial port for stdin forwarding.
-- For manual fallback when MCP is unavailable, use `cargo xrun -- --agent` for serial-driven boot verification and host-side process inspection plus `kill` for cleanup. Do not invent a tty-socket or ad-hoc input path.
+- Do not rely on direct host-side cargo/QEMU/manual process workflows as a fallback. If MCP cannot do the job, extend MCP and use that path instead.
 - When debugging interactive login issues where the user needs to type a username or password manually, run `nix develop -c cargo xrun` in the foreground and let the user provide the login input, or use MCP QMP input if the login can be driven programmatically.
 - If QMP input appears to produce no reaction, treat kernel deadlock, echo being disabled, or the foreground being owned by another program as primary explanations to check before blaming the MCP transport.
 - After you finish using an MCP, interactive, or VM, terminate it yourself instead of relying on a default runner timeout to clean it up.
