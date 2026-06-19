@@ -125,6 +125,7 @@ Recent commits are short, imperative, and lowercase, for example: `deleted seele
 
 - Speak with the user in Chinese.
 - If the user provides a workflow or debugging suggestion that is broadly useful for future work in this repository, add it to `AGENTS.md` when appropriate instead of treating it as a one-off remark.
+- Use `agent-notes/` for local, long-running debugging notes such as current LTP failure lists, partial investigation state, and temporary handoff context. Keep `agent-notes/` gitignored and do not treat its contents as source-of-truth code or committed documentation.
 - For Codex-driven VM interaction, prefer the `seele` MCP server when it is available. Use `start` to launch the VM, `status` to confirm the runner/QEMU/QMP state, `serial_tail` for boot logs, `screenshot` for the display, and the QMP key/mouse tools for guest input.
 - When MCP is available, do not replace these workflows with ad-hoc bare shell commands; use the MCP tools first and only fall back to manual commands when MCP is unavailable.
 - Do not reintroduce the old background terminal input workflow. `cargo xrun -- --agent` no longer prints or uses a `background terminal input path`, `/tmp/seele-agent-tty.sock`, `SEELE_AGENT_TTY_SOCKET`, or a second guest serial port for stdin forwarding.
