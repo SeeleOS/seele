@@ -18,7 +18,7 @@ use crate::{
         vfs_traits::{File as VfsFile, FileLike, FileLikeType, Whence},
     },
     impl_cast_function, impl_cast_function_non_trait,
-    memory::{addrspace::mem_area::Data, protection::Protection},
+    memory::{addrspace::mem_area::Data, protection::Protection, utils::Mut},
     object::{
         FileFlags, Object,
         config::ConfigurateRequest,
@@ -34,6 +34,7 @@ use crate::{
 pub struct OpenedFileObject {
     backend: OpenBackend,
     open_state: OpenState,
+    directory_offset: Mut<usize>,
     path: Path,
     mount_device_id: u64,
     mount_id: u64,
@@ -141,6 +142,7 @@ impl OpenedFileObject {
         Self {
             backend,
             open_state: OpenState::default(),
+            directory_offset: Mut::new(0),
             path,
             mount_device_id,
             mount_id,
@@ -212,6 +214,18 @@ impl OpenedFileObject {
 
     pub fn directory_contents(&self) -> ObjectResult<Vec<DirectoryContentInfo>> {
         self.resolve_dir()?.lock().contents().map_err(Into::into)
+    }
+
+    pub fn directory_offset(&self, entry_count: usize) -> usize {
+        let mut offset = self.directory_offset.lock();
+        let current_offset = (*offset).min(entry_count);
+        *offset = current_offset;
+        current_offset
+    }
+
+    pub fn advance_directory_offset(&self, count: usize) {
+        let mut offset = self.directory_offset.lock();
+        *offset = offset.saturating_add(count);
     }
 
     pub fn read_at(&self, buf: &mut [u8], offset: u64) -> FSResult<usize> {

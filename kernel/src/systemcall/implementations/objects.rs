@@ -3,8 +3,7 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::memory::utils::Mut;
-use alloc::{collections::btree_map::BTreeMap, format, string::String, vec, vec::Vec};
+use alloc::{format, string::String, vec, vec::Vec};
 
 use crate::{
     define_syscall,
@@ -25,18 +24,13 @@ use crate::{
         misc::{ObjectRef, get_object_current_process},
         traits::Readable,
     },
-    process::{
-        FdFlags,
-        manager::get_current_process,
-        misc::{ProcessID, with_current_process},
-    },
+    process::{FdFlags, manager::get_current_process, misc::with_current_process},
     systemcall::utils::{SyscallError, SyscallImpl, SyscallResult},
     thread::get_current_thread,
 };
 
 use super::{CloseRangeFlags, DupFlags, FallocateFlags, MemfdFlags};
 
-static DIR_OFFSETS: Mut<BTreeMap<(ProcessID, u64), usize>> = Mut::new(BTreeMap::new());
 static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
 const COPY_CHUNK_SIZE: usize = 16 * 1024;
 const LINEAR_IO_CHUNK_SIZE: usize = 64 * 1024;
@@ -125,9 +119,8 @@ fn fallback_dirent_inode(info: &DirectoryContentInfo, offset: usize) -> u64 {
 }
 
 fn directory_contents_with_dot_entries(
-    object_index: u64,
+    obj: &FileLikeObject,
 ) -> SyscallResult<Vec<DirectoryContentInfo>> {
-    let obj = get_object_current_process(object_index)?.as_file_like()?;
     let contents = obj.directory_contents().map_err(SyscallError::from)?;
     let mut entries = Vec::with_capacity(contents.len() + 2);
     if !contents.iter().any(|entry| entry.name == ".") {
@@ -180,11 +173,10 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
         return Err(SyscallError::BadAddress);
     }
 
-    let contents = directory_contents_with_dot_entries(object_index)?;
-    let current_pid = get_current_process().lock().pid;
-    let mut offsets = DIR_OFFSETS.lock();
-    let offset_entry = offsets.entry((current_pid, object_index)).or_insert(0usize);
-    if *offset_entry >= contents.len() {
+    let obj = get_object_current_process(object_index)?.as_file_like()?;
+    let contents = directory_contents_with_dot_entries(&obj)?;
+    let mut offset_entry = obj.directory_offset(contents.len());
+    if offset_entry >= contents.len() {
         return Ok(0);
     }
     if len < 24 {
@@ -192,8 +184,8 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
     }
     let mut bytes_written = 0;
 
-    while *offset_entry < contents.len() {
-        let info = &contents[*offset_entry];
+    while offset_entry < contents.len() {
+        let info = &contents[offset_entry];
         let name_bytes = info.name.as_bytes();
         let reclen = ((20 + name_bytes.len() + 7) & !7) as u16;
         if bytes_written + reclen as usize > len {
@@ -204,10 +196,10 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
         let inode = if info.inode != 0 {
             info.inode
         } else {
-            fallback_dirent_inode(info, *offset_entry)
+            fallback_dirent_inode(info, offset_entry)
         };
         entry[0..8].copy_from_slice(&inode.to_ne_bytes());
-        entry[8..16].copy_from_slice(&((*offset_entry as i64) + 1).to_ne_bytes());
+        entry[8..16].copy_from_slice(&((offset_entry as i64) + 1).to_ne_bytes());
         entry[16..18].copy_from_slice(&reclen.to_ne_bytes());
         entry[18] = match info.content_type {
             DirectoryContentType::Directory => 4,
@@ -219,7 +211,8 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
         user_safe::write_buffer(unsafe { buf.add(bytes_written) }, &entry)?;
 
         bytes_written += reclen as usize;
-        *offset_entry += 1;
+        offset_entry += 1;
+        obj.advance_directory_offset(1);
     }
 
     Ok(bytes_written)
@@ -230,11 +223,10 @@ fn write_dirents(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult {
         return Err(SyscallError::BadAddress);
     }
 
-    let contents = directory_contents_with_dot_entries(object_index)?;
-    let current_pid = get_current_process().lock().pid;
-    let mut offsets = DIR_OFFSETS.lock();
-    let offset_entry = offsets.entry((current_pid, object_index)).or_insert(0usize);
-    if *offset_entry >= contents.len() {
+    let obj = get_object_current_process(object_index)?.as_file_like()?;
+    let contents = directory_contents_with_dot_entries(&obj)?;
+    let mut offset_entry = obj.directory_offset(contents.len());
+    if offset_entry >= contents.len() {
         return Ok(0);
     }
     if len < 24 {
@@ -242,8 +234,8 @@ fn write_dirents(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult {
     }
     let mut bytes_written = 0;
 
-    while *offset_entry < contents.len() {
-        let info = &contents[*offset_entry];
+    while offset_entry < contents.len() {
+        let info = &contents[offset_entry];
         let name_bytes = info.name.as_bytes();
         let reclen = ((20 + name_bytes.len() + 7) & !7) as u16;
         if bytes_written + reclen as usize > len {
@@ -254,10 +246,10 @@ fn write_dirents(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult {
         let inode = if info.inode != 0 {
             info.inode
         } else {
-            fallback_dirent_inode(info, *offset_entry)
+            fallback_dirent_inode(info, offset_entry)
         };
         entry[0..8].copy_from_slice(&inode.to_ne_bytes());
-        entry[8..16].copy_from_slice(&((*offset_entry as u64) + 1).to_ne_bytes());
+        entry[8..16].copy_from_slice(&((offset_entry as u64) + 1).to_ne_bytes());
         entry[16..18].copy_from_slice(&reclen.to_ne_bytes());
         entry[18..18 + name_bytes.len()].copy_from_slice(name_bytes);
         entry[18 + name_bytes.len()] = 0;
@@ -269,7 +261,8 @@ fn write_dirents(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult {
         user_safe::write_buffer(unsafe { buf.add(bytes_written) }, &entry)?;
 
         bytes_written += reclen as usize;
-        *offset_entry += 1;
+        offset_entry += 1;
+        obj.advance_directory_offset(1);
     }
 
     Ok(bytes_written)
@@ -712,9 +705,7 @@ define_syscall!(Splice, |fd_in: ObjectRef,
 define_syscall!(Close, |object_num: usize| {
     let process_ref = get_current_process();
     let mut process = process_ref.lock();
-    let current_pid = process.pid;
     if process.clear_fd_slot(object_num).is_ok() {
-        DIR_OFFSETS.lock().remove(&(current_pid, object_num as u64));
         Ok(0)
     } else {
         Err(SyscallError::BadFileDescriptor)
