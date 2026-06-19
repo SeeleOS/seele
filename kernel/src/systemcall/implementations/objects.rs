@@ -967,10 +967,15 @@ define_syscall!(Pwrite64, |object: ObjectRef,
 #[cfg(test)]
 mod tests {
     use crate::{
-        object::{FileFlags, config::LinuxTermios, misc::get_object_current_process},
+        object::{
+            FileFlags, config::LinuxTermios, file_locks::LinuxFlock,
+            misc::get_object_current_process,
+        },
         process::FdFlags,
         systemcall::{
-            implementations::{CloseRange, CreatePty, Eventfd, Ioctl, SchedSetscheduler, Socket},
+            implementations::{
+                CloseRange, CreatePty, Eventfd, Fcntl, Ioctl, SchedSetscheduler, Socket,
+            },
             test::{
                 TestLinuxSchedParam, assert_fd_flags, assert_object_flags, close_test_fd,
                 expect_fd, occupied_fd_count,
@@ -1040,6 +1045,9 @@ mod tests {
     }
 
     fn object_control_syscalls_follow_linux_rules() {
+        const F_GETLK: u64 = 5;
+        const F_RDLCK: i16 = 0;
+        const F_UNLCK: i16 = 2;
         const TCGETS: u64 = 0x5401;
         const TIOCSPTLCK: u64 = 0x4004_5431;
         const TIOCGPTN: u64 = 0x8004_5430;
@@ -1058,6 +1066,26 @@ mod tests {
         assert_linux_layout::<TestLinuxSchedParam>(4, 4);
 
         let page = allocate_user_test_page();
+        let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+        write_user_value(
+            page + 1024,
+            &LinuxFlock {
+                lock_type: F_RDLCK,
+                whence: 0,
+                start: 0,
+                len: 0,
+                pid: 1234,
+                __reserved: 0,
+            },
+        );
+        expect_ok(
+            SyscallArgs::new([eventfd as u64, F_GETLK, page + 1024, 0, 0, 0]).call::<Fcntl>(),
+            0,
+        );
+        let no_conflict_lock = read_user_value::<LinuxFlock>(page + 1024);
+        assert_eq!(no_conflict_lock.lock_type, F_UNLCK);
+        assert_eq!(no_conflict_lock.pid, 1234);
+
         let [master_fd, slave_fd] = {
             write_user_value(page + 896, &0i32);
             write_user_value(page + 900, &0i32);
@@ -1162,5 +1190,6 @@ mod tests {
 
         close_test_fd(master_fd);
         close_test_fd(slave_fd);
+        close_test_fd(eventfd);
     }
 }

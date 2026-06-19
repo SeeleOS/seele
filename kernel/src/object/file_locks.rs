@@ -117,7 +117,6 @@ pub(crate) fn fcntl_get_lock(object: &ObjectRef, arg: *mut LinuxFlock, ofd: bool
         };
     } else {
         flock.lock_type = F_UNLCK;
-        flock.pid = 0;
     }
 
     user_safe::write(arg, &flock)?;
