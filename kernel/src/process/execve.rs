@@ -87,10 +87,10 @@ impl Process {
                 if let Some(parent) = prepared.parent {
                     parent.lock().addrspace = old_addrspace;
                 } else {
-                    defer_exec_addrspace_cleanup(old_addrspace);
+                    cleanup_exec_addrspace(old_addrspace);
                 }
             } else {
-                defer_exec_addrspace_cleanup(old_addrspace);
+                cleanup_exec_addrspace(old_addrspace);
             }
         }
 
@@ -169,11 +169,8 @@ fn wait_for_exec_siblings_to_stop(
     }
 }
 
-fn defer_exec_addrspace_cleanup(_addrspace: AddrSpace) {
-    // Other CPUs may still be returning from sibling threads while execve is
-    // replacing the process address space. Dropping the old page table here can
-    // leave those CPUs running with a reclaimed CR3; keep it alive until this
-    // path grows a real cross-CPU quiescence/RCU mechanism.
+fn cleanup_exec_addrspace(mut addrspace: AddrSpace) {
+    addrspace.clean();
 }
 
 pub fn execve(path: Path, args: Vec<String>, env: Vec<String>) -> Result<(), FSError> {
