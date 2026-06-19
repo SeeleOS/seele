@@ -30,7 +30,7 @@ struct SigSetWithSize {
     sigsetsize: usize,
 }
 
-fn has_unblocked_pending_signals() -> bool {
+pub(in crate::systemcall) fn has_unblocked_pending_signals() -> bool {
     let current = get_current_thread();
     let (blocked_signals, pending_signals, parent) = {
         let current = current.lock();
@@ -44,6 +44,27 @@ fn has_unblocked_pending_signals() -> bool {
     let unblockable = Signals::from(Signal::SIGKILL) | Signals::from(Signal::SIGSTOP);
     let deliverable = (pending_signals - blocked_signals) | (pending_signals & unblockable);
     !deliverable.is_empty()
+}
+
+pub(in crate::systemcall) fn with_temporary_signal_mask<T>(
+    new_mask: Option<Signals>,
+    body: impl FnOnce() -> Result<T, SyscallError>,
+) -> Result<T, SyscallError> {
+    let old_mask = new_mask.map(|new_mask| {
+        let current = get_current_thread();
+        let mut current = current.lock();
+        let old_mask = current.blocked_signals;
+        current.blocked_signals = new_mask;
+        old_mask
+    });
+
+    let result = body();
+
+    if let Some(old_mask) = old_mask {
+        get_current_thread().lock().blocked_signals = old_mask;
+    }
+
+    result
 }
 
 fn block_on_poller(poller: Arc<PollerObject>, timeout: Option<Time>) -> Result<(), SyscallError> {
@@ -318,15 +339,7 @@ define_syscall!(
         let writefds_in = read_fdset(writefds.cast_const(), nfds)?;
         let exceptfds_in = read_fdset(exceptfds.cast_const(), nfds)?;
 
-        let old_mask = requested_sigmask.map(|new_mask| {
-            let current = get_current_thread();
-            let mut current = current.lock();
-            let old_mask = current.blocked_signals;
-            current.blocked_signals = new_mask;
-            old_mask
-        });
-
-        let result = (|| {
+        with_temporary_signal_mask(requested_sigmask, || {
             let timeout_is_zero = timeout
                 .as_ref()
                 .is_some_and(|timeout| timeout.tv_sec == 0 && timeout.tv_nsec == 0);
@@ -420,13 +433,7 @@ define_syscall!(
             rewrite_fdset(exceptfds, &except_ready, nfds)?;
 
             Ok(ready_count)
-        })();
-
-        if let Some(old_mask) = old_mask {
-            get_current_thread().lock().blocked_signals = old_mask;
-        }
-
-        result
+        })
     }
 );
 

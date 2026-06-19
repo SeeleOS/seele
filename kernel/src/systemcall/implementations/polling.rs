@@ -16,6 +16,10 @@ use crate::{
     define_syscall,
     polling::poller::PollerObject,
     process::{FdFlags, manager::get_current_process},
+    signal::Signals,
+    systemcall::implementations::select::{
+        has_unblocked_pending_signals, with_temporary_signal_mask,
+    },
 };
 
 bitflags! {
@@ -269,6 +273,10 @@ fn epoll_wait_impl(
             return Ok(0);
         }
 
+        if has_unblocked_pending_signals() {
+            return Err(SyscallError::Interrupted);
+        }
+
         let deadline = if timeout < 0 {
             None
         } else {
@@ -289,6 +297,10 @@ fn epoll_wait_impl(
             cancel_block(&current);
         } else {
             finish_block_current();
+        }
+
+        if has_unblocked_pending_signals() {
+            return Err(SyscallError::Interrupted);
         }
     }
 
@@ -335,8 +347,21 @@ define_syscall!(EpollWait, |poller: ObjectRef,
 define_syscall!(EpollPwait, |poller: ObjectRef,
                              events_ptr: *mut LinuxEpollEvent,
                              maxevents: usize,
-                             timeout: i32| {
-    epoll_wait_impl(poller, events_ptr, maxevents, timeout)
+                             timeout: i32,
+                             sigmask: *const u64,
+                             sigsetsize: usize| {
+    let requested_sigmask = if sigmask.is_null() {
+        None
+    } else {
+        if sigsetsize != core::mem::size_of::<u64>() {
+            return Err(SyscallError::InvalidArguments);
+        }
+        Some(Signals::from_bits_truncate(user_safe::read(sigmask)?))
+    };
+
+    with_temporary_signal_mask(requested_sigmask, || {
+        epoll_wait_impl(poller, events_ptr, maxevents, timeout)
+    })
 });
 
 define_syscall!(
@@ -345,10 +370,20 @@ define_syscall!(
      events_ptr: *mut LinuxEpollEvent,
      maxevents: usize,
      timeout: *const LinuxTimespec,
-     _sigmask: *const u8,
-     _sigsetsize: usize| {
+     sigmask: *const u64,
+     sigsetsize: usize| {
+        let requested_sigmask = if sigmask.is_null() {
+            None
+        } else {
+            if sigsetsize != core::mem::size_of::<u64>() {
+                return Err(SyscallError::InvalidArguments);
+            }
+            Some(Signals::from_bits_truncate(user_safe::read(sigmask)?))
+        };
         let timeout = epoll_pwait2_timeout_ms(timeout)?;
-        epoll_wait_impl(poller, events_ptr, maxevents, timeout)
+        with_temporary_signal_mask(requested_sigmask, || {
+            epoll_wait_impl(poller, events_ptr, maxevents, timeout)
+        })
     }
 );
 
@@ -760,6 +795,10 @@ mod tests {
         expect_errno(
             SyscallArgs::new([epoll_fd as u64, page + 64, 1, 1, 0, 0]).call::<EpollPwait2>(),
             SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([epoll_fd as u64, page + 64, 1, 0, page, 4]).call::<EpollPwait2>(),
+            SyscallError::InvalidArguments,
         );
 
         close_test_fd(epoll_fd);
