@@ -258,7 +258,7 @@ fn install_cached_package(
     }
     run_chroot_shell(
         rootfs_mount,
-        &format!("pacman --noconfirm --needed -U {guest_cache_path}/*.pkg.tar.*"),
+        &format!("pacman --noconfirm --needed -U \"{guest_cache_path}\"/*.pkg.tar.*"),
         reporter,
     )
     .with_context(|| format!("failed to install cached AUR package {package}"))
