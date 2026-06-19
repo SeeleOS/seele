@@ -5,7 +5,7 @@ use ext4plus::{Ext4, file, inode::Inode};
 
 use crate::filesystem::{
     errors::FSError,
-    impls::ext4::{LookupCache, chmod_inode, lookup_cache_insert_raw},
+    impls::ext4::{LookupCache, chmod_inode, chown_inode, lookup_cache_insert_raw},
     info::{FileLikeInfo, UnixPermission},
     vfs::FSResult,
     vfs_traits::{File, FileLikeType, Whence},
@@ -144,6 +144,13 @@ impl File for Ext4File {
     fn chmod(&self, mode: u32) -> FSResult<()> {
         let mut inode = self.inode.clone();
         chmod_inode(&self.fs, &mut inode, mode)?;
+        lookup_cache_insert_raw(&self.lookup_cache, self.parent_inode, &self.name, &inode);
+        Ok(())
+    }
+
+    fn chown(&self, uid: u32, gid: u32) -> FSResult<()> {
+        let mut inode = self.inode.clone();
+        chown_inode(&self.fs, &mut inode, uid, gid)?;
         lookup_cache_insert_raw(&self.lookup_cache, self.parent_inode, &self.name, &inode);
         Ok(())
     }

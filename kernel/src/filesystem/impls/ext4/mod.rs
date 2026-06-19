@@ -139,6 +139,17 @@ pub(super) fn chmod_inode(fs: &Ext4, inode: &mut Inode, mode: u32) -> FSResult<(
     Ok(())
 }
 
+pub(super) fn chown_inode(fs: &Ext4, inode: &mut Inode, uid: u32, gid: u32) -> FSResult<()> {
+    if uid != u32::MAX {
+        inode.set_uid(uid);
+    }
+    if gid != u32::MAX {
+        inode.set_gid(gid);
+    }
+    inode.write(fs).map_err(FSError::from)?;
+    Ok(())
+}
+
 /// Wrapper around the `ext4plus::Ext4` filesystem so it can be used
 /// through the kernel's generic `FileSystem` trait.
 pub struct EXT4 {

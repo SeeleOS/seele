@@ -89,6 +89,9 @@ pub trait File: Send + Sync {
     fn chmod(&self, _mode: u32) -> FSResult<()> {
         Err(FSError::Readonly)
     }
+    fn chown(&self, _uid: u32, _gid: u32) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
 }
 
 pub trait Directory: Send + Sync {
@@ -115,6 +118,9 @@ pub trait Directory: Send + Sync {
     fn chmod(&self, _mode: u32) -> FSResult<()> {
         Err(FSError::Readonly)
     }
+    fn chown(&self, _uid: u32, _gid: u32) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
 }
 
 pub trait Symlink: Send + Sync {
@@ -124,6 +130,9 @@ pub trait Symlink: Send + Sync {
         Ok(self.target()?.as_string())
     }
     fn chmod(&self, _mode: u32) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+    fn chown(&self, _uid: u32, _gid: u32) -> FSResult<()> {
         Err(FSError::Readonly)
     }
 }

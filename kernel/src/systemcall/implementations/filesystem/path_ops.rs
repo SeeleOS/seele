@@ -76,9 +76,9 @@ define_syscall!(Chmod, |path: CString, mode: u32| {
     Ok(0)
 });
 
-define_syscall!(Chown, |path: CString, _owner: u32, _group: u32| {
+define_syscall!(Chown, |path: CString, owner: u32, group: u32| {
     let path_str = path_from_raw(path)?;
-    chown_at(AT_FDCWD, &path_str, AtFlags::empty())
+    chown_at(AT_FDCWD, &path_str, owner, group, AtFlags::empty())
 });
 
 define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {

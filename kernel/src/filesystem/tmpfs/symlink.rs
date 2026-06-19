@@ -55,4 +55,10 @@ impl Symlink for TmpfsSymlinkHandle {
             TmpNodeKind::Directory { .. } | TmpNodeKind::File { .. } => Err(FSError::NotASymlink),
         }
     }
+
+    fn chown(&self, uid: u32, gid: u32) -> FSResult<()> {
+        let mut state = self.state.lock();
+        let inode = state.node(&self.path)?.inode;
+        state.update_owner_by_inode(inode, uid, gid)
+    }
 }

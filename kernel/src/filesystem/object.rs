@@ -15,7 +15,7 @@ use crate::{
         },
         vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
         vfs_operations::{open_path, resolve_dir_path, resolve_file_path},
-        vfs_traits::{File as VfsFile, FileLike, FileLikeType, Whence},
+        vfs_traits::{File as VfsFile, FileLike, FileLikeType, Symlink, Whence},
     },
     impl_cast_function, impl_cast_function_non_trait,
     memory::{addrspace::mem_area::Data, protection::Protection, utils::Mut},
@@ -51,6 +51,7 @@ enum OpenBackend {
     },
     Directory(WrappedDirectory),
     SymlinkPath {
+        symlink: Arc<Mut<dyn Symlink>>,
         read_link_target: String,
         target: Path,
         info: FileLikeInfo,
@@ -111,9 +112,11 @@ impl OpenBackend {
             FileLike::File(file) => Self::from_wrapped_file(file),
             FileLike::Directory(dir) => Ok(Self::Directory(dir)),
             FileLike::Symlink(symlink) => {
-                let symlink = symlink.lock();
+                let symlink_handle = symlink.clone();
+                let symlink = symlink_handle.lock();
                 let read_link_target = symlink.read_link_target()?;
                 Ok(Self::SymlinkPath {
+                    symlink: symlink_handle.clone(),
                     target: Self::symlink_target_from_path(path, &read_link_target),
                     read_link_target,
                     info: symlink.info()?,
@@ -304,6 +307,36 @@ impl OpenedFileObject {
             OpenBackend::SymlinkPath { target, .. } => {
                 let nested = open_path(target.clone())?;
                 nested.chmod(mode)
+            }
+        }
+    }
+
+    pub fn chown(&self, uid: u32, gid: u32) -> FSResult<()> {
+        self.chown_following_symlink(uid, gid, true)
+    }
+
+    pub fn lchown(&self, uid: u32, gid: u32) -> FSResult<()> {
+        self.chown_following_symlink(uid, gid, false)
+    }
+
+    fn chown_following_symlink(&self, uid: u32, gid: u32, follow_symlink: bool) -> FSResult<()> {
+        if self.device_object().is_some() {
+            let _ = (uid, gid);
+            return Ok(());
+        }
+
+        match &self.backend {
+            OpenBackend::RegularFile(file) => file.lock().chown(uid, gid),
+            OpenBackend::Device { .. } => Ok(()),
+            OpenBackend::Directory(dir) => dir.lock().chown(uid, gid),
+            OpenBackend::SymlinkPath {
+                symlink, target, ..
+            } => {
+                if !follow_symlink {
+                    return symlink.lock().chown(uid, gid);
+                }
+                let nested = open_path(target.clone())?;
+                nested.chown(uid, gid)
             }
         }
     }

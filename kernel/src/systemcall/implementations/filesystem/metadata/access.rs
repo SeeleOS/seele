@@ -259,6 +259,8 @@ pub(in crate::systemcall::implementations::filesystem) fn chmod_fd_object(
 pub(in crate::systemcall::implementations::filesystem) fn chown_at(
     dirfd: i32,
     path_str: &str,
+    uid: u32,
+    gid: u32,
     flags: AtFlags,
 ) -> Result<usize, SyscallError> {
     let allowed_flags = AtFlags::EMPTY_PATH | AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT;
@@ -270,18 +272,36 @@ pub(in crate::systemcall::implementations::filesystem) fn chown_at(
         if !flags.contains(AtFlags::EMPTY_PATH) {
             return Err(SyscallError::InvalidArguments);
         }
-        chown_fd_object(get_object_current_process(dirfd as u64).map_err(SyscallError::from)?)?;
+        chown_fd_object(
+            get_object_current_process(dirfd as u64).map_err(SyscallError::from)?,
+            uid,
+            gid,
+        )?;
         return Ok(0);
     }
 
-    ensure_path_exists_at(dirfd, path_str, flags.contains(AtFlags::SYMLINK_NOFOLLOW))?;
+    let path = resolve_path_at(dirfd, path_str)?;
+    let file = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
+        open_path_nofollow(path)?
+    } else {
+        open_path(path)?
+    };
+    if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
+        file.lchown(uid, gid)?;
+    } else {
+        file.chown(uid, gid)?;
+    }
     Ok(0)
 }
 
 pub(in crate::systemcall::implementations::filesystem) fn chown_fd_object(
     object: ObjectRef,
+    uid: u32,
+    gid: u32,
 ) -> Result<(), SyscallError> {
-    if object.clone().as_file_like().is_err() {
+    if let Ok(file_like) = object.clone().as_file_like() {
+        file_like.chown(uid, gid)?;
+    } else {
         let _ = object.as_statable()?;
     }
 

@@ -172,4 +172,10 @@ impl File for TmpfsFileHandle {
             state.update_file_mode_by_inode(self.inode, mode & 0o7777)
         }
     }
+
+    fn chown(&self, uid: u32, gid: u32) -> FSResult<()> {
+        self.state
+            .lock()
+            .update_owner_by_inode(self.inode, uid, gid)
+    }
 }

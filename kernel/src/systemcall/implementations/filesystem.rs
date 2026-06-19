@@ -2041,15 +2041,62 @@ mod tests {
             0,
         );
         expect_ok(
-            SyscallArgs::new([fd as u64, 123, 456, 0, 0, 0]).call::<Fchown>(),
+            SyscallArgs::new([user_page, user_page + 768, 0, 0, 0, 0]).call::<Stat>(),
             0,
         );
+        let chown_stat = read_user_value::<LinuxStat>(user_page + 768);
+        assert_eq!(chown_stat.st_uid, 123);
+        assert_eq!(chown_stat.st_gid, 456);
+        expect_ok(
+            SyscallArgs::new([fd as u64, 321, 654, 0, 0, 0]).call::<Fchown>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([fd as u64, user_page + 768, 0, 0, 0, 0]).call::<Fstat>(),
+            0,
+        );
+        let fchown_stat = read_user_value::<LinuxStat>(user_page + 768);
+        assert_eq!(fchown_stat.st_uid, 321);
+        assert_eq!(fchown_stat.st_gid, 654);
+        expect_ok(
+            SyscallArgs::new([fd as u64, u32::MAX as u64, 777, 0, 0, 0]).call::<Fchown>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([fd as u64, user_page + 768, 0, 0, 0, 0]).call::<Fstat>(),
+            0,
+        );
+        let owner_preserved_stat = read_user_value::<LinuxStat>(user_page + 768);
+        assert_eq!(owner_preserved_stat.st_uid, 321);
+        assert_eq!(owner_preserved_stat.st_gid, 777);
         write_user_cstr(user_page + 128, b"/tmp/syscall-file-metadata-test/link\0");
         expect_ok(
             SyscallArgs::new([AT_FDCWD, user_page + 128, 1, 2, AT_SYMLINK_NOFOLLOW, 0])
                 .call::<Fchownat>(),
             0,
         );
+        expect_ok(
+            SyscallArgs::new([
+                AT_FDCWD,
+                user_page + 128,
+                user_page + 768,
+                AT_SYMLINK_NOFOLLOW,
+                0,
+                0,
+            ])
+            .call::<Newfstatat>(),
+            0,
+        );
+        let link_chown_stat = read_user_value::<LinuxStat>(user_page + 768);
+        assert_eq!(link_chown_stat.st_uid, 1);
+        assert_eq!(link_chown_stat.st_gid, 2);
+        expect_ok(
+            SyscallArgs::new([user_page, user_page + 768, 0, 0, 0, 0]).call::<Stat>(),
+            0,
+        );
+        let target_after_lchown_stat = read_user_value::<LinuxStat>(user_page + 768);
+        assert_eq!(target_after_lchown_stat.st_uid, 321);
+        assert_eq!(target_after_lchown_stat.st_gid, 777);
         expect_errno(
             SyscallArgs::new([AT_FDCWD, 0, 1, 2, 0, 0]).call::<Fchownat>(),
             SyscallError::BadAddress,

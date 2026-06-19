@@ -20,8 +20,9 @@ use ext4plus::{
 use crate::filesystem::{
     errors::FSError,
     impls::ext4::{
-        LookupCache, chmod_inode, file::Ext4File, lookup_cache_clear, lookup_cache_get,
-        lookup_cache_insert, lookup_cache_insert_raw, lookup_cache_remove, symlink::Ext4Symlink,
+        LookupCache, chmod_inode, chown_inode, file::Ext4File, lookup_cache_clear,
+        lookup_cache_get, lookup_cache_insert, lookup_cache_insert_raw, lookup_cache_remove,
+        symlink::Ext4Symlink,
     },
     info::{DirectoryContentInfo, FileLikeInfo, UnixPermission},
     vfs::FSResult,
@@ -397,6 +398,21 @@ impl Directory for Ext4Directory {
     fn chmod(&self, mode: u32) -> FSResult<()> {
         let mut inode = self.current_inode();
         chmod_inode(&self.fs, &mut inode, mode)?;
+        self.update_cached_inode(inode);
+        if let Some(parent_inode) = self.parent_inode {
+            lookup_cache_insert_raw(
+                &self.lookup_cache,
+                parent_inode,
+                &self.name,
+                &self.current_inode(),
+            );
+        }
+        Ok(())
+    }
+
+    fn chown(&self, uid: u32, gid: u32) -> FSResult<()> {
+        let mut inode = self.current_inode();
+        chown_inode(&self.fs, &mut inode, uid, gid)?;
         self.update_cached_inode(inode);
         if let Some(parent_inode) = self.parent_inode {
             lookup_cache_insert_raw(

@@ -69,9 +69,9 @@ define_syscall!(Fchmodat, |dirfd: i32, path: CString, mode: u32| {
     chmod_at(dirfd, &path_str, mode, AtFlags::empty())
 });
 
-define_syscall!(Fchown, |fd: u64, _owner: u32, _group: u32| {
+define_syscall!(Fchown, |fd: u64, owner: u32, group: u32| {
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
-    chown_fd_object(object)?;
+    chown_fd_object(object, owner, group)?;
     Ok(0)
 });
 
@@ -95,8 +95,8 @@ define_syscall!(Fchmodat2, |dirfd: i32,
 
 define_syscall!(Fchownat, |dirfd: i32,
                            path: u64,
-                           _owner: u32,
-                           _group: u32,
+                           owner: u32,
+                           group: u32,
                            flags: AtFlags| {
     let path = path as CString;
     let path_str = if path.is_null() {
@@ -109,7 +109,7 @@ define_syscall!(Fchownat, |dirfd: i32,
         path_from_raw(path)?
     };
 
-    chown_at(dirfd, &path_str, flags)
+    chown_at(dirfd, &path_str, owner, group, flags)
 });
 
 define_syscall!(Newfstatat, |dirfd: i32,

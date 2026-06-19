@@ -245,6 +245,17 @@ impl TmpfsState {
         Ok(())
     }
 
+    pub(crate) fn update_owner_by_inode(&mut self, inode: u64, uid: u32, gid: u32) -> FSResult<()> {
+        let node = self.node_by_inode_mut(inode)?;
+        if uid != u32::MAX {
+            node.uid = uid;
+        }
+        if gid != u32::MAX {
+            node.gid = gid;
+        }
+        Ok(())
+    }
+
     pub(crate) fn quota(&self, quota_type: u32, id: u32) -> Option<TmpfsQuota> {
         self.quota_map(quota_type)?.get(&id).copied()
     }

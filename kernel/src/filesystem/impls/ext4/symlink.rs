@@ -3,6 +3,7 @@ use ext4plus::{Ext4, inode::Inode};
 
 use crate::filesystem::{
     errors::FSError,
+    impls::ext4::chown_inode,
     info::{FileLikeInfo, UnixPermission},
     path::Path,
     vfs::FSResult,
@@ -43,5 +44,10 @@ impl Symlink for Ext4Symlink {
             .to_str()
             .map(String::from)
             .map_err(|_| FSError::Other)
+    }
+
+    fn chown(&self, uid: u32, gid: u32) -> FSResult<()> {
+        let mut inode = self.inode.clone();
+        chown_inode(&self.fs, &mut inode, uid, gid)
     }
 }
