@@ -130,14 +130,18 @@ fn directory_contents_with_dot_entries(
     let obj = get_object_current_process(object_index)?.as_file_like()?;
     let contents = obj.directory_contents().map_err(SyscallError::from)?;
     let mut entries = Vec::with_capacity(contents.len() + 2);
-    entries.push(DirectoryContentInfo::new(
-        ".".into(),
-        DirectoryContentType::Directory,
-    ));
-    entries.push(DirectoryContentInfo::new(
-        "..".into(),
-        DirectoryContentType::Directory,
-    ));
+    if !contents.iter().any(|entry| entry.name == ".") {
+        entries.push(DirectoryContentInfo::new(
+            ".".into(),
+            DirectoryContentType::Directory,
+        ));
+    }
+    if !contents.iter().any(|entry| entry.name == "..") {
+        entries.push(DirectoryContentInfo::new(
+            "..".into(),
+            DirectoryContentType::Directory,
+        ));
+    }
     entries.extend(contents);
     Ok(entries)
 }
