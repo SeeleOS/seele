@@ -230,7 +230,7 @@ fn install_cached_package(
     package: &str,
     reporter: &dyn WorkflowReporter,
 ) -> Result<()> {
-    let guest_cache_path = format!("/tmp/seele-aur-cache/{package}");
+    let guest_cache_path = format!("/var/tmp/seele-aur-cache/{package}");
     let host_cache_path = rootfs_mount.join(guest_cache_path.trim_start_matches('/'));
     let cached_packages = package_artifacts(package_cache)?;
     if cached_packages.is_empty() {
