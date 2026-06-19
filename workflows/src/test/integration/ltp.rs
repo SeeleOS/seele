@@ -145,7 +145,7 @@ fn ltp_timeout() -> Duration {
     env::var("SEELE_LTP_TIMEOUT")
         .ok()
         .and_then(|value| parse_duration(&value))
-        .unwrap_or_else(|| Duration::from_secs(180))
+        .unwrap_or_else(|| Duration::from_secs(15 * 60))
 }
 
 fn parse_duration(value: &str) -> Option<Duration> {
