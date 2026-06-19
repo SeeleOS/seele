@@ -171,14 +171,63 @@ fn parse_ltp_exit_code(output: &str) -> Option<i32> {
 fn extract_ltp_report(output: &str) -> Option<LtpReport> {
     let start = output.find(REPORT_BEGIN)? + REPORT_BEGIN.len();
     let end = output[start..].find(REPORT_END)? + start;
-    let json = output[start..end].trim();
-    serde_json::from_str(json).ok()
+    let json = strip_ansi_escape_sequences(output[start..end].trim());
+    serde_json::from_str(&json).ok()
+}
+
+fn strip_ansi_escape_sequences(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch != '\x1b' {
+            output.push(ch);
+            continue;
+        }
+
+        skip_ansi_sequence(&mut chars);
+    }
+
+    output
+}
+
+fn skip_ansi_sequence(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    match chars.peek() {
+        Some('[') => {
+            chars.next();
+            for ch in chars.by_ref() {
+                if ('@'..='~').contains(&ch) {
+                    break;
+                }
+            }
+        }
+        Some(']') => {
+            chars.next();
+            while let Some(ch) = chars.next() {
+                if ch == '\x07' {
+                    break;
+                }
+                if ch == '\x1b' && matches!(chars.peek(), Some('\\')) {
+                    chars.next();
+                    break;
+                }
+            }
+        }
+        Some('%' | '(' | ')' | '*' | '+' | '-' | '.' | '/') => {
+            chars.next();
+            chars.next();
+        }
+        Some(_) => {
+            chars.next();
+        }
+        None => {}
+    }
 }
 
 fn emit_ltp_json_events(reporter: &dyn WorkflowReporter, report: &LtpReport) -> Result<()> {
     let summary = report.summary();
     for result in &report.results {
-        let name = result.test.name.as_deref().unwrap_or("ltp::unknown");
+        let name = result.name().unwrap_or("ltp::unknown");
         let status = result_status(result);
         test_event(
             reporter,
@@ -213,11 +262,11 @@ fn emit_ltp_json_events(reporter: &dyn WorkflowReporter, report: &LtpReport) -> 
 }
 
 fn result_status(result: &LtpTestResult) -> TestStatus {
-    if result.failed > 0 {
+    if result.failed() > 0 {
         TestStatus::Failed
-    } else if result.broken > 0 {
+    } else if result.broken() > 0 {
         TestStatus::Broken
-    } else if result.skipped > 0 {
+    } else if result.skipped() > 0 {
         TestStatus::Skipped
     } else {
         TestStatus::Ok
@@ -237,11 +286,11 @@ impl LtpReport {
     fn summary(&self) -> LtpSummary {
         let mut summary = LtpSummary::default();
         for result in &self.results {
-            summary.passed += result.passed;
-            summary.failed += result.failed;
-            summary.broken += result.broken;
-            summary.skipped += result.skipped;
-            summary.warnings += result.warnings;
+            summary.passed += result.passed();
+            summary.failed += result.failed();
+            summary.broken += result.broken();
+            summary.skipped += result.skipped();
+            summary.warnings += result.warnings();
         }
         summary
     }
@@ -256,27 +305,70 @@ struct LtpReport {
 #[derive(Debug, Default, Deserialize)]
 struct LtpTestResult {
     #[serde(default)]
+    test_fqn: Option<String>,
+    #[serde(default)]
     test: LtpTest,
     #[serde(default)]
-    passed: u64,
+    passed: Option<u64>,
     #[serde(default)]
-    failed: u64,
+    failed: Option<u64>,
     #[serde(default)]
-    broken: u64,
+    broken: Option<u64>,
     #[serde(default)]
-    skipped: u64,
+    skipped: Option<u64>,
     #[serde(default)]
-    warnings: u64,
+    warnings: Option<u64>,
     #[serde(default)]
     stdout: Option<String>,
     #[serde(flatten)]
     _extra: Value,
 }
 
+impl LtpTestResult {
+    fn name(&self) -> Option<&str> {
+        self.test_fqn
+            .as_deref()
+            .or(self.test.name.as_deref())
+            .or(self.test.command.as_deref())
+    }
+
+    fn passed(&self) -> u64 {
+        self.passed.or(self.test.passed).unwrap_or_default()
+    }
+
+    fn failed(&self) -> u64 {
+        self.failed.or(self.test.failed).unwrap_or_default()
+    }
+
+    fn broken(&self) -> u64 {
+        self.broken.or(self.test.broken).unwrap_or_default()
+    }
+
+    fn skipped(&self) -> u64 {
+        self.skipped.or(self.test.skipped).unwrap_or_default()
+    }
+
+    fn warnings(&self) -> u64 {
+        self.warnings.or(self.test.warnings).unwrap_or_default()
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 struct LtpTest {
     #[serde(default)]
     name: Option<String>,
+    #[serde(default)]
+    command: Option<String>,
+    #[serde(default)]
+    passed: Option<u64>,
+    #[serde(default)]
+    failed: Option<u64>,
+    #[serde(default)]
+    broken: Option<u64>,
+    #[serde(default)]
+    skipped: Option<u64>,
+    #[serde(default)]
+    warnings: Option<u64>,
 }
 
 #[cfg(test)]
@@ -293,27 +385,67 @@ mod tests {
 
         assert_eq!(report.results.len(), 1);
         assert_eq!(report.results[0].test.name.as_deref(), Some("getpid01"));
-        assert_eq!(result_status(&report.results[0]), "ok");
+        assert_eq!(result_status(&report.results[0]), TestStatus::Ok);
+    }
+
+    #[test]
+    fn extracts_report_with_ansi_colored_json() {
+        let output = format!(
+            "noise\n{REPORT_BEGIN}\n{{\n    \x1b[1m\"results\"\x1b[0m: [{{\x1b[1m\"test\"\x1b[0m: {{\x1b[1m\"name\"\x1b[0m: \x1b[32m\"getpid02\"\x1b[0m}}, \x1b[1m\"failed\"\x1b[0m: \x1b[33m1\x1b[0m}}]\n}}\n{REPORT_END}\n"
+        );
+
+        let report = extract_ltp_report(&output).unwrap();
+
+        assert_eq!(report.results.len(), 1);
+        assert_eq!(report.results[0].test.name.as_deref(), Some("getpid02"));
+        assert_eq!(report.results[0].failed(), 1);
+    }
+
+    #[test]
+    fn reads_kirk_counts_from_nested_test_object() {
+        let output = format!(
+            "noise\n{REPORT_BEGIN}\n{{\"results\":[{{\"test_fqn\":\"brk01\",\"test\":{{\"command\":\"brk01\",\"passed\":2,\"broken\":1,\"warnings\":3}}}}]}}\n{REPORT_END}\n"
+        );
+
+        let report = extract_ltp_report(&output).unwrap();
+        let summary = report.summary();
+
+        assert_eq!(report.results[0].name(), Some("brk01"));
+        assert_eq!(result_status(&report.results[0]), TestStatus::Broken);
+        assert_eq!(summary.passed, 2);
+        assert_eq!(summary.broken, 1);
+        assert_eq!(summary.warnings, 3);
+    }
+
+    #[test]
+    fn strips_non_csi_ansi_sequences_from_report_json() {
+        let output = format!(
+            "noise\n{REPORT_BEGIN}\n\x1b]0;title\x07{{\x1b(B\x1b[1m\"results\"\x1b[0m:[]}}\n{REPORT_END}\n"
+        );
+
+        let report = extract_ltp_report(&output).unwrap();
+
+        assert!(report.results.is_empty());
     }
 
     #[test]
     fn maps_ltp_result_status_by_linux_outcome_counts() {
         let failed = LtpTestResult {
-            failed: 1,
+            failed: Some(1),
             ..Default::default()
         };
         let broken = LtpTestResult {
-            broken: 1,
+            broken: Some(1),
             ..Default::default()
         };
         let skipped = LtpTestResult {
-            skipped: 1,
+            skipped: Some(1),
             ..Default::default()
         };
 
-        assert_eq!(result_status(&failed), "failed");
-        assert_eq!(result_status(&broken), "broken");
-        assert_eq!(result_status(&skipped), "skipped");
+        assert_eq!(result_status(&failed), TestStatus::Failed);
+        assert_eq!(result_status(&broken), TestStatus::Broken);
+        assert_eq!(result_status(&skipped), TestStatus::Skipped);
     }
 
     #[test]

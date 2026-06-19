@@ -102,7 +102,18 @@ status=$?
 
 echo __SEELE_LTP_JSON_BEGIN__
 if command -v python >/dev/null 2>&1; then
-    python -m json.tool "$report" 2>/dev/null || cat "$report" 2>/dev/null
+    python - "$report" <<'PY'
+import re
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8", errors="replace") as report:
+    data = report.read()
+
+data = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", data)
+data = re.sub(r"\x1b\][^\x07]*(?:\x07|\x1b\\)", "", data)
+data = re.sub(r"\x1b[%()*+\-./].", "", data)
+sys.stdout.write(data)
+PY
 else
     cat "$report" 2>/dev/null
 fi
