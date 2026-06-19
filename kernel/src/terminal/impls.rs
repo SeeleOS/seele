@@ -7,24 +7,24 @@ use crate::terminal::{
 
 impl AbstractTerminal for KernelTerminal {
     fn push_str(&mut self, str: &str) {
-        self.0.write_str(str);
+        self.write_str(str);
     }
 
     fn size(&self) -> TerminalSize {
-        TerminalSize::new(self.0.rows(), self.0.columns())
+        TerminalSize::new(self.rows(), self.columns())
     }
 
     fn cursor_position(&self) -> TerminalCursorPosition {
-        let (row, column) = self.0.cursor_position();
+        let (row, column) = self.cursor_position();
         TerminalCursorPosition::from_zero_based(row, column)
     }
 
     fn set_pty_writer(&mut self, writer: PtyWriter) {
-        self.0.set_pty_writer(writer);
+        self.set_pty_writer(writer);
     }
 
     fn clear(&mut self) {
-        self.0.clear();
+        self.clear();
     }
 }
 

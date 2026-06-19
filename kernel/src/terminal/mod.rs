@@ -1,10 +1,10 @@
 pub mod color;
-pub mod flanterm;
 pub mod impls;
 pub mod line_discipline;
 pub mod linux_kd;
 pub mod linux_vt;
 pub mod macros;
+pub mod os_terminal;
 pub mod pty;
 pub mod state;
 pub mod term_trait;
@@ -13,8 +13,8 @@ pub mod termios;
 use crate::memory::utils::Mut;
 use alloc::{boxed::Box, sync::Arc};
 pub use color::Color;
-pub use flanterm::KernelTerminal;
 pub use macros::term_print;
+pub use os_terminal::KernelTerminal;
 
 use crate::{
     misc::framebuffer::FRAME_BUFFER,
