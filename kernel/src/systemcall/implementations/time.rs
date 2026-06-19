@@ -1,7 +1,6 @@
 use bitflags::bitflags;
 
 use crate::misc::time::{self, Time as KernelTime};
-use crate::misc::timer::ClockId;
 use crate::object::FileFlags;
 use crate::object::linux_anon::{TimerFdObject, wake_linux_io_waiters};
 use crate::object::misc::ObjectRef;
@@ -31,6 +30,12 @@ bitflags! {
     pub(crate) struct ClockNanosleepFlags: i32 {
         const TIMER_ABSTIME = 1;
     }
+}
+
+#[derive(Clone, Copy)]
+enum SleepClock {
+    Realtime,
+    Monotonic,
 }
 
 #[repr(C)]
@@ -131,6 +136,15 @@ fn linux_clock_now_ns(clock_id: i32) -> Result<i64, SyscallError> {
         0 | 5 | 8 | 11 => Ok(KernelTime::current().as_nanoseconds() as i64),
         1 | 4 | 6 | 7 | 9 => Ok(KernelTime::since_boot().as_nanoseconds() as i64),
         2 | 3 => Ok(KernelTime::since_boot().as_nanoseconds().max(1) as i64),
+        _ => Err(SyscallError::InvalidArguments),
+    }
+}
+
+fn clock_nanosleep_clock(clock_id: i32) -> Result<SleepClock, SyscallError> {
+    match clock_id {
+        0 | 5 | 8 | 11 => Ok(SleepClock::Realtime),
+        1 | 4 | 6 | 7 | 9 => Ok(SleepClock::Monotonic),
+        2 | 3 => Err(SyscallError::OperationNotSupported),
         _ => Err(SyscallError::InvalidArguments),
     }
 }
@@ -376,19 +390,18 @@ define_syscall!(
             return Err(SyscallError::InvalidArguments);
         }
 
-        let clock =
-            ClockId::try_from(clock_id as u64).map_err(|_| SyscallError::InvalidArguments)?;
+        let clock = clock_nanosleep_clock(clock_id)?;
         let requested_ns =
             (requested.tv_sec as u64).saturating_mul(1_000_000_000) + (requested.tv_nsec as u64);
 
         let deadline = if flags.contains(ClockNanosleepFlags::TIMER_ABSTIME) {
             match clock {
-                ClockId::Realtime => {
+                SleepClock::Realtime => {
                     let now_realtime = KernelTime::current();
                     let now_boot = KernelTime::since_boot();
                     now_boot.add_ns(requested_ns.saturating_sub(now_realtime.as_nanoseconds()))
                 }
-                ClockId::SinceBoot => KernelTime::from_nanoseconds(requested_ns),
+                SleepClock::Monotonic => KernelTime::from_nanoseconds(requested_ns),
             }
         } else {
             // Blocked-thread timeouts are evaluated against since_boot.
@@ -398,7 +411,13 @@ define_syscall!(
         };
 
         if deadline > KernelTime::since_boot() {
-            block_current_with_sig_check(BlockType::SetTime(deadline))?;
+            if let Err(err) = block_current_with_sig_check(BlockType::SetTime(deadline)) {
+                if !flags.contains(ClockNanosleepFlags::TIMER_ABSTIME) && !rem.is_null() {
+                    let remaining = deadline.sub(KernelTime::since_boot()).as_nanoseconds();
+                    user_safe::write(rem, &ns_to_linux_timespec(remaining))?;
+                }
+                return Err(err.into());
+            }
         }
 
         if !flags.contains(ClockNanosleepFlags::TIMER_ABSTIME) && !rem.is_null() {
@@ -507,6 +526,8 @@ mod tests {
     fn clock_and_affinity_syscalls_follow_linux_pointer_rules() {
         const CLOCK_REALTIME: u64 = 0;
         const CLOCK_MONOTONIC: u64 = 1;
+        const CLOCK_PROCESS_CPUTIME_ID: u64 = 2;
+        const CLOCK_THREAD_CPUTIME_ID: u64 = 3;
         const TIMER_ABSTIME: u64 = 1;
 
         let clock_page = allocate_user_test_page();
@@ -602,6 +623,16 @@ mod tests {
         expect_errno(
             SyscallArgs::new([99, 0, clock_page, 0, 0, 0]).call::<ClockNanosleep>(),
             SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([CLOCK_PROCESS_CPUTIME_ID, 0, clock_page, 0, 0, 0])
+                .call::<ClockNanosleep>(),
+            SyscallError::OperationNotSupported,
+        );
+        expect_errno(
+            SyscallArgs::new([CLOCK_THREAD_CPUTIME_ID, 0, clock_page, 0, 0, 0])
+                .call::<ClockNanosleep>(),
+            SyscallError::OperationNotSupported,
         );
         expect_errno(
             SyscallArgs::new([CLOCK_MONOTONIC, 0, 0, 0, 0, 0]).call::<ClockNanosleep>(),
