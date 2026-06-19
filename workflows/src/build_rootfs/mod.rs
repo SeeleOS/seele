@@ -71,6 +71,13 @@ pub fn build_rootfs(config: BuildRootfsConfig, reporter: &dyn WorkflowReporter) 
     )?;
     let pacman_conf = create_pacman_config(&repo_root)?;
     install_packages(&sh, pacman_conf.path(), &rootfs_mount, reporter)?;
+    progress(
+        reporter,
+        "build-rootfs",
+        "arch",
+        "setting empty root password",
+    )?;
+    set_empty_root_password(&sh, &rootfs_mount, reporter)?;
     progress(reporter, "build-rootfs", "arch", "installing AUR packages")?;
     install_aur_packages(
         &sh,
@@ -87,13 +94,6 @@ pub fn build_rootfs(config: BuildRootfsConfig, reporter: &dyn WorkflowReporter) 
         "installing kirk test runner",
     )?;
     install_kirk(&sh, &repo_root, &rootfs_mount, reporter)?;
-    progress(
-        reporter,
-        "build-rootfs",
-        "arch",
-        "setting empty root password",
-    )?;
-    set_empty_root_password(&sh, &rootfs_mount, reporter)?;
     progress(
         reporter,
         "build-rootfs",

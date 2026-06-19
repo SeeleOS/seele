@@ -117,10 +117,7 @@ pub fn set_empty_root_password(
     run_xshell_command(
         "build-rootfs",
         sh,
-        cmd!(
-            sh,
-            "printf 'root:\\n' | sudo chroot {rootfs_mount} /usr/bin/chpasswd -e"
-        ),
+        cmd!(sh, "sudo chroot {rootfs_mount} /usr/bin/passwd -d root"),
         reporter,
     )?;
     Ok(())
