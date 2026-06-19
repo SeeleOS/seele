@@ -29,6 +29,7 @@ impl KernelTerminal {
         let font: Box<dyn FontManager> = Box::new(BitmapFont);
         let mut terminal = Terminal::new(display, font);
         terminal.set_auto_flush(false);
+        terminal.set_crnl_mapping(true);
         terminal.flush();
 
         Self {
