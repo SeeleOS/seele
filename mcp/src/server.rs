@@ -197,7 +197,7 @@ impl SeeleMcp {
     }
 
     #[tool(
-        description = "Start cargo xtest for Seele OS as a background MCP job. Optionally pass a test name filter."
+        description = "Start cargo xtest for Seele OS as a background MCP job. By default this runs kernel unit tests plus LTP. Pass \"full\" to run every integration test, or pass a test name filter."
     )]
     async fn run_tests(&self, Parameters(request): Parameters<RunTestsRequest>) -> CallToolResult {
         json_result(self.session.start_xtest(request.test.as_deref()).await).await

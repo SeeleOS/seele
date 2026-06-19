@@ -14,7 +14,7 @@
 - `debug_start`: start the VM paused at QEMU's GDB stub and attach `gdb` to the kernel ELF.
 - `debug_command`: run a command in the active GDB session and return output up to the next prompt.
 - `debug_status`, `debug_stop`: inspect or stop the active GDB-backed VM session.
-- `run_tests`, `build_rootfs`: start shared `seele-workflows` jobs in the MCP process and return a job id plus status path.
+- `run_tests`, `build_rootfs`: start shared `seele-workflows` jobs in the MCP process and return a job id plus status path. `run_tests` defaults to kernel unit tests plus LTP; pass `test: "full"` for every integration test or a specific test-name filter for targeted debugging.
 - `command_status`: poll a background job and return its structured workflow events, summarized output, and final exit status.
 - `command_wait`: block until a background job finishes, then return its final status.
 - `ensure_rootfs_mounted`: mount `target/rootfs_mnt/` from `target/rootfs.img`, leaving an already mounted `target/rootfs_mnt/` unchanged.
@@ -38,4 +38,4 @@ After changing MCP or VM launch behavior:
 5. Stop the VM with `stop` or `cleanup`.
 6. Confirm `status` is idle and no session metadata remains.
 
-For long-running `run_tests` or `build_rootfs` work, call the tool once, then either `command_wait` on the returned id or use `command_status` for live structured workflow events. Running jobs refresh their status about once per second.
+For long-running `run_tests` or `build_rootfs` work, call the tool once, then either `command_wait` on the returned id or use `command_status` for live structured workflow events. Running jobs refresh their status about once per second. The normal `run_tests` gate is kernel unit tests plus LTP; use `run_tests(test: "full")` when changing boot, image, panic, or VM-launch behavior.

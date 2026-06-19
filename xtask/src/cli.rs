@@ -33,6 +33,7 @@ pub struct McpRunArgs {
 
 #[derive(Debug, Args)]
 pub struct TestArgs {
+    /// Optional test filter. Omit for kernel unit tests plus LTP; use "full" for every integration test.
     pub test: Option<String>,
 }
 

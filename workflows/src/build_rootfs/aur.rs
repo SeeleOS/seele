@@ -7,7 +7,9 @@ use std::{
 use xshell::{Shell, cmd};
 
 use super::RebuildAur;
-use crate::reporter::{WorkflowReporter, log_event, progress, run_xshell_command};
+use crate::reporter::{
+    WorkflowReporter, log_command_output_on_failure, progress, run_xshell_command,
+};
 
 pub const AUR_PACKAGES: &[&str] = &["linux-test-project-git"];
 const BUILD_USER: &str = "seelebuild";
@@ -441,14 +443,7 @@ fn run_command(
         .stderr(Stdio::piped())
         .output()
         .context("failed to run command")?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !stdout.is_empty() {
-        log_event(reporter, command_name, "stdout", &stdout)?;
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stderr.is_empty() {
-        log_event(reporter, command_name, "stderr", &stderr)?;
-    }
+    log_command_output_on_failure(reporter, command_name, &output)?;
     if !output.status.success() {
         bail!("command failed with status {}", output.status);
     }
@@ -481,14 +476,7 @@ fn run_chroot_output(
         .stderr(Stdio::piped())
         .output()
         .context("failed to run command")?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !stdout.is_empty() {
-        log_event(reporter, "build-rootfs", "stdout", &stdout)?;
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stderr.is_empty() {
-        log_event(reporter, "build-rootfs", "stderr", &stderr)?;
-    }
+    log_command_output_on_failure(reporter, "build-rootfs", &output)?;
     if !output.status.success() {
         bail!("command failed with status {}", output.status);
     }

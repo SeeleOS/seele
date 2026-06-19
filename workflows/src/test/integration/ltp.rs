@@ -80,7 +80,7 @@ impl IntegrationTest for Ltp {
         Ok(IntegrationTestResult {
             exit_code: if failure.is_some() { 1 } else { 0 },
             failure,
-            output: result.serial_output,
+            output: ltp_failure_output(&result.serial_output),
         })
     }
 }
@@ -175,6 +175,37 @@ fn extract_ltp_report(output: &str) -> Option<LtpReport> {
     serde_json::from_str(&json).ok()
 }
 
+fn ltp_failure_output(output: &str) -> String {
+    let Some(begin) = output.find(REPORT_BEGIN) else {
+        return output.to_string();
+    };
+    let Some(exit_start) = output[begin..]
+        .find(EXIT_PREFIX)
+        .map(|offset| begin + offset)
+    else {
+        return output.to_string();
+    };
+
+    let mut trimmed = String::new();
+    let before_report = output[..begin].trim();
+    if !before_report.is_empty() {
+        trimmed.push_str(before_report);
+        trimmed.push('\n');
+    }
+
+    let exit_line = output[exit_start..]
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim_end_matches('\r');
+    if !exit_line.is_empty() {
+        trimmed.push_str(exit_line);
+        trimmed.push('\n');
+    }
+
+    trimmed
+}
+
 fn strip_ansi_escape_sequences(input: &str) -> String {
     let mut output = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
@@ -237,10 +268,10 @@ fn emit_ltp_json_events(reporter: &dyn WorkflowReporter, report: &LtpReport) -> 
             status.as_str(),
         )?;
         if matches!(status, TestStatus::Failed | TestStatus::Broken)
-            && let Some(stdout) = &result.stdout
-            && !stdout.is_empty()
+            && let Some(log) = result.log()
+            && !log.is_empty()
         {
-            log_event(reporter, "test", "ltp", stdout)?;
+            log_event(reporter, "test", "ltp", log)?;
         }
     }
 
@@ -273,17 +304,26 @@ fn result_status(result: &LtpTestResult) -> TestStatus {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
 struct LtpSummary {
+    #[serde(default)]
     passed: u64,
+    #[serde(default)]
     failed: u64,
+    #[serde(default)]
     broken: u64,
+    #[serde(default)]
     skipped: u64,
+    #[serde(default)]
     warnings: u64,
 }
 
 impl LtpReport {
     fn summary(&self) -> LtpSummary {
+        if let Some(stats) = self.stats {
+            return stats;
+        }
+
         let mut summary = LtpSummary::default();
         for result in &self.results {
             summary.passed += result.passed();
@@ -300,6 +340,8 @@ impl LtpReport {
 struct LtpReport {
     #[serde(default)]
     results: Vec<LtpTestResult>,
+    #[serde(default)]
+    stats: Option<LtpSummary>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -351,6 +393,10 @@ impl LtpTestResult {
     fn warnings(&self) -> u64 {
         self.warnings.or(self.test.warnings).unwrap_or_default()
     }
+
+    fn log(&self) -> Option<&str> {
+        self.stdout.as_deref().or(self.test.log.as_deref())
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -359,6 +405,8 @@ struct LtpTest {
     name: Option<String>,
     #[serde(default)]
     command: Option<String>,
+    #[serde(default)]
+    log: Option<String>,
     #[serde(default)]
     passed: Option<u64>,
     #[serde(default)]
@@ -418,6 +466,23 @@ mod tests {
     }
 
     #[test]
+    fn prefers_kirk_top_level_stats() {
+        let output = format!(
+            "noise\n{REPORT_BEGIN}\n{{\"results\":[{{\"test_fqn\":\"waitpid01\",\"status\":\"fail\",\"test\":{{\"command\":\"waitpid01\",\"log\":\"failure details\"}}}}],\"stats\":{{\"passed\":10,\"failed\":1,\"broken\":2,\"skipped\":3,\"warnings\":4}}}}\n{REPORT_END}\n"
+        );
+
+        let report = extract_ltp_report(&output).unwrap();
+        let summary = report.summary();
+
+        assert_eq!(summary.passed, 10);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.broken, 2);
+        assert_eq!(summary.skipped, 3);
+        assert_eq!(summary.warnings, 4);
+        assert_eq!(report.results[0].log(), Some("failure details"));
+    }
+
+    #[test]
     fn strips_non_csi_ansi_sequences_from_report_json() {
         let output = format!(
             "noise\n{REPORT_BEGIN}\n\x1b]0;title\x07{{\x1b(B\x1b[1m\"results\"\x1b[0m:[]}}\n{REPORT_END}\n"
@@ -461,5 +526,18 @@ mod tests {
         assert!(shell_prompt_observed("root@Seele ~ # "));
         assert!(shell_prompt_observed("bash-5.2# "));
         assert!(!login_prompt_observed("root@Seele ~ # "));
+    }
+
+    #[test]
+    fn trims_ltp_failure_output_to_non_json_serial_context() {
+        let output = format!(
+            "login\n{REPORT_BEGIN}\n{{\"results\":[{{\"test\":{{\"log\":\"big\"}}}}]}}\n{REPORT_END}\n{EXIT_PREFIX}1\n"
+        );
+
+        let trimmed = ltp_failure_output(&output);
+
+        assert!(trimmed.contains("login"));
+        assert!(trimmed.contains(EXIT_PREFIX));
+        assert!(!trimmed.contains("\"results\""));
     }
 }

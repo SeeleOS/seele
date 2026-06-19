@@ -320,6 +320,14 @@ pub(super) fn build_qemu_command(
                 .join("target")
                 .join("rootfs.img")
         });
+    let ltp_device_image = env::var_os("SEELE_LTP_DEVICE_IMAGE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("target")
+                .join("ltp-dev.img")
+        });
     let mut cmd = if options.agent_mode {
         if let Some(timeout) = &options.agent_timeout {
             let mut timeout_cmd = Command::new("timeout");
@@ -382,6 +390,13 @@ pub(super) fn build_qemu_command(
         cmd.arg("-device")
             .arg("virtio-blk-pci,drive=rootdisk,disable-legacy=on,disable-modern=off");
     }
+    ensure_ltp_device_image(&ltp_device_image)?;
+    cmd.arg("-drive").arg(format!(
+        "if=none,format=raw,file={},id=ltpdisk",
+        ltp_device_image.display()
+    ));
+    cmd.arg("-device")
+        .arg("virtio-blk-pci,drive=ltpdisk,disable-legacy=on,disable-modern=off");
     cmd.arg("-netdev").arg("user,id=net0");
     cmd.arg("-device")
         .arg("e1000,netdev=net0,mac=52:54:00:12:34:56");
@@ -406,6 +421,25 @@ pub(super) fn build_qemu_command(
     ));
 
     Ok(cmd)
+}
+
+fn ensure_ltp_device_image(path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(path)
+        .with_context(|| format!("failed to open {}", path.display()))?;
+    let min_size = 512 * 1024 * 1024;
+    if file.metadata()?.len() < min_size {
+        file.set_len(min_size)
+            .with_context(|| format!("failed to size {}", path.display()))?;
+    }
+    Ok(())
 }
 
 pub(super) fn cleanup_qemu_context(context: &QemuRunContext) {

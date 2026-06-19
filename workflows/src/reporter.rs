@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::{
     io::{self, Write},
     path::Path,
-    process::{Command, Stdio},
+    process::{Command, Output, Stdio},
     sync::{Arc, Mutex},
 };
 use xshell::Shell;
@@ -223,6 +223,26 @@ pub fn log_event(
     })
 }
 
+pub fn log_command_output_on_failure(
+    reporter: &dyn WorkflowReporter,
+    command_name: &str,
+    output: &Output,
+) -> Result<()> {
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !stdout.is_empty() {
+        log_event(reporter, command_name, "stdout", &stdout)?;
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.is_empty() {
+        log_event(reporter, command_name, "stderr", &stderr)?;
+    }
+    Ok(())
+}
+
 pub fn metadata_event(
     reporter: &dyn WorkflowReporter,
     command: &str,
@@ -283,15 +303,7 @@ pub fn run_xshell_command(
     let output = command
         .output()
         .with_context(|| format!("failed to run command: {rendered}"))?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !stdout.is_empty() {
-        log_event(reporter, command_name, "stdout", &stdout)?;
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stderr.is_empty() {
-        log_event(reporter, command_name, "stderr", &stderr)?;
-    }
-
+    log_command_output_on_failure(reporter, command_name, &output)?;
     if !output.status.success() {
         bail!("command failed with status {}: {rendered}", output.status);
     }

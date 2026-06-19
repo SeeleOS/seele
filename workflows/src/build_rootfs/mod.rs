@@ -97,6 +97,13 @@ pub fn build_rootfs(config: BuildRootfsConfig, reporter: &dyn WorkflowReporter) 
     progress(
         reporter,
         "build-rootfs",
+        "arch",
+        "configuring ext4 mkfs defaults",
+    )?;
+    configure_mke2fs(&rootfs_mount, reporter)?;
+    progress(
+        reporter,
+        "build-rootfs",
         "mount-points",
         "creating rootfs mount points",
     )?;
@@ -104,6 +111,21 @@ pub fn build_rootfs(config: BuildRootfsConfig, reporter: &dyn WorkflowReporter) 
 
     finished(reporter, "build-rootfs", 0, FinishStatus::Ok)?;
     Ok(0)
+}
+
+fn configure_mke2fs(rootfs_mount: &Path, reporter: &dyn WorkflowReporter) -> Result<()> {
+    let sh = Shell::new()?;
+    let mke2fs_config = rootfs_mount.join("etc").join("mke2fs.conf");
+    run_xshell_command(
+        "build-rootfs",
+        &sh,
+        xshell::cmd!(
+            sh,
+            "sudo sed -i '/^[[:space:]]*features = has_journal,/ { /filetype/! s/has_journal,/has_journal,filetype,/ }' {mke2fs_config}"
+        ),
+        reporter,
+    )
+    .context("failed to configure mke2fs ext4 defaults")
 }
 
 fn create_mount_points(rootfs_mount: &Path, reporter: &dyn WorkflowReporter) -> Result<()> {

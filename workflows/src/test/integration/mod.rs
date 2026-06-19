@@ -8,6 +8,8 @@ use owo_colors::OwoColorize;
 
 use crate::reporter::{TestStatus, WorkflowReporter, log_event, progress, test_event};
 
+const FULL_TEST_FILTER: &str = "full";
+
 trait IntegrationTest {
     fn name(&self) -> &'static str;
     fn run(&self, reporter: &dyn WorkflowReporter) -> Result<IntegrationTestResult>;
@@ -113,15 +115,55 @@ fn integration_tests(test_filter: Option<&str>) -> Option<Vec<&'static dyn Integ
         &panic_handler_smoke::PANIC_HANDLER_SMOKE as &dyn IntegrationTest,
     ];
     let filtered = match test_filter {
+        Some(FULL_TEST_FILTER) => tests.into_iter().collect::<Vec<_>>(),
         Some(filter) => tests
             .into_iter()
             .filter(|test| test.name().contains(filter))
             .collect::<Vec<_>>(),
-        None => tests.into_iter().collect::<Vec<_>>(),
+        None => vec![&ltp::LTP as &dyn IntegrationTest],
     };
     if filtered.is_empty() {
         None
     } else {
         Some(filtered)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn selected_names(test_filter: Option<&str>) -> Vec<&'static str> {
+        integration_tests(test_filter)
+            .unwrap()
+            .into_iter()
+            .map(IntegrationTest::name)
+            .collect()
+    }
+
+    #[test]
+    fn default_integration_set_runs_only_ltp() {
+        assert_eq!(selected_names(None), vec!["integration::ltp"]);
+    }
+
+    #[test]
+    fn full_integration_set_runs_every_integration_test() {
+        assert_eq!(
+            selected_names(Some("full")),
+            vec![
+                "integration::kernel_images",
+                "integration::userspace_boot",
+                "integration::ltp",
+                "integration::panic_handler_smoke",
+            ]
+        );
+    }
+
+    #[test]
+    fn explicit_filter_still_selects_matching_test() {
+        assert_eq!(
+            selected_names(Some("panic_handler")),
+            vec!["integration::panic_handler_smoke"]
+        );
     }
 }

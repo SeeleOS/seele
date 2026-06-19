@@ -6,7 +6,9 @@ use std::{
 };
 use xshell::{Shell, cmd};
 
-use crate::reporter::{WorkflowReporter, log_event, progress, run_xshell_command};
+use crate::reporter::{
+    WorkflowReporter, log_command_output_on_failure, progress, run_xshell_command,
+};
 
 const DISK_SIZE: &str = "10G";
 
@@ -68,18 +70,11 @@ fn check_rootfs_image(sh: &Shell, image: &Path, reporter: &dyn WorkflowReporter)
         .stderr(Stdio::piped())
         .output()
         .context("failed to run e2fsck")?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !stdout.is_empty() {
-        log_event(reporter, "build-rootfs", "stdout", &stdout)?;
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stderr.is_empty() {
-        log_event(reporter, "build-rootfs", "stderr", &stderr)?;
-    }
 
     if e2fsck_repaired_or_clean(output.status.code()) {
         return Ok(());
     }
+    log_command_output_on_failure(reporter, "build-rootfs", &output)?;
     bail!("e2fsck failed with status {}", output.status)
 }
 
