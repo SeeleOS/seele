@@ -241,7 +241,7 @@ fn write_dirents(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult {
     while *offset_entry < contents.len() {
         let info = &contents[*offset_entry];
         let name_bytes = info.name.as_bytes();
-        let reclen = ((19 + name_bytes.len() + 7) & !7) as u16;
+        let reclen = ((20 + name_bytes.len() + 7) & !7) as u16;
         if bytes_written + reclen as usize > len {
             break;
         }
