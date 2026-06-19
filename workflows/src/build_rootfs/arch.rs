@@ -25,6 +25,7 @@ const ARCH_PACKAGES: &[&str] = &[
     "procps",
     "iproute2",
     "curl",
+    "e2fsprogs",
     "gcc",
     "glibc",
     "make",
