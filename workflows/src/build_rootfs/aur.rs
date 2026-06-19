@@ -236,6 +236,21 @@ fn install_cached_package(
     if cached_packages.is_empty() {
         bail!("AUR package cache for {package} is empty");
     }
+    let guest_packages = cached_packages
+        .iter()
+        .map(|package| {
+            let file_name = package
+                .file_name()
+                .and_then(|name| name.to_str())
+                .with_context(|| {
+                    format!(
+                        "cached AUR package path is not valid UTF-8: {}",
+                        package.display()
+                    )
+                })?;
+            Ok(shell_quote(&format!("{guest_cache_path}/{file_name}")))
+        })
+        .collect::<Result<Vec<_>>>()?;
     run_xshell_command(
         "build-rootfs",
         sh,
@@ -258,10 +273,17 @@ fn install_cached_package(
     }
     run_chroot_shell(
         rootfs_mount,
-        &format!("pacman --noconfirm --needed -U \"{guest_cache_path}\"/*.pkg.tar.*"),
+        &format!(
+            "pacman --noconfirm --needed -U {}",
+            guest_packages.join(" ")
+        ),
         reporter,
     )
     .with_context(|| format!("failed to install cached AUR package {package}"))
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn ensure_build_user(rootfs_mount: &Path, reporter: &dyn WorkflowReporter) -> Result<u32> {
