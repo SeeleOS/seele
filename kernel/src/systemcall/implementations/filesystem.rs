@@ -1360,6 +1360,8 @@ mod tests {
         let mut saw_file = false;
         let mut saw_dir = false;
         let mut saw_link = false;
+        let mut saw_dot = false;
+        let mut saw_dotdot = false;
         while offset < bytes {
             let entry =
                 read_user_value::<LinuxDirent64Header>((user_page + 128 + offset as u64) as u64);
@@ -1380,6 +1382,8 @@ mod tests {
                 ("file", DT_REG) => saw_file = true,
                 ("subdir", DT_DIR) => saw_dir = true,
                 ("link", DT_LNK) => saw_link = true,
+                (".", DT_DIR) => saw_dot = true,
+                ("..", DT_DIR) => saw_dotdot = true,
                 _ => {}
             }
             offset += entry.d_reclen as usize;
@@ -1387,6 +1391,8 @@ mod tests {
         assert!(saw_file);
         assert!(saw_dir);
         assert!(saw_link);
+        assert!(saw_dot);
+        assert!(saw_dotdot);
 
         write_user_cstr(user_page + 640, b"/tmp/syscall-getdents-test\0");
         let old_dir_fd = expect_fd(
@@ -1406,6 +1412,8 @@ mod tests {
         assert!(old_bytes > 0);
         let mut offset = 0usize;
         let mut saw_old_file = false;
+        let mut saw_old_dot = false;
+        let mut saw_old_dotdot = false;
         while offset < old_bytes {
             let reclen = read_user_value::<u16>(user_page + 128 + offset as u64 + 16);
             assert!(reclen as usize >= 24);
@@ -1423,9 +1431,17 @@ mod tests {
             if name == "file" && d_type == DT_REG {
                 saw_old_file = true;
             }
+            if name == "." && d_type == DT_DIR {
+                saw_old_dot = true;
+            }
+            if name == ".." && d_type == DT_DIR {
+                saw_old_dotdot = true;
+            }
             offset += reclen as usize;
         }
         assert!(saw_old_file);
+        assert!(saw_old_dot);
+        assert!(saw_old_dotdot);
         close_test_fd(old_dir_fd);
 
         expect_ok(

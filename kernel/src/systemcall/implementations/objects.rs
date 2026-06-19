@@ -124,6 +124,24 @@ fn fallback_dirent_inode(info: &DirectoryContentInfo, offset: usize) -> u64 {
     hash.max(1)
 }
 
+fn directory_contents_with_dot_entries(
+    object_index: u64,
+) -> SyscallResult<Vec<DirectoryContentInfo>> {
+    let obj = get_object_current_process(object_index)?.as_file_like()?;
+    let contents = obj.directory_contents().map_err(SyscallError::from)?;
+    let mut entries = Vec::with_capacity(contents.len() + 2);
+    entries.push(DirectoryContentInfo::new(
+        ".".into(),
+        DirectoryContentType::Directory,
+    ));
+    entries.push(DirectoryContentInfo::new(
+        "..".into(),
+        DirectoryContentType::Directory,
+    ));
+    entries.extend(contents);
+    Ok(entries)
+}
+
 fn ioctl_target_for_object(object: &ObjectRef) -> Option<LinuxIoctlTarget> {
     if object.clone().as_drm_prime_buffer().is_ok() {
         Some(LinuxIoctlTarget::DrmPrime)
@@ -158,8 +176,7 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
         return Err(SyscallError::BadAddress);
     }
 
-    let obj = get_object_current_process(object_index)?.as_file_like()?;
-    let contents = obj.directory_contents().map_err(SyscallError::from)?;
+    let contents = directory_contents_with_dot_entries(object_index)?;
     let current_pid = get_current_process().lock().pid;
     let mut offsets = DIR_OFFSETS.lock();
     let offset_entry = offsets.entry((current_pid, object_index)).or_insert(0usize);
@@ -209,8 +226,7 @@ fn write_dirents(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult {
         return Err(SyscallError::BadAddress);
     }
 
-    let obj = get_object_current_process(object_index)?.as_file_like()?;
-    let contents = obj.directory_contents().map_err(SyscallError::from)?;
+    let contents = directory_contents_with_dot_entries(object_index)?;
     let current_pid = get_current_process().lock().pid;
     let mut offsets = DIR_OFFSETS.lock();
     let offset_entry = offsets.entry((current_pid, object_index)).or_insert(0usize);
