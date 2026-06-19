@@ -15,6 +15,7 @@ use crate::{
     memory::user_safe,
     misc::profile::{self, HotSyscallPhase},
     object::{
+        FileFlags,
         config::ConfigurateRequest,
         control::control_object,
         device::get_device,
@@ -651,6 +652,25 @@ define_syscall!(Close, |object_num: usize| {
 
 define_syscall!(Ioctl, |fd: usize, request: u64, request_ptr: u64| {
     let object = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+    if matches!(socket_raw_ioctl_op(request), Some(LinuxIoctlOp::RawFionbio)) {
+        let nonblocking: i32 = user_safe::read(request_ptr as *const i32)?;
+        let mut flags = object.clone().get_flags().map_err(SyscallError::from)?;
+        if nonblocking != 0 {
+            flags.insert(FileFlags::NONBLOCK);
+        } else {
+            flags.remove(FileFlags::NONBLOCK);
+        }
+        object.set_flags(flags).map_err(SyscallError::from)?;
+        return Ok(0);
+    }
+    if matches!(socket_raw_ioctl_op(request), Some(LinuxIoctlOp::RawFioclex)) {
+        get_current_process()
+            .lock()
+            .set_fd_flags(fd, FdFlags::CLOEXEC)
+            .map_err(SyscallError::from)?;
+        return Ok(0);
+    }
+
     let config_request = ConfigurateRequest::new(request, request_ptr)?;
     let ioctl_op = config_request.kind();
     let ioctl_target = ioctl_target_for_object(&object);
@@ -663,14 +683,6 @@ define_syscall!(Ioctl, |fd: usize, request: u64, request_ptr: u64| {
     }
     if let Some(target) = ioctl_target {
         profile::record_ioctl_target(target, ioctl_cycles);
-    }
-
-    if matches!(socket_raw_ioctl_op(request), Some(LinuxIoctlOp::RawFioclex)) && res.is_ok() {
-        let process_ref = get_current_process();
-        let mut process = process_ref.lock();
-        process
-            .set_fd_flags(fd, FdFlags::CLOEXEC)
-            .map_err(SyscallError::from)?;
     }
 
     res.map(|val| val as usize).map_err(Into::into)

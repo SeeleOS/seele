@@ -60,11 +60,12 @@ define_syscall!(Pipe2, |fds: *mut i32, flags: PipeFlags| {
 #[cfg(test)]
 mod tests {
     use crate::{
+        filesystem::info::LinuxStat,
         memory::user_safe,
         object::FileFlags,
         process::FdFlags,
         systemcall::{
-            implementations::{Close, Dup, Dup2, Dup3, Pipe, Pipe2, Read, Write},
+            implementations::{Close, Dup, Dup2, Dup3, Fstat, Ioctl, Pipe, Pipe2, Read, Write},
             test::{
                 assert_fd_flags, assert_object_flags, assert_same_object, close_test_fd, expect_fd,
                 occupied_fd_count,
@@ -86,8 +87,13 @@ mod tests {
     fn pipe_and_dup_syscalls_follow_linux_fd_rules() {
         const O_NONBLOCK: u64 = 0o4_000;
         const O_CLOEXEC: u64 = 0o2_000_000;
+        const S_IFMT: u32 = 0o170000;
+        const S_IFIFO: u32 = 0o010000;
+        const FIONBIO: u64 = 0x5421;
+        const FIOCLEX: u64 = 0x5451;
 
         let fd_page = allocate_user_test_page();
+        let stat_page = fd_page + 512;
 
         let occupied_before_bad_pipe = occupied_fd_count();
         expect_errno(
@@ -105,6 +111,36 @@ mod tests {
         assert_fd_flags(write_fd, FdFlags::empty());
         assert_object_flags(read_fd, FileFlags::empty());
         assert_object_flags(write_fd, FileFlags::empty());
+        expect_ok(
+            SyscallArgs::new([read_fd as u64, stat_page, 0, 0, 0, 0]).call::<Fstat>(),
+            0,
+        );
+        assert_eq!(
+            read_user_value::<LinuxStat>(stat_page).st_mode & S_IFMT,
+            S_IFIFO,
+            "fstat on a pipe fd must report a FIFO, not fail with EBADF"
+        );
+        write_user_value(fd_page + 640, &1i32);
+        expect_ok(
+            SyscallArgs::new([read_fd as u64, FIONBIO, fd_page + 640, 0, 0, 0]).call::<Ioctl>(),
+            0,
+        );
+        assert_object_flags(read_fd, FileFlags::NONBLOCK);
+        expect_ok(
+            SyscallArgs::new([read_fd as u64, FIOCLEX, 0, 0, 0, 0]).call::<Ioctl>(),
+            0,
+        );
+        assert_fd_flags(read_fd, FdFlags::CLOEXEC);
+        write_user_value(fd_page + 640, &0i32);
+        expect_ok(
+            SyscallArgs::new([read_fd as u64, FIONBIO, fd_page + 640, 0, 0, 0]).call::<Ioctl>(),
+            0,
+        );
+        assert_object_flags(read_fd, FileFlags::empty());
+        expect_errno(
+            SyscallArgs::new([read_fd as u64, FIONBIO, 1, 0, 0, 0]).call::<Ioctl>(),
+            SyscallError::BadAddress,
+        );
 
         user_safe::write_buffer(fd_page as *mut u8, b"abc")
             .expect("test buffer should be writable");

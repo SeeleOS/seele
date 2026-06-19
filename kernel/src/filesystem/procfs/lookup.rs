@@ -115,6 +115,11 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             PROC_SYS_KERNEL_CAP_LAST_CAP_INODE,
             proc_cap_last_cap_bytes,
         )),
+        ["sys", "kernel", "tainted"] => Ok(proc_file(
+            "tainted",
+            PROC_SYS_KERNEL_TAINTED_INODE,
+            proc_tainted_bytes,
+        )),
         ["sys", "kernel", "random"] => Ok(proc_dir(
             "/sys/kernel/random",
             "random",

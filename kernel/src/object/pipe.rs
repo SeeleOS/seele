@@ -4,13 +4,14 @@ use alloc::{
 };
 
 use crate::{
+    filesystem::info::LinuxStat,
     impl_cast_function,
     memory::utils::Mut,
     object::{
         FileFlags, Object,
         error::ObjectError,
         misc::{ObjectRef, ObjectResult},
-        traits::{Readable, Writable},
+        traits::{Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable, wait_for_object_event},
     socket::SocketError,
@@ -140,6 +141,21 @@ impl Object for PipeEndpoint {
     impl_cast_function!("readable", Readable);
     impl_cast_function!("writable", Writable);
     impl_cast_function!("pollable", Pollable);
+    impl_cast_function!("statable", Statable);
+}
+
+impl Statable for PipeEndpoint {
+    fn stat(&self) -> LinuxStat {
+        const S_IFIFO: u32 = 0o010000;
+
+        LinuxStat {
+            st_dev: 1,
+            st_nlink: 1,
+            st_mode: S_IFIFO | 0o600,
+            st_blksize: 4096,
+            ..Default::default()
+        }
+    }
 }
 
 impl Readable for PipeEndpoint {

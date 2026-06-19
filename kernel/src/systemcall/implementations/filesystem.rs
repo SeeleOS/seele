@@ -2761,10 +2761,11 @@ mod tests {
         write_user_cstr(page + 2560, b"/proc/uptime\0");
         write_user_cstr(page + 2688, b"/proc/mounts\0");
         write_user_cstr(page + 2816, b"/proc/self/mountinfo\0");
+        write_user_cstr(page + 2944, b"/proc/sys/kernel/tainted\0");
 
         let self_status_fd = openat_fd(AT_FDCWD, page, OpenFlags::empty());
         let pid_status_fd = openat_fd(AT_FDCWD, page + 128, OpenFlags::empty());
-        let self_status = read_file_via_fd(self_status_fd, page, 2944, 512);
+        let self_status = read_file_via_fd(self_status_fd, page, 3072, 512);
         let pid_status = read_file_via_fd(pid_status_fd, page, 3584, 512);
         let self_status = core::str::from_utf8(&self_status).unwrap();
         let pid_status = core::str::from_utf8(&pid_status).unwrap();
@@ -2772,6 +2773,10 @@ mod tests {
         assert!(pid_status.contains(&format!("Pid:\t{current_pid}\n")));
         close_test_fd(self_status_fd);
         close_test_fd(pid_status_fd);
+        let tainted_fd = openat_fd(AT_FDCWD, page + 2944, OpenFlags::empty());
+        let tainted = read_file_via_fd(tainted_fd, page, 3072, 16);
+        assert_eq!(core::str::from_utf8(&tainted).unwrap(), "0\n");
+        close_test_fd(tainted_fd);
 
         let self_target = readlink_bytes((-1i32) as u64, page + 256, page + 3200, 64);
         assert_eq!(

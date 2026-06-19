@@ -42,6 +42,7 @@ pub(super) const PROC_SYS_KERNEL_RANDOM_UUID_INODE: u64 = 0x301a;
 pub(super) const PROC_SYS_KERNEL_NGROUPS_MAX_INODE: u64 = 0x301b;
 pub(super) const PROC_SYS_KERNEL_CAP_LAST_CAP_INODE: u64 = 0x301c;
 pub(super) const PROC_FILESYSTEMS_INODE: u64 = 0x301d;
+pub(super) const PROC_SYS_KERNEL_TAINTED_INODE: u64 = 0x301e;
 
 static PROC_UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -163,6 +164,7 @@ pub(super) fn proc_kernel_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("osrelease".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("ngroups_max".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("cap_last_cap".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("tainted".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("random".into(), DirectoryContentType::Directory),
     ]
 }
@@ -193,6 +195,10 @@ pub(super) fn proc_ngroups_max_bytes() -> Vec<u8> {
 
 pub(super) fn proc_cap_last_cap_bytes() -> Vec<u8> {
     format!("{}\n", crate::process::CAP_LAST_CAP).into_bytes()
+}
+
+pub(super) fn proc_tainted_bytes() -> Vec<u8> {
+    b"0\n".to_vec()
 }
 
 pub(super) fn proc_pressure_entries() -> Vec<DirectoryContentInfo> {
@@ -318,6 +324,7 @@ mod tests {
                 "osrelease",
                 "ngroups_max",
                 "cap_last_cap",
+                "tainted",
                 "random"
             ]
         );
@@ -343,6 +350,7 @@ mod tests {
         assert!(proc_boot_id_bytes().ends_with(b"\n"));
         assert_eq!(proc_ngroups_max_bytes(), b"65536\n");
         assert!(proc_cap_last_cap_bytes().ends_with(b"\n"));
+        assert_eq!(proc_tainted_bytes(), b"0\n");
     }
 
     fn procfs_root_includes_current_pid_and_stable_mount_renderings() {
