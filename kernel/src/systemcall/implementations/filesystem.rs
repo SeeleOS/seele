@@ -959,7 +959,7 @@ mod tests {
                 0,
             ])
             .call::<Newfstatat>(),
-            SyscallError::NoSyscall,
+            SyscallError::InvalidArguments,
         );
 
         close_test_fd(file_fd);

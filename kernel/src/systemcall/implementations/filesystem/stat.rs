@@ -121,7 +121,7 @@ define_syscall!(Newfstatat, |dirfd: i32,
         != flags.bits()
             & (AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT | AtFlags::EMPTY_PATH).bits()
     {
-        return Err(SyscallError::NoSyscall);
+        return Err(SyscallError::InvalidArguments);
     }
     let path_str = if path.is_null() {
         if flags.contains(AtFlags::EMPTY_PATH) {
