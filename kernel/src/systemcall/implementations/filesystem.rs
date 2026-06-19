@@ -1388,6 +1388,46 @@ mod tests {
         assert!(saw_dir);
         assert!(saw_link);
 
+        write_user_cstr(user_page + 640, b"/tmp/syscall-getdents-test\0");
+        let old_dir_fd = expect_fd(
+            SyscallArgs::new([
+                AT_FDCWD,
+                user_page + 640,
+                OpenFlags::DIRECTORY.bits() as u64,
+                0,
+                0,
+                0,
+            ])
+            .call::<OpenAt>(),
+        );
+        let old_bytes = SyscallArgs::new([old_dir_fd as u64, user_page + 128, 512, 0, 0, 0])
+            .call::<crate::systemcall::implementations::Getdents>()
+            .expect("getdents should return byte count");
+        assert!(old_bytes > 0);
+        let mut offset = 0usize;
+        let mut saw_old_file = false;
+        while offset < old_bytes {
+            let reclen = read_user_value::<u16>(user_page + 128 + offset as u64 + 16);
+            assert!(reclen as usize >= 24);
+            let d_type = read_user_value::<u8>(user_page + 128 + offset as u64 + reclen as u64 - 1);
+            let raw_name = get_current_process()
+                .lock()
+                .addrspace
+                .read_buffer(
+                    (user_page + 128 + offset as u64 + 18) as *const u8,
+                    reclen as usize - 19,
+                )
+                .unwrap();
+            let nul = raw_name.iter().position(|byte| *byte == 0).unwrap();
+            let name = core::str::from_utf8(&raw_name[..nul]).unwrap();
+            if name == "file" && d_type == DT_REG {
+                saw_old_file = true;
+            }
+            offset += reclen as usize;
+        }
+        assert!(saw_old_file);
+        close_test_fd(old_dir_fd);
+
         expect_ok(
             SyscallArgs::new([dir_fd as u64, user_page + 128, 512, 0, 0, 0])
                 .call::<crate::systemcall::implementations::Getdents>(),

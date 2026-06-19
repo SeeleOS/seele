@@ -204,6 +204,57 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
     Ok(bytes_written)
 }
 
+fn write_dirents(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult {
+    if buf.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let obj = get_object_current_process(object_index)?.as_file_like()?;
+    let contents = obj.directory_contents().map_err(SyscallError::from)?;
+    let current_pid = get_current_process().lock().pid;
+    let mut offsets = DIR_OFFSETS.lock();
+    let offset_entry = offsets.entry((current_pid, object_index)).or_insert(0usize);
+    if *offset_entry >= contents.len() {
+        return Ok(0);
+    }
+    if len < 24 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    let mut bytes_written = 0;
+
+    while *offset_entry < contents.len() {
+        let info = &contents[*offset_entry];
+        let name_bytes = info.name.as_bytes();
+        let reclen = ((19 + name_bytes.len() + 7) & !7) as u16;
+        if bytes_written + reclen as usize > len {
+            break;
+        }
+
+        let mut entry = vec![0u8; reclen as usize];
+        let inode = if info.inode != 0 {
+            info.inode
+        } else {
+            fallback_dirent_inode(info, *offset_entry)
+        };
+        entry[0..8].copy_from_slice(&inode.to_ne_bytes());
+        entry[8..16].copy_from_slice(&((*offset_entry as u64) + 1).to_ne_bytes());
+        entry[16..18].copy_from_slice(&reclen.to_ne_bytes());
+        entry[18..18 + name_bytes.len()].copy_from_slice(name_bytes);
+        entry[18 + name_bytes.len()] = 0;
+        entry[reclen as usize - 1] = match info.content_type {
+            DirectoryContentType::Directory => 4,
+            DirectoryContentType::File => 8,
+            DirectoryContentType::Symlink => 10,
+        };
+        user_safe::write_buffer(unsafe { buf.add(bytes_written) }, &entry)?;
+
+        bytes_written += reclen as usize;
+        *offset_entry += 1;
+    }
+
+    Ok(bytes_written)
+}
+
 fn read_object_at_offset(
     object: &ObjectRef,
     buffer: &mut [u8],
@@ -455,7 +506,7 @@ fn pwrite_object_in_chunks(
 }
 
 define_syscall!(Getdents, |object_index: u64, buf: *mut u8, len: usize| {
-    write_dirents64(object_index, buf, len)
+    write_dirents(object_index, buf, len)
 });
 
 define_syscall!(Getdents64, |object_index: u64, buf: *mut u8, len: usize| {

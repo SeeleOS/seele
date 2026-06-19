@@ -129,16 +129,26 @@ fn epoll_interest_entries(bits: EpollEvents) -> [(bool, PollableEvent, u32); 6] 
     ]
 }
 
+fn create_epoll(fd_flags: FdFlags) -> usize {
+    get_current_process()
+        .lock()
+        .push_object_with_flags(PollerObject::new(), fd_flags)
+}
+
+define_syscall!(EpollCreate, |size: i32| {
+    if size <= 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    Ok(create_epoll(FdFlags::empty()))
+});
+
 define_syscall!(EpollCreate1, |flags: EpollCreateFlags| {
     let fd_flags = if flags.contains(EpollCreateFlags::EPOLL_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
         FdFlags::empty()
     };
-    let fd = get_current_process()
-        .lock()
-        .push_object_with_flags(PollerObject::new(), fd_flags);
-    Ok(fd)
+    Ok(create_epoll(fd_flags))
 });
 
 fn epoll_update_impl(

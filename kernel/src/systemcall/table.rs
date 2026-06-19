@@ -180,6 +180,7 @@ define_syscall_table!(
     Waitid,
     AddKey,
     Keyctl,
+    EpollCreate,
     EpollWait,
     EpollCtl,
     Tgkill,

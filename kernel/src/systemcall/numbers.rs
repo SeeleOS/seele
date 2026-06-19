@@ -156,6 +156,7 @@ pub enum SyscallNumber {
     InotifyInit = 253,
     InotifyAddWatch = 254,
     InotifyRmWatch = 255,
+    EpollCreate = 213,
     EpollWait = 232,
     EpollCtl = 233,
     Tgkill = 234,
