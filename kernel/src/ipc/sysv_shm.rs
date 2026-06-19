@@ -11,7 +11,7 @@ use crate::{
     memory::{
         addrspace::{
             cow::{decrease_ref, increase_ref},
-            mem_area::{Data, MemoryArea},
+            mem_area::{Data, MemoryArea, SharedFrames},
         },
         paging::FRAME_ALLOCATOR,
         utils::apply_offset,
@@ -312,16 +312,12 @@ pub fn shmat(process: &mut Process, shmid: i32, shmaddr: *const u8, shmflg: i32)
             PageTableFlags::empty()
         };
 
-    for frame in frames.iter().copied() {
-        increase_ref(frame);
-    }
-
     process.addrspace.map(MemoryArea::new(
         addr,
         pages,
         flags,
         Data::Shared {
-            frames,
+            frames: Arc::new(SharedFrames::new(frames.to_vec())),
             flags: PageTableFlags::empty(),
         },
         false,

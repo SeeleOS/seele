@@ -4,8 +4,7 @@ define_syscall!(Access, |path: CString, mode: i32| {
     check_access_mode(mode)?;
     let path_str = path_from_raw(path)?;
     let path = resolve_path_at(AT_FDCWD, &path_str)?;
-    let object = open_path(path)?;
-    check_access_permissions(&object.stat(), mode)?;
+    check_access_target(path, mode, AtFlags::empty())?;
     Ok(0)
 });
 

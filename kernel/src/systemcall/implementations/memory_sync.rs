@@ -6,16 +6,18 @@ use alloc::{
 };
 use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
-use x86_64::structures::paging::{PageSize, Size4KiB};
+use x86_64::structures::paging::{FrameAllocator, PageSize, Size4KiB};
 use x86_64::{VirtAddr, registers::model_specific::FsBase};
 
 use crate::{
     define_syscall,
     memory::{
         addrspace::AddrSpace,
-        addrspace::mem_area::{Data, MemoryArea},
+        addrspace::mem_area::{Data, MemoryArea, SharedFrames},
+        paging::FRAME_ALLOCATOR,
         protection::Protection,
         user_safe,
+        utils::apply_offset,
     },
     misc::others::protection_to_page_flags,
     misc::time::Time,
@@ -788,6 +790,35 @@ fn resized_file_mapping(
     file.mmap_data(offset, pages, shared)
 }
 
+fn anonymous_mapping_data(
+    pages: u64,
+    shared: bool,
+    protection: Protection,
+) -> Result<Data, SyscallError> {
+    if !shared {
+        return Ok(Data::Normal);
+    }
+
+    let mut frames = Vec::with_capacity(pages as usize);
+    let mut allocator = FRAME_ALLOCATOR.get().unwrap().lock();
+    for _ in 0..pages {
+        let frame = allocator.allocate_frame().ok_or(SyscallError::NoMemory)?;
+        unsafe {
+            core::ptr::write_bytes(
+                apply_offset(frame.start_address().as_u64()) as *mut u8,
+                0,
+                Size4KiB::SIZE as usize,
+            );
+        }
+        frames.push(frame);
+    }
+
+    Ok(Data::Shared {
+        frames: Arc::new(SharedFrames::new(frames)),
+        flags: protection_to_page_flags(protection),
+    })
+}
+
 define_syscall!(Mmap, |addr: u64,
                        len: u64,
                        prot: i32,
@@ -836,7 +867,11 @@ define_syscall!(Mmap, |addr: u64,
             current.addrspace.unmap(start, pages * 4096);
         }
 
-        let data = file_mapping.unwrap_or(Data::Normal);
+        let data = if let Some(data) = file_mapping {
+            data
+        } else {
+            anonymous_mapping_data(pages, shared, protection)?
+        };
 
         current.addrspace.register_area(MemoryArea::new(
             start,
@@ -854,10 +889,11 @@ define_syscall!(Mmap, |addr: u64,
 
     if flags.contains(MmapFlags::ANONYMOUS) {
         let current = get_current_process();
+        let data = anonymous_mapping_data(pages, shared, protection)?;
         return Ok(current
             .lock()
             .addrspace
-            .allocate_user_lazy(pages, protection, Data::Normal)
+            .allocate_user_lazy(pages, protection, data)
             .as_u64() as usize);
     }
 
@@ -1551,6 +1587,46 @@ mod tests {
                 .expect("forked child should read the shared mapping"),
             b"shared",
             "MAP_SHARED file mappings must remain shared after fork instead of becoming COW"
+        );
+
+        let anonymous_shared_addr = SyscallArgs::new([
+            0,
+            4096,
+            (Protection::READ | Protection::WRITE).bits() as u64,
+            MAP_SHARED | MAP_ANONYMOUS,
+            u64::MAX,
+            0,
+        ])
+        .call::<Mmap>()
+        .expect("anonymous shared mmap should succeed") as u64;
+        let (anonymous_shared_child, _) = Process::fork(process.clone());
+        anonymous_shared_child
+            .lock()
+            .addrspace
+            .write(anonymous_shared_addr as *mut i32, &252i32)
+            .expect("forked child should write anonymous shared mapping");
+        assert_eq!(
+            process
+                .lock()
+                .addrspace
+                .read::<i32>(anonymous_shared_addr as *const i32)
+                .expect("parent should read forked child shared mapping write"),
+            252,
+            "MAP_SHARED anonymous mappings must remain shared after fork"
+        );
+        anonymous_shared_child.lock().addrspace.clean();
+        assert_eq!(
+            process
+                .lock()
+                .addrspace
+                .read::<i32>(anonymous_shared_addr as *const i32)
+                .expect("parent should keep anonymous shared mapping after child exit"),
+            252,
+            "child exit must not release the shared anonymous frame still mapped by the parent"
+        );
+        expect_ok(
+            SyscallArgs::new([anonymous_shared_addr, 4096, 0, 0, 0, 0]).call::<Munmap>(),
+            0,
         );
 
         expect_ok(

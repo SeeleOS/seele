@@ -1,11 +1,12 @@
 use alloc::{string::String, sync::Arc, vec::Vec};
 use bitflags::bitflags;
+use strum::IntoEnumIterator;
 
 use crate::{
     define_syscall,
     filesystem::path::Path,
     memory::user_safe,
-    misc::signal::SigInfo,
+    misc::signal::{SigInfo, SignalHandlingType},
     object::misc::get_object_current_process,
     process::{
         Process, ProcessExitStatus, ProcessRef,
@@ -14,7 +15,7 @@ use crate::{
         misc::{ProcessID, get_process_with_pid},
         wait::{ProcessWaitEvent, take_wait_event},
     },
-    signal::Signal,
+    signal::{Signal, Signals},
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
         get_current_thread,
@@ -24,6 +25,8 @@ use crate::{
         },
     },
 };
+
+const SA_RESTART: u64 = 0x1000_0000;
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -77,9 +80,34 @@ struct LinuxRusage {
 }
 
 fn has_wait_interrupt_signal(process: &ProcessRef) -> bool {
-    let mut pending = process.lock().pending_signals;
-    pending.remove(Signal::SIGCHLD.into());
-    !pending.is_empty()
+    let process = process.lock();
+    let current_thread = get_current_thread();
+    let current_thread = current_thread.lock();
+
+    let signal_interrupts_wait = |signal: Signal| {
+        let action = &process.signal_actions[signal.index()];
+        signal != Signal::SIGCHLD
+            && matches!(
+                action.handling_type,
+                SignalHandlingType::Function1(_) | SignalHandlingType::Function2(_)
+            )
+            && action.flags & SA_RESTART == 0
+    };
+
+    Signal::iter().any(|signal| {
+        (process.pending_signals.contains(Signals::from(signal))
+            || current_thread
+                .pending_signals
+                .contains(Signals::from(signal)))
+            && signal_interrupts_wait(signal)
+    })
+}
+
+fn consume_ignored_child_signal(process: &ProcessRef) {
+    process
+        .lock()
+        .pending_signals
+        .remove(Signal::SIGCHLD.into());
 }
 
 const CLD_TRAPPED: i32 = 4;
@@ -194,12 +222,14 @@ fn wait_for_child_exit(
 
         match check_result {
             Some(WaitOutcome::Exited(process, pid, exit_status)) => {
+                consume_ignored_child_signal(&current_process);
                 if !wait_behavior.preserve_child {
                     MANAGER.lock().reap_process(process.clone());
                 }
                 return Ok(Some(WaitOutcome::Exited(process, pid, exit_status)));
             }
             Some(WaitOutcome::Stopped(process, pid, wait_event)) => {
+                consume_ignored_child_signal(&current_process);
                 return Ok(Some(WaitOutcome::Stopped(process, pid, wait_event)));
             }
             None if wait_behavior.nohang => return Ok(None),
@@ -214,6 +244,7 @@ fn wait_for_child_exit(
                 });
                 match check_wait_outcome(target_process, wait_behavior, &current_process) {
                     Ok(Some(outcome)) => {
+                        consume_ignored_child_signal(&current_process);
                         cancel_block(&current);
                         finish_block_current();
                         return Ok(Some(outcome));
@@ -790,6 +821,34 @@ mod tests {
                 .lock()
                 .processes
                 .contains_key(&ProcessID(wait4_preserve_child_pid))
+        );
+        get_current_process()
+            .lock()
+            .pending_signals
+            .insert(Signals::from(Signal::SIGCHLD));
+
+        let wait4_sigchld_child = Process::empty();
+        let wait4_sigchld_child_pid = {
+            let mut child = wait4_sigchld_child.lock();
+            child.pid = ProcessID::new();
+            child.parent = Some(current.clone());
+            child.group_id = current.lock().group_id;
+            child.exit_status = Some(ProcessExitStatus::Exited(13));
+            child.pid.0
+        };
+        MANAGER.lock().processes.insert(
+            ProcessID(wait4_sigchld_child_pid),
+            wait4_sigchld_child.clone(),
+        );
+        expect_ok(
+            SyscallArgs::new([wait4_sigchld_child_pid, 0, WNOHANG, 0, 0, 0]).call::<Wait4>(),
+            wait4_sigchld_child_pid as usize,
+        );
+        assert!(
+            !get_current_process()
+                .lock()
+                .pending_signals
+                .contains(Signals::from(Signal::SIGCHLD))
         );
 
         let stopped_child = Process::empty();

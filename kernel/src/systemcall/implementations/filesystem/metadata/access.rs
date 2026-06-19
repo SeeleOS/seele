@@ -13,19 +13,131 @@ pub(in crate::systemcall::implementations::filesystem) fn check_access_permissio
     stat: &LinuxStat,
     mode: i32,
 ) -> Result<(), SyscallError> {
-    let permission = stat.st_mode & 0o777;
+    check_access_permissions_for_ids(stat, mode, &access_credentials(false))
+}
 
-    if (mode & 4) != 0 && permission & 0o444 == 0 {
+#[derive(Clone)]
+struct AccessCredentials {
+    uid: u32,
+    gid: u32,
+    supplementary_groups: Vec<u32>,
+}
+
+fn access_credentials(use_effective_ids: bool) -> AccessCredentials {
+    let process = get_current_process();
+    let process = process.lock();
+    AccessCredentials {
+        uid: if use_effective_ids {
+            process.effective_uid
+        } else {
+            process.real_uid
+        },
+        gid: if use_effective_ids {
+            process.effective_gid
+        } else {
+            process.real_gid
+        },
+        supplementary_groups: process.supplementary_groups.clone(),
+    }
+}
+
+fn check_access_permissions_for_ids(
+    stat: &LinuxStat,
+    mode: i32,
+    credentials: &AccessCredentials,
+) -> Result<(), SyscallError> {
+    let permission = stat.st_mode & 0o777;
+    if credentials.uid == 0 {
+        if (mode & 1) != 0 && permission & 0o111 == 0 {
+            return Err(SyscallError::AccessDenied);
+        }
+        return Ok(());
+    }
+
+    let permission_shift = if credentials.uid == stat.st_uid {
+        6
+    } else if credentials.gid == stat.st_gid
+        || credentials.supplementary_groups.contains(&stat.st_gid)
+    {
+        3
+    } else {
+        0
+    };
+    let permission = (permission >> permission_shift) & 0o7;
+
+    if (mode & 4) != 0 && permission & 0o4 == 0 {
         return Err(SyscallError::AccessDenied);
     }
-    if (mode & 2) != 0 && permission & 0o222 == 0 {
+    if (mode & 2) != 0 && permission & 0o2 == 0 {
         return Err(SyscallError::AccessDenied);
     }
-    if (mode & 1) != 0 && permission & 0o111 == 0 {
+    if (mode & 1) != 0 && permission & 0o1 == 0 {
         return Err(SyscallError::AccessDenied);
     }
 
     Ok(())
+}
+
+fn check_effective_access_permissions(stat: &LinuxStat, mode: i32) -> Result<(), SyscallError> {
+    check_access_permissions_for_ids(stat, mode, &access_credentials(true))
+}
+
+fn check_access_path_search_permissions(
+    path: &Path,
+    credentials: &AccessCredentials,
+) -> Result<(), SyscallError> {
+    if credentials.uid == 0 {
+        return Ok(());
+    }
+
+    let path = path.normalize();
+    let normal_parts = path
+        .parts
+        .iter()
+        .filter(|part| matches!(part, crate::filesystem::path::PathPart::Normal(_)))
+        .count();
+    if normal_parts == 0 {
+        return Ok(());
+    }
+
+    let mut prefix = Path::default();
+    check_access_permissions_for_ids(&open_path(prefix.clone())?.stat(), 1, credentials)?;
+
+    let mut seen = 0;
+    for part in path.parts {
+        let crate::filesystem::path::PathPart::Normal(component) = part else {
+            continue;
+        };
+
+        seen += 1;
+        if seen == normal_parts {
+            break;
+        }
+
+        prefix = prefix.join_component(&component);
+        let directory = open_path(prefix.clone())?;
+        if !matches!(directory.info()?.file_like_type, FileLikeType::Directory) {
+            return Err(SyscallError::NotADirectory);
+        }
+        check_access_permissions_for_ids(&directory.stat(), 1, credentials)?;
+    }
+
+    Ok(())
+}
+
+pub(in crate::systemcall::implementations::filesystem) fn check_access_target(
+    path: Path,
+    mode: i32,
+    flags: AtFlags,
+) -> Result<(), SyscallError> {
+    let credentials = access_credentials(flags.contains(AtFlags::EACCESS));
+    check_access_path_search_permissions(&path, &credentials)?;
+    let object = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
+        open_path_nofollow(path)
+    } else {
+        open_path(path)
+    }?;
+    check_access_permissions_for_ids(&object.stat(), mode, &credentials)
 }
 
 pub(in crate::systemcall::implementations::filesystem) fn faccessat_impl(
@@ -47,18 +159,17 @@ pub(in crate::systemcall::implementations::filesystem) fn faccessat_impl(
         }
 
         let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
-        check_access_permissions(&object.as_statable()?.stat(), mode)?;
+        let stat = object.as_statable()?.stat();
+        if flags.contains(AtFlags::EACCESS) {
+            check_effective_access_permissions(&stat, mode)?;
+        } else {
+            check_access_permissions(&stat, mode)?;
+        }
         return Ok(0);
     }
 
     let path = resolve_path_at(dirfd, path_str)?;
-    let open_result = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
-        open_path_nofollow(path.clone())
-    } else {
-        open_path(path.clone())
-    };
-    let object: ObjectRef = Arc::new(open_result?);
-    check_access_permissions(&object.as_statable()?.stat(), mode)?;
+    check_access_target(path, mode, flags)?;
     Ok(0)
 }
 

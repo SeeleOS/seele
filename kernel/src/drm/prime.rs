@@ -3,10 +3,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use crate::memory::utils::Mut;
 use alloc::{string::String, sync::Arc};
 use bitflags::bitflags;
-use x86_64::{
-    VirtAddr,
-    structures::paging::{PhysFrame, Size4KiB},
-};
+use x86_64::VirtAddr;
 
 use crate::{
     filesystem::{
@@ -14,7 +11,11 @@ use crate::{
         vfs_traits::{FileLikeType, Whence},
     },
     impl_cast_function, impl_cast_function_non_trait,
-    memory::{addrspace::mem_area::Data, protection::Protection, user_safe},
+    memory::{
+        addrspace::mem_area::{Data, SharedFrames},
+        protection::Protection,
+        user_safe,
+    },
     object::{
         FileFlags, Object,
         config::ConfigurateRequest,
@@ -137,16 +138,14 @@ impl MemoryMappable for DrmPrimeBufferObject {
         let page_delta =
             usize::try_from(offset / 4096).map_err(|_| ObjectError::InvalidArguments)?;
         let page_count = usize::try_from(pages).map_err(|_| ObjectError::InvalidArguments)?;
-        let frames = Arc::<[PhysFrame<Size4KiB>]>::from(
-            self.buffer.frames[page_delta..page_delta + page_count].to_vec(),
-        );
+        let frames = self.buffer.frames[page_delta..page_delta + page_count].to_vec();
 
         Ok(with_current_process(|process| {
             process.addrspace.allocate_user_lazy(
                 pages,
                 protection,
                 Data::Shared {
-                    frames,
+                    frames: Arc::new(SharedFrames::new(frames)),
                     flags: self.buffer.shared_flags,
                 },
             )

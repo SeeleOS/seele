@@ -7,7 +7,10 @@ use x86_64::VirtAddr;
 use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function,
-    memory::{addrspace::mem_area::Data, protection::Protection},
+    memory::{
+        addrspace::mem_area::{Data, SharedFrames},
+        protection::Protection,
+    },
     object::{
         FileFlags, Object,
         config::ConfigurateRequest,
@@ -72,7 +75,7 @@ impl MemoryMappable for DrmCardObject {
                 pages,
                 protection,
                 Data::Shared {
-                    frames,
+                    frames: Arc::new(SharedFrames::new(frames.to_vec())),
                     flags: shared_flags,
                 },
             )

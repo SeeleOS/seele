@@ -5,6 +5,7 @@ const DEFAULT_INOTIFY_MAX_QUEUED_EVENTS: u64 = 16_384;
 const DEFAULT_INOTIFY_MAX_USER_INSTANCES: u64 = 128;
 const DEFAULT_INOTIFY_MAX_USER_WATCHES: u64 = 524_288;
 const DEFAULT_NR_OPEN: u64 = 1_048_576;
+const DEFAULT_PID_MAX: u64 = 4_194_304;
 
 pub(super) static PROC_FILE_MAX: AtomicU64 = AtomicU64::new(DEFAULT_FILE_MAX);
 pub(super) static PROC_INOTIFY_MAX_QUEUED_EVENTS: AtomicU64 =
@@ -14,6 +15,7 @@ pub(super) static PROC_INOTIFY_MAX_USER_INSTANCES: AtomicU64 =
 pub(super) static PROC_INOTIFY_MAX_USER_WATCHES: AtomicU64 =
     AtomicU64::new(DEFAULT_INOTIFY_MAX_USER_WATCHES);
 pub(super) static PROC_NR_OPEN: AtomicU64 = AtomicU64::new(DEFAULT_NR_OPEN);
+pub(super) static PROC_PID_MAX: AtomicU64 = AtomicU64::new(DEFAULT_PID_MAX);
 
 pub(super) fn proc_hostname_bytes() -> Vec<u8> {
     proc_c_string_bytes(crate::misc::utsname::current_hostname(crate::NAME))

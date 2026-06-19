@@ -4,7 +4,12 @@ use x86_64::{VirtAddr, structures::paging::Translate};
 
 use crate::{
     impl_cast_function,
-    memory::{addrspace::mem_area::Data, paging::MAPPER, protection::Protection, user_safe},
+    memory::{
+        addrspace::mem_area::{Data, SharedFrames},
+        paging::MAPPER,
+        protection::Protection,
+        user_safe,
+    },
     misc::{
         framebuffer::{
             FRAME_BUFFER, FramebufferInfo, FramebufferPixelFormat, framebuffer_set_user_controlled,
@@ -122,7 +127,7 @@ impl MemoryMappable for FramebufferObject {
                 pages,
                 protection,
                 Data::Shared {
-                    frames: Arc::<[PhysFrame]>::from(frames),
+                    frames: Arc::new(SharedFrames::new(frames)),
                     flags: shared_flags,
                 },
             )

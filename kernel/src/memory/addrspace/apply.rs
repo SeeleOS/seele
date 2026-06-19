@@ -391,9 +391,9 @@ impl AddrSpace {
                 flags: shared_flags,
             } => {
                 let page_index = (page.start_address().as_u64() - area.start.as_u64()) / 4096;
-                let frame = frames[page_index as usize];
+                let frame = frames.get(page_index as usize);
                 AppliedPageCluster {
-                    frame: self.map_existing_frame(page, frame, area.flags | shared_flags, false),
+                    frame: self.map_existing_frame(page, frame, area.flags | shared_flags, true),
                     file_lazy_stats: FileLazyFaultStats::default(),
                 }
             }

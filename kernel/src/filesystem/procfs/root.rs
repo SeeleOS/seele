@@ -43,6 +43,7 @@ pub(super) const PROC_SYS_KERNEL_NGROUPS_MAX_INODE: u64 = 0x301b;
 pub(super) const PROC_SYS_KERNEL_CAP_LAST_CAP_INODE: u64 = 0x301c;
 pub(super) const PROC_FILESYSTEMS_INODE: u64 = 0x301d;
 pub(super) const PROC_SYS_KERNEL_TAINTED_INODE: u64 = 0x301e;
+pub(super) const PROC_SYS_KERNEL_PID_MAX_INODE: u64 = 0x301f;
 
 static PROC_UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -163,6 +164,7 @@ pub(super) fn proc_kernel_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("domainname".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("osrelease".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("ngroups_max".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("pid_max".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("cap_last_cap".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("tainted".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("random".into(), DirectoryContentType::Directory),
@@ -269,7 +271,7 @@ mod tests {
     use super::{
         generate_uuid, proc_boot_id_bytes, proc_cap_last_cap_bytes, proc_filesystems_bytes,
         proc_kernel_entries, proc_kernel_random_entries, proc_mountinfo_bytes, proc_mounts_bytes,
-        proc_ngroups_max_bytes, proc_pressure_entries, proc_root_entries,
+        proc_ngroups_max_bytes, proc_pressure_entries, proc_root_entries, proc_tainted_bytes,
     };
     use crate::process::manager::get_current_process;
     use alloc::{
@@ -323,6 +325,7 @@ mod tests {
                 "domainname",
                 "osrelease",
                 "ngroups_max",
+                "pid_max",
                 "cap_last_cap",
                 "tainted",
                 "random"

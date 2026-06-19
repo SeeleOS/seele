@@ -110,6 +110,12 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             PROC_SYS_KERNEL_NGROUPS_MAX_INODE,
             proc_ngroups_max_bytes,
         )),
+        ["sys", "kernel", "pid_max"] => Ok(proc_rw_file(
+            "pid_max",
+            PROC_SYS_KERNEL_PID_MAX_INODE,
+            || proc_sysctl_value_bytes(&PROC_PID_MAX),
+            |buffer| proc_write_sysctl_u64(&PROC_PID_MAX, buffer),
+        )),
         ["sys", "kernel", "cap_last_cap"] => Ok(proc_file(
             "cap_last_cap",
             PROC_SYS_KERNEL_CAP_LAST_CAP_INODE,

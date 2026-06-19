@@ -31,7 +31,10 @@ impl AddrSpace {
                 continue;
             }
 
-            let is_shared_file_mapping = matches!(area.data, Data::File { shared: true, .. });
+            let is_shared_mapping = matches!(
+                area.data,
+                Data::File { shared: true, .. } | Data::Shared { .. }
+            );
             let start = Page::<Size4KiB>::containing_address(area.start);
             let end = Page::<Size4KiB>::containing_address(area.end - 1u64);
             let pages = Page::<Size4KiB>::range_inclusive(start, end);
@@ -47,17 +50,16 @@ impl AddrSpace {
                 {
                     unsafe {
                         let already_ref_counted = is_ref_counted(frame);
-                        let new_flags = if flags.contains(PageTableFlags::WRITABLE)
-                            && !is_shared_file_mapping
-                        {
-                            old_page_table
-                                .update_flags(page, as_cow_flags(flags))
-                                .unwrap()
-                                .flush();
-                            as_cow_flags(flags)
-                        } else {
-                            flags
-                        };
+                        let new_flags =
+                            if flags.contains(PageTableFlags::WRITABLE) && !is_shared_mapping {
+                                old_page_table
+                                    .update_flags(page, as_cow_flags(flags))
+                                    .unwrap()
+                                    .flush();
+                                as_cow_flags(flags)
+                            } else {
+                                flags
+                            };
 
                         // Only writable pages should enter the CoW path. Read-only
                         // mappings can stay shared with their original permissions.

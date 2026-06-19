@@ -1,7 +1,7 @@
 use super::sysctl::{
-    proc_c_string_bytes, proc_fs_entries, proc_fs_inotify_entries, proc_pressure_bytes,
-    proc_sys_entries, proc_sysctl_value_bytes, proc_trim_sysctl_string, proc_write_domainname,
-    proc_write_hostname, proc_write_pressure, proc_write_sysctl_u64,
+    PROC_PID_MAX, proc_c_string_bytes, proc_fs_entries, proc_fs_inotify_entries,
+    proc_pressure_bytes, proc_sys_entries, proc_sysctl_value_bytes, proc_trim_sysctl_string,
+    proc_write_domainname, proc_write_hostname, proc_write_pressure, proc_write_sysctl_u64,
 };
 use crate::filesystem::errors::FSError;
 use crate::misc::utsname::{current_domainname, current_hostname, set_domainname, set_hostname};
@@ -57,6 +57,8 @@ fn procfs_static_entry_builders_expose_stable_names() {
     assert_eq!(sys_entries.len(), 2);
     assert_eq!(sys_entries[0].name, "fs");
     assert_eq!(sys_entries[1].name, "kernel");
+
+    assert_eq!(proc_sysctl_value_bytes(&PROC_PID_MAX), b"4194304\n");
 }
 
 fn procfs_pressure_and_sysctl_rendering_stays_stable() {

@@ -1,10 +1,51 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use x86_64::{
     VirtAddr,
-    structures::paging::{Page, PageTableFlags, PhysFrame, Size4KiB, page::PageRange},
+    structures::paging::{
+        FrameDeallocator, Page, PageTableFlags, PhysFrame, Size4KiB, page::PageRange,
+    },
 };
 
-use crate::{filesystem::object::FileLikeObject, memory::addrspace::USER_MEM_END};
+use crate::{
+    filesystem::object::FileLikeObject,
+    memory::{
+        addrspace::{USER_MEM_END, cow::decrease_ref},
+        paging::FRAME_ALLOCATOR,
+    },
+};
+
+#[derive(Debug)]
+pub struct SharedFrames {
+    frames: Arc<[PhysFrame]>,
+}
+
+impl SharedFrames {
+    pub fn new(frames: Vec<PhysFrame>) -> Self {
+        for frame in &frames {
+            crate::memory::addrspace::cow::increase_ref(*frame);
+        }
+        Self {
+            frames: Arc::from(frames),
+        }
+    }
+
+    pub fn get(&self, index: usize) -> PhysFrame {
+        self.frames[index]
+    }
+}
+
+impl Drop for SharedFrames {
+    fn drop(&mut self) {
+        let mut allocator = FRAME_ALLOCATOR.get().unwrap().lock();
+        for frame in self.frames.iter().copied() {
+            if decrease_ref(frame) {
+                unsafe {
+                    allocator.deallocate_frame(frame);
+                }
+            }
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct MemoryArea {
@@ -28,7 +69,7 @@ pub enum Data {
         shared: bool,
     },
     Shared {
-        frames: Arc<[PhysFrame]>,
+        frames: Arc<SharedFrames>,
         flags: PageTableFlags,
     },
 }
