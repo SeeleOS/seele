@@ -42,7 +42,8 @@ impl Directory for TmpfsDirectoryHandle {
             UnixPermission(mode),
             FileLikeType::Directory,
         )
-        .with_inode(node.inode))
+        .with_inode(node.inode)
+        .with_owner(node.uid, node.gid))
     }
 
     fn name(&self) -> FSResult<String> {

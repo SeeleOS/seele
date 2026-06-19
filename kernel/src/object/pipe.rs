@@ -5,7 +5,7 @@ use alloc::{
 
 use crate::{
     filesystem::info::LinuxStat,
-    impl_cast_function,
+    impl_cast_function, impl_cast_function_non_trait,
     memory::utils::Mut,
     object::{
         FileFlags, Object,
@@ -142,6 +142,7 @@ impl Object for PipeEndpoint {
     impl_cast_function!("writable", Writable);
     impl_cast_function!("pollable", Pollable);
     impl_cast_function!("statable", Statable);
+    impl_cast_function_non_trait!("pipe", PipeEndpoint);
 }
 
 impl Statable for PipeEndpoint {

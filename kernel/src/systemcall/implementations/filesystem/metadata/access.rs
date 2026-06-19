@@ -41,13 +41,35 @@ fn access_credentials(use_effective_ids: bool) -> AccessCredentials {
     }
 }
 
+fn fs_access_credentials() -> AccessCredentials {
+    let process = get_current_process();
+    let process = process.lock();
+    AccessCredentials {
+        uid: process.fs_uid,
+        gid: process.fs_gid,
+        supplementary_groups: process.supplementary_groups.clone(),
+    }
+}
+
 fn check_access_permissions_for_ids(
     stat: &LinuxStat,
     mode: i32,
     credentials: &AccessCredentials,
 ) -> Result<(), SyscallError> {
+    check_access_permissions_for_ids_with_options(stat, mode, credentials, false)
+}
+
+fn check_access_permissions_for_ids_with_options(
+    stat: &LinuxStat,
+    mode: i32,
+    credentials: &AccessCredentials,
+    allow_root_directory_search: bool,
+) -> Result<(), SyscallError> {
     let permission = stat.st_mode & 0o777;
     if credentials.uid == 0 {
+        if allow_root_directory_search && (stat.st_mode & S_IFMT) == S_IFDIR {
+            return Ok(());
+        }
         if (mode & 1) != 0 && permission & 0o111 == 0 {
             return Err(SyscallError::AccessDenied);
         }
@@ -138,6 +160,15 @@ pub(in crate::systemcall::implementations::filesystem) fn check_access_target(
         open_path(path)
     }?;
     check_access_permissions_for_ids(&object.stat(), mode, &credentials)
+}
+
+pub(in crate::systemcall::implementations::filesystem) fn check_chdir_target(
+    path: &Path,
+    stat: &LinuxStat,
+) -> Result<(), SyscallError> {
+    let credentials = fs_access_credentials();
+    check_access_path_search_permissions(path, &credentials)?;
+    check_access_permissions_for_ids_with_options(stat, 1, &credentials, true)
 }
 
 pub(in crate::systemcall::implementations::filesystem) fn faccessat_impl(

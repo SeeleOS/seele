@@ -130,7 +130,7 @@ fn linux_clock_now_ns(clock_id: i32) -> Result<i64, SyscallError> {
     match clock_id {
         0 | 5 | 8 | 11 => Ok(KernelTime::current().as_nanoseconds() as i64),
         1 | 4 | 6 | 7 | 9 => Ok(KernelTime::since_boot().as_nanoseconds() as i64),
-        2 | 3 => Ok(0),
+        2 | 3 => Ok(KernelTime::since_boot().as_nanoseconds().max(1) as i64),
         _ => Err(SyscallError::InvalidArguments),
     }
 }

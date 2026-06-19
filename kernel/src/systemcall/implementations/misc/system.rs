@@ -44,7 +44,7 @@ define_syscall!(Brk, |addr: u64| {
             VirtAddr::new(old_aligned),
             (new_aligned - old_aligned) / 4096,
             protection_to_page_flags(Protection::READ | Protection::WRITE),
-            Data::Normal,
+            Data::Normal(Default::default()),
             true,
         ));
     } else if new_aligned < old_aligned {
@@ -569,6 +569,7 @@ mod tests {
         let uts = read_user_value::<TestUtsName>(uts_page);
         assert_eq!(&uts.sysname[..6], b"Seele\0");
         assert_eq!(&uts.nodename[..10], b"linuxhost\0");
+        assert_eq!(&uts.release[..13], b"6.12.0-seele\0");
         assert_eq!(&uts.machine[..7], b"x86_64\0");
         expect_errno(
             SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Uname>(),

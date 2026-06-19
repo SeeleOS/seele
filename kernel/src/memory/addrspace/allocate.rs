@@ -22,7 +22,7 @@ impl AddrSpace {
             mem,
             pages,
             PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE,
-            Data::Normal,
+            Data::Normal(Default::default()),
             false,
         ))
     }
@@ -56,7 +56,7 @@ impl AddrSpace {
             VirtAddr::new(KERNEL_MEM.fetch_add((pages + 1) * 4096, Ordering::Relaxed)),
             pages,
             PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
-            Data::Normal,
+            Data::Normal(Default::default()),
             false,
         ))
     }

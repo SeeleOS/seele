@@ -1,6 +1,7 @@
 use crate::memory::utils::Mut;
-use alloc::sync::Arc;
+use alloc::{string::String, sync::Arc, vec::Vec};
 use conquer_once::spin::OnceCell;
+use spin::Mutex;
 use virtio_drivers::{
     Error as VirtioError,
     device::blk::{SECTOR_SIZE, VirtIOBlk},
@@ -15,15 +16,35 @@ use crate::{
         pci::{PciConfigPorts, enumerate_devices},
         virtio::hal::KernelHal,
     },
-    filesystem::block_device::{BlockDevice, BlockDeviceError, BlockDeviceResult},
+    filesystem::{
+        block_device::{BlockDevice, BlockDeviceError, BlockDeviceResult},
+        info::LinuxStat,
+    },
 };
 
 use virtio_drivers::transport::pci::bus::{Command, PciRoot};
 
 static ROOT_DEVICE: OnceCell<Arc<dyn BlockDevice>> = OnceCell::uninit();
+static DEVICES: Mutex<Vec<NamedBlockDevice>> = Mutex::new(Vec::new());
+const VIRTIO_BLK_MAJOR: u64 = 252;
+const VIRTIO_BLK_DISK_MINOR_STRIDE: u64 = 16;
+
+#[derive(Clone)]
+pub struct NamedBlockDevice {
+    pub name: String,
+    pub minor: u64,
+    pub device: Arc<dyn BlockDevice>,
+}
+
+impl NamedBlockDevice {
+    pub fn rdev(&self) -> u64 {
+        LinuxStat::linux_makedev(VIRTIO_BLK_MAJOR, self.minor)
+    }
+}
 
 pub fn init() {
     let mut selected = None;
+    let mut index = 0usize;
 
     for record in enumerate_devices() {
         if record.info.device_id < 0x1040 {
@@ -63,11 +84,20 @@ pub fn init() {
             device.readonly,
         );
 
-        if is_ext4_candidate(device.as_ref()) {
-            let dyn_device: Arc<dyn BlockDevice> = device;
+        let name = virtio_disk_name(index);
+        let minor = index as u64 * VIRTIO_BLK_DISK_MINOR_STRIDE;
+        index += 1;
+
+        let dyn_device: Arc<dyn BlockDevice> = device;
+        DEVICES.lock().push(NamedBlockDevice {
+            name,
+            minor,
+            device: dyn_device.clone(),
+        });
+
+        if is_ext4_candidate(dyn_device.as_ref()) {
             let _ = ROOT_DEVICE.get_or_init(|| dyn_device.clone());
             selected = Some(dyn_device);
-            break;
         }
     }
 
@@ -78,6 +108,24 @@ pub fn init() {
 
 pub fn root_device() -> Option<Arc<dyn BlockDevice>> {
     ROOT_DEVICE.get().cloned()
+}
+
+pub fn named_device(name: &str) -> Option<NamedBlockDevice> {
+    DEVICES
+        .lock()
+        .iter()
+        .find(|device| device.name == name)
+        .cloned()
+}
+
+pub fn list_devices() -> Vec<NamedBlockDevice> {
+    DEVICES.lock().clone()
+}
+
+fn virtio_disk_name(index: usize) -> String {
+    const LETTERS: &[u8; 26] = b"abcdefghijklmnopqrstuvwxyz";
+    let letter = LETTERS.get(index).copied().unwrap_or(b'z');
+    alloc::format!("vd{}", letter as char)
 }
 
 fn is_ext4_candidate(device: &dyn BlockDevice) -> bool {

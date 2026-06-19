@@ -5,6 +5,7 @@ use crate::{
         cgroupfs::pid_cgroup_path, errors::FSError, info::DirectoryContentInfo, vfs::FSResult,
         vfs_traits::DirectoryContentType,
     },
+    misc::time::{NANOSECONDS_PER_SECOND, Time},
     object::misc::ObjectRef,
     process::{
         manager::get_current_process,
@@ -44,6 +45,7 @@ const PROC_PID_INIT_INO: u64 = 0xEFFF_FFFC;
 const PROC_TIME_INIT_INO: u64 = 0xEFFF_FFFA;
 const PROC_USER_INIT_INO: u64 = 0xEFFF_FFFD;
 const PROC_UTS_INIT_INO: u64 = 0xEFFF_FFFE;
+const USER_HZ: u64 = 100;
 
 fn default_user_namespace_map(id: u32) -> String {
     format!("0 {id} 1\n")
@@ -109,12 +111,25 @@ pub(super) fn proc_pid_stat_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
         .map(|parent| parent.lock().pid.0)
         .unwrap_or(0);
     let comm = pid_string(pid);
+    let ticks_since_boot = Time::since_boot().as_nanoseconds() / (NANOSECONDS_PER_SECOND / USER_HZ);
+    let utime = ticks_since_boot.max(1);
+    let stime = 0;
     let content = format!(
         concat!(
-            "{} ({}) {} {} {} {} {} {} 0 0 0 0 0 0 0 0 0 0 20 0 {} 0 ",
+            "{} ({}) {} {} {} {} {} {} 0 0 0 0 0 {} {} 0 0 0 20 0 {} 0 ",
             "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
         ),
-        pid.0, comm, state, parent_pid, group_id, session, tty_nr, tty_pgrp, num_threads,
+        pid.0,
+        comm,
+        state,
+        parent_pid,
+        group_id,
+        session,
+        tty_nr,
+        tty_pgrp,
+        utime,
+        stime,
+        num_threads,
     );
     Ok(content.into_bytes())
 }

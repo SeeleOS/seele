@@ -61,6 +61,10 @@ pub struct LinuxStat {
 }
 
 impl LinuxStat {
+    pub fn linux_makedev(major: u64, minor: u64) -> u64 {
+        ((major & 0xfff) << 8) | (minor & 0xff) | ((minor & !0xff) << 12) | ((major & !0xfff) << 32)
+    }
+
     pub fn new(info: FileLikeInfo) -> Self {
         pub const S_IFMT: u32 = 0o170000;
         pub const S_IFDIR: u32 = 0o040000;
@@ -85,6 +89,7 @@ impl LinuxStat {
             st_mode,
             st_uid: info.uid,
             st_gid: info.gid,
+            st_rdev: info.rdev,
             st_size: info.size as i64,
             st_blksize: 4096,
             st_blocks: (info.size as i64 + 511) / 512,
@@ -103,6 +108,19 @@ impl LinuxStat {
             st_dev: 1,
             st_nlink: 1,
             st_mode: S_IFCHR | permission,
+            st_rdev: rdev,
+            st_blksize: 4096,
+            ..Default::default()
+        }
+    }
+
+    pub fn block_device_with_rdev(permission: u32, rdev: u64) -> Self {
+        pub const S_IFBLK: u32 = 0o060000;
+
+        Self {
+            st_dev: 1,
+            st_nlink: 1,
+            st_mode: S_IFBLK | permission,
             st_rdev: rdev,
             st_blksize: 4096,
             ..Default::default()

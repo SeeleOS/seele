@@ -191,7 +191,6 @@ impl Ext4Directory {
                 fs: lookup.fs,
                 inode: lookup.inode,
                 name: lookup.name,
-                parent_path: self.path.clone(),
             })))),
             FileLikeType::File => Ok(FileLike::File(Arc::new(Mut::new(Ext4File::new(
                 lookup.name,

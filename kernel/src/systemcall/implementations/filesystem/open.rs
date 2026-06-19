@@ -190,7 +190,11 @@ define_syscall!(OpenAt, |dirfd: i32,
             profile::scope_start().saturating_sub(truncate_start),
         );
     }
-    let mut file_flags = FileFlags::empty();
+    let mut file_flags = match flags.bits() & 0o3 {
+        0o1 => FileFlags::WRONLY,
+        0o2 => FileFlags::RDWR,
+        _ => FileFlags::empty(),
+    };
     if flags.contains(OpenFlags::APPEND) {
         file_flags.insert(FileFlags::APPEND);
     }
@@ -230,6 +234,17 @@ define_syscall!(Open, |path: CString, flags: OpenFlags, mode: u32| {
         (-100i32) as u64,
         path as u64,
         flags.bits() as u64,
+        mode as u64,
+        0,
+        0,
+    )
+});
+
+define_syscall!(Creat, |path: CString, mode: u32| {
+    OpenAt::handle_call(
+        (-100i32) as u64,
+        path as u64,
+        (OpenFlags::CREAT | OpenFlags::TRUNC).bits() as u64 | 0o1,
         mode as u64,
         0,
         0,

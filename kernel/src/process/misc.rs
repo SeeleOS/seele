@@ -26,12 +26,9 @@ impl Process {
             return Err(FSError::AccessDenied);
         }
 
-        if resolve_dir_path(directory.as_normal()).is_ok() {
-            self.fs_context.lock().current_directory = directory;
-            Ok(())
-        } else {
-            Err(FSError::NotADirectory)
-        }
+        resolve_dir_path(directory.as_normal())?;
+        self.fs_context.lock().current_directory = directory;
+        Ok(())
     }
 
     pub fn wake_blocked_threads(&self) {

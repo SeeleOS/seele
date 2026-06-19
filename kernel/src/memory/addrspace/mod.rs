@@ -24,6 +24,8 @@ use crate::{
         profile::{self, HotSyscallPhase},
         stack_builder::StackBuilder,
     },
+    object::{FileFlags, Object},
+    systemcall::utils::SyscallError,
 };
 
 pub mod allocate;
@@ -362,6 +364,54 @@ impl AddrSpace {
         }
     }
 
+    pub fn validate_permission_update(
+        &self,
+        start: VirtAddr,
+        end: VirtAddr,
+        protection: Protection,
+    ) -> Result<(), SyscallError> {
+        if start >= end {
+            return Ok(());
+        }
+
+        let mut cursor = start;
+        for area in &self.memory_areas {
+            if area.end <= cursor {
+                continue;
+            }
+            if area.start > cursor {
+                return Err(SyscallError::NoMemory);
+            }
+
+            let overlap_end = core::cmp::min(area.end, end);
+            if protection.contains(Protection::WRITE) {
+                match &area.data {
+                    Data::File {
+                        file, shared: true, ..
+                    } => {
+                        let flags = file.clone().get_flags().map_err(SyscallError::from)?;
+                        if !flags.intersects(FileFlags::WRONLY | FileFlags::RDWR) {
+                            return Err(SyscallError::AccessDenied);
+                        }
+                    }
+                    Data::Normal(permissions)
+                        if permissions.shared_write_allowed == Some(false) =>
+                    {
+                        return Err(SyscallError::AccessDenied);
+                    }
+                    _ => {}
+                }
+            }
+
+            cursor = overlap_end;
+            if cursor >= end {
+                return Ok(());
+            }
+        }
+
+        Err(SyscallError::NoMemory)
+    }
+
     pub fn translate_addr(&mut self, addr: VirtAddr) -> Option<PhysAddr> {
         self.page_table.translate_addr(addr)
     }
@@ -390,6 +440,37 @@ impl AddrSpace {
             } else {
                 self.last_area_index = Some(mid);
                 return self.memory_areas.get(mid);
+            }
+        }
+
+        self.last_area_index = None;
+        None
+    }
+
+    pub fn get_area_mut(&mut self, addr: VirtAddr) -> Option<&mut MemoryArea> {
+        if let Some(index) = self.last_area_index
+            && self
+                .memory_areas
+                .get(index)
+                .is_some_and(|area| area.contains(addr))
+        {
+            return self.memory_areas.get_mut(index);
+        }
+
+        let mut left = 0usize;
+        let mut right = self.memory_areas.len();
+
+        while left < right {
+            let mid = left + (right - left) / 2;
+            let area = &self.memory_areas[mid];
+
+            if addr < area.start {
+                right = mid;
+            } else if addr >= area.end {
+                left = mid + 1;
+            } else {
+                self.last_area_index = Some(mid);
+                return self.memory_areas.get_mut(mid);
             }
         }
 

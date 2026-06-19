@@ -51,7 +51,8 @@ impl File for TmpfsFileHandle {
                 UnixPermission(*mode),
                 FileLikeType::File,
             )
-            .with_inode(node.inode)),
+            .with_inode(node.inode)
+            .with_owner(node.uid, node.gid)),
             TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => Err(FSError::NotAFile),
         }
     }

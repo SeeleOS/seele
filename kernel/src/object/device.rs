@@ -1,14 +1,16 @@
 use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc};
 
 use crate::{
+    drivers::virtio::block::named_device,
     drm::object::DrmCardObject,
     evdev::open_event_device,
     misc::{
-        devices::{DevKmsg, DevNull, DevRandom},
+        devices::{DevKmsg, DevNull, DevRandom, DevZero},
         fb_object::FramebufferObject,
         mouse::PS2MouseObject,
     },
     object::{
+        block_device::BlockDeviceObject,
         fuse_device::FuseDevice,
         misc::ObjectRef,
         tty_device::{get_active_tty, get_default_tty, get_virtual_tty},
@@ -25,6 +27,7 @@ lazy_static::lazy_static! {
 
         devices.insert("framebuffer", Arc::new(FramebufferObject::default()) as ObjectRef);
         devices.insert("devnull", Arc::new(DevNull) as ObjectRef);
+        devices.insert("devzero", Arc::new(DevZero) as ObjectRef);
         devices.insert("random", Arc::new(DevRandom) as ObjectRef);
         devices.insert("urandom", Arc::new(DevRandom) as ObjectRef);
         devices.insert("fuse", FuseDevice::new() as ObjectRef);
@@ -74,6 +77,14 @@ pub fn get_device_ref(name: &str) -> SyscallResult<ObjectRef> {
 
     if let Some(device) = open_event_device(name) {
         return Ok(device);
+    }
+
+    if let Some(block_device) = named_device(name) {
+        return Ok(Arc::new(BlockDeviceObject::new(
+            block_device.name,
+            block_device.minor,
+            block_device.device,
+        )) as ObjectRef);
     }
 
     DEVICES

@@ -13,7 +13,7 @@ use crate::{
     define_syscall,
     memory::{
         addrspace::AddrSpace,
-        addrspace::mem_area::{Data, MemoryArea, SharedFrames},
+        addrspace::mem_area::{Data, MemoryArea, MmapPermissions, SharedFrames},
         paging::FRAME_ALLOCATOR,
         protection::Protection,
         user_safe,
@@ -114,6 +114,15 @@ bitflags! {
         const ASYNC = 0x1;
         const INVALIDATE = 0x2;
         const SYNC = 0x4;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) struct GetMempolicyFlags: u64 {
+        const NODE = 0x1;
+        const ADDR = 0x2;
+        const MEMS_ALLOWED = 0x4;
     }
 }
 
@@ -796,7 +805,7 @@ fn anonymous_mapping_data(
     protection: Protection,
 ) -> Result<Data, SyscallError> {
     if !shared {
-        return Ok(Data::Normal);
+        return Ok(Data::Normal(MmapPermissions::default()));
     }
 
     let mut frames = Vec::with_capacity(pages as usize);
@@ -817,6 +826,37 @@ fn anonymous_mapping_data(
         frames: Arc::new(SharedFrames::new(frames)),
         flags: protection_to_page_flags(protection),
     })
+}
+
+fn fd_allows_shared_write(object: &Arc<dyn crate::object::Object>) -> Result<bool, SyscallError> {
+    let flags = object.clone().get_flags().map_err(SyscallError::from)?;
+    Ok(flags.intersects(crate::object::FileFlags::WRONLY | crate::object::FileFlags::RDWR))
+}
+
+fn check_shared_writable_mapping(
+    object: &Arc<dyn crate::object::Object>,
+    shared: bool,
+    protection: Protection,
+) -> Result<(), SyscallError> {
+    if !shared || !protection.contains(Protection::WRITE) {
+        return Ok(());
+    }
+
+    if fd_allows_shared_write(object)? {
+        Ok(())
+    } else {
+        Err(SyscallError::AccessDenied)
+    }
+}
+
+fn shared_write_permission(
+    object: &Arc<dyn crate::object::Object>,
+    shared: bool,
+) -> Result<bool, SyscallError> {
+    if !shared {
+        return Ok(false);
+    }
+    fd_allows_shared_write(object)
 }
 
 define_syscall!(Mmap, |addr: u64,
@@ -847,6 +887,7 @@ define_syscall!(Mmap, |addr: u64,
             }
             let object = crate::object::misc::get_object_current_process(fd as u64)
                 .map_err(SyscallError::from)?;
+            check_shared_writable_mapping(&object, shared, protection)?;
             let file = object.as_file_like()?;
             if file.is_device_backed() {
                 return Err(SyscallError::InvalidArguments);
@@ -902,6 +943,8 @@ define_syscall!(Mmap, |addr: u64,
     }
     let object =
         crate::object::misc::get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+    check_shared_writable_mapping(&object, shared, protection)?;
+    let shared_write_allowed = shared_write_permission(&object, shared)?;
     if let Ok(file) = object.clone().as_file_like()
         && !file.is_device_backed()
     {
@@ -914,6 +957,14 @@ define_syscall!(Mmap, |addr: u64,
     }
     let object = object.as_mappable()?;
     let address = object.map(offset, pages, protection)?;
+    if shared {
+        let current = get_current_process();
+        if let Some(area) = current.lock().addrspace.get_area_mut(address)
+            && let Data::Normal(permissions) = &mut area.data
+        {
+            permissions.shared_write_allowed = Some(shared_write_allowed);
+        }
+    }
     Ok(address.as_u64() as usize)
 });
 
@@ -984,7 +1035,7 @@ define_syscall!(Mremap, |old_addr: VirtAddr,
 
     let new_start = current.addrspace.fetch_add_user_mem(new_pages);
     let new_data = match &area.data {
-        Data::Normal => Data::Normal,
+        Data::Normal(permissions) => Data::Normal(*permissions),
         Data::File {
             offset,
             file,
@@ -997,7 +1048,7 @@ define_syscall!(Mremap, |old_addr: VirtAddr,
     current.addrspace.register_area(new_area.clone());
 
     let copy_pages = match &area.data {
-        Data::Normal => old_pages,
+        Data::Normal(_) => old_pages,
         Data::File { .. } => old_pages,
         Data::Shared { .. } => 0,
     };
@@ -1039,12 +1090,31 @@ define_syscall!(Mremap, |old_addr: VirtAddr,
 
 define_syscall!(Mprotect, |addr: VirtAddr, len: u64, prot: i32| {
     let protection = prot_to_protection(prot)?;
+    if len == 0 {
+        return Ok(0);
+    }
+
+    if !addr.is_aligned(Size4KiB::SIZE) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
     let pages = len.div_ceil(4096);
-    get_current_process().lock().addrspace.update_permissions(
-        addr,
-        addr + pages * 4096,
-        protection,
-    );
+    let end = addr
+        .as_u64()
+        .checked_add(
+            pages
+                .checked_mul(Size4KiB::SIZE)
+                .ok_or(SyscallError::NoMemory)?,
+        )
+        .ok_or(SyscallError::NoMemory)?;
+    let end = VirtAddr::new(end);
+
+    let current_process = get_current_process();
+    let mut current = current_process.lock();
+    current
+        .addrspace
+        .validate_permission_update(addr, end, protection)?;
+    current.addrspace.update_permissions(addr, end, protection);
     Ok(0)
 });
 
@@ -1154,6 +1224,65 @@ define_syscall!(Mincore, |addr: VirtAddr, len: usize, vec: *mut u8| {
     Ok(0)
 });
 
+define_syscall!(
+    GetMempolicy,
+    |mode: *mut i32, nodemask: *mut u64, maxnode: u64, addr: u64, flags: GetMempolicyFlags| {
+        if flags.contains(GetMempolicyFlags::MEMS_ALLOWED)
+            && flags.intersects(GetMempolicyFlags::ADDR | GetMempolicyFlags::NODE)
+        {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if flags.contains(GetMempolicyFlags::ADDR) {
+            if addr == 0 {
+                return Err(SyscallError::InvalidArguments);
+            }
+        } else if addr != 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if flags.contains(GetMempolicyFlags::NODE) && !flags.contains(GetMempolicyFlags::ADDR) {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if !nodemask.is_null() && maxnode == 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
+
+        if flags.contains(GetMempolicyFlags::ADDR) {
+            let process = get_current_process();
+            let mut process = process.lock();
+            let addr = VirtAddr::new(addr);
+            if process.addrspace.get_area(addr).is_none() {
+                return Err(SyscallError::BadAddress);
+            }
+            if flags.contains(GetMempolicyFlags::NODE)
+                && process.addrspace.translate_addr(addr).is_none()
+            {
+                let _ = process.addrspace.read(addr.as_u64() as *const u8)?;
+            }
+        }
+
+        if !mode.is_null() && !flags.contains(GetMempolicyFlags::MEMS_ALLOWED) {
+            user_safe::write(mode, &0i32)?;
+        }
+
+        if !nodemask.is_null() {
+            let word_count = maxnode.div_ceil(u64::BITS as u64) as usize;
+            let first_word = if flags.contains(GetMempolicyFlags::MEMS_ALLOWED) {
+                1u64
+            } else {
+                0u64
+            };
+            user_safe::write(nodemask, &first_word)?;
+            for word_index in 1..word_count {
+                unsafe {
+                    user_safe::write(nodemask.add(word_index), &0u64)?;
+                }
+            }
+        }
+
+        Ok(0)
+    }
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1166,8 +1295,8 @@ mod tests {
         systemcall::{
             arg_types::SyscallArg,
             implementations::{
-                Brk, Ftruncate, Futex, Lseek, Mincore, Mlock, Mmap, Mprotect, Mremap, Msync,
-                Munlock, Munmap, OpenAt, PollEvents, Read, Write, filesystem::OpenFlags,
+                Brk, Ftruncate, Futex, GetMempolicy, Lseek, Mincore, Mlock, Mmap, Mprotect, Mremap,
+                Msync, Munlock, Munmap, OpenAt, PollEvents, Read, Write, filesystem::OpenFlags,
             },
             test::{
                 TestLinuxTimespec, assert_user_bytes, close_test_fd, expect_errno, expect_fd,
@@ -1280,7 +1409,7 @@ mod tests {
             .get_area(x86_64::VirtAddr::new(current_break.div_ceil(4096) * 4096))
             .cloned()
             .expect("brk growth should create mapped area");
-        assert!(matches!(brk_area.data, Data::Normal));
+        assert!(matches!(brk_area.data, Data::Normal(_)));
         expect_ok(
             SyscallArgs::new([current_break, 0, 0, 0, 0, 0]).call::<Brk>(),
             current_break as usize,
@@ -1303,7 +1432,7 @@ mod tests {
             .get_area(x86_64::VirtAddr::new(anon_addr))
             .cloned()
             .expect("anon mmap should register area");
-        assert!(matches!(anon_area.data, Data::Normal));
+        assert!(matches!(anon_area.data, Data::Normal(_)));
         assert_eq!(
             SyscallArgs::new([anon_addr, 4096, 0, 0, 0, 0]).call::<Mlock>(),
             Ok(0),
@@ -1448,13 +1577,107 @@ mod tests {
             SyscallError::NoMemory,
         );
 
+        let mode_addr = mincore_vec + 64;
+        let nodemask_addr = mincore_vec + 128;
+        write_user_value(mode_addr, &-1i32);
+        write_user_value(nodemask_addr, &u64::MAX);
+        expect_ok(
+            SyscallArgs::new([mode_addr, nodemask_addr, 64, 0, 0, 0]).call::<GetMempolicy>(),
+            0,
+        );
+        assert_eq!(read_user_value::<i32>(mode_addr), 0);
+        assert_eq!(read_user_value::<u64>(nodemask_addr), 0);
+        write_user_value(mode_addr, &-1i32);
+        write_user_value(nodemask_addr, &0u64);
+        expect_ok(
+            SyscallArgs::new([
+                mode_addr,
+                nodemask_addr,
+                64,
+                0,
+                GetMempolicyFlags::MEMS_ALLOWED.bits(),
+                0,
+            ])
+            .call::<GetMempolicy>(),
+            0,
+        );
+        assert_eq!(read_user_value::<i32>(mode_addr), -1);
+        assert_eq!(read_user_value::<u64>(nodemask_addr), 1);
+        write_user_value(mode_addr, &-1i32);
+        expect_ok(
+            SyscallArgs::new([
+                mode_addr,
+                nodemask_addr,
+                64,
+                remapped_addr,
+                (GetMempolicyFlags::ADDR | GetMempolicyFlags::NODE).bits(),
+                0,
+            ])
+            .call::<GetMempolicy>(),
+            0,
+        );
+        assert_eq!(read_user_value::<i32>(mode_addr), 0);
+        expect_errno(
+            SyscallArgs::new([mode_addr, nodemask_addr, 64, remapped_addr, 0, 0])
+                .call::<GetMempolicy>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([
+                mode_addr,
+                nodemask_addr,
+                64,
+                0,
+                GetMempolicyFlags::NODE.bits(),
+                0,
+            ])
+            .call::<GetMempolicy>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([
+                mode_addr,
+                nodemask_addr,
+                64,
+                remapped_addr,
+                (GetMempolicyFlags::ADDR | GetMempolicyFlags::MEMS_ALLOWED).bits(),
+                0,
+            ])
+            .call::<GetMempolicy>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([
+                mode_addr,
+                nodemask_addr,
+                64,
+                0x2000_0000,
+                GetMempolicyFlags::ADDR.bits(),
+                0,
+            ])
+            .call::<GetMempolicy>(),
+            SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([mode_addr, nodemask_addr, 0, 0, 0, 0]).call::<GetMempolicy>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([mode_addr, 1, 64, 0, 0, 0]).call::<GetMempolicy>(),
+            SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([mode_addr, nodemask_addr, 64, 0, 8, 0]).call::<GetMempolicy>(),
+            SyscallError::InvalidArguments,
+        );
+
         let page = allocate_user_test_page();
         write_user_cstr(page, b"/tmp/syscall-mmap-file-test\0");
         let fd = expect_fd(
             SyscallArgs::new([
                 AT_FDCWD,
                 page,
-                (OpenFlags::CREAT | OpenFlags::TRUNC).bits() as u64,
+                (OpenFlags::CREAT | OpenFlags::TRUNC).bits() as u64 | 0o2,
                 0o600,
                 0,
                 0,
@@ -1629,6 +1852,24 @@ mod tests {
             0,
         );
 
+        write_user_cstr(page, b"/dev/zero\0");
+        let zero_fd = expect_fd(
+            SyscallArgs::new([AT_FDCWD, page, OpenFlags::empty().bits() as u64, 0, 0, 0])
+                .call::<OpenAt>(),
+        );
+        expect_errno(
+            SyscallArgs::new([
+                0,
+                4096,
+                Protection::WRITE.bits() as u64,
+                MAP_SHARED,
+                zero_fd as u64,
+                0,
+            ])
+            .call::<Mmap>(),
+            SyscallError::AccessDenied,
+        );
+
         expect_ok(
             SyscallArgs::new([second_file_map_addr, 8192, 0, 0, 0, 0]).call::<Munmap>(),
             0,
@@ -1648,6 +1889,7 @@ mod tests {
                 .get_area(x86_64::VirtAddr::new(remapped_addr))
                 .is_none()
         );
+        close_test_fd(zero_fd);
         close_test_fd(fd);
         let _ = VirtualFS
             .lock()

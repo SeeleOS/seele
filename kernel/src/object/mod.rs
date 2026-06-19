@@ -7,6 +7,8 @@ bitflags::bitflags! {
     pub struct FileFlags: u64 {
         const NONBLOCK = 1 << 0;
         const APPEND = 1 << 1;
+        const WRONLY = 1 << 2;
+        const RDWR = 1 << 3;
     }
 }
 
@@ -16,12 +18,14 @@ use crate::{
     net::namespace::NetNamespace,
     object::{
         anon::{EventFdObject, InotifyObject, PidFdObject, SignalfdObject, TimerFdObject},
+        block_device::BlockDeviceObject,
         bpf::BpfObject,
         error::ObjectError,
         fs_context::FsContextObject,
         fuse_device::FuseDevice,
         misc::ObjectResult,
         netlink::NetlinkSocketObject,
+        pipe::PipeEndpoint,
         traits::{Configuratable, MemoryMappable, Readable, Seekable, Statable, Writable},
         tty_device::TtyDevice,
     },
@@ -32,6 +36,7 @@ use crate::{
 };
 
 pub mod anon;
+pub mod block_device;
 pub mod bpf;
 pub mod config;
 pub mod control;
@@ -102,9 +107,11 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function_non_trait!("fs_context", FsContextObject, BadFileDescriptor);
     define_cast_function_non_trait!("fuse_device", FuseDevice, BadFileDescriptor);
     define_cast_function_non_trait!("bpf", BpfObject, BadFileDescriptor);
+    define_cast_function_non_trait!("block_device", BlockDeviceObject, BadFileDescriptor);
     define_cast_function_non_trait!("inotify", InotifyObject, BadFileDescriptor);
     define_cast_function_non_trait!("poller", PollerObject, BadFileDescriptor);
     define_cast_function_non_trait!("pidfd", PidFdObject, BadFileDescriptor);
+    define_cast_function_non_trait!("pipe", PipeEndpoint, BadFileDescriptor);
     define_cast_function_non_trait!("signalfd", SignalfdObject, BadFileDescriptor);
     define_cast_function_non_trait!("netlink_socket", NetlinkSocketObject, BadFileDescriptor);
     define_cast_function_non_trait!("net_namespace", NetNamespace, BadFileDescriptor);

@@ -17,6 +17,10 @@ impl Configuratable for TerminalObject {
         }
 
         match request {
+            ConfigurateRequest::LinuxTcGetA(termio) => {
+                user_safe::write(termio, &self.termios.lock().as_linux_termio())
+                    .map_err(|_| ObjectError::BadAddress)?;
+            }
             ConfigurateRequest::LinuxTcGets(termios) => {
                 user_safe::write(termios, &self.termios.lock().as_linux_termios())
                     .map_err(|_| ObjectError::BadAddress)?;

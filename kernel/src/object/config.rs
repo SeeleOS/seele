@@ -41,6 +41,23 @@ use crate::misc::framebuffer_ioctl::{FbCmap, FbFixScreeninfo, FbVarScreeninfo};
 use crate::terminal::linux_kd::{LinuxKbEntry, LinuxVtMode, LinuxVtStat};
 
 pub enum ConfigurateRequest {
+    BlockDiscard(*const [u64; 2]),
+    BlockFlushBuffers,
+    BlockGetAlignmentOffset(*mut i32),
+    BlockGetBlockSize(*mut u64),
+    BlockGetDiskSequence(*mut u64),
+    BlockGetGeometry(*mut LinuxHdGeometry),
+    BlockGetIOOptimalSize(*mut u32),
+    BlockGetIOMinimumSize(*mut u32),
+    BlockGetPhysicalSectorSize(*mut u32),
+    BlockGetReadOnly(*mut i32),
+    BlockGetSectorSize(*mut u32),
+    BlockGetSize(*mut u64),
+    BlockGetSize64(*mut u64),
+    BlockGetZoneCount(*mut u32),
+    BlockGetZoneSize(*mut u32),
+    BlockGetDiscardZeroes(*mut u32),
+    BlockZeroOut(*const [u64; 2]),
     FbGetVariableScreenInfo(*mut FbVarScreeninfo),
     FbPutVariableScreenInfo(*mut FbVarScreeninfo),
     FbGetFixedScreenInfo(*mut FbFixScreeninfo),
@@ -48,6 +65,7 @@ pub enum ConfigurateRequest {
     FbPutColorMap(*mut FbCmap),
     FbPanDisplay(*mut FbVarScreeninfo),
     FbBlank(u32),
+    LinuxTcGetA(*mut LinuxTermio),
     LinuxTcGets(*mut LinuxTermios),
     LinuxTcSets(*const LinuxTermios),
     LinuxTcFlush(u32),
@@ -169,6 +187,23 @@ pub enum ConfigurateRequest {
 impl ConfigurateRequest {
     pub fn name(&self) -> &'static str {
         match self {
+            Self::BlockDiscard(_) => "BlockDiscard",
+            Self::BlockFlushBuffers => "BlockFlushBuffers",
+            Self::BlockGetAlignmentOffset(_) => "BlockGetAlignmentOffset",
+            Self::BlockGetBlockSize(_) => "BlockGetBlockSize",
+            Self::BlockGetDiskSequence(_) => "BlockGetDiskSequence",
+            Self::BlockGetGeometry(_) => "BlockGetGeometry",
+            Self::BlockGetIOOptimalSize(_) => "BlockGetIOOptimalSize",
+            Self::BlockGetIOMinimumSize(_) => "BlockGetIOMinimumSize",
+            Self::BlockGetPhysicalSectorSize(_) => "BlockGetPhysicalSectorSize",
+            Self::BlockGetReadOnly(_) => "BlockGetReadOnly",
+            Self::BlockGetSectorSize(_) => "BlockGetSectorSize",
+            Self::BlockGetSize(_) => "BlockGetSize",
+            Self::BlockGetSize64(_) => "BlockGetSize64",
+            Self::BlockGetZoneCount(_) => "BlockGetZoneCount",
+            Self::BlockGetZoneSize(_) => "BlockGetZoneSize",
+            Self::BlockGetDiscardZeroes(_) => "BlockGetDiscardZeroes",
+            Self::BlockZeroOut(_) => "BlockZeroOut",
             Self::FbGetVariableScreenInfo(_) => "FbGetVariableScreenInfo",
             Self::FbPutVariableScreenInfo(_) => "FbPutVariableScreenInfo",
             Self::FbGetFixedScreenInfo(_) => "FbGetFixedScreenInfo",
@@ -176,6 +211,7 @@ impl ConfigurateRequest {
             Self::FbPutColorMap(_) => "FbPutColorMap",
             Self::FbPanDisplay(_) => "FbPanDisplay",
             Self::FbBlank(_) => "FbBlank",
+            Self::LinuxTcGetA(_) => "LinuxTcGetA",
             Self::LinuxTcGets(_) => "LinuxTcGets",
             Self::LinuxTcSets(_) => "LinuxTcSets",
             Self::LinuxTcFlush(_) => "LinuxTcFlush",
@@ -357,6 +393,24 @@ impl ConfigurateRequest {
             Self::EvdevGrab(_) => LinuxIoctlOp::EvdevGrab,
             Self::EvdevRevoke(_) => LinuxIoctlOp::EvdevRevoke,
             Self::EvdevSetClockId(_) => LinuxIoctlOp::EvdevSetClockId,
+            Self::BlockDiscard(_)
+            | Self::BlockFlushBuffers
+            | Self::BlockGetAlignmentOffset(_)
+            | Self::BlockGetBlockSize(_)
+            | Self::BlockGetDiskSequence(_)
+            | Self::BlockGetGeometry(_)
+            | Self::BlockGetIOOptimalSize(_)
+            | Self::BlockGetIOMinimumSize(_)
+            | Self::BlockGetPhysicalSectorSize(_)
+            | Self::BlockGetReadOnly(_)
+            | Self::BlockGetSectorSize(_)
+            | Self::BlockGetSize(_)
+            | Self::BlockGetSize64(_)
+            | Self::BlockGetZoneCount(_)
+            | Self::BlockGetZoneSize(_)
+            | Self::BlockGetDiscardZeroes(_)
+            | Self::BlockZeroOut(_) => return None,
+            Self::LinuxTcGetA(_) => return None,
             Self::RawIoctl { .. } => return None,
         })
     }
@@ -496,6 +550,26 @@ impl PtyPeerOpenRequest {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
+pub struct LinuxHdGeometry {
+    pub heads: u8,
+    pub sectors: u8,
+    pub cylinders: u16,
+    pub start: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LinuxTermio {
+    pub c_iflag: u16,
+    pub c_oflag: u16,
+    pub c_cflag: u16,
+    pub c_lflag: u16,
+    pub c_line: u8,
+    pub c_cc: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct LinuxTermios {
     pub c_iflag: u32,
     pub c_oflag: u32,
@@ -530,6 +604,23 @@ pub struct LinuxWinsize {
 impl ConfigurateRequest {
     pub fn new(request: u64, ptr: u64) -> ObjectResult<Self> {
         Ok(match request {
+            0x0301 => Self::BlockGetGeometry(ptr as *mut LinuxHdGeometry),
+            0x125e => Self::BlockGetReadOnly(ptr as *mut i32),
+            0x1260 => Self::BlockGetSize(ptr as *mut u64),
+            0x1261 => Self::BlockFlushBuffers,
+            0x1268 => Self::BlockGetSectorSize(ptr as *mut u32),
+            0x80081270 | 0xffff_ffff_8008_1270 => Self::BlockGetBlockSize(ptr as *mut u64),
+            0x80081272 => Self::BlockGetSize64(ptr as *mut u64),
+            0x1277 => Self::BlockDiscard(ptr as *const [u64; 2]),
+            0x1278 => Self::BlockGetIOMinimumSize(ptr as *mut u32),
+            0x1279 => Self::BlockGetIOOptimalSize(ptr as *mut u32),
+            0x127a => Self::BlockGetAlignmentOffset(ptr as *mut i32),
+            0x127b => Self::BlockGetPhysicalSectorSize(ptr as *mut u32),
+            0x127c => Self::BlockGetDiscardZeroes(ptr as *mut u32),
+            0x127f => Self::BlockZeroOut(ptr as *const [u64; 2]),
+            0x80081280 => Self::BlockGetDiskSequence(ptr as *mut u64),
+            0x80041284 => Self::BlockGetZoneSize(ptr as *mut u32),
+            0x80041285 => Self::BlockGetZoneCount(ptr as *mut u32),
             DRM_IOCTL_VERSION => Self::DrmVersion(ptr as *mut DrmVersion),
             DRM_IOCTL_GET_UNIQUE => Self::DrmGetUnique(ptr as *mut DrmUnique),
             DRM_IOCTL_GET_MAGIC => Self::DrmGetMagic(ptr as *mut DrmAuth),
@@ -580,6 +671,7 @@ impl ConfigurateRequest {
             0x4611 => Self::FbBlank(ptr as u32),
             0x5401 => Self::LinuxTcGets(ptr as *mut LinuxTermios),
             0x5402..=0x5404 => Self::LinuxTcSets(ptr as *const LinuxTermios),
+            0x5405 => Self::LinuxTcGetA(ptr as *mut LinuxTermio),
             0x540B => Self::LinuxTcFlush(ptr as u32),
             0x540D => Self::LinuxTiocnxcl,
             0x540E => Self::LinuxTiocsctty(ptr as u32),

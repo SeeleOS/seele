@@ -48,13 +48,19 @@ bitflags! {
 }
 
 fn access_mode_bits(object: &ObjectRef) -> usize {
-    let readable = object.clone().as_readable().is_ok();
-    let writable = object.clone().as_writable().is_ok();
+    match object.clone().get_flags() {
+        Ok(flags) if flags.contains(FileFlags::RDWR) => O_RDWR,
+        Ok(flags) if flags.contains(FileFlags::WRONLY) => O_WRONLY,
+        _ => {
+            let readable = object.clone().as_readable().is_ok();
+            let writable = object.clone().as_writable().is_ok();
 
-    match (readable, writable) {
-        (false, true) => O_WRONLY,
-        (true, true) => O_RDWR,
-        _ => 0,
+            match (readable, writable) {
+                (false, true) => O_WRONLY,
+                (true, true) => O_RDWR,
+                _ => 0,
+            }
+        }
     }
 }
 
@@ -62,7 +68,8 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
     match FcntlCmd::try_from(command).map_err(|_| SyscallError::InvalidArguments)? {
         FcntlCmd::SetFl => {
-            let mut flags = FileFlags::empty();
+            let mut flags = object.clone().get_flags().map_err(SyscallError::from)?
+                & (FileFlags::WRONLY | FileFlags::RDWR);
             let status_flags = FileStatusFlags::from_bits_truncate(arg);
             if status_flags.contains(FileStatusFlags::O_APPEND) {
                 flags.insert(FileFlags::APPEND);

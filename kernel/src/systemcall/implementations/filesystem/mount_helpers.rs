@@ -12,6 +12,7 @@ pub(super) fn is_supported_api_mount(fstype: &str) -> bool {
             | "bpf"
             | "pstore"
             | "securityfs"
+            | "ext4"
     )
 }
 

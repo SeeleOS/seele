@@ -1,17 +1,25 @@
+use alloc::sync::Arc;
+use x86_64::VirtAddr;
+
 use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function,
+    memory::{addrspace::mem_area::Data, protection::Protection},
     misc::time::Time,
     object::{
         FileFlags, Object,
         misc::ObjectResult,
-        traits::{Readable, Statable, Writable},
+        traits::{MemoryMappable, Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
+    process::manager::get_current_process,
 };
 
 #[derive(Debug)]
 pub struct DevNull;
+
+#[derive(Debug)]
+pub struct DevZero;
 
 fn fill_pseudo_random(buffer: &mut [u8]) {
     let mut state = Time::since_boot().as_nanoseconds()
@@ -48,6 +56,47 @@ impl Readable for DevNull {
 impl Statable for DevNull {
     fn stat(&self) -> LinuxStat {
         LinuxStat::char_device(0o666)
+    }
+}
+
+impl Object for DevZero {
+    impl_cast_function!("writable", Writable);
+    impl_cast_function!("readable", Readable);
+    impl_cast_function!("mappable", MemoryMappable);
+    impl_cast_function!("statable", Statable);
+}
+
+impl Writable for DevZero {
+    fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
+        Ok(buffer.len())
+    }
+}
+
+impl Readable for DevZero {
+    fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
+        buffer.fill(0);
+        Ok(buffer.len())
+    }
+}
+
+impl Statable for DevZero {
+    fn stat(&self) -> LinuxStat {
+        LinuxStat::char_device(0o666)
+    }
+}
+
+impl MemoryMappable for DevZero {
+    fn map(
+        self: Arc<Self>,
+        _offset: u64,
+        pages: u64,
+        protection: Protection,
+    ) -> ObjectResult<VirtAddr> {
+        Ok(get_current_process().lock().addrspace.allocate_user_lazy(
+            pages,
+            protection,
+            Data::Normal(Default::default()),
+        ))
     }
 }
 

@@ -56,11 +56,16 @@ pub struct MemoryArea {
     pub lazy: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MmapPermissions {
+    pub shared_write_allowed: Option<bool>,
+}
+
 // The data a memory area contains. Aka backing
 #[derive(Clone, Debug)]
 pub enum Data {
     // Normal data that a process/thread can write to. Aka anonymus.
-    Normal,
+    Normal(MmapPermissions),
     File {
         offset: u64,
         // Bytes from `offset` that belong to this mapping; the rest stays zeroed.

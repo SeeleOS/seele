@@ -264,7 +264,7 @@ impl AddrSpace {
         cluster_pages: u64,
     ) -> AppliedPageCluster {
         match area.data {
-            Data::Normal => AppliedPageCluster {
+            Data::Normal(_) => AppliedPageCluster {
                 frame: self.alloc_map_zeroed_page(page, area, true).0,
                 file_lazy_stats: FileLazyFaultStats::default(),
             },
@@ -419,7 +419,7 @@ impl AddrSpace {
                     page_write_bases.push(apply_offset(frame.start_address().as_u64()));
                 }
             }
-            Data::Normal => {
+            Data::Normal(_) => {
                 for i in 0..pages {
                     let page = start + i;
                     let frame = self.alloc_map_zeroed_page(page, area.clone(), true).0;

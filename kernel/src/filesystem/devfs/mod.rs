@@ -7,6 +7,7 @@ use alloc::{
 };
 
 use crate::{
+    drivers::virtio::block::{list_devices as list_block_devices, named_device},
     drm::fs::DEV_DRI_NODE,
     filesystem::{
         errors::FSError,
@@ -20,6 +21,7 @@ use crate::{
         vfs::FSResult,
         vfs_traits::{Directory, DirectoryContentType, FileLike, FileLikeType, FileSystem},
     },
+    object::device::get_device_ref,
     terminal::pty::{get_pty_slave, list_ptys},
 };
 
@@ -29,6 +31,14 @@ static DEV_NULL_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     mode: 0o020666,
     device_name: "devnull",
     rdev: Some((1u64 << 8) | 3),
+});
+
+static DEV_ZERO_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
+    name: "zero",
+    inode: 0x1019,
+    mode: 0o020666,
+    device_name: "devzero",
+    rdev: Some((1u64 << 8) | 5),
 });
 
 static DEV_RANDOM_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
@@ -228,6 +238,10 @@ static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
         node: &DEV_NULL_NODE,
     },
     StaticDirEntry {
+        name: "zero",
+        node: &DEV_ZERO_NODE,
+    },
+    StaticDirEntry {
         name: "random",
         node: &DEV_RANDOM_NODE,
     },
@@ -377,6 +391,20 @@ fn pts_file_like(number: u32) -> FSResult<FileLike> {
     ))))
 }
 
+fn block_device_file_like(name: &str) -> FSResult<FileLike> {
+    let device = named_device(name).ok_or(FSError::NotFound)?;
+    let object = get_device_ref(name).map_err(|_| FSError::NotFound)?;
+    Ok(FileLike::File(Arc::new(Mut::new(
+        StaticDeviceHandle::from_object(
+            device.name.clone(),
+            0x3000 + device.minor,
+            0o060660,
+            Some(device.rdev()),
+            object,
+        ),
+    ))))
+}
+
 fn overlay_directory_path(path: &Path) -> String {
     let normalized = path.normalize();
     let components = normalized
@@ -494,6 +522,17 @@ impl Directory for DevDirectoryHandle {
             }
         }
 
+        if self.path == "/" {
+            for device in list_block_devices() {
+                if seen.insert(device.name.clone()) {
+                    entries.push(
+                        DirectoryContentInfo::new(device.name, DirectoryContentType::File)
+                            .with_inode(0x3000 + device.minor),
+                    );
+                }
+            }
+        }
+
         Ok(entries)
     }
 
@@ -534,6 +573,10 @@ impl Directory for DevDirectoryHandle {
         if let Some(node) = static_directory_child(self.node, name) {
             let child_path = TmpfsState::child_path(&self.path, name);
             return Ok(static_node_file_like(self.state.clone(), child_path, node));
+        }
+
+        if self.path == "/" && named_device(name).is_some() {
+            return block_device_file_like(name);
         }
 
         let child_path = TmpfsState::child_path(&self.path, name);

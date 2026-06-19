@@ -131,6 +131,10 @@ fn process_exit_status_exports_wait_encodings() {
         ProcessExitStatus::Signaled(Signal::SIGKILL).wait_status(),
         Signal::SIGKILL as i32
     );
+    assert_eq!(
+        ProcessExitStatus::Signaled(Signal::SIGALRM).wait_status(),
+        Signal::SIGALRM as i32
+    );
 }
 
 fn misc_pure_layout_constants_and_kernel_error_mapping_stay_stable() {

@@ -68,24 +68,40 @@ impl File for StaticDeviceHandle {
     }
 
     fn read_at(&mut self, buffer: &mut [u8], _offset: u64) -> FSResult<usize> {
+        let object = self.object()?;
+        if let Ok(block_device) = object.clone().as_block_device() {
+            return block_device
+                .read_at(buffer, _offset as usize)
+                .map_err(|_| FSError::Other);
+        }
         self.read(buffer)
     }
 
     fn read(&mut self, buffer: &mut [u8]) -> FSResult<usize> {
         let object = self.object()?;
+        if let Ok(block_device) = object.clone().as_block_device() {
+            return block_device
+                .read_from_cursor(buffer)
+                .map_err(|_| FSError::Other);
+        }
         let readable = object.as_readable().map_err(|_| FSError::Other)?;
         readable.read(buffer).map_err(|_| FSError::Other)
     }
 
     fn write(&mut self, buffer: &[u8]) -> FSResult<usize> {
         let object = self.object()?;
+        if let Ok(block_device) = object.clone().as_block_device() {
+            return block_device
+                .write_to_cursor(buffer)
+                .map_err(|_| FSError::Other);
+        }
         let writable = object.as_writable().map_err(|_| FSError::Other)?;
         writable.write(buffer).map_err(|_| FSError::Other)
     }
 
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {
         let object = self.object()?;
-        let seekable = object.as_seekable().map_err(|_| FSError::Other)?;
+        let seekable = object.as_seekable().map_err(|_| FSError::IllegalSeek)?;
         seekable.seek(offset, seek_type).map_err(|_| FSError::Other)
     }
 }

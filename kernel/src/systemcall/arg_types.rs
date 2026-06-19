@@ -24,10 +24,10 @@ use crate::{
     signal::{Signal, Signals},
     systemcall::implementations::{
         AtFlags, ClockNanosleepFlags, CloseRangeFlags, DupFlags, EpollCreateFlags, FallocateFlags,
-        FsMountFlags, FsOpenFlags, GetRandomFlags, InotifyInitFlags, LinuxIoprioWho,
-        LinuxSchedPolicy, MemfdFlags, MmapFlags, MoveMountFlags, MremapFlags, MsyncFlags,
-        OpenFlags, OpenTreeFlags, PipeFlags, PollEvents, RseqFlags, SetnsFlags, TimerFdFlags,
-        TimerSetTimeFlags, UmountFlags, Wait4Options, WaitidOptions, XattrFlags,
+        FsMountFlags, FsOpenFlags, GetMempolicyFlags, GetRandomFlags, InotifyInitFlags,
+        LinuxIoprioWho, LinuxSchedPolicy, MemfdFlags, MmapFlags, MoveMountFlags, MremapFlags,
+        MsyncFlags, OpenFlags, OpenTreeFlags, PipeFlags, PollEvents, RseqFlags, SetnsFlags,
+        TimerFdFlags, TimerSetTimeFlags, UmountFlags, Wait4Options, WaitidOptions, XattrFlags,
     },
     systemcall::utils::{SyscallError, SyscallResult, invalid_syscall_flag_error},
 };
@@ -179,6 +179,8 @@ add_syscall_arg_flags_type!(
     u32,
     MoveMountFlags,
     u32,
+    GetMempolicyFlags,
+    u64,
     OpenTreeFlags,
     u32,
     MremapFlags,

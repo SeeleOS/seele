@@ -575,6 +575,7 @@ impl Process {
                     | Signal::SIGBUS
                     | Signal::SIGSEGV
                     | Signal::SIGPIPE
+                    | Signal::SIGALRM
                     | Signal::SIGHUP
                     | Signal::SIGFPE
                     | Signal::SIGILL
@@ -611,7 +612,6 @@ impl Process {
                 }
             }
             Signal::SIGCONT => unreachable!(),
-            Signal::SIGALRM => ProcessSignalsResult::default(),
             _ => ProcessSignalsResult::default(),
         }
     }

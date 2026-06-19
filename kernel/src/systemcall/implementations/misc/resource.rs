@@ -5,6 +5,13 @@ define_syscall!(Setrlimit, |resource: i32, rlimit: u64| {
         RlimitResource::try_from(resource as u32).map_err(|_| SyscallError::InvalidArguments)?;
     let limit = user_safe::read(rlimit as *const LinuxRlimit64)?;
     match resource {
+        RlimitResource::Core => {
+            let process = get_current_process();
+            let mut process = process.lock();
+            process.rlimit_core_cur = limit.rlim_cur;
+            process.rlimit_core_max = limit.rlim_max;
+            Ok(0)
+        }
         RlimitResource::Stack => {
             let process = get_current_process();
             let mut process = process.lock();
@@ -56,6 +63,10 @@ define_syscall!(
                 let process = get_current_process();
                 let process = process.lock();
                 match resource {
+                    RlimitResource::Core => LinuxRlimit64 {
+                        rlim_cur: process.rlimit_core_cur,
+                        rlim_max: process.rlimit_core_max,
+                    },
                     RlimitResource::Stack => LinuxRlimit64 {
                         rlim_cur: process.rlimit_stack_cur,
                         rlim_max: process.rlimit_stack_max,
@@ -81,6 +92,10 @@ define_syscall!(
             let process = get_current_process();
             let mut process = process.lock();
             match resource {
+                RlimitResource::Core => {
+                    process.rlimit_core_cur = limit.rlim_cur;
+                    process.rlimit_core_max = limit.rlim_max;
+                }
                 RlimitResource::Stack => {
                     process.rlimit_stack_cur = limit.rlim_cur;
                     process.rlimit_stack_max = limit.rlim_max;

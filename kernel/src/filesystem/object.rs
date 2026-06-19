@@ -261,6 +261,15 @@ impl OpenedFileObject {
     }
 
     pub fn write_at(&self, buf: &[u8], offset: u64) -> FSResult<usize> {
+        if let Some(device) = self.device_object()
+            && let Ok(block_device) = device.clone().as_block_device()
+        {
+            self.invalidate_page_cache();
+            return block_device
+                .write_at(buf, offset as usize)
+                .map_err(|_| FSError::Other);
+        }
+
         self.with_file_write_cursor(true, |file| Self::write_all_to_cursor(file, buf, offset))
     }
 
@@ -451,6 +460,10 @@ impl Object for OpenedFileObject {
 impl Writable for OpenedFileObject {
     fn write(&self, buffer: &[u8]) -> ObjectResult<usize> {
         if let Some(device) = self.device_object() {
+            if let Ok(block_device) = device.clone().as_block_device() {
+                self.invalidate_page_cache();
+                return block_device.write_to_cursor(buffer);
+            }
             let writable = device
                 .as_writable()
                 .map_err(|_| ObjectError::InvalidArguments)?;
@@ -472,6 +485,9 @@ impl Writable for OpenedFileObject {
 impl Readable for OpenedFileObject {
     fn read(&self, buffer: &mut [u8]) -> ObjectResult<usize> {
         if let Some(device) = self.device_object() {
+            if let Ok(block_device) = device.clone().as_block_device() {
+                return block_device.read_from_cursor(buffer);
+            }
             let readable = device
                 .as_readable()
                 .map_err(|_| ObjectError::InvalidArguments)?;

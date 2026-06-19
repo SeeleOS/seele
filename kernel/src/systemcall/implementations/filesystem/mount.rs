@@ -7,10 +7,11 @@ define_syscall!(Mount, |source: CString,
                         data: CString| {
     let source = string_from_raw_optional(source)?.filter(|value| !value.is_empty());
     let target = path_from_raw(target)?;
+    let target = resolve_path_at(AT_FDCWD, &target)?;
     let filesystemtype =
         string_from_raw_optional(filesystemtype)?.filter(|value| !value.is_empty());
     let data = string_from_raw_optional(data)?.filter(|value| !value.is_empty());
-    let target_object = open_path(Path::new(&target))?;
+    let target_object = open_path(target)?;
     let target_path = target_object.path();
     let target_is_directory = matches!(
         target_object.info()?.file_like_type,
@@ -123,6 +124,27 @@ define_syscall!(Mount, |source: CString,
             let mount_root = open_path(target_path)?;
             mount_root.chmod(mode)?;
         }
+        return Ok(0);
+    }
+
+    if filesystemtype == "ext4" {
+        let source = source.ok_or(SyscallError::InvalidArguments)?;
+        let source_path = resolve_path_at(AT_FDCWD, &source)?;
+        let source_object = open_path(source_path)?;
+        let block_device = source_object
+            .device_backing_object()
+            .ok_or(SyscallError::NoDevice)?
+            .as_block_device()?;
+        let device = block_device.backing_device();
+        let reader = Ext4BlockOperator::new(device.clone());
+        let writer = Ext4BlockOperator::new(device);
+        let ext4 = Ext4Inner::load_with_writer(Box::new(reader), Some(Box::new(writer)))
+            .map_err(|_| SyscallError::IOError)?;
+        let ext4 = EXT4::new(ext4).map_err(|_| SyscallError::IOError)?;
+        VirtualFS
+            .lock()
+            .mount(target_path, ext4)
+            .map_err(SyscallError::from)?;
         return Ok(0);
     }
 

@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 
-use crate::object::config::{LinuxTermios, LinuxTermios2, LinuxWinsize};
+use crate::object::config::{LinuxTermio, LinuxTermios, LinuxTermios2, LinuxWinsize};
 
 pub const VINTR_INDEX: usize = 0;
 pub const VQUIT_INDEX: usize = 1;
@@ -86,6 +86,19 @@ impl LinuxTermios2 {
             c_lflag: self.c_lflag,
             c_line: self.c_line,
             c_cc: self.c_cc,
+        }
+    }
+
+    pub fn as_linux_termio(&self) -> LinuxTermio {
+        let mut c_cc = [0; 8];
+        c_cc.copy_from_slice(&self.c_cc[..8]);
+        LinuxTermio {
+            c_iflag: self.c_iflag as u16,
+            c_oflag: self.c_oflag as u16,
+            c_cflag: self.c_cflag as u16,
+            c_lflag: self.c_lflag as u16,
+            c_line: self.c_line,
+            c_cc,
         }
     }
 

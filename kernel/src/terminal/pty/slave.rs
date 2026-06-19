@@ -156,6 +156,12 @@ impl Configuratable for PtySlave {
                 self.shared.lock().active_group = Some(ProcessGroupID(requested_group));
                 Ok(0)
             }
+            ConfigurateRequest::LinuxTcGetA(termio) => {
+                let termios_state = self.shared.lock().termios;
+                user_safe::write(termio, &termios_state.as_linux_termio())
+                    .map_err(|_| ObjectError::BadAddress)?;
+                Ok(0)
+            }
             ConfigurateRequest::LinuxTcGets(termios) => {
                 let termios_state = self.shared.lock().termios;
                 user_safe::write(termios, &termios_state.as_linux_termios())

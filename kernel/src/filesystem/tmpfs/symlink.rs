@@ -32,7 +32,8 @@ impl Symlink for TmpfsSymlinkHandle {
                 UnixPermission::symlink(),
                 FileLikeType::Symlink,
             )
-            .with_inode(node.inode)),
+            .with_inode(node.inode)
+            .with_owner(node.uid, node.gid)),
             TmpNodeKind::Directory { .. } | TmpNodeKind::File { .. } => Err(FSError::NotASymlink),
         }
     }

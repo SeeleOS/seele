@@ -65,7 +65,7 @@ mod tests {
         object::FileFlags,
         process::FdFlags,
         systemcall::{
-            implementations::{Close, Dup, Dup2, Dup3, Fstat, Ioctl, Pipe, Pipe2, Read, Write},
+            implementations::{Dup, Dup2, Dup3, Fstat, Ioctl, Pipe, Pipe2, Read, Write},
             test::{
                 assert_fd_flags, assert_object_flags, assert_same_object, close_test_fd, expect_fd,
                 occupied_fd_count,

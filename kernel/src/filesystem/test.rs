@@ -200,6 +200,18 @@ fn linux_stat_preserves_explicit_mode_type_bits_and_fills_metadata() {
     let char_device = LinuxStat::char_device_with_rdev(0o600, 0x1234);
     assert_eq!(char_device.st_mode, 0o020600);
     assert_eq!(char_device.st_rdev, 0x1234);
+
+    let block_rdev = LinuxStat::linux_makedev(252, 16);
+    let block_device = FileLikeInfo::new(
+        "vdb".into(),
+        0,
+        UnixPermission(0o060660),
+        FileLikeType::File,
+    )
+    .with_rdev(block_rdev)
+    .as_linux();
+    assert_eq!(block_device.st_mode, 0o060660);
+    assert_eq!(block_device.st_rdev, block_rdev);
 }
 
 fn mount_flags_render_stable_proc_option_strings() {
@@ -508,6 +520,14 @@ fn devfs_preserves_static_overlay_roots_and_readonly_gating() {
     assert!(root_entries.iter().any(|entry| entry.name == "input"));
     assert!(root_entries.iter().any(|entry| entry.name == "dri"));
     assert!(root_entries.iter().any(|entry| entry.name == "shm"));
+    assert!(root_entries.iter().any(|entry| entry.name == "zero"));
+
+    let FileLike::File(zero) = fs.lookup(&Path::new("/zero")).unwrap() else {
+        panic!("/zero should be a device");
+    };
+    let zero_info = zero.lock().info().unwrap();
+    assert_eq!(zero_info.permission.0, 0o020666);
+    assert_eq!(zero_info.rdev, (1u64 << 8) | 5);
 
     let FileLike::Directory(pts) = fs.lookup(&Path::new("/pts")).unwrap() else {
         panic!("/pts should be a directory");

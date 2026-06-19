@@ -13,6 +13,11 @@ define_syscall!(Chdir, |dir: String| {
     let fs_context = process.lock().fs_context.lock().clone();
     let path =
         Path::new(&dir).as_absolute_from(&fs_context.root_directory, &fs_context.current_directory);
+    let object = open_path(path.as_normal())?;
+    if !matches!(object.info()?.file_like_type, FileLikeType::Directory) {
+        return Err(SyscallError::NotADirectory);
+    }
+    check_chdir_target(&path.as_normal(), &object.stat())?;
     get_current_process().lock().change_directory(path)?;
     Ok(0)
 });
@@ -77,10 +82,6 @@ define_syscall!(Chown, |path: CString, _owner: u32, _group: u32| {
 });
 
 define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
-    if buf_ptr.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-
     let process = get_current_process();
     let fs_context = process.lock().fs_context.lock().clone();
     let path_str = fs_context
@@ -89,14 +90,17 @@ define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
     let path_bytes = path_str.as_bytes();
     let path_len = path_bytes.len();
 
-    if len > path_len {
-        let mut buffer = Vec::with_capacity(path_len + 1);
-        buffer.extend_from_slice(path_bytes);
-        buffer.push(0);
-        user_safe::write(buf_ptr, &buffer[..])?;
-    } else {
+    if len <= path_len {
         return Err(SyscallError::RangeError);
     }
+    if buf_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let mut buffer = Vec::with_capacity(path_len + 1);
+    buffer.extend_from_slice(path_bytes);
+    buffer.push(0);
+    user_safe::write(buf_ptr, &buffer[..])?;
 
     Ok(path_len + 1)
 });

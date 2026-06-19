@@ -126,7 +126,7 @@ mod tests {
         );
 
         assert_eq!(&uts.sysname[..5], b"Seele");
-        assert_eq!(&uts.release[..5], b"0.0.1");
+        assert_eq!(&uts.release[..13], b"6.12.0-seele\0");
         assert_eq!(&uts.version[..5], b"0.0.1");
         assert_eq!(&uts.machine[..6], b"x86_64");
         assert_eq!(uts.sysname[5], 0);

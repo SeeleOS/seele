@@ -30,6 +30,10 @@ pub(in crate::systemcall::implementations::filesystem) fn filesystem_magic_for_o
         return Ok(SOCKFS_MAGIC);
     }
 
+    if object.clone().as_pipe().is_ok() {
+        return Ok(PIPEFS_MAGIC);
+    }
+
     Err(SyscallError::BadFileDescriptor)
 }
 
@@ -55,6 +59,7 @@ pub(in crate::systemcall::implementations::filesystem) fn pseudo_mount_id(
     let offset = match magic {
         SOCKFS_MAGIC => 0,
         ANON_INODE_FS_MAGIC => 1,
+        PIPEFS_MAGIC => 2,
         _ => return None,
     };
 

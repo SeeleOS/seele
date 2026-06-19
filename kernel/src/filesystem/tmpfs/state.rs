@@ -42,6 +42,8 @@ pub(crate) enum TmpNodeKind {
 
 pub(crate) struct TmpNode {
     pub(crate) inode: u64,
+    pub(crate) uid: u32,
+    pub(crate) gid: u32,
     pub(crate) link_count: u64,
     pub(crate) open_count: u64,
     pub(crate) kind: TmpNodeKind,
@@ -65,6 +67,8 @@ impl TmpfsState {
             ROOT_INODE,
             TmpNode {
                 inode: ROOT_INODE,
+                uid: 0,
+                gid: 0,
                 link_count: 1,
                 open_count: 0,
                 kind: TmpNodeKind::Directory {
@@ -175,11 +179,16 @@ impl TmpfsState {
         let _ = self.directory_children_mut(&parent)?;
         let inode = self.next_inode;
         self.next_inode += 1;
+        let (uid, gid) = crate::process::manager::get_current_process()
+            .lock()
+            .fs_owner_ids();
         self.paths.insert(child, inode);
         self.nodes.insert(
             inode,
             TmpNode {
                 inode,
+                uid,
+                gid,
                 link_count: 1,
                 open_count: 0,
                 kind,

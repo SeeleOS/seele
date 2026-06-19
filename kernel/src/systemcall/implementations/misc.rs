@@ -529,6 +529,7 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
 #[repr(u32)]
 enum RlimitResource {
+    Core = 4,
     Stack = 3,
     NoFile = 7,
     MemLock = 8,

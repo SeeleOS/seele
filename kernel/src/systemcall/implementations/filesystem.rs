@@ -6,6 +6,7 @@ use crate::{
         devfs::{DevFs, DevPtsFs},
         errors::FSError,
         fusefs::FuseFs,
+        impls::ext4::{EXT4, operator::Ext4BlockOperator},
         info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
         object::{FileLikeObject, mount_device_id_for_path},
         path::Path,
@@ -35,12 +36,13 @@ use crate::{
     process::{FdFlags, manager::get_current_process},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
-use alloc::{format, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, format, string::String, sync::Arc, vec::Vec};
 use bitflags::bitflags;
 use core::{
     mem::size_of,
     sync::atomic::{AtomicU64, Ordering},
 };
+use ext4plus::Ext4 as Ext4Inner;
 
 mod directory;
 mod fsinfo;
@@ -78,7 +80,7 @@ pub use xattr::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::systemcall::implementations::{Close, Lseek, Read};
+    use crate::systemcall::implementations::{Close, Lseek, Pipe, Read};
     use crate::systemcall::test::*;
     use alloc::{string::ToString, vec};
 
@@ -246,7 +248,7 @@ mod tests {
             0,
         );
         expect_errno(
-            SyscallArgs::new([user_page, 4, 0, 0, 0, 0]).call::<Access>(),
+            SyscallArgs::new([user_page, 1, 0, 0, 0, 0]).call::<Access>(),
             SyscallError::AccessDenied,
         );
         expect_errno(
@@ -1956,6 +1958,18 @@ mod tests {
         );
         let fstatfs = read_user_value::<TestLinuxStatFs>(user_page + 384);
         assert_eq!(fstatfs.f_type, TMPFS_MAGIC);
+        let pipe_fds = user_page + 512;
+        expect_ok(
+            SyscallArgs::new([pipe_fds, 0, 0, 0, 0, 0]).call::<Pipe>(),
+            0,
+        );
+        let pipe_read_fd = read_user_value::<i32>(pipe_fds);
+        expect_ok(
+            SyscallArgs::new([pipe_read_fd as u64, user_page + 640, 0, 0, 0, 0]).call::<Fstatfs>(),
+            0,
+        );
+        let pipe_statfs = read_user_value::<TestLinuxStatFs>(user_page + 640);
+        assert_eq!(pipe_statfs.f_type, PIPEFS_MAGIC);
         expect_errno(
             SyscallArgs::new([4096, user_page + 384, 0, 0, 0, 0]).call::<Fstatfs>(),
             SyscallError::BadFileDescriptor,
