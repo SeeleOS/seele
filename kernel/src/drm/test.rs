@@ -31,7 +31,9 @@ use crate::{
         },
         object::{DRM_EVENT_QUEUE, DRM_STATE, DrmCardObject},
     },
-    misc::framebuffer::FRAME_BUFFER,
+    misc::framebuffer::{
+        FRAME_BUFFER, framebuffer_set_user_controlled, framebuffer_user_controlled,
+    },
     object::{
         config::ConfigurateRequest, error::ObjectError, linux_ioctl::ioctl_request,
         traits::Configuratable,
@@ -251,6 +253,14 @@ fn drm_card_ioctls_follow_linux_rules() {
     assert_eq!(connector_ids[0], CONNECTOR0_ID);
     assert_eq!(encoder_ids[0], ENCODER0_ID);
     assert_ne!(fb_ids[0], 0);
+    assert!(
+        DRM_STATE
+            .lock()
+            .dumb_buffers
+            .values()
+            .any(|buffer| buffer.scanout_backed)
+    );
+    framebuffer_set_user_controlled(false);
 
     let mut crtc = DrmModeCrtc::default();
     assert_eq!(
@@ -261,6 +271,24 @@ fn drm_card_ioctls_follow_linux_rules() {
     assert_eq!(crtc.crtc_id, CRTC0_ID);
     assert_eq!(crtc.gamma_size, MODE_GAMMA_LUT_SIZE);
     assert_eq!(crtc.mode.hdisplay, fb.width as u16);
+    assert!(!framebuffer_user_controlled());
+
+    let mut probe_plane = DrmModeGetPlane::default();
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeGetPlane(&mut probe_plane))
+            .unwrap(),
+        0
+    );
+    assert_eq!(probe_plane.fb_id, crtc.fb_id);
+    assert!(!framebuffer_user_controlled());
+
+    let mut probe_dirty = DrmModeFbDirtyCmd::default();
+    assert_eq!(
+        card.configure(ConfigurateRequest::DrmModeDirtyFb(&mut probe_dirty))
+            .unwrap(),
+        0
+    );
+    assert!(!framebuffer_user_controlled());
 
     let mut gamma = DrmModeCrtcLut {
         red: [0u16; 256].as_mut_ptr() as u64,

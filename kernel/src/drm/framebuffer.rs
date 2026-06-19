@@ -71,11 +71,13 @@ pub(super) fn scanout_framebuffer_id(fb_id: u32) -> ObjectResult<()> {
         (framebuffer, dumb_buffer, state.cursor.clone())
     };
 
-    if !dumb_buffer.scanout_backed {
-        // TODO: This is still a legacy compatibility bridge over the boot
-        // framebuffer, not a real KMS scanout implementation.
-        blit_dumb_buffer_to_scanout(&dumb_buffer, &framebuffer, cursor.as_ref())?;
+    if dumb_buffer.scanout_backed {
+        return Ok(());
     }
+
+    // TODO: This is still a legacy compatibility bridge over the boot
+    // framebuffer, not a real KMS scanout implementation.
+    blit_dumb_buffer_to_scanout(&dumb_buffer, &framebuffer, cursor.as_ref())?;
     framebuffer_set_user_controlled(true);
     Ok(())
 }

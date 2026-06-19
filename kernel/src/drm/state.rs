@@ -112,6 +112,11 @@ impl DrmState {
             pixel_format: DRM_FORMAT_XRGB8888,
             handle: request.handle,
         });
+        let buffer = self
+            .dumb_buffers
+            .get_mut(&request.handle)
+            .ok_or(ObjectError::Other)?;
+        buffer.scanout_backed = true;
         self.current_fb_id = Some(fb_id);
         Ok(())
     }
