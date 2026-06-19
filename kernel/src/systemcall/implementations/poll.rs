@@ -8,6 +8,7 @@ use crate::{
     misc::{error::AsSyscallError, time::Time},
     object::{Object, error::ObjectError, misc::get_object_current_process},
     polling::{event::PollableEvent, poller::PollerObject},
+    process::manager::get_current_process,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::yielding::{
         BlockType, WakeType, block_current_with_sig_check, cancel_block, finish_block_current,
@@ -114,6 +115,14 @@ fn read_pollfds(fds: *const LinuxPollFd, nfds: usize) -> Result<Vec<LinuxPollFd>
 fn write_pollfds_revents(fds: *mut LinuxPollFd, local: &[LinuxPollFd]) -> Result<(), SyscallError> {
     for (index, pollfd) in local.iter().enumerate() {
         user_safe::write(unsafe { fds.add(index) }, pollfd)?;
+    }
+    Ok(())
+}
+
+fn check_nfds_limit(nfds: usize) -> Result<(), SyscallError> {
+    let nofile_limit = get_current_process().lock().rlimit_nofile_cur;
+    if nfds as u64 > nofile_limit {
+        return Err(SyscallError::InvalidArguments);
     }
     Ok(())
 }
@@ -242,6 +251,14 @@ mod tests {
         expect_errno(
             SyscallArgs::new([0, 1, 0, 0, 0, 0]).call::<Ppoll>(),
             SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([poll_page, 1025, 0, 0, 0, 0]).call::<Poll>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([poll_page, 1025, 0, 0, 0, 0]).call::<Ppoll>(),
+            SyscallError::InvalidArguments,
         );
 
         close_test_fd(eventfd);
@@ -453,6 +470,7 @@ fn poll_impl(fds: &mut [LinuxPollFd], timeout_ms: i32) -> Result<usize, SyscallE
 }
 
 define_syscall!(Poll, |fds: *mut LinuxPollFd, nfds: usize, timeout: i32| {
+    check_nfds_limit(nfds)?;
     if fds.is_null() && nfds != 0 {
         return Err(SyscallError::BadAddress);
     }
@@ -468,6 +486,7 @@ define_syscall!(Ppoll, |fds: *mut LinuxPollFd,
                         timeout: *const Timespec,
                         sigmask: *const u64,
                         sigsetsize: usize| {
+    check_nfds_limit(nfds)?;
     if !sigmask.is_null() && sigsetsize != core::mem::size_of::<u64>() {
         return Err(SyscallError::InvalidArguments);
     }

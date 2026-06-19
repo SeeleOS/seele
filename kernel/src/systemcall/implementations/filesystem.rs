@@ -2091,6 +2091,25 @@ mod tests {
         assert_eq!(link_chown_stat.st_uid, 1);
         assert_eq!(link_chown_stat.st_gid, 2);
         expect_ok(
+            SyscallArgs::new([user_page + 128, 3, 4, 0, 0, 0]).call::<Lchown>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([
+                AT_FDCWD,
+                user_page + 128,
+                user_page + 768,
+                AT_SYMLINK_NOFOLLOW,
+                0,
+                0,
+            ])
+            .call::<Newfstatat>(),
+            0,
+        );
+        let lchown_stat = read_user_value::<LinuxStat>(user_page + 768);
+        assert_eq!(lchown_stat.st_uid, 3);
+        assert_eq!(lchown_stat.st_gid, 4);
+        expect_ok(
             SyscallArgs::new([user_page, user_page + 768, 0, 0, 0, 0]).call::<Stat>(),
             0,
         );

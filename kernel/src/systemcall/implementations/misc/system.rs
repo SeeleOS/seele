@@ -647,6 +647,21 @@ mod tests {
             assert_eq!(process.rlimit_stack_cur, 4096);
             assert_eq!(process.rlimit_stack_max, 8192);
         }
+        expect_ok(
+            SyscallArgs::new([RLIMIT_STACK, rlimit_page + 64, 0, 0, 0, 0]).call::<Getrlimit>(),
+            0,
+        );
+        let stack_limit = read_user_value::<TestLinuxRlimit64>(rlimit_page + 64);
+        assert_eq!(stack_limit.rlim_cur, 4096);
+        assert_eq!(stack_limit.rlim_max, 8192);
+        expect_errno(
+            SyscallArgs::new([99, rlimit_page + 64, 0, 0, 0, 0]).call::<Getrlimit>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([RLIMIT_STACK, 0, 0, 0, 0, 0]).call::<Getrlimit>(),
+            SyscallError::BadAddress,
+        );
         expect_errno(
             SyscallArgs::new([99, rlimit_page, 0, 0, 0, 0]).call::<Setrlimit>(),
             SyscallError::InvalidArguments,

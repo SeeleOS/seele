@@ -81,6 +81,11 @@ define_syscall!(Chown, |path: CString, owner: u32, group: u32| {
     chown_at(AT_FDCWD, &path_str, owner, group, AtFlags::empty())
 });
 
+define_syscall!(Lchown, |path: CString, owner: u32, group: u32| {
+    let path_str = path_from_raw(path)?;
+    chown_at(AT_FDCWD, &path_str, owner, group, AtFlags::SYMLINK_NOFOLLOW)
+});
+
 define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
     let process = get_current_process();
     let fs_context = process.lock().fs_context.lock().clone();
