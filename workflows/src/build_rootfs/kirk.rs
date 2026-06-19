@@ -71,10 +71,7 @@ pub fn install_kirk(
     run_xshell_command(
         "build-rootfs",
         sh,
-        cmd!(
-            sh,
-            "sudo install -Dm755 {host_kirk_dir}/kirk {host_kirk_bin}"
-        ),
+        cmd!(sh, "sudo ln -sfn /opt/kirk/kirk {host_kirk_bin}"),
         reporter,
     )?;
     fs::write(&ltp_runner, LTP_RUNNER).context("failed to write LTP runner script")?;
