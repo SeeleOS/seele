@@ -34,6 +34,10 @@ pub fn init_objects(fd_table: &mut Vec<Option<FdEntry>>) {
 }
 
 impl Process {
+    pub fn fd_within_limit(&self, fd: usize) -> bool {
+        (fd as u64) < self.rlimit_nofile_cur
+    }
+
     pub fn find_empty_fd_slot(&self, starts_from: usize) -> Option<usize> {
         self.fd_table
             .lock()
@@ -85,6 +89,10 @@ impl Process {
         object: ObjectRef,
         fd_flags: FdFlags,
     ) -> ObjectResult<usize> {
+        if !self.fd_within_limit(slot) {
+            return Err(ObjectError::DoesNotExist);
+        }
+
         let mut fd_table = self.fd_table.lock();
         if fd_table.len() <= slot {
             fd_table.resize(slot + 1, None);

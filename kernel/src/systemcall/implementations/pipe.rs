@@ -194,6 +194,10 @@ mod tests {
             pipe2_read_fd,
         );
         expect_errno(
+            SyscallArgs::new([pipe2_read_fd as u64, i32::MAX as u64, 0, 0, 0, 0]).call::<Dup2>(),
+            SyscallError::BadFileDescriptor,
+        );
+        expect_errno(
             SyscallArgs::new([u64::MAX, u64::MAX, 0, 0, 0, 0]).call::<Dup2>(),
             SyscallError::BadFileDescriptor,
         );
@@ -210,6 +214,10 @@ mod tests {
             SyscallArgs::new([pipe2_read_fd as u64, pipe2_read_fd as u64, 0, 0, 0, 0])
                 .call::<Dup3>(),
             SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([pipe2_read_fd as u64, i32::MAX as u64, 0, 0, 0, 0]).call::<Dup3>(),
+            SyscallError::BadFileDescriptor,
         );
         expect_errno(
             SyscallArgs::new([

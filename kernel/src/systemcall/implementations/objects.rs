@@ -754,6 +754,9 @@ define_syscall!(Dup, |object: ObjectRef| {
 
 define_syscall!(Dup2, |source_fd: usize, dest: usize| {
     let source = get_object_current_process(source_fd as u64).map_err(SyscallError::from)?;
+    if !get_current_process().lock().fd_within_limit(dest) {
+        return Err(SyscallError::BadFileDescriptor);
+    }
     if source_fd == dest {
         return Ok(dest);
     }
@@ -767,6 +770,9 @@ define_syscall!(Dup2, |source_fd: usize, dest: usize| {
 define_syscall!(Dup3, |source_fd: usize, dest: usize, flags: DupFlags| {
     if source_fd == dest {
         return Err(SyscallError::InvalidArguments);
+    }
+    if !get_current_process().lock().fd_within_limit(dest) {
+        return Err(SyscallError::BadFileDescriptor);
     }
 
     let source = get_object_current_process(source_fd as u64).map_err(SyscallError::from)?;
