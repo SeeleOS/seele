@@ -419,7 +419,7 @@ define_syscall!(
 mod tests {
     use crate::{
         filesystem::{path::Path, vfs::VirtualFS},
-        signal::{Signal, SignalAction, SignalHandlingType, Signals},
+        signal::{Signal, SignalAction, SignalHandlingType, Signals, send_signal_to_thread},
         systemcall::{
             implementations::{
                 EpollCreate1, EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Pipe, Read,
@@ -1001,7 +1001,8 @@ mod tests {
 
         extern "C" fn test_signal_handler(_: i32) {}
 
-        let process = crate::process::manager::get_current_process();
+        let current = get_current_thread();
+        let process = current.lock().parent.clone();
         let (saved_process_signals, saved_sigusr1_action) = {
             let mut process = process.lock();
             let saved_signals = process.pending_signals;
@@ -1016,11 +1017,13 @@ mod tests {
             };
             (saved_signals, saved_action)
         };
-        let (saved_thread_signals, saved_blocked_signals) = {
+        let (saved_thread_signals, saved_blocked_signals, saved_temporary_mask, saved_interrupted) = {
             let current = get_current_thread();
             let mut thread = current.lock();
             let saved_signals = thread.pending_signals;
             let saved_blocked = thread.blocked_signals;
+            let saved_temporary_mask = thread.temporary_blocked_signals;
+            let saved_interrupted = thread.interrupted_by_signal;
             thread
                 .pending_signals
                 .remove(Signals::from(Signal::SIGUSR1));
@@ -1028,7 +1031,14 @@ mod tests {
             thread
                 .blocked_signals
                 .remove(Signals::from(Signal::SIGUSR1));
-            (saved_signals, saved_blocked)
+            thread.temporary_blocked_signals = None;
+            thread.interrupted_by_signal = false;
+            (
+                saved_signals,
+                saved_blocked,
+                saved_temporary_mask,
+                saved_interrupted,
+            )
         };
 
         let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
@@ -1045,18 +1055,12 @@ mod tests {
             0,
         );
 
-        get_current_thread()
-            .lock()
-            .pending_signals
-            .insert(Signals::from(Signal::SIGUSR1));
+        send_signal_to_thread(&current, Signal::SIGUSR1);
         expect_errno(
             SyscallArgs::new([epoll_fd as u64, page + 64, 1, 0, 0, 0]).call::<EpollPwait>(),
             SyscallError::Interrupted,
         );
-        get_current_thread()
-            .lock()
-            .pending_signals
-            .insert(Signals::from(Signal::SIGUSR1));
+        send_signal_to_thread(&current, Signal::SIGUSR1);
 
         write_user_value(page + 128, &Signals::from(Signal::SIGUSR1).bits());
         write_user_value(page + 160, &1u64);
@@ -1087,6 +1091,8 @@ mod tests {
             thread.pending_signals = saved_thread_signals;
             thread.pending_signal_info[Signal::SIGUSR1.index()] = None;
             thread.blocked_signals = saved_blocked_signals;
+            thread.temporary_blocked_signals = saved_temporary_mask;
+            thread.interrupted_by_signal = saved_interrupted;
         }
         close_test_fd(epoll_fd);
         close_test_fd(eventfd);
