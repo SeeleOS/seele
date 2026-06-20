@@ -30,6 +30,16 @@ bitflags! {
     }
 }
 
+impl EventFdFlags {
+    pub fn object_flags(self) -> FileFlags {
+        if self.contains(Self::EFD_NONBLOCK) {
+            FileFlags::NONBLOCK
+        } else {
+            FileFlags::empty()
+        }
+    }
+}
+
 #[derive(Debug)]
 struct EventFdState {
     counter: u64,
@@ -46,7 +56,7 @@ pub struct EventFdObject {
 impl EventFdObject {
     pub fn new(initial: u64, flags: EventFdFlags) -> Arc<Self> {
         let eventfd = Arc::new(Self {
-            flags: Mut::new(FileFlags::empty()),
+            flags: Mut::new(flags.object_flags()),
             state: Mut::new(EventFdState { counter: initial }),
             semaphore: flags.contains(EventFdFlags::EFD_SEMAPHORE),
             self_ref: Mut::new(None),
@@ -54,9 +64,6 @@ impl EventFdObject {
         {
             let mut self_ref = eventfd.self_ref.lock();
             *self_ref = Some(Arc::downgrade(&eventfd));
-        }
-        if flags.contains(EventFdFlags::EFD_NONBLOCK) {
-            let _ = eventfd.clone().set_flags(FileFlags::NONBLOCK);
         }
         eventfd
     }

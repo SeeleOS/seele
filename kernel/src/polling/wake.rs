@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeSet, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, collections::BTreeSet, sync::Arc, vec::Vec};
 
 use crate::{
     object::misc::ObjectRef,
@@ -119,11 +119,23 @@ impl PollerObject {
         if has_ready {
             let mut woken_events = self.woken_events.lock();
             let mut disable_keys = BTreeSet::new();
+            let mut delivered_by_object: BTreeMap<usize, usize> = BTreeMap::new();
             for (object, event, data, ready_bits, oneshot) in ready_entries {
+                let object_key = Self::object_key(&object);
+                if !woken_events
+                    .iter()
+                    .any(|ready| Arc::ptr_eq(&ready.object, &object))
+                {
+                    let delivered = delivered_by_object.entry(object_key).or_insert(0);
+                    if *delivered > 0 {
+                        continue;
+                    }
+                    *delivered += 1;
+                }
                 let _ =
                     Self::queue_ready_event(&mut woken_events, &object, event, data, ready_bits);
                 if oneshot {
-                    disable_keys.insert(Self::object_key(&object));
+                    disable_keys.insert(object_key);
                 }
             }
             drop(woken_events);

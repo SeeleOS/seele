@@ -301,6 +301,21 @@ fn collect_ready(
     }
 }
 
+define_syscall!(Select, |nfds: i32,
+                         readfds: *mut u64,
+                         writefds: *mut u64,
+                         exceptfds: *mut u64,
+                         timeout: *const Timespec| {
+    Pselect6::handle_call(
+        nfds as u64,
+        readfds as u64,
+        writefds as u64,
+        exceptfds as u64,
+        timeout as u64,
+        0,
+    )
+});
+
 define_syscall!(
     Pselect6,
     |nfds: i32,
@@ -463,9 +478,9 @@ mod tests {
         select_timeout_helpers_validate_null_zero_and_invalid_timespecs
     );
     crate::test!(
-        pselect6_syscalls,
-        "pselect6 follows linux rules",
-        pselect6_syscalls_follow_linux_rules
+        select_and_pselect6_syscalls,
+        "select and pselect6 follow linux rules",
+        select_and_pselect6_syscalls_follow_linux_rules
     );
 
     fn select_fdset_helpers_count_clear_test_and_set_words() {
@@ -507,7 +522,7 @@ mod tests {
         ));
     }
 
-    fn pselect6_syscalls_follow_linux_rules() {
+    fn select_and_pselect6_syscalls_follow_linux_rules() {
         let page = allocate_user_test_page();
         let thread = crate::thread::get_current_thread();
         let saved_mask = thread.lock().blocked_signals;
@@ -551,6 +566,10 @@ mod tests {
         assert_eq!(read_user_value::<u64>(page + 96), 0);
         assert_eq!(read_user_value::<u64>(page + 104), 1u64 << eventfd);
         assert_eq!(read_user_value::<u64>(page + 112), 0);
+        expect_ok(
+            SyscallArgs::new([eventfd as u64 + 1, 0, page + 104, 0, page, 0]).call::<Select>(),
+            1,
+        );
 
         write_user_value(
             page + 120,

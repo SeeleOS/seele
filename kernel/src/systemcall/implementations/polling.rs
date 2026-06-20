@@ -261,6 +261,9 @@ fn epoll_wait_impl(
     if maxevents == 0 {
         return Err(SyscallError::InvalidArguments);
     }
+    if events_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
 
     let poller = poller.as_poller()?;
 
@@ -306,14 +309,12 @@ fn epoll_wait_impl(
 
     let woken_events = poller.take_woken_events(maxevents);
 
-    if !events_ptr.is_null() {
-        for (index, woken) in woken_events.iter().enumerate() {
-            write_epoll_event(
-                unsafe { events_ptr.add(index) },
-                woken.ready_bits,
-                woken.data,
-            )?;
-        }
+    for (index, woken) in woken_events.iter().enumerate() {
+        write_epoll_event(
+            unsafe { events_ptr.add(index) },
+            woken.ready_bits,
+            woken.data,
+        )?;
     }
 
     Ok(woken_events.len())
@@ -353,7 +354,7 @@ define_syscall!(EpollPwait, |poller: ObjectRef,
     let requested_sigmask = if sigmask.is_null() {
         None
     } else {
-        if sigsetsize != core::mem::size_of::<u64>() {
+        if sigsetsize != 8 {
             return Err(SyscallError::InvalidArguments);
         }
         Some(Signals::from_bits_truncate(user_safe::read(sigmask)?))
@@ -375,7 +376,7 @@ define_syscall!(
         let requested_sigmask = if sigmask.is_null() {
             None
         } else {
-            if sigsetsize != core::mem::size_of::<u64>() {
+            if sigsetsize != 8 {
                 return Err(SyscallError::InvalidArguments);
             }
             Some(Signals::from_bits_truncate(user_safe::read(sigmask)?))

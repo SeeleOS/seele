@@ -9,12 +9,15 @@ use crate::{
     object::{Object, error::ObjectError, misc::get_object_current_process},
     polling::{event::PollableEvent, poller::PollerObject},
     process::manager::get_current_process,
+    signal::Signals,
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::yielding::{
         BlockType, WakeType, block_current_with_sig_check, cancel_block, finish_block_current,
         prepare_block_current,
     },
 };
+
+use super::select::with_temporary_signal_mask;
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -502,8 +505,15 @@ define_syscall!(Ppoll, |fds: *mut LinuxPollFd,
         return Err(SyscallError::BadAddress);
     }
 
+    let requested_sigmask = if sigmask.is_null() {
+        None
+    } else {
+        Some(Signals::from_bits_truncate(user_safe::read(sigmask)?))
+    };
+
     let mut local_fds = read_pollfds(fds, nfds)?;
-    let result = poll_impl(&mut local_fds, timeout_ms)?;
+    let result =
+        with_temporary_signal_mask(requested_sigmask, || poll_impl(&mut local_fds, timeout_ms))?;
     write_pollfds_revents(fds, &local_fds)?;
     Ok(result)
 });

@@ -212,7 +212,10 @@ impl PollerObject {
         edge_triggered: bool,
     ) {
         let mut entries = self.entries.lock();
-        let is_new_entry = if let Some(existing) = entries.iter_mut().find(|entry| {
+        let is_new_event_interest = !entries
+            .iter()
+            .any(|entry| entry.event == event && Arc::ptr_eq(&entry.object, &object));
+        if let Some(existing) = entries.iter_mut().find(|entry| {
             entry.event == event
                 && entry.ready_bits == ready_bits
                 && Arc::ptr_eq(&entry.object, &object)
@@ -222,7 +225,6 @@ impl PollerObject {
             existing.edge_triggered = edge_triggered;
             existing.delivered_once = false;
             existing.enabled = true;
-            false
         } else {
             entries.push(PollerEntry::new(
                 object.clone(),
@@ -232,11 +234,10 @@ impl PollerObject {
                 oneshot,
                 edge_triggered,
             ));
-            true
-        };
+        }
         drop(entries);
 
-        if is_new_entry && let Some(poller) = self.self_poller() {
+        if is_new_event_interest && let Some(poller) = self.self_poller() {
             register_interest(&poller, &object, event);
         }
 
@@ -247,6 +248,7 @@ impl PollerObject {
 
     pub fn unregister_obj(&self, object: ObjectRef, event: PollableEvent) {
         let mut waiting_to_remove = Vec::new();
+        let mut removed_any = false;
 
         for (index, entry) in self.entries.lock().iter().enumerate() {
             if entry.event == event && Arc::ptr_eq(&entry.object, &object) {
@@ -258,10 +260,11 @@ impl PollerObject {
             let mut entries = self.entries.lock();
             for index in waiting_to_remove.into_iter().rev() {
                 entries.remove(index);
+                removed_any = true;
             }
         }
 
-        if let Some(poller) = self.self_poller() {
+        if removed_any && let Some(poller) = self.self_poller() {
             unregister_interest(&poller, &object, event);
         }
 

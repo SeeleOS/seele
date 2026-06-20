@@ -18,13 +18,14 @@ use crate::{
         config::ConfigurateRequest,
         control::control_object,
         device::get_device,
-        file_locks::flock_lock,
+        file_locks::{flock_lock, release_fd_entry_locks},
         linux_ioctl::{LinuxIoctlOp, LinuxIoctlTarget, socket_raw_ioctl_op},
         memfd::create_memfd_object,
         misc::{ObjectRef, get_object_current_process},
         traits::Readable,
     },
-    process::{FdFlags, manager::get_current_process, misc::with_current_process},
+    process::{FdEntry, FdFlags, manager::get_current_process, misc::with_current_process},
+    signal::{Signal, send_signal_to_process},
     systemcall::utils::{SyscallError, SyscallImpl, SyscallResult},
     thread::get_current_thread,
 };
@@ -65,6 +66,12 @@ fn iovec_total_len(iovs: &[LinuxIovec]) -> Result<usize, SyscallError> {
         acc.checked_add(iov.iov_len)
             .ok_or(SyscallError::InvalidArguments)
     })
+}
+
+fn release_closed_fd_locks(pid: crate::process::misc::ProcessID, entries: Vec<FdEntry>) {
+    for entry in entries {
+        release_fd_entry_locks(pid, &entry);
+    }
 }
 
 fn read_iovecs(iov_ptr: *const LinuxIovec, iovcnt: i32) -> Result<Vec<LinuxIovec>, SyscallError> {
@@ -187,7 +194,7 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
     while offset_entry < contents.len() {
         let info = &contents[offset_entry];
         let name_bytes = info.name.as_bytes();
-        let reclen = ((20 + name_bytes.len() + 7) & !7) as u16;
+        let reclen = ((19 + name_bytes.len() + 1 + 7) & !7) as u16;
         if bytes_written + reclen as usize > len {
             break;
         }
@@ -201,13 +208,13 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
         entry[0..8].copy_from_slice(&inode.to_ne_bytes());
         entry[8..16].copy_from_slice(&((offset_entry as i64) + 1).to_ne_bytes());
         entry[16..18].copy_from_slice(&reclen.to_ne_bytes());
-        entry[18] = match info.content_type {
+        entry[18..18 + name_bytes.len()].copy_from_slice(name_bytes);
+        entry[18 + name_bytes.len()] = 0;
+        entry[reclen as usize - 1] = match info.content_type {
             DirectoryContentType::Directory => 4,
             DirectoryContentType::File => 8,
             DirectoryContentType::Symlink => 10,
         };
-        entry[19..19 + name_bytes.len()].copy_from_slice(name_bytes);
-        entry[19 + name_bytes.len()] = 0;
         user_safe::write_buffer(unsafe { buf.add(bytes_written) }, &entry)?;
 
         bytes_written += reclen as usize;
@@ -591,7 +598,17 @@ define_syscall!(Write, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
     }
 
     let bytes = user_safe::read_buffer(buf_ptr.cast_const(), len)?;
-    Ok(object.as_writable()?.write(&bytes)?)
+    let writable = object.as_writable()?;
+    match writable.write(&bytes) {
+        Ok(written) => Ok(written),
+        Err(err) => {
+            let syscall_err = SyscallError::from(err);
+            if syscall_err == SyscallError::BrokenPipe {
+                send_signal_to_process(&get_current_process(), Signal::SIGPIPE);
+            }
+            Err(syscall_err)
+        }
+    }
 });
 
 define_syscall!(Readv, |object: ObjectRef,
@@ -648,7 +665,16 @@ define_syscall!(Writev, |object: ObjectRef,
     let iovs = read_iovecs(iov_ptr, iovcnt)?;
     let writable = object.clone().as_writable()?;
     let buffer = copy_iovecs(&iovs)?;
-    Ok(writable.write(&buffer)?)
+    match writable.write(&buffer) {
+        Ok(written) => Ok(written),
+        Err(err) => {
+            let syscall_err = SyscallError::from(err);
+            if syscall_err == SyscallError::BrokenPipe {
+                send_signal_to_process(&get_current_process(), Signal::SIGPIPE);
+            }
+            Err(syscall_err)
+        }
+    }
 });
 
 define_syscall!(Sendfile, |out_fd: ObjectRef,
@@ -777,8 +803,10 @@ define_syscall!(Ftruncate, |object: ObjectRef, length: i64| {
         return Err(SyscallError::InvalidArguments);
     }
 
-    object
-        .as_file_like()?
+    let file_like = object
+        .as_file_like()
+        .map_err(|_| SyscallError::InvalidArguments)?;
+    file_like
         .truncate(length as u64)
         .map_err(SyscallError::from)?;
     Ok(0)
@@ -855,25 +883,39 @@ define_syscall!(
         if first > last {
             return Err(SyscallError::InvalidArguments);
         }
+        let allowed = CloseRangeFlags::CLOSE_RANGE_UNSHARE | CloseRangeFlags::CLOSE_RANGE_CLOEXEC;
+        if flags.bits() & !allowed.bits() != 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
 
         let process_ref = get_current_process();
         let mut process = process_ref.lock();
-        let fd_table_len = process.fd_table.lock().len();
-        if first >= fd_table_len {
-            return Ok(0);
+        if flags.contains(CloseRangeFlags::CLOSE_RANGE_UNSHARE) {
+            process.unshare_fd_table();
         }
 
-        let end = last.min(fd_table_len.saturating_sub(1));
-        for fd in first..=end {
-            if process.fd_table.lock()[fd].is_none() {
-                continue;
+        let mut closed_entries = Vec::new();
+        let pid = process.pid;
+        {
+            let mut fd_table = process.fd_table.lock();
+            if first >= fd_table.len() {
+                return Ok(0);
             }
-            if flags.contains(CloseRangeFlags::CLOSE_RANGE_CLOEXEC) {
-                process.set_fd_flags(fd, FdFlags::CLOEXEC)?;
-            } else {
-                process.clear_fd_slot(fd)?;
+
+            let end = last.min(fd_table.len().saturating_sub(1));
+            for fd in first..=end {
+                let Some(entry) = fd_table.get_mut(fd).and_then(Option::as_mut) else {
+                    continue;
+                };
+                if flags.contains(CloseRangeFlags::CLOSE_RANGE_CLOEXEC) {
+                    entry.fd_flags = FdFlags::CLOEXEC;
+                } else if let Some(entry) = fd_table[fd].take() {
+                    closed_entries.push(entry);
+                }
             }
         }
+
+        release_closed_fd_locks(pid, closed_entries);
 
         Ok(0)
     }
