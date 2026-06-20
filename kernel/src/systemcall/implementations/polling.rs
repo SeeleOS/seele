@@ -267,9 +267,18 @@ fn epoll_wait_impl(
 
     let poller = poller.as_poller()?;
 
-    poller.push_already_ready_events();
+    let deadline = if timeout < 0 {
+        None
+    } else {
+        Some(Time::since_boot().add_ms(timeout as u64))
+    };
 
-    if !poller.has_woken_events() {
+    loop {
+        poller.push_already_ready_events();
+        if poller.has_woken_events() {
+            break;
+        }
+
         if timeout == 0 {
             return Ok(0);
         }
@@ -278,11 +287,9 @@ fn epoll_wait_impl(
             return Err(SyscallError::Interrupted);
         }
 
-        let deadline = if timeout < 0 {
-            None
-        } else {
-            Some(Time::since_boot().add_ms(timeout as u64))
-        };
+        if deadline.is_some_and(|deadline| deadline <= Time::since_boot()) {
+            return Ok(0);
+        }
 
         let poller_ref: Arc<dyn Object> = poller.clone();
         let current = prepare_block_current(BlockType::WakeRequired {
@@ -299,12 +306,15 @@ fn epoll_wait_impl(
 
         if poller.has_woken_events() {
             cancel_block(&current);
+            break;
         } else {
             finish_block_current();
-        }
-
-        if has_unblocked_pending_signals() {
-            return Err(SyscallError::Interrupted);
+            if has_unblocked_pending_signals() {
+                return Err(SyscallError::Interrupted);
+            }
+            if deadline.is_some_and(|deadline| deadline <= Time::since_boot()) {
+                return Ok(0);
+            }
         }
     }
 
