@@ -60,6 +60,15 @@ impl Ext4File {
         );
     }
 
+    fn refresh_inode(&self) -> FSResult<Inode> {
+        let inode_index = self.inode.lock().index;
+        Inode::read(&self.fs, inode_index).map_err(FSError::from)
+    }
+
+    fn replace_cached_inode(&self, inode: Inode) {
+        *self.inode.lock() = inode;
+    }
+
     fn set_xattr_impl(
         &self,
         name: String,
@@ -67,7 +76,7 @@ impl Ext4File {
         create: bool,
         replace: bool,
     ) -> FSResult<()> {
-        let mut inode = self.inode.lock();
+        let mut inode = self.refresh_inode()?;
         let exists = inode
             .get_xattr(&self.fs, &name)
             .map_err(FSError::from)?
@@ -81,7 +90,7 @@ impl Ext4File {
         inode
             .set_xattr(&self.fs, name.as_bytes(), value.as_slice())
             .map_err(FSError::from)?;
-        drop(inode);
+        self.replace_cached_inode(inode);
         self.update_lookup_cache();
         Ok(())
     }
@@ -101,9 +110,11 @@ impl File for Ext4File {
 
     fn write(&mut self, buffer: &[u8]) -> FSResult<usize> {
         let _operation = self.operation_lock.lock();
-        let written = file::write_at(&self.fs, &mut self.inode.lock(), buffer, self.position)
-            .map_err(FSError::from)?;
+        let mut inode = self.refresh_inode()?;
+        let written =
+            file::write_at(&self.fs, &mut inode, buffer, self.position).map_err(FSError::from)?;
         self.position = self.position.saturating_add(written as u64);
+        self.replace_cached_inode(inode);
         self.update_lookup_cache();
         Ok(written)
     }
@@ -155,7 +166,7 @@ impl File for Ext4File {
 
     fn truncate(&mut self, length: u64) -> FSResult<()> {
         let _operation = self.operation_lock.lock();
-        let mut inode = self.inode.lock();
+        let mut inode = self.refresh_inode()?;
         let old_length = inode.size_in_bytes();
         const ZERO_TAIL_GRANULE: u64 = 4096;
         if length < old_length && !length.is_multiple_of(ZERO_TAIL_GRANULE) {
@@ -171,8 +182,8 @@ impl File for Ext4File {
             }
         }
         file::truncate(&self.fs, &mut inode, length).map_err(FSError::from)?;
-        drop(inode);
         self.position = self.position.min(length);
+        self.replace_cached_inode(inode);
         self.update_lookup_cache();
         Ok(())
     }
@@ -184,8 +195,10 @@ impl File for Ext4File {
         }
 
         let end = offset.checked_add(len).ok_or(FSError::Other)?;
-        if end > self.inode.lock().size_in_bytes() {
-            file::truncate(&self.fs, &mut self.inode.lock(), end).map_err(FSError::from)?;
+        let mut inode = self.refresh_inode()?;
+        if end > inode.size_in_bytes() {
+            file::truncate(&self.fs, &mut inode, end).map_err(FSError::from)?;
+            self.replace_cached_inode(inode);
             self.update_lookup_cache();
         }
         Ok(())
@@ -193,17 +206,19 @@ impl File for Ext4File {
 
     fn chmod(&self, mode: u32) -> FSResult<()> {
         let _operation = self.operation_lock.lock();
-        let mut inode = self.inode.lock();
+        let mut inode = self.refresh_inode()?;
         chmod_inode(&self.fs, &mut inode, mode)?;
         lookup_cache_insert_raw(&self.lookup_cache, self.parent_inode, &self.name, &inode);
+        self.replace_cached_inode(inode);
         Ok(())
     }
 
     fn chown(&self, uid: u32, gid: u32) -> FSResult<()> {
         let _operation = self.operation_lock.lock();
-        let mut inode = self.inode.lock();
+        let mut inode = self.refresh_inode()?;
         chown_inode(&self.fs, &mut inode, uid, gid)?;
         lookup_cache_insert_raw(&self.lookup_cache, self.parent_inode, &self.name, &inode);
+        self.replace_cached_inode(inode);
         Ok(())
     }
 

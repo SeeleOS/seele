@@ -167,6 +167,11 @@ impl Ext4Directory {
         self.inode.lock().clone()
     }
 
+    fn refresh_inode(&self) -> FSResult<Inode> {
+        let inode_index = self.inode.lock().index;
+        Inode::read(&self.fs, inode_index).map_err(map_ext4_error)
+    }
+
     #[cfg(test)]
     pub(crate) fn inode(&self) -> Inode {
         self.current_inode()
@@ -177,7 +182,7 @@ impl Ext4Directory {
     }
 
     fn open_parent_dir(&self) -> FSResult<(Inode, Dir)> {
-        let parent_inode = self.current_inode();
+        let parent_inode = self.refresh_inode()?;
         let parent = Dir::open_inode(&self.fs, parent_inode.clone()).map_err(map_ext4_error)?;
         Ok((parent_inode, parent))
     }
@@ -320,8 +325,6 @@ impl Directory for Ext4Directory {
         if matches!(info.content_type, DirectoryContentType::Directory) {
             // A freshly-created ext4 directory needs an initialized first block
             // containing "." and ".." before new children can be linked into it.
-            new_inode.set_links_count(1);
-            new_inode.write(&self.fs).map_err(map_ext4_error)?;
             let child_dir = Dir::init(self.fs.clone(), new_inode, parent_inode.index)
                 .map_err(map_ext4_error)?;
             new_inode = child_dir.inode().clone();
