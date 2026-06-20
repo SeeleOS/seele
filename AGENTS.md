@@ -14,7 +14,7 @@
 - Because LTP is expensive, when fixing LTP failures do not run the full LTP gate after every single small fix. First batch all fixes for the currently known failing tests or suite, then run the appropriate LTP verification once for that batch. Use targeted unit checks or narrow compile checks while editing.
 - After finishing VM-based testing, shut the VM down and verify there is no leftover runner or QEMU process before moving on.
 - To inspect the current VM and runner processes before shutdown, prefer `status` for MCP-managed sessions; otherwise inspect host runner/QEMU processes directly and kill leftover PIDs explicitly.
-- Do not assume `target/rootfs_mnt/` is mounted or synchronized with `target/rootfs.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the xtask VM flow when in doubt.
+- Do not assume `target/rootfs_mnt/` is mounted or synchronized with `target/rootfs.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the control-plane VM flow when in doubt.
 - If you need `target/rootfs_mnt/` mounted, prefer the MCP `ensure_rootfs_mounted` tool; for manual fallback, check `mountpoint -q target/rootfs_mnt` and mount `target/rootfs.img` to `target/rootfs_mnt/` as a separate step first. Do not chain the mount step together with the real inspection command.
 - After mounting `target/rootfs_mnt/`, if you only need to read files from it, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
 - If the sandbox, `no_new_privileges`, missing mounts, or network restrictions block a necessary command, ask the user for privilege escalation or the required access instead of silently giving up on that path.
@@ -85,7 +85,7 @@ Do not use `strace` inside the VM for guest userspace debugging in this reposito
 
 ## Repository Layout Notes
 
-- `xtask/src/build_rootfs/` contains the rootfs image and guest rootfs construction workflow used by `cargo xbuild-rootfs`.
+- `control/` contains the non-kernel control plane. `control/core` owns jobs, events, artifacts, rootfs, QEMU, and tests; `control/mcp` is the MCP-first entry point; `control/cli` is the thin human CLI used by cargo aliases.
 
 ## Review Terminology
 

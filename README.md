@@ -83,15 +83,14 @@ For Codex-driven work, prefer the Seele MCP server over manual QEMU control when
 nix develop -c seele-mcp
 ```
 
-The MCP server exposes tools for the full VM loop:
+The MCP server exposes tools for the structured control-plane loop:
 
-- `run_tests`: run kernel unit tests through the existing cargo alias.
-- `start`: build and launch the VM through `xtask mcp-run`.
-- `status`: report runner/QEMU PIDs, QMP connectivity, and serial log location.
+- `run_tests`: start a structured test job and return typed reports/artifacts.
+- `start_vm` / `start`: launch the VM through `control-core`.
+- `vm_status` / `status`: report QEMU PID, QMP connectivity, and serial log location.
 - `serial_tail`: read recent serial output.
-- `screenshot`: capture the display through QMP `screendump`.
-- `send_key`, `type_text`, `mouse_move`, `mouse_click`: drive guest input through QMP.
-- `stop` and `cleanup`: stop MCP-managed runner/QEMU processes and clean QMP socket state.
+- `job_status`, `job_wait`, `job_cancel`: inspect and control structured jobs.
+- `stop_vm` / `stop`: stop MCP-managed QEMU state.
 
 Manual `cargo xrun` and `cargo xrun -- --agent` remain useful for local foreground runs and fallback verification when MCP is unavailable.
 
@@ -124,5 +123,5 @@ cargo xtest
 ## Notes
 
 - `cargo xrun` is the main local workflow entrypoint.
-- `nix run` uses the same xtask-based flow.
+- `nix run` uses the same `control-cli` flow.
 - If `/dev/kvm` exists, QEMU will use KVM automatically.

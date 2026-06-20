@@ -65,7 +65,7 @@
             export SEELE_REPO="''${SEELE_REPO:-$repo_root}"
             export SEELE_QMP_SOCKET="''${SEELE_QMP_SOCKET:-/tmp/seele-agent-qmp.sock}"
 
-            exec cargo run -p seele-mcp -- "$@"
+            exec cargo run -p control-mcp -- "$@"
           '';
         };
 

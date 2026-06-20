@@ -8,6 +8,6 @@ rustflags = [
 ]
 
 [alias]
-xrun = "run -p xtask -- run"
-xtest = "run -q -p xtask -- test"
-xbuild-rootfs = "run -p xtask -- build-rootfs"
+xrun = "run -p control-cli -- run"
+xtest = "run -q -p control-cli -- test"
+xbuild-rootfs = "run -p control-cli -- rootfs"
