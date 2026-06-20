@@ -830,6 +830,23 @@ fn ensure_mapped_user_range(addr: VirtAddr, len: u64) -> Result<(), SyscallError
     }
 }
 
+fn current_process_may_lock_memory_beyond_limit() -> bool {
+    const CAP_IPC_LOCK: usize = 14;
+
+    let process = get_current_process();
+    let process = process.lock();
+    if process.effective_uid == 0 {
+        return true;
+    }
+
+    let slot = CAP_IPC_LOCK / 32;
+    let mask = 1u32 << (CAP_IPC_LOCK % 32);
+    process
+        .capability_effective
+        .get(slot)
+        .is_some_and(|caps| caps & mask != 0)
+}
+
 fn resized_file_mapping(
     file: Arc<crate::filesystem::object::FileLikeObject>,
     offset: u64,
@@ -1189,7 +1206,9 @@ define_syscall!(Mlock, |addr: VirtAddr, len: u64| {
     let last_page = VirtAddr::new(end - 1);
 
     let process = get_current_process();
-    if rounded_len > process.lock().rlimit_memlock_cur {
+    if rounded_len > process.lock().rlimit_memlock_cur
+        && !current_process_may_lock_memory_beyond_limit()
+    {
         return Err(SyscallError::NoMemory);
     }
 
@@ -1578,12 +1597,39 @@ mod tests {
             SyscallError::NoMemory,
         );
         let old_memlock_limit = process.lock().rlimit_memlock_cur;
-        process.lock().rlimit_memlock_cur = 0;
+        let (old_effective_uid, old_capability_effective) = {
+            let mut process = process.lock();
+            let old_effective_uid = process.effective_uid;
+            let old_capability_effective = process.capability_effective;
+            process.rlimit_memlock_cur = 0;
+            process.effective_uid = 1000;
+            process.capability_effective = [0; 2];
+            (old_effective_uid, old_capability_effective)
+        };
         expect_errno(
             SyscallArgs::new([remapped_addr, 4096, 0, 0, 0, 0]).call::<Mlock>(),
             SyscallError::NoMemory,
         );
-        process.lock().rlimit_memlock_cur = old_memlock_limit;
+        process.lock().effective_uid = 0;
+        expect_ok(
+            SyscallArgs::new([remapped_addr, 4096, 0, 0, 0, 0]).call::<Mlock>(),
+            0,
+        );
+        {
+            let mut process = process.lock();
+            process.effective_uid = 1000;
+            process.capability_effective[0] = 1 << 14;
+        }
+        expect_ok(
+            SyscallArgs::new([remapped_addr, 4096, 0, 0, 0, 0]).call::<Mlock>(),
+            0,
+        );
+        {
+            let mut process = process.lock();
+            process.rlimit_memlock_cur = old_memlock_limit;
+            process.effective_uid = old_effective_uid;
+            process.capability_effective = old_capability_effective;
+        }
 
         let mincore_vec = allocate_user_test_page();
         expect_ok(
