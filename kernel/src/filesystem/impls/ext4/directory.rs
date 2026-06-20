@@ -364,7 +364,7 @@ impl Directory for Ext4Directory {
 
     fn delete(&self, name: &str) -> FSResult<()> {
         let _operation = self.operation_lock.lock();
-        let (mut parent_inode, mut parent) = self.open_parent_dir()?;
+        let (parent_inode, mut parent) = self.open_parent_dir()?;
 
         let entry_name = DirEntryName::try_from(name).map_err(|_| FSError::Other)?;
         let inode = parent.get_entry(entry_name).map_err(map_ext4_error)?;
@@ -385,20 +385,9 @@ impl Directory for Ext4Directory {
                 }
             }
 
-            let mut child_inode = inode;
-            child_inode.set_links_count(1);
-            child_inode.write(&self.fs).map_err(map_ext4_error)?;
-            parent
-                .unlink(entry_name, child_inode)
-                .map_err(map_ext4_error)?;
+            parent.unlink(entry_name, inode).map_err(map_ext4_error)?;
 
-            let new_links = parent_inode
-                .links_count()
-                .checked_sub(1)
-                .ok_or(FSError::Other)?;
-            parent_inode.set_links_count(new_links);
-            parent_inode.write(&self.fs).map_err(map_ext4_error)?;
-            self.update_cached_inode(parent_inode);
+            self.update_cached_inode(parent.inode().clone());
             lookup_cache_clear(&self.lookup_cache);
             return Ok(());
         } else {
