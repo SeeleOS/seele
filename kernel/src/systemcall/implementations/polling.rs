@@ -419,7 +419,7 @@ define_syscall!(
 mod tests {
     use crate::{
         filesystem::{path::Path, vfs::VirtualFS},
-        signal::{Signal, Signals, send_signal_to_process},
+        signal::{Signal, SignalAction, SignalHandlingType, Signals, send_signal_to_process},
         systemcall::{
             implementations::{
                 EpollCreate1, EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Pipe, Read,
@@ -999,15 +999,22 @@ mod tests {
         const EPOLL_CTL_ADD: u64 = 1;
         const EPOLLIN: u32 = 0x001;
 
+        extern "C" fn test_signal_handler(_: i32) {}
+
         let process = crate::process::manager::get_current_process();
-        let saved_process_signals = {
+        let (saved_process_signals, saved_sigusr1_action) = {
             let mut process = process.lock();
-            let saved = process.pending_signals;
+            let saved_signals = process.pending_signals;
+            let saved_action = process.signal_actions[Signal::SIGUSR1.index()].clone();
             process
                 .pending_signals
                 .remove(Signals::from(Signal::SIGUSR1));
             process.pending_signal_info[Signal::SIGUSR1.index()] = None;
-            saved
+            process.signal_actions[Signal::SIGUSR1.index()] = SignalAction {
+                handling_type: SignalHandlingType::Function1(test_signal_handler),
+                ..SignalAction::default()
+            };
+            (saved_signals, saved_action)
         };
         let saved_thread_signals = {
             let current = get_current_thread();
@@ -1061,6 +1068,7 @@ mod tests {
             let mut process = process.lock();
             process.pending_signals = saved_process_signals;
             process.pending_signal_info[Signal::SIGUSR1.index()] = None;
+            process.signal_actions[Signal::SIGUSR1.index()] = saved_sigusr1_action;
         }
         {
             let current = get_current_thread();
