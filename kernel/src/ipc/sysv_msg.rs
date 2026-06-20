@@ -6,7 +6,6 @@ use lazy_static::lazy_static;
 use crate::{
     memory::{user_safe, utils::Mut},
     misc::time::unix_timestamp_seconds,
-    process::Process,
     systemcall::utils::{SyscallError, SyscallResult},
     thread::yielding::{BlockType, WakeType, block_current_with_sig_check},
 };
@@ -74,6 +73,14 @@ pub struct LinuxMsginfo {
     pub msgseg: u16,
 }
 
+#[derive(Clone, Debug)]
+pub struct SysvMsgCredentials {
+    pub pid: i32,
+    pub effective_uid: u32,
+    pub effective_gid: u32,
+    pub supplementary_groups: Vec<u32>,
+}
+
 #[derive(Debug, Default)]
 struct SysvMsgState {
     next_msqid: i32,
@@ -130,8 +137,8 @@ fn msginfo() -> LinuxMsginfo {
     }
 }
 
-fn has_access(queue: &SysvMsgQueue, process: &Process, write: bool) -> bool {
-    if process.effective_uid == 0 {
+fn has_access(queue: &SysvMsgQueue, credentials: &SysvMsgCredentials, write: bool) -> bool {
+    if credentials.effective_uid == 0 {
         return true;
     }
 
@@ -140,12 +147,14 @@ fn has_access(queue: &SysvMsgQueue, process: &Process, write: bool) -> bool {
         mask |= 0o2;
     }
     let mode = queue.mode;
-    if process.effective_uid == queue.owner_uid || process.effective_uid == queue.creator_uid {
+    if credentials.effective_uid == queue.owner_uid
+        || credentials.effective_uid == queue.creator_uid
+    {
         return mode & (mask << 6) == (mask << 6);
     }
-    if process.effective_gid == queue.owner_gid
-        || process.effective_gid == queue.creator_gid
-        || process
+    if credentials.effective_gid == queue.owner_gid
+        || credentials.effective_gid == queue.creator_gid
+        || credentials
             .supplementary_groups
             .iter()
             .any(|gid| *gid == queue.owner_gid || *gid == queue.creator_gid)
@@ -197,7 +206,7 @@ fn select_message(messages: &[SysvMessage], msgtyp: i64) -> Option<usize> {
         .map(|(index, _)| index)
 }
 
-pub fn msgget(process: &Process, key: i32, msgflg: i32) -> SyscallResult {
+pub fn msgget(credentials: &SysvMsgCredentials, key: i32, msgflg: i32) -> SyscallResult {
     let create = msgflg & IPC_CREAT != 0;
     let exclusive = msgflg & IPC_EXCL != 0;
 
@@ -211,7 +220,7 @@ pub fn msgget(process: &Process, key: i32, msgflg: i32) -> SyscallResult {
         if create && exclusive {
             return Err(SyscallError::FileAlreadyExists);
         }
-        if !has_access(queue, process, false) {
+        if !has_access(queue, credentials, false) {
             return Err(SyscallError::PermissionDenied);
         }
         return Ok(*msqid as usize);
@@ -235,10 +244,10 @@ pub fn msgget(process: &Process, key: i32, msgflg: i32) -> SyscallResult {
             qbytes: MSGMNB,
             last_send_pid: 0,
             last_recv_pid: 0,
-            owner_uid: process.effective_uid,
-            owner_gid: process.effective_gid,
-            creator_uid: process.effective_uid,
-            creator_gid: process.effective_gid,
+            owner_uid: credentials.effective_uid,
+            owner_gid: credentials.effective_gid,
+            creator_uid: credentials.effective_uid,
+            creator_gid: credentials.effective_gid,
             mode: (msgflg & IPC_MODE_MASK) as u32,
             seq: 0,
             stime: 0,
@@ -250,8 +259,12 @@ pub fn msgget(process: &Process, key: i32, msgflg: i32) -> SyscallResult {
     Ok(msqid as usize)
 }
 
+#[expect(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "syscall implementations take user pointers and access them through user_safe"
+)]
 pub fn msgsnd(
-    process: &Process,
+    credentials: &SysvMsgCredentials,
     msqid: i32,
     msgp: *const u8,
     msgsz: usize,
@@ -277,7 +290,7 @@ pub fn msgsnd(
                 .get_mut(&msqid)
                 .filter(|queue| !queue.removed)
                 .ok_or(SyscallError::InvalidArguments)?;
-            if !has_access(queue, process, true) {
+            if !has_access(queue, credentials, true) {
                 return Err(SyscallError::PermissionDenied);
             }
             if queue.bytes + msgsz <= queue.qbytes {
@@ -286,7 +299,7 @@ pub fn msgsnd(
                     ty,
                     data: data.clone(),
                 });
-                queue.last_send_pid = process.pid.0 as i32;
+                queue.last_send_pid = credentials.pid;
                 queue.stime = now_seconds();
                 drop(state);
                 crate::thread::with_thread_manager(|manager| manager.wake_io());
@@ -305,8 +318,12 @@ pub fn msgsnd(
     }
 }
 
+#[expect(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "syscall implementations take user pointers and access them through user_safe"
+)]
 pub fn msgrcv(
-    process: &Process,
+    credentials: &SysvMsgCredentials,
     msqid: i32,
     msgp: *mut u8,
     msgsz: usize,
@@ -325,7 +342,7 @@ pub fn msgrcv(
                 .get_mut(&msqid)
                 .filter(|queue| !queue.removed)
                 .ok_or(SyscallError::IdentifierRemoved)?;
-            if !has_access(queue, process, false) {
+            if !has_access(queue, credentials, false) {
                 return Err(SyscallError::PermissionDenied);
             }
             if let Some(index) = select_message(&queue.messages, msgtyp) {
@@ -335,7 +352,7 @@ pub fn msgrcv(
                     return Err(SyscallError::InvalidArguments);
                 }
                 queue.bytes = queue.bytes.saturating_sub(message.data.len());
-                queue.last_recv_pid = process.pid.0 as i32;
+                queue.last_recv_pid = credentials.pid;
                 queue.rtime = now_seconds();
                 let copied = message.data.len().min(msgsz);
                 let ty = message.ty;
@@ -359,7 +376,12 @@ pub fn msgrcv(
     }
 }
 
-pub fn msgctl(process: &Process, msqid: i32, cmd: i32, buf: *mut LinuxMsqidDs) -> SyscallResult {
+pub fn msgctl(
+    credentials: &SysvMsgCredentials,
+    msqid: i32,
+    cmd: i32,
+    buf: *mut LinuxMsqidDs,
+) -> SyscallResult {
     match cmd {
         IPC_INFO | MSG_INFO => {
             if buf.is_null() {
@@ -380,9 +402,9 @@ pub fn msgctl(process: &Process, msqid: i32, cmd: i32, buf: *mut LinuxMsqidDs) -
 
     match cmd {
         IPC_RMID => {
-            if process.effective_uid != 0
-                && process.effective_uid != queue.owner_uid
-                && process.effective_uid != queue.creator_uid
+            if credentials.effective_uid != 0
+                && credentials.effective_uid != queue.owner_uid
+                && credentials.effective_uid != queue.creator_uid
             {
                 return Err(SyscallError::PermissionDenied);
             }
@@ -393,7 +415,7 @@ pub fn msgctl(process: &Process, msqid: i32, cmd: i32, buf: *mut LinuxMsqidDs) -
             Ok(0)
         }
         IPC_STAT | MSG_STAT => {
-            if !has_access(queue, process, false) {
+            if !has_access(queue, credentials, false) {
                 return Err(SyscallError::PermissionDenied);
             }
             if buf.is_null() {
@@ -408,9 +430,9 @@ pub fn msgctl(process: &Process, msqid: i32, cmd: i32, buf: *mut LinuxMsqidDs) -
             if buf.is_null() {
                 return Err(SyscallError::BadAddress);
             }
-            if process.effective_uid != 0
-                && process.effective_uid != queue.owner_uid
-                && process.effective_uid != queue.creator_uid
+            if credentials.effective_uid != 0
+                && credentials.effective_uid != queue.owner_uid
+                && credentials.effective_uid != queue.creator_uid
             {
                 return Err(SyscallError::PermissionDenied);
             }

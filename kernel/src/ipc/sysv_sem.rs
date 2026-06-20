@@ -6,7 +6,6 @@ use lazy_static::lazy_static;
 use crate::{
     memory::{user_safe, utils::Mut},
     misc::time::{Time, unix_timestamp_seconds},
-    process::Process,
     systemcall::utils::{SyscallError, SyscallResult},
     thread::yielding::{BlockType, WakeType, block_current_with_sig_check},
 };
@@ -87,6 +86,14 @@ pub struct LinuxSembuf {
     pub sem_flg: i16,
 }
 
+#[derive(Clone, Debug)]
+pub struct SysvSemCredentials {
+    pub pid: i32,
+    pub effective_uid: u32,
+    pub effective_gid: u32,
+    pub supplementary_groups: Vec<u32>,
+}
+
 #[derive(Debug, Default)]
 struct SysvSemState {
     next_semid: i32,
@@ -135,8 +142,8 @@ fn seminfo() -> LinuxSeminfo {
     }
 }
 
-fn has_access(set: &SysvSemSet, process: &Process, write: bool) -> bool {
-    if process.effective_uid == 0 {
+fn has_access(set: &SysvSemSet, credentials: &SysvSemCredentials, write: bool) -> bool {
+    if credentials.effective_uid == 0 {
         return true;
     }
 
@@ -145,12 +152,12 @@ fn has_access(set: &SysvSemSet, process: &Process, write: bool) -> bool {
         mask |= 0o2;
     }
     let mode = set.mode;
-    if process.effective_uid == set.owner_uid || process.effective_uid == set.creator_uid {
+    if credentials.effective_uid == set.owner_uid || credentials.effective_uid == set.creator_uid {
         return mode & (mask << 6) == (mask << 6);
     }
-    if process.effective_gid == set.owner_gid
-        || process.effective_gid == set.creator_gid
-        || process
+    if credentials.effective_gid == set.owner_gid
+        || credentials.effective_gid == set.creator_gid
+        || credentials
             .supplementary_groups
             .iter()
             .any(|gid| *gid == set.owner_gid || *gid == set.creator_gid)
@@ -256,7 +263,12 @@ pub struct LinuxTimespec {
     pub tv_nsec: i64,
 }
 
-pub fn semget(process: &Process, key: i32, nsems: i32, semflg: i32) -> SyscallResult {
+pub fn semget(
+    credentials: &SysvSemCredentials,
+    key: i32,
+    nsems: i32,
+    semflg: i32,
+) -> SyscallResult {
     let create = semflg & IPC_CREAT != 0;
     let exclusive = semflg & IPC_EXCL != 0;
     let nsems = usize::try_from(nsems).map_err(|_| SyscallError::InvalidArguments)?;
@@ -277,7 +289,7 @@ pub fn semget(process: &Process, key: i32, nsems: i32, semflg: i32) -> SyscallRe
         if nsems != 0 && nsems > set.values.len() {
             return Err(SyscallError::InvalidArguments);
         }
-        if !has_access(set, process, false) {
+        if !has_access(set, credentials, false) {
             return Err(SyscallError::PermissionDenied);
         }
         return Ok(*semid as usize);
@@ -300,11 +312,11 @@ pub fn semget(process: &Process, key: i32, nsems: i32, semflg: i32) -> SyscallRe
         SysvSemSet {
             key,
             values: vec![0; nsems],
-            last_pid: process.pid.0 as i32,
-            owner_uid: process.effective_uid,
-            owner_gid: process.effective_gid,
-            creator_uid: process.effective_uid,
-            creator_gid: process.effective_gid,
+            last_pid: credentials.pid,
+            owner_uid: credentials.effective_uid,
+            owner_gid: credentials.effective_gid,
+            creator_uid: credentials.effective_uid,
+            creator_gid: credentials.effective_gid,
             mode: (semflg & IPC_MODE_MASK) as u32,
             seq: 0,
             otime: 0,
@@ -315,7 +327,13 @@ pub fn semget(process: &Process, key: i32, nsems: i32, semflg: i32) -> SyscallRe
     Ok(semid as usize)
 }
 
-pub fn semctl(process: &Process, semid: i32, semnum: i32, cmd: i32, arg: usize) -> SyscallResult {
+pub fn semctl(
+    credentials: &SysvSemCredentials,
+    semid: i32,
+    semnum: i32,
+    cmd: i32,
+    arg: usize,
+) -> SyscallResult {
     match cmd {
         IPC_INFO | SEM_INFO => {
             if arg == 0 {
@@ -336,9 +354,9 @@ pub fn semctl(process: &Process, semid: i32, semnum: i32, cmd: i32, arg: usize) 
 
     match cmd {
         IPC_RMID => {
-            if process.effective_uid != 0
-                && process.effective_uid != set.owner_uid
-                && process.effective_uid != set.creator_uid
+            if credentials.effective_uid != 0
+                && credentials.effective_uid != set.owner_uid
+                && credentials.effective_uid != set.creator_uid
             {
                 return Err(SyscallError::PermissionDenied);
             }
@@ -349,7 +367,7 @@ pub fn semctl(process: &Process, semid: i32, semnum: i32, cmd: i32, arg: usize) 
             Ok(0)
         }
         IPC_STAT | SEM_STAT => {
-            if !has_access(set, process, false) {
+            if !has_access(set, credentials, false) {
                 return Err(SyscallError::PermissionDenied);
             }
             if arg == 0 {
@@ -364,9 +382,9 @@ pub fn semctl(process: &Process, semid: i32, semnum: i32, cmd: i32, arg: usize) 
             if arg == 0 {
                 return Err(SyscallError::BadAddress);
             }
-            if process.effective_uid != 0
-                && process.effective_uid != set.owner_uid
-                && process.effective_uid != set.creator_uid
+            if credentials.effective_uid != 0
+                && credentials.effective_uid != set.owner_uid
+                && credentials.effective_uid != set.creator_uid
             {
                 return Err(SyscallError::PermissionDenied);
             }
@@ -382,7 +400,7 @@ pub fn semctl(process: &Process, semid: i32, semnum: i32, cmd: i32, arg: usize) 
             if index >= set.values.len() {
                 return Err(SyscallError::InvalidArguments);
             }
-            if !has_access(set, process, false) {
+            if !has_access(set, credentials, false) {
                 return Err(SyscallError::PermissionDenied);
             }
             Ok(match cmd {
@@ -393,7 +411,7 @@ pub fn semctl(process: &Process, semid: i32, semnum: i32, cmd: i32, arg: usize) 
             })
         }
         GETALL => {
-            if !has_access(set, process, false) {
+            if !has_access(set, credentials, false) {
                 return Err(SyscallError::PermissionDenied);
             }
             if arg == 0 {
@@ -406,7 +424,7 @@ pub fn semctl(process: &Process, semid: i32, semnum: i32, cmd: i32, arg: usize) 
         }
         SETVAL => {
             let index = usize::try_from(semnum).map_err(|_| SyscallError::InvalidArguments)?;
-            if !has_access(set, process, true) {
+            if !has_access(set, credentials, true) {
                 return Err(SyscallError::PermissionDenied);
             }
             if arg > SEMVMX as usize {
@@ -422,7 +440,7 @@ pub fn semctl(process: &Process, semid: i32, semnum: i32, cmd: i32, arg: usize) 
             Ok(0)
         }
         SETALL => {
-            if !has_access(set, process, true) {
+            if !has_access(set, credentials, true) {
                 return Err(SyscallError::PermissionDenied);
             }
             if arg == 0 {
@@ -447,7 +465,7 @@ pub fn semctl(process: &Process, semid: i32, semnum: i32, cmd: i32, arg: usize) 
 }
 
 pub fn semtimedop(
-    process: &Process,
+    credentials: &SysvSemCredentials,
     semid: i32,
     ops: *const LinuxSembuf,
     nsops: usize,
@@ -465,11 +483,11 @@ pub fn semtimedop(
                 .get_mut(&semid)
                 .filter(|set| !set.removed)
                 .ok_or(SyscallError::IdentifierRemoved)?;
-            if !has_access(set, process, true) {
+            if !has_access(set, credentials, true) {
                 return Err(SyscallError::PermissionDenied);
             }
             if ops_ready(set, &ops)? {
-                apply_ops(set, &ops, process.pid.0 as i32)?;
+                apply_ops(set, &ops, credentials.pid)?;
                 return Ok(0);
             }
         }
@@ -501,12 +519,12 @@ pub fn semtimedop(
 }
 
 pub fn semop(
-    process: &Process,
+    credentials: &SysvSemCredentials,
     semid: i32,
     ops: *const LinuxSembuf,
     nsops: usize,
 ) -> SyscallResult {
-    semtimedop(process, semid, ops, nsops, core::ptr::null())
+    semtimedop(credentials, semid, ops, nsops, core::ptr::null())
 }
 
 pub fn proc_sysvipc_sem_bytes() -> Vec<u8> {
