@@ -13,7 +13,7 @@ use crate::{
     define_syscall,
     memory::{
         addrspace::AddrSpace,
-        addrspace::mem_area::{Data, MemoryArea, MmapPermissions, SharedFrames},
+        addrspace::mem_area::{Data, MemoryArea, MmapPermissions},
         paging::FRAME_ALLOCATOR,
         protection::Protection,
         user_safe,
@@ -790,6 +790,46 @@ fn checked_user_mapping(addr: u64, pages: u64) -> Result<(VirtAddr, VirtAddr), S
     AddrSpace::checked_user_range(addr, len).ok_or(SyscallError::InvalidArguments)
 }
 
+fn checked_user_range_for_memory_syscall(addr: u64, len: u64) -> Result<(u64, u64), SyscallError> {
+    if len == 0 {
+        return Ok((addr, addr));
+    }
+    let end = addr
+        .checked_add(len)
+        .ok_or(SyscallError::InvalidArguments)?;
+    let _ = AddrSpace::checked_user_range(addr, len).ok_or(SyscallError::NoMemory)?;
+    Ok((addr, end))
+}
+
+fn mapped_area_covers_range(areas: &[MemoryArea], start: u64, end: u64) -> bool {
+    let mut cursor = start;
+    while cursor < end {
+        let Some(area) = areas
+            .iter()
+            .find(|area| area.start.as_u64() <= cursor && area.end.as_u64() > cursor)
+        else {
+            return false;
+        };
+        cursor = area.end.as_u64().min(end);
+    }
+    true
+}
+
+fn ensure_mapped_user_range(addr: VirtAddr, len: u64) -> Result<(), SyscallError> {
+    let (start, end) = checked_user_range_for_memory_syscall(addr.as_u64(), len)?;
+    if start == end {
+        return Ok(());
+    }
+
+    let process = get_current_process();
+    let process = process.lock();
+    if mapped_area_covers_range(&process.addrspace.memory_areas, start, end) {
+        Ok(())
+    } else {
+        Err(SyscallError::NoMemory)
+    }
+}
+
 fn resized_file_mapping(
     file: Arc<crate::filesystem::object::FileLikeObject>,
     offset: u64,
@@ -805,7 +845,10 @@ fn anonymous_mapping_data(
     protection: Protection,
 ) -> Result<Data, SyscallError> {
     if !shared {
-        return Ok(Data::Normal(MmapPermissions::default()));
+        return Ok(Data::Normal(MmapPermissions {
+            shared_mapping: false,
+            ..Default::default()
+        }));
     }
 
     let mut frames = Vec::with_capacity(pages as usize);
@@ -822,10 +865,11 @@ fn anonymous_mapping_data(
         frames.push(frame);
     }
 
-    Ok(Data::Shared {
-        frames: Arc::new(SharedFrames::new(frames)),
-        flags: protection_to_page_flags(protection),
-    })
+    let _ = (frames, protection);
+    Ok(Data::Normal(MmapPermissions {
+        shared_mapping: true,
+        ..Default::default()
+    }))
 }
 
 fn fd_allows_shared_write(object: &Arc<dyn crate::object::Object>) -> Result<bool, SyscallError> {
@@ -918,6 +962,7 @@ define_syscall!(Mmap, |addr: u64,
             start,
             pages,
             protection_to_page_flags(protection),
+            protection,
             data,
             true,
         ));
@@ -1044,7 +1089,14 @@ define_syscall!(Mremap, |old_addr: VirtAddr,
         } => resized_file_mapping(file.clone(), *offset, new_pages, *shared),
         Data::Shared { .. } => return Err(SyscallError::InvalidArguments),
     };
-    let new_area = MemoryArea::new(new_start, new_pages, area.flags, new_data, area.lazy);
+    let new_area = MemoryArea::new(
+        new_start,
+        new_pages,
+        area.flags,
+        area.protection,
+        new_data,
+        area.lazy,
+    );
     current.addrspace.register_area(new_area.clone());
 
     let copy_pages = match &area.data {
@@ -1123,6 +1175,7 @@ define_syscall!(Mlock, |addr: VirtAddr, len: u64| {
         return Ok(0);
     }
 
+    ensure_mapped_user_range(addr, len)?;
     let start = align_down(addr.as_u64(), Size4KiB::SIZE);
     let end = align_up(
         addr.as_u64()
@@ -1145,9 +1198,6 @@ define_syscall!(Mlock, |addr: VirtAddr, len: u64| {
     let addrspace = &mut process.addrspace;
     let mut page_addr = start;
     loop {
-        if addrspace.get_area(page_addr).is_none() {
-            return Err(SyscallError::NoMemory);
-        }
         let _ = addrspace.read(page_addr.as_u64() as *const u8)?;
         if page_addr >= last_page {
             break;
@@ -1163,30 +1213,7 @@ define_syscall!(Munlock, |addr: VirtAddr, len: u64| {
         return Ok(0);
     }
 
-    let start = align_down(addr.as_u64(), Size4KiB::SIZE);
-    let end = align_up(
-        addr.as_u64()
-            .checked_add(len)
-            .ok_or(SyscallError::InvalidArguments)?,
-        Size4KiB::SIZE,
-    );
-    let start = VirtAddr::new(start);
-    let last_page = VirtAddr::new(end - 1);
-
-    let process = get_current_process();
-    let mut process = process.lock();
-    let addrspace = &mut process.addrspace;
-    let mut page_addr = start;
-    loop {
-        if addrspace.get_area(page_addr).is_none() {
-            return Err(SyscallError::NoMemory);
-        }
-        if page_addr >= last_page {
-            break;
-        }
-        page_addr += Size4KiB::SIZE;
-    }
-
+    ensure_mapped_user_range(addr, len)?;
     Ok(0)
 });
 
@@ -1202,6 +1229,7 @@ define_syscall!(Mincore, |addr: VirtAddr, len: usize, vec: *mut u8| {
     }
 
     let page_count = len.div_ceil(Size4KiB::SIZE as usize);
+    user_safe::read_buffer(vec, page_count)?;
     let mut residency = Vec::with_capacity(page_count);
 
     {

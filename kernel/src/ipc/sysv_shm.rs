@@ -14,6 +14,7 @@ use crate::{
             mem_area::{Data, MemoryArea, SharedFrames},
         },
         paging::FRAME_ALLOCATOR,
+        protection::Protection,
         utils::apply_offset,
     },
     misc::time::unix_timestamp_seconds,
@@ -316,6 +317,11 @@ pub fn shmat(process: &mut Process, shmid: i32, shmaddr: *const u8, shmflg: i32)
         addr,
         pages,
         flags,
+        if shmflg & SHM_RDONLY == 0 {
+            Protection::READ | Protection::WRITE
+        } else {
+            Protection::READ
+        },
         Data::Shared {
             frames: Arc::new(SharedFrames::new(frames.to_vec())),
             flags: PageTableFlags::empty(),
@@ -412,4 +418,32 @@ pub fn shmctl(effective_uid: u32, shmid: i32, cmd: i32, buf: *mut LinuxShmidDs) 
         }
         _ => Err(SyscallError::InvalidArguments),
     }
+}
+
+pub fn proc_sysvipc_shm_bytes() -> Vec<u8> {
+    let state = SYSV_SHM_STATE.lock();
+    let mut out = b"       key      shmid perms                  size  cpid  lpid nattch   uid   gid  cuid  cgid      atime      dtime      ctime\n".to_vec();
+    for (shmid, segment) in &state.segments {
+        out.extend_from_slice(
+            alloc::format!(
+                "{:10} {:10} {:5o} {:21} {:5} {:5} {:6} {:5} {:5} {:5} {:5} {:10} {:10} {:10}\n",
+                segment.key,
+                shmid,
+                segment.mode & IPC_MODE_MASK as u32,
+                segment.size,
+                segment.creator_pid,
+                segment.last_pid,
+                segment.attach_count,
+                segment.owner_uid,
+                segment.owner_gid,
+                segment.creator_uid,
+                segment.creator_gid,
+                segment.atime,
+                segment.dtime,
+                segment.ctime
+            )
+            .as_bytes(),
+        );
+    }
+    out
 }

@@ -5,12 +5,14 @@ use crate::{
         cgroupfs::pid_cgroup_path, errors::FSError, info::DirectoryContentInfo, vfs::FSResult,
         vfs_traits::DirectoryContentType,
     },
+    memory::addrspace::mem_area::Data,
     misc::time::{NANOSECONDS_PER_SECOND, Time},
     object::misc::ObjectRef,
     process::{
         manager::get_current_process,
         misc::{ProcessID, get_process_with_pid},
     },
+    thread::misc::State,
 };
 
 pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
@@ -25,6 +27,7 @@ pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("cgroup".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("oom_score_adj".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("mountinfo".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("maps".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("uid_map".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("gid_map".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("setgroups".into(), DirectoryContentType::File),
@@ -93,6 +96,15 @@ pub(super) fn proc_pid_stat_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
             process.parent.clone(),
             if process.have_exited() || process.threads.is_empty() {
                 'Z'
+            } else if process.threads.iter().any(|thread| {
+                thread.upgrade().is_some_and(|thread| {
+                    matches!(
+                        thread.lock().state,
+                        State::Running | State::Ready | State::Woken
+                    )
+                })
+            }) {
+                'R'
             } else {
                 'S'
             },
@@ -396,6 +408,72 @@ pub(super) fn proc_pid_fdinfo_bytes(pid: ProcessID, fd: usize) -> FSResult<Vec<u
     Ok(content.into_bytes())
 }
 
+fn proc_maps_permission_suffix(data: &Data) -> char {
+    match data {
+        Data::File { shared, .. } => {
+            if *shared {
+                's'
+            } else {
+                'p'
+            }
+        }
+        Data::Shared { .. } => 's',
+        Data::Normal(permissions) => {
+            if permissions.shared_mapping {
+                's'
+            } else {
+                'p'
+            }
+        }
+    }
+}
+
+pub(super) fn proc_pid_maps_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    let process = process.lock();
+    let mut content = String::new();
+
+    for area in &process.addrspace.memory_areas {
+        let read = if area
+            .protection
+            .contains(crate::memory::protection::Protection::READ)
+        {
+            'r'
+        } else {
+            '-'
+        };
+        let write = if area
+            .protection
+            .contains(crate::memory::protection::Protection::WRITE)
+        {
+            'w'
+        } else {
+            '-'
+        };
+        let exec = if area
+            .protection
+            .contains(crate::memory::protection::Protection::EXEC)
+        {
+            'x'
+        } else {
+            '-'
+        };
+        let shared = proc_maps_permission_suffix(&area.data);
+
+        content.push_str(&format!(
+            "{:08x}-{:08x} {}{}{}{} 00000000 00:00 0\n",
+            area.start.as_u64(),
+            area.end.as_u64(),
+            read,
+            write,
+            exec,
+            shared
+        ));
+    }
+
+    Ok(content.into_bytes())
+}
+
 pub(super) fn parse_pid(pid: &str) -> FSResult<ProcessID> {
     pid.parse::<u64>()
         .map(ProcessID)
@@ -437,6 +515,10 @@ pub(super) fn pid_cgroup_inode(pid: ProcessID) -> u64 {
 
 pub(super) fn pid_oom_score_adj_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 5
+}
+
+pub(super) fn pid_maps_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 15
 }
 
 pub(super) fn pid_stat_inode(pid: ProcessID) -> u64 {

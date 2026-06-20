@@ -11,6 +11,7 @@ use crate::{
     memory::{
         addrspace::{USER_MEM_END, cow::decrease_ref},
         paging::FRAME_ALLOCATOR,
+        protection::Protection,
     },
 };
 
@@ -52,6 +53,7 @@ pub struct MemoryArea {
     pub start: VirtAddr,
     pub end: VirtAddr,
     pub flags: PageTableFlags,
+    pub protection: Protection,
     pub data: Data,
     pub lazy: bool,
 }
@@ -59,6 +61,7 @@ pub struct MemoryArea {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MmapPermissions {
     pub shared_write_allowed: Option<bool>,
+    pub shared_mapping: bool,
 }
 
 // The data a memory area contains. Aka backing
@@ -80,11 +83,19 @@ pub enum Data {
 }
 
 impl MemoryArea {
-    pub fn new(start: VirtAddr, pages: u64, flags: PageTableFlags, data: Data, lazy: bool) -> Self {
+    pub fn new(
+        start: VirtAddr,
+        pages: u64,
+        flags: PageTableFlags,
+        protection: Protection,
+        data: Data,
+        lazy: bool,
+    ) -> Self {
         Self {
             start,
             end: start + (pages * 4096),
             flags,
+            protection,
             data,
             lazy,
         }
@@ -94,10 +105,11 @@ impl MemoryArea {
         start: VirtAddr,
         pages: u64,
         flags: PageTableFlags,
+        protection: Protection,
         data: Data,
         lazy: bool,
     ) -> Self {
-        Self::new(start + 4096, pages, flags, data, lazy)
+        Self::new(start + 4096, pages, flags, protection, data, lazy)
     }
 
     pub fn pages(&self) -> u64 {

@@ -44,6 +44,14 @@ pub(super) const PROC_SYS_KERNEL_CAP_LAST_CAP_INODE: u64 = 0x301c;
 pub(super) const PROC_FILESYSTEMS_INODE: u64 = 0x301d;
 pub(super) const PROC_SYS_KERNEL_TAINTED_INODE: u64 = 0x301e;
 pub(super) const PROC_SYS_KERNEL_PID_MAX_INODE: u64 = 0x301f;
+pub(super) const PROC_SYS_VM_INODE: u64 = 0x3020;
+pub(super) const PROC_SYS_VM_NR_HUGEPAGES_INODE: u64 = 0x3021;
+pub(super) const PROC_SYS_VM_HUGETLB_SHM_GROUP_INODE: u64 = 0x3022;
+pub(super) const PROC_SYS_VM_OVERCOMMIT_MEMORY_INODE: u64 = 0x3023;
+pub(super) const PROC_SYSVIPC_INODE: u64 = 0x3024;
+pub(super) const PROC_SYSVIPC_MSG_INODE: u64 = 0x3025;
+pub(super) const PROC_SYSVIPC_SEM_INODE: u64 = 0x3026;
+pub(super) const PROC_SYSVIPC_SHM_INODE: u64 = 0x3027;
 
 static PROC_UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -63,6 +71,7 @@ pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("stat".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("self".into(), DirectoryContentType::Symlink),
         DirectoryContentInfo::new("sys".into(), DirectoryContentType::Directory),
+        DirectoryContentInfo::new("sysvipc".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("uptime".into(), DirectoryContentType::File),
     ];
 
@@ -208,6 +217,14 @@ pub(super) fn proc_pressure_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("cpu".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("io".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("memory".into(), DirectoryContentType::File),
+    ]
+}
+
+pub(super) fn proc_sysvipc_entries() -> Vec<DirectoryContentInfo> {
+    vec![
+        DirectoryContentInfo::new("msg".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("sem".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("shm".into(), DirectoryContentType::File),
     ]
 }
 

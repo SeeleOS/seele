@@ -69,6 +69,27 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             proc_pressure_bytes,
             proc_write_pressure,
         )),
+        ["sysvipc"] => Ok(proc_dir(
+            "/sysvipc",
+            "sysvipc",
+            PROC_SYSVIPC_INODE,
+            proc_sysvipc_entries(),
+        )),
+        ["sysvipc", "msg"] => Ok(proc_file(
+            "msg",
+            PROC_SYSVIPC_MSG_INODE,
+            crate::ipc::sysv_msg::proc_sysvipc_msg_bytes,
+        )),
+        ["sysvipc", "sem"] => Ok(proc_file(
+            "sem",
+            PROC_SYSVIPC_SEM_INODE,
+            crate::ipc::sysv_sem::proc_sysvipc_sem_bytes,
+        )),
+        ["sysvipc", "shm"] => Ok(proc_file(
+            "shm",
+            PROC_SYSVIPC_SHM_INODE,
+            crate::ipc::sysv_shm::proc_sysvipc_shm_bytes,
+        )),
         ["sys"] => Ok(proc_dir("/sys", "sys", PROC_SYS_INODE, proc_sys_entries())),
         ["sys", "fs"] => Ok(proc_dir(
             "/sys/fs",
@@ -87,6 +108,30 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             "kernel",
             PROC_SYS_KERNEL_INODE,
             proc_kernel_entries(),
+        )),
+        ["sys", "vm"] => Ok(proc_dir(
+            "/sys/vm",
+            "vm",
+            PROC_SYS_VM_INODE,
+            proc_vm_entries(),
+        )),
+        ["sys", "vm", "nr_hugepages"] => Ok(proc_rw_file(
+            "nr_hugepages",
+            PROC_SYS_VM_NR_HUGEPAGES_INODE,
+            || proc_sysctl_value_bytes(&PROC_NR_HUGEPAGES),
+            |buffer| proc_write_sysctl_u64(&PROC_NR_HUGEPAGES, buffer),
+        )),
+        ["sys", "vm", "hugetlb_shm_group"] => Ok(proc_rw_file(
+            "hugetlb_shm_group",
+            PROC_SYS_VM_HUGETLB_SHM_GROUP_INODE,
+            || proc_sysctl_value_bytes(&PROC_HUGETLB_SHM_GROUP),
+            |buffer| proc_write_sysctl_u64(&PROC_HUGETLB_SHM_GROUP, buffer),
+        )),
+        ["sys", "vm", "overcommit_memory"] => Ok(proc_rw_file(
+            "overcommit_memory",
+            PROC_SYS_VM_OVERCOMMIT_MEMORY_INODE,
+            || proc_sysctl_value_bytes(&PROC_OVERCOMMIT_MEMORY),
+            |buffer| proc_write_sysctl_u64(&PROC_OVERCOMMIT_MEMORY, buffer),
         )),
         ["sys", "kernel", "hostname"] => Ok(proc_rw_file(
             "hostname",

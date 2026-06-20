@@ -22,6 +22,7 @@ impl AddrSpace {
             mem,
             pages,
             PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE,
+            Protection::READ | Protection::WRITE,
             Data::Normal(Default::default()),
             false,
         ))
@@ -43,7 +44,14 @@ impl AddrSpace {
     ) -> VirtAddr {
         log::trace!("addrspace: allocate_user_lazy pages {}", pages);
         let mem = self.fetch_add_user_mem(pages);
-        let area = MemoryArea::new(mem, pages, protection_to_page_flags(protection), data, true);
+        let area = MemoryArea::new(
+            mem,
+            pages,
+            protection_to_page_flags(protection),
+            protection,
+            data,
+            true,
+        );
 
         self.register_area(area);
 
@@ -56,6 +64,7 @@ impl AddrSpace {
             VirtAddr::new(KERNEL_MEM.fetch_add((pages + 1) * 4096, Ordering::Relaxed)),
             pages,
             PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
+            Protection::READ | Protection::WRITE,
             Data::Normal(Default::default()),
             false,
         ))

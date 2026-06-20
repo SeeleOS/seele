@@ -42,6 +42,18 @@ fn tty0_active() -> Vec<u8> {
     format!("tty{}\n", get_active_vt()).into_bytes()
 }
 
+fn one_line() -> Vec<u8> {
+    b"1\n".to_vec()
+}
+
+fn zero_line() -> Vec<u8> {
+    b"0\n".to_vec()
+}
+
+fn hugepage_size_kb() -> Vec<u8> {
+    b"2048\n".to_vec()
+}
+
 fn i8042_uevent() -> Vec<u8> {
     b"DRIVER=i8042\nMODALIAS=platform:i8042\nSUBSYSTEM=platform\n".to_vec()
 }
@@ -305,6 +317,100 @@ static SYS_FS_BPF_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     entries: &[],
 });
 
+static SYS_KERNEL_MM_HUGEPAGES_2MB_NR_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "nr_hugepages",
+    inode: 0x2075,
+    mode: 0o100644,
+    read: zero_line,
+    write: None,
+});
+
+static SYS_KERNEL_MM_HUGEPAGES_2MB_FREE_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "free_hugepages",
+    inode: 0x2076,
+    mode: 0o100644,
+    read: zero_line,
+    write: None,
+});
+
+static SYS_KERNEL_MM_HUGEPAGES_2MB_RESV_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "resv_hugepages",
+    inode: 0x2077,
+    mode: 0o100644,
+    read: zero_line,
+    write: None,
+});
+
+static SYS_KERNEL_MM_HUGEPAGES_2MB_SURPLUS_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "surplus_hugepages",
+    inode: 0x2078,
+    mode: 0o100644,
+    read: zero_line,
+    write: None,
+});
+
+static SYS_KERNEL_MM_HUGEPAGES_2MB_SIZE_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "hugepages_size_kB",
+    inode: 0x2079,
+    mode: 0o100444,
+    read: hugepage_size_kb,
+    write: None,
+});
+
+static SYS_KERNEL_MM_HUGEPAGES_2MB_ENTRIES: &[StaticDirEntry] = &[
+    StaticDirEntry {
+        name: "nr_hugepages",
+        node: &SYS_KERNEL_MM_HUGEPAGES_2MB_NR_NODE,
+    },
+    StaticDirEntry {
+        name: "free_hugepages",
+        node: &SYS_KERNEL_MM_HUGEPAGES_2MB_FREE_NODE,
+    },
+    StaticDirEntry {
+        name: "resv_hugepages",
+        node: &SYS_KERNEL_MM_HUGEPAGES_2MB_RESV_NODE,
+    },
+    StaticDirEntry {
+        name: "surplus_hugepages",
+        node: &SYS_KERNEL_MM_HUGEPAGES_2MB_SURPLUS_NODE,
+    },
+    StaticDirEntry {
+        name: "hugepages_size_kB",
+        node: &SYS_KERNEL_MM_HUGEPAGES_2MB_SIZE_NODE,
+    },
+];
+
+static SYS_KERNEL_MM_HUGEPAGES_2MB_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "hugepages-2048kB",
+    inode: 0x207a,
+    mode: 0o040755,
+    entries: SYS_KERNEL_MM_HUGEPAGES_2MB_ENTRIES,
+});
+
+static SYS_KERNEL_MM_HUGEPAGES_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
+    name: "hugepages-2048kB",
+    node: &SYS_KERNEL_MM_HUGEPAGES_2MB_NODE,
+}];
+
+static SYS_KERNEL_MM_HUGEPAGES_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "hugepages",
+    inode: 0x207b,
+    mode: 0o040755,
+    entries: SYS_KERNEL_MM_HUGEPAGES_ENTRIES,
+});
+
+static SYS_KERNEL_MM_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
+    name: "hugepages",
+    node: &SYS_KERNEL_MM_HUGEPAGES_NODE,
+}];
+
+static SYS_KERNEL_MM_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "mm",
+    inode: 0x207c,
+    mode: 0o040755,
+    entries: SYS_KERNEL_MM_ENTRIES,
+});
+
 static SYS_FS_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "cgroup",
@@ -334,10 +440,16 @@ static SYS_KERNEL_SECURITY_NODE: StaticNode = StaticNode::Directory(StaticDirect
     entries: &[],
 });
 
-static SYS_KERNEL_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
-    name: "security",
-    node: &SYS_KERNEL_SECURITY_NODE,
-}];
+static SYS_KERNEL_ENTRIES: &[StaticDirEntry] = &[
+    StaticDirEntry {
+        name: "security",
+        node: &SYS_KERNEL_SECURITY_NODE,
+    },
+    StaticDirEntry {
+        name: "mm",
+        node: &SYS_KERNEL_MM_NODE,
+    },
+];
 
 static SYS_KERNEL_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     name: "kernel",
@@ -473,7 +585,93 @@ static SYS_DEVICES_ENTRIES: &[StaticDirEntry] = &[
         name: "platform",
         node: &SYS_DEVICES_PLATFORM_NODE,
     },
+    StaticDirEntry {
+        name: "system",
+        node: &SYS_DEVICES_SYSTEM_NODE,
+    },
 ];
+
+static SYS_DEVICES_SYSTEM_CPU0_ONLINE_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "online",
+    inode: 0x207d,
+    mode: 0o100444,
+    read: one_line,
+    write: None,
+});
+
+static SYS_DEVICES_SYSTEM_CPU0_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
+    name: "online",
+    node: &SYS_DEVICES_SYSTEM_CPU0_ONLINE_NODE,
+}];
+
+static SYS_DEVICES_SYSTEM_CPU0_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "cpu0",
+    inode: 0x207e,
+    mode: 0o040755,
+    entries: SYS_DEVICES_SYSTEM_CPU0_ENTRIES,
+});
+
+static SYS_DEVICES_SYSTEM_CPU_ONLINE_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "online",
+    inode: 0x207f,
+    mode: 0o100444,
+    read: zero_line,
+    write: None,
+});
+
+static SYS_DEVICES_SYSTEM_CPU_PRESENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "present",
+    inode: 0x2080,
+    mode: 0o100444,
+    read: zero_line,
+    write: None,
+});
+
+static SYS_DEVICES_SYSTEM_CPU_POSSIBLE_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "possible",
+    inode: 0x2081,
+    mode: 0o100444,
+    read: zero_line,
+    write: None,
+});
+
+static SYS_DEVICES_SYSTEM_CPU_ENTRIES: &[StaticDirEntry] = &[
+    StaticDirEntry {
+        name: "cpu0",
+        node: &SYS_DEVICES_SYSTEM_CPU0_NODE,
+    },
+    StaticDirEntry {
+        name: "online",
+        node: &SYS_DEVICES_SYSTEM_CPU_ONLINE_NODE,
+    },
+    StaticDirEntry {
+        name: "present",
+        node: &SYS_DEVICES_SYSTEM_CPU_PRESENT_NODE,
+    },
+    StaticDirEntry {
+        name: "possible",
+        node: &SYS_DEVICES_SYSTEM_CPU_POSSIBLE_NODE,
+    },
+];
+
+static SYS_DEVICES_SYSTEM_CPU_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "cpu",
+    inode: 0x2082,
+    mode: 0o040755,
+    entries: SYS_DEVICES_SYSTEM_CPU_ENTRIES,
+});
+
+static SYS_DEVICES_SYSTEM_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
+    name: "cpu",
+    node: &SYS_DEVICES_SYSTEM_CPU_NODE,
+}];
+
+static SYS_DEVICES_SYSTEM_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "system",
+    inode: 0x2083,
+    mode: 0o040755,
+    entries: SYS_DEVICES_SYSTEM_ENTRIES,
+});
 
 static SYS_DEVICES_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     name: "devices",

@@ -5,7 +5,10 @@ use xmas_elf::program::{Flags, ProgramHeader};
 use crate::{
     elfloader::util::{align_down, align_up},
     filesystem::object::FileLikeObject,
-    memory::addrspace::mem_area::{Data, MemoryArea},
+    memory::{
+        addrspace::mem_area::{Data, MemoryArea},
+        protection::Protection,
+    },
 };
 
 pub(crate) fn elf_flags_to_page_flags(flags: Flags) -> PageTableFlags {
@@ -17,6 +20,17 @@ pub(crate) fn elf_flags_to_page_flags(flags: Flags) -> PageTableFlags {
         page_flags |= PageTableFlags::NO_EXECUTE;
     }
     page_flags
+}
+
+pub(crate) fn elf_flags_to_protection(flags: Flags) -> Protection {
+    let mut protection = Protection::READ;
+    if flags.is_write() {
+        protection |= Protection::WRITE;
+    }
+    if flags.is_execute() {
+        protection |= Protection::EXEC;
+    }
+    protection
 }
 
 /// Loads the [`ProgramHeader`] into a [`MemoryArea`]
@@ -35,6 +49,7 @@ pub fn load_segment_to_area(
         start: VirtAddr::new(start),
         end: VirtAddr::new(end),
         flags: elf_flags_to_page_flags(header.flags()),
+        protection: elf_flags_to_protection(header.flags()),
         data: Data::File {
             offset: file_offset,
             file_bytes,

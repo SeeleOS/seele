@@ -44,6 +44,7 @@ define_syscall!(Brk, |addr: u64| {
             VirtAddr::new(old_aligned),
             (new_aligned - old_aligned) / 4096,
             protection_to_page_flags(Protection::READ | Protection::WRITE),
+            Protection::READ | Protection::WRITE,
             Data::Normal(Default::default()),
             true,
         ));

@@ -16,6 +16,9 @@ pub(super) static PROC_INOTIFY_MAX_USER_WATCHES: AtomicU64 =
     AtomicU64::new(DEFAULT_INOTIFY_MAX_USER_WATCHES);
 pub(super) static PROC_NR_OPEN: AtomicU64 = AtomicU64::new(DEFAULT_NR_OPEN);
 pub(super) static PROC_PID_MAX: AtomicU64 = AtomicU64::new(DEFAULT_PID_MAX);
+pub(super) static PROC_NR_HUGEPAGES: AtomicU64 = AtomicU64::new(0);
+pub(super) static PROC_HUGETLB_SHM_GROUP: AtomicU64 = AtomicU64::new(0);
+pub(super) static PROC_OVERCOMMIT_MEMORY: AtomicU64 = AtomicU64::new(0);
 
 pub(super) fn proc_hostname_bytes() -> Vec<u8> {
     proc_c_string_bytes(crate::misc::utsname::current_hostname(crate::NAME))
@@ -48,9 +51,15 @@ pub(super) fn proc_meminfo_bytes() -> Vec<u8> {
             "Unevictable:    {:>8} kB\n",
             "Mlocked:        {:>8} kB\n",
             "SwapTotal:      {:>8} kB\n",
-            "SwapFree:       {:>8} kB\n"
+            "SwapFree:       {:>8} kB\n",
+            "HugePages_Total:{:>8}\n",
+            "HugePages_Free: {:>8}\n",
+            "HugePages_Rsvd: {:>8}\n",
+            "HugePages_Surp: {:>8}\n",
+            "Hugepagesize:   {:>8} kB\n",
+            "Hugetlb:        {:>8} kB\n"
         ),
-        total_kib, total_kib, total_kib, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        total_kib, total_kib, total_kib, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2048, 0,
     )
     .into_bytes()
 }
@@ -115,6 +124,15 @@ pub(super) fn proc_sys_entries() -> Vec<DirectoryContentInfo> {
     vec![
         DirectoryContentInfo::new("fs".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("kernel".into(), DirectoryContentType::Directory),
+        DirectoryContentInfo::new("vm".into(), DirectoryContentType::Directory),
+    ]
+}
+
+pub(super) fn proc_vm_entries() -> Vec<DirectoryContentInfo> {
+    vec![
+        DirectoryContentInfo::new("nr_hugepages".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("hugetlb_shm_group".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("overcommit_memory".into(), DirectoryContentType::File),
     ]
 }
 

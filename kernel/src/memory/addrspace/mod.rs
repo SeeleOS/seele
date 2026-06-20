@@ -322,6 +322,7 @@ impl AddrSpace {
             middle.start = overlap_start;
             middle.end = overlap_end;
             middle.flags = new_flags;
+            middle.protection = protection;
 
             if let Data::File {
                 offset,
