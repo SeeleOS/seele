@@ -138,7 +138,13 @@ impl AgentSession {
             Ok(result) => result,
             Err(err) => {
                 let mut state = self.state.lock().await;
-                let _ = stop_state(&mut state).await;
+                let _ = stop_state(
+                    &mut state,
+                    &self.qmp_socket,
+                    &self.serial_log,
+                    &self.command_log_dir.join("mcp-run.log"),
+                )
+                .await;
                 return Err(err);
             }
         };
@@ -247,7 +253,13 @@ impl AgentSession {
 
     pub async fn stop(&self) -> Result<SessionStatus> {
         let mut state = self.state.lock().await;
-        stop_state(&mut state).await?;
+        stop_state(
+            &mut state,
+            &self.qmp_socket,
+            &self.serial_log,
+            &self.command_log_dir.join("mcp-run.log"),
+        )
+        .await?;
         drop(state);
         let _ = fs::remove_file(&self.qmp_socket).await;
         self.status().await
@@ -255,7 +267,13 @@ impl AgentSession {
 
     pub async fn cleanup(&self) -> Result<SessionStatus> {
         let mut state = self.state.lock().await;
-        stop_state(&mut state).await?;
+        stop_state(
+            &mut state,
+            &self.qmp_socket,
+            &self.serial_log,
+            &self.command_log_dir.join("mcp-run.log"),
+        )
+        .await?;
         drop(state);
         let _ = fs::remove_file(&self.qmp_socket).await;
         self.status().await
@@ -264,6 +282,13 @@ impl AgentSession {
     pub async fn status(&self) -> Result<SessionStatus> {
         let mut state = self.state.lock().await;
         refresh_child_state(&mut state).await;
+        refresh_metadata_from_log(
+            &mut state,
+            &self.command_log_dir.join("mcp-run.log"),
+            &self.qmp_socket,
+            &self.serial_log,
+        )
+        .await;
         let metadata = state.metadata.clone();
         let running = state.child.is_some();
         let qmp_connectable = tokio::net::UnixStream::connect(&self.qmp_socket)
@@ -335,7 +360,13 @@ impl AgentSession {
     pub async fn debug_stop(&self) -> Result<SessionStatus> {
         let mut state = self.state.lock().await;
         stop_gdb_state(&mut state).await?;
-        stop_state(&mut state).await?;
+        stop_state(
+            &mut state,
+            &self.qmp_socket,
+            &self.serial_log,
+            &self.command_log_dir.join("mcp-run.log"),
+        )
+        .await?;
         drop(state);
         let _ = fs::remove_file(&self.qmp_socket).await;
         self.status().await
@@ -886,17 +917,111 @@ async fn refresh_gdb_state(state: &mut SessionState) {
     }
 }
 
-async fn stop_state(state: &mut SessionState) -> Result<()> {
+async fn refresh_metadata_from_log(
+    state: &mut SessionState,
+    mcp_run_log: &Path,
+    default_qmp_socket: &Path,
+    default_serial_log: &Path,
+) {
+    let Ok(data) = fs::read_to_string(mcp_run_log).await else {
+        return;
+    };
+    let Some(metadata) = parse_metadata_from_log(
+        &data,
+        Some(mcp_run_log),
+        default_qmp_socket,
+        default_serial_log,
+    ) else {
+        return;
+    };
+    state.metadata = Some(metadata);
+}
+
+fn parse_metadata_from_log(
+    log: &str,
+    mcp_run_log: Option<&Path>,
+    default_qmp_socket: &Path,
+    default_serial_log: &Path,
+) -> Option<SessionMetadata> {
+    log.lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find_map(|value| {
+            parse_metadata_value(&value, mcp_run_log, default_qmp_socket, default_serial_log).ok()
+        })
+}
+
+fn parse_metadata_value(
+    value: &serde_json::Value,
+    mcp_run_log: Option<&Path>,
+    default_qmp_socket: &Path,
+    default_serial_log: &Path,
+) -> Result<SessionMetadata> {
+    let runner_pid = value
+        .get("runner_pid")
+        .and_then(serde_json::Value::as_u64)
+        .context("metadata missing runner_pid")?;
+    let qemu_pid = value
+        .get("qemu_pid")
+        .and_then(serde_json::Value::as_u64)
+        .map(u32::try_from)
+        .transpose()
+        .context("metadata qemu_pid out of range")?;
+    let qmp_socket = value
+        .get("qmp_socket")
+        .and_then(serde_json::Value::as_str)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_qmp_socket.to_path_buf());
+    let serial_log = value
+        .get("serial_log")
+        .and_then(serde_json::Value::as_str)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_serial_log.to_path_buf());
+    let iso_image = value
+        .get("iso_image")
+        .and_then(serde_json::Value::as_str)
+        .map(PathBuf::from);
+
+    Ok(SessionMetadata {
+        runner_pid: u32::try_from(runner_pid).context("metadata runner_pid out of range")?,
+        qemu_pid,
+        qmp_socket,
+        serial_log,
+        mcp_run_log: mcp_run_log
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from(DEFAULT_COMMAND_LOG_DIR).join("mcp-run.log")),
+        iso_image,
+    })
+}
+
+async fn stop_state(
+    state: &mut SessionState,
+    default_qmp_socket: &Path,
+    default_serial_log: &Path,
+    default_mcp_run_log: &Path,
+) -> Result<()> {
     stop_gdb_state(state).await?;
+    refresh_metadata_from_log(
+        state,
+        default_mcp_run_log,
+        default_qmp_socket,
+        default_serial_log,
+    )
+    .await;
     if let Some(qemu_pid) = state
         .metadata
         .as_ref()
         .and_then(|metadata| metadata.qemu_pid)
     {
-        let _ = Command::new("kill")
-            .arg(qemu_pid.to_string())
-            .status()
-            .await;
+        kill_pid(qemu_pid).await;
+    }
+    let qmp_socket = state
+        .metadata
+        .as_ref()
+        .map(|metadata| metadata.qmp_socket.as_path())
+        .unwrap_or(default_qmp_socket);
+    for qemu_pid in qemu_pids_for_qmp_socket(qmp_socket).await {
+        kill_pid(qemu_pid).await;
     }
     if let Some(child) = state.child.as_mut() {
         let _ = child.kill().await;
@@ -906,6 +1031,71 @@ async fn stop_state(state: &mut SessionState) -> Result<()> {
     state.child = None;
     state.metadata = None;
     Ok(())
+}
+
+async fn kill_pid(pid: u32) {
+    let _ = Command::new("kill").arg(pid.to_string()).status().await;
+    for _ in 0..10 {
+        if !process_exists(pid).await {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let _ = Command::new("kill")
+        .arg("-9")
+        .arg(pid.to_string())
+        .status()
+        .await;
+}
+
+async fn process_exists(pid: u32) -> bool {
+    fs::metadata(format!("/proc/{pid}")).await.is_ok()
+}
+
+async fn qemu_pids_for_qmp_socket(qmp_socket: &Path) -> Vec<u32> {
+    let Ok(mut entries) = fs::read_dir("/proc").await else {
+        return Vec::new();
+    };
+    let mut result = Vec::new();
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let cmdline_path = entry.path().join("cmdline");
+        let Ok(cmdline) = fs::read(&cmdline_path).await else {
+            continue;
+        };
+        if qemu_cmdline_uses_qmp_socket(&cmdline, qmp_socket) {
+            result.push(pid);
+        }
+    }
+    result
+}
+
+fn qemu_cmdline_uses_qmp_socket(cmdline: &[u8], qmp_socket: &Path) -> bool {
+    let args = cmdline
+        .split(|byte| *byte == 0)
+        .filter(|arg| !arg.is_empty())
+        .filter_map(|arg| std::str::from_utf8(arg).ok())
+        .collect::<Vec<_>>();
+    if !args
+        .first()
+        .is_some_and(|program| program.contains("qemu-system"))
+    {
+        return false;
+    }
+    let socket = qmp_socket.to_string_lossy();
+    args.windows(2).any(|window| {
+        window[0] == "-qmp"
+            && window[1]
+                .strip_prefix("unix:")
+                .and_then(|value| value.split(',').next())
+                .is_some_and(|path| path == socket)
+    })
 }
 
 async fn stop_gdb_state(state: &mut SessionState) -> Result<()> {
@@ -971,5 +1161,41 @@ mod tests {
         assert_eq!(metadata.qemu_pid, Some(99));
         assert_eq!(metadata.qmp_socket, PathBuf::from("/tmp/qmp.sock"));
         assert_eq!(metadata.serial_log, PathBuf::from("/tmp/serial.log"));
+    }
+
+    #[test]
+    fn parse_metadata_from_log_uses_latest_metadata_line() {
+        let log = r#"
+ignored
+{"runner_pid":1,"qemu_pid":2,"qmp_socket":"/tmp/old.sock"}
+finished build
+{"runner_pid":3,"qemu_pid":4,"qmp_socket":"/tmp/new.sock","serial_log":"/tmp/new.log","iso_image":"/tmp/kernel.iso"}
+"#;
+        let metadata = parse_metadata_from_log(
+            log,
+            Some(Path::new("/tmp/mcp-run.log")),
+            Path::new("/tmp/default-qmp.sock"),
+            Path::new("/tmp/default-serial.log"),
+        )
+        .unwrap();
+        assert_eq!(metadata.runner_pid, 3);
+        assert_eq!(metadata.qemu_pid, Some(4));
+        assert_eq!(metadata.qmp_socket, PathBuf::from("/tmp/new.sock"));
+        assert_eq!(metadata.serial_log, PathBuf::from("/tmp/new.log"));
+        assert_eq!(metadata.mcp_run_log, PathBuf::from("/tmp/mcp-run.log"));
+        assert_eq!(metadata.iso_image, Some(PathBuf::from("/tmp/kernel.iso")));
+    }
+
+    #[test]
+    fn qemu_cmdline_matches_exact_qmp_socket() {
+        let cmdline = b"qemu-system-x86_64\0-m\04G\0-qmp\0unix:/tmp/seele-agent-qmp.sock,server=on,wait=off\0";
+        assert!(qemu_cmdline_uses_qmp_socket(
+            cmdline,
+            Path::new("/tmp/seele-agent-qmp.sock")
+        ));
+        assert!(!qemu_cmdline_uses_qmp_socket(
+            cmdline,
+            Path::new("/tmp/other.sock")
+        ));
     }
 }
