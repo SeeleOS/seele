@@ -1,12 +1,32 @@
 use super::*;
 
+const RLIM_INFINITY: u64 = u64::MAX;
+const DEFAULT_RLIMIT_NPROC: u64 = 4096;
+const DEFAULT_RLIMIT_SIGPENDING: u64 = 4096;
+const DEFAULT_RLIMIT_MSGQUEUE: u64 = 819_200;
+const DEFAULT_RLIMIT_RTTIME: u64 = RLIM_INFINITY;
+
 fn get_rlimit(resource: RlimitResource) -> LinuxRlimit64 {
     let process = get_current_process();
     let process = process.lock();
     match resource {
+        RlimitResource::Cpu
+        | RlimitResource::Fsize
+        | RlimitResource::Data
+        | RlimitResource::Rss
+        | RlimitResource::As
+        | RlimitResource::Locks
+        | RlimitResource::Nice => LinuxRlimit64 {
+            rlim_cur: RLIM_INFINITY,
+            rlim_max: RLIM_INFINITY,
+        },
         RlimitResource::Core => LinuxRlimit64 {
             rlim_cur: process.rlimit_core_cur,
             rlim_max: process.rlimit_core_max,
+        },
+        RlimitResource::Nproc => LinuxRlimit64 {
+            rlim_cur: DEFAULT_RLIMIT_NPROC,
+            rlim_max: DEFAULT_RLIMIT_NPROC,
         },
         RlimitResource::Stack => LinuxRlimit64 {
             rlim_cur: process.rlimit_stack_cur,
@@ -24,6 +44,18 @@ fn get_rlimit(resource: RlimitResource) -> LinuxRlimit64 {
             rlim_cur: process.rlimit_rtprio_cur,
             rlim_max: process.rlimit_rtprio_max,
         },
+        RlimitResource::Sigpending => LinuxRlimit64 {
+            rlim_cur: DEFAULT_RLIMIT_SIGPENDING,
+            rlim_max: DEFAULT_RLIMIT_SIGPENDING,
+        },
+        RlimitResource::Msgqueue => LinuxRlimit64 {
+            rlim_cur: DEFAULT_RLIMIT_MSGQUEUE,
+            rlim_max: DEFAULT_RLIMIT_MSGQUEUE,
+        },
+        RlimitResource::Rttime => LinuxRlimit64 {
+            rlim_cur: DEFAULT_RLIMIT_RTTIME,
+            rlim_max: DEFAULT_RLIMIT_RTTIME,
+        },
     }
 }
 
@@ -31,6 +63,17 @@ fn set_rlimit(resource: RlimitResource, limit: LinuxRlimit64) {
     let process = get_current_process();
     let mut process = process.lock();
     match resource {
+        RlimitResource::Cpu
+        | RlimitResource::Fsize
+        | RlimitResource::Data
+        | RlimitResource::Rss
+        | RlimitResource::As
+        | RlimitResource::Locks
+        | RlimitResource::Nproc
+        | RlimitResource::Sigpending
+        | RlimitResource::Msgqueue
+        | RlimitResource::Nice
+        | RlimitResource::Rttime => {}
         RlimitResource::Core => {
             process.rlimit_core_cur = limit.rlim_cur;
             process.rlimit_core_max = limit.rlim_max;

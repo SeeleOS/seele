@@ -529,11 +529,22 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
 #[repr(u32)]
 enum RlimitResource {
+    Cpu = 0,
+    Fsize = 1,
+    Data = 2,
+    Rss = 5,
+    Nproc = 6,
     Core = 4,
     Stack = 3,
     NoFile = 7,
     MemLock = 8,
+    As = 9,
+    Locks = 10,
+    Sigpending = 11,
+    Msgqueue = 12,
+    Nice = 13,
     RtPrio = 14,
+    Rttime = 15,
 }
 
 bitflags! {

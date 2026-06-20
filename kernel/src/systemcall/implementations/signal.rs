@@ -21,8 +21,8 @@ use crate::{
     process::{FdFlags, manager::get_current_process},
     signal::{
         PendingSignalInfo, SI_QUEUE, SI_TKILL, SigInfo, Signal, UContext, action::SignalAction,
-        send_signal_to_process, send_signal_to_process_with_siginfo,
-        send_signal_to_thread_with_siginfo,
+        process_current_process_signals, send_signal_to_process,
+        send_signal_to_process_with_siginfo, send_signal_to_thread_with_siginfo,
     },
 };
 use alloc::vec::Vec;
@@ -507,6 +507,9 @@ define_syscall!(
             user_safe::write(old_set, &old_bits)?;
         }
 
+        let process = get_current_process();
+        process_current_process_signals(&process);
+
         Ok(0)
     }
 );
@@ -621,7 +624,7 @@ mod tests {
         },
         systemcall::{
             implementations::{
-                Kill, Nanosleep, Pause, Read, RtSigaction, RtSigpending, RtSigprocmask,
+                Getitimer, Kill, Nanosleep, Pause, Read, RtSigaction, RtSigpending, RtSigprocmask,
                 RtSigqueueinfo, RtSigsuspend, RtSigtimedwait, Setitimer, Sigaltstack, Signalfd4,
                 Tgkill,
             },
@@ -726,17 +729,26 @@ mod tests {
                 .tv_sec,
             0
         );
+        expect_ok(
+            SyscallArgs::new([0, 0, page + 96, 0, 0, 0]).call::<Setitimer>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([0, page + 96, 0, 0, 0, 0]).call::<Getitimer>(),
+            0,
+        );
         expect_errno(
             SyscallArgs::new([99, page + 64, 0, 0, 0, 0]).call::<Setitimer>(),
             SyscallError::InvalidArguments,
         );
-        expect_errno(
-            SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Setitimer>(),
-            SyscallError::BadAddress,
-        );
+        expect_ok(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Setitimer>(), 0);
         expect_errno(
             SyscallArgs::new([0, 1, 0, 0, 0, 0]).call::<Setitimer>(),
             SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([99, page + 96, 0, 0, 0, 0]).call::<Getitimer>(),
+            SyscallError::InvalidArguments,
         );
 
         let thread = crate::thread::get_current_thread();

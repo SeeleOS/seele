@@ -1,6 +1,9 @@
 use bitflags::bitflags;
 
-use crate::misc::time::{self, Time as KernelTime};
+use crate::misc::{
+    time::{self, Time as KernelTime},
+    timer::{ClockId, TimerNotifyMethod, TimerState},
+};
 use crate::object::FileFlags;
 use crate::object::linux_anon::{TimerFdObject, wake_linux_io_waiters};
 use crate::object::misc::ObjectRef;
@@ -131,6 +134,58 @@ fn linux_timeval_to_realtime_ns(timeval: LinuxTimeval) -> Result<i64, SyscallErr
         .saturating_add(timeval.tv_usec.saturating_mul(1_000)))
 }
 
+fn linux_timeval_to_ns(timeval: LinuxTimeval) -> Result<u64, SyscallError> {
+    if timeval.tv_sec < 0 || !(0..1_000_000).contains(&timeval.tv_usec) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    Ok((timeval.tv_sec as u64)
+        .saturating_mul(1_000_000_000)
+        .saturating_add(timeval.tv_usec as u64 * 1_000))
+}
+
+fn ns_to_linux_timeval(ns: u64) -> LinuxTimeval {
+    LinuxTimeval {
+        tv_sec: (ns / 1_000_000_000) as i64,
+        tv_usec: ((ns % 1_000_000_000) / 1_000) as i64,
+    }
+}
+
+fn itimer_clock(which: i32) -> Result<ClockId, SyscallError> {
+    match which {
+        0 => Ok(ClockId::Realtime),
+        1 | 2 => Ok(ClockId::SinceBoot),
+        _ => Err(SyscallError::InvalidArguments),
+    }
+}
+
+fn itimer_signal(which: i32) -> Result<crate::signal::Signal, SyscallError> {
+    match which {
+        0 => Ok(crate::signal::Signal::SIGALRM),
+        1 => Ok(crate::signal::Signal::SIGVTALRM),
+        2 => Ok(crate::signal::Signal::SIGPROF),
+        _ => Err(SyscallError::InvalidArguments),
+    }
+}
+
+fn itimer_to_linux_value(state: TimerState, clock: ClockId) -> LinuxItimerval {
+    let now = match clock {
+        ClockId::Realtime => KernelTime::current(),
+        ClockId::SinceBoot => KernelTime::since_boot(),
+    };
+    match state {
+        TimerState::Disabled => LinuxItimerval::default(),
+        TimerState::OneShot { deadline } => LinuxItimerval {
+            it_interval: LinuxTimeval::default(),
+            it_value: ns_to_linux_timeval(deadline.sub(now).as_nanoseconds()),
+        },
+        TimerState::Periodic { deadline, interval } => LinuxItimerval {
+            it_interval: ns_to_linux_timeval(interval.as_nanoseconds()),
+            it_value: ns_to_linux_timeval(deadline.sub(now).as_nanoseconds()),
+        },
+    }
+}
+
 fn linux_clock_now_ns(clock_id: i32) -> Result<i64, SyscallError> {
     match clock_id {
         0 | 5 | 8 | 11 => Ok(KernelTime::current().as_nanoseconds() as i64),
@@ -144,7 +199,7 @@ fn clock_nanosleep_clock(clock_id: i32) -> Result<SleepClock, SyscallError> {
     match clock_id {
         0 | 5 | 8 | 11 => Ok(SleepClock::Realtime),
         1 | 4 | 6 | 7 | 9 => Ok(SleepClock::Monotonic),
-        2 | 3 => Err(SyscallError::OperationNotSupported),
+        2 | 3 => Err(SyscallError::InvalidArguments),
         _ => Err(SyscallError::InvalidArguments),
     }
 }
@@ -361,16 +416,79 @@ define_syscall!(
 define_syscall!(
     Setitimer,
     |which: i32, new_value: *const LinuxItimerval, old_value: *mut LinuxItimerval| {
-        if !(0..=2).contains(&which) {
-            return Err(SyscallError::InvalidArguments);
+        let clock = itimer_clock(which)?;
+        let requested = if new_value.is_null() {
+            None
+        } else {
+            Some(user_safe::read(new_value)?)
+        };
+        let process = get_current_process();
+        let mut process = process.lock();
+
+        let timer_id = which as usize;
+        if !old_value.is_null() {
+            let old = process
+                .timers
+                .get(timer_id)
+                .and_then(Option::as_ref)
+                .map(|timer| itimer_to_linux_value(timer.state, timer.time_type))
+                .unwrap_or_default();
+            process.addrspace.write(old_value, &old)?;
         }
-        if new_value.is_null() {
+
+        let Some(requested) = requested else {
+            return Ok(0);
+        };
+
+        let value_ns = linux_timeval_to_ns(requested.it_value)?;
+        let interval_ns = linux_timeval_to_ns(requested.it_interval)?;
+        if process.timers.len() <= timer_id {
+            process.timers.resize_with(timer_id + 1, || None);
+        }
+        let state = if value_ns == 0 {
+            TimerState::Disabled
+        } else {
+            let now = match clock {
+                ClockId::Realtime => KernelTime::current(),
+                ClockId::SinceBoot => KernelTime::since_boot(),
+            };
+            let deadline = now.add_ns(value_ns);
+            if interval_ns == 0 {
+                TimerState::OneShot { deadline }
+            } else {
+                TimerState::Periodic {
+                    deadline,
+                    interval: KernelTime::from_nanoseconds(interval_ns),
+                }
+            }
+        };
+        process.timers[timer_id] = Some(crate::misc::timer::Timer {
+            notify_method: TimerNotifyMethod::Signal(itimer_signal(which)?),
+            time_type: clock,
+            state,
+            overrun: 0,
+        });
+        Ok(0)
+    }
+);
+
+define_syscall!(
+    Getitimer,
+    |which: i32, current_value: *mut LinuxItimerval| {
+        if current_value.is_null() {
             return Err(SyscallError::BadAddress);
         }
-        let _ = user_safe::read(new_value)?;
-        if !old_value.is_null() {
-            user_safe::write(old_value, &LinuxItimerval::default())?;
-        }
+        let clock = itimer_clock(which)?;
+        let process = get_current_process();
+        let mut process = process.lock();
+        let timer_id = which as usize;
+        let value = process
+            .timers
+            .get(timer_id)
+            .and_then(Option::as_ref)
+            .map(|timer| itimer_to_linux_value(timer.state, timer.time_type))
+            .unwrap_or_else(|| itimer_to_linux_value(TimerState::Disabled, clock));
+        process.addrspace.write(current_value, &value)?;
         Ok(0)
     }
 );
@@ -389,7 +507,6 @@ define_syscall!(
         if requested.tv_sec < 0 || requested.tv_nsec < 0 || requested.tv_nsec >= 1_000_000_000 {
             return Err(SyscallError::InvalidArguments);
         }
-
         let clock = clock_nanosleep_clock(clock_id)?;
         let requested_ns =
             (requested.tv_sec as u64).saturating_mul(1_000_000_000) + (requested.tv_nsec as u64);

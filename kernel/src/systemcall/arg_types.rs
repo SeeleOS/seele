@@ -197,8 +197,6 @@ add_syscall_arg_flags_type!(
     i32,
     DupFlags,
     i32,
-    CloseRangeFlags,
-    u32,
     MemfdFlags,
     u32,
 );
@@ -208,6 +206,8 @@ add_syscall_arg_flags_retain_type!(
     i32,
     AtFlags,
     i32,
+    CloseRangeFlags,
+    u32,
     OpenFlags,
     i32,
     TimerSetTimeFlags,

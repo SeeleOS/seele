@@ -91,6 +91,11 @@ define_syscall!(Setuid, |uid: u32| {
     process.effective_uid = uid;
     process.saved_uid = uid;
     process.fs_uid = uid;
+    if uid != 0 && !process.keep_capabilities {
+        process.capability_effective = [0; 2];
+        process.capability_permitted = [0; 2];
+        process.capability_ambient = [0; 2];
+    }
     Ok(0)
 });
 

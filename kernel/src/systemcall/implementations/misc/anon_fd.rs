@@ -23,6 +23,10 @@ define_syscall!(InotifyInit1, |flags: InotifyInitFlags| {
 });
 
 fn create_eventfd(initval: u32, flags: EventFdFlags) -> Result<usize, SyscallError> {
+    if flags.bits() & !EventFdFlags::all().bits() != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
     let object = EventFdObject::new(initval as u64, flags);
     let fd_flags = if flags.contains(EventFdFlags::EFD_CLOEXEC) {
         FdFlags::CLOEXEC
