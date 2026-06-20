@@ -42,7 +42,9 @@ pub(super) fn resolve_path_at(dirfd: i32, path_str: &str) -> Result<Path, Syscal
     }
 
     let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
-    let file_like = object.as_file_like()?;
+    let file_like = object
+        .as_file_like()
+        .map_err(|_| SyscallError::NotADirectory)?;
     if !matches!(file_like.info()?.file_like_type, FileLikeType::Directory) {
         return Err(SyscallError::NotADirectory);
     }
