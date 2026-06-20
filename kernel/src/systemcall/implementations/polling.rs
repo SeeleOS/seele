@@ -18,7 +18,8 @@ use crate::{
     process::{FdFlags, manager::get_current_process},
     signal::Signals,
     systemcall::implementations::select::{
-        has_unblocked_pending_signals, with_temporary_signal_mask,
+        has_interrupting_pending_signals, has_unblocked_pending_signals, take_signal_interrupt,
+        with_temporary_signal_mask,
     },
 };
 
@@ -274,6 +275,10 @@ fn epoll_wait_impl(
     };
 
     loop {
+        if has_interrupting_pending_signals() {
+            return Err(SyscallError::Interrupted);
+        }
+
         poller.push_already_ready_events();
         if poller.has_woken_events() {
             break;
@@ -281,10 +286,6 @@ fn epoll_wait_impl(
 
         if timeout == 0 {
             return Ok(0);
-        }
-
-        if has_unblocked_pending_signals() {
-            return Err(SyscallError::Interrupted);
         }
 
         if deadline.is_some_and(|deadline| deadline <= Time::since_boot()) {
@@ -308,10 +309,13 @@ fn epoll_wait_impl(
             cancel_block(&current);
             break;
         } else {
-            finish_block_current();
-            if has_unblocked_pending_signals() {
+            let signal_interrupt = take_signal_interrupt();
+            let pending_interrupt = has_interrupting_pending_signals();
+            if signal_interrupt || pending_interrupt {
+                cancel_block(&current);
                 return Err(SyscallError::Interrupted);
             }
+            finish_block_current();
             if deadline.is_some_and(|deadline| deadline <= Time::since_boot()) {
                 return Ok(0);
             }
@@ -401,19 +405,23 @@ define_syscall!(
 
 #[cfg(test)]
 mod tests {
-    use crate::systemcall::{
-        implementations::{
-            EpollCreate1, EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Pipe, Read,
-            Shutdown, Socketpair, Write,
+    use crate::{
+        signal::{Signal, Signals, send_signal_to_process},
+        systemcall::{
+            implementations::{
+                EpollCreate1, EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Pipe, Read,
+                Shutdown, Socketpair, Write,
+            },
+            test::{
+                TestLinuxEpollEvent, TestLinuxTimespec, assert_user_bytes, close_test_fd, expect_fd,
+            },
+            test_helpers::{
+                SyscallArgs, allocate_user_test_page, assert_linux_layout, expect_errno, expect_ok,
+                read_user_value, write_user_value,
+            },
+            utils::SyscallError,
         },
-        test::{
-            TestLinuxEpollEvent, TestLinuxTimespec, assert_user_bytes, close_test_fd, expect_fd,
-        },
-        test_helpers::{
-            SyscallArgs, allocate_user_test_page, assert_linux_layout, expect_errno, expect_ok,
-            read_user_value, write_user_value,
-        },
-        utils::SyscallError,
+        thread::get_current_thread,
     };
 
     crate::test!(
@@ -425,6 +433,11 @@ mod tests {
         epoll_pwait2_syscalls,
         "epoll_pwait2 follows linux timeout rules",
         epoll_pwait2_syscalls_follow_linux_rules
+    );
+    crate::test!(
+        epoll_pwait_signal_mask,
+        "epoll_pwait signal mask controls interruptibility",
+        epoll_pwait_signal_mask_controls_interruptibility
     );
 
     fn epoll_syscalls_follow_linux_rules() {
@@ -932,6 +945,78 @@ mod tests {
             SyscallError::InvalidArguments,
         );
 
+        close_test_fd(epoll_fd);
+        close_test_fd(eventfd);
+    }
+
+    fn epoll_pwait_signal_mask_controls_interruptibility() {
+        const EPOLL_CTL_ADD: u64 = 1;
+        const EPOLLOUT: u32 = 0x004;
+
+        let process = crate::process::manager::get_current_process();
+        let saved_process_signals = {
+            let mut process = process.lock();
+            let saved = process.pending_signals;
+            process
+                .pending_signals
+                .remove(Signals::from(Signal::SIGUSR1));
+            process.pending_signal_info[Signal::SIGUSR1.index()] = None;
+            saved
+        };
+        let saved_thread_signals = {
+            let current = get_current_thread();
+            let mut thread = current.lock();
+            let saved = thread.pending_signals;
+            thread
+                .pending_signals
+                .remove(Signals::from(Signal::SIGUSR1));
+            thread.pending_signal_info[Signal::SIGUSR1.index()] = None;
+            saved
+        };
+
+        let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+        let epoll_fd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<EpollCreate1>());
+        let page = allocate_user_test_page();
+        let event = TestLinuxEpollEvent {
+            events: EPOLLOUT,
+            data: 0x5eed,
+        };
+        write_user_value(page, &event);
+        expect_ok(
+            SyscallArgs::new([epoll_fd as u64, EPOLL_CTL_ADD, eventfd as u64, page, 0, 0])
+                .call::<EpollCtl>(),
+            0,
+        );
+
+        send_signal_to_process(&process, Signal::SIGUSR1);
+        expect_errno(
+            SyscallArgs::new([epoll_fd as u64, page + 64, 1, 0, 0, 0]).call::<EpollPwait>(),
+            SyscallError::Interrupted,
+        );
+
+        write_user_value(page + 128, &Signals::from(Signal::SIGUSR1).bits());
+        expect_ok(
+            SyscallArgs::new([epoll_fd as u64, page + 64, 1, 0, page + 128, 8])
+                .call::<EpollPwait>(),
+            1,
+        );
+        let ready = read_user_value::<TestLinuxEpollEvent>(page + 64);
+        let ready_events = ready.events;
+        let ready_data = ready.data;
+        assert_eq!(ready_events, EPOLLOUT);
+        assert_eq!(ready_data, 0x5eed);
+
+        {
+            let mut process = process.lock();
+            process.pending_signals = saved_process_signals;
+            process.pending_signal_info[Signal::SIGUSR1.index()] = None;
+        }
+        {
+            let current = get_current_thread();
+            let mut thread = current.lock();
+            thread.pending_signals = saved_thread_signals;
+            thread.pending_signal_info[Signal::SIGUSR1.index()] = None;
+        }
         close_test_fd(epoll_fd);
         close_test_fd(eventfd);
     }

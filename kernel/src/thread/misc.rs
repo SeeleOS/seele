@@ -31,7 +31,9 @@ impl BlockedSyscall {
             SyscallNumber::Waitid => Some(Self::Waitid),
             SyscallNumber::Poll => Some(Self::Poll),
             SyscallNumber::Ppoll => Some(Self::Ppoll),
-            SyscallNumber::EpollWait => Some(Self::EpollWait),
+            SyscallNumber::EpollWait | SyscallNumber::EpollPwait | SyscallNumber::EpollPwait2 => {
+                Some(Self::EpollWait)
+            }
             SyscallNumber::Pselect6 => Some(Self::Pselect6),
             SyscallNumber::Nanosleep => Some(Self::Nanosleep),
             SyscallNumber::ClockNanosleep => Some(Self::ClockNanosleep),

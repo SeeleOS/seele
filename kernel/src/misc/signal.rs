@@ -414,14 +414,45 @@ fn wake_process_threads(process: &ProcessRef, wake_stopped_only: bool) {
     });
 }
 
-fn wake_specific_thread(thread: &ThreadRef) {
+fn wake_specific_thread_for_signal(thread: &ThreadRef, signal: Signal) {
     let should_wake = {
-        let thread = thread.lock();
-        matches!(&thread.state, State::Blocked(block_type) if !matches!(block_type, BlockType::Stopped))
+        let mut thread = thread.lock();
+        let should_wake = matches!(
+            &thread.state,
+            State::Blocking(block_type) | State::Blocked(block_type)
+                if !matches!(block_type, BlockType::Stopped)
+        );
+        if should_wake && !thread_blocks_signal_inner(&thread, signal) {
+            thread.interrupted_by_signal = true;
+            true
+        } else {
+            false
+        }
     };
 
     if should_wake {
         crate::thread::with_thread_manager(|manager| manager.wake(thread.clone()));
+    }
+}
+
+fn thread_blocks_signal_inner(thread: &Thread, signal: Signal) -> bool {
+    if signal.is_unblockable() {
+        return false;
+    }
+    thread.blocked_signals.contains(Signals::from(signal))
+}
+
+fn wake_process_threads_for_signal(process: &ProcessRef, signal: Signal) {
+    let threads = {
+        let process = process.lock();
+        process.threads.clone()
+    };
+
+    for weak in threads {
+        let Some(thread) = weak.upgrade() else {
+            continue;
+        };
+        wake_specific_thread_for_signal(&thread, signal);
     }
 }
 
@@ -444,7 +475,7 @@ fn queue_signal(process: &ProcessRef, signal: Signal, siginfo: Option<SigInfo>) 
             };
             wake_signalfd_for_process(pid);
             request_all_cpus_resched();
-            wake_process_threads(process, false);
+            wake_process_threads_for_signal(process, signal);
         }
     }
 }
@@ -475,7 +506,7 @@ fn queue_signal_to_thread(thread: &ThreadRef, signal: Signal, siginfo: Option<Si
     let pid = parent.lock().pid.0;
     wake_signalfd_for_process(pid);
     request_all_cpus_resched();
-    wake_specific_thread(thread);
+    wake_specific_thread_for_signal(thread, signal);
 }
 
 pub fn send_signal_to_thread(thread: &ThreadRef, signal: Signal) {

@@ -1,5 +1,6 @@
 use alloc::{sync::Arc, vec, vec::Vec};
 use core::mem::size_of;
+use strum::IntoEnumIterator;
 
 use crate::object::Object;
 use crate::object::misc::get_object_current_process;
@@ -11,10 +12,13 @@ use crate::{
     define_syscall,
     filesystem::object::poll_identity_object,
     memory::user_safe,
+    misc::signal::SignalHandlingType,
     misc::time::Time,
     signal::{Signal, Signals},
     thread::{get_current_thread, yielding::BlockType, yielding::WakeType},
 };
+
+const SA_RESTART: u64 = 0x1000_0000;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -44,6 +48,44 @@ pub(in crate::systemcall) fn has_unblocked_pending_signals() -> bool {
     let unblockable = Signals::from(Signal::SIGKILL) | Signals::from(Signal::SIGSTOP);
     let deliverable = (pending_signals - blocked_signals) | (pending_signals & unblockable);
     !deliverable.is_empty()
+}
+
+pub(in crate::systemcall) fn has_interrupting_pending_signals() -> bool {
+    let current = get_current_thread();
+    let (blocked_signals, pending_signals, parent) = {
+        let current = current.lock();
+        (
+            current.blocked_signals,
+            current.pending_signals,
+            current.parent.clone(),
+        )
+    };
+    let parent = parent.lock();
+    let pending_signals = pending_signals | parent.pending_signals;
+
+    Signal::iter().any(|signal| {
+        let signal_bits = Signals::from(signal);
+        if !pending_signals.contains(signal_bits) {
+            return false;
+        }
+        if !signal.is_unblockable() && blocked_signals.contains(signal_bits) {
+            return false;
+        }
+
+        let action = &parent.signal_actions[signal.index()];
+        matches!(
+            action.handling_type,
+            SignalHandlingType::Function1(_) | SignalHandlingType::Function2(_)
+        ) && action.flags & SA_RESTART == 0
+    })
+}
+
+pub(in crate::systemcall) fn take_signal_interrupt() -> bool {
+    let current = get_current_thread();
+    let mut current = current.lock();
+    let interrupted = current.interrupted_by_signal;
+    current.interrupted_by_signal = false;
+    interrupted
 }
 
 pub(in crate::systemcall) fn with_temporary_signal_mask<T>(

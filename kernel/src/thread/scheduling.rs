@@ -25,7 +25,7 @@ use crate::{
         extended_state::{
             clear_active_user_extended_state_ptr, update_active_user_extended_state_ptr_for_thread,
         },
-        misc::State,
+        misc::{SnapshotState, State},
         scheduler_thread,
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
         thread::DEFAULT_USER_TIMESLICE_NS,
@@ -526,13 +526,24 @@ fn after_thread_yield(thread_ref: ThreadRef) {
         return;
     }
 
-    let process = {
+    let (process, was_running_user_context) = {
         let thread = thread_ref.lock();
-        thread.parent.clone()
+        (
+            thread.parent.clone(),
+            matches!(
+                match thread.snapshot_state {
+                    SnapshotState::Normal => thread.snapshot.snapshot_type,
+                    SnapshotState::SignalHandler => thread.sig_handler_snapshot.snapshot_type,
+                },
+                ThreadSnapshotType::Thread
+            ),
+        )
     };
-    let should_cleanup = process_current_process_signals(&process);
-    if should_cleanup {
-        with_thread_manager(|manager| manager.cleanup_exited_threads());
+    if was_running_user_context {
+        let should_cleanup = process_current_process_signals(&process);
+        if should_cleanup {
+            with_thread_manager(|manager| manager.cleanup_exited_threads());
+        }
     }
 
     let state = thread_ref.lock().state.clone();
