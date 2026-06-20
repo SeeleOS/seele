@@ -62,8 +62,6 @@
             repo_root="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || ${pkgs.coreutils}/bin/pwd -P)"
             cd "$repo_root"
 
-            export SEELE_REPO="''${SEELE_REPO:-$repo_root}"
-
             exec cargo run -p control-mcp -- "$@"
           '';
         };

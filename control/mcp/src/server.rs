@@ -20,10 +20,8 @@ pub struct ControlMcp {
 }
 
 impl ControlMcp {
-    pub fn from_env() -> Result<Self> {
-        let repo = std::env::var_os("SEELE_REPO")
-            .map(PathBuf::from)
-            .unwrap_or(std::env::current_dir()?);
+    pub fn new() -> Result<Self> {
+        let repo = std::env::current_dir()?;
         Ok(Self {
             plane: ControlPlane::new(repo),
             tool_router: Self::tool_router(),
