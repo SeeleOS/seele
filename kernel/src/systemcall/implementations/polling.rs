@@ -419,7 +419,7 @@ define_syscall!(
 mod tests {
     use crate::{
         filesystem::{path::Path, vfs::VirtualFS},
-        signal::{Signal, SignalAction, SignalHandlingType, Signals, send_signal_to_process},
+        signal::{Signal, SignalAction, SignalHandlingType, Signals},
         systemcall::{
             implementations::{
                 EpollCreate1, EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Pipe, Read,
@@ -1045,11 +1045,18 @@ mod tests {
             0,
         );
 
-        send_signal_to_process(&process, Signal::SIGUSR1);
+        get_current_thread()
+            .lock()
+            .pending_signals
+            .insert(Signals::from(Signal::SIGUSR1));
         expect_errno(
             SyscallArgs::new([epoll_fd as u64, page + 64, 1, 0, 0, 0]).call::<EpollPwait>(),
             SyscallError::Interrupted,
         );
+        get_current_thread()
+            .lock()
+            .pending_signals
+            .insert(Signals::from(Signal::SIGUSR1));
 
         write_user_value(page + 128, &Signals::from(Signal::SIGUSR1).bits());
         write_user_value(page + 160, &1u64);
