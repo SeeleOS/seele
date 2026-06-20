@@ -198,8 +198,9 @@ impl Ext4Directory {
             }
             FileLikeType::Symlink => Ok(FileLike::Symlink(Arc::new(Mut::new(Ext4Symlink {
                 fs: lookup.fs,
-                inode: lookup.inode,
+                inode: Mut::new(lookup.inode),
                 name: lookup.name,
+                operation_lock: lookup.operation_lock,
             })))),
             FileLikeType::File => Ok(FileLike::File(Arc::new(Mut::new(Ext4File::new(
                 lookup.name,
@@ -440,6 +441,53 @@ impl Directory for Ext4Directory {
                 &self.current_inode(),
             );
         }
+        Ok(())
+    }
+
+    fn get_xattr(&self, name: &str) -> FSResult<Option<Vec<u8>>> {
+        self.current_inode()
+            .get_xattr(&self.fs, name)
+            .map_err(FSError::from)
+    }
+
+    fn set_xattr(&self, name: String, value: Vec<u8>, create: bool, replace: bool) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
+        let mut inode = self.current_inode();
+        let exists = inode
+            .get_xattr(&self.fs, &name)
+            .map_err(FSError::from)?
+            .is_some();
+        if create && exists {
+            return Err(FSError::AlreadyExists);
+        }
+        if replace && !exists {
+            return Err(FSError::NotFound);
+        }
+        inode
+            .set_xattr(&self.fs, name.as_bytes(), value.as_slice())
+            .map_err(FSError::from)?;
+        self.update_cached_inode(inode);
+        Ok(())
+    }
+
+    fn list_xattrs(&self) -> FSResult<Vec<String>> {
+        self.current_inode()
+            .list_xattrs(&self.fs)
+            .map(|names| {
+                names
+                    .into_iter()
+                    .map(String::from_utf8)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|_| FSError::Other)
+            })
+            .map_err(FSError::from)?
+    }
+
+    fn remove_xattr(&self, name: &str) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
+        let mut inode = self.current_inode();
+        inode.remove_xattr(&self.fs, name).map_err(FSError::from)?;
+        self.update_cached_inode(inode);
         Ok(())
     }
 }

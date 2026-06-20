@@ -1,4 +1,4 @@
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 use core::any::Any;
 
 use ext4plus::{Ext4, file, inode::Inode};
@@ -10,11 +10,12 @@ use crate::filesystem::{
     vfs::FSResult,
     vfs_traits::{File, FileLikeType, Whence},
 };
+use crate::memory::utils::Mut;
 
 pub struct Ext4File {
     name: String,
     fs: Ext4,
-    inode: Inode,
+    inode: Mut<Inode>,
     position: u64,
     parent_inode: u32,
     lookup_cache: LookupCache,
@@ -33,7 +34,7 @@ impl Ext4File {
         Self {
             name,
             fs,
-            inode,
+            inode: Mut::new(inode),
             position: 0,
             parent_inode,
             lookup_cache,
@@ -42,12 +43,12 @@ impl Ext4File {
     }
 
     fn size(&self) -> Result<usize, FSError> {
-        let meta = self.inode.metadata();
+        let meta = self.inode.lock().metadata();
         Ok(usize::try_from(meta.len()).unwrap())
     }
 
     pub fn inode(&self) -> Inode {
-        self.inode.clone()
+        self.inode.lock().clone()
     }
 
     fn update_lookup_cache(&self) {
@@ -55,8 +56,34 @@ impl Ext4File {
             &self.lookup_cache,
             self.parent_inode,
             &self.name,
-            &self.inode,
+            &self.inode.lock(),
         );
+    }
+
+    fn set_xattr_impl(
+        &self,
+        name: String,
+        value: Vec<u8>,
+        create: bool,
+        replace: bool,
+    ) -> FSResult<()> {
+        let mut inode = self.inode.lock();
+        let exists = inode
+            .get_xattr(&self.fs, &name)
+            .map_err(FSError::from)?
+            .is_some();
+        if create && exists {
+            return Err(FSError::AlreadyExists);
+        }
+        if replace && !exists {
+            return Err(FSError::NotFound);
+        }
+        inode
+            .set_xattr(&self.fs, name.as_bytes(), value.as_slice())
+            .map_err(FSError::from)?;
+        drop(inode);
+        self.update_lookup_cache();
+        Ok(())
     }
 }
 
@@ -66,15 +93,15 @@ impl File for Ext4File {
     }
 
     fn read(&mut self, buffer: &mut [u8]) -> FSResult<usize> {
-        let read =
-            file::read_at(&self.fs, &self.inode, buffer, self.position).map_err(FSError::from)?;
+        let read = file::read_at(&self.fs, &self.inode.lock(), buffer, self.position)
+            .map_err(FSError::from)?;
         self.position = self.position.saturating_add(read as u64);
         Ok(read)
     }
 
     fn write(&mut self, buffer: &[u8]) -> FSResult<usize> {
         let _operation = self.operation_lock.lock();
-        let written = file::write_at(&self.fs, &mut self.inode, buffer, self.position)
+        let written = file::write_at(&self.fs, &mut self.inode.lock(), buffer, self.position)
             .map_err(FSError::from)?;
         self.position = self.position.saturating_add(written as u64);
         self.update_lookup_cache();
@@ -82,23 +109,24 @@ impl File for Ext4File {
     }
 
     fn read_at(&mut self, buffer: &mut [u8], offset: u64) -> FSResult<usize> {
-        file::read_at(&self.fs, &self.inode, buffer, offset).map_err(Into::into)
+        file::read_at(&self.fs, &self.inode.lock(), buffer, offset).map_err(Into::into)
     }
 
     fn info(&mut self) -> FSResult<FileLikeInfo> {
         let size = self.size()?;
+        let inode = self.inode.lock();
         Ok(FileLikeInfo::new(
             self.name.clone(),
             size,
-            UnixPermission(self.inode.mode().bits() as u32),
+            UnixPermission(inode.mode().bits() as u32),
             FileLikeType::File,
         )
-        .with_owner(self.inode.uid(), self.inode.gid())
-        .with_inode(self.inode.index.get().into()))
+        .with_owner(inode.uid(), inode.gid())
+        .with_inode(inode.index.get().into()))
     }
 
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {
-        let len = self.inode.size_in_bytes() as i64;
+        let len = self.inode.lock().size_in_bytes() as i64;
         let pos = match seek_type {
             Whence::Start => offset,
             Whence::Current => self.position as i64 + offset,
@@ -127,7 +155,7 @@ impl File for Ext4File {
 
     fn truncate(&mut self, length: u64) -> FSResult<()> {
         let _operation = self.operation_lock.lock();
-        file::truncate(&self.fs, &mut self.inode, length).map_err(FSError::from)?;
+        file::truncate(&self.fs, &mut self.inode.lock(), length).map_err(FSError::from)?;
         self.position = self.position.min(length);
         self.update_lookup_cache();
         Ok(())
@@ -140,8 +168,8 @@ impl File for Ext4File {
         }
 
         let end = offset.checked_add(len).ok_or(FSError::Other)?;
-        if end > self.inode.size_in_bytes() {
-            file::truncate(&self.fs, &mut self.inode, end).map_err(FSError::from)?;
+        if end > self.inode.lock().size_in_bytes() {
+            file::truncate(&self.fs, &mut self.inode.lock(), end).map_err(FSError::from)?;
             self.update_lookup_cache();
         }
         Ok(())
@@ -149,7 +177,7 @@ impl File for Ext4File {
 
     fn chmod(&self, mode: u32) -> FSResult<()> {
         let _operation = self.operation_lock.lock();
-        let mut inode = self.inode.clone();
+        let mut inode = self.inode.lock();
         chmod_inode(&self.fs, &mut inode, mode)?;
         lookup_cache_insert_raw(&self.lookup_cache, self.parent_inode, &self.name, &inode);
         Ok(())
@@ -157,9 +185,43 @@ impl File for Ext4File {
 
     fn chown(&self, uid: u32, gid: u32) -> FSResult<()> {
         let _operation = self.operation_lock.lock();
-        let mut inode = self.inode.clone();
+        let mut inode = self.inode.lock();
         chown_inode(&self.fs, &mut inode, uid, gid)?;
         lookup_cache_insert_raw(&self.lookup_cache, self.parent_inode, &self.name, &inode);
         Ok(())
+    }
+
+    fn get_xattr(&self, name: &str) -> FSResult<Option<Vec<u8>>> {
+        self.inode
+            .lock()
+            .get_xattr(&self.fs, name)
+            .map_err(FSError::from)
+    }
+
+    fn set_xattr(&self, name: String, value: Vec<u8>, create: bool, replace: bool) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
+        self.set_xattr_impl(name, value, create, replace)
+    }
+
+    fn list_xattrs(&self) -> FSResult<Vec<String>> {
+        self.inode
+            .lock()
+            .list_xattrs(&self.fs)
+            .map(|names| {
+                names
+                    .into_iter()
+                    .map(String::from_utf8)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|_| FSError::Other)
+            })
+            .map_err(FSError::from)?
+    }
+
+    fn remove_xattr(&self, name: &str) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
+        self.inode
+            .lock()
+            .remove_xattr(&self.fs, name)
+            .map_err(FSError::from)
     }
 }
