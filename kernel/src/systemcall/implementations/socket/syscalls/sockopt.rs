@@ -94,6 +94,7 @@ define_syscall!(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signal::{Signal, SignalAction, SignalHandlingType, Signals};
     use crate::systemcall::implementations::{
         Getpeername, Getsockname, Getsockopt, Poll, Read, Setsockopt, Shutdown, Socket, Socketpair,
         Write,
@@ -140,6 +141,27 @@ mod tests {
 
         let saved = CredentialSnapshot::save_current();
         let page = allocate_user_test_page();
+        let process = get_current_process();
+        let (saved_exit_status, saved_sigpipe_action, saved_pending_signals) = {
+            let mut process = process.lock();
+            let saved_exit_status = process.exit_status;
+            let saved_sigpipe_action = process.signal_actions[Signal::SIGPIPE.index()].clone();
+            let saved_pending_signals = process.pending_signals;
+            process.exit_status = None;
+            process
+                .pending_signals
+                .remove(Signals::from(Signal::SIGPIPE));
+            process.pending_signal_info[Signal::SIGPIPE.index()] = None;
+            process.signal_actions[Signal::SIGPIPE.index()] = SignalAction {
+                handling_type: SignalHandlingType::Ignore,
+                ..SignalAction::default()
+            };
+            (
+                saved_exit_status,
+                saved_sigpipe_action,
+                saved_pending_signals,
+            )
+        };
 
         let socketpair_fds_page = page;
         expect_ok(
@@ -813,5 +835,13 @@ mod tests {
         close_test_fd(unix_socket);
         close_test_fd(right_fd);
         close_test_fd(left_fd);
+
+        {
+            let mut process = process.lock();
+            process.exit_status = saved_exit_status;
+            process.pending_signals = saved_pending_signals;
+            process.pending_signal_info[Signal::SIGPIPE.index()] = None;
+            process.signal_actions[Signal::SIGPIPE.index()] = saved_sigpipe_action;
+        }
     }
 }
