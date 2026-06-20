@@ -5,7 +5,7 @@ use ext4plus::{Ext4, file, inode::Inode};
 
 use crate::filesystem::{
     errors::FSError,
-    impls::ext4::{LookupCache, chmod_inode, chown_inode, lookup_cache_insert_raw},
+    impls::ext4::{LookupCache, OperationLock, chmod_inode, chown_inode, lookup_cache_insert_raw},
     info::{FileLikeInfo, UnixPermission},
     vfs::FSResult,
     vfs_traits::{File, FileLikeType, Whence},
@@ -18,6 +18,7 @@ pub struct Ext4File {
     position: u64,
     parent_inode: u32,
     lookup_cache: LookupCache,
+    operation_lock: OperationLock,
 }
 
 impl Ext4File {
@@ -27,6 +28,7 @@ impl Ext4File {
         inode: Inode,
         parent_inode: u32,
         lookup_cache: LookupCache,
+        operation_lock: OperationLock,
     ) -> Self {
         Self {
             name,
@@ -35,6 +37,7 @@ impl Ext4File {
             position: 0,
             parent_inode,
             lookup_cache,
+            operation_lock,
         }
     }
 
@@ -70,6 +73,7 @@ impl File for Ext4File {
     }
 
     fn write(&mut self, buffer: &[u8]) -> FSResult<usize> {
+        let _operation = self.operation_lock.lock();
         let written = file::write_at(&self.fs, &mut self.inode, buffer, self.position)
             .map_err(FSError::from)?;
         self.position = self.position.saturating_add(written as u64);
@@ -122,6 +126,7 @@ impl File for Ext4File {
     }
 
     fn truncate(&mut self, length: u64) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
         file::truncate(&self.fs, &mut self.inode, length).map_err(FSError::from)?;
         self.position = self.position.min(length);
         self.update_lookup_cache();
@@ -129,6 +134,7 @@ impl File for Ext4File {
     }
 
     fn allocate(&mut self, mode: u32, offset: u64, len: u64) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
         if mode != 0 {
             return Err(FSError::Other);
         }
@@ -142,6 +148,7 @@ impl File for Ext4File {
     }
 
     fn chmod(&self, mode: u32) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
         let mut inode = self.inode.clone();
         chmod_inode(&self.fs, &mut inode, mode)?;
         lookup_cache_insert_raw(&self.lookup_cache, self.parent_inode, &self.name, &inode);
@@ -149,6 +156,7 @@ impl File for Ext4File {
     }
 
     fn chown(&self, uid: u32, gid: u32) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
         let mut inode = self.inode.clone();
         chown_inode(&self.fs, &mut inode, uid, gid)?;
         lookup_cache_insert_raw(&self.lookup_cache, self.parent_inode, &self.name, &inode);

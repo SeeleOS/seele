@@ -20,7 +20,7 @@ use ext4plus::{
 use crate::filesystem::{
     errors::FSError,
     impls::ext4::{
-        LookupCache, chmod_inode, chown_inode, file::Ext4File, lookup_cache_clear,
+        LookupCache, OperationLock, chmod_inode, chown_inode, file::Ext4File, lookup_cache_clear,
         lookup_cache_get, lookup_cache_insert, lookup_cache_insert_raw, lookup_cache_remove,
         symlink::Ext4Symlink,
     },
@@ -41,6 +41,7 @@ pub(crate) struct Ext4Lookup {
     pub(crate) parent_inode: u32,
     pub(crate) fs: Ext4,
     pub(crate) lookup_cache: LookupCache,
+    pub(crate) operation_lock: OperationLock,
 }
 
 impl Ext4Lookup {
@@ -85,6 +86,7 @@ pub(crate) fn lookup_child(
     fs: &Ext4,
     parent_inode: &Inode,
     lookup_cache: &LookupCache,
+    operation_lock: &OperationLock,
     name: &str,
 ) -> FSResult<Ext4Lookup> {
     let parent_id = parent_inode.index.get();
@@ -97,6 +99,7 @@ pub(crate) fn lookup_child(
             parent_inode: parent_id,
             fs: fs.clone(),
             lookup_cache: lookup_cache.clone(),
+            operation_lock: operation_lock.clone(),
         });
     }
 
@@ -111,6 +114,7 @@ pub(crate) fn lookup_child(
         parent_inode: parent_id,
         fs: fs.clone(),
         lookup_cache: lookup_cache.clone(),
+        operation_lock: operation_lock.clone(),
     })
 }
 
@@ -123,6 +127,7 @@ pub struct Ext4Directory {
     inode: Mut<Inode>,
     parent_inode: Option<u32>,
     lookup_cache: LookupCache,
+    operation_lock: OperationLock,
 }
 
 impl Ext4Directory {
@@ -133,6 +138,7 @@ impl Ext4Directory {
         inode: Inode,
         parent_inode: Option<u32>,
         lookup_cache: LookupCache,
+        operation_lock: OperationLock,
     ) -> Self {
         Self {
             name,
@@ -141,6 +147,7 @@ impl Ext4Directory {
             inode: Mut::new(inode),
             parent_inode,
             lookup_cache,
+            operation_lock,
         }
     }
 
@@ -186,6 +193,7 @@ impl Ext4Directory {
                     lookup.inode,
                     Some(lookup.parent_inode),
                     lookup.lookup_cache,
+                    lookup.operation_lock,
                 )))))
             }
             FileLikeType::Symlink => Ok(FileLike::Symlink(Arc::new(Mut::new(Ext4Symlink {
@@ -199,12 +207,19 @@ impl Ext4Directory {
                 lookup.inode,
                 lookup.parent_inode,
                 lookup.lookup_cache,
+                lookup.operation_lock,
             ))))),
         }
     }
 
     pub(crate) fn lookup_child(&self, name: &str) -> FSResult<Ext4Lookup> {
-        lookup_child(&self.fs, &self.current_inode(), &self.lookup_cache, name)
+        lookup_child(
+            &self.fs,
+            &self.current_inode(),
+            &self.lookup_cache,
+            &self.operation_lock,
+            name,
+        )
     }
 }
 
@@ -269,6 +284,7 @@ impl Directory for Ext4Directory {
     }
 
     fn create(&self, info: DirectoryContentInfo) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
         let requested_mode = info.permission.map(|permission| permission.0 & 0o7777);
         let (file_type, mode) = match info.content_type {
             DirectoryContentType::File => (
@@ -321,6 +337,7 @@ impl Directory for Ext4Directory {
     }
 
     fn create_symlink(&self, name: &str, target: &str) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
         let (parent_inode, mut parent) = self.open_parent_dir()?;
         let entry_name = DirEntryName::try_from(name).map_err(|_| FSError::PathTooLong)?;
         let target = Ext4PathBuf::try_from(target.to_string()).map_err(|_| FSError::PathTooLong)?;
@@ -340,6 +357,7 @@ impl Directory for Ext4Directory {
     }
 
     fn delete(&self, name: &str) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
         let (mut parent_inode, mut parent) = self.open_parent_dir()?;
 
         let entry_name = DirEntryName::try_from(name).map_err(|_| FSError::Other)?;
@@ -394,6 +412,7 @@ impl Directory for Ext4Directory {
     }
 
     fn chmod(&self, mode: u32) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
         let mut inode = self.current_inode();
         chmod_inode(&self.fs, &mut inode, mode)?;
         self.update_cached_inode(inode);
@@ -409,6 +428,7 @@ impl Directory for Ext4Directory {
     }
 
     fn chown(&self, uid: u32, gid: u32) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
         let mut inode = self.current_inode();
         chown_inode(&self.fs, &mut inode, uid, gid)?;
         self.update_cached_inode(inode);

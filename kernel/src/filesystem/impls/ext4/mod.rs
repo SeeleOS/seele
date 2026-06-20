@@ -32,6 +32,7 @@ const CHMOD_PERMISSION_BITS: u16 = 0o7777;
 const FILE_TYPE_BITS: u16 = 0o170000;
 const MAX_LOOKUP_CACHE_ENTRIES: usize = 16_384;
 pub(crate) type LookupCache = Arc<Mut<LookupCacheState>>;
+pub(crate) type OperationLock = Arc<Mut<()>>;
 
 #[derive(Debug, Default)]
 pub struct LookupCacheState {
@@ -156,6 +157,7 @@ pub struct EXT4 {
     fs: Ext4,
     root_inode: Inode,
     lookup_cache: LookupCache,
+    operation_lock: OperationLock,
 }
 
 impl EXT4 {
@@ -167,6 +169,7 @@ impl EXT4 {
             fs,
             root_inode,
             lookup_cache: Arc::new(Mut::new(LookupCacheState::default())),
+            operation_lock: Arc::new(Mut::new(())),
         })
     }
 
@@ -192,6 +195,7 @@ impl EXT4 {
             self.root_inode.clone(),
             None,
             self.lookup_cache.clone(),
+            self.operation_lock.clone(),
         )))
     }
 }
@@ -250,6 +254,7 @@ impl FileSystem for EXT4 {
     }
 
     fn rename(&self, old_path: &Path, new_path: &Path) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
         lookup_cache_clear(&self.lookup_cache);
         let old_path = old_path.normalize();
         let new_path = new_path.normalize();
@@ -344,6 +349,7 @@ impl FileSystem for EXT4 {
     }
 
     fn link(&self, old_path: &Path, new_path: &Path) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
         let source_inode = self
             .fs
             .path_to_inode(
