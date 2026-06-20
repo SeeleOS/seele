@@ -34,6 +34,14 @@ pub struct SerialTailRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SerialWaitRequest {
+    pub pattern: String,
+    pub timeout_ms: Option<u64>,
+    pub lines: Option<usize>,
+    pub bytes: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SendKeyRequest {
     pub keys: Vec<String>,
 }
@@ -124,6 +132,23 @@ impl SeeleMcp {
         Parameters(request): Parameters<SerialTailRequest>,
     ) -> CallToolResult {
         text_result(self.session.serial_tail(request.lines, request.bytes).await)
+    }
+
+    #[tool(description = "Wait until the serial log tail contains a substring pattern")]
+    async fn wait_serial(
+        &self,
+        Parameters(request): Parameters<SerialWaitRequest>,
+    ) -> CallToolResult {
+        text_result(
+            self.session
+                .wait_serial(
+                    &request.pattern,
+                    request.timeout_ms,
+                    request.lines,
+                    request.bytes,
+                )
+                .await,
+        )
     }
 
     #[tool(description = "Capture a Seele OS VM screenshot through QMP screendump")]
@@ -251,6 +276,14 @@ impl SeeleMcp {
                 .await,
         )
         .await
+    }
+
+    #[tool(description = "Cancel a running background MCP xtask job and clean up its QEMU process")]
+    async fn command_cancel(
+        &self,
+        Parameters(request): Parameters<CommandStatusRequest>,
+    ) -> CallToolResult {
+        json_result(self.session.command_cancel(request.id).await).await
     }
 
     #[tool(description = "Ensure rootfs_mnt/ is mounted from rootfs.img")]

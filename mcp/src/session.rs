@@ -6,12 +6,13 @@ use seele_workflows::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     env,
     path::{Path, PathBuf},
     process::Stdio,
     sync::{
-        Mutex as StdMutex, OnceLock,
-        atomic::{AtomicU64, Ordering},
+        Arc, Mutex as StdMutex, OnceLock,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 use tokio::{
@@ -27,6 +28,9 @@ const DEFAULT_QMP_SOCKET: &str = "/tmp/seele-agent-qmp.sock";
 const DEFAULT_SERIAL_LOG: &str = "/tmp/seele-agent-serial.log";
 const DEFAULT_COMMAND_LOG_DIR: &str = "/tmp/seele-agent-xtask";
 const COMMAND_STATUS_REFRESH: Duration = Duration::from_secs(1);
+const STARTUP_METADATA_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const STARTUP_METADATA_REFRESH: Duration = Duration::from_millis(100);
+const SERIAL_WAIT_REFRESH: Duration = Duration::from_millis(200);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SessionStatus {
@@ -76,6 +80,15 @@ pub struct AgentSession {
     command_log_dir: PathBuf,
     next_command_id: AtomicU64,
     state: Mutex<SessionState>,
+    commands: Mutex<HashMap<u64, CommandTask>>,
+}
+
+#[derive(Debug)]
+struct CommandTask {
+    status_path: PathBuf,
+    command: String,
+    timeout_ms: Option<u64>,
+    cancelled: Arc<AtomicBool>,
 }
 
 impl AgentSession {
@@ -100,6 +113,7 @@ impl AgentSession {
             command_log_dir,
             next_command_id: AtomicU64::new(1),
             state: Mutex::new(SessionState::default()),
+            commands: Mutex::new(HashMap::new()),
         })
     }
 
@@ -215,7 +229,48 @@ impl AgentSession {
         state.child = Some(child);
         state.metadata = Some(metadata.clone());
         state.last_exit = None;
-        Ok(metadata)
+        drop(state);
+
+        self.wait_for_startup_metadata(STARTUP_METADATA_TIMEOUT)
+            .await
+    }
+
+    async fn wait_for_startup_metadata(
+        &self,
+        timeout_duration: Duration,
+    ) -> Result<SessionMetadata> {
+        let deadline = Instant::now() + timeout_duration;
+        let mcp_run_log = self.command_log_dir.join("mcp-run.log");
+        loop {
+            let mut state = self.state.lock().await;
+            refresh_child_state(&mut state).await;
+            refresh_metadata_from_log(&mut state, &mcp_run_log, &self.qmp_socket, &self.serial_log)
+                .await;
+            if let Some(metadata) = state
+                .metadata
+                .as_mut()
+                .filter(|metadata| metadata.qemu_pid.is_some())
+            {
+                return Ok(metadata.clone());
+            }
+            if state.child.is_none() {
+                bail!("xtask mcp-run exited before QEMU metadata became available");
+            }
+            drop(state);
+
+            if Instant::now() >= deadline {
+                let mut state = self.state.lock().await;
+                let _ = stop_state(
+                    &mut state,
+                    &self.qmp_socket,
+                    &self.serial_log,
+                    &self.command_log_dir.join("mcp-run.log"),
+                )
+                .await;
+                bail!("timed out waiting for QEMU metadata from xtask mcp-run");
+            }
+            tokio::time::sleep(STARTUP_METADATA_REFRESH).await;
+        }
     }
 
     async fn spawn_gdb(&self, port: u16) -> Result<GdbState> {
@@ -266,6 +321,21 @@ impl AgentSession {
     }
 
     pub async fn cleanup(&self) -> Result<SessionStatus> {
+        let cleanup_qmp_socket = {
+            let mut state = self.state.lock().await;
+            refresh_metadata_from_log(
+                &mut state,
+                &self.command_log_dir.join("mcp-run.log"),
+                &self.qmp_socket,
+                &self.serial_log,
+            )
+            .await;
+            state
+                .metadata
+                .as_ref()
+                .map(|metadata| metadata.qmp_socket.clone())
+                .unwrap_or_else(|| self.qmp_socket.clone())
+        };
         let mut state = self.state.lock().await;
         stop_state(
             &mut state,
@@ -276,6 +346,13 @@ impl AgentSession {
         .await?;
         drop(state);
         let _ = fs::remove_file(&self.qmp_socket).await;
+        let residual = qemu_pids_for_qmp_socket(&cleanup_qmp_socket).await;
+        if !residual.is_empty() {
+            bail!(
+                "cleanup left QEMU processes running for {}: {residual:?}",
+                cleanup_qmp_socket.display()
+            );
+        }
         self.status().await
     }
 
@@ -289,12 +366,32 @@ impl AgentSession {
             &self.serial_log,
         )
         .await;
-        let metadata = state.metadata.clone();
-        let running = state.child.is_some();
-        let qmp_connectable = tokio::net::UnixStream::connect(&self.qmp_socket)
+        let mut metadata = state.metadata.clone();
+        let status_qmp_socket = metadata
+            .as_ref()
+            .map(|metadata| metadata.qmp_socket.clone())
+            .unwrap_or_else(|| self.qmp_socket.clone());
+        let status_serial_log = metadata
+            .as_ref()
+            .map(|metadata| metadata.serial_log.clone())
+            .unwrap_or_else(|| self.serial_log.clone());
+        let qmp_connectable = tokio::net::UnixStream::connect(&status_qmp_socket)
             .await
             .is_ok();
-        let serial_log_exists = fs::metadata(&self.serial_log).await.is_ok();
+        let qemu_pids = qemu_pids_for_qmp_socket(&status_qmp_socket).await;
+        if let Some(metadata) = metadata.as_mut()
+            && metadata.qemu_pid.is_none()
+        {
+            metadata.qemu_pid = qemu_pids.first().copied();
+            state.metadata = Some(metadata.clone());
+        }
+        let metadata_qemu_pid = metadata
+            .as_ref()
+            .and_then(|metadata| metadata.qemu_pid)
+            .filter(|pid| qemu_pids.contains(pid));
+        let qemu_pid = metadata_qemu_pid.or_else(|| qemu_pids.first().copied());
+        let running = state.child.is_some() || qmp_connectable || qemu_pid.is_some();
+        let serial_log_exists = fs::metadata(&status_serial_log).await.is_ok();
         let mcp_run_log = metadata
             .as_ref()
             .map(|metadata| metadata.mcp_run_log.clone())
@@ -304,16 +401,10 @@ impl AgentSession {
         Ok(SessionStatus {
             running,
             runner_pid: metadata.as_ref().map(|metadata| metadata.runner_pid),
-            qemu_pid: metadata.as_ref().and_then(|metadata| metadata.qemu_pid),
-            qmp_socket: metadata
-                .as_ref()
-                .map(|metadata| metadata.qmp_socket.clone())
-                .unwrap_or_else(|| self.qmp_socket.clone()),
+            qemu_pid,
+            qmp_socket: status_qmp_socket,
             qmp_connectable,
-            serial_log: metadata
-                .as_ref()
-                .map(|metadata| metadata.serial_log.clone())
-                .unwrap_or_else(|| self.serial_log.clone()),
+            serial_log: status_serial_log,
             serial_log_exists,
             mcp_run_log,
             mcp_run_log_exists,
@@ -389,6 +480,26 @@ impl AgentSession {
         }
     }
 
+    pub async fn wait_serial(
+        &self,
+        pattern: &str,
+        timeout_ms: Option<u64>,
+        lines: Option<usize>,
+        bytes: Option<usize>,
+    ) -> Result<String> {
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms.unwrap_or(30_000));
+        loop {
+            let tail = self.serial_tail(lines, bytes).await.unwrap_or_default();
+            if tail.contains(pattern) {
+                return Ok(tail);
+            }
+            if Instant::now() >= deadline {
+                bail!("timed out waiting for serial pattern {pattern:?}");
+            }
+            tokio::time::sleep(SERIAL_WAIT_REFRESH).await;
+        }
+    }
+
     pub async fn start_xtest(
         &self,
         test: Option<&str>,
@@ -432,8 +543,12 @@ impl AgentSession {
         let data = fs::read(&path)
             .await
             .with_context(|| format!("failed to read command status {}", path.display()))?;
-        serde_json::from_slice(&data)
-            .with_context(|| format!("failed to parse command status {}", path.display()))
+        let status: CommandStatus = serde_json::from_slice(&data)
+            .with_context(|| format!("failed to parse command status {}", path.display()))?;
+        if status.finished {
+            self.commands.lock().await.remove(&id);
+        }
+        Ok(status)
     }
 
     pub async fn command_wait(&self, id: u64, timeout_ms: Option<u64>) -> Result<CommandStatus> {
@@ -449,6 +564,33 @@ impl AgentSession {
             }
             tokio::time::sleep(COMMAND_STATUS_REFRESH).await;
         }
+    }
+
+    pub async fn command_cancel(&self, id: u64) -> Result<CommandStatus> {
+        let task = self
+            .commands
+            .lock()
+            .await
+            .remove(&id)
+            .with_context(|| format!("command {id} is not running or is unknown"))?;
+        task.cancelled.store(true, Ordering::Release);
+        for qemu_pid in qemu_pids_for_qmp_socket(&self.qmp_socket).await {
+            kill_pid(qemu_pid).await;
+        }
+        let status = command_status_from_parts(
+            id,
+            &task.command,
+            None,
+            true,
+            false,
+            task.timeout_ms,
+            130,
+            Vec::new(),
+            String::new(),
+            format!("cancelled command {id}"),
+        );
+        write_command_status(&task.status_path, &status).await?;
+        Ok(status)
     }
 
     async fn start_workflow_command(
@@ -484,9 +626,28 @@ impl AgentSession {
 
         let log_path_for_task = log_path.clone();
         let command_for_task = command.clone();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancelled_for_task = cancelled.clone();
         tokio::spawn(async move {
-            run_workflow_job(id, command_for_task, timeout_ms, log_path_for_task, job).await;
+            run_workflow_job(
+                id,
+                command_for_task,
+                timeout_ms,
+                log_path_for_task,
+                job,
+                cancelled_for_task,
+            )
+            .await;
         });
+        self.commands.lock().await.insert(
+            id,
+            CommandTask {
+                status_path: log_path.clone(),
+                command: command.clone(),
+                timeout_ms,
+                cancelled,
+            },
+        );
 
         Ok(CommandHandle {
             id,
@@ -653,6 +814,7 @@ async fn run_workflow_job(
     timeout_ms: Option<u64>,
     status_path: PathBuf,
     job: WorkflowJob,
+    cancelled: Arc<AtomicBool>,
 ) {
     let collector = EventCollector::default();
     let started = std::time::Instant::now();
@@ -676,6 +838,24 @@ async fn run_workflow_job(
 
     let timed_out = false;
     let exit_code = loop {
+        if cancelled.load(Ordering::Acquire) {
+            let events = collector.events();
+            let status = command_status_from_parts(
+                id,
+                &command,
+                None,
+                true,
+                false,
+                timeout_ms,
+                130,
+                events,
+                String::new(),
+                format!("cancelled command {id}"),
+            );
+            let _ = write_command_status(&status_path, &status).await;
+            return;
+        }
+
         if let Some(limit_ms) = timeout_ms
             && started.elapsed() >= Duration::from_millis(limit_ms)
         {
@@ -752,6 +932,22 @@ async fn run_workflow_job(
 
     let events = collector.events();
     let stdout = summarize_workflow_events(&events);
+    if cancelled.load(Ordering::Acquire) {
+        let status = command_status_from_parts(
+            id,
+            &command,
+            None,
+            true,
+            false,
+            timeout_ms,
+            130,
+            events,
+            stdout,
+            format!("cancelled command {id}"),
+        );
+        let _ = write_command_status(&status_path, &status).await;
+        return;
+    }
     let status = command_status_from_parts(
         id,
         &command,
