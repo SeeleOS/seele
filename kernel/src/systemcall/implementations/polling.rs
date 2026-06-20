@@ -166,7 +166,11 @@ fn epoll_update_impl(
     let oneshot = bits.contains(EpollEvents::ONESHOT);
     let edge_triggered = bits.contains(EpollEvents::ET);
 
-    if target_object.clone().as_pollable().is_err() {
+    let pollable = target_object
+        .clone()
+        .as_pollable()
+        .map_err(|_| SyscallError::PermissionDenied)?;
+    if !pollable.supports_epoll() {
         return Err(SyscallError::PermissionDenied);
     }
 
@@ -413,14 +417,16 @@ define_syscall!(
 #[cfg(test)]
 mod tests {
     use crate::{
+        filesystem::{path::Path, vfs::VirtualFS},
         signal::{Signal, Signals, send_signal_to_process},
         systemcall::{
             implementations::{
                 EpollCreate1, EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Pipe, Read,
-                Shutdown, Socketpair, Write,
+                Shutdown, Socketpair, Write, filesystem::OpenFlags,
             },
             test::{
-                TestLinuxEpollEvent, TestLinuxTimespec, assert_user_bytes, close_test_fd, expect_fd,
+                TestLinuxEpollEvent, TestLinuxTimespec, assert_user_bytes, close_test_fd,
+                expect_fd, write_user_cstr,
             },
             test_helpers::{
                 SyscallArgs, allocate_user_test_page, assert_linux_layout, expect_errno, expect_ok,
@@ -460,6 +466,7 @@ mod tests {
         const AF_UNIX: u64 = 1;
         const SOCK_STREAM: u64 = 1;
         const SHUT_WR: u64 = 1;
+        const AT_FDCWD: u64 = (-100i32) as u64;
         assert_linux_layout::<TestLinuxEpollEvent>(12, 1);
 
         let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
@@ -608,6 +615,37 @@ mod tests {
             SyscallArgs::new([epoll_fd as u64, epoll_events, 0, 0, 0, 0]).call::<EpollWait>(),
             SyscallError::InvalidArguments,
         );
+
+        VirtualFS
+            .lock()
+            .create_file(Path::new("/tmp/epoll-regular-file-test"))
+            .unwrap();
+        write_user_cstr(epoll_events + 32, b"/tmp/epoll-regular-file-test\0");
+        let regular_file_fd = expect_fd(
+            SyscallArgs::new([
+                AT_FDCWD,
+                epoll_events + 32,
+                OpenFlags::empty().bits() as u64,
+                0,
+                0,
+                0,
+            ])
+            .call::<crate::systemcall::implementations::OpenAt>(),
+        );
+        write_user_value(epoll_events + 48, &event);
+        expect_errno(
+            SyscallArgs::new([
+                epoll_fd as u64,
+                EPOLL_CTL_ADD,
+                regular_file_fd as u64,
+                epoll_events + 48,
+                0,
+                0,
+            ])
+            .call::<EpollCtl>(),
+            SyscallError::PermissionDenied,
+        );
+        close_test_fd(regular_file_fd);
 
         let pipe_fds = epoll_events + 64;
         let pipe_event_in = epoll_events + 96;

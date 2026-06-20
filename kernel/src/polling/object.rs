@@ -80,4 +80,8 @@ impl Object for PollerObject {
 
 pub trait Pollable: Object {
     fn is_event_ready(&self, event: PollableEvent) -> bool;
+
+    fn supports_epoll(&self) -> bool {
+        true
+    }
 }

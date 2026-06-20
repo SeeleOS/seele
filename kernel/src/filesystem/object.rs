@@ -699,6 +699,12 @@ impl Pollable for OpenedFileObject {
             PollableEvent::CanBeRead | PollableEvent::CanBeWritten
         )
     }
+
+    fn supports_epoll(&self) -> bool {
+        self.device_object()
+            .and_then(|device| device.as_pollable().ok())
+            .is_some_and(|pollable| pollable.supports_epoll())
+    }
 }
 
 impl Seekable for OpenedFileObject {
