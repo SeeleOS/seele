@@ -169,6 +169,28 @@ fn ltp_failure_output(output: &str) -> String {
     trimmed
 }
 
+#[cfg(test)]
+fn login_prompt_observed(output: &str) -> bool {
+    output.lines().any(|line| {
+        let line = line.trim_end_matches('\r').trim_end();
+        line.ends_with(" login:")
+    }) || output
+        .trim_end_matches('\r')
+        .trim_end()
+        .ends_with(" login:")
+}
+
+#[cfg(test)]
+fn shell_prompt_observed(output: &str) -> bool {
+    output.lines().any(is_shell_prompt_line) || is_shell_prompt_line(output)
+}
+
+#[cfg(test)]
+fn is_shell_prompt_line(line: &str) -> bool {
+    let line = line.trim_end_matches('\r').trim_end();
+    line.ends_with(" #") || line.ends_with("#")
+}
+
 fn strip_ansi_escape_sequences(input: &str) -> String {
     let mut output = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();

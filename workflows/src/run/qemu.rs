@@ -82,11 +82,9 @@ impl RunOptions {
 
 impl QemuRunContext {
     pub(super) fn new(options: &RunOptions) -> Self {
-        let serial_log = env::temp_dir().join(if options.agent_mode {
-            "seele-agent-serial.log"
-        } else {
-            "seele-serial.log"
-        });
+        let serial_log = env::var_os("SEELE_SERIAL_LOG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| default_serial_log(options.agent_mode));
         let qmp_socket = env::var_os("SEELE_QMP_SOCKET")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/tmp/seele-agent-qmp.sock"));
@@ -104,6 +102,14 @@ impl QemuRunContext {
             keep_debug_log,
         }
     }
+}
+
+fn default_serial_log(agent_mode: bool) -> PathBuf {
+    env::temp_dir().join(if agent_mode {
+        "seele-agent-serial.log"
+    } else {
+        "seele-serial.log"
+    })
 }
 
 pub fn run_qemu(iso_path: &Path, options: &RunOptions) -> Result<i32> {
@@ -468,4 +474,60 @@ pub(super) fn report_qemu_fault(debug_log: &Path) -> Result<()> {
         eprintln!("qemu: detected triple fault");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        ffi::OsString,
+        sync::{Mutex, OnceLock},
+    };
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn restore_serial_log_env(original: Option<OsString>) {
+        unsafe {
+            match original {
+                Some(value) => env::set_var("SEELE_SERIAL_LOG", value),
+                None => env::remove_var("SEELE_SERIAL_LOG"),
+            }
+        }
+    }
+
+    #[test]
+    fn qemu_context_uses_serial_log_env_override() {
+        let _guard = env_lock().lock().unwrap();
+        let original = env::var_os("SEELE_SERIAL_LOG");
+        unsafe {
+            env::set_var("SEELE_SERIAL_LOG", "/tmp/custom-seele-serial.log");
+        }
+
+        let options = RunOptions::for_agent_run_without_timeout();
+        let context = QemuRunContext::new(&options);
+
+        restore_serial_log_env(original);
+        assert_eq!(
+            context.serial_log,
+            PathBuf::from("/tmp/custom-seele-serial.log")
+        );
+    }
+
+    #[test]
+    fn qemu_context_uses_agent_default_serial_log_without_env_override() {
+        let _guard = env_lock().lock().unwrap();
+        let original = env::var_os("SEELE_SERIAL_LOG");
+        unsafe {
+            env::remove_var("SEELE_SERIAL_LOG");
+        }
+
+        let options = RunOptions::for_agent_run_without_timeout();
+        let context = QemuRunContext::new(&options);
+
+        restore_serial_log_env(original);
+        assert_eq!(context.serial_log, default_serial_log(true));
+    }
 }
