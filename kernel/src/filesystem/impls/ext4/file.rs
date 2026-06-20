@@ -155,7 +155,23 @@ impl File for Ext4File {
 
     fn truncate(&mut self, length: u64) -> FSResult<()> {
         let _operation = self.operation_lock.lock();
-        file::truncate(&self.fs, &mut self.inode.lock(), length).map_err(FSError::from)?;
+        let mut inode = self.inode.lock();
+        let old_length = inode.size_in_bytes();
+        const ZERO_TAIL_GRANULE: u64 = 4096;
+        if length < old_length && !length.is_multiple_of(ZERO_TAIL_GRANULE) {
+            let zeroes = [0u8; ZERO_TAIL_GRANULE as usize];
+            let tail_end = old_length.min(length.next_multiple_of(ZERO_TAIL_GRANULE));
+            let mut offset = length;
+            while offset < tail_end {
+                let chunk_len = usize::try_from((tail_end - offset).min(zeroes.len() as u64))
+                    .map_err(|_| FSError::Other)?;
+                file::write_at(&self.fs, &mut inode, &zeroes[..chunk_len], offset)
+                    .map_err(FSError::from)?;
+                offset += chunk_len as u64;
+            }
+        }
+        file::truncate(&self.fs, &mut inode, length).map_err(FSError::from)?;
+        drop(inode);
         self.position = self.position.min(length);
         self.update_lookup_cache();
         Ok(())
