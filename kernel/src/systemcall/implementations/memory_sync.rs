@@ -1030,7 +1030,17 @@ define_syscall!(Mmap, |addr: u64,
 });
 
 define_syscall!(Munmap, |addr: VirtAddr, len: u64| {
-    get_current_process().lock().addrspace.unmap(addr, len);
+    if !addr.is_aligned(Size4KiB::SIZE) {
+        return Err(SyscallError::InvalidArguments);
+    }
+    let (start, end) = checked_user_range_for_memory_syscall(addr.as_u64(), len)?;
+    if start == end {
+        return Ok(0);
+    }
+    get_current_process()
+        .lock()
+        .addrspace
+        .unmap(addr, end - start);
     Ok(0)
 });
 
@@ -1802,6 +1812,34 @@ mod tests {
         expect_ok(
             SyscallArgs::new([file_map_addr, 0, 0, 0, 0, 0]).call::<Msync>(),
             0,
+        );
+        expect_ok(
+            SyscallArgs::new([file_map_addr, 0, 0, 0, 0, 0]).call::<Munmap>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([file_map_addr + 1, 4096, 0, 0, 0, 0]).call::<Munmap>(),
+            SyscallError::InvalidArguments,
+        );
+        assert!(
+            process
+                .lock()
+                .addrspace
+                .get_area(x86_64::VirtAddr::new(file_map_addr))
+                .is_some(),
+            "failed munmap must not remove any part of the mapping"
+        );
+        expect_errno(
+            SyscallArgs::new([
+                crate::memory::addrspace::USER_MEM_END - 4096,
+                8192,
+                0,
+                0,
+                0,
+                0,
+            ])
+            .call::<Munmap>(),
+            SyscallError::NoMemory,
         );
         expect_ok(
             SyscallArgs::new([fd as u64, 8192, 0, 0, 0, 0]).call::<Ftruncate>(),
