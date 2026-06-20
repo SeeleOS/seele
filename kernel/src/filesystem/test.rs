@@ -606,7 +606,7 @@ fn procfs_exposes_stable_static_directories_files_and_mount_flags() {
         .into_iter()
         .map(|entry| entry.name)
         .collect::<Vec<_>>();
-    assert_eq!(sys_names, vec!["fs", "kernel"]);
+    assert_eq!(sys_names, vec!["fs", "kernel", "vm"]);
 
     let FileLike::File(osrelease) = fs.lookup(&Path::new("/sys/kernel/osrelease")).unwrap() else {
         panic!("osrelease should be a file");
