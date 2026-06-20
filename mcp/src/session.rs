@@ -9,7 +9,10 @@ use std::{
     env,
     path::{Path, PathBuf},
     process::Stdio,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Mutex as StdMutex, OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 use tokio::{
     fs,
@@ -335,10 +338,17 @@ impl AgentSession {
         }
     }
 
-    pub async fn start_xtest(&self, test: Option<&str>) -> Result<CommandHandle> {
+    pub async fn start_xtest(
+        &self,
+        test: Option<&str>,
+        ltp_pattern: Option<&str>,
+        ltp_suite: Option<&str>,
+    ) -> Result<CommandHandle> {
         self.start_workflow_command(
             WorkflowJob::Test {
                 test: test.map(str::to_string),
+                ltp_pattern: ltp_pattern.map(str::to_string),
+                ltp_suite: ltp_suite.map(str::to_string),
             },
             None,
         )
@@ -567,8 +577,14 @@ pub struct GdbCommandOutput {
 
 #[derive(Debug)]
 enum WorkflowJob {
-    Test { test: Option<String> },
-    BuildRootfs { config: BuildRootfsConfig },
+    Test {
+        test: Option<String>,
+        ltp_pattern: Option<String>,
+        ltp_suite: Option<String>,
+    },
+    BuildRootfs {
+        config: BuildRootfsConfig,
+    },
 }
 
 impl WorkflowJob {
@@ -592,7 +608,17 @@ async fn run_workflow_job(
     let handle = tokio::task::spawn_blocking({
         let collector = collector.clone();
         move || match job {
-            WorkflowJob::Test { test } => run_workflow_tests(&collector, test.as_deref()),
+            WorkflowJob::Test {
+                test,
+                ltp_pattern,
+                ltp_suite,
+            } => with_optional_env_vars(
+                [
+                    ("SEELE_LTP_PATTERN", ltp_pattern.as_deref()),
+                    ("SEELE_LTP_SUITE", ltp_suite.as_deref()),
+                ],
+                || run_workflow_tests(&collector, test.as_deref()),
+            ),
             WorkflowJob::BuildRootfs { config } => build_rootfs(config, &collector),
         }
     });
@@ -688,6 +714,42 @@ async fn run_workflow_job(
         String::new(),
     );
     let _ = write_command_status(&status_path, &status).await;
+}
+
+fn with_optional_env_vars<T, const N: usize>(
+    vars: [(&str, Option<&str>); N],
+    f: impl FnOnce() -> T,
+) -> T {
+    static ENV_LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
+    let _guard = ENV_LOCK.get_or_init(|| StdMutex::new(())).lock().unwrap();
+    let previous = vars
+        .iter()
+        .map(|(key, _)| (*key, env::var_os(key)))
+        .collect::<Vec<_>>();
+
+    unsafe {
+        for (key, value) in vars {
+            if let Some(value) = value {
+                env::set_var(key, value);
+            } else {
+                env::remove_var(key);
+            }
+        }
+    }
+
+    let result = f();
+
+    unsafe {
+        for (key, value) in previous {
+            if let Some(value) = value {
+                env::set_var(key, value);
+            } else {
+                env::remove_var(key);
+            }
+        }
+    }
+
+    result
 }
 
 async fn write_command_status(path: &Path, status: &CommandStatus) -> Result<()> {

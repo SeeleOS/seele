@@ -73,6 +73,8 @@ pub struct StartRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct RunTestsRequest {
     pub test: Option<String>,
+    pub ltp_pattern: Option<String>,
+    pub ltp_suite: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -197,10 +199,19 @@ impl SeeleMcp {
     }
 
     #[tool(
-        description = "Start cargo xtest for Seele OS as a background MCP job. By default this runs kernel unit tests plus LTP. Pass \"full\" to run every integration test, or pass a test name filter."
+        description = "Start cargo xtest for Seele OS as a background MCP job. By default this runs kernel unit tests plus LTP. Pass \"full\" to run every integration test, or pass a test name filter. For the LTP integration, pass ltp_pattern to run only matching LTP cases, and ltp_suite to select a LTP suite."
     )]
     async fn run_tests(&self, Parameters(request): Parameters<RunTestsRequest>) -> CallToolResult {
-        json_result(self.session.start_xtest(request.test.as_deref()).await).await
+        json_result(
+            self.session
+                .start_xtest(
+                    request.test.as_deref(),
+                    request.ltp_pattern.as_deref(),
+                    request.ltp_suite.as_deref(),
+                )
+                .await,
+        )
+        .await
     }
 
     #[tool(description = "Start cargo xbuild-rootfs for Seele OS as a background MCP job")]

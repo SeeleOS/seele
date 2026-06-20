@@ -87,7 +87,9 @@ pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
 }
 
 pub(super) fn proc_kernel_cmdline_bytes() -> Vec<u8> {
-    Vec::new()
+    crate::boot::executable_cmdline()
+        .map(|cmdline| format!("{cmdline}\n").into_bytes())
+        .unwrap_or_default()
 }
 
 pub(super) fn proc_devices_bytes() -> Vec<u8> {

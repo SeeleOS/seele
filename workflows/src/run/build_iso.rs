@@ -86,13 +86,25 @@ fn create_efi_boot_image(
 fn limine_config_contents() -> Result<String> {
     let mut contents =
         fs::read_to_string(limine_config_path()).context("failed to read limine.conf")?;
+    let mut cmdline_args = Vec::new();
     if let Ok(init) = env::var("SEELE_INIT") {
+        cmdline_args.push(format!("init={init}"));
+    }
+    if let Ok(suite) = env::var("SEELE_LTP_SUITE") {
+        cmdline_args.push(format!("seele.ltp_suite={suite}"));
+    }
+    if let Ok(pattern) = env::var("SEELE_LTP_PATTERN") {
+        cmdline_args.push(format!("seele.ltp_pattern={pattern}"));
+    }
+
+    if !cmdline_args.is_empty() {
+        let cmdline = cmdline_args.join(" ");
         contents = contents
             .lines()
             .map(|line| {
                 if line.trim_start().starts_with("cmdline:") {
                     let indent = &line[..line.len() - line.trim_start().len()];
-                    format!("{indent}cmdline: init={init}")
+                    format!("{indent}cmdline: {cmdline}")
                 } else {
                     line.to_string()
                 }
