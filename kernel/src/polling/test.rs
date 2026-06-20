@@ -42,9 +42,10 @@ impl Pollable for DummyObject {
 fn pollable_event_u64_conversion_preserves_known_and_unknown_values() {
     assert_eq!(PollableEvent::from(0), PollableEvent::CanBeRead);
     assert_eq!(PollableEvent::from(1), PollableEvent::CanBeWritten);
-    assert_eq!(PollableEvent::from(2), PollableEvent::Error);
-    assert_eq!(PollableEvent::from(3), PollableEvent::Closed);
-    assert_eq!(PollableEvent::from(4), PollableEvent::ReadClosed);
+    assert_eq!(PollableEvent::from(2), PollableEvent::Priority);
+    assert_eq!(PollableEvent::from(3), PollableEvent::Error);
+    assert_eq!(PollableEvent::from(4), PollableEvent::Closed);
+    assert_eq!(PollableEvent::from(5), PollableEvent::ReadClosed);
     assert_eq!(PollableEvent::from(99), PollableEvent::Other(99));
 }
 
