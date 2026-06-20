@@ -46,6 +46,7 @@ pub(crate) struct TmpNode {
     pub(crate) gid: u32,
     pub(crate) link_count: u64,
     pub(crate) open_count: u64,
+    pub(crate) xattrs: BTreeMap<String, Vec<u8>>,
     pub(crate) kind: TmpNodeKind,
 }
 
@@ -71,6 +72,7 @@ impl TmpfsState {
                 gid: 0,
                 link_count: 1,
                 open_count: 0,
+                xattrs: BTreeMap::new(),
                 kind: TmpNodeKind::Directory {
                     children: BTreeSet::new(),
                     mode: DEFAULT_DIR_MODE,
@@ -133,13 +135,13 @@ impl TmpfsState {
         }
     }
 
-    pub(crate) fn create_file(&mut self, parent: &str, name: &str) -> FSResult<()> {
+    pub(crate) fn create_file(&mut self, parent: &str, name: &str, mode: u32) -> FSResult<()> {
         self.create_node(
             parent,
             name,
             TmpNodeKind::File {
                 data: SparseFileData::new(),
-                mode: DEFAULT_FILE_MODE,
+                mode: mode & 0o7777,
             },
         )
     }
@@ -191,6 +193,7 @@ impl TmpfsState {
                 gid,
                 link_count: 1,
                 open_count: 0,
+                xattrs: BTreeMap::new(),
                 kind,
             },
         );
@@ -254,6 +257,45 @@ impl TmpfsState {
             node.gid = gid;
         }
         Ok(())
+    }
+
+    pub(crate) fn xattr(&self, inode: u64, name: &str) -> Option<Vec<u8>> {
+        self.nodes
+            .get(&inode)
+            .and_then(|node| node.xattrs.get(name))
+            .cloned()
+    }
+
+    pub(crate) fn set_xattr(
+        &mut self,
+        inode: u64,
+        name: String,
+        value: Vec<u8>,
+        create: bool,
+        replace: bool,
+    ) -> FSResult<()> {
+        let node = self.node_by_inode_mut(inode)?;
+        let exists = node.xattrs.contains_key(&name);
+        if create && exists {
+            return Err(FSError::AlreadyExists);
+        }
+        if replace && !exists {
+            return Err(FSError::NotFound);
+        }
+        node.xattrs.insert(name, value);
+        Ok(())
+    }
+
+    pub(crate) fn list_xattrs(&self, inode: u64) -> FSResult<Vec<String>> {
+        Ok(self.node_by_inode(inode)?.xattrs.keys().cloned().collect())
+    }
+
+    pub(crate) fn remove_xattr(&mut self, inode: u64, name: &str) -> FSResult<()> {
+        self.node_by_inode_mut(inode)?
+            .xattrs
+            .remove(name)
+            .map(|_| ())
+            .ok_or(FSError::NotFound)
     }
 
     pub(crate) fn quota(&self, quota_type: u32, id: u32) -> Option<TmpfsQuota> {

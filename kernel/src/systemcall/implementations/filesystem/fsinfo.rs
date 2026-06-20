@@ -63,10 +63,26 @@ define_syscall!(RenameAt2, |old_dirfd: i32,
                             new_dirfd: i32,
                             new_path: CString,
                             flags: u32| {
+    const RENAME_NOREPLACE: u32 = 1;
+    const RENAME_EXCHANGE: u32 = 2;
+    const RENAME_WHITEOUT: u32 = 4;
+
     let old_path = path_from_raw(old_path)?;
     let new_path = path_from_raw(new_path)?;
-    if flags != 0 {
-        return Err(SyscallError::NoSyscall);
+    if flags & !(RENAME_NOREPLACE | RENAME_EXCHANGE | RENAME_WHITEOUT) != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if flags.count_ones() > 1 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if flags & (RENAME_EXCHANGE | RENAME_WHITEOUT) != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if flags & RENAME_NOREPLACE != 0 {
+        let resolved_new_path = resolve_path_at(new_dirfd, &new_path)?;
+        if open_path(resolved_new_path).is_ok() {
+            return Err(SyscallError::FileAlreadyExists);
+        }
     }
     rename_impl(old_dirfd, old_path, new_dirfd, new_path)
 });

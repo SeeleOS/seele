@@ -273,11 +273,9 @@ impl Directory for Ext4Directory {
         let (file_type, mode) = match info.content_type {
             DirectoryContentType::File => (
                 FileType::Regular,
-                InodeMode::S_IFREG
-                    | InodeMode::S_IRUSR
-                    | InodeMode::S_IWUSR
-                    | InodeMode::S_IRGRP
-                    | InodeMode::S_IROTH,
+                InodeMode::from_bits_retain(
+                    InodeMode::S_IFREG.bits() | requested_mode.unwrap_or(0o644) as u16,
+                ),
             ),
             DirectoryContentType::Directory => (
                 FileType::Directory,

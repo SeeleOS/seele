@@ -1,5 +1,8 @@
 use super::*;
 
+const CAP_DAC_OVERRIDE: u64 = 1;
+const CAP_DAC_READ_SEARCH: u64 = 2;
+
 pub(in crate::systemcall::implementations::filesystem) fn check_access_mode(
     mode: i32,
 ) -> Result<(), SyscallError> {
@@ -21,6 +24,7 @@ struct AccessCredentials {
     uid: u32,
     gid: u32,
     supplementary_groups: Vec<u32>,
+    capability_effective: [u32; 2],
 }
 
 fn access_credentials(use_effective_ids: bool) -> AccessCredentials {
@@ -38,6 +42,11 @@ fn access_credentials(use_effective_ids: bool) -> AccessCredentials {
             process.real_gid
         },
         supplementary_groups: process.supplementary_groups.clone(),
+        capability_effective: if use_effective_ids {
+            process.capability_effective
+        } else {
+            [0; 2]
+        },
     }
 }
 
@@ -48,7 +57,26 @@ fn fs_access_credentials() -> AccessCredentials {
         uid: process.fs_uid,
         gid: process.fs_gid,
         supplementary_groups: process.supplementary_groups.clone(),
+        capability_effective: process.capability_effective,
     }
+}
+
+pub(in crate::systemcall::implementations::filesystem) fn check_open_permissions(
+    stat: &LinuxStat,
+    flags: OpenFlags,
+) -> Result<(), SyscallError> {
+    if flags.contains(OpenFlags::PATH) {
+        return Ok(());
+    }
+
+    let mode = match flags.bits() & 0o3 {
+        0o0 => 4,
+        0o1 => 2,
+        0o2 => 4 | 2,
+        _ => return Err(SyscallError::InvalidArguments),
+    };
+
+    check_access_permissions_for_ids(stat, mode, &fs_access_credentials())
 }
 
 fn check_access_permissions_for_ids(
@@ -57,6 +85,15 @@ fn check_access_permissions_for_ids(
     credentials: &AccessCredentials,
 ) -> Result<(), SyscallError> {
     check_access_permissions_for_ids_with_options(stat, mode, credentials, false)
+}
+
+fn has_capability(credentials: &AccessCredentials, capability: u64) -> bool {
+    let slot = (capability / 32) as usize;
+    let mask = 1u32 << (capability % 32);
+    credentials
+        .capability_effective
+        .get(slot)
+        .is_some_and(|value| value & mask != 0)
 }
 
 fn check_access_permissions_for_ids_with_options(
@@ -74,6 +111,15 @@ fn check_access_permissions_for_ids_with_options(
             return Err(SyscallError::AccessDenied);
         }
         return Ok(());
+    }
+
+    if mode & 1 == 0 {
+        if mode & 4 != 0 && has_capability(credentials, CAP_DAC_READ_SEARCH) {
+            return Ok(());
+        }
+        if mode & 2 != 0 && has_capability(credentials, CAP_DAC_OVERRIDE) {
+            return Ok(());
+        }
     }
 
     let permission_shift = if credentials.uid == stat.st_uid {
@@ -179,7 +225,7 @@ pub(in crate::systemcall::implementations::filesystem) fn faccessat_impl(
 ) -> Result<usize, SyscallError> {
     let allowed = (AtFlags::EMPTY_PATH | AtFlags::SYMLINK_NOFOLLOW | AtFlags::EACCESS).bits();
     if flags.bits() != flags.bits() & allowed {
-        return Err(SyscallError::NoSyscall);
+        return Err(SyscallError::InvalidArguments);
     }
 
     check_access_mode(mode)?;

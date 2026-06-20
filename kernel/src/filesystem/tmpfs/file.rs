@@ -1,6 +1,6 @@
 use core::any::Any;
 
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 
 use crate::filesystem::{
     errors::FSError,
@@ -177,5 +177,23 @@ impl File for TmpfsFileHandle {
         self.state
             .lock()
             .update_owner_by_inode(self.inode, uid, gid)
+    }
+
+    fn get_xattr(&self, name: &str) -> FSResult<Option<Vec<u8>>> {
+        Ok(self.state.lock().xattr(self.inode, name))
+    }
+
+    fn set_xattr(&self, name: String, value: Vec<u8>, create: bool, replace: bool) -> FSResult<()> {
+        self.state
+            .lock()
+            .set_xattr(self.inode, name, value, create, replace)
+    }
+
+    fn list_xattrs(&self) -> FSResult<Vec<String>> {
+        self.state.lock().list_xattrs(self.inode)
+    }
+
+    fn remove_xattr(&self, name: &str) -> FSResult<()> {
+        self.state.lock().remove_xattr(self.inode, name)
     }
 }

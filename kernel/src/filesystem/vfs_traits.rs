@@ -92,6 +92,24 @@ pub trait File: Send + Sync {
     fn chown(&self, _uid: u32, _gid: u32) -> FSResult<()> {
         Err(FSError::Readonly)
     }
+    fn get_xattr(&self, _name: &str) -> FSResult<Option<Vec<u8>>> {
+        Ok(None)
+    }
+    fn set_xattr(
+        &self,
+        _name: String,
+        _value: Vec<u8>,
+        _create: bool,
+        _replace: bool,
+    ) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+    fn list_xattrs(&self) -> FSResult<Vec<String>> {
+        Ok(Vec::new())
+    }
+    fn remove_xattr(&self, _name: &str) -> FSResult<()> {
+        Err(FSError::NotFound)
+    }
 }
 
 pub trait Directory: Send + Sync {
@@ -121,6 +139,24 @@ pub trait Directory: Send + Sync {
     fn chown(&self, _uid: u32, _gid: u32) -> FSResult<()> {
         Err(FSError::Readonly)
     }
+    fn get_xattr(&self, _name: &str) -> FSResult<Option<Vec<u8>>> {
+        Ok(None)
+    }
+    fn set_xattr(
+        &self,
+        _name: String,
+        _value: Vec<u8>,
+        _create: bool,
+        _replace: bool,
+    ) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+    fn list_xattrs(&self) -> FSResult<Vec<String>> {
+        Ok(Vec::new())
+    }
+    fn remove_xattr(&self, _name: &str) -> FSResult<()> {
+        Err(FSError::NotFound)
+    }
 }
 
 pub trait Symlink: Send + Sync {
@@ -134,6 +170,24 @@ pub trait Symlink: Send + Sync {
     }
     fn chown(&self, _uid: u32, _gid: u32) -> FSResult<()> {
         Err(FSError::Readonly)
+    }
+    fn get_xattr(&self, _name: &str) -> FSResult<Option<Vec<u8>>> {
+        Ok(None)
+    }
+    fn set_xattr(
+        &self,
+        _name: String,
+        _value: Vec<u8>,
+        _create: bool,
+        _replace: bool,
+    ) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+    fn list_xattrs(&self) -> FSResult<Vec<String>> {
+        Ok(Vec::new())
+    }
+    fn remove_xattr(&self, _name: &str) -> FSResult<()> {
+        Err(FSError::NotFound)
     }
 }
 

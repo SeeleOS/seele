@@ -1,4 +1,4 @@
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 
 use crate::filesystem::{
     errors::FSError,
@@ -60,5 +60,29 @@ impl Symlink for TmpfsSymlinkHandle {
         let mut state = self.state.lock();
         let inode = state.node(&self.path)?.inode;
         state.update_owner_by_inode(inode, uid, gid)
+    }
+
+    fn get_xattr(&self, name: &str) -> FSResult<Option<Vec<u8>>> {
+        let state = self.state.lock();
+        let inode = state.node(&self.path)?.inode;
+        Ok(state.xattr(inode, name))
+    }
+
+    fn set_xattr(&self, name: String, value: Vec<u8>, create: bool, replace: bool) -> FSResult<()> {
+        let mut state = self.state.lock();
+        let inode = state.node(&self.path)?.inode;
+        state.set_xattr(inode, name, value, create, replace)
+    }
+
+    fn list_xattrs(&self) -> FSResult<Vec<String>> {
+        let state = self.state.lock();
+        let inode = state.node(&self.path)?.inode;
+        state.list_xattrs(inode)
+    }
+
+    fn remove_xattr(&self, name: &str) -> FSResult<()> {
+        let mut state = self.state.lock();
+        let inode = state.node(&self.path)?.inode;
+        state.remove_xattr(inode, name)
     }
 }

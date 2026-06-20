@@ -6,7 +6,10 @@ define_syscall!(OpenAt, |dirfd: i32,
                          mode: u32| {
     let current_process = get_current_process();
     let path_str = path_from_raw(path)?;
-    let create_mode = mode & 0o7777;
+    let create_mode = {
+        let process = current_process.lock();
+        mode & 0o7777 & !process.fs_context.lock().file_mode_creation_mask
+    };
     if flags.contains(OpenFlags::TMPFILE) {
         let object = open_tmpfile_at(dirfd, &path_str)?;
         if create_mode != 0 {
@@ -172,6 +175,7 @@ define_syscall!(OpenAt, |dirfd: i32,
     if directory_only {
         profile::record_hot_syscall_phase(HotSyscallPhase::OpenAtDirectoryCheck, 1);
     }
+    check_open_permissions(&file_like.stat(), flags)?;
     if flags.contains(OpenFlags::TRUNC) && !path_only {
         let truncate_start = profile::scope_start();
         let file_like = object.clone().as_file_like()?;

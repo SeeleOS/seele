@@ -341,9 +341,112 @@ impl OpenedFileObject {
         }
     }
 
+    pub fn get_xattr(&self, name: &str) -> FSResult<Option<Vec<u8>>> {
+        match &self.backend {
+            OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => {
+                file.lock().get_xattr(name)
+            }
+            OpenBackend::Directory(dir) => dir.lock().get_xattr(name),
+            OpenBackend::SymlinkPath { target, .. } => open_path(target.clone())?.get_xattr(name),
+        }
+    }
+
+    pub fn lget_xattr(&self, name: &str) -> FSResult<Option<Vec<u8>>> {
+        match &self.backend {
+            OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => {
+                file.lock().get_xattr(name)
+            }
+            OpenBackend::Directory(dir) => dir.lock().get_xattr(name),
+            OpenBackend::SymlinkPath { symlink, .. } => symlink.lock().get_xattr(name),
+        }
+    }
+
+    pub fn set_xattr(
+        &self,
+        name: String,
+        value: Vec<u8>,
+        create: bool,
+        replace: bool,
+    ) -> FSResult<()> {
+        match &self.backend {
+            OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => {
+                file.lock().set_xattr(name, value, create, replace)
+            }
+            OpenBackend::Directory(dir) => dir.lock().set_xattr(name, value, create, replace),
+            OpenBackend::SymlinkPath { target, .. } => {
+                open_path(target.clone())?.set_xattr(name, value, create, replace)
+            }
+        }
+    }
+
+    pub fn lset_xattr(
+        &self,
+        name: String,
+        value: Vec<u8>,
+        create: bool,
+        replace: bool,
+    ) -> FSResult<()> {
+        match &self.backend {
+            OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => {
+                file.lock().set_xattr(name, value, create, replace)
+            }
+            OpenBackend::Directory(dir) => dir.lock().set_xattr(name, value, create, replace),
+            OpenBackend::SymlinkPath { symlink, .. } => {
+                symlink.lock().set_xattr(name, value, create, replace)
+            }
+        }
+    }
+
+    pub fn list_xattrs(&self) -> FSResult<Vec<String>> {
+        match &self.backend {
+            OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => {
+                file.lock().list_xattrs()
+            }
+            OpenBackend::Directory(dir) => dir.lock().list_xattrs(),
+            OpenBackend::SymlinkPath { target, .. } => open_path(target.clone())?.list_xattrs(),
+        }
+    }
+
+    pub fn llist_xattrs(&self) -> FSResult<Vec<String>> {
+        match &self.backend {
+            OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => {
+                file.lock().list_xattrs()
+            }
+            OpenBackend::Directory(dir) => dir.lock().list_xattrs(),
+            OpenBackend::SymlinkPath { symlink, .. } => symlink.lock().list_xattrs(),
+        }
+    }
+
+    pub fn remove_xattr(&self, name: &str) -> FSResult<()> {
+        match &self.backend {
+            OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => {
+                file.lock().remove_xattr(name)
+            }
+            OpenBackend::Directory(dir) => dir.lock().remove_xattr(name),
+            OpenBackend::SymlinkPath { target, .. } => {
+                open_path(target.clone())?.remove_xattr(name)
+            }
+        }
+    }
+
+    pub fn lremove_xattr(&self, name: &str) -> FSResult<()> {
+        match &self.backend {
+            OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => {
+                file.lock().remove_xattr(name)
+            }
+            OpenBackend::Directory(dir) => dir.lock().remove_xattr(name),
+            OpenBackend::SymlinkPath { symlink, .. } => symlink.lock().remove_xattr(name),
+        }
+    }
+
     pub fn truncate(&self, length: u64) -> FSResult<()> {
         self.invalidate_page_cache();
-        self.resolve_file()?.lock().truncate(length)
+        match &self.backend {
+            OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => {
+                file.lock().truncate(length)
+            }
+            OpenBackend::Directory(_) | OpenBackend::SymlinkPath { .. } => Err(FSError::NotAFile),
+        }
     }
 
     pub fn allocate(&self, mode: u32, offset: u64, len: u64) -> FSResult<()> {
@@ -585,9 +688,16 @@ impl Configuratable for OpenedFileObject {
 
 impl Pollable for OpenedFileObject {
     fn is_event_ready(&self, event: PollableEvent) -> bool {
-        self.device_object()
-            .and_then(|device| device.as_pollable().ok())
-            .is_some_and(|pollable| pollable.is_event_ready(event))
+        if let Some(device) = self.device_object() {
+            return device
+                .as_pollable()
+                .is_ok_and(|pollable| pollable.is_event_ready(event));
+        }
+
+        matches!(
+            event,
+            PollableEvent::CanBeRead | PollableEvent::CanBeWritten
+        )
     }
 }
 

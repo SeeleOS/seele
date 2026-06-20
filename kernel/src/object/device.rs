@@ -36,6 +36,7 @@ lazy_static::lazy_static! {
         devices.insert("tty", get_default_tty() as ObjectRef);
         devices.insert("tty0", get_default_tty() as ObjectRef);
         devices.insert("tty1", get_default_tty() as ObjectRef);
+        devices.insert("ttyS0", get_default_tty() as ObjectRef);
         devices.insert("ps2mouse", Arc::new(PS2MouseObject::default()) as ObjectRef);
         devices.insert("drm-card0", drm_device.clone());
         devices.insert("drm-renderD128", drm_device);
@@ -59,6 +60,10 @@ pub fn get_device_ref(name: &str) -> SyscallResult<ObjectRef> {
 
     if name == "console" {
         return Ok(get_active_tty());
+    }
+
+    if name == "ttyS0" {
+        return Ok(get_default_tty());
     }
 
     if name == "tty"

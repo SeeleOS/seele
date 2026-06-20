@@ -128,3 +128,51 @@ define_syscall!(Chroot, |path: CString| {
     process.fs_context.lock().root_directory = new_root;
     Ok(0)
 });
+
+define_syscall!(PivotRoot, |new_root: CString, put_old: CString| {
+    let new_root = path_from_raw(new_root)?;
+    let put_old = path_from_raw(put_old)?;
+    let new_root = resolve_path_at(AT_FDCWD, &new_root)?.normalize();
+    let put_old = resolve_path_at(AT_FDCWD, &put_old)?.normalize();
+
+    let new_root_file = open_path(new_root.clone())?;
+    if !matches!(
+        new_root_file.info()?.file_like_type,
+        FileLikeType::Directory
+    ) {
+        return Err(SyscallError::NotADirectory);
+    }
+    let put_old_file = open_path(put_old.clone())?;
+    if !matches!(put_old_file.info()?.file_like_type, FileLikeType::Directory) {
+        return Err(SyscallError::NotADirectory);
+    }
+    if !put_old.starts_with(&new_root) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let vfs = VirtualFS.lock();
+    let old_root = get_current_process()
+        .lock()
+        .fs_context
+        .lock()
+        .root_directory
+        .as_normal();
+    let old_root_mount = vfs.mount_path(old_root)?;
+    let new_root_mount = vfs.mount_path(new_root.clone())?;
+    let put_old_mount = vfs.mount_path(put_old)?;
+    drop(vfs);
+
+    if new_root_mount != new_root || new_root_mount == old_root_mount || put_old_mount != new_root {
+        return Err(SyscallError::DeviceOrResourceBusy);
+    }
+
+    let new_root = AbsolutePath::from_root_path(&new_root);
+    let process = get_current_process();
+    let process = process.lock();
+    let mut fs_context = process.fs_context.lock();
+    fs_context.root_directory = new_root.clone();
+    if !fs_context.current_directory.starts_with(&new_root) {
+        fs_context.current_directory = new_root;
+    }
+    Ok(0)
+});

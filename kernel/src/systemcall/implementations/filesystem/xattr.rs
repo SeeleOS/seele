@@ -2,103 +2,124 @@ use super::*;
 
 define_syscall!(Getxattr, |path: CString,
                            name: CString,
-                           _value: *mut u8,
-                           _size: usize| {
+                           value: *mut u8,
+                           size: usize| {
     let path_str = path_from_raw(path)?;
-    let _name = xattr_name_from_raw(name)?;
-    ensure_path_exists_at(AT_FDCWD, &path_str, false)?;
-    Err(SyscallError::NoData)
+    let name = xattr_name_from_raw(name)?;
+    let object = xattr_path_object_at(AT_FDCWD, &path_str, false)?;
+    let xattr_value = object.get_xattr(&name)?.ok_or(SyscallError::NoData)?;
+    write_xattr_value(value, size, xattr_value)
 });
 
 define_syscall!(Lgetxattr, |path: CString,
                             name: CString,
-                            _value: *mut u8,
-                            _size: usize| {
+                            value: *mut u8,
+                            size: usize| {
     let path_str = path_from_raw(path)?;
-    let _name = xattr_name_from_raw(name)?;
-    ensure_path_exists_at(AT_FDCWD, &path_str, true)?;
-    Err(SyscallError::NoData)
+    let name = xattr_name_from_raw(name)?;
+    let object = xattr_path_object_at(AT_FDCWD, &path_str, true)?;
+    let xattr_value = object.lget_xattr(&name)?.ok_or(SyscallError::NoData)?;
+    write_xattr_value(value, size, xattr_value)
 });
 
 define_syscall!(Fgetxattr, |object: ObjectRef,
                             name: CString,
-                            _value: *mut u8,
-                            _size: usize| {
-    let _name = xattr_name_from_raw(name)?;
-    ensure_object_supports_xattrs(&object)?;
-    Err(SyscallError::NoData)
+                            value: *mut u8,
+                            size: usize| {
+    let name = xattr_name_from_raw(name)?;
+    let object = xattr_fd_object(&object)?;
+    let xattr_value = object.get_xattr(&name)?.ok_or(SyscallError::NoData)?;
+    write_xattr_value(value, size, xattr_value)
 });
 
 define_syscall!(Setxattr, |path: CString,
                            name: CString,
-                           _value: *const u8,
-                           _size: usize,
+                           value: *const u8,
+                           size: usize,
                            flags: XattrFlags| {
     let path_str = path_from_raw(path)?;
-    let _name = xattr_name_from_raw(name)?;
+    let name = xattr_name_from_raw(name)?;
     validate_xattr_flags(flags)?;
-    ensure_path_exists_at(AT_FDCWD, &path_str, false)?;
+    let value = xattr_value_from_user(value, size)?;
+    let (create, replace) = xattr_flag_modes(flags);
+    xattr_path_object_at(AT_FDCWD, &path_str, false)?
+        .set_xattr(name, value, create, replace)
+        .map_err(xattr_not_found)?;
     Ok(0)
 });
 
 define_syscall!(Lsetxattr, |path: CString,
                             name: CString,
-                            _value: *const u8,
-                            _size: usize,
+                            value: *const u8,
+                            size: usize,
                             flags: XattrFlags| {
     let path_str = path_from_raw(path)?;
-    let _name = xattr_name_from_raw(name)?;
+    let name = xattr_name_from_raw(name)?;
     validate_xattr_flags(flags)?;
-    ensure_path_exists_at(AT_FDCWD, &path_str, true)?;
+    let value = xattr_value_from_user(value, size)?;
+    let (create, replace) = xattr_flag_modes(flags);
+    xattr_path_object_at(AT_FDCWD, &path_str, true)?
+        .lset_xattr(name, value, create, replace)
+        .map_err(xattr_not_found)?;
     Ok(0)
 });
 
 define_syscall!(Fsetxattr, |object: ObjectRef,
                             name: CString,
-                            _value: *const u8,
-                            _size: usize,
+                            value: *const u8,
+                            size: usize,
                             flags: XattrFlags| {
-    let _name = xattr_name_from_raw(name)?;
+    let name = xattr_name_from_raw(name)?;
     validate_xattr_flags(flags)?;
-    ensure_object_supports_xattrs(&object)?;
+    let value = xattr_value_from_user(value, size)?;
+    let (create, replace) = xattr_flag_modes(flags);
+    xattr_fd_object(&object)?
+        .set_xattr(name, value, create, replace)
+        .map_err(xattr_not_found)?;
     Ok(0)
 });
 
-define_syscall!(Listxattr, |path: CString, _list: *mut u8, _size: usize| {
+define_syscall!(Listxattr, |path: CString, list: *mut u8, size: usize| {
     let path_str = path_from_raw(path)?;
-    ensure_path_exists_at(AT_FDCWD, &path_str, false)?;
-    Ok(0)
+    let object = xattr_path_object_at(AT_FDCWD, &path_str, false)?;
+    write_xattr_list(list, size, object.list_xattrs()?)
 });
 
-define_syscall!(Llistxattr, |path: CString, _list: *mut u8, _size: usize| {
+define_syscall!(Llistxattr, |path: CString, list: *mut u8, size: usize| {
     let path_str = path_from_raw(path)?;
-    ensure_path_exists_at(AT_FDCWD, &path_str, true)?;
-    Ok(0)
+    let object = xattr_path_object_at(AT_FDCWD, &path_str, true)?;
+    write_xattr_list(list, size, object.llist_xattrs()?)
 });
 
 define_syscall!(Flistxattr, |object: ObjectRef,
-                             _list: *mut u8,
-                             _size: usize| {
-    ensure_object_supports_xattrs(&object)?;
-    Ok(0)
+                             list: *mut u8,
+                             size: usize| {
+    let object = xattr_fd_object(&object)?;
+    write_xattr_list(list, size, object.list_xattrs()?)
 });
 
 define_syscall!(Removexattr, |path: CString, name: CString| {
     let path_str = path_from_raw(path)?;
-    let _name = xattr_name_from_raw(name)?;
-    ensure_path_exists_at(AT_FDCWD, &path_str, false)?;
-    Err(SyscallError::NoData)
+    let name = xattr_name_from_raw(name)?;
+    xattr_path_object_at(AT_FDCWD, &path_str, false)?
+        .remove_xattr(&name)
+        .map_err(xattr_not_found)?;
+    Ok(0)
 });
 
 define_syscall!(Lremovexattr, |path: CString, name: CString| {
     let path_str = path_from_raw(path)?;
-    let _name = xattr_name_from_raw(name)?;
-    ensure_path_exists_at(AT_FDCWD, &path_str, true)?;
-    Err(SyscallError::NoData)
+    let name = xattr_name_from_raw(name)?;
+    xattr_path_object_at(AT_FDCWD, &path_str, true)?
+        .lremove_xattr(&name)
+        .map_err(xattr_not_found)?;
+    Ok(0)
 });
 
 define_syscall!(Fremovexattr, |object: ObjectRef, name: CString| {
-    let _name = xattr_name_from_raw(name)?;
-    ensure_object_supports_xattrs(&object)?;
-    Err(SyscallError::NoData)
+    let name = xattr_name_from_raw(name)?;
+    xattr_fd_object(&object)?
+        .remove_xattr(&name)
+        .map_err(xattr_not_found)?;
+    Ok(0)
 });

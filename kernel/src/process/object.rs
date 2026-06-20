@@ -212,4 +212,13 @@ impl Process {
 
         self.fd_table = new_fd_table();
     }
+
+    pub fn unshare_fd_table(&mut self) {
+        let entries = {
+            let original = self.fd_table.lock();
+            original.clone()
+        };
+        self.fd_table = new_fd_table();
+        *self.fd_table.lock() = entries;
+    }
 }

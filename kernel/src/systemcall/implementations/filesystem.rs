@@ -1277,6 +1277,34 @@ mod tests {
             ));
         }
 
+        expect_ok(
+            SyscallArgs::new([
+                dir_fd as u64,
+                user_page,
+                dir_fd as u64,
+                user_page + 128,
+                1,
+                0,
+            ])
+            .call::<RenameAt2>(),
+            0,
+        );
+        write_user_cstr(user_page, b"subdir/renamed\0");
+        write_user_cstr(user_page + 128, b"subdir/renamed2\0");
+        expect_ok(
+            SyscallArgs::new([
+                dir_fd as u64,
+                user_page,
+                dir_fd as u64,
+                user_page + 128,
+                1,
+                0,
+            ])
+            .call::<RenameAt2>(),
+            0,
+        );
+        write_user_cstr(user_page, b"subdir/renamed2\0");
+        write_user_cstr(user_page + 128, b"subdir/renamed2\0");
         expect_errno(
             SyscallArgs::new([
                 dir_fd as u64,
@@ -1287,7 +1315,7 @@ mod tests {
                 0,
             ])
             .call::<RenameAt2>(),
-            SyscallError::NoSyscall,
+            SyscallError::FileAlreadyExists,
         );
         close_test_fd(dir_fd);
 
@@ -2178,6 +2206,7 @@ mod tests {
         let user_page = allocate_user_test_page();
         write_user_cstr(user_page, b"/tmp/syscall-xattr-test/file\0");
         write_user_cstr(user_page + 128, b"user.test\0");
+        write_user_value(user_page + 256, b"abcd");
         let fd = expect_fd(
             SyscallArgs::new([
                 AT_FDCWD,
@@ -2195,7 +2224,7 @@ mod tests {
                 .call::<Setxattr>(),
             0,
         );
-        expect_ok(
+        expect_errno(
             SyscallArgs::new([
                 user_page,
                 user_page + 128,
@@ -2205,7 +2234,7 @@ mod tests {
                 0,
             ])
             .call::<Setxattr>(),
-            0,
+            SyscallError::FileAlreadyExists,
         );
         expect_ok(
             SyscallArgs::new([
@@ -2249,37 +2278,48 @@ mod tests {
             0,
         );
 
-        expect_errno(
+        expect_ok(
             SyscallArgs::new([user_page, user_page + 128, user_page + 384, 16, 0, 0])
                 .call::<Getxattr>(),
-            SyscallError::NoData,
+            4,
         );
+        assert_user_bytes(user_page + 384, b"abcd");
         expect_errno(
+            SyscallArgs::new([user_page, user_page + 128, user_page + 384, 3, 0, 0])
+                .call::<Getxattr>(),
+            SyscallError::RangeError,
+        );
+        expect_ok(
             SyscallArgs::new([user_page + 64, user_page + 128, user_page + 384, 16, 0, 0])
                 .call::<Lgetxattr>(),
-            SyscallError::NoData,
+            4,
         );
-        expect_errno(
+        expect_ok(
             SyscallArgs::new([fd as u64, user_page + 128, user_page + 384, 16, 0, 0])
                 .call::<Fgetxattr>(),
-            SyscallError::NoData,
+            4,
         );
 
         expect_ok(
             SyscallArgs::new([user_page, user_page + 512, 0, 0, 0, 0]).call::<Listxattr>(),
-            0,
+            10,
         );
         expect_ok(
             SyscallArgs::new([user_page + 64, user_page + 512, 0, 0, 0, 0]).call::<Llistxattr>(),
-            0,
+            10,
         );
         expect_ok(
             SyscallArgs::new([fd as u64, user_page + 512, 0, 0, 0, 0]).call::<Flistxattr>(),
-            0,
+            10,
         );
 
-        expect_errno(
+        expect_ok(
             SyscallArgs::new([user_page, user_page + 128, 0, 0, 0, 0]).call::<Removexattr>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([user_page, user_page + 128, user_page + 384, 16, 0, 0])
+                .call::<Getxattr>(),
             SyscallError::NoData,
         );
         expect_errno(

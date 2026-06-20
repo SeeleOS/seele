@@ -9,7 +9,9 @@ use crate::filesystem::{
     vfs_traits::{Directory, DirectoryContentType, FileLike, FileLikeType},
 };
 
-use super::{TmpNodeKind, TmpfsState, TmpfsStateRef, node_name, tmpfs_lookup_path};
+use super::{
+    DEFAULT_FILE_MODE, TmpNodeKind, TmpfsState, TmpfsStateRef, node_name, tmpfs_lookup_path,
+};
 
 pub(crate) struct TmpfsDirectoryHandle {
     state: TmpfsStateRef,
@@ -79,7 +81,13 @@ impl Directory for TmpfsDirectoryHandle {
     fn create(&self, info: DirectoryContentInfo) -> FSResult<()> {
         let mut state = self.state.lock();
         match info.content_type {
-            DirectoryContentType::File => state.create_file(&self.path, &info.name),
+            DirectoryContentType::File => state.create_file(
+                &self.path,
+                &info.name,
+                info.permission
+                    .unwrap_or(UnixPermission(DEFAULT_FILE_MODE))
+                    .0,
+            ),
             DirectoryContentType::Directory => state.create_directory(
                 &self.path,
                 &info.name,
@@ -118,5 +126,29 @@ impl Directory for TmpfsDirectoryHandle {
         let mut state = self.state.lock();
         let inode = state.node(&self.path)?.inode;
         state.update_owner_by_inode(inode, uid, gid)
+    }
+
+    fn get_xattr(&self, name: &str) -> FSResult<Option<Vec<u8>>> {
+        let state = self.state.lock();
+        let inode = state.node(&self.path)?.inode;
+        Ok(state.xattr(inode, name))
+    }
+
+    fn set_xattr(&self, name: String, value: Vec<u8>, create: bool, replace: bool) -> FSResult<()> {
+        let mut state = self.state.lock();
+        let inode = state.node(&self.path)?.inode;
+        state.set_xattr(inode, name, value, create, replace)
+    }
+
+    fn list_xattrs(&self) -> FSResult<Vec<String>> {
+        let state = self.state.lock();
+        let inode = state.node(&self.path)?.inode;
+        state.list_xattrs(inode)
+    }
+
+    fn remove_xattr(&self, name: &str) -> FSResult<()> {
+        let mut state = self.state.lock();
+        let inode = state.node(&self.path)?.inode;
+        state.remove_xattr(inode, name)
     }
 }

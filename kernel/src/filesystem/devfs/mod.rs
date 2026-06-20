@@ -17,7 +17,7 @@ use crate::{
             StaticDeviceNode, StaticDirEntry, StaticDirectoryNode, StaticNode, StaticSymlinkNode,
             device::StaticDeviceHandle, directory::StaticDirectoryHandle,
         },
-        tmpfs::{TmpNodeKind, TmpfsState, TmpfsStateRef, tmpfs_lookup_path},
+        tmpfs::{DEFAULT_FILE_MODE, TmpNodeKind, TmpfsState, TmpfsStateRef, tmpfs_lookup_path},
         vfs::FSResult,
         vfs_traits::{Directory, DirectoryContentType, FileLike, FileLikeType, FileSystem},
     },
@@ -87,6 +87,14 @@ static DEV_TTY1_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
     mode: 0o020620,
     device_name: "tty1",
     rdev: Some((4u64 << 8) | 1),
+});
+
+static DEV_TTYS0_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
+    name: "ttyS0",
+    inode: 0x101a,
+    mode: 0o020620,
+    device_name: "ttyS0",
+    rdev: Some((4u64 << 8) | 64),
 });
 
 static DEV_TTY2_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
@@ -264,6 +272,10 @@ static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "tty1",
         node: &DEV_TTY1_NODE,
+    },
+    StaticDirEntry {
+        name: "ttyS0",
+        node: &DEV_TTYS0_NODE,
     },
     StaticDirEntry {
         name: "tty2",
@@ -543,7 +555,13 @@ impl Directory for DevDirectoryHandle {
 
         let mut state = self.state.lock();
         match info.content_type {
-            DirectoryContentType::File => state.create_file(&self.path, &info.name),
+            DirectoryContentType::File => state.create_file(
+                &self.path,
+                &info.name,
+                info.permission
+                    .unwrap_or(UnixPermission(DEFAULT_FILE_MODE))
+                    .0,
+            ),
             DirectoryContentType::Directory => state.create_directory(
                 &self.path,
                 &info.name,
