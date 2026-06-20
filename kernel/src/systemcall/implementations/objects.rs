@@ -208,13 +208,13 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
         entry[0..8].copy_from_slice(&inode.to_ne_bytes());
         entry[8..16].copy_from_slice(&((offset_entry as i64) + 1).to_ne_bytes());
         entry[16..18].copy_from_slice(&reclen.to_ne_bytes());
-        entry[18..18 + name_bytes.len()].copy_from_slice(name_bytes);
-        entry[18 + name_bytes.len()] = 0;
-        entry[reclen as usize - 1] = match info.content_type {
+        entry[18] = match info.content_type {
             DirectoryContentType::Directory => 4,
             DirectoryContentType::File => 8,
             DirectoryContentType::Symlink => 10,
         };
+        entry[19..19 + name_bytes.len()].copy_from_slice(name_bytes);
+        entry[19 + name_bytes.len()] = 0;
         user_safe::write_buffer(unsafe { buf.add(bytes_written) }, &entry)?;
 
         bytes_written += reclen as usize;
