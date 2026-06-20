@@ -1016,15 +1016,19 @@ mod tests {
             };
             (saved_signals, saved_action)
         };
-        let saved_thread_signals = {
+        let (saved_thread_signals, saved_blocked_signals) = {
             let current = get_current_thread();
             let mut thread = current.lock();
-            let saved = thread.pending_signals;
+            let saved_signals = thread.pending_signals;
+            let saved_blocked = thread.blocked_signals;
             thread
                 .pending_signals
                 .remove(Signals::from(Signal::SIGUSR1));
             thread.pending_signal_info[Signal::SIGUSR1.index()] = None;
-            saved
+            thread
+                .blocked_signals
+                .remove(Signals::from(Signal::SIGUSR1));
+            (saved_signals, saved_blocked)
         };
 
         let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
@@ -1075,6 +1079,7 @@ mod tests {
             let mut thread = current.lock();
             thread.pending_signals = saved_thread_signals;
             thread.pending_signal_info[Signal::SIGUSR1.index()] = None;
+            thread.blocked_signals = saved_blocked_signals;
         }
         close_test_fd(epoll_fd);
         close_test_fd(eventfd);
