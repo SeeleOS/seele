@@ -54,9 +54,10 @@ fn procfs_static_entry_builders_expose_stable_names() {
     assert_eq!(inotify_entries[2].name, "max_user_watches");
 
     let sys_entries = proc_sys_entries();
-    assert_eq!(sys_entries.len(), 2);
+    assert_eq!(sys_entries.len(), 3);
     assert_eq!(sys_entries[0].name, "fs");
     assert_eq!(sys_entries[1].name, "kernel");
+    assert_eq!(sys_entries[2].name, "vm");
 
     assert_eq!(proc_sysctl_value_bytes(&PROC_PID_MAX), b"4194304\n");
 }
