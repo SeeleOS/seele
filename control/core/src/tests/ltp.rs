@@ -2,9 +2,8 @@ use super::config::RunTestsConfig;
 use crate::{
     Artifact, ArtifactKind, JobContext, LtpCase, LtpReport,
     build::{KernelBuildMode, KernelBuildOptions, build_kernel},
-    iso::{BootConfig, create_boot_iso},
-    qemu::{VmConfig, run_iso_capture},
     target_dir,
+    vm::{BootConfig, VmConfig, create_boot_iso, run_iso_capture},
 };
 use anyhow::{Context, Result, bail};
 use serde_json::Value;

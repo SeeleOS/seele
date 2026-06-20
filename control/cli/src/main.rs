@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use control_core::{
-    plane::ControlPlane, qemu::VmConfig, rootfs::BuildRootfsConfig, tests::RunTestsConfig,
+    plane::ControlPlane, rootfs::BuildRootfsConfig, tests::RunTestsConfig, vm::VmConfig,
 };
 use std::{path::PathBuf, process::ExitCode};
 

@@ -1,8 +1,8 @@
 use crate::{
     JobKind, JobManager,
-    qemu::{self, VmConfig},
     rootfs::{self, BuildRootfsConfig},
     tests::{self, RunTestsConfig},
+    vm::{self, VmConfig},
 };
 use anyhow::Result;
 use std::{path::PathBuf, sync::Arc};
@@ -45,14 +45,14 @@ impl ControlPlane {
             config = VmConfig::for_repo(&repo);
         }
         self.jobs.start(JobKind::RunVm, move |context| {
-            qemu::start_vm(&repo, config, &context)
+            vm::start_vm(&repo, config, &context)
         })
     }
 
     pub fn stop_vm(&self) -> crate::JobStatus {
         let repo = self.repo.clone();
         self.jobs.start(JobKind::Cleanup, move |context| {
-            qemu::stop_vm(&repo, &context)
+            vm::stop_vm(&repo, &context)
         })
     }
 
@@ -71,39 +71,39 @@ impl ControlPlane {
         })
     }
 
-    pub fn vm_status(&self) -> qemu::VmStatus {
-        qemu::vm_status(&self.repo)
+    pub fn vm_status(&self) -> vm::VmStatus {
+        vm::vm_status(&self.repo)
     }
 
     pub fn serial_tail(&self, lines: Option<usize>, bytes: Option<usize>) -> Result<String> {
-        qemu::serial_tail(&self.repo, lines, bytes)
+        vm::serial_tail(&self.repo, lines, bytes)
     }
 
     pub fn wait_serial(&self, pattern: String, timeout_ms: Option<u64>) -> crate::JobStatus {
         let repo = self.repo.clone();
         self.jobs.start(JobKind::RunVm, move |context| {
-            qemu::wait_serial(&repo, &pattern, timeout_ms, &context)?;
+            vm::wait_serial(&repo, &pattern, timeout_ms, &context)?;
             Ok(0)
         })
     }
 
     pub fn screenshot(&self) -> Result<PathBuf> {
-        qemu::screenshot(&self.repo)
+        vm::screenshot(&self.repo)
     }
 
     pub fn send_key(&self, keys: &[String]) -> Result<()> {
-        qemu::send_key(&self.repo, keys)
+        vm::send_key(&self.repo, keys)
     }
 
     pub fn type_text(&self, text: &str) -> Result<()> {
-        qemu::type_text(&self.repo, text)
+        vm::type_text(&self.repo, text)
     }
 
     pub fn mouse_move(&self, x: i64, y: i64) -> Result<()> {
-        qemu::mouse_move(&self.repo, x, y)
+        vm::mouse_move(&self.repo, x, y)
     }
 
     pub fn mouse_click(&self, button: &str) -> Result<()> {
-        qemu::mouse_click(&self.repo, button)
+        vm::mouse_click(&self.repo, button)
     }
 }

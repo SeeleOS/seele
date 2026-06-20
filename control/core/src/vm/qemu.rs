@@ -1,9 +1,9 @@
 use crate::{
     Artifact, ArtifactKind, Event, JobContext, VmEvent, VmSmokeReport,
     build::{KernelBuildMode, KernelBuildOptions, build_kernel},
-    iso::{BootConfig, create_boot_iso},
     process::ProcessRunner,
     target_dir,
+    vm::iso::{BootConfig, create_boot_iso},
 };
 use anyhow::{Context, Result, bail};
 use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};

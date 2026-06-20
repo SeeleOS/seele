@@ -1,6 +1,6 @@
 use anyhow::Result;
 use control_core::{
-    plane::ControlPlane, qemu::VmConfig, rootfs::BuildRootfsConfig, tests::RunTestsConfig,
+    plane::ControlPlane, rootfs::BuildRootfsConfig, tests::RunTestsConfig, vm::VmConfig,
 };
 use rmcp::{
     ServerHandler,

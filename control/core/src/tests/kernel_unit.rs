@@ -1,8 +1,7 @@
 use crate::{
     JobContext, KernelUnitReport,
     build::{KernelBuildMode, KernelBuildOptions, build_kernel},
-    iso::{BootConfig, create_boot_iso},
-    qemu::{VmConfig, run_iso_capture},
+    vm::{BootConfig, VmConfig, create_boot_iso, run_iso_capture},
 };
 use anyhow::Result;
 use std::{path::Path, time::Duration};
