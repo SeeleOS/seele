@@ -26,7 +26,6 @@ const DEFAULT_REPO: &str = "/home/elysia/coding-project/seele-os-linux";
 const DEFAULT_QMP_SOCKET: &str = "/tmp/seele-agent-qmp.sock";
 const DEFAULT_SERIAL_LOG: &str = "/tmp/seele-agent-serial.log";
 const DEFAULT_COMMAND_LOG_DIR: &str = "/tmp/seele-agent-xtask";
-const LOG_LIMIT: usize = 64 * 1024;
 const COMMAND_STATUS_REFRESH: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Serialize)]
@@ -147,8 +146,8 @@ impl AgentSession {
         Ok(DebugStartStatus {
             metadata,
             gdb_port: port,
-            startup_output: truncate_log(&startup_output),
-            connect_output: truncate_log(&connect_output),
+            startup_output,
+            connect_output,
         })
     }
 
@@ -302,7 +301,7 @@ impl AgentSession {
         match read_gdb_until_prompt(&mut gdb.stdout, timeout_duration).await {
             Ok(output) => Ok(GdbCommandOutput {
                 timed_out: false,
-                output: truncate_log(&output),
+                output,
             }),
             Err(err) if err.is::<tokio::time::error::Elapsed>() => Ok(GdbCommandOutput {
                 timed_out: true,
@@ -421,8 +420,8 @@ impl AgentSession {
             exit_code: 0,
             stdout: String::new(),
             stderr: String::new(),
-            stdout_limit: Some(LOG_LIMIT),
-            stderr_limit: Some(LOG_LIMIT),
+            stdout_limit: None,
+            stderr_limit: None,
             stdout_path: None,
             stderr_path: None,
             events: Vec::new(),
@@ -477,8 +476,8 @@ impl AgentSession {
             .with_context(|| format!("failed to mount rootfs from {}", rootfs_image.display()))?;
         Ok(CommandOutput {
             exit_code: output.status.code().unwrap_or(1),
-            stdout: truncate_log(String::from_utf8_lossy(&output.stdout).as_ref()),
-            stderr: truncate_log(String::from_utf8_lossy(&output.stderr).as_ref()),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             events: Vec::new(),
         })
     }
@@ -511,8 +510,8 @@ impl AgentSession {
             .with_context(|| format!("failed to unmount {}", rootfs_mount.display()))?;
         Ok(CommandOutput {
             exit_code: output.status.code().unwrap_or(1),
-            stdout: truncate_log(String::from_utf8_lossy(&output.stdout).as_ref()),
-            stderr: truncate_log(String::from_utf8_lossy(&output.stderr).as_ref()),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             events: Vec::new(),
         })
     }
@@ -673,7 +672,7 @@ async fn run_workflow_job(
                         1,
                         collector.events(),
                         String::new(),
-                        truncate_log(&err.to_string()),
+                        err.to_string(),
                     );
                     let _ = write_command_status(&status_path, &status).await;
                     return;
@@ -776,7 +775,7 @@ fn status_from_error(
         1,
         events,
         String::new(),
-        truncate_log(&err.to_string()),
+        err.to_string(),
     )
 }
 
@@ -801,32 +800,14 @@ fn command_status_from_parts(
         timed_out,
         timeout_ms,
         exit_code,
-        stdout: truncate_log(&stdout),
-        stderr: truncate_log(&stderr),
-        stdout_limit: Some(LOG_LIMIT),
-        stderr_limit: Some(LOG_LIMIT),
+        stdout,
+        stderr,
+        stdout_limit: None,
+        stderr_limit: None,
         stdout_path: None,
         stderr_path: None,
-        events: truncate_workflow_events(events),
+        events,
     }
-}
-
-fn truncate_workflow_events(events: Vec<WorkflowEvent>) -> Vec<WorkflowEvent> {
-    events
-        .into_iter()
-        .map(|event| match event {
-            WorkflowEvent::Log {
-                command,
-                stream,
-                output,
-            } => WorkflowEvent::Log {
-                command,
-                stream,
-                output: truncate_log(&output),
-            },
-            other => other,
-        })
-        .collect()
 }
 
 fn summarize_workflow_events(events: &[WorkflowEvent]) -> String {
@@ -849,7 +830,7 @@ fn summarize_workflow_events(events: &[WorkflowEvent]) -> String {
                     lines.push(format!("test {name}: {} - {message}", status.as_str()));
                 }
             }
-            WorkflowEvent::Log { output, .. } => lines.push(truncate_log(output)),
+            WorkflowEvent::Log { output, .. } => lines.push(output.clone()),
             WorkflowEvent::Metadata { metadata, .. } => lines.push(metadata.to_string()),
             WorkflowEvent::Finished {
                 command,
@@ -861,7 +842,7 @@ fn summarize_workflow_events(events: &[WorkflowEvent]) -> String {
             )),
         }
     }
-    truncate_log(&lines.join("\n"))
+    lines.join("\n")
 }
 
 async fn refresh_child_state(state: &mut SessionState) {
@@ -949,15 +930,6 @@ async fn read_gdb_until_prompt(
         }
     })
     .await?
-}
-
-fn truncate_log(text: &str) -> String {
-    const LIMIT: usize = 64 * 1024;
-    if text.len() <= LIMIT {
-        return text.to_string();
-    }
-    let start = text.len().saturating_sub(LIMIT);
-    format!("[truncated]\n{}", &text[start..])
 }
 
 #[cfg(test)]
