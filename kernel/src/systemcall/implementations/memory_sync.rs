@@ -1037,6 +1037,10 @@ define_syscall!(Munmap, |addr: VirtAddr, len: u64| {
     if start == end {
         return Ok(0);
     }
+    let end = align_up(end, Size4KiB::SIZE);
+    if end > crate::memory::addrspace::USER_MEM_END {
+        return Err(SyscallError::NoMemory);
+    }
     get_current_process()
         .lock()
         .addrspace
@@ -1840,6 +1844,29 @@ mod tests {
             ])
             .call::<Munmap>(),
             SyscallError::NoMemory,
+        );
+        let rounded_munmap_addr = SyscallArgs::new([
+            0,
+            8192,
+            (Protection::READ | Protection::WRITE).bits() as u64,
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            u64::MAX,
+            0,
+        ])
+        .call::<Mmap>()
+        .expect("rounded munmap test mapping should succeed")
+            as u64;
+        expect_ok(
+            SyscallArgs::new([rounded_munmap_addr, 4097, 0, 0, 0, 0]).call::<Munmap>(),
+            0,
+        );
+        assert!(
+            process
+                .lock()
+                .addrspace
+                .get_area(x86_64::VirtAddr::new(rounded_munmap_addr))
+                .is_none(),
+            "munmap length must be rounded up and remove all covered pages"
         );
         expect_ok(
             SyscallArgs::new([fd as u64, 8192, 0, 0, 0, 0]).call::<Ftruncate>(),
