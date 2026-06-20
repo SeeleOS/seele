@@ -49,7 +49,10 @@ pub struct StartVmRequest {
     pub qmp_socket: Option<PathBuf>,
     pub serial_log: Option<PathBuf>,
     pub rootfs_image: Option<PathBuf>,
+    pub ltp_device_image: Option<PathBuf>,
+    pub iso_image: Option<PathBuf>,
     pub enable_profiling: Option<bool>,
+    pub display: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -121,7 +124,8 @@ impl ControlMcp {
 
     #[tool(description = "Start a managed Seele OS QEMU VM job")]
     async fn start_vm(&self, Parameters(request): Parameters<StartVmRequest>) -> CallToolResult {
-        let mut config = VmConfig::for_repo(&std::env::current_dir().unwrap_or_default());
+        let repo = std::env::current_dir().expect("failed to resolve current directory");
+        let mut config = VmConfig::for_repo(&repo);
         if let Some(path) = request.qmp_socket {
             config.qmp_socket = path;
         }
@@ -131,7 +135,14 @@ impl ControlMcp {
         if let Some(path) = request.rootfs_image {
             config.rootfs_image = path;
         }
+        if let Some(path) = request.ltp_device_image {
+            config.ltp_device_image = path;
+        }
+        if let Some(path) = request.iso_image {
+            config.iso_image = Some(path);
+        }
         config.enable_profiling = request.enable_profiling.unwrap_or(false);
+        config.display = request.display.unwrap_or(false);
         json_result(Ok(self.plane.start_vm(config)))
     }
 
@@ -236,17 +247,17 @@ impl ControlMcp {
         self.job_cancel(Parameters(request)).await
     }
 
-    #[tool(description = "QMP keyboard input placeholder; returns a structured unsupported error")]
+    #[tool(description = "Send a QMP keyboard key or key combination to the VM")]
     async fn send_key(&self, Parameters(request): Parameters<SendKeyRequest>) -> CallToolResult {
         unit_result(self.plane.send_key(&request.keys))
     }
 
-    #[tool(description = "QMP text input placeholder; returns a structured unsupported error")]
+    #[tool(description = "Type ASCII text into the VM through QMP keyboard events")]
     async fn type_text(&self, Parameters(request): Parameters<TypeTextRequest>) -> CallToolResult {
         unit_result(self.plane.type_text(&request.text))
     }
 
-    #[tool(description = "QMP mouse move placeholder; returns a structured unsupported error")]
+    #[tool(description = "Move the VM absolute pointer through QMP")]
     async fn mouse_move(
         &self,
         Parameters(request): Parameters<MouseMoveRequest>,
@@ -254,7 +265,7 @@ impl ControlMcp {
         unit_result(self.plane.mouse_move(request.x, request.y))
     }
 
-    #[tool(description = "QMP mouse click placeholder; returns a structured unsupported error")]
+    #[tool(description = "Click a VM mouse button through QMP")]
     async fn mouse_click(
         &self,
         Parameters(request): Parameters<MouseClickRequest>,

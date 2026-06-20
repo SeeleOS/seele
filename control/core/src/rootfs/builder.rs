@@ -1,13 +1,14 @@
 use super::{
+    arch::{PacmanConfig, configure_login_services, install_packages, set_empty_root_password},
+    aur::{install_aur_packages, validate_rebuild_packages},
     config::BuildRootfsConfig,
+    kirk::install_kirk,
     mount::{ensure_mounted_with_runner, unmount_with_runner},
     paths::paths,
     steps::run_step,
 };
-use crate::{
-    Artifact, ArtifactKind, Event, JobContext, RootfsEvent, StepState, process::ProcessRunner,
-};
-use anyhow::{Context, Result, bail};
+use crate::{Artifact, ArtifactKind, JobContext, process::ProcessRunner};
+use anyhow::{Context, Result};
 use std::{fs, path::Path, process::Command};
 
 pub fn build_rootfs(repo: &Path, config: &BuildRootfsConfig, context: &JobContext) -> Result<i32> {
@@ -42,33 +43,30 @@ pub fn build_rootfs(repo: &Path, config: &BuildRootfsConfig, context: &JobContex
     run_step(context, "mount", || {
         ensure_mounted_with_runner(&runner, context, &paths)
     })?;
+    let pacman_conf = PacmanConfig::create(repo)?;
     run_step(context, "install_base", || {
-        runner.run_success(
-            context,
-            "pacstrap_base",
-            Command::new("sudo")
-                .arg("pacstrap")
-                .arg("-M")
-                .arg(&paths.mount)
-                .args(["base", "bash", "coreutils", "util-linux", "procps-ng"]),
-        )?;
-        Ok(())
+        install_packages(&runner, context, pacman_conf.path(), &paths.mount)
+    })?;
+    run_step(context, "set_empty_root_password", || {
+        set_empty_root_password(&runner, context, &paths.mount)
+    })?;
+    run_step(context, "configure_login_services", || {
+        configure_login_services(&runner, context, &paths.mount)
     })?;
     run_step(context, "install_aur", || {
-        if config.rebuild_aur || !config.rebuild_aur_packages.is_empty() {
-            context.event(Event::Rootfs(RootfsEvent {
-                step: "install_aur".to_string(),
-                state: StepState::Skipped,
-                message: "AUR rebuild requested; package-specific implementation is intentionally not stubbed in the new control plane yet".to_string(),
-            }));
-            bail!("AUR package build is not implemented in the new control plane");
-        }
-        Ok(())
+        let rebuild_aur = config.rebuild_aur();
+        validate_rebuild_packages(&rebuild_aur.packages)?;
+        install_aur_packages(
+            repo,
+            &runner,
+            context,
+            pacman_conf.path(),
+            &paths.mount,
+            &rebuild_aur,
+        )
     })?;
     run_step(context, "install_kirk_ltp", || {
-        fs::create_dir_all(paths.mount.join("opt/seele-tests"))
-            .context("failed to create test directory in rootfs")?;
-        Ok(())
+        install_kirk(repo, &runner, context, &paths.mount)
     })?;
     run_step(context, "configure", || {
         fs::create_dir_all(paths.mount.join("var/log")).context("failed to create var/log")?;

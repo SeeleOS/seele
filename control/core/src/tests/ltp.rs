@@ -1,8 +1,18 @@
 use super::config::RunTestsConfig;
-use crate::{Artifact, ArtifactKind, JobContext, LtpCase, LtpReport, target_dir};
+use crate::{
+    Artifact, ArtifactKind, JobContext, LtpCase, LtpReport,
+    build::{KernelBuildMode, KernelBuildOptions, build_kernel},
+    iso::{BootConfig, create_boot_iso},
+    qemu::{VmConfig, run_iso_capture},
+    target_dir,
+};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
-use std::{fs, path::Path};
+use std::{fs, path::Path, time::Duration};
+
+const REPORT_BEGIN: &str = "__SEELE_LTP_JSON_BEGIN__";
+const REPORT_END: &str = "__SEELE_LTP_JSON_END__";
+const EXIT_PREFIX: &str = "__SEELE_LTP_EXIT__:";
 
 pub fn run(repo: &Path, config: &RunTestsConfig, context: &JobContext) -> Result<LtpReport> {
     let artifact_dir = target_dir(repo)
@@ -18,14 +28,65 @@ pub fn run(repo: &Path, config: &RunTestsConfig, context: &JobContext) -> Result
         description: "kirk JSON report".to_string(),
     });
 
-    if !kirk_json.exists() {
+    let kernels = build_kernel(
+        repo,
+        KernelBuildMode::Run,
+        KernelBuildOptions::default(),
+        context,
+    )?;
+    let iso = create_boot_iso(
+        repo,
+        &kernels[0],
+        &BootConfig {
+            init: Some("/usr/local/bin/seele-run-ltp".to_string()),
+            ltp_suite: config.ltp_suite.clone(),
+            ltp_pattern: config.ltp_pattern.clone(),
+        },
+        context,
+    )?;
+    let result = run_iso_capture(
+        repo,
+        &iso,
+        VmConfig::for_repo(repo),
+        Some(Duration::from_secs(45 * 60)),
+        Some(ltp_report_observed),
+        context,
+    )?;
+
+    let report_json = extract_ltp_report(&result.serial_output).with_context(|| {
+        format!(
+            "LTP JSON report was not observed in {}",
+            result.serial_log.display()
+        )
+    })?;
+    fs::write(&kirk_json, &report_json)
+        .with_context(|| format!("failed to write {}", kirk_json.display()))?;
+    let mut report = parse_report(&kirk_json, config)?;
+    report.artifact = Some(kirk_json);
+    let exit_code = parse_ltp_exit_code(&result.serial_output).unwrap_or(result.exit_code);
+    if exit_code != 0 || report.failed > 0 {
         bail!(
-            "LTP execution is not implemented in the new control plane yet; expected kirk JSON artifact at {}",
-            kirk_json.display()
+            "LTP failed: kirk exit {exit_code}, failed cases {}",
+            report.failed
         );
     }
+    Ok(report)
+}
 
-    parse_report(&kirk_json, config)
+fn ltp_report_observed(output: &str) -> bool {
+    output.contains(REPORT_END) && output.contains(EXIT_PREFIX)
+}
+
+fn parse_ltp_exit_code(output: &str) -> Option<i32> {
+    output
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(EXIT_PREFIX)?.parse().ok())
+}
+
+fn extract_ltp_report(output: &str) -> Option<String> {
+    let start = output.find(REPORT_BEGIN)? + REPORT_BEGIN.len();
+    let end = output[start..].find(REPORT_END)? + start;
+    Some(strip_ansi_escape_sequences(output[start..end].trim()))
 }
 
 fn parse_report(path: &Path, config: &RunTestsConfig) -> Result<LtpReport> {
@@ -48,6 +109,7 @@ fn parse_report(path: &Path, config: &RunTestsConfig) -> Result<LtpReport> {
                 .to_string(),
             status: case
                 .get("status")
+                .or_else(|| case.pointer("/test/result"))
                 .and_then(Value::as_str)
                 .unwrap_or("unknown")
                 .to_string(),
@@ -55,7 +117,7 @@ fn parse_report(path: &Path, config: &RunTestsConfig) -> Result<LtpReport> {
         })
         .collect::<Vec<_>>();
 
-    let summary = value.get("summary");
+    let summary = value.get("summary").or_else(|| value.get("stats"));
     Ok(LtpReport {
         suite: config.ltp_suite.clone(),
         pattern: config.ltp_pattern.clone(),
@@ -83,4 +145,46 @@ fn count_status(cases: &[LtpCase], needle: &str) -> u64 {
         .iter()
         .filter(|case| case.status.to_ascii_lowercase().contains(needle))
         .count() as u64
+}
+
+fn strip_ansi_escape_sequences(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\x1b' {
+            output.push(ch);
+            continue;
+        }
+        match chars.peek() {
+            Some('[') => {
+                chars.next();
+                for ch in chars.by_ref() {
+                    if ('@'..='~').contains(&ch) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                chars.next();
+                while let Some(ch) = chars.next() {
+                    if ch == '\x07' {
+                        break;
+                    }
+                    if ch == '\x1b' && matches!(chars.peek(), Some('\\')) {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            Some('%' | '(' | ')' | '*' | '+' | '-' | '.' | '/') => {
+                chars.next();
+                chars.next();
+            }
+            Some(_) => {
+                chars.next();
+            }
+            None => {}
+        }
+    }
+    output
 }

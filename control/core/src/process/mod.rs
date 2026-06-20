@@ -77,6 +77,15 @@ impl ProcessRunner {
     pub fn artifact_dir(&self) -> &Path {
         &self.artifact_dir
     }
+
+    pub fn run_shell_success(
+        &self,
+        context: &JobContext,
+        name: &str,
+        script: &str,
+    ) -> Result<ProcessResult> {
+        self.run_success(context, name, Command::new("bash").arg("-lc").arg(script))
+    }
 }
 
 fn write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {

@@ -1,5 +1,8 @@
+mod arch;
+mod aur;
 mod builder;
 mod config;
+mod kirk;
 mod mount;
 mod paths;
 mod steps;

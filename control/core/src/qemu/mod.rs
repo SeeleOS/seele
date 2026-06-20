@@ -1,8 +1,12 @@
 use crate::{
-    Artifact, ArtifactKind, Event, JobContext, VmEvent, VmSmokeReport, process::ProcessRunner,
+    Artifact, ArtifactKind, Event, JobContext, VmEvent, VmSmokeReport,
+    build::{KernelBuildMode, KernelBuildOptions, build_kernel},
+    iso::{BootConfig, create_boot_iso},
+    process::ProcessRunner,
     target_dir,
 };
 use anyhow::{Context, Result, bail};
+use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -20,7 +24,10 @@ pub struct VmConfig {
     pub qmp_socket: PathBuf,
     pub serial_log: PathBuf,
     pub rootfs_image: PathBuf,
+    pub ltp_device_image: PathBuf,
+    pub iso_image: Option<PathBuf>,
     pub enable_profiling: bool,
+    pub display: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,51 +40,100 @@ pub struct VmStatus {
     pub serial_log_exists: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct QemuRunResult {
+    pub exit_code: i32,
+    pub serial_log: PathBuf,
+    pub serial_output: String,
+    pub failure: Option<String>,
+}
+
 impl VmConfig {
     pub fn for_repo(repo: &Path) -> Self {
         Self {
             qmp_socket: PathBuf::from("/tmp/seele-agent-qmp.sock"),
             serial_log: PathBuf::from("/tmp/seele-agent-serial.log"),
             rootfs_image: target_dir(repo).join("rootfs.img"),
+            ltp_device_image: target_dir(repo).join("ltp-dev.img"),
+            iso_image: None,
             enable_profiling: false,
+            display: false,
         }
     }
 }
 
 pub fn start_vm(repo: &Path, mut config: VmConfig, context: &JobContext) -> Result<i32> {
-    config.rootfs_image = if config.rootfs_image.is_relative() {
-        repo.join(&config.rootfs_image)
-    } else {
-        config.rootfs_image
+    absolutize_paths(repo, &mut config);
+    let iso = match config.iso_image.clone() {
+        Some(iso) => iso,
+        None => {
+            let kernels = build_kernel(
+                repo,
+                KernelBuildMode::Run,
+                KernelBuildOptions {
+                    enable_profiling: config.enable_profiling,
+                },
+                context,
+            )?;
+            create_boot_iso(repo, &kernels[0], &BootConfig::default(), context)?
+        }
     };
-    let artifact_dir = target_dir(repo).join("control-artifacts").join("vm");
-    fs::create_dir_all(&artifact_dir)
-        .with_context(|| format!("failed to create {}", artifact_dir.display()))?;
-    let _ = fs::remove_file(&config.qmp_socket);
-    let _ = fs::remove_file(&config.serial_log);
-    let stderr = fs::File::create(artifact_dir.join("qemu.stderr.log"))?;
-    let stdout = fs::File::create(artifact_dir.join("qemu.stdout.log"))?;
-    context.artifact(Artifact {
-        kind: ArtifactKind::SerialLog,
-        path: config.serial_log.clone(),
-        description: "QEMU serial log".to_string(),
-    });
+    let mut child = spawn_qemu(repo, &iso, &config, context)?;
+    wait_for_qmp_or_exit(&mut child, &config.qmp_socket, Duration::from_secs(30))
+}
 
-    let mut command = qemu_command(&config);
-    let child = command
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
-        .spawn()
-        .context("failed to start qemu-system-x86_64")?;
-    let pid = child.id();
-    fs::write(artifact_dir.join("qemu.pid"), pid.to_string())?;
-    context.event(Event::Vm(VmEvent::Started {
-        runner_pid: std::process::id(),
-        qemu_pid: Some(pid),
-        qmp_socket: config.qmp_socket.clone(),
-        serial_log: config.serial_log.clone(),
-    }));
-    wait_for_qmp_or_exit(child, &config.qmp_socket, Duration::from_secs(30))
+pub fn run_iso_capture(
+    repo: &Path,
+    iso: &Path,
+    mut config: VmConfig,
+    timeout: Option<Duration>,
+    condition: Option<fn(&str) -> bool>,
+    context: &JobContext,
+) -> Result<QemuRunResult> {
+    absolutize_paths(repo, &mut config);
+    let mut child = spawn_qemu(repo, iso, &config, context)?;
+    let deadline = timeout.map(|timeout| Instant::now() + timeout);
+    let mut captured = String::new();
+    let mut offset = 0;
+
+    loop {
+        append_serial(&config.serial_log, &mut offset, &mut captured);
+        if condition.is_some_and(|condition| condition(&captured)) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(QemuRunResult {
+                exit_code: 0,
+                serial_log: config.serial_log,
+                serial_output: captured,
+                failure: None,
+            });
+        }
+
+        if let Some(status) = child.try_wait().context("failed to poll qemu")? {
+            append_serial(&config.serial_log, &mut offset, &mut captured);
+            let exit_code = decode_qemu_exit_code(status.code());
+            return Ok(QemuRunResult {
+                exit_code,
+                serial_log: config.serial_log,
+                serial_output: captured,
+                failure: (exit_code != 0).then(|| format!("qemu exited with code {exit_code}")),
+            });
+        }
+
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            let _ = child.kill();
+            let _ = child.wait();
+            append_serial(&config.serial_log, &mut offset, &mut captured);
+            return Ok(QemuRunResult {
+                exit_code: 1,
+                serial_log: config.serial_log,
+                serial_output: captured,
+                failure: Some("timed out waiting for qemu".to_string()),
+            });
+        }
+
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 pub fn stop_vm(repo: &Path, context: &JobContext) -> Result<i32> {
@@ -248,11 +304,45 @@ pub fn mouse_click(repo: &Path, button: &str) -> Result<()> {
     Ok(())
 }
 
-fn qemu_command(config: &VmConfig) -> Command {
+fn spawn_qemu(repo: &Path, iso: &Path, config: &VmConfig, context: &JobContext) -> Result<Child> {
+    let artifact_dir = target_dir(repo).join("control-artifacts").join("vm");
+    fs::create_dir_all(&artifact_dir)
+        .with_context(|| format!("failed to create {}", artifact_dir.display()))?;
+    let _ = fs::remove_file(&config.qmp_socket);
+    let _ = fs::remove_file(&config.serial_log);
+    ensure_ltp_device_image(&config.ltp_device_image)?;
+    let stderr = fs::File::create(artifact_dir.join("qemu.stderr.log"))?;
+    let stdout = fs::File::create(artifact_dir.join("qemu.stdout.log"))?;
+    context.artifact(Artifact {
+        kind: ArtifactKind::SerialLog,
+        path: config.serial_log.clone(),
+        description: "QEMU serial log".to_string(),
+    });
+
+    let mut command = qemu_command(repo, iso, config)?;
+    let child = command
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
+        .spawn()
+        .context("failed to start qemu-system-x86_64")?;
+    let pid = child.id();
+    fs::write(artifact_dir.join("qemu.pid"), pid.to_string())?;
+    context.event(Event::Vm(VmEvent::Started {
+        runner_pid: std::process::id(),
+        qemu_pid: Some(pid),
+        qmp_socket: config.qmp_socket.clone(),
+        serial_log: config.serial_log.clone(),
+    }));
+    Ok(child)
+}
+
+fn qemu_command(repo: &Path, iso: &Path, config: &VmConfig) -> Result<Command> {
     let mut command = Command::new("qemu-system-x86_64");
     command
         .args(["-machine", "q35"])
-        .args(["-m", "2G"])
+        .args(["-m", "4G"])
+        .arg("-smp")
+        .arg(default_smp())
         .args(["-serial"])
         .arg(format!("file:{}", config.serial_log.display()))
         .args(["-qmp"])
@@ -260,16 +350,56 @@ fn qemu_command(config: &VmConfig) -> Command {
             "unix:{},server=on,wait=off",
             config.qmp_socket.display()
         ))
-        .args(["-drive"])
-        .arg(format!(
-            "file={},format=raw,if=virtio",
+        .args(["-monitor", "none"])
+        .args(["-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"])
+        .args(["-device", "qemu-xhci"])
+        .args(["-device", "usb-tablet"])
+        .args(["-display", if config.display { "sdl" } else { "none" }])
+        .args(["-cdrom"])
+        .arg(iso);
+
+    if Path::new("/dev/kvm").exists() {
+        command
+            .arg("-enable-kvm")
+            .args(["-cpu", "host,+hypervisor,+kvmclock,+kvmclock-stable-bit"]);
+    }
+    if config.rootfs_image.exists() {
+        command.arg("-drive").arg(format!(
+            "if=none,format=raw,file={},id=rootdisk",
             config.rootfs_image.display()
-        ))
-        .args(["-display", "none"]);
+        ));
+        command
+            .arg("-device")
+            .arg("virtio-blk-pci,drive=rootdisk,disable-legacy=on,disable-modern=off");
+    }
+    command.arg("-drive").arg(format!(
+        "if=none,format=raw,file={},id=ltpdisk",
+        config.ltp_device_image.display()
+    ));
     command
+        .arg("-device")
+        .arg("virtio-blk-pci,drive=ltpdisk,disable-legacy=on,disable-modern=off");
+    command
+        .args(["-netdev", "user,id=net0"])
+        .args(["-device", "e1000,netdev=net0,mac=52:54:00:12:34:56"]);
+
+    let prebuilt = Prebuilt::fetch(Source::LATEST, repo.join("target/ovmf"))
+        .context("failed to fetch OVMF")?;
+    let code = prebuilt.get_file(Arch::X64, FileType::Code);
+    let vars = prebuilt.get_file(Arch::X64, FileType::Vars);
+    command.arg("-drive").arg(format!(
+        "if=pflash,format=raw,unit=0,file={},readonly=on",
+        code.display()
+    ));
+    command.arg("-drive").arg(format!(
+        "if=pflash,format=raw,unit=1,file={},snapshot=on",
+        vars.display()
+    ));
+    command.args(["-no-reboot", "-action", "reboot=shutdown"]);
+    Ok(command)
 }
 
-fn wait_for_qmp_or_exit(mut child: Child, qmp_socket: &Path, timeout: Duration) -> Result<i32> {
+fn wait_for_qmp_or_exit(child: &mut Child, qmp_socket: &Path, timeout: Duration) -> Result<i32> {
     let deadline = Instant::now() + timeout;
     loop {
         if qmp_socket.exists() {
@@ -284,6 +414,66 @@ fn wait_for_qmp_or_exit(mut child: Child, qmp_socket: &Path, timeout: Duration) 
             bail!("timed out waiting for QMP socket");
         }
         thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn decode_qemu_exit_code(code: Option<i32>) -> i32 {
+    match code.unwrap_or(1) {
+        33 => 0,
+        35 => 1,
+        other => other.max(1),
+    }
+}
+
+fn ensure_ltp_device_image(path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(path)
+        .with_context(|| format!("failed to open {}", path.display()))?;
+    let min_size = 512 * 1024 * 1024;
+    if file.metadata()?.len() < min_size {
+        file.set_len(min_size)
+            .with_context(|| format!("failed to size {}", path.display()))?;
+    }
+    Ok(())
+}
+
+fn default_smp() -> String {
+    thread::available_parallelism()
+        .map(|count| count.get().to_string())
+        .unwrap_or_else(|_| "1".to_string())
+}
+
+fn append_serial(path: &Path, offset: &mut usize, captured: &mut String) {
+    let Ok(content) = fs::read_to_string(path) else {
+        return;
+    };
+    if *offset > content.len() {
+        *offset = 0;
+    }
+    if *offset < content.len() {
+        captured.push_str(&content[*offset..]);
+        *offset = content.len();
+    }
+}
+
+fn absolutize_paths(repo: &Path, config: &mut VmConfig) {
+    if config.rootfs_image.is_relative() {
+        config.rootfs_image = repo.join(&config.rootfs_image);
+    }
+    if config.ltp_device_image.is_relative() {
+        config.ltp_device_image = repo.join(&config.ltp_device_image);
+    }
+    if let Some(iso) = &config.iso_image
+        && iso.is_relative()
+    {
+        config.iso_image = Some(repo.join(iso));
     }
 }
 

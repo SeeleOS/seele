@@ -36,7 +36,13 @@ struct VmArgs {
     #[arg(long)]
     rootfs_image: Option<PathBuf>,
     #[arg(long)]
+    ltp_device_image: Option<PathBuf>,
+    #[arg(long)]
+    iso_image: Option<PathBuf>,
+    #[arg(long)]
     enable_profiling: bool,
+    #[arg(long)]
+    display: bool,
 }
 
 #[derive(Debug, Args)]
@@ -130,7 +136,8 @@ fn real_main() -> Result<i32> {
 }
 
 fn vm_config(args: VmArgs) -> VmConfig {
-    let mut config = VmConfig::for_repo(&std::env::current_dir().unwrap_or_default());
+    let repo = std::env::current_dir().expect("failed to resolve current directory");
+    let mut config = VmConfig::for_repo(&repo);
     if let Some(path) = args.qmp_socket {
         config.qmp_socket = path;
     }
@@ -140,7 +147,14 @@ fn vm_config(args: VmArgs) -> VmConfig {
     if let Some(path) = args.rootfs_image {
         config.rootfs_image = path;
     }
+    if let Some(path) = args.ltp_device_image {
+        config.ltp_device_image = path;
+    }
+    if let Some(path) = args.iso_image {
+        config.iso_image = Some(path);
+    }
     config.enable_profiling = args.enable_profiling;
+    config.display = args.display;
     config
 }
 
