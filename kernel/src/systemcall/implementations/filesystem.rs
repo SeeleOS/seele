@@ -292,7 +292,7 @@ mod tests {
         expect_errno(
             SyscallArgs::new([file_fd as u64, user_page + 128, 0, 0x8000_0000, 0, 0])
                 .call::<Faccessat2>(),
-            SyscallError::NoSyscall,
+            SyscallError::InvalidArguments,
         );
         close_test_fd(file_fd);
 
