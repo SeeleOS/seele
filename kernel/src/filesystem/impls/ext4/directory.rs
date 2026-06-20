@@ -361,6 +361,13 @@ impl Directory for Ext4Directory {
                 }
             }
 
+            let mut child_inode = inode;
+            child_inode.set_links_count(1);
+            child_inode.write(&self.fs).map_err(map_ext4_error)?;
+            parent
+                .unlink(entry_name, child_inode)
+                .map_err(map_ext4_error)?;
+
             let new_links = parent_inode
                 .links_count()
                 .checked_sub(1)
@@ -369,13 +376,6 @@ impl Directory for Ext4Directory {
             parent_inode.write(&self.fs).map_err(map_ext4_error)?;
             self.update_cached_inode(parent_inode);
             lookup_cache_clear(&self.lookup_cache);
-
-            let mut child_inode = inode;
-            child_inode.set_links_count(1);
-            child_inode.write(&self.fs).map_err(map_ext4_error)?;
-            parent
-                .unlink(entry_name, child_inode)
-                .map_err(map_ext4_error)?;
             return Ok(());
         } else {
             lookup_cache_remove(&self.lookup_cache, &parent_inode, name);
