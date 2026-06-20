@@ -18,8 +18,6 @@ use crate::{
     thread::{get_current_thread, yielding::BlockType, yielding::WakeType},
 };
 
-const SA_RESTART: u64 = 0x1000_0000;
-
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(in crate::systemcall) struct Timespec {
@@ -50,7 +48,7 @@ pub(in crate::systemcall) fn has_unblocked_pending_signals() -> bool {
     !deliverable.is_empty()
 }
 
-pub(in crate::systemcall) fn has_interrupting_pending_signals() -> bool {
+pub(in crate::systemcall) fn has_pending_signal_handlers_ignoring_restart() -> bool {
     let current = get_current_thread();
     let (blocked_signals, pending_signals, parent) = {
         let current = current.lock();
@@ -76,7 +74,7 @@ pub(in crate::systemcall) fn has_interrupting_pending_signals() -> bool {
         matches!(
             action.handling_type,
             SignalHandlingType::Function1(_) | SignalHandlingType::Function2(_)
-        ) && action.flags & SA_RESTART == 0
+        )
     })
 }
 
@@ -88,6 +86,24 @@ pub(in crate::systemcall) fn take_signal_interrupt() -> bool {
     interrupted
 }
 
+pub(in crate::systemcall) struct InterruptibleWaitGuard;
+
+impl InterruptibleWaitGuard {
+    pub(in crate::systemcall) fn new() -> Self {
+        let current = get_current_thread();
+        let mut current = current.lock();
+        current.interruptible_wait_active = true;
+        current.interrupted_by_signal = false;
+        Self
+    }
+}
+
+impl Drop for InterruptibleWaitGuard {
+    fn drop(&mut self) {
+        get_current_thread().lock().interruptible_wait_active = false;
+    }
+}
+
 pub(in crate::systemcall) fn with_temporary_signal_mask<T>(
     new_mask: Option<Signals>,
     body: impl FnOnce() -> Result<T, SyscallError>,
@@ -97,13 +113,25 @@ pub(in crate::systemcall) fn with_temporary_signal_mask<T>(
         let mut current = current.lock();
         let old_mask = current.blocked_signals;
         current.blocked_signals = new_mask;
+        current.temporary_blocked_signals = Some((old_mask, new_mask));
         old_mask
     });
 
     let result = body();
 
     if let Some(old_mask) = old_mask {
-        get_current_thread().lock().blocked_signals = old_mask;
+        let current = get_current_thread();
+        let mut current = current.lock();
+        if current
+            .temporary_blocked_signals
+            .take()
+            .is_some_and(|(saved_old_mask, active_mask)| {
+                saved_old_mask.bits() == old_mask.bits()
+                    && current.blocked_signals.bits() == active_mask.bits()
+            })
+        {
+            current.blocked_signals = old_mask;
+        }
     }
 
     result

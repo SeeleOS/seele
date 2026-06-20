@@ -18,8 +18,8 @@ use crate::{
     process::{FdFlags, manager::get_current_process},
     signal::Signals,
     systemcall::implementations::select::{
-        has_interrupting_pending_signals, has_unblocked_pending_signals, take_signal_interrupt,
-        with_temporary_signal_mask,
+        InterruptibleWaitGuard, has_pending_signal_handlers_ignoring_restart,
+        take_signal_interrupt, with_temporary_signal_mask,
     },
 };
 
@@ -259,6 +259,8 @@ fn epoll_wait_impl(
     maxevents: usize,
     timeout: i32,
 ) -> Result<usize, SyscallError> {
+    let _interruptible_wait = InterruptibleWaitGuard::new();
+
     if maxevents == 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -275,7 +277,7 @@ fn epoll_wait_impl(
     };
 
     loop {
-        if has_interrupting_pending_signals() {
+        if take_signal_interrupt() || has_pending_signal_handlers_ignoring_restart() {
             return Err(SyscallError::Interrupted);
         }
 
@@ -298,28 +300,33 @@ fn epoll_wait_impl(
             deadline,
         });
 
-        if has_unblocked_pending_signals() {
+        if has_pending_signal_handlers_ignoring_restart() {
             cancel_block(&current);
             return Err(SyscallError::Interrupted);
         }
 
-        poller.push_already_ready_events();
-
-        if poller.has_woken_events() {
+        let signal_interrupt = take_signal_interrupt();
+        let pending_interrupt = has_pending_signal_handlers_ignoring_restart();
+        if poller.has_woken_events() || signal_interrupt || pending_interrupt {
             cancel_block(&current);
-            break;
-        } else {
-            let signal_interrupt = take_signal_interrupt();
-            let pending_interrupt = has_interrupting_pending_signals();
             if signal_interrupt || pending_interrupt {
-                cancel_block(&current);
                 return Err(SyscallError::Interrupted);
             }
+            poller.push_already_ready_events();
+            if poller.has_woken_events() {
+                break;
+            }
+            continue;
+        } else {
             finish_block_current();
             if deadline.is_some_and(|deadline| deadline <= Time::since_boot()) {
                 return Ok(0);
             }
         }
+    }
+
+    if take_signal_interrupt() || has_pending_signal_handlers_ignoring_restart() {
+        return Err(SyscallError::Interrupted);
     }
 
     let woken_events = poller.take_woken_events(maxevents);

@@ -589,6 +589,7 @@ define_syscall!(RtSigreturn, {
     let mut thread = current.lock();
     thread.snapshot_state = SnapshotState::Normal;
     thread.restore_blocked_signals();
+    thread.temporary_blocked_signals = None;
     update_active_user_extended_state_ptr_for_thread(&mut thread);
     drop(thread);
 

@@ -422,7 +422,11 @@ fn wake_specific_thread_for_signal(thread: &ThreadRef, signal: Signal) {
             State::Blocking(block_type) | State::Blocked(block_type)
                 if !matches!(block_type, BlockType::Stopped)
         );
-        if should_wake && !thread_blocks_signal_inner(&thread, signal) {
+        let interrupts_wait = !thread_blocks_signal_inner(&thread, signal);
+        if thread.interruptible_wait_active && interrupts_wait {
+            thread.interrupted_by_signal = true;
+        }
+        if should_wake && interrupts_wait {
             thread.interrupted_by_signal = true;
             true
         } else {
@@ -540,6 +544,9 @@ pub fn process_current_process_signals(process: &ProcessRef) -> bool {
     };
     {
         let mut thread = thread_ref.lock();
+        if result.should_switch && thread.interruptible_wait_active {
+            thread.interrupted_by_signal = true;
+        }
         thread.pending_signals = pending_signals;
         thread.pending_signal_info = pending_signal_info;
     }
@@ -674,6 +681,7 @@ fn process_pending_signals(
                 }
                 SignalHandlingType::Ignore => {}
                 SignalHandlingType::Function1(func) => with_current_thread(|current_thread| {
+                    current_thread.restore_temporary_blocked_signals();
                     let (_, mut stack_builder) = process.addrspace.allocate_user_stack(16);
                     // x86_64 SysV requires %rsp % 16 == 8 on function entry.
                     // We only push a single synthetic return address, so reserve one
@@ -706,6 +714,7 @@ fn process_pending_signals(
                     let (_, mut stack_builder) = process.addrspace.allocate_user_stack(16);
                     let (_, mut frame_builder) = process.addrspace.allocate_user(1);
 
+                    current_thread.restore_temporary_blocked_signals();
                     let ucontext = build_signal_ucontext(current_thread);
 
                     let ucontext_ptr = frame_builder.push_struct(&ucontext);
@@ -746,6 +755,12 @@ fn process_pending_signals(
 }
 
 impl Thread {
+    fn restore_temporary_blocked_signals(&mut self) {
+        if let Some((old_mask, _)) = self.temporary_blocked_signals {
+            self.blocked_signals = old_mask;
+        }
+    }
+
     fn block_signals_for_handler(&mut self, mut signals_to_block: Signals, signal: Signal) {
         signals_to_block.insert(Signals::from(signal));
         self.saved_blocked_signals.push(self.blocked_signals);
