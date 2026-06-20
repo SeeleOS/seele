@@ -13,7 +13,7 @@ use crate::{
     define_syscall,
     memory::{
         addrspace::AddrSpace,
-        addrspace::mem_area::{Data, MemoryArea, MmapPermissions},
+        addrspace::mem_area::{Data, MemoryArea, MmapPermissions, SharedFrames},
         paging::FRAME_ALLOCATOR,
         protection::Protection,
         user_safe,
@@ -865,11 +865,10 @@ fn anonymous_mapping_data(
         frames.push(frame);
     }
 
-    let _ = (frames, protection);
-    Ok(Data::Normal(MmapPermissions {
-        shared_mapping: true,
-        ..Default::default()
-    }))
+    Ok(Data::Shared {
+        frames: Arc::new(SharedFrames::new(frames)),
+        flags: protection_to_page_flags(protection),
+    })
 }
 
 fn fd_allows_shared_write(object: &Arc<dyn crate::object::Object>) -> Result<bool, SyscallError> {
