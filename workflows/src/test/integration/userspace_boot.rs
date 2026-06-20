@@ -1,5 +1,4 @@
-use super::{IntegrationTest, IntegrationTestResult};
-use crate::reporter::WorkflowReporter;
+use crate::reporter::{WorkflowReporter, log_event};
 use crate::run::{
     build::build_kernel,
     build_iso::create_boot_iso,
@@ -8,37 +7,49 @@ use crate::run::{
 use anyhow::{Context, Result};
 use std::{env, fs, path::Path, time::Duration};
 
-pub const USERSPACE_BOOT: UserspaceBoot = UserspaceBoot;
+pub const NAME: &str = "integration::userspace_boot";
 
-pub struct UserspaceBoot;
-
-impl IntegrationTest for UserspaceBoot {
-    fn name(&self) -> &'static str {
-        "integration::userspace_boot"
+pub fn run(reporter: &dyn WorkflowReporter) -> Result<i32> {
+    let kernel_paths = build_kernel(reporter)?;
+    let kernel_path = kernel_paths
+        .first()
+        .map(Path::new)
+        .context("kernel executable missing")?;
+    let iso_path = create_boot_iso(kernel_path)?;
+    let options = RunOptions::for_agent_run_without_timeout();
+    let result = run_qemu_until_serial_condition_capture(
+        &iso_path,
+        &options,
+        qemu_test_timeout(),
+        userspace_startup_observed,
+    )?;
+    fs::remove_file(&iso_path)
+        .with_context(|| format!("failed to remove ISO image {}", iso_path.display()))?;
+    if result.exit_code != 0 {
+        log_failure(reporter, result.failure.as_deref(), &result.serial_output)?;
     }
+    Ok(result.exit_code)
+}
 
-    fn run(&self, reporter: &dyn WorkflowReporter) -> Result<IntegrationTestResult> {
-        let kernel_paths = build_kernel(reporter)?;
-        let kernel_path = kernel_paths
-            .first()
-            .map(Path::new)
-            .context("kernel executable missing")?;
-        let iso_path = create_boot_iso(kernel_path)?;
-        let options = RunOptions::for_agent_run_without_timeout();
-        let result = run_qemu_until_serial_condition_capture(
-            &iso_path,
-            &options,
-            qemu_test_timeout(),
-            userspace_startup_observed,
-        )?;
-        fs::remove_file(&iso_path)
-            .with_context(|| format!("failed to remove ISO image {}", iso_path.display()))?;
-        Ok(IntegrationTestResult {
-            exit_code: result.exit_code,
-            failure: result.failure,
-            output: result.serial_output,
-        })
+fn log_failure(reporter: &dyn WorkflowReporter, failure: Option<&str>, output: &str) -> Result<()> {
+    if let Some(failure) = failure {
+        log_event(reporter, "test", "stderr", failure)?;
     }
+    if !output.is_empty() {
+        log_event(reporter, "test", "serial", output)?;
+    }
+    if !reporter.capture_subprocess_output() {
+        if let Some(failure) = failure {
+            eprintln!("{failure}");
+        }
+        if !output.is_empty() {
+            eprint!("{output}");
+            if !output.ends_with('\n') {
+                eprintln!();
+            }
+        }
+    }
+    Ok(())
 }
 
 fn userspace_startup_observed(output: &str) -> bool {

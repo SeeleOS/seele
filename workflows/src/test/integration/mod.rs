@@ -9,17 +9,7 @@ use owo_colors::OwoColorize;
 use crate::reporter::{TestStatus, WorkflowReporter, log_event, progress, test_event};
 
 const FULL_TEST_FILTER: &str = "full";
-
-trait IntegrationTest {
-    fn name(&self) -> &'static str;
-    fn run(&self, reporter: &dyn WorkflowReporter) -> Result<IntegrationTestResult>;
-}
-
-pub struct IntegrationTestResult {
-    pub exit_code: i32,
-    pub failure: Option<String>,
-    pub output: String,
-}
+type IntegrationRun = fn(&dyn WorkflowReporter) -> Result<i32>;
 
 pub fn run(reporter: &dyn WorkflowReporter, test_filter: Option<&str>) -> Result<i32> {
     let tests = integration_tests(test_filter);
@@ -40,87 +30,51 @@ pub fn run(reporter: &dyn WorkflowReporter, test_filter: Option<&str>) -> Result
         eprintln!("running {} integration tests", tests.len());
     }
 
-    for test in tests {
-        test_event(
-            reporter,
-            "test",
-            test.name(),
-            TestStatus::Running,
-            "integration test started",
-        )?;
-        let result = test.run(reporter)?;
-        if result.exit_code == 0 {
-            test_event(
-                reporter,
-                "test",
-                test.name(),
-                TestStatus::Ok,
-                "integration test passed",
-            )?;
+    for (name, run) in tests {
+        test_event(reporter, "test", name, TestStatus::Running, "started")?;
+        let exit_code = run(reporter)?;
+        if exit_code == 0 {
+            test_event(reporter, "test", name, TestStatus::Ok, "passed")?;
             if !reporter.capture_subprocess_output() {
-                eprint!("test {} ... ", test.name());
+                eprint!("test {name} ... ");
                 eprintln!("{}", "ok".green().bold());
             }
         } else {
-            if let Some(failure) = &result.failure {
-                log_event(reporter, "test", "stderr", failure)?;
-            }
-            if !result.output.is_empty() {
-                log_event(reporter, "test", "serial", &result.output)?;
-            }
             test_event(
                 reporter,
                 "test",
-                test.name(),
+                name,
                 TestStatus::Failed,
-                result
-                    .failure
-                    .as_deref()
-                    .unwrap_or("integration test failed"),
+                "integration test failed",
             )?;
             if !reporter.capture_subprocess_output() {
-                eprint!("test {} ... ", test.name());
+                eprint!("test {name} ... ");
                 eprintln!("{}", "FAILED".red().bold());
-                report_failure(test.name(), &result);
             }
-            return Ok(result.exit_code);
+            return Ok(exit_code);
         }
     }
 
     Ok(0)
 }
 
-fn report_failure(name: &str, result: &IntegrationTestResult) {
-    eprintln!();
-    eprintln!("{}", "failures:".red().bold());
-    eprintln!();
-    eprintln!("---- {name} stdout ----");
-    if let Some(failure) = &result.failure {
-        eprintln!("{failure}");
-    }
-    if !result.output.is_empty() {
-        eprint!("{}", result.output);
-        if !result.output.ends_with('\n') {
-            eprintln!();
-        }
-    }
-    eprintln!();
-}
-
-fn integration_tests(test_filter: Option<&str>) -> Option<Vec<&'static dyn IntegrationTest>> {
+fn integration_tests(test_filter: Option<&str>) -> Option<Vec<(&'static str, IntegrationRun)>> {
     let tests = [
-        &kernel_images::KERNEL_IMAGES as &dyn IntegrationTest,
-        &userspace_boot::USERSPACE_BOOT as &dyn IntegrationTest,
-        &ltp::LTP as &dyn IntegrationTest,
-        &panic_handler_smoke::PANIC_HANDLER_SMOKE as &dyn IntegrationTest,
+        (kernel_images::NAME, kernel_images::run as IntegrationRun),
+        (userspace_boot::NAME, userspace_boot::run as IntegrationRun),
+        (ltp::NAME, ltp::run as IntegrationRun),
+        (
+            panic_handler_smoke::NAME,
+            panic_handler_smoke::run as IntegrationRun,
+        ),
     ];
     let filtered = match test_filter {
         Some(FULL_TEST_FILTER) => tests.into_iter().collect::<Vec<_>>(),
         Some(filter) => tests
             .into_iter()
-            .filter(|test| test.name().contains(filter))
+            .filter(|(name, _)| name.contains(filter))
             .collect::<Vec<_>>(),
-        None => vec![&ltp::LTP as &dyn IntegrationTest],
+        None => vec![(ltp::NAME, ltp::run as IntegrationRun)],
     };
     if filtered.is_empty() {
         None
@@ -137,7 +91,7 @@ mod tests {
         integration_tests(test_filter)
             .unwrap()
             .into_iter()
-            .map(IntegrationTest::name)
+            .map(|(name, _)| name)
             .collect()
     }
 

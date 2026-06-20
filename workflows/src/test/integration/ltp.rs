@@ -1,4 +1,3 @@
-use super::{IntegrationTest, IntegrationTestResult};
 use crate::{
     reporter::{TestStatus, WorkflowReporter, log_event, metadata_event, test_event},
     run::{
@@ -16,74 +15,85 @@ use std::{
     time::Duration,
 };
 
-pub const LTP: Ltp = Ltp;
-
+pub const NAME: &str = "integration::ltp";
 const REPORT_BEGIN: &str = "__SEELE_LTP_JSON_BEGIN__";
 const REPORT_END: &str = "__SEELE_LTP_JSON_END__";
 const EXIT_PREFIX: &str = "__SEELE_LTP_EXIT__:";
 
-pub struct Ltp;
+pub fn run(reporter: &dyn WorkflowReporter) -> Result<i32> {
+    let kernel_paths = build_kernel(reporter)?;
+    let kernel_path = kernel_paths
+        .first()
+        .map(Path::new)
+        .context("kernel executable missing")?;
+    let iso_path = with_env_var("SEELE_INIT", "/usr/local/bin/seele-run-ltp", || {
+        create_boot_iso(kernel_path)
+    })?;
+    let options = RunOptions::for_agent_run_without_timeout();
+    let timeout = ltp_timeout();
+    let result = run_qemu_interactive_capture(&iso_path, &options, timeout, |output| {
+        output.contains(REPORT_END) && output.contains(EXIT_PREFIX)
+    })?;
+    fs::remove_file(&iso_path)
+        .with_context(|| format!("failed to remove ISO image {}", iso_path.display()))?;
 
-impl IntegrationTest for Ltp {
-    fn name(&self) -> &'static str {
-        "integration::ltp"
+    if result.exit_code != 0 {
+        log_failure(reporter, result.failure.as_deref(), &result.serial_output)?;
+        return Ok(result.exit_code);
     }
 
-    fn run(&self, reporter: &dyn WorkflowReporter) -> Result<IntegrationTestResult> {
-        let kernel_paths = build_kernel(reporter)?;
-        let kernel_path = kernel_paths
-            .first()
-            .map(Path::new)
-            .context("kernel executable missing")?;
-        let iso_path = with_env_var("SEELE_INIT", "/usr/local/bin/seele-run-ltp", || {
-            create_boot_iso(kernel_path)
-        })?;
-        let options = RunOptions::for_agent_run_without_timeout();
-        let timeout = ltp_timeout();
-        let result = run_qemu_interactive_capture(&iso_path, &options, timeout, |output| {
-            output.contains(REPORT_END) && output.contains(EXIT_PREFIX)
-        })?;
-        fs::remove_file(&iso_path)
-            .with_context(|| format!("failed to remove ISO image {}", iso_path.display()))?;
-
-        if result.exit_code != 0 {
-            return Ok(IntegrationTestResult {
-                exit_code: result.exit_code,
-                failure: result.failure,
-                output: result.serial_output,
-            });
-        }
-
-        let exit_code = parse_ltp_exit_code(&result.serial_output).unwrap_or(1);
-        let report = extract_ltp_report(&result.serial_output);
-        let failure = if let Some(report) = &report {
-            let summary = report.summary();
-            (summary.failed > 0 || summary.broken > 0).then(|| {
-                format!(
-                    "LTP reported {} failed and {} broken results",
-                    summary.failed, summary.broken
-                )
-            })
-        } else {
-            Some("LTP JSON report was not observed on serial output".to_string())
-        };
-        let failure = failure.or_else(|| {
-            if exit_code != 0 {
-                Some(format!("kirk exited with status {exit_code}"))
-            } else {
-                None
-            }
-        });
-        if let Some(report) = report {
-            emit_ltp_json_events(reporter, &report)?;
-        }
-
-        Ok(IntegrationTestResult {
-            exit_code: if failure.is_some() { 1 } else { 0 },
-            failure,
-            output: ltp_failure_output(&result.serial_output),
+    let exit_code = parse_ltp_exit_code(&result.serial_output).unwrap_or(1);
+    let report = extract_ltp_report(&result.serial_output);
+    let failure = if let Some(report) = &report {
+        let summary = report.summary();
+        (summary.failed > 0 || summary.broken > 0).then(|| {
+            format!(
+                "LTP reported {} failed and {} broken results",
+                summary.failed, summary.broken
+            )
         })
+    } else {
+        Some("LTP JSON report was not observed on serial output".to_string())
+    };
+    let failure = failure.or_else(|| {
+        if exit_code != 0 {
+            Some(format!("kirk exited with status {exit_code}"))
+        } else {
+            None
+        }
+    });
+    if let Some(report) = report {
+        emit_ltp_json_events(reporter, &report)?;
     }
+
+    if let Some(failure) = failure {
+        let output = ltp_failure_output(&result.serial_output);
+        log_failure(reporter, Some(&failure), &output)?;
+        Ok(1)
+    } else {
+        Ok(0)
+    }
+}
+
+fn log_failure(reporter: &dyn WorkflowReporter, failure: Option<&str>, output: &str) -> Result<()> {
+    if let Some(failure) = failure {
+        log_event(reporter, "test", "stderr", failure)?;
+    }
+    if !output.is_empty() {
+        log_event(reporter, "test", "serial", output)?;
+    }
+    if !reporter.capture_subprocess_output() {
+        if let Some(failure) = failure {
+            eprintln!("{failure}");
+        }
+        if !output.is_empty() {
+            eprint!("{output}");
+            if !output.ends_with('\n') {
+                eprintln!();
+            }
+        }
+    }
+    Ok(())
 }
 
 fn ltp_timeout() -> Duration {
