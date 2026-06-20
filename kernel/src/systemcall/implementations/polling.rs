@@ -997,7 +997,7 @@ mod tests {
 
     fn epoll_pwait_signal_mask_controls_interruptibility() {
         const EPOLL_CTL_ADD: u64 = 1;
-        const EPOLLOUT: u32 = 0x004;
+        const EPOLLIN: u32 = 0x001;
 
         let process = crate::process::manager::get_current_process();
         let saved_process_signals = {
@@ -1024,7 +1024,7 @@ mod tests {
         let epoll_fd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<EpollCreate1>());
         let page = allocate_user_test_page();
         let event = TestLinuxEpollEvent {
-            events: EPOLLOUT,
+            events: EPOLLIN,
             data: 0x5eed,
         };
         write_user_value(page, &event);
@@ -1041,6 +1041,11 @@ mod tests {
         );
 
         write_user_value(page + 128, &Signals::from(Signal::SIGUSR1).bits());
+        write_user_value(page + 160, &1u64);
+        expect_ok(
+            SyscallArgs::new([eventfd as u64, page + 160, 8, 0, 0, 0]).call::<Write>(),
+            8,
+        );
         expect_ok(
             SyscallArgs::new([epoll_fd as u64, page + 64, 1, 0, page + 128, 8])
                 .call::<EpollPwait>(),
@@ -1049,7 +1054,7 @@ mod tests {
         let ready = read_user_value::<TestLinuxEpollEvent>(page + 64);
         let ready_events = ready.events;
         let ready_data = ready.data;
-        assert_eq!(ready_events, EPOLLOUT);
+        assert_eq!(ready_events, EPOLLIN);
         assert_eq!(ready_data, 0x5eed);
 
         {
