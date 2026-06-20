@@ -11,6 +11,7 @@
 - When adding new tooling for builds, tests, MCP workflows, debugging, image conversion, or VM automation, prefer adding it to the appropriate `flake.nix` dev shell or runtime input instead of relying on whatever happens to be installed on the host `PATH`.
 - When polling VM state or serial output, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
 - `cargo xtest` and MCP `run_tests` default to kernel unit tests plus LTP. Use `cargo xtest full` or MCP `run_tests(test: "full")` when every integration test is required, including boot/image/panic smoke coverage. Use a specific filter such as `ltp` or `integration::panic_handler_smoke` for targeted debugging.
+- Because LTP is expensive, when fixing LTP failures do not run the full LTP gate after every single small fix. First batch all fixes for the currently known failing tests or suite, then run the appropriate LTP verification once for that batch. Use targeted unit checks or narrow compile checks while editing.
 - After finishing VM-based testing, shut the VM down and verify there is no leftover runner or QEMU process before moving on.
 - To inspect the current VM and runner processes before shutdown, prefer `status` for MCP-managed sessions; otherwise inspect host runner/QEMU processes directly and kill leftover PIDs explicitly.
 - Do not assume `target/rootfs_mnt/` is mounted or synchronized with `target/rootfs.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the xtask VM flow when in doubt.
@@ -38,6 +39,7 @@ After finishing a change, prefer the `seele` MCP workflow when available: run `r
 - Prefer macro-based abstractions when they remove meaningful repetition without hiding important control flow or making diagnostics worse.
 - Prefer chain-style Rust APIs when they stay readable and do not obscure error handling or ownership.
 - Do not take shortcuts just to get something running quickly. In particular, avoid adding stubs, temporary shortcuts, or ad-hoc special cases merely to make a feature appear to work.
+- Do not fake fixes merely to pass tests or LTP. Implement the real Linux-compatible behavior or a truthful unsupported/error path; do not add test-name checks, environment-specific bypasses, placeholder files, or superficial stubs that only satisfy the current test harness.
 - During refactors, do not leave compatibility layers, fallback paths, or old/new dual implementations behind. Update call sites to the new structure directly and remove the obsolete path in the same change unless there is an explicit migration plan.
 - If a debug-only stub is temporarily unavoidable, mark it explicitly with `todo!()` or `unimplemented!()`. If it cannot use either, add a clear `TODO` comment stating that it is a temporary debug stub and not a real implementation.
 - For syscall handlers, do not take a user pointer as `u64` and then immediately cast it to `*const T` or `*mut T` in the body. Make the syscall argument itself a properly typed pointer and add or reuse the `SyscallArg` conversion in `kernel/src/systemcall/arg_types.rs`.
