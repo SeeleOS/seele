@@ -36,12 +36,8 @@ pub struct VmStatus {
 impl VmConfig {
     pub fn for_repo(repo: &Path) -> Self {
         Self {
-            qmp_socket: std::env::var_os("SEELE_QMP_SOCKET")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/tmp/seele-agent-qmp.sock")),
-            serial_log: std::env::var_os("SEELE_SERIAL_LOG")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/tmp/seele-agent-serial.log")),
+            qmp_socket: PathBuf::from("/tmp/seele-agent-qmp.sock"),
+            serial_log: PathBuf::from("/tmp/seele-agent-serial.log"),
             rootfs_image: target_dir(repo).join("rootfs.img"),
             enable_profiling: false,
         }
