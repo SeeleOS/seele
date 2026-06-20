@@ -79,6 +79,8 @@ define_syscall!(RenameAt2, |old_dirfd: i32,
         return Err(SyscallError::InvalidArguments);
     }
     if flags & RENAME_NOREPLACE != 0 {
+        let resolved_old_path = resolve_path_at(old_dirfd, &old_path)?;
+        let _ = open_path(resolved_old_path)?;
         let resolved_new_path = resolve_path_at(new_dirfd, &new_path)?;
         if open_path(resolved_new_path).is_ok() {
             return Err(SyscallError::FileAlreadyExists);

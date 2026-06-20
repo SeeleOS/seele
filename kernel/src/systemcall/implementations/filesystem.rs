@@ -1277,7 +1277,7 @@ mod tests {
             ));
         }
 
-        expect_ok(
+        expect_errno(
             SyscallArgs::new([
                 dir_fd as u64,
                 user_page,
@@ -1287,7 +1287,23 @@ mod tests {
                 0,
             ])
             .call::<RenameAt2>(),
-            0,
+            SyscallError::FileNotFound,
+        );
+        VirtualFS
+            .lock()
+            .create_file(Path::new("/tmp/syscall-rename-test/subdir/child"))
+            .unwrap();
+        expect_errno(
+            SyscallArgs::new([
+                dir_fd as u64,
+                user_page,
+                dir_fd as u64,
+                user_page + 128,
+                1,
+                0,
+            ])
+            .call::<RenameAt2>(),
+            SyscallError::FileAlreadyExists,
         );
         write_user_cstr(user_page, b"subdir/renamed\0");
         write_user_cstr(user_page + 128, b"subdir/renamed2\0");
