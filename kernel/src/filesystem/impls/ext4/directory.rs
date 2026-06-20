@@ -200,6 +200,8 @@ impl Ext4Directory {
                 fs: lookup.fs,
                 inode: Mut::new(lookup.inode),
                 name: lookup.name,
+                parent_inode: lookup.parent_inode,
+                lookup_cache: lookup.lookup_cache,
                 operation_lock: lookup.operation_lock,
             })))),
             FileLikeType::File => Ok(FileLike::File(Arc::new(Mut::new(Ext4File::new(

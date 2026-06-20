@@ -3,7 +3,7 @@ use ext4plus::{Ext4, inode::Inode};
 
 use crate::filesystem::{
     errors::FSError,
-    impls::ext4::{OperationLock, chown_inode},
+    impls::ext4::{LookupCache, OperationLock, chown_inode, lookup_cache_insert_raw},
     info::{FileLikeInfo, UnixPermission},
     path::Path,
     vfs::FSResult,
@@ -15,7 +15,20 @@ pub struct Ext4Symlink {
     pub fs: Ext4,
     pub inode: Mut<Inode>,
     pub name: String,
+    pub parent_inode: u32,
+    pub lookup_cache: LookupCache,
     pub operation_lock: OperationLock,
+}
+
+impl Ext4Symlink {
+    fn update_lookup_cache(&self) {
+        lookup_cache_insert_raw(
+            &self.lookup_cache,
+            self.parent_inode,
+            &self.name,
+            &self.inode.lock(),
+        );
+    }
 }
 
 impl Symlink for Ext4Symlink {
@@ -24,7 +37,7 @@ impl Symlink for Ext4Symlink {
         Ok(FileLikeInfo {
             name: self.name.clone(),
             file_like_type: FileLikeType::Symlink,
-            size: 0,
+            size: inode.metadata().len() as usize,
             inode: inode.index.get().into(),
             uid: inode.uid(),
             gid: inode.gid(),
@@ -60,7 +73,10 @@ impl Symlink for Ext4Symlink {
     fn chown(&self, uid: u32, gid: u32) -> FSResult<()> {
         let _operation = self.operation_lock.lock();
         let mut inode = self.inode.lock();
-        chown_inode(&self.fs, &mut inode, uid, gid)
+        chown_inode(&self.fs, &mut inode, uid, gid)?;
+        drop(inode);
+        self.update_lookup_cache();
+        Ok(())
     }
 
     fn get_xattr(&self, name: &str) -> FSResult<Option<Vec<u8>>> {
@@ -85,7 +101,10 @@ impl Symlink for Ext4Symlink {
         }
         inode
             .set_xattr(&self.fs, name.as_bytes(), value.as_slice())
-            .map_err(FSError::from)
+            .map_err(FSError::from)?;
+        drop(inode);
+        self.update_lookup_cache();
+        Ok(())
     }
 
     fn list_xattrs(&self) -> FSResult<Vec<String>> {
@@ -107,6 +126,8 @@ impl Symlink for Ext4Symlink {
         self.inode
             .lock()
             .remove_xattr(&self.fs, name)
-            .map_err(FSError::from)
+            .map_err(FSError::from)?;
+        self.update_lookup_cache();
+        Ok(())
     }
 }
