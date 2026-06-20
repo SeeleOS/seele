@@ -43,10 +43,11 @@ impl Process {
     fn prepare_execve(
         &mut self,
         path: Path,
+        exec_path: Path,
         args: Vec<String>,
         env: Vec<String>,
     ) -> Result<PreparedExecve, FSError> {
-        let path_string = path.clone().as_string();
+        let path_string = exec_path.clone().as_string();
         let command_line = if args.is_empty() {
             vec![path_string.clone()]
         } else {
@@ -57,6 +58,7 @@ impl Process {
         close_cloexec_fd_entries(&mut next_fd_table);
         let next_snapshot = setup_process(
             path.clone(),
+            exec_path,
             args,
             env,
             &mut next_addrspace,
@@ -174,11 +176,14 @@ fn cleanup_exec_addrspace(mut addrspace: AddrSpace) {
 }
 
 pub fn execve(path: Path, args: Vec<String>, env: Vec<String>) -> Result<(), FSError> {
+    let exec_path = path.clone();
     let (_, resolved_path) = resolve_path_with_final(path, true)?;
     let current_thread = current_thread();
     let current_thread_id = current_thread.lock().id;
     let current = current_process();
-    let prepared = current.lock().prepare_execve(resolved_path, args, env)?;
+    let prepared = current
+        .lock()
+        .prepare_execve(resolved_path, exec_path, args, env)?;
     request_exec_siblings_to_exit(prepared.threads.clone(), current_thread_id);
     wait_for_exec_siblings_to_stop(prepared.threads.clone(), current_thread_id);
     let (snapshot, vfork_blocker) = { current.lock().commit_execve(prepared, current_thread) };

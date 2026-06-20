@@ -94,6 +94,7 @@ impl Process {
         let mut fd_table = Vec::new();
         let context = setup_process(
             Path::new(&init_path),
+            Path::new(&init_path),
             Vec::new(),
             alloc::vec![
                 DEFAULT_PATH.into(),
@@ -140,6 +141,7 @@ fn init_path() -> String {
 
 fn setup_process_inner(
     path: Path,
+    exec_path: String,
     args: Vec<String>,
     env: Vec<String>,
     addrspace: &mut AddrSpace,
@@ -150,14 +152,13 @@ fn setup_process_inner(
         return Err(FSError::Other);
     }
 
-    let path_string = path.clone().as_string();
     let program_file = open_file(path.clone())?;
     let program_prefix = read_shebang_prefix(&program_file)?;
 
     if let Some((interpreter, optional_arg)) = parse_shebang(&program_prefix)? {
         log::debug!(
             "setup_process: shebang {} -> {}",
-            path_string,
+            exec_path,
             interpreter.clone().as_string()
         );
 
@@ -166,11 +167,13 @@ fn setup_process_inner(
         if let Some(optional_arg) = optional_arg {
             interpreter_args.push(optional_arg);
         }
-        interpreter_args.push(path_string);
+        interpreter_args.push(exec_path);
         interpreter_args.extend(args.into_iter().skip(1));
+        let interpreter_exec_path = interpreter.clone().as_string();
 
         return setup_process_inner(
             interpreter,
+            interpreter_exec_path,
             interpreter_args,
             env,
             addrspace,
@@ -197,14 +200,14 @@ fn setup_process_inner(
     };
 
     let stack_pages =
-        user_stack_pages_for_exec(&path_string, &args, &env, interpreter_base.is_some());
+        user_stack_pages_for_exec(&exec_path, &args, &env, interpreter_base.is_some());
     let mut stack_builder = addrspace.allocate_user_stack(stack_pages).1;
 
     init_stack_layout(
         &mut stack_builder,
         &program,
         interpreter_base,
-        &path_string,
+        &exec_path,
         args,
         env,
     );
@@ -267,14 +270,16 @@ pub(crate) fn prefault_targets(
 
 pub fn setup_process(
     path: Path,
+    exec_path: Path,
     mut args: Vec<String>,
     env: Vec<String>,
     addrspace: &mut AddrSpace,
     fd_table: &mut Vec<Option<FdEntry>>,
 ) -> Result<ThreadSnapshot, FSError> {
+    let exec_path = exec_path.as_string();
     if args.is_empty() {
-        args.insert(0, path.clone().as_string());
+        args.insert(0, exec_path.clone());
     }
 
-    setup_process_inner(path, args, env, addrspace, fd_table, 0)
+    setup_process_inner(path, exec_path, args, env, addrspace, fd_table, 0)
 }
