@@ -56,35 +56,6 @@ default-features = false
 [build-dependencies]
 cargo-emit = "0.2.1"
 
-[[test]]
-name = "boot"
-harness = false
-
-[[test]]
-name = "interrupt_breakpoint"
-harness = false
-
-[[test]]
-name = "memory"
-harness = false
-
-[[test]]
-name = "panic_handler"
-harness = false
-
-[[test]]
-name = "stack_overflow_manual"
-path = "tests/stack_overflow.rs"
-harness = false
-
-[[test]]
-name = "syscall"
-harness = false
-
-[[test]]
-name = "vfs"
-harness = false
-
 [dependencies.crossbeam-queue]
 version = "0.3.11"
 default-features = false

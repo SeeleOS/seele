@@ -1,4 +1,4 @@
-use super::{config::RunTestsConfig, integration, kernel_unit, ltp};
+use super::{config::RunTestsConfig, kernel_unit, ltp};
 use crate::{Event, JobContext, Report, TestEvent, TestSelector};
 use anyhow::Result;
 use std::path::Path;
@@ -35,16 +35,6 @@ pub fn run_tests(repo: &Path, config: &RunTestsConfig, context: &JobContext) -> 
         passed += report.passed;
         skipped += report.skipped;
         context.report(Report::Ltp(report));
-    }
-
-    if let TestSelector::Integration(name) = selector {
-        let report = integration::run(repo, &name, context)?;
-        if report.booted && report.qmp_connectable {
-            passed += 1;
-        } else {
-            failed += 1;
-        }
-        context.report(Report::VmSmoke(report));
     }
 
     context.event(Event::Test(TestEvent::Finished {

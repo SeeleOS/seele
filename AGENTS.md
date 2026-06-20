@@ -10,7 +10,7 @@
 - If a required tool is missing for this repository workflow, add it to the `flake.nix` dev shell instead of treating it as a one-off host prerequisite.
 - When adding new tooling for builds, tests, MCP workflows, debugging, image conversion, or VM automation, prefer adding it to the appropriate `flake.nix` dev shell or runtime input instead of relying on whatever happens to be installed on the host `PATH`.
 - When polling VM state or serial output, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
-- `cargo xtest` and MCP `run_tests` default to kernel unit tests plus LTP. Use `cargo xtest full` or MCP `run_tests(test: "full")` when every integration test is required, including boot/image/panic smoke coverage. Use a specific filter such as `ltp` or `integration::panic_handler_smoke` for targeted debugging.
+- `cargo xtest` and MCP `run_tests` default to kernel unit tests plus LTP. Use a specific selector such as `kernel_unit` or `ltp` for targeted debugging.
 - Because LTP is expensive, when fixing LTP failures do not run the full LTP gate after every single small fix. First batch all fixes for the currently known failing tests or suite, then run the appropriate LTP verification once for that batch. Use targeted unit checks or narrow compile checks while editing.
 - After finishing VM-based testing, shut the VM down and verify there is no leftover runner or QEMU process before moving on.
 - To inspect the current VM and runner processes before shutdown, prefer `status` for MCP-managed sessions; otherwise inspect host runner/QEMU processes directly and kill leftover PIDs explicitly.
@@ -19,7 +19,7 @@
 - After mounting `target/rootfs_mnt/`, if you only need to read files from it, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
 - If the sandbox, `no_new_privileges`, missing mounts, or network restrictions block a necessary command, ask the user for privilege escalation or the required access instead of silently giving up on that path.
 
-After finishing a change, prefer the `seele` MCP workflow when available: run `run_tests` for the default kernel-unit-plus-LTP gate. For boot, terminal, panic, image, or VM-launch changes, run `run_tests(test: "full")` or the relevant targeted integration test, then use `start`, `status`, `serial_tail`, and `screenshot` for VM smoke coverage, followed by `stop` or `cleanup`. If MCP is missing a required capability, add that capability to MCP rather than falling back to direct host project commands. If any required test fails, keep fixing the issue before considering the work done.
+After finishing a change, prefer the `seele` MCP workflow when available: run `run_tests` for the default kernel-unit-plus-LTP gate. For boot, terminal, panic, image, or VM-launch changes, use `start`, `status`, `serial_tail`, and `screenshot` for VM smoke coverage, followed by `stop` or `cleanup`. If MCP is missing a required capability, add that capability to MCP rather than falling back to direct host project commands. If any required test fails, keep fixing the issue before considering the work done.
 
 ## Coding Style & Naming Conventions
 
@@ -55,7 +55,7 @@ There is no large standalone test suite yet; verification is primarily compile c
 - This kernel targets Linux binary compatibility. Syscall tests and other ABI-facing tests must use Linux semantics as the only oracle, not the current implementation behavior. Validate x86_64 Linux syscall ABI return values, errno values, struct layouts, flag combinations, state side effects, and Linux-specific edge cases. If implementation behavior disagrees with Linux semantics, fix the kernel implementation instead of relaxing tests to accept the wrong behavior.
 - Run `cargo check --manifest-path kernel/Cargo.toml` for all kernel changes.
 - Run `cargo xtest` for the default kernel unit-test plus LTP coverage.
-- Run `cargo xtest full` before broad integration submissions or when touching boot/image/panic/VM launch behavior.
+- For broad boot/image/panic/VM launch changes, use the MCP VM smoke workflow after `cargo xtest`.
 - Treat compiler warnings as failures. Do not leave any `cargo check` warnings in the tree.
 - After finishing code changes, run `cargo clippy` and address its findings before considering the work complete.
 - Put focused Rust unit tests in the same file as the code they cover, inside a local `#[cfg(test)] mod tests {}` block. Do not create separate `test.rs` files for new code unless the existing module already uses that layout or the tests must span multiple files.

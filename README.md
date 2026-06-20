@@ -114,7 +114,7 @@ Mount `target/rootfs_mnt/` from `target/rootfs.img` through the MCP `ensure_root
 
 ## Tests
 
-Run kernel and integration coverage in QEMU:
+Run kernel unit and LTP coverage:
 
 ```sh
 cargo xtest

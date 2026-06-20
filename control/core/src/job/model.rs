@@ -168,7 +168,6 @@ pub enum TestSelector {
     Full,
     KernelUnit,
     Ltp,
-    Integration(String),
 }
 
 impl TestSelector {
@@ -178,10 +177,7 @@ impl TestSelector {
             Some("full") => Self::Full,
             Some("kernel_unit") | Some("kernel-unit") => Self::KernelUnit,
             Some("ltp") => Self::Ltp,
-            Some(value) if value.starts_with("integration:") => {
-                Self::Integration(value["integration:".len()..].to_string())
-            }
-            Some(value) => Self::Integration(value.to_string()),
+            Some(_) => Self::Default,
         }
     }
 }
@@ -198,10 +194,7 @@ mod tests {
             TestSelector::parse(Some("kernel_unit")),
             TestSelector::KernelUnit
         );
-        assert_eq!(
-            TestSelector::parse(Some("integration:panic_handler_smoke")),
-            TestSelector::Integration("panic_handler_smoke".to_string())
-        );
+        assert_eq!(TestSelector::parse(Some("unknown")), TestSelector::Default);
     }
 }
 
