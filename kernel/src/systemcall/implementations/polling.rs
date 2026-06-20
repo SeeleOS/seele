@@ -267,9 +267,7 @@ fn epoll_wait_impl(
 
     let poller = poller.as_poller()?;
 
-    if !poller.has_woken_events() {
-        poller.push_already_ready_events();
-    }
+    poller.push_already_ready_events();
 
     if !poller.has_woken_events() {
         if timeout == 0 {
@@ -292,9 +290,7 @@ fn epoll_wait_impl(
             deadline,
         });
 
-        if !poller.has_woken_events() {
-            poller.push_already_ready_events();
-        }
+        poller.push_already_ready_events();
 
         if poller.has_woken_events() {
             cancel_block(&current);
@@ -392,8 +388,8 @@ define_syscall!(
 mod tests {
     use crate::systemcall::{
         implementations::{
-            EpollCreate1, EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Read, Shutdown,
-            Socketpair, Write,
+            EpollCreate1, EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Pipe, Read,
+            Shutdown, Socketpair, Write,
         },
         test::{
             TestLinuxEpollEvent, TestLinuxTimespec, assert_user_bytes, close_test_fd, expect_fd,
@@ -577,6 +573,125 @@ mod tests {
             SyscallArgs::new([epoll_fd as u64, epoll_events, 0, 0, 0, 0]).call::<EpollWait>(),
             SyscallError::InvalidArguments,
         );
+
+        let pipe_fds = epoll_events + 64;
+        let pipe_event_in = epoll_events + 96;
+        let pipe_event_write_in = epoll_events + 112;
+        let pipe_event_out = epoll_events + 128;
+        let pipe_buffer = epoll_events + 160;
+        let pipe_results = epoll_events + 192;
+        expect_ok(
+            SyscallArgs::new([pipe_fds, 0, 0, 0, 0, 0]).call::<Pipe>(),
+            0,
+        );
+        let pipe_read = read_user_value::<i32>(pipe_fds) as usize;
+        let pipe_write = read_user_value::<i32>(pipe_fds + 4) as usize;
+        let pipe_read_event = TestLinuxEpollEvent {
+            events: EPOLLIN,
+            data: pipe_read as u64,
+        };
+        let pipe_write_read_event = TestLinuxEpollEvent {
+            events: EPOLLIN,
+            data: pipe_write as u64,
+        };
+        let pipe_write_event = TestLinuxEpollEvent {
+            events: EPOLLOUT,
+            data: pipe_write as u64,
+        };
+        write_user_value(pipe_event_in, &pipe_read_event);
+        expect_ok(
+            SyscallArgs::new([
+                epoll_fd as u64,
+                EPOLL_CTL_ADD,
+                pipe_read as u64,
+                pipe_event_in,
+                0,
+                0,
+            ])
+            .call::<EpollCtl>(),
+            0,
+        );
+        write_user_value(pipe_event_write_in, &pipe_write_read_event);
+        expect_ok(
+            SyscallArgs::new([
+                epoll_fd as u64,
+                EPOLL_CTL_ADD,
+                pipe_write as u64,
+                pipe_event_write_in,
+                0,
+                0,
+            ])
+            .call::<EpollCtl>(),
+            0,
+        );
+        write_user_value(pipe_buffer, b"test\0");
+        expect_ok(
+            SyscallArgs::new([pipe_write as u64, pipe_buffer, 5, 0, 0, 0]).call::<Write>(),
+            5,
+        );
+        expect_ok(
+            SyscallArgs::new([epoll_fd as u64, pipe_results, 2, 0, 0, 0]).call::<EpollWait>(),
+            1,
+        );
+        let pipe_initial_ready = read_user_value::<TestLinuxEpollEvent>(pipe_results);
+        let pipe_initial_events = pipe_initial_ready.events;
+        let pipe_initial_data = pipe_initial_ready.data;
+        assert_eq!(pipe_initial_events, EPOLLIN);
+        assert_eq!(pipe_initial_data, pipe_read as u64);
+
+        write_user_value(pipe_event_out, &pipe_write_event);
+        expect_ok(
+            SyscallArgs::new([
+                epoll_fd as u64,
+                EPOLL_CTL_MOD,
+                pipe_write as u64,
+                pipe_event_out,
+                0,
+                0,
+            ])
+            .call::<EpollCtl>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([epoll_fd as u64, pipe_results, 2, 0, 0, 0]).call::<EpollWait>(),
+            2,
+        );
+        let pipe_ready_a = read_user_value::<TestLinuxEpollEvent>(pipe_results);
+        let pipe_ready_b = read_user_value::<TestLinuxEpollEvent>(pipe_results + 12);
+        let mut saw_pipe_read = false;
+        let mut saw_pipe_write = false;
+        for ready in [pipe_ready_a, pipe_ready_b] {
+            let ready_events = ready.events;
+            let ready_data = ready.data;
+            if ready_data == pipe_read as u64 {
+                assert_eq!(ready_events, EPOLLIN);
+                saw_pipe_read = true;
+            } else if ready_data == pipe_write as u64 {
+                assert_eq!(ready_events, EPOLLOUT);
+                saw_pipe_write = true;
+            } else {
+                panic!("unexpected pipe epoll data {ready_data}");
+            }
+        }
+        assert!(saw_pipe_read);
+        assert!(saw_pipe_write);
+        expect_ok(
+            SyscallArgs::new([pipe_read as u64, pipe_buffer, 5, 0, 0, 0]).call::<Read>(),
+            5,
+        );
+        assert_user_bytes(pipe_buffer, b"test\0");
+        expect_ok(
+            SyscallArgs::new([epoll_fd as u64, EPOLL_CTL_DEL, pipe_write as u64, 0, 0, 0])
+                .call::<EpollCtl>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([epoll_fd as u64, EPOLL_CTL_DEL, pipe_read as u64, 0, 0, 0])
+                .call::<EpollCtl>(),
+            0,
+        );
+        close_test_fd(pipe_write);
+        close_test_fd(pipe_read);
 
         let socketpair_page = epoll_events + 128;
         expect_ok(
