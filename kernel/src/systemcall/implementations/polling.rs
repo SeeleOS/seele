@@ -290,6 +290,11 @@ fn epoll_wait_impl(
             deadline,
         });
 
+        if has_unblocked_pending_signals() {
+            cancel_block(&current);
+            return Err(SyscallError::Interrupted);
+        }
+
         poller.push_already_ready_events();
 
         if poller.has_woken_events() {
