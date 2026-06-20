@@ -87,12 +87,13 @@ impl Process {
         }));
 
         let process = &mut *process_arc.lock();
-        process.command_line = vec![String::from(INIT_PATH)];
+        let init_path = init_path();
+        process.command_line = vec![init_path.clone()];
 
         log::debug!("process {}: setup start", pid.0);
         let mut fd_table = Vec::new();
         let context = setup_process(
-            Path::new(INIT_PATH),
+            Path::new(&init_path),
             Vec::new(),
             alloc::vec![
                 DEFAULT_PATH.into(),
@@ -123,6 +124,18 @@ impl Process {
 
         process_arc.clone()
     }
+}
+
+fn init_path() -> String {
+    crate::boot::executable_cmdline()
+        .and_then(|cmdline| {
+            cmdline
+                .split_ascii_whitespace()
+                .find_map(|arg| arg.strip_prefix("init="))
+        })
+        .filter(|path| path.starts_with('/'))
+        .unwrap_or(INIT_PATH)
+        .into()
 }
 
 fn setup_process_inner(

@@ -122,3 +122,39 @@ pub fn set_empty_root_password(
     )?;
     Ok(())
 }
+
+pub fn configure_login_services(
+    sh: &Shell,
+    rootfs_mount: &Path,
+    reporter: &dyn WorkflowReporter,
+) -> Result<()> {
+    let getty_wants = rootfs_mount
+        .join("etc")
+        .join("systemd")
+        .join("system")
+        .join("getty.target.wants");
+    let systemd_system = rootfs_mount.join("etc").join("systemd").join("system");
+    let default_target = systemd_system.join("default.target");
+    run_xshell_command(
+        "build-rootfs",
+        sh,
+        cmd!(
+            sh,
+            "sudo ln -sfn /usr/lib/systemd/system/multi-user.target {default_target}"
+        ),
+        reporter,
+    )?;
+    fs::create_dir_all(&getty_wants)
+        .with_context(|| format!("failed to create {}", getty_wants.display()))?;
+    let tty1_getty = getty_wants.join("getty@tty1.service");
+    run_xshell_command(
+        "build-rootfs",
+        sh,
+        cmd!(
+            sh,
+            "sudo ln -sfn /usr/lib/systemd/system/getty@.service {tty1_getty}"
+        ),
+        reporter,
+    )?;
+    Ok(())
+}

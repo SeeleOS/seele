@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use std::{
-    fs,
+    env, fs,
     path::{Path, PathBuf},
 };
 use xshell::{Shell, cmd};
@@ -26,7 +26,8 @@ pub fn create_boot_iso(kernel_path: &Path) -> Result<PathBuf> {
 
     fs::copy(kernel_path, iso_boot_dir.join("kernel"))
         .with_context(|| format!("failed to stage kernel {}", kernel_path.display()))?;
-    fs::copy(limine_config_path(), iso_limine_dir.join("limine.conf"))
+    let limine_config = limine_config_contents()?;
+    fs::write(iso_limine_dir.join("limine.conf"), &limine_config)
         .context("failed to stage limine.conf")?;
 
     let limine_dir = limine_support_dir()?;
@@ -63,7 +64,9 @@ fn create_efi_boot_image(
     cmd!(sh, "truncate -s 128M {image}").run()?;
 
     let boot_efi = limine_dir.join("BOOTX64.EFI");
-    let limine_conf = limine_config_path();
+    let limine_conf = image.with_file_name("limine.conf");
+    fs::write(&limine_conf, limine_config_contents()?)
+        .with_context(|| format!("failed to write {}", limine_conf.display()))?;
     cmd!(sh, "mformat -i {image} -F ::").run()?;
     cmd!(
         sh,
@@ -78,6 +81,27 @@ fn create_efi_boot_image(
     .run()?;
     cmd!(sh, "mcopy -i {image} {kernel_path} ::/boot/kernel").run()?;
     Ok(())
+}
+
+fn limine_config_contents() -> Result<String> {
+    let mut contents =
+        fs::read_to_string(limine_config_path()).context("failed to read limine.conf")?;
+    if let Ok(init) = env::var("SEELE_INIT") {
+        contents = contents
+            .lines()
+            .map(|line| {
+                if line.trim_start().starts_with("cmdline:") {
+                    let indent = &line[..line.len() - line.trim_start().len()];
+                    format!("{indent}cmdline: init={init}")
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        contents.push('\n');
+    }
+    Ok(contents)
 }
 
 fn limine_config_path() -> PathBuf {

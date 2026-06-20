@@ -2,16 +2,19 @@ use super::{IntegrationTest, IntegrationTestResult};
 use crate::{
     reporter::{TestStatus, WorkflowReporter, log_event, metadata_event, test_event},
     run::{
-        build::build_kernel,
-        build_iso::create_boot_iso,
-        interaction::{qmp_type_text, run_qemu_interactive_capture},
+        build::build_kernel, build_iso::create_boot_iso, interaction::run_qemu_interactive_capture,
         qemu::RunOptions,
     },
 };
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{env, fs, path::Path, time::Duration};
+use std::{
+    env, fs,
+    path::Path,
+    sync::{Mutex, OnceLock},
+    time::Duration,
+};
 
 pub const LTP: Ltp = Ltp;
 
@@ -32,14 +35,12 @@ impl IntegrationTest for Ltp {
             .first()
             .map(Path::new)
             .context("kernel executable missing")?;
-        let iso_path = create_boot_iso(kernel_path)?;
-        let mut login_state = LoginState::AwaitLogin;
+        let iso_path = with_env_var("SEELE_INIT", "/usr/local/bin/seele-run-ltp", || {
+            create_boot_iso(kernel_path)
+        })?;
         let options = RunOptions::for_agent_run_without_timeout();
         let timeout = ltp_timeout();
         let result = run_qemu_interactive_capture(&iso_path, &options, timeout, |output| {
-            if let Err(err) = advance_login(&mut login_state, output) {
-                eprintln!("failed to drive LTP login through QMP: {err:?}");
-            }
             output.contains(REPORT_END) && output.contains(EXIT_PREFIX)
         })?;
         fs::remove_file(&iso_path)
@@ -85,67 +86,29 @@ impl IntegrationTest for Ltp {
     }
 }
 
-fn qmp_socket_path() -> std::path::PathBuf {
-    env::var_os("SEELE_QMP_SOCKET")
-        .map(Into::into)
-        .unwrap_or_else(|| "/tmp/seele-agent-qmp.sock".into())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LoginState {
-    AwaitLogin,
-    AwaitPasswordOrShell,
-    AwaitShell,
-    CommandSent,
-}
-
-fn advance_login(state: &mut LoginState, output: &str) -> Result<()> {
-    match *state {
-        LoginState::AwaitLogin if login_prompt_observed(output) => {
-            qmp_type_text(&qmp_socket_path(), "root\n")?;
-            *state = LoginState::AwaitPasswordOrShell;
-        }
-        LoginState::AwaitPasswordOrShell if password_prompt_observed(output) => {
-            qmp_type_text(&qmp_socket_path(), "\n")?;
-            *state = LoginState::AwaitShell;
-        }
-        LoginState::AwaitPasswordOrShell | LoginState::AwaitShell
-            if shell_prompt_observed(output) =>
-        {
-            qmp_type_text(&qmp_socket_path(), "seele-run-ltp\n")?;
-            *state = LoginState::CommandSent;
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn login_prompt_observed(output: &str) -> bool {
-    output.lines().any(|line| {
-        let line = line.trim_end_matches('\r').trim_end();
-        line.ends_with("Seele login:")
-    })
-}
-
-fn password_prompt_observed(output: &str) -> bool {
-    output.lines().any(|line| {
-        let line = line.trim_end_matches('\r').trim_end();
-        line.ends_with("Password:")
-    })
-}
-
-fn shell_prompt_observed(output: &str) -> bool {
-    output.lines().any(|line| {
-        let line = line.trim_end_matches('\r');
-        (line.contains("bash-") || line.contains("root@")) && line.contains("# ")
-    })
-}
-
 fn ltp_timeout() -> Duration {
     env::var("SEELE_LTP_TIMEOUT")
         .ok()
         .and_then(|value| parse_duration(&value))
         .unwrap_or_else(|| Duration::from_secs(45 * 60))
+}
+
+fn with_env_var<T>(key: &str, value: &str, f: impl FnOnce() -> T) -> T {
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let previous = env::var_os(key);
+    unsafe {
+        env::set_var(key, value);
+    }
+    let result = f();
+    unsafe {
+        if let Some(previous) = previous {
+            env::set_var(key, previous);
+        } else {
+            env::remove_var(key);
+        }
+    }
+    result
 }
 
 fn parse_duration(value: &str) -> Option<Duration> {

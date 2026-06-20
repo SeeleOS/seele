@@ -3,7 +3,10 @@ use core::mem::MaybeUninit;
 use limine::{
     framebuffer::Framebuffer,
     memory_map::{Entry, EntryType},
-    request::{FramebufferRequest, HhdmRequest, MemoryMapRequest, RsdpRequest, StackSizeRequest},
+    request::{
+        ExecutableCmdlineRequest, FramebufferRequest, HhdmRequest, MemoryMapRequest, RsdpRequest,
+        StackSizeRequest,
+    },
 };
 
 const KERNEL_STACK_SIZE: u64 = 2 * 1024 * 1024;
@@ -27,6 +30,10 @@ static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
 #[used]
 #[unsafe(link_section = ".requests")]
 static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
+
+#[used]
+#[unsafe(link_section = ".requests")]
+static EXECUTABLE_CMDLINE_REQUEST: ExecutableCmdlineRequest = ExecutableCmdlineRequest::new();
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MemoryRegionKind {
@@ -105,4 +112,10 @@ pub fn rsdp_address() -> u64 {
         .get_response()
         .expect("limine rsdp response missing")
         .address() as u64
+}
+
+pub fn executable_cmdline() -> Option<&'static str> {
+    EXECUTABLE_CMDLINE_REQUEST
+        .get_response()
+        .and_then(|response| response.cmdline().to_str().ok())
 }

@@ -16,7 +16,9 @@ use crate::reporter::{
 };
 
 use self::{
-    arch::{create_pacman_config, install_packages, set_empty_root_password},
+    arch::{
+        configure_login_services, create_pacman_config, install_packages, set_empty_root_password,
+    },
     aur::{install_aur_packages, validate_rebuild_packages},
     kirk::install_kirk,
     mount::{MountedRootfs, mount_rootfs_image, unmount_if_mounted},
@@ -78,6 +80,13 @@ pub fn build_rootfs(config: BuildRootfsConfig, reporter: &dyn WorkflowReporter) 
         "setting empty root password",
     )?;
     set_empty_root_password(&sh, &rootfs_mount, reporter)?;
+    progress(
+        reporter,
+        "build-rootfs",
+        "arch",
+        "configuring login services",
+    )?;
+    configure_login_services(&sh, &rootfs_mount, reporter)?;
     progress(reporter, "build-rootfs", "arch", "installing AUR packages")?;
     install_aur_packages(
         &sh,

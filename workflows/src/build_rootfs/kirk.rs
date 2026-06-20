@@ -86,6 +86,9 @@ pub fn install_kirk(
 
 const LTP_RUNNER: &str = r#"#!/bin/sh
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin"
+export PYTHONHOME=/usr
+export PYTHONPATH=/usr/lib/python3.14:/usr/lib/python3.14/lib-dynload:/usr/lib/python3.14/site-packages
+export PYTHONSAFEPATH=1
 suite="${SEELE_LTP_SUITE:-syscalls}"
 export LTP_SINGLE_FS_TYPE="${LTP_SINGLE_FS_TYPE:-ext4}"
 default_pattern="^(access01|access02|brk01|brk02|chdir01|chdir02|chmod01|chown01|clock_getres01|clock_gettime01|clock_nanosleep01|clone01|close01|close_range01|dup01|dup201|dup202|dup301|epoll_create101|epoll_ctl01|epoll_pwait01|epoll_pwait201|epoll_wait01|eventfd.*|execve01|exit_group01|faccessat01|faccessat02|faccessat201|fchdir01|fchmod01|fchmodat01|fchown01|fchownat01|fcntl01|fcntl02|fcntl03|fcntl04|fcntl05|fdatasync01|flistxattr01|fork01|fork02|fstat01|fstatat01|fstatfs01|fstatfs02|fsync01|ftruncate01|getcwd01|getcwd02|getdents01|getdents64.*|getegid01|geteuid01|getgid01|getgroups01|getitimer01|getpid01|getpid02|getrlimit01|getrusage01|getsid01|gettimeofday01|getuid01|getxattr01|ioctl01|kill01|lchown01|lgetxattr01|link01|linkat01|listxattr01|lseek01|lstat01|lsetxattr01|madvise01|mincore01|mkdir01|mkdirat01|mlock01|mmap01|mmap02|mmap03|mmap04|mmap_fixed01|mmapstress01|mount01|mprotect01|mprotect02|mremap01|msync01|munlock01|munmap01|nanosleep01|newfstatat01|open01|openat01|pipe01|pipe02|pipe201|pivot_root01|poll01|ppoll01|pread64.*|prlimit64_01|pselect01|pwrite64.*|read01|readlink01|readlinkat01|readv01|removexattr01|rename01|renameat.*|rmdir01|rt_sigaction01|rt_sigpending01|rt_sigprocmask01|select01|select02|setgroups01|setitimer01|setpgid01|setrlimit01|setxattr01|sigaltstack01|sigsuspend01|socketpair01|stat01|statfs01|statfs02|statx01|symlink01|symlinkat01|sysinfo01|tgkill01|timer_create01|timer_gettime01|timer_settime01|timerfd_.*|tkill01|truncate01|umask01|umount01|uname01|unlink01|unlinkat01|utime01|utimensat01|utimes01|vfork01|wait401|waitid01|waitpid01|waitpid02|write01|writev01)$"
@@ -95,6 +98,25 @@ report="$report_dir/report.json"
 
 mkdir -p "$report_dir"
 rm -f "$report"
+cat > /tmp/seele-kernel.config <<'EOF'
+CONFIG_EVENTFD=y
+CONFIG_EPOLL=y
+CONFIG_TMPFS=y
+CONFIG_PROC_FS=y
+CONFIG_SYSVIPC=y
+CONFIG_EXT4_FS=y
+CONFIG_NET=y
+CONFIG_UNIX=y
+# CONFIG_AIO is not set
+EOF
+export KCONFIG_PATH=/tmp/seele-kernel.config
+
+mountpoint -q /proc || mount -t proc proc /proc
+mountpoint -q /sys || mount -t sysfs sysfs /sys
+mountpoint -q /dev || mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts /dev/shm
+mountpoint -q /dev/pts || mount -t devpts devpts /dev/pts
+mountpoint -q /dev/shm || mount -t tmpfs tmpfs /dev/shm
 
 if [ -z "${LTP_DEV:-}" ]; then
     for dev in /dev/vd?; do
@@ -114,7 +136,9 @@ LTPROOT=/usr/share LTP_COLORIZE_OUTPUT=0 kirk --no-colors \
 status=$?
 
 echo __SEELE_LTP_JSON_BEGIN__
-if command -v python >/dev/null 2>&1; then
+if [ ! -s "$report" ]; then
+    echo '{"results":[]}'
+elif command -v python >/dev/null 2>&1; then
     python - "$report" <<'PY'
 import re
 import json
