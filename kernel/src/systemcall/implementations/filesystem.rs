@@ -2338,8 +2338,13 @@ mod tests {
                 .call::<Getxattr>(),
             SyscallError::NoData,
         );
-        expect_errno(
+        expect_ok(
             SyscallArgs::new([user_page + 64, user_page + 128, 0, 0, 0, 0]).call::<Lremovexattr>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([user_page + 64, user_page + 128, user_page + 384, 16, 0, 0])
+                .call::<Lgetxattr>(),
             SyscallError::NoData,
         );
         expect_errno(
