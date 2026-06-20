@@ -51,16 +51,16 @@ pub(in crate::systemcall) struct Timespec {
     pub(in crate::systemcall) tv_nsec: i64,
 }
 
-pub(in crate::systemcall) fn kernel_events_for(bits: PollEvents) -> [Option<PollableEvent>; 5] {
-    let watch_read = bits.intersects(
-        PollEvents::POLLIN | PollEvents::POLLPRI | PollEvents::POLLRDNORM | PollEvents::POLLRDBAND,
-    );
+pub(in crate::systemcall) fn kernel_events_for(bits: PollEvents) -> [Option<PollableEvent>; 6] {
+    let watch_read = bits.intersects(PollEvents::POLLIN | PollEvents::POLLRDNORM);
+    let watch_priority = bits.intersects(PollEvents::POLLPRI | PollEvents::POLLRDBAND);
     let watch_write =
         bits.intersects(PollEvents::POLLOUT | PollEvents::POLLWRNORM | PollEvents::POLLWRBAND);
-    let watch_any = watch_read || watch_write;
+    let watch_any = watch_read || watch_priority || watch_write;
 
     [
         watch_read.then_some(PollableEvent::CanBeRead),
+        watch_priority.then_some(PollableEvent::Priority),
         watch_write.then_some(PollableEvent::CanBeWritten),
         (watch_any || bits.contains(PollEvents::POLLERR)).then_some(PollableEvent::Error),
         (watch_any || bits.contains(PollEvents::POLLHUP)).then_some(PollableEvent::Closed),
@@ -75,11 +75,10 @@ pub(in crate::systemcall) fn translate_ready_events(
     let mut translated = PollEvents::empty();
 
     if kernel_events & (PollEvents::POLLIN.bits() as u32) != 0 {
-        translated |= requested_events
-            & (PollEvents::POLLIN
-                | PollEvents::POLLPRI
-                | PollEvents::POLLRDNORM
-                | PollEvents::POLLRDBAND);
+        translated |= requested_events & (PollEvents::POLLIN | PollEvents::POLLRDNORM);
+    }
+    if kernel_events & (PollEvents::POLLPRI.bits() as u32) != 0 {
+        translated |= requested_events & (PollEvents::POLLPRI | PollEvents::POLLRDBAND);
     }
     if kernel_events & (PollEvents::POLLOUT.bits() as u32) != 0 {
         translated |= requested_events
@@ -92,11 +91,7 @@ pub(in crate::systemcall) fn translate_ready_events(
         translated |= PollEvents::POLLHUP;
     }
     if kernel_events & (PollEvents::POLLRDHUP.bits() as u32) != 0 {
-        translated |= requested_events
-            & (PollEvents::POLLIN
-                | PollEvents::POLLPRI
-                | PollEvents::POLLRDNORM
-                | PollEvents::POLLRDBAND);
+        translated |= requested_events & (PollEvents::POLLIN | PollEvents::POLLRDNORM);
         translated |= requested_events & PollEvents::POLLRDHUP;
     }
 
@@ -268,13 +263,15 @@ mod tests {
     }
 
     fn poll_helpers_translate_linux_events_to_kernel_readiness() {
-        let events = kernel_events_for(PollEvents::POLLIN | PollEvents::POLLOUT);
+        let events =
+            kernel_events_for(PollEvents::POLLIN | PollEvents::POLLPRI | PollEvents::POLLOUT);
 
         assert_eq!(events[0], Some(PollableEvent::CanBeRead));
-        assert_eq!(events[1], Some(PollableEvent::CanBeWritten));
-        assert_eq!(events[2], Some(PollableEvent::Error));
-        assert_eq!(events[3], Some(PollableEvent::Closed));
-        assert_eq!(events[4], Some(PollableEvent::ReadClosed));
+        assert_eq!(events[1], Some(PollableEvent::Priority));
+        assert_eq!(events[2], Some(PollableEvent::CanBeWritten));
+        assert_eq!(events[3], Some(PollableEvent::Error));
+        assert_eq!(events[4], Some(PollableEvent::Closed));
+        assert_eq!(events[5], Some(PollableEvent::ReadClosed));
 
         let translated = translate_ready_events(
             PollEvents::POLLIN
@@ -289,6 +286,14 @@ mod tests {
         assert!(translated.contains(PollEvents::POLLHUP));
         assert!(translated.contains(PollEvents::POLLRDHUP));
         assert!(!translated.contains(PollEvents::POLLOUT));
+
+        let translated = translate_ready_events(
+            PollEvents::POLLPRI | PollEvents::POLLRDBAND,
+            PollEvents::POLLPRI.bits() as u32,
+        );
+        let translated = PollEvents::from_bits_retain(translated);
+        assert!(translated.contains(PollEvents::POLLPRI));
+        assert!(translated.contains(PollEvents::POLLRDBAND));
     }
 
     fn poll_timeout_helpers_reject_invalid_timespecs_and_saturate() {

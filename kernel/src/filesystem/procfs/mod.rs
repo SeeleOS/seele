@@ -29,8 +29,8 @@ use net::{
     proc_net_dev_bytes, proc_net_entries, proc_net_if_inet6_bytes, proc_net_route_bytes,
 };
 use nodes::{
-    proc_dir, proc_dynamic_dir, proc_dynamic_symlink, proc_file, proc_object_file, proc_rw_file,
-    proc_symlink,
+    proc_dir, proc_dynamic_dir, proc_dynamic_symlink, proc_file, proc_file_with_epoll,
+    proc_object_file, proc_rw_file, proc_rw_file_with_epoll, proc_symlink,
 };
 use pid::{
     current_pid, fd_target, parse_fd, parse_pid, pid_cgroup_inode, pid_cmdline_inode,
@@ -69,6 +69,8 @@ use root::{
 };
 use self_paths::{lookup_proc_self_path, proc_pid_namespace_file};
 use sysctl::*;
+
+pub(crate) use nodes::ProcFile;
 
 pub struct ProcFs;
 

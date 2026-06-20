@@ -12,12 +12,13 @@ use crate::filesystem::{
 type ProcReadCallback = dyn Fn() -> Vec<u8> + Send + Sync;
 type ProcWriteCallback = dyn Fn(&[u8]) -> FSResult<usize> + Send + Sync;
 
-pub(super) struct ProcFile {
+pub(crate) struct ProcFile {
     name: String,
     inode: u64,
     mode: u32,
     read: Arc<ProcReadCallback>,
     write: Option<Arc<ProcWriteCallback>>,
+    epoll_ready: bool,
     offset: usize,
 }
 
@@ -28,6 +29,7 @@ impl ProcFile {
         mode: u32,
         read: Arc<ProcReadCallback>,
         write: Option<Arc<ProcWriteCallback>>,
+        epoll_ready: bool,
     ) -> Self {
         Self {
             name,
@@ -35,8 +37,13 @@ impl ProcFile {
             mode,
             read,
             write,
+            epoll_ready,
             offset: 0,
         }
+    }
+
+    pub(crate) fn supports_epoll(&self) -> bool {
+        self.epoll_ready
     }
 }
 

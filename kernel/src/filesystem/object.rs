@@ -701,9 +701,19 @@ impl Pollable for OpenedFileObject {
     }
 
     fn supports_epoll(&self) -> bool {
-        self.device_object()
-            .and_then(|device| device.as_pollable().ok())
-            .is_some_and(|pollable| pollable.supports_epoll())
+        if let Some(device) = self.device_object() {
+            return device
+                .as_pollable()
+                .is_ok_and(|pollable| pollable.supports_epoll());
+        }
+
+        let OpenBackend::RegularFile(file) = &self.backend else {
+            return false;
+        };
+        file.lock()
+            .as_any()
+            .downcast_ref::<crate::filesystem::procfs::ProcFile>()
+            .is_some_and(crate::filesystem::procfs::ProcFile::supports_epoll)
     }
 }
 

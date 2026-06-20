@@ -14,7 +14,7 @@ mod file;
 mod symlink;
 
 use directory::ProcDirectory;
-use file::ProcFile;
+pub(crate) use file::ProcFile;
 use symlink::ProcSymlink;
 
 const PROC_FILE_MODE_READONLY: u32 = 0o100444;
@@ -50,16 +50,43 @@ pub(super) fn proc_file<F>(name: &str, inode: u64, read: F) -> FileLike
 where
     F: Fn() -> Vec<u8> + Send + Sync + 'static,
 {
+    proc_file_with_epoll(name, inode, read, false)
+}
+
+pub(super) fn proc_file_with_epoll<F>(
+    name: &str,
+    inode: u64,
+    read: F,
+    epoll_ready: bool,
+) -> FileLike
+where
+    F: Fn() -> Vec<u8> + Send + Sync + 'static,
+{
     FileLike::File(Arc::new(Mut::new(ProcFile::new(
         name.into(),
         inode,
         PROC_FILE_MODE_READONLY,
         Arc::new(read),
         None,
+        epoll_ready,
     ))))
 }
 
 pub(super) fn proc_rw_file<F, W>(name: &str, inode: u64, read: F, write: W) -> FileLike
+where
+    F: Fn() -> Vec<u8> + Send + Sync + 'static,
+    W: Fn(&[u8]) -> FSResult<usize> + Send + Sync + 'static,
+{
+    proc_rw_file_with_epoll(name, inode, read, write, false)
+}
+
+pub(super) fn proc_rw_file_with_epoll<F, W>(
+    name: &str,
+    inode: u64,
+    read: F,
+    write: W,
+    epoll_ready: bool,
+) -> FileLike
 where
     F: Fn() -> Vec<u8> + Send + Sync + 'static,
     W: Fn(&[u8]) -> FSResult<usize> + Send + Sync + 'static,
@@ -70,6 +97,7 @@ where
         PROC_FILE_MODE_READWRITE,
         Arc::new(read),
         Some(Arc::new(write)),
+        epoll_ready,
     ))))
 }
 

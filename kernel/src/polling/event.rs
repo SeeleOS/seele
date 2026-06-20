@@ -3,6 +3,7 @@
 pub enum PollableEvent {
     CanBeRead,
     CanBeWritten,
+    Priority,
     Error,
     Closed,
     ReadClosed,
@@ -14,9 +15,10 @@ impl From<u64> for PollableEvent {
         match value {
             0 => Self::CanBeRead,
             1 => Self::CanBeWritten,
-            2 => Self::Error,
-            3 => Self::Closed,
-            4 => Self::ReadClosed,
+            2 => Self::Priority,
+            3 => Self::Error,
+            4 => Self::Closed,
+            5 => Self::ReadClosed,
             _ => Self::Other(value),
         }
     }

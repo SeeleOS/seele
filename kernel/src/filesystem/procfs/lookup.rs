@@ -51,23 +51,26 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             PROC_PRESSURE_INODE,
             proc_pressure_entries(),
         )),
-        ["pressure", "cpu"] => Ok(proc_rw_file(
+        ["pressure", "cpu"] => Ok(proc_rw_file_with_epoll(
             "cpu",
             PROC_PRESSURE_CPU_INODE,
             proc_pressure_bytes,
             proc_write_pressure,
+            true,
         )),
-        ["pressure", "io"] => Ok(proc_rw_file(
+        ["pressure", "io"] => Ok(proc_rw_file_with_epoll(
             "io",
             PROC_PRESSURE_IO_INODE,
             proc_pressure_bytes,
             proc_write_pressure,
+            true,
         )),
-        ["pressure", "memory"] => Ok(proc_rw_file(
+        ["pressure", "memory"] => Ok(proc_rw_file_with_epoll(
             "memory",
             PROC_PRESSURE_MEMORY_INODE,
             proc_pressure_bytes,
             proc_write_pressure,
+            true,
         )),
         ["sysvipc"] => Ok(proc_dir(
             "/sysvipc",

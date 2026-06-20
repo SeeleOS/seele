@@ -108,7 +108,7 @@ fn epoll_interest_entries(bits: EpollEvents) -> [(bool, PollableEvent, u32); 6] 
         ),
         (
             bits.contains(EpollEvents::PRI),
-            PollableEvent::CanBeRead,
+            PollableEvent::Priority,
             EpollEvents::PRI.bits(),
         ),
         (
@@ -230,6 +230,7 @@ define_syscall!(
                 for existing in [
                     PollableEvent::CanBeRead,
                     PollableEvent::CanBeWritten,
+                    PollableEvent::Priority,
                     PollableEvent::Error,
                     PollableEvent::Closed,
                     PollableEvent::ReadClosed,

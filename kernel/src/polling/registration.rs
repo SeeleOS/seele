@@ -33,9 +33,10 @@ fn event_key(event: PollableEvent) -> u64 {
     match event {
         PollableEvent::CanBeRead => 0,
         PollableEvent::CanBeWritten => 1,
-        PollableEvent::Error => 2,
-        PollableEvent::Closed => 3,
-        PollableEvent::ReadClosed => 4,
+        PollableEvent::Priority => 2,
+        PollableEvent::Error => 3,
+        PollableEvent::Closed => 4,
+        PollableEvent::ReadClosed => 5,
         PollableEvent::Other(bits) => bits,
     }
 }
@@ -192,6 +193,7 @@ impl PollerObject {
             match event {
                 PollableEvent::CanBeRead => 0x001,
                 PollableEvent::CanBeWritten => 0x004,
+                PollableEvent::Priority => 0x002,
                 PollableEvent::Error => 0x008,
                 PollableEvent::Closed => 0x010,
                 PollableEvent::ReadClosed => 0x2000,

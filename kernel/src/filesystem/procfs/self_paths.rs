@@ -79,10 +79,11 @@ pub(super) fn lookup_proc_self_path(parts: &[&str]) -> FSResult<FileLike> {
         }
         ["self", "mountinfo"] => {
             let pid = current_pid()?;
-            Ok(proc_file(
+            Ok(proc_file_with_epoll(
                 "mountinfo",
                 pid_mountinfo_inode(pid),
                 proc_mountinfo_bytes,
+                true,
             ))
         }
         ["self", "maps"] => {
