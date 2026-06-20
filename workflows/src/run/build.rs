@@ -6,7 +6,6 @@ use std::{
     io::{BufRead, BufReader},
     path::PathBuf,
     process::Stdio,
-    sync::{Arc, Mutex},
     thread,
 };
 use xshell::{Shell, cmd};
@@ -56,43 +55,40 @@ pub fn build_kernel_with_mode(
     let stderr = child.stderr.take().context("missing cargo stderr")?;
     let reader = BufReader::new(stdout);
     let mut executables = Vec::new();
-    let stderr_buffer = Arc::new(Mutex::new(String::new()));
-    let stderr_buffer_thread = Arc::clone(&stderr_buffer);
-    let stderr_thread = thread::spawn(move || {
-        let stderr_reader = BufReader::new(stderr);
-        for line in stderr_reader.lines() {
-            match line {
-                Ok(line) => {
-                    if let Ok(mut buffer) = stderr_buffer_thread.lock() {
-                        buffer.push_str(&line);
-                        buffer.push('\n');
+    let status = thread::scope(|scope| {
+        let stderr_thread = scope.spawn(|| {
+            let stderr_reader = BufReader::new(stderr);
+            for line in stderr_reader.lines() {
+                match line {
+                    Ok(line) => {
+                        let _ = log_event(reporter, "build", "stderr", &line);
+                        let _ = log_event(reporter, "build", "stderr", "\n");
                     }
-                }
-                Err(err) => {
-                    if let Ok(mut buffer) = stderr_buffer_thread.lock() {
-                        buffer.push_str(&format!("failed to read cargo stderr: {err}\n"));
+                    Err(err) => {
+                        let _ = log_event(
+                            reporter,
+                            "build",
+                            "stderr",
+                            &format!("failed to read cargo stderr: {err}\n"),
+                        );
+                        break;
                     }
-                    break;
                 }
             }
-        }
-    });
+        });
 
-    for line in reader.lines() {
-        let line: String = line.context("failed to read cargo output")?;
-        if let Some(path) = handle_cargo_message(&line, &mode, reporter) {
-            executables.push(path);
+        for line in reader.lines() {
+            let line: String = line.context("failed to read cargo output")?;
+            if let Some(path) = handle_cargo_message(&line, &mode, reporter) {
+                executables.push(path);
+            }
         }
-    }
 
-    let status = child.wait().context("failed to wait on cargo")?;
-    let _ = stderr_thread.join();
+        let status = child.wait().context("failed to wait on cargo")?;
+        let _ = stderr_thread.join();
+        Ok::<_, anyhow::Error>(status)
+    })?;
     if !status.success() {
-        if let Ok(buffer) = stderr_buffer.lock()
-            && !buffer.is_empty()
-        {
-            eprint!("{buffer}");
-        }
         bail!("cargo command failed with status {}", status);
     }
     if executables.is_empty() {
