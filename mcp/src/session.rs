@@ -37,6 +37,8 @@ pub struct SessionStatus {
     pub qmp_connectable: bool,
     pub serial_log: PathBuf,
     pub serial_log_exists: bool,
+    pub mcp_run_log: PathBuf,
+    pub mcp_run_log_exists: bool,
     pub last_exit: Option<i32>,
 }
 
@@ -46,6 +48,7 @@ pub struct SessionMetadata {
     pub qemu_pid: Option<u32>,
     pub qmp_socket: PathBuf,
     pub serial_log: PathBuf,
+    pub mcp_run_log: PathBuf,
     pub iso_image: Option<PathBuf>,
 }
 
@@ -163,6 +166,16 @@ impl AgentSession {
 
         let _ = fs::remove_file(&self.qmp_socket).await;
         let _ = fs::remove_file(&self.serial_log).await;
+        fs::create_dir_all(&self.command_log_dir)
+            .await
+            .with_context(|| format!("failed to create {}", self.command_log_dir.display()))?;
+        let mcp_run_log = self.command_log_dir.join("mcp-run.log");
+        let _ = fs::remove_file(&mcp_run_log).await;
+        let log = std::fs::File::create(&mcp_run_log)
+            .with_context(|| format!("failed to create {}", mcp_run_log.display()))?;
+        let log_for_stderr = log
+            .try_clone()
+            .with_context(|| format!("failed to clone {}", mcp_run_log.display()))?;
 
         let mut command = Command::new("cargo");
         command
@@ -179,8 +192,8 @@ impl AgentSession {
             .current_dir(&self.repo)
             .env("SEELE_QMP_SOCKET", &self.qmp_socket)
             .env("SEELE_SERIAL_LOG", &self.serial_log)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stdout(Stdio::from(log))
+            .stderr(Stdio::from(log_for_stderr));
         for (key, value) in envs {
             command.env(key, value);
         }
@@ -190,6 +203,7 @@ impl AgentSession {
             qemu_pid: None,
             qmp_socket: self.qmp_socket.clone(),
             serial_log: self.serial_log.clone(),
+            mcp_run_log,
             iso_image: None,
         };
         state.child = Some(child);
@@ -256,6 +270,11 @@ impl AgentSession {
             .await
             .is_ok();
         let serial_log_exists = fs::metadata(&self.serial_log).await.is_ok();
+        let mcp_run_log = metadata
+            .as_ref()
+            .map(|metadata| metadata.mcp_run_log.clone())
+            .unwrap_or_else(|| self.command_log_dir.join("mcp-run.log"));
+        let mcp_run_log_exists = fs::metadata(&mcp_run_log).await.is_ok();
 
         Ok(SessionStatus {
             running,
@@ -271,6 +290,8 @@ impl AgentSession {
                 .map(|metadata| metadata.serial_log.clone())
                 .unwrap_or_else(|| self.serial_log.clone()),
             serial_log_exists,
+            mcp_run_log,
+            mcp_run_log_exists,
             last_exit: state.last_exit,
         })
     }
