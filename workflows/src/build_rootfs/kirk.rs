@@ -15,6 +15,7 @@ pub fn install_kirk(
     let kirk_checkout = repo_root.join("target").join("kirk");
     let host_kirk_dir = rootfs_mount.join("opt").join("kirk");
     let host_kirk_bin = rootfs_mount.join("usr/local/bin/kirk");
+    let kirk_bin = repo_root.join("target").join("kirk-runner");
     let ltp_runner = repo_root.join("target").join("seele-run-ltp");
     let host_ltp_runner = rootfs_mount.join("usr/local/bin/seele-run-ltp");
 
@@ -71,7 +72,14 @@ pub fn install_kirk(
     run_xshell_command(
         "build-rootfs",
         sh,
-        cmd!(sh, "sudo ln -sfn /opt/kirk/kirk {host_kirk_bin}"),
+        cmd!(sh, "sudo rm -f {host_kirk_bin}"),
+        reporter,
+    )?;
+    fs::write(&kirk_bin, KIRK_RUNNER).context("failed to write kirk runner script")?;
+    run_xshell_command(
+        "build-rootfs",
+        sh,
+        cmd!(sh, "sudo install -Dm755 {kirk_bin} {host_kirk_bin}"),
         reporter,
     )?;
     fs::write(&ltp_runner, LTP_RUNNER).context("failed to write LTP runner script")?;
@@ -87,7 +95,7 @@ pub fn install_kirk(
 const LTP_RUNNER: &str = r#"#!/bin/sh
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin"
 export PYTHONHOME=/usr
-export PYTHONPATH=/usr/lib/python3.14:/usr/lib/python3.14/lib-dynload:/usr/lib/python3.14/site-packages
+export PYTHONPATH=/opt/kirk:/usr/lib/python3.14:/usr/lib/python3.14/lib-dynload:/usr/lib/python3.14/site-packages
 export PYTHONSAFEPATH=1
 suite="${SEELE_LTP_SUITE:-syscalls}"
 export LTP_SINGLE_FS_TYPE="${LTP_SINGLE_FS_TYPE:-ext4}"
@@ -164,4 +172,9 @@ fi
 echo __SEELE_LTP_JSON_END__
 echo __SEELE_LTP_EXIT__:$status
 exit "$status"
+"#;
+
+const KIRK_RUNNER: &str = r#"#!/bin/sh
+export PYTHONPATH="/opt/kirk${PYTHONPATH:+:$PYTHONPATH}"
+exec /usr/bin/python /opt/kirk/kirk "$@"
 "#;
