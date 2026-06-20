@@ -8,7 +8,10 @@ use x86_64::{
 use alloc::{vec, vec::Vec};
 
 use crate::{
-    memory::addrspace::{AddrSpace, cow::COW_FLAG, mem_area::Data},
+    memory::{
+        addrspace::{AddrSpace, cow::COW_FLAG, mem_area::Data},
+        protection::Protection,
+    },
     systemcall::utils::{SyscallError, SyscallResult},
 };
 
@@ -22,16 +25,18 @@ impl AddrSpace {
         if !Self::is_user_addr(addr) {
             return false;
         }
+        let Some(area) = self.get_area(addr).cloned() else {
+            return false;
+        };
+        if !area.is_user() || !area.protection.contains(Protection::READ) {
+            return false;
+        }
         match self.page_table.translate(addr) {
             TranslateResult::Mapped { flags, .. } => {
                 flags.contains(PageTableFlags::USER_ACCESSIBLE)
             }
-            _ => match self.get_area(addr).cloned() {
-                Some(area)
-                    if area.lazy
-                        && area.is_user()
-                        && area.flags.contains(PageTableFlags::USER_ACCESSIBLE) =>
-                {
+            _ => {
+                if area.lazy && area.flags.contains(PageTableFlags::USER_ACCESSIBLE) {
                     let page = Page::<Size4KiB>::containing_address(addr);
                     let is_file_backed = matches!(area.data, Data::File { .. });
                     if is_file_backed {
@@ -44,9 +49,10 @@ impl AddrSpace {
                         TranslateResult::Mapped { flags, .. }
                             if flags.contains(PageTableFlags::USER_ACCESSIBLE)
                     )
+                } else {
+                    false
                 }
-                _ => false,
-            },
+            }
         }
     }
 

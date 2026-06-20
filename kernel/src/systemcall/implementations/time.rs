@@ -199,7 +199,7 @@ fn clock_nanosleep_clock(clock_id: i32) -> Result<SleepClock, SyscallError> {
     match clock_id {
         0 | 5 | 8 | 11 => Ok(SleepClock::Realtime),
         1 | 4 | 6 | 7 | 9 => Ok(SleepClock::Monotonic),
-        2 | 3 => Err(SyscallError::InvalidArguments),
+        2 | 3 => Err(SyscallError::OperationNotSupported),
         _ => Err(SyscallError::InvalidArguments),
     }
 }
