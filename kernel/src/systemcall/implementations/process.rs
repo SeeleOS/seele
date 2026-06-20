@@ -183,12 +183,11 @@ fn check_wait_outcome(
 
         matched_child = true;
 
-        if wait_behavior.report_exited && p_lock.threads.is_empty() {
-            ready_child = Some(WaitOutcome::Exited(
-                process.clone(),
-                pid.0,
-                p_lock.exit_status.unwrap_or(ProcessExitStatus::Exited(0)),
-            ));
+        if wait_behavior.report_exited
+            && let Some(exit_status) = p_lock.exit_status
+            && p_lock.threads.is_empty()
+        {
+            ready_child = Some(WaitOutcome::Exited(process.clone(), pid.0, exit_status));
             break;
         }
 
