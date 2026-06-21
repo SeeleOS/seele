@@ -4,7 +4,7 @@ use strum::IntoEnumIterator;
 
 use crate::{
     define_syscall,
-    filesystem::path::Path,
+    filesystem::{absolute_path::AbsolutePath, path::Path},
     memory::user_safe,
     misc::signal::{SigInfo, SignalHandlingType},
     object::misc::get_object_current_process,
@@ -360,6 +360,13 @@ define_syscall!(Execve, |path_str: String,
                          args: Vec<String>,
                          env: Vec<String>| {
     let path = Path::new(path_str.as_str());
+    let fs_context = get_current_process().lock().fs_context.lock().clone();
+    let path = AbsolutePath::join_under_root(
+        &fs_context.root_directory,
+        &fs_context.current_directory,
+        &path,
+    )
+    .as_normal();
     execve(path, args, env)?;
     log::info!("execve done");
     Ok(0)

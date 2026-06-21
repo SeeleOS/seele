@@ -216,10 +216,22 @@ mod tests {
 
         let process = get_current_process();
         let saved_fs_context = process.lock().fs_context.lock().clone();
+        let saved_credentials = CredentialSnapshot::save_current();
+        let saved_groups = process.lock().supplementary_groups.clone();
         let base_path = Path::new("/tmp/syscall-path-state-test");
         let subdir_path = Path::new("/tmp/syscall-path-state-test/subdir");
+        let no_perm_file_path = Path::new("/tmp/syscall-path-state-test/no-perm");
+        let read_only_file_path = Path::new("/tmp/syscall-path-state-test/read-only");
+        let write_only_file_path = Path::new("/tmp/syscall-path-state-test/write-only");
+        let exec_only_file_path = Path::new("/tmp/syscall-path-state-test/exec-only");
+        let read_only_link_path = Path::new("/tmp/syscall-path-state-test/read-only-link");
         let locked_file_path = Path::new("/tmp/syscall-path-state-test/locked");
         let existing_file_path = Path::new("/tmp/syscall-path-state-test/existing");
+        let _ = VirtualFS.lock().delete_file(read_only_link_path.clone());
+        let _ = VirtualFS.lock().delete_file(exec_only_file_path.clone());
+        let _ = VirtualFS.lock().delete_file(write_only_file_path.clone());
+        let _ = VirtualFS.lock().delete_file(read_only_file_path.clone());
+        let _ = VirtualFS.lock().delete_file(no_perm_file_path.clone());
         let _ = VirtualFS.lock().delete_file(existing_file_path.clone());
         let _ = VirtualFS.lock().delete_file(locked_file_path.clone());
         let _ = VirtualFS.lock().delete_file(subdir_path.clone());
@@ -229,6 +241,50 @@ mod tests {
         VirtualFS
             .lock()
             .create_file(locked_file_path.clone())
+            .unwrap();
+        VirtualFS
+            .lock()
+            .create_file(no_perm_file_path.clone())
+            .unwrap();
+        VirtualFS
+            .lock()
+            .open(no_perm_file_path.clone())
+            .unwrap()
+            .chmod(0o000)
+            .unwrap();
+        VirtualFS
+            .lock()
+            .create_file(read_only_file_path.clone())
+            .unwrap();
+        VirtualFS
+            .lock()
+            .open(read_only_file_path.clone())
+            .unwrap()
+            .chmod(0o444)
+            .unwrap();
+        VirtualFS
+            .lock()
+            .create_file(write_only_file_path.clone())
+            .unwrap();
+        VirtualFS
+            .lock()
+            .open(write_only_file_path.clone())
+            .unwrap()
+            .chmod(0o222)
+            .unwrap();
+        VirtualFS
+            .lock()
+            .create_file(exec_only_file_path.clone())
+            .unwrap();
+        VirtualFS
+            .lock()
+            .open(exec_only_file_path.clone())
+            .unwrap()
+            .chmod(0o555)
+            .unwrap();
+        VirtualFS
+            .lock()
+            .create_symlink(read_only_link_path.clone(), "read-only")
             .unwrap();
         VirtualFS
             .lock()
@@ -255,6 +311,110 @@ mod tests {
             SyscallArgs::new([user_page, 8, 0, 0, 0, 0]).call::<Access>(),
             SyscallError::InvalidArguments,
         );
+
+        write_user_cstr(user_page, b"/tmp/syscall-path-state-test/no-perm\0");
+        expect_ok(
+            SyscallArgs::new([user_page, 4, 0, 0, 0, 0]).call::<Access>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([user_page, 2, 0, 0, 0, 0]).call::<Access>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([user_page, 1, 0, 0, 0, 0]).call::<Access>(),
+            SyscallError::AccessDenied,
+        );
+        {
+            let mut process = process.lock();
+            process.real_uid = 65_534;
+            process.effective_uid = 65_534;
+            process.saved_uid = 65_534;
+            process.fs_uid = 65_534;
+            process.real_gid = 65_534;
+            process.effective_gid = 65_534;
+            process.saved_gid = 65_534;
+            process.fs_gid = 65_534;
+            process.supplementary_groups.clear();
+            process.capability_effective = [0; 2];
+        }
+
+        for (path, read_ok, write_ok, exec_ok) in [
+            (
+                b"/tmp/syscall-path-state-test/no-perm\0".as_slice(),
+                false,
+                false,
+                false,
+            ),
+            (
+                b"/tmp/syscall-path-state-test/read-only\0".as_slice(),
+                true,
+                false,
+                false,
+            ),
+            (
+                b"/tmp/syscall-path-state-test/write-only\0".as_slice(),
+                false,
+                true,
+                false,
+            ),
+            (
+                b"/tmp/syscall-path-state-test/exec-only\0".as_slice(),
+                true,
+                false,
+                true,
+            ),
+            (
+                b"/tmp/syscall-path-state-test/read-only-link\0".as_slice(),
+                true,
+                false,
+                false,
+            ),
+        ] {
+            write_user_cstr(user_page, path);
+            expect_ok(
+                SyscallArgs::new([user_page, 0, 0, 0, 0, 0]).call::<Access>(),
+                0,
+            );
+            let read_result = SyscallArgs::new([user_page, 4, 0, 0, 0, 0]).call::<Access>();
+            if read_ok {
+                expect_ok(read_result, 0);
+            } else {
+                expect_errno(read_result, SyscallError::AccessDenied);
+            }
+            let write_result = SyscallArgs::new([user_page, 2, 0, 0, 0, 0]).call::<Access>();
+            if write_ok {
+                expect_ok(write_result, 0);
+            } else {
+                expect_errno(write_result, SyscallError::AccessDenied);
+            }
+            let exec_result = SyscallArgs::new([user_page, 1, 0, 0, 0, 0]).call::<Access>();
+            if exec_ok {
+                expect_ok(exec_result, 0);
+            } else {
+                expect_errno(exec_result, SyscallError::AccessDenied);
+            }
+        }
+
+        write_user_cstr(user_page, b"/tmp/syscall-path-state-test/read-only\0");
+        let read_only_fd =
+            expect_fd(SyscallArgs::new([AT_FDCWD, user_page, 0, 0, 0, 0]).call::<OpenAt>());
+        close_test_fd(read_only_fd);
+        expect_errno(
+            SyscallArgs::new([AT_FDCWD, user_page, 1, 0, 0, 0]).call::<OpenAt>(),
+            SyscallError::AccessDenied,
+        );
+        write_user_cstr(user_page, b"/tmp/syscall-path-state-test/write-only\0");
+        expect_errno(
+            SyscallArgs::new([AT_FDCWD, user_page, 0, 0, 0, 0]).call::<OpenAt>(),
+            SyscallError::AccessDenied,
+        );
+        let write_only_fd =
+            expect_fd(SyscallArgs::new([AT_FDCWD, user_page, 1, 0, 0, 0]).call::<OpenAt>());
+        close_test_fd(write_only_fd);
+
+        saved_credentials.restore();
+        process.lock().supplementary_groups = saved_groups.clone();
 
         write_user_cstr(user_page, b"/tmp/syscall-path-state-test/existing\0");
         let file_fd = expect_fd(
@@ -386,6 +546,12 @@ mod tests {
         {
             *process.lock().fs_context.lock() = saved_fs_context;
         }
+        process.lock().supplementary_groups = saved_groups;
+        let _ = VirtualFS.lock().delete_file(read_only_link_path);
+        let _ = VirtualFS.lock().delete_file(exec_only_file_path);
+        let _ = VirtualFS.lock().delete_file(write_only_file_path);
+        let _ = VirtualFS.lock().delete_file(read_only_file_path);
+        let _ = VirtualFS.lock().delete_file(no_perm_file_path);
         let _ = VirtualFS.lock().delete_file(existing_file_path);
         let _ = VirtualFS.lock().delete_file(locked_file_path);
         let _ = VirtualFS.lock().delete_file(subdir_path);
@@ -1348,6 +1514,7 @@ mod tests {
 
         let base_path = Path::new("/tmp/syscall-getdents-test");
         let cleanup_paths = [
+            "/tmp/syscall-getdents-test/long-entry-name",
             "/tmp/syscall-getdents-test/file",
             "/tmp/syscall-getdents-test/link",
             "/tmp/syscall-getdents-test/subdir",
@@ -1360,6 +1527,10 @@ mod tests {
         VirtualFS
             .lock()
             .create_file(Path::new("/tmp/syscall-getdents-test/file"))
+            .unwrap();
+        VirtualFS
+            .lock()
+            .create_file(Path::new("/tmp/syscall-getdents-test/long-entry-name"))
             .unwrap();
         VirtualFS
             .lock()
@@ -1487,6 +1658,66 @@ mod tests {
         assert!(saw_old_dot);
         assert!(saw_old_dotdot);
         close_test_fd(old_dir_fd);
+
+        write_user_cstr(user_page + 768, b"/tmp/syscall-getdents-test\0");
+        let small_buf_dir_fd = expect_fd(
+            SyscallArgs::new([
+                AT_FDCWD,
+                user_page + 768,
+                OpenFlags::DIRECTORY.bits() as u64,
+                0,
+                0,
+                0,
+            ])
+            .call::<OpenAt>(),
+        );
+        for _ in 0..8 {
+            match SyscallArgs::new([small_buf_dir_fd as u64, user_page + 128, 24, 0, 0, 0])
+                .call::<crate::systemcall::implementations::Getdents64>()
+            {
+                Ok(24) => {}
+                Err(SyscallError::InvalidArguments) => break,
+                Ok(0) => panic!("getdents64 returned EOF before reporting a too-small buffer"),
+                Ok(bytes) => panic!("unexpected getdents64 byte count {bytes}"),
+                Err(err) => panic!("unexpected getdents64 error {err:?}"),
+            }
+        }
+        expect_errno(
+            SyscallArgs::new([small_buf_dir_fd as u64, user_page + 128, 24, 0, 0, 0])
+                .call::<crate::systemcall::implementations::Getdents64>(),
+            SyscallError::InvalidArguments,
+        );
+        close_test_fd(small_buf_dir_fd);
+
+        write_user_cstr(user_page + 896, b"/tmp/syscall-getdents-test\0");
+        let old_small_buf_dir_fd = expect_fd(
+            SyscallArgs::new([
+                AT_FDCWD,
+                user_page + 896,
+                OpenFlags::DIRECTORY.bits() as u64,
+                0,
+                0,
+                0,
+            ])
+            .call::<OpenAt>(),
+        );
+        for _ in 0..8 {
+            match SyscallArgs::new([old_small_buf_dir_fd as u64, user_page + 128, 24, 0, 0, 0])
+                .call::<crate::systemcall::implementations::Getdents>()
+            {
+                Ok(24) => {}
+                Err(SyscallError::InvalidArguments) => break,
+                Ok(0) => panic!("getdents returned EOF before reporting a too-small buffer"),
+                Ok(bytes) => panic!("unexpected getdents byte count {bytes}"),
+                Err(err) => panic!("unexpected getdents error {err:?}"),
+            }
+        }
+        expect_errno(
+            SyscallArgs::new([old_small_buf_dir_fd as u64, user_page + 128, 24, 0, 0, 0])
+                .call::<crate::systemcall::implementations::Getdents>(),
+            SyscallError::InvalidArguments,
+        );
+        close_test_fd(old_small_buf_dir_fd);
 
         expect_ok(
             SyscallArgs::new([dir_fd as u64, user_page + 128, 512, 0, 0, 0])

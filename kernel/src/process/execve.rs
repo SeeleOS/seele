@@ -55,6 +55,7 @@ impl Process {
         };
         let mut next_addrspace = AddrSpace::default();
         let mut next_fd_table = self.fd_table.lock().clone();
+        let fs_context = self.fs_context.lock().clone();
         close_cloexec_fd_entries(&mut next_fd_table);
         let next_snapshot = setup_process(
             path.clone(),
@@ -63,6 +64,7 @@ impl Process {
             env,
             &mut next_addrspace,
             &mut next_fd_table,
+            &fs_context,
         )?;
 
         Ok(PreparedExecve {

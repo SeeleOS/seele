@@ -8,11 +8,14 @@ use alloc::{
 
 use crate::{
     elfloader::{load_elf_lazy, read_elf_header},
-    filesystem::{errors::FSError, object::FileLikeObject, path::Path, vfs_operations::open_path},
+    filesystem::{
+        absolute_path::AbsolutePath, errors::FSError, object::FileLikeObject, path::Path,
+        vfs_operations::open_path,
+    },
     memory::addrspace::AddrSpace,
     object::tty_device::get_default_tty,
     process::{
-        FdEntry, Process, ProcessRef,
+        FdEntry, FsContext, Process, ProcessRef,
         group::{ProcessGroupID, SessionID},
         misc::{ProcessID, init_stack_layout, user_stack_pages_for_exec},
         new_fd_table,
@@ -71,6 +74,21 @@ fn read_shebang_prefix(file: &FileLikeObject) -> Result<Vec<u8>, FSError> {
     Ok(bytes)
 }
 
+fn process_absolute_path(path: Path, fs_context: &FsContext) -> Path {
+    AbsolutePath::join_under_root(
+        &fs_context.root_directory,
+        &fs_context.current_directory,
+        &path,
+    )
+    .as_normal()
+}
+
+struct SetupProcessState<'a> {
+    addrspace: &'a mut AddrSpace,
+    fd_table: &'a mut Vec<Option<FdEntry>>,
+    fs_context: &'a FsContext,
+}
+
 impl Process {
     pub fn init() -> ProcessRef {
         let pid = ProcessID::new();
@@ -103,6 +121,7 @@ impl Process {
             ],
             &mut process.addrspace,
             &mut fd_table,
+            &process.fs_context.lock().clone(),
         )
         .unwrap();
         log::debug!("process {}: setup done", pid.0);
@@ -144,8 +163,7 @@ fn setup_process_inner(
     exec_path: String,
     args: Vec<String>,
     env: Vec<String>,
-    addrspace: &mut AddrSpace,
-    fd_table: &mut Vec<Option<FdEntry>>,
+    state: &mut SetupProcessState<'_>,
     shebang_depth: usize,
 ) -> Result<ThreadSnapshot, FSError> {
     if shebang_depth > MAX_SHEBANG_DEPTH {
@@ -170,38 +188,38 @@ fn setup_process_inner(
         interpreter_args.push(exec_path);
         interpreter_args.extend(args.into_iter().skip(1));
         let interpreter_exec_path = interpreter.clone().as_string();
+        let interpreter = process_absolute_path(interpreter, state.fs_context);
 
         return setup_process_inner(
             interpreter,
             interpreter_exec_path,
             interpreter_args,
             env,
-            addrspace,
-            fd_table,
+            state,
             shebang_depth + 1,
         );
     }
 
     let program_headers = read_elf_header(&program_file)?;
-    let program = load_elf_lazy(addrspace, program_file, &program_headers)?;
+    let program = load_elf_lazy(state.addrspace, program_file, &program_headers)?;
 
     let (entry_point, interpreter_base) = match program.interpreter.as_deref() {
         Some(interpreter_path) => {
             let interp_file = open_file(Path::new(interpreter_path))?;
             let interp_headers = read_elf_header(&interp_file)?;
-            let interp = load_elf_lazy(addrspace, interp_file, &interp_headers)?;
-            prefault_exec_pages(addrspace, &program, Some(&interp));
+            let interp = load_elf_lazy(state.addrspace, interp_file, &interp_headers)?;
+            prefault_exec_pages(state.addrspace, &program, Some(&interp));
             (interp.entry_point, Some(interp.load_base))
         }
         None => {
-            prefault_exec_pages(addrspace, &program, None);
+            prefault_exec_pages(state.addrspace, &program, None);
             (program.entry_point, None)
         }
     };
 
     let stack_pages =
         user_stack_pages_for_exec(&exec_path, &args, &env, interpreter_base.is_some());
-    let mut stack_builder = addrspace.allocate_user_stack(stack_pages).1;
+    let mut stack_builder = state.addrspace.allocate_user_stack(stack_pages).1;
 
     init_stack_layout(
         &mut stack_builder,
@@ -212,11 +230,11 @@ fn setup_process_inner(
         env,
     );
 
-    init_objects(fd_table);
+    init_objects(state.fd_table);
 
     Ok(ThreadSnapshot::new(
         entry_point,
-        addrspace,
+        state.addrspace,
         stack_builder.finish().as_u64(),
         ThreadSnapshotType::Thread,
     ))
@@ -275,11 +293,17 @@ pub fn setup_process(
     env: Vec<String>,
     addrspace: &mut AddrSpace,
     fd_table: &mut Vec<Option<FdEntry>>,
+    fs_context: &FsContext,
 ) -> Result<ThreadSnapshot, FSError> {
     let exec_path = exec_path.as_string();
     if args.is_empty() {
         args.insert(0, exec_path.clone());
     }
 
-    setup_process_inner(path, exec_path, args, env, addrspace, fd_table, 0)
+    let mut state = SetupProcessState {
+        addrspace,
+        fd_table,
+        fs_context,
+    };
+    setup_process_inner(path, exec_path, args, env, &mut state, 0)
 }

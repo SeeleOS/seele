@@ -196,6 +196,9 @@ fn write_dirents64(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult
         let name_bytes = info.name.as_bytes();
         let reclen = ((19 + name_bytes.len() + 1 + 7) & !7) as u16;
         if bytes_written + reclen as usize > len {
+            if bytes_written == 0 {
+                return Err(SyscallError::InvalidArguments);
+            }
             break;
         }
 
@@ -246,6 +249,9 @@ fn write_dirents(object_index: u64, buf: *mut u8, len: usize) -> SyscallResult {
         let name_bytes = info.name.as_bytes();
         let reclen = ((20 + name_bytes.len() + 7) & !7) as u16;
         if bytes_written + reclen as usize > len {
+            if bytes_written == 0 {
+                return Err(SyscallError::InvalidArguments);
+            }
             break;
         }
 
