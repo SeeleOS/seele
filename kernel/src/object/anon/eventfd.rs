@@ -84,6 +84,10 @@ impl EventFdObject {
         self.state.lock().counter < EVENTFD_COUNTER_MAX
     }
 
+    fn has_overflowed(&self) -> bool {
+        self.state.lock().counter == u64::MAX
+    }
+
     fn wake_waiters(&self, event: PollableEvent) {
         crate::thread::with_thread_manager(|manager| {
             manager.wake_io();
@@ -91,6 +95,20 @@ impl EventFdObject {
         if let Some(object) = self.self_object() {
             wake_pollers_for_object(object, event);
         }
+    }
+
+    pub fn notify_kernel_event(&self) {
+        let event = {
+            let mut state = self.state.lock();
+            if state.counter == EVENTFD_COUNTER_MAX {
+                state.counter = u64::MAX;
+                PollableEvent::Error
+            } else {
+                state.counter = state.counter.saturating_add(1);
+                PollableEvent::CanBeRead
+            }
+        };
+        self.wake_waiters(event);
     }
 }
 
@@ -114,8 +132,9 @@ impl Object for EventFdObject {
 impl Pollable for EventFdObject {
     fn is_event_ready(&self, event: PollableEvent) -> bool {
         match event {
-            PollableEvent::CanBeRead => self.is_read_ready(),
+            PollableEvent::CanBeRead => self.is_read_ready() || self.has_overflowed(),
             PollableEvent::CanBeWritten => self.is_write_ready(),
+            PollableEvent::Error => self.has_overflowed(),
             _ => false,
         }
     }

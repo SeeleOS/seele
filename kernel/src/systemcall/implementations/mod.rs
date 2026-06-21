@@ -1,3 +1,4 @@
+mod aio;
 mod bpf;
 mod filesystem;
 mod memory_sync;
@@ -22,6 +23,7 @@ mod timer;
 #[cfg(test)]
 pub(in crate::systemcall) use select::Timespec as SelectTimespec;
 
+pub use aio::*;
 pub use bpf::*;
 pub use filesystem::*;
 pub use memory_sync::*;
