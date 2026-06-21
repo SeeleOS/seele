@@ -24,7 +24,7 @@ pub(super) fn xattr_path_object_at(
 }
 
 pub(super) fn xattr_fd_object(object: &ObjectRef) -> Result<Arc<FileLikeObject>, SyscallError> {
-    object.clone().as_file_like().map_err(Into::into)
+    object.clone().as_file_like()
 }
 
 pub(super) fn validate_xattr_flags(flags: XattrFlags) -> Result<(), SyscallError> {

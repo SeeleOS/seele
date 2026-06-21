@@ -527,14 +527,14 @@ define_syscall!(
             KernelTime::since_boot().add_ns(requested_ns)
         };
 
-        if deadline > KernelTime::since_boot() {
-            if let Err(err) = block_current_with_sig_check(BlockType::SetTime(deadline)) {
-                if !flags.contains(ClockNanosleepFlags::TIMER_ABSTIME) && !rem.is_null() {
-                    let remaining = deadline.sub(KernelTime::since_boot()).as_nanoseconds();
-                    user_safe::write(rem, &ns_to_linux_timespec(remaining))?;
-                }
-                return Err(err.into());
+        if deadline > KernelTime::since_boot()
+            && let Err(err) = block_current_with_sig_check(BlockType::SetTime(deadline))
+        {
+            if !flags.contains(ClockNanosleepFlags::TIMER_ABSTIME) && !rem.is_null() {
+                let remaining = deadline.sub(KernelTime::since_boot()).as_nanoseconds();
+                user_safe::write(rem, &ns_to_linux_timespec(remaining))?;
             }
+            return Err(err.into());
         }
 
         if !flags.contains(ClockNanosleepFlags::TIMER_ABSTIME) && !rem.is_null() {
