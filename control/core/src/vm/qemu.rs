@@ -79,7 +79,17 @@ pub fn start_vm(repo: &Path, mut config: VmConfig, context: &JobContext) -> Resu
         }
     };
     let mut child = spawn_qemu(repo, &iso, &config, context)?;
-    wait_for_qmp_or_exit(&mut child, &config.qmp_socket, Duration::from_secs(30))
+    let result = wait_for_qmp_or_exit(
+        repo,
+        &mut child,
+        &config.qmp_socket,
+        Duration::from_secs(30),
+        context,
+    );
+    if result.is_ok() {
+        reap_child_when_it_exits(child);
+    }
+    result
 }
 
 pub fn run_iso_capture(
@@ -92,15 +102,29 @@ pub fn run_iso_capture(
 ) -> Result<QemuRunResult> {
     absolutize_paths(repo, &mut config);
     let mut child = spawn_qemu(repo, iso, &config, context)?;
+    let qemu_pid_path = qemu_pid_path(repo);
     let deadline = timeout.map(|timeout| Instant::now() + timeout);
     let mut captured = String::new();
     let mut offset = 0;
 
     loop {
         append_serial(&config.serial_log, &mut offset, &mut captured);
+        if context.is_cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = fs::remove_file(&qemu_pid_path);
+            append_serial(&config.serial_log, &mut offset, &mut captured);
+            return Ok(QemuRunResult {
+                exit_code: 1,
+                serial_log: config.serial_log,
+                serial_output: captured,
+                failure: Some("cancelled".to_string()),
+            });
+        }
         if condition.is_some_and(|condition| condition(&captured)) {
             let _ = child.kill();
             let _ = child.wait();
+            let _ = fs::remove_file(&qemu_pid_path);
             return Ok(QemuRunResult {
                 exit_code: 0,
                 serial_log: config.serial_log,
@@ -110,6 +134,7 @@ pub fn run_iso_capture(
         }
 
         if let Some(status) = child.try_wait().context("failed to poll qemu")? {
+            let _ = fs::remove_file(&qemu_pid_path);
             append_serial(&config.serial_log, &mut offset, &mut captured);
             let exit_code = decode_qemu_exit_code(status.code());
             return Ok(QemuRunResult {
@@ -123,6 +148,7 @@ pub fn run_iso_capture(
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             let _ = child.kill();
             let _ = child.wait();
+            let _ = fs::remove_file(&qemu_pid_path);
             append_serial(&config.serial_log, &mut offset, &mut captured);
             return Ok(QemuRunResult {
                 exit_code: 1,
@@ -138,7 +164,7 @@ pub fn run_iso_capture(
 
 pub fn stop_vm(repo: &Path, context: &JobContext) -> Result<i32> {
     let artifact_dir = target_dir(repo).join("control-artifacts").join("vm");
-    let pid_path = artifact_dir.join("qemu.pid");
+    let pid_path = qemu_pid_path(repo);
     if let Ok(pid) = fs::read_to_string(&pid_path).map(|pid| pid.trim().to_string())
         && !pid.is_empty()
     {
@@ -326,7 +352,12 @@ fn spawn_qemu(repo: &Path, iso: &Path, config: &VmConfig, context: &JobContext) 
         .spawn()
         .context("failed to start qemu-system-x86_64")?;
     let pid = child.id();
-    fs::write(artifact_dir.join("qemu.pid"), pid.to_string())?;
+    let pid_path = qemu_pid_path(repo);
+    fs::write(&pid_path, pid.to_string())?;
+    context.on_cancel(move || {
+        kill_process(pid);
+        let _ = fs::remove_file(pid_path);
+    });
     context.event(Event::Vm(VmEvent::Started {
         runner_pid: std::process::id(),
         qemu_pid: Some(pid),
@@ -399,18 +430,33 @@ fn qemu_command(repo: &Path, iso: &Path, config: &VmConfig) -> Result<Command> {
     Ok(command)
 }
 
-fn wait_for_qmp_or_exit(child: &mut Child, qmp_socket: &Path, timeout: Duration) -> Result<i32> {
+fn wait_for_qmp_or_exit(
+    repo: &Path,
+    child: &mut Child,
+    qmp_socket: &Path,
+    timeout: Duration,
+    context: &JobContext,
+) -> Result<i32> {
+    let qemu_pid_path = qemu_pid_path(repo);
     let deadline = Instant::now() + timeout;
     loop {
+        if context.is_cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = fs::remove_file(&qemu_pid_path);
+            return Ok(1);
+        }
         if qmp_socket.exists() {
             return Ok(0);
         }
         if let Some(status) = child.try_wait().context("failed to poll qemu")? {
+            let _ = fs::remove_file(&qemu_pid_path);
             return Ok(status.code().unwrap_or(1).max(1));
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
+            let _ = fs::remove_file(&qemu_pid_path);
             bail!("timed out waiting for QMP socket");
         }
         thread::sleep(Duration::from_millis(50));
@@ -463,6 +509,13 @@ fn append_serial(path: &Path, offset: &mut usize, captured: &mut String) {
     }
 }
 
+fn qemu_pid_path(repo: &Path) -> PathBuf {
+    target_dir(repo)
+        .join("control-artifacts")
+        .join("vm")
+        .join("qemu.pid")
+}
+
 fn absolutize_paths(repo: &Path, config: &mut VmConfig) {
     if config.rootfs_image.is_relative() {
         config.rootfs_image = repo.join(&config.rootfs_image);
@@ -483,6 +536,19 @@ fn process_exists(pid: u32) -> bool {
         .arg(pid.to_string())
         .status()
         .is_ok_and(|status| status.success())
+}
+
+fn kill_process(pid: u32) {
+    let _ = Command::new("kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status();
+}
+
+fn reap_child_when_it_exits(mut child: Child) {
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
 }
 
 fn qmp_execute(socket: &Path, command: serde_json::Value) -> Result<serde_json::Value> {

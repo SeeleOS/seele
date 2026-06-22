@@ -3,6 +3,7 @@ use anyhow::{Result, anyhow};
 use chrono::Utc;
 use std::{
     collections::HashMap,
+    fmt,
     sync::{
         Arc, Condvar, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -23,11 +24,22 @@ struct Inner {
     changed: Condvar,
 }
 
-#[derive(Debug)]
 struct JobEntry {
     status: JobStatus,
     cancel: Arc<AtomicBool>,
+    cancel_cleanup: Vec<Box<dyn FnOnce() + Send>>,
     handle: Option<JoinHandle<()>>,
+}
+
+impl fmt::Debug for JobEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("JobEntry")
+            .field("status", &self.status)
+            .field("cancel", &self.cancel)
+            .field("cancel_cleanup_count", &self.cancel_cleanup.len())
+            .field("handle", &self.handle.is_some())
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +70,7 @@ impl JobManager {
                 JobEntry {
                     status: status.clone(),
                     cancel,
+                    cancel_cleanup: Vec::new(),
                     handle: None,
                 },
             );
@@ -69,6 +82,7 @@ impl JobManager {
             let result = run(context.clone());
             let mut jobs = inner.jobs.lock().expect("job lock poisoned");
             if let Some(entry) = jobs.get_mut(&id) {
+                entry.cancel_cleanup.clear();
                 entry.status.finished_at = Some(Utc::now());
                 match result {
                     Ok(exit_code) if context.is_cancelled() => {
@@ -158,16 +172,27 @@ impl JobManager {
         let entry = jobs
             .get_mut(&id)
             .ok_or_else(|| anyhow!("unknown job id {id}"))?;
-        entry.cancel.store(true, Ordering::Relaxed);
-        if !matches!(
+        let active = !matches!(
             entry.status.state,
             JobState::Finished | JobState::Failed | JobState::Cancelled | JobState::TimedOut
-        ) {
+        );
+        entry.cancel.store(true, Ordering::Relaxed);
+        let cancel_cleanup = if active {
+            std::mem::take(&mut entry.cancel_cleanup)
+        } else {
+            Vec::new()
+        };
+        if active {
             entry.status.state = JobState::Cancelled;
             entry.status.finished_at = Some(Utc::now());
         }
+        let status = entry.status.clone();
         self.inner.changed.notify_all();
-        Ok(entry.status.clone())
+        drop(jobs);
+        for cleanup in cancel_cleanup {
+            cleanup();
+        }
+        Ok(status)
     }
 }
 
@@ -199,6 +224,13 @@ impl JobContext {
         self.update(|status| status.reports.push(report));
     }
 
+    pub fn on_cancel(&self, cleanup: impl FnOnce() + Send + 'static) {
+        let mut jobs = self.inner.jobs.lock().expect("job lock poisoned");
+        if let Some(entry) = jobs.get_mut(&self.id) {
+            entry.cancel_cleanup.push(Box::new(cleanup));
+        }
+    }
+
     fn update(&self, f: impl FnOnce(&mut JobStatus)) {
         let mut jobs = self.inner.jobs.lock().expect("job lock poisoned");
         if let Some(entry) = jobs.get_mut(&self.id) {
@@ -212,6 +244,7 @@ impl JobContext {
 mod tests {
     use super::*;
     use crate::{Event, JobKind};
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
 
     #[test]
     fn job_reaches_finished_state_with_events() {
@@ -244,5 +277,37 @@ mod tests {
         assert_eq!(status.state, JobState::Cancelled);
         let status = manager.wait(status.id, Some(5_000)).unwrap();
         assert_eq!(status.state, JobState::Cancelled);
+    }
+
+    #[test]
+    fn cancel_runs_cleanup_once_for_active_job() {
+        let manager = JobManager::default();
+        let cleanup_registered = Arc::new(AtomicBool::new(false));
+        let cleanup_count = Arc::new(AtomicUsize::new(0));
+        let cleanup_registered_for_job = cleanup_registered.clone();
+        let cleanup_count_for_job = cleanup_count.clone();
+        let status = manager.start(JobKind::Cleanup, move |context| {
+            context.on_cancel(move || {
+                cleanup_count_for_job.fetch_add(1, Ordering::Relaxed);
+            });
+            cleanup_registered_for_job.store(true, Ordering::Relaxed);
+            while !context.is_cancelled() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Ok(0)
+        });
+
+        while !cleanup_registered.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        let status = manager.cancel(status.id).unwrap();
+        assert_eq!(status.state, JobState::Cancelled);
+        assert_eq!(cleanup_count.load(Ordering::Relaxed), 1);
+        let status = manager.wait(status.id, Some(5_000)).unwrap();
+        assert_eq!(status.state, JobState::Cancelled);
+        let status = manager.cancel(status.id).unwrap();
+        assert_eq!(status.state, JobState::Cancelled);
+        assert_eq!(cleanup_count.load(Ordering::Relaxed), 1);
     }
 }
