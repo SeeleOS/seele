@@ -127,7 +127,7 @@ define_syscall!(Mount, |source: CString,
         return Ok(0);
     }
 
-    if filesystemtype == "ext4" {
+    if matches!(filesystemtype, "ext2" | "ext3" | "ext4") {
         let source = source.ok_or(SyscallError::InvalidArguments)?;
         let source_path = resolve_path_at(AT_FDCWD, &source)?;
         let source_object = open_path(source_path)?;

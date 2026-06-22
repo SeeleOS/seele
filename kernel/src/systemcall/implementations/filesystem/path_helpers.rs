@@ -195,6 +195,11 @@ pub(super) fn rename_impl(
         return Ok(0);
     }
 
+    let _ = open_path_nofollow(old_path.clone())?;
+    if let Some(parent) = new_path.parent() {
+        let _ = open_path(parent)?;
+    }
+
     VirtualFS
         .lock()
         .rename_file(old_path.clone(), new_path.clone())
