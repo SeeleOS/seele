@@ -21,8 +21,8 @@ use crate::{
     process::{FdFlags, manager::get_current_process},
     signal::{
         PendingSignalInfo, SI_QUEUE, SI_TKILL, SigInfo, Signal, UContext, action::SignalAction,
-        process_current_process_signals, send_signal_to_process,
-        send_signal_to_process_with_siginfo, send_signal_to_thread_with_siginfo,
+        send_signal_to_process, send_signal_to_process_with_siginfo,
+        send_signal_to_thread_with_siginfo,
     },
 };
 use alloc::vec::Vec;
@@ -284,7 +284,17 @@ define_syscall!(
         let mut thread = current_thread.lock();
 
         if !old_stack.is_null() {
-            user_safe::write(old_stack, &thread.sigaltstack)?;
+            let mut stack = thread.sigaltstack;
+            let flags = StackFlags::from_bits_truncate(stack.ss_flags);
+            if !flags.contains(StackFlags::SS_DISABLE) && stack.ss_sp != 0 && stack.ss_size != 0 {
+                let rsp = thread.get_appropriate_snapshot().inner.rsp;
+                let start = stack.ss_sp;
+                let end = stack.ss_sp.saturating_add(stack.ss_size as u64);
+                if (start..end).contains(&rsp) {
+                    stack.ss_flags |= StackFlags::SS_ONSTACK.bits();
+                }
+            }
+            user_safe::write(old_stack, &stack)?;
         }
 
         if new_stack.is_null() {
@@ -506,9 +516,6 @@ define_syscall!(
         if !old_set.is_null() {
             user_safe::write(old_set, &old_bits)?;
         }
-
-        let process = get_current_process();
-        process_current_process_signals(&process);
 
         Ok(0)
     }

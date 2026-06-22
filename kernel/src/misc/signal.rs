@@ -350,6 +350,37 @@ bitflags! {
         const SIGSYS = Signal::SIGSYS.mask();
         const SIGCANCEL = Signal::SIGCANCEL.mask();
         const SIGSETXID = Signal::SIGSETXID.mask();
+        const SIGRTMIN = Signal::SIGRTMIN.mask();
+        const SIGRTMIN_PLUS_1 = Signal::SIGRTMIN_PLUS_1.mask();
+        const SIGRTMIN_PLUS_2 = Signal::SIGRTMIN_PLUS_2.mask();
+        const SIGRTMIN_PLUS_3 = Signal::SIGRTMIN_PLUS_3.mask();
+        const SIGRTMIN_PLUS_4 = Signal::SIGRTMIN_PLUS_4.mask();
+        const SIGRTMIN_PLUS_5 = Signal::SIGRTMIN_PLUS_5.mask();
+        const SIGRTMIN_PLUS_6 = Signal::SIGRTMIN_PLUS_6.mask();
+        const SIGRTMIN_PLUS_7 = Signal::SIGRTMIN_PLUS_7.mask();
+        const SIGRTMIN_PLUS_8 = Signal::SIGRTMIN_PLUS_8.mask();
+        const SIGRTMIN_PLUS_9 = Signal::SIGRTMIN_PLUS_9.mask();
+        const SIGRTMIN_PLUS_10 = Signal::SIGRTMIN_PLUS_10.mask();
+        const SIGRTMIN_PLUS_11 = Signal::SIGRTMIN_PLUS_11.mask();
+        const SIGRTMIN_PLUS_12 = Signal::SIGRTMIN_PLUS_12.mask();
+        const SIGRTMIN_PLUS_13 = Signal::SIGRTMIN_PLUS_13.mask();
+        const SIGRTMIN_PLUS_14 = Signal::SIGRTMIN_PLUS_14.mask();
+        const SIGRTMIN_PLUS_15 = Signal::SIGRTMIN_PLUS_15.mask();
+        const SIGRTMIN_PLUS_16 = Signal::SIGRTMIN_PLUS_16.mask();
+        const SIGRTMIN_PLUS_17 = Signal::SIGRTMIN_PLUS_17.mask();
+        const SIGRTMIN_PLUS_18 = Signal::SIGRTMIN_PLUS_18.mask();
+        const SIGRTMIN_PLUS_19 = Signal::SIGRTMIN_PLUS_19.mask();
+        const SIGRTMIN_PLUS_20 = Signal::SIGRTMIN_PLUS_20.mask();
+        const SIGRTMIN_PLUS_21 = Signal::SIGRTMIN_PLUS_21.mask();
+        const SIGRTMIN_PLUS_22 = Signal::SIGRTMIN_PLUS_22.mask();
+        const SIGRTMIN_PLUS_23 = Signal::SIGRTMIN_PLUS_23.mask();
+        const SIGRTMIN_PLUS_24 = Signal::SIGRTMIN_PLUS_24.mask();
+        const SIGRTMIN_PLUS_25 = Signal::SIGRTMIN_PLUS_25.mask();
+        const SIGRTMIN_PLUS_26 = Signal::SIGRTMIN_PLUS_26.mask();
+        const SIGRTMIN_PLUS_27 = Signal::SIGRTMIN_PLUS_27.mask();
+        const SIGRTMIN_PLUS_28 = Signal::SIGRTMIN_PLUS_28.mask();
+        const SIGRTMIN_PLUS_29 = Signal::SIGRTMIN_PLUS_29.mask();
+        const SIGRTMIN_PLUS_30 = Signal::SIGRTMIN_PLUS_30.mask();
     }
 }
 
@@ -719,12 +750,12 @@ fn process_pending_signals(
                 SignalHandlingType::Ignore => {}
                 SignalHandlingType::Function1(func) => with_current_thread(|current_thread| {
                     let saved_mask = current_thread.restore_temporary_blocked_signals();
-                    let (_, mut stack_builder) = process.addrspace.allocate_user_stack(16);
-                    // x86_64 SysV requires %rsp % 16 == 8 on function entry.
-                    // We only push a single synthetic return address, so reserve one
-                    // extra slot before it to keep the handler ABI-compliant.
-                    stack_builder.push(0);
-                    stack_builder.push(action.restorer as u64);
+                    let handler_stack = prepare_signal_handler_stack(
+                        process,
+                        current_thread,
+                        action.flags,
+                        action.restorer,
+                    );
 
                     let (current_extended_state, current_fs_base) = {
                         let snapshot = current_thread.get_appropriate_snapshot();
@@ -733,7 +764,7 @@ fn process_pending_signals(
                     let mut thread_snapshot = ThreadSnapshot::new_with_extended_state(
                         (func as usize) as u64,
                         &mut process.addrspace,
-                        stack_builder.finish().as_u64(),
+                        handler_stack,
                         ThreadSnapshotType::Thread,
                         current_extended_state,
                     );
@@ -751,7 +782,6 @@ fn process_pending_signals(
                     result.should_switch = true;
                 }),
                 SignalHandlingType::Function2(func) => with_current_thread(|current_thread| {
-                    let (_, mut stack_builder) = process.addrspace.allocate_user_stack(16);
                     let (_, mut frame_builder) = process.addrspace.allocate_user(1);
 
                     let saved_mask = current_thread.restore_temporary_blocked_signals();
@@ -760,9 +790,12 @@ fn process_pending_signals(
                     let ucontext_ptr = frame_builder.push_struct(&ucontext);
                     let siginfo_ptr = frame_builder.push_struct(&siginfo);
 
-                    // Keep the signal handler entry stack ABI-aligned.
-                    stack_builder.push(0);
-                    stack_builder.push(action.restorer as u64);
+                    let handler_stack = prepare_signal_handler_stack(
+                        process,
+                        current_thread,
+                        action.flags,
+                        action.restorer,
+                    );
 
                     let (current_extended_state, current_fs_base) = {
                         let snapshot = current_thread.get_appropriate_snapshot();
@@ -771,7 +804,7 @@ fn process_pending_signals(
                     let mut thread_snapshot = ThreadSnapshot::new_with_extended_state(
                         (func as usize) as u64,
                         &mut process.addrspace,
-                        stack_builder.finish().as_u64(),
+                        handler_stack,
                         ThreadSnapshotType::Thread,
                         current_extended_state,
                     );
@@ -797,7 +830,49 @@ fn process_pending_signals(
     result
 }
 
+const SA_ONSTACK: u64 = 0x0800_0000;
+
+fn prepare_signal_handler_stack(
+    process: &mut Process,
+    thread: &Thread,
+    action_flags: u64,
+    restorer: usize,
+) -> u64 {
+    if action_flags & SA_ONSTACK != 0
+        && let Some(stack_top) = thread.enabled_sigaltstack_top()
+    {
+        // x86_64 SysV requires %rsp % 16 == 8 on function entry.
+        let rsp = (stack_top - 16) & !0xf;
+        let padding_ptr = rsp as *mut u64;
+        let restorer_ptr = (rsp + 8) as *mut u64;
+        let _ = process.addrspace.write(padding_ptr, &0);
+        let _ = process.addrspace.write(restorer_ptr, &(restorer as u64));
+        return restorer_ptr as u64;
+    }
+
+    let (_, mut stack_builder) = process.addrspace.allocate_user_stack(16);
+    stack_builder.push(0);
+    stack_builder.push(restorer as u64);
+    stack_builder.finish().as_u64()
+}
+
 impl Thread {
+    fn enabled_sigaltstack_top(&self) -> Option<u64> {
+        const SS_DISABLE: i32 = 2;
+
+        if self.sigaltstack.ss_flags & SS_DISABLE != 0
+            || self.sigaltstack.ss_sp == 0
+            || self.sigaltstack.ss_size == 0
+        {
+            return None;
+        }
+        Some(
+            self.sigaltstack
+                .ss_sp
+                .saturating_add(self.sigaltstack.ss_size as u64),
+        )
+    }
+
     fn restore_temporary_blocked_signals(&mut self) -> Signals {
         if let Some((old_mask, _)) = self.temporary_blocked_signals.take() {
             self.blocked_signals = old_mask;
