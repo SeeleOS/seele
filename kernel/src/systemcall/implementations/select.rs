@@ -31,6 +31,13 @@ pub(in crate::systemcall) struct Timespec {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+struct Timeval {
+    tv_sec: i64,
+    tv_usec: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 struct SigSetWithSize {
     sigmask: *const u64,
     sigsetsize: usize,
@@ -272,6 +279,17 @@ fn timeout_to_deadline_value(timeout: Timespec) -> Result<Time, SyscallError> {
     Ok(Time::since_boot().add_ns(timeout_ns))
 }
 
+fn timeval_to_timespec(timeout: Timeval) -> Result<Timespec, SyscallError> {
+    if timeout.tv_sec < 0 || timeout.tv_usec < 0 || timeout.tv_usec >= 1_000_000 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    Ok(Timespec {
+        tv_sec: timeout.tv_sec,
+        tv_nsec: timeout.tv_usec * 1_000,
+    })
+}
+
 fn read_fdset(fdset: *const u64, nfds: usize) -> Result<Option<Vec<u64>>, SyscallError> {
     if fdset.is_null() {
         return Ok(None);
@@ -391,19 +409,131 @@ fn collect_ready(
     }
 }
 
+fn select_impl(
+    nfds: i32,
+    readfds: *mut u64,
+    writefds: *mut u64,
+    exceptfds: *mut u64,
+    timeout: Option<Timespec>,
+    requested_sigmask: Option<Signals>,
+) -> Result<usize, SyscallError> {
+    if nfds < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let nfds = nfds as usize;
+    let readfds_in = read_fdset(readfds.cast_const(), nfds)?;
+    let writefds_in = read_fdset(writefds.cast_const(), nfds)?;
+    let exceptfds_in = read_fdset(exceptfds.cast_const(), nfds)?;
+
+    with_temporary_signal_mask(requested_sigmask, || {
+        let timeout_is_zero = timeout
+            .as_ref()
+            .is_some_and(|timeout| timeout.tv_sec == 0 && timeout.tv_nsec == 0);
+        if nfds == 0 {
+            if !timeout_is_zero {
+                let deadline = timeout.map(timeout_to_deadline_value).transpose()?;
+                sleep_without_fds(deadline)?;
+            }
+            return Ok(0);
+        }
+
+        let poller = PollerObject::new();
+        let mut ready_fds = vec![false; nfds];
+        let mut read_ready = vec![false; nfds];
+        let mut write_ready = vec![false; nfds];
+        let mut except_ready = vec![false; nfds];
+        let mut ready_count = 0usize;
+
+        register_interest(
+            &poller,
+            readfds_in.as_deref(),
+            nfds,
+            PollableEvent::CanBeRead,
+            &mut read_ready,
+            &mut ready_fds,
+            &mut ready_count,
+        )?;
+        register_interest(
+            &poller,
+            readfds_in.as_deref(),
+            nfds,
+            PollableEvent::Closed,
+            &mut read_ready,
+            &mut ready_fds,
+            &mut ready_count,
+        )?;
+        register_interest(
+            &poller,
+            readfds_in.as_deref(),
+            nfds,
+            PollableEvent::ReadClosed,
+            &mut read_ready,
+            &mut ready_fds,
+            &mut ready_count,
+        )?;
+        register_interest(
+            &poller,
+            writefds_in.as_deref(),
+            nfds,
+            PollableEvent::CanBeWritten,
+            &mut write_ready,
+            &mut ready_fds,
+            &mut ready_count,
+        )?;
+        register_interest(
+            &poller,
+            writefds_in.as_deref(),
+            nfds,
+            PollableEvent::Closed,
+            &mut write_ready,
+            &mut ready_fds,
+            &mut ready_count,
+        )?;
+        register_interest(
+            &poller,
+            exceptfds_in.as_deref(),
+            nfds,
+            PollableEvent::Error,
+            &mut except_ready,
+            &mut ready_fds,
+            &mut ready_count,
+        )?;
+
+        if ready_count == 0 && !timeout_is_zero {
+            let deadline = timeout.map(timeout_to_deadline_value).transpose()?;
+            block_on_poller(poller.clone(), deadline)?;
+        }
+
+        collect_ready(
+            &poller,
+            nfds,
+            &mut read_ready,
+            &mut write_ready,
+            &mut except_ready,
+            &mut ready_fds,
+            &mut ready_count,
+        );
+
+        rewrite_fdset(readfds, &read_ready, nfds)?;
+        rewrite_fdset(writefds, &write_ready, nfds)?;
+        rewrite_fdset(exceptfds, &except_ready, nfds)?;
+
+        Ok(ready_count)
+    })
+}
+
 define_syscall!(Select, |nfds: i32,
                          readfds: *mut u64,
                          writefds: *mut u64,
                          exceptfds: *mut u64,
-                         timeout: *const Timespec| {
-    Pselect6::handle_call(
-        nfds as u64,
-        readfds as u64,
-        writefds as u64,
-        exceptfds as u64,
-        timeout as u64,
-        0,
-    )
+                         timeout: *const Timeval| {
+    let timeout = if timeout.is_null() {
+        None
+    } else {
+        Some(timeval_to_timespec(user_safe::read(timeout)?)?)
+    };
+    select_impl(nfds, readfds, writefds, exceptfds, timeout, None)
 });
 
 define_syscall!(
@@ -414,10 +544,6 @@ define_syscall!(
      exceptfds: *mut u64,
      timeout: *const Timespec,
      sigmask: *const SigSetWithSize| {
-        if nfds < 0 {
-            return Err(SyscallError::InvalidArguments);
-        }
-
         let requested_sigmask = if sigmask.is_null() {
             None
         } else {
@@ -434,111 +560,19 @@ define_syscall!(
             }
         };
 
-        let nfds = nfds as usize;
         let timeout = if timeout.is_null() {
             None
         } else {
             Some(user_safe::read(timeout)?)
         };
-        let readfds_in = read_fdset(readfds.cast_const(), nfds)?;
-        let writefds_in = read_fdset(writefds.cast_const(), nfds)?;
-        let exceptfds_in = read_fdset(exceptfds.cast_const(), nfds)?;
-
-        with_temporary_signal_mask(requested_sigmask, || {
-            let timeout_is_zero = timeout
-                .as_ref()
-                .is_some_and(|timeout| timeout.tv_sec == 0 && timeout.tv_nsec == 0);
-            if nfds == 0 {
-                if !timeout_is_zero {
-                    let deadline = timeout.map(timeout_to_deadline_value).transpose()?;
-                    sleep_without_fds(deadline)?;
-                }
-                return Ok(0);
-            }
-
-            let poller = PollerObject::new();
-            let mut ready_fds = vec![false; nfds];
-            let mut read_ready = vec![false; nfds];
-            let mut write_ready = vec![false; nfds];
-            let mut except_ready = vec![false; nfds];
-            let mut ready_count = 0usize;
-
-            register_interest(
-                &poller,
-                readfds_in.as_deref(),
-                nfds,
-                PollableEvent::CanBeRead,
-                &mut read_ready,
-                &mut ready_fds,
-                &mut ready_count,
-            )?;
-            register_interest(
-                &poller,
-                readfds_in.as_deref(),
-                nfds,
-                PollableEvent::Closed,
-                &mut read_ready,
-                &mut ready_fds,
-                &mut ready_count,
-            )?;
-            register_interest(
-                &poller,
-                readfds_in.as_deref(),
-                nfds,
-                PollableEvent::ReadClosed,
-                &mut read_ready,
-                &mut ready_fds,
-                &mut ready_count,
-            )?;
-            register_interest(
-                &poller,
-                writefds_in.as_deref(),
-                nfds,
-                PollableEvent::CanBeWritten,
-                &mut write_ready,
-                &mut ready_fds,
-                &mut ready_count,
-            )?;
-            register_interest(
-                &poller,
-                writefds_in.as_deref(),
-                nfds,
-                PollableEvent::Closed,
-                &mut write_ready,
-                &mut ready_fds,
-                &mut ready_count,
-            )?;
-            register_interest(
-                &poller,
-                exceptfds_in.as_deref(),
-                nfds,
-                PollableEvent::Error,
-                &mut except_ready,
-                &mut ready_fds,
-                &mut ready_count,
-            )?;
-
-            if ready_count == 0 && !timeout_is_zero {
-                let deadline = timeout.map(timeout_to_deadline_value).transpose()?;
-                block_on_poller(poller.clone(), deadline)?;
-            }
-
-            collect_ready(
-                &poller,
-                nfds,
-                &mut read_ready,
-                &mut write_ready,
-                &mut except_ready,
-                &mut ready_fds,
-                &mut ready_count,
-            );
-
-            rewrite_fdset(readfds, &read_ready, nfds)?;
-            rewrite_fdset(writefds, &write_ready, nfds)?;
-            rewrite_fdset(exceptfds, &except_ready, nfds)?;
-
-            Ok(ready_count)
-        })
+        select_impl(
+            nfds,
+            readfds,
+            writefds,
+            exceptfds,
+            timeout,
+            requested_sigmask,
+        )
     }
 );
 
