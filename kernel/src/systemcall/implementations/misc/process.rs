@@ -12,7 +12,52 @@ define_syscall!(Pause, {
     }
 });
 
-define_syscall!(Alarm, |_seconds: u32| { Ok(0) });
+define_syscall!(Alarm, |seconds: u32| {
+    const ITIMER_REAL: usize = 0;
+    const NANOS_PER_SECOND: u64 = 1_000_000_000;
+
+    let process = get_current_process();
+    let mut process = process.lock();
+    let now = crate::misc::time::Time::since_boot();
+    let remaining_seconds = process
+        .timers
+        .get(ITIMER_REAL)
+        .and_then(Option::as_ref)
+        .map(|timer| match timer.state {
+            crate::misc::timer::TimerState::Disabled => 0,
+            crate::misc::timer::TimerState::OneShot { deadline }
+            | crate::misc::timer::TimerState::Periodic { deadline, .. } => {
+                deadline
+                    .sub(now)
+                    .as_nanoseconds()
+                    .saturating_add(NANOS_PER_SECOND - 1)
+                    / NANOS_PER_SECOND
+            }
+        })
+        .unwrap_or(0);
+
+    if process.timers.len() <= ITIMER_REAL {
+        process.timers.resize_with(ITIMER_REAL + 1, || None);
+    }
+
+    let state = if seconds == 0 {
+        crate::misc::timer::TimerState::Disabled
+    } else {
+        crate::misc::timer::TimerState::OneShot {
+            deadline: now.add_ns((seconds as u64).saturating_mul(NANOS_PER_SECOND)),
+        }
+    };
+    process.timers[ITIMER_REAL] = Some(crate::misc::timer::Timer {
+        notify_method: crate::misc::timer::TimerNotifyMethod::Signal(
+            crate::signal::Signal::SIGALRM,
+        ),
+        time_type: crate::misc::timer::ClockId::SinceBoot,
+        state,
+        overrun: 0,
+    });
+
+    Ok(remaining_seconds as usize)
+});
 
 define_syscall!(RtSigsuspend, |mask: *const u64, sigset_size: usize| {
     if sigset_size != 8 {
@@ -24,25 +69,18 @@ define_syscall!(RtSigsuspend, |mask: *const u64, sigset_size: usize| {
     }
 
     let new_mask = Signals::from_bits_truncate(user_safe::read(mask)?);
-    let old_mask = {
-        let current = crate::thread::get_current_thread();
-        let mut current = current.lock();
-        let old = current.blocked_signals;
-        current.blocked_signals = new_mask;
-        old
-    };
+    super::super::select::with_temporary_signal_mask(Some(new_mask), || {
+        loop {
+            let result = block_current_with_sig_check(BlockType::WakeRequired {
+                wake_type: WakeType::IO,
+                deadline: None,
+            });
 
-    loop {
-        let result = block_current_with_sig_check(BlockType::WakeRequired {
-            wake_type: WakeType::IO,
-            deadline: None,
-        });
-
-        if result.is_err() {
-            crate::thread::get_current_thread().lock().blocked_signals = old_mask;
-            return Err(SyscallError::Interrupted);
+            if result.is_err() {
+                return Err(SyscallError::Interrupted);
+            }
         }
-    }
+    })
 });
 
 define_syscall!(Unshare, |flags: u64| {

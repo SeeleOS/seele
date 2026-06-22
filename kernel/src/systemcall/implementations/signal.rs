@@ -588,8 +588,14 @@ define_syscall!(RtSigreturn, {
     let current = get_current_thread();
     let mut thread = current.lock();
     thread.snapshot_state = SnapshotState::Normal;
-    thread.restore_blocked_signals();
-    thread.temporary_blocked_signals = None;
+    if let Some((old_mask, _)) = thread.temporary_blocked_signals.take() {
+        thread.blocked_signals = old_mask;
+        if let Some(saved_mask) = thread.saved_blocked_signals.last_mut() {
+            *saved_mask = old_mask;
+        }
+    } else {
+        thread.restore_blocked_signals();
+    }
     update_active_user_extended_state_ptr_for_thread(&mut thread);
     drop(thread);
 

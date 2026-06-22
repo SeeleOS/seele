@@ -89,6 +89,36 @@ pub(in crate::systemcall) fn has_pending_signal_handlers_ignoring_restart() -> b
     })
 }
 
+fn has_temporary_unblocked_pending_signal_handlers() -> bool {
+    let current = get_current_thread();
+    let (Some((old_mask, new_mask)), pending_signals, parent) = ({
+        let current = current.lock();
+        (
+            current.temporary_blocked_signals,
+            current.pending_signals,
+            current.parent.clone(),
+        )
+    }) else {
+        return false;
+    };
+    let parent = parent.lock();
+    let pending_signals = pending_signals | parent.pending_signals;
+    let newly_unblocked = old_mask - new_mask;
+
+    Signal::iter().any(|signal| {
+        let signal_bits = Signals::from(signal);
+        if !pending_signals.contains(signal_bits) || !newly_unblocked.contains(signal_bits) {
+            return false;
+        }
+
+        let action = &parent.signal_actions[signal.index()];
+        matches!(
+            action.handling_type,
+            SignalHandlingType::Function1(_) | SignalHandlingType::Function2(_)
+        )
+    })
+}
+
 fn effective_user_signal_mask(thread: &crate::thread::thread::Thread) -> Signals {
     if thread.temporary_blocked_signals.is_some() {
         return thread.blocked_signals;
@@ -149,6 +179,12 @@ pub(in crate::systemcall) fn with_temporary_signal_mask<T>(
     let result = body();
 
     if let Some(old_mask) = old_mask {
+        if matches!(result, Err(SyscallError::Interrupted))
+            && has_temporary_unblocked_pending_signal_handlers()
+        {
+            return result;
+        }
+
         let current = get_current_thread();
         let mut current = current.lock();
         current.temporary_blocked_signals = None;

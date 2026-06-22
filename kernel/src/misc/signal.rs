@@ -529,8 +529,8 @@ pub fn process_current_process_signals(process: &ProcessRef) -> bool {
             if thread.interruptible_wait_active {
                 drop(thread);
                 thread_ref.lock().interrupted_by_signal = true;
+                return false;
             }
-            return false;
         }
         if thread.interruptible_wait_active
             && process_has_pending_user_handler_signal(process, thread.blocked_signals)
@@ -814,8 +814,7 @@ impl Thread {
         saved_mask: Signals,
     ) {
         signals_to_block.insert(Signals::from(signal));
-        self.saved_blocked_signals
-            .push(saved_mask - Signals::from(signal));
+        self.saved_blocked_signals.push(saved_mask);
         self.blocked_signals.insert(signals_to_block);
     }
 
