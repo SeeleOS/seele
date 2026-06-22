@@ -75,8 +75,13 @@ define_syscall!(RenameAt2, |old_dirfd: i32,
     if flags.count_ones() > 1 {
         return Err(SyscallError::InvalidArguments);
     }
-    if flags & (RENAME_EXCHANGE | RENAME_WHITEOUT) != 0 {
+    if flags & RENAME_WHITEOUT != 0 {
         return Err(SyscallError::InvalidArguments);
+    }
+    if flags & RENAME_EXCHANGE != 0 {
+        let old_path = resolve_path_at(old_dirfd, &old_path)?;
+        let new_path = resolve_path_at(new_dirfd, &new_path)?;
+        return rename_exchange_impl(old_path, new_path);
     }
     if flags & RENAME_NOREPLACE != 0 {
         let resolved_old_path = resolve_path_at(old_dirfd, &old_path)?;
@@ -88,3 +93,35 @@ define_syscall!(RenameAt2, |old_dirfd: i32,
     }
     rename_impl(old_dirfd, old_path, new_dirfd, new_path)
 });
+
+fn rename_exchange_impl(old_path: Path, new_path: Path) -> Result<usize, SyscallError> {
+    if old_path.clone().as_string() == new_path.clone().as_string() {
+        return Ok(0);
+    }
+
+    let _ = open_path(old_path.clone())?;
+    let _ = open_path(new_path.clone())?;
+    let temp_path = unused_exchange_path(&old_path)?;
+
+    let mut vfs = VirtualFS.lock();
+    vfs.rename_file(new_path.clone(), temp_path.clone())
+        .map_err(SyscallError::from)?;
+    vfs.rename_file(old_path.clone(), new_path)
+        .map_err(SyscallError::from)?;
+    vfs.rename_file(temp_path, old_path)
+        .map_err(SyscallError::from)?;
+    Ok(0)
+}
+
+fn unused_exchange_path(path: &Path) -> Result<Path, SyscallError> {
+    let parent = path.parent().ok_or(SyscallError::FileNotFound)?;
+    for index in 0..256 {
+        let candidate = parent.join_component(&alloc::format!(".seele-rename-exchange-{index}"));
+        match open_path(candidate.clone()) {
+            Ok(_) => {}
+            Err(FSError::NotFound) => return Ok(candidate),
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Err(SyscallError::FileAlreadyExists)
+}

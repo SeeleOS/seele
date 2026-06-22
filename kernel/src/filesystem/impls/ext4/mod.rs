@@ -151,6 +151,19 @@ pub(super) fn chown_inode(fs: &Ext4, inode: &mut Inode, uid: u32, gid: u32) -> F
     Ok(())
 }
 
+fn directory_is_empty(fs: &Ext4, path: &Path) -> FSResult<bool> {
+    let path = path.clone().as_string();
+    let iter = fs.read_dir(path.as_str()).map_err(FSError::from)?;
+    for entry in iter {
+        let entry = entry.map_err(FSError::from)?;
+        let name = entry.file_name().as_str().map_err(|_| FSError::Other)?;
+        if name != "." && name != ".." {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// Wrapper around the `ext4plus::Ext4` filesystem so it can be used
 /// through the kernel's generic `FileSystem` trait.
 pub struct EXT4 {
@@ -269,9 +282,7 @@ impl FileSystem for EXT4 {
                 FollowSymlinks::ExcludeFinalComponent,
             )
             .map_err(FSError::from)?;
-        if source_inode.metadata().is_dir() {
-            return Err(FSError::Other);
-        }
+        let source_is_dir = source_inode.metadata().is_dir();
 
         let old_parent = old_path.parent().ok_or(FSError::NotFound)?;
         let old_name = old_path.file_name().ok_or(FSError::NotFound)?;
@@ -282,7 +293,15 @@ impl FileSystem for EXT4 {
             Ext4Path::new(&new_path.clone().as_string()),
             FollowSymlinks::ExcludeFinalComponent,
         ) {
-            if target_inode.metadata().is_dir() {
+            let target_is_dir = target_inode.metadata().is_dir();
+            if source_is_dir != target_is_dir {
+                return Err(if source_is_dir {
+                    FSError::NotADirectory
+                } else {
+                    FSError::NotAFile
+                });
+            }
+            if target_is_dir && !directory_is_empty(&self.fs, &new_path)? {
                 return Err(FSError::DirectoryNotEmpty);
             }
             let new_parent_inode = match self.fs.path_to_inode(
