@@ -28,7 +28,7 @@ use crate::{
         traits::{Configuratable, MemoryMappable, Readable, Seekable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
-    process::misc::with_current_process,
+    process::{manager::get_current_process, misc::with_current_process},
 };
 
 pub struct OpenedFileObject {
@@ -135,6 +135,19 @@ impl OpenBackend {
 }
 
 impl OpenedFileObject {
+    fn rlimit_fsize_cur() -> u64 {
+        get_current_process().lock().rlimit_fsize_cur
+    }
+
+    fn limit_write_len_for_rlimit(offset: u64, requested_len: usize) -> ObjectResult<usize> {
+        let limit = Self::rlimit_fsize_cur();
+        if limit <= offset {
+            return Err(ObjectError::Other);
+        }
+
+        Ok(requested_len.min((limit - offset) as usize))
+    }
+
     fn from_backend(
         path: Path,
         backend: OpenBackend,
@@ -287,7 +300,11 @@ impl OpenedFileObject {
                 .map_err(|_| FSError::Other);
         }
 
-        self.with_file_write_cursor(true, |file| Self::write_all_to_cursor(file, buf, offset))
+        let len =
+            Self::limit_write_len_for_rlimit(offset, buf.len()).map_err(|_| FSError::Other)?;
+        self.with_file_write_cursor(true, |file| {
+            Self::write_all_to_cursor(file, &buf[..len], offset)
+        })
     }
 
     pub fn write_exact_at(&self, buf: &[u8], offset: u64) -> FSResult<usize> {
@@ -628,7 +645,9 @@ impl Writable for OpenedFileObject {
             file.seek(0, Whence::End)?;
         }
 
-        file.write(buffer).map_err(Into::into)
+        let offset = file.seek(0, Whence::Current)? as u64;
+        let len = Self::limit_write_len_for_rlimit(offset, buffer.len())?;
+        file.write(&buffer[..len]).map_err(Into::into)
     }
 }
 

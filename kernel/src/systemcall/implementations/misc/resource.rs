@@ -1,7 +1,6 @@
 use super::*;
 
 const RLIM_INFINITY: u64 = u64::MAX;
-const DEFAULT_RLIMIT_NPROC: u64 = 4096;
 const DEFAULT_RLIMIT_SIGPENDING: u64 = 4096;
 const DEFAULT_RLIMIT_MSGQUEUE: u64 = 819_200;
 const DEFAULT_RLIMIT_RTTIME: u64 = RLIM_INFINITY;
@@ -11,7 +10,6 @@ fn get_rlimit(resource: RlimitResource) -> LinuxRlimit64 {
     let process = process.lock();
     match resource {
         RlimitResource::Cpu
-        | RlimitResource::Fsize
         | RlimitResource::Data
         | RlimitResource::Rss
         | RlimitResource::As
@@ -24,9 +22,13 @@ fn get_rlimit(resource: RlimitResource) -> LinuxRlimit64 {
             rlim_cur: process.rlimit_core_cur,
             rlim_max: process.rlimit_core_max,
         },
+        RlimitResource::Fsize => LinuxRlimit64 {
+            rlim_cur: process.rlimit_fsize_cur,
+            rlim_max: process.rlimit_fsize_max,
+        },
         RlimitResource::Nproc => LinuxRlimit64 {
-            rlim_cur: DEFAULT_RLIMIT_NPROC,
-            rlim_max: DEFAULT_RLIMIT_NPROC,
+            rlim_cur: process.rlimit_nproc_cur,
+            rlim_max: process.rlimit_nproc_max,
         },
         RlimitResource::Stack => LinuxRlimit64 {
             rlim_cur: process.rlimit_stack_cur,
@@ -64,12 +66,10 @@ fn set_rlimit(resource: RlimitResource, limit: LinuxRlimit64) {
     let mut process = process.lock();
     match resource {
         RlimitResource::Cpu
-        | RlimitResource::Fsize
         | RlimitResource::Data
         | RlimitResource::Rss
         | RlimitResource::As
         | RlimitResource::Locks
-        | RlimitResource::Nproc
         | RlimitResource::Sigpending
         | RlimitResource::Msgqueue
         | RlimitResource::Nice
@@ -77,6 +77,14 @@ fn set_rlimit(resource: RlimitResource, limit: LinuxRlimit64) {
         RlimitResource::Core => {
             process.rlimit_core_cur = limit.rlim_cur;
             process.rlimit_core_max = limit.rlim_max;
+        }
+        RlimitResource::Fsize => {
+            process.rlimit_fsize_cur = limit.rlim_cur;
+            process.rlimit_fsize_max = limit.rlim_max;
+        }
+        RlimitResource::Nproc => {
+            process.rlimit_nproc_cur = limit.rlim_cur;
+            process.rlimit_nproc_max = limit.rlim_max;
         }
         RlimitResource::Stack => {
             process.rlimit_stack_cur = limit.rlim_cur;

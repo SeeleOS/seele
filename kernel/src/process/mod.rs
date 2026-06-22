@@ -50,6 +50,8 @@ const DEFAULT_RLIMIT_MEMLOCK: u64 = 8 * 1024 * 1024;
 const DEFAULT_RLIMIT_STACK_CUR: u64 = 8 * 1024 * 1024;
 const DEFAULT_RLIMIT_STACK_MAX: u64 = u64::MAX;
 const DEFAULT_RLIMIT_CORE: u64 = 0;
+const DEFAULT_RLIMIT_FSIZE: u64 = u64::MAX;
+const DEFAULT_RLIMIT_NPROC: u64 = 4096;
 const CLD_EXITED: i32 = 1;
 const CLD_KILLED: i32 = 2;
 
@@ -144,6 +146,10 @@ pub struct Process {
     pub rlimit_rtprio_max: u64,
     pub rlimit_core_cur: u64,
     pub rlimit_core_max: u64,
+    pub rlimit_fsize_cur: u64,
+    pub rlimit_fsize_max: u64,
+    pub rlimit_nproc_cur: u64,
+    pub rlimit_nproc_max: u64,
     pub rlimit_stack_cur: u64,
     pub rlimit_stack_max: u64,
     pub session_keyring: i32,
@@ -208,6 +214,10 @@ impl Default for Process {
             rlimit_rtprio_max: 0,
             rlimit_core_cur: DEFAULT_RLIMIT_CORE,
             rlimit_core_max: DEFAULT_RLIMIT_CORE,
+            rlimit_fsize_cur: DEFAULT_RLIMIT_FSIZE,
+            rlimit_fsize_max: DEFAULT_RLIMIT_FSIZE,
+            rlimit_nproc_cur: DEFAULT_RLIMIT_NPROC,
+            rlimit_nproc_max: DEFAULT_RLIMIT_NPROC,
             rlimit_stack_cur: DEFAULT_RLIMIT_STACK_CUR,
             rlimit_stack_max: DEFAULT_RLIMIT_STACK_MAX,
             session_keyring: 0,
