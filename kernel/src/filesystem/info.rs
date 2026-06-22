@@ -8,6 +8,7 @@ pub struct DirectoryContentInfo {
     pub content_type: DirectoryContentType,
     pub inode: u64,
     pub permission: Option<UnixPermission>,
+    pub rdev: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -228,6 +229,7 @@ impl DirectoryContentInfo {
             content_type,
             inode: 0,
             permission: None,
+            rdev: 0,
         }
     }
 
@@ -238,6 +240,11 @@ impl DirectoryContentInfo {
 
     pub fn with_permission(mut self, permission: UnixPermission) -> Self {
         self.permission = Some(permission);
+        self
+    }
+
+    pub fn with_rdev(mut self, rdev: u64) -> Self {
+        self.rdev = rdev;
         self
     }
 }

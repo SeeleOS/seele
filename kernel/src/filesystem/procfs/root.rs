@@ -278,16 +278,23 @@ fn generate_uuid(mut state: u64) -> String {
     )
 }
 
-fn sorted_mounts() -> Vec<(String, FileSystemRef, String, MountFlags)> {
+fn sorted_mounts() -> Vec<(String, FileSystemRef, String, MountFlags, u64, u64)> {
     let mut mounts = VirtualFS
         .lock()
         .mount_snapshots()
         .into_iter()
-        .map(|(path, fs, source_path, flags, _device_id, _mount_id)| {
-            (path.as_string(), fs, source_path.as_string(), flags)
+        .map(|(path, fs, source_path, flags, device_id, mount_id)| {
+            (
+                path.as_string(),
+                fs,
+                source_path.as_string(),
+                flags,
+                device_id,
+                mount_id,
+            )
         })
         .collect::<Vec<_>>();
-    mounts.sort_by_key(|(path, _, _, _)| (path.matches('/').count(), path.len()));
+    mounts.sort_by_key(|(path, _, _, _, _, _)| (path.matches('/').count(), path.len()));
     mounts
 }
 
@@ -414,7 +421,7 @@ mod tests {
 
 pub(super) fn proc_mounts_bytes() -> Vec<u8> {
     let mut out = String::new();
-    for (path, fs, _, flags) in sorted_mounts() {
+    for (path, fs, _, flags, _, _) in sorted_mounts() {
         let fs = fs.lock();
         out.push_str(fs.mount_source());
         out.push(' ');
@@ -431,23 +438,13 @@ pub(super) fn proc_mounts_bytes() -> Vec<u8> {
 pub(super) fn proc_mountinfo_bytes() -> Vec<u8> {
     let mounts = sorted_mounts();
     let mut ids = BTreeMap::new();
-    let mut dev_ids = BTreeMap::new();
-    let mut next_dev_id = 1u64;
 
-    for (index, (path, fs, _, _)) in mounts.iter().enumerate() {
-        ids.insert(path.clone(), index as u64 + 1);
-
-        let fs_key = format!("{:p}", alloc::sync::Arc::as_ptr(fs));
-        dev_ids.entry(fs_key).or_insert_with(|| {
-            let dev_id = next_dev_id;
-            next_dev_id += 1;
-            dev_id
-        });
+    for (path, _, _, _, _, mount_id) in mounts.iter() {
+        ids.insert(path.clone(), *mount_id);
     }
 
     let mut out = String::new();
-    for (path, fs, source_path, flags) in mounts {
-        let id = *ids.get(&path).unwrap_or(&1);
+    for (path, fs, source_path, flags, device_id, mount_id) in mounts {
         let parent_id = if path == "/" {
             0
         } else {
@@ -462,12 +459,10 @@ pub(super) fn proc_mountinfo_bytes() -> Vec<u8> {
                 .copied()
                 .unwrap_or(1)
         };
-        let fs_key = format!("{:p}", alloc::sync::Arc::as_ptr(&fs));
         let fs = fs.lock();
-        let dev_id = *dev_ids.get(&fs_key).unwrap_or(&1);
         let options = flags.proc_options();
         out.push_str(&format!(
-            "{id} {parent_id} 0:{dev_id} {source_path} {path} {options} - {} {} {options}\n",
+            "{mount_id} {parent_id} 0:{device_id} {source_path} {path} {options} - {} {} {options}\n",
             fs.name(),
             fs.mount_source()
         ));

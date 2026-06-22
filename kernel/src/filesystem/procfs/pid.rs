@@ -400,7 +400,18 @@ pub(super) fn proc_pid_fdinfo_bytes(pid: ProcessID, fd: usize) -> FSResult<Vec<u
         .map(|entry| entry.object.clone())
         .ok_or(FSError::NotFound)?;
 
-    let mut content = String::from("pos:\t0\nflags:\t0\nmnt_id:\t0\nino:\t0\n");
+    let (mount_id, inode) = if let Ok(file_like) = object.clone().as_file_like() {
+        let inode = object
+            .clone()
+            .as_statable()
+            .map(|statable| statable.stat().st_ino)
+            .unwrap_or(0);
+        (file_like.mount_id(), inode)
+    } else {
+        (0, 0)
+    };
+
+    let mut content = format!("pos:\t0\nflags:\t0\nmnt_id:\t{mount_id}\nino:\t{inode}\n");
     if let Ok(pidfd) = object.as_pidfd() {
         content.push_str(&format!("Pid:\t{}\n", pidfd.pid()));
     }
@@ -772,8 +783,8 @@ mod tests {
         let fdinfo = String::from_utf8(proc_pid_fdinfo_bytes(pid, 0).unwrap()).unwrap();
         assert!(fdinfo.contains("pos:\t0\n"));
         assert!(fdinfo.contains("flags:\t0\n"));
-        assert!(fdinfo.contains("mnt_id:\t0\n"));
-        assert!(fdinfo.contains("ino:\t0\n"));
+        assert!(fdinfo.contains("mnt_id:\t"));
+        assert!(fdinfo.contains("ino:\t"));
 
         MANAGER.lock().processes.remove(&pid);
     }

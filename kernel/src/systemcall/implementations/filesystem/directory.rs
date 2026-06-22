@@ -94,23 +94,22 @@ define_syscall!(MkdirAt, |dirfd: i32, path: CString, mode: u32| {
     Ok(0)
 });
 
-define_syscall!(Mknodat, |dirfd: i32,
-                          path: CString,
-                          mode: u32,
-                          _dev: u64| {
+define_syscall!(Mknodat, |dirfd: i32, path: CString, mode: u32, dev: u64| {
     let path = path_from_raw(path)?;
     let path = resolve_path_at(dirfd, &path)?;
-    let create_mode = {
+    let umask = {
         let process = get_current_process();
         let process = process.lock();
-        mode & 0o7777 & !process.fs_context.lock().file_mode_creation_mask
+        process.fs_context.lock().file_mode_creation_mask
     };
+    let file_type = mode & S_IFMT;
+    let create_mode = file_type | (mode & 0o7777 & !umask);
 
-    match mode & S_IFMT {
+    match file_type {
         0 | S_IFREG | S_IFIFO | S_IFCHR | S_IFBLK | S_IFSOCK => {
             VirtualFS
                 .lock()
-                .create_file_with_mode(path.clone(), Some(create_mode))?;
+                .create_file_with_metadata(path.clone(), Some(create_mode), dev)?;
             Ok(0)
         }
         _ => Err(SyscallError::NoSyscall),

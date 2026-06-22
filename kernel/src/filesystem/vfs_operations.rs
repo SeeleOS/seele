@@ -34,6 +34,15 @@ impl VFS {
     }
 
     pub fn create_file_with_mode(&mut self, path: Path, mode: Option<u32>) -> FSResult<()> {
+        self.create_file_with_metadata(path, mode, 0)
+    }
+
+    pub fn create_file_with_metadata(
+        &mut self,
+        path: Path,
+        mode: Option<u32>,
+        rdev: u64,
+    ) -> FSResult<()> {
         let normalized = self.normalize_path(path.clone());
         if normalized.ends_with_slash() {
             return Err(FSError::NotADirectory);
@@ -44,8 +53,9 @@ impl VFS {
 
         let mut info = DirectoryContentInfo::new(name, DirectoryContentType::File);
         if let Some(mode) = mode {
-            info = info.with_permission(crate::filesystem::info::UnixPermission(mode & 0o7777));
+            info = info.with_permission(crate::filesystem::info::UnixPermission(mode));
         }
+        info = info.with_rdev(rdev);
 
         parent_dir.clone().lock().create(info)
     }

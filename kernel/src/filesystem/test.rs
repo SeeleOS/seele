@@ -159,9 +159,9 @@ fn tmpfs_state_tracks_children_and_empty_directory_rules() {
     let mut state = TmpfsState::new();
 
     state.create_directory("/", "run", 0o7777).unwrap();
-    state.create_file("/run", "pid", 0o644).unwrap();
+    state.create_file("/run", "pid", 0o644, 0).unwrap();
     assert!(matches!(
-        state.create_file("/run", "pid", 0o644),
+        state.create_file("/run", "pid", 0o644, 0),
         Err(FSError::AlreadyExists)
     ));
     assert!(matches!(

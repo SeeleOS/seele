@@ -36,6 +36,7 @@ pub(crate) enum TmpNodeKind {
     File {
         data: SparseFileData,
         mode: u32,
+        rdev: u64,
     },
     Symlink {
         target: String,
@@ -139,13 +140,20 @@ impl TmpfsState {
         }
     }
 
-    pub(crate) fn create_file(&mut self, parent: &str, name: &str, mode: u32) -> FSResult<()> {
+    pub(crate) fn create_file(
+        &mut self,
+        parent: &str,
+        name: &str,
+        mode: u32,
+        rdev: u64,
+    ) -> FSResult<()> {
         self.create_node(
             parent,
             name,
             TmpNodeKind::File {
                 data: SparseFileData::new(),
-                mode: mode & 0o7777,
+                mode,
+                rdev,
             },
         )
     }

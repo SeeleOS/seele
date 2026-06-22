@@ -88,6 +88,7 @@ impl Directory for TmpfsDirectoryHandle {
                 info.permission
                     .unwrap_or(UnixPermission(DEFAULT_FILE_MODE))
                     .0,
+                info.rdev,
             ),
             DirectoryContentType::Directory => state.create_directory(
                 &self.path,

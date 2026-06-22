@@ -45,7 +45,7 @@ impl File for TmpfsFileHandle {
         let state = self.state.lock();
         let node = state.node_by_inode(self.inode)?;
         match &node.kind {
-            TmpNodeKind::File { data, mode } => Ok(FileLikeInfo::new(
+            TmpNodeKind::File { data, mode, rdev } => Ok(FileLikeInfo::new(
                 node_name(&self.path),
                 data.len(),
                 UnixPermission(*mode),
@@ -53,6 +53,7 @@ impl File for TmpfsFileHandle {
             )
             .with_inode(node.inode)
             .with_owner(node.uid, node.gid)
+            .with_rdev(*rdev)
             .with_times(node.times)),
             TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => Err(FSError::NotAFile),
         }

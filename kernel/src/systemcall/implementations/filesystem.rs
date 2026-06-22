@@ -3245,8 +3245,8 @@ mod tests {
         let fdinfo = core::str::from_utf8(&fdinfo).unwrap();
         assert!(fdinfo.contains("pos:\t0\n"));
         assert!(fdinfo.contains("flags:\t0\n"));
-        assert!(fdinfo.contains("mnt_id:\t0\n"));
-        assert!(fdinfo.contains("ino:\t0\n"));
+        assert!(fdinfo.contains("mnt_id:\t"));
+        assert!(fdinfo.contains("ino:\t"));
         close_test_fd(fdinfo_fd);
         close_test_fd(known_fd);
 
