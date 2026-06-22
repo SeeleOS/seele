@@ -126,10 +126,29 @@ bitflags! {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-struct FutexKey {
-    pid: u64,
-    addr: u64,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum FutexKey {
+    Private {
+        pid: u64,
+        addr: u64,
+    },
+    SharedAnonymous {
+        frames: u64,
+        offset: u64,
+    },
+    SharedFile {
+        device_id: u64,
+        inode: u64,
+        offset: u64,
+    },
+    SharedObject {
+        object: u64,
+        offset: u64,
+    },
+    SharedPhysical {
+        frame: u64,
+        offset: u64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -199,9 +218,58 @@ fn write_user_u32(addr: u64, value: u32) -> Result<(), SyscallError> {
     user_safe::write(addr as *mut u32, &value)
 }
 
-fn current_futex_key(addr: u64) -> FutexKey {
-    let pid = get_current_process().lock().pid.0;
-    FutexKey { pid, addr }
+fn current_futex_key(addr: u64) -> Result<FutexKey, SyscallError> {
+    if !addr.is_multiple_of(core::mem::size_of::<u32>() as u64) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let process = get_current_process();
+    let mut process = process.lock();
+    let pid = process.pid.0;
+    let Some(area) = process.addrspace.get_area(VirtAddr::new(addr)).cloned() else {
+        return Ok(FutexKey::Private { pid, addr });
+    };
+    let area_offset = addr - area.start.as_u64();
+
+    match area.data {
+        Data::Shared { frames, .. } => Ok(FutexKey::SharedAnonymous {
+            frames: Arc::as_ptr(&frames) as *const () as u64,
+            offset: area_offset,
+        }),
+        Data::File {
+            offset,
+            file,
+            shared: true,
+            ..
+        } => {
+            let futex_offset = offset.saturating_add(area_offset);
+            if let Some(identity) = file.mapping_identity() {
+                Ok(FutexKey::SharedFile {
+                    device_id: identity.device_id,
+                    inode: identity.inode,
+                    offset: futex_offset,
+                })
+            } else {
+                Ok(FutexKey::SharedObject {
+                    object: Arc::as_ptr(&file) as *const () as u64,
+                    offset: futex_offset,
+                })
+            }
+        }
+        Data::Normal(permissions) if permissions.shared_mapping => {
+            let page_offset = addr % Size4KiB::SIZE;
+            let frame = process
+                .addrspace
+                .translate_addr(VirtAddr::new(addr - page_offset))
+                .ok_or(SyscallError::BadAddress)?
+                .as_u64();
+            Ok(FutexKey::SharedPhysical {
+                frame,
+                offset: page_offset,
+            })
+        }
+        _ => Ok(FutexKey::Private { pid, addr }),
+    }
 }
 
 fn queue_waiter_in_locked_queue(
@@ -248,7 +316,7 @@ fn bucket_is_empty(queue: &BTreeMap<FutexKey, FutexBucket>, key: FutexKey) -> bo
 }
 
 pub fn wake_futex_for_process(pid: u64, addr: u64, count: usize) -> usize {
-    let threads = take_futex_waiters(pid, addr, count, None);
+    let threads = take_futex_waiters(FutexKey::Private { pid, addr }, count, None);
     let woken = threads.len();
 
     with_thread_manager(|manager| {
@@ -266,7 +334,7 @@ pub fn wake_futex_for_process_with_manager(
     count: usize,
     manager: &mut ThreadManager,
 ) -> usize {
-    let threads = take_futex_waiters(pid, addr, count, None);
+    let threads = take_futex_waiters(FutexKey::Private { pid, addr }, count, None);
     let woken = threads.len();
 
     for thread in threads {
@@ -276,8 +344,7 @@ pub fn wake_futex_for_process_with_manager(
     woken
 }
 
-fn take_futex_waiters(pid: u64, addr: u64, count: usize, wake_mask: Option<u32>) -> Vec<ThreadRef> {
-    let key = FutexKey { pid, addr };
+fn take_futex_waiters(key: FutexKey, count: usize, wake_mask: Option<u32>) -> Vec<ThreadRef> {
     let mut queue = FUTEX_QUEUE.lock();
     let woken = queue
         .get_mut(&key)
@@ -357,7 +424,7 @@ fn futex_wait_impl(
     deadline: Option<Time>,
     bitset: u32,
 ) -> Result<usize, SyscallError> {
-    let key = current_futex_key(arg1);
+    let key = current_futex_key(arg1)?;
     let current = get_current_thread();
     // Keep the value check and queue publication ordered with wakeups on the
     // same futex bucket. Without this, a wake can race between the user-space
@@ -395,15 +462,21 @@ fn futex_wait_impl(
 
 fn futex_wake_impl(arg1: u64, arg2: u64) -> Result<usize, SyscallError> {
     validate_futex_user_addr(arg1)?;
-    let key = current_futex_key(arg1);
-    let woken = wake_futex_for_process(key.pid, key.addr, arg2 as usize);
+    let key = current_futex_key(arg1)?;
+    let threads = take_futex_waiters(key, arg2 as usize, None);
+    let woken = threads.len();
+    with_thread_manager(|manager| {
+        for thread in threads {
+            manager.wake(thread);
+        }
+    });
     Ok(woken)
 }
 
 fn futex_wake_bitset_impl(arg1: u64, arg2: u64, bitset: u32) -> Result<usize, SyscallError> {
     validate_futex_user_addr(arg1)?;
-    let key = current_futex_key(arg1);
-    let threads = take_futex_waiters(key.pid, key.addr, arg2 as usize, Some(bitset));
+    let key = current_futex_key(arg1)?;
+    let threads = take_futex_waiters(key, arg2 as usize, Some(bitset));
     let woken = threads.len();
 
     with_thread_manager(|manager| {
@@ -429,9 +502,8 @@ fn futex_requeue_impl(
         }
     }
 
-    let pid = get_current_process().lock().pid.0;
-    let source = FutexKey { pid, addr: arg1 };
-    let target = FutexKey { pid, addr: uaddr2 };
+    let source = current_futex_key(arg1)?;
+    let target = current_futex_key(uaddr2)?;
     let mut queue = FUTEX_QUEUE.lock();
     let mut woken = Vec::new();
     let mut moved = Vec::new();
@@ -542,15 +614,28 @@ fn futex_wake_op_impl(
     uaddr2: u64,
     encoded_op: u64,
 ) -> Result<usize, SyscallError> {
-    let pid = get_current_process().lock().pid.0;
     let old_value = read_user_u32(uaddr2)?;
     let encoded_op = u32::try_from(encoded_op).map_err(|_| SyscallError::InvalidArguments)?;
     let (new_value, should_wake_second) = futex_wake_op_apply(old_value, encoded_op)?;
     write_user_u32(uaddr2, new_value)?;
 
-    let mut total_woken = wake_futex_for_process(pid, arg1, wake_count_1 as usize);
+    let key1 = current_futex_key(arg1)?;
+    let key2 = current_futex_key(uaddr2)?;
+    let threads = take_futex_waiters(key1, wake_count_1 as usize, None);
+    let mut total_woken = threads.len();
+    with_thread_manager(|manager| {
+        for thread in threads {
+            manager.wake(thread);
+        }
+    });
     if should_wake_second {
-        total_woken += wake_futex_for_process(pid, uaddr2, wake_count_2 as usize);
+        let threads = take_futex_waiters(key2, wake_count_2 as usize, None);
+        total_woken += threads.len();
+        with_thread_manager(|manager| {
+            for thread in threads {
+                manager.wake(thread);
+            }
+        });
     }
     Ok(total_woken)
 }
@@ -564,7 +649,7 @@ fn futex_lock_pi_impl(
     timeout: u64,
     clock_realtime: bool,
 ) -> Result<usize, SyscallError> {
-    let key = current_futex_key(arg1);
+    let key = current_futex_key(arg1)?;
     let current = get_current_thread();
     let tid = current_tid_u32()?;
     let deadline = if timeout == 0 {
@@ -659,7 +744,7 @@ fn futex_unlock_pi_impl(arg1: u64) -> Result<usize, SyscallError> {
     }
 
     let next_waiter = {
-        let key = current_futex_key(arg1);
+        let key = current_futex_key(arg1)?;
         let mut queue = FUTEX_QUEUE.lock();
         let next = queue
             .get_mut(&key)
@@ -677,7 +762,7 @@ fn futex_unlock_pi_impl(arg1: u64) -> Result<usize, SyscallError> {
             u32::try_from(next.id.0).map_err(|_| SyscallError::InvalidArguments)?
         };
         let still_has_waiters = {
-            let key = current_futex_key(arg1);
+            let key = current_futex_key(arg1)?;
             FUTEX_QUEUE
                 .lock()
                 .get(&key)
