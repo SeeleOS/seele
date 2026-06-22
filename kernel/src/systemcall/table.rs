@@ -179,6 +179,7 @@ define_syscall_table!(
     Lremovexattr,
     Fremovexattr,
     SetTidAddress,
+    Tkill,
     Time,
     Futex,
     SchedSetscheduler,

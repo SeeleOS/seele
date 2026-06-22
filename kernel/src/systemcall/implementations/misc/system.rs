@@ -67,7 +67,7 @@ define_syscall!(Uname, |info: *mut UtsName| {
         return Err(SyscallError::BadAddress);
     }
     let mut uts = UtsName::new(
-        crate::misc::utsname::DEFAULT_SYSNAME,
+        "Linux",
         crate::KERNEL_RELEASE,
         crate::KERNEL_VERSION,
         crate::misc::utsname::DEFAULT_MACHINE,
@@ -568,7 +568,7 @@ mod tests {
             0,
         );
         let uts = read_user_value::<TestUtsName>(uts_page);
-        assert_eq!(&uts.sysname[..6], b"Seele\0");
+        assert_eq!(&uts.sysname[..6], b"Linux\0");
         assert_eq!(&uts.nodename[..10], b"linuxhost\0");
         assert_eq!(&uts.release[..13], b"6.12.0-seele\0");
         assert_eq!(&uts.machine[..7], b"x86_64\0");

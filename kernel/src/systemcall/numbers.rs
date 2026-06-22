@@ -156,6 +156,7 @@ pub enum SyscallNumber {
     Mlock = 149,
     Munlock = 150,
     Time = 201,
+    Tkill = 200,
     Futex = 202,
     SchedSetaffinity = 203,
     SchedGetaffinity = 204,

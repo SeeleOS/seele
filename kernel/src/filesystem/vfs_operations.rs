@@ -30,17 +30,24 @@ impl VFS {
     }
 
     pub fn create_file(&mut self, path: Path) -> FSResult<()> {
+        self.create_file_with_mode(path, None)
+    }
+
+    pub fn create_file_with_mode(&mut self, path: Path, mode: Option<u32>) -> FSResult<()> {
         let normalized = self.normalize_path(path.clone());
         if normalized.ends_with_slash() {
             return Err(FSError::NotADirectory);
         }
+        self.ensure_writable_mount(normalized.clone())?;
 
         let (parent_dir, name) = self.resolve_parent_normalized(normalized)?;
 
-        parent_dir
-            .clone()
-            .lock()
-            .create(DirectoryContentInfo::new(name, DirectoryContentType::File))
+        let mut info = DirectoryContentInfo::new(name, DirectoryContentType::File);
+        if let Some(mode) = mode {
+            info = info.with_permission(crate::filesystem::info::UnixPermission(mode & 0o7777));
+        }
+
+        parent_dir.clone().lock().create(info)
     }
 
     pub fn create_dir(&mut self, path: Path) -> FSResult<()> {
@@ -49,6 +56,7 @@ impl VFS {
 
     pub fn create_dir_with_mode(&mut self, path: Path, mode: Option<u32>) -> FSResult<()> {
         let normalized = self.normalize_path(path);
+        self.ensure_writable_mount(normalized.clone())?;
         let (parent_dir, name) = self.resolve_parent_normalized(normalized)?;
 
         let mut info = DirectoryContentInfo::new(name, DirectoryContentType::Directory);
@@ -61,6 +69,7 @@ impl VFS {
 
     pub fn create_symlink(&mut self, path: Path, target: &str) -> FSResult<()> {
         let normalized = self.normalize_path(path);
+        self.ensure_writable_mount(normalized.clone())?;
         let (parent_dir, name) = self.resolve_parent_normalized(normalized)?;
         parent_dir.lock().create_symlink(&name, target)
     }

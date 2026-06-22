@@ -71,7 +71,7 @@ define_syscall!(OpenAt, |dirfd: i32,
                     }
                     Ok(None) if create => {
                         let create_start = profile::scope_start();
-                        create_file_unlocked(path.clone())?;
+                        create_file_unlocked(path.clone(), create_mode)?;
                         profile::record_hot_syscall_phase(
                             HotSyscallPhase::OpenAtCreateFile,
                             profile::scope_start().saturating_sub(create_start),
@@ -83,12 +83,7 @@ define_syscall!(OpenAt, |dirfd: i32,
                             profile::scope_start().saturating_sub(retry_start),
                         );
                         match reopen_result {
-                            Ok(file) => {
-                                if create_mode != 0 {
-                                    file.chmod(create_mode)?;
-                                }
-                                Arc::new(file)
-                            }
+                            Ok(file) => Arc::new(file),
                             Err(err) => return Err(SyscallError::from(err)),
                         }
                     }
@@ -119,7 +114,7 @@ define_syscall!(OpenAt, |dirfd: i32,
             }
             Err(FSError::NotFound) if create => {
                 let create_start = profile::scope_start();
-                create_file_unlocked(path.clone())?;
+                create_file_unlocked(path.clone(), create_mode)?;
                 profile::record_hot_syscall_phase(
                     HotSyscallPhase::OpenAtCreateFile,
                     profile::scope_start().saturating_sub(create_start),
@@ -131,12 +126,7 @@ define_syscall!(OpenAt, |dirfd: i32,
                     profile::scope_start().saturating_sub(retry_start),
                 );
                 match reopen_result {
-                    Ok(file) => {
-                        if create_mode != 0 {
-                            file.chmod(create_mode)?;
-                        }
-                        Arc::new(file)
-                    }
+                    Ok(file) => Arc::new(file),
                     Err(err) => return Err(SyscallError::from(err)),
                 }
             }

@@ -100,12 +100,17 @@ define_syscall!(Mknodat, |dirfd: i32,
                           _dev: u64| {
     let path = path_from_raw(path)?;
     let path = resolve_path_at(dirfd, &path)?;
+    let create_mode = {
+        let process = get_current_process();
+        let process = process.lock();
+        mode & 0o7777 & !process.fs_context.lock().file_mode_creation_mask
+    };
 
     match mode & S_IFMT {
         0 | S_IFREG | S_IFIFO | S_IFCHR | S_IFBLK | S_IFSOCK => {
-            VirtualFS.lock().create_file(path.clone())?;
-            let file = open_path(path)?;
-            file.chmod(mode)?;
+            VirtualFS
+                .lock()
+                .create_file_with_mode(path.clone(), Some(create_mode))?;
             Ok(0)
         }
         _ => Err(SyscallError::NoSyscall),

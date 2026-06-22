@@ -266,6 +266,14 @@ impl VFS {
         ))
     }
 
+    pub fn ensure_writable_mount(&self, path: Path) -> FSResult<()> {
+        let (mount, _) = self.find_mount(&self.normalize_path(path))?;
+        if mount.flags.contains(MountFlags::MS_RDONLY) {
+            return Err(FSError::Readonly);
+        }
+        Ok(())
+    }
+
     pub fn mount_device_id(&self, path: Path) -> FSResult<u64> {
         let (mount, _) = self.find_mount(&self.normalize_path(path))?;
         Ok(mount.device_id)

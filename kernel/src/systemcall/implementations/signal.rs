@@ -416,6 +416,25 @@ define_syscall!(Tgkill, |tgid: i32, tid: i32, signal: i32| {
     Ok(0)
 });
 
+define_syscall!(Tkill, |tid: i32, signal: i32| {
+    let signal = Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?;
+    let tid = ThreadID(tid as u64);
+
+    let thread = crate::thread::with_thread_manager(|manager| manager.threads.get(&tid).cloned())
+        .ok_or(SyscallError::NoProcess)?;
+
+    let (sender_pid, sender_uid) = {
+        let current = get_current_process();
+        let current = current.lock();
+        (current.pid.0 as i32, current.real_uid)
+    };
+    let mut siginfo = SigInfo::for_process_signal(signal, sender_pid, sender_uid);
+    siginfo.si_code = SI_TKILL;
+
+    send_signal_to_thread_with_siginfo(&thread, signal, siginfo);
+    Ok(0)
+});
+
 define_syscall!(
     RtSigqueueinfo,
     |pid: i32, signal: i32, info: *const SigInfo| {

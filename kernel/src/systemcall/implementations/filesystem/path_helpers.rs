@@ -125,19 +125,23 @@ pub(super) fn proc_self_fd_object(path: &Path) -> Result<Option<ObjectRef>, Sysc
     };
     Ok(Some(object))
 }
-pub(super) fn create_file_unlocked(path: Path) -> Result<(), SyscallError> {
+pub(super) fn create_file_unlocked(path: Path, mode: u32) -> Result<(), SyscallError> {
     let (parent_dir, name) = {
         let vfs = VirtualFS.lock();
         let normalized = vfs.normalize_path(path.clone());
         if normalized.ends_with_slash() {
             return Err(SyscallError::NotADirectory);
         }
+        vfs.ensure_writable_mount(normalized)?;
         vfs.resolve_parent(path).map_err(SyscallError::from)?
     };
 
     parent_dir
         .lock()
-        .create(DirectoryContentInfo::new(name, DirectoryContentType::File))
+        .create(
+            DirectoryContentInfo::new(name, DirectoryContentType::File)
+                .with_permission(crate::filesystem::info::UnixPermission(mode & 0o7777)),
+        )
         .map_err(SyscallError::from)
 }
 
@@ -200,9 +204,10 @@ pub(super) fn rename_impl(
         let _ = open_path(parent)?;
     }
 
-    VirtualFS
-        .lock()
-        .rename_file(old_path.clone(), new_path.clone())
+    let mut vfs = VirtualFS.lock();
+    vfs.ensure_writable_mount(old_path.clone())?;
+    vfs.ensure_writable_mount(new_path.clone())?;
+    vfs.rename_file(old_path.clone(), new_path.clone())
         .map_err(SyscallError::from)?;
     Ok(0)
 }
