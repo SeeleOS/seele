@@ -37,20 +37,40 @@ define_syscall!(LinkAt, |old_dirfd: i32,
         return Err(SyscallError::BadAddress);
     }
 
-    let old_path = path_from_raw(old_path)?;
-    if old_path.is_empty() {
+    let old_path_str = path_from_raw(old_path)?;
+    if old_path_str.is_empty() {
         if !flags.contains(AtFlags::EMPTY_PATH) {
             return Err(SyscallError::InvalidArguments);
         }
         let object = get_object_current_process(old_dirfd as u64).map_err(SyscallError::from)?;
         let result = object.as_file_like()?.link_to(new_path.clone());
-        let result = result.map_err(SyscallError::from);
+        let result = result.map_err(|err| match err {
+            FSError::Other => SyscallError::CrossDeviceLink,
+            err => SyscallError::from(err),
+        });
         result?;
         return Ok(0);
     }
 
-    let old_path = resolve_path_at(old_dirfd, &old_path)?;
-    VirtualFS.lock().link_file(old_path, new_path)?;
+    let old_path_is_relative = !Path::new(&old_path_str).is_absolute();
+    let old_path = resolve_path_at(old_dirfd, &old_path_str)?;
+    if old_dirfd != AT_FDCWD && old_path_is_relative {
+        let object = get_object_current_process(old_dirfd as u64).map_err(SyscallError::from)?;
+        let file_like = object
+            .as_file_like()
+            .map_err(|_| SyscallError::NotADirectory)?;
+        if !matches!(file_like.info()?.file_like_type, FileLikeType::Directory) {
+            return Err(SyscallError::NotADirectory);
+        }
+        open_path(file_like.path()).map_err(|_| SyscallError::FileNotFound)?;
+    }
+    VirtualFS
+        .lock()
+        .link_file(old_path, new_path)
+        .map_err(|err| match err {
+            FSError::Other => SyscallError::CrossDeviceLink,
+            err => SyscallError::from(err),
+        })?;
 
     Ok(0)
 });

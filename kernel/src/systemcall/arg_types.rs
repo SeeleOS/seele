@@ -159,6 +159,8 @@ add_syscall_arg_flags_type!(
     i32,
     TimerFdFlags,
     i32,
+    TimerSetTimeFlags,
+    i32,
     ClockNanosleepFlags,
     i32,
     SignalfdFlags,
@@ -207,8 +209,6 @@ add_syscall_arg_flags_retain_type!(
     CloseRangeFlags,
     u32,
     OpenFlags,
-    i32,
-    TimerSetTimeFlags,
     i32,
     XattrFlags,
     u32

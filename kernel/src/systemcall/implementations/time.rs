@@ -6,7 +6,7 @@ use crate::misc::{
 };
 use crate::object::FileFlags;
 use crate::object::linux_anon::{TimerFdObject, wake_linux_io_waiters};
-use crate::object::misc::ObjectRef;
+use crate::object::misc::get_object_current_process;
 use crate::process::{FdFlags, manager::get_current_process};
 use crate::systemcall::utils::{SyscallError, SyscallImpl};
 use crate::thread::yielding::{BlockType, block_current_with_sig_check};
@@ -272,7 +272,7 @@ define_syscall!(TimerfdCreate, |clock_id: i32, flags: TimerFdFlags| {
 
 define_syscall!(
     TimerfdSettime,
-    |object: ObjectRef,
+    |fd: i32,
      flags: TimerSetTimeFlags,
      new_value: *const LinuxItimerspec,
      old_value: *mut LinuxItimerspec| {
@@ -280,7 +280,10 @@ define_syscall!(
             return Err(SyscallError::BadAddress);
         }
 
-        let timerfd = object.as_timerfd()?;
+        let object = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+        let timerfd = object
+            .as_timerfd()
+            .map_err(|_| SyscallError::InvalidArguments)?;
         let now = KernelTime::since_boot();
         let (old_deadline, old_interval_ns) = timerfd.current_timer();
         if !old_value.is_null() {
@@ -305,8 +308,8 @@ define_syscall!(
             Some(now.add_ns(value_ns))
         };
         timerfd.set_timer(deadline, interval_ns);
-        wake_linux_io_waiters();
         if timerfd.is_read_ready() {
+            wake_linux_io_waiters();
             timerfd.wake_waiters();
         }
 
@@ -316,12 +319,14 @@ define_syscall!(
 
 define_syscall!(
     TimerfdGettime,
-    |object: ObjectRef, curr_value: *mut LinuxItimerspec| {
+    |fd: i32, curr_value: *mut LinuxItimerspec| {
+        let object = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+        let timerfd = object
+            .as_timerfd()
+            .map_err(|_| SyscallError::InvalidArguments)?;
         if curr_value.is_null() {
             return Err(SyscallError::BadAddress);
         }
-
-        let timerfd = object.as_timerfd()?;
         let now = KernelTime::since_boot();
         let (deadline, interval_ns) = timerfd.current_timer();
         let remaining_ns = deadline
@@ -873,7 +878,11 @@ mod tests {
         let non_timerfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
         expect_errno(
             SyscallArgs::new([non_timerfd as u64, 0, spec_page, 0, 0, 0]).call::<TimerfdSettime>(),
-            SyscallError::BadFileDescriptor,
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([non_timerfd as u64, spec_page, 0, 0, 0, 0]).call::<TimerfdGettime>(),
+            SyscallError::InvalidArguments,
         );
         close_test_fd(non_timerfd);
         close_test_fd(timerfd);
