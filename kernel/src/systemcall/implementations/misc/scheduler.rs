@@ -1,6 +1,9 @@
 use super::*;
 
-define_syscall!(SchedYield, { Ok(0) });
+define_syscall!(SchedYield, {
+    return_to_scheduler_from_current();
+    Ok(0)
+});
 
 define_syscall!(Madvise, |_addr: u64, _len: usize, _advice: i32| { Ok(0) });
 

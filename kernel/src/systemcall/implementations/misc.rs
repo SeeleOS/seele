@@ -31,6 +31,7 @@ use crate::signal::{
 use crate::systemcall::utils::{SyscallError, SyscallImpl};
 use crate::terminal::pty::create_pty;
 use crate::thread::misc::with_current_thread;
+use crate::thread::scheduling::return_to_scheduler_from_current;
 use crate::thread::yielding::{
     BlockType, WakeType, block_current_with_sig_check, cancel_block, finish_block_current,
     prepare_block_current,
