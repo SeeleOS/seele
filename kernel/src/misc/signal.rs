@@ -556,12 +556,10 @@ pub fn process_current_process_signals(process: &ProcessRef) -> bool {
     let thread_ref = get_current_thread();
     {
         let thread = thread_ref.lock();
-        if thread.temporary_blocked_signals.is_some() {
-            if thread.interruptible_wait_active {
-                drop(thread);
-                thread_ref.lock().interrupted_by_signal = true;
-                return false;
-            }
+        if thread.temporary_blocked_signals.is_some() && thread.interruptible_wait_active {
+            drop(thread);
+            thread_ref.lock().interrupted_by_signal = true;
+            return false;
         }
         if thread.interruptible_wait_active
             && process_has_pending_user_handler_signal(process, thread.blocked_signals)

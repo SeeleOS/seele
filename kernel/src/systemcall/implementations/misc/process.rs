@@ -36,7 +36,7 @@ define_syscall!(Alarm, |seconds: u32| {
         })
         .unwrap_or(0);
 
-    if process.timers.len() <= ITIMER_REAL {
+    if process.timers.get(ITIMER_REAL).is_none() {
         process.timers.resize_with(ITIMER_REAL + 1, || None);
     }
 
