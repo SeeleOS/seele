@@ -6,7 +6,9 @@ use alloc::{
     vec::Vec,
 };
 
-use crate::filesystem::{errors::FSError, path::Path, sparse_file::SparseFileData, vfs::FSResult};
+use crate::filesystem::{
+    errors::FSError, info::FileTimes, path::Path, sparse_file::SparseFileData, vfs::FSResult,
+};
 
 const ROOT_INODE: u64 = 0x7000_0000;
 pub(crate) const DEFAULT_DIR_MODE: u32 = 0o755;
@@ -46,6 +48,7 @@ pub(crate) struct TmpNode {
     pub(crate) gid: u32,
     pub(crate) link_count: u64,
     pub(crate) open_count: u64,
+    pub(crate) times: FileTimes,
     pub(crate) xattrs: BTreeMap<String, Vec<u8>>,
     pub(crate) kind: TmpNodeKind,
 }
@@ -72,6 +75,7 @@ impl TmpfsState {
                 gid: 0,
                 link_count: 1,
                 open_count: 0,
+                times: FileTimes::now(),
                 xattrs: BTreeMap::new(),
                 kind: TmpNodeKind::Directory {
                     children: BTreeSet::new(),
@@ -193,6 +197,7 @@ impl TmpfsState {
                 gid,
                 link_count: 1,
                 open_count: 0,
+                times: FileTimes::now(),
                 xattrs: BTreeMap::new(),
                 kind,
             },
@@ -256,6 +261,11 @@ impl TmpfsState {
         if gid != u32::MAX {
             node.gid = gid;
         }
+        Ok(())
+    }
+
+    pub(crate) fn update_times_by_inode(&mut self, inode: u64, times: FileTimes) -> FSResult<()> {
+        self.node_by_inode_mut(inode)?.times = times;
         Ok(())
     }
 

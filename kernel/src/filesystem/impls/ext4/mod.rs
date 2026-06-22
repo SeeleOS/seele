@@ -5,6 +5,7 @@ use alloc::{
     string::ToString,
     sync::Arc,
 };
+use core::time::Duration;
 
 use ext4plus::{
     DirEntryName, Ext4, FollowSymlinks,
@@ -16,6 +17,7 @@ use ext4plus::{
 use crate::filesystem::{
     errors::FSError,
     impls::ext4::{directory::Ext4Directory, file::Ext4File},
+    info::FileTimes,
     path::{Path, PathPart},
     vfs::{FSResult, WrappedDirectory},
     vfs_traits::{FileLike, FileSystem},
@@ -147,6 +149,37 @@ pub(super) fn chown_inode(fs: &Ext4, inode: &mut Inode, uid: u32, gid: u32) -> F
     if gid != u32::MAX {
         inode.set_gid(gid);
     }
+    inode.write(fs).map_err(FSError::from)?;
+    Ok(())
+}
+
+pub(super) fn inode_times(inode: &Inode) -> FileTimes {
+    fn parts(time: Duration) -> (i64, i64) {
+        (
+            time.as_secs().min(i64::MAX as u64) as i64,
+            time.subsec_nanos() as i64,
+        )
+    }
+
+    let (atime_sec, atime_nsec) = parts(inode.atime());
+    let (mtime_sec, mtime_nsec) = parts(inode.mtime());
+    let (ctime_sec, ctime_nsec) = parts(inode.ctime());
+    FileTimes::from_parts(
+        atime_sec, atime_nsec, mtime_sec, mtime_nsec, ctime_sec, ctime_nsec,
+    )
+}
+
+pub(super) fn set_inode_times(fs: &Ext4, inode: &mut Inode, times: FileTimes) -> FSResult<()> {
+    fn duration(sec: i64, nsec: i64) -> FSResult<Duration> {
+        if sec < 0 || !(0..1_000_000_000).contains(&nsec) {
+            return Err(FSError::InvalidArguments);
+        }
+        Ok(Duration::new(sec as u64, nsec as u32))
+    }
+
+    inode.set_atime(duration(times.atime_sec, times.atime_nsec)?);
+    inode.set_mtime(duration(times.mtime_sec, times.mtime_nsec)?);
+    inode.set_ctime(duration(times.ctime_sec, times.ctime_nsec)?);
     inode.write(fs).map_err(FSError::from)?;
     Ok(())
 }

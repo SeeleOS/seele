@@ -7,7 +7,7 @@ use num_enum::TryFromPrimitive;
 
 use crate::filesystem::{
     errors::FSError,
-    info::{DirectoryContentInfo, FileLikeInfo, UnixPermission},
+    info::{DirectoryContentInfo, FileLikeInfo, FileTimes, UnixPermission},
     path::Path,
     vfs::{FSResult, WrappedDirectory, WrappedFile, WrappedSymlink},
 };
@@ -92,6 +92,9 @@ pub trait File: Send + Sync {
     fn chown(&self, _uid: u32, _gid: u32) -> FSResult<()> {
         Err(FSError::Readonly)
     }
+    fn set_times(&self, _times: FileTimes) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
     fn get_xattr(&self, _name: &str) -> FSResult<Option<Vec<u8>>> {
         Ok(None)
     }
@@ -139,6 +142,9 @@ pub trait Directory: Send + Sync {
     fn chown(&self, _uid: u32, _gid: u32) -> FSResult<()> {
         Err(FSError::Readonly)
     }
+    fn set_times(&self, _times: FileTimes) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
     fn get_xattr(&self, _name: &str) -> FSResult<Option<Vec<u8>>> {
         Ok(None)
     }
@@ -169,6 +175,9 @@ pub trait Symlink: Send + Sync {
         Err(FSError::Readonly)
     }
     fn chown(&self, _uid: u32, _gid: u32) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+    fn set_times(&self, _times: FileTimes) -> FSResult<()> {
         Err(FSError::Readonly)
     }
     fn get_xattr(&self, _name: &str) -> FSResult<Option<Vec<u8>>> {
@@ -229,6 +238,14 @@ impl FileLike {
             FileLike::File(file) => file.lock().info(),
             FileLike::Directory(dir) => dir.lock().info(),
             FileLike::Symlink(symlink) => symlink.lock().info(),
+        }
+    }
+
+    pub fn set_times(&self, times: FileTimes) -> FSResult<()> {
+        match self {
+            FileLike::File(file) => file.lock().set_times(times),
+            FileLike::Directory(dir) => dir.lock().set_times(times),
+            FileLike::Symlink(symlink) => symlink.lock().set_times(times),
         }
     }
 }

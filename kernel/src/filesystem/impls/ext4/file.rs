@@ -5,8 +5,11 @@ use ext4plus::{Ext4, file, inode::Inode};
 
 use crate::filesystem::{
     errors::FSError,
-    impls::ext4::{LookupCache, OperationLock, chmod_inode, chown_inode, lookup_cache_insert_raw},
-    info::{FileLikeInfo, UnixPermission},
+    impls::ext4::{
+        LookupCache, OperationLock, chmod_inode, chown_inode, inode_times, lookup_cache_insert_raw,
+        set_inode_times,
+    },
+    info::{FileLikeInfo, FileTimes, UnixPermission},
     vfs::FSResult,
     vfs_traits::{File, FileLikeType, Whence},
 };
@@ -42,8 +45,8 @@ impl Ext4File {
         }
     }
 
-    fn size(&self) -> Result<usize, FSError> {
-        let meta = self.inode.lock().metadata();
+    fn size_from_inode(inode: &Inode) -> Result<usize, FSError> {
+        let meta = inode.metadata();
         Ok(usize::try_from(meta.len()).unwrap())
     }
 
@@ -124,8 +127,8 @@ impl File for Ext4File {
     }
 
     fn info(&mut self) -> FSResult<FileLikeInfo> {
-        let size = self.size()?;
-        let inode = self.inode.lock();
+        let inode = self.refresh_inode()?;
+        let size = Self::size_from_inode(&inode)?;
         Ok(FileLikeInfo::new(
             self.name.clone(),
             size,
@@ -133,7 +136,8 @@ impl File for Ext4File {
             FileLikeType::File,
         )
         .with_owner(inode.uid(), inode.gid())
-        .with_inode(inode.index.get().into()))
+        .with_inode(inode.index.get().into())
+        .with_times(inode_times(&inode)))
     }
 
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {
@@ -219,6 +223,16 @@ impl File for Ext4File {
         chown_inode(&self.fs, &mut inode, uid, gid)?;
         lookup_cache_insert_raw(&self.lookup_cache, self.parent_inode, &self.name, &inode);
         self.replace_cached_inode(inode);
+        Ok(())
+    }
+
+    fn set_times(&self, times: FileTimes) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
+        let mut inode = self.refresh_inode()?;
+        set_inode_times(&self.fs, &mut inode, times)?;
+        lookup_cache_insert_raw(&self.lookup_cache, self.parent_inode, &self.name, &inode);
+        self.replace_cached_inode(inode);
+        crate::filesystem::impls::ext4::lookup_cache_clear(&self.lookup_cache);
         Ok(())
     }
 

@@ -3,8 +3,11 @@ use ext4plus::{Ext4, inode::Inode};
 
 use crate::filesystem::{
     errors::FSError,
-    impls::ext4::{LookupCache, OperationLock, chown_inode, lookup_cache_insert_raw},
-    info::{FileLikeInfo, UnixPermission},
+    impls::ext4::{
+        LookupCache, OperationLock, chown_inode, inode_times, lookup_cache_insert_raw,
+        set_inode_times,
+    },
+    info::{FileLikeInfo, FileTimes, UnixPermission},
     path::Path,
     vfs::FSResult,
     vfs_traits::{FileLikeType, Symlink},
@@ -29,11 +32,16 @@ impl Ext4Symlink {
             &self.inode.lock(),
         );
     }
+
+    fn refresh_inode(&self) -> FSResult<Inode> {
+        let inode_index = self.inode.lock().index;
+        Inode::read(&self.fs, inode_index).map_err(FSError::from)
+    }
 }
 
 impl Symlink for Ext4Symlink {
     fn info(&self) -> FSResult<FileLikeInfo> {
-        let inode = self.inode.lock();
+        let inode = self.refresh_inode()?;
         Ok(FileLikeInfo {
             name: self.name.clone(),
             file_like_type: FileLikeType::Symlink,
@@ -42,6 +50,7 @@ impl Symlink for Ext4Symlink {
             uid: inode.uid(),
             gid: inode.gid(),
             rdev: 0,
+            times: inode_times(&inode),
             permission: UnixPermission::symlink(),
         })
     }
@@ -76,6 +85,15 @@ impl Symlink for Ext4Symlink {
         chown_inode(&self.fs, &mut inode, uid, gid)?;
         drop(inode);
         self.update_lookup_cache();
+        Ok(())
+    }
+
+    fn set_times(&self, times: FileTimes) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
+        let mut inode = self.inode.lock();
+        set_inode_times(&self.fs, &mut inode, times)?;
+        drop(inode);
+        crate::filesystem::impls::ext4::lookup_cache_clear(&self.lookup_cache);
         Ok(())
     }
 

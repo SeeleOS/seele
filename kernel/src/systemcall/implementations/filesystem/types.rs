@@ -1,8 +1,8 @@
 use super::*;
 
 pub(super) const AT_FDCWD: i32 = -100;
-pub(super) const UTIME_NOW: i64 = 0x3fff_fffe;
-pub(super) const UTIME_OMIT: i64 = 0x3fff_ffff;
+pub(super) const UTIME_NOW: i64 = 0x3fff_ffff;
+pub(super) const UTIME_OMIT: i64 = 0x3fff_fffe;
 pub(super) const STATX_BASIC_STATS: u32 = 0x0000_07ff;
 pub(super) const STATX_MNT_ID: u32 = 0x0000_1000;
 pub(super) const STATX_ATTR_MOUNT_ROOT: u64 = 0x0000_2000;

@@ -18,8 +18,49 @@ pub struct FileLikeInfo {
     pub uid: u32,
     pub gid: u32,
     pub rdev: u64,
+    pub times: FileTimes,
     pub file_like_type: FileLikeType,
     pub permission: UnixPermission,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FileTimes {
+    pub atime_sec: i64,
+    pub atime_nsec: i64,
+    pub mtime_sec: i64,
+    pub mtime_nsec: i64,
+    pub ctime_sec: i64,
+    pub ctime_nsec: i64,
+}
+
+impl FileTimes {
+    pub fn now() -> Self {
+        Self::from_unix_ns(crate::misc::time::unix_timestamp_nanoseconds().max(1_000_000_000))
+    }
+
+    pub const fn from_unix_ns(ns: u64) -> Self {
+        let sec = (ns / 1_000_000_000) as i64;
+        let nsec = (ns % 1_000_000_000) as i64;
+        Self::from_parts(sec, nsec, sec, nsec, sec, nsec)
+    }
+
+    pub const fn from_parts(
+        atime_sec: i64,
+        atime_nsec: i64,
+        mtime_sec: i64,
+        mtime_nsec: i64,
+        ctime_sec: i64,
+        ctime_nsec: i64,
+    ) -> Self {
+        Self {
+            atime_sec,
+            atime_nsec,
+            mtime_sec,
+            mtime_nsec,
+            ctime_sec,
+            ctime_nsec,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -93,6 +134,12 @@ impl LinuxStat {
             st_size: info.size as i64,
             st_blksize: 4096,
             st_blocks: (info.size as i64 + 511) / 512,
+            st_atime: info.times.atime_sec,
+            st_atime_nsec: info.times.atime_nsec,
+            st_mtime: info.times.mtime_sec,
+            st_mtime_nsec: info.times.mtime_nsec,
+            st_ctime: info.times.ctime_sec,
+            st_ctime_nsec: info.times.ctime_nsec,
             ..Default::default()
         }
     }
@@ -142,6 +189,7 @@ impl FileLikeInfo {
             uid: 0,
             gid: 0,
             rdev: 0,
+            times: FileTimes::default(),
             file_like_type,
             permission,
         }
@@ -160,6 +208,11 @@ impl FileLikeInfo {
 
     pub fn with_rdev(mut self, rdev: u64) -> Self {
         self.rdev = rdev;
+        self
+    }
+
+    pub fn with_times(mut self, times: FileTimes) -> Self {
+        self.times = times;
         self
     }
 

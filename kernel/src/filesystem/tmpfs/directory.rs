@@ -4,7 +4,7 @@ use alloc::{string::String, vec::Vec};
 
 use crate::filesystem::{
     errors::FSError,
-    info::{DirectoryContentInfo, FileLikeInfo, UnixPermission},
+    info::{DirectoryContentInfo, FileLikeInfo, FileTimes, UnixPermission},
     vfs::FSResult,
     vfs_traits::{Directory, DirectoryContentType, FileLike, FileLikeType},
 };
@@ -45,7 +45,8 @@ impl Directory for TmpfsDirectoryHandle {
             FileLikeType::Directory,
         )
         .with_inode(node.inode)
-        .with_owner(node.uid, node.gid))
+        .with_owner(node.uid, node.gid)
+        .with_times(node.times))
     }
 
     fn name(&self) -> FSResult<String> {
@@ -126,6 +127,12 @@ impl Directory for TmpfsDirectoryHandle {
         let mut state = self.state.lock();
         let inode = state.node(&self.path)?.inode;
         state.update_owner_by_inode(inode, uid, gid)
+    }
+
+    fn set_times(&self, times: FileTimes) -> FSResult<()> {
+        let mut state = self.state.lock();
+        let inode = state.node(&self.path)?.inode;
+        state.update_times_by_inode(inode, times)
     }
 
     fn get_xattr(&self, name: &str) -> FSResult<Option<Vec<u8>>> {

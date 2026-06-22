@@ -7,7 +7,7 @@ use crate::object::misc::ObjectRef;
 use crate::{
     filesystem::{
         errors::FSError,
-        info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
+        info::{DirectoryContentInfo, FileLikeInfo, FileTimes, LinuxStat},
         page_cache::{self, FileCacheIdentity, FileCacheKey},
         path::Path,
         staticfs::{
@@ -354,6 +354,27 @@ impl OpenedFileObject {
                 }
                 let nested = open_path(target.clone())?;
                 nested.chown(uid, gid)
+            }
+        }
+    }
+
+    pub fn set_times(&self, times: FileTimes, follow_symlink: bool) -> FSResult<()> {
+        if self.device_object().is_some() {
+            let _ = times;
+            return Ok(());
+        }
+
+        match &self.backend {
+            OpenBackend::RegularFile(file) => file.lock().set_times(times),
+            OpenBackend::Device { .. } => Ok(()),
+            OpenBackend::Directory(dir) => dir.lock().set_times(times),
+            OpenBackend::SymlinkPath {
+                symlink, target, ..
+            } => {
+                if !follow_symlink {
+                    return symlink.lock().set_times(times);
+                }
+                open_path(target.clone())?.set_times(times, true)
             }
         }
     }

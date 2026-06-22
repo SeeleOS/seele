@@ -2976,7 +2976,7 @@ mod tests {
     fn filesystem_utimensat_success_syscalls_follow_linux_rules() {
         const AT_FDCWD: u64 = (-100i32) as u64;
         const AT_EMPTY_PATH: u64 = 0x1000;
-        const UTIME_OMIT: i64 = 0x3fff_ffff;
+        const UTIME_OMIT: i64 = 0x3fff_fffe;
 
         let base_path = Path::new("/tmp/syscall-utimensat-test");
         let cleanup_paths = [

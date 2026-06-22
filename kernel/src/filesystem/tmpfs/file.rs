@@ -4,7 +4,7 @@ use alloc::{string::String, vec::Vec};
 
 use crate::filesystem::{
     errors::FSError,
-    info::{FileLikeInfo, UnixPermission},
+    info::{FileLikeInfo, FileTimes, UnixPermission},
     path::Path,
     vfs::FSResult,
     vfs_traits::{File, FileLikeType, Whence},
@@ -52,7 +52,8 @@ impl File for TmpfsFileHandle {
                 FileLikeType::File,
             )
             .with_inode(node.inode)
-            .with_owner(node.uid, node.gid)),
+            .with_owner(node.uid, node.gid)
+            .with_times(node.times)),
             TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => Err(FSError::NotAFile),
         }
     }
@@ -177,6 +178,10 @@ impl File for TmpfsFileHandle {
         self.state
             .lock()
             .update_owner_by_inode(self.inode, uid, gid)
+    }
+
+    fn set_times(&self, times: FileTimes) -> FSResult<()> {
+        self.state.lock().update_times_by_inode(self.inode, times)
     }
 
     fn get_xattr(&self, name: &str) -> FSResult<Option<Vec<u8>>> {

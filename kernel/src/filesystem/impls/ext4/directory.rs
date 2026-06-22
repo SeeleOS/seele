@@ -22,9 +22,9 @@ use crate::filesystem::{
     impls::ext4::{
         LookupCache, OperationLock, chmod_inode, chown_inode, file::Ext4File, lookup_cache_clear,
         lookup_cache_get, lookup_cache_insert, lookup_cache_insert_raw, lookup_cache_remove,
-        symlink::Ext4Symlink,
+        set_inode_times, symlink::Ext4Symlink,
     },
-    info::{DirectoryContentInfo, FileLikeInfo, UnixPermission},
+    info::{DirectoryContentInfo, FileLikeInfo, FileTimes, UnixPermission},
     vfs::FSResult,
     vfs_traits::{Directory, DirectoryContentType, FileLike, FileLikeType},
 };
@@ -46,7 +46,8 @@ pub(crate) struct Ext4Lookup {
 
 impl Ext4Lookup {
     pub(crate) fn info(&self) -> FileLikeInfo {
-        file_like_info_from_inode(self.name.clone(), self.file_like_type.clone(), &self.inode)
+        let inode = Inode::read(&self.fs, self.inode.index).unwrap_or_else(|_| self.inode.clone());
+        file_like_info_from_inode(self.name.clone(), self.file_like_type.clone(), &inode)
     }
 }
 
@@ -80,6 +81,7 @@ fn file_like_info_from_inode(
     )
     .with_owner(inode.uid(), inode.gid())
     .with_inode(inode.index.get().into())
+    .with_times(crate::filesystem::impls::ext4::inode_times(inode))
 }
 
 pub(crate) fn lookup_child(
@@ -91,7 +93,8 @@ pub(crate) fn lookup_child(
 ) -> FSResult<Ext4Lookup> {
     let parent_id = parent_inode.index.get();
 
-    if let Some(inode) = lookup_cache_get(lookup_cache, parent_inode, name) {
+    if let Some(cached_inode) = lookup_cache_get(lookup_cache, parent_inode, name) {
+        let inode = Inode::read(fs, cached_inode.index).unwrap_or(cached_inode);
         return Ok(Ext4Lookup {
             name: name.to_string(),
             inode: inode.clone(),
@@ -237,15 +240,16 @@ impl Directory for Ext4Directory {
     }
 
     fn info(&self) -> FSResult<FileLikeInfo> {
-        let inode = self.current_inode();
+        let inode = self.refresh_inode()?;
         Ok(FileLikeInfo::new(
             self.name.clone(),
-            0,
+            inode.metadata().len() as usize,
             UnixPermission(inode.mode().bits().into()),
             FileLikeType::Directory,
         )
         .with_owner(inode.uid(), inode.gid())
-        .with_inode(inode.index.get().into()))
+        .with_inode(inode.index.get().into())
+        .with_times(crate::filesystem::impls::ext4::inode_times(&inode)))
     }
 
     fn name(&self) -> FSResult<String> {
@@ -315,7 +319,7 @@ impl Directory for Ext4Directory {
             uid: 0,
             gid: 0,
             flags: InodeFlags::empty(),
-            time: Duration::from_millis(0),
+            time: Duration::from_nanos(crate::misc::time::unix_timestamp_nanoseconds()),
             mode,
         })?;
 
@@ -435,6 +439,15 @@ impl Directory for Ext4Directory {
                 &self.current_inode(),
             );
         }
+        Ok(())
+    }
+
+    fn set_times(&self, times: FileTimes) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
+        let mut inode = self.current_inode();
+        set_inode_times(&self.fs, &mut inode, times)?;
+        self.update_cached_inode(inode);
+        lookup_cache_clear(&self.lookup_cache);
         Ok(())
     }
 
