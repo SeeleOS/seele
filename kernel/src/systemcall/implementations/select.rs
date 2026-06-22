@@ -413,6 +413,12 @@ fn rewrite_fdset(fdset: *mut u64, ready: &[bool], nfds: usize) -> Result<(), Sys
     Ok(())
 }
 
+fn count_ready_sets(read_ready: &[bool], write_ready: &[bool], except_ready: &[bool]) -> usize {
+    read_ready.iter().filter(|ready| **ready).count()
+        + write_ready.iter().filter(|ready| **ready).count()
+        + except_ready.iter().filter(|ready| **ready).count()
+}
+
 fn collect_ready(
     poller: &Arc<PollerObject>,
     nfds: usize,
@@ -479,7 +485,7 @@ fn select_impl(
         let mut read_ready = vec![false; nfds];
         let mut write_ready = vec![false; nfds];
         let mut except_ready = vec![false; nfds];
-        let mut ready_count = 0usize;
+        let mut unique_ready_count = 0usize;
 
         register_interest(
             &poller,
@@ -488,7 +494,7 @@ fn select_impl(
             PollableEvent::CanBeRead,
             &mut read_ready,
             &mut ready_fds,
-            &mut ready_count,
+            &mut unique_ready_count,
         )?;
         register_interest(
             &poller,
@@ -497,7 +503,7 @@ fn select_impl(
             PollableEvent::Closed,
             &mut read_ready,
             &mut ready_fds,
-            &mut ready_count,
+            &mut unique_ready_count,
         )?;
         register_interest(
             &poller,
@@ -506,7 +512,7 @@ fn select_impl(
             PollableEvent::ReadClosed,
             &mut read_ready,
             &mut ready_fds,
-            &mut ready_count,
+            &mut unique_ready_count,
         )?;
         register_interest(
             &poller,
@@ -515,7 +521,7 @@ fn select_impl(
             PollableEvent::CanBeWritten,
             &mut write_ready,
             &mut ready_fds,
-            &mut ready_count,
+            &mut unique_ready_count,
         )?;
         register_interest(
             &poller,
@@ -524,7 +530,7 @@ fn select_impl(
             PollableEvent::Closed,
             &mut write_ready,
             &mut ready_fds,
-            &mut ready_count,
+            &mut unique_ready_count,
         )?;
         register_interest(
             &poller,
@@ -533,9 +539,10 @@ fn select_impl(
             PollableEvent::Error,
             &mut except_ready,
             &mut ready_fds,
-            &mut ready_count,
+            &mut unique_ready_count,
         )?;
 
+        let mut ready_count = count_ready_sets(&read_ready, &write_ready, &except_ready);
         if ready_count == 0 && !timeout_is_zero {
             let deadline = timeout.map(timeout_to_deadline_value).transpose()?;
             block_on_poller(poller.clone(), deadline)?;
@@ -548,8 +555,9 @@ fn select_impl(
             &mut write_ready,
             &mut except_ready,
             &mut ready_fds,
-            &mut ready_count,
+            &mut unique_ready_count,
         );
+        ready_count = count_ready_sets(&read_ready, &write_ready, &except_ready);
 
         rewrite_fdset(readfds, &read_ready, nfds)?;
         rewrite_fdset(writefds, &write_ready, nfds)?;
