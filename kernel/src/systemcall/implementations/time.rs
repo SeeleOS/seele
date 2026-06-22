@@ -153,7 +153,7 @@ fn ns_to_linux_timeval(ns: u64) -> LinuxTimeval {
 
 fn itimer_clock(which: i32) -> Result<ClockId, SyscallError> {
     match which {
-        0 => Ok(ClockId::Realtime),
+        0 => Ok(ClockId::SinceBoot),
         1 | 2 => Ok(ClockId::SinceBoot),
         _ => Err(SyscallError::InvalidArguments),
     }
