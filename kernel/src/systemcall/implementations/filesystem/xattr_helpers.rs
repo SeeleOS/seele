@@ -2,10 +2,22 @@ use super::*;
 
 use alloc::sync::Arc;
 
+const XATTR_NAME_MAX: usize = 255;
+const XATTR_SIZE_MAX: usize = 64 * 1024;
+
 pub(super) fn xattr_name_from_raw(name: CString) -> Result<String, SyscallError> {
-    let name = path_from_raw(name)?;
-    if name.is_empty() || name.as_bytes().contains(&0) {
+    if name.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+    let name = String::k_from(name).map_err(|_| SyscallError::BadAddress)?;
+    if name.is_empty() {
+        return Err(SyscallError::RangeError);
+    }
+    if name.as_bytes().contains(&0) {
         return Err(SyscallError::InvalidArguments);
+    }
+    if name.len() > XATTR_NAME_MAX {
+        return Err(SyscallError::RangeError);
     }
     Ok(name)
 }
@@ -48,6 +60,9 @@ pub(super) fn xattr_value_from_user(
     value: *const u8,
     size: usize,
 ) -> Result<Vec<u8>, SyscallError> {
+    if size > XATTR_SIZE_MAX {
+        return Err(SyscallError::ArgumentListTooLong);
+    }
     user_safe::read_buffer(value, size)
 }
 

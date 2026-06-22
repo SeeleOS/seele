@@ -169,8 +169,6 @@ add_syscall_arg_flags_type!(
     i32,
     FallocateFlags,
     i32,
-    XattrFlags,
-    u32,
     UmountFlags,
     i32,
     FsOpenFlags,
@@ -211,5 +209,7 @@ add_syscall_arg_flags_retain_type!(
     OpenFlags,
     i32,
     TimerSetTimeFlags,
-    i32
+    i32,
+    XattrFlags,
+    u32
 );
