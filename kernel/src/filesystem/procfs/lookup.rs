@@ -29,6 +29,7 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             PROC_FILESYSTEMS_INODE,
             proc_filesystems_bytes,
         )),
+        ["loadavg"] => Ok(proc_file("loadavg", PROC_LOADAVG_INODE, proc_loadavg_bytes)),
         ["meminfo"] => Ok(proc_file("meminfo", PROC_MEMINFO_INODE, proc_meminfo_bytes)),
         ["mounts"] => Ok(proc_file("mounts", PROC_MOUNTS_INODE, proc_mounts_bytes)),
         ["net"] => Ok(proc_dir("/net", "net", PROC_NET_INODE, proc_net_entries())),

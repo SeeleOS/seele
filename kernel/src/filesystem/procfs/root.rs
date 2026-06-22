@@ -52,6 +52,7 @@ pub(super) const PROC_SYSVIPC_INODE: u64 = 0x3024;
 pub(super) const PROC_SYSVIPC_MSG_INODE: u64 = 0x3025;
 pub(super) const PROC_SYSVIPC_SEM_INODE: u64 = 0x3026;
 pub(super) const PROC_SYSVIPC_SHM_INODE: u64 = 0x3027;
+pub(super) const PROC_LOADAVG_INODE: u64 = 0x3028;
 
 static PROC_UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -64,6 +65,7 @@ pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("cmdline".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("devices".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("filesystems".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("loadavg".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("meminfo".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("mounts".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("net".into(), DirectoryContentType::Directory),
@@ -155,6 +157,10 @@ pub(super) fn proc_stat_bytes() -> Vec<u8> {
     }
 
     out.into_bytes()
+}
+
+pub(super) fn proc_loadavg_bytes() -> Vec<u8> {
+    b"0.00 0.00 0.00 1/1 1\n".to_vec()
 }
 
 pub(super) fn proc_uptime_bytes() -> Vec<u8> {

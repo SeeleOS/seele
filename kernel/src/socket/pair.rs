@@ -4,18 +4,32 @@ use alloc::sync::Arc;
 use crate::object::FileFlags;
 
 use super::{
-    AF_UNIX, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_SEQPACKET, SOCK_STREAM, SocketError,
-    SocketResult, UnixDatagramInner, UnixSocketKind, UnixSocketObject, UnixSocketState,
-    UnixStreamInner, current_socket_peer_cred,
+    AF_INET, AF_UNIX, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_RAW, SOCK_SEQPACKET,
+    SOCK_STREAM, SocketError, SocketResult, UnixDatagramInner, UnixSocketKind, UnixSocketObject,
+    UnixSocketState, UnixStreamInner, current_socket_peer_cred,
 };
 
 impl UnixSocketObject {
     pub fn pair(domain: u64, kind: u64, protocol: u64) -> SocketResult<(Arc<Self>, Arc<Self>)> {
+        let socket_type = kind & !(SOCK_NONBLOCK | SOCK_CLOEXEC);
+        if !matches!(
+            socket_type,
+            SOCK_STREAM | SOCK_DGRAM | SOCK_SEQPACKET | SOCK_RAW
+        ) {
+            return Err(SocketError::InvalidArguments);
+        }
+
+        if domain == AF_INET {
+            return match (socket_type, protocol) {
+                (SOCK_DGRAM, 17) | (SOCK_STREAM, 6) => Err(SocketError::OperationNotSupported),
+                _ => Err(SocketError::ProtocolNotSupported),
+            };
+        }
+
         if domain != AF_UNIX {
             return Err(SocketError::AddressFamilyNotSupported);
         }
 
-        let socket_type = kind & !(SOCK_NONBLOCK | SOCK_CLOEXEC);
         if protocol != 0 {
             return Err(SocketError::ProtocolNotSupported);
         }
@@ -89,7 +103,7 @@ impl UnixSocketObject {
                 *right_inner.peer_cred.lock() = left.creator_cred;
                 (left, right)
             }
-            _ => return Err(SocketError::ProtocolNotSupported),
+            _ => return Err(SocketError::InvalidArguments),
         };
 
         if (kind & SOCK_NONBLOCK) != 0 {

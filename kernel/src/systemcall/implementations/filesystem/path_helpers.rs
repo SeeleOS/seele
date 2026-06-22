@@ -1,11 +1,26 @@
 use super::*;
 
 pub(super) fn path_from_raw(path: CString) -> Result<String, SyscallError> {
+    const PATH_MAX: usize = 4096;
+
     if path.is_null() {
         return Err(SyscallError::BadAddress);
     }
 
-    String::k_from(path).map_err(|_| SyscallError::InvalidArguments)
+    let mut out = String::new();
+    for index in 0..=PATH_MAX {
+        let byte =
+            user_safe::read(unsafe { path.add(index) }).map_err(|_| SyscallError::BadAddress)?;
+        if byte == 0 {
+            return Ok(out);
+        }
+        if index == PATH_MAX {
+            return Err(SyscallError::PathTooLong);
+        }
+        out.push(byte as char);
+    }
+
+    unreachable!()
 }
 
 pub(super) fn string_from_raw_optional(value: CString) -> Result<Option<String>, SyscallError> {

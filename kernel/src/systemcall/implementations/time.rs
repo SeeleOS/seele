@@ -559,10 +559,11 @@ define_syscall!(Time, |time_ptr: *mut i64| {
 
 define_syscall!(Sysinfo, |info_ptr: *mut LinuxSysinfo| {
     let uptime = (KernelTime::since_boot().as_nanoseconds() / 1_000_000_000) as i64;
+    let totalram = crate::memory::usable_memory_bytes();
     let info = LinuxSysinfo {
         uptime,
-        totalram: 4 * 1024 * 1024 * 1024,
-        freeram: 2 * 1024 * 1024 * 1024,
+        totalram,
+        freeram: totalram,
         procs: 1,
         mem_unit: 1,
         ..Default::default()
