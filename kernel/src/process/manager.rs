@@ -243,6 +243,11 @@ impl Process {
         if self.exit_status.is_none() {
             self.exit_status = Some(exit_status);
             remove_pid_cgroup_path(self.pid);
+            if let Some(snapshot) = &self.mount_namespace_snapshot {
+                crate::filesystem::vfs::VirtualFS
+                    .lock()
+                    .detach_mounts_created_after_snapshot(snapshot);
+            }
         }
 
         self.close_all_fds();

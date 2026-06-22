@@ -99,9 +99,8 @@ define_syscall!(Unshare, |flags: u64| {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let supported_namespace_flags = UnshareFlags::NEWNET.bits();
-    let unsupported_namespace_flags = (UnshareFlags::NEWNS
-        | UnshareFlags::NEWCGROUP
+    let supported_namespace_flags = (UnshareFlags::NEWNET | UnshareFlags::NEWNS).bits();
+    let unsupported_namespace_flags = (UnshareFlags::NEWCGROUP
         | UnshareFlags::NEWUTS
         | UnshareFlags::NEWIPC
         | UnshareFlags::NEWUSER
@@ -111,7 +110,26 @@ define_syscall!(Unshare, |flags: u64| {
         return Err(SyscallError::OperationNotSupported);
     }
     if flags & supported_namespace_flags != 0 {
-        get_current_process().lock().net_namespace = NetNamespace::new();
+        let process = get_current_process();
+        let mut process = process.lock();
+        if flags & UnshareFlags::NEWNET.bits() != 0 {
+            process.net_namespace = NetNamespace::new();
+        }
+        if flags & UnshareFlags::NEWNS.bits() != 0 {
+            process.mount_namespace_snapshot = Some(
+                crate::filesystem::vfs::VirtualFS
+                    .lock()
+                    .mount_snapshots()
+                    .into_iter()
+                    .map(|(_, _, _, _, _, mount_id)| mount_id)
+                    .collect(),
+            );
+        }
+    }
+    if flags & UnshareFlags::FS.bits() != 0 {
+        let process = get_current_process();
+        let mut process = process.lock();
+        process.fs_context = crate::process::clone_fs_context(&process.fs_context);
     }
 
     Ok(0)

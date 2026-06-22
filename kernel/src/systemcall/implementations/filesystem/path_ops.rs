@@ -130,6 +130,19 @@ define_syscall!(Chroot, |path: CString| {
 });
 
 define_syscall!(PivotRoot, |new_root: CString, put_old: CString| {
+    const CAP_SYS_ADMIN: usize = 21;
+
+    let has_sys_admin = {
+        let process = get_current_process();
+        let process = process.lock();
+        let slot = CAP_SYS_ADMIN / 32;
+        let mask = 1u32 << (CAP_SYS_ADMIN % 32);
+        process.capability_effective[slot] & mask != 0
+    };
+    if !has_sys_admin {
+        return Err(SyscallError::PermissionDenied);
+    }
+
     let new_root = path_from_raw(new_root)?;
     let put_old = path_from_raw(put_old)?;
     let new_root = resolve_path_at(AT_FDCWD, &new_root)?.normalize();
@@ -159,12 +172,12 @@ define_syscall!(PivotRoot, |new_root: CString, put_old: CString| {
         .as_normal();
     let old_root_mount = vfs.mount_path(old_root)?;
     let new_root_mount = vfs.mount_path(new_root.clone())?;
-    let put_old_mount = vfs.mount_path(put_old)?;
-    drop(vfs);
+    let put_old_mount = vfs.mount_path(put_old.clone())?;
 
     if new_root_mount != new_root || new_root_mount == old_root_mount || put_old_mount != new_root {
         return Err(SyscallError::DeviceOrResourceBusy);
     }
+    drop(vfs);
 
     let new_root = AbsolutePath::from_root_path(&new_root);
     let process = get_current_process();

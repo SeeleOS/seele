@@ -251,6 +251,11 @@ impl VFS {
         self.remove_mounts_at(&normalized_path, true)
     }
 
+    pub fn detach_mounts_created_after_snapshot(&mut self, snapshot_mount_ids: &[u64]) {
+        self.mounts
+            .retain(|mount| snapshot_mount_ids.contains(&mount.mount_id));
+    }
+
     pub fn mount_metadata(&self, path: Path) -> FSResult<(Path, FileSystemRef, Path, MountFlags)> {
         let (mount, _) = self.find_mount(&self.normalize_path(path))?;
         Ok((
