@@ -523,6 +523,24 @@ pub fn send_signal_to_thread_with_siginfo(thread: &ThreadRef, signal: Signal, si
 
 pub fn process_current_process_signals(process: &ProcessRef) -> bool {
     let thread_ref = get_current_thread();
+    {
+        let thread = thread_ref.lock();
+        if thread.temporary_blocked_signals.is_some() {
+            if thread.interruptible_wait_active {
+                drop(thread);
+                thread_ref.lock().interrupted_by_signal = true;
+            }
+            return false;
+        }
+        if thread.interruptible_wait_active
+            && process_has_pending_user_handler_signal(process, thread.blocked_signals)
+        {
+            drop(thread);
+            thread_ref.lock().interrupted_by_signal = true;
+            return false;
+        }
+    }
+
     let (blocked_signals, mut pending_signals, mut pending_signal_info) = {
         let mut thread = thread_ref.lock();
         (
@@ -577,6 +595,25 @@ pub fn process_current_process_signals(process: &ProcessRef) -> bool {
     }
 
     result.should_switch
+}
+
+fn process_has_pending_user_handler_signal(process: &ProcessRef, blocked_signals: Signals) -> bool {
+    let process = process.lock();
+    Signal::iter().any(|signal| {
+        let signal_bits = Signals::from(signal);
+        if !process.pending_signals.contains(signal_bits) {
+            return false;
+        }
+        if !signal.is_unblockable() && blocked_signals.contains(signal_bits) {
+            return false;
+        }
+
+        let action = &process.signal_actions[signal.index()];
+        matches!(
+            action.handling_type,
+            SignalHandlingType::Function1(_) | SignalHandlingType::Function2(_)
+        )
+    })
 }
 
 impl Process {
@@ -681,7 +718,7 @@ fn process_pending_signals(
                 }
                 SignalHandlingType::Ignore => {}
                 SignalHandlingType::Function1(func) => with_current_thread(|current_thread| {
-                    current_thread.restore_temporary_blocked_signals();
+                    let saved_mask = current_thread.restore_temporary_blocked_signals();
                     let (_, mut stack_builder) = process.addrspace.allocate_user_stack(16);
                     // x86_64 SysV requires %rsp % 16 == 8 on function entry.
                     // We only push a single synthetic return address, so reserve one
@@ -704,8 +741,11 @@ fn process_pending_signals(
 
                     thread_snapshot.inner.rdi = signal as u64;
 
-                    current_thread
-                        .block_signals_for_handler(action.sig_handler_ignored_sigs, signal);
+                    current_thread.block_signals_for_handler(
+                        action.sig_handler_ignored_sigs,
+                        signal,
+                        saved_mask,
+                    );
                     current_thread.enter_signal_handler(thread_snapshot);
 
                     result.should_switch = true;
@@ -714,7 +754,7 @@ fn process_pending_signals(
                     let (_, mut stack_builder) = process.addrspace.allocate_user_stack(16);
                     let (_, mut frame_builder) = process.addrspace.allocate_user(1);
 
-                    current_thread.restore_temporary_blocked_signals();
+                    let saved_mask = current_thread.restore_temporary_blocked_signals();
                     let ucontext = build_signal_ucontext(current_thread);
 
                     let ucontext_ptr = frame_builder.push_struct(&ucontext);
@@ -741,8 +781,11 @@ fn process_pending_signals(
                     thread_snapshot.inner.rsi = siginfo_ptr;
                     thread_snapshot.inner.rdx = ucontext_ptr;
 
-                    current_thread
-                        .block_signals_for_handler(action.sig_handler_ignored_sigs, signal);
+                    current_thread.block_signals_for_handler(
+                        action.sig_handler_ignored_sigs,
+                        signal,
+                        saved_mask,
+                    );
                     current_thread.enter_signal_handler(thread_snapshot);
 
                     result.should_switch = true;
@@ -755,15 +798,24 @@ fn process_pending_signals(
 }
 
 impl Thread {
-    fn restore_temporary_blocked_signals(&mut self) {
-        if let Some((old_mask, _)) = self.temporary_blocked_signals {
+    fn restore_temporary_blocked_signals(&mut self) -> Signals {
+        if let Some((old_mask, _)) = self.temporary_blocked_signals.take() {
             self.blocked_signals = old_mask;
+            old_mask
+        } else {
+            self.blocked_signals
         }
     }
 
-    fn block_signals_for_handler(&mut self, mut signals_to_block: Signals, signal: Signal) {
+    fn block_signals_for_handler(
+        &mut self,
+        mut signals_to_block: Signals,
+        signal: Signal,
+        saved_mask: Signals,
+    ) {
         signals_to_block.insert(Signals::from(signal));
-        self.saved_blocked_signals.push(self.blocked_signals);
+        self.saved_blocked_signals
+            .push(saved_mask - Signals::from(signal));
         self.blocked_signals.insert(signals_to_block);
     }
 

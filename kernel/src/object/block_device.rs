@@ -194,7 +194,11 @@ impl BlockDeviceObject {
         }
 
         let block_size = self.device.block_size().max(1);
-        let zeroes = alloc::vec![0u8; block_size];
+        let chunk_size = block_size
+            .saturating_mul(256)
+            .min(1024 * 1024)
+            .max(block_size);
+        let zeroes = alloc::vec![0u8; chunk_size];
         let mut cursor = offset;
         while cursor < end {
             let chunk = (end - cursor).min(zeroes.len());

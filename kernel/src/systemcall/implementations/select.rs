@@ -15,7 +15,11 @@ use crate::{
     misc::signal::SignalHandlingType,
     misc::time::Time,
     signal::{Signal, Signals},
-    thread::{get_current_thread, yielding::BlockType, yielding::WakeType},
+    thread::{
+        get_current_thread,
+        misc::SnapshotState,
+        yielding::{BlockType, WakeType},
+    },
 };
 
 #[repr(C)]
@@ -53,7 +57,7 @@ pub(in crate::systemcall) fn has_pending_signal_handlers_ignoring_restart() -> b
     let (blocked_signals, pending_signals, parent) = {
         let current = current.lock();
         (
-            current.blocked_signals,
+            effective_user_signal_mask(&current),
             current.pending_signals,
             current.parent.clone(),
         )
@@ -78,6 +82,17 @@ pub(in crate::systemcall) fn has_pending_signal_handlers_ignoring_restart() -> b
     })
 }
 
+fn effective_user_signal_mask(thread: &crate::thread::thread::Thread) -> Signals {
+    if thread.temporary_blocked_signals.is_some() {
+        return thread.blocked_signals;
+    }
+    thread
+        .saved_blocked_signals
+        .last()
+        .copied()
+        .unwrap_or(thread.blocked_signals)
+}
+
 pub(in crate::systemcall) fn take_signal_interrupt() -> bool {
     let current = get_current_thread();
     let mut current = current.lock();
@@ -93,7 +108,6 @@ impl InterruptibleWaitGuard {
         let current = get_current_thread();
         let mut current = current.lock();
         current.interruptible_wait_active = true;
-        current.interrupted_by_signal = false;
         Self
     }
 }
@@ -111,7 +125,15 @@ pub(in crate::systemcall) fn with_temporary_signal_mask<T>(
     let old_mask = new_mask.map(|new_mask| {
         let current = get_current_thread();
         let mut current = current.lock();
-        let old_mask = current.blocked_signals;
+        let old_mask = if matches!(current.snapshot_state, SnapshotState::SignalHandler) {
+            current
+                .saved_blocked_signals
+                .last()
+                .copied()
+                .unwrap_or(current.blocked_signals)
+        } else {
+            current.blocked_signals
+        };
         current.blocked_signals = new_mask;
         current.temporary_blocked_signals = Some((old_mask, new_mask));
         old_mask
@@ -122,16 +144,13 @@ pub(in crate::systemcall) fn with_temporary_signal_mask<T>(
     if let Some(old_mask) = old_mask {
         let current = get_current_thread();
         let mut current = current.lock();
-        if current
-            .temporary_blocked_signals
-            .take()
-            .is_some_and(|(saved_old_mask, active_mask)| {
-                saved_old_mask.bits() == old_mask.bits()
-                    && current.blocked_signals.bits() == active_mask.bits()
-            })
+        current.temporary_blocked_signals = None;
+        if matches!(current.snapshot_state, SnapshotState::SignalHandler)
+            && let Some(saved_mask) = current.saved_blocked_signals.last_mut()
         {
-            current.blocked_signals = old_mask;
+            *saved_mask = old_mask;
         }
+        current.blocked_signals = old_mask;
     }
 
     result

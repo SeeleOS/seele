@@ -794,9 +794,7 @@ fn checked_user_range_for_memory_syscall(addr: u64, len: u64) -> Result<(u64, u6
     if len == 0 {
         return Ok((addr, addr));
     }
-    let end = addr
-        .checked_add(len)
-        .ok_or(SyscallError::InvalidArguments)?;
+    let end = addr.checked_add(len).ok_or(SyscallError::NoMemory)?;
     let _ = AddrSpace::checked_user_range(addr, len).ok_or(SyscallError::NoMemory)?;
     Ok((addr, end))
 }
@@ -815,16 +813,34 @@ fn mapped_area_covers_range(areas: &[MemoryArea], start: u64, end: u64) -> bool 
     true
 }
 
-fn ensure_mapped_user_range(addr: VirtAddr, len: u64) -> Result<(), SyscallError> {
+fn checked_page_range_for_memory_syscall(
+    addr: VirtAddr,
+    len: u64,
+) -> Result<(u64, u64), SyscallError> {
     let (start, end) = checked_user_range_for_memory_syscall(addr.as_u64(), len)?;
     if start == end {
-        return Ok(());
+        return Ok((start, end));
+    }
+
+    let page_start = align_down(start, Size4KiB::SIZE);
+    let page_end = align_up(end, Size4KiB::SIZE);
+    if page_end > crate::memory::addrspace::USER_MEM_END {
+        return Err(SyscallError::NoMemory);
+    }
+
+    Ok((page_start, page_end))
+}
+
+fn ensure_mapped_user_page_range(addr: VirtAddr, len: u64) -> Result<(u64, u64), SyscallError> {
+    let (start, end) = checked_page_range_for_memory_syscall(addr, len)?;
+    if start == end {
+        return Ok((start, end));
     }
 
     let process = get_current_process();
     let process = process.lock();
     if mapped_area_covers_range(&process.addrspace.memory_areas, start, end) {
-        Ok(())
+        Ok((start, end))
     } else {
         Err(SyscallError::NoMemory)
     }
@@ -1205,19 +1221,11 @@ define_syscall!(Mlock, |addr: VirtAddr, len: u64| {
         return Ok(0);
     }
 
-    ensure_mapped_user_range(addr, len)?;
-    let start = align_down(addr.as_u64(), Size4KiB::SIZE);
-    let end = align_up(
-        addr.as_u64()
-            .checked_add(len)
-            .ok_or(SyscallError::InvalidArguments)?,
-        Size4KiB::SIZE,
-    );
+    let (start, end) = ensure_mapped_user_page_range(addr, len)?;
     let rounded_len = end
         .checked_sub(start)
         .ok_or(SyscallError::InvalidArguments)?;
     let start = VirtAddr::new(start);
-    let last_page = VirtAddr::new(end - 1);
 
     let process = get_current_process();
     if rounded_len > process.lock().rlimit_memlock_cur
@@ -1229,11 +1237,8 @@ define_syscall!(Mlock, |addr: VirtAddr, len: u64| {
     let mut process = process.lock();
     let addrspace = &mut process.addrspace;
     let mut page_addr = start;
-    loop {
+    while page_addr.as_u64() < end {
         let _ = addrspace.read(page_addr.as_u64() as *const u8)?;
-        if page_addr >= last_page {
-            break;
-        }
         page_addr += Size4KiB::SIZE;
     }
 
@@ -1245,7 +1250,7 @@ define_syscall!(Munlock, |addr: VirtAddr, len: u64| {
         return Ok(0);
     }
 
-    ensure_mapped_user_range(addr, len)?;
+    ensure_mapped_user_page_range(addr, len)?;
     Ok(0)
 });
 
@@ -1260,7 +1265,10 @@ define_syscall!(Mincore, |addr: VirtAddr, len: usize, vec: *mut u8| {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let page_count = len.div_ceil(Size4KiB::SIZE as usize);
+    let (_, end) = checked_user_range_for_memory_syscall(addr.as_u64(), len as u64)?;
+    let page_count_u64 = (end - addr.as_u64()).div_ceil(Size4KiB::SIZE);
+    let page_count = usize::try_from(page_count_u64).map_err(|_| SyscallError::NoMemory)?;
+
     user_safe::read_buffer(vec, page_count)?;
     let mut residency = Vec::with_capacity(page_count);
 
@@ -1594,6 +1602,15 @@ mod tests {
             SyscallArgs::new([remapped_addr + 1, 4095, 0, 0, 0, 0]).call::<Munlock>(),
             0,
         );
+        assert_eq!(
+            SyscallArgs::new([remapped_addr + 1, 8191, 0, 0, 0, 0]).call::<Mlock>(),
+            Ok(0),
+            "mlock should round unaligned ranges out to covering pages"
+        );
+        expect_ok(
+            SyscallArgs::new([remapped_addr + 1, 8191, 0, 0, 0, 0]).call::<Munlock>(),
+            0,
+        );
         expect_errno(
             SyscallArgs::new([anon_addr, 4096, 0, 0, 0, 0]).call::<Mlock>(),
             SyscallError::NoMemory,
@@ -1661,6 +1678,18 @@ mod tests {
         );
         expect_errno(
             SyscallArgs::new([0x2000_0000, 4096, mincore_vec, 0, 0, 0]).call::<Mincore>(),
+            SyscallError::NoMemory,
+        );
+        expect_errno(
+            SyscallArgs::new([
+                crate::memory::addrspace::USER_MEM_END - 4096,
+                u64::MAX,
+                mincore_vec,
+                0,
+                0,
+                0,
+            ])
+            .call::<Mincore>(),
             SyscallError::NoMemory,
         );
 

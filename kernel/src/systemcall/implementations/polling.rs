@@ -312,18 +312,24 @@ fn epoll_wait_impl(
 
         let signal_interrupt = take_signal_interrupt();
         let pending_interrupt = has_pending_signal_handlers_ignoring_restart();
-        if poller.has_woken_events() || signal_interrupt || pending_interrupt {
+        if signal_interrupt || pending_interrupt || poller.has_woken_events() {
             cancel_block(&current);
             if signal_interrupt || pending_interrupt {
                 return Err(SyscallError::Interrupted);
             }
             poller.push_already_ready_events();
+            if take_signal_interrupt() || has_pending_signal_handlers_ignoring_restart() {
+                return Err(SyscallError::Interrupted);
+            }
             if poller.has_woken_events() {
                 break;
             }
             continue;
         } else {
             finish_block_current();
+            if take_signal_interrupt() || has_pending_signal_handlers_ignoring_restart() {
+                return Err(SyscallError::Interrupted);
+            }
             if deadline.is_some_and(|deadline| deadline <= Time::since_boot()) {
                 return Ok(0);
             }
@@ -419,7 +425,10 @@ define_syscall!(
 mod tests {
     use crate::{
         filesystem::{path::Path, vfs::VirtualFS},
-        signal::{Signal, SignalAction, SignalHandlingType, Signals, send_signal_to_thread},
+        signal::{
+            Signal, SignalAction, SignalHandlingType, Signals, send_signal_to_process,
+            send_signal_to_thread,
+        },
         systemcall::{
             implementations::{
                 EpollCreate1, EpollCtl, EpollPwait, EpollPwait2, EpollWait, Eventfd, Pipe, Read,
@@ -1071,6 +1080,46 @@ mod tests {
         expect_ok(
             SyscallArgs::new([epoll_fd as u64, page + 64, 1, 0, page + 128, 8])
                 .call::<EpollPwait>(),
+            1,
+        );
+        let ready = read_user_value::<TestLinuxEpollEvent>(page + 64);
+        let ready_events = ready.events;
+        let ready_data = ready.data;
+        assert_eq!(ready_events, EPOLLIN);
+        assert_eq!(ready_data, 0x5eed);
+
+        let mut value = 0u64;
+        expect_ok(
+            SyscallArgs::new([eventfd as u64, (&mut value as *mut u64) as u64, 8, 0, 0, 0])
+                .call::<Read>(),
+            8,
+        );
+        send_signal_to_process(&process, Signal::SIGUSR1);
+        write_user_value(page + 160, &1u64);
+        expect_ok(
+            SyscallArgs::new([eventfd as u64, page + 160, 8, 0, 0, 0]).call::<Write>(),
+            8,
+        );
+        expect_errno(
+            SyscallArgs::new([epoll_fd as u64, page + 64, 1, 0, 0, 0]).call::<EpollPwait2>(),
+            SyscallError::Interrupted,
+        );
+
+        write_user_value(page + 160, &1u64);
+        expect_ok(
+            SyscallArgs::new([eventfd as u64, page + 160, 8, 0, 0, 0]).call::<Write>(),
+            8,
+        );
+        send_signal_to_thread(&current, Signal::SIGUSR1);
+        expect_errno(
+            SyscallArgs::new([epoll_fd as u64, page + 64, 1, 0, 0, 0]).call::<EpollPwait2>(),
+            SyscallError::Interrupted,
+        );
+        send_signal_to_thread(&current, Signal::SIGUSR1);
+
+        expect_ok(
+            SyscallArgs::new([epoll_fd as u64, page + 64, 1, 0, page + 128, 8])
+                .call::<EpollPwait2>(),
             1,
         );
         let ready = read_user_value::<TestLinuxEpollEvent>(page + 64);
