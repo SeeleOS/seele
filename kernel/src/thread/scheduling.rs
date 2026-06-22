@@ -184,6 +184,10 @@ fn scheduler_deferred_work_snapshot() -> SchedulerDeferredWork {
     }
 }
 
+pub fn has_due_scheduler_deadline(now: Time) -> bool {
+    scheduler_deferred_work_snapshot().has_due_deadline(now)
+}
+
 fn process_deferred_timer_work(snapshot: SchedulerDeferredWork) {
     let now = Time::since_boot();
     let timerfd_objects = snapshot

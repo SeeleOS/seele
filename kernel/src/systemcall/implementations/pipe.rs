@@ -158,6 +158,27 @@ mod tests {
             user_safe::read_buffer(fd_page as *const u8, 3).unwrap(),
             b"abc"
         );
+        expect_ok(SyscallArgs::new([fd_page, 0, 0, 0, 0, 0]).call::<Pipe>(), 0);
+        let sigpipe_fds = read_user_value::<[i32; 2]>(fd_page);
+        let sigpipe_read_fd = sigpipe_fds[0] as usize;
+        let sigpipe_write_fd = sigpipe_fds[1] as usize;
+        let duplicated_read =
+            expect_fd(SyscallArgs::new([sigpipe_read_fd as u64, 0, 0, 0, 0, 0]).call::<Dup>());
+        expect_ok(
+            SyscallArgs::new([sigpipe_write_fd as u64, fd_page, 3, 0, 0, 0]).call::<Write>(),
+            3,
+        );
+        close_test_fd(sigpipe_read_fd);
+        expect_ok(
+            SyscallArgs::new([sigpipe_write_fd as u64, fd_page, 3, 0, 0, 0]).call::<Write>(),
+            3,
+        );
+        close_test_fd(duplicated_read);
+        expect_errno(
+            SyscallArgs::new([sigpipe_write_fd as u64, fd_page, 3, 0, 0, 0]).call::<Write>(),
+            SyscallError::BrokenPipe,
+        );
+        close_test_fd(sigpipe_write_fd);
 
         expect_ok(
             SyscallArgs::new([fd_page, O_NONBLOCK | O_CLOEXEC, 0, 0, 0, 0]).call::<Pipe2>(),

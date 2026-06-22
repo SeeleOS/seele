@@ -1,7 +1,4 @@
-use alloc::{
-    collections::VecDeque,
-    sync::{Arc, Weak},
-};
+use alloc::{collections::VecDeque, sync::Arc};
 
 use crate::{
     filesystem::info::LinuxStat,
@@ -23,13 +20,15 @@ const PIPE_CAPACITY: usize = 64 * 1024;
 #[derive(Debug)]
 struct PipeState {
     buffer: VecDeque<u8>,
+    readers: usize,
+    writers: usize,
 }
 
 #[derive(Debug)]
 struct PipeInner {
     state: Mut<PipeState>,
-    read_endpoint: Mut<Option<Weak<PipeEndpoint>>>,
-    write_endpoint: Mut<Option<Weak<PipeEndpoint>>>,
+    read_endpoint: Mut<Option<Arc<PipeEndpoint>>>,
+    write_endpoint: Mut<Option<Arc<PipeEndpoint>>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +49,8 @@ impl PipeEndpoint {
         let inner = Arc::new(PipeInner {
             state: Mut::new(PipeState {
                 buffer: VecDeque::new(),
+                readers: 0,
+                writers: 0,
             }),
             read_endpoint: Mut::new(None),
             write_endpoint: Mut::new(None),
@@ -65,8 +66,8 @@ impl PipeEndpoint {
             flags: Mut::new(flags),
         });
 
-        *inner.read_endpoint.lock() = Some(Arc::downgrade(&read));
-        *inner.write_endpoint.lock() = Some(Arc::downgrade(&write));
+        *inner.read_endpoint.lock() = Some(read.clone());
+        *inner.write_endpoint.lock() = Some(write.clone());
         (read, write)
     }
 
@@ -75,56 +76,43 @@ impl PipeEndpoint {
     }
 
     fn wake_readers(&self) {
-        if let Some(read) = self
-            .inner
-            .read_endpoint
-            .lock()
-            .as_ref()
-            .and_then(Weak::upgrade)
-        {
-            wake_pollers_for_object(read as ObjectRef, PollableEvent::CanBeRead);
+        if let Some(read) = self.inner.read_endpoint.lock().as_ref() {
+            wake_pollers_for_object(read.clone() as ObjectRef, PollableEvent::CanBeRead);
         }
     }
 
     fn wake_writers(&self) {
-        if let Some(write) = self
-            .inner
-            .write_endpoint
-            .lock()
-            .as_ref()
-            .and_then(Weak::upgrade)
-        {
-            wake_pollers_for_object(write as ObjectRef, PollableEvent::CanBeWritten);
+        if let Some(write) = self.inner.write_endpoint.lock().as_ref() {
+            wake_pollers_for_object(write.clone() as ObjectRef, PollableEvent::CanBeWritten);
         }
     }
 
-    fn clear_peer(&self) {
+    pub fn clone_fd_reference(&self) {
+        let mut state = self.inner.state.lock();
+        match self.kind {
+            PipeEndpointKind::Read => state.readers += 1,
+            PipeEndpointKind::Write => state.writers += 1,
+        }
+    }
+
+    pub fn close_fd_reference(&self) {
+        let mut state = self.inner.state.lock();
         match self.kind {
             PipeEndpointKind::Read => {
-                *self.inner.read_endpoint.lock() = None;
+                state.readers = state.readers.saturating_sub(1);
+                if state.readers == 0 {
+                    drop(state);
+                    self.wake_writers();
+                }
             }
             PipeEndpointKind::Write => {
-                *self.inner.write_endpoint.lock() = None;
+                state.writers = state.writers.saturating_sub(1);
+                if state.writers == 0 {
+                    drop(state);
+                    self.wake_readers();
+                }
             }
         }
-    }
-
-    fn has_writer(&self) -> bool {
-        self.inner
-            .write_endpoint
-            .lock()
-            .as_ref()
-            .and_then(Weak::upgrade)
-            .is_some()
-    }
-
-    fn has_reader(&self) -> bool {
-        self.inner
-            .read_endpoint
-            .lock()
-            .as_ref()
-            .and_then(Weak::upgrade)
-            .is_some()
     }
 }
 
@@ -186,21 +174,17 @@ impl Readable for PipeEndpoint {
                 return Ok(read_len);
             }
 
-            if !self.has_writer() {
+            if state.writers == 0 {
                 return Ok(0);
             }
             if self.is_nonblocking() {
                 return Err(ObjectError::TryAgain);
             }
             drop(state);
-            let read = self
-                .inner
-                .read_endpoint
-                .lock()
-                .as_ref()
-                .and_then(Weak::upgrade)
-                .expect("pipe read endpoint must exist while reading");
-            wait_for_object_event(read as ObjectRef, PollableEvent::CanBeRead);
+            wait_for_object_event(
+                self.inner.read_endpoint.lock().as_ref().unwrap().clone() as ObjectRef,
+                PollableEvent::CanBeRead,
+            );
         }
     }
 }
@@ -216,7 +200,7 @@ impl Writable for PipeEndpoint {
 
         loop {
             let mut state = self.inner.state.lock();
-            if !self.has_reader() {
+            if state.readers == 0 {
                 return Err(SocketError::BrokenPipe.into());
             }
 
@@ -233,14 +217,10 @@ impl Writable for PipeEndpoint {
                 return Err(ObjectError::TryAgain);
             }
             drop(state);
-            let write = self
-                .inner
-                .write_endpoint
-                .lock()
-                .as_ref()
-                .and_then(Weak::upgrade)
-                .expect("pipe write endpoint must exist while writing");
-            wait_for_object_event(write as ObjectRef, PollableEvent::CanBeWritten);
+            wait_for_object_event(
+                self.inner.write_endpoint.lock().as_ref().unwrap().clone() as ObjectRef,
+                PollableEvent::CanBeWritten,
+            );
         }
     }
 }
@@ -250,26 +230,16 @@ impl Pollable for PipeEndpoint {
         let state = self.inner.state.lock();
         match (self.kind, event) {
             (PipeEndpointKind::Read, PollableEvent::CanBeRead) => {
-                !state.buffer.is_empty() || !self.has_writer()
+                !state.buffer.is_empty() || state.writers == 0
             }
             (PipeEndpointKind::Read, PollableEvent::Closed | PollableEvent::ReadClosed) => {
-                !self.has_writer()
+                state.writers == 0
             }
             (PipeEndpointKind::Write, PollableEvent::CanBeWritten) => {
-                !self.has_reader() || state.buffer.len() < PIPE_CAPACITY
+                state.readers == 0 || state.buffer.len() < PIPE_CAPACITY
             }
-            (PipeEndpointKind::Write, PollableEvent::Closed) => !self.has_reader(),
+            (PipeEndpointKind::Write, PollableEvent::Closed) => state.readers == 0,
             _ => false,
-        }
-    }
-}
-
-impl Drop for PipeEndpoint {
-    fn drop(&mut self) {
-        self.clear_peer();
-        match self.kind {
-            PipeEndpointKind::Read => self.wake_writers(),
-            PipeEndpointKind::Write => self.wake_readers(),
         }
     }
 }

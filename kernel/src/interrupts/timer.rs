@@ -11,7 +11,8 @@ use crate::{
     thread::{
         get_current_thread,
         scheduling::{
-            consume_current_thread_timeslice, current_cpu_has_resched_request, return_to_scheduler,
+            consume_current_thread_timeslice, current_cpu_has_resched_request,
+            has_due_scheduler_deadline, return_to_scheduler,
         },
         snapshot::ThreadSnapshotType,
     },
@@ -116,7 +117,9 @@ pub extern "C" fn timer_interrupt_handler(snapshot: &mut Snapshot) {
     profile::record(ProfileCategory::IrqTimer, irq_start);
     let now_ns = Time::since_boot().as_nanoseconds();
     let timeslice_exhausted = consume_current_thread_timeslice(now_ns);
+    let has_due_deadline = has_due_scheduler_deadline(Time::from_nanoseconds(now_ns));
     let should_resched = timeslice_exhausted
+        || has_due_deadline
         || current_cpu_has_resched_request()
         || matches!(
             get_current_thread().lock().state,

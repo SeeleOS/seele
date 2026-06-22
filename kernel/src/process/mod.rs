@@ -60,7 +60,7 @@ bitflags! {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FdEntry {
     pub object: ObjectRef,
     pub fd_flags: FdFlags,
@@ -68,7 +68,24 @@ pub struct FdEntry {
 
 impl FdEntry {
     pub fn new(object: ObjectRef, fd_flags: FdFlags) -> Self {
+        if let Ok(pipe) = object.clone().as_pipe() {
+            pipe.clone_fd_reference();
+        }
         Self { object, fd_flags }
+    }
+}
+
+impl Clone for FdEntry {
+    fn clone(&self) -> Self {
+        Self::new(self.object.clone(), self.fd_flags)
+    }
+}
+
+impl Drop for FdEntry {
+    fn drop(&mut self) {
+        if let Ok(pipe) = self.object.clone().as_pipe() {
+            pipe.close_fd_reference();
+        }
     }
 }
 
