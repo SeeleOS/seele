@@ -11,9 +11,11 @@ use crate::{
 #[derive(TryFromPrimitive, Debug, Clone, Copy, Default, Eq, PartialEq)]
 #[repr(u64)]
 pub enum ClockId {
-    Realtime,
+    Realtime = 0,
     #[default]
-    SinceBoot,
+    SinceBoot = 1,
+    ProcessCpu = 2,
+    ThreadCpu = 3,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
@@ -134,8 +136,19 @@ impl Timer {
     pub fn get_appropriate_time(&self) -> Time {
         match self.time_type {
             ClockId::Realtime => Time::current(),
-            ClockId::SinceBoot => Time::since_boot(),
+            ClockId::SinceBoot | ClockId::ProcessCpu | ClockId::ThreadCpu => Time::since_boot(),
         }
+    }
+
+    pub fn scheduler_deadline(&self) -> Option<Time> {
+        let deadline = self.next_deadline()?;
+        let now = self.get_appropriate_time();
+        let since_boot = Time::since_boot();
+        Some(if deadline <= now {
+            since_boot
+        } else {
+            since_boot.add_ns(deadline.sub(now).as_nanoseconds())
+        })
     }
 
     pub fn process(&mut self) -> TimerAction {
@@ -241,8 +254,12 @@ impl Process {
         self.timers
             .iter()
             .flatten()
-            .filter_map(Timer::next_deadline)
+            .filter_map(Timer::scheduler_deadline)
             .min()
+    }
+
+    pub fn has_expired_timer(&self) -> bool {
+        self.timers.iter().flatten().any(Timer::is_over_deadline)
     }
 }
 
@@ -258,17 +275,14 @@ pub fn next_process_timer_deadline() -> Option<Time> {
         .min()
 }
 
-pub fn process_expired_process_timers(now: Time) {
+pub fn process_expired_process_timers() {
     let processes = {
         let manager = MANAGER.lock();
         manager.processes.values().cloned().collect::<Vec<_>>()
     };
 
     for process in processes {
-        let should_process = process
-            .lock()
-            .next_timer_deadline()
-            .is_some_and(|deadline| deadline <= now);
+        let should_process = process.lock().has_expired_timer();
         if !should_process {
             continue;
         }

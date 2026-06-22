@@ -199,7 +199,7 @@ fn process_deferred_timer_work(snapshot: SchedulerDeferredWork) {
         .process_timer_deadline
         .is_some_and(|deadline| deadline <= now)
     {
-        process_expired_process_timers(now);
+        process_expired_process_timers();
     }
 
     with_thread_manager(|manager| {

@@ -171,7 +171,7 @@ fn itimer_signal(which: i32) -> Result<crate::signal::Signal, SyscallError> {
 fn itimer_to_linux_value(state: TimerState, clock: ClockId) -> LinuxItimerval {
     let now = match clock {
         ClockId::Realtime => KernelTime::current(),
-        ClockId::SinceBoot => KernelTime::since_boot(),
+        ClockId::SinceBoot | ClockId::ProcessCpu | ClockId::ThreadCpu => KernelTime::since_boot(),
     };
     match state {
         TimerState::Disabled => LinuxItimerval::default(),
@@ -455,7 +455,9 @@ define_syscall!(
         } else {
             let now = match clock {
                 ClockId::Realtime => KernelTime::current(),
-                ClockId::SinceBoot => KernelTime::since_boot(),
+                ClockId::SinceBoot | ClockId::ProcessCpu | ClockId::ThreadCpu => {
+                    KernelTime::since_boot()
+                }
             };
             let deadline = now.add_ns(value_ns);
             if interval_ns == 0 {

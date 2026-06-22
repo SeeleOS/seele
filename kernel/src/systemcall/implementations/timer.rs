@@ -1,8 +1,9 @@
 use crate::{
     memory::user_safe,
     misc::time::Time,
-    misc::timer::{ClockId, Sigevent, TimerNotifyMethod, TimerState},
+    misc::timer::{ClockId, TimerNotifyMethod, TimerState},
     process::misc::with_current_process,
+    signal::Signal,
     systemcall::{
         implementations::TimerSetTimeFlags,
         utils::{SyscallError, SyscallImpl},
@@ -25,6 +26,35 @@ struct LinuxItimerspec {
     it_value: LinuxTimespec,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxSigevent {
+    sigev_value: u64,
+    sigev_signo: i32,
+    sigev_notify: i32,
+}
+
+impl TryFrom<LinuxSigevent> for TimerNotifyMethod {
+    type Error = SyscallError;
+
+    fn try_from(value: LinuxSigevent) -> Result<Self, Self::Error> {
+        const SIGEV_NONE: i32 = 0;
+        const SIGEV_SIGNAL: i32 = 1;
+        const SIGEV_THREAD: i32 = 2;
+        const SIGEV_THREAD_ID: i32 = 4;
+
+        match value.sigev_notify {
+            SIGEV_NONE => Ok(Self::None),
+            SIGEV_SIGNAL | SIGEV_THREAD | SIGEV_THREAD_ID => {
+                let signal = Signal::try_from(value.sigev_signo as u64)
+                    .map_err(|_| SyscallError::InvalidArguments)?;
+                Ok(Self::Signal(signal))
+            }
+            _ => Err(SyscallError::InvalidArguments),
+        }
+    }
+}
+
 fn linux_timespec_to_ns(timespec: LinuxTimespec) -> Result<u64, SyscallError> {
     if timespec.tv_sec < 0 || !(0..1_000_000_000).contains(&timespec.tv_nsec) {
         return Err(SyscallError::InvalidArguments);
@@ -44,7 +74,7 @@ fn ns_to_linux_timespec(ns: u64) -> LinuxTimespec {
 
 define_syscall!(
     TimerCreate,
-    |time_type: ClockId, notify_method: *const Sigevent, timer_id: *mut usize| {
+    |time_type: ClockId, notify_method: *const LinuxSigevent, timer_id: *mut usize| {
         if timer_id.is_null() {
             return Err(SyscallError::BadAddress);
         }
@@ -52,7 +82,7 @@ define_syscall!(
         let notify_method = if notify_method.is_null() {
             TimerNotifyMethod::Signal(crate::signal::Signal::SIGALRM)
         } else {
-            TimerNotifyMethod::from(user_safe::read(notify_method)?)
+            TimerNotifyMethod::try_from(user_safe::read(notify_method)?)?
         };
 
         let id = with_current_process(|process| process.create_timer(time_type, notify_method));
@@ -87,14 +117,15 @@ mod tests {
     fn posix_timer_syscalls_follow_linux_rules() {
         const CLOCK_REALTIME: u64 = 0;
         const TIMER_ABSTIME: u64 = 1;
-        const SIGEV_NONE: u8 = 0;
-        const SIGEV_SIGNAL: u8 = 1;
+        const SIGEV_NONE: i32 = 0;
+        const SIGEV_SIGNAL: i32 = 1;
 
         #[repr(C)]
         #[derive(Clone, Copy)]
         struct TestLinuxSigevent {
-            notify_type: u8,
-            signal: Signal,
+            value: u64,
+            signal: i32,
+            notify_type: i32,
         }
 
         assert_linux_layout::<TestLinuxItimerspec>(32, 8);
@@ -103,8 +134,9 @@ mod tests {
         write_user_value(
             page,
             &TestLinuxSigevent {
+                value: 0,
+                signal: Signal::SIGUSR1 as i32,
                 notify_type: SIGEV_SIGNAL,
-                signal: Signal::SIGUSR1,
             },
         );
 
@@ -298,7 +330,7 @@ define_syscall!(
 
             let now = match timer.time_type {
                 ClockId::Realtime => Time::current(),
-                ClockId::SinceBoot => Time::since_boot(),
+                ClockId::SinceBoot | ClockId::ProcessCpu | ClockId::ThreadCpu => Time::since_boot(),
             };
             let old_spec = match timer.state {
                 TimerState::Disabled => LinuxItimerspec::default(),
@@ -317,7 +349,9 @@ define_syscall!(
             } else {
                 let now = match timer.time_type {
                     ClockId::Realtime => Time::current(),
-                    ClockId::SinceBoot => Time::since_boot(),
+                    ClockId::SinceBoot | ClockId::ProcessCpu | ClockId::ThreadCpu => {
+                        Time::since_boot()
+                    }
                 };
                 let deadline = if flags.contains(TimerSetTimeFlags::TFD_TIMER_ABSTIME) {
                     Time::from_nanoseconds(value_ns)
@@ -361,7 +395,7 @@ define_syscall!(
                 .ok_or(SyscallError::InvalidArguments)?;
             let now = match timer.time_type {
                 ClockId::Realtime => Time::current(),
-                ClockId::SinceBoot => Time::since_boot(),
+                ClockId::SinceBoot | ClockId::ProcessCpu | ClockId::ThreadCpu => Time::since_boot(),
             };
             let spec = match timer.state {
                 TimerState::Disabled => LinuxItimerspec::default(),
