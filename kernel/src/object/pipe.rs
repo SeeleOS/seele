@@ -1,4 +1,7 @@
-use alloc::{collections::VecDeque, sync::Arc};
+use alloc::{
+    collections::VecDeque,
+    sync::{Arc, Weak},
+};
 
 use crate::{
     filesystem::info::LinuxStat,
@@ -27,8 +30,8 @@ struct PipeState {
 #[derive(Debug)]
 struct PipeInner {
     state: Mut<PipeState>,
-    read_endpoint: Mut<Option<Arc<PipeEndpoint>>>,
-    write_endpoint: Mut<Option<Arc<PipeEndpoint>>>,
+    read_endpoint: Mut<Option<Weak<PipeEndpoint>>>,
+    write_endpoint: Mut<Option<Weak<PipeEndpoint>>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,8 +69,8 @@ impl PipeEndpoint {
             flags: Mut::new(flags),
         });
 
-        *inner.read_endpoint.lock() = Some(read.clone());
-        *inner.write_endpoint.lock() = Some(write.clone());
+        *inner.read_endpoint.lock() = Some(Arc::downgrade(&read));
+        *inner.write_endpoint.lock() = Some(Arc::downgrade(&write));
         (read, write)
     }
 
@@ -76,14 +79,26 @@ impl PipeEndpoint {
     }
 
     fn wake_readers(&self) {
-        if let Some(read) = self.inner.read_endpoint.lock().as_ref() {
-            wake_pollers_for_object(read.clone() as ObjectRef, PollableEvent::CanBeRead);
+        if let Some(read) = self
+            .inner
+            .read_endpoint
+            .lock()
+            .as_ref()
+            .and_then(Weak::upgrade)
+        {
+            wake_pollers_for_object(read as ObjectRef, PollableEvent::CanBeRead);
         }
     }
 
     fn wake_writers(&self) {
-        if let Some(write) = self.inner.write_endpoint.lock().as_ref() {
-            wake_pollers_for_object(write.clone() as ObjectRef, PollableEvent::CanBeWritten);
+        if let Some(write) = self
+            .inner
+            .write_endpoint
+            .lock()
+            .as_ref()
+            .and_then(Weak::upgrade)
+        {
+            wake_pollers_for_object(write as ObjectRef, PollableEvent::CanBeWritten);
         }
     }
 
@@ -181,10 +196,14 @@ impl Readable for PipeEndpoint {
                 return Err(ObjectError::TryAgain);
             }
             drop(state);
-            wait_for_object_event(
-                self.inner.read_endpoint.lock().as_ref().unwrap().clone() as ObjectRef,
-                PollableEvent::CanBeRead,
-            );
+            let read = self
+                .inner
+                .read_endpoint
+                .lock()
+                .as_ref()
+                .and_then(Weak::upgrade)
+                .expect("pipe read endpoint must exist while reading");
+            wait_for_object_event(read as ObjectRef, PollableEvent::CanBeRead);
         }
     }
 }
@@ -217,10 +236,14 @@ impl Writable for PipeEndpoint {
                 return Err(ObjectError::TryAgain);
             }
             drop(state);
-            wait_for_object_event(
-                self.inner.write_endpoint.lock().as_ref().unwrap().clone() as ObjectRef,
-                PollableEvent::CanBeWritten,
-            );
+            let write = self
+                .inner
+                .write_endpoint
+                .lock()
+                .as_ref()
+                .and_then(Weak::upgrade)
+                .expect("pipe write endpoint must exist while writing");
+            wait_for_object_event(write as ObjectRef, PollableEvent::CanBeWritten);
         }
     }
 }

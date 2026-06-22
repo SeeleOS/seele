@@ -11,7 +11,7 @@ use crate::ipc::sysv_shm::ProcessShmMapping;
 use crate::memory::addrspace::AddrSpace;
 use crate::misc::timer::Timer;
 use crate::net::namespace::{NetNamespace, NetNamespaceRef};
-use crate::object::misc::ObjectRef;
+use crate::object::{misc::ObjectRef, pipe::PipeEndpoint};
 use crate::process::group::{ProcessGroupID, SessionID};
 use crate::signal::misc::default_signal_action_vec;
 use crate::signal::{PendingSignalInfo, SIGNAL_AMOUNT, Signal, Signals, action::SignalAction};
@@ -61,30 +61,43 @@ bitflags! {
 }
 
 #[derive(Debug)]
+struct PipeFdReference {
+    pipe: Arc<PipeEndpoint>,
+}
+
+impl PipeFdReference {
+    fn new(pipe: Arc<PipeEndpoint>) -> Self {
+        pipe.clone_fd_reference();
+        Self { pipe }
+    }
+}
+
+impl Clone for PipeFdReference {
+    fn clone(&self) -> Self {
+        Self::new(self.pipe.clone())
+    }
+}
+
+impl Drop for PipeFdReference {
+    fn drop(&mut self) {
+        self.pipe.close_fd_reference();
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct FdEntry {
     pub object: ObjectRef,
     pub fd_flags: FdFlags,
+    _pipe_reference: Option<PipeFdReference>,
 }
 
 impl FdEntry {
     pub fn new(object: ObjectRef, fd_flags: FdFlags) -> Self {
-        if let Ok(pipe) = object.clone().as_pipe() {
-            pipe.clone_fd_reference();
-        }
-        Self { object, fd_flags }
-    }
-}
-
-impl Clone for FdEntry {
-    fn clone(&self) -> Self {
-        Self::new(self.object.clone(), self.fd_flags)
-    }
-}
-
-impl Drop for FdEntry {
-    fn drop(&mut self) {
-        if let Ok(pipe) = self.object.clone().as_pipe() {
-            pipe.close_fd_reference();
+        let pipe_reference = object.clone().as_pipe().ok().map(PipeFdReference::new);
+        Self {
+            object,
+            fd_flags,
+            _pipe_reference: pipe_reference,
         }
     }
 }
