@@ -22,7 +22,10 @@ use crate::{
     misc::others::protection_to_page_flags,
     misc::time::Time,
     process::manager::get_current_process,
-    systemcall::utils::{SyscallError, SyscallImpl},
+    systemcall::{
+        implementations::{InterruptibleWaitGuard, take_signal_interrupt},
+        utils::{SyscallError, SyscallImpl},
+    },
     thread::{
         ThreadRef, get_current_thread,
         manager::ThreadManager,
@@ -429,6 +432,7 @@ fn futex_wait_impl(
     // Keep the value check and queue publication ordered with wakeups on the
     // same futex bucket. Without this, a wake can race between the user-space
     // store and our waiter publication, leaving the thread asleep forever.
+    let _interruptible = InterruptibleWaitGuard::new();
     with_thread_manager(|manager| -> Result<(), SyscallError> {
         let mut queue = FUTEX_QUEUE.lock();
         let cur_value = u64::from(read_user_u32(arg1)?);
@@ -451,6 +455,9 @@ fn futex_wait_impl(
 
     finish_block_current();
 
+    if take_signal_interrupt() {
+        return Err(SyscallError::Interrupted);
+    }
     if let Some(deadline) = deadline
         && Time::since_boot() >= deadline
     {
