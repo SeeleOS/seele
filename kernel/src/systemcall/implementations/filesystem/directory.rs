@@ -43,7 +43,11 @@ define_syscall!(LinkAt, |old_dirfd: i32,
             return Err(SyscallError::InvalidArguments);
         }
         let object = get_object_current_process(old_dirfd as u64).map_err(SyscallError::from)?;
-        let result = object.as_file_like()?.link_to(new_path.clone());
+        let file_like = object.as_file_like()?;
+        if matches!(file_like.info()?.file_like_type, FileLikeType::Directory) {
+            return Err(SyscallError::PermissionDenied);
+        }
+        let result = file_like.link_to(new_path.clone());
         let result = result.map_err(|err| match err {
             FSError::Other => SyscallError::CrossDeviceLink,
             err => SyscallError::from(err),
@@ -54,6 +58,12 @@ define_syscall!(LinkAt, |old_dirfd: i32,
 
     let old_path_is_relative = !Path::new(&old_path_str).is_absolute();
     let old_path = resolve_path_at(old_dirfd, &old_path_str)?;
+    if matches!(
+        open_path_nofollow(old_path.clone())?.info()?.file_like_type,
+        FileLikeType::Directory
+    ) {
+        return Err(SyscallError::PermissionDenied);
+    }
     if old_dirfd != AT_FDCWD && old_path_is_relative {
         let object = get_object_current_process(old_dirfd as u64).map_err(SyscallError::from)?;
         let file_like = object

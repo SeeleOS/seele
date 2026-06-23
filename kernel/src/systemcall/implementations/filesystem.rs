@@ -670,6 +670,20 @@ mod tests {
             SyscallArgs::new([dir_fd as u64, user_page + 128, 0o700, 0, 0, 0]).call::<MkdirAt>(),
             0,
         );
+        write_user_cstr(user_page, b".\0");
+        write_user_cstr(user_page + 128, b"dirhard\0");
+        expect_errno(
+            SyscallArgs::new([
+                dir_fd as u64,
+                user_page,
+                dir_fd as u64,
+                user_page + 128,
+                0,
+                0,
+            ])
+            .call::<LinkAt>(),
+            SyscallError::PermissionDenied,
+        );
         expect_ok(
             SyscallArgs::new([dir_fd as u64, user_page + 128, AT_REMOVEDIR, 0, 0, 0])
                 .call::<UnlinkAt>(),
