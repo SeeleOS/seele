@@ -5,6 +5,10 @@ use x86_64::instructions::port::Port;
 
 const STATUS_OUTPUT_FULL: u8 = 1 << 0;
 const STATUS_AUX_DATA: u8 = 1 << 5;
+// Debug-only input activity probe: when enabled, each keyboard IRQ prints a dot
+// so an apparently frozen system can be distinguished from one that still
+// receives keyboard interrupts. Keep this disabled for normal interactive use.
+const LOG_KEYBOARD_IRQ_ACTIVITY: bool = false;
 
 lazy_static! {
     pub static ref _PS2_KEYBOARD: Mut<PS2Keyboard<layouts::Us104Key, ScancodeSet1>> =
@@ -42,7 +46,9 @@ pub extern "C" fn keyboard_interrupt_handler() {
 
     let mut keyboard_port = Port::new(0x60);
     let scancode = unsafe { keyboard_port.read() };
-    s_print!(".");
+    if LOG_KEYBOARD_IRQ_ACTIVITY {
+        s_print!(".");
+    }
     push_scancode(scancode);
     request_current_cpu_resched();
     send_eoi();
