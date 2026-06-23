@@ -1,6 +1,6 @@
 use crate::{
     build::{KernelBuildMode, KernelBuildOptions, build_kernel, shell_for_repo},
-    vm::{BootConfig, VmConfig, create_boot_iso, run_iso_capture},
+    vm::{BootConfig, SerialConfig, VmConfig, create_boot_iso, run_iso_capture},
 };
 use anyhow::Result;
 use std::{path::Path, time::Duration};
@@ -18,7 +18,7 @@ pub fn run(repo: &Path) -> Result<bool> {
         &sh,
         repo,
         &iso,
-        VmConfig::for_repo(repo),
+        test_vm_config(repo),
         Some(Duration::from_secs(10 * 60)),
         None,
     )?;
@@ -27,4 +27,11 @@ pub fn run(repo: &Path) -> Result<bool> {
     }
     eprintln!("kernel unit serial log: {}", result.serial_log.display());
     Ok(result.exit_code == 0)
+}
+
+fn test_vm_config(repo: &Path) -> VmConfig {
+    let mut config = VmConfig::for_repo(repo);
+    config.display = false;
+    config.serial = SerialConfig::File;
+    config
 }

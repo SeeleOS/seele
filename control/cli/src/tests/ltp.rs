@@ -1,7 +1,7 @@
 use super::config::RunTestsConfig;
 use crate::{
     build::{KernelBuildMode, KernelBuildOptions, build_kernel, shell_for_repo},
-    vm::{BootConfig, VmConfig, create_boot_iso, run_iso_capture},
+    vm::{BootConfig, SerialConfig, VmConfig, create_boot_iso, run_iso_capture},
 };
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -36,7 +36,7 @@ pub fn run(repo: &Path, config: &RunTestsConfig) -> Result<LtpSummary> {
         &sh,
         repo,
         &iso,
-        VmConfig::for_repo(repo),
+        test_vm_config(repo),
         Some(Duration::from_secs(45 * 60)),
         Some(ltp_report_observed),
     )?;
@@ -61,6 +61,13 @@ pub fn run(repo: &Path, config: &RunTestsConfig) -> Result<LtpSummary> {
         );
     }
     Ok(summary)
+}
+
+fn test_vm_config(repo: &Path) -> VmConfig {
+    let mut config = VmConfig::for_repo(repo);
+    config.display = false;
+    config.serial = SerialConfig::File;
+    config
 }
 
 fn ltp_report_observed(output: &str) -> bool {

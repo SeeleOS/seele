@@ -51,7 +51,7 @@ impl VmConfig {
             ltp_device_image: target_dir(repo).join("ltp-dev.img"),
             iso_image: None,
             enable_profiling: false,
-            display: true,
+            display: false,
         }
     }
 }
