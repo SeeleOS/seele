@@ -1,5 +1,5 @@
 use anyhow::Result;
-use control_core::{
+use control_mcp::{
     plane::ControlPlane, rootfs::BuildRootfsConfig, tests::RunTestsConfig, vm::VmConfig,
 };
 use rmcp::{

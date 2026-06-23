@@ -69,12 +69,6 @@ From the repository root:
 cargo xrun
 ```
 
-Run the headless agent path with serial log capture:
-
-```sh
-cargo xrun -- --agent
-```
-
 ## Agent MCP workflow
 
 For Codex-driven work, prefer the Seele MCP server over manual QEMU control when it is registered in your MCP configuration. The dev shell provides a `seele-mcp` command:
@@ -86,13 +80,13 @@ nix develop -c seele-mcp
 The MCP server exposes tools for the structured control-plane loop:
 
 - `run_tests`: start a structured test job and return typed reports/artifacts.
-- `start_vm` / `start`: launch the VM through `control-core`.
+- `start_vm` / `start`: launch the VM through the MCP control plane.
 - `vm_status` / `status`: report QEMU PID, QMP connectivity, and serial log location.
 - `serial_tail`: read recent serial output.
 - `job_status`, `job_wait`, `job_cancel`: inspect and control structured jobs.
 - `stop_vm` / `stop`: stop MCP-managed QEMU state.
 
-Manual `cargo xrun` and `cargo xrun -- --agent` remain useful for local foreground runs and fallback verification when MCP is unavailable.
+Manual `cargo xrun` remains useful for local foreground runs when MCP is unavailable.
 
 ## Rootfs and rootfs image
 

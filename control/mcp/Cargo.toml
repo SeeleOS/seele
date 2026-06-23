@@ -6,10 +6,11 @@ edition = "2024"
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
-control-core = { path = "../core" }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+ovmf-prebuilt = "0.2"
 rmcp = { version = "1.7", features = ["server", "transport-io"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-

@@ -1,12 +1,12 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::{Args, Parser, Subcommand};
-use control_core::{
-    plane::ControlPlane, rootfs::BuildRootfsConfig, tests::RunTestsConfig, vm::VmConfig,
+use control_cli::{
+    JobState, plane::ControlPlane, rootfs::BuildRootfsConfig, tests::RunTestsConfig, vm::VmConfig,
 };
 use std::{path::PathBuf, process::ExitCode};
 
 #[derive(Debug, Parser)]
-#[command(version, about = "Seele OS control-plane CLI")]
+#[command(version, about = "Seele OS human control CLI")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -15,16 +15,8 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Run(VmArgs),
-    Test(TestArgs),
     Rootfs(RootfsArgs),
-    Vm {
-        #[command(subcommand)]
-        command: VmCommand,
-    },
-    Job {
-        #[command(subcommand)]
-        command: JobCommand,
-    },
+    Test(TestArgs),
 }
 
 #[derive(Debug, Args)]
@@ -46,17 +38,8 @@ struct VmArgs {
 }
 
 #[derive(Debug, Args)]
-struct TestArgs {
-    selector: Option<String>,
-    #[arg(long)]
-    ltp_suite: Option<String>,
-    #[arg(long)]
-    ltp_pattern: Option<String>,
-}
-
-#[derive(Debug, Args)]
 struct RootfsArgs {
-    #[arg(long)]
+    #[arg(long, alias = "override")]
     override_rootfs: bool,
     #[arg(long)]
     rebuild_aur: bool,
@@ -64,32 +47,13 @@ struct RootfsArgs {
     rebuild_aur_packages: Vec<String>,
 }
 
-#[derive(Debug, Subcommand)]
-enum VmCommand {
-    Start(VmArgs),
-    Stop,
-    Status,
-    SerialTail {
-        #[arg(long)]
-        lines: Option<usize>,
-        #[arg(long)]
-        bytes: Option<usize>,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum JobCommand {
-    Status {
-        id: u64,
-    },
-    Wait {
-        id: u64,
-        #[arg(long)]
-        timeout_ms: Option<u64>,
-    },
-    Cancel {
-        id: u64,
-    },
+#[derive(Debug, Args)]
+struct TestArgs {
+    selector: Option<String>,
+    #[arg(long)]
+    ltp_suite: Option<String>,
+    #[arg(long)]
+    ltp_pattern: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -103,41 +67,43 @@ fn main() -> ExitCode {
 }
 
 fn real_main() -> Result<i32> {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(normalized_args());
     let repo = std::env::current_dir()?;
-    let plane = ControlPlane::new(repo);
-    match cli.command {
-        Command::Run(args) => print_json(&plane.start_vm(vm_config(args)))?,
-        Command::Test(args) => print_json(&plane.start_tests(RunTestsConfig {
-            selector: args.selector,
-            ltp_suite: args.ltp_suite,
-            ltp_pattern: args.ltp_pattern,
-        }))?,
-        Command::Rootfs(args) => print_json(&plane.start_build_rootfs(BuildRootfsConfig {
+    let plane = ControlPlane::new(&repo);
+    let status = match cli.command {
+        Command::Run(args) => plane.start_vm(vm_config(&repo, args)),
+        Command::Rootfs(args) => plane.start_build_rootfs(BuildRootfsConfig {
             override_rootfs: args.override_rootfs,
             rebuild_aur: args.rebuild_aur,
             rebuild_aur_packages: args.rebuild_aur_packages,
-        }))?,
-        Command::Vm { command } => match command {
-            VmCommand::Start(args) => print_json(&plane.start_vm(vm_config(args)))?,
-            VmCommand::Stop => print_json(&plane.stop_vm())?,
-            VmCommand::Status => print_json(&plane.vm_status())?,
-            VmCommand::SerialTail { lines, bytes } => {
-                println!("{}", plane.serial_tail(lines, bytes)?)
-            }
-        },
-        Command::Job { command } => match command {
-            JobCommand::Status { id } => print_json(&plane.jobs().status(id)?)?,
-            JobCommand::Wait { id, timeout_ms } => print_json(&plane.jobs().wait(id, timeout_ms)?)?,
-            JobCommand::Cancel { id } => print_json(&plane.jobs().cancel(id)?)?,
-        },
+        }),
+        Command::Test(args) => plane.start_tests(RunTestsConfig {
+            selector: args.selector,
+            ltp_suite: args.ltp_suite,
+            ltp_pattern: args.ltp_pattern,
+        }),
+    };
+    let status = plane.jobs().wait(status.id, None)?;
+    println!("{}", serde_json::to_string_pretty(&status)?);
+    match status.state {
+        JobState::Finished => Ok(status.exit_code.unwrap_or(0)),
+        JobState::Failed | JobState::Cancelled | JobState::TimedOut => {
+            Ok(status.exit_code.unwrap_or(1))
+        }
+        JobState::Queued | JobState::Running => bail!("job did not reach a terminal state"),
     }
-    Ok(0)
 }
 
-fn vm_config(args: VmArgs) -> VmConfig {
-    let repo = std::env::current_dir().expect("failed to resolve current directory");
-    let mut config = VmConfig::for_repo(&repo);
+fn normalized_args() -> Vec<String> {
+    let mut args = std::env::args().collect::<Vec<_>>();
+    if args.len() == 4 && args[2] == "--" && matches!(args[3].as_str(), "--help" | "-h") {
+        args.remove(2);
+    }
+    args
+}
+
+fn vm_config(repo: &std::path::Path, args: VmArgs) -> VmConfig {
+    let mut config = VmConfig::for_repo(repo);
     if let Some(path) = args.qmp_socket {
         config.qmp_socket = path;
     }
@@ -156,9 +122,4 @@ fn vm_config(args: VmArgs) -> VmConfig {
     config.enable_profiling = args.enable_profiling;
     config.display = args.display;
     config
-}
-
-fn print_json(value: &impl serde::Serialize) -> Result<()> {
-    println!("{}", serde_json::to_string_pretty(value)?);
-    Ok(())
 }

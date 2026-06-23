@@ -10,7 +10,6 @@ Seele OS is an x86_64 operating system kernel written in `no_std` Rust targeting
 
 ```sh
 cargo xrun                  # build and boot in QEMU
-cargo xrun -- --agent       # manual fallback headless boot; serial logs captured automatically
 cargo xtest                 # kernel and integration tests in QEMU
 cargo xbuild-rootfs         # build/refresh target/rootfs.img and rootfs
 cargo xbuild-rootfs -- --override  # rebuild target/rootfs.img from scratch
@@ -32,9 +31,9 @@ send_key/type_text    # drive guest input through QMP
 stop or cleanup # stop the VM and remove QMP socket state
 ```
 
-The `xtask/` crate implements every `cargo x*` subcommand. The local Rust toolchain is named `seele`; install it from `toolchain/install.rs` before building outside Nix. `nix develop` / `nix run` set up the full reproducible environment.
+The `control/cli` crate implements the human `cargo x*` subcommands. The local Rust toolchain is named `seele`; install it from `toolchain/install.rs` before building outside Nix. `nix develop` / `nix run` set up the full reproducible environment.
 
-After any change: prefer the MCP workflow (`run_tests`, then `start`/status/serial/screenshot/stop). If MCP is unavailable, run `cargo xtest`, then `cargo xrun -- --agent`. The VM must boot cleanly before the work is done.
+After any change: prefer the MCP workflow (`run_tests`, then `start`/status/serial/screenshot/stop). If MCP is unavailable, run `cargo xtest`, then `cargo xrun`. The VM must boot cleanly before the work is done.
 
 ## Kernel Architecture
 
@@ -60,8 +59,8 @@ boot → memory → SMP BSP → framebuffer/terminal/logging → early drivers �
 | `kernel/src/net/` | Network stack initialization |
 | `kernel/src/ipc/` | IPC primitives |
 | `kernel/src/terminal/` | In-kernel framebuffer terminal (flanterm) |
-| `xtask/src/` | All `cargo x*` subcommands: VM launch, rootfs build, test runner |
-| `mcp/src/` | Seele MCP server: VM lifecycle, QMP screenshot/input, serial tail, and test wrappers |
+| `control/cli/src/` | Human `cargo x*` subcommands: VM launch, rootfs build, test runner |
+| `control/mcp/src/` | Seele MCP server: VM lifecycle, QMP screenshot/input, serial tail, and test wrappers |
 
 ### Syscall Path
 

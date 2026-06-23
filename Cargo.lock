@@ -351,18 +351,8 @@ name = "control-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap",
- "control-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "control-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
  "chrono",
+ "clap",
  "ovmf-prebuilt",
  "serde",
  "serde_json",
@@ -375,11 +365,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
- "control-core",
+ "chrono",
+ "ovmf-prebuilt",
  "rmcp",
  "schemars",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 
