@@ -1,6 +1,5 @@
 use core::{arch::naked_asm, mem::offset_of};
 
-use x2apic::lapic::IpiAllShorthand;
 use x86_64::{VirtAddr, structures::idt::InterruptDescriptorTable};
 
 use crate::{
@@ -23,6 +22,7 @@ pub enum HardwareInterrupt {
     Timer = PIC_1_OFFSET,
     Keyboard,
     Mouse,
+    TlbShootdown = PIC_1_OFFSET + 14,
     SchedulerWake = PIC_1_OFFSET + 15,
 }
 
@@ -39,13 +39,20 @@ pub fn send_eoi() {
     unsafe { with_current_cpu(|cpu| cpu.local_apic.end_of_interrupt()) };
 }
 
-pub fn wake_scheduler_cpus() {
+pub fn wake_scheduler_cpu(apic_id: u32) {
     unsafe {
         with_current_cpu(|cpu| {
-            cpu.local_apic.send_ipi_all(
-                HardwareInterrupt::SchedulerWake.as_u8(),
-                IpiAllShorthand::AllExcludingSelf,
-            );
+            cpu.local_apic
+                .send_ipi(HardwareInterrupt::SchedulerWake.as_u8(), apic_id);
+        });
+    }
+}
+
+pub fn shootdown_tlb_cpu(apic_id: u32) {
+    unsafe {
+        with_current_cpu(|cpu| {
+            cpu.local_apic
+                .send_ipi(HardwareInterrupt::TlbShootdown.as_u8(), apic_id);
         });
     }
 }
@@ -60,10 +67,19 @@ pub fn init_hardware_interrupts(idt: &mut InterruptDescriptorTable) {
         ));
         idt[HardwareInterrupt::Mouse.as_u8()]
             .set_handler_addr(VirtAddr::new(mouse_interrupt_wrapper as *const () as u64));
+        idt[HardwareInterrupt::TlbShootdown.as_u8()].set_handler_addr(VirtAddr::new(
+            tlb_shootdown_interrupt_wrapper as *const () as u64,
+        ));
         idt[HardwareInterrupt::SchedulerWake.as_u8()].set_handler_addr(VirtAddr::new(
             scheduler_wake_interrupt_wrapper as *const () as u64,
         ))
     };
+}
+
+extern "C" fn tlb_shootdown_interrupt_handler() {
+    crate::memory::tlb::flush_current();
+    crate::memory::tlb::ack_remote_shootdown();
+    send_eoi();
 }
 
 extern "C" fn scheduler_wake_interrupt_handler() {
@@ -173,6 +189,54 @@ macro_rules! define_user_safe_irq_wrapper {
 
 define_user_safe_irq_wrapper!(keyboard_interrupt_wrapper, keyboard_interrupt_handler);
 define_user_safe_irq_wrapper!(mouse_interrupt_wrapper, mouse_interrupt_handler);
+
+#[unsafe(naked)]
+extern "C" fn tlb_shootdown_interrupt_wrapper() {
+    naked_asm!(
+        "push rax",
+        "push rcx",
+        "push rdx",
+        "push rbx",
+        "push rbp",
+        "push rsi",
+        "push rdi",
+        "push r8",
+        "push r9",
+        "push r10",
+        "push r11",
+        "push r12",
+        "push r13",
+        "push r14",
+        "push r15",
+        "test qword ptr [rsp + {CS_OFF}], 0x3",
+        "jz 0f",
+        "swapgs",
+        "0:",
+        "call {handler}",
+        "test qword ptr [rsp + {CS_OFF}], 0x3",
+        "jz 1f",
+        "swapgs",
+        "1:",
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop r11",
+        "pop r10",
+        "pop r9",
+        "pop r8",
+        "pop rdi",
+        "pop rsi",
+        "pop rbp",
+        "pop rbx",
+        "pop rdx",
+        "pop rcx",
+        "pop rax",
+        "iretq",
+        handler = sym tlb_shootdown_interrupt_handler,
+        CS_OFF = const offset_of!(Snapshot, cs),
+    )
+}
 
 #[unsafe(naked)]
 extern "C" fn scheduler_wake_interrupt_wrapper() {

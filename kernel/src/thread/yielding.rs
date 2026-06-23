@@ -5,7 +5,6 @@ use alloc::{
 };
 
 use crate::{
-    interrupts::hardware_interrupt::wake_scheduler_cpus,
     misc::{profile, time::Time},
     object::{
         error::ObjectError,
@@ -246,7 +245,6 @@ impl ThreadManager {
                 drop(locked_thread);
                 self.push_ready_balanced(thread);
                 request_all_cpus_resched();
-                wake_scheduler_cpus();
             }
             _ => {}
         }

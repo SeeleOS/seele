@@ -183,13 +183,17 @@ pub fn mark_current_cpu_online() {
 
 pub fn wait_for_cpu_online(apic_id: u32, spins: usize) -> bool {
     for _ in 0..spins {
-        if with_cpu_by_apic_id(apic_id, |cpu| cpu.online.load(Ordering::Acquire)) {
+        if is_cpu_online(apic_id) {
             return true;
         }
         core::hint::spin_loop();
     }
 
     false
+}
+
+pub fn is_cpu_online(apic_id: u32) -> bool {
+    with_cpu_by_apic_id(apic_id, |cpu| cpu.online.load(Ordering::Acquire))
 }
 
 pub fn kernel_code_selector() -> SegmentSelector {

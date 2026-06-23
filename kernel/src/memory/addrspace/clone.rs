@@ -1,3 +1,5 @@
+use core::sync::atomic::AtomicU64;
+
 use x86_64::{
     VirtAddr,
     structures::paging::{Page, PageTableFlags, Size4KiB, mapper::TranslateResult},
@@ -25,6 +27,7 @@ impl AddrSpace {
 
         let mut new_page_table = PageTableWrapped::new_with_frame_allocator(&mut frame_allocator);
         let old_page_table = &mut self.page_table;
+        let mut parent_page_table_changed = false;
 
         for area in self.memory_areas.clone() {
             if area.pages() == 0 {
@@ -56,6 +59,7 @@ impl AddrSpace {
                                     .update_flags(page, as_cow_flags(flags))
                                     .unwrap()
                                     .flush();
+                                parent_page_table_changed = true;
                                 as_cow_flags(flags)
                             } else {
                                 flags
@@ -79,9 +83,11 @@ impl AddrSpace {
                 }
             }
         }
+        self.flush_page_table_updates(parent_page_table_changed);
 
         Self {
             page_table: new_page_table,
+            loaded_cpu_mask: AtomicU64::new(0),
             memory_areas: self.memory_areas.clone(),
             user_mem: self.user_mem,
             last_area_index: None,

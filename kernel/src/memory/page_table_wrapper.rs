@@ -139,4 +139,8 @@ impl PageTableWrapped {
             Cr3::write(self.frame, Cr3Flags::empty());
         }
     }
+
+    pub fn is_loaded(&self) -> bool {
+        Cr3::read().0 == self.frame
+    }
 }

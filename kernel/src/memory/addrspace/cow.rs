@@ -52,7 +52,9 @@ impl AddrSpace {
         };
 
         increase_ref(new_frame);
-        if decrease_ref(old_frame) {
+        let deallocate_old_frame = decrease_ref(old_frame);
+        self.flush_page_table_updates(true);
+        if deallocate_old_frame {
             unsafe {
                 frame_allocator.deallocate_frame(old_frame);
             }

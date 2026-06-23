@@ -48,6 +48,7 @@ impl AddrSpace {
 
         let end = start + len;
         let last_mapped_addr = end - 1u64;
+        let mut changed = false;
 
         for page in Page::<Size4KiB>::range_inclusive(
             Page::containing_address(start),
@@ -55,8 +56,10 @@ impl AddrSpace {
         ) {
             if let Ok((_, flush)) = self.page_table.unmap(page) {
                 flush.flush();
+                changed = true;
             }
         }
+        self.flush_page_table_updates(changed);
 
         self.unmap_areas(start, end);
     }

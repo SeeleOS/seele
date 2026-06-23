@@ -17,6 +17,7 @@ pub mod mmio;
 pub mod page_table_wrapper;
 pub mod paging;
 pub mod protection;
+pub mod tlb;
 pub mod user_safe;
 pub mod utils;
 

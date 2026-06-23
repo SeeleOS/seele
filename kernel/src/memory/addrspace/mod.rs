@@ -1,4 +1,4 @@
-use core::sync::atomic::AtomicU64;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use alloc::vec::Vec;
 use x86_64::{
@@ -51,6 +51,7 @@ pub type AllocResult = (VirtAddr, StackBuilder);
 pub struct AddrSpace {
     pub memory_areas: Vec<MemoryArea>,
     pub page_table: PageTableWrapped,
+    loaded_cpu_mask: AtomicU64,
 
     pub user_mem: VirtAddr,
     pub last_area_index: Option<usize>,
@@ -61,6 +62,7 @@ impl Default for AddrSpace {
         Self {
             memory_areas: Vec::default(),
             page_table: PageTableWrapped::default(),
+            loaded_cpu_mask: AtomicU64::new(0),
             user_mem: VirtAddr::new(USER_MEM_START),
             last_area_index: None,
         }
@@ -68,6 +70,20 @@ impl Default for AddrSpace {
 }
 
 impl AddrSpace {
+    fn current_cpu_bit() -> u64 {
+        1u64.checked_shl(crate::smp::current_cpu_index() as u32)
+            .unwrap_or(0)
+    }
+
+    fn flush_page_table_updates(&self, changed: bool) {
+        if changed {
+            crate::memory::tlb::flush_after_page_table_update(
+                self.page_table.is_loaded(),
+                self.loaded_cpu_mask.load(Ordering::Acquire),
+            );
+        }
+    }
+
     pub fn is_user_addr(addr: VirtAddr) -> bool {
         addr.as_u64() < USER_MEM_END
     }
@@ -261,12 +277,17 @@ impl AddrSpace {
     }
 
     pub fn load(&mut self) {
+        let current_cpu_bit = Self::current_cpu_bit();
         self.page_table.load();
+        self.loaded_cpu_mask
+            .fetch_or(current_cpu_bit, Ordering::AcqRel);
     }
 
     pub fn clean(&mut self) {
         log::debug!("addrspace: clean");
         let areas = self.memory_areas.clone();
+        let mut changed = false;
+        let mut frames_to_deallocate = Vec::new();
         for area in &areas {
             if !area.is_user() {
                 continue;
@@ -277,20 +298,25 @@ impl AddrSpace {
             for page in area.page_range() {
                 if let Ok((frame, flush)) = self.page_table.unmap(page) {
                     flush.flush();
+                    changed = true;
                     if decrease_ref(frame) {
-                        unsafe {
-                            FRAME_ALLOCATOR
-                                .get()
-                                .unwrap()
-                                .lock()
-                                .deallocate_frame(frame);
-                        }
+                        frames_to_deallocate.push(frame);
                     }
+                }
+            }
+        }
+        self.flush_page_table_updates(changed);
+        if !frames_to_deallocate.is_empty() {
+            let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
+            for frame in frames_to_deallocate {
+                unsafe {
+                    frame_allocator.deallocate_frame(frame);
                 }
             }
         }
         self.user_mem = VirtAddr::new(USER_MEM_START);
         self.page_table = PageTableWrapped::default();
+        self.loaded_cpu_mask.store(0, Ordering::Release);
         self.memory_areas = Vec::new();
         self.last_area_index = None;
     }
@@ -353,6 +379,7 @@ impl AddrSpace {
         self.last_area_index = None;
 
         let last_addr = end - 1u64;
+        let mut changed = false;
         for page in Page::<Size4KiB>::range_inclusive(
             Page::<Size4KiB>::containing_address(start),
             Page::<Size4KiB>::containing_address(last_addr),
@@ -360,9 +387,11 @@ impl AddrSpace {
             unsafe {
                 if let Ok(flush) = self.page_table.update_flags(page, new_flags) {
                     flush.flush();
+                    changed = true;
                 }
             }
         }
+        self.flush_page_table_updates(changed);
     }
 
     pub fn validate_permission_update(

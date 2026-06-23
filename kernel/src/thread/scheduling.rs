@@ -7,6 +7,7 @@ use core::{
 use x86_64::instructions::interrupts::{self, enable_and_hlt, without_interrupts};
 
 use crate::{
+    interrupts::hardware_interrupt::wake_scheduler_cpu,
     keyboard,
     misc::mouse,
     misc::profile::{self, ProfileCategory},
@@ -50,10 +51,14 @@ pub fn request_remote_resched(apic_id: u32) {
     if !crate::SMP_ENABLED {
         return;
     }
+    if !crate::smp::is_cpu_online(apic_id) {
+        return;
+    }
 
     crate::smp::with_cpu_by_apic_id(apic_id, |cpu| {
         cpu.need_resched.store(true, Ordering::Release);
     });
+    wake_scheduler_cpu(apic_id);
 }
 
 pub fn request_all_cpus_resched() {
