@@ -3,7 +3,7 @@ use crate::{
     target_dir,
     vm::iso::{BootConfig, create_boot_iso},
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
 use std::{
     fs,
@@ -43,7 +43,7 @@ impl VmConfig {
             ltp_device_image: target_dir(repo).join("ltp-dev.img"),
             iso_image: None,
             enable_profiling: false,
-            display: false,
+            display: true,
         }
     }
 }
@@ -67,16 +67,9 @@ pub fn run(repo: &Path, mut config: VmConfig) -> Result<i32> {
     eprintln!("==> launching QEMU");
     eprintln!("    serial log: {}", config.serial_log.display());
     let mut child = spawn_qemu(repo, &iso, &config)?;
-    let exit = wait_for_qmp_or_exit(
-        repo,
-        &mut child,
-        &config.qmp_socket,
-        Duration::from_secs(30),
-    )?;
-    if exit == 0 {
-        reap_child_when_it_exits(child);
-    }
-    Ok(exit)
+    let status = child.wait().context("failed to wait for qemu")?;
+    let _ = fs::remove_file(qemu_pid_path(repo));
+    Ok(decode_qemu_exit_code(status.code()))
 }
 
 pub fn run_iso_capture(
@@ -220,32 +213,6 @@ fn qemu_command(repo: &Path, iso: &Path, config: &VmConfig) -> Result<Command> {
     Ok(command)
 }
 
-fn wait_for_qmp_or_exit(
-    repo: &Path,
-    child: &mut Child,
-    qmp_socket: &Path,
-    timeout: Duration,
-) -> Result<i32> {
-    let qemu_pid_path = qemu_pid_path(repo);
-    let deadline = Instant::now() + timeout;
-    loop {
-        if qmp_socket.exists() {
-            return Ok(0);
-        }
-        if let Some(status) = child.try_wait().context("failed to poll qemu")? {
-            let _ = fs::remove_file(&qemu_pid_path);
-            return Ok(status.code().unwrap_or(1).max(1));
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = fs::remove_file(&qemu_pid_path);
-            bail!("timed out waiting for QMP socket");
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-}
-
 fn decode_qemu_exit_code(code: Option<i32>) -> i32 {
     match code.unwrap_or(1) {
         33 => 0,
@@ -311,10 +278,4 @@ fn absolutize_paths(repo: &Path, config: &mut VmConfig) {
     {
         config.iso_image = Some(repo.join(iso));
     }
-}
-
-fn reap_child_when_it_exits(mut child: Child) {
-    thread::spawn(move || {
-        let _ = child.wait();
-    });
 }

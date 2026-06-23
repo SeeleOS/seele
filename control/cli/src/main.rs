@@ -28,7 +28,7 @@ struct VmArgs {
     #[arg(long)]
     enable_profiling: bool,
     #[arg(long)]
-    display: bool,
+    no_display: bool,
 }
 
 #[derive(Debug, Args)]
@@ -104,6 +104,6 @@ fn vm_config(repo: &std::path::Path, args: VmArgs) -> VmConfig {
         config.iso_image = Some(path);
     }
     config.enable_profiling = args.enable_profiling;
-    config.display = args.display;
+    config.display = !args.no_display;
     config
 }
