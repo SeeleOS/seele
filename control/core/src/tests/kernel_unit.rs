@@ -1,12 +1,12 @@
 use crate::{
-    JobContext, KernelUnitReport,
+    ControlContext, KernelUnitReport,
     build::{KernelBuildMode, KernelBuildOptions, build_kernel},
     vm::{BootConfig, VmConfig, create_boot_iso, run_iso_capture},
 };
 use anyhow::Result;
 use std::{path::Path, time::Duration};
 
-pub fn run(repo: &Path, context: &JobContext) -> Result<KernelUnitReport> {
+pub fn run(repo: &Path, context: &dyn ControlContext) -> Result<KernelUnitReport> {
     let kernels = build_kernel(
         repo,
         KernelBuildMode::UnitTest,

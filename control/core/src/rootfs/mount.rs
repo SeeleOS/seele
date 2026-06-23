@@ -1,5 +1,5 @@
 use super::paths::{RootfsPaths, paths};
-use crate::{JobContext, process::ProcessRunner};
+use crate::{ControlContext, process::ProcessRunner};
 use anyhow::{Context, Result, bail};
 use std::{
     fs,
@@ -7,14 +7,14 @@ use std::{
     process::{Command, Stdio},
 };
 
-pub fn ensure_mounted(repo: &Path, context: &JobContext) -> Result<RootfsPaths> {
+pub fn ensure_mounted(repo: &Path, context: &dyn ControlContext) -> Result<RootfsPaths> {
     let paths = paths(repo);
     let runner = ProcessRunner::new(&paths.artifact_dir)?;
     ensure_mounted_with_runner(&runner, context, &paths)?;
     Ok(paths)
 }
 
-pub fn unmount(repo: &Path, context: &JobContext) -> Result<i32> {
+pub fn unmount(repo: &Path, context: &dyn ControlContext) -> Result<i32> {
     let paths = paths(repo);
     let runner = ProcessRunner::new(&paths.artifact_dir)?;
     unmount_with_runner(&runner, context, &paths.mount)?;
@@ -23,7 +23,7 @@ pub fn unmount(repo: &Path, context: &JobContext) -> Result<i32> {
 
 pub(super) fn ensure_mounted_with_runner(
     runner: &ProcessRunner,
-    context: &JobContext,
+    context: &dyn ControlContext,
     paths: &RootfsPaths,
 ) -> Result<()> {
     fs::create_dir_all(&paths.mount)
@@ -49,7 +49,7 @@ pub(super) fn ensure_mounted_with_runner(
 
 pub(super) fn unmount_with_runner(
     runner: &ProcessRunner,
-    context: &JobContext,
+    context: &dyn ControlContext,
     mount: &Path,
 ) -> Result<()> {
     if is_mounted(mount)? {

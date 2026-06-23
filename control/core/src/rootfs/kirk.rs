@@ -1,4 +1,4 @@
-use crate::{JobContext, process::ProcessRunner};
+use crate::{ControlContext, process::ProcessRunner};
 use anyhow::{Context, Result};
 use std::{fs, path::Path, process::Command};
 
@@ -7,7 +7,7 @@ const KIRK_URL: &str = "https://github.com/linux-test-project/kirk";
 pub fn install_kirk(
     repo: &Path,
     runner: &ProcessRunner,
-    context: &JobContext,
+    context: &dyn ControlContext,
     rootfs_mount: &Path,
 ) -> Result<()> {
     let kirk_checkout = repo.join("target").join("kirk");

@@ -1,7 +1,6 @@
 use anyhow::Result;
-use control_mcp::{
-    plane::ControlPlane, rootfs::BuildRootfsConfig, tests::RunTestsConfig, vm::VmConfig,
-};
+use control_core::{rootfs::BuildRootfsConfig, tests::RunTestsConfig, vm::VmConfig};
+use control_mcp::plane::ControlPlane;
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},

@@ -1,4 +1,4 @@
-use crate::{Artifact, ArtifactKind, JobContext, process::ProcessRunner};
+use crate::{Artifact, ArtifactKind, ControlContext, process::ProcessRunner};
 use anyhow::{Context, Result};
 use std::{
     fs,
@@ -17,7 +17,7 @@ pub fn create_boot_iso(
     repo: &Path,
     kernel_path: &Path,
     config: &BootConfig,
-    context: &JobContext,
+    context: &dyn ControlContext,
 ) -> Result<PathBuf> {
     let artifact_dir = crate::target_dir(repo)
         .join("control-artifacts")
@@ -107,7 +107,7 @@ fn create_efi_boot_image(
     kernel_path: &Path,
     limine_dir: &Path,
     config: &BootConfig,
-    context: &JobContext,
+    context: &dyn ControlContext,
 ) -> Result<()> {
     runner.run_success(
         context,
@@ -200,7 +200,7 @@ fn limine_config_contents(repo: &Path, config: &BootConfig) -> Result<String> {
     Ok(contents)
 }
 
-fn limine_support_dir(runner: &ProcessRunner, context: &JobContext) -> Result<PathBuf> {
+fn limine_support_dir(runner: &ProcessRunner, context: &dyn ControlContext) -> Result<PathBuf> {
     let result = runner.run_success(
         context,
         "limine_datadir",

@@ -1,15 +1,8 @@
-pub mod build;
 pub mod job;
 pub mod plane;
-pub mod process;
-pub mod rootfs;
-pub mod tests;
-pub mod utils;
-pub mod vm;
 
-pub use job::{
-    Artifact, ArtifactKind, BuildEvent, Event, JobContext, JobKind, JobManager, JobState,
-    JobStatus, KernelUnitReport, LtpCase, LtpReport, Report, RootfsEvent, StepState, TestEvent,
-    TestSelector, VmEvent, VmSmokeReport,
+pub use control_core::{
+    Artifact, ArtifactKind, BuildEvent, Event, KernelUnitReport, LtpCase, LtpReport, Report,
+    RootfsEvent, StepState, TestEvent, TestSelector, VmEvent, VmSmokeReport,
 };
-pub use utils::{repo_root, target_dir};
+pub use job::{JobContext, JobKind, JobManager, JobState, JobStatus};

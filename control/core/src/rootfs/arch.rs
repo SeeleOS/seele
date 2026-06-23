@@ -1,4 +1,4 @@
-use crate::{JobContext, process::ProcessRunner};
+use crate::{ControlContext, process::ProcessRunner};
 use anyhow::{Context, Result};
 use std::{
     fs,
@@ -95,7 +95,7 @@ impl Drop for PacmanConfig {
 
 pub fn install_packages(
     runner: &ProcessRunner,
-    context: &JobContext,
+    context: &dyn ControlContext,
     pacman_conf: &Path,
     rootfs_mount: &Path,
 ) -> Result<()> {
@@ -116,7 +116,7 @@ pub fn install_packages(
 
 pub fn set_empty_root_password(
     runner: &ProcessRunner,
-    context: &JobContext,
+    context: &dyn ControlContext,
     rootfs_mount: &Path,
 ) -> Result<()> {
     runner.run_success(
@@ -134,7 +134,7 @@ pub fn set_empty_root_password(
 
 pub fn configure_login_services(
     runner: &ProcessRunner,
-    context: &JobContext,
+    context: &dyn ControlContext,
     rootfs_mount: &Path,
 ) -> Result<()> {
     let getty_wants = rootfs_mount

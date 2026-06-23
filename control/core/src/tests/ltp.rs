@@ -1,6 +1,6 @@
 use super::config::RunTestsConfig;
 use crate::{
-    Artifact, ArtifactKind, JobContext, LtpCase, LtpReport,
+    Artifact, ArtifactKind, ControlContext, LtpCase, LtpReport,
     build::{KernelBuildMode, KernelBuildOptions, build_kernel},
     target_dir,
     vm::{BootConfig, VmConfig, create_boot_iso, run_iso_capture},
@@ -13,7 +13,11 @@ const REPORT_BEGIN: &str = "__SEELE_LTP_JSON_BEGIN__";
 const REPORT_END: &str = "__SEELE_LTP_JSON_END__";
 const EXIT_PREFIX: &str = "__SEELE_LTP_EXIT__:";
 
-pub fn run(repo: &Path, config: &RunTestsConfig, context: &JobContext) -> Result<LtpReport> {
+pub fn run(
+    repo: &Path,
+    config: &RunTestsConfig,
+    context: &dyn ControlContext,
+) -> Result<LtpReport> {
     let artifact_dir = target_dir(repo)
         .join("control-artifacts")
         .join("tests")

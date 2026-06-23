@@ -1,7 +1,11 @@
-use crate::{Event, JobContext, RootfsEvent, StepState};
+use crate::{ControlContext, Event, RootfsEvent, StepState};
 use anyhow::Result;
 
-pub fn run_step(context: &JobContext, step: &str, f: impl FnOnce() -> Result<()>) -> Result<()> {
+pub fn run_step(
+    context: &dyn ControlContext,
+    step: &str,
+    f: impl FnOnce() -> Result<()>,
+) -> Result<()> {
     context.event(Event::Rootfs(RootfsEvent {
         step: step.to_string(),
         state: StepState::Started,

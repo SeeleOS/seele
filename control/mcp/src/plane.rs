@@ -1,10 +1,10 @@
-use crate::{
-    JobKind, JobManager,
+use crate::{JobKind, JobManager};
+use anyhow::Result;
+use control_core::{
     rootfs::{self, BuildRootfsConfig},
     tests::{self, RunTestsConfig},
     vm::{self, VmConfig},
 };
-use anyhow::Result;
 use std::{path::PathBuf, sync::Arc};
 
 #[derive(Debug, Clone)]

@@ -1,5 +1,5 @@
 use crate::{
-    Artifact, ArtifactKind, Event, JobContext, VmEvent, VmSmokeReport,
+    Artifact, ArtifactKind, ControlContext, Event, VmEvent, VmSmokeReport,
     build::{KernelBuildMode, KernelBuildOptions, build_kernel},
     process::ProcessRunner,
     target_dir,
@@ -23,11 +23,18 @@ use std::{
 pub struct VmConfig {
     pub qmp_socket: PathBuf,
     pub serial_log: PathBuf,
+    pub serial: SerialConfig,
     pub rootfs_image: PathBuf,
     pub ltp_device_image: PathBuf,
     pub iso_image: Option<PathBuf>,
     pub enable_profiling: bool,
     pub display: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SerialConfig {
+    File,
+    Stdio,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +60,7 @@ impl VmConfig {
         Self {
             qmp_socket: PathBuf::from("/tmp/seele-agent-qmp.sock"),
             serial_log: PathBuf::from("/tmp/seele-agent-serial.log"),
+            serial: SerialConfig::File,
             rootfs_image: target_dir(repo).join("rootfs.img"),
             ltp_device_image: target_dir(repo).join("ltp-dev.img"),
             iso_image: None,
@@ -62,7 +70,7 @@ impl VmConfig {
     }
 }
 
-pub fn start_vm(repo: &Path, mut config: VmConfig, context: &JobContext) -> Result<i32> {
+pub fn run_vm(repo: &Path, mut config: VmConfig, context: &dyn ControlContext) -> Result<i32> {
     absolutize_paths(repo, &mut config);
     let iso = match config.iso_image.clone() {
         Some(iso) => iso,
@@ -78,7 +86,34 @@ pub fn start_vm(repo: &Path, mut config: VmConfig, context: &JobContext) -> Resu
             create_boot_iso(repo, &kernels[0], &BootConfig::default(), context)?
         }
     };
-    let mut child = spawn_qemu(repo, &iso, &config, context)?;
+    context.event(Event::Progress {
+        stage: "vm".to_string(),
+        message: "launching QEMU".to_string(),
+    });
+    describe_serial(config.serial, &config.serial_log);
+    let mut child = spawn_qemu(repo, &iso, &config, context, SpawnMode::Foreground)?;
+    let status = child.wait().context("failed to wait for qemu")?;
+    let _ = fs::remove_file(qemu_pid_path(repo));
+    Ok(decode_qemu_exit_code(status.code()))
+}
+
+pub fn start_vm(repo: &Path, mut config: VmConfig, context: &dyn ControlContext) -> Result<i32> {
+    absolutize_paths(repo, &mut config);
+    let iso = match config.iso_image.clone() {
+        Some(iso) => iso,
+        None => {
+            let kernels = build_kernel(
+                repo,
+                KernelBuildMode::Run,
+                KernelBuildOptions {
+                    enable_profiling: config.enable_profiling,
+                },
+                context,
+            )?;
+            create_boot_iso(repo, &kernels[0], &BootConfig::default(), context)?
+        }
+    };
+    let mut child = spawn_qemu(repo, &iso, &config, context, SpawnMode::Managed)?;
     let result = wait_for_qmp_or_exit(
         repo,
         &mut child,
@@ -98,10 +133,10 @@ pub fn run_iso_capture(
     mut config: VmConfig,
     timeout: Option<Duration>,
     condition: Option<fn(&str) -> bool>,
-    context: &JobContext,
+    context: &dyn ControlContext,
 ) -> Result<QemuRunResult> {
     absolutize_paths(repo, &mut config);
-    let mut child = spawn_qemu(repo, iso, &config, context)?;
+    let mut child = spawn_qemu(repo, iso, &config, context, SpawnMode::Managed)?;
     let qemu_pid_path = qemu_pid_path(repo);
     let deadline = timeout.map(|timeout| Instant::now() + timeout);
     let mut captured = String::new();
@@ -162,7 +197,7 @@ pub fn run_iso_capture(
     }
 }
 
-pub fn stop_vm(repo: &Path, context: &JobContext) -> Result<i32> {
+pub fn stop_vm(repo: &Path, context: &dyn ControlContext) -> Result<i32> {
     let artifact_dir = target_dir(repo).join("control-artifacts").join("vm");
     let pid_path = qemu_pid_path(repo);
     if let Ok(pid) = fs::read_to_string(&pid_path).map(|pid| pid.trim().to_string())
@@ -223,7 +258,7 @@ pub fn wait_serial(
     repo: &Path,
     pattern: &str,
     timeout_ms: Option<u64>,
-    context: &JobContext,
+    context: &dyn ControlContext,
 ) -> Result<String> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms.unwrap_or(30_000));
     loop {
@@ -330,34 +365,55 @@ pub fn mouse_click(repo: &Path, button: &str) -> Result<()> {
     Ok(())
 }
 
-fn spawn_qemu(repo: &Path, iso: &Path, config: &VmConfig, context: &JobContext) -> Result<Child> {
+fn spawn_qemu(
+    repo: &Path,
+    iso: &Path,
+    config: &VmConfig,
+    context: &dyn ControlContext,
+    mode: SpawnMode,
+) -> Result<Child> {
     let artifact_dir = target_dir(repo).join("control-artifacts").join("vm");
     fs::create_dir_all(&artifact_dir)
         .with_context(|| format!("failed to create {}", artifact_dir.display()))?;
     let _ = fs::remove_file(&config.qmp_socket);
-    let _ = fs::remove_file(&config.serial_log);
+    if config.serial == SerialConfig::File {
+        let _ = fs::remove_file(&config.serial_log);
+    }
     ensure_ltp_device_image(&config.ltp_device_image)?;
-    let stderr = fs::File::create(artifact_dir.join("qemu.stderr.log"))?;
-    let stdout = fs::File::create(artifact_dir.join("qemu.stdout.log"))?;
-    context.artifact(Artifact {
-        kind: ArtifactKind::SerialLog,
-        path: config.serial_log.clone(),
-        description: "QEMU serial log".to_string(),
-    });
+    if config.serial == SerialConfig::File {
+        context.artifact(Artifact {
+            kind: ArtifactKind::SerialLog,
+            path: config.serial_log.clone(),
+            description: "QEMU serial log".to_string(),
+        });
+    }
 
     let mut command = qemu_command(repo, iso, config)?;
+    match mode {
+        SpawnMode::Foreground => {
+            command
+                .stdin(Stdio::null())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit());
+        }
+        SpawnMode::Managed => {
+            let stderr = fs::File::create(artifact_dir.join("qemu.stderr.log"))?;
+            let stdout = fs::File::create(artifact_dir.join("qemu.stdout.log"))?;
+            command
+                .stdout(Stdio::from(stdout))
+                .stderr(Stdio::from(stderr));
+        }
+    }
     let child = command
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
         .spawn()
         .context("failed to start qemu-system-x86_64")?;
     let pid = child.id();
     let pid_path = qemu_pid_path(repo);
     fs::write(&pid_path, pid.to_string())?;
-    context.on_cancel(move || {
+    context.on_cancel(Box::new(move || {
         kill_process(pid);
         let _ = fs::remove_file(pid_path);
-    });
+    }));
     context.event(Event::Vm(VmEvent::Started {
         runner_pid: std::process::id(),
         qemu_pid: Some(pid),
@@ -375,7 +431,7 @@ fn qemu_command(repo: &Path, iso: &Path, config: &VmConfig) -> Result<Command> {
         .arg("-smp")
         .arg(default_smp())
         .args(["-serial"])
-        .arg(format!("file:{}", config.serial_log.display()))
+        .arg(serial_qemu_arg(config.serial, &config.serial_log))
         .args(["-qmp"])
         .arg(format!(
             "unix:{},server=on,wait=off",
@@ -435,7 +491,7 @@ fn wait_for_qmp_or_exit(
     child: &mut Child,
     qmp_socket: &Path,
     timeout: Duration,
-    context: &JobContext,
+    context: &dyn ControlContext,
 ) -> Result<i32> {
     let qemu_pid_path = qemu_pid_path(repo);
     let deadline = Instant::now() + timeout;
@@ -460,6 +516,26 @@ fn wait_for_qmp_or_exit(
             bail!("timed out waiting for QMP socket");
         }
         thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SpawnMode {
+    Foreground,
+    Managed,
+}
+
+fn serial_qemu_arg(serial: SerialConfig, serial_log: &Path) -> String {
+    match serial {
+        SerialConfig::File => format!("file:{}", serial_log.display()),
+        SerialConfig::Stdio => "stdio".to_string(),
+    }
+}
+
+fn describe_serial(serial: SerialConfig, serial_log: &Path) {
+    match serial {
+        SerialConfig::File => eprintln!("    serial log: {}", serial_log.display()),
+        SerialConfig::Stdio => eprintln!("    serial: stdout"),
     }
 }
 

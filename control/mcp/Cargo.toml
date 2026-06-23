@@ -7,7 +7,7 @@ edition = "2024"
 anyhow = "1"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
-ovmf-prebuilt = "0.2"
+control-core = { path = "../core" }
 rmcp = { version = "1.7", features = ["server", "transport-io"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
