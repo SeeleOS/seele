@@ -7,9 +7,12 @@ use anyhow::{Context, Result};
 use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
 use std::{
     fs,
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    sync::mpsc,
     thread,
+    thread::JoinHandle,
     time::{Duration, Instant},
 };
 use xshell::Shell;
@@ -35,7 +38,6 @@ pub enum SerialConfig {
 #[derive(Debug, Clone)]
 pub struct QemuRunResult {
     pub exit_code: i32,
-    pub serial_log: PathBuf,
     pub serial_output: String,
     pub failure: Option<String>,
 }
@@ -89,21 +91,26 @@ pub fn run_iso_capture(
     condition: Option<fn(&str) -> bool>,
 ) -> Result<QemuRunResult> {
     absolutize_paths(repo, &mut config);
-    let mut child = spawn_qemu(repo, iso, &config)?;
+    config.serial = SerialConfig::Stdio;
+    let mut child = spawn_qemu_with_stdout(repo, iso, &config, Stdio::piped())?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("captured QEMU process did not expose stdout")?;
+    let serial_stdout = spawn_stdout_reader(stdout);
     let qemu_pid_path = qemu_pid_path(repo);
     let deadline = timeout.map(|timeout| Instant::now() + timeout);
     let mut captured = String::new();
-    let mut offset = 0;
 
     loop {
-        append_serial(&config.serial_log, &mut offset, &mut captured);
+        drain_serial_stdout(&serial_stdout.rx, &mut captured);
         if condition.is_some_and(|condition| condition(&captured)) {
             let _ = child.kill();
             let _ = child.wait();
             let _ = sh.remove_path(&qemu_pid_path);
+            finish_serial_stdout(serial_stdout, &mut captured);
             return Ok(QemuRunResult {
                 exit_code: 0,
-                serial_log: config.serial_log,
                 serial_output: captured,
                 failure: None,
             });
@@ -111,11 +118,10 @@ pub fn run_iso_capture(
 
         if let Some(status) = child.try_wait().context("failed to poll qemu")? {
             let _ = sh.remove_path(&qemu_pid_path);
-            append_serial(&config.serial_log, &mut offset, &mut captured);
+            finish_serial_stdout(serial_stdout, &mut captured);
             let exit_code = decode_qemu_exit_code(status.code());
             return Ok(QemuRunResult {
                 exit_code,
-                serial_log: config.serial_log,
                 serial_output: captured,
                 failure: (exit_code != 0).then(|| format!("qemu exited with code {exit_code}")),
             });
@@ -125,10 +131,9 @@ pub fn run_iso_capture(
             let _ = child.kill();
             let _ = child.wait();
             let _ = sh.remove_path(&qemu_pid_path);
-            append_serial(&config.serial_log, &mut offset, &mut captured);
+            finish_serial_stdout(serial_stdout, &mut captured);
             return Ok(QemuRunResult {
                 exit_code: 1,
-                serial_log: config.serial_log,
                 serial_output: captured,
                 failure: Some("timed out waiting for qemu".to_string()),
             });
@@ -139,19 +144,26 @@ pub fn run_iso_capture(
 }
 
 fn spawn_qemu(repo: &Path, iso: &Path, config: &VmConfig) -> Result<Child> {
+    spawn_qemu_with_stdout(repo, iso, config, Stdio::inherit())
+}
+
+fn spawn_qemu_with_stdout(
+    repo: &Path,
+    iso: &Path,
+    config: &VmConfig,
+    stdout: Stdio,
+) -> Result<Child> {
     let artifact_dir = target_dir(repo).join("control-cli").join("vm");
     fs::create_dir_all(&artifact_dir)
         .with_context(|| format!("failed to create {}", artifact_dir.display()))?;
     let _ = fs::remove_file(&config.qmp_socket);
-    if config.serial == SerialConfig::File {
-        let _ = fs::remove_file(&config.serial_log);
-    }
+    let _ = fs::remove_file(&config.serial_log);
     ensure_ltp_device_image(&config.ltp_device_image)?;
 
     let mut command = qemu_command(repo, iso, config)?;
     let child = command
         .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
+        .stdout(stdout)
         .stderr(Stdio::inherit())
         .spawn()
         .context("failed to start qemu-system-x86_64")?;
@@ -272,17 +284,48 @@ fn default_smp() -> String {
         .unwrap_or_else(|_| "1".to_string())
 }
 
-fn append_serial(path: &Path, offset: &mut usize, captured: &mut String) {
-    let Ok(content) = fs::read_to_string(path) else {
-        return;
-    };
-    if *offset > content.len() {
-        *offset = 0;
+struct SerialStdout {
+    rx: mpsc::Receiver<Vec<u8>>,
+    reader: JoinHandle<()>,
+}
+
+fn spawn_stdout_reader(mut stdout: impl Read + Send + 'static) -> SerialStdout {
+    let (tx, rx) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        let mut buffer = [0; 8192];
+        loop {
+            match stdout.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(count) => {
+                    if tx.send(buffer[..count].to_vec()).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    SerialStdout { rx, reader }
+}
+
+fn drain_serial_stdout(rx: &mpsc::Receiver<Vec<u8>>, captured: &mut String) {
+    while let Ok(chunk) = rx.try_recv() {
+        append_stdout_chunk(&chunk, captured);
     }
-    if *offset < content.len() {
-        captured.push_str(&content[*offset..]);
-        *offset = content.len();
+}
+
+fn finish_serial_stdout(serial_stdout: SerialStdout, captured: &mut String) {
+    while let Ok(chunk) = serial_stdout.rx.recv() {
+        append_stdout_chunk(&chunk, captured);
     }
+    let _ = serial_stdout.reader.join();
+}
+
+fn append_stdout_chunk(chunk: &[u8], captured: &mut String) {
+    let text = String::from_utf8_lossy(chunk);
+    print!("{text}");
+    let _ = io::stdout().flush();
+    captured.push_str(&text);
 }
 
 fn qemu_pid_path(repo: &Path) -> PathBuf {
