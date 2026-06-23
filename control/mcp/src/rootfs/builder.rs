@@ -7,15 +7,11 @@ use super::{
     paths::paths,
     steps::run_step,
 };
-use crate::{Artifact, ArtifactKind, ControlContext, process::ProcessRunner};
+use crate::{Artifact, ArtifactKind, JobContext, process::ProcessRunner};
 use anyhow::{Context, Result};
 use std::{fs, path::Path, process::Command};
 
-pub fn build_rootfs(
-    repo: &Path,
-    config: &BuildRootfsConfig,
-    context: &dyn ControlContext,
-) -> Result<i32> {
+pub fn build_rootfs(repo: &Path, config: &BuildRootfsConfig, context: &JobContext) -> Result<i32> {
     let paths = paths(repo);
     fs::create_dir_all(&paths.mount)
         .with_context(|| format!("failed to create {}", paths.mount.display()))?;

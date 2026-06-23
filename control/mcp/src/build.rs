@@ -1,5 +1,5 @@
 use crate::{
-    Artifact, ArtifactKind, BuildEvent, ControlContext, Event, process::ProcessRunner, target_dir,
+    Artifact, ArtifactKind, BuildEvent, Event, JobContext, process::ProcessRunner, target_dir,
 };
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -24,7 +24,7 @@ pub fn build_kernel(
     repo: &Path,
     mode: KernelBuildMode,
     options: KernelBuildOptions,
-    context: &dyn ControlContext,
+    context: &JobContext,
 ) -> Result<Vec<PathBuf>> {
     let artifact_dir = target_dir(repo).join("control-artifacts").join("build");
     let runner = ProcessRunner::new(&artifact_dir)?;
@@ -92,7 +92,7 @@ fn cargo_args(mode: KernelBuildMode, options: KernelBuildOptions) -> Vec<String>
 fn parse_cargo_json(
     path: &Path,
     mode: KernelBuildMode,
-    context: &dyn ControlContext,
+    context: &JobContext,
 ) -> Result<Vec<PathBuf>> {
     let content =
         fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;

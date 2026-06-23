@@ -1,7 +1,6 @@
-use super::model::{JobKind, JobState, JobStatus};
+use super::model::{Artifact, Event, JobKind, JobState, JobStatus, Report};
 use anyhow::{Result, anyhow};
 use chrono::Utc;
-use control_core::{Artifact, ControlContext, Event, Report};
 use std::{
     collections::HashMap,
     fmt,
@@ -238,31 +237,6 @@ impl JobContext {
             f(&mut entry.status);
         }
         self.inner.changed.notify_all();
-    }
-}
-
-impl ControlContext for JobContext {
-    fn is_cancelled(&self) -> bool {
-        self.is_cancelled()
-    }
-
-    fn event(&self, event: Event) {
-        self.event(event);
-    }
-
-    fn artifact(&self, artifact: Artifact) {
-        self.artifact(artifact);
-    }
-
-    fn report(&self, report: Report) {
-        self.report(report);
-    }
-
-    fn on_cancel(&self, cleanup: Box<dyn FnOnce() + Send>) {
-        let mut jobs = self.inner.jobs.lock().expect("job lock poisoned");
-        if let Some(entry) = jobs.get_mut(&self.id) {
-            entry.cancel_cleanup.push(cleanup);
-        }
     }
 }
 

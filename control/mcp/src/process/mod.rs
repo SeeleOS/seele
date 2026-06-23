@@ -1,4 +1,4 @@
-use crate::{Artifact, ArtifactKind, ControlContext};
+use crate::{Artifact, ArtifactKind, JobContext};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -30,7 +30,7 @@ impl ProcessRunner {
 
     pub fn run(
         &self,
-        context: &dyn ControlContext,
+        context: &JobContext,
         name: &str,
         command: &mut Command,
     ) -> Result<ProcessResult> {
@@ -63,7 +63,7 @@ impl ProcessRunner {
 
     pub fn run_success(
         &self,
-        context: &dyn ControlContext,
+        context: &JobContext,
         name: &str,
         command: &mut Command,
     ) -> Result<ProcessResult> {
@@ -80,7 +80,7 @@ impl ProcessRunner {
 
     pub fn run_shell_success(
         &self,
-        context: &dyn ControlContext,
+        context: &JobContext,
         name: &str,
         script: &str,
     ) -> Result<ProcessResult> {

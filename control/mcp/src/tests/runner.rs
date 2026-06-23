@@ -1,14 +1,10 @@
 use super::{config::RunTestsConfig, kernel_unit, ltp};
-use crate::{ControlContext, Event, Report, TestEvent, TestSelector};
+use crate::{Event, JobContext, Report, TestEvent, TestSelector};
 use anyhow::Result;
 use std::path::Path;
 
-pub fn run_tests(
-    repo: &Path,
-    config: &RunTestsConfig,
-    context: &dyn ControlContext,
-) -> Result<i32> {
-    let selector = TestSelector::parse(config.selector.as_deref())?;
+pub fn run_tests(repo: &Path, config: &RunTestsConfig, context: &JobContext) -> Result<i32> {
+    let selector = TestSelector::parse(config.selector.as_deref());
     context.event(Event::Test(TestEvent::Started {
         selector: selector.clone(),
     }));

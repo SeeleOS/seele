@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use control_core::{
-    ConsoleContext, rootfs, tests, vm,
+use control_cli::{
+    rootfs, tests, vm,
     vm::{SerialConfig, VmConfig},
 };
 use std::{path::PathBuf, process::ExitCode};
@@ -66,9 +66,8 @@ fn main() -> ExitCode {
 fn real_main() -> Result<i32> {
     let cli = Cli::parse_from(normalized_args());
     let repo = std::env::current_dir()?;
-    let context = ConsoleContext::new();
     match cli.command {
-        Command::Run(args) => vm::run_vm(&repo, vm_config(&repo, args), &context),
+        Command::Run(args) => vm::run(&repo, vm_config(&repo, args)),
         Command::Rootfs(args) => rootfs::build_rootfs(
             &repo,
             &rootfs::BuildRootfsConfig {
@@ -76,7 +75,6 @@ fn real_main() -> Result<i32> {
                 rebuild_aur: args.rebuild_aur,
                 rebuild_aur_packages: args.rebuild_aur_packages,
             },
-            &context,
         ),
         Command::Test(args) => tests::run_tests(
             &repo,
@@ -85,7 +83,6 @@ fn real_main() -> Result<i32> {
                 ltp_suite: args.ltp_suite,
                 ltp_pattern: args.ltp_pattern,
             },
-            &context,
         ),
     }
 }
