@@ -24,6 +24,14 @@ pub fn run_tests(repo: &Path, config: &RunTestsConfig, context: &JobContext) -> 
             failed += 1;
         }
         context.report(Report::KernelUnit(report));
+        if failed != 0 {
+            context.event(Event::Test(TestEvent::Finished {
+                passed,
+                failed,
+                skipped,
+            }));
+            return Ok(1);
+        }
     }
 
     if matches!(

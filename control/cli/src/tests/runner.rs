@@ -44,6 +44,10 @@ pub fn run_tests(repo: &Path, config: &RunTestsConfig) -> Result<i32> {
         } else {
             failed += 1;
         }
+        if failed != 0 {
+            eprintln!("test summary: {passed} passed, {failed} failed, {skipped} skipped");
+            return Ok(1);
+        }
     }
 
     if selector.includes_ltp() {
