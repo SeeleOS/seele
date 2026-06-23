@@ -1,6 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct BuildRootfsConfig {
     pub override_rootfs: bool,
     pub rebuild_aur: bool,

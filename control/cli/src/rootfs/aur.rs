@@ -1,11 +1,10 @@
 use super::config::RebuildAur;
-use crate::{JobContext, process::ProcessRunner};
 use anyhow::{Context, Result, bail};
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::Command,
 };
+use xshell::{Shell, cmd};
 
 pub const AUR_PACKAGES: &[&str] = &["linux-test-project-git"];
 const BUILD_USER: &str = "seelebuild";
@@ -22,9 +21,8 @@ pub fn validate_rebuild_packages(packages: &[String]) -> Result<()> {
 }
 
 pub fn install_aur_packages(
+    sh: &Shell,
     repo: &Path,
-    runner: &ProcessRunner,
-    context: &JobContext,
     pacman_conf: &Path,
     rootfs_mount: &Path,
     rebuild_aur: &RebuildAur,
@@ -35,16 +33,17 @@ pub fn install_aur_packages(
         .with_context(|| format!("failed to create {}", build_root.display()))?;
     fs::create_dir_all(&cache_root)
         .with_context(|| format!("failed to create {}", cache_root.display()))?;
-    install_pacman_config(runner, context, rootfs_mount, pacman_conf)?;
-    let uid = ensure_build_user(runner, context, rootfs_mount)?;
+
+    install_pacman_config(sh, rootfs_mount, pacman_conf)?;
+    let uid = ensure_build_user(sh, rootfs_mount)?;
     let install_context = AurInstallContext {
-        runner,
-        context,
+        sh,
         rootfs_mount,
         build_root: &build_root,
         cache_root: &cache_root,
         build_user_uid: uid,
     };
+
     for package in AUR_PACKAGES {
         ensure_cached_package(&install_context, package, rebuild_aur)?;
     }
@@ -52,8 +51,7 @@ pub fn install_aur_packages(
 }
 
 struct AurInstallContext<'a> {
-    runner: &'a ProcessRunner,
-    context: &'a JobContext,
+    sh: &'a Shell,
     rootfs_mount: &'a Path,
     build_root: &'a Path,
     cache_root: &'a Path,
@@ -70,45 +68,36 @@ fn ensure_cached_package(
         rebuild_aur.all || rebuild_aur.packages.iter().any(|name| name == package);
     if !package_rebuild && cached_package_exists(&package_cache)? {
         return install_cached_package(
-            install_context.runner,
-            install_context.context,
+            install_context.sh,
             install_context.rootfs_mount,
             &package_cache,
             package,
         );
     }
 
-    let package_dir = prepare_package_checkout(
-        install_context.runner,
-        install_context.context,
-        install_context.build_root,
-        package,
-    )?;
+    let package_dir =
+        prepare_package_checkout(install_context.sh, install_context.build_root, package)?;
     let guest_package_dir = sync_package_to_rootfs(
-        install_context.runner,
-        install_context.context,
+        install_context.sh,
         install_context.rootfs_mount,
         &package_dir,
         package,
         install_context.build_user_uid,
     )?;
     build_package_in_rootfs(
-        install_context.runner,
-        install_context.context,
+        install_context.sh,
         install_context.rootfs_mount,
         &guest_package_dir,
     )?;
     refresh_package_cache(
-        install_context.runner,
-        install_context.context,
+        install_context.sh,
         install_context.rootfs_mount,
         &package_cache,
         &guest_package_dir,
         package,
     )?;
     install_cached_package(
-        install_context.runner,
-        install_context.context,
+        install_context.sh,
         install_context.rootfs_mount,
         &package_cache,
         package,
@@ -116,78 +105,37 @@ fn ensure_cached_package(
     Ok(())
 }
 
-fn install_pacman_config(
-    runner: &ProcessRunner,
-    context: &JobContext,
-    rootfs_mount: &Path,
-    pacman_conf: &Path,
-) -> Result<()> {
-    runner.run_success(
-        context,
-        "rootfs_install_pacman_conf",
-        Command::new("sudo")
-            .arg("install")
-            .arg("-Dm644")
-            .arg(pacman_conf)
-            .arg(rootfs_mount.join("etc/pacman.conf")),
-    )?;
+fn install_pacman_config(sh: &Shell, rootfs_mount: &Path, pacman_conf: &Path) -> Result<()> {
+    let dest = rootfs_mount.join("etc/pacman.conf");
+    cmd!(sh, "sudo install -Dm644 {pacman_conf} {dest}").run()?;
     Ok(())
 }
 
-fn ensure_build_user(
-    runner: &ProcessRunner,
-    context: &JobContext,
-    rootfs_mount: &Path,
-) -> Result<u32> {
-    if run_chroot_output(
-        runner,
-        context,
-        rootfs_mount,
-        &format!("id -u {BUILD_USER}"),
-    )
-    .is_err()
-    {
+fn ensure_build_user(sh: &Shell, rootfs_mount: &Path) -> Result<u32> {
+    if run_chroot_output(sh, rootfs_mount, &format!("id -u {BUILD_USER}")).is_err() {
         run_chroot_shell(
-            runner,
-            context,
+            sh,
             rootfs_mount,
             &format!("useradd -m -s /bin/bash {BUILD_USER}"),
         )?;
     }
-    Ok(run_chroot_output(
-        runner,
-        context,
-        rootfs_mount,
-        &format!("id -u {BUILD_USER}"),
-    )?
-    .trim()
-    .parse()?)
+    Ok(
+        run_chroot_output(sh, rootfs_mount, &format!("id -u {BUILD_USER}"))?
+            .trim()
+            .parse()?,
+    )
 }
 
-fn prepare_package_checkout(
-    runner: &ProcessRunner,
-    context: &JobContext,
-    build_root: &Path,
-    package: &str,
-) -> Result<PathBuf> {
+fn prepare_package_checkout(sh: &Shell, build_root: &Path, package: &str) -> Result<PathBuf> {
     let package_dir = build_root.join(package);
     let aur_url = format!("https://aur.archlinux.org/{package}.git");
-    runner.run_shell_success(
-        context,
-        &format!("aur_clone_{package}"),
-        &format!(
-            "rm -rf {} && git clone {} {}",
-            sh(&package_dir),
-            sh(&aur_url),
-            sh(&package_dir)
-        ),
-    )?;
+    sh.remove_path(&package_dir)?;
+    cmd!(sh, "git clone {aur_url} {package_dir}").run()?;
     Ok(package_dir)
 }
 
 fn sync_package_to_rootfs(
-    runner: &ProcessRunner,
-    context: &JobContext,
+    sh: &Shell,
     rootfs_mount: &Path,
     package_dir: &Path,
     package: &str,
@@ -195,32 +143,23 @@ fn sync_package_to_rootfs(
 ) -> Result<String> {
     let host_build_root = rootfs_mount.join(GUEST_BUILD_ROOT.trim_start_matches('/'));
     let host_package_dir = host_build_root.join(package);
-    runner.run_shell_success(
-        context,
-        &format!("aur_sync_{package}"),
-        &format!(
-            "sudo rm -rf {} && sudo mkdir -p {} && sudo cp -a {} {} && sudo chown -R {}:{} {}",
-            sh(&host_package_dir),
-            sh(&host_build_root),
-            sh(package_dir),
-            sh(&host_build_root),
-            build_user_uid,
-            build_user_uid,
-            sh(&host_package_dir)
-        ),
-    )?;
+    let script = format!(
+        "sudo rm -rf {} && sudo mkdir -p {} && sudo cp -a {} {} && sudo chown -R {}:{} {}",
+        quote(&host_package_dir),
+        quote(&host_build_root),
+        quote(package_dir),
+        quote(&host_build_root),
+        build_user_uid,
+        build_user_uid,
+        quote(&host_package_dir)
+    );
+    cmd!(sh, "bash -lc {script}").run()?;
     Ok(format!("{GUEST_BUILD_ROOT}/{package}"))
 }
 
-fn build_package_in_rootfs(
-    runner: &ProcessRunner,
-    context: &JobContext,
-    rootfs_mount: &Path,
-    guest_package_dir: &str,
-) -> Result<()> {
+fn build_package_in_rootfs(sh: &Shell, rootfs_mount: &Path, guest_package_dir: &str) -> Result<()> {
     run_chroot_shell(
-        runner,
-        context,
+        sh,
         rootfs_mount,
         &format!(
             "cd {} && runuser -u {BUILD_USER} -- makepkg --syncdeps --noconfirm --needed --cleanbuild --force --nocheck",
@@ -230,8 +169,7 @@ fn build_package_in_rootfs(
 }
 
 fn refresh_package_cache(
-    runner: &ProcessRunner,
-    context: &JobContext,
+    sh: &Shell,
     rootfs_mount: &Path,
     package_cache: &Path,
     guest_package_dir: &str,
@@ -242,32 +180,21 @@ fn refresh_package_cache(
     if built_packages.is_empty() {
         bail!("AUR package {package} did not produce a non-debug package artifact");
     }
-    runner.run_shell_success(
-        context,
-        &format!("aur_cache_{package}"),
-        &format!(
-            "sudo rm -rf {} && sudo mkdir -p {}",
-            sh(package_cache),
-            sh(package_cache)
-        ),
-    )?;
+
+    let script = format!(
+        "sudo rm -rf {} && sudo mkdir -p {}",
+        quote(package_cache),
+        quote(package_cache)
+    );
+    cmd!(sh, "bash -lc {script}").run()?;
     for built_package in built_packages {
-        runner.run_success(
-            context,
-            &format!("aur_cache_copy_{package}"),
-            Command::new("sudo")
-                .arg("cp")
-                .arg("-a")
-                .arg(built_package)
-                .arg(package_cache),
-        )?;
+        cmd!(sh, "sudo cp -a {built_package} {package_cache}").run()?;
     }
     Ok(())
 }
 
 fn install_cached_package(
-    runner: &ProcessRunner,
-    context: &JobContext,
+    sh: &Shell,
     rootfs_mount: &Path,
     package_cache: &Path,
     package: &str,
@@ -278,37 +205,26 @@ fn install_cached_package(
     if cached_packages.is_empty() {
         bail!("AUR package cache for {package} is empty");
     }
-    runner.run_shell_success(
-        context,
-        &format!("aur_stage_cache_{package}"),
-        &format!(
-            "sudo rm -rf {} && sudo mkdir -p {}",
-            sh(&host_cache_path),
-            sh(&host_cache_path)
-        ),
-    )?;
+
+    let script = format!(
+        "sudo rm -rf {} && sudo mkdir -p {}",
+        quote(&host_cache_path),
+        quote(&host_cache_path)
+    );
+    cmd!(sh, "bash -lc {script}").run()?;
     let mut guest_packages = Vec::new();
     for cached_package in cached_packages {
         let file_name = cached_package
             .file_name()
             .context("cached package missing file name")?;
-        runner.run_success(
-            context,
-            &format!("aur_stage_pkg_{package}"),
-            Command::new("sudo")
-                .arg("cp")
-                .arg("-a")
-                .arg(&cached_package)
-                .arg(&host_cache_path),
-        )?;
+        cmd!(sh, "sudo cp -a {cached_package} {host_cache_path}").run()?;
         guest_packages.push(format!(
             "{guest_cache_path}/{}",
             file_name.to_string_lossy()
         ));
     }
     run_chroot_shell(
-        runner,
-        context,
+        sh,
         rootfs_mount,
         &format!(
             "pacman --noconfirm --needed -U {}",
@@ -321,42 +237,21 @@ fn install_cached_package(
     )
 }
 
-fn run_chroot_shell(
-    runner: &ProcessRunner,
-    context: &JobContext,
-    rootfs_mount: &Path,
-    script: &str,
-) -> Result<()> {
-    runner.run_success(
-        context,
-        "rootfs_chroot_shell",
-        Command::new("sudo")
-            .arg("arch-chroot")
-            .arg(rootfs_mount)
-            .arg("/usr/bin/bash")
-            .arg("-lc")
-            .arg(script),
-    )?;
+fn run_chroot_shell(sh: &Shell, rootfs_mount: &Path, script: &str) -> Result<()> {
+    cmd!(
+        sh,
+        "sudo arch-chroot {rootfs_mount} /usr/bin/bash -lc {script}"
+    )
+    .run()?;
     Ok(())
 }
 
-fn run_chroot_output(
-    runner: &ProcessRunner,
-    context: &JobContext,
-    rootfs_mount: &Path,
-    script: &str,
-) -> Result<String> {
-    let result = runner.run_success(
-        context,
-        "rootfs_chroot_output",
-        Command::new("sudo")
-            .arg("arch-chroot")
-            .arg(rootfs_mount)
-            .arg("/usr/bin/bash")
-            .arg("-lc")
-            .arg(script),
-    )?;
-    Ok(fs::read_to_string(result.stdout_artifact)?)
+fn run_chroot_output(sh: &Shell, rootfs_mount: &Path, script: &str) -> Result<String> {
+    Ok(cmd!(
+        sh,
+        "sudo arch-chroot {rootfs_mount} /usr/bin/bash -lc {script}"
+    )
+    .read()?)
 }
 
 fn cached_package_exists(package_cache: &Path) -> Result<bool> {
@@ -384,8 +279,8 @@ fn package_artifacts(dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(packages)
 }
 
-fn sh(path: impl AsRef<std::ffi::OsStr>) -> String {
-    shell_quote(&path.as_ref().to_string_lossy())
+fn quote(path: &Path) -> String {
+    shell_quote(&path.to_string_lossy())
 }
 
 fn shell_quote(value: &str) -> String {

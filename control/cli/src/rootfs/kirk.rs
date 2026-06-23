@@ -1,15 +1,10 @@
-use crate::{JobContext, process::ProcessRunner};
 use anyhow::{Context, Result};
-use std::{fs, path::Path, process::Command};
+use std::{fs, path::Path};
+use xshell::{Shell, cmd};
 
 const KIRK_URL: &str = "https://github.com/linux-test-project/kirk";
 
-pub fn install_kirk(
-    repo: &Path,
-    runner: &ProcessRunner,
-    context: &JobContext,
-    rootfs_mount: &Path,
-) -> Result<()> {
+pub fn install_kirk(sh: &Shell, repo: &Path, rootfs_mount: &Path) -> Result<()> {
     let kirk_checkout = repo.join("target").join("kirk");
     let host_kirk_dir = rootfs_mount.join("opt").join("kirk");
     let host_kirk_bin = rootfs_mount.join("usr/local/bin/kirk");
@@ -18,79 +13,36 @@ pub fn install_kirk(
     let host_ltp_runner = rootfs_mount.join("usr/local/bin/seele-run-ltp");
 
     if !kirk_checkout.exists() {
-        runner.run_success(
-            context,
-            "kirk_clone",
-            Command::new("git")
-                .arg("clone")
-                .arg("--depth")
-                .arg("1")
-                .arg(KIRK_URL)
-                .arg(&kirk_checkout),
-        )?;
+        let depth = "1";
+        cmd!(sh, "git clone --depth {depth} {KIRK_URL} {kirk_checkout}").run()?;
     } else {
-        runner.run_success(
-            context,
-            "kirk_update",
-            Command::new("git")
-                .arg("-C")
-                .arg(&kirk_checkout)
-                .args(["fetch", "--depth", "1", "origin", "master"]),
-        )?;
-        runner.run_success(
-            context,
-            "kirk_reset",
-            Command::new("git").arg("-C").arg(&kirk_checkout).args([
-                "reset",
-                "--hard",
-                "FETCH_HEAD",
-            ]),
-        )?;
-        runner.run_success(
-            context,
-            "kirk_clean",
-            Command::new("git")
-                .arg("-C")
-                .arg(&kirk_checkout)
-                .args(["clean", "-fdx"]),
-        )?;
+        let depth = "1";
+        cmd!(
+            sh,
+            "git -C {kirk_checkout} fetch --depth {depth} origin master"
+        )
+        .run()?;
+        cmd!(sh, "git -C {kirk_checkout} reset --hard FETCH_HEAD").run()?;
+        cmd!(sh, "git -C {kirk_checkout} clean -fdx").run()?;
     }
 
-    runner.run_shell_success(
-        context,
-        "kirk_install_tree",
-        &format!(
-            "sudo rm -rf {} && sudo mkdir -p {} && sudo cp -a {}/. {}",
-            sh(&host_kirk_dir),
-            sh(&host_kirk_dir),
-            sh(&kirk_checkout),
-            sh(&host_kirk_dir)
-        ),
-    )?;
+    let script = format!(
+        "sudo rm -rf {} && sudo mkdir -p {} && sudo cp -a {}/. {}",
+        quote(&host_kirk_dir),
+        quote(&host_kirk_dir),
+        quote(&kirk_checkout),
+        quote(&host_kirk_dir)
+    );
+    cmd!(sh, "bash -lc {script}").run()?;
     fs::write(&kirk_bin, KIRK_RUNNER).context("failed to write kirk runner script")?;
-    runner.run_success(
-        context,
-        "kirk_install_runner",
-        Command::new("sudo")
-            .arg("install")
-            .arg("-Dm755")
-            .arg(&kirk_bin)
-            .arg(&host_kirk_bin),
-    )?;
+    let mode = "-Dm755";
+    cmd!(sh, "sudo install {mode} {kirk_bin} {host_kirk_bin}").run()?;
     fs::write(&ltp_runner, LTP_RUNNER).context("failed to write LTP runner script")?;
-    runner.run_success(
-        context,
-        "ltp_install_runner",
-        Command::new("sudo")
-            .arg("install")
-            .arg("-Dm755")
-            .arg(&ltp_runner)
-            .arg(&host_ltp_runner),
-    )?;
+    cmd!(sh, "sudo install {mode} {ltp_runner} {host_ltp_runner}").run()?;
     Ok(())
 }
 
-fn sh(path: &Path) -> String {
+fn quote(path: &Path) -> String {
     format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
 }
 

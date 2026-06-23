@@ -351,12 +351,10 @@ name = "control-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "clap",
  "ovmf-prebuilt",
- "serde",
  "serde_json",
- "tempfile",
+ "xshell",
 ]
 
 [[package]]
@@ -2240,6 +2238,21 @@ checksum = "18245fcbb8b3de8dd198ce7944fdd4096986fd6cd306b0fcfa27df817bd545d6"
 dependencies = [
  "zero",
 ]
+
+[[package]]
+name = "xshell"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e7290c623014758632efe00737145b6867b66292c42167f2ec381eb566a373d"
+dependencies = [
+ "xshell-macros",
+]
+
+[[package]]
+name = "xshell-macros"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32ac00cd3f8ec9c1d33fb3e7958a82df6989c42d747bd326c822b1d625283547"
 
 [[package]]
 name = "zero"

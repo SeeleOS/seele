@@ -1,8 +1,6 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use control_cli::{
-    JobState, plane::ControlPlane, rootfs::BuildRootfsConfig, tests::RunTestsConfig, vm::VmConfig,
-};
+use control_cli::{rootfs, tests, vm, vm::VmConfig};
 use std::{path::PathBuf, process::ExitCode};
 
 #[derive(Debug, Parser)]
@@ -22,14 +20,10 @@ enum Command {
 #[derive(Debug, Args)]
 struct VmArgs {
     #[arg(long)]
-    qmp_socket: Option<PathBuf>,
-    #[arg(long)]
-    serial_log: Option<PathBuf>,
-    #[arg(long)]
     rootfs_image: Option<PathBuf>,
-    #[arg(long)]
+    #[arg(long, hide = true)]
     ltp_device_image: Option<PathBuf>,
-    #[arg(long)]
+    #[arg(long, hide = true)]
     iso_image: Option<PathBuf>,
     #[arg(long)]
     enable_profiling: bool,
@@ -69,28 +63,24 @@ fn main() -> ExitCode {
 fn real_main() -> Result<i32> {
     let cli = Cli::parse_from(normalized_args());
     let repo = std::env::current_dir()?;
-    let plane = ControlPlane::new(&repo);
-    let status = match cli.command {
-        Command::Run(args) => plane.start_vm(vm_config(&repo, args)),
-        Command::Rootfs(args) => plane.start_build_rootfs(BuildRootfsConfig {
-            override_rootfs: args.override_rootfs,
-            rebuild_aur: args.rebuild_aur,
-            rebuild_aur_packages: args.rebuild_aur_packages,
-        }),
-        Command::Test(args) => plane.start_tests(RunTestsConfig {
-            selector: args.selector,
-            ltp_suite: args.ltp_suite,
-            ltp_pattern: args.ltp_pattern,
-        }),
-    };
-    let status = plane.jobs().wait(status.id, None)?;
-    println!("{}", serde_json::to_string_pretty(&status)?);
-    match status.state {
-        JobState::Finished => Ok(status.exit_code.unwrap_or(0)),
-        JobState::Failed | JobState::Cancelled | JobState::TimedOut => {
-            Ok(status.exit_code.unwrap_or(1))
-        }
-        JobState::Queued | JobState::Running => bail!("job did not reach a terminal state"),
+    match cli.command {
+        Command::Run(args) => vm::run(&repo, vm_config(&repo, args)),
+        Command::Rootfs(args) => rootfs::build_rootfs(
+            &repo,
+            &rootfs::BuildRootfsConfig {
+                override_rootfs: args.override_rootfs,
+                rebuild_aur: args.rebuild_aur,
+                rebuild_aur_packages: args.rebuild_aur_packages,
+            },
+        ),
+        Command::Test(args) => tests::run_tests(
+            &repo,
+            &tests::RunTestsConfig {
+                selector: args.selector,
+                ltp_suite: args.ltp_suite,
+                ltp_pattern: args.ltp_pattern,
+            },
+        ),
     }
 }
 
@@ -104,12 +94,6 @@ fn normalized_args() -> Vec<String> {
 
 fn vm_config(repo: &std::path::Path, args: VmArgs) -> VmConfig {
     let mut config = VmConfig::for_repo(repo);
-    if let Some(path) = args.qmp_socket {
-        config.qmp_socket = path;
-    }
-    if let Some(path) = args.serial_log {
-        config.serial_log = path;
-    }
     if let Some(path) = args.rootfs_image {
         config.rootfs_image = path;
     }

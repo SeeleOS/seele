@@ -1,39 +1,29 @@
 use super::config::RunTestsConfig;
 use crate::{
-    Artifact, ArtifactKind, JobContext, LtpCase, LtpReport,
-    build::{KernelBuildMode, KernelBuildOptions, build_kernel},
-    target_dir,
+    build::{KernelBuildMode, KernelBuildOptions, build_kernel, shell_for_repo},
     vm::{BootConfig, VmConfig, create_boot_iso, run_iso_capture},
 };
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
-use std::{fs, path::Path, time::Duration};
+use std::{path::Path, time::Duration};
 
 const REPORT_BEGIN: &str = "__SEELE_LTP_JSON_BEGIN__";
 const REPORT_END: &str = "__SEELE_LTP_JSON_END__";
 const EXIT_PREFIX: &str = "__SEELE_LTP_EXIT__:";
 
-pub fn run(repo: &Path, config: &RunTestsConfig, context: &JobContext) -> Result<LtpReport> {
-    let artifact_dir = target_dir(repo)
-        .join("control-artifacts")
-        .join("tests")
-        .join("ltp");
-    fs::create_dir_all(&artifact_dir)
-        .with_context(|| format!("failed to create {}", artifact_dir.display()))?;
-    let kirk_json = artifact_dir.join("kirk-results.json");
-    context.artifact(Artifact {
-        kind: ArtifactKind::KirkJson,
-        path: kirk_json.clone(),
-        description: "kirk JSON report".to_string(),
-    });
+#[derive(Debug, Clone, Copy)]
+pub struct LtpSummary {
+    pub passed: u64,
+    pub failed: u64,
+    pub skipped: u64,
+}
 
-    let kernels = build_kernel(
-        repo,
-        KernelBuildMode::Run,
-        KernelBuildOptions::default(),
-        context,
-    )?;
+pub fn run(repo: &Path, config: &RunTestsConfig) -> Result<LtpSummary> {
+    eprintln!("==> running LTP");
+    let sh = shell_for_repo(repo)?;
+    let kernels = build_kernel(&sh, KernelBuildMode::Run, KernelBuildOptions::default())?;
     let iso = create_boot_iso(
+        &sh,
         repo,
         &kernels[0],
         &BootConfig {
@@ -41,15 +31,14 @@ pub fn run(repo: &Path, config: &RunTestsConfig, context: &JobContext) -> Result
             ltp_suite: config.ltp_suite.clone(),
             ltp_pattern: config.ltp_pattern.clone(),
         },
-        context,
     )?;
     let result = run_iso_capture(
+        &sh,
         repo,
         &iso,
         VmConfig::for_repo(repo),
         Some(Duration::from_secs(45 * 60)),
         Some(ltp_report_observed),
-        context,
     )?;
 
     let report_json = extract_ltp_report(&result.serial_output).with_context(|| {
@@ -58,18 +47,20 @@ pub fn run(repo: &Path, config: &RunTestsConfig, context: &JobContext) -> Result
             result.serial_log.display()
         )
     })?;
-    fs::write(&kirk_json, &report_json)
-        .with_context(|| format!("failed to write {}", kirk_json.display()))?;
-    let mut report = parse_report(&kirk_json, config)?;
-    report.artifact = Some(kirk_json);
+    let summary = parse_report(&report_json)?;
     let exit_code = parse_ltp_exit_code(&result.serial_output).unwrap_or(result.exit_code);
-    if exit_code != 0 || report.failed > 0 {
+    eprintln!(
+        "LTP summary: {} passed, {} failed, {} skipped",
+        summary.passed, summary.failed, summary.skipped
+    );
+    eprintln!("LTP serial log: {}", result.serial_log.display());
+    if exit_code != 0 || summary.failed > 0 {
         bail!(
             "LTP failed: kirk exit {exit_code}, failed cases {}",
-            report.failed
+            summary.failed
         );
     }
-    Ok(report)
+    Ok(summary)
 }
 
 fn ltp_report_observed(output: &str) -> bool {
@@ -88,38 +79,17 @@ fn extract_ltp_report(output: &str) -> Option<String> {
     Some(strip_ansi_escape_sequences(output[start..end].trim()))
 }
 
-fn parse_report(path: &Path, config: &RunTestsConfig) -> Result<LtpReport> {
-    let value: Value = serde_json::from_slice(
-        &fs::read(path).with_context(|| format!("failed to read {}", path.display()))?,
-    )
-    .with_context(|| format!("failed to parse {}", path.display()))?;
-
+fn parse_report(report_json: &str) -> Result<LtpSummary> {
+    let value: Value = serde_json::from_str(report_json).context("failed to parse LTP JSON")?;
     let cases = value
         .get("results")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .map(|case| LtpCase {
-            name: case
-                .get("test")
-                .or_else(|| case.get("name"))
-                .and_then(Value::as_str)
-                .unwrap_or("unknown")
-                .to_string(),
-            status: case
-                .get("status")
-                .or_else(|| case.pointer("/test/result"))
-                .and_then(Value::as_str)
-                .unwrap_or("unknown")
-                .to_string(),
-            duration_ms: case.get("duration_ms").and_then(Value::as_u64),
-        })
+        .map(case_status)
         .collect::<Vec<_>>();
-
     let summary = value.get("summary").or_else(|| value.get("stats"));
-    Ok(LtpReport {
-        suite: config.ltp_suite.clone(),
-        pattern: config.ltp_pattern.clone(),
+    Ok(LtpSummary {
         passed: summary
             .and_then(|summary| summary.get("passed"))
             .and_then(Value::as_u64)
@@ -132,17 +102,21 @@ fn parse_report(path: &Path, config: &RunTestsConfig) -> Result<LtpReport> {
             .and_then(|summary| summary.get("skipped"))
             .and_then(Value::as_u64)
             .unwrap_or_else(|| count_status(&cases, "skip")),
-        cases,
-        artifact: Some(path.to_path_buf()),
-        stdout: String::new(),
-        stderr: String::new(),
     })
 }
 
-fn count_status(cases: &[LtpCase], needle: &str) -> u64 {
+fn case_status(case: &Value) -> String {
+    case.get("status")
+        .or_else(|| case.pointer("/test/result"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn count_status(cases: &[String], needle: &str) -> u64 {
     cases
         .iter()
-        .filter(|case| case.status.to_ascii_lowercase().contains(needle))
+        .filter(|status| status.to_ascii_lowercase().contains(needle))
         .count() as u64
 }
 

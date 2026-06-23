@@ -1,74 +1,42 @@
 use super::paths::{RootfsPaths, paths};
-use crate::{JobContext, process::ProcessRunner};
-use anyhow::{Context, Result, bail};
-use std::{
-    fs,
-    path::Path,
-    process::{Command, Stdio},
-};
+use anyhow::{Result, bail};
+use std::path::Path;
+use xshell::{Shell, cmd};
 
-pub fn ensure_mounted(repo: &Path, context: &JobContext) -> Result<RootfsPaths> {
+pub fn ensure_mounted_repo(sh: &Shell, repo: &Path) -> Result<RootfsPaths> {
     let paths = paths(repo);
-    let runner = ProcessRunner::new(&paths.artifact_dir)?;
-    ensure_mounted_with_runner(&runner, context, &paths)?;
+    ensure_mounted(sh, &paths)?;
     Ok(paths)
 }
 
-pub fn unmount(repo: &Path, context: &JobContext) -> Result<i32> {
+pub fn unmount_repo(sh: &Shell, repo: &Path) -> Result<i32> {
     let paths = paths(repo);
-    let runner = ProcessRunner::new(&paths.artifact_dir)?;
-    unmount_with_runner(&runner, context, &paths.mount)?;
+    unmount(sh, &paths.mount)?;
     Ok(0)
 }
 
-pub(super) fn ensure_mounted_with_runner(
-    runner: &ProcessRunner,
-    context: &JobContext,
-    paths: &RootfsPaths,
-) -> Result<()> {
-    fs::create_dir_all(&paths.mount)
-        .with_context(|| format!("failed to create {}", paths.mount.display()))?;
+pub(super) fn ensure_mounted(sh: &Shell, paths: &RootfsPaths) -> Result<()> {
+    sh.create_dir(&paths.mount)?;
     if is_mounted(&paths.mount)? {
         return Ok(());
     }
     if !paths.image.exists() {
         bail!("rootfs image does not exist: {}", paths.image.display());
     }
-    runner.run_success(
-        context,
-        "rootfs_mount",
-        Command::new("sudo")
-            .arg("mount")
-            .arg("-o")
-            .arg("loop")
-            .arg(&paths.image)
-            .arg(&paths.mount),
-    )?;
+    let image = &paths.image;
+    let mount = &paths.mount;
+    cmd!(sh, "sudo mount -o loop {image} {mount}").run()?;
     Ok(())
 }
 
-pub(super) fn unmount_with_runner(
-    runner: &ProcessRunner,
-    context: &JobContext,
-    mount: &Path,
-) -> Result<()> {
+pub(super) fn unmount(sh: &Shell, mount: &Path) -> Result<()> {
     if is_mounted(mount)? {
-        runner.run_success(
-            context,
-            "rootfs_umount",
-            Command::new("sudo").arg("umount").arg(mount),
-        )?;
+        cmd!(sh, "sudo umount {mount}").run()?;
     }
     Ok(())
 }
 
 fn is_mounted(path: &Path) -> Result<bool> {
-    Ok(Command::new("mountpoint")
-        .arg("-q")
-        .arg(path)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .context("failed to inspect rootfs mountpoint")?
-        .success())
+    let sh = Shell::new()?;
+    Ok(cmd!(sh, "mountpoint -q {path}").quiet().run().is_ok())
 }

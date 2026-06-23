@@ -1,10 +1,6 @@
-use crate::{Artifact, ArtifactKind, JobContext, process::ProcessRunner};
 use anyhow::{Context, Result};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::path::{Path, PathBuf};
+use xshell::{Shell, cmd};
 
 #[derive(Debug, Clone, Default)]
 pub struct BootConfig {
@@ -14,15 +10,12 @@ pub struct BootConfig {
 }
 
 pub fn create_boot_iso(
+    sh: &Shell,
     repo: &Path,
     kernel_path: &Path,
     config: &BootConfig,
-    context: &JobContext,
 ) -> Result<PathBuf> {
-    let artifact_dir = crate::target_dir(repo)
-        .join("control-artifacts")
-        .join("iso");
-    let runner = ProcessRunner::new(&artifact_dir)?;
+    eprintln!("==> creating boot ISO");
     let image_path = kernel_path.with_extension("iso");
     let build_root = kernel_path
         .parent()
@@ -33,143 +26,75 @@ pub fn create_boot_iso(
     let iso_efi_dir = build_root.join("EFI").join("BOOT");
     let efi_image = build_root.join("efiboot.img");
 
-    let _ = fs::remove_file(&image_path);
-    let _ = fs::remove_dir_all(&build_root);
-    fs::create_dir_all(&iso_limine_dir)
-        .with_context(|| format!("failed to create {}", iso_limine_dir.display()))?;
-    fs::create_dir_all(&iso_efi_dir)
-        .with_context(|| format!("failed to create {}", iso_efi_dir.display()))?;
+    sh.remove_path(&image_path)?;
+    sh.remove_path(&build_root)?;
+    sh.create_dir(&iso_limine_dir)?;
+    sh.create_dir(&iso_efi_dir)?;
 
-    fs::copy(kernel_path, iso_boot_dir.join("kernel"))
-        .with_context(|| format!("failed to stage kernel {}", kernel_path.display()))?;
-    fs::write(
+    sh.copy_file(kernel_path, iso_boot_dir.join("kernel"))?;
+    sh.write_file(
         iso_limine_dir.join("limine.conf"),
-        limine_config_contents(repo, config)?,
-    )
-    .context("failed to stage limine.conf")?;
+        limine_config_contents(sh, repo, config)?,
+    )?;
 
-    let limine_dir = limine_support_dir(&runner, context)?;
-    fs::copy(
+    let limine_dir = limine_support_dir(sh)?;
+    sh.copy_file(
         limine_dir.join("BOOTX64.EFI"),
         iso_efi_dir.join("BOOTX64.EFI"),
-    )
-    .context("failed to stage BOOTX64.EFI")?;
-    fs::copy(
+    )?;
+    sh.copy_file(
         limine_dir.join("limine-bios.sys"),
         iso_limine_dir.join("limine-bios.sys"),
+    )?;
+    create_efi_boot_image(sh, repo, &efi_image, kernel_path, &limine_dir, config)?;
+
+    let _dir = sh.push_dir(&build_root);
+    cmd!(
+        sh,
+        "xorriso -as mkisofs -e efiboot.img -no-emul-boot -isohybrid-gpt-basdat -efi-boot-part --efi-boot-image --protective-msdos-label . -o {image_path}"
     )
-    .context("failed to stage limine-bios.sys")?;
-    create_efi_boot_image(
-        repo,
-        &runner,
-        &efi_image,
-        kernel_path,
-        &limine_dir,
-        config,
-        context,
-    )?;
+    .run()?;
+    drop(_dir);
 
-    runner.run_success(
-        context,
-        "xorriso_boot_iso",
-        Command::new("xorriso")
-            .current_dir(&build_root)
-            .args([
-                "-as",
-                "mkisofs",
-                "-e",
-                "efiboot.img",
-                "-no-emul-boot",
-                "-isohybrid-gpt-basdat",
-                "-efi-boot-part",
-                "--efi-boot-image",
-                "--protective-msdos-label",
-                ".",
-                "-o",
-            ])
-            .arg(&image_path),
-    )?;
-
-    fs::remove_dir_all(&build_root)
-        .with_context(|| format!("failed to remove {}", build_root.display()))?;
-    context.artifact(Artifact {
-        kind: ArtifactKind::IsoImage,
-        path: image_path.clone(),
-        description: "Limine boot ISO".to_string(),
-    });
+    sh.remove_path(&build_root)?;
+    eprintln!("    ISO: {}", image_path.display());
     Ok(image_path)
 }
 
 fn create_efi_boot_image(
+    sh: &Shell,
     repo: &Path,
-    runner: &ProcessRunner,
     image: &Path,
     kernel_path: &Path,
     limine_dir: &Path,
     config: &BootConfig,
-    context: &JobContext,
 ) -> Result<()> {
-    runner.run_success(
-        context,
-        "efi_truncate",
-        Command::new("truncate").args(["-s", "128M"]).arg(image),
-    )?;
+    let size = "128M";
+    cmd!(sh, "truncate -s {size} {image}").run()?;
 
     let boot_efi = limine_dir.join("BOOTX64.EFI");
     let limine_conf = image.with_file_name("limine.conf");
-    fs::write(&limine_conf, limine_config_contents(repo, config)?)
-        .with_context(|| format!("failed to write {}", limine_conf.display()))?;
-    runner.run_success(
-        context,
-        "efi_mformat",
-        Command::new("mformat")
-            .arg("-i")
-            .arg(image)
-            .args(["-F", "::"]),
-    )?;
-    runner.run_success(
-        context,
-        "efi_mmd",
-        Command::new("mmd").arg("-i").arg(image).args([
-            "::/EFI",
-            "::/EFI/BOOT",
-            "::/boot",
-            "::/boot/limine",
-        ]),
-    )?;
-    runner.run_success(
-        context,
-        "efi_mcopy_bootx64",
-        Command::new("mcopy")
-            .arg("-i")
-            .arg(image)
-            .arg(boot_efi)
-            .arg("::/EFI/BOOT/BOOTX64.EFI"),
-    )?;
-    runner.run_success(
-        context,
-        "efi_mcopy_limine_conf",
-        Command::new("mcopy")
-            .arg("-i")
-            .arg(image)
-            .arg(limine_conf)
-            .arg("::/boot/limine/limine.conf"),
-    )?;
-    runner.run_success(
-        context,
-        "efi_mcopy_kernel",
-        Command::new("mcopy")
-            .arg("-i")
-            .arg(image)
-            .arg(kernel_path)
-            .arg("::/boot/kernel"),
-    )?;
+    sh.write_file(&limine_conf, limine_config_contents(sh, repo, config)?)?;
+    cmd!(sh, "mformat -i {image} -F ::").run()?;
+    cmd!(
+        sh,
+        "mmd -i {image} ::/EFI ::/EFI/BOOT ::/boot ::/boot/limine"
+    )
+    .run()?;
+    cmd!(sh, "mcopy -i {image} {boot_efi} ::/EFI/BOOT/BOOTX64.EFI").run()?;
+    cmd!(
+        sh,
+        "mcopy -i {image} {limine_conf} ::/boot/limine/limine.conf"
+    )
+    .run()?;
+    cmd!(sh, "mcopy -i {image} {kernel_path} ::/boot/kernel").run()?;
     Ok(())
 }
 
-fn limine_config_contents(repo: &Path, config: &BootConfig) -> Result<String> {
-    let mut contents =
-        fs::read_to_string(repo.join("limine.conf")).context("failed to read limine.conf")?;
+fn limine_config_contents(sh: &Shell, repo: &Path, config: &BootConfig) -> Result<String> {
+    let mut contents = sh
+        .read_file(repo.join("limine.conf"))
+        .context("failed to read limine.conf")?;
     let mut cmdline_args = Vec::new();
     if let Some(init) = &config.init {
         cmdline_args.push(format!("init={init}"));
@@ -200,13 +125,8 @@ fn limine_config_contents(repo: &Path, config: &BootConfig) -> Result<String> {
     Ok(contents)
 }
 
-fn limine_support_dir(runner: &ProcessRunner, context: &JobContext) -> Result<PathBuf> {
-    let result = runner.run_success(
-        context,
-        "limine_datadir",
-        Command::new("limine").arg("--print-datadir"),
-    )?;
-    let path = fs::read_to_string(&result.stdout_artifact)
-        .with_context(|| format!("failed to read {}", result.stdout_artifact.display()))?;
-    Ok(PathBuf::from(path.trim()))
+fn limine_support_dir(sh: &Shell) -> Result<PathBuf> {
+    Ok(PathBuf::from(
+        cmd!(sh, "limine --print-datadir").read()?.trim(),
+    ))
 }
