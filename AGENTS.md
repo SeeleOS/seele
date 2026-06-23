@@ -88,6 +88,7 @@ Do not use `strace` inside the VM for guest userspace debugging in this reposito
 ## Repository Layout Notes
 
 - `control/` contains the non-kernel control plane. `control/core` owns jobs, events, artifacts, rootfs, QEMU, and tests; `control/mcp` is the MCP-first entry point; `control/cli` is the thin human CLI used by cargo aliases.
+- When changing CLI or MCP control-plane behavior, update the corresponding behavior in the other entry point as well unless the difference is intentional and explicitly documented. Preserve human CLI foreground output/interaction semantics when changing shared or MCP-driven implementations.
 
 ## Review Terminology
 
