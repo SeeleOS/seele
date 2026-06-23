@@ -1,6 +1,9 @@
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use control_cli::{rootfs, tests, vm, vm::VmConfig};
+use control_cli::{
+    rootfs, tests, vm,
+    vm::{SerialConfig, VmConfig},
+};
 use std::{path::PathBuf, process::ExitCode};
 
 #[derive(Debug, Parser)]
@@ -105,5 +108,6 @@ fn vm_config(repo: &std::path::Path, args: VmArgs) -> VmConfig {
     }
     config.enable_profiling = args.enable_profiling;
     config.display = !args.no_display;
+    config.serial = SerialConfig::Stdio;
     config
 }

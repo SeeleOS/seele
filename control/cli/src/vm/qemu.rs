@@ -18,11 +18,18 @@ use xshell::Shell;
 pub struct VmConfig {
     pub qmp_socket: PathBuf,
     pub serial_log: PathBuf,
+    pub serial: SerialConfig,
     pub rootfs_image: PathBuf,
     pub ltp_device_image: PathBuf,
     pub iso_image: Option<PathBuf>,
     pub enable_profiling: bool,
     pub display: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SerialConfig {
+    File,
+    Stdio,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +46,7 @@ impl VmConfig {
         Self {
             qmp_socket: artifact_dir.join("qmp.sock"),
             serial_log: artifact_dir.join("serial.log"),
+            serial: SerialConfig::File,
             rootfs_image: target_dir(repo).join("rootfs.img"),
             ltp_device_image: target_dir(repo).join("ltp-dev.img"),
             iso_image: None,
@@ -65,7 +73,7 @@ pub fn run(repo: &Path, mut config: VmConfig) -> Result<i32> {
         }
     };
     eprintln!("==> launching QEMU");
-    eprintln!("    serial log: {}", config.serial_log.display());
+    config.serial.describe(&config.serial_log);
     let mut child = spawn_qemu(repo, &iso, &config)?;
     let status = child.wait().context("failed to wait for qemu")?;
     let _ = fs::remove_file(qemu_pid_path(repo));
@@ -135,7 +143,9 @@ fn spawn_qemu(repo: &Path, iso: &Path, config: &VmConfig) -> Result<Child> {
     fs::create_dir_all(&artifact_dir)
         .with_context(|| format!("failed to create {}", artifact_dir.display()))?;
     let _ = fs::remove_file(&config.qmp_socket);
-    let _ = fs::remove_file(&config.serial_log);
+    if config.serial == SerialConfig::File {
+        let _ = fs::remove_file(&config.serial_log);
+    }
     ensure_ltp_device_image(&config.ltp_device_image)?;
 
     let mut command = qemu_command(repo, iso, config)?;
@@ -158,7 +168,7 @@ fn qemu_command(repo: &Path, iso: &Path, config: &VmConfig) -> Result<Command> {
         .arg("-smp")
         .arg(default_smp())
         .args(["-serial"])
-        .arg(format!("file:{}", config.serial_log.display()))
+        .arg(config.serial.qemu_arg(&config.serial_log))
         .args(["-qmp"])
         .arg(format!(
             "unix:{},server=on,wait=off",
@@ -211,6 +221,22 @@ fn qemu_command(repo: &Path, iso: &Path, config: &VmConfig) -> Result<Command> {
     ));
     command.args(["-no-reboot", "-action", "reboot=shutdown"]);
     Ok(command)
+}
+
+impl SerialConfig {
+    fn qemu_arg(self, serial_log: &Path) -> String {
+        match self {
+            Self::File => format!("file:{}", serial_log.display()),
+            Self::Stdio => "stdio".to_string(),
+        }
+    }
+
+    fn describe(self, serial_log: &Path) {
+        match self {
+            Self::File => eprintln!("    serial log: {}", serial_log.display()),
+            Self::Stdio => eprintln!("    serial: stdout"),
+        }
+    }
 }
 
 fn decode_qemu_exit_code(code: Option<i32>) -> i32 {
