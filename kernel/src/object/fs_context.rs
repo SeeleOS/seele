@@ -16,6 +16,7 @@ use crate::{
         sysfs::SysFs,
         tmpfs::TmpFs,
         vfs::{FileSystemRef, VirtualFS},
+        vfs_traits::MountFlags,
     },
     impl_cast_function, impl_cast_function_non_trait,
     object::{FileFlags, Object, misc::ObjectResult, traits::Statable},
@@ -42,6 +43,7 @@ struct FsContextState {
     flags: BTreeSet<String>,
     strings: BTreeMap<String, String>,
     created_fs: Option<FileSystemRef>,
+    picked_mount_path: Option<Path>,
 }
 
 pub struct FsContextObject {
@@ -57,6 +59,19 @@ impl FsContextObject {
                 flags: BTreeSet::new(),
                 strings: BTreeMap::new(),
                 created_fs: None,
+                picked_mount_path: None,
+            }),
+        })
+    }
+
+    pub fn new_picked(fs_type: String, fs: FileSystemRef, mount_path: Path) -> Arc<Self> {
+        Arc::new(Self {
+            fs_type,
+            state: Mut::new(FsContextState {
+                flags: BTreeSet::new(),
+                strings: BTreeMap::new(),
+                created_fs: Some(fs),
+                picked_mount_path: Some(mount_path),
             }),
         })
     }
@@ -73,7 +88,19 @@ impl FsContextObject {
                 if !self.flag_supported(key) {
                     return Err(SyscallError::InvalidArguments);
                 }
-                self.state.lock().flags.insert(key.into());
+                let mut state = self.state.lock();
+                if state.picked_mount_path.is_some() {
+                    match key {
+                        "ro" => {
+                            state.flags.remove("rw");
+                        }
+                        "rw" => {
+                            state.flags.remove("ro");
+                        }
+                        _ => {}
+                    }
+                }
+                state.flags.insert(key.into());
                 Ok(())
             }
             FsConfigCommand::SetString => {
@@ -121,8 +148,27 @@ impl FsContextObject {
     }
 
     fn reconfigure_filesystem(&self) -> Result<(), SyscallError> {
-        if self.state.lock().created_fs.is_none() {
+        let state = self.state.lock();
+        if state.created_fs.is_none() {
             return Err(SyscallError::InvalidArguments);
+        }
+        if let Some(path) = state.picked_mount_path.clone() {
+            let mut flags = MountFlags::empty();
+            let mut mask = MountFlags::empty();
+            if state.flags.contains("ro") {
+                flags.insert(MountFlags::MS_RDONLY);
+                mask.insert(MountFlags::MS_RDONLY);
+            }
+            if state.flags.contains("rw") {
+                mask.insert(MountFlags::MS_RDONLY);
+            }
+            drop(state);
+            if !mask.is_empty() {
+                VirtualFS
+                    .lock()
+                    .remount_bind(path, flags, mask, false)
+                    .map_err(SyscallError::from)?;
+            }
         }
         Ok(())
     }
@@ -165,6 +211,9 @@ impl FsContextObject {
     }
 
     fn flag_supported(&self, key: &str) -> bool {
+        if self.state.lock().picked_mount_path.is_some() {
+            return matches!(key, "ro" | "rw");
+        }
         match self.fs_type.as_str() {
             "tmpfs" | "ramfs" => matches!(key, "noswap" | "ro"),
             "proc" => false,
@@ -173,6 +222,9 @@ impl FsContextObject {
     }
 
     fn string_supported(&self, key: &str) -> bool {
+        if self.state.lock().picked_mount_path.is_some() {
+            return key == "sync";
+        }
         if key == "source" {
             return true;
         }

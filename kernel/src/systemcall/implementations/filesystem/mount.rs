@@ -192,6 +192,9 @@ define_syscall!(Umount2, |target: CString, flags: UmountFlags| {
 
 define_syscall!(Fsopen, |fs_name: CString, flags: FsOpenFlags| {
     let fs_name = path_from_raw(fs_name)?;
+    if !is_supported_fs_context_type(&fs_name) {
+        return Err(SyscallError::NoDevice);
+    }
     let fd_flags = if flags.contains(FsOpenFlags::FSCONTEXT_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
@@ -217,9 +220,24 @@ define_syscall!(Fsconfig, |fd: i32,
     Ok(0)
 });
 
-define_syscall!(Fsmount, |fd: i32,
-                          flags: FsMountFlags,
-                          _mount_attrs: u32| {
+define_syscall!(Fsmount, |fd: i32, flags: FsMountFlags, mount_attrs: u32| {
+    const FSMOUNT_SUPPORTED_ATTRS: u32 = (MOUNT_ATTR_RDONLY
+        | MOUNT_ATTR_NOSUID
+        | MOUNT_ATTR_NODEV
+        | MOUNT_ATTR_NOEXEC
+        | MOUNT_ATTR_NOATIME
+        | MOUNT_ATTR_STRICTATIME
+        | MOUNT_ATTR_NODIRATIME) as u32;
+    if mount_attrs & !FSMOUNT_SUPPORTED_ATTRS != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    let attr = LinuxMountAttr {
+        attr_set: u64::from(mount_attrs),
+        attr_clr: 0,
+        propagation: 0,
+        userns_fd: 0,
+    };
+    let (mount_flags, mount_mask, _) = mount_attr_flag_update(&attr)?;
     let object = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
     let fs_context = object.as_fs_context()?;
     let mount_path = next_api_mount_path()?;
@@ -232,6 +250,10 @@ define_syscall!(Fsmount, |fd: i32,
         let mount_root = open_path(mount_path.clone())?;
         mount_root.chmod(mode)?;
     }
+    VirtualFS
+        .lock()
+        .remount_bind(mount_path.clone(), mount_flags, mount_mask, false)
+        .map_err(SyscallError::from)?;
 
     let mount_root: ObjectRef = Arc::new(open_path(mount_path)?);
     let fd_flags = if flags.contains(FsMountFlags::FSMOUNT_CLOEXEC) {
@@ -333,6 +355,53 @@ define_syscall!(
         Ok(0)
     }
 );
+
+define_syscall!(Fspick, |dirfd: i32, path: CString, flags: FsPickFlags| {
+    let object_path = if path.is_null() {
+        if !flags.contains(FsPickFlags::FSPICK_EMPTY_PATH) {
+            return Err(SyscallError::BadAddress);
+        }
+        get_object_current_process(dirfd as u64)
+            .map_err(SyscallError::from)?
+            .as_file_like()?
+            .path()
+            .normalize()
+    } else {
+        let path = path_from_raw(path)?;
+        if path.is_empty() {
+            if !flags.contains(FsPickFlags::FSPICK_EMPTY_PATH) {
+                return Err(SyscallError::InvalidArguments);
+            }
+            get_object_current_process(dirfd as u64)
+                .map_err(SyscallError::from)?
+                .as_file_like()?
+                .path()
+                .normalize()
+        } else {
+            let resolved = resolve_path_at(dirfd, &path)?.normalize();
+            if flags.contains(FsPickFlags::FSPICK_SYMLINK_NOFOLLOW) {
+                open_path_nofollow(resolved.clone())?;
+            } else {
+                open_path(resolved.clone())?;
+            }
+            resolved
+        }
+    };
+
+    let (mount_path, fs, _, _) = VirtualFS
+        .lock()
+        .mount_metadata(object_path)
+        .map_err(SyscallError::from)?;
+    let fs_context = FsContextObject::new_picked("picked".into(), fs, mount_path);
+    let fd_flags = if flags.contains(FsPickFlags::FSPICK_CLOEXEC) {
+        FdFlags::CLOEXEC
+    } else {
+        FdFlags::empty()
+    };
+    Ok(get_current_process()
+        .lock()
+        .push_object_with_flags(fs_context, fd_flags))
+});
 
 define_syscall!(OpenTree, |dirfd: i32,
                            path: CString,

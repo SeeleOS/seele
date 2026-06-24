@@ -262,6 +262,7 @@ pub enum SyscallNumber {
     PidfdSendSignal = 424,
     Fsopen = 430,
     Fsconfig = 431,
+    Fspick = 433,
     OpenTree = 428,
     MoveMount = 429,
     Fsmount = 432,

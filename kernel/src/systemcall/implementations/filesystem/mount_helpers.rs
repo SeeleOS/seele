@@ -2,6 +2,10 @@ use super::*;
 use crate::filesystem::vfs::MountPropagationUpdate;
 
 pub(super) fn is_supported_api_mount(fstype: &str) -> bool {
+    is_supported_fs_context_type(fstype) || matches!(fstype, "fuse" | "fuseblk")
+}
+
+pub(super) fn is_supported_fs_context_type(fstype: &str) -> bool {
     matches!(
         fstype,
         "proc"
@@ -16,6 +20,7 @@ pub(super) fn is_supported_api_mount(fstype: &str) -> bool {
             | "ext2"
             | "ext3"
             | "ext4"
+            | "ramfs"
     )
 }
 

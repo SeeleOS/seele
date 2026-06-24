@@ -281,6 +281,7 @@ define_syscall_table!(
     Fsopen,
     Fsconfig,
     Fsmount,
+    Fspick,
     PidfdOpen,
     Clone3,
     CloseRange,

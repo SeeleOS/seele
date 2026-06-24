@@ -201,11 +201,22 @@ bitflags! {
         const MOVE_MOUNT_F_SYMLINKS = 0x0000_0001;
         const MOVE_MOUNT_F_AUTOMOUNTS = 0x0000_0002;
         const MOVE_MOUNT_F_EMPTY_PATH = 0x0000_0004;
+        const MOVE_MOUNT_F_NOFOLLOW = 0x0000_0008;
         const MOVE_MOUNT_T_SYMLINKS = 0x0000_0010;
         const MOVE_MOUNT_T_AUTOMOUNTS = 0x0000_0020;
         const MOVE_MOUNT_T_EMPTY_PATH = 0x0000_0040;
         const MOVE_MOUNT_SET_GROUP = 0x0000_0100;
         const MOVE_MOUNT_BENEATH = 0x0000_0200;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) struct FsPickFlags: u32 {
+        const FSPICK_CLOEXEC = 0x0000_0001;
+        const FSPICK_SYMLINK_NOFOLLOW = 0x0000_0002;
+        const FSPICK_NO_AUTOMOUNT = 0x0000_0004;
+        const FSPICK_EMPTY_PATH = 0x0000_0008;
     }
 }
 
