@@ -21,8 +21,27 @@ bitflags! {
         const MS_NOEXEC = 8;
         const MS_NOATIME = 1024;
         const MS_NODIRATIME = 2048;
+        const MS_NOSYMFOLLOW = 8192;
         const MS_RELATIME = 1 << 21;
         const MS_STRICTATIME = 1 << 24;
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MountPropagation {
+    Private,
+    Shared(u64),
+    Slave { master: u64 },
+    Unbindable,
+}
+
+impl MountPropagation {
+    pub fn mountinfo_options(self) -> Option<String> {
+        match self {
+            Self::Private | Self::Unbindable => None,
+            Self::Shared(id) => Some(alloc::format!("shared:{id}")),
+            Self::Slave { master } => Some(alloc::format!("master:{master}")),
+        }
     }
 }
 
@@ -48,6 +67,9 @@ impl MountFlags {
         }
         if self.contains(Self::MS_NODIRATIME) {
             options.push("nodiratime");
+        }
+        if self.contains(Self::MS_NOSYMFOLLOW) {
+            options.push("nosymfollow");
         }
         if self.contains(Self::MS_RELATIME) {
             options.push("relatime");

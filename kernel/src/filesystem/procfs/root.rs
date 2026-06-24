@@ -6,7 +6,7 @@ use crate::{
     filesystem::{
         info::DirectoryContentInfo,
         vfs::{FileSystemRef, VirtualFS},
-        vfs_traits::{DirectoryContentType, MountFlags},
+        vfs_traits::{DirectoryContentType, MountFlags, MountPropagation},
     },
     misc::time::Time,
     process::manager::MANAGER,
@@ -285,23 +285,36 @@ fn generate_uuid(mut state: u64) -> String {
     )
 }
 
-fn sorted_mounts() -> Vec<(String, FileSystemRef, String, MountFlags, u64, u64)> {
+type ProcMountSnapshot = (
+    String,
+    FileSystemRef,
+    String,
+    MountFlags,
+    MountPropagation,
+    u64,
+    u64,
+);
+
+fn sorted_mounts() -> Vec<ProcMountSnapshot> {
     let mut mounts = VirtualFS
         .lock()
-        .mount_snapshots()
+        .mount_snapshots_with_propagation()
         .into_iter()
-        .map(|(path, fs, source_path, flags, device_id, mount_id)| {
-            (
-                path.as_string(),
-                fs,
-                source_path.as_string(),
-                flags,
-                device_id,
-                mount_id,
-            )
-        })
+        .map(
+            |(path, fs, source_path, flags, propagation, device_id, mount_id)| {
+                (
+                    path.as_string(),
+                    fs,
+                    source_path.as_string(),
+                    flags,
+                    propagation,
+                    device_id,
+                    mount_id,
+                )
+            },
+        )
         .collect::<Vec<_>>();
-    mounts.sort_by_key(|(path, _, _, _, _, _)| (path.matches('/').count(), path.len()));
+    mounts.sort_by_key(|(path, _, _, _, _, _, _)| (path.matches('/').count(), path.len()));
     mounts
 }
 
@@ -428,7 +441,7 @@ mod tests {
 
 pub(super) fn proc_mounts_bytes() -> Vec<u8> {
     let mut out = String::new();
-    for (path, fs, _, flags, _, _) in sorted_mounts() {
+    for (path, fs, _, flags, _, _, _) in sorted_mounts() {
         let fs = fs.lock();
         out.push_str(fs.mount_source());
         out.push(' ');
@@ -446,12 +459,12 @@ pub(super) fn proc_mountinfo_bytes() -> Vec<u8> {
     let mounts = sorted_mounts();
     let mut ids = BTreeMap::new();
 
-    for (path, _, _, _, _, mount_id) in mounts.iter() {
+    for (path, _, _, _, _, _, mount_id) in mounts.iter() {
         ids.insert(path.clone(), *mount_id);
     }
 
     let mut out = String::new();
-    for (path, fs, source_path, flags, device_id, mount_id) in mounts {
+    for (path, fs, source_path, flags, propagation, device_id, mount_id) in mounts {
         let parent_id = if path == "/" {
             0
         } else {
@@ -468,8 +481,12 @@ pub(super) fn proc_mountinfo_bytes() -> Vec<u8> {
         };
         let fs = fs.lock();
         let options = flags.proc_options();
+        let propagation_options = propagation
+            .mountinfo_options()
+            .map(|option| format!(" {option}"))
+            .unwrap_or_default();
         out.push_str(&format!(
-            "{mount_id} {parent_id} 0:{device_id} {source_path} {path} {options} - {} {} {options}\n",
+            "{mount_id} {parent_id} 0:{device_id} {source_path} {path} {options}{propagation_options} - {} {} {options}\n",
             fs.name(),
             fs.mount_source()
         ));

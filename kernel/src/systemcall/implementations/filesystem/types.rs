@@ -222,6 +222,18 @@ bitflags! {
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
+    pub(crate) struct OpenTreeAttrFlags: u64 {
+        const OPEN_TREE_CLONE = OpenTreeFlags::OPEN_TREE_CLONE.bits() as u64;
+        const AT_SYMLINK_NOFOLLOW = AtFlags::SYMLINK_NOFOLLOW.bits() as u64;
+        const AT_NO_AUTOMOUNT = AtFlags::NO_AUTOMOUNT.bits() as u64;
+        const AT_EMPTY_PATH = AtFlags::EMPTY_PATH.bits() as u64;
+        const OPEN_TREE_CLOEXEC = OpenTreeFlags::OPEN_TREE_CLOEXEC.bits() as u64;
+        const RECURSIVE = AtFlags::RECURSIVE.bits() as u64;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
     pub(super) struct MountOperationFlags: u64 {
         const MS_REMOUNT = 32;
         const MS_BIND = 4096;

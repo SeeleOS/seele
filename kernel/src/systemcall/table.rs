@@ -292,4 +292,5 @@ define_syscall_table!(
     MountSetattr,
     QuotactlFd,
     Fchmodat2,
+    OpenTreeAttr,
 );

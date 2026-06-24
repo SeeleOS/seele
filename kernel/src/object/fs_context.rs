@@ -5,18 +5,24 @@ use num_enum::TryFromPrimitive;
 
 use crate::{
     filesystem::{
+        block_device::BlockDevice,
+        block_device::cache::CachedBlockDevice,
         cgroupfs::CgroupFs,
         devfs::{DevFs, DevPtsFs},
+        impls::ext4::{EXT4, operator::Ext4BlockOperator},
         info::LinuxStat,
+        path::Path,
         procfs::ProcFs,
         sysfs::SysFs,
         tmpfs::TmpFs,
-        vfs::FileSystemRef,
+        vfs::{FileSystemRef, VirtualFS},
     },
     impl_cast_function, impl_cast_function_non_trait,
     object::{FileFlags, Object, misc::ObjectResult, traits::Statable},
     systemcall::utils::SyscallError,
 };
+use alloc::boxed::Box;
+use ext4plus::Ext4 as Ext4Inner;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
 #[repr(u32)]
@@ -106,11 +112,11 @@ impl FsContextObject {
     }
 
     fn create_filesystem(&self) -> Result<(), SyscallError> {
-        let mut state = self.state.lock();
-        if state.created_fs.is_some() {
+        if self.state.lock().created_fs.is_some() {
             return Ok(());
         }
-        state.created_fs = Some(self.instantiate_filesystem()?);
+        let fs = self.instantiate_filesystem()?;
+        self.state.lock().created_fs = Some(fs);
         Ok(())
     }
 
@@ -130,8 +136,32 @@ impl FsContextObject {
             "cgroup2" => Ok(Arc::new(Mut::new(CgroupFs::new()))),
             "tmpfs" => Ok(Arc::new(Mut::new(TmpFs::new()))),
             "ramfs" => Ok(Arc::new(Mut::new(TmpFs::ramfs()))),
-            _ => Err(SyscallError::NoSyscall),
+            "ext2" | "ext3" | "ext4" => self.instantiate_ext_filesystem(),
+            _ => Err(SyscallError::NoDevice),
         }
+    }
+
+    fn instantiate_ext_filesystem(&self) -> Result<FileSystemRef, SyscallError> {
+        let source = self
+            .state
+            .lock()
+            .strings
+            .get("source")
+            .cloned()
+            .ok_or(SyscallError::InvalidArguments)?;
+        let source_object = VirtualFS.lock().open(Path::new(&source))?;
+        let block_device = source_object
+            .device_backing_object()
+            .ok_or(SyscallError::NoDevice)?
+            .as_block_device()?;
+        let device: Arc<dyn BlockDevice> =
+            Arc::new(CachedBlockDevice::new(block_device.backing_device()));
+        let reader = Ext4BlockOperator::new(device.clone());
+        let writer = Ext4BlockOperator::new(device);
+        let ext4 = Ext4Inner::load_with_writer(Box::new(reader), Some(Box::new(writer)))
+            .map_err(|_| SyscallError::IOError)?;
+        let ext4 = EXT4::new(ext4).map_err(|_| SyscallError::IOError)?;
+        Ok(Arc::new(Mut::new(ext4)))
     }
 
     fn flag_supported(&self, key: &str) -> bool {
@@ -153,6 +183,7 @@ impl FsContextObject {
             ),
             "ramfs" => matches!(key, "mode"),
             "proc" => matches!(key, "hidepid" | "subset"),
+            "ext2" | "ext3" | "ext4" => key == "source",
             _ => false,
         }
     }

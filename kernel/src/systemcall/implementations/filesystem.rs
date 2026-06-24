@@ -67,8 +67,8 @@ use mount_helpers::*;
 use path_helpers::*;
 use types::*;
 pub(crate) use types::{
-    AtFlags, FsMountFlags, FsOpenFlags, MoveMountFlags, OpenFlags, OpenTreeFlags, UmountFlags,
-    XattrFlags,
+    AtFlags, FsMountFlags, FsOpenFlags, MoveMountFlags, OpenFlags, OpenTreeAttrFlags,
+    OpenTreeFlags, UmountFlags, XattrFlags,
 };
 use xattr_helpers::*;
 

@@ -5,7 +5,8 @@ define_syscall!(Statfs, |path: CString, buf: *mut LinuxStatFs| {
     let path = resolve_path_at(AT_FDCWD, &path)?;
 
     let _ = open_path(path.clone())?;
-    let statfs = linux_statfs(filesystem_magic_for_path(&path)?);
+    let (_, _, _, mount_flags) = VirtualFS.lock().mount_metadata(path.clone())?;
+    let statfs = linux_statfs_with_flags(filesystem_magic_for_path(&path)?, mount_flags);
     user_safe::write(buf, &statfs)?;
 
     Ok(0)
@@ -13,7 +14,19 @@ define_syscall!(Statfs, |path: CString, buf: *mut LinuxStatFs| {
 
 define_syscall!(Fstatfs, |fd: u64, buf: *mut LinuxStatFs| {
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
-    let statfs = linux_statfs(filesystem_magic_for_object(&object)?);
+    let mount_flags = object
+        .clone()
+        .as_file_like()
+        .ok()
+        .and_then(|file_like| {
+            VirtualFS
+                .lock()
+                .mount_metadata(file_like.path())
+                .ok()
+                .map(|(_, _, _, flags)| flags)
+        })
+        .unwrap_or_else(MountFlags::empty);
+    let statfs = linux_statfs_with_flags(filesystem_magic_for_object(&object)?, mount_flags);
     user_safe::write(buf, &statfs)?;
     Ok(0)
 });

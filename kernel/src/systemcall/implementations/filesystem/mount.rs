@@ -268,7 +268,18 @@ define_syscall!(
                     get_object_current_process(from_dirfd as u64).map_err(SyscallError::from)?;
                 object.as_file_like()?.path().normalize()
             } else {
-                resolve_path_at(from_dirfd, &from_path)?.normalize()
+                let object =
+                    get_object_current_process(from_dirfd as u64).map_err(SyscallError::from)?;
+                let file_like = object.as_file_like()?;
+                let base = file_like.path().normalize();
+                let resolved = if from_path.starts_with('/') {
+                    resolve_path_at(from_dirfd, &from_path)?
+                } else {
+                    let candidate = base.join_path(&Path::new(&from_path));
+                    let _ = open_path(candidate.clone())?;
+                    candidate
+                };
+                resolved.normalize()
             }
         };
 
@@ -300,19 +311,25 @@ define_syscall!(
 
         let _ = open_path(target_path.clone())?;
 
-        VirtualFS
-            .lock()
-            .attach_mount(target_path, mount_fs, mount_source_path, mount_flags)
-            .map_err(SyscallError::from)?;
-        VirtualFS
-            .lock()
-            .unmount(source_path.clone())
-            .map_err(SyscallError::from)?;
+        if flags.contains(MoveMountFlags::MOVE_MOUNT_BENEATH) {
+            VirtualFS
+                .lock()
+                .stack_mount_beneath(source_path.clone(), target_path)
+                .map_err(SyscallError::from)?;
+        } else {
+            VirtualFS
+                .lock()
+                .attach_mount(target_path, mount_fs, mount_source_path, mount_flags)
+                .map_err(SyscallError::from)?;
+            VirtualFS
+                .lock()
+                .unmount(source_path.clone())
+                .map_err(SyscallError::from)?;
+        }
         if is_api_mount_path(&source_path) {
             let _ = VirtualFS.lock().delete_file(source_path);
         }
 
-        let _ = flags.contains(MoveMountFlags::MOVE_MOUNT_BENEATH);
         Ok(0)
     }
 );
@@ -320,27 +337,56 @@ define_syscall!(
 define_syscall!(OpenTree, |dirfd: i32,
                            path: CString,
                            flags: OpenTreeFlags| {
-    let object = if path.is_null() {
+    let object_path = if path.is_null() {
         if !flags.contains(OpenTreeFlags::AT_EMPTY_PATH) {
             return Err(SyscallError::BadAddress);
         }
-        get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
+        get_object_current_process(dirfd as u64)
+            .map_err(SyscallError::from)?
+            .as_file_like()?
+            .path()
+            .normalize()
     } else {
         let path = path_from_raw(path)?;
         if path.is_empty() && flags.contains(OpenTreeFlags::AT_EMPTY_PATH) {
-            get_object_current_process(dirfd as u64).map_err(SyscallError::from)?
+            get_object_current_process(dirfd as u64)
+                .map_err(SyscallError::from)?
+                .as_file_like()?
+                .path()
+                .normalize()
         } else {
             let path = resolve_path_at(dirfd, &path)?;
-            let file = if flags.contains(OpenTreeFlags::AT_SYMLINK_NOFOLLOW) {
-                open_path_nofollow(path)?
+            if flags.contains(OpenTreeFlags::AT_SYMLINK_NOFOLLOW) {
+                open_path_nofollow(path.clone())?;
             } else {
-                open_path(path)?
+                open_path(path.clone())?;
             };
-            Arc::new(file)
+            path.normalize()
         }
     };
 
-    let _ = object.clone().as_file_like()?;
+    let object: ObjectRef = if flags.contains(OpenTreeFlags::OPEN_TREE_CLONE) {
+        let (mount_path, fs, source_path, mount_flags, propagation) = VirtualFS
+            .lock()
+            .mount_metadata_with_propagation(object_path.clone())?;
+        if mount_path != object_path {
+            return Err(SyscallError::InvalidArguments);
+        }
+        let detached_path = next_api_mount_path()?;
+        VirtualFS
+            .lock()
+            .attach_mount_with_propagation(
+                detached_path.clone(),
+                fs,
+                source_path,
+                mount_flags,
+                propagation,
+            )
+            .map_err(SyscallError::from)?;
+        Arc::new(open_path(detached_path)?)
+    } else {
+        Arc::new(open_path(object_path)?)
+    };
 
     let fd_flags = if flags.contains(OpenTreeFlags::OPEN_TREE_CLOEXEC) {
         FdFlags::CLOEXEC
@@ -349,6 +395,65 @@ define_syscall!(OpenTree, |dirfd: i32,
     };
     let process = get_current_process();
     let fd = process.lock().push_object_with_flags(object, fd_flags);
+    Ok(fd)
+});
+
+define_syscall!(OpenTreeAttr, |dirfd: i32,
+                               path: CString,
+                               flags: OpenTreeAttrFlags,
+                               attr: *const LinuxMountAttr,
+                               size: usize| {
+    if size < core::mem::size_of::<LinuxMountAttr>() {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if attr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let attr = user_safe::read(attr)?;
+    let open_tree_flags = OpenTreeFlags::from_bits(
+        (flags.bits()
+            & (OpenTreeFlags::OPEN_TREE_CLONE
+                | OpenTreeFlags::AT_SYMLINK_NOFOLLOW
+                | OpenTreeFlags::AT_NO_AUTOMOUNT
+                | OpenTreeFlags::AT_EMPTY_PATH
+                | OpenTreeFlags::OPEN_TREE_CLOEXEC)
+                .bits() as u64) as u32,
+    )
+    .ok_or(SyscallError::InvalidArguments)?;
+    let fd = OpenTree::handle_call(
+        dirfd as u64,
+        path as u64,
+        open_tree_flags.bits() as u64,
+        0,
+        0,
+        0,
+    )?;
+    let target_path = get_object_current_process(fd as u64)
+        .map_err(SyscallError::from)?
+        .as_file_like()?
+        .path()
+        .normalize();
+    let (remount_flags, remount_mask, propagation) = mount_attr_flag_update(&attr)?;
+    VirtualFS
+        .lock()
+        .remount_bind(
+            target_path.clone(),
+            remount_flags,
+            remount_mask,
+            flags.contains(OpenTreeAttrFlags::RECURSIVE),
+        )
+        .map_err(SyscallError::from)?;
+    if let Some(propagation) = propagation {
+        VirtualFS
+            .lock()
+            .set_mount_propagation(
+                target_path,
+                propagation,
+                flags.contains(OpenTreeAttrFlags::RECURSIVE),
+            )
+            .map_err(SyscallError::from)?;
+    }
     Ok(fd)
 });
 
@@ -378,17 +483,23 @@ define_syscall!(MountSetattr, |dirfd: i32,
     if mount_path != target_path {
         return Err(SyscallError::InvalidArguments);
     }
-    let (remount_flags, remount_mask) = mount_attr_flag_update(&attr)?;
+    let (remount_flags, remount_mask, propagation) = mount_attr_flag_update(&attr)?;
 
     VirtualFS
         .lock()
         .remount_bind(
-            target_path,
+            target_path.clone(),
             remount_flags,
             remount_mask,
             flags.contains(AtFlags::RECURSIVE),
         )
         .map_err(SyscallError::from)?;
+    if let Some(propagation) = propagation {
+        VirtualFS
+            .lock()
+            .set_mount_propagation(target_path, propagation, flags.contains(AtFlags::RECURSIVE))
+            .map_err(SyscallError::from)?;
+    }
 
     Ok(0)
 });

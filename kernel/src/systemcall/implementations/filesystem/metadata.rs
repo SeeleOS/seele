@@ -20,7 +20,7 @@ pub(super) fn linux_minor(dev: u64) -> u32 {
     ((dev & 0xff) | ((dev >> 12) & !0xff)) as u32
 }
 
-pub(super) fn linux_statfs(f_type: i64) -> LinuxStatFs {
+pub(super) fn linux_statfs_with_flags(f_type: i64, flags: MountFlags) -> LinuxStatFs {
     LinuxStatFs {
         f_type,
         f_bsize: 4096,
@@ -32,7 +32,7 @@ pub(super) fn linux_statfs(f_type: i64) -> LinuxStatFs {
         f_fsid: 1,
         f_namelen: 255,
         f_frsize: 4096,
-        f_flags: 0,
+        f_flags: flags.bits() as i64,
         f_spare: [0; 4],
     }
 }

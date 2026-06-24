@@ -9,7 +9,7 @@ use crate::filesystem::{
     errors::FSError,
     impls::ext4::{EXT4, operator::Ext4BlockOperator},
     path::Path,
-    vfs_traits::{Directory, File, FileSystem, MountFlags, Symlink},
+    vfs_traits::{Directory, File, FileSystem, MountFlags, MountPropagation, Symlink},
 };
 use ext4plus::Ext4 as Ext4Inner;
 use lazy_static::lazy_static;
@@ -32,6 +32,7 @@ pub struct Mount {
     pub fs: FileSystemRef,
     pub source_path: Path,
     pub flags: MountFlags,
+    pub propagation: MountPropagation,
     pub device_id: u64,
     pub mount_id: u64,
 }
@@ -40,6 +41,7 @@ pub struct VFS {
     pub(super) mounts: Vec<Mount>,
     next_mount_device_id: u64,
     next_mount_id: u64,
+    next_peer_group_id: u64,
 }
 
 impl VFS {
@@ -54,11 +56,16 @@ impl VFS {
             return Err(FSError::NotFound);
         }
 
+        let mut removed_exact = false;
         self.mounts.retain(|mount| {
             let mount_path = mount.path.clone();
             let mount_path_string = mount_path.clone().as_string();
             if mount_path_string == normalized_path_string {
-                return false;
+                if include_children || !removed_exact {
+                    removed_exact = true;
+                    return false;
+                }
+                return true;
             }
 
             !(include_children && mount_path.starts_with(&normalized_path))
@@ -71,6 +78,7 @@ impl VFS {
             mounts: Vec::new(),
             next_mount_device_id: 1,
             next_mount_id: 1,
+            next_peer_group_id: 1,
         }
     }
 
@@ -120,6 +128,17 @@ impl VFS {
         source_path: Path,
         flags: MountFlags,
     ) -> FSResult<()> {
+        self.attach_mount_with_propagation(path, fs, source_path, flags, MountPropagation::Private)
+    }
+
+    pub fn attach_mount_with_propagation(
+        &mut self,
+        path: Path,
+        fs: FileSystemRef,
+        source_path: Path,
+        flags: MountFlags,
+        propagation: MountPropagation,
+    ) -> FSResult<()> {
         let normalized_path = self.normalize_path(path);
         let normalized_path_string = normalized_path.clone().as_string();
         let device_id = self
@@ -149,6 +168,7 @@ impl VFS {
             fs,
             source_path: source_path.normalize(),
             flags,
+            propagation,
             device_id,
             mount_id,
         });
@@ -168,17 +188,19 @@ impl VFS {
                 fs: mount.fs.clone(),
                 source_path: mount.source_path.clone(),
                 flags: mount.flags,
+                propagation: mount.propagation,
                 device_id: mount.device_id,
                 mount_id: mount.mount_id,
             })
             .collect::<Vec<_>>();
 
         let (source_mount, source_relative) = self.find_mount(&source)?;
-        self.attach_mount(
+        self.attach_mount_with_propagation(
             target.clone(),
             source_mount.fs.clone(),
             source_relative,
             source_mount.flags,
+            source_mount.propagation,
         )?;
 
         if !recursive {
@@ -194,11 +216,12 @@ impl VFS {
                 continue;
             };
             let target_path = join_paths(&target, &suffix);
-            self.attach_mount(
+            self.attach_mount_with_propagation(
                 target_path,
                 mount.fs.clone(),
                 mount.source_path.clone(),
                 mount.flags,
+                mount.propagation,
             )?;
         }
 
@@ -234,6 +257,83 @@ impl VFS {
         Ok(())
     }
 
+    pub fn set_mount_propagation(
+        &mut self,
+        path: Path,
+        propagation: MountPropagationUpdate,
+        recursive: bool,
+    ) -> FSResult<()> {
+        let mount_path = self.mount_path(path)?;
+        let mut updated = false;
+        let shared_id = if propagation == MountPropagationUpdate::Shared {
+            let id = self.next_peer_group_id;
+            self.next_peer_group_id += 1;
+            Some(id)
+        } else {
+            None
+        };
+
+        for mount in &mut self.mounts {
+            if !(mount.path == mount_path || recursive && mount.path.starts_with(&mount_path)) {
+                continue;
+            }
+
+            mount.propagation = match propagation {
+                MountPropagationUpdate::Shared => MountPropagation::Shared(shared_id.unwrap()),
+                MountPropagationUpdate::Slave => {
+                    let master = match mount.propagation {
+                        MountPropagation::Shared(id) => id,
+                        MountPropagation::Slave { master } => master,
+                        MountPropagation::Private | MountPropagation::Unbindable => {
+                            let id = self.next_peer_group_id;
+                            self.next_peer_group_id += 1;
+                            id
+                        }
+                    };
+                    MountPropagation::Slave { master }
+                }
+                MountPropagationUpdate::Private => MountPropagation::Private,
+                MountPropagationUpdate::Unbindable => MountPropagation::Unbindable,
+            };
+            updated = true;
+        }
+
+        if !updated {
+            return Err(FSError::NotFound);
+        }
+
+        Ok(())
+    }
+
+    pub fn stack_mount_beneath(&mut self, source: Path, target: Path) -> FSResult<()> {
+        let source = self.normalize_path(source);
+        let target = self.normalize_path(target);
+        let source_index = self
+            .mounts
+            .iter()
+            .position(|mount| mount.path == source)
+            .ok_or(FSError::NotFound)?;
+        let target_index = self
+            .mounts
+            .iter()
+            .position(|mount| mount.path == target)
+            .ok_or(FSError::NotFound)?;
+
+        let mut source_mount = self.mounts.remove(source_index);
+        let target_index = if source_index < target_index {
+            target_index - 1
+        } else {
+            target_index
+        };
+        source_mount.path = target;
+        source_mount.mount_id = self.next_mount_id;
+        self.next_mount_id += 1;
+        self.mounts.insert(target_index + 1, source_mount);
+        self.mounts
+            .sort_by_key(|mount| Reverse(mount.path.clone().as_string().len()));
+        Ok(())
+    }
+
     pub fn unmount(&mut self, path: Path) -> FSResult<()> {
         let normalized_path = self.normalize_path(path);
         if self
@@ -263,6 +363,20 @@ impl VFS {
             mount.fs.clone(),
             mount.source_path.clone(),
             mount.flags,
+        ))
+    }
+
+    pub fn mount_metadata_with_propagation(
+        &self,
+        path: Path,
+    ) -> FSResult<(Path, FileSystemRef, Path, MountFlags, MountPropagation)> {
+        let (mount, _) = self.find_mount(&self.normalize_path(path))?;
+        Ok((
+            mount.path.clone(),
+            mount.fs.clone(),
+            mount.source_path.clone(),
+            mount.flags,
+            mount.propagation,
         ))
     }
 
@@ -309,9 +423,44 @@ impl VFS {
             .collect()
     }
 
+    pub fn mount_snapshots_with_propagation(
+        &self,
+    ) -> Vec<(
+        Path,
+        FileSystemRef,
+        Path,
+        MountFlags,
+        MountPropagation,
+        u64,
+        u64,
+    )> {
+        self.mounts
+            .iter()
+            .map(|mount| {
+                (
+                    mount.path.clone(),
+                    mount.fs.clone(),
+                    mount.source_path.clone(),
+                    mount.flags,
+                    mount.propagation,
+                    mount.device_id,
+                    mount.mount_id,
+                )
+            })
+            .collect()
+    }
+
     pub fn normalize_path(&self, path: Path) -> Path {
         path.normalize()
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MountPropagationUpdate {
+    Private,
+    Shared,
+    Slave,
+    Unbindable,
 }
 
 fn join_paths(base: &Path, suffix: &Path) -> Path {

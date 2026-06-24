@@ -274,6 +274,7 @@ pub enum SyscallNumber {
     MountSetattr = 442,
     QuotactlFd = 443,
     Fchmodat2 = 452,
+    OpenTreeAttr = 467,
 }
 
 impl SyscallNumber {

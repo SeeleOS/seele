@@ -1,4 +1,5 @@
 use super::*;
+use crate::filesystem::vfs::MountPropagationUpdate;
 
 pub(super) fn is_supported_api_mount(fstype: &str) -> bool {
     matches!(
@@ -98,23 +99,39 @@ pub(super) fn remount_bind_flag_update(bits: u64) -> (MountFlags, MountFlags) {
 
 pub(super) fn mount_attr_flag_update(
     attr: &LinuxMountAttr,
-) -> Result<(MountFlags, MountFlags), SyscallError> {
+) -> Result<(MountFlags, MountFlags, Option<MountPropagationUpdate>), SyscallError> {
     let supported_basic =
         MOUNT_ATTR_RDONLY | MOUNT_ATTR_NOSUID | MOUNT_ATTR_NODEV | MOUNT_ATTR_NOEXEC;
-    let supported_set =
-        supported_basic | MOUNT_ATTR_NOATIME | MOUNT_ATTR_STRICTATIME | MOUNT_ATTR_NODIRATIME;
+    let supported_set = supported_basic
+        | MOUNT_ATTR_NOATIME
+        | MOUNT_ATTR_STRICTATIME
+        | MOUNT_ATTR_NODIRATIME
+        | MOUNT_ATTR_NOSYMFOLLOW;
     let supported_clr = supported_basic | MOUNT_ATTR__ATIME;
 
-    if attr.propagation != 0 {
-        return Err(SyscallError::OperationNotSupported);
-    }
+    let propagation = match attr.propagation {
+        0 => None,
+        value if value == MountOperationFlags::MS_PRIVATE.bits() => {
+            Some(MountPropagationUpdate::Private)
+        }
+        value if value == MountOperationFlags::MS_SHARED.bits() => {
+            Some(MountPropagationUpdate::Shared)
+        }
+        value if value == MountOperationFlags::MS_SLAVE.bits() => {
+            Some(MountPropagationUpdate::Slave)
+        }
+        value if value == MountOperationFlags::MS_UNBINDABLE.bits() => {
+            Some(MountPropagationUpdate::Unbindable)
+        }
+        _ => return Err(SyscallError::InvalidArguments),
+    };
     if attr.attr_set & !supported_set != 0 {
         return Err(SyscallError::OperationNotSupported);
     }
     if attr.attr_clr & !supported_clr != 0 {
         return Err(SyscallError::OperationNotSupported);
     }
-    if attr.attr_set & (MOUNT_ATTR_IDMAP | MOUNT_ATTR_NOSYMFOLLOW) != 0 {
+    if attr.attr_set & MOUNT_ATTR_IDMAP != 0 {
         return Err(SyscallError::OperationNotSupported);
     }
 
@@ -142,8 +159,12 @@ pub(super) fn mount_attr_flag_update(
         flags.insert(MountFlags::MS_NODIRATIME);
         mask.insert(MountFlags::MS_NODIRATIME);
     }
+    if attr.attr_set & MOUNT_ATTR_NOSYMFOLLOW != 0 {
+        flags.insert(MountFlags::MS_NOSYMFOLLOW);
+        mask.insert(MountFlags::MS_NOSYMFOLLOW);
+    }
 
-    Ok((flags, mask))
+    Ok((flags, mask, propagation))
 }
 
 pub(super) fn tmpfs_root_mode_from_mount_data(
