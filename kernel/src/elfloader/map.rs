@@ -40,7 +40,7 @@ pub fn load_elf_lazy(
     file: Arc<FileLikeObject>,
     elf_bytes: &[u8],
 ) -> Result<ElfInfo, FSError> {
-    let elf = ElfFile::new(elf_bytes).map_err(|_| FSError::Other)?;
+    let elf = ElfFile::new(elf_bytes).map_err(|_| FSError::ExecFormat)?;
     let load_base = choose_load_base_offset(addrspace, &elf);
     let mut interpreter = None;
     let mut prefault_addrs = Vec::new();

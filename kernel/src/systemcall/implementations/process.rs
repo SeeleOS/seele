@@ -4,10 +4,15 @@ use strum::IntoEnumIterator;
 
 use crate::{
     define_syscall,
-    filesystem::{absolute_path::AbsolutePath, path::Path},
+    filesystem::{absolute_path::AbsolutePath, path::Path, vfs_operations::open_path},
     memory::user_safe,
-    misc::signal::{SigInfo, SignalHandlingType},
+    misc::{
+        c_types::{CString, CVec},
+        others::KernelFrom,
+        signal::{SigInfo, SignalHandlingType},
+    },
     object::misc::get_object_current_process,
+    object::traits::Statable,
     process::{
         Process, ProcessExitStatus, ProcessRef,
         execve::execve,
@@ -24,6 +29,11 @@ use crate::{
             BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
         },
     },
+};
+
+use super::filesystem::{
+    check_access_path_search_permissions, check_access_permissions_for_ids_with_options,
+    fs_access_credentials,
 };
 
 const SA_RESTART: u64 = 0x1000_0000;
@@ -356,9 +366,56 @@ define_syscall!(Waitid, |id_type: i32,
     Ok(0)
 });
 
-define_syscall!(Execve, |path_str: String,
-                         args: Vec<String>,
-                         env: Vec<String>| {
+fn execve_path_from_raw(path: CString) -> Result<String, SyscallError> {
+    const PATH_MAX: usize = 4096;
+    const NAME_MAX: usize = 255;
+
+    if path.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let mut out = String::new();
+    let mut component_len = 0;
+    for index in 0..=PATH_MAX {
+        let byte =
+            user_safe::read(unsafe { path.add(index) }).map_err(|_| SyscallError::BadAddress)?;
+        if byte == 0 {
+            return Ok(out);
+        }
+        if index == PATH_MAX {
+            return Err(SyscallError::PathTooLong);
+        }
+        if byte == b'/' {
+            component_len = 0;
+        } else {
+            component_len += 1;
+            if component_len > NAME_MAX {
+                return Err(SyscallError::PathTooLong);
+            }
+        }
+        out.push(byte as char);
+    }
+
+    unreachable!()
+}
+
+fn execve_strings_from_raw(values: CVec<CString>) -> Result<Vec<String>, SyscallError> {
+    Vec::k_from(values).map_err(|err| err.as_syscall_error())
+}
+
+fn check_execve_permissions(path: &Path) -> Result<(), SyscallError> {
+    let credentials = fs_access_credentials();
+    check_access_path_search_permissions(path, &credentials)?;
+    let object = open_path(path.clone())?;
+    check_access_permissions_for_ids_with_options(&object.stat(), 1, &credentials, false)
+}
+
+define_syscall!(Execve, |path_str: CString,
+                         args: CVec<CString>,
+                         env: CVec<CString>| {
+    let path_str = execve_path_from_raw(path_str)?;
+    let args = execve_strings_from_raw(args)?;
+    let env = execve_strings_from_raw(env)?;
     let path = Path::new(path_str.as_str());
     let fs_context = get_current_process().lock().fs_context.lock().clone();
     let path = AbsolutePath::join_under_root(
@@ -367,6 +424,7 @@ define_syscall!(Execve, |path_str: String,
         &path,
     )
     .as_normal();
+    check_execve_permissions(&path)?;
     execve(path, args, env)?;
     log::info!("execve done");
     Ok(0)

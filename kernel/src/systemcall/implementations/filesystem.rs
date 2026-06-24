@@ -59,6 +59,10 @@ mod xattr;
 mod xattr_helpers;
 
 use metadata::*;
+pub(in crate::systemcall::implementations) use metadata::{
+    check_access_path_search_permissions, check_access_permissions_for_ids_with_options,
+    fs_access_credentials,
+};
 use mount_helpers::*;
 use path_helpers::*;
 use types::*;

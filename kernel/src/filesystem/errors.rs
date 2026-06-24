@@ -31,6 +31,8 @@ pub enum FSError {
     AccessDenied,
     #[error("path too long")]
     PathTooLong,
+    #[error("exec format error")]
+    ExecFormat,
     #[error("too many symlinks")]
     TooManySymlinks,
     #[error("filesystem is read-only")]
@@ -56,6 +58,7 @@ impl AsSyscallError for FSError {
             Self::InvalidArguments => SyscallError::InvalidArguments,
             Self::AccessDenied => SyscallError::AccessDenied,
             Self::PathTooLong => SyscallError::PathTooLong,
+            Self::ExecFormat => SyscallError::ExecFormatError,
             Self::TooManySymlinks => SyscallError::TooManySymbolicLinks,
 
             Self::Readonly => SyscallError::ReadOnlyFileSystem,

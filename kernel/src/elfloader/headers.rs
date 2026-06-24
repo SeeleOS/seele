@@ -12,7 +12,7 @@ pub fn read_elf_header(file: &FileLikeObject) -> Result<Vec<u8>, FSError> {
     let read = file.read_at(&mut header_prefix, 0)?;
     header_prefix.truncate(read);
 
-    let elf = ElfFile::new(&header_prefix).map_err(|_| FSError::Other)?;
+    let elf = ElfFile::new(&header_prefix).map_err(|_| FSError::ExecFormat)?;
     let total = header_bytes_len(elf.header.pt2);
     let mut bytes = vec![0u8; total];
     file.read_exact_at(&mut bytes, 0)?;

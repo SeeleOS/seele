@@ -20,7 +20,7 @@ pub(in crate::systemcall::implementations::filesystem) fn check_access_permissio
 }
 
 #[derive(Clone)]
-struct AccessCredentials {
+pub(in crate::systemcall::implementations) struct AccessCredentials {
     uid: u32,
     gid: u32,
     supplementary_groups: Vec<u32>,
@@ -50,7 +50,7 @@ fn access_credentials(use_effective_ids: bool) -> AccessCredentials {
     }
 }
 
-fn fs_access_credentials() -> AccessCredentials {
+pub(in crate::systemcall::implementations) fn fs_access_credentials() -> AccessCredentials {
     let process = get_current_process();
     let process = process.lock();
     AccessCredentials {
@@ -96,7 +96,7 @@ fn has_capability(credentials: &AccessCredentials, capability: u64) -> bool {
         .is_some_and(|value| value & mask != 0)
 }
 
-fn check_access_permissions_for_ids_with_options(
+pub(in crate::systemcall::implementations) fn check_access_permissions_for_ids_with_options(
     stat: &LinuxStat,
     mode: i32,
     credentials: &AccessCredentials,
@@ -150,7 +150,7 @@ fn check_effective_access_permissions(stat: &LinuxStat, mode: i32) -> Result<(),
     check_access_permissions_for_ids(stat, mode, &access_credentials(true))
 }
 
-fn check_access_path_search_permissions(
+pub(in crate::systemcall::implementations) fn check_access_path_search_permissions(
     path: &Path,
     credentials: &AccessCredentials,
 ) -> Result<(), SyscallError> {
