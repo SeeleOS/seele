@@ -4,9 +4,9 @@ use alloc::sync::Arc;
 use crate::object::FileFlags;
 
 use super::{
-    AF_INET, AF_UNIX, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_RAW, SOCK_SEQPACKET,
-    SOCK_STREAM, SocketError, SocketResult, UnixDatagramInner, UnixSocketKind, UnixSocketObject,
-    UnixSocketState, UnixStreamInner, current_socket_peer_cred,
+    AF_INET, AF_UNIX, IPPROTO_TCP, IPPROTO_UDP, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_RAW,
+    SOCK_SEQPACKET, SOCK_STREAM, SocketError, SocketResult, UnixDatagramInner, UnixSocketKind,
+    UnixSocketObject, UnixSocketState, UnixStreamInner, current_socket_peer_cred,
 };
 
 impl UnixSocketObject {
@@ -16,11 +16,16 @@ impl UnixSocketObject {
             socket_type,
             SOCK_STREAM | SOCK_DGRAM | SOCK_SEQPACKET | SOCK_RAW
         ) {
-            return Err(SocketError::SocketTypeNotSupported);
+            return Err(SocketError::InvalidArguments);
         }
 
         if domain == AF_INET {
-            return Err(SocketError::OperationNotSupported);
+            return match (socket_type, protocol) {
+                (SOCK_DGRAM, IPPROTO_UDP) | (SOCK_STREAM, IPPROTO_TCP) => {
+                    Err(SocketError::OperationNotSupported)
+                }
+                _ => Err(SocketError::ProtocolNotSupported),
+            };
         }
 
         if domain != AF_UNIX {

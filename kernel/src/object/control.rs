@@ -65,8 +65,20 @@ fn access_mode_bits(object: &ObjectRef) -> usize {
 }
 
 pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
+    let command = FcntlCmd::try_from(command).map_err(|_| SyscallError::InvalidArguments)?;
+    match command {
+        FcntlCmd::DupFd | FcntlCmd::DupFdCloexec => {
+            with_current_process(|process| {
+                if arg >= process.rlimit_nofile_cur {
+                    return Err(SyscallError::TooManyOpenFilesProcess);
+                }
+                Ok(())
+            })?;
+        }
+        _ => {}
+    }
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
-    match FcntlCmd::try_from(command).map_err(|_| SyscallError::InvalidArguments)? {
+    match command {
         FcntlCmd::SetFl => {
             let mut flags = object.clone().get_flags().map_err(SyscallError::from)?
                 & (FileFlags::WRONLY | FileFlags::RDWR);
@@ -125,14 +137,14 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
         FcntlCmd::GetLk | FcntlCmd::OfdGetLk => fcntl_get_lock(
             &object,
             arg as *mut LinuxFlock,
-            matches!(command, x if x == FcntlCmd::OfdGetLk as u64),
+            matches!(command, FcntlCmd::OfdGetLk),
         ),
         FcntlCmd::SetLk | FcntlCmd::SetLkw | FcntlCmd::OfdSetLk | FcntlCmd::OfdSetLkw => {
             fcntl_set_lock(
                 &object,
                 arg as *mut LinuxFlock,
-                matches!(command, x if x == FcntlCmd::OfdSetLk as u64 || x == FcntlCmd::OfdSetLkw as u64),
-                matches!(command, x if x == FcntlCmd::SetLkw as u64 || x == FcntlCmd::OfdSetLkw as u64),
+                matches!(command, FcntlCmd::OfdSetLk | FcntlCmd::OfdSetLkw),
+                matches!(command, FcntlCmd::SetLkw | FcntlCmd::OfdSetLkw),
             )
         }
         FcntlCmd::AddSeals => {

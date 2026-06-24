@@ -21,6 +21,8 @@ pub enum ObjectError {
     DeviceRevoked,
     #[error("invalid object request")]
     InvalidRequest,
+    #[error("too many open files")]
+    TooManyOpenFilesProcess,
     #[error("invalid object arguments")]
     InvalidArguments,
     #[error("operation not implemented")]
@@ -45,6 +47,7 @@ impl AsSyscallError for ObjectError {
             Self::DeviceRevoked => SyscallError::NoDevice,
             Self::DoesNotExist => SyscallError::BadFileDescriptor,
             Self::InvalidRequest => SyscallError::InappropriateIoctl,
+            Self::TooManyOpenFilesProcess => SyscallError::TooManyOpenFilesProcess,
             Self::SocketError(err) => err.as_syscall_error(),
             Self::FSError(err) => err.as_syscall_error(),
             Self::Other => SyscallError::IOError,

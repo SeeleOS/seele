@@ -39,37 +39,48 @@ impl Process {
     }
 
     pub fn find_empty_fd_slot(&self, starts_from: usize) -> Option<usize> {
+        let limit = self.rlimit_nofile_cur as usize;
         self.fd_table
             .lock()
             .iter()
             .enumerate()
             .skip(starts_from)
+            .take(limit.saturating_sub(starts_from))
             .find(|(_, entry)| entry.is_none())
             .map(|(index, _)| index)
     }
 
-    pub fn alloc_fd_slot(&mut self) -> usize {
+    pub fn alloc_fd_slot(&mut self) -> ObjectResult<usize> {
         if let Some(index) = self.find_empty_fd_slot(0) {
-            index
+            return Ok(index);
+        }
+
+        let mut fd_table = self.fd_table.lock();
+        if fd_table.len() >= self.rlimit_nofile_cur as usize {
+            Err(ObjectError::TooManyOpenFilesProcess)
         } else {
-            let mut fd_table = self.fd_table.lock();
             fd_table.push(None);
-            fd_table.len() - 1
+            Ok(fd_table.len() - 1)
         }
     }
 
-    pub fn alloc_fd_slot_with_min(&mut self, min: usize) -> usize {
+    pub fn alloc_fd_slot_with_min(&mut self, min: usize) -> ObjectResult<usize> {
+        if min >= self.rlimit_nofile_cur as usize {
+            return Err(ObjectError::TooManyOpenFilesProcess);
+        }
         if let Some(index) = self.find_empty_fd_slot(min) {
-            return index;
+            return Ok(index);
         }
 
         let mut fd_table = self.fd_table.lock();
         if fd_table.len() <= min {
             fd_table.resize(min + 1, None);
-            min
-        } else {
+            Ok(min)
+        } else if fd_table.len() < self.rlimit_nofile_cur as usize {
             fd_table.push(None);
-            fd_table.len() - 1
+            Ok(fd_table.len() - 1)
+        } else {
+            Err(ObjectError::TooManyOpenFilesProcess)
         }
     }
 
@@ -134,7 +145,7 @@ impl Process {
     }
 
     pub fn clone_object(&mut self, object: ObjectRef) -> ObjectResult<usize> {
-        let slot = self.alloc_fd_slot();
+        let slot = self.alloc_fd_slot()?;
         self.set_fd_entry(slot, object, FdFlags::empty())
     }
 
@@ -148,7 +159,7 @@ impl Process {
         min: usize,
         fd_flags: FdFlags,
     ) -> ObjectResult<usize> {
-        let slot = self.alloc_fd_slot_with_min(min);
+        let slot = self.alloc_fd_slot_with_min(min)?;
         self.set_fd_entry(slot, object, fd_flags)
     }
 
