@@ -14,7 +14,7 @@ pub(super) static PROC_INOTIFY_MAX_USER_INSTANCES: AtomicU64 =
     AtomicU64::new(DEFAULT_INOTIFY_MAX_USER_INSTANCES);
 pub(super) static PROC_INOTIFY_MAX_USER_WATCHES: AtomicU64 =
     AtomicU64::new(DEFAULT_INOTIFY_MAX_USER_WATCHES);
-pub(super) static PROC_NR_OPEN: AtomicU64 = AtomicU64::new(DEFAULT_NR_OPEN);
+pub(crate) static PROC_NR_OPEN: AtomicU64 = AtomicU64::new(DEFAULT_NR_OPEN);
 pub(super) static PROC_PID_MAX: AtomicU64 = AtomicU64::new(DEFAULT_PID_MAX);
 pub(super) static PROC_NR_HUGEPAGES: AtomicU64 = AtomicU64::new(0);
 pub(super) static PROC_HUGETLB_SHM_GROUP: AtomicU64 = AtomicU64::new(0);

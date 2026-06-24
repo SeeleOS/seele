@@ -84,6 +84,8 @@ define_syscall!(RtSigsuspend, |mask: *const u64, sigset_size: usize| {
 });
 
 define_syscall!(Unshare, |flags: u64| {
+    const CAP_SYS_ADMIN: usize = 21;
+
     let unsupported = flags
         & !UnshareFlags::all().bits()
         & !(CloneFlags::THREAD | CloneFlags::SIGHAND | CloneFlags::VM | CloneFlags::CLEAR_SIGHAND)
@@ -112,10 +114,16 @@ define_syscall!(Unshare, |flags: u64| {
     if flags & supported_namespace_flags != 0 {
         let process = get_current_process();
         let mut process = process.lock();
+        let slot = CAP_SYS_ADMIN / 32;
+        let mask = 1u32 << (CAP_SYS_ADMIN % 32);
+        if process.capability_effective[slot] & mask == 0 {
+            return Err(SyscallError::PermissionDenied);
+        }
         if flags & UnshareFlags::NEWNET.bits() != 0 {
             process.net_namespace = NetNamespace::new();
         }
         if flags & UnshareFlags::NEWNS.bits() != 0 {
+            process.fs_context = crate::process::clone_fs_context(&process.fs_context);
             process.mount_namespace_snapshot = Some(
                 crate::filesystem::vfs::VirtualFS
                     .lock()
@@ -130,6 +138,22 @@ define_syscall!(Unshare, |flags: u64| {
         let process = get_current_process();
         let mut process = process.lock();
         process.fs_context = crate::process::clone_fs_context(&process.fs_context);
+    }
+    if flags & UnshareFlags::FILES.bits() != 0 {
+        let process = get_current_process();
+        let mut process = process.lock();
+        let highest_open_fd = process
+            .fd_table
+            .lock()
+            .iter()
+            .rposition(|entry| entry.is_some())
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        if highest_open_fd as u64 > crate::filesystem::procfs::PROC_NR_OPEN.load(Ordering::Relaxed)
+        {
+            return Err(SyscallError::TooManyOpenFilesProcess);
+        }
+        process.unshare_fd_table();
     }
 
     Ok(0)
