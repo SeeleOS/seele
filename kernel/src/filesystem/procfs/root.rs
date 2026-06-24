@@ -54,6 +54,7 @@ pub(super) const PROC_SYSVIPC_MSG_INODE: u64 = 0x3025;
 pub(super) const PROC_SYSVIPC_SEM_INODE: u64 = 0x3026;
 pub(super) const PROC_SYSVIPC_SHM_INODE: u64 = 0x3027;
 pub(super) const PROC_LOADAVG_INODE: u64 = 0x3028;
+pub(super) const PROC_VERSION_INODE: u64 = 0x302a;
 
 static PROC_UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -76,6 +77,7 @@ pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("sys".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("sysvipc".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("uptime".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("version".into(), DirectoryContentType::File),
     ];
 
     let pids = MANAGER.lock().processes.keys().copied().collect::<Vec<_>>();
@@ -162,6 +164,10 @@ pub(super) fn proc_stat_bytes() -> Vec<u8> {
 
 pub(super) fn proc_loadavg_bytes() -> Vec<u8> {
     b"0.00 0.00 0.00 1/1 1\n".to_vec()
+}
+
+pub(super) fn proc_version_bytes() -> Vec<u8> {
+    b"Linux version 6.12.0-seele (seele-os) #1 SMP x86_64 GNU/Linux\n".to_vec()
 }
 
 pub(super) fn proc_uptime_bytes() -> Vec<u8> {

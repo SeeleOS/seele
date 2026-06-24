@@ -46,6 +46,7 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
         )),
         ["stat"] => Ok(proc_file("stat", PROC_STAT_INODE, proc_stat_bytes)),
         ["uptime"] => Ok(proc_file("uptime", PROC_UPTIME_INODE, proc_uptime_bytes)),
+        ["version"] => Ok(proc_file("version", PROC_VERSION_INODE, proc_version_bytes)),
         ["pressure"] => Ok(proc_dir(
             "/pressure",
             "pressure",

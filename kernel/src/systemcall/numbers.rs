@@ -268,6 +268,7 @@ pub enum SyscallNumber {
     PidfdOpen = 434,
     Clone3 = 435,
     CloseRange = 436,
+    OpenAt2 = 437,
     Faccessat2 = 439,
     EpollPwait2 = 441,
     MountSetattr = 442,

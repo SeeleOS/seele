@@ -121,6 +121,14 @@ pub(super) struct LinuxMountAttr {
     pub(super) userns_fd: u64,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub(super) struct LinuxOpenHow {
+    pub(super) flags: u64,
+    pub(super) mode: u64,
+    pub(super) resolve: u64,
+}
+
 bitflags! {
     #[derive(Clone, Copy, Debug)]
     pub(crate) struct OpenFlags: i32 {
@@ -140,6 +148,18 @@ bitflags! {
         const SYNC = 0x101000;
         const PATH = 0o10000000;
         const TMPFILE = 0o20200000;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) struct OpenResolveFlags: u64 {
+        const RESOLVE_NO_XDEV = 0x01;
+        const RESOLVE_NO_MAGICLINKS = 0x02;
+        const RESOLVE_NO_SYMLINKS = 0x04;
+        const RESOLVE_BENEATH = 0x08;
+        const RESOLVE_IN_ROOT = 0x10;
+        const RESOLVE_CACHED = 0x20;
     }
 }
 

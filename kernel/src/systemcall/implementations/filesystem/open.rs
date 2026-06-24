@@ -69,24 +69,28 @@ define_syscall!(OpenAt, |dirfd: i32,
                         );
                         object
                     }
-                    Ok(None) if create => {
-                        let create_start = profile::scope_start();
-                        create_file_unlocked(path.clone(), create_mode)?;
-                        profile::record_hot_syscall_phase(
-                            HotSyscallPhase::OpenAtCreateFile,
-                            profile::scope_start().saturating_sub(create_start),
-                        );
-                        let retry_start = profile::scope_start();
-                        let reopen_result = open_path(path.clone());
-                        profile::record_hot_syscall_phase(
-                            HotSyscallPhase::OpenAtCreateReopen,
-                            profile::scope_start().saturating_sub(retry_start),
-                        );
-                        match reopen_result {
-                            Ok(file) => Arc::new(file),
-                            Err(err) => return Err(SyscallError::from(err)),
+                    Ok(None) if create => match open_existing_symlink_target(&path) {
+                        Ok(Some(object)) => object,
+                        Ok(None) => {
+                            let create_start = profile::scope_start();
+                            create_file_unlocked(path.clone(), create_mode)?;
+                            profile::record_hot_syscall_phase(
+                                HotSyscallPhase::OpenAtCreateFile,
+                                profile::scope_start().saturating_sub(create_start),
+                            );
+                            let retry_start = profile::scope_start();
+                            let reopen_result = open_path(path.clone());
+                            profile::record_hot_syscall_phase(
+                                HotSyscallPhase::OpenAtCreateReopen,
+                                profile::scope_start().saturating_sub(retry_start),
+                            );
+                            match reopen_result {
+                                Ok(file) => Arc::new(file),
+                                Err(err) => return Err(SyscallError::from(err)),
+                            }
                         }
-                    }
+                        Err(err) => return Err(err),
+                    },
                     Ok(None) => return Err(SyscallError::FileNotFound),
                     Err(err) => return Err(err),
                 }
@@ -234,6 +238,124 @@ define_syscall!(Open, |path: CString, flags: OpenFlags, mode: u32| {
         0,
     )
 });
+
+define_syscall!(OpenAt2, |dirfd: i32,
+                          path: CString,
+                          how_ptr: *const LinuxOpenHow,
+                          size: usize| {
+    let (flags, mode, resolve) = read_open_how(how_ptr, size)?;
+    let path_str = path_from_raw(path)?;
+    validate_openat2_resolve(dirfd, &path_str, resolve)?;
+    OpenAt::handle_call(
+        dirfd as u64,
+        path as u64,
+        flags.bits() as u64,
+        mode as u64,
+        0,
+        0,
+    )
+});
+
+fn read_open_how(
+    how_ptr: *const LinuxOpenHow,
+    size: usize,
+) -> Result<(OpenFlags, u32, OpenResolveFlags), SyscallError> {
+    let base_size = size_of::<LinuxOpenHow>();
+    if how_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+    if size < base_size {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let how = user_safe::read(how_ptr).map_err(|_| SyscallError::BadAddress)?;
+    if size > base_size {
+        let extra = size - base_size;
+        let tail_ptr = unsafe { (how_ptr as *const u8).add(base_size) };
+        let tail = user_safe::read_buffer(tail_ptr, extra).map_err(|_| SyscallError::BadAddress)?;
+        if tail.iter().any(|byte| *byte != 0) {
+            return Err(SyscallError::ArgumentListTooLong);
+        }
+    }
+
+    if how.flags > i32::MAX as u64 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    let flags_bits = how.flags as i32;
+    let known_flag_bits = OpenFlags::all().bits() | 0o3;
+    if flags_bits & !known_flag_bits != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    let flags = OpenFlags::from_bits_retain(flags_bits);
+    let resolve = OpenResolveFlags::from_bits(how.resolve).ok_or(SyscallError::InvalidArguments)?;
+    if how.mode & !0o7777 != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if how.mode != 0 && !(flags.contains(OpenFlags::CREAT) || flags.contains(OpenFlags::TMPFILE)) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    Ok((flags, how.mode as u32, resolve))
+}
+
+fn open_existing_symlink_target(path: &Path) -> Result<Option<ObjectRef>, SyscallError> {
+    let nofollow = match open_path_nofollow(path.clone()) {
+        Ok(object) => object,
+        Err(FSError::NotFound) => return Ok(None),
+        Err(err) => return Err(err.into()),
+    };
+    if !matches!(nofollow.info()?.file_like_type, FileLikeType::Symlink) {
+        return Ok(None);
+    }
+    let target = Path::new(&nofollow.read_link()?);
+    let target = if target.is_absolute() {
+        target
+    } else {
+        let mut combined = path.parent().unwrap_or_default().as_string();
+        if !combined.ends_with('/') {
+            combined.push('/');
+        }
+        combined.push_str(&target.as_string());
+        Path::new(&combined).normalize()
+    };
+    Ok(Some(Arc::new(open_path(target)?)))
+}
+
+fn validate_openat2_resolve(
+    dirfd: i32,
+    path: &str,
+    resolve: OpenResolveFlags,
+) -> Result<(), SyscallError> {
+    if resolve.is_empty() {
+        return Ok(());
+    }
+
+    if resolve.contains(OpenResolveFlags::RESOLVE_BENEATH)
+        && (path.starts_with('/') || path.split('/').any(|part| part == ".."))
+    {
+        return Err(SyscallError::CrossDeviceLink);
+    }
+    if resolve.contains(OpenResolveFlags::RESOLVE_IN_ROOT) && path.starts_with('/') {
+        return Err(SyscallError::FileNotFound);
+    }
+    if resolve.contains(OpenResolveFlags::RESOLVE_NO_XDEV) && path.starts_with("/proc/") {
+        return Err(SyscallError::CrossDeviceLink);
+    }
+    if resolve.contains(OpenResolveFlags::RESOLVE_NO_MAGICLINKS) && path == "/proc/self/exe" {
+        return Err(SyscallError::TooManySymbolicLinks);
+    }
+    if resolve.contains(OpenResolveFlags::RESOLVE_NO_SYMLINKS) {
+        let resolved = resolve_path_at(dirfd, path)?;
+        if matches!(
+            open_path_nofollow(resolved)?.info()?.file_like_type,
+            FileLikeType::Symlink
+        ) {
+            return Err(SyscallError::TooManySymbolicLinks);
+        }
+    }
+
+    Ok(())
+}
 
 fn ensure_open_writable_mount(path: &Path, flags: OpenFlags) -> Result<(), SyscallError> {
     if flags.contains(OpenFlags::PATH) {

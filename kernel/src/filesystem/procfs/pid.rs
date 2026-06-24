@@ -31,6 +31,7 @@ pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("uid_map".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("gid_map".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("setgroups".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("exe".into(), DirectoryContentType::Symlink),
         DirectoryContentInfo::new("root".into(), DirectoryContentType::Symlink),
         DirectoryContentInfo::new("ns".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("fd".into(), DirectoryContentType::Directory),
@@ -357,6 +358,11 @@ pub(super) fn proc_pid_oom_score_adj_bytes(pid: ProcessID) -> FSResult<Vec<u8>> 
     Ok(format!("{}\n", process.lock().oom_score_adj).into_bytes())
 }
 
+pub(super) fn proc_pid_exe_target(pid: ProcessID) -> FSResult<String> {
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    Ok(process.lock().exec_path.clone().as_string())
+}
+
 pub(super) fn proc_pid_write_oom_score_adj(pid: ProcessID, buffer: &[u8]) -> FSResult<usize> {
     let content = core::str::from_utf8(buffer).map_err(|_| FSError::Other)?;
     let value = content
@@ -562,6 +568,10 @@ pub(super) fn pid_setgroups_inode(pid: ProcessID) -> u64 {
 
 pub(super) fn pid_root_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 13
+}
+
+pub(super) fn pid_exe_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 16
 }
 
 pub(super) fn pid_environ_inode(pid: ProcessID) -> u64 {

@@ -77,6 +77,7 @@ impl Process {
             next_addrspace,
             next_fd_table,
             next_snapshot,
+            exec_path: path,
             command_line,
             threads: self.threads.clone(),
             borrowed_addrspace_from_parent: self.borrowed_addrspace_from_parent,
@@ -134,6 +135,7 @@ impl Process {
         self.signal_actions = execve_signal_actions(&self.signal_actions);
         self.program_break = 0;
         self.command_line = prepared.command_line;
+        self.exec_path = prepared.exec_path;
         self.sysv_shm_mappings.clear();
 
         self.addrspace.load();
@@ -150,6 +152,7 @@ struct PreparedExecve {
     next_addrspace: AddrSpace,
     next_fd_table: Vec<Option<crate::process::FdEntry>>,
     next_snapshot: ThreadSnapshot,
+    exec_path: Path,
     command_line: Vec<String>,
     threads: Vec<alloc::sync::Weak<crate::memory::utils::Mut<crate::thread::thread::Thread>>>,
     borrowed_addrspace_from_parent: bool,

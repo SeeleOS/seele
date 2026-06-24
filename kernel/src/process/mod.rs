@@ -7,6 +7,7 @@ use alloc::{
 use bitflags::bitflags;
 use x86_64::VirtAddr;
 
+use crate::filesystem::path::Path;
 use crate::ipc::sysv_shm::ProcessShmMapping;
 use crate::memory::addrspace::AddrSpace;
 use crate::misc::timer::Timer;
@@ -112,6 +113,7 @@ pub struct Process {
     pub threads: Vec<Weak<Mut<Thread>>>,
     pub fd_table: FdTableRef,
     pub fs_context: FsContextRef,
+    pub exec_path: Path,
     pub command_line: Vec<String>,
     pub exit_status: Option<ProcessExitStatus>,
     pub parent: Option<ProcessRef>,
@@ -188,6 +190,7 @@ impl Default for Process {
             threads: Vec::new(),
             fd_table: fd_table::new_fd_table(),
             fs_context: fs_context::new_fs_context(),
+            exec_path: Path::new(""),
             command_line: Vec::new(),
             exit_status: None,
             parent: None,

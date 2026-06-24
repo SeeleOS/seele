@@ -120,6 +120,12 @@ pub(super) fn lookup_proc_pid_path(parts: &[&str]) -> FSResult<FileLike> {
             let pid = parse_pid(pid)?;
             Ok(proc_symlink("root", pid_root_inode(pid), "/".into()))
         }
+        [pid, "exe"] => {
+            let pid = parse_pid(pid)?;
+            Ok(proc_dynamic_symlink("exe", pid_exe_inode(pid), move || {
+                proc_pid_exe_target(pid)
+            }))
+        }
         [pid, "net"] => {
             let pid = parse_pid(pid)?;
             Ok(proc_dir(

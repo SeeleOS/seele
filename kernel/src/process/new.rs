@@ -117,6 +117,7 @@ impl Process {
         let process = &mut *process_arc.lock();
         let init_path = init_path();
         process.command_line = vec![init_path.clone()];
+        process.exec_path = Path::new(&init_path);
 
         log::debug!("process {}: setup start", pid.0);
         let mut fd_table = Vec::new();

@@ -284,6 +284,7 @@ define_syscall_table!(
     PidfdOpen,
     Clone3,
     CloseRange,
+    OpenAt2,
     RtSigsuspend,
     ClockGetres,
     Setpriority,
