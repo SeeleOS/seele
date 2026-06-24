@@ -39,6 +39,17 @@ impl Process {
             } else {
                 parent_locked.addrspace.clone_all()
             };
+            let child_pid_namespace = parent_locked
+                .pending_child_pid_namespace
+                .take()
+                .unwrap_or_else(|| parent_locked.pid_namespace.clone());
+            let child_pid_namespace_local_pid =
+                if Arc::ptr_eq(&child_pid_namespace, &parent_locked.pid_namespace) {
+                    parent_locked.pid_namespace_local_pid
+                } else {
+                    Some(1)
+                };
+
             let new_process = Arc::new(Mut::new(Self {
                 pid,
                 pending_signals: parent_locked.pending_signals,
@@ -90,7 +101,9 @@ impl Process {
                 net_namespace: parent_locked.net_namespace.clone(),
                 ipc_namespace: parent_locked.ipc_namespace.clone(),
                 mnt_namespace: parent_locked.mnt_namespace.clone(),
-                pid_namespace: parent_locked.pid_namespace.clone(),
+                pid_namespace: child_pid_namespace,
+                pid_namespace_local_pid: child_pid_namespace_local_pid,
+                pending_child_pid_namespace: None,
                 uts_namespace: parent_locked.uts_namespace.clone(),
                 sysv_shm_mappings: inherited_shm_mappings.clone(),
                 ..Default::default()

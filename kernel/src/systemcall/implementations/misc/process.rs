@@ -101,11 +101,13 @@ define_syscall!(Unshare, |flags: u64| {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let supported_namespace_flags =
-        (UnshareFlags::NEWNET | UnshareFlags::NEWNS | UnshareFlags::NEWUTS | UnshareFlags::NEWIPC)
-            .bits();
-    let unsupported_namespace_flags =
-        (UnshareFlags::NEWCGROUP | UnshareFlags::NEWUSER | UnshareFlags::NEWPID).bits();
+    let supported_namespace_flags = (UnshareFlags::NEWNET
+        | UnshareFlags::NEWNS
+        | UnshareFlags::NEWUTS
+        | UnshareFlags::NEWIPC
+        | UnshareFlags::NEWPID)
+        .bits();
+    let unsupported_namespace_flags = (UnshareFlags::NEWCGROUP | UnshareFlags::NEWUSER).bits();
     if flags & unsupported_namespace_flags != 0 {
         return Err(SyscallError::OperationNotSupported);
     }
@@ -137,6 +139,10 @@ define_syscall!(Unshare, |flags: u64| {
                     .map(|(_, _, _, _, _, mount_id)| mount_id)
                     .collect(),
             );
+        }
+        if flags & UnshareFlags::NEWPID.bits() != 0 {
+            process.pending_child_pid_namespace =
+                Some(NamespaceObject::dynamic(NamespaceKind::Pid));
         }
     }
     if flags & UnshareFlags::FS.bits() != 0 {

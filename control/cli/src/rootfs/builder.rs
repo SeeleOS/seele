@@ -16,6 +16,7 @@ pub fn build_rootfs(repo: &Path, config: &BuildRootfsConfig) -> Result<i32> {
     let paths = paths(repo);
     fs::create_dir_all(&paths.mount)
         .with_context(|| format!("failed to create {}", paths.mount.display()))?;
+    let existing_rootfs = paths.image.exists() && !config.override_rootfs;
 
     step("prepare rootfs image");
     if config.override_rootfs && paths.image.exists() {
@@ -32,16 +33,20 @@ pub fn build_rootfs(repo: &Path, config: &BuildRootfsConfig) -> Result<i32> {
     step("mount rootfs");
     ensure_mounted(&sh, &paths)?;
     let pacman_conf = PacmanConfig::create(repo)?;
-    step("install base packages");
-    install_packages(&sh, pacman_conf.path(), &paths.mount)?;
-    step("set empty root password");
-    set_empty_root_password(&sh, &paths.mount)?;
-    step("configure login services");
-    configure_login_services(&sh, &paths.mount)?;
-    step("install AUR packages");
     let rebuild_aur = config.rebuild_aur();
     validate_rebuild_packages(&rebuild_aur.packages)?;
-    install_aur_packages(&sh, repo, pacman_conf.path(), &paths.mount, &rebuild_aur)?;
+    if !existing_rootfs {
+        step("install base packages");
+        install_packages(&sh, pacman_conf.path(), &paths.mount)?;
+        step("set empty root password");
+        set_empty_root_password(&sh, &paths.mount)?;
+        step("configure login services");
+        configure_login_services(&sh, &paths.mount)?;
+    }
+    if !existing_rootfs || rebuild_aur.all || !rebuild_aur.packages.is_empty() {
+        step("install AUR packages");
+        install_aur_packages(&sh, repo, pacman_conf.path(), &paths.mount, &rebuild_aur)?;
+    }
     step("install kirk LTP runner");
     install_kirk(&sh, repo, &paths.mount)?;
     step("configure rootfs directories");

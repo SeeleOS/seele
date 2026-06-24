@@ -16,6 +16,7 @@ pub fn build_rootfs(repo: &Path, config: &BuildRootfsConfig, context: &JobContex
     fs::create_dir_all(&paths.mount)
         .with_context(|| format!("failed to create {}", paths.mount.display()))?;
     let runner = ProcessRunner::new(&paths.artifact_dir)?;
+    let existing_rootfs = paths.image.exists() && !config.override_rootfs;
 
     run_step(context, "prepare_image", || {
         if config.override_rootfs && paths.image.exists() {
@@ -44,27 +45,31 @@ pub fn build_rootfs(repo: &Path, config: &BuildRootfsConfig, context: &JobContex
         ensure_mounted_with_runner(&runner, context, &paths)
     })?;
     let pacman_conf = PacmanConfig::create(repo)?;
-    run_step(context, "install_base", || {
-        install_packages(&runner, context, pacman_conf.path(), &paths.mount)
-    })?;
-    run_step(context, "set_empty_root_password", || {
-        set_empty_root_password(&runner, context, &paths.mount)
-    })?;
-    run_step(context, "configure_login_services", || {
-        configure_login_services(&runner, context, &paths.mount)
-    })?;
-    run_step(context, "install_aur", || {
-        let rebuild_aur = config.rebuild_aur();
-        validate_rebuild_packages(&rebuild_aur.packages)?;
-        install_aur_packages(
-            repo,
-            &runner,
-            context,
-            pacman_conf.path(),
-            &paths.mount,
-            &rebuild_aur,
-        )
-    })?;
+    if !existing_rootfs {
+        run_step(context, "install_base", || {
+            install_packages(&runner, context, pacman_conf.path(), &paths.mount)
+        })?;
+        run_step(context, "set_empty_root_password", || {
+            set_empty_root_password(&runner, context, &paths.mount)
+        })?;
+        run_step(context, "configure_login_services", || {
+            configure_login_services(&runner, context, &paths.mount)
+        })?;
+    }
+    let rebuild_aur = config.rebuild_aur();
+    validate_rebuild_packages(&rebuild_aur.packages)?;
+    if !existing_rootfs || rebuild_aur.all || !rebuild_aur.packages.is_empty() {
+        run_step(context, "install_aur", || {
+            install_aur_packages(
+                repo,
+                &runner,
+                context,
+                pacman_conf.path(),
+                &paths.mount,
+                &rebuild_aur,
+            )
+        })?;
+    }
     run_step(context, "install_kirk_ltp", || {
         install_kirk(repo, &runner, context, &paths.mount)
     })?;

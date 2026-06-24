@@ -287,7 +287,12 @@ fn wait_for_child_exit(
 }
 
 define_syscall!(Getppid, {
-    if let Some(parent) = get_current_process().lock().parent.clone() {
+    let current = get_current_process();
+    let current = current.lock();
+    if current.pid_namespace_local_pid == Some(1) {
+        return Ok(0);
+    }
+    if let Some(parent) = current.parent.clone() {
         Ok(parent.lock().pid.0 as usize)
     } else {
         Ok(0)
@@ -520,7 +525,11 @@ define_syscall!(Fork, {
     Ok(pid as usize)
 });
 
-define_syscall!(Getpid, { Ok(get_current_process().lock().pid.0 as usize) });
+define_syscall!(Getpid, {
+    let process = get_current_process();
+    let process = process.lock();
+    Ok(process.pid_namespace_local_pid.unwrap_or(process.pid.0) as usize)
+});
 
 define_syscall!(Gettid, { Ok(get_current_thread().lock().id.0 as usize) });
 
