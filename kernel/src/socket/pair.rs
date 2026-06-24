@@ -16,14 +16,11 @@ impl UnixSocketObject {
             socket_type,
             SOCK_STREAM | SOCK_DGRAM | SOCK_SEQPACKET | SOCK_RAW
         ) {
-            return Err(SocketError::InvalidArguments);
+            return Err(SocketError::SocketTypeNotSupported);
         }
 
         if domain == AF_INET {
-            return match (socket_type, protocol) {
-                (SOCK_DGRAM, 17) | (SOCK_STREAM, 6) => Err(SocketError::OperationNotSupported),
-                _ => Err(SocketError::ProtocolNotSupported),
-            };
+            return Err(SocketError::OperationNotSupported);
         }
 
         if domain != AF_UNIX {

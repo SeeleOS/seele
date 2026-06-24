@@ -10,6 +10,8 @@ pub enum SocketError {
     InvalidArguments,
     #[error("socket operation not supported")]
     OperationNotSupported,
+    #[error("socket type not supported")]
+    SocketTypeNotSupported,
     #[error("address family not supported")]
     AddressFamilyNotSupported,
     #[error("protocol not supported")]
@@ -40,6 +42,7 @@ impl AsSyscallError for SocketError {
             Self::TryAgain => SyscallError::TryAgain,
             Self::InvalidArguments => SyscallError::InvalidArguments,
             Self::OperationNotSupported => SyscallError::OperationNotSupported,
+            Self::SocketTypeNotSupported => SyscallError::SocketTypeNotSupported,
             Self::AddressFamilyNotSupported => SyscallError::AddressFamilyNotSupported,
             Self::ProtocolNotSupported => SyscallError::ProtocolNotSupported,
             Self::AddressInUse => SyscallError::AddressInUse,
