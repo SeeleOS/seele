@@ -3,9 +3,9 @@ use x86_64::{
     PhysAddr, VirtAddr,
     registers::control::{Cr3, Cr3Flags},
     structures::paging::{
-        FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame,
-        Size4KiB, Translate, mapper::FlagUpdateError, mapper::MapToError, mapper::MapperFlush,
-        mapper::TranslateError, mapper::UnmapError,
+        FrameAllocator, FrameDeallocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags,
+        PhysFrame, Size4KiB, Translate, mapper::FlagUpdateError, mapper::MapToError,
+        mapper::MapperFlush, mapper::TranslateError, mapper::UnmapError,
     },
 };
 
@@ -73,6 +73,50 @@ impl PageTableWrapped {
 
     fn level_4_table_mut(&mut self) -> &mut PageTable {
         unsafe { &mut *self.table_addr().as_mut_ptr() }
+    }
+
+    fn table_from_frame(frame: PhysFrame<Size4KiB>) -> &'static mut PageTable {
+        let table_addr = VirtAddr::new(apply_offset(frame.start_address().as_u64()));
+        unsafe { &mut *table_addr.as_mut_ptr() }
+    }
+
+    fn collect_child_table_frames(
+        table_frame: PhysFrame<Size4KiB>,
+        level: usize,
+        entry_range: core::ops::Range<usize>,
+        frames: &mut alloc::vec::Vec<PhysFrame<Size4KiB>>,
+    ) {
+        if level == 1 {
+            return;
+        }
+
+        let table = Self::table_from_frame(table_frame);
+        for index in entry_range {
+            let entry = &mut table[index];
+            if entry.is_unused() || entry.flags().contains(PageTableFlags::HUGE_PAGE) {
+                continue;
+            }
+
+            let Ok(child_frame) = entry.frame() else {
+                continue;
+            };
+            Self::collect_child_table_frames(child_frame, level - 1, 0..512, frames);
+            entry.set_unused();
+            frames.push(child_frame);
+        }
+    }
+
+    pub fn deallocate_user_page_tables(self) {
+        let mut frames = alloc::vec::Vec::new();
+        Self::collect_child_table_frames(self.frame, 4, 0..128, &mut frames);
+        frames.push(self.frame);
+
+        let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
+        for frame in frames {
+            unsafe {
+                frame_allocator.deallocate_frame(frame);
+            }
+        }
     }
 
     fn with_mapper<R>(&mut self, f: impl FnOnce(&mut OffsetPageTable<'_>) -> R) -> R {

@@ -315,10 +315,12 @@ impl AddrSpace {
             }
         }
         self.user_mem = VirtAddr::new(USER_MEM_START);
-        self.page_table = PageTableWrapped::default();
+        let old_page_table = core::mem::take(&mut self.page_table);
         self.loaded_cpu_mask.store(0, Ordering::Release);
         self.memory_areas = Vec::new();
         self.last_area_index = None;
+        self.page_table.load();
+        old_page_table.deallocate_user_page_tables();
     }
 
     pub fn update_permissions(&mut self, start: VirtAddr, end: VirtAddr, protection: Protection) {
