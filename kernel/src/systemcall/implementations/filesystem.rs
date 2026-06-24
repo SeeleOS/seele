@@ -684,6 +684,7 @@ mod tests {
             .call::<LinkAt>(),
             SyscallError::PermissionDenied,
         );
+        write_user_cstr(user_page + 128, b"atdir\0");
         expect_ok(
             SyscallArgs::new([dir_fd as u64, user_page + 128, AT_REMOVEDIR, 0, 0, 0])
                 .call::<UnlinkAt>(),

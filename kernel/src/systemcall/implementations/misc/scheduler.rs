@@ -1,6 +1,11 @@
 use super::*;
 
 define_syscall!(SchedYield, {
+    let current = crate::thread::get_current_thread();
+    if alloc::sync::Arc::ptr_eq(&current, &crate::thread::scheduler_thread()) {
+        return Ok(0);
+    }
+
     return_to_scheduler_from_current();
     Ok(0)
 });

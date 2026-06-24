@@ -437,7 +437,7 @@ mod tests {
             SyscallError::InvalidArguments,
         );
         expect_errno(
-            SyscallArgs::new([0x20000, 0, 0, 0, 0, 0]).call::<Unshare>(),
+            SyscallArgs::new([0x0400_0000, 0, 0, 0, 0, 0]).call::<Unshare>(),
             SyscallError::OperationNotSupported,
         );
 

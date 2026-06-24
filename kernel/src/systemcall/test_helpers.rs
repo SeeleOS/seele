@@ -21,10 +21,12 @@ impl SyscallArgs {
     }
 }
 
+#[track_caller]
 pub fn expect_ok(result: SyscallResult, expected: usize) {
     assert_eq!(result, Ok(expected));
 }
 
+#[track_caller]
 pub fn expect_errno(result: SyscallResult, expected: SyscallError) {
     assert_eq!(result, Err(expected));
 }

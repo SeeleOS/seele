@@ -201,6 +201,7 @@ mod tests {
             )
         };
         let old_timezone = crate::misc::time::timezone();
+        let old_timers = core::mem::take(&mut process.lock().timers);
 
         {
             let mut process = process.lock();
@@ -484,6 +485,7 @@ mod tests {
         expect_ok(SyscallArgs::new([30, 0, 0, 0, 0, 0]).call::<Alarm>(), 0);
         expect_ok(SyscallArgs::none().call::<Sync>(), 0);
 
+        process.lock().timers = old_timers;
         crate::misc::time::set_timezone(old_timezone.0, old_timezone.1);
         {
             let current = crate::thread::get_current_thread();
