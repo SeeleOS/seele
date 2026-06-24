@@ -309,6 +309,7 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         IoSubmit => "aio_context_syscalls_follow_linux_lifecycle_rules",
         IoCancel => "aio_context_syscalls_follow_linux_lifecycle_rules",
         Execve => "execve_syscalls_follow_linux_rules",
+        Execveat => "execve_syscalls_follow_linux_rules",
         Exit => "exit_thread_semantics_follow_linux_rules",
         ExitGroup => "exit_group_semantics_follow_linux_rules",
     }

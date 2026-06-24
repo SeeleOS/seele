@@ -4,7 +4,12 @@ use strum::IntoEnumIterator;
 
 use crate::{
     define_syscall,
-    filesystem::{absolute_path::AbsolutePath, path::Path, vfs_operations::open_path},
+    filesystem::{
+        absolute_path::AbsolutePath,
+        path::Path,
+        vfs_operations::{open_path, open_path_nofollow},
+        vfs_traits::FileLikeType,
+    },
     memory::user_safe,
     misc::{
         c_types::{CString, CVec},
@@ -32,11 +37,12 @@ use crate::{
 };
 
 use super::filesystem::{
-    check_access_path_search_permissions, check_access_permissions_for_ids_with_options,
+    AtFlags, check_access_path_search_permissions, check_access_permissions_for_ids_with_options,
     fs_access_credentials,
 };
 
 const SA_RESTART: u64 = 0x1000_0000;
+const AT_FDCWD: i32 = -100;
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -410,23 +416,83 @@ fn check_execve_permissions(path: &Path) -> Result<(), SyscallError> {
     check_access_permissions_for_ids_with_options(&object.stat(), 1, &credentials, false)
 }
 
+fn execve_absolute_path(path_str: &str) -> Path {
+    let path = Path::new(path_str);
+    let fs_context = get_current_process().lock().fs_context.lock().clone();
+    AbsolutePath::join_under_root(
+        &fs_context.root_directory,
+        &fs_context.current_directory,
+        &path,
+    )
+    .as_normal()
+}
+
+fn execveat_path(dirfd: i32, path_str: &str, flags: AtFlags) -> Result<Path, SyscallError> {
+    const ALLOWED_FLAGS: AtFlags = AtFlags::EMPTY_PATH.union(AtFlags::SYMLINK_NOFOLLOW);
+
+    if flags.bits() != (flags & ALLOWED_FLAGS).bits() {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    if path_str.is_empty() {
+        if !flags.contains(AtFlags::EMPTY_PATH) {
+            return Err(SyscallError::FileNotFound);
+        }
+        let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
+        let file_like = object.as_file_like()?;
+        return Ok(file_like.path());
+    }
+
+    let path = Path::new(path_str);
+    if path.is_absolute() || dirfd == AT_FDCWD {
+        return Ok(execve_absolute_path(path_str));
+    }
+
+    let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;
+    let file_like = object
+        .as_file_like()
+        .map_err(|_| SyscallError::NotADirectory)?;
+    if !matches!(file_like.info()?.file_like_type, FileLikeType::Directory) {
+        return Err(SyscallError::NotADirectory);
+    }
+    let mut base = AbsolutePath::from_root_path(&file_like.path());
+    base.push_path_str(path_str);
+    Ok(base.as_normal())
+}
+
+fn execve_common(path: Path, args: Vec<String>, env: Vec<String>) -> Result<(), SyscallError> {
+    check_execve_permissions(&path)?;
+    execve(path, args, env)?;
+    log::info!("execve done");
+    Ok(())
+}
+
 define_syscall!(Execve, |path_str: CString,
                          args: CVec<CString>,
                          env: CVec<CString>| {
     let path_str = execve_path_from_raw(path_str)?;
     let args = execve_strings_from_raw(args)?;
     let env = execve_strings_from_raw(env)?;
-    let path = Path::new(path_str.as_str());
-    let fs_context = get_current_process().lock().fs_context.lock().clone();
-    let path = AbsolutePath::join_under_root(
-        &fs_context.root_directory,
-        &fs_context.current_directory,
-        &path,
-    )
-    .as_normal();
-    check_execve_permissions(&path)?;
-    execve(path, args, env)?;
-    log::info!("execve done");
+    let path = execve_absolute_path(path_str.as_str());
+    execve_common(path, args, env)?;
+    Ok(0)
+});
+
+define_syscall!(Execveat, |dirfd: i32,
+                           path_str: CString,
+                           args: CVec<CString>,
+                           env: CVec<CString>,
+                           flags: AtFlags| {
+    let path_str = execve_path_from_raw(path_str)?;
+    let args = execve_strings_from_raw(args)?;
+    let env = execve_strings_from_raw(env)?;
+    let path = execveat_path(dirfd, path_str.as_str(), flags)?;
+    if flags.contains(AtFlags::SYMLINK_NOFOLLOW)
+        && open_path_nofollow(path.clone())?.read_link().is_ok()
+    {
+        return Err(SyscallError::TooManySymbolicLinks);
+    }
+    execve_common(path, args, env)?;
     Ok(0)
 });
 

@@ -251,6 +251,7 @@ pub enum SyscallNumber {
     RenameAt2 = 316,
     Getrandom = 318,
     Bpf = 321,
+    Execveat = 322,
     CopyFileRange = 326,
     Statx = 332,
     Rseq = 334,

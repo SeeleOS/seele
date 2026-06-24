@@ -93,6 +93,7 @@ define_syscall_table!(
     Fork,
     Vfork,
     Execve,
+    Execveat,
     Exit,
     Wait4,
     Alarm,
