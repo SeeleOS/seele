@@ -307,6 +307,8 @@ impl Directory for Ext4Directory {
                 } else {
                     requested_mode
                 };
+                // TODO: Persist device inode rdev data for S_IFCHR/S_IFBLK instead of only
+                // preserving the Linux mode bits.
                 (
                     FileType::Regular,
                     InodeMode::from_bits_retain(mode_bits as u16),

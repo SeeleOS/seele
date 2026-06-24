@@ -18,6 +18,7 @@ pub struct FileLikeInfo {
     pub inode: u64,
     pub uid: u32,
     pub gid: u32,
+    pub nlink: u64,
     pub rdev: u64,
     pub times: FileTimes,
     pub file_like_type: FileLikeType,
@@ -136,7 +137,7 @@ impl LinuxStat {
         Self {
             st_dev: 1,
             st_ino: info.inode,
-            st_nlink: 1,
+            st_nlink: info.nlink,
             st_mode,
             st_uid: info.uid,
             st_gid: info.gid,
@@ -198,6 +199,7 @@ impl FileLikeInfo {
             inode: 0,
             uid: 0,
             gid: 0,
+            nlink: 1,
             rdev: 0,
             times: FileTimes::default(),
             file_like_type,
@@ -218,6 +220,11 @@ impl FileLikeInfo {
 
     pub fn with_rdev(mut self, rdev: u64) -> Self {
         self.rdev = rdev;
+        self
+    }
+
+    pub fn with_nlink(mut self, nlink: u64) -> Self {
+        self.nlink = nlink;
         self
     }
 

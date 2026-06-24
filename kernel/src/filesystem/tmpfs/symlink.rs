@@ -34,6 +34,7 @@ impl Symlink for TmpfsSymlinkHandle {
             )
             .with_inode(node.inode)
             .with_owner(node.uid, node.gid)
+            .with_nlink(node.link_count)
             .with_times(node.times)),
             TmpNodeKind::Directory { .. } | TmpNodeKind::File { .. } => Err(FSError::NotASymlink),
         }

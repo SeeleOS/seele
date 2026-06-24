@@ -46,6 +46,7 @@ impl Directory for TmpfsDirectoryHandle {
         )
         .with_inode(node.inode)
         .with_owner(node.uid, node.gid)
+        .with_nlink(node.link_count)
         .with_times(node.times))
     }
 

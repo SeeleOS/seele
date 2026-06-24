@@ -68,6 +68,9 @@ impl VFS {
         let normalized = self.normalize_path(path);
         self.ensure_writable_mount(normalized.clone())?;
         let (parent_dir, name) = self.resolve_parent_normalized(normalized)?;
+        if parent_dir.lock().get(&name).is_ok() {
+            return Err(FSError::AlreadyExists);
+        }
 
         let mut info = DirectoryContentInfo::new(name, DirectoryContentType::Directory);
         if let Some(mode) = mode {

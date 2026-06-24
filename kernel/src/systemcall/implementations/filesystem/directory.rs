@@ -100,6 +100,16 @@ define_syscall!(SymlinkAt, |target: CString,
 define_syscall!(MkdirAt, |dirfd: i32, path: CString, mode: u32| {
     let path = path_from_raw(path)?;
     let mode = mode & !S_IFMT;
+    let resolved = resolve_path_at(dirfd, &path)?;
+    if let Some(parent) = resolved.parent() {
+        check_access_path_search_permissions(&parent, &fs_access_credentials())?;
+        check_access_permissions_for_ids_with_options(
+            &open_path(parent)?.stat(),
+            3,
+            &fs_access_credentials(),
+            false,
+        )?;
+    }
     profile_mkdir_common(dirfd, &path, mode)?;
     Ok(0)
 });
@@ -129,6 +139,16 @@ define_syscall!(Mknodat, |dirfd: i32, path: CString, mode: u32, dev: u64| {
 define_syscall!(Mkdir, |path: CString, mode: u32| {
     let path = path_from_raw(path)?;
     let mode = mode & !S_IFMT;
+    let resolved = resolve_path_at(AT_FDCWD, &path)?;
+    if let Some(parent) = resolved.parent() {
+        check_access_path_search_permissions(&parent, &fs_access_credentials())?;
+        check_access_permissions_for_ids_with_options(
+            &open_path(parent)?.stat(),
+            3,
+            &fs_access_credentials(),
+            false,
+        )?;
+    }
     profile_mkdir_common(AT_FDCWD, &path, mode)?;
     Ok(0)
 });

@@ -79,6 +79,7 @@ pub(in crate::systemcall::implementations::filesystem) fn lookup_path_metadata(
 
     let resolve_start = profile::scope_start();
     let normalized_path = resolve_path_at(dirfd, path_str)?.normalize();
+    check_access_path_search_permissions(&normalized_path, &fs_access_credentials())?;
     profile::record_hot_syscall_phase(
         phases.resolve,
         profile::scope_start().saturating_sub(resolve_start),

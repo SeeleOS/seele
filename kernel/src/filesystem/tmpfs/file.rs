@@ -53,6 +53,7 @@ impl File for TmpfsFileHandle {
             )
             .with_inode(node.inode)
             .with_owner(node.uid, node.gid)
+            .with_nlink(node.link_count)
             .with_rdev(*rdev)
             .with_times(node.times)),
             TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => Err(FSError::NotAFile),

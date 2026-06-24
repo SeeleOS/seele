@@ -170,6 +170,13 @@ define_syscall!(OpenAt, |dirfd: i32,
         profile::record_hot_syscall_phase(HotSyscallPhase::OpenAtDirectoryCheck, 1);
     }
     check_open_permissions(&file_like.stat(), flags)?;
+    if flags.contains(OpenFlags::NOATIME) {
+        let stat = file_like.stat();
+        let credentials = fs_access_credentials();
+        if get_current_process().lock().fs_uid != stat.st_uid && !has_capability(&credentials, 3) {
+            return Err(SyscallError::PermissionDenied);
+        }
+    }
     ensure_open_writable_mount(&path, flags)?;
     if flags.contains(OpenFlags::TRUNC) && !path_only {
         let truncate_start = profile::scope_start();

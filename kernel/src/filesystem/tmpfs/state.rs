@@ -190,12 +190,26 @@ impl TmpfsState {
         if self.paths.contains_key(&child) {
             return Err(FSError::AlreadyExists);
         }
-        let _ = self.directory_children_mut(&parent)?;
+        let parent_gid = self.node(&parent)?.gid;
+        let parent_setgid = match &self.node(&parent)?.kind {
+            TmpNodeKind::Directory { mode, .. } => *mode & 0o2000 != 0,
+            TmpNodeKind::File { .. } | TmpNodeKind::Symlink { .. } => {
+                return Err(FSError::NotADirectory);
+            }
+        };
         let inode = self.next_inode;
         self.next_inode += 1;
         let (uid, gid) = crate::process::manager::get_current_process()
             .lock()
             .fs_owner_ids();
+        let gid = if parent_setgid { parent_gid } else { gid };
+        let kind = match kind {
+            TmpNodeKind::Directory { children, mode } if parent_setgid => TmpNodeKind::Directory {
+                children,
+                mode: mode | 0o2000,
+            },
+            kind => kind,
+        };
         self.paths.insert(child, inode);
         self.nodes.insert(
             inode,

@@ -55,6 +55,7 @@ pub(super) const PROC_SYSVIPC_SEM_INODE: u64 = 0x3026;
 pub(super) const PROC_SYSVIPC_SHM_INODE: u64 = 0x3027;
 pub(super) const PROC_LOADAVG_INODE: u64 = 0x3028;
 pub(super) const PROC_VERSION_INODE: u64 = 0x302a;
+pub(super) const PROC_CPUINFO_INODE: u64 = 0x302b;
 
 static PROC_UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -65,6 +66,7 @@ lazy_static! {
 pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
     let mut entries = vec![
         DirectoryContentInfo::new("cmdline".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("cpuinfo".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("devices".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("filesystems".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("loadavg".into(), DirectoryContentType::File),
@@ -95,6 +97,27 @@ pub(super) fn proc_kernel_cmdline_bytes() -> Vec<u8> {
     crate::boot::executable_cmdline()
         .map(|cmdline| format!("{cmdline}\n").into_bytes())
         .unwrap_or_default()
+}
+
+pub(super) fn proc_cpuinfo_bytes() -> Vec<u8> {
+    let cpu_count = crate::smp::topology::processors().len().max(1);
+    let mut out = String::new();
+    for cpu_index in 0..cpu_count {
+        out.push_str(&format!(
+            concat!(
+                "processor\t: {}\n",
+                "vendor_id\t: Seele\n",
+                "cpu family\t: 6\n",
+                "model\t\t: 0\n",
+                "model name\t: Seele virtual CPU\n",
+                "stepping\t: 0\n",
+                "cpu MHz\t\t: 1000.000\n",
+                "\n",
+            ),
+            cpu_index
+        ));
+    }
+    out.into_bytes()
 }
 
 pub(super) fn proc_devices_bytes() -> Vec<u8> {

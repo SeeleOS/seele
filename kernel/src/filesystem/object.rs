@@ -157,6 +157,12 @@ impl OpenedFileObject {
             || mode != 0 && file_type == 0 && (mode & (S_IFCHR | S_IFBLK) != 0)
     }
 
+    fn is_fifo_mode(mode: u32) -> bool {
+        const S_IFMT: u32 = 0o170000;
+        const S_IFIFO: u32 = 0o010000;
+        mode & S_IFMT == S_IFIFO || mode != 0 && mode & S_IFMT == 0 && mode & S_IFIFO == S_IFIFO
+    }
+
     fn from_backend(
         path: Path,
         backend: OpenBackend,
@@ -784,6 +790,9 @@ impl Seekable for OpenedFileObject {
 
         match &self.backend {
             OpenBackend::RegularFile(file) => {
+                if Self::is_fifo_mode(file.lock().info()?.permission.0) {
+                    return Err(ObjectError::FSError(FSError::IllegalSeek));
+                }
                 file.lock().seek(offset, seek_type).map_err(Into::into)
             }
             OpenBackend::Device { .. }

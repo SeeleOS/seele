@@ -435,11 +435,18 @@ fn chown_file_like(
         file_like.lchown(uid, gid)?;
     }
 
-    clear_chown_mode_bits(file_like, stat.st_mode)?;
+    clear_chown_mode_bits(file_like, stat.st_mode, &credentials)?;
     Ok(())
 }
 
-fn clear_chown_mode_bits(file_like: &FileLikeObject, old_mode: u32) -> Result<(), SyscallError> {
+fn clear_chown_mode_bits(
+    file_like: &FileLikeObject,
+    old_mode: u32,
+    credentials: &AccessCredentials,
+) -> Result<(), SyscallError> {
+    if has_capability(credentials, CAP_FSETID) {
+        return Ok(());
+    }
     let mut mode = old_mode & 0o7777;
     mode &= !S_ISUID;
     if (mode & 0o010) != 0 {

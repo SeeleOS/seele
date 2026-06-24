@@ -23,6 +23,7 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             PROC_CMDLINE_INODE,
             proc_kernel_cmdline_bytes,
         )),
+        ["cpuinfo"] => Ok(proc_file("cpuinfo", PROC_CPUINFO_INODE, proc_cpuinfo_bytes)),
         ["devices"] => Ok(proc_file("devices", PROC_DEVICES_INODE, proc_devices_bytes)),
         ["filesystems"] => Ok(proc_file(
             "filesystems",

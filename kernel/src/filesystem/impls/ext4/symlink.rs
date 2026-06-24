@@ -49,6 +49,7 @@ impl Symlink for Ext4Symlink {
             inode: inode.index.get().into(),
             uid: inode.uid(),
             gid: inode.gid(),
+            nlink: 1,
             rdev: 0,
             times: inode_times(&inode),
             permission: UnixPermission::symlink(),
