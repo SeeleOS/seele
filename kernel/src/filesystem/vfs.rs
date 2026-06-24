@@ -35,6 +35,7 @@ pub struct Mount {
     pub propagation: MountPropagation,
     pub device_id: u64,
     pub mount_id: u64,
+    pub expire_pending: bool,
 }
 
 pub struct VFS {
@@ -171,6 +172,7 @@ impl VFS {
             propagation,
             device_id,
             mount_id,
+            expire_pending: false,
         });
         self.mounts
             .sort_by_key(|mount| Reverse(mount.path.clone().as_string().len()));
@@ -191,6 +193,7 @@ impl VFS {
                 propagation: mount.propagation,
                 device_id: mount.device_id,
                 mount_id: mount.mount_id,
+                expire_pending: false,
             })
             .collect::<Vec<_>>();
 
@@ -344,6 +347,68 @@ impl VFS {
             return Err(FSError::Busy);
         }
         self.remove_mounts_at(&normalized_path, false)
+    }
+
+    pub fn begin_expire_mount(&mut self, path: Path) -> FSResult<bool> {
+        let normalized_path = self.normalize_path(path);
+        let mount = self
+            .mounts
+            .iter_mut()
+            .find(|mount| mount.path == normalized_path)
+            .ok_or(FSError::NotFound)?;
+        if mount.expire_pending {
+            return Ok(true);
+        }
+        mount.expire_pending = true;
+        Ok(false)
+    }
+
+    pub fn mark_mount_accessed(&mut self, path: Path) -> FSResult<()> {
+        let normalized_path = self.normalize_path(path);
+        let (mount, _) = self.find_mount(&normalized_path)?;
+        let mount_path = mount.path.clone();
+        if let Some(mount) = self
+            .mounts
+            .iter_mut()
+            .find(|mount| mount.path == mount_path)
+        {
+            mount.expire_pending = false;
+        }
+        Ok(())
+    }
+
+    pub fn contains_mount_at(&self, path: Path) -> bool {
+        let normalized_path = self.normalize_path(path);
+        self.mounts
+            .iter()
+            .any(|mount| mount.path == normalized_path)
+    }
+
+    pub fn is_mount_busy(&self, path: Path) -> FSResult<bool> {
+        let normalized_path = self.normalize_path(path);
+        let target_mount_id = self
+            .mounts
+            .iter()
+            .find(|mount| mount.path == normalized_path)
+            .ok_or(FSError::NotFound)?
+            .mount_id;
+        Ok(crate::process::manager::MANAGER
+            .lock()
+            .processes
+            .values()
+            .any(|process| {
+                process
+                    .lock()
+                    .fd_table
+                    .lock()
+                    .iter()
+                    .flatten()
+                    .any(|entry| {
+                        entry.object.clone().as_file_like().is_ok_and(|file| {
+                            file.mount_id() == target_mount_id && !file.mount_root()
+                        })
+                    })
+            }))
     }
 
     pub fn detach_mount(&mut self, path: Path) -> FSResult<()> {

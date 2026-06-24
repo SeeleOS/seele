@@ -5,8 +5,10 @@ define_syscall!(Mount, |source: CString,
                         filesystemtype: CString,
                         mountflags: u64,
                         data: CString| {
+    require_cap_sys_admin()?;
     let source = string_from_raw_optional(source)?.filter(|value| !value.is_empty());
     let target = path_from_raw(target)?;
+    let target_is_proc_fd = is_proc_fd_path(&target);
     let target = resolve_path_at(AT_FDCWD, &target)?;
     let filesystemtype =
         string_from_raw_optional(filesystemtype)?.filter(|value| !value.is_empty());
@@ -18,9 +20,12 @@ define_syscall!(Mount, |source: CString,
         FileLikeType::Directory
     );
     let operation_flags = MountOperationFlags::from_bits_retain(mountflags);
+    let requested_mount_flags = mount_flags_from_mount_bits(mountflags);
+    let propagation = mount_propagation_from_mount_flags(operation_flags);
 
     if operation_flags.contains(MountOperationFlags::MS_BIND) {
         if operation_flags.contains(MountOperationFlags::MS_REMOUNT) {
+            ensure_mount_root(&target_path)?;
             let (remount_flags, remount_mask) = remount_bind_flag_update(mountflags);
             VirtualFS
                 .lock()
@@ -34,6 +39,12 @@ define_syscall!(Mount, |source: CString,
         } else {
             let source = source.ok_or(SyscallError::BadAddress)?;
             let source_path = resolve_path_at(AT_FDCWD, &source)?;
+            if target_is_proc_fd {
+                return Err(SyscallError::FileNotFound);
+            }
+            if is_proc_fd_path(&source_path.clone().normalize().as_string()) {
+                return Err(SyscallError::FileNotFound);
+            }
             VirtualFS
                 .lock()
                 .bind_mount(
@@ -47,10 +58,29 @@ define_syscall!(Mount, |source: CString,
     }
 
     if operation_flags.contains(MountOperationFlags::MS_MOVE) {
-        return Err(SyscallError::OperationNotSupported);
+        let source = source.ok_or(SyscallError::InvalidArguments)?;
+        let source_path = resolve_path_at(AT_FDCWD, &source)?.normalize();
+        let (mount_path, mount_fs, mount_source_path, mount_flags) =
+            VirtualFS.lock().mount_metadata(source_path.clone())?;
+        if mount_path != source_path {
+            return Err(SyscallError::InvalidArguments);
+        }
+        VirtualFS
+            .lock()
+            .attach_mount(target_path, mount_fs, mount_source_path, mount_flags)
+            .map_err(SyscallError::from)?;
+        VirtualFS
+            .lock()
+            .unmount(source_path)
+            .map_err(SyscallError::from)?;
+        return Ok(0);
     }
 
     if operation_flags.contains(MountOperationFlags::MS_REMOUNT) {
+        ensure_mount_root(&target_path)?;
+        if VirtualFS.lock().is_mount_busy(target_path.clone())? {
+            return Err(SyscallError::DeviceOrResourceBusy);
+        }
         let (remount_flags, remount_mask) = remount_bind_flag_update(mountflags);
         VirtualFS
             .lock()
@@ -69,8 +99,17 @@ define_syscall!(Mount, |source: CString,
             | MountOperationFlags::MS_SLAVE
             | MountOperationFlags::MS_SHARED
             | MountOperationFlags::MS_UNBINDABLE,
-    ) && filesystemtype.is_none()
+    ) && filesystemtype.as_deref().is_none_or(|fs| fs == "none")
     {
+        let propagation = propagation.ok_or(SyscallError::InvalidArguments)?;
+        VirtualFS
+            .lock()
+            .set_mount_propagation(
+                target_path,
+                propagation,
+                operation_flags.contains(MountOperationFlags::MS_REC),
+            )
+            .map_err(SyscallError::from)?;
         return Ok(0);
     }
 
@@ -113,6 +152,9 @@ define_syscall!(Mount, |source: CString,
         return Err(SyscallError::NotADirectory);
     }
     resolve_dir_path(target_path.clone())?;
+    if VirtualFS.lock().contains_mount_at(target_path.clone()) {
+        return Err(SyscallError::DeviceOrResourceBusy);
+    }
 
     if filesystemtype == "tmpfs" {
         let root_mode = tmpfs_root_mode_from_mount_data(data.as_deref())?;
@@ -120,6 +162,7 @@ define_syscall!(Mount, |source: CString,
             .lock()
             .mount(target_path.clone(), TmpFs::new())
             .map_err(SyscallError::from)?;
+        apply_initial_mount_flags(target_path.clone(), requested_mount_flags)?;
         if let Some(mode) = root_mode {
             let mount_root = open_path(target_path)?;
             mount_root.chmod(mode)?;
@@ -130,7 +173,15 @@ define_syscall!(Mount, |source: CString,
     if matches!(filesystemtype, "ext2" | "ext3" | "ext4") {
         let source = source.ok_or(SyscallError::InvalidArguments)?;
         let source_path = resolve_path_at(AT_FDCWD, &source)?;
+        if let Ok((source_info, _)) = resolve_path_info_with_final(source_path.clone(), false)
+            && is_char_device_mode(source_info.permission.0)
+        {
+            return Err(SyscallError::BlockDeviceRequired);
+        }
         let source_object = open_path(source_path)?;
+        if is_char_device_mode(source_object.info()?.permission.0) {
+            return Err(SyscallError::BlockDeviceRequired);
+        }
         let block_device = source_object
             .device_backing_object()
             .ok_or(SyscallError::NoDevice)?
@@ -143,32 +194,38 @@ define_syscall!(Mount, |source: CString,
         let ext4 = EXT4::new(ext4).map_err(|_| SyscallError::IOError)?;
         VirtualFS
             .lock()
-            .mount(target_path, ext4)
+            .mount(target_path.clone(), ext4)
             .map_err(SyscallError::from)?;
+        apply_initial_mount_flags(target_path, requested_mount_flags)?;
         return Ok(0);
     }
 
     let fs = create_api_filesystem(filesystemtype)?;
     VirtualFS
         .lock()
-        .mount_ref(target_path, fs)
+        .mount_ref(target_path.clone(), fs)
         .map_err(SyscallError::from)?;
+    apply_initial_mount_flags(target_path, requested_mount_flags)?;
     Ok(0)
 });
 
 define_syscall!(Umount2, |target: CString, flags: UmountFlags| {
+    require_cap_sys_admin()?;
     let target = path_from_raw(target)?;
     let flags = validate_umount_flags(flags)?;
     let path = resolve_path_at(AT_FDCWD, &target)?.normalize();
 
-    if flags.contains(UmountFlags::NOFOLLOW) {
-        let _ = open_path_nofollow(path.clone())?;
-    } else {
-        let _ = open_path(path.clone())?;
-    }
-
     if path == Path::new("/") {
         return Err(SyscallError::DeviceOrResourceBusy);
+    }
+
+    if !flags.contains(UmountFlags::EXPIRE) {
+        if flags.contains(UmountFlags::NOFOLLOW) {
+            let _ = open_path_nofollow(path.clone())?;
+        } else {
+            let _ = resolve_path_info_with_final(path.clone(), false)?;
+            let _ = open_path(path.clone())?;
+        }
     }
 
     let mount_path = VirtualFS
@@ -177,6 +234,17 @@ define_syscall!(Umount2, |target: CString, flags: UmountFlags| {
         .map_err(SyscallError::from)?;
     if mount_path != path {
         return Err(SyscallError::InvalidArguments);
+    }
+    if flags.contains(UmountFlags::EXPIRE) {
+        if flags.intersects(UmountFlags::FORCE | UmountFlags::DETACH) {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if !VirtualFS.lock().begin_expire_mount(path.clone())? {
+            return Err(SyscallError::TryAgain);
+        }
+    }
+    if VirtualFS.lock().is_mount_busy(path.clone())? {
+        return Err(SyscallError::DeviceOrResourceBusy);
     }
 
     if flags.contains(UmountFlags::DETACH) {
@@ -631,7 +699,8 @@ mod tests {
         process::FdFlags,
         systemcall::{
             implementations::{
-                Fsconfig, Fsmount, Fsopen, Mount, MountSetattr, MoveMount, OpenTree, Umount2,
+                Fsconfig, Fsmount, Fsopen, Fspick, Mount, MountSetattr, MoveMount, OpenTree,
+                Umount2,
             },
             test::{assert_fd_flags, close_test_fd, expect_fd, write_user_cstr},
             test_helpers::{
@@ -788,6 +857,24 @@ mod tests {
         let moved_stat = moved_root.stat();
         assert_eq!(moved_stat.st_mode & 0o777, 0o755);
 
+        let picked_fd =
+            expect_fd(SyscallArgs::new([AT_FDCWD, page + 256, 1, 0, 0, 0]).call::<Fspick>());
+        assert_fd_flags(picked_fd, FdFlags::CLOEXEC);
+        let picked_mount_fd =
+            expect_fd(SyscallArgs::new([picked_fd as u64, 0, 0, 0, 0, 0]).call::<Fsmount>());
+        expect_ok(
+            SyscallArgs::new([
+                picked_mount_fd as u64,
+                page + 704,
+                AT_FDCWD,
+                page,
+                MOVE_MOUNT_F_EMPTY_PATH,
+                0,
+            ])
+            .call::<MoveMount>(),
+            0,
+        );
+
         let proc_fsfd = expect_fd(SyscallArgs::new([page + 1536, 0, 0, 0, 0, 0]).call::<Fsopen>());
         expect_ok(
             SyscallArgs::new([proc_fsfd as u64, FSCONFIG_CMD_CREATE, 0, 0, 0, 0])
@@ -854,9 +941,9 @@ mod tests {
             0,
         );
 
-        expect_ok(
+        expect_errno(
             SyscallArgs::new([0, page + 896, page + 1536, 0, 0, 0]).call::<Mount>(),
-            0,
+            SyscallError::DeviceOrResourceBusy,
         );
         expect_ok(
             SyscallArgs::new([0, page + 1024, page + 1664, 0, 0, 0]).call::<Mount>(),

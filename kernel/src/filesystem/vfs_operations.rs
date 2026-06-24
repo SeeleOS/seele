@@ -3,7 +3,7 @@ use crate::{
         info::{DirectoryContentInfo, FileLikeInfo},
         object::OpenedFileObject,
         resolve,
-        vfs::{FSResult, VFS, WrappedDirectory, WrappedFile},
+        vfs::{FSResult, VFS, VirtualFS, WrappedDirectory, WrappedFile},
     },
     object::traits::Readable,
 };
@@ -88,15 +88,17 @@ impl VFS {
         let normalized = self.normalize_path(path);
         log::trace!("vfs: open {}", normalized.clone().as_string());
         let (file, resolved_path) = self.resolve_with_path(normalized)?;
-        let (mount_path, mount_device_id, mount_id) =
-            self.mount_path_and_ids(resolved_path.clone())?;
+        let (mount_path, _, _, mount_flags) = self.mount_metadata(resolved_path.clone())?;
+        let (_, mount_device_id, mount_id) = self.mount_path_and_ids(resolved_path.clone())?;
         let mount_root = resolved_path == mount_path;
+        self.mark_mount_accessed(resolved_path.clone())?;
         OpenedFileObject::new_with_mount_device_id(
             file,
             resolved_path,
             mount_device_id,
             mount_id,
             mount_root,
+            mount_flags,
         )
     }
 
@@ -104,15 +106,17 @@ impl VFS {
         let normalized = self.normalize_path(path);
         log::trace!("vfs: open_nofollow {}", normalized.clone().as_string());
         let (file, resolved_path) = self.resolve_nofollow_with_path(normalized)?;
-        let (mount_path, mount_device_id, mount_id) =
-            self.mount_path_and_ids(resolved_path.clone())?;
+        let (mount_path, _, _, mount_flags) = self.mount_metadata(resolved_path.clone())?;
+        let (_, mount_device_id, mount_id) = self.mount_path_and_ids(resolved_path.clone())?;
         let mount_root = resolved_path == mount_path;
+        self.mark_mount_accessed(resolved_path.clone())?;
         OpenedFileObject::new_with_mount_device_id(
             file,
             resolved_path,
             mount_device_id,
             mount_id,
             mount_root,
+            mount_flags,
         )
     }
 
@@ -272,32 +276,36 @@ pub fn read_all(path: Path) -> FSResult<Vec<u8>> {
 pub fn open_path(path: Path) -> FSResult<OpenedFileObject> {
     let normalized = path.normalize();
     log::trace!("vfs: open {}", normalized.clone().as_string());
-    let (file, resolved_path, mount_id, mount_root) =
+    let (file, resolved_path, mount_flags, mount_id, mount_root) =
         resolve::resolve_path_with_mount_info(normalized, true)?;
     let mount_device_id =
         resolve::resolve_path_with_mount_device_id(resolved_path.clone(), true)?.2;
+    let _ = VirtualFS.lock().mark_mount_accessed(resolved_path.clone());
     OpenedFileObject::new_with_mount_device_id(
         file,
         resolved_path,
         mount_device_id,
         mount_id,
         mount_root,
+        mount_flags,
     )
 }
 
 pub fn open_path_nofollow(path: Path) -> FSResult<OpenedFileObject> {
     let normalized = path.normalize();
     log::trace!("vfs: open_nofollow {}", normalized.clone().as_string());
-    let (file, resolved_path, mount_id, mount_root) =
+    let (file, resolved_path, mount_flags, mount_id, mount_root) =
         resolve::resolve_path_with_mount_info(normalized, false)?;
     let mount_device_id =
         resolve::resolve_path_with_mount_device_id(resolved_path.clone(), false)?.2;
+    let _ = VirtualFS.lock().mark_mount_accessed(resolved_path.clone());
     OpenedFileObject::new_with_mount_device_id(
         file,
         resolved_path,
         mount_device_id,
         mount_id,
         mount_root,
+        mount_flags,
     )
 }
 
@@ -305,7 +313,7 @@ pub fn resolve_path_with_mount_info(
     path: Path,
     follow_final_symlink: bool,
 ) -> FSResult<(FileLikeInfo, Path, u64, bool)> {
-    let (file, resolved_path, mount_id, mount_root) =
+    let (file, resolved_path, _, mount_id, mount_root) =
         resolve::resolve_path_with_mount_info(path, follow_final_symlink)?;
     Ok((file.info()?, resolved_path, mount_id, mount_root))
 }

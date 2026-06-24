@@ -4,13 +4,14 @@ use crate::filesystem::{
     errors::FSError,
     path::{Path, PathPart},
     vfs::{FSResult, FileSystemRef, Mount, VFS, VirtualFS},
-    vfs_traits::FileLike,
+    vfs_traits::{FileLike, MountFlags},
 };
 
-type MountSnapshot = (Path, FileSystemRef, Path, u64, u64);
+type MountSnapshot = (Path, FileSystemRef, Path, MountFlags, u64, u64);
 
 trait PathResolver {
     fn resolve_root(&self) -> FSResult<FileLike>;
+    fn mount_flags(&self, path: &Path) -> FSResult<MountFlags>;
     fn lookup_child(
         &self,
         current: FileLike,
@@ -58,6 +59,12 @@ fn resolve_path_walk<R: PathResolver>(
 
             match next {
                 FileLike::Symlink(symlink) if !is_final || follow_final_symlink => {
+                    if resolver
+                        .mount_flags(&next_path)?
+                        .contains(MountFlags::MS_NOSYMFOLLOW)
+                    {
+                        return Err(FSError::TooManySymlinks);
+                    }
                     followed_symlinks += 1;
                     if followed_symlinks > MAX_SYMLINKS {
                         return Err(FSError::TooManySymlinks);
@@ -85,6 +92,12 @@ fn resolve_path_walk<R: PathResolver>(
                 }
                 entry @ FileLike::Symlink(_) if is_final => {
                     if had_trailing_slash {
+                        if resolver
+                            .mount_flags(&next_path)?
+                            .contains(MountFlags::MS_NOSYMFOLLOW)
+                        {
+                            return Err(FSError::TooManySymlinks);
+                        }
                         followed_symlinks += 1;
                         if followed_symlinks > MAX_SYMLINKS {
                             return Err(FSError::TooManySymlinks);
@@ -110,6 +123,11 @@ fn resolve_path_walk<R: PathResolver>(
 impl PathResolver for VFS {
     fn resolve_root(&self) -> FSResult<FileLike> {
         self.resolve_raw(Path::new("/"))
+    }
+
+    fn mount_flags(&self, path: &Path) -> FSResult<MountFlags> {
+        let (mount, _) = self.find_mount(path)?;
+        Ok(mount.flags)
     }
 
     fn lookup_child(
@@ -142,6 +160,11 @@ impl PathResolver for SnapshotResolver<'_> {
         resolve_raw_with_mounts(Path::new("/"), self.mounts)
     }
 
+    fn mount_flags(&self, path: &Path) -> FSResult<MountFlags> {
+        let (_, _, _, flags, _, _) = find_mount_in_snapshots(path, self.mounts)?;
+        Ok(flags)
+    }
+
     fn lookup_child(
         &self,
         current: FileLike,
@@ -150,7 +173,7 @@ impl PathResolver for SnapshotResolver<'_> {
     ) -> FSResult<FileLike> {
         match current {
             FileLike::Directory(dir) => {
-                let (mount_path, _, _, _, _) = find_mount_in_snapshots(next_path, self.mounts)?;
+                let (mount_path, _, _, _, _, _) = find_mount_in_snapshots(next_path, self.mounts)?;
                 if mount_path == *next_path {
                     resolve_raw_with_mounts(next_path.clone(), self.mounts)
                 } else {
@@ -249,32 +272,26 @@ pub fn resolve_path_with_mount_device_id(
 pub fn resolve_path_with_mount_info(
     path: Path,
     follow_final_symlink: bool,
-) -> FSResult<(FileLike, Path, u64, bool)> {
+) -> FSResult<(FileLike, Path, MountFlags, u64, bool)> {
     let mounts = mount_snapshots();
     let (file, resolved_path) = resolve_with_mounts(path, follow_final_symlink, &mounts)?;
-    let (mount_path, _, _, _, mount_id) = find_mount_in_snapshots(&resolved_path, &mounts)?;
+    let (mount_path, _, _, flags, _, mount_id) = find_mount_in_snapshots(&resolved_path, &mounts)?;
     let mount_root = resolved_path == mount_path;
-    Ok((file, resolved_path, mount_id, mount_root))
+    Ok((file, resolved_path, flags, mount_id, mount_root))
 }
 
 fn mount_snapshots() -> Vec<MountSnapshot> {
-    VirtualFS
-        .lock()
-        .mount_snapshots()
-        .into_iter()
-        .map(|(path, fs, source_path, _, device_id, mount_id)| {
-            (path, fs, source_path, device_id, mount_id)
-        })
-        .collect()
+    VirtualFS.lock().mount_snapshots()
 }
 
 fn find_mount_in_snapshots(path: &Path, mounts: &[MountSnapshot]) -> FSResult<MountSnapshot> {
-    for (mount_path, fs, source_path, device_id, mount_id) in mounts {
+    for (mount_path, fs, source_path, flags, device_id, mount_id) in mounts {
         if let Some(stripped) = path.strip_prefix(mount_path) {
             return Ok((
                 mount_path.clone(),
                 fs.clone(),
                 join_mount_source(source_path, &stripped),
+                *flags,
                 *device_id,
                 *mount_id,
             ));
@@ -286,13 +303,13 @@ fn find_mount_in_snapshots(path: &Path, mounts: &[MountSnapshot]) -> FSResult<Mo
 
 fn resolve_raw_with_mounts(path: Path, mounts: &[MountSnapshot]) -> FSResult<FileLike> {
     let normalized_path = path.normalize();
-    let (_, fs, mount_path, _, _) = find_mount_in_snapshots(&normalized_path, mounts)?;
+    let (_, fs, mount_path, _, _, _) = find_mount_in_snapshots(&normalized_path, mounts)?;
     fs.lock().lookup(&mount_path)
 }
 
 fn mount_device_id_in_snapshots(path: &Path, mounts: &[MountSnapshot]) -> FSResult<u64> {
     let normalized_path = path.normalize();
-    let (_, _, _, device_id, _) = find_mount_in_snapshots(&normalized_path, mounts)?;
+    let (_, _, _, _, device_id, _) = find_mount_in_snapshots(&normalized_path, mounts)?;
     Ok(device_id)
 }
 

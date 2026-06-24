@@ -16,7 +16,7 @@ use crate::{
         vfs::{FileSystemRef, VirtualFS},
         vfs_operations::{
             file_info_path, open_path, open_path_nofollow, resolve_dir_path,
-            resolve_path_with_mount_info,
+            resolve_path_info_with_final, resolve_path_with_mount_info,
         },
         vfs_traits::{DirectoryContentType, FileLikeType, MountFlags},
     },

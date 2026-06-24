@@ -1,8 +1,29 @@
 use super::*;
 use crate::filesystem::vfs::MountPropagationUpdate;
 
+const CAP_SYS_ADMIN: u64 = 21;
+const LEGACY_MS_NOSYMFOLLOW: u64 = 1 << 8;
+
+pub(super) fn require_cap_sys_admin() -> Result<(), SyscallError> {
+    let credentials = fs_access_credentials();
+    if has_capability(&credentials, CAP_SYS_ADMIN) {
+        Ok(())
+    } else {
+        Err(SyscallError::PermissionDenied)
+    }
+}
+
 pub(super) fn is_supported_api_mount(fstype: &str) -> bool {
     is_supported_fs_context_type(fstype) || matches!(fstype, "fuse" | "fuseblk")
+}
+
+pub(super) fn is_proc_fd_path(path: &str) -> bool {
+    let path = Path::new(path).normalize().as_string();
+    path.starts_with("/proc/") && path.contains("/fd/")
+}
+
+pub(super) fn is_char_device_mode(mode: u32) -> bool {
+    mode & S_IFMT == S_IFCHR || mode != 0 && mode & S_IFMT == 0 && mode & S_IFCHR == S_IFCHR
 }
 
 pub(super) fn is_supported_fs_context_type(fstype: &str) -> bool {
@@ -91,7 +112,7 @@ pub(super) fn is_api_mount_path(path: &Path) -> bool {
 }
 
 pub(super) fn remount_bind_flag_update(bits: u64) -> (MountFlags, MountFlags) {
-    let flags = MountFlags::from_bits_retain(bits & MountFlags::all().bits());
+    let flags = mount_flags_from_mount_bits(bits);
     let mut mask = MountFlags::MS_RDONLY
         | MountFlags::MS_NOSUID
         | MountFlags::MS_NODEV
@@ -99,7 +120,69 @@ pub(super) fn remount_bind_flag_update(bits: u64) -> (MountFlags, MountFlags) {
     if flags.contains(MountFlags::MS_RELATIME) {
         mask |= MountFlags::MS_RELATIME;
     }
+    if bits & LEGACY_MS_NOSYMFOLLOW != 0 {
+        mask |= MountFlags::MS_NOSYMFOLLOW;
+    }
     (flags, mask)
+}
+
+pub(super) fn mount_flags_from_mount_bits(bits: u64) -> MountFlags {
+    let mut flags = MountFlags::from_bits_retain(bits & MountFlags::all().bits());
+    if bits & LEGACY_MS_NOSYMFOLLOW != 0 {
+        flags.insert(MountFlags::MS_NOSYMFOLLOW);
+    }
+    flags
+}
+
+pub(super) fn apply_initial_mount_flags(path: Path, flags: MountFlags) -> Result<(), SyscallError> {
+    if flags.is_empty() {
+        return Ok(());
+    }
+    VirtualFS
+        .lock()
+        .remount_bind(path, flags, flags, false)
+        .map_err(SyscallError::from)
+}
+
+pub(super) fn ensure_mount_root(path: &Path) -> Result<(), SyscallError> {
+    let mount_path = VirtualFS
+        .lock()
+        .mount_path(path.clone())
+        .map_err(SyscallError::from)?;
+    if mount_path == *path {
+        Ok(())
+    } else {
+        Err(SyscallError::InvalidArguments)
+    }
+}
+
+pub(super) fn mount_propagation_from_mount_flags(
+    flags: MountOperationFlags,
+) -> Option<MountPropagationUpdate> {
+    let mut propagation = None;
+    for (flag, update) in [
+        (
+            MountOperationFlags::MS_PRIVATE,
+            MountPropagationUpdate::Private,
+        ),
+        (
+            MountOperationFlags::MS_SHARED,
+            MountPropagationUpdate::Shared,
+        ),
+        (MountOperationFlags::MS_SLAVE, MountPropagationUpdate::Slave),
+        (
+            MountOperationFlags::MS_UNBINDABLE,
+            MountPropagationUpdate::Unbindable,
+        ),
+    ] {
+        if flags.contains(flag) {
+            if propagation.is_some() {
+                return None;
+            }
+            propagation = Some(update);
+        }
+    }
+    propagation
 }
 
 pub(super) fn mount_attr_flag_update(

@@ -40,7 +40,7 @@ pub(super) fn string_from_raw_optional(value: CString) -> Result<Option<String>,
 
     String::k_from(value)
         .map(Some)
-        .map_err(|_| SyscallError::InvalidArguments)
+        .map_err(|_| SyscallError::BadAddress)
 }
 pub(super) fn resolve_path_at(dirfd: i32, path_str: &str) -> Result<Path, SyscallError> {
     if path_str.is_empty() {

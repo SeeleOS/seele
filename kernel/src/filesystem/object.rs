@@ -15,7 +15,7 @@ use crate::{
         },
         vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
         vfs_operations::{open_path, resolve_dir_path, resolve_file_path},
-        vfs_traits::{File as VfsFile, FileLike, FileLikeType, Symlink, Whence},
+        vfs_traits::{File as VfsFile, FileLike, FileLikeType, MountFlags, Symlink, Whence},
     },
     impl_cast_function, impl_cast_function_non_trait,
     memory::{addrspace::mem_area::Data, protection::Protection, utils::Mut},
@@ -148,6 +148,15 @@ impl OpenedFileObject {
         Ok(requested_len.min((limit - offset) as usize))
     }
 
+    fn is_device_mode(mode: u32) -> bool {
+        const S_IFMT: u32 = 0o170000;
+        const S_IFCHR: u32 = 0o020000;
+        const S_IFBLK: u32 = 0o060000;
+        let file_type = mode & S_IFMT;
+        matches!(file_type, S_IFCHR | S_IFBLK)
+            || mode != 0 && file_type == 0 && (mode & (S_IFCHR | S_IFBLK) != 0)
+    }
+
     fn from_backend(
         path: Path,
         backend: OpenBackend,
@@ -191,7 +200,14 @@ impl OpenedFileObject {
         mount_device_id: u64,
         mount_id: u64,
         mount_root: bool,
+        mount_flags: MountFlags,
     ) -> FSResult<Self> {
+        let info = file.info()?;
+        if mount_flags.contains(MountFlags::MS_NODEV)
+            && (Self::is_device_mode(info.permission.0) || info.rdev != 0)
+        {
+            return Err(FSError::AccessDenied);
+        }
         Ok(Self::from_backend(
             path.clone(),
             OpenBackend::from_file_like(file, &path)?,

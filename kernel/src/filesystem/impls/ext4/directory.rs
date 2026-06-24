@@ -297,18 +297,25 @@ impl Directory for Ext4Directory {
 
     fn create(&self, info: DirectoryContentInfo) -> FSResult<()> {
         let _operation = self.operation_lock.lock();
-        let requested_mode = info.permission.map(|permission| permission.0 & 0o7777);
+        let requested_mode = info.permission.map(|permission| permission.0);
         let (file_type, mode) = match info.content_type {
-            DirectoryContentType::File => (
-                FileType::Regular,
-                InodeMode::from_bits_retain(
-                    InodeMode::S_IFREG.bits() | requested_mode.unwrap_or(0o644) as u16,
-                ),
-            ),
+            DirectoryContentType::File => {
+                let requested_mode = requested_mode.unwrap_or(0o644);
+                let file_type_bits = requested_mode & 0o170000;
+                let mode_bits = if file_type_bits == 0 {
+                    0o100000 | requested_mode
+                } else {
+                    requested_mode
+                };
+                (
+                    FileType::Regular,
+                    InodeMode::from_bits_retain(mode_bits as u16),
+                )
+            }
             DirectoryContentType::Directory => (
                 FileType::Directory,
                 InodeMode::from_bits_retain(
-                    InodeMode::S_IFDIR.bits() | requested_mode.unwrap_or(0o755) as u16,
+                    InodeMode::S_IFDIR.bits() | (requested_mode.unwrap_or(0o755) & 0o7777) as u16,
                 ),
             ),
             _ => unimplemented!(),

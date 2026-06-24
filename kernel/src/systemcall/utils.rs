@@ -25,6 +25,7 @@ pub enum SyscallError {
     NoMemory = -12,
     AccessDenied = -13,
     BadAddress = -14,
+    BlockDeviceRequired = -15,
     DeviceOrResourceBusy = -16,
     FileAlreadyExists = -17,
     CrossDeviceLink = -18,

@@ -302,6 +302,7 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Fsopen => "mount_api_syscalls_follow_linux_rules",
         Fsconfig => "mount_api_syscalls_follow_linux_rules",
         Fsmount => "mount_api_syscalls_follow_linux_rules",
+        Fspick => "mount_api_syscalls_follow_linux_rules",
         MountSetattr => "mount_api_syscalls_follow_linux_rules",
         Ptrace => "ptrace_syscalls_follow_linux_rules",
         Clone => "clone_and_fork_syscalls_follow_linux_rules",
