@@ -14,6 +14,7 @@ use crate::{
     },
     thread::misc::State,
 };
+use x86_64::structures::paging::{PageTableFlags, mapper::TranslateResult};
 
 pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
     vec![
@@ -28,6 +29,7 @@ pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("oom_score_adj".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("mountinfo".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("maps".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("pagemap".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("uid_map".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("gid_map".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("setgroups".into(), DirectoryContentType::File),
@@ -198,6 +200,7 @@ pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
         capability_permitted,
         capability_effective,
         capability_ambient,
+        locked_kb,
     ) = {
         let process = process.lock();
         (
@@ -231,6 +234,7 @@ pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
             process.capability_permitted,
             process.capability_effective,
             process.capability_ambient,
+            process.addrspace.locked_user_bytes() / 1024,
         )
     };
     let parent_pid = parent
@@ -250,6 +254,7 @@ pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
             "Gid:\t{}\t{}\t{}\t{}\n",
             "FDSize:\t{}\n",
             "Groups:\t{}\n",
+            "VmLck:\t{:>8} kB\n",
             "CapInh:\t{}\n",
             "CapPrm:\t{}\n",
             "CapEff:\t{}\n",
@@ -275,6 +280,7 @@ pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
         fs_gid,
         fd_size,
         groups,
+        locked_kb,
         format_capability_set(capability_inheritable[0], capability_inheritable[1]),
         format_capability_set(capability_permitted[0], capability_permitted[1]),
         format_capability_set(capability_effective[0], capability_effective[1]),
@@ -282,6 +288,64 @@ pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
         format_capability_set(capability_ambient[0], capability_ambient[1]),
     );
     Ok(content.into_bytes())
+}
+
+fn pagemap_entry_for_page(process: &mut crate::process::Process, page_index: u64) -> u64 {
+    const PAGE_PRESENT: u64 = 1 << 63;
+
+    let addr = x86_64::VirtAddr::new(page_index.saturating_mul(4096));
+    process
+        .addrspace
+        .translate_addr(addr)
+        .map(|phys| PAGE_PRESENT | (phys.as_u64() / 4096))
+        .unwrap_or(0)
+}
+
+pub(super) fn proc_pid_pagemap_read_at(
+    pid: ProcessID,
+    buffer: &mut [u8],
+    offset: u64,
+) -> FSResult<usize> {
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    let mut process = process.lock();
+
+    for (index, byte) in buffer.iter_mut().enumerate() {
+        let absolute = offset.saturating_add(index as u64);
+        let entry = pagemap_entry_for_page(&mut process, absolute / 8).to_le_bytes();
+        *byte = entry[(absolute % 8) as usize];
+    }
+
+    Ok(buffer.len())
+}
+
+pub(super) fn proc_kpageflags_read_at(buffer: &mut [u8], offset: u64) -> FSResult<usize> {
+    for (index, byte) in buffer.iter_mut().enumerate() {
+        let absolute = offset.saturating_add(index as u64);
+        let pfn = absolute / 8;
+        let entry = kpageflags_entry_for_pfn(pfn).to_le_bytes();
+        *byte = entry[(absolute % 8) as usize];
+    }
+    Ok(buffer.len())
+}
+
+fn kpageflags_entry_for_pfn(pfn: u64) -> u64 {
+    const KPF_DIRTY: u64 = 1 << 4;
+
+    let process = get_current_process();
+    let mut process = process.lock();
+    for area in process.addrspace.memory_areas.clone() {
+        for page in area.page_range() {
+            if let TranslateResult::Mapped { frame, flags, .. } =
+                process.addrspace.page_table.translate(page.start_address())
+                && frame.start_address().as_u64() / 4096 == pfn
+                && flags.contains(PageTableFlags::DIRTY)
+            {
+                return KPF_DIRTY;
+            }
+        }
+    }
+
+    0
 }
 
 pub(super) fn proc_pid_sessionid_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
@@ -532,6 +596,10 @@ pub(super) fn pid_oom_score_adj_inode(pid: ProcessID) -> u64 {
 
 pub(super) fn pid_maps_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 15
+}
+
+pub(super) fn pid_pagemap_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 17
 }
 
 pub(super) fn pid_stat_inode(pid: ProcessID) -> u64 {

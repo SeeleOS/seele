@@ -56,6 +56,8 @@ pub struct MemoryArea {
     pub protection: Protection,
     pub data: Data,
     pub lazy: bool,
+    pub locked: bool,
+    pub grows_down: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -73,6 +75,7 @@ pub enum Data {
         offset: u64,
         // Bytes from `offset` that belong to this mapping; the rest stays zeroed.
         file_bytes: u64,
+        zero_fill_after_file: bool,
         file: Arc<FileLikeObject>,
         shared: bool,
     },
@@ -98,7 +101,19 @@ impl MemoryArea {
             protection,
             data,
             lazy,
+            locked: false,
+            grows_down: false,
         }
+    }
+
+    pub fn with_locked(mut self, locked: bool) -> Self {
+        self.locked = locked;
+        self
+    }
+
+    pub fn with_grows_down(mut self, grows_down: bool) -> Self {
+        self.grows_down = grows_down;
+        self
     }
 
     pub fn new_with_guard(

@@ -56,6 +56,7 @@ pub(super) const PROC_SYSVIPC_SHM_INODE: u64 = 0x3027;
 pub(super) const PROC_LOADAVG_INODE: u64 = 0x3028;
 pub(super) const PROC_VERSION_INODE: u64 = 0x302a;
 pub(super) const PROC_CPUINFO_INODE: u64 = 0x302b;
+pub(super) const PROC_KPAGEFLAGS_INODE: u64 = 0x302c;
 
 static PROC_UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -69,6 +70,7 @@ pub(super) fn proc_root_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("cpuinfo".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("devices".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("filesystems".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("kpageflags".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("loadavg".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("meminfo".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("mounts".into(), DirectoryContentType::File),

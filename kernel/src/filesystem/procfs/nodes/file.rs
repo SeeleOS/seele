@@ -10,6 +10,7 @@ use crate::filesystem::{
 };
 
 type ProcReadCallback = dyn Fn() -> Vec<u8> + Send + Sync;
+type ProcReadAtCallback = dyn Fn(&mut [u8], u64) -> FSResult<usize> + Send + Sync;
 type ProcWriteCallback = dyn Fn(&[u8]) -> FSResult<usize> + Send + Sync;
 
 pub(crate) struct ProcFile {
@@ -17,6 +18,7 @@ pub(crate) struct ProcFile {
     inode: u64,
     mode: u32,
     read: Arc<ProcReadCallback>,
+    read_at: Option<Arc<ProcReadAtCallback>>,
     write: Option<Arc<ProcWriteCallback>>,
     epoll_ready: bool,
     offset: usize,
@@ -28,6 +30,7 @@ impl ProcFile {
         inode: u64,
         mode: u32,
         read: Arc<ProcReadCallback>,
+        read_at: Option<Arc<ProcReadAtCallback>>,
         write: Option<Arc<ProcWriteCallback>>,
         epoll_ready: bool,
     ) -> Self {
@@ -36,6 +39,7 @@ impl ProcFile {
             inode,
             mode,
             read,
+            read_at,
             write,
             epoll_ready,
             offset: 0,
@@ -66,6 +70,10 @@ impl File for ProcFile {
     }
 
     fn read_at(&mut self, buffer: &mut [u8], offset: u64) -> FSResult<usize> {
+        if let Some(read_at) = &self.read_at {
+            return read_at(buffer, offset);
+        }
+
         let data = (self.read)();
         let offset = offset as usize;
         if offset >= data.len() {
@@ -99,18 +107,19 @@ impl File for ProcFile {
     }
 
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {
-        let len = (self.read)().len() as i64;
         let next = match seek_type {
             Whence::Start => offset,
             Whence::Current => self.offset as i64 + offset,
-            Whence::End => len + offset,
+            Whence::End => (self.read)().len() as i64 + offset,
             Whence::Data => {
+                let len = (self.read)().len() as i64;
                 if offset < 0 || offset >= len {
                     return Err(FSError::Other);
                 }
                 offset
             }
             Whence::Hole => {
+                let len = (self.read)().len() as i64;
                 if offset < 0 || offset > len {
                     return Err(FSError::Other);
                 }

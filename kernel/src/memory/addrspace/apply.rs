@@ -273,6 +273,7 @@ impl AddrSpace {
                 file_bytes,
                 ref file,
                 shared,
+                ..
             } => {
                 let resolved = Self::resolve_file_cache(file)
                     .expect("file-backed mapping missing readonly page-cache backend");

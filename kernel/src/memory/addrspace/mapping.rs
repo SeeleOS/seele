@@ -104,6 +104,7 @@ impl AddrSpace {
                 if let Data::File {
                     offset,
                     file_bytes,
+                    zero_fill_after_file,
                     file,
                     shared,
                 } = &area.data
@@ -112,6 +113,7 @@ impl AddrSpace {
                     left.data = Data::File {
                         offset: *offset,
                         file_bytes: (*file_bytes).min(span),
+                        zero_fill_after_file: *zero_fill_after_file,
                         file: file.clone(),
                         shared: *shared,
                     };
@@ -126,6 +128,7 @@ impl AddrSpace {
                 if let Data::File {
                     offset,
                     file_bytes,
+                    zero_fill_after_file,
                     file,
                     shared,
                 } = &area.data
@@ -136,6 +139,7 @@ impl AddrSpace {
                         file_bytes: file_bytes
                             .saturating_sub(overlap_end.as_u64() - area_start.as_u64())
                             .min(span),
+                        zero_fill_after_file: *zero_fill_after_file,
                         file: file.clone(),
                         shared: *shared,
                     };

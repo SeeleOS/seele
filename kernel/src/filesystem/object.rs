@@ -624,6 +624,7 @@ impl OpenedFileObject {
         Data::File {
             offset,
             file_bytes,
+            zero_fill_after_file: false,
             file: self,
             shared,
         }

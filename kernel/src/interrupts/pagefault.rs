@@ -1,10 +1,11 @@
 use core::{arch::naked_asm, mem::offset_of};
 
 use x86_64::{
+    VirtAddr,
     registers::control::Cr2,
     structures::{
         idt::PageFaultErrorCode,
-        paging::{Page, mapper::TranslateResult},
+        paging::{Page, PageSize, Size4KiB, mapper::TranslateResult},
     },
 };
 
@@ -23,6 +24,8 @@ use crate::{
     smp::gs::GsContext,
 };
 
+const STACK_GUARD_GAP_PAGES: u64 = 256;
+
 pub extern "C" fn pagefault_handler(
     snapshot: &mut SnapshotWithErrorCode,
     error_code: PageFaultErrorCode,
@@ -31,7 +34,7 @@ pub extern "C" fn pagefault_handler(
     let fault_start = profile::scope_start();
     let address = Cr2::read().unwrap();
 
-    let handled = {
+    let fault_signal = {
         let process_ref = get_current_process();
         let mut process = process_ref.lock();
         let addrspace = &mut process.addrspace;
@@ -46,12 +49,43 @@ pub extern "C" fn pagefault_handler(
             process.addrspace.replace_cow_page(address);
             profile::record(ProfileCategory::PageFaultResolve, resolve_start);
             profile::record(ProfileCategory::PageFaultCow, resolve_start);
-            true
+            None
         } else if error_code.contains(PageFaultErrorCode::PROTECTION_VIOLATION) {
             profile::record(ProfileCategory::PageFaultLookup, lookup_start);
-            false
+            Some(Signal::SIGSEGV)
         } else {
-            let area = addrspace.get_area(address).cloned();
+            let mut area = addrspace.get_area(address).cloned();
+            if area.is_none() {
+                let fault_page = Page::<Size4KiB>::containing_address(address);
+                let fault_page_start = fault_page.start_address();
+                if let Some(index) = addrspace.memory_areas.iter().position(|area| {
+                    area.grows_down
+                        && fault_page_start < area.start
+                        && fault_page_start + Size4KiB::SIZE == area.start
+                }) {
+                    let guard_start = VirtAddr::new(
+                        fault_page_start
+                            .as_u64()
+                            .saturating_sub(STACK_GUARD_GAP_PAGES * Size4KiB::SIZE),
+                    );
+                    let guard_blocked =
+                        addrspace
+                            .memory_areas
+                            .iter()
+                            .enumerate()
+                            .any(|(other_index, other)| {
+                                other_index != index
+                                    && other.start < fault_page_start
+                                    && other.end > guard_start
+                            });
+
+                    if !guard_blocked {
+                        addrspace.memory_areas[index].start = fault_page_start;
+                        addrspace.last_area_index = Some(index);
+                        area = addrspace.memory_areas.get(index).cloned();
+                    }
+                }
+            }
             profile::record(ProfileCategory::PageFaultLookup, lookup_start);
             match area {
                 Some(area)
@@ -60,51 +94,70 @@ pub extern "C" fn pagefault_handler(
                     let resolve_start = profile::scope_start();
                     let is_file_backed = matches!(&area.data, Data::File { .. });
                     if is_file_backed {
-                        let applied = addrspace.apply_page_cluster(
-                            Page::containing_address(address),
-                            area.clone(),
-                            AddrSpace::file_lazy_cluster_pages(),
-                        );
-                        profile::record(ProfileCategory::PageFaultResolve, resolve_start);
-                        profile::record(ProfileCategory::PageFaultFileLazy, resolve_start);
-                        profile::record_cycles(
-                            ProfileCategory::PageFaultFileLazyCacheLookup,
-                            applied.file_lazy_stats.cache_lookup_cycles,
-                        );
-                        profile::record_cycles(
-                            ProfileCategory::PageFaultFileLazyCacheLoad,
-                            applied.file_lazy_stats.cache_load_cycles,
-                        );
-                        profile::record_cycles(
-                            ProfileCategory::PageFaultFileLazyMap,
-                            applied.file_lazy_stats.map_cycles,
-                        );
-                        profile::record_cycles(
-                            ProfileCategory::PageFaultFileLazyCopy,
-                            applied.file_lazy_stats.copy_cycles,
-                        );
-                        profile::record_file_lazy_fault(profile::FileLazyFaultRecord {
-                            cluster_pages_loaded: applied.file_lazy_stats.cluster_pages_loaded,
-                            cache_hits: applied.file_lazy_stats.cache_hits,
-                            cache_misses: applied.file_lazy_stats.cache_misses,
-                            cache_lookup_cycles: applied.file_lazy_stats.cache_lookup_cycles,
-                            cache_load_cycles: applied.file_lazy_stats.cache_load_cycles,
-                            map_cycles: applied.file_lazy_stats.map_cycles,
-                            copy_cycles: applied.file_lazy_stats.copy_cycles,
-                        });
+                        let beyond_file = if let Data::File {
+                            file_bytes,
+                            zero_fill_after_file,
+                            ..
+                        } = &area.data
+                        {
+                            let page_start =
+                                Page::<Size4KiB>::containing_address(address).start_address();
+                            let page_offset = page_start.as_u64() - area.start.as_u64();
+                            !*zero_fill_after_file && page_offset >= *file_bytes
+                        } else {
+                            false
+                        };
+                        if beyond_file {
+                            profile::record(ProfileCategory::PageFaultResolve, resolve_start);
+                            Some(Signal::SIGBUS)
+                        } else {
+                            let applied = addrspace.apply_page_cluster(
+                                Page::containing_address(address),
+                                area.clone(),
+                                AddrSpace::file_lazy_cluster_pages(),
+                            );
+                            profile::record(ProfileCategory::PageFaultResolve, resolve_start);
+                            profile::record(ProfileCategory::PageFaultFileLazy, resolve_start);
+                            profile::record_cycles(
+                                ProfileCategory::PageFaultFileLazyCacheLookup,
+                                applied.file_lazy_stats.cache_lookup_cycles,
+                            );
+                            profile::record_cycles(
+                                ProfileCategory::PageFaultFileLazyCacheLoad,
+                                applied.file_lazy_stats.cache_load_cycles,
+                            );
+                            profile::record_cycles(
+                                ProfileCategory::PageFaultFileLazyMap,
+                                applied.file_lazy_stats.map_cycles,
+                            );
+                            profile::record_cycles(
+                                ProfileCategory::PageFaultFileLazyCopy,
+                                applied.file_lazy_stats.copy_cycles,
+                            );
+                            profile::record_file_lazy_fault(profile::FileLazyFaultRecord {
+                                cluster_pages_loaded: applied.file_lazy_stats.cluster_pages_loaded,
+                                cache_hits: applied.file_lazy_stats.cache_hits,
+                                cache_misses: applied.file_lazy_stats.cache_misses,
+                                cache_lookup_cycles: applied.file_lazy_stats.cache_lookup_cycles,
+                                cache_load_cycles: applied.file_lazy_stats.cache_load_cycles,
+                                map_cycles: applied.file_lazy_stats.map_cycles,
+                                copy_cycles: applied.file_lazy_stats.copy_cycles,
+                            });
+                            None
+                        }
                     } else {
                         addrspace.apply_page(Page::containing_address(address), area.clone());
                         profile::record(ProfileCategory::PageFaultResolve, resolve_start);
                         profile::record(ProfileCategory::PageFaultAnonLazy, resolve_start);
+                        None
                     }
-                    true
                 }
-                _ => false,
+                _ => Some(Signal::SIGSEGV),
             }
         }
     };
 
-    if handled {
+    if fault_signal.is_none() {
         profile::record(ProfileCategory::PageFault, fault_start);
         return;
     }
@@ -113,7 +166,7 @@ pub extern "C" fn pagefault_handler(
 
     let snapshot = snapshot.as_snapshot();
     if from_user != 0 {
-        handle_usermode_exception(&snapshot, Signal::SIGSEGV);
+        handle_usermode_exception(&snapshot, fault_signal.unwrap_or(Signal::SIGSEGV));
     }
 
     panic!(

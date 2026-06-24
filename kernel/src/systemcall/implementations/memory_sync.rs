@@ -6,7 +6,7 @@ use alloc::{
 };
 use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
-use x86_64::structures::paging::{FrameAllocator, PageSize, Size4KiB};
+use x86_64::structures::paging::{FrameAllocator, Page, PageSize, Size4KiB};
 use x86_64::{VirtAddr, registers::model_specific::FsBase};
 
 use crate::{
@@ -878,6 +878,10 @@ fn mmap_shared(flags: MmapFlags) -> Result<bool, SyscallError> {
 }
 
 fn check_mmap_flags(flags: MmapFlags) -> Result<(), SyscallError> {
+    let unknown = flags.bits() & !MmapFlags::all().bits();
+    if unknown != 0 && flags.contains(MmapFlags::SHARED_VALIDATE) {
+        return Err(SyscallError::OperationNotSupported);
+    }
     if flags.contains(MmapFlags::SYNC) && !flags.contains(MmapFlags::SHARED_VALIDATE) {
         return Err(SyscallError::InvalidArguments);
     }
@@ -885,6 +889,59 @@ fn check_mmap_flags(flags: MmapFlags) -> Result<(), SyscallError> {
         return Err(SyscallError::InvalidArguments);
     }
     Ok(())
+}
+
+fn mmap_hint_addr(addr: u64, pages: u64, areas: &[MemoryArea]) -> Option<VirtAddr> {
+    if addr == 0 || !addr.is_multiple_of(Size4KiB::SIZE) {
+        return None;
+    }
+    let (start, end) = checked_user_mapping(addr, pages).ok()?;
+    if mapping_overlaps(areas, start, end) {
+        None
+    } else {
+        Some(start)
+    }
+}
+
+fn populate_mapping(addrspace: &mut AddrSpace, start: VirtAddr, pages: u64) {
+    for page_index in 0..pages {
+        let address = start + page_index * Size4KiB::SIZE;
+        if let Some(area) = addrspace.get_area(address).cloned() {
+            addrspace.apply_page(Page::containing_address(address), area);
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct MappingOptions {
+    locked: bool,
+    grows_down: bool,
+    populate: bool,
+}
+
+fn register_lazy_mapping(
+    addrspace: &mut AddrSpace,
+    start: VirtAddr,
+    pages: u64,
+    protection: Protection,
+    data: Data,
+    options: MappingOptions,
+) -> VirtAddr {
+    let area = MemoryArea::new(
+        start,
+        pages,
+        protection_to_page_flags(protection),
+        protection,
+        data,
+        true,
+    )
+    .with_locked(options.locked)
+    .with_grows_down(options.grows_down);
+    addrspace.register_area(area);
+    if options.populate || options.locked {
+        populate_mapping(addrspace, start, pages);
+    }
+    start
 }
 
 fn checked_user_mapping(addr: u64, pages: u64) -> Result<(VirtAddr, VirtAddr), SyscallError> {
@@ -1061,14 +1118,24 @@ define_syscall!(Mmap, |addr: u64,
                        flags: MmapFlags,
                        fd: i32,
                        offset: u64| {
-    if len == 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
     check_mmap_flags(flags)?;
     let protection = prot_to_protection(prot)?;
+    if len == 0 {
+        if !flags.contains(MmapFlags::ANONYMOUS) {
+            if fd < 0 {
+                return Err(SyscallError::BadFileDescriptor);
+            }
+            let _ = crate::object::misc::get_object_current_process(fd as u64)
+                .map_err(|_| SyscallError::BadFileDescriptor)?;
+        }
+        return Err(SyscallError::InvalidArguments);
+    }
     let pages = len.div_ceil(4096);
     let fixed = flags.intersects(MmapFlags::FIXED | MmapFlags::FIXED_NOREPLACE);
     let shared = mmap_shared(flags)?;
+    let locked = flags.contains(MmapFlags::LOCKED);
+    let grows_down = flags.contains(MmapFlags::GROWSDOWN);
+    let populate = flags.contains(MmapFlags::POPULATE);
 
     if fixed {
         if !offset.is_multiple_of(4096) {
@@ -1080,10 +1147,10 @@ define_syscall!(Mmap, |addr: u64,
             None
         } else {
             if fd < 0 {
-                return Err(SyscallError::InvalidArguments);
+                return Err(SyscallError::BadFileDescriptor);
             }
             let object = crate::object::misc::get_object_current_process(fd as u64)
-                .map_err(SyscallError::from)?;
+                .map_err(|_| SyscallError::BadFileDescriptor)?;
             check_file_mapping_readable(&object)?;
             check_shared_writable_mapping(&object, shared, protection)?;
             let file = object.as_file_like()?;
@@ -1112,36 +1179,53 @@ define_syscall!(Mmap, |addr: u64,
             anonymous_mapping_data(pages, shared, protection)?
         };
 
-        current.addrspace.register_area(MemoryArea::new(
-            start,
-            pages,
-            protection_to_page_flags(protection),
-            protection,
-            data,
-            true,
-        ));
+        current.addrspace.register_area(
+            MemoryArea::new(
+                start,
+                pages,
+                protection_to_page_flags(protection),
+                protection,
+                data,
+                true,
+            )
+            .with_locked(locked)
+            .with_grows_down(grows_down),
+        );
+        if populate || locked {
+            populate_mapping(&mut current.addrspace, start, pages);
+        }
         return Ok(addr as usize);
-    }
-
-    if addr != 0 {
-        return Err(SyscallError::InvalidArguments);
     }
 
     if flags.contains(MmapFlags::ANONYMOUS) {
         let current = get_current_process();
         let data = anonymous_mapping_data(pages, shared, protection)?;
-        return Ok(current
-            .lock()
-            .addrspace
-            .allocate_user_lazy(pages, protection, data)
-            .as_u64() as usize);
+        let mut current = current.lock();
+        let start = mmap_hint_addr(addr, pages, &current.addrspace.memory_areas)
+            .unwrap_or_else(|| current.addrspace.fetch_add_user_mem(pages));
+        return Ok(register_lazy_mapping(
+            &mut current.addrspace,
+            start,
+            pages,
+            protection,
+            data,
+            MappingOptions {
+                locked,
+                grows_down,
+                populate,
+            },
+        )
+        .as_u64() as usize);
     }
 
-    if !offset.is_multiple_of(4096) || fd < 0 {
+    if !offset.is_multiple_of(4096) {
         return Err(SyscallError::InvalidArguments);
     }
-    let object =
-        crate::object::misc::get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+    if fd < 0 {
+        return Err(SyscallError::BadFileDescriptor);
+    }
+    let object = crate::object::misc::get_object_current_process(fd as u64)
+        .map_err(|_| SyscallError::BadFileDescriptor)?;
     check_file_mapping_readable(&object)?;
     check_shared_writable_mapping(&object, shared, protection)?;
     let shared_write_allowed = shared_write_permission(&object, shared)?;
@@ -1149,10 +1233,22 @@ define_syscall!(Mmap, |addr: u64,
         && !file.is_device_backed()
     {
         let data = file.mmap_data(offset, pages, shared);
-        let address = get_current_process()
-            .lock()
-            .addrspace
-            .allocate_user_lazy(pages, protection, data);
+        let current = get_current_process();
+        let mut current = current.lock();
+        let address = mmap_hint_addr(addr, pages, &current.addrspace.memory_areas)
+            .unwrap_or_else(|| current.addrspace.fetch_add_user_mem(pages));
+        let address = register_lazy_mapping(
+            &mut current.addrspace,
+            address,
+            pages,
+            protection,
+            data,
+            MappingOptions {
+                locked,
+                grows_down,
+                populate,
+            },
+        );
         return Ok(address.as_u64() as usize);
     }
     let object = object.as_mappable()?;
@@ -1194,15 +1290,26 @@ define_syscall!(Msync, |addr: VirtAddr, len: u64, flags: MsyncFlags| {
     if len == 0 {
         return Ok(0);
     }
-    if flags.contains(MsyncFlags::INVALIDATE) {
-        return Err(SyscallError::OperationNotSupported);
+    if flags.bits() & !MsyncFlags::all().bits() != 0 {
+        return Err(SyscallError::InvalidArguments);
     }
     if flags.contains(MsyncFlags::ASYNC) && flags.contains(MsyncFlags::SYNC) {
         return Err(SyscallError::InvalidArguments);
     }
+    let (start, end) = checked_page_range_for_memory_syscall(addr, len)?;
 
     let process = get_current_process();
     let mut process = process.lock();
+    if !mapped_area_covers_range(&process.addrspace.memory_areas, start, end) {
+        return Err(SyscallError::NoMemory);
+    }
+    if flags.contains(MsyncFlags::INVALIDATE)
+        && process
+            .addrspace
+            .range_has_locked_area(VirtAddr::new(start), VirtAddr::new(end))
+    {
+        return Err(SyscallError::DeviceOrResourceBusy);
+    }
     process
         .addrspace
         .flush_file_mappings(addr, len)
@@ -1243,6 +1350,38 @@ define_syscall!(Mremap, |old_addr: VirtAddr,
         return Ok(old_addr.as_u64() as usize);
     }
 
+    let old_mapping_end = old_addr + old_pages * Size4KiB::SIZE;
+    let new_mapping_end = old_addr + new_pages * Size4KiB::SIZE;
+    let in_place_extension_free =
+        checked_user_mapping(old_addr.as_u64(), new_pages).is_ok_and(|_| {
+            !mapping_overlaps(
+                &current.addrspace.memory_areas,
+                old_mapping_end,
+                new_mapping_end,
+            )
+        });
+    if in_place_extension_free
+        && let Some(area_index) = current
+            .addrspace
+            .memory_areas
+            .iter()
+            .position(|existing| existing.start == old_addr)
+    {
+        let area = &mut current.addrspace.memory_areas[area_index];
+        area.end = new_mapping_end;
+        if let Data::File {
+            offset,
+            file,
+            shared,
+            ..
+        } = &area.data
+        {
+            area.data = resized_file_mapping(file.clone(), *offset, new_pages, *shared);
+        }
+        current.addrspace.last_area_index = None;
+        return Ok(old_addr.as_u64() as usize);
+    }
+
     if !flags.contains(MremapFlags::MAYMOVE) {
         return Err(SyscallError::NoMemory);
     }
@@ -1265,7 +1404,8 @@ define_syscall!(Mremap, |old_addr: VirtAddr,
         area.protection,
         new_data,
         area.lazy,
-    );
+    )
+    .with_locked(area.locked);
     current.addrspace.register_area(new_area.clone());
 
     let copy_pages = match &area.data {
@@ -1364,6 +1504,7 @@ define_syscall!(Mlock, |addr: VirtAddr, len: u64| {
         let _ = addrspace.read(page_addr.as_u64() as *const u8)?;
         page_addr += Size4KiB::SIZE;
     }
+    addrspace.set_locked(start, VirtAddr::new(end), true);
 
     Ok(0)
 });
@@ -1373,7 +1514,12 @@ define_syscall!(Munlock, |addr: VirtAddr, len: u64| {
         return Ok(0);
     }
 
-    ensure_mapped_user_page_range(addr, len)?;
+    let (start, end) = ensure_mapped_user_page_range(addr, len)?;
+    get_current_process().lock().addrspace.set_locked(
+        VirtAddr::new(start),
+        VirtAddr::new(end),
+        false,
+    );
     Ok(0)
 });
 
@@ -1651,17 +1797,21 @@ mod tests {
             .call::<Mmap>(),
             SyscallError::InvalidArguments,
         );
-        expect_errno(
-            SyscallArgs::new([
-                0x2000,
-                4096,
-                Protection::READ.bits() as u64,
-                MAP_PRIVATE | MAP_ANONYMOUS,
-                u64::MAX,
-                0,
-            ])
-            .call::<Mmap>(),
-            SyscallError::InvalidArguments,
+        let hinted_addr = SyscallArgs::new([
+            0x2000,
+            4096,
+            Protection::READ.bits() as u64,
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            u64::MAX,
+            0,
+        ])
+        .call::<Mmap>()
+        .expect("mmap should accept a free non-fixed page-aligned hint")
+            as u64;
+        assert_eq!(hinted_addr, 0x2000);
+        expect_ok(
+            SyscallArgs::new([hinted_addr, 4096, 0, 0, 0, 0]).call::<Munmap>(),
+            0,
         );
         expect_errno(
             SyscallArgs::new([
@@ -2081,9 +2231,21 @@ mod tests {
             SyscallArgs::new([file_map_addr, 4096, MS_ASYNC | MS_SYNC, 0, 0, 0]).call::<Msync>(),
             SyscallError::InvalidArguments,
         );
+        expect_ok(
+            SyscallArgs::new([file_map_addr, 4096, MS_INVALIDATE, 0, 0, 0]).call::<Msync>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([file_map_addr, 4096, 0, 0, 0, 0]).call::<Mlock>(),
+            0,
+        );
         expect_errno(
             SyscallArgs::new([file_map_addr, 4096, MS_INVALIDATE, 0, 0, 0]).call::<Msync>(),
-            SyscallError::OperationNotSupported,
+            SyscallError::DeviceOrResourceBusy,
+        );
+        expect_ok(
+            SyscallArgs::new([file_map_addr, 4096, 0, 0, 0, 0]).call::<Munlock>(),
+            0,
         );
 
         let (forked_process, _) = Process::fork(process.clone());

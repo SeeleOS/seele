@@ -110,6 +110,7 @@ impl AddrSpace {
             file_bytes,
             file,
             shared,
+            ..
         } = &area.data
         else {
             return Ok(());
@@ -155,6 +156,7 @@ impl AddrSpace {
 
             let write_len = core::cmp::min(4096, (current_file_bytes - page_offset) as usize);
             page_writes.push((
+                page,
                 apply_offset(phys.as_u64()),
                 *offset + page_offset,
                 write_len,
@@ -196,7 +198,7 @@ impl AddrSpace {
                 Ok(())
             };
 
-            for (phys_addr, file_offset, write_len) in &page_writes {
+            for (_, phys_addr, file_offset, write_len) in &page_writes {
                 let write_page_start = profile::scope_start();
                 let src =
                     unsafe { core::slice::from_raw_parts(*phys_addr as *const u8, *write_len) };
@@ -216,6 +218,20 @@ impl AddrSpace {
             flush_chunk(writer, &mut chunk_buffer, chunk_start, chunk_end)?;
             Ok(())
         })?;
+
+        for (page, _, _, _) in &page_writes {
+            if let x86_64::structures::paging::mapper::TranslateResult::Mapped { flags, .. } =
+                self.page_table.translate(page.start_address())
+            {
+                let clean_flags = flags & !x86_64::structures::paging::PageTableFlags::DIRTY;
+                unsafe {
+                    if let Ok(flush) = self.page_table.update_flags(*page, clean_flags) {
+                        flush.flush();
+                    }
+                }
+            }
+        }
+        self.flush_page_table_updates(!page_writes.is_empty());
 
         if page_writes.is_empty() {
             profile::record_hot_syscall_phase(
@@ -254,6 +270,76 @@ impl AddrSpace {
         }
 
         Ok(())
+    }
+
+    pub fn range_has_locked_area(&self, start: VirtAddr, end: VirtAddr) -> bool {
+        self.memory_areas
+            .iter()
+            .any(|area| area.locked && area.start < end && area.end > start)
+    }
+
+    pub fn locked_user_bytes(&self) -> u64 {
+        self.memory_areas
+            .iter()
+            .filter(|area| area.locked && area.is_user())
+            .map(|area| area.end.as_u64() - area.start.as_u64())
+            .sum()
+    }
+
+    pub fn set_locked(&mut self, start: VirtAddr, end: VirtAddr, locked: bool) {
+        if start >= end {
+            return;
+        }
+
+        let mut new_areas = Vec::new();
+        for area in self.memory_areas.drain(..) {
+            let overlap_start = core::cmp::max(area.start, start);
+            let overlap_end = core::cmp::min(area.end, end);
+
+            if overlap_start >= overlap_end {
+                new_areas.push(area);
+                continue;
+            }
+
+            let (left, right) = split_memory_area(&area, start, end);
+            if let Some(left) = left {
+                new_areas.push(left);
+            }
+
+            let mut middle = area.clone();
+            middle.start = overlap_start;
+            middle.end = overlap_end;
+            middle.locked = locked;
+
+            if let Data::File {
+                offset,
+                file_bytes,
+                zero_fill_after_file,
+                file,
+                shared,
+            } = &area.data
+            {
+                let span = middle.end.as_u64() - middle.start.as_u64();
+                middle.data = Data::File {
+                    offset: *offset + (overlap_start.as_u64() - area.start.as_u64()),
+                    file_bytes: file_bytes
+                        .saturating_sub(overlap_start.as_u64() - area.start.as_u64())
+                        .min(span),
+                    zero_fill_after_file: *zero_fill_after_file,
+                    file: file.clone(),
+                    shared: *shared,
+                };
+            }
+
+            new_areas.push(middle);
+
+            if let Some(right) = right {
+                new_areas.push(right);
+            }
+        }
+
+        self.memory_areas = new_areas;
+        self.last_area_index = None;
     }
 
     pub fn flush_all_file_mappings(&mut self) -> Result<(), crate::filesystem::errors::FSError> {
@@ -355,6 +441,7 @@ impl AddrSpace {
             if let Data::File {
                 offset,
                 file_bytes,
+                zero_fill_after_file,
                 file,
                 shared,
             } = &area.data
@@ -365,6 +452,7 @@ impl AddrSpace {
                     file_bytes: file_bytes
                         .saturating_sub(overlap_start.as_u64() - area.start.as_u64())
                         .min(span),
+                    zero_fill_after_file: *zero_fill_after_file,
                     file: file.clone(),
                     shared: *shared,
                 };

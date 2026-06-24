@@ -30,6 +30,11 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             PROC_FILESYSTEMS_INODE,
             proc_filesystems_bytes,
         )),
+        ["kpageflags"] => Ok(proc_sparse_file(
+            "kpageflags",
+            PROC_KPAGEFLAGS_INODE,
+            proc_kpageflags_read_at,
+        )),
         ["loadavg"] => Ok(proc_file("loadavg", PROC_LOADAVG_INODE, proc_loadavg_bytes)),
         ["meminfo"] => Ok(proc_file("meminfo", PROC_MEMINFO_INODE, proc_meminfo_bytes)),
         ["mounts"] => Ok(proc_file("mounts", PROC_MOUNTS_INODE, proc_mounts_bytes)),

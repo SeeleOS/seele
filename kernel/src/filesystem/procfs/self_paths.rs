@@ -93,6 +93,14 @@ pub(super) fn lookup_proc_self_path(parts: &[&str]) -> FSResult<FileLike> {
                 proc_pid_maps_bytes(pid).unwrap_or_default()
             }))
         }
+        ["self", "pagemap"] => {
+            let pid = current_pid()?;
+            Ok(proc_sparse_file(
+                "pagemap",
+                pid_pagemap_inode(pid),
+                move |buffer, offset| proc_pid_pagemap_read_at(pid, buffer, offset),
+            ))
+        }
         ["self", "uid_map"] => {
             let pid = current_pid()?;
             Ok(proc_rw_file(

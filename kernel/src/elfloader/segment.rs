@@ -53,9 +53,12 @@ pub fn load_segment_to_area(
         data: Data::File {
             offset: file_offset,
             file_bytes,
+            zero_fill_after_file: true,
             file,
             shared: false,
         },
         lazy: true,
+        locked: false,
+        grows_down: false,
     }
 }

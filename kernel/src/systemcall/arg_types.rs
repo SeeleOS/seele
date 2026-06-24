@@ -168,8 +168,6 @@ add_syscall_arg_flags_type!(
     i32,
     PipeFlags,
     i32,
-    MsyncFlags,
-    i32,
     FallocateFlags,
     i32,
     UmountFlags,
@@ -208,6 +206,8 @@ add_syscall_arg_flags_type!(
 
 add_syscall_arg_flags_retain_type!(
     MmapFlags,
+    i32,
+    MsyncFlags,
     i32,
     AtFlags,
     i32,
