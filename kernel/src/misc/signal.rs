@@ -763,6 +763,7 @@ fn process_pending_signals(
                         (func as usize) as u64,
                         &mut process.addrspace,
                         handler_stack,
+                        current_thread.kernel_stack_top,
                         ThreadSnapshotType::Thread,
                         current_extended_state,
                     );
@@ -803,6 +804,7 @@ fn process_pending_signals(
                         (func as usize) as u64,
                         &mut process.addrspace,
                         handler_stack,
+                        current_thread.kernel_stack_top,
                         ThreadSnapshotType::Thread,
                         current_extended_state,
                     );

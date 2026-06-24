@@ -9,7 +9,7 @@ use crate::{
         ThreadRef,
         misc::{BlockedSyscall, SnapshotState, State, ThreadID},
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
-        stack::allocate_kernel_stack,
+        stack::{KernelStack, allocate_owned_kernel_stack},
     },
 };
 
@@ -44,6 +44,8 @@ pub struct Thread {
     // Kernel stack for the cpu to switch to a clean stack on interrupts
     // not to be confused with the kernel_rsp in ThreadSnapshot
     pub kernel_stack_top: u64,
+    pub kernel_stack: Option<KernelStack>,
+    pub scheduler_stack: Option<KernelStack>,
 
     pub saved_blocked_signals: Vec<Signals>,
     pub blocked_signals: Signals,
@@ -82,9 +84,11 @@ impl Default for Thread {
             parent: Process::empty(),
             id: ThreadID::default(),
             snapshot: ThreadSnapshot::default(),
-            scheduler_snapshot: ThreadSnapshot::new_scheduler(),
+            scheduler_snapshot: ThreadSnapshot::default(),
             state: State::Ready,
             kernel_stack_top: 0,
+            kernel_stack: None,
+            scheduler_stack: None,
             blocked_signals: Signals::default(),
             temporary_blocked_signals: None,
             pending_signals: Signals::default(),
@@ -114,7 +118,18 @@ impl Default for Thread {
 
 impl Thread {
     pub fn empty() -> ThreadRef {
-        Arc::new(Mut::new(Thread::default()))
+        let kernel_stack = allocate_owned_kernel_stack(16).finish();
+        let kernel_stack_top = kernel_stack.top().as_u64();
+        let scheduler_stack = allocate_owned_kernel_stack(16).finish();
+        let scheduler_stack_top = scheduler_stack.top().as_u64();
+
+        Arc::new(Mut::new(Thread {
+            kernel_stack_top,
+            kernel_stack: Some(kernel_stack),
+            scheduler_snapshot: ThreadSnapshot::new_scheduler(scheduler_stack_top),
+            scheduler_stack: Some(scheduler_stack),
+            ..Default::default()
+        }))
     }
 }
 
@@ -127,13 +142,17 @@ impl Thread {
         let mut parent_lock = parent.lock();
         let (_, stack) = parent_lock.addrspace.allocate_user_stack(64);
         let user_stack = stack.finish().as_u64();
-        let kernel_stack_top = allocate_kernel_stack(16).finish().as_u64();
+        let kernel_stack = allocate_owned_kernel_stack(16).finish();
+        let kernel_stack_top = kernel_stack.top().as_u64();
+        let scheduler_stack = allocate_owned_kernel_stack(16).finish();
+        let scheduler_stack_top = scheduler_stack.top().as_u64();
         Self {
             id,
             snapshot: ThreadSnapshot::new(
                 entry_point,
                 &mut parent.clone().lock().addrspace,
                 user_stack,
+                kernel_stack_top,
                 ThreadSnapshotType::Thread,
             ),
             last_user_snapshot: Snapshot::default_regs(
@@ -145,6 +164,9 @@ impl Thread {
             ),
             parent: parent.clone(),
             kernel_stack_top,
+            kernel_stack: Some(kernel_stack),
+            scheduler_snapshot: ThreadSnapshot::new_scheduler(scheduler_stack_top),
+            scheduler_stack: Some(scheduler_stack),
             ..Default::default()
         }
     }
@@ -152,17 +174,20 @@ impl Thread {
     pub fn from_snapshot(
         snapshot: ThreadSnapshot,
         parent: ProcessRef,
-        kernel_stack_top: u64,
+        kernel_stack: KernelStack,
     ) -> Self {
-        Self::from_snapshot_with_id(snapshot, parent, kernel_stack_top, ThreadID::new())
+        Self::from_snapshot_with_id(snapshot, parent, kernel_stack, ThreadID::new())
     }
 
     pub fn from_snapshot_with_id(
         snapshot: ThreadSnapshot,
         parent: ProcessRef,
-        kernel_stack_top: u64,
+        kernel_stack: KernelStack,
         id: ThreadID,
     ) -> Self {
+        let kernel_stack_top = kernel_stack.top().as_u64();
+        let scheduler_stack = allocate_owned_kernel_stack(16).finish();
+        let scheduler_stack_top = scheduler_stack.top().as_u64();
         Self {
             id,
             last_user_snapshot: snapshot.inner,
@@ -170,6 +195,9 @@ impl Thread {
             snapshot,
             parent,
             kernel_stack_top,
+            kernel_stack: Some(kernel_stack),
+            scheduler_snapshot: ThreadSnapshot::new_scheduler(scheduler_stack_top),
+            scheduler_stack: Some(scheduler_stack),
             ..Default::default()
         }
     }

@@ -375,6 +375,7 @@ mod tests {
                 0x1234,
                 &mut addrspace,
                 0x5678,
+                0,
                 ThreadSnapshotType::Thread,
                 extended_state.clone(),
             );
@@ -393,8 +394,13 @@ mod tests {
         "active user extended state tracking follows pointer and saved state transitions",
         || {
             let mut addrspace = AddrSpace::default();
-            let mut snapshot =
-                ThreadSnapshot::new(0x1234, &mut addrspace, 0x5678, ThreadSnapshotType::Thread);
+            let mut snapshot = ThreadSnapshot::new(
+                0x1234,
+                &mut addrspace,
+                0x5678,
+                0,
+                ThreadSnapshotType::Thread,
+            );
             let ptr = snapshot.extended_state.active_ptr();
 
             set_active_user_extended_state_ptr(ptr);

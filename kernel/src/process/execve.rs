@@ -5,8 +5,12 @@ use crate::{
     ipc::sysv_shm::detach_all_process_mappings,
     memory::addrspace::AddrSpace,
     process::{
-        Process, manager::wake_vfork_blocker, new::setup_process, new_fd_table,
-        object::close_cloexec_fd_entries, ptrace::maybe_stop_current_after_exec,
+        Process,
+        manager::wake_vfork_blocker,
+        new::{SetupProcessRequest, setup_process},
+        new_fd_table,
+        object::close_cloexec_fd_entries,
+        ptrace::maybe_stop_current_after_exec,
     },
     signal::{
         Signals,
@@ -19,7 +23,6 @@ use crate::{
         misc::{SnapshotState, ThreadID},
         scheduling::return_to_scheduler_from_current,
         snapshot::ThreadSnapshot,
-        stack::allocate_kernel_stack,
         thread::LinuxStack,
         with_thread_manager,
     },
@@ -58,10 +61,13 @@ impl Process {
         let fs_context = self.fs_context.lock().clone();
         close_cloexec_fd_entries(&mut next_fd_table);
         let next_snapshot = setup_process(
-            path.clone(),
-            exec_path,
-            args,
-            env,
+            SetupProcessRequest {
+                path: path.clone(),
+                exec_path,
+                args,
+                env,
+                kernel_stack_top: crate::thread::get_current_thread().lock().kernel_stack_top,
+            },
             &mut next_addrspace,
             &mut next_fd_table,
             &fs_context,
@@ -102,16 +108,13 @@ impl Process {
 
         //thread_manager.kill_all_except(thread.clone());
 
-        // Reallocates the kernel stack top (just in case)
-        self.kernel_stack_top = allocate_kernel_stack(16).finish();
-
         let mut thread_locked = thread.lock();
+        self.kernel_stack_top = x86_64::VirtAddr::new(thread_locked.kernel_stack_top);
 
         let fd_table = new_fd_table();
         *fd_table.lock() = prepared.next_fd_table;
         self.fd_table = fd_table;
         thread_locked.snapshot = prepared.next_snapshot;
-        thread_locked.kernel_stack_top = self.kernel_stack_top.as_u64();
         thread_locked.snapshot_state = SnapshotState::Normal;
         thread_locked.sig_handler_snapshot = ThreadSnapshot::default();
         thread_locked.sigaltstack = LinuxStack::default();

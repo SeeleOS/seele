@@ -3,7 +3,6 @@ use crate::{
     misc::snapshot::Snapshot,
     smp::{user_code_selector, user_data_selector},
     thread::extended_state::ExtendedState,
-    thread::stack::allocate_kernel_stack,
 };
 
 #[repr(C)]
@@ -34,12 +33,14 @@ impl ThreadSnapshot {
         entry_point: u64,
         addrspace: &mut AddrSpace,
         virt_stack_addr: u64,
+        kernel_stack_top: u64,
         snapshot_type: ThreadSnapshotType,
     ) -> Self {
         Self::new_with_extended_state(
             entry_point,
             addrspace,
             virt_stack_addr,
+            kernel_stack_top,
             snapshot_type,
             ExtendedState::capture_current(),
         )
@@ -49,6 +50,7 @@ impl ThreadSnapshot {
         entry_point: u64,
         _addrspace: &mut AddrSpace,
         virt_stack_addr: u64,
+        kernel_stack_top: u64,
         snapshot_type: ThreadSnapshotType,
         extended_state: ExtendedState,
     ) -> Self {
@@ -65,7 +67,7 @@ impl ThreadSnapshot {
                 virt_stack_addr,
                 user_data_selector().0,
             ),
-            kernel_rsp: allocate_kernel_stack(16).finish().as_u64(),
+            kernel_rsp: kernel_stack_top,
             extended_state,
             kernel_extended_state: ExtendedState::capture_current(),
             fs_base: 0,
@@ -73,11 +75,11 @@ impl ThreadSnapshot {
         }
     }
 
-    pub fn new_scheduler() -> Self {
+    pub fn new_scheduler(kernel_stack_top: u64) -> Self {
         Self {
             inner: Snapshot::default(),
             snapshot_type: ThreadSnapshotType::Scheduler,
-            kernel_rsp: allocate_kernel_stack(16).finish().as_u64(),
+            kernel_rsp: kernel_stack_top,
             extended_state: ExtendedState::capture_current(),
             kernel_extended_state: ExtendedState::capture_current(),
             fs_base: 0,

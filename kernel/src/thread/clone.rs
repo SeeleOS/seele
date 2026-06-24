@@ -1,7 +1,7 @@
 use crate::{
     process::ProcessRef,
     thread::{
-        ThreadRef, misc::ThreadID, stack::allocate_kernel_stack, thread::Thread,
+        ThreadRef, misc::ThreadID, stack::allocate_owned_kernel_stack, thread::Thread,
         with_thread_manager, yielding::BlockType,
     },
 };
@@ -10,14 +10,23 @@ impl Thread {
     fn clone_for_spawn_with_id(&self, process: ProcessRef, id: ThreadID) -> Thread {
         log::debug!("clone_and_spawn: start");
         let mut snapshot = self.snapshot.clone();
+        let kernel_stack = allocate_owned_kernel_stack(16).finish();
+        let kernel_stack_top = kernel_stack.top().as_u64();
+        let scheduler_stack = allocate_owned_kernel_stack(16).finish();
+        let scheduler_stack_top = scheduler_stack.top().as_u64();
         Self {
             parent: process.clone(),
             id,
             snapshot: {
-                snapshot.kernel_rsp = allocate_kernel_stack(16).finish().as_u64();
+                snapshot.kernel_rsp = kernel_stack_top;
                 snapshot
             },
-            kernel_stack_top: allocate_kernel_stack(16).finish().as_u64(),
+            kernel_stack_top,
+            kernel_stack: Some(kernel_stack),
+            scheduler_snapshot: crate::thread::snapshot::ThreadSnapshot::new_scheduler(
+                scheduler_stack_top,
+            ),
+            scheduler_stack: Some(scheduler_stack),
             blocked_signals: self.blocked_signals,
             saved_blocked_signals: self.saved_blocked_signals.clone(),
             last_syscall_no: self.last_syscall_no,

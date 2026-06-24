@@ -24,7 +24,7 @@ use crate::{
     thread::{
         misc::ThreadID,
         snapshot::{ThreadSnapshot, ThreadSnapshotType},
-        stack::allocate_kernel_stack,
+        stack::allocate_owned_kernel_stack,
         thread::Thread,
     },
 };
@@ -87,13 +87,23 @@ struct SetupProcessState<'a> {
     addrspace: &'a mut AddrSpace,
     fd_table: &'a mut Vec<Option<FdEntry>>,
     fs_context: &'a FsContext,
+    kernel_stack_top: u64,
+}
+
+pub struct SetupProcessRequest {
+    pub path: Path,
+    pub exec_path: Path,
+    pub args: Vec<String>,
+    pub env: Vec<String>,
+    pub kernel_stack_top: u64,
 }
 
 impl Process {
     pub fn init() -> ProcessRef {
         let pid = ProcessID::new();
         let addrspace = AddrSpace::default();
-        let kernel_stack_top = allocate_kernel_stack(16).finish();
+        let kernel_stack = allocate_owned_kernel_stack(16).finish();
+        let kernel_stack_top = kernel_stack.top();
 
         let process_arc = Arc::new(Mut::new(Process {
             pid,
@@ -111,14 +121,17 @@ impl Process {
         log::debug!("process {}: setup start", pid.0);
         let mut fd_table = Vec::new();
         let context = setup_process(
-            Path::new(&init_path),
-            Path::new(&init_path),
-            Vec::new(),
-            alloc::vec![
-                DEFAULT_PATH.into(),
-                DEFAULT_TERM.into(),
-                DEFAULT_HOME.into()
-            ],
+            SetupProcessRequest {
+                path: Path::new(&init_path),
+                exec_path: Path::new(&init_path),
+                args: Vec::new(),
+                env: alloc::vec![
+                    DEFAULT_PATH.into(),
+                    DEFAULT_TERM.into(),
+                    DEFAULT_HOME.into()
+                ],
+                kernel_stack_top: kernel_stack_top.as_u64(),
+            },
             &mut process.addrspace,
             &mut fd_table,
             &process.fs_context.lock().clone(),
@@ -134,7 +147,7 @@ impl Process {
             manager.spawn(Thread::from_snapshot_with_id(
                 context,
                 process_arc.clone(),
-                kernel_stack_top.as_u64(),
+                kernel_stack,
                 ThreadID(pid.0),
             ))
         });
@@ -236,6 +249,7 @@ fn setup_process_inner(
         entry_point,
         state.addrspace,
         stack_builder.finish().as_u64(),
+        state.kernel_stack_top,
         ThreadSnapshotType::Thread,
     ))
 }
@@ -287,15 +301,13 @@ pub(crate) fn prefault_targets(
 }
 
 pub fn setup_process(
-    path: Path,
-    exec_path: Path,
-    mut args: Vec<String>,
-    env: Vec<String>,
+    request: SetupProcessRequest,
     addrspace: &mut AddrSpace,
     fd_table: &mut Vec<Option<FdEntry>>,
     fs_context: &FsContext,
 ) -> Result<ThreadSnapshot, FSError> {
-    let exec_path = exec_path.as_string();
+    let exec_path = request.exec_path.as_string();
+    let mut args = request.args;
     if args.is_empty() {
         args.insert(0, exec_path.clone());
     }
@@ -304,6 +316,7 @@ pub fn setup_process(
         addrspace,
         fd_table,
         fs_context,
+        kernel_stack_top: request.kernel_stack_top,
     };
-    setup_process_inner(path, exec_path, args, env, &mut state, 0)
+    setup_process_inner(request.path, exec_path, args, request.env, &mut state, 0)
 }
