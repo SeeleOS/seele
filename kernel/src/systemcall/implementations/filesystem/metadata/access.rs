@@ -2,6 +2,11 @@ use super::*;
 
 const CAP_DAC_OVERRIDE: u64 = 1;
 const CAP_DAC_READ_SEARCH: u64 = 2;
+const CAP_CHOWN: u64 = 0;
+const CAP_FOWNER: u64 = 3;
+const CAP_FSETID: u64 = 4;
+const S_ISUID: u32 = 0o4000;
+const S_ISGID: u32 = 0o2000;
 
 pub(in crate::systemcall::implementations::filesystem) fn check_access_mode(
     mode: i32,
@@ -87,13 +92,20 @@ fn check_access_permissions_for_ids(
     check_access_permissions_for_ids_with_options(stat, mode, credentials, false)
 }
 
-fn has_capability(credentials: &AccessCredentials, capability: u64) -> bool {
+pub(in crate::systemcall::implementations) fn has_capability(
+    credentials: &AccessCredentials,
+    capability: u64,
+) -> bool {
     let slot = (capability / 32) as usize;
     let mask = 1u32 << (capability % 32);
     credentials
         .capability_effective
         .get(slot)
         .is_some_and(|value| value & mask != 0)
+}
+
+fn is_group_member(credentials: &AccessCredentials, gid: u32) -> bool {
+    credentials.gid == gid || credentials.supplementary_groups.contains(&gid)
 }
 
 pub(in crate::systemcall::implementations) fn check_access_permissions_for_ids_with_options(
@@ -264,7 +276,7 @@ pub(in crate::systemcall::implementations::filesystem) fn chmod_at(
     let mode = mode & !S_IFMT;
     if path_str.is_empty() {
         if !flags.contains(AtFlags::EMPTY_PATH) {
-            return Err(SyscallError::InvalidArguments);
+            return Err(SyscallError::FileNotFound);
         }
         chmod_fd_object(
             get_object_current_process(dirfd as u64).map_err(SyscallError::from)?,
@@ -274,10 +286,18 @@ pub(in crate::systemcall::implementations::filesystem) fn chmod_at(
     }
 
     let path = resolve_path_at(dirfd, path_str)?;
+    let credentials = fs_access_credentials();
+    check_access_path_search_permissions(&path, &credentials)?;
+    if let Some(object) = proc_self_fd_object(&path)?
+        && let Ok(file_like) = object.as_file_like()
+        && file_like.read_link().is_ok()
+    {
+        return Err(SyscallError::OperationNotSupported);
+    }
     let file = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
-        open_path_nofollow(path)?
+        open_path_nofollow(path.clone())?
     } else {
-        open_path(path)?
+        open_path(path.clone())?
     };
     if flags.contains(AtFlags::SYMLINK_NOFOLLOW)
         && matches!(file.info()?.file_like_type, FileLikeType::Symlink)
@@ -285,7 +305,7 @@ pub(in crate::systemcall::implementations::filesystem) fn chmod_at(
         return Err(SyscallError::OperationNotSupported);
     }
 
-    file.chmod(mode)?;
+    chmod_file_like(&file, Some(path), mode)?;
     Ok(0)
 }
 
@@ -294,11 +314,39 @@ pub(in crate::systemcall::implementations::filesystem) fn chmod_fd_object(
     mode: u32,
 ) -> Result<(), SyscallError> {
     if let Ok(file_like) = object.clone().as_file_like() {
-        file_like.chmod(mode)?;
+        if file_like.read_link().is_ok() {
+            return Err(SyscallError::OperationNotSupported);
+        }
+        chmod_file_like(&file_like, None, mode)?;
     } else {
         let _ = object.as_statable()?;
     }
 
+    Ok(())
+}
+
+fn chmod_file_like(
+    file_like: &FileLikeObject,
+    path: Option<Path>,
+    mode: u32,
+) -> Result<(), SyscallError> {
+    let stat = file_like.stat();
+    let credentials = fs_access_credentials();
+    if credentials.uid != stat.st_uid && !has_capability(&credentials, CAP_FOWNER) {
+        return Err(SyscallError::PermissionDenied);
+    }
+
+    ensure_file_like_writable(file_like, path)?;
+
+    let mut mode = mode & 0o7777;
+    if (mode & S_ISGID) != 0
+        && !has_capability(&credentials, CAP_FSETID)
+        && !is_group_member(&credentials, stat.st_gid)
+    {
+        mode &= !S_ISGID;
+    }
+
+    file_like.chmod(mode)?;
     Ok(())
 }
 
@@ -316,7 +364,7 @@ pub(in crate::systemcall::implementations::filesystem) fn chown_at(
 
     if path_str.is_empty() {
         if !flags.contains(AtFlags::EMPTY_PATH) {
-            return Err(SyscallError::InvalidArguments);
+            return Err(SyscallError::FileNotFound);
         }
         chown_fd_object(
             get_object_current_process(dirfd as u64).map_err(SyscallError::from)?,
@@ -327,15 +375,17 @@ pub(in crate::systemcall::implementations::filesystem) fn chown_at(
     }
 
     let path = resolve_path_at(dirfd, path_str)?;
+    let credentials = fs_access_credentials();
+    check_access_path_search_permissions(&path, &credentials)?;
     let file = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
-        open_path_nofollow(path)?
+        open_path_nofollow(path.clone())?
     } else {
-        open_path(path)?
+        open_path(path.clone())?
     };
     if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
-        file.lchown(uid, gid)?;
+        chown_file_like(&file, Some(path), uid, gid, false)?;
     } else {
-        file.chown(uid, gid)?;
+        chown_file_like(&file, Some(path), uid, gid, true)?;
     }
     Ok(0)
 }
@@ -346,10 +396,66 @@ pub(in crate::systemcall::implementations::filesystem) fn chown_fd_object(
     gid: u32,
 ) -> Result<(), SyscallError> {
     if let Ok(file_like) = object.clone().as_file_like() {
-        file_like.chown(uid, gid)?;
+        chown_file_like(&file_like, None, uid, gid, true)?;
     } else {
         let _ = object.as_statable()?;
     }
 
+    Ok(())
+}
+
+fn chown_file_like(
+    file_like: &FileLikeObject,
+    path: Option<Path>,
+    uid: u32,
+    gid: u32,
+    follow_symlink: bool,
+) -> Result<(), SyscallError> {
+    let stat = file_like.stat();
+    let credentials = fs_access_credentials();
+    let has_chown = has_capability(&credentials, CAP_CHOWN);
+
+    ensure_file_like_writable(file_like, path)?;
+
+    if !has_chown {
+        if uid != u32::MAX && uid != stat.st_uid {
+            return Err(SyscallError::PermissionDenied);
+        }
+        if credentials.uid != stat.st_uid {
+            return Err(SyscallError::PermissionDenied);
+        }
+        if gid != u32::MAX && !is_group_member(&credentials, gid) {
+            return Err(SyscallError::PermissionDenied);
+        }
+    }
+
+    if follow_symlink {
+        file_like.chown(uid, gid)?;
+    } else {
+        file_like.lchown(uid, gid)?;
+    }
+
+    clear_chown_mode_bits(file_like, stat.st_mode)?;
+    Ok(())
+}
+
+fn clear_chown_mode_bits(file_like: &FileLikeObject, old_mode: u32) -> Result<(), SyscallError> {
+    let mut mode = old_mode & 0o7777;
+    mode &= !S_ISUID;
+    if (mode & 0o010) != 0 {
+        mode &= !S_ISGID;
+    }
+    if mode != (old_mode & 0o7777) {
+        file_like.chmod(mode)?;
+    }
+    Ok(())
+}
+
+fn ensure_file_like_writable(
+    file_like: &FileLikeObject,
+    path: Option<Path>,
+) -> Result<(), SyscallError> {
+    let path = path.unwrap_or_else(|| file_like.path());
+    VirtualFS.lock().ensure_writable_mount(path)?;
     Ok(())
 }

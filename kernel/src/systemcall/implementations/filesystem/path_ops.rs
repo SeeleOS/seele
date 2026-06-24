@@ -70,10 +70,7 @@ define_syscall!(Symlink, |target: CString, link_path: CString| {
 
 define_syscall!(Chmod, |path: CString, mode: u32| {
     let path_str = path_from_raw(path)?;
-    let path = resolve_path_at(AT_FDCWD, &path_str)?;
-    let file = open_path(path)?;
-    file.chmod(mode)?;
-    Ok(0)
+    chmod_at(AT_FDCWD, &path_str, mode, AtFlags::empty())
 });
 
 define_syscall!(Chown, |path: CString, owner: u32, group: u32| {
@@ -111,11 +108,19 @@ define_syscall!(Getcwd, |buf_ptr: *mut u8, len: usize| {
 });
 
 define_syscall!(Chroot, |path: CString| {
+    const CAP_SYS_CHROOT: u64 = 18;
+
     let path_str = path_from_raw(path)?;
     let path = resolve_path_at(AT_FDCWD, &path_str)?;
     let file = open_path(path.clone())?;
     if !matches!(file.info()?.file_like_type, FileLikeType::Directory) {
         return Err(SyscallError::NotADirectory);
+    }
+    let credentials = fs_access_credentials();
+    check_access_path_search_permissions(&path, &credentials)?;
+    check_access_permissions_for_ids_with_options(&file.stat(), 1, &credentials, false)?;
+    if !has_capability(&credentials, CAP_SYS_CHROOT) {
+        return Err(SyscallError::PermissionDenied);
     }
 
     let new_root = AbsolutePath::from_root_path(&path);

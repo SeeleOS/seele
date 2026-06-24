@@ -5,7 +5,7 @@ mod path_metadata;
 pub(super) use access::*;
 pub(in crate::systemcall::implementations) use access::{
     check_access_path_search_permissions, check_access_permissions_for_ids_with_options,
-    fs_access_credentials,
+    fs_access_credentials, has_capability,
 };
 pub(super) use fs_magic::*;
 pub(super) use path_metadata::*;

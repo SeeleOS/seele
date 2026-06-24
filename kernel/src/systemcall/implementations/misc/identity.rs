@@ -47,6 +47,7 @@ define_syscall!(Getresgid, |rgid: *mut u32,
 define_syscall!(Setresuid, |ruid: i32, euid: i32, suid: i32| {
     let process = get_current_process();
     let mut process = process.lock();
+    let old_effective_uid = process.effective_uid;
     if ruid != -1 {
         process.real_uid = ruid as u32;
     }
@@ -57,6 +58,7 @@ define_syscall!(Setresuid, |ruid: i32, euid: i32, suid: i32| {
     if suid != -1 {
         process.saved_uid = suid as u32;
     }
+    update_uid_capabilities(&mut process, old_effective_uid);
     Ok(0)
 });
 
@@ -87,21 +89,19 @@ define_syscall!(Getgid, {
 define_syscall!(Setuid, |uid: u32| {
     let process = get_current_process();
     let mut process = process.lock();
+    let old_effective_uid = process.effective_uid;
     process.real_uid = uid;
     process.effective_uid = uid;
     process.saved_uid = uid;
     process.fs_uid = uid;
-    if uid != 0 && !process.keep_capabilities {
-        process.capability_effective = [0; 2];
-        process.capability_permitted = [0; 2];
-        process.capability_ambient = [0; 2];
-    }
+    update_uid_capabilities(&mut process, old_effective_uid);
     Ok(0)
 });
 
 define_syscall!(Setreuid, |ruid: i32, euid: i32| {
     let process = get_current_process();
     let mut process = process.lock();
+    let old_effective_uid = process.effective_uid;
     if ruid != -1 {
         process.real_uid = ruid as u32;
     }
@@ -110,6 +110,7 @@ define_syscall!(Setreuid, |ruid: i32, euid: i32| {
         process.saved_uid = euid as u32;
         process.fs_uid = euid as u32;
     }
+    update_uid_capabilities(&mut process, old_effective_uid);
     Ok(0)
 });
 
@@ -185,6 +186,23 @@ define_syscall!(Setfsgid, |gid: u32| {
 });
 
 define_syscall!(Vhangup, { Ok(0) });
+
+fn update_uid_capabilities(process: &mut crate::process::Process, old_effective_uid: u32) {
+    if process.effective_uid == 0 {
+        process.capability_effective = process.capability_permitted;
+    } else if old_effective_uid == 0 {
+        process.capability_effective = [0; 2];
+    }
+
+    if process.real_uid != 0
+        && process.effective_uid != 0
+        && process.saved_uid != 0
+        && !process.keep_capabilities
+    {
+        process.capability_permitted = [0; 2];
+        process.capability_ambient = [0; 2];
+    }
+}
 
 #[cfg(test)]
 mod tests {
