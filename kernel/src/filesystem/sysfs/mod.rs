@@ -54,6 +54,10 @@ fn hugepage_size_kb() -> Vec<u8> {
     b"2048\n".to_vec()
 }
 
+fn block_logical_block_size() -> Vec<u8> {
+    b"512\n".to_vec()
+}
+
 fn i8042_uevent() -> Vec<u8> {
     b"DRIVER=i8042\nMODALIAS=platform:i8042\nSUBSYSTEM=platform\n".to_vec()
 }
@@ -262,6 +266,89 @@ static SYS_CLASS_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
     inode: 0x2002,
     mode: 0o040755,
     entries: SYS_CLASS_ENTRIES,
+});
+
+static SYS_BLOCK_QUEUE_LOGICAL_BLOCK_SIZE_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "logical_block_size",
+    inode: 0x2084,
+    mode: 0o100444,
+    read: block_logical_block_size,
+    write: None,
+});
+
+static SYS_BLOCK_QUEUE_DMA_ALIGNMENT_NODE: StaticNode = StaticNode::File(StaticFileNode {
+    name: "dma_alignment",
+    inode: 0x2085,
+    mode: 0o100444,
+    read: zero_line,
+    write: None,
+});
+
+static SYS_BLOCK_QUEUE_ENTRIES: &[StaticDirEntry] = &[
+    StaticDirEntry {
+        name: "logical_block_size",
+        node: &SYS_BLOCK_QUEUE_LOGICAL_BLOCK_SIZE_NODE,
+    },
+    StaticDirEntry {
+        name: "dma_alignment",
+        node: &SYS_BLOCK_QUEUE_DMA_ALIGNMENT_NODE,
+    },
+];
+
+static SYS_BLOCK_VDA_QUEUE_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "queue",
+    inode: 0x2086,
+    mode: 0o040755,
+    entries: SYS_BLOCK_QUEUE_ENTRIES,
+});
+
+static SYS_BLOCK_VDB_QUEUE_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "queue",
+    inode: 0x2087,
+    mode: 0o040755,
+    entries: SYS_BLOCK_QUEUE_ENTRIES,
+});
+
+static SYS_BLOCK_VDA_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
+    name: "queue",
+    node: &SYS_BLOCK_VDA_QUEUE_NODE,
+}];
+
+static SYS_BLOCK_VDB_ENTRIES: &[StaticDirEntry] = &[StaticDirEntry {
+    name: "queue",
+    node: &SYS_BLOCK_VDB_QUEUE_NODE,
+}];
+
+static SYS_BLOCK_VDA_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "vda",
+    inode: 0x2088,
+    mode: 0o040755,
+    entries: SYS_BLOCK_VDA_ENTRIES,
+});
+
+static SYS_BLOCK_VDB_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "vdb",
+    inode: 0x2089,
+    mode: 0o040755,
+    entries: SYS_BLOCK_VDB_ENTRIES,
+});
+
+static SYS_BLOCK_ENTRIES: &[StaticDirEntry] = &[
+    StaticDirEntry {
+        name: "vda",
+        node: &SYS_BLOCK_VDA_NODE,
+    },
+    StaticDirEntry {
+        name: "vdb",
+        node: &SYS_BLOCK_VDB_NODE,
+    },
+];
+
+static SYS_BLOCK_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
+    name: "block",
+    inode: 0x208a,
+    mode: 0o040755,
+    entries: SYS_BLOCK_ENTRIES,
 });
 
 static SYS_BUS_PLATFORM_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
@@ -684,6 +771,10 @@ static SYS_ROOT_ENTRIES: &[StaticDirEntry] = &[
     StaticDirEntry {
         name: "class",
         node: &SYS_CLASS_NODE,
+    },
+    StaticDirEntry {
+        name: "block",
+        node: &SYS_BLOCK_NODE,
     },
     StaticDirEntry {
         name: "bus",

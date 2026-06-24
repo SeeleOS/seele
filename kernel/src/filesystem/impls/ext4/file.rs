@@ -6,8 +6,8 @@ use ext4plus::{Ext4, file, inode::Inode};
 use crate::filesystem::{
     errors::FSError,
     impls::ext4::{
-        LookupCache, OperationLock, chmod_inode, chown_inode, inode_times, lookup_cache_insert_raw,
-        set_inode_times,
+        LookupCache, OperationLock, chmod_inode, chown_inode, duration_from_parts, inode_times,
+        lookup_cache_insert_raw, set_inode_times,
     },
     info::{FileLikeInfo, FileTimes, UnixPermission},
     vfs::FSResult,
@@ -105,8 +105,14 @@ impl File for Ext4File {
     }
 
     fn read(&mut self, buffer: &mut [u8]) -> FSResult<usize> {
-        let read = file::read_at(&self.fs, &self.inode.lock(), buffer, self.position)
-            .map_err(FSError::from)?;
+        let _operation = self.operation_lock.lock();
+        let mut inode = self.refresh_inode()?;
+        let read = file::read_at(&self.fs, &inode, buffer, self.position).map_err(FSError::from)?;
+        let now = FileTimes::now();
+        inode.set_atime(duration_from_parts(now.atime_sec, now.atime_nsec)?);
+        inode.write(&self.fs).map_err(FSError::from)?;
+        self.replace_cached_inode(inode);
+        self.update_lookup_cache();
         self.position = self.position.saturating_add(read as u64);
         Ok(read)
     }
@@ -116,6 +122,13 @@ impl File for Ext4File {
         let mut inode = self.refresh_inode()?;
         let written =
             file::write_at(&self.fs, &mut inode, buffer, self.position).map_err(FSError::from)?;
+        if written != 0 {
+            let now = FileTimes::now();
+            let duration = duration_from_parts(now.mtime_sec, now.mtime_nsec)?;
+            inode.set_mtime(duration);
+            inode.set_ctime(duration);
+            inode.write(&self.fs).map_err(FSError::from)?;
+        }
         self.position = self.position.saturating_add(written as u64);
         self.replace_cached_inode(inode);
         self.update_lookup_cache();
@@ -123,7 +136,15 @@ impl File for Ext4File {
     }
 
     fn read_at(&mut self, buffer: &mut [u8], offset: u64) -> FSResult<usize> {
-        file::read_at(&self.fs, &self.inode.lock(), buffer, offset).map_err(Into::into)
+        let _operation = self.operation_lock.lock();
+        let mut inode = self.refresh_inode()?;
+        let read = file::read_at(&self.fs, &inode, buffer, offset).map_err(FSError::from)?;
+        let now = FileTimes::now();
+        inode.set_atime(duration_from_parts(now.atime_sec, now.atime_nsec)?);
+        inode.write(&self.fs).map_err(FSError::from)?;
+        self.replace_cached_inode(inode);
+        self.update_lookup_cache();
+        Ok(read)
     }
 
     fn info(&mut self) -> FSResult<FileLikeInfo> {

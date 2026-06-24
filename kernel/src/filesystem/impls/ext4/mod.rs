@@ -138,6 +138,8 @@ pub(super) fn chmod_inode(fs: &Ext4, inode: &mut Inode, mode: u32) -> FSResult<(
     let merged_bits = (inode.mode().bits() & FILE_TYPE_BITS) | requested_mode.bits();
     let merged_mode = InodeMode::from_bits(merged_bits).ok_or(FSError::Other)?;
     inode.set_mode(merged_mode).map_err(FSError::from)?;
+    let now = FileTimes::now();
+    inode.set_ctime(duration_from_parts(now.ctime_sec, now.ctime_nsec)?);
     inode.write(fs).map_err(FSError::from)?;
     Ok(())
 }
@@ -149,8 +151,17 @@ pub(super) fn chown_inode(fs: &Ext4, inode: &mut Inode, uid: u32, gid: u32) -> F
     if gid != u32::MAX {
         inode.set_gid(gid);
     }
+    let now = FileTimes::now();
+    inode.set_ctime(duration_from_parts(now.ctime_sec, now.ctime_nsec)?);
     inode.write(fs).map_err(FSError::from)?;
     Ok(())
+}
+
+pub(super) fn duration_from_parts(sec: i64, nsec: i64) -> FSResult<Duration> {
+    if sec < 0 || !(0..1_000_000_000).contains(&nsec) {
+        return Err(FSError::InvalidArguments);
+    }
+    Ok(Duration::new(sec as u64, nsec as u32))
 }
 
 pub(super) fn inode_times(inode: &Inode) -> FileTimes {
@@ -161,25 +172,25 @@ pub(super) fn inode_times(inode: &Inode) -> FileTimes {
         )
     }
 
+    let (btime_sec, btime_nsec) = inode
+        .crtime()
+        .map(parts)
+        .unwrap_or_else(|| parts(inode.ctime()));
     let (atime_sec, atime_nsec) = parts(inode.atime());
     let (mtime_sec, mtime_nsec) = parts(inode.mtime());
     let (ctime_sec, ctime_nsec) = parts(inode.ctime());
     FileTimes::from_parts(
-        atime_sec, atime_nsec, mtime_sec, mtime_nsec, ctime_sec, ctime_nsec,
+        (btime_sec, btime_nsec),
+        (atime_sec, atime_nsec),
+        (mtime_sec, mtime_nsec),
+        (ctime_sec, ctime_nsec),
     )
 }
 
 pub(super) fn set_inode_times(fs: &Ext4, inode: &mut Inode, times: FileTimes) -> FSResult<()> {
-    fn duration(sec: i64, nsec: i64) -> FSResult<Duration> {
-        if sec < 0 || !(0..1_000_000_000).contains(&nsec) {
-            return Err(FSError::InvalidArguments);
-        }
-        Ok(Duration::new(sec as u64, nsec as u32))
-    }
-
-    inode.set_atime(duration(times.atime_sec, times.atime_nsec)?);
-    inode.set_mtime(duration(times.mtime_sec, times.mtime_nsec)?);
-    inode.set_ctime(duration(times.ctime_sec, times.ctime_nsec)?);
+    inode.set_atime(duration_from_parts(times.atime_sec, times.atime_nsec)?);
+    inode.set_mtime(duration_from_parts(times.mtime_sec, times.mtime_nsec)?);
+    inode.set_ctime(duration_from_parts(times.ctime_sec, times.ctime_nsec)?);
     inode.write(fs).map_err(FSError::from)?;
     Ok(())
 }

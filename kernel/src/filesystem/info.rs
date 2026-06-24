@@ -26,6 +26,8 @@ pub struct FileLikeInfo {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FileTimes {
+    pub btime_sec: i64,
+    pub btime_nsec: i64,
     pub atime_sec: i64,
     pub atime_nsec: i64,
     pub mtime_sec: i64,
@@ -39,27 +41,34 @@ impl FileTimes {
         Self::from_unix_ns(crate::misc::time::unix_timestamp_nanoseconds().max(1_000_000_000))
     }
 
+    pub fn creation_now() -> Self {
+        let realtime = crate::misc::time::unix_timestamp_nanoseconds();
+        let monotonic_floor =
+            crate::misc::time::Time::since_boot().as_nanoseconds() + 1_000_000_000;
+        Self::from_unix_ns(realtime.max(monotonic_floor).max(1_000_000_000))
+    }
+
     pub const fn from_unix_ns(ns: u64) -> Self {
         let sec = (ns / 1_000_000_000) as i64;
         let nsec = (ns % 1_000_000_000) as i64;
-        Self::from_parts(sec, nsec, sec, nsec, sec, nsec)
+        Self::from_parts((sec, nsec), (sec, nsec), (sec, nsec), (sec, nsec))
     }
 
     pub const fn from_parts(
-        atime_sec: i64,
-        atime_nsec: i64,
-        mtime_sec: i64,
-        mtime_nsec: i64,
-        ctime_sec: i64,
-        ctime_nsec: i64,
+        btime: (i64, i64),
+        atime: (i64, i64),
+        mtime: (i64, i64),
+        ctime: (i64, i64),
     ) -> Self {
         Self {
-            atime_sec,
-            atime_nsec,
-            mtime_sec,
-            mtime_nsec,
-            ctime_sec,
-            ctime_nsec,
+            btime_sec: btime.0,
+            btime_nsec: btime.1,
+            atime_sec: atime.0,
+            atime_nsec: atime.1,
+            mtime_sec: mtime.0,
+            mtime_nsec: mtime.1,
+            ctime_sec: ctime.0,
+            ctime_nsec: ctime.1,
         }
     }
 }

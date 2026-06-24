@@ -2,12 +2,14 @@ use super::*;
 
 pub(super) fn path_from_raw(path: CString) -> Result<String, SyscallError> {
     const PATH_MAX: usize = 4096;
+    const NAME_MAX: usize = 255;
 
     if path.is_null() {
         return Err(SyscallError::BadAddress);
     }
 
     let mut out = String::new();
+    let mut component_len = 0;
     for index in 0..=PATH_MAX {
         let byte =
             user_safe::read(unsafe { path.add(index) }).map_err(|_| SyscallError::BadAddress)?;
@@ -16,6 +18,14 @@ pub(super) fn path_from_raw(path: CString) -> Result<String, SyscallError> {
         }
         if index == PATH_MAX {
             return Err(SyscallError::PathTooLong);
+        }
+        if byte == b'/' {
+            component_len = 0;
+        } else {
+            component_len += 1;
+            if component_len > NAME_MAX {
+                return Err(SyscallError::PathTooLong);
+            }
         }
         out.push(byte as char);
     }

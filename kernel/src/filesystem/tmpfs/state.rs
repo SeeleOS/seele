@@ -205,7 +205,7 @@ impl TmpfsState {
                 gid,
                 link_count: 1,
                 open_count: 0,
-                times: FileTimes::now(),
+                times: FileTimes::creation_now(),
                 xattrs: BTreeMap::new(),
                 kind,
             },

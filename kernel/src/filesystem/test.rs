@@ -484,6 +484,25 @@ fn sysfs_exposes_stable_metadata_flags_and_static_tree_entries() {
     assert_eq!(uevent_info.inode, 0x2064);
     assert_eq!(uevent_info.permission.0, 0o100644);
 
+    let FileLike::File(logical_block_size) = fs
+        .lookup(&Path::new("/block/vdb/queue/logical_block_size"))
+        .unwrap()
+    else {
+        panic!("vdb logical_block_size should be a file");
+    };
+    let mut buffer = [0; 8];
+    let bytes = logical_block_size.lock().read(&mut buffer).unwrap();
+    assert_eq!(&buffer[..bytes], b"512\n");
+
+    let FileLike::File(dma_alignment) = fs
+        .lookup(&Path::new("/block/vdb/queue/dma_alignment"))
+        .unwrap()
+    else {
+        panic!("vdb dma_alignment should be a file");
+    };
+    let bytes = dma_alignment.lock().read(&mut buffer).unwrap();
+    assert_eq!(&buffer[..bytes], b"0\n");
+
     let FileLike::Symlink(subsystem) = fs
         .lookup(&Path::new("/class/graphics/fb0/device/subsystem"))
         .unwrap()

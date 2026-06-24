@@ -314,14 +314,25 @@ impl Directory for Ext4Directory {
             _ => unimplemented!(),
         };
 
+        let creation_time = FileTimes::creation_now();
         let mut new_inode = self.fs.create_inode(InodeCreationOptions {
             file_type,
             uid: 0,
             gid: 0,
             flags: InodeFlags::empty(),
-            time: Duration::from_nanos(crate::misc::time::unix_timestamp_nanoseconds()),
+            time: Duration::from_nanos(
+                creation_time.ctime_sec as u64 * 1_000_000_000 + creation_time.ctime_nsec as u64,
+            ),
             mode,
         })?;
+        let creation_duration = Duration::from_nanos(
+            creation_time.ctime_sec as u64 * 1_000_000_000 + creation_time.ctime_nsec as u64,
+        );
+        new_inode.set_atime(creation_duration);
+        new_inode.set_mtime(creation_duration);
+        new_inode.set_ctime(creation_duration);
+        new_inode.set_crtime(creation_duration);
+        new_inode.write(&self.fs).map_err(FSError::from)?;
 
         // Parent inode of the new inode. In this case, the parent inode is [`self`]
         let (parent_inode, mut parent) = self.open_parent_dir()?;

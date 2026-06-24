@@ -159,8 +159,13 @@ define_syscall!(Newfstatat, |dirfd: i32,
 define_syscall!(Statx, |dirfd: i32,
                         path: CString,
                         flags: AtFlags,
-                        _mask: u32,
+                        mask: u32,
                         statx_ptr: *mut LinuxStatx| {
+    let allowed_mask = STATX_BASIC_STATS | STATX_BTIME | STATX_MNT_ID | STATX_DIOALIGN;
+    if mask & !allowed_mask != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
     let allowed_flags = (AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT | AtFlags::EMPTY_PATH)
         .bits()
         | AT_STATX_FORCE_SYNC
@@ -202,8 +207,12 @@ define_syscall!(Statx, |dirfd: i32,
     let mount_root = lookup.mount_root;
 
     let pack_output_start = profile::scope_start();
+    let block_device = stat.st_mode & S_IFMT == S_IFBLK;
     let statx = LinuxStatx {
-        stx_mask: STATX_BASIC_STATS | STATX_MNT_ID,
+        stx_mask: STATX_BASIC_STATS
+            | STATX_BTIME
+            | STATX_MNT_ID
+            | if block_device { STATX_DIOALIGN } else { 0 },
         stx_blksize: stat.st_blksize as u32,
         stx_attributes: if mount_root { STATX_ATTR_MOUNT_ROOT } else { 0 },
         stx_nlink: stat.st_nlink as u32,
@@ -216,6 +225,11 @@ define_syscall!(Statx, |dirfd: i32,
         stx_atime: StatxTimestamp {
             tv_sec: stat.st_atime,
             tv_nsec: stat.st_atime_nsec as u32,
+            __reserved: 0,
+        },
+        stx_btime: StatxTimestamp {
+            tv_sec: lookup.times.btime_sec,
+            tv_nsec: lookup.times.btime_nsec as u32,
             __reserved: 0,
         },
         stx_ctime: StatxTimestamp {
@@ -233,6 +247,8 @@ define_syscall!(Statx, |dirfd: i32,
         stx_dev_major: linux_major(stat.st_dev),
         stx_dev_minor: linux_minor(stat.st_dev),
         stx_mnt_id: mount_id,
+        stx_dio_mem_align: if block_device { 1 } else { 0 },
+        stx_dio_offset_align: if block_device { 512 } else { 0 },
         stx_attributes_mask: STATX_ATTR_MOUNT_ROOT,
         ..Default::default()
     };

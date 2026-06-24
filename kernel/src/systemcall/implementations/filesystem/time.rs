@@ -120,12 +120,10 @@ fn build_file_times(current: FileTimes, requested: [RequestedTime; 2]) -> FileTi
     };
 
     FileTimes::from_parts(
-        atime_sec,
-        atime_nsec,
-        mtime_sec,
-        mtime_nsec,
-        now.ctime_sec,
-        now.ctime_nsec,
+        (current.btime_sec, current.btime_nsec),
+        (atime_sec, atime_nsec),
+        (mtime_sec, mtime_nsec),
+        (now.ctime_sec, now.ctime_nsec),
     )
 }
 

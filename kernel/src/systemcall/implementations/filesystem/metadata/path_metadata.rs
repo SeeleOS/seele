@@ -1,8 +1,10 @@
 use super::*;
+use crate::filesystem::info::FileTimes;
 
 #[derive(Clone)]
 pub(in crate::systemcall::implementations::filesystem) struct PathLookup {
     pub(in crate::systemcall::implementations::filesystem) stat: LinuxStat,
+    pub(in crate::systemcall::implementations::filesystem) times: FileTimes,
     pub(in crate::systemcall::implementations::filesystem) mount_id: u64,
     pub(in crate::systemcall::implementations::filesystem) mount_root: bool,
 }
@@ -50,6 +52,12 @@ pub(in crate::systemcall::implementations::filesystem) fn lookup_path_metadata(
 
         let build_stat_start = profile::scope_start();
         let stat = object.clone().as_statable()?.stat();
+        let times = FileTimes::from_parts(
+            (stat.st_ctime, stat.st_ctime_nsec),
+            (stat.st_atime, stat.st_atime_nsec),
+            (stat.st_mtime, stat.st_mtime_nsec),
+            (stat.st_ctime, stat.st_ctime_nsec),
+        );
         profile::record_hot_syscall_phase(
             phases.build_stat,
             profile::scope_start().saturating_sub(build_stat_start),
@@ -63,6 +71,7 @@ pub(in crate::systemcall::implementations::filesystem) fn lookup_path_metadata(
         );
         return Ok(PathLookup {
             stat,
+            times,
             mount_id,
             mount_root,
         });
@@ -84,6 +93,7 @@ pub(in crate::systemcall::implementations::filesystem) fn lookup_path_metadata(
     );
 
     let build_stat_start = profile::scope_start();
+    let times = info.times;
     let stat = linux_stat_from_file_like_info(info, &resolved_path);
     profile::record_hot_syscall_phase(
         phases.build_stat,
@@ -92,6 +102,7 @@ pub(in crate::systemcall::implementations::filesystem) fn lookup_path_metadata(
 
     Ok(PathLookup {
         stat,
+        times,
         mount_id,
         mount_root,
     })
