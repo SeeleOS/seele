@@ -324,21 +324,25 @@ pub(super) fn find_conflict(
     api: AdvisoryLockApi,
 ) -> Option<AdvisoryLock> {
     let requested_lock = requested_lock?;
-    entries.iter().copied().find(|entry| {
-        if entry.api != api {
-            return false;
-        }
-        if entry.owner == owner {
-            return false;
-        }
-        if !ranges_overlap(entry.range, requested_lock.range) {
-            return false;
-        }
-        !matches!(
-            (requested_lock.lock_type, entry.lock_type),
-            (AdvisoryLockType::Read, AdvisoryLockType::Read)
-        )
-    })
+    entries
+        .iter()
+        .copied()
+        .filter(|entry| {
+            if entry.api != api {
+                return false;
+            }
+            if entry.owner == owner {
+                return false;
+            }
+            if !ranges_overlap(entry.range, requested_lock.range) {
+                return false;
+            }
+            !matches!(
+                (requested_lock.lock_type, entry.lock_type),
+                (AdvisoryLockType::Read, AdvisoryLockType::Read)
+            )
+        })
+        .min_by_key(|entry| (entry.range.start, range_end_bound(entry.range)))
 }
 
 fn resolve_flock_range(
