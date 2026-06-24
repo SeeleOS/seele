@@ -159,6 +159,7 @@ pub(super) fn proc_sys_net_ipv4_conf_if_entries() -> Vec<DirectoryContentInfo> {
 
 pub(super) fn proc_vm_entries() -> Vec<DirectoryContentInfo> {
     vec![
+        DirectoryContentInfo::new("drop_caches".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("nr_hugepages".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("hugetlb_shm_group".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("overcommit_memory".into(), DirectoryContentType::File),
@@ -197,6 +198,17 @@ pub(super) fn proc_write_sysctl_u64(target: &AtomicU64, buffer: &[u8]) -> FSResu
     let value = parse_sysctl_u64(buffer)?;
     target.store(value, Ordering::Relaxed);
     Ok(buffer.len())
+}
+
+pub(super) fn proc_drop_caches_bytes() -> Vec<u8> {
+    b"0\n".to_vec()
+}
+
+pub(super) fn proc_write_drop_caches(buffer: &[u8]) -> FSResult<usize> {
+    match parse_sysctl_u64(buffer)? {
+        1..=3 => Ok(buffer.len()),
+        _ => Err(FSError::InvalidArguments),
+    }
 }
 
 pub(super) fn proc_write_net_ipv4_conf_lo_tag(buffer: &[u8]) -> FSResult<usize> {

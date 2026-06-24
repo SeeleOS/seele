@@ -79,6 +79,13 @@ fn procfs_static_entry_builders_expose_stable_names() {
     assert_eq!(if_entries.len(), 1);
     assert_eq!(if_entries[0].name, "tag");
 
+    let vm_entries = proc_vm_entries();
+    assert_eq!(vm_entries.len(), 4);
+    assert_eq!(vm_entries[0].name, "drop_caches");
+    assert_eq!(vm_entries[1].name, "nr_hugepages");
+    assert_eq!(vm_entries[2].name, "hugetlb_shm_group");
+    assert_eq!(vm_entries[3].name, "overcommit_memory");
+
     assert_eq!(proc_sysctl_value_bytes(&PROC_PID_MAX), b"4194304\n");
 }
 
@@ -135,4 +142,10 @@ fn procfs_write_helpers_trim_values_update_state_and_reject_invalid_inputs() {
     ));
 
     assert_eq!(proc_write_pressure(b"some 100 1000").unwrap(), 13);
+    assert_eq!(proc_drop_caches_bytes(), b"0\n");
+    assert_eq!(proc_write_drop_caches(b"3\n").unwrap(), 2);
+    assert!(matches!(
+        proc_write_drop_caches(b"4\n"),
+        Err(FSError::InvalidArguments)
+    ));
 }

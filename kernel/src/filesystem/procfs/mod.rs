@@ -59,14 +59,14 @@ use root::{
     PROC_SYS_KERNEL_OSRELEASE_INODE, PROC_SYS_KERNEL_PID_MAX_INODE,
     PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE, PROC_SYS_KERNEL_RANDOM_INODE,
     PROC_SYS_KERNEL_RANDOM_UUID_INODE, PROC_SYS_KERNEL_TAINTED_INODE,
-    PROC_SYS_VM_HUGETLB_SHM_GROUP_INODE, PROC_SYS_VM_INODE, PROC_SYS_VM_NR_HUGEPAGES_INODE,
-    PROC_SYS_VM_OVERCOMMIT_MEMORY_INODE, PROC_SYSVIPC_INODE, PROC_SYSVIPC_MSG_INODE,
-    PROC_SYSVIPC_SEM_INODE, PROC_SYSVIPC_SHM_INODE, PROC_UPTIME_INODE, proc_boot_id_bytes,
-    proc_cap_last_cap_bytes, proc_devices_bytes, proc_filesystems_bytes, proc_kernel_cmdline_bytes,
-    proc_kernel_entries, proc_kernel_random_entries, proc_loadavg_bytes, proc_mountinfo_bytes,
-    proc_mounts_bytes, proc_ngroups_max_bytes, proc_pressure_entries, proc_random_uuid_bytes,
-    proc_root_entries, proc_stat_bytes, proc_sysvipc_entries, proc_tainted_bytes,
-    proc_uptime_bytes,
+    PROC_SYS_VM_DROP_CACHES_INODE, PROC_SYS_VM_HUGETLB_SHM_GROUP_INODE, PROC_SYS_VM_INODE,
+    PROC_SYS_VM_NR_HUGEPAGES_INODE, PROC_SYS_VM_OVERCOMMIT_MEMORY_INODE, PROC_SYSVIPC_INODE,
+    PROC_SYSVIPC_MSG_INODE, PROC_SYSVIPC_SEM_INODE, PROC_SYSVIPC_SHM_INODE, PROC_UPTIME_INODE,
+    proc_boot_id_bytes, proc_cap_last_cap_bytes, proc_devices_bytes, proc_filesystems_bytes,
+    proc_kernel_cmdline_bytes, proc_kernel_entries, proc_kernel_random_entries, proc_loadavg_bytes,
+    proc_mountinfo_bytes, proc_mounts_bytes, proc_ngroups_max_bytes, proc_pressure_entries,
+    proc_random_uuid_bytes, proc_root_entries, proc_stat_bytes, proc_sysvipc_entries,
+    proc_tainted_bytes, proc_uptime_bytes,
 };
 use self_paths::{lookup_proc_self_path, proc_pid_namespace_file};
 use sysctl::*;

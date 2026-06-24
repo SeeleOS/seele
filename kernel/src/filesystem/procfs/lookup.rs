@@ -149,6 +149,12 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             PROC_SYS_VM_INODE,
             proc_vm_entries(),
         )),
+        ["sys", "vm", "drop_caches"] => Ok(proc_rw_file(
+            "drop_caches",
+            PROC_SYS_VM_DROP_CACHES_INODE,
+            proc_drop_caches_bytes,
+            proc_write_drop_caches,
+        )),
         ["sys", "vm", "nr_hugepages"] => Ok(proc_rw_file(
             "nr_hugepages",
             PROC_SYS_VM_NR_HUGEPAGES_INODE,

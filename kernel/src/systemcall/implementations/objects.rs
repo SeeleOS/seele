@@ -30,11 +30,12 @@ use crate::{
     thread::get_current_thread,
 };
 
-use super::{CloseRangeFlags, DupFlags, FallocateFlags, MemfdFlags};
+use super::{CloseRangeFlags, DupFlags, FallocateFlags, MemfdFlags, PositionedIoFlags};
 
 static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
 const COPY_CHUNK_SIZE: usize = 16 * 1024;
 const LINEAR_IO_CHUNK_SIZE: usize = 64 * 1024;
+const LINUX_IOV_MAX: i32 = 1024;
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -43,28 +44,21 @@ struct LinuxIovec {
     iov_len: usize,
 }
 
-fn copy_iovecs(iovs: &[LinuxIovec]) -> Result<Vec<u8>, SyscallError> {
-    let total_len = iovs.iter().try_fold(0usize, |acc, iov| {
-        acc.checked_add(iov.iov_len)
-            .ok_or(SyscallError::InvalidArguments)
-    })?;
-    let mut buffer = Vec::with_capacity(total_len);
-    for iov in iovs {
-        if iov.iov_len == 0 {
-            continue;
-        }
-        if iov.iov_base.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-        buffer.extend_from_slice(&user_safe::read_buffer(iov.iov_base, iov.iov_len)?);
-    }
-    Ok(buffer)
+#[derive(Clone, Copy)]
+enum PositionedIoOffset {
+    Explicit(u64),
+    Current,
 }
 
 fn iovec_total_len(iovs: &[LinuxIovec]) -> Result<usize, SyscallError> {
     iovs.iter().try_fold(0usize, |acc, iov| {
-        acc.checked_add(iov.iov_len)
-            .ok_or(SyscallError::InvalidArguments)
+        let next = acc
+            .checked_add(iov.iov_len)
+            .ok_or(SyscallError::InvalidArguments)?;
+        if next > isize::MAX as usize {
+            return Err(SyscallError::InvalidArguments);
+        }
+        Ok(next)
     })
 }
 
@@ -89,12 +83,33 @@ fn read_iovecs(iov_ptr: *const LinuxIovec, iovcnt: i32) -> Result<Vec<LinuxIovec
     Ok(iovs)
 }
 
-fn write_iovecs(iovs: &[LinuxIovec], buffer: &[u8]) -> Result<(), SyscallError> {
-    let mut copied = 0usize;
+fn read_iovecs_for_syscall(
+    iov_ptr: *const LinuxIovec,
+    iovcnt: i32,
+) -> Result<Vec<LinuxIovec>, SyscallError> {
+    if !(0..=LINUX_IOV_MAX).contains(&iovcnt) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    if iovcnt > 0 && iov_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    read_iovecs(iov_ptr, iovcnt)
+}
+
+fn read_into_iovecs<F>(iovs: &[LinuxIovec], mut read_fn: F) -> SyscallResult<usize>
+where
+    F: FnMut(&mut [u8], usize) -> SyscallResult<usize>,
+{
+    let total_len = iovec_total_len(iovs)?;
+    if total_len == 0 {
+        return Ok(0);
+    }
+
+    let mut buffer = vec![0; total_len.min(LINEAR_IO_CHUNK_SIZE)];
+    let mut total = 0usize;
     for iov in iovs {
-        if copied == buffer.len() {
-            break;
-        }
         if iov.iov_len == 0 {
             continue;
         }
@@ -102,12 +117,61 @@ fn write_iovecs(iovs: &[LinuxIovec], buffer: &[u8]) -> Result<(), SyscallError> 
             return Err(SyscallError::BadAddress);
         }
 
-        let remaining = buffer.len() - copied;
-        let copy_len = iov.iov_len.min(remaining);
-        user_safe::write_buffer(iov.iov_base.cast_mut(), &buffer[copied..copied + copy_len])?;
-        copied += copy_len;
+        let mut copied_into_iov = 0usize;
+        while copied_into_iov < iov.iov_len {
+            let chunk_len = (iov.iov_len - copied_into_iov).min(buffer.len());
+            let read = read_fn(&mut buffer[..chunk_len], total)?;
+            if read == 0 {
+                return Ok(total);
+            }
+            user_safe::write_buffer(
+                unsafe { iov.iov_base.cast_mut().add(copied_into_iov) },
+                &buffer[..read],
+            )?;
+            total += read;
+            copied_into_iov += read;
+            if read < chunk_len {
+                return Ok(total);
+            }
+        }
     }
-    Ok(())
+
+    Ok(total)
+}
+
+fn write_from_iovecs<F>(iovs: &[LinuxIovec], mut write_fn: F) -> SyscallResult<usize>
+where
+    F: FnMut(&[u8], usize) -> SyscallResult<usize>,
+{
+    let total_len = iovec_total_len(iovs)?;
+    if total_len == 0 {
+        return Ok(0);
+    }
+
+    let mut total = 0usize;
+    for iov in iovs {
+        if iov.iov_len == 0 {
+            continue;
+        }
+        if iov.iov_base.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+
+        let mut copied_from_iov = 0usize;
+        while copied_from_iov < iov.iov_len {
+            let chunk_len = (iov.iov_len - copied_from_iov).min(LINEAR_IO_CHUNK_SIZE);
+            let bytes =
+                user_safe::read_buffer(unsafe { iov.iov_base.add(copied_from_iov) }, chunk_len)?;
+            let written = write_fn(&bytes, total)?;
+            total += written;
+            copied_from_iov += written;
+            if written < chunk_len {
+                return Ok(total);
+            }
+        }
+    }
+
+    Ok(total)
 }
 
 fn fallback_dirent_inode(info: &DirectoryContentInfo, offset: usize) -> u64 {
@@ -531,6 +595,92 @@ fn pwrite_object_in_chunks(
     Ok(total)
 }
 
+fn preadv_file_like(
+    file: &FileLikeObject,
+    iovs: &[LinuxIovec],
+    offset: u64,
+) -> SyscallResult<usize> {
+    read_into_iovecs(iovs, |buffer, total| {
+        file.read_at(buffer, offset + total as u64)
+            .map_err(SyscallError::from)
+    })
+}
+
+fn pwritev_object(object: &ObjectRef, iovs: &[LinuxIovec], offset: i64) -> SyscallResult<usize> {
+    if let Ok(file) = object.clone().as_file_like() {
+        return write_from_iovecs(iovs, |bytes, total| {
+            file.write_at(bytes, offset as u64 + total as u64)
+                .map_err(SyscallError::from)
+        });
+    }
+
+    let seekable = object.clone().as_seekable()?;
+    let writable = object.clone().as_writable()?;
+    let current = seekable.clone().seek(0, Whence::Current)? as i64;
+    seekable.clone().seek(offset, Whence::Start)?;
+    let result = write_from_iovecs(iovs, |bytes, _total| {
+        writable.write(bytes).map_err(SyscallError::from)
+    });
+    let _ = seekable.seek(current, Whence::Start);
+    result
+}
+
+fn positioned_io_offset(offset: i64) -> SyscallResult<PositionedIoOffset> {
+    if offset == -1 {
+        return Ok(PositionedIoOffset::Current);
+    }
+    if offset < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    Ok(PositionedIoOffset::Explicit(offset as u64))
+}
+
+fn check_positioned_io_flags(flags: PositionedIoFlags) -> SyscallResult<()> {
+    if flags.bits() & !PositionedIoFlags::all().bits() != 0 {
+        return Err(SyscallError::OperationNotSupported);
+    }
+    if flags.contains(PositionedIoFlags::RWF_HIPRI) {
+        return Err(SyscallError::OperationNotSupported);
+    }
+    Ok(())
+}
+
+fn positioned_io_flags_from_raw(raw: u64) -> SyscallResult<PositionedIoFlags> {
+    let flags = PositionedIoFlags::from_bits_retain(raw as i32);
+    check_positioned_io_flags(flags)?;
+    Ok(flags)
+}
+
+fn decode_preadv2_args(raw_arg5: u64, raw_arg6: u64) -> SyscallResult<PositionedIoFlags> {
+    let raw_arg5_flags = raw_arg5 as i32;
+    if raw_arg5_flags != 0 && raw_arg5_flags & !PositionedIoFlags::all().bits() == 0 {
+        return positioned_io_flags_from_raw(raw_arg5);
+    }
+    positioned_io_flags_from_raw(raw_arg6)
+}
+
+fn ensure_object_readable(object: &ObjectRef) -> SyscallResult<()> {
+    if object.clone().as_file_like().is_ok()
+        && object.clone().get_flags()?.contains(FileFlags::WRONLY)
+    {
+        Err(SyscallError::BadFileDescriptor)
+    } else {
+        Ok(())
+    }
+}
+
+fn ensure_object_writable(object: &ObjectRef) -> SyscallResult<()> {
+    if object.clone().as_file_like().is_err() {
+        return Ok(());
+    }
+    let flags = object.clone().get_flags()?;
+    if flags.contains(FileFlags::WRONLY) || flags.contains(FileFlags::RDWR) {
+        Ok(())
+    } else {
+        Err(SyscallError::BadFileDescriptor)
+    }
+}
+
 define_syscall!(Getdents, |object_index: u64, buf: *mut u8, len: usize| {
     write_dirents(object_index, buf, len)
 });
@@ -540,6 +690,7 @@ define_syscall!(Getdents64, |object_index: u64, buf: *mut u8, len: usize| {
 });
 
 define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
+    ensure_object_readable(&object)?;
     let thread_ref = get_current_thread();
     let mut buffer = {
         let mut thread = thread_ref.lock();
@@ -599,6 +750,7 @@ define_syscall!(Read, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
 });
 
 define_syscall!(Write, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
+    ensure_object_writable(&object)?;
     if object.clone().as_file_like().is_ok() {
         return write_object_in_chunks(&object, buf_ptr.cast_const(), len);
     }
@@ -620,65 +772,146 @@ define_syscall!(Write, |object: ObjectRef, buf_ptr: *mut u8, len: usize| {
 define_syscall!(Readv, |object: ObjectRef,
                         iov_ptr: *const LinuxIovec,
                         iovcnt: i32| {
-    if iovcnt < 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
-
-    if iovcnt > 0 && iov_ptr.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-
-    let iovs = read_iovecs(iov_ptr, iovcnt)?;
+    ensure_object_readable(&object)?;
+    let iovs = read_iovecs_for_syscall(iov_ptr, iovcnt)?;
     let total_len = iovec_total_len(&iovs)?;
     if total_len == 0 {
         return Ok(0);
     }
 
-    let mut buffer = vec![0; total_len];
-    let read = if let Ok(file) = object.clone().as_file_like() {
-        let mut total = 0usize;
-        while total < total_len {
-            let remaining = total_len - total;
-            let count = file.read(&mut buffer[total..])?;
-            if count == 0 {
-                break;
-            }
-            total += count;
-            if count < remaining {
-                break;
-            }
-        }
-        total
-    } else {
-        object.as_readable()?.read(&mut buffer)?
-    };
+    if let Ok(file) = object.clone().as_file_like() {
+        return read_into_iovecs(&iovs, |buffer, _total| {
+            file.read(buffer).map_err(SyscallError::from)
+        });
+    }
 
-    write_iovecs(&iovs, &buffer[..read])?;
-    Ok(read)
+    let readable = object.as_readable()?;
+    read_into_iovecs(&iovs, |buffer, _total| {
+        readable.read(buffer).map_err(SyscallError::from)
+    })
 });
 
 define_syscall!(Writev, |object: ObjectRef,
                          iov_ptr: *const LinuxIovec,
                          iovcnt: i32| {
-    if iovcnt < 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
-
-    if iovcnt > 0 && iov_ptr.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
-
-    let iovs = read_iovecs(iov_ptr, iovcnt)?;
+    ensure_object_writable(&object)?;
+    let iovs = read_iovecs_for_syscall(iov_ptr, iovcnt)?;
     let writable = object.clone().as_writable()?;
-    let buffer = copy_iovecs(&iovs)?;
-    match writable.write(&buffer) {
+    match write_from_iovecs(&iovs, |bytes, _total| {
+        writable.write(bytes).map_err(SyscallError::from)
+    }) {
         Ok(written) => Ok(written),
-        Err(err) => {
-            let syscall_err = SyscallError::from(err);
+        Err(syscall_err) => {
             if syscall_err == SyscallError::BrokenPipe {
                 send_signal_to_process(&get_current_process(), Signal::SIGPIPE);
             }
             Err(syscall_err)
+        }
+    }
+});
+
+define_syscall!(Preadv, |object: ObjectRef,
+                         iov_ptr: *const LinuxIovec,
+                         iovcnt: i32,
+                         offset: i64| {
+    if offset < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    ensure_object_readable(&object)?;
+    let iovs = read_iovecs_for_syscall(iov_ptr, iovcnt)?;
+    let file = object
+        .clone()
+        .as_file_like()
+        .map_err(|_| SyscallError::IllegalSeek)?;
+    preadv_file_like(&file, &iovs, offset as u64)
+});
+
+define_syscall!(Pwritev, |object: ObjectRef,
+                          iov_ptr: *const LinuxIovec,
+                          iovcnt: i32,
+                          offset: i64| {
+    if offset < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    ensure_object_writable(&object)?;
+    let iovs = read_iovecs_for_syscall(iov_ptr, iovcnt)?;
+    pwritev_object(&object, &iovs, offset)
+});
+
+define_syscall!(Preadv2, |object: ObjectRef,
+                          iov_ptr: *const LinuxIovec,
+                          iovcnt: i32,
+                          raw_offset: i64,
+                          raw_arg5: u64,
+                          raw_arg6: u64| {
+    let flags = decode_preadv2_args(raw_arg5, raw_arg6)?;
+    if flags.contains(PositionedIoFlags::RWF_NOWAIT) {
+        return Err(SyscallError::TryAgain);
+    }
+    let offset = positioned_io_offset(raw_offset)?;
+    ensure_object_readable(&object)?;
+    let iovs = read_iovecs_for_syscall(iov_ptr, iovcnt)?;
+    match offset {
+        PositionedIoOffset::Explicit(offset) => {
+            let file = object
+                .clone()
+                .as_file_like()
+                .map_err(|_| SyscallError::IllegalSeek)?;
+            preadv_file_like(&file, &iovs, offset)
+        }
+        PositionedIoOffset::Current => {
+            if let Ok(file) = object.clone().as_file_like() {
+                read_into_iovecs(&iovs, |buffer, _total| {
+                    file.read(buffer).map_err(SyscallError::from)
+                })
+            } else {
+                let readable = object.as_readable()?;
+                read_into_iovecs(&iovs, |buffer, _total| {
+                    readable.read(buffer).map_err(SyscallError::from)
+                })
+            }
+        }
+    }
+});
+
+define_syscall!(Pwritev2, |object: ObjectRef,
+                           iov_ptr: *const LinuxIovec,
+                           iovcnt: i32,
+                           raw_offset: i64,
+                           raw_arg5: u64,
+                           raw_arg6: u64| {
+    let flags = decode_preadv2_args(raw_arg5, raw_arg6)?;
+    let offset = positioned_io_offset(raw_offset)?;
+    ensure_object_writable(&object)?;
+    let iovs = read_iovecs_for_syscall(iov_ptr, iovcnt)?;
+    match offset {
+        PositionedIoOffset::Explicit(offset) => {
+            if flags.contains(PositionedIoFlags::RWF_APPEND) {
+                let seekable = object.clone().as_seekable()?;
+                let end = seekable.seek(0, Whence::End)? as i64;
+                pwritev_object(&object, &iovs, end)
+            } else {
+                pwritev_object(&object, &iovs, offset as i64)
+            }
+        }
+        PositionedIoOffset::Current if flags.contains(PositionedIoFlags::RWF_APPEND) => {
+            let seekable = object.clone().as_seekable()?;
+            let end = seekable.seek(0, Whence::End)? as i64;
+            pwritev_object(&object, &iovs, end)
+        }
+        PositionedIoOffset::Current => {
+            let writable = object.clone().as_writable()?;
+            match write_from_iovecs(&iovs, |bytes, _total| {
+                writable.write(bytes).map_err(SyscallError::from)
+            }) {
+                Ok(written) => Ok(written),
+                Err(syscall_err) => {
+                    if syscall_err == SyscallError::BrokenPipe {
+                        send_signal_to_process(&get_current_process(), Signal::SIGPIPE);
+                    }
+                    Err(syscall_err)
+                }
+            }
         }
     }
 });
@@ -997,6 +1230,7 @@ define_syscall!(Pread64, |object: ObjectRef,
     if offset < 0 {
         return Err(SyscallError::InvalidArguments);
     }
+    ensure_object_readable(&object)?;
     let file = object.clone().as_file_like()?;
     pread_file_like_in_chunks(&file, buf_ptr, len, offset as u64)
 });
@@ -1009,6 +1243,7 @@ define_syscall!(Pwrite64, |object: ObjectRef,
         return Err(SyscallError::InvalidArguments);
     }
 
+    ensure_object_writable(&object)?;
     pwrite_object_in_chunks(&object, buf_ptr, len, offset)
 });
 
