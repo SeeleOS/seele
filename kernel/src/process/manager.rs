@@ -56,11 +56,6 @@ impl Manager {
         let pid = process.lock().pid;
         self.processes.remove(&pid);
         remove_pid_cgroup_path(pid);
-        let mut process = process.lock();
-        process.close_all_fds();
-        process.timers.clear();
-        detach_all_process_mappings(&mut process);
-        process.addrspace.clean();
     }
 
     pub fn load_process(&mut self, process: ProcessRef) {
@@ -251,6 +246,9 @@ impl Process {
         }
 
         self.close_all_fds();
+        self.timers.clear();
+        detach_all_process_mappings(self);
+        self.addrspace.clean();
 
         self.threads
             .iter()

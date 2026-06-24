@@ -166,6 +166,7 @@ define_syscall!(OpenAt, |dirfd: i32,
         profile::record_hot_syscall_phase(HotSyscallPhase::OpenAtDirectoryCheck, 1);
     }
     check_open_permissions(&file_like.stat(), flags)?;
+    ensure_open_writable_mount(&path, flags)?;
     if flags.contains(OpenFlags::TRUNC) && !path_only {
         let truncate_start = profile::scope_start();
         let file_like = object.clone().as_file_like()?;
@@ -233,6 +234,29 @@ define_syscall!(Open, |path: CString, flags: OpenFlags, mode: u32| {
         0,
     )
 });
+
+fn ensure_open_writable_mount(path: &Path, flags: OpenFlags) -> Result<(), SyscallError> {
+    if flags.contains(OpenFlags::PATH) {
+        return Ok(());
+    }
+
+    let access_mode = flags.bits() & 0o3;
+    let wants_write = access_mode == 0o1 || access_mode == 0o2 || flags.contains(OpenFlags::TRUNC);
+    if !wants_write {
+        return Ok(());
+    }
+
+    match VirtualFS.lock().ensure_writable_mount(path.clone()) {
+        Ok(()) => Ok(()),
+        Err(FSError::Readonly) if is_proc_sysctl_path(path) => Ok(()),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn is_proc_sysctl_path(path: &Path) -> bool {
+    let path = path.clone().as_string();
+    path.starts_with("/proc/sys/") || path.starts_with("/sys/")
+}
 
 define_syscall!(Creat, |path: CString, mode: u32| {
     OpenAt::handle_call(

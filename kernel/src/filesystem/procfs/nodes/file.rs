@@ -90,6 +90,14 @@ impl File for ProcFile {
         }
     }
 
+    fn truncate(&mut self, _length: u64) -> FSResult<()> {
+        if self.write.is_some() {
+            Ok(())
+        } else {
+            Err(FSError::Readonly)
+        }
+    }
+
     fn seek(&mut self, offset: i64, seek_type: Whence) -> FSResult<usize> {
         let len = (self.read)().len() as i64;
         let next = match seek_type {

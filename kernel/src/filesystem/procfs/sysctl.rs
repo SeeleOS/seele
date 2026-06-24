@@ -124,8 +124,37 @@ pub(super) fn proc_sys_entries() -> Vec<DirectoryContentInfo> {
     vec![
         DirectoryContentInfo::new("fs".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("kernel".into(), DirectoryContentType::Directory),
+        DirectoryContentInfo::new("net".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("vm".into(), DirectoryContentType::Directory),
     ]
+}
+
+pub(super) fn proc_sys_net_entries() -> Vec<DirectoryContentInfo> {
+    vec![DirectoryContentInfo::new(
+        "ipv4".into(),
+        DirectoryContentType::Directory,
+    )]
+}
+
+pub(super) fn proc_sys_net_ipv4_entries() -> Vec<DirectoryContentInfo> {
+    vec![DirectoryContentInfo::new(
+        "conf".into(),
+        DirectoryContentType::Directory,
+    )]
+}
+
+pub(super) fn proc_sys_net_ipv4_conf_entries() -> Vec<DirectoryContentInfo> {
+    vec![
+        DirectoryContentInfo::new("default".into(), DirectoryContentType::Directory),
+        DirectoryContentInfo::new("lo".into(), DirectoryContentType::Directory),
+    ]
+}
+
+pub(super) fn proc_sys_net_ipv4_conf_if_entries() -> Vec<DirectoryContentInfo> {
+    vec![DirectoryContentInfo::new(
+        "tag".into(),
+        DirectoryContentType::File,
+    )]
 }
 
 pub(super) fn proc_vm_entries() -> Vec<DirectoryContentInfo> {
@@ -140,12 +169,52 @@ pub(super) fn proc_sysctl_value_bytes(value: &AtomicU64) -> Vec<u8> {
     format!("{}\n", value.load(Ordering::Relaxed)).into_bytes()
 }
 
-pub(super) fn proc_write_sysctl_u64(target: &AtomicU64, buffer: &[u8]) -> FSResult<usize> {
+pub(super) fn proc_net_ipv4_conf_lo_tag_bytes() -> Vec<u8> {
+    let namespace = crate::process::manager::get_current_process()
+        .lock()
+        .net_namespace
+        .clone();
+    format!("{}\n", namespace.ipv4_conf_lo_tag()).into_bytes()
+}
+
+pub(super) fn proc_net_ipv4_conf_default_tag_bytes() -> Vec<u8> {
+    let namespace = crate::process::manager::get_current_process()
+        .lock()
+        .net_namespace
+        .clone();
+    format!("{}\n", namespace.ipv4_conf_default_tag()).into_bytes()
+}
+
+fn parse_sysctl_u64(buffer: &[u8]) -> FSResult<u64> {
     let content = core::str::from_utf8(buffer).map_err(|_| FSError::Other)?;
-    let value = content
+    content
         .trim_matches(|c: char| c.is_ascii_whitespace() || c == '\0')
         .parse::<u64>()
-        .map_err(|_| FSError::Other)?;
+        .map_err(|_| FSError::Other)
+}
+
+pub(super) fn proc_write_sysctl_u64(target: &AtomicU64, buffer: &[u8]) -> FSResult<usize> {
+    let value = parse_sysctl_u64(buffer)?;
     target.store(value, Ordering::Relaxed);
+    Ok(buffer.len())
+}
+
+pub(super) fn proc_write_net_ipv4_conf_lo_tag(buffer: &[u8]) -> FSResult<usize> {
+    let value = parse_sysctl_u64(buffer)?;
+    let namespace = crate::process::manager::get_current_process()
+        .lock()
+        .net_namespace
+        .clone();
+    namespace.set_ipv4_conf_lo_tag(value);
+    Ok(buffer.len())
+}
+
+pub(super) fn proc_write_net_ipv4_conf_default_tag(buffer: &[u8]) -> FSResult<usize> {
+    let value = parse_sysctl_u64(buffer)?;
+    let namespace = crate::process::manager::get_current_process()
+        .lock()
+        .net_namespace
+        .clone();
+    namespace.set_ipv4_conf_default_tag(value);
     Ok(buffer.len())
 }

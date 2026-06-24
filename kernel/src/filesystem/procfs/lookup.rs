@@ -113,6 +113,36 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             PROC_SYS_KERNEL_INODE,
             proc_kernel_entries(),
         )),
+        ["sys", "net"] => Ok(proc_dir(
+            "/sys/net",
+            "net",
+            PROC_SYS_INODE + 0x100,
+            proc_sys_net_entries(),
+        )),
+        ["sys", "net", "ipv4"] => Ok(proc_dir(
+            "/sys/net/ipv4",
+            "ipv4",
+            PROC_SYS_INODE + 0x101,
+            proc_sys_net_ipv4_entries(),
+        )),
+        ["sys", "net", "ipv4", "conf"] => Ok(proc_dir(
+            "/sys/net/ipv4/conf",
+            "conf",
+            PROC_SYS_INODE + 0x102,
+            proc_sys_net_ipv4_conf_entries(),
+        )),
+        ["sys", "net", "ipv4", "conf", "lo"] => Ok(proc_dir(
+            "/sys/net/ipv4/conf/lo",
+            "lo",
+            PROC_SYS_INODE + 0x103,
+            proc_sys_net_ipv4_conf_if_entries(),
+        )),
+        ["sys", "net", "ipv4", "conf", "default"] => Ok(proc_dir(
+            "/sys/net/ipv4/conf/default",
+            "default",
+            PROC_SYS_INODE + 0x104,
+            proc_sys_net_ipv4_conf_if_entries(),
+        )),
         ["sys", "vm"] => Ok(proc_dir(
             "/sys/vm",
             "vm",
@@ -190,6 +220,18 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             "uuid",
             PROC_SYS_KERNEL_RANDOM_UUID_INODE,
             proc_random_uuid_bytes,
+        )),
+        ["sys", "net", "ipv4", "conf", "lo", "tag"] => Ok(proc_rw_file(
+            "tag",
+            PROC_SYS_INODE + 0x105,
+            proc_net_ipv4_conf_lo_tag_bytes,
+            proc_write_net_ipv4_conf_lo_tag,
+        )),
+        ["sys", "net", "ipv4", "conf", "default", "tag"] => Ok(proc_rw_file(
+            "tag",
+            PROC_SYS_INODE + 0x106,
+            proc_net_ipv4_conf_default_tag_bytes,
+            proc_write_net_ipv4_conf_default_tag,
         )),
         ["sys", "fs", "file-max"] => Ok(proc_rw_file(
             "file-max",

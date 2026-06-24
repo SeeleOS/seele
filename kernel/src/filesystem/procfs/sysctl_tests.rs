@@ -1,7 +1,9 @@
 use super::sysctl::{
     PROC_PID_MAX, proc_c_string_bytes, proc_fs_entries, proc_fs_inotify_entries,
-    proc_pressure_bytes, proc_sys_entries, proc_sysctl_value_bytes, proc_trim_sysctl_string,
-    proc_write_domainname, proc_write_hostname, proc_write_pressure, proc_write_sysctl_u64,
+    proc_pressure_bytes, proc_sys_entries, proc_sys_net_entries, proc_sys_net_ipv4_conf_entries,
+    proc_sys_net_ipv4_conf_if_entries, proc_sys_net_ipv4_entries, proc_sysctl_value_bytes,
+    proc_trim_sysctl_string, proc_write_domainname, proc_write_hostname, proc_write_pressure,
+    proc_write_sysctl_u64,
 };
 use crate::filesystem::errors::FSError;
 use crate::misc::utsname::{current_domainname, current_hostname, set_domainname, set_hostname};
@@ -54,10 +56,28 @@ fn procfs_static_entry_builders_expose_stable_names() {
     assert_eq!(inotify_entries[2].name, "max_user_watches");
 
     let sys_entries = proc_sys_entries();
-    assert_eq!(sys_entries.len(), 3);
+    assert_eq!(sys_entries.len(), 4);
     assert_eq!(sys_entries[0].name, "fs");
     assert_eq!(sys_entries[1].name, "kernel");
-    assert_eq!(sys_entries[2].name, "vm");
+    assert_eq!(sys_entries[2].name, "net");
+    assert_eq!(sys_entries[3].name, "vm");
+
+    let net_entries = proc_sys_net_entries();
+    assert_eq!(net_entries.len(), 1);
+    assert_eq!(net_entries[0].name, "ipv4");
+
+    let ipv4_entries = proc_sys_net_ipv4_entries();
+    assert_eq!(ipv4_entries.len(), 1);
+    assert_eq!(ipv4_entries[0].name, "conf");
+
+    let conf_entries = proc_sys_net_ipv4_conf_entries();
+    assert_eq!(conf_entries.len(), 2);
+    assert_eq!(conf_entries[0].name, "default");
+    assert_eq!(conf_entries[1].name, "lo");
+
+    let if_entries = proc_sys_net_ipv4_conf_if_entries();
+    assert_eq!(if_entries.len(), 1);
+    assert_eq!(if_entries[0].name, "tag");
 
     assert_eq!(proc_sysctl_value_bytes(&PROC_PID_MAX), b"4194304\n");
 }

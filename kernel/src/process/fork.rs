@@ -1,18 +1,17 @@
 use crate::memory::utils::Mut;
-use alloc::sync::Arc;
-use core::mem;
-
 use crate::{
     ipc::sysv_shm::inherit_forked_mappings,
     process::{Process, ProcessRef, clone_fd_table, clone_fs_context, misc::ProcessID},
     thread::{ThreadRef, get_current_thread, misc::ThreadID, yielding::BlockType},
 };
+use alloc::sync::Arc;
 
 impl Process {
     fn fork_process(
         parent: ProcessRef,
         share_fd_table: bool,
         share_fs_context: bool,
+        share_addrspace: bool,
     ) -> (ProcessID, ProcessRef) {
         let (pid, new_process, inherited_shm_mappings) = {
             let current_thread = get_current_thread();
@@ -35,11 +34,16 @@ impl Process {
             } else {
                 clone_fs_context(&parent_locked.fs_context)
             };
+            let child_addrspace = if share_addrspace {
+                parent_locked.addrspace.clone_shared_vm()
+            } else {
+                parent_locked.addrspace.clone_all()
+            };
             let new_process = Arc::new(Mut::new(Self {
                 pid,
                 pending_signals: parent_locked.pending_signals,
                 pending_signal_info: parent_locked.pending_signal_info.clone(),
-                addrspace: parent_locked.addrspace.clone_all(),
+                addrspace: child_addrspace,
                 kernel_stack_top: parent_locked.kernel_stack_top,
                 fd_table: child_fd_table,
                 fs_context: child_fs_context,
@@ -95,15 +99,17 @@ impl Process {
     }
 
     pub fn fork(parent: ProcessRef) -> (ProcessRef, ThreadRef) {
-        Self::fork_with_sharing(parent, false, false)
+        Self::fork_with_sharing(parent, false, false, false)
     }
 
     pub fn fork_with_sharing(
         parent: ProcessRef,
         share_fd_table: bool,
         share_fs_context: bool,
+        share_addrspace: bool,
     ) -> (ProcessRef, ThreadRef) {
-        let (pid, new_process) = Self::fork_process(parent, share_fd_table, share_fs_context);
+        let (pid, new_process) =
+            Self::fork_process(parent, share_fd_table, share_fs_context, share_addrspace);
 
         let current_thread = get_current_thread();
         let new_thread = current_thread
@@ -117,16 +123,21 @@ impl Process {
     }
 
     pub fn vfork(parent: ProcessRef) -> (ProcessRef, ThreadRef) {
-        Self::vfork_with_sharing(parent, false, false)
+        Self::vfork_with_sharing(parent, false, false, true)
     }
 
     pub fn vfork_with_sharing(
         parent: ProcessRef,
         share_fd_table: bool,
         share_fs_context: bool,
+        share_addrspace: bool,
     ) -> (ProcessRef, ThreadRef) {
-        let (pid, new_process) =
-            Self::fork_process(parent.clone(), share_fd_table, share_fs_context);
+        let (pid, new_process) = Self::fork_process(
+            parent.clone(),
+            share_fd_table,
+            share_fs_context,
+            share_addrspace,
+        );
 
         let current_thread = get_current_thread();
         let new_thread = current_thread.lock().clone_and_spawn_blocked_with_id(
@@ -150,7 +161,7 @@ impl Process {
             return;
         };
 
-        let borrowed_addrspace = mem::take(&mut self.addrspace);
+        let borrowed_addrspace = core::mem::take(&mut self.addrspace);
         self.borrowed_addrspace_from_parent = false;
         parent.lock().addrspace = borrowed_addrspace;
     }

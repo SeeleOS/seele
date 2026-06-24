@@ -79,6 +79,10 @@ pub(super) fn lookup_proc_pid_path(parts: &[&str]) -> FSResult<FileLike> {
                 true,
             ))
         }
+        [pid, "mounts"] => {
+            parse_pid(pid)?;
+            Ok(proc_file("mounts", PROC_MOUNTS_INODE, proc_mounts_bytes))
+        }
         [pid, "maps"] => {
             let pid = parse_pid(pid)?;
             Ok(proc_file("maps", pid_maps_inode(pid), move || {

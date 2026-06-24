@@ -606,7 +606,27 @@ fn procfs_exposes_stable_static_directories_files_and_mount_flags() {
         .into_iter()
         .map(|entry| entry.name)
         .collect::<Vec<_>>();
-    assert_eq!(sys_names, vec!["fs", "kernel", "vm"]);
+    assert_eq!(sys_names, vec!["fs", "kernel", "net", "vm"]);
+
+    let FileLike::Directory(net_conf) = fs.lookup(&Path::new("/sys/net/ipv4/conf")).unwrap() else {
+        panic!("/proc/sys/net/ipv4/conf should be a directory");
+    };
+    let net_conf_names = net_conf
+        .lock()
+        .contents()
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.name)
+        .collect::<Vec<_>>();
+    assert_eq!(net_conf_names, vec!["default", "lo"]);
+
+    let FileLike::File(lo_tag) = fs.lookup(&Path::new("/sys/net/ipv4/conf/lo/tag")).unwrap() else {
+        panic!("/proc/sys/net/ipv4/conf/lo/tag should be a file");
+    };
+    let mut tag_file = lo_tag.lock();
+    let mut tag_bytes = [0; 8];
+    let read = tag_file.read(&mut tag_bytes).unwrap();
+    assert_eq!(str::from_utf8(&tag_bytes[..read]).unwrap(), "0\n");
 
     let FileLike::File(osrelease) = fs.lookup(&Path::new("/sys/kernel/osrelease")).unwrap() else {
         panic!("osrelease should be a file");
@@ -662,6 +682,18 @@ fn procfs_exposes_dynamic_pid_entries_symlinks_and_writable_control_nodes() {
     };
     let net_ns_inode = net_ns.lock().info().unwrap().inode;
     assert_ne!(net_ns_inode, 0);
+
+    let FileLike::File(self_mounts) = fs.lookup(&Path::new("/self/mounts")).unwrap() else {
+        panic!("/proc/self/mounts should be a file");
+    };
+    let mut self_mounts = self_mounts.lock();
+    let mut mounts_bytes = [0; 256];
+    let mounts_read = self_mounts.read(&mut mounts_bytes).unwrap();
+    assert!(
+        str::from_utf8(&mounts_bytes[..mounts_read])
+            .unwrap()
+            .contains("proc /proc proc ")
+    );
 
     let FileLike::Directory(fd_dir) = fs.lookup(&Path::new("/self/fd")).unwrap() else {
         panic!("/proc/self/fd should be a directory");

@@ -153,6 +153,32 @@ define_syscall!(Setns, |fd: ObjectRef, flags: SetnsFlags| {
     Ok(0)
 });
 
+fn validate_clone_flags(flags: CloneFlags, exit_signal: u64) -> Result<(), SyscallError> {
+    if exit_signal > 0xff {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if flags.contains(CloneFlags::SIGHAND) && !flags.contains(CloneFlags::VM) {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if flags.contains(CloneFlags::THREAD) && !flags.contains(CloneFlags::SIGHAND) {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if flags.contains(CloneFlags::FS) && flags.contains(CloneFlags::NEWNS) {
+        return Err(SyscallError::InvalidArguments);
+    }
+    Ok(())
+}
+
+fn validate_clone3_stack(stack: u64, stack_size: u64) -> Result<(), SyscallError> {
+    if stack != 0 && stack_size == 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if stack == 0 && stack_size != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    Ok(())
+}
+
 define_syscall!(Clone, |flags: u64,
                         stack_pointer: u64,
                         parent_tid: *mut i32,
@@ -160,16 +186,10 @@ define_syscall!(Clone, |flags: u64,
                         tls: u64| {
     let clone_flags = CloneFlags::from_bits_truncate(flags);
     let exit_signal = (flags & 0xff) as u8;
-    let required = CloneFlags::VM
-        | CloneFlags::FS
-        | CloneFlags::FILES
-        | CloneFlags::SIGHAND
-        | CloneFlags::THREAD;
+    validate_clone_flags(clone_flags, u64::from(exit_signal))?;
+    let required = CloneFlags::VM | CloneFlags::SIGHAND | CloneFlags::THREAD;
     if !clone_flags.contains(CloneFlags::THREAD) {
         if clone_flags.contains(CloneFlags::VFORK) && !clone_flags.contains(CloneFlags::VM) {
-            return Err(SyscallError::NoSyscall);
-        }
-        if clone_flags.contains(CloneFlags::VM) && !clone_flags.contains(CloneFlags::VFORK) {
             return Err(SyscallError::NoSyscall);
         }
         let pidfd_ptr = if clone_flags.contains(CloneFlags::PIDFD) {
@@ -191,9 +211,6 @@ define_syscall!(Clone, |flags: u64,
     }
 
     let flags = clone_flags;
-    if flags.contains(CloneFlags::NEWNET) {
-        return Err(SyscallError::InvalidArguments);
-    }
     if !flags.contains(required) {
         return Err(SyscallError::NoSyscall);
     }
@@ -246,11 +263,18 @@ define_syscall!(Vfork, {
 });
 
 define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
-    if size < core::mem::size_of::<LinuxCloneArgs>() {
+    const CLONE_ARGS_MINIMAL_SIZE: usize = 64;
+
+    if size < CLONE_ARGS_MINIMAL_SIZE {
         return Err(SyscallError::InvalidArguments);
     }
     if args.is_null() {
         return Err(SyscallError::BadAddress);
+    }
+    if size > core::mem::size_of::<LinuxCloneArgs>() {
+        let extra = unsafe { (args as *const u8).add(core::mem::size_of::<LinuxCloneArgs>()) };
+        user_safe::read(extra)?;
+        return Err(SyscallError::InvalidArguments);
     }
 
     let args = user_safe::read(args)?;
@@ -265,11 +289,10 @@ define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
     };
     let flags = args.flags | (args.exit_signal & 0xff);
     let clone_flags = CloneFlags::from_bits_truncate(flags);
+    validate_clone_flags(clone_flags, args.exit_signal)?;
+    validate_clone3_stack(args.stack, args.stack_size)?;
 
     if clone_flags.contains(CloneFlags::THREAD) {
-        if clone_flags.contains(CloneFlags::NEWNET) {
-            return Err(SyscallError::InvalidArguments);
-        }
         return <Clone as SyscallImpl>::handle_call(
             flags,
             stack_pointer,
@@ -281,9 +304,6 @@ define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
     }
 
     if clone_flags.contains(CloneFlags::VFORK) && !clone_flags.contains(CloneFlags::VM) {
-        return Err(SyscallError::NoSyscall);
-    }
-    if clone_flags.contains(CloneFlags::VM) && !clone_flags.contains(CloneFlags::VFORK) {
         return Err(SyscallError::NoSyscall);
     }
 
@@ -588,10 +608,6 @@ mod tests {
             SyscallError::NoSyscall,
         );
         expect_errno(
-            SyscallArgs::new([CLONE_VM | SIGCHLD, 0, 0, 0, 0, 0]).call::<Clone>(),
-            SyscallError::NoSyscall,
-        );
-        expect_errno(
             SyscallArgs::new([CLONE_PIDFD | SIGCHLD, 0, 0, 0, 0, 0]).call::<Clone>(),
             SyscallError::BadAddress,
         );
@@ -606,7 +622,11 @@ mod tests {
                 0,
             ])
             .call::<Clone>(),
-            SyscallError::NoSyscall,
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([CLONE_SIGHAND | SIGCHLD, 0, 0, 0, 0, 0]).call::<Clone>(),
+            SyscallError::InvalidArguments,
         );
 
         write_user_value(

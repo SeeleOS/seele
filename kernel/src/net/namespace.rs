@@ -21,6 +21,8 @@ static NEXT_DYNAMIC_NET_NAMESPACE_INO: AtomicU64 =
 lazy_static! {
     static ref INIT_NET_NAMESPACE: Arc<NetNamespace> = Arc::new(NetNamespace {
         inode: PROC_NET_INIT_INO,
+        ipv4_conf_lo_tag: AtomicU64::new(0),
+        ipv4_conf_default_tag: AtomicU64::new(0),
         open_state: OpenState::default(),
     });
 }
@@ -30,6 +32,8 @@ pub type NetNamespaceRef = Arc<NetNamespace>;
 #[derive(Debug)]
 pub struct NetNamespace {
     inode: u64,
+    ipv4_conf_lo_tag: AtomicU64,
+    ipv4_conf_default_tag: AtomicU64,
     open_state: OpenState,
 }
 
@@ -41,12 +45,30 @@ impl NetNamespace {
     pub fn new() -> NetNamespaceRef {
         Arc::new(Self {
             inode: NEXT_DYNAMIC_NET_NAMESPACE_INO.fetch_add(1, Ordering::Relaxed),
+            ipv4_conf_lo_tag: AtomicU64::new(0),
+            ipv4_conf_default_tag: AtomicU64::new(0),
             open_state: OpenState::default(),
         })
     }
 
     pub fn inode(&self) -> u64 {
         self.inode
+    }
+
+    pub fn ipv4_conf_lo_tag(&self) -> u64 {
+        self.ipv4_conf_lo_tag.load(Ordering::Relaxed)
+    }
+
+    pub fn set_ipv4_conf_lo_tag(&self, value: u64) {
+        self.ipv4_conf_lo_tag.store(value, Ordering::Relaxed);
+    }
+
+    pub fn ipv4_conf_default_tag(&self) -> u64 {
+        self.ipv4_conf_default_tag.load(Ordering::Relaxed)
+    }
+
+    pub fn set_ipv4_conf_default_tag(&self, value: u64) {
+        self.ipv4_conf_default_tag.store(value, Ordering::Relaxed);
     }
 }
 

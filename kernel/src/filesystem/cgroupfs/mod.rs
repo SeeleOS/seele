@@ -21,6 +21,7 @@ use crate::{
         info::{DirectoryContentInfo, FileLikeInfo, UnixPermission},
         path::{Path, PathPart},
         vfs::FSResult,
+        vfs::VirtualFS,
         vfs_traits::{
             Directory, DirectoryContentType, File, FileLike, FileLikeType, FileSystem, Whence,
         },
@@ -125,14 +126,17 @@ pub fn pid_cgroup_path(pid: ProcessID) -> String {
 }
 
 pub fn set_pid_cgroup_path_from_fs_path(pid: ProcessID, path: &Path) -> FSResult<()> {
-    let normalized = path.normalize().as_string();
-    let cgroup_path = if normalized == "/sys/fs/cgroup" {
-        "/".into()
-    } else if let Some(relative) = normalized.strip_prefix("/sys/fs/cgroup/") {
-        format!("/{}", relative.trim_start_matches('/'))
-    } else {
+    let normalized = path.normalize();
+    let (mount_path, fs, _, _) = VirtualFS.lock().mount_metadata(normalized.clone())?;
+    if fs.lock().as_any().downcast_ref::<CgroupFs>().is_none() {
         return Err(FSError::NotFound);
     };
+
+    let cgroup_path = normalized
+        .strip_prefix(&mount_path)
+        .unwrap_or_default()
+        .normalize()
+        .as_string();
 
     CGROUP_STATE.lock().set_pid_path(pid, &cgroup_path)
 }

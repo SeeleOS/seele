@@ -47,8 +47,10 @@ bitflags! {
         const SIGHAND = 0x0000_0800;
         const PIDFD = 0x0000_1000;
         const VFORK = 0x0000_4000;
+        const PARENT = 0x0000_8000;
         const NEWPID = 0x2000_0000;
         const NEWNS = 0x0002_0000;
+        const SYSVSEM = 0x0004_0000;
         const NEWCGROUP = 0x0200_0000;
         const NEWUTS = 0x0400_0000;
         const NEWIPC = 0x0800_0000;
@@ -415,9 +417,12 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
         & !(0xff
             | CloneFlags::VM.bits()
             | CloneFlags::VFORK.bits()
+            | CloneFlags::PARENT.bits()
             | CloneFlags::FS.bits()
             | CloneFlags::FILES.bits()
+            | CloneFlags::SIGHAND.bits()
             | CloneFlags::NEWNS.bits()
+            | CloneFlags::SYSVSEM.bits()
             | CloneFlags::NEWCGROUP.bits()
             | CloneFlags::NEWUTS.bits()
             | CloneFlags::NEWIPC.bits()
@@ -449,15 +454,33 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
 
     let current = get_current_process();
     let is_vfork = clone_flags.contains(CloneFlags::VFORK);
+    let share_addrspace = clone_flags.contains(CloneFlags::VM);
+    if share_addrspace {
+        prefault_clone_vm_tid_pages(clone_flags, parent_tid, child_tid)?;
+    }
     let share_fd_table = clone_flags.contains(CloneFlags::FILES);
     let share_fs_context = clone_flags.contains(CloneFlags::FS);
     let (child_process, child_thread) = if is_vfork {
-        Process::vfork_with_sharing(current.clone(), share_fd_table, share_fs_context)
+        Process::vfork_with_sharing(
+            current.clone(),
+            share_fd_table,
+            share_fs_context,
+            share_addrspace,
+        )
     } else {
-        Process::fork_with_sharing(current.clone(), share_fd_table, share_fs_context)
+        Process::fork_with_sharing(
+            current.clone(),
+            share_fd_table,
+            share_fs_context,
+            share_addrspace,
+        )
     };
     if clone_flags.contains(CloneFlags::NEWNET) {
         child_process.lock().net_namespace = NetNamespace::new();
+    }
+    if clone_flags.contains(CloneFlags::PARENT) {
+        let parent = current.lock().parent.clone();
+        child_process.lock().parent = parent;
     }
     let pid = child_process.lock().pid;
     MANAGER.lock().processes.insert(pid, child_process.clone());
@@ -493,6 +516,12 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
 
     if clone_flags.contains(CloneFlags::PARENT_SETTID) {
         user_safe::write(parent_tid, &(pid.0 as i32))?;
+        if share_addrspace {
+            child_process
+                .lock()
+                .addrspace
+                .write(parent_tid, &(pid.0 as i32))?;
+        }
     }
 
     if clone_flags.contains(CloneFlags::CHILD_SETTID) {
@@ -517,14 +546,31 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
         user_safe::write(pidfd_ptr, &pidfd_fd)?;
     }
 
+    Process::wake_vfork_child(child_thread);
+
     if is_vfork {
         // Keep vfork safe for multi-threaded parents by using the existing
         // fork/COW address-space clone and only adding the parent wait semantics.
-        Process::wake_vfork_child(child_thread);
         wait_for_vfork_completion(&child_process);
     }
 
     Ok(pid.0 as usize)
+}
+
+fn prefault_clone_vm_tid_pages(
+    clone_flags: CloneFlags,
+    parent_tid: *mut i32,
+    child_tid: *mut i32,
+) -> Result<(), SyscallError> {
+    if clone_flags.contains(CloneFlags::PARENT_SETTID) {
+        let _: i32 = user_safe::read(parent_tid.cast_const())?;
+    }
+    if clone_flags.contains(CloneFlags::CHILD_SETTID)
+        || clone_flags.contains(CloneFlags::CHILD_CLEARTID)
+    {
+        let _: i32 = user_safe::read(child_tid.cast_const())?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
