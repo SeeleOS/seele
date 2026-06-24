@@ -475,6 +475,8 @@ mod tests {
 
     fn namespace_and_kcmp_syscalls_follow_linux_rules() {
         const AT_FDCWD: u64 = (-100i32) as u64;
+        const CLONE_NEWUTS: u64 = 0x0400_0000;
+        const CLONE_NEWIPC: u64 = 0x0800_0000;
         const CLONE_NEWNET: u64 = 0x4000_0000;
 
         let eventfd = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
@@ -516,9 +518,23 @@ mod tests {
             SyscallArgs::new([0x8000_0000, 0, 0, 0, 0, 0]).call::<Unshare>(),
             SyscallError::InvalidArguments,
         );
-        expect_errno(
-            SyscallArgs::new([0x0400_0000, 0, 0, 0, 0, 0]).call::<Unshare>(),
-            SyscallError::OperationNotSupported,
+        let original_uts_inode = get_current_process().lock().uts_namespace.inode();
+        expect_ok(
+            SyscallArgs::new([CLONE_NEWUTS, 0, 0, 0, 0, 0]).call::<Unshare>(),
+            0,
+        );
+        assert_ne!(
+            get_current_process().lock().uts_namespace.inode(),
+            original_uts_inode
+        );
+        let original_ipc_inode = get_current_process().lock().ipc_namespace.inode();
+        expect_ok(
+            SyscallArgs::new([CLONE_NEWIPC, 0, 0, 0, 0, 0]).call::<Unshare>(),
+            0,
+        );
+        assert_ne!(
+            get_current_process().lock().ipc_namespace.inode(),
+            original_ipc_inode
         );
 
         let saved_process = get_current_process();

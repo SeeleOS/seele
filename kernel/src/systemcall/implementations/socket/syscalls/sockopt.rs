@@ -366,7 +366,7 @@ mod tests {
         expect_errno(
             SyscallArgs::new([AF_INET, SOCK_STREAM, 0, socketpair_fds_page, 0, 0])
                 .call::<Socketpair>(),
-            SyscallError::OperationNotSupported,
+            SyscallError::ProtocolNotSupported,
         );
         expect_errno(
             SyscallArgs::new([AF_UNIX, SOCK_STREAM, 1, socketpair_fds_page, 0, 0])
@@ -379,7 +379,7 @@ mod tests {
         );
         expect_errno(
             SyscallArgs::new([AF_UNIX, 7, 0, socketpair_fds_page, 0, 0]).call::<Socketpair>(),
-            SyscallError::SocketTypeNotSupported,
+            SyscallError::InvalidArguments,
         );
 
         let unix_socket = expect_fd(

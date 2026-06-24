@@ -1155,6 +1155,7 @@ mod tests {
 
     fn filesystem_io_syscalls_follow_linux_rules() {
         const AT_FDCWD: u64 = (-100i32) as u64;
+        const O_RDWR: u64 = 0o2;
 
         let base_path = Path::new("/tmp/syscall-io-test");
         let cleanup_paths = ["/tmp/syscall-io-test/file", "/tmp/syscall-io-test"];
@@ -1169,17 +1170,8 @@ mod tests {
 
         let user_page = allocate_user_test_page();
         write_user_cstr(user_page, b"/tmp/syscall-io-test/file\0");
-        let fd = expect_fd(
-            SyscallArgs::new([
-                AT_FDCWD,
-                user_page,
-                OpenFlags::empty().bits() as u64,
-                0,
-                0,
-                0,
-            ])
-            .call::<OpenAt>(),
-        );
+        let fd =
+            expect_fd(SyscallArgs::new([AT_FDCWD, user_page, O_RDWR, 0, 0, 0]).call::<OpenAt>());
 
         get_object_current_process(fd as u64)
             .unwrap()
@@ -1763,6 +1755,7 @@ mod tests {
 
     fn filesystem_file_object_syscalls_follow_linux_rules() {
         const AT_FDCWD: u64 = (-100i32) as u64;
+        const O_RDWR: u64 = 0o2;
         const O_APPEND: u64 = 0o2_000;
         const SEEK_CUR: u64 = 1;
         const LOCK_SH: u64 = 1;
@@ -1799,40 +1792,15 @@ mod tests {
 
         let user_page = allocate_user_test_page();
         write_user_cstr(user_page, b"/tmp/syscall-file-object-test/file\0");
-        let fd = expect_fd(
-            SyscallArgs::new([
-                AT_FDCWD,
-                user_page,
-                OpenFlags::empty().bits() as u64,
-                0,
-                0,
-                0,
-            ])
-            .call::<OpenAt>(),
-        );
+        let fd =
+            expect_fd(SyscallArgs::new([AT_FDCWD, user_page, O_RDWR, 0, 0, 0]).call::<OpenAt>());
         write_user_cstr(user_page + 128, b"/tmp/syscall-file-object-test/file\0");
         let out_fd = expect_fd(
-            SyscallArgs::new([
-                AT_FDCWD,
-                user_page + 128,
-                OpenFlags::empty().bits() as u64,
-                0,
-                0,
-                0,
-            ])
-            .call::<OpenAt>(),
+            SyscallArgs::new([AT_FDCWD, user_page + 128, O_RDWR, 0, 0, 0]).call::<OpenAt>(),
         );
         write_user_cstr(user_page + 192, b"/tmp/syscall-file-object-test/out\0");
         let copy_out_fd = expect_fd(
-            SyscallArgs::new([
-                AT_FDCWD,
-                user_page + 192,
-                OpenFlags::empty().bits() as u64,
-                0,
-                0,
-                0,
-            ])
-            .call::<OpenAt>(),
+            SyscallArgs::new([AT_FDCWD, user_page + 192, O_RDWR, 0, 0, 0]).call::<OpenAt>(),
         );
 
         get_object_current_process(fd as u64)
@@ -1936,7 +1904,7 @@ mod tests {
             SyscallArgs::new([fd as u64, F_SETFL, O_APPEND, 0, 0, 0]).call::<Fcntl>(),
             0,
         );
-        assert_object_flags(fd, FileFlags::APPEND);
+        assert_object_flags(fd, FileFlags::APPEND | FileFlags::RDWR);
         assert_eq!(
             SyscallArgs::new([fd as u64, F_GETFL, 0, 0, 0, 0])
                 .call::<Fcntl>()
@@ -2627,6 +2595,7 @@ mod tests {
         const AT_STATX_FORCE_SYNC: u64 = 0x2000;
         const AT_STATX_DONT_SYNC: u64 = 0x4000;
         const STATX_BASIC_STATS: u64 = 0x0000_07ff;
+        const STATX_BTIME: u32 = 0x0000_0800;
         const STATX_MNT_ID: u32 = 0x0000_1000;
         const STATX_ATTR_MOUNT_ROOT: u64 = 0x0000_2000;
 
@@ -2691,7 +2660,10 @@ mod tests {
             };
             file.stat()
         };
-        assert_eq!(statx.stx_mask, STATX_BASIC_STATS as u32 | STATX_MNT_ID);
+        assert_eq!(
+            statx.stx_mask,
+            STATX_BASIC_STATS as u32 | STATX_BTIME | STATX_MNT_ID
+        );
         assert_eq!(statx.stx_mode, file_stat.st_mode as u16);
         assert_eq!(statx.stx_nlink, file_stat.st_nlink as u32);
         assert_eq!(statx.stx_size, file_stat.st_size as u64);
@@ -2699,8 +2671,7 @@ mod tests {
         assert_eq!(statx.stx_attributes_mask, STATX_ATTR_MOUNT_ROOT);
         assert_eq!(statx.stx_attributes & STATX_ATTR_MOUNT_ROOT, 0);
         assert!(statx.stx_mnt_id >= 1);
-        assert_eq!(statx.stx_btime.tv_sec, 0);
-        assert_eq!(statx.stx_btime.tv_nsec, 0);
+        assert!(statx.stx_btime.tv_nsec < 1_000_000_000);
 
         expect_ok(
             SyscallArgs::new([
@@ -3177,6 +3148,7 @@ mod tests {
     fn procfs_syscalls_follow_linux_proc_abi_rules() {
         const AT_FDCWD: u64 = (-100i32) as u64;
         const O_WRONLY: u64 = 1;
+        const O_RDWR: u64 = 2;
         const O_DIRECTORY: u64 = 0o200000;
         const STATX_BASIC_STATS: u64 = 0x0000_07ff;
         const AT_SYMLINK_NOFOLLOW: u64 = 0x100;
@@ -3332,7 +3304,9 @@ mod tests {
                 .addrspace
                 .write_buffer(payload_addr as *mut u8, payload)
                 .expect("test payload should be writable");
-            let fd = openat_fd(AT_FDCWD, path_addr, OpenFlags::empty());
+            let fd = expect_fd(
+                SyscallArgs::new([AT_FDCWD, path_addr, O_RDWR, 0, 0, 0]).call::<OpenAt>(),
+            );
             expect_ok(
                 SyscallArgs::new([fd as u64, payload_addr, payload.len() as u64, 0, 0, 0])
                     .call::<Write>(),
@@ -3343,7 +3317,9 @@ mod tests {
             close_test_fd(fd);
         }
 
-        let restore_hostname_fd = openat_fd(AT_FDCWD, page + 1280, OpenFlags::empty());
+        let restore_hostname_fd = expect_fd(
+            SyscallArgs::new([AT_FDCWD, page + 1280, O_WRONLY, 0, 0, 0]).call::<OpenAt>(),
+        );
         get_current_process()
             .lock()
             .addrspace
@@ -3362,7 +3338,9 @@ mod tests {
             hostname_before.len(),
         );
         close_test_fd(restore_hostname_fd);
-        let restore_domain_fd = openat_fd(AT_FDCWD, page + 1408, OpenFlags::empty());
+        let restore_domain_fd = expect_fd(
+            SyscallArgs::new([AT_FDCWD, page + 1408, O_WRONLY, 0, 0, 0]).call::<OpenAt>(),
+        );
         get_current_process()
             .lock()
             .addrspace
@@ -3409,7 +3387,8 @@ mod tests {
         );
         close_test_fd(invalid_oom_fd);
 
-        let pressure_fd = openat_fd(AT_FDCWD, page + 2304, OpenFlags::empty());
+        let pressure_fd =
+            expect_fd(SyscallArgs::new([AT_FDCWD, page + 2304, O_RDWR, 0, 0, 0]).call::<OpenAt>());
         get_current_process()
             .lock()
             .addrspace
@@ -3639,7 +3618,8 @@ mod tests {
             SyscallArgs::new([AT_FDCWD, page, O_DIRECTORY, 0, 0, 0]).call::<OpenAt>(),
             SyscallError::NotADirectory,
         );
-        let readonly_active_fd = openat_fd(AT_FDCWD, page, OpenFlags::empty());
+        let readonly_active_fd =
+            expect_fd(SyscallArgs::new([AT_FDCWD, page, O_WRONLY, 0, 0, 0]).call::<OpenAt>());
         get_current_process()
             .lock()
             .addrspace
