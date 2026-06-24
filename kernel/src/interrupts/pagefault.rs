@@ -10,7 +10,10 @@ use x86_64::{
 
 use crate::{
     interrupts::exception_interrupt::handle_usermode_exception,
-    memory::addrspace::{AddrSpace, cow::COW_FLAG, mem_area::Data},
+    memory::{
+        addrspace::{AddrSpace, cow::COW_FLAG, mem_area::Data},
+        protection::Protection,
+    },
     misc::{
         profile::{self, ProfileCategory},
         snapshot::SnapshotWithErrorCode,
@@ -51,7 +54,9 @@ pub extern "C" fn pagefault_handler(
             let area = addrspace.get_area(address).cloned();
             profile::record(ProfileCategory::PageFaultLookup, lookup_start);
             match area {
-                Some(area) if area.lazy => {
+                Some(area)
+                    if area.lazy && fault_allowed_by_protection(error_code, area.protection) =>
+                {
                     let resolve_start = profile::scope_start();
                     let is_file_backed = matches!(&area.data, Data::File { .. });
                     if is_file_backed {
@@ -115,6 +120,16 @@ pub extern "C" fn pagefault_handler(
         "Kernel page fault. \n {:#?} \n fault address: {:?} \n errcode: {:?}",
         snapshot, address, error_code
     )
+}
+
+fn fault_allowed_by_protection(error_code: PageFaultErrorCode, protection: Protection) -> bool {
+    if error_code.contains(PageFaultErrorCode::INSTRUCTION_FETCH) {
+        return protection.contains(Protection::EXEC);
+    }
+    if error_code.contains(PageFaultErrorCode::CAUSED_BY_WRITE) {
+        return protection.contains(Protection::WRITE);
+    }
+    protection.contains(Protection::READ)
 }
 
 #[unsafe(naked)]

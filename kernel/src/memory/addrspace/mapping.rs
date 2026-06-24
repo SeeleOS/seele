@@ -1,10 +1,16 @@
 use alloc::vec::Vec;
 use x86_64::{
     VirtAddr,
-    structures::paging::{Page, Size4KiB},
+    structures::paging::{FrameDeallocator, Page, Size4KiB},
 };
 
-use crate::memory::addrspace::mem_area::{Data, MemoryArea};
+use crate::memory::{
+    addrspace::{
+        cow::decrease_ref,
+        mem_area::{Data, MemoryArea},
+    },
+    paging::FRAME_ALLOCATOR,
+};
 
 use super::{AddrSpace, AllocResult, LAZY_MAP};
 
@@ -49,17 +55,29 @@ impl AddrSpace {
         let end = start + len;
         let last_mapped_addr = end - 1u64;
         let mut changed = false;
+        let mut frames_to_deallocate = Vec::new();
 
         for page in Page::<Size4KiB>::range_inclusive(
             Page::containing_address(start),
             Page::containing_address(last_mapped_addr),
         ) {
-            if let Ok((_, flush)) = self.page_table.unmap(page) {
+            if let Ok((frame, flush)) = self.page_table.unmap(page) {
                 flush.flush();
                 changed = true;
+                if decrease_ref(frame) {
+                    frames_to_deallocate.push(frame);
+                }
             }
         }
         self.flush_page_table_updates(changed);
+        if !frames_to_deallocate.is_empty() {
+            let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
+            for frame in frames_to_deallocate {
+                unsafe {
+                    frame_allocator.deallocate_frame(frame);
+                }
+            }
+        }
 
         self.unmap_areas(start, end);
     }

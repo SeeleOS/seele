@@ -850,10 +850,19 @@ fn prepare_signal_handler_stack(
         return restorer_ptr as u64;
     }
 
-    let (_, mut stack_builder) = process.addrspace.allocate_user_stack(16);
-    stack_builder.push(0);
-    stack_builder.push(restorer as u64);
-    stack_builder.finish().as_u64()
+    let interrupted_rsp = match thread.snapshot_state {
+        SnapshotState::Normal => thread.snapshot.inner.rsp,
+        SnapshotState::SignalHandler => thread.sig_handler_snapshot.inner.rsp,
+    };
+    // x86_64 signal handlers run on the interrupted user stack unless an
+    // alternate signal stack is active. Keeping that stack relationship also
+    // lets libc's longjmp stack checks recognize jumps out of handlers.
+    let rsp = interrupted_rsp.saturating_sub(16) & !0xf;
+    let padding_ptr = rsp as *mut u64;
+    let restorer_ptr = (rsp + 8) as *mut u64;
+    let _ = process.addrspace.write(padding_ptr, &0);
+    let _ = process.addrspace.write(restorer_ptr, &(restorer as u64));
+    restorer_ptr as u64
 }
 
 impl Thread {

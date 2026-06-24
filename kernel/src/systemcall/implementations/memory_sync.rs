@@ -844,6 +844,11 @@ define_syscall!(ArchPrctl, |code: u64, addr: u64| {
 });
 
 fn prot_to_protection(prot: i32) -> Result<Protection, SyscallError> {
+    let known = (Protection::READ | Protection::WRITE | Protection::EXEC).bits() as i32;
+    if prot & !known != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
     let mut protection = Protection::empty();
     if (prot & Protection::READ.bits() as i32) != 0 {
         protection |= Protection::READ;
@@ -870,6 +875,16 @@ fn mmap_shared(flags: MmapFlags) -> Result<bool, SyscallError> {
         bits if bits == MmapFlags::SHARED_VALIDATE.bits() => Ok(true),
         _ => Err(SyscallError::InvalidArguments),
     }
+}
+
+fn check_mmap_flags(flags: MmapFlags) -> Result<(), SyscallError> {
+    if flags.contains(MmapFlags::SYNC) && !flags.contains(MmapFlags::SHARED_VALIDATE) {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if flags.contains(MmapFlags::FIXED_NOREPLACE) && flags.contains(MmapFlags::FIXED) {
+        return Err(SyscallError::InvalidArguments);
+    }
+    Ok(())
 }
 
 fn checked_user_mapping(addr: u64, pages: u64) -> Result<(VirtAddr, VirtAddr), SyscallError> {
@@ -1001,6 +1016,19 @@ fn fd_allows_shared_write(object: &Arc<dyn crate::object::Object>) -> Result<boo
     Ok(flags.intersects(crate::object::FileFlags::WRONLY | crate::object::FileFlags::RDWR))
 }
 
+fn check_file_mapping_readable(
+    object: &Arc<dyn crate::object::Object>,
+) -> Result<(), SyscallError> {
+    let flags = object.clone().get_flags().map_err(SyscallError::from)?;
+    if flags.contains(crate::object::FileFlags::WRONLY)
+        && !flags.contains(crate::object::FileFlags::RDWR)
+    {
+        Err(SyscallError::AccessDenied)
+    } else {
+        Ok(())
+    }
+}
+
 fn check_shared_writable_mapping(
     object: &Arc<dyn crate::object::Object>,
     shared: bool,
@@ -1036,6 +1064,7 @@ define_syscall!(Mmap, |addr: u64,
     if len == 0 {
         return Err(SyscallError::InvalidArguments);
     }
+    check_mmap_flags(flags)?;
     let protection = prot_to_protection(prot)?;
     let pages = len.div_ceil(4096);
     let fixed = flags.intersects(MmapFlags::FIXED | MmapFlags::FIXED_NOREPLACE);
@@ -1055,6 +1084,7 @@ define_syscall!(Mmap, |addr: u64,
             }
             let object = crate::object::misc::get_object_current_process(fd as u64)
                 .map_err(SyscallError::from)?;
+            check_file_mapping_readable(&object)?;
             check_shared_writable_mapping(&object, shared, protection)?;
             let file = object.as_file_like()?;
             if file.is_device_backed() {
@@ -1112,6 +1142,7 @@ define_syscall!(Mmap, |addr: u64,
     }
     let object =
         crate::object::misc::get_object_current_process(fd as u64).map_err(SyscallError::from)?;
+    check_file_mapping_readable(&object)?;
     check_shared_writable_mapping(&object, shared, protection)?;
     let shared_write_allowed = shared_write_permission(&object, shared)?;
     if let Ok(file) = object.clone().as_file_like()
