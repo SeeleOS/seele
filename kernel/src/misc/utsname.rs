@@ -1,8 +1,11 @@
 use crate::memory::utils::Mut;
+use alloc::collections::BTreeMap;
 use thiserror::Error;
 
 static HOSTNAME: Mut<Option<[u8; 65]>> = Mut::new(None);
 static DOMAINNAME: Mut<Option<[u8; 65]>> = Mut::new(None);
+static NAMESPACE_HOSTNAMES: Mut<BTreeMap<u64, [u8; 65]>> = Mut::new(BTreeMap::new());
+static NAMESPACE_DOMAINNAMES: Mut<BTreeMap<u64, [u8; 65]>> = Mut::new(BTreeMap::new());
 
 pub const DEFAULT_SYSNAME: &str = "Seele";
 pub const DEFAULT_MACHINE: &str = "x86_64";
@@ -49,6 +52,11 @@ impl UtsName {
 }
 
 pub fn current_hostname(default: &str) -> [u8; 65] {
+    if let Some(hostname) = current_uts_namespace_inode()
+        .and_then(|inode| NAMESPACE_HOSTNAMES.lock().get(&inode).copied())
+    {
+        return hostname;
+    }
     let hostname = HOSTNAME.lock();
     if let Some(hostname) = *hostname {
         hostname
@@ -66,11 +74,20 @@ pub fn set_hostname(hostname: &[u8]) -> Result<(), SetHostnameError> {
 
     let mut field = [0; 65];
     write_c_field(&mut field, hostname);
-    *HOSTNAME.lock() = Some(field);
+    if let Some(inode) = current_uts_namespace_inode() {
+        NAMESPACE_HOSTNAMES.lock().insert(inode, field);
+    } else {
+        *HOSTNAME.lock() = Some(field);
+    }
     Ok(())
 }
 
 pub fn current_domainname(default: &str) -> [u8; 65] {
+    if let Some(domainname) = current_uts_namespace_inode()
+        .and_then(|inode| NAMESPACE_DOMAINNAMES.lock().get(&inode).copied())
+    {
+        return domainname;
+    }
     let domainname = DOMAINNAME.lock();
     if let Some(domainname) = *domainname {
         domainname
@@ -88,8 +105,21 @@ pub fn set_domainname(domainname: &[u8]) -> Result<(), SetHostnameError> {
 
     let mut field = [0; 65];
     write_c_field(&mut field, domainname);
-    *DOMAINNAME.lock() = Some(field);
+    if let Some(inode) = current_uts_namespace_inode() {
+        NAMESPACE_DOMAINNAMES.lock().insert(inode, field);
+    } else {
+        *DOMAINNAME.lock() = Some(field);
+    }
     Ok(())
+}
+
+fn current_uts_namespace_inode() -> Option<u64> {
+    Some(
+        crate::process::manager::get_current_process()
+            .lock()
+            .uts_namespace
+            .inode(),
+    )
 }
 
 fn write_c_field(dst: &mut [u8], src: &[u8]) {

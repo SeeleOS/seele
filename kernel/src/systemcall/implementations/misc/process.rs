@@ -101,13 +101,11 @@ define_syscall!(Unshare, |flags: u64| {
         return Err(SyscallError::InvalidArguments);
     }
 
-    let supported_namespace_flags = (UnshareFlags::NEWNET | UnshareFlags::NEWNS).bits();
-    let unsupported_namespace_flags = (UnshareFlags::NEWCGROUP
-        | UnshareFlags::NEWUTS
-        | UnshareFlags::NEWIPC
-        | UnshareFlags::NEWUSER
-        | UnshareFlags::NEWPID)
-        .bits();
+    let supported_namespace_flags =
+        (UnshareFlags::NEWNET | UnshareFlags::NEWNS | UnshareFlags::NEWUTS | UnshareFlags::NEWIPC)
+            .bits();
+    let unsupported_namespace_flags =
+        (UnshareFlags::NEWCGROUP | UnshareFlags::NEWUSER | UnshareFlags::NEWPID).bits();
     if flags & unsupported_namespace_flags != 0 {
         return Err(SyscallError::OperationNotSupported);
     }
@@ -122,7 +120,14 @@ define_syscall!(Unshare, |flags: u64| {
         if flags & UnshareFlags::NEWNET.bits() != 0 {
             process.net_namespace = NetNamespace::new();
         }
+        if flags & UnshareFlags::NEWUTS.bits() != 0 {
+            process.uts_namespace = NamespaceObject::dynamic(NamespaceKind::Uts);
+        }
+        if flags & UnshareFlags::NEWIPC.bits() != 0 {
+            process.ipc_namespace = NamespaceObject::dynamic(NamespaceKind::Ipc);
+        }
         if flags & UnshareFlags::NEWNS.bits() != 0 {
+            process.mnt_namespace = NamespaceObject::dynamic(NamespaceKind::Mnt);
             process.fs_context = crate::process::clone_fs_context(&process.fs_context);
             process.mount_namespace_snapshot = Some(
                 crate::filesystem::vfs::VirtualFS
@@ -160,21 +165,46 @@ define_syscall!(Unshare, |flags: u64| {
 });
 
 define_syscall!(Setns, |fd: ObjectRef, flags: SetnsFlags| {
+    const CAP_SYS_ADMIN: usize = 21;
+
     let namespace_object = fd
         .clone()
         .as_file_like()
         .ok()
         .and_then(|file| file.device_backing_object())
         .unwrap_or(fd);
-    let net_namespace = namespace_object
-        .as_net_namespace()
-        .map_err(|_| SyscallError::InvalidArguments)?;
-    if !flags.is_empty() && flags != SetnsFlags::NEWNET {
-        return Err(SyscallError::InvalidArguments);
+
+    let process = get_current_process();
+    let mut process = process.lock();
+    let slot = CAP_SYS_ADMIN / 32;
+    let mask = 1u32 << (CAP_SYS_ADMIN % 32);
+    if process.capability_effective[slot] & mask == 0 {
+        return Err(SyscallError::PermissionDenied);
     }
 
-    get_current_process().lock().net_namespace = net_namespace;
-    Ok(0)
+    if let Ok(net_namespace) = namespace_object.clone().as_net_namespace() {
+        if !flags.is_empty() && flags != SetnsFlags::NEWNET {
+            return Err(SyscallError::InvalidArguments);
+        }
+        process.net_namespace = net_namespace;
+        return Ok(0);
+    }
+
+    let namespace = namespace_object
+        .as_namespace()
+        .map_err(|_| SyscallError::InvalidArguments)?;
+    match namespace.kind() {
+        NamespaceKind::Ipc if flags.is_empty() || flags == SetnsFlags::NEWIPC => {
+            process.ipc_namespace = namespace;
+            Ok(0)
+        }
+        NamespaceKind::Uts if flags.is_empty() || flags == SetnsFlags::NEWUTS => {
+            process.uts_namespace = namespace;
+            Ok(0)
+        }
+        NamespaceKind::Mnt | NamespaceKind::Pid => Err(SyscallError::InvalidArguments),
+        _ => Err(SyscallError::InvalidArguments),
+    }
 });
 
 fn validate_clone_flags(flags: CloneFlags, exit_signal: u64) -> Result<(), SyscallError> {

@@ -88,6 +88,10 @@ impl Process {
                 dumpable: parent_locked.dumpable,
                 no_new_privs: parent_locked.no_new_privs,
                 net_namespace: parent_locked.net_namespace.clone(),
+                ipc_namespace: parent_locked.ipc_namespace.clone(),
+                mnt_namespace: parent_locked.mnt_namespace.clone(),
+                pid_namespace: parent_locked.pid_namespace.clone(),
+                uts_namespace: parent_locked.uts_namespace.clone(),
                 sysv_shm_mappings: inherited_shm_mappings.clone(),
                 ..Default::default()
             }));

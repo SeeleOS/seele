@@ -24,6 +24,7 @@ use crate::{
         fs_context::FsContextObject,
         fuse_device::FuseDevice,
         misc::ObjectResult,
+        namespace::NamespaceObject,
         netlink::NetlinkSocketObject,
         pipe::PipeEndpoint,
         traits::{Configuratable, MemoryMappable, Readable, Seekable, Statable, Writable},
@@ -50,6 +51,7 @@ pub mod linux_ioctl;
 pub mod linux_ioctl_semantics;
 pub mod memfd;
 pub mod misc;
+pub mod namespace;
 pub mod netlink;
 pub mod open_state;
 pub mod pipe;
@@ -115,6 +117,7 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function_non_trait!("signalfd", SignalfdObject, BadFileDescriptor);
     define_cast_function_non_trait!("netlink_socket", NetlinkSocketObject, BadFileDescriptor);
     define_cast_function_non_trait!("net_namespace", NetNamespace, BadFileDescriptor);
+    define_cast_function_non_trait!("namespace", NamespaceObject, BadFileDescriptor);
     define_cast_function_non_trait!("inet_socket", InetSocketObject, BadFileDescriptor);
     define_cast_function_non_trait!("timerfd", TimerFdObject, BadFileDescriptor);
     define_cast_function_non_trait!("unix_socket", UnixSocketObject, BadFileDescriptor);

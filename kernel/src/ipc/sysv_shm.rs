@@ -81,6 +81,7 @@ struct SysvShmState {
 
 #[derive(Clone, Debug)]
 struct SysvShmSegment {
+    namespace_inode: u64,
     key: i32,
     size: usize,
     frames: Arc<[PhysFrame<Size4KiB>]>,
@@ -233,13 +234,15 @@ pub fn shmget(process: &Process, key: i32, size: usize, shmflg: i32) -> SyscallR
     let create = shmflg & IPC_CREAT != 0;
     let exclusive = shmflg & IPC_EXCL != 0;
     let mode = (shmflg & IPC_MODE_MASK) as u32;
+    let namespace_inode = process.ipc_namespace.inode();
 
     let mut state = SYSV_SHM_STATE.lock();
     if key != IPC_PRIVATE
-        && let Some((existing_id, existing)) = state
-            .segments
-            .iter()
-            .find(|(_, segment)| segment.key == key && !segment.marked_for_removal)
+        && let Some((existing_id, existing)) = state.segments.iter().find(|(_, segment)| {
+            segment.namespace_inode == namespace_inode
+                && segment.key == key
+                && !segment.marked_for_removal
+        })
     {
         if create && exclusive {
             return Err(SyscallError::FileAlreadyExists);
@@ -264,6 +267,7 @@ pub fn shmget(process: &Process, key: i32, size: usize, shmflg: i32) -> SyscallR
     state.segments.insert(
         shmid,
         SysvShmSegment {
+            namespace_inode,
             key,
             size,
             frames,
@@ -296,6 +300,9 @@ pub fn shmat(process: &mut Process, shmid: i32, shmaddr: *const u8, shmflg: i32)
             .segments
             .get(&shmid)
             .ok_or(SyscallError::InvalidArguments)?;
+        if segment.namespace_inode != process.ipc_namespace.inode() {
+            return Err(SyscallError::InvalidArguments);
+        }
         let readonly = shmflg & SHM_RDONLY != 0;
         if !segment_allows_access(segment, process, readonly) {
             return Err(SyscallError::PermissionDenied);
@@ -361,7 +368,13 @@ pub fn shmdt(process: &mut Process, shmaddr: *const u8) -> SyscallResult {
     Ok(0)
 }
 
-pub fn shmctl(effective_uid: u32, shmid: i32, cmd: i32, buf: *mut LinuxShmidDs) -> SyscallResult {
+pub fn shmctl(
+    effective_uid: u32,
+    ipc_namespace_inode: u64,
+    shmid: i32,
+    cmd: i32,
+    buf: *mut LinuxShmidDs,
+) -> SyscallResult {
     let mut state = SYSV_SHM_STATE.lock();
     match cmd {
         IPC_RMID => {
@@ -369,6 +382,9 @@ pub fn shmctl(effective_uid: u32, shmid: i32, cmd: i32, buf: *mut LinuxShmidDs) 
                 .segments
                 .get_mut(&shmid)
                 .ok_or(SyscallError::InvalidArguments)?;
+            if segment.namespace_inode != ipc_namespace_inode {
+                return Err(SyscallError::InvalidArguments);
+            }
             if effective_uid != 0
                 && effective_uid != segment.owner_uid
                 && effective_uid != segment.creator_uid
@@ -390,6 +406,9 @@ pub fn shmctl(effective_uid: u32, shmid: i32, cmd: i32, buf: *mut LinuxShmidDs) 
                 .segments
                 .get(&shmid)
                 .ok_or(SyscallError::InvalidArguments)?;
+            if segment.namespace_inode != ipc_namespace_inode {
+                return Err(SyscallError::InvalidArguments);
+            }
             let ds = LinuxShmidDs {
                 shm_perm: LinuxIpcPerm {
                     __ipc_perm_key: segment.key,
@@ -421,9 +440,16 @@ pub fn shmctl(effective_uid: u32, shmid: i32, cmd: i32, buf: *mut LinuxShmidDs) 
 }
 
 pub fn proc_sysvipc_shm_bytes() -> Vec<u8> {
+    let namespace_inode = crate::process::manager::get_current_process()
+        .lock()
+        .ipc_namespace
+        .inode();
     let state = SYSV_SHM_STATE.lock();
     let mut out = b"       key      shmid perms                  size  cpid  lpid nattch   uid   gid  cuid  cgid      atime      dtime      ctime\n".to_vec();
     for (shmid, segment) in &state.segments {
+        if segment.namespace_inode != namespace_inode {
+            continue;
+        }
         out.extend_from_slice(
             alloc::format!(
                 "{:10} {:10} {:5o} {:21} {:5} {:5} {:6} {:5} {:5} {:5} {:5} {:10} {:10} {:10}\n",

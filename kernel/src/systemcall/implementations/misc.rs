@@ -17,6 +17,7 @@ use crate::misc::{others::protection_to_page_flags, reboot as reboot_state, utsn
 use crate::net::namespace::NetNamespace;
 use crate::object::linux_anon::{EventFdFlags, EventFdObject, InotifyObject, PidFdObject};
 use crate::object::misc::get_object_current_process;
+use crate::object::namespace::{NamespaceKind, NamespaceObject};
 use crate::object::{FileFlags, Object, misc::ObjectRef};
 use crate::process::{
     FdFlags, Process,
@@ -85,6 +86,10 @@ bitflags! {
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct SetnsFlags: u32 {
+        const NEWIPC = CloneFlags::NEWIPC.bits() as u32;
+        const NEWNS = CloneFlags::NEWNS.bits() as u32;
+        const NEWPID = CloneFlags::NEWPID.bits() as u32;
+        const NEWUTS = CloneFlags::NEWUTS.bits() as u32;
         const NEWNET = CloneFlags::NEWNET.bits() as u32;
     }
 }
@@ -477,6 +482,15 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
     };
     if clone_flags.contains(CloneFlags::NEWNET) {
         child_process.lock().net_namespace = NetNamespace::new();
+    }
+    if clone_flags.contains(CloneFlags::NEWNS) {
+        child_process.lock().mnt_namespace = NamespaceObject::dynamic(NamespaceKind::Mnt);
+    }
+    if clone_flags.contains(CloneFlags::NEWUTS) {
+        child_process.lock().uts_namespace = NamespaceObject::dynamic(NamespaceKind::Uts);
+    }
+    if clone_flags.contains(CloneFlags::NEWIPC) {
+        child_process.lock().ipc_namespace = NamespaceObject::dynamic(NamespaceKind::Ipc);
     }
     if clone_flags.contains(CloneFlags::PARENT) {
         let parent = current.lock().parent.clone();

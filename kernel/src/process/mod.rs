@@ -12,6 +12,7 @@ use crate::ipc::sysv_shm::ProcessShmMapping;
 use crate::memory::addrspace::AddrSpace;
 use crate::misc::timer::Timer;
 use crate::net::namespace::{NetNamespace, NetNamespaceRef};
+use crate::object::namespace::{NamespaceKind, NamespaceObject, NamespaceRef};
 use crate::object::{misc::ObjectRef, pipe::PipeEndpoint};
 use crate::process::group::{ProcessGroupID, SessionID};
 use crate::signal::misc::default_signal_action_vec;
@@ -166,6 +167,10 @@ pub struct Process {
     pub dumpable: bool,
     pub no_new_privs: bool,
     pub net_namespace: NetNamespaceRef,
+    pub ipc_namespace: NamespaceRef,
+    pub mnt_namespace: NamespaceRef,
+    pub pid_namespace: NamespaceRef,
+    pub uts_namespace: NamespaceRef,
     pub mount_namespace_snapshot: Option<Vec<u64>>,
     pub sysv_shm_mappings: Vec<ProcessShmMapping>,
     pub vfork_blocker: Option<ThreadID>,
@@ -236,6 +241,10 @@ impl Default for Process {
             dumpable: true,
             no_new_privs: false,
             net_namespace: NetNamespace::init(),
+            ipc_namespace: NamespaceObject::new(NamespaceKind::Ipc, 0xEFFF_FFFF),
+            mnt_namespace: NamespaceObject::new(NamespaceKind::Mnt, 0xEFFF_FFF8),
+            pid_namespace: NamespaceObject::new(NamespaceKind::Pid, 0xEFFF_FFFC),
+            uts_namespace: NamespaceObject::new(NamespaceKind::Uts, 0xEFFF_FFFE),
             mount_namespace_snapshot: None,
             sysv_shm_mappings: Vec::new(),
             vfork_blocker: None,

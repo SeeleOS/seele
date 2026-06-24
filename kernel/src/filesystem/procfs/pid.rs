@@ -43,12 +43,8 @@ const PROC_NAMESPACE_NAMES: [&str; 8] =
     ["cgroup", "ipc", "mnt", "net", "pid", "time", "user", "uts"];
 
 const PROC_CGROUP_INIT_INO: u64 = 0xEFFF_FFFB;
-const PROC_IPC_INIT_INO: u64 = 0xEFFF_FFFF;
-const PROC_MNT_INIT_INO: u64 = 0xEFFF_FFF8;
-const PROC_PID_INIT_INO: u64 = 0xEFFF_FFFC;
 const PROC_TIME_INIT_INO: u64 = 0xEFFF_FFFA;
 const PROC_USER_INIT_INO: u64 = 0xEFFF_FFFD;
-const PROC_UTS_INIT_INO: u64 = 0xEFFF_FFFE;
 const USER_HZ: u64 = 100;
 
 fn default_user_namespace_map(id: u32) -> String {
@@ -601,28 +597,72 @@ pub(super) fn pid_fdinfo_inode(pid: ProcessID, fd: &str) -> u64 {
 pub(super) fn pid_ns_inode(pid: ProcessID, name: &str) -> FSResult<u64> {
     match name {
         "cgroup" => Ok(PROC_CGROUP_INIT_INO),
-        "ipc" => Ok(PROC_IPC_INIT_INO),
-        "mnt" => Ok(PROC_MNT_INIT_INO),
+        "ipc" => Ok(get_process_with_pid(pid)
+            .map_err(|_| FSError::NotFound)?
+            .lock()
+            .ipc_namespace
+            .inode()),
+        "mnt" => Ok(get_process_with_pid(pid)
+            .map_err(|_| FSError::NotFound)?
+            .lock()
+            .mnt_namespace
+            .inode()),
         "net" => Ok(get_process_with_pid(pid)
             .map_err(|_| FSError::NotFound)?
             .lock()
             .net_namespace
             .inode()),
-        "pid" => Ok(PROC_PID_INIT_INO),
+        "pid" => Ok(get_process_with_pid(pid)
+            .map_err(|_| FSError::NotFound)?
+            .lock()
+            .pid_namespace
+            .inode()),
         "time" => Ok(PROC_TIME_INIT_INO),
         "user" => Ok(PROC_USER_INIT_INO),
-        "uts" => Ok(PROC_UTS_INIT_INO),
+        "uts" => Ok(get_process_with_pid(pid)
+            .map_err(|_| FSError::NotFound)?
+            .lock()
+            .uts_namespace
+            .inode()),
         _ => Err(FSError::NotFound),
     }
 }
 
 pub(super) fn pid_ns_object(pid: ProcessID, name: &str) -> FSResult<Option<ObjectRef>> {
     match name {
+        "ipc" => Ok(Some(
+            get_process_with_pid(pid)
+                .map_err(|_| FSError::NotFound)?
+                .lock()
+                .ipc_namespace
+                .clone(),
+        )),
+        "mnt" => Ok(Some(
+            get_process_with_pid(pid)
+                .map_err(|_| FSError::NotFound)?
+                .lock()
+                .mnt_namespace
+                .clone(),
+        )),
         "net" => Ok(Some(
             get_process_with_pid(pid)
                 .map_err(|_| FSError::NotFound)?
                 .lock()
                 .net_namespace
+                .clone(),
+        )),
+        "uts" => Ok(Some(
+            get_process_with_pid(pid)
+                .map_err(|_| FSError::NotFound)?
+                .lock()
+                .uts_namespace
+                .clone(),
+        )),
+        "pid" => Ok(Some(
+            get_process_with_pid(pid)
+                .map_err(|_| FSError::NotFound)?
+                .lock()
+                .pid_namespace
                 .clone(),
         )),
         _ => Ok(None),
