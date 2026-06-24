@@ -2,6 +2,7 @@ use crate::memory::utils::Mut;
 use crate::{
     ipc::sysv_shm::inherit_forked_mappings,
     process::{Process, ProcessRef, clone_fd_table, clone_fs_context, misc::ProcessID},
+    signal::Signal,
     thread::{ThreadRef, get_current_thread, misc::ThreadID, yielding::BlockType},
 };
 use alloc::sync::Arc;
@@ -96,6 +97,7 @@ impl Process {
                 capability_bounding: parent_locked.capability_bounding,
                 capability_ambient: parent_locked.capability_ambient,
                 child_subreaper: false,
+                child_exit_signal: Signal::SIGCHLD,
                 dumpable: parent_locked.dumpable,
                 no_new_privs: parent_locked.no_new_privs,
                 net_namespace: parent_locked.net_namespace.clone(),

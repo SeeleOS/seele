@@ -217,6 +217,9 @@ fn validate_clone_flags(flags: CloneFlags, exit_signal: u64) -> Result<(), Sysca
     if exit_signal > 0xff {
         return Err(SyscallError::InvalidArguments);
     }
+    if exit_signal != 0 {
+        let _ = Signal::try_from(exit_signal).map_err(|_| SyscallError::InvalidArguments)?;
+    }
     if flags.contains(CloneFlags::SIGHAND) && !flags.contains(CloneFlags::VM) {
         return Err(SyscallError::InvalidArguments);
     }
@@ -225,6 +228,22 @@ fn validate_clone_flags(flags: CloneFlags, exit_signal: u64) -> Result<(), Sysca
     }
     if flags.contains(CloneFlags::FS) && flags.contains(CloneFlags::NEWNS) {
         return Err(SyscallError::InvalidArguments);
+    }
+    let namespace_flags = CloneFlags::NEWCGROUP
+        | CloneFlags::NEWIPC
+        | CloneFlags::NEWNET
+        | CloneFlags::NEWNS
+        | CloneFlags::NEWPID
+        | CloneFlags::NEWUTS;
+    if flags.intersects(namespace_flags) {
+        const CAP_SYS_ADMIN: usize = 21;
+        let process = get_current_process();
+        let process = process.lock();
+        let slot = CAP_SYS_ADMIN / 32;
+        let mask = 1u32 << (CAP_SYS_ADMIN % 32);
+        if process.capability_effective[slot] & mask == 0 {
+            return Err(SyscallError::PermissionDenied);
+        }
     }
     Ok(())
 }
@@ -367,9 +386,14 @@ define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
         return Err(SyscallError::NoSyscall);
     }
 
-    if clone_flags.contains(CloneFlags::PIDFD) != (args.pidfd != 0) {
-        return Err(SyscallError::InvalidArguments);
-    }
+    let pidfd_ptr = if clone_flags.contains(CloneFlags::PIDFD) {
+        if args.pidfd == 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
+        args.pidfd as *mut i32
+    } else {
+        core::ptr::null_mut()
+    };
     if clone_flags.contains(CloneFlags::INTO_CGROUP) != (args.cgroup != 0) {
         return Err(SyscallError::InvalidArguments);
     }
@@ -382,7 +406,7 @@ define_syscall!(Clone3, |args: *const LinuxCloneArgs, size: usize| {
         parent_tid: args.parent_tid as *mut i32,
         child_tid: args.child_tid as *mut i32,
         tls: args.tls,
-        pidfd_ptr: args.pidfd as *mut i32,
+        pidfd_ptr,
         cgroup_fd: args.cgroup,
     })
 });

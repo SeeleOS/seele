@@ -441,7 +441,7 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
             | CloneFlags::SETTLS.bits()
             | CloneFlags::PIDFD.bits()
             | CloneFlags::INTO_CGROUP.bits());
-    if unsupported != 0 || (exit_signal != 0 && exit_signal != 17) {
+    if unsupported != 0 {
         return Err(SyscallError::NoSyscall);
     }
     if clone_flags.contains(CloneFlags::PIDFD) && pidfd_ptr.is_null() {
@@ -495,6 +495,10 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
     if clone_flags.contains(CloneFlags::PARENT) {
         let parent = current.lock().parent.clone();
         child_process.lock().parent = parent;
+    }
+    if exit_signal != 0 {
+        child_process.lock().child_exit_signal =
+            Signal::try_from(u64::from(exit_signal)).map_err(|_| SyscallError::InvalidArguments)?;
     }
     let pid = child_process.lock().pid;
     MANAGER.lock().processes.insert(pid, child_process.clone());

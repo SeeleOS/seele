@@ -120,10 +120,11 @@ fn has_wait_interrupt_signal(process: &ProcessRef) -> bool {
 }
 
 fn consume_ignored_child_signal(process: &ProcessRef) {
-    process
-        .lock()
-        .pending_signals
-        .remove(Signal::SIGCHLD.into());
+    let mut process = process.lock();
+    let signal_action = &process.signal_actions[Signal::SIGCHLD.index()];
+    if matches!(signal_action.handling_type, SignalHandlingType::Default) {
+        process.pending_signals.remove(Signal::SIGCHLD.into());
+    }
 }
 
 const CLD_TRAPPED: i32 = 4;

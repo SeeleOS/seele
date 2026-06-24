@@ -11,7 +11,7 @@ use crate::{
         wake_pidfd_for_process_with_manager, wake_signalfd_for_process_with_manager,
     },
     process::ProcessRef,
-    signal::{Signal, Signals},
+    signal::Signals,
     systemcall::implementations::wake_futex_for_process_with_manager,
     thread::{
         ThreadRef,
@@ -283,12 +283,16 @@ impl ThreadManager {
         }
 
         for dead_process in &to_remove {
-            if let Some(parent) = dead_process.lock().parent.clone() {
+            let (parent, child_exit_signal) = {
+                let dead_process = dead_process.lock();
+                (dead_process.parent.clone(), dead_process.child_exit_signal)
+            };
+            if let Some(parent) = parent {
                 let (parent_pid, threads) = {
                     let mut parent = parent.lock();
                     parent
                         .pending_signals
-                        .insert(Signals::from(Signal::SIGCHLD));
+                        .insert(Signals::from(child_exit_signal));
                     (parent.pid.0, parent.threads.clone())
                 };
 
