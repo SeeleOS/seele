@@ -1,6 +1,12 @@
 use super::*;
 
+const ROBUST_LIST_HEAD_LEN_X86_64: usize = 24;
+
 define_syscall!(SetRobustList, |head: u64, len: usize| {
+    if len != ROBUST_LIST_HEAD_LEN_X86_64 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
     let current = crate::thread::get_current_thread();
     let mut current = current.lock();
     current.robust_list_head = head;

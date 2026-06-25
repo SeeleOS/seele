@@ -318,6 +318,16 @@ mod tests {
             assert_eq!(current.robust_list_head, 0x1234_5000);
             assert_eq!(current.robust_list_len, 24);
         }
+        expect_errno(
+            SyscallArgs::new([0x1234_6000, usize::MAX as u64, 0, 0, 0, 0]).call::<SetRobustList>(),
+            SyscallError::InvalidArguments,
+        );
+        {
+            let current = crate::thread::get_current_thread();
+            let current = current.lock();
+            assert_eq!(current.robust_list_head, 0x1234_5000);
+            assert_eq!(current.robust_list_len, 24);
+        }
 
         {
             let current = crate::thread::get_current_thread();
