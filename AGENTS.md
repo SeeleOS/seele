@@ -12,7 +12,7 @@
 - When polling VM state or serial output, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
 - `cargo xtest` and MCP `run_tests` default to kernel unit tests plus LTP. Use a specific selector such as `kernel_unit` or `ltp` for targeted debugging.
 - In the default kernel-unit-plus-LTP test gate, stop immediately if kernel unit tests fail instead of continuing into LTP. LTP is expensive, and continuing after unit failure can obscure the serial context for the first failure.
-- Because LTP is expensive, when fixing LTP failures do not run the full LTP gate after every single small fix. First batch all fixes for the currently known failing tests or suite, then run the appropriate LTP verification once for that batch. Use targeted unit checks or narrow compile checks while editing.
+- Because LTP is expensive, when fixing LTP failures, collect the currently known failing tests, fix that batch together, and then run the appropriate LTP verification once for the batch. Do not rerun LTP after each single LTP fix; use targeted unit checks or narrow compile checks while editing.
 - After finishing VM-based testing, shut the VM down and verify there is no leftover runner or QEMU process before moving on.
 - To inspect the current VM and runner processes before shutdown, prefer `status` for MCP-managed sessions; otherwise inspect host runner/QEMU processes directly and kill leftover PIDs explicitly.
 - Do not assume `target/rootfs_mnt/` is mounted or synchronized with `target/rootfs.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the control-plane VM flow when in doubt.
