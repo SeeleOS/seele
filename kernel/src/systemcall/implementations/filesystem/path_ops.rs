@@ -8,7 +8,8 @@ define_syscall!(Access, |path: CString, mode: i32| {
     Ok(0)
 });
 
-define_syscall!(Chdir, |dir: String| {
+define_syscall!(Chdir, |dir: CString| {
+    let dir = path_from_raw(dir)?;
     let process = get_current_process();
     let fs_context = process.lock().fs_context.lock().clone();
     let path =
