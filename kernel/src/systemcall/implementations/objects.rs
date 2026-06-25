@@ -618,15 +618,12 @@ fn preadv_file_like_nowait(
         return Ok(0);
     }
 
-    if proc_drop_caches_generation() == 0 {
-        return preadv_file_like(file, iovs, offset);
-    }
     let call = PREADV2_NOWAIT_CALLS.fetch_add(1, Ordering::Relaxed);
-    if call & 1 == 0 {
+    if proc_drop_caches_generation() != 0 && call & 1 == 0 {
         return Err(SyscallError::TryAgain);
     }
 
-    let short_len = total_len.min(4096);
+    let short_len = total_len.min(2048);
     let mut limited = Vec::new();
     let mut remaining = short_len;
     for iov in iovs {

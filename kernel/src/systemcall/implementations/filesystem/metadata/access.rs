@@ -8,6 +8,8 @@ const CAP_FSETID: u64 = 4;
 const S_ISUID: u32 = 0o4000;
 const S_ISGID: u32 = 0o2000;
 const S_IXGRP: u32 = 0o010;
+const S_IFMT: u32 = 0o170000;
+const S_IFREG: u32 = 0o100000;
 
 pub(in crate::systemcall::implementations::filesystem) fn check_access_mode(
     mode: i32,
@@ -468,6 +470,9 @@ fn clear_chown_mode_bits(
     old_mode: u32,
     credentials: &AccessCredentials,
 ) -> Result<(), SyscallError> {
+    if old_mode & S_IFMT != S_IFREG {
+        return Ok(());
+    }
     let mut mode = old_mode & 0o7777;
     mode &= !S_ISUID;
     if !has_capability(credentials, CAP_FSETID) || (mode & S_IXGRP) != 0 {
