@@ -1,4 +1,5 @@
 use alloc::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{Arc, Weak},
     vec,
     vec::Vec,
@@ -6,6 +7,7 @@ use alloc::{
 use core::{mem, slice};
 
 use crate::memory::utils::Mut;
+use conquer_once::spin::OnceCell;
 
 use crate::{
     filesystem::info::LinuxStat,
@@ -32,12 +34,27 @@ use super::{
     AF_INET, IPPROTO_TCP, IPPROTO_UDP, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PRIORITY,
     SO_PROTOCOL, SO_RCVBUF, SO_RCVBUFFORCE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_REUSEADDR,
     SO_SNDBUF, SO_SNDBUFFORCE, SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD, SO_TYPE, SOCK_CLOEXEC, SOCK_DGRAM,
-    SOCK_NONBLOCK, SOCK_STREAM, SOL_SOCKET, SOL_TCP, SocketError, SocketLike, SocketResult,
+    SOCK_NONBLOCK, SOCK_STREAM, SOL_IP, SOL_SOCKET, SOL_TCP, SocketError, SocketLike, SocketResult,
     can_set_socket_priority, self_ref::object_ref, socket_timeout_option_len,
     wait::wait_for_object_event,
 };
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
+const IP_ADD_MEMBERSHIP: u64 = 35;
+const IP_DROP_MEMBERSHIP: u64 = 36;
+const MCAST_JOIN_GROUP: u64 = 42;
+const MCAST_LEAVE_GROUP: u64 = 45;
+const IP_MULTICAST_ALL: u64 = 49;
+
+type LocalListenerKey = (u64, [u8; 4], u16);
+
+static LOCAL_LISTENERS: OnceCell<Mut<BTreeMap<LocalListenerKey, Weak<InetSocketObject>>>> =
+    OnceCell::uninit();
+
+fn local_listeners() -> &'static Mut<BTreeMap<LocalListenerKey, Weak<InetSocketObject>>> {
+    LOCAL_LISTENERS.get_or_init(|| Mut::new(BTreeMap::new()))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InetSocketKind {
     Stream,
@@ -60,6 +77,10 @@ pub struct InetSocketObject {
     state: Mut<InetState>,
     flags: Mut<FileFlags>,
     priority: Mut<i32>,
+    multicast_groups: Mut<BTreeSet<Vec<u8>>>,
+    pending_local_streams: Mut<VecDeque<Arc<InetSocketObject>>>,
+    local_listener_key: Mut<Option<LocalListenerKey>>,
+    local_backlog: Mut<usize>,
     self_ref: Mut<Option<Weak<InetSocketObject>>>,
 }
 
@@ -130,6 +151,10 @@ impl InetSocketObject {
             }),
             flags: Mut::new(FileFlags::empty()),
             priority: Mut::new(0),
+            multicast_groups: Mut::new(BTreeSet::new()),
+            pending_local_streams: Mut::new(VecDeque::new()),
+            local_listener_key: Mut::new(None),
+            local_backlog: Mut::new(0),
             self_ref: Mut::new(None),
         });
         *socket.self_ref.lock() = Some(Arc::downgrade(&socket));
@@ -149,10 +174,80 @@ impl InetSocketObject {
             }),
             flags: Mut::new(FileFlags::empty()),
             priority: Mut::new(0),
+            multicast_groups: Mut::new(BTreeSet::new()),
+            pending_local_streams: Mut::new(VecDeque::new()),
+            local_listener_key: Mut::new(None),
+            local_backlog: Mut::new(0),
             self_ref: Mut::new(None),
         });
         *socket.self_ref.lock() = Some(Arc::downgrade(&socket));
         socket
+    }
+
+    fn local_listener_keys(namespace_inode: u64, local: InetAddress) -> [LocalListenerKey; 2] {
+        [
+            (namespace_inode, local.addr, local.port),
+            (namespace_inode, [0, 0, 0, 0], local.port),
+        ]
+    }
+
+    fn register_local_listener(&self, local: InetAddress) {
+        let Some(owner) = self.self_ref.lock().clone() else {
+            return;
+        };
+        let key = (
+            self.current_handle().namespace_inode(),
+            local.addr,
+            local.port,
+        );
+        local_listeners().lock().insert(key, owner);
+        *self.local_listener_key.lock() = Some(key);
+    }
+
+    fn ensure_local_listener_available(&self, local: InetAddress) -> SocketResult<()> {
+        let namespace_inode = self.current_handle().namespace_inode();
+        let keys = Self::local_listener_keys(namespace_inode, local);
+        let listeners = local_listeners().lock();
+        if keys.iter().any(|key| {
+            listeners
+                .get(key)
+                .and_then(Weak::upgrade)
+                .is_some_and(|listener| !core::ptr::eq(listener.as_ref(), self))
+        }) {
+            return Err(SocketError::AddressInUse);
+        }
+        Ok(())
+    }
+
+    fn unregister_local_listener(&self) {
+        let Some(key) = self.local_listener_key.lock().take() else {
+            return;
+        };
+        local_listeners().lock().remove(&key);
+    }
+
+    fn find_local_listener(namespace_inode: u64, remote: InetAddress) -> Option<Arc<Self>> {
+        let listeners = local_listeners().lock();
+        for key in Self::local_listener_keys(namespace_inode, remote) {
+            if let Some(listener) = listeners.get(&key).and_then(Weak::upgrade) {
+                return Some(listener);
+            }
+        }
+        None
+    }
+
+    fn local_for_remote(mut local: InetAddress, remote: InetAddress) -> InetAddress {
+        if local.is_unspecified() {
+            local.addr = remote.addr;
+        }
+        local
+    }
+
+    fn is_local_address(addr: [u8; 4]) -> bool {
+        net::interfaces()
+            .iter()
+            .filter_map(|interface| interface.ipv4.map(|(ipv4, _)| ipv4))
+            .any(|ipv4| ipv4 == addr)
     }
 
     fn map_net_error(err: NetError) -> SocketError {
@@ -212,7 +307,9 @@ impl InetSocketObject {
                 state.handle.tcp_is_active() || state.handle.tcp_is_closed()
             }
             (InetSocketKind::Stream, InetWaitKind::Accept) => {
-                state.listening && state.handle.tcp_listener_accept_ready()
+                state.listening
+                    && (!self.pending_local_streams.lock().is_empty()
+                        || state.handle.tcp_listener_accept_ready())
             }
             (InetSocketKind::Stream, InetWaitKind::Send) => {
                 state.handle.tcp_can_send() || state.handle.tcp_is_closed()
@@ -291,7 +388,7 @@ impl InetSocketObject {
         }
     }
 
-    pub fn listen(&self, _backlog: usize) -> SocketResult<()> {
+    pub fn listen(&self, backlog: usize) -> SocketResult<()> {
         if self.kind != InetSocketKind::Stream {
             return Err(SocketError::OperationNotSupported);
         }
@@ -301,10 +398,13 @@ impl InetSocketObject {
             state.local.ok_or(SocketError::AddressNotAvailable)?
         };
 
+        self.ensure_local_listener_available(local)?;
         self.current_handle()
             .tcp_listen(local)
             .map_err(Self::map_net_error)?;
         self.state.lock().listening = true;
+        *self.local_backlog.lock() = backlog;
+        self.register_local_listener(local);
         Ok(())
     }
 
@@ -331,6 +431,32 @@ impl InetSocketObject {
             Some(local) => local,
             None => InetAddress::any(net::allocate_ephemeral_port().map_err(Self::map_net_error)?),
         };
+
+        if Self::is_local_address(remote.addr)
+            && let Some(listener) =
+                Self::find_local_listener(self.current_handle().namespace_inode(), remote)
+        {
+            let local = Self::local_for_remote(local, remote);
+            if listener.pending_local_streams.lock().len() >= *listener.local_backlog.lock() {
+                return Err(SocketError::ConnectionRefused);
+            }
+            let server_handle =
+                net::create_socket(TransportKind::Tcp).map_err(Self::map_net_error)?;
+            let server_socket = Self::from_accepted(server_handle, remote, local);
+            listener
+                .pending_local_streams
+                .lock()
+                .push_back(server_socket);
+            {
+                let mut state = self.state.lock();
+                state.local = Some(local);
+                state.peer = Some(remote);
+            }
+            if let Some(object) = object_ref(&listener.self_ref) {
+                wake_pollers_for_object(object as ObjectRef, PollableEvent::CanBeRead);
+            }
+            return Ok(());
+        }
 
         self.current_handle()
             .tcp_connect(remote, local)
@@ -384,6 +510,10 @@ impl InetSocketObject {
         };
 
         loop {
+            if let Some(socket) = self.pending_local_streams.lock().pop_front() {
+                return Ok(socket);
+            }
+
             net::poll();
             match self.current_handle().tcp_accept(local) {
                 Ok((new_listener, accepted_local, peer)) => {
@@ -576,6 +706,7 @@ impl InetSocketObject {
 
 impl Drop for InetSocketObject {
     fn drop(&mut self) {
+        self.unregister_local_listener();
         net::remove_socket(self.state.lock().handle);
     }
 }
@@ -648,7 +779,8 @@ impl Pollable for InetSocketObject {
             InetSocketKind::Stream => match event {
                 PollableEvent::CanBeRead => {
                     if state.listening {
-                        state.handle.tcp_listener_accept_ready()
+                        !self.pending_local_streams.lock().is_empty()
+                            || state.handle.tcp_listener_accept_ready()
                     } else {
                         state.read_shutdown
                             || state.handle.tcp_can_recv()
@@ -741,6 +873,33 @@ impl SocketLike for InetSocketObject {
     }
 
     fn setsockopt(&self, level: u64, option_name: u64, option_value: &[u8]) -> SocketResult<()> {
+        if level == SOL_IP {
+            return match option_name {
+                IP_MULTICAST_ALL => {
+                    let _ = Self::decode_i32(option_value)?;
+                    Ok(())
+                }
+                IP_ADD_MEMBERSHIP | MCAST_JOIN_GROUP => {
+                    if option_value.is_empty() {
+                        return Err(SocketError::InvalidArguments);
+                    }
+                    self.multicast_groups.lock().insert(option_value.to_vec());
+                    Ok(())
+                }
+                IP_DROP_MEMBERSHIP | MCAST_LEAVE_GROUP => {
+                    if option_value.is_empty() {
+                        return Err(SocketError::InvalidArguments);
+                    }
+                    if self.multicast_groups.lock().remove(option_value) {
+                        Ok(())
+                    } else {
+                        Err(SocketError::AddressNotAvailable)
+                    }
+                }
+                _ => Err(SocketError::InvalidArguments),
+            };
+        }
+
         if level == SOL_TCP {
             if option_name == super::TCP_NODELAY {
                 let _ = Self::decode_i32(option_value)?;
@@ -777,6 +936,13 @@ impl SocketLike for InetSocketObject {
     }
 
     fn getsockopt(&self, level: u64, option_name: u64, option_len: usize) -> SocketResult<Vec<u8>> {
+        if level == SOL_IP {
+            return match option_name {
+                IP_MULTICAST_ALL => Self::encode_i32(option_len, 1),
+                _ => Err(SocketError::InvalidArguments),
+            };
+        }
+
         if level == SOL_TCP {
             if option_name == super::TCP_NODELAY {
                 return Self::encode_i32(option_len, 1);

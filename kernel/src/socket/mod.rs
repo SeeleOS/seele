@@ -28,6 +28,7 @@ use crate::process::manager::get_current_process;
 pub const AF_UNIX: u64 = 1;
 pub const AF_INET: u64 = 2;
 pub const AF_NETLINK: u64 = 16;
+pub const SOL_IP: u64 = 0;
 pub const SOL_TCP: u64 = 6;
 pub const SOL_UDP: u64 = 17;
 pub const SOL_SOCKET: u64 = 1;

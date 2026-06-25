@@ -248,13 +248,13 @@ mod tests {
             sin_zero: [0; 8],
         };
         write_user_value(page + 512, &inet_any);
-        expect_errno(
+        expect_ok(
             SyscallArgs::new([inet_stream as u64, page + 512, 16, 0, 0, 0]).call::<Bind>(),
-            SyscallError::AddressNotAvailable,
+            0,
         );
-        expect_errno(
+        expect_ok(
             SyscallArgs::new([inet_stream as u64, 1, 0, 0, 0, 0]).call::<Listen>(),
-            SyscallError::AddressNotAvailable,
+            0,
         );
         expect_errno(
             SyscallArgs::new([inet_stream as u64, page + 512, 16, 0, 0, 0]).call::<Connect>(),

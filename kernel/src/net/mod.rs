@@ -478,6 +478,10 @@ pub fn move_primary_device_to_namespace(namespace_inode: u64) -> NetResult<()> {
 }
 
 impl NetSocketHandle {
+    pub fn namespace_inode(self) -> u64 {
+        self.namespace_inode
+    }
+
     fn tcp_has_pending_accepted_connection(socket: &tcp::Socket<'static>) -> bool {
         matches!(socket.state(), TcpState::Established | TcpState::CloseWait)
             && socket.local_endpoint().is_some()

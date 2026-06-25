@@ -82,6 +82,11 @@ crate::test!(
     object_wait_only_wakes_target_inet_listener_readers
 );
 crate::test!(
+    inet_loopback_connect_wakes_target_listener,
+    "inet loopback connect queues an accepted socket and wakes the target listener",
+    inet_loopback_connect_wakes_target_listener
+);
+crate::test!(
     object_wait_recv_ignores_unrelated_writable_events,
     "recv wait pollers ignore unrelated writable activity",
     object_wait_recv_ignores_unrelated_writable_events
@@ -410,6 +415,36 @@ fn object_wait_only_wakes_target_inet_listener_readers() {
         assert!(!wait_poller.push_already_ready_events());
     }
     assert!(!wait_poller.has_woken_events());
+}
+
+fn inet_loopback_connect_wakes_target_listener() {
+    let listener = InetSocketObject::create(AF_INET, crate::socket::SOCK_STREAM, 0)
+        .expect("inet listener should be created");
+    let server_addr = InetAddress::new([127, 0, 0, 1], 22349);
+    listener.bind(server_addr).expect("listener should bind");
+    listener.listen(1).expect("listener should listen");
+
+    let poller = PollerObject::new();
+    let listener_object: crate::object::misc::ObjectRef = listener.clone();
+    poller.register_obj(listener_object, PollableEvent::CanBeRead, 0x55);
+
+    let client = InetSocketObject::create(AF_INET, crate::socket::SOCK_STREAM, 0)
+        .expect("inet client should be created");
+    client
+        .bind(InetAddress::any(0))
+        .expect("client should bind to an ephemeral port");
+    client
+        .connect(server_addr)
+        .expect("loopback connect should succeed");
+
+    assert!(listener.is_event_ready(PollableEvent::CanBeRead));
+    assert!(poller.has_woken_events());
+
+    let accepted = listener
+        .accept()
+        .expect("listener should accept local client");
+    assert!(!listener.is_event_ready(PollableEvent::CanBeRead));
+    drop(accepted);
 }
 
 fn object_wait_recv_ignores_unrelated_writable_events() {
