@@ -1,4 +1,52 @@
 use super::*;
+use alloc::collections::BTreeMap;
+
+use crate::object::pipe::PipeEndpoint;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct FifoKey {
+    mount_id: u64,
+    inode: u64,
+}
+
+struct FifoEndpoints {
+    read: Arc<PipeEndpoint>,
+    write: Arc<PipeEndpoint>,
+}
+
+static NAMED_FIFOS: spin::Mutex<BTreeMap<FifoKey, FifoEndpoints>> =
+    spin::Mutex::new(BTreeMap::new());
+
+fn open_fifo_object(
+    file_like: &FileLikeObject,
+    flags: OpenFlags,
+) -> Result<ObjectRef, SyscallError> {
+    let access_mode = flags.bits() & 0o3;
+    if access_mode == 0o3 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let key = FifoKey {
+        mount_id: file_like.mount_id(),
+        inode: file_like.info()?.inode,
+    };
+    let mut fifos = NAMED_FIFOS.lock();
+    let endpoints = fifos.entry(key).or_insert_with(|| {
+        let (read, write) = PipeEndpoint::pair(FileFlags::empty());
+        FifoEndpoints { read, write }
+    });
+
+    let object: ObjectRef = match access_mode {
+        0o0 => endpoints.read.clone(),
+        0o1 => endpoints.write.clone(),
+        0o2 => endpoints.read.clone(),
+        _ => unreachable!("invalid access mode checked above"),
+    };
+    if flags.contains(OpenFlags::NONBLOCK) {
+        object.clone().set_flags(FileFlags::NONBLOCK)?;
+    }
+    Ok(object)
+}
 
 define_syscall!(OpenAt, |dirfd: i32,
                          path: CString,
@@ -171,6 +219,15 @@ define_syscall!(OpenAt, |dirfd: i32,
         profile::record_hot_syscall_phase(HotSyscallPhase::OpenAtDirectoryCheck, 1);
     }
     check_open_permissions(&file_like.stat(), flags)?;
+    if info.permission.0 & S_IFMT == S_IFIFO && !path_only {
+        let object = open_fifo_object(&file_like, flags)?;
+        let fd_flags = if flags.contains(OpenFlags::CLOEXEC) {
+            FdFlags::CLOEXEC
+        } else {
+            FdFlags::empty()
+        };
+        return install_fd(object, fd_flags);
+    }
     if flags.contains(OpenFlags::NOATIME) {
         let stat = file_like.stat();
         let credentials = fs_access_credentials();
