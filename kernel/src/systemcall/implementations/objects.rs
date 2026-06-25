@@ -33,7 +33,6 @@ use crate::{
 use super::{CloseRangeFlags, DupFlags, FallocateFlags, MemfdFlags, PositionedIoFlags};
 
 static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
-static PREADV2_NOWAIT_CALLS: AtomicU64 = AtomicU64::new(0);
 const COPY_CHUNK_SIZE: usize = 16 * 1024;
 const LINEAR_IO_CHUNK_SIZE: usize = 64 * 1024;
 const LINUX_IOV_MAX: i32 = 1024;
@@ -619,39 +618,6 @@ fn preadv_file_like(
     })
 }
 
-fn preadv_file_like_nowait(
-    file: &FileLikeObject,
-    iovs: &[LinuxIovec],
-    offset: u64,
-) -> SyscallResult<usize> {
-    let total_len = iovec_total_len(iovs)?;
-    if total_len == 0 {
-        return Ok(0);
-    }
-
-    let call = PREADV2_NOWAIT_CALLS.fetch_add(1, Ordering::Relaxed);
-    if call & 1 == 0 {
-        return Err(SyscallError::TryAgain);
-    }
-
-    let short_len = total_len.min(2048);
-    let mut limited = Vec::new();
-    let mut remaining = short_len;
-    for iov in iovs {
-        if remaining == 0 {
-            break;
-        }
-        let len = iov.iov_len.min(remaining);
-        limited.push(LinuxIovec {
-            iov_base: iov.iov_base,
-            iov_len: len,
-        });
-        remaining -= len;
-    }
-
-    preadv_file_like(file, &limited, offset)
-}
-
 fn pwritev_object(object: &ObjectRef, iovs: &[LinuxIovec], offset: i64) -> SyscallResult<usize> {
     if let Ok(file) = object.clone().as_file_like() {
         return write_from_iovecs(iovs, |bytes, total| {
@@ -901,13 +867,13 @@ define_syscall!(Preadv2, |object: ObjectRef,
                 .as_file_like()
                 .map_err(|_| SyscallError::IllegalSeek)?;
             if flags.contains(PositionedIoFlags::RWF_NOWAIT) {
-                return preadv_file_like_nowait(&file, &iovs, offset);
+                return Err(SyscallError::OperationNotSupported);
             }
             preadv_file_like(&file, &iovs, offset)
         }
         PositionedIoOffset::Current => {
             if flags.contains(PositionedIoFlags::RWF_NOWAIT) {
-                return Err(SyscallError::TryAgain);
+                return Err(SyscallError::OperationNotSupported);
             }
             if let Ok(file) = object.clone().as_file_like() {
                 read_into_iovecs(&iovs, |buffer, _total| {
