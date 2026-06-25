@@ -100,6 +100,8 @@ impl Process {
                 rlimit_data_max: parent_locked.rlimit_data_max,
                 rlimit_stack_cur: parent_locked.rlimit_stack_cur,
                 rlimit_stack_max: parent_locked.rlimit_stack_max,
+                thread_keyring: 0,
+                process_keyring: parent_locked.process_keyring,
                 session_keyring: parent_locked.session_keyring,
                 user_keyring: parent_locked.user_keyring,
                 capability_effective: parent_locked.capability_effective,

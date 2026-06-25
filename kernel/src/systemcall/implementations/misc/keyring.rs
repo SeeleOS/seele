@@ -5,16 +5,27 @@ define_syscall!(AddKey, |type_name: String,
                          payload: *const u8,
                          plen: usize,
                          keyring: i32| {
-    let _ = (type_name, description);
     if plen != 0 {
         if payload.is_null() {
             return Err(SyscallError::BadAddress);
         }
         let _ = user_safe::read_buffer(payload, plen)?;
     }
+    match type_name.as_str() {
+        "keyring" if plen != 0 => return Err(SyscallError::InvalidArguments),
+        "keyring" => {}
+        "user" if plen > KEY_USER_MAX_PAYLOAD => return Err(SyscallError::InvalidArguments),
+        "user" => {}
+        "logon" | "big_key" => return Err(SyscallError::NoDevice),
+        _ => return Err(SyscallError::NoDevice),
+    }
     let _ = resolve_keyring(keyring, true)?;
     let serial = NEXT_KEY_SERIAL.fetch_add(1, Ordering::Relaxed);
-    ensure_key_entry(serial);
+    if type_name == "keyring" {
+        ensure_keyring_entry(serial, &description);
+    } else {
+        ensure_key_entry(serial);
+    }
     Ok(serial as usize)
 });
 
@@ -52,7 +63,7 @@ define_syscall!(Keyctl, |cmd: u64,
                 .clone()
                 .ok_or(SyscallError::NoProcess)?;
             parent.lock().session_keyring = current_keyring;
-            ensure_keyring_entry(current_keyring);
+            ensure_keyring_entry(current_keyring, "");
             Ok(0)
         }
         Err(_) => Err(SyscallError::NoSyscall),
@@ -128,8 +139,11 @@ mod tests {
     );
 
     fn key_and_bpf_syscalls_follow_linux_rules() {
+        const KEY_SPEC_THREAD_KEYRING: u64 = (-1i32) as u64;
+        const KEY_SPEC_PROCESS_KEYRING: u64 = (-2i32) as u64;
         const KEY_SPEC_SESSION_KEYRING: u64 = (-3i32) as u64;
         const KEY_SPEC_USER_KEYRING: u64 = (-4i32) as u64;
+        const KEY_SPEC_USER_SESSION_KEYRING: u64 = (-5i32) as u64;
         const BPF_MAP_CREATE: u64 = 0;
         const BPF_MAP_LOOKUP_ELEM: u64 = 1;
         const BPF_MAP_UPDATE_ELEM: u64 = 2;
@@ -141,10 +155,58 @@ mod tests {
         let page = allocate_user_test_page();
         write_user_cstr(page, b"user\0");
         write_user_cstr(page + 64, b"demo\0");
+        write_user_cstr(page + 96, b"keyring\0");
         expect_errno(
             SyscallArgs::new([page, page + 64, 1, 1, KEY_SPEC_SESSION_KEYRING, 0]).call::<AddKey>(),
             SyscallError::BadAddress,
         );
+        write_user_cstr(page + 320, b"asymmetric\0");
+        expect_errno(
+            SyscallArgs::new([page + 320, page + 64, 0, 0, KEY_SPEC_THREAD_KEYRING, 0])
+                .call::<AddKey>(),
+            SyscallError::NoDevice,
+        );
+        expect_errno(
+            SyscallArgs::new([page + 320, page + 64, 0, 64, KEY_SPEC_PROCESS_KEYRING, 0])
+                .call::<AddKey>(),
+            SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([
+                page + 320,
+                page + 64,
+                page + 128,
+                64,
+                KEY_SPEC_PROCESS_KEYRING,
+                0,
+            ])
+            .call::<AddKey>(),
+            SyscallError::NoDevice,
+        );
+        let _small_user_key =
+            SyscallArgs::new([page, page + 64, page + 128, 16, KEY_SPEC_THREAD_KEYRING, 0])
+                .call::<AddKey>()
+                .expect("add_key should accept user payload under the limit");
+        expect_errno(
+            SyscallArgs::new([
+                page + 96,
+                page + 64,
+                page + 128,
+                1,
+                KEY_SPEC_THREAD_KEYRING,
+                0,
+            ])
+            .call::<AddKey>(),
+            SyscallError::InvalidArguments,
+        );
+        let process_keyring = SyscallArgs::new([0, KEY_SPEC_PROCESS_KEYRING, 1, 0, 0, 0])
+            .call::<Keyctl>()
+            .expect("get_keyring_id should create process keyring")
+            as u64;
+        let keyring_serial = SyscallArgs::new([page + 96, page + 64, 0, 0, process_keyring, 0])
+            .call::<AddKey>()
+            .expect("add_key should create keyring") as u64;
+        assert_ne!(keyring_serial, process_keyring);
         let key_serial = SyscallArgs::new([page, page + 64, 0, 0, KEY_SPEC_SESSION_KEYRING, 0])
             .call::<AddKey>()
             .expect("add_key should create key") as u64;
@@ -179,6 +241,13 @@ mod tests {
             SyscallArgs::new([0, KEY_SPEC_USER_KEYRING, 0, 0, 0, 0]).call::<Keyctl>(),
             SyscallError::NoData,
         );
+        let user_keyring = SyscallArgs::new([0, KEY_SPEC_USER_KEYRING, 1, 0, 0, 0])
+            .call::<Keyctl>()
+            .expect("get_keyring_id should create user keyring");
+        let user_session_keyring = SyscallArgs::new([0, KEY_SPEC_USER_SESSION_KEYRING, 1, 0, 0, 0])
+            .call::<Keyctl>()
+            .expect("get_keyring_id should create user session keyring");
+        assert_ne!(user_keyring, user_session_keyring);
         expect_errno(
             SyscallArgs::new([99, 0, 0, 0, 0, 0]).call::<Keyctl>(),
             SyscallError::NoSyscall,

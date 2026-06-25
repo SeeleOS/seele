@@ -187,19 +187,31 @@ const LINUX_REBOOT_MAGIC1: u32 = 0xfee1_dead;
 const LINUX_REBOOT_MAGIC2: u32 = 0x2812_1969;
 const LINUX_REBOOT_CMD_CAD_OFF: u32 = 0x0000_0000;
 const LINUX_REBOOT_CMD_CAD_ON: u32 = 0x89ab_cdef;
+const KEY_SPEC_THREAD_KEYRING: i32 = -1;
+const KEY_SPEC_PROCESS_KEYRING: i32 = -2;
 const KEY_SPEC_SESSION_KEYRING: i32 = -3;
 const KEY_SPEC_USER_KEYRING: i32 = -4;
 const KEY_SPEC_USER_SESSION_KEYRING: i32 = -5;
+const KEY_USER_MAX_PAYLOAD: usize = 32_767;
 
 static NEXT_SESSION_KEYRING_ID: AtomicI32 = AtomicI32::new(1);
 static NEXT_KEY_SERIAL: AtomicI32 = AtomicI32::new(1024);
 
 lazy_static! {
     static ref KEY_REGISTRY: Mut<BTreeMap<i32, KeyEntry>> = Mut::new(BTreeMap::new());
+    static ref USER_KEYRINGS: Mut<BTreeMap<(u32, UserKeyringKind), i32>> =
+        Mut::new(BTreeMap::new());
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum UserKeyringKind {
+    User,
+    UserSession,
 }
 
 #[derive(Clone, Debug, Default)]
 struct KeyEntry {
+    description: String,
     permissions: u32,
     links: Vec<i32>,
     is_keyring: bool,
@@ -246,6 +258,36 @@ fn capability_slot_and_mask(capability: u64) -> Result<(usize, u32), SyscallErro
     Ok((slot, mask))
 }
 
+fn next_keyring_id() -> i32 {
+    NEXT_SESSION_KEYRING_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn current_thread_keyring(create: bool) -> Result<i32, SyscallError> {
+    let process = get_current_process();
+    let mut process = process.lock();
+    if process.thread_keyring == 0 {
+        if !create {
+            return Err(SyscallError::NoData);
+        }
+        process.thread_keyring = next_keyring_id();
+        ensure_keyring_entry(process.thread_keyring, "");
+    }
+    Ok(process.thread_keyring)
+}
+
+fn current_process_keyring(create: bool) -> Result<i32, SyscallError> {
+    let process = get_current_process();
+    let mut process = process.lock();
+    if process.process_keyring == 0 {
+        if !create {
+            return Err(SyscallError::NoData);
+        }
+        process.process_keyring = next_keyring_id();
+        ensure_keyring_entry(process.process_keyring, "");
+    }
+    Ok(process.process_keyring)
+}
+
 fn current_session_keyring(create: bool) -> Result<i32, SyscallError> {
     let process = get_current_process();
     let mut process = process.lock();
@@ -253,33 +295,42 @@ fn current_session_keyring(create: bool) -> Result<i32, SyscallError> {
         if !create {
             return Err(SyscallError::NoData);
         }
-        process.session_keyring = NEXT_SESSION_KEYRING_ID.fetch_add(1, Ordering::Relaxed);
-        ensure_keyring_entry(process.session_keyring);
+        process.session_keyring = next_keyring_id();
+        ensure_keyring_entry(process.session_keyring, "");
     }
     Ok(process.session_keyring)
 }
 
-fn current_user_keyring(create: bool) -> Result<i32, SyscallError> {
-    let process = get_current_process();
-    let mut process = process.lock();
-    if process.user_keyring == 0 {
-        if !create {
-            return Err(SyscallError::NoData);
-        }
-        process.user_keyring = NEXT_SESSION_KEYRING_ID.fetch_add(1, Ordering::Relaxed);
-        ensure_keyring_entry(process.user_keyring);
+fn current_user_keyring(kind: UserKeyringKind, create: bool) -> Result<i32, SyscallError> {
+    let uid = get_current_process().lock().effective_uid;
+    let mut user_keyrings = USER_KEYRINGS.lock();
+    if let Some(serial) = user_keyrings.get(&(uid, kind)) {
+        return Ok(*serial);
     }
-    Ok(process.user_keyring)
+    if !create {
+        return Err(SyscallError::NoData);
+    }
+
+    let serial = next_keyring_id();
+    let description = match kind {
+        UserKeyringKind::User => alloc::format!("_uid.{uid}"),
+        UserKeyringKind::UserSession => alloc::format!("_uid_ses.{uid}"),
+    };
+    ensure_keyring_entry(serial, &description);
+    user_keyrings.insert((uid, kind), serial);
+    Ok(serial)
 }
 
 fn resolve_keyring(spec: i32, create: bool) -> Result<i32, SyscallError> {
     match spec {
+        KEY_SPEC_THREAD_KEYRING => current_thread_keyring(create),
+        KEY_SPEC_PROCESS_KEYRING => current_process_keyring(create),
         KEY_SPEC_SESSION_KEYRING => current_session_keyring(create),
-        KEY_SPEC_USER_KEYRING => current_user_keyring(create),
-        KEY_SPEC_USER_SESSION_KEYRING => current_session_keyring(create),
+        KEY_SPEC_USER_KEYRING => current_user_keyring(UserKeyringKind::User, create),
+        KEY_SPEC_USER_SESSION_KEYRING => current_user_keyring(UserKeyringKind::UserSession, create),
         serial if serial > 0 => {
             if create {
-                ensure_keyring_entry(serial);
+                ensure_keyring_entry(serial, "");
                 Ok(serial)
             } else if keyring_exists(serial) {
                 Ok(serial)
@@ -298,10 +349,13 @@ fn keyring_exists(serial: i32) -> bool {
         .is_some_and(|entry| entry.is_keyring && !entry.revoked)
 }
 
-fn ensure_keyring_entry(serial: i32) {
+fn ensure_keyring_entry(serial: i32, description: &str) {
     let mut registry = KEY_REGISTRY.lock();
     let entry = registry.entry(serial).or_default();
     entry.is_keyring = true;
+    if !description.is_empty() {
+        entry.description = description.into();
+    }
 }
 
 fn ensure_key_entry(serial: i32) {
