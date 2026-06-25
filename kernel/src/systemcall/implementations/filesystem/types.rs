@@ -7,6 +7,7 @@ pub(super) const STATX_BASIC_STATS: u32 = 0x0000_07ff;
 pub(super) const STATX_BTIME: u32 = 0x0000_0800;
 pub(super) const STATX_MNT_ID: u32 = 0x0000_1000;
 pub(super) const STATX_DIOALIGN: u32 = 0x0000_2000;
+pub(super) const STATX_MNT_ID_UNIQUE: u32 = 0x0000_4000;
 pub(super) const STATX_ATTR_MOUNT_ROOT: u64 = 0x0000_2000;
 pub(super) const ANON_INODE_FS_MAGIC: i64 = 0x0904_1934;
 pub(super) const SOCKFS_MAGIC: i64 = 0x534f_434b;

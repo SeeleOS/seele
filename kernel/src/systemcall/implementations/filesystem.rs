@@ -2662,7 +2662,7 @@ mod tests {
         };
         assert_eq!(
             statx.stx_mask,
-            STATX_BASIC_STATS as u32 | STATX_BTIME | STATX_MNT_ID
+            STATX_BASIC_STATS as u32 | STATX_BTIME | STATX_MNT_ID | STATX_MNT_ID_UNIQUE
         );
         assert_eq!(statx.stx_mode, file_stat.st_mode as u16);
         assert_eq!(statx.stx_nlink, file_stat.st_nlink as u32);
@@ -2672,6 +2672,22 @@ mod tests {
         assert_eq!(statx.stx_attributes & STATX_ATTR_MOUNT_ROOT, 0);
         assert!(statx.stx_mnt_id >= 1);
         assert!(statx.stx_btime.tv_nsec < 1_000_000_000);
+
+        expect_ok(
+            SyscallArgs::new([
+                AT_FDCWD,
+                user_page,
+                0,
+                STATX_MNT_ID_UNIQUE as u64,
+                user_page + 256,
+                0,
+            ])
+            .call::<Statx>(),
+            0,
+        );
+        let unique_mnt_statx = read_user_value::<TestLinuxStatx>(user_page + 256);
+        assert_eq!(unique_mnt_statx.stx_mnt_id, statx.stx_mnt_id);
+        assert!(unique_mnt_statx.stx_mask & STATX_MNT_ID_UNIQUE != 0);
 
         expect_ok(
             SyscallArgs::new([

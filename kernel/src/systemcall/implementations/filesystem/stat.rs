@@ -161,7 +161,8 @@ define_syscall!(Statx, |dirfd: i32,
                         flags: AtFlags,
                         mask: u32,
                         statx_ptr: *mut LinuxStatx| {
-    let allowed_mask = STATX_BASIC_STATS | STATX_BTIME | STATX_MNT_ID | STATX_DIOALIGN;
+    let allowed_mask =
+        STATX_BASIC_STATS | STATX_BTIME | STATX_MNT_ID | STATX_DIOALIGN | STATX_MNT_ID_UNIQUE;
     if mask & !allowed_mask != 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -212,6 +213,7 @@ define_syscall!(Statx, |dirfd: i32,
         stx_mask: STATX_BASIC_STATS
             | STATX_BTIME
             | STATX_MNT_ID
+            | STATX_MNT_ID_UNIQUE
             | if block_device { STATX_DIOALIGN } else { 0 },
         stx_blksize: stat.st_blksize as u32,
         stx_attributes: if mount_root { STATX_ATTR_MOUNT_ROOT } else { 0 },
