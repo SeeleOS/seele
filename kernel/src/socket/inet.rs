@@ -24,6 +24,7 @@ use crate::{
     polling::{event::PollableEvent, object::Pollable},
     thread::yielding::{
         BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
+        wake_pollers_for_object,
     },
 };
 
@@ -263,9 +264,14 @@ impl InetSocketObject {
     }
 
     pub fn bind(&self, addr: InetAddress) -> SocketResult<()> {
-        if addr.port == 0 {
-            return Err(SocketError::AddressNotAvailable);
-        }
+        let addr = if addr.port == 0 {
+            InetAddress::new(
+                addr.addr,
+                net::allocate_ephemeral_port().map_err(Self::map_net_error)?,
+            )
+        } else {
+            addr
+        };
 
         let mut state = self.state.lock();
         if state.local.is_some() {
@@ -539,6 +545,13 @@ impl InetSocketObject {
             }
             _ => return Err(SocketError::InvalidArguments),
         }
+        drop(state);
+        if let Some(object) = object_ref(&self.self_ref) {
+            let object_ref = object as ObjectRef;
+            wake_pollers_for_object(object_ref.clone(), PollableEvent::CanBeRead);
+            wake_pollers_for_object(object_ref.clone(), PollableEvent::ReadClosed);
+            wake_pollers_for_object(object_ref, PollableEvent::Closed);
+        }
         Ok(())
     }
 
@@ -645,12 +658,14 @@ impl Pollable for InetSocketObject {
                 PollableEvent::CanBeWritten => {
                     !state.write_shutdown && !state.listening && state.handle.tcp_can_send()
                 }
+                PollableEvent::ReadClosed => state.read_shutdown || state.handle.tcp_is_closed(),
                 PollableEvent::Closed => state.handle.tcp_is_closed(),
                 _ => false,
             },
             InetSocketKind::Datagram => match event {
                 PollableEvent::CanBeRead => !state.read_shutdown && state.handle.udp_can_recv(),
                 PollableEvent::CanBeWritten => !state.write_shutdown && state.handle.udp_can_send(),
+                PollableEvent::ReadClosed => state.read_shutdown,
                 PollableEvent::Closed => state.read_shutdown && state.write_shutdown,
                 _ => false,
             },

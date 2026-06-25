@@ -18,11 +18,13 @@ use crate::{
     thread::yielding::wake_pollers_for_object,
 };
 
-const PIPE_CAPACITY: usize = 64 * 1024;
+pub const PIPE_CAPACITY: usize = 64 * 1024;
+const PIPE_BUF: usize = 4096;
 
 #[derive(Debug)]
 struct PipeState {
     buffer: VecDeque<u8>,
+    capacity: usize,
     readers: usize,
     writers: usize,
 }
@@ -52,6 +54,7 @@ impl PipeEndpoint {
         let inner = Arc::new(PipeInner {
             state: Mut::new(PipeState {
                 buffer: VecDeque::new(),
+                capacity: PIPE_CAPACITY,
                 readers: 0,
                 writers: 0,
             }),
@@ -129,6 +132,17 @@ impl PipeEndpoint {
             }
         }
     }
+
+    pub fn capacity(&self) -> usize {
+        self.inner.state.lock().capacity
+    }
+
+    pub fn set_capacity(&self, capacity: usize) -> ObjectResult<usize> {
+        let capacity = capacity.clamp(4096, PIPE_CAPACITY);
+        let mut state = self.inner.state.lock();
+        state.capacity = capacity.max(state.buffer.len());
+        Ok(state.capacity)
+    }
 }
 
 impl Object for PipeEndpoint {
@@ -174,7 +188,7 @@ impl Readable for PipeEndpoint {
         loop {
             let mut state = self.inner.state.lock();
             if !state.buffer.is_empty() {
-                let was_full = state.buffer.len() >= PIPE_CAPACITY;
+                let was_full = state.buffer.len() >= state.capacity;
                 let read_len = buffer.len().min(state.buffer.len());
                 for dst in buffer.iter_mut().take(read_len) {
                     *dst = state
@@ -223,7 +237,7 @@ impl Writable for PipeEndpoint {
                 return Err(SocketError::BrokenPipe.into());
             }
 
-            let available = PIPE_CAPACITY.saturating_sub(state.buffer.len());
+            let available = state.capacity.saturating_sub(state.buffer.len());
             if available > 0 {
                 let write_len = buffer.len().min(available);
                 state.buffer.extend(buffer[..write_len].iter().copied());
@@ -259,7 +273,7 @@ impl Pollable for PipeEndpoint {
                 state.writers == 0
             }
             (PipeEndpointKind::Write, PollableEvent::CanBeWritten) => {
-                state.readers == 0 || state.buffer.len() < PIPE_CAPACITY
+                state.readers == 0 || state.capacity.saturating_sub(state.buffer.len()) >= PIPE_BUF
             }
             (PipeEndpointKind::Write, PollableEvent::Closed) => state.readers == 0,
             _ => false,

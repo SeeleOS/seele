@@ -1,6 +1,6 @@
-use crate::object::FileFlags;
 use crate::{
     object::{
+        FileFlags,
         file_locks::{LinuxFlock, fcntl_get_lock, fcntl_set_lock},
         memfd::{memfd_add_seals, memfd_get_seals},
         misc::{ObjectRef, get_object_current_process},
@@ -26,6 +26,8 @@ enum FcntlCmd {
     OfdSetLk = 37,
     OfdSetLkw = 38,
     DupFdCloexec = 1030,
+    SetPipeSz = 1031,
+    GetPipeSz = 1032,
     AddSeals = 1033,
     GetSeals = 1034,
 }
@@ -146,6 +148,14 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
                 matches!(command, FcntlCmd::OfdSetLk | FcntlCmd::OfdSetLkw),
                 matches!(command, FcntlCmd::SetLkw | FcntlCmd::OfdSetLkw),
             )
+        }
+        FcntlCmd::SetPipeSz => {
+            let pipe = object.as_pipe()?;
+            Ok(pipe.set_capacity(arg as usize)?)
+        }
+        FcntlCmd::GetPipeSz => {
+            let pipe = object.as_pipe()?;
+            Ok(pipe.capacity())
         }
         FcntlCmd::AddSeals => {
             let file_like = object.as_file_like()?;
