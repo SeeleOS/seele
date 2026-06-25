@@ -11,19 +11,20 @@ define_syscall!(OpenAt, |dirfd: i32,
         mode & 0o7777 & !process.fs_context.lock().file_mode_creation_mask
     };
     if flags.contains(OpenFlags::TMPFILE) {
-        let object = open_tmpfile_at(dirfd, &path_str)?;
-        if create_mode != 0 {
-            let file_like = object.clone().as_file_like()?;
-            file_like.chmod(create_mode)?;
-        }
+        let object = open_tmpfile_at(dirfd, &path_str, create_mode)?;
         let fd_flags = if flags.contains(OpenFlags::CLOEXEC) {
             FdFlags::CLOEXEC
         } else {
             FdFlags::empty()
         };
-        return Ok(current_process
-            .lock()
-            .push_object_with_flags(object, fd_flags));
+        let file_flags = file_flags_from_open_flags(flags)?;
+        if !file_flags.is_empty() {
+            match object.clone().set_flags(file_flags) {
+                Ok(()) | Err(ObjectError::Unimplemented) => {}
+                Err(err) => return Err(err.into()),
+            }
+        }
+        return install_fd(object, fd_flags);
     }
     let create = flags.contains(OpenFlags::CREAT);
     let nofollow = flags.contains(OpenFlags::NOFOLLOW);
@@ -196,17 +197,7 @@ define_syscall!(OpenAt, |dirfd: i32,
             profile::scope_start().saturating_sub(truncate_start),
         );
     }
-    let mut file_flags = match flags.bits() & 0o3 {
-        0o1 => FileFlags::WRONLY,
-        0o2 => FileFlags::RDWR,
-        _ => FileFlags::empty(),
-    };
-    if flags.contains(OpenFlags::APPEND) {
-        file_flags.insert(FileFlags::APPEND);
-    }
-    if flags.contains(OpenFlags::NONBLOCK) {
-        file_flags.insert(FileFlags::NONBLOCK);
-    }
+    let file_flags = file_flags_from_open_flags(flags)?;
     if !file_flags.is_empty() {
         let set_flags_start = profile::scope_start();
         match object.clone().set_flags(file_flags) {
@@ -225,15 +216,37 @@ define_syscall!(OpenAt, |dirfd: i32,
         FdFlags::empty()
     };
     let install_fd_start = profile::scope_start();
-    let fd = current_process
-        .lock()
-        .push_object_with_flags(object, fd_flags);
+    let fd = install_fd(object, fd_flags)?;
     profile::record_hot_syscall_phase(
         HotSyscallPhase::OpenAtInstallFd,
         profile::scope_start().saturating_sub(install_fd_start),
     );
     Ok(fd)
 });
+
+fn file_flags_from_open_flags(flags: OpenFlags) -> Result<FileFlags, SyscallError> {
+    let mut file_flags = match flags.bits() & 0o3 {
+        0o1 => FileFlags::WRONLY,
+        0o2 => FileFlags::RDWR,
+        0o0 => FileFlags::empty(),
+        _ => return Err(SyscallError::InvalidArguments),
+    };
+    if flags.contains(OpenFlags::APPEND) {
+        file_flags.insert(FileFlags::APPEND);
+    }
+    if flags.contains(OpenFlags::NONBLOCK) {
+        file_flags.insert(FileFlags::NONBLOCK);
+    }
+    Ok(file_flags)
+}
+
+fn install_fd(object: ObjectRef, fd_flags: FdFlags) -> Result<usize, SyscallError> {
+    let current_process = get_current_process();
+    let mut process = current_process.lock();
+    let slot = process.alloc_fd_slot()?;
+    process.set_fd_entry(slot, object, fd_flags)?;
+    Ok(slot)
+}
 
 define_syscall!(Open, |path: CString, flags: OpenFlags, mode: u32| {
     OpenAt::handle_call(

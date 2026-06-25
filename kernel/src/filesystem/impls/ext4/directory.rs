@@ -232,6 +232,36 @@ impl Ext4Directory {
             name,
         )
     }
+
+    pub(crate) fn create_tmpfile(&self, mode: u32, uid: u32, gid: u32) -> FSResult<Ext4File> {
+        let _operation = self.operation_lock.lock();
+        let creation_time = FileTimes::creation_now();
+        let creation_duration = Duration::from_nanos(
+            creation_time.ctime_sec as u64 * 1_000_000_000 + creation_time.ctime_nsec as u64,
+        );
+        let mut inode = self.fs.create_inode(InodeCreationOptions {
+            file_type: FileType::Regular,
+            uid,
+            gid,
+            flags: InodeFlags::empty(),
+            time: creation_duration,
+            mode: InodeMode::from_bits_retain((0o100000 | (mode & 0o7777)) as u16),
+        })?;
+        inode.set_atime(creation_duration);
+        inode.set_mtime(creation_duration);
+        inode.set_ctime(creation_duration);
+        inode.set_crtime(creation_duration);
+        inode.write(&self.fs).map_err(FSError::from)?;
+
+        Ok(Ext4File::new(
+            "".to_string(),
+            self.fs.clone(),
+            inode,
+            self.current_inode().index.get(),
+            self.lookup_cache.clone(),
+            self.operation_lock.clone(),
+        ))
+    }
 }
 
 impl Directory for Ext4Directory {

@@ -1,5 +1,7 @@
 use super::*;
 
+const S_ISGID: u32 = 0o2000;
+
 pub(super) fn path_from_raw(path: CString) -> Result<String, SyscallError> {
     const PATH_MAX: usize = 4096;
     const NAME_MAX: usize = 255;
@@ -93,11 +95,43 @@ pub(super) fn next_tmpfile_path(dir_path: &Path) -> Path {
     Path::new(&path)
 }
 
-pub(super) fn open_tmpfile_at(dirfd: i32, path_str: &str) -> Result<ObjectRef, SyscallError> {
+pub(super) fn open_tmpfile_at(
+    dirfd: i32,
+    path_str: &str,
+    requested_mode: u32,
+) -> Result<ObjectRef, SyscallError> {
     let dir_path = resolve_path_at(dirfd, path_str)?;
     let dir = open_path(dir_path.clone())?;
     if !matches!(dir.info()?.file_like_type, FileLikeType::Directory) {
         return Err(SyscallError::NotADirectory);
+    }
+    let dir_stat = dir.stat();
+    let gid = if (dir_stat.st_mode & S_ISGID) != 0 {
+        dir_stat.st_gid
+    } else {
+        fs_gid()
+    };
+    let mode = strip_sgid_for_create(requested_mode, gid);
+    {
+        let dir_handle = resolve_dir_path(dir_path.clone())?;
+        let dir_guard = dir_handle.lock();
+        if let Some(ext4_dir) = dir_guard
+            .as_any()
+            .downcast_ref::<crate::filesystem::impls::ext4::directory::Ext4Directory>(
+        ) {
+            let file = ext4_dir.create_tmpfile(mode, fs_uid(), gid)?;
+            let file_like = FileLike::File(Arc::new(Mut::new(file)));
+            let (_, mount_device_id, mount_id) =
+                VirtualFS.lock().mount_path_and_ids(dir_path.clone())?;
+            return Ok(Arc::new(OpenedFileObject::new_with_mount_device_id(
+                file_like,
+                dir_path,
+                mount_device_id,
+                mount_id,
+                false,
+                MountFlags::empty(),
+            )?));
+        }
     }
 
     for _ in 0..128 {
@@ -106,6 +140,9 @@ pub(super) fn open_tmpfile_at(dirfd: i32, path_str: &str) -> Result<ObjectRef, S
         match create_result {
             Ok(()) => {
                 let object: ObjectRef = Arc::new(open_path(tmp_path.clone())?);
+                let file_like = object.clone().as_file_like()?;
+                file_like.chown(u32::MAX, gid)?;
+                file_like.chmod(mode)?;
                 VirtualFS.lock().delete_file(tmp_path)?;
                 return Ok(object);
             }

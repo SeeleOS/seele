@@ -134,9 +134,9 @@ pub(super) fn lookup_cache_contains_raw(
 
 pub(super) fn chmod_inode(fs: &Ext4, inode: &mut Inode, mode: u32) -> FSResult<()> {
     let requested_bits = (mode as u16) & CHMOD_PERMISSION_BITS;
-    let requested_mode = InodeMode::from_bits(requested_bits).ok_or(FSError::Other)?;
+    let requested_mode = InodeMode::from_bits_retain(requested_bits);
     let merged_bits = (inode.mode().bits() & FILE_TYPE_BITS) | requested_mode.bits();
-    let merged_mode = InodeMode::from_bits(merged_bits).ok_or(FSError::Other)?;
+    let merged_mode = InodeMode::from_bits_retain(merged_bits);
     inode.set_mode(merged_mode).map_err(FSError::from)?;
     let now = FileTimes::now();
     inode.set_ctime(duration_from_parts(now.ctime_sec, now.ctime_nsec)?);

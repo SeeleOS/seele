@@ -58,6 +58,19 @@ define_syscall!(LinkAt, |old_dirfd: i32,
 
     let old_path_is_relative = !Path::new(&old_path_str).is_absolute();
     let old_path = resolve_path_at(old_dirfd, &old_path_str)?;
+    if flags.contains(AtFlags::SYMLINK_FOLLOW)
+        && let Some(object) = proc_self_fd_object(&old_path)?
+    {
+        let file_like = object.as_file_like()?;
+        if matches!(file_like.info()?.file_like_type, FileLikeType::Directory) {
+            return Err(SyscallError::PermissionDenied);
+        }
+        file_like.link_to(new_path).map_err(|err| match err {
+            FSError::Other => SyscallError::CrossDeviceLink,
+            err => SyscallError::from(err),
+        })?;
+        return Ok(0);
+    }
     if matches!(
         open_path_nofollow(old_path.clone())?.info()?.file_like_type,
         FileLikeType::Directory

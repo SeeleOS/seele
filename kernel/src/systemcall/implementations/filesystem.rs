@@ -8,7 +8,7 @@ use crate::{
         fusefs::FuseFs,
         impls::ext4::{EXT4, operator::Ext4BlockOperator},
         info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
-        object::{FileLikeObject, mount_device_id_for_path},
+        object::{FileLikeObject, OpenedFileObject, mount_device_id_for_path},
         path::Path,
         procfs::ProcFs,
         sysfs::SysFs,
@@ -18,7 +18,7 @@ use crate::{
             file_info_path, open_path, open_path_nofollow, resolve_dir_path,
             resolve_path_info_with_final, resolve_path_with_mount_info,
         },
-        vfs_traits::{DirectoryContentType, FileLikeType, MountFlags},
+        vfs_traits::{DirectoryContentType, FileLike, FileLikeType, MountFlags},
     },
     memory::{user_safe, utils::Mut},
     misc::{

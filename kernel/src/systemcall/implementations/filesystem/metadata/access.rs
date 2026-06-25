@@ -66,6 +66,14 @@ pub(in crate::systemcall::implementations) fn fs_access_credentials() -> AccessC
     }
 }
 
+pub(in crate::systemcall::implementations::filesystem) fn fs_gid() -> u32 {
+    fs_access_credentials().gid
+}
+
+pub(in crate::systemcall::implementations::filesystem) fn fs_uid() -> u32 {
+    fs_access_credentials().uid
+}
+
 pub(in crate::systemcall::implementations::filesystem) fn check_open_permissions(
     stat: &LinuxStat,
     flags: OpenFlags,
@@ -106,6 +114,21 @@ pub(in crate::systemcall::implementations) fn has_capability(
 
 fn is_group_member(credentials: &AccessCredentials, gid: u32) -> bool {
     credentials.gid == gid || credentials.supplementary_groups.contains(&gid)
+}
+
+pub(in crate::systemcall::implementations::filesystem) fn strip_sgid_for_create(
+    mode: u32,
+    gid: u32,
+) -> u32 {
+    let credentials = fs_access_credentials();
+    if (mode & S_ISGID) != 0
+        && !has_capability(&credentials, CAP_FSETID)
+        && !is_group_member(&credentials, gid)
+    {
+        mode & !S_ISGID
+    } else {
+        mode
+    }
 }
 
 pub(in crate::systemcall::implementations) fn check_access_permissions_for_ids_with_options(

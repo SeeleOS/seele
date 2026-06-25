@@ -1,15 +1,18 @@
 use alloc::{string::String, vec::Vec};
 use core::any::Any;
 
-use ext4plus::{Ext4, file, inode::Inode};
+use ext4plus::{
+    DirEntryName, Ext4, FollowSymlinks, dir::Dir, file, inode::Inode, path::Path as Ext4Path,
+};
 
 use crate::filesystem::{
     errors::FSError,
     impls::ext4::{
         LookupCache, OperationLock, chmod_inode, chown_inode, duration_from_parts, inode_times,
-        lookup_cache_insert_raw, set_inode_times,
+        lookup_cache_clear, lookup_cache_insert_raw, set_inode_times,
     },
     info::{FileLikeInfo, FileTimes, UnixPermission},
+    path::Path,
     vfs::FSResult,
     vfs_traits::{File, FileLikeType, Whence},
 };
@@ -229,6 +232,34 @@ impl File for Ext4File {
             self.replace_cached_inode(inode);
             self.update_lookup_cache();
         }
+        Ok(())
+    }
+
+    fn link_to(&self, new_path: &Path) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
+        let new_parent = new_path.parent().ok_or(FSError::NotFound)?;
+        let new_name = new_path.file_name().ok_or(FSError::NotFound)?;
+        let parent_inode = self
+            .fs
+            .path_to_inode(
+                Ext4Path::new(&new_parent.clone().as_string()),
+                FollowSymlinks::All,
+            )
+            .map_err(FSError::from)?;
+        if !parent_inode.metadata().is_dir() {
+            return Err(FSError::NotADirectory);
+        }
+
+        let mut parent_dir = Dir::open_inode(&self.fs, parent_inode).map_err(FSError::from)?;
+        let mut inode = self.refresh_inode()?;
+        parent_dir
+            .link(
+                DirEntryName::try_from(new_name.as_str()).map_err(|_| FSError::Other)?,
+                &mut inode,
+            )
+            .map_err(FSError::from)?;
+        self.replace_cached_inode(inode);
+        lookup_cache_clear(&self.lookup_cache);
         Ok(())
     }
 
