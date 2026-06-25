@@ -1,6 +1,6 @@
 use crate::{
     filesystem::{
-        info::{DirectoryContentInfo, FileLikeInfo},
+        info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
         object::OpenedFileObject,
         resolve,
         vfs::{FSResult, VFS, VirtualFS, WrappedDirectory, WrappedFile},
@@ -16,6 +16,16 @@ use crate::filesystem::{
     path::Path,
     vfs_traits::{DirectoryContentType, FileLike},
 };
+
+const S_ISGID: u32 = 0o2000;
+
+fn file_like_chown(file_like: &FileLike, uid: u32, gid: u32) -> FSResult<()> {
+    match file_like {
+        FileLike::File(file) => file.lock().chown(uid, gid),
+        FileLike::Directory(dir) => dir.lock().chown(uid, gid),
+        FileLike::Symlink(symlink) => symlink.lock().chown(uid, gid),
+    }
+}
 
 impl VFS {
     fn resolve_parent_normalized(&self, normalized: Path) -> FSResult<(WrappedDirectory, String)> {
@@ -72,12 +82,23 @@ impl VFS {
             return Err(FSError::AlreadyExists);
         }
 
+        let parent_stat = LinuxStat::new(parent_dir.lock().info()?);
+        let inherited_gid = (parent_stat.st_mode & S_ISGID != 0).then_some(parent_stat.st_gid);
         let mut info = DirectoryContentInfo::new(name, DirectoryContentType::Directory);
         if let Some(mode) = mode {
-            info = info.with_permission(crate::filesystem::info::UnixPermission(mode & 0o7777));
+            let mut mode = mode & 0o7777;
+            if inherited_gid.is_some() {
+                mode |= S_ISGID;
+            }
+            info = info.with_permission(crate::filesystem::info::UnixPermission(mode));
         }
 
-        parent_dir.clone().lock().create(info)
+        let name = info.name.clone();
+        parent_dir.clone().lock().create(info)?;
+        if let Some(gid) = inherited_gid {
+            file_like_chown(&parent_dir.lock().get(&name)?, u32::MAX, gid)?;
+        }
+        Ok(())
     }
 
     pub fn create_symlink(&mut self, path: Path, target: &str) -> FSResult<()> {

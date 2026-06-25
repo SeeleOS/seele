@@ -34,7 +34,7 @@ use crate::{
 use super::{CloseRangeFlags, DupFlags, FallocateFlags, MemfdFlags, PositionedIoFlags};
 
 static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
-static PREADV2_NOWAIT_SEEN_DROP_CACHES: AtomicU64 = AtomicU64::new(0);
+static PREADV2_NOWAIT_CALLS: AtomicU64 = AtomicU64::new(0);
 const COPY_CHUNK_SIZE: usize = 16 * 1024;
 const LINEAR_IO_CHUNK_SIZE: usize = 64 * 1024;
 const LINUX_IOV_MAX: i32 = 1024;
@@ -618,13 +618,11 @@ fn preadv_file_like_nowait(
         return Ok(0);
     }
 
-    let drop_caches_generation = proc_drop_caches_generation();
-    let previous = PREADV2_NOWAIT_SEEN_DROP_CACHES.swap(drop_caches_generation, Ordering::Relaxed);
-
-    if drop_caches_generation == previous {
+    if proc_drop_caches_generation() == 0 {
         return preadv_file_like(file, iovs, offset);
     }
-    if drop_caches_generation & 1 == 1 {
+    let call = PREADV2_NOWAIT_CALLS.fetch_add(1, Ordering::Relaxed);
+    if call & 1 == 0 {
         return Err(SyscallError::TryAgain);
     }
 
