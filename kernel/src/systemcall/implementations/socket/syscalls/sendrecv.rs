@@ -128,7 +128,9 @@ fn sendmsg_impl(
         None
     };
 
-    let socket = socket.as_unix_socket()?;
+    let socket = socket
+        .as_unix_socket()
+        .map_err(|_| SyscallError::NotSocket)?;
     let dontwait = (flags & MSG_DONTWAIT) != 0;
     let rights = sendmsg_rights(msg)?;
     if socket.kind == UnixSocketKind::Datagram {
@@ -177,8 +179,7 @@ define_syscall!(Sendto, |socket: ObjectRef,
     let address = (!address.is_null())
         .then(|| socket_address_bytes(address, address_len))
         .transpose()?;
-    let written = socket
-        .as_socket_like()?
+    let written = socket_like(socket)?
         .sendto(user_buffer.as_slice(), address.as_deref())
         .map_err(ObjectError::from)?;
 
@@ -244,9 +245,7 @@ define_syscall!(
         }
 
         let mut data = vec![0; len];
-        let (read, source) = socket
-            .clone()
-            .as_socket_like()?
+        let (read, source) = socket_like(socket.clone())?
             .recvfrom(&mut data)
             .map_err(ObjectError::from)?;
 
@@ -432,7 +431,9 @@ define_syscall!(Recvmsg, |socket: ObjectRef,
             return Ok(copied_total);
         }
 
-        let socket = socket.as_unix_socket()?;
+        let socket = socket
+            .as_unix_socket()
+            .map_err(|_| SyscallError::NotSocket)?;
         let dontwait = (flags & MSG_DONTWAIT) != 0;
         let peek = (flags & MSG_PEEK) != 0;
         let report_trunc = (flags & MSG_TRUNC) != 0;

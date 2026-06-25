@@ -9,6 +9,7 @@ bitflags::bitflags! {
         const APPEND = 1 << 1;
         const WRONLY = 1 << 2;
         const RDWR = 1 << 3;
+        const PATH = 1 << 4;
     }
 }
 

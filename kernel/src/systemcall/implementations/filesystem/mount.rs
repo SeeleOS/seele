@@ -522,7 +522,9 @@ define_syscall!(OpenTree, |dirfd: i32,
             .map_err(SyscallError::from)?;
         Arc::new(open_path(detached_path)?)
     } else {
-        Arc::new(open_path(object_path)?)
+        let object: ObjectRef = Arc::new(open_path(object_path)?);
+        object.clone().set_flags(FileFlags::PATH)?;
+        object
     };
 
     let fd_flags = if flags.contains(OpenTreeFlags::OPEN_TREE_CLOEXEC) {

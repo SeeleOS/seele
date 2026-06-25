@@ -382,6 +382,9 @@ fn file_flags_from_open_flags(flags: OpenFlags) -> Result<FileFlags, SyscallErro
     if flags.contains(OpenFlags::NONBLOCK) {
         file_flags.insert(FileFlags::NONBLOCK);
     }
+    if flags.contains(OpenFlags::PATH) {
+        file_flags.insert(FileFlags::PATH);
+    }
     Ok(file_flags)
 }
 

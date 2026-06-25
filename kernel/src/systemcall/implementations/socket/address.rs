@@ -147,14 +147,22 @@ pub(super) fn socket_address_bytes(
 }
 
 pub(super) fn accept_socket(socket: ObjectRef, flags: u32) -> Result<usize, SyscallError> {
+    if socket
+        .clone()
+        .get_flags()
+        .is_ok_and(|flags| flags.contains(FileFlags::PATH))
+    {
+        return Err(SyscallError::BadFileDescriptor);
+    }
+
     if let Ok(socket) = socket.clone().as_unix_socket() {
-        let fd = socket.accept().map_err(ObjectError::from)?;
+        let fd = UnixSocketObject::accept(&socket).map_err(ObjectError::from)?;
         let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
         let mut file_flags = FileFlags::empty();
         if (flags & SOCK_NONBLOCK as u32) != 0 {
             file_flags.insert(FileFlags::NONBLOCK);
         }
-        let _ = accepted.set_flags(file_flags);
+        let _ = accepted.clone().set_flags(file_flags);
         if (flags & SOCK_CLOEXEC as u32) != 0 {
             get_current_process()
                 .lock()
@@ -167,7 +175,7 @@ pub(super) fn accept_socket(socket: ObjectRef, flags: u32) -> Result<usize, Sysc
     let accepted: ObjectRef = if let Ok(socket) = socket.as_inet_socket() {
         socket.accept().map_err(ObjectError::from)?
     } else {
-        return Err(SyscallError::BadFileDescriptor);
+        return Err(SyscallError::NotSocket);
     };
 
     let mut file_flags = FileFlags::empty();

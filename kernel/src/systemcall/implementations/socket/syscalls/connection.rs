@@ -54,9 +54,7 @@ define_syscall!(Bind, |socket: ObjectRef,
                        address: *const u8,
                        address_len: u32| {
     let address = socket_address_bytes(address, address_len)?;
-    socket
-        .clone()
-        .as_socket_like()?
+    socket_like(socket.clone())?
         .bind_bytes(&address)
         .map_err(ObjectError::from)
         .map_err(SyscallError::from)?;
@@ -64,9 +62,7 @@ define_syscall!(Bind, |socket: ObjectRef,
 });
 
 define_syscall!(Listen, |socket: ObjectRef, backlog: usize| {
-    socket
-        .clone()
-        .as_socket_like()?
+    socket_like(socket.clone())?
         .listen(backlog)
         .map_err(ObjectError::from)
         .map_err(SyscallError::from)?;
@@ -77,9 +73,7 @@ define_syscall!(Connect, |socket: ObjectRef,
                           address: *const u8,
                           address_len: u32| {
     let address = socket_address_bytes(address, address_len)?;
-    socket
-        .clone()
-        .as_socket_like()?
+    socket_like(socket.clone())?
         .connect_bytes(&address)
         .map_err(ObjectError::from)
         .map_err(SyscallError::from)?;
@@ -95,8 +89,7 @@ define_syscall!(Accept, |socket: ObjectRef,
     let fd = accept_socket(socket, 0)?;
     if !address_len_ptr.is_null() {
         let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
-        let name = accepted
-            .as_socket_like()?
+        let name = socket_like(accepted)?
             .getpeername_bytes()
             .map_err(ObjectError::from)?;
         write_socket_name(address, address_len_ptr, &name)?;
@@ -114,8 +107,7 @@ define_syscall!(Accept4, |socket: ObjectRef,
     let fd = accept_socket(socket, flags)?;
     if !address_len_ptr.is_null() {
         let accepted = get_object_current_process(fd as u64).map_err(SyscallError::from)?;
-        let name = accepted
-            .as_socket_like()?
+        let name = socket_like(accepted)?
             .getpeername_bytes()
             .map_err(ObjectError::from)?;
         write_socket_name(address, address_len_ptr, &name)?;
@@ -124,8 +116,7 @@ define_syscall!(Accept4, |socket: ObjectRef,
 });
 
 define_syscall!(Shutdown, |socket: ObjectRef, how: u64| {
-    socket
-        .as_socket_like()?
+    socket_like(socket)?
         .shutdown(how)
         .map_err(ObjectError::from)?;
     Ok(0)
@@ -134,7 +125,7 @@ define_syscall!(Shutdown, |socket: ObjectRef, how: u64| {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::systemcall::implementations::{Accept4, Bind, Connect, Listen, Socket};
+    use crate::systemcall::implementations::{Accept4, Bind, Connect, Eventfd, Listen, Socket};
     use crate::systemcall::test::*;
 
     crate::test!(
@@ -285,6 +276,14 @@ mod tests {
                 .call::<Accept4>(),
             SyscallError::OperationNotSupported,
         );
+
+        let non_socket = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
+        expect_errno(
+            SyscallArgs::new([non_socket as u64, page + 256, page + 264, 0, 0, 0])
+                .call::<Accept4>(),
+            SyscallError::NotSocket,
+        );
+        close_test_fd(non_socket);
 
         close_test_fd(inet_dgram);
         close_test_fd(inet_stream);

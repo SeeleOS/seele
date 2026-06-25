@@ -14,8 +14,7 @@ define_syscall!(Setsockopt, |socket: ObjectRef,
     } else {
         user_safe::read_buffer(option_value, option_len as usize)?
     };
-    socket
-        .as_socket_like()?
+    socket_like(socket)?
         .setsockopt(level as u64, option_name as u64, option_value.as_slice())
         .map_err(ObjectError::from)?;
 
@@ -34,8 +33,7 @@ define_syscall!(
         }
 
         let option_len = user_safe::read(option_len_ptr)? as usize;
-        let value = socket
-            .as_socket_like()?
+        let value = socket_like(socket)?
             .getsockopt(level as u64, option_name as u64, option_len)
             .map_err(ObjectError::from)?;
 
@@ -70,8 +68,7 @@ define_syscall!(
 define_syscall!(
     Getsockname,
     |socket: ObjectRef, address: *mut u8, address_len_ptr: *mut u32| {
-        let name = socket
-            .as_socket_like()?
+        let name = socket_like(socket)?
             .getsockname_bytes()
             .map_err(ObjectError::from)?;
         write_socket_name(address, address_len_ptr, &name)?;
@@ -82,8 +79,7 @@ define_syscall!(
 define_syscall!(
     Getpeername,
     |socket: ObjectRef, address: *mut u8, address_len_ptr: *mut u32| {
-        let name = socket
-            .as_socket_like()?
+        let name = socket_like(socket)?
             .getpeername_bytes()
             .map_err(ObjectError::from)?;
         write_socket_name(address, address_len_ptr, &name)?;
