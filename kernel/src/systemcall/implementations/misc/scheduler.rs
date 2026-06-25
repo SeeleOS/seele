@@ -12,7 +12,17 @@ define_syscall!(SchedYield, {
 
 define_syscall!(Madvise, |_addr: u64, _len: usize, _advice: i32| { Ok(0) });
 
-define_syscall!(Getpriority, |_which: i32, _who: i32| { Ok(0) });
+define_syscall!(Getpriority, |which: i32, who: i32| {
+    match which {
+        0..=2 => {}
+        _ => return Err(SyscallError::InvalidArguments),
+    }
+    if who < 0 {
+        return Err(SyscallError::NoProcess);
+    }
+
+    Ok(20)
+});
 
 define_syscall!(Setpriority, |_which: i32, _who: i32, _prio: i32| { Ok(0) });
 
@@ -103,7 +113,15 @@ mod tests {
         expect_ok(SyscallArgs::new([0, 4096, 0, 0, 0, 0]).call::<Madvise>(), 0);
         expect_ok(
             SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Getpriority>(),
-            0,
+            20,
+        );
+        expect_errno(
+            SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<Getpriority>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([0, u64::MAX, 0, 0, 0, 0]).call::<Getpriority>(),
+            SyscallError::NoProcess,
         );
         expect_ok(
             SyscallArgs::new([0, 0, 10, 0, 0, 0]).call::<Setpriority>(),

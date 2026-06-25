@@ -255,6 +255,7 @@ pub(super) fn proc_pid_status_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
             "FDSize:\t{}\n",
             "Groups:\t{}\n",
             "VmLck:\t{:>8} kB\n",
+            "VmSwap:\t       0 kB\n",
             "CapInh:\t{}\n",
             "CapPrm:\t{}\n",
             "CapEff:\t{}\n",
@@ -860,6 +861,7 @@ mod tests {
         assert!(status.contains("Uid:\t1000\t1001\t1002\t1003\n"));
         assert!(status.contains("Gid:\t2000\t2001\t2002\t2003\n"));
         assert!(status.contains("Groups:\t10 20\n"));
+        assert!(status.contains("VmSwap:\t       0 kB\n"));
 
         let stat = String::from_utf8(proc_pid_stat_bytes(pid).unwrap()).unwrap();
         assert!(stat.starts_with(&format!("{} (", pid.0)));

@@ -157,6 +157,8 @@ pub enum SyscallNumber {
     Setsid = 112,
     Mlock = 149,
     Munlock = 150,
+    Mlockall = 151,
+    Munlockall = 152,
     Time = 201,
     Tkill = 200,
     Futex = 202,

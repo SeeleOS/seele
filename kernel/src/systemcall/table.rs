@@ -253,6 +253,8 @@ define_syscall_table!(
     SchedGetPriorityMin,
     Mlock,
     Munlock,
+    Mlockall,
+    Munlockall,
     PivotRoot,
     Setrlimit,
     Sync,

@@ -122,6 +122,15 @@ bitflags! {
 }
 
 bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(crate) struct MlockAllFlags: i32 {
+        const CURRENT = 0x1;
+        const FUTURE = 0x2;
+        const ONFAULT = 0x4;
+    }
+}
+
+bitflags! {
     #[derive(Clone, Copy, Debug)]
     pub(crate) struct GetMempolicyFlags: u64 {
         const NODE = 0x1;
@@ -1525,6 +1534,24 @@ define_syscall!(Munlock, |addr: VirtAddr, len: u64| {
     Ok(0)
 });
 
+define_syscall!(Mlockall, |flags: MlockAllFlags| {
+    if flags.is_empty() || flags == MlockAllFlags::ONFAULT {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    Ok(0)
+});
+
+define_syscall!(Munlockall, {
+    let process = get_current_process();
+    let mut process = process.lock();
+    let user_end = process.addrspace.user_mem;
+    process
+        .addrspace
+        .set_locked(VirtAddr::new(0), user_end, false);
+    Ok(0)
+});
+
 define_syscall!(Mincore, |addr: VirtAddr, len: usize, vec: *mut u8| {
     if len == 0 {
         return Ok(0);
@@ -1634,8 +1661,9 @@ mod tests {
         systemcall::{
             arg_types::SyscallArg,
             implementations::{
-                Brk, Ftruncate, Futex, GetMempolicy, Lseek, Mincore, Mlock, Mmap, Mprotect, Mremap,
-                Msync, Munlock, Munmap, OpenAt, PollEvents, Read, Write, filesystem::OpenFlags,
+                Brk, Ftruncate, Futex, GetMempolicy, Lseek, Mincore, Mlock, Mlockall, Mmap,
+                Mprotect, Mremap, Msync, Munlock, Munlockall, Munmap, OpenAt, PollEvents, Read,
+                Write, filesystem::OpenFlags,
             },
             test::{
                 TestLinuxTimespec, assert_user_bytes, close_test_fd, expect_errno, expect_fd,
@@ -1781,6 +1809,22 @@ mod tests {
             SyscallArgs::new([anon_addr, 4096, 0, 0, 0, 0]).call::<Munlock>(),
             0,
         );
+        expect_ok(SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<Mlockall>(), 0);
+        expect_ok(SyscallArgs::new([3, 0, 0, 0, 0, 0]).call::<Mlockall>(), 0);
+        expect_ok(SyscallArgs::new([5, 0, 0, 0, 0, 0]).call::<Mlockall>(), 0);
+        expect_errno(
+            SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Mlockall>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([4, 0, 0, 0, 0, 0]).call::<Mlockall>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([8, 0, 0, 0, 0, 0]).call::<Mlockall>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_ok(SyscallArgs::none().call::<Munlockall>(), 0);
         process
             .lock()
             .addrspace
