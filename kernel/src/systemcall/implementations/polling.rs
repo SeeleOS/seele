@@ -191,11 +191,18 @@ fn epoll_update_impl(
     Ok(0)
 }
 
+fn as_epoll_poller(object: ObjectRef) -> Result<Arc<PollerObject>, SyscallError> {
+    object.as_poller().map_err(|err| match err {
+        SyscallError::BadFileDescriptor => SyscallError::InvalidArguments,
+        err => err,
+    })
+}
+
 define_syscall!(
     EpollCtl,
     |poller: ObjectRef, op: u64, target_object: ObjectRef, event: *const LinuxEpollEvent| {
         let target_object = poll_identity_object(target_object);
-        let poller = poller.as_poller()?;
+        let poller = as_epoll_poller(poller)?;
         let is_registered = poller.has_registration(&target_object);
 
         match EpollCtlOp::try_from(op).map_err(|_| SyscallError::InvalidArguments)? {
@@ -206,13 +213,25 @@ define_syscall!(
                 if event.is_null() {
                     return Err(SyscallError::BadAddress);
                 }
+                let poller_object = poller
+                    .self_object()
+                    .expect("poller should have self object");
+                if Arc::ptr_eq(&poller_object, &target_object) {
+                    return Err(SyscallError::InvalidArguments);
+                }
+                if let Ok(target_poller) = target_object.clone().as_poller() {
+                    if target_poller.has_epoll_path_to(&poller_object) {
+                        return Err(SyscallError::TooManySymbolicLinks);
+                    }
+                    if poller.would_exceed_epoll_nesting_depth(&target_object) {
+                        return Err(SyscallError::InvalidArguments);
+                    }
+                }
                 let event = read_epoll_event(event)?;
                 let bits = EpollEvents::from_bits_retain(event.events);
                 poller.remember_registration(&target_object);
                 epoll_update_impl(
-                    poller
-                        .self_object()
-                        .expect("poller should have self object"),
+                    poller_object,
                     target_object,
                     bits,
                     epoll_event_data_u64(&event),
@@ -261,19 +280,20 @@ define_syscall!(
 fn epoll_wait_impl(
     poller: ObjectRef,
     events_ptr: *mut LinuxEpollEvent,
-    maxevents: usize,
+    maxevents: i32,
     timeout: i32,
 ) -> Result<usize, SyscallError> {
     let _interruptible_wait = InterruptibleWaitGuard::new();
 
-    if maxevents == 0 {
+    if maxevents <= 0 {
         return Err(SyscallError::InvalidArguments);
     }
+    let maxevents = maxevents as usize;
     if events_ptr.is_null() {
         return Err(SyscallError::BadAddress);
     }
 
-    let poller = poller.as_poller()?;
+    let poller = as_epoll_poller(poller)?;
 
     let deadline = if timeout < 0 {
         None
@@ -373,14 +393,14 @@ fn epoll_pwait2_timeout_ms(timeout: *const LinuxTimespec) -> Result<i32, Syscall
 
 define_syscall!(EpollWait, |poller: ObjectRef,
                             events_ptr: *mut LinuxEpollEvent,
-                            maxevents: usize,
+                            maxevents: i32,
                             timeout: i32| {
     epoll_wait_impl(poller, events_ptr, maxevents, timeout)
 });
 
 define_syscall!(EpollPwait, |poller: ObjectRef,
                              events_ptr: *mut LinuxEpollEvent,
-                             maxevents: usize,
+                             maxevents: i32,
                              timeout: i32,
                              sigmask: *const u64,
                              sigsetsize: usize| {
@@ -402,7 +422,7 @@ define_syscall!(
     EpollPwait2,
     |poller: ObjectRef,
      events_ptr: *mut LinuxEpollEvent,
-     maxevents: usize,
+     maxevents: i32,
      timeout: *const LinuxTimespec,
      sigmask: *const u64,
      sigsetsize: usize| {

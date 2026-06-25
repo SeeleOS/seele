@@ -10,6 +10,8 @@ use crate::{
     polling::{PollerEntry, PollerObject, event::PollableEvent},
 };
 
+const EPOLL_MAX_NESTING_DEPTH: usize = 5;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct RegistryKey {
     object: usize,
@@ -162,6 +164,56 @@ pub fn notify_pollers(object: ObjectRef, event: PollableEvent) -> Vec<ObjectRef>
 }
 
 impl PollerObject {
+    pub fn has_epoll_path_to(&self, target: &ObjectRef) -> bool {
+        let mut visited = BTreeSet::new();
+        self.has_epoll_path_to_inner(target, &mut visited)
+    }
+
+    fn has_epoll_path_to_inner(&self, target: &ObjectRef, visited: &mut BTreeSet<usize>) -> bool {
+        let Some(self_object) = self.self_object() else {
+            return false;
+        };
+        if Arc::ptr_eq(&self_object, target) {
+            return true;
+        }
+        if !visited.insert(object_key(&self_object)) {
+            return false;
+        }
+
+        self.registered_objects
+            .lock()
+            .iter()
+            .filter_map(|object| object.clone().as_poller().ok())
+            .any(|poller| poller.has_epoll_path_to_inner(target, visited))
+    }
+
+    pub fn would_exceed_epoll_nesting_depth(&self, target: &ObjectRef) -> bool {
+        let Ok(target_poller) = target.clone().as_poller() else {
+            return false;
+        };
+
+        1 + target_poller.epoll_nesting_depth(&mut BTreeSet::new()) > EPOLL_MAX_NESTING_DEPTH
+    }
+
+    fn epoll_nesting_depth(&self, visited: &mut BTreeSet<usize>) -> usize {
+        let Some(self_object) = self.self_object() else {
+            return 1;
+        };
+        if !visited.insert(object_key(&self_object)) {
+            return EPOLL_MAX_NESTING_DEPTH + 1;
+        }
+
+        let child_depth = self
+            .registered_objects
+            .lock()
+            .iter()
+            .filter_map(|object| object.clone().as_poller().ok())
+            .map(|poller| poller.epoll_nesting_depth(visited))
+            .max()
+            .unwrap_or(0);
+        1 + child_depth
+    }
+
     pub fn has_registration(&self, object: &ObjectRef) -> bool {
         self.registered_objects
             .lock()
