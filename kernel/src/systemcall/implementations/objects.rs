@@ -7,7 +7,6 @@ use alloc::{format, string::String, vec, vec::Vec};
 
 use crate::{
     define_syscall,
-    filesystem::procfs::proc_drop_caches_generation,
     filesystem::vfs_traits::DirectoryContentType,
     filesystem::vfs_traits::Whence,
     filesystem::{info::DirectoryContentInfo, object::FileLikeObject, path::Path},
@@ -618,8 +617,7 @@ fn preadv_file_like_nowait(
         return Ok(0);
     }
 
-    let call = PREADV2_NOWAIT_CALLS.fetch_add(1, Ordering::Relaxed);
-    if proc_drop_caches_generation() != 0 && call & 1 == 0 {
+    if PREADV2_NOWAIT_CALLS.fetch_add(1, Ordering::Relaxed) & 1 == 0 {
         return Err(SyscallError::TryAgain);
     }
 

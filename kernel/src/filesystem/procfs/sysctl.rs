@@ -19,7 +19,6 @@ pub(super) static PROC_PID_MAX: AtomicU64 = AtomicU64::new(DEFAULT_PID_MAX);
 pub(super) static PROC_NR_HUGEPAGES: AtomicU64 = AtomicU64::new(0);
 pub(super) static PROC_HUGETLB_SHM_GROUP: AtomicU64 = AtomicU64::new(0);
 pub(super) static PROC_OVERCOMMIT_MEMORY: AtomicU64 = AtomicU64::new(0);
-static PROC_DROP_CACHES_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 pub(super) fn proc_hostname_bytes() -> Vec<u8> {
     proc_c_string_bytes(crate::misc::utsname::current_hostname(crate::NAME))
@@ -207,16 +206,9 @@ pub(super) fn proc_drop_caches_bytes() -> Vec<u8> {
 
 pub(super) fn proc_write_drop_caches(buffer: &[u8]) -> FSResult<usize> {
     match parse_sysctl_u64(buffer)? {
-        1..=3 => {
-            PROC_DROP_CACHES_GENERATION.fetch_add(1, Ordering::Relaxed);
-            Ok(buffer.len())
-        }
+        1..=3 => Ok(buffer.len()),
         _ => Err(FSError::InvalidArguments),
     }
-}
-
-pub(crate) fn proc_drop_caches_generation() -> u64 {
-    PROC_DROP_CACHES_GENERATION.load(Ordering::Relaxed)
 }
 
 pub(super) fn proc_write_net_ipv4_conf_lo_tag(buffer: &[u8]) -> FSResult<usize> {

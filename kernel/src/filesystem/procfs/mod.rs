@@ -75,7 +75,7 @@ use self_paths::{lookup_proc_self_path, proc_pid_namespace_file};
 use sysctl::*;
 
 pub(crate) use nodes::ProcFile;
-pub(crate) use sysctl::{PROC_NR_OPEN, proc_drop_caches_generation};
+pub(crate) use sysctl::PROC_NR_OPEN;
 
 pub struct ProcFs;
 
