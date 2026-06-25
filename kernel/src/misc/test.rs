@@ -128,13 +128,23 @@ fn process_exit_status_exports_wait_encodings() {
     );
     assert_eq!(ProcessExitStatus::Exited(7).waitid_status(), 7);
     assert_eq!(
-        ProcessExitStatus::Signaled(Signal::SIGKILL).wait_status(),
+        ProcessExitStatus::from_signal(Signal::SIGKILL).wait_status(),
         Signal::SIGKILL as i32
     );
     assert_eq!(
-        ProcessExitStatus::Signaled(Signal::SIGALRM).wait_status(),
+        ProcessExitStatus::from_signal(Signal::SIGALRM).wait_status(),
         Signal::SIGALRM as i32
     );
+    assert_eq!(
+        (ProcessExitStatus::Signaled {
+            signal: Signal::SIGABRT,
+            core_dumped: true,
+        })
+        .wait_status(),
+        Signal::SIGABRT as i32 | 0x80
+    );
+    assert!(Signal::SIGABRT.default_action_dumps_core());
+    assert!(!Signal::SIGTERM.default_action_dumps_core());
 }
 
 fn misc_pure_layout_constants_and_kernel_error_mapping_stay_stable() {

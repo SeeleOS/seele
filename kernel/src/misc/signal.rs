@@ -311,6 +311,22 @@ impl Signal {
     pub const fn is_unblockable(self) -> bool {
         matches!(self, Self::SIGKILL | Self::SIGSTOP)
     }
+
+    pub const fn default_action_dumps_core(self) -> bool {
+        matches!(
+            self,
+            Self::SIGQUIT
+                | Self::SIGILL
+                | Self::SIGTRAP
+                | Self::SIGABRT
+                | Self::SIGBUS
+                | Self::SIGFPE
+                | Self::SIGSEGV
+                | Self::SIGXCPU
+                | Self::SIGXFSZ
+                | Self::SIGSYS
+        )
+    }
 }
 
 bitflags! {
@@ -696,7 +712,12 @@ impl Process {
                     | Signal::SIGSYS
             )
         {
-            let threads = self.terminate_inner(ProcessExitStatus::Signaled(signal));
+            let threads = self.terminate_inner(ProcessExitStatus::Signaled {
+                signal,
+                core_dumped: signal.default_action_dumps_core()
+                    && self.dumpable
+                    && self.rlimit_core_cur > 0,
+            });
             return ProcessSignalsResult {
                 should_switch: true,
                 exited_threads: threads,

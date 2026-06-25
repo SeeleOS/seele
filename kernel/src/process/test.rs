@@ -44,7 +44,7 @@ fn fd_flags_track_cloexec_bit() {
 fn exit_and_wait_events_preserve_linux_status_encoding() {
     assert_eq!(ProcessExitStatus::Exited(3).wait_status(), 3 << 8);
     assert_eq!(
-        ProcessExitStatus::Signaled(Signal::SIGTERM).waitid_status(),
+        ProcessExitStatus::from_signal(Signal::SIGTERM).waitid_status(),
         Signal::SIGTERM as i32
     );
 

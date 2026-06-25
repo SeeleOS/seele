@@ -205,6 +205,6 @@ pub fn handle_usermode_exception(snapshot: &Snapshot, sig: Signal) -> ! {
         return_to_scheduler_no_save();
     }
 
-    terminate_process(get_current_process(), ProcessExitStatus::Signaled(sig));
+    terminate_process(get_current_process(), ProcessExitStatus::from_signal(sig));
     return_to_scheduler_no_save();
 }

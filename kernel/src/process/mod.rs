@@ -303,7 +303,7 @@ impl Default for Process {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessExitStatus {
     Exited(u8),
-    Signaled(Signal),
+    Signaled { signal: Signal, core_dumped: bool },
 }
 
 impl ProcessExitStatus {
@@ -311,24 +311,34 @@ impl ProcessExitStatus {
         Self::Exited((code & 0xff) as u8)
     }
 
+    pub fn from_signal(signal: Signal) -> Self {
+        Self::Signaled {
+            signal,
+            core_dumped: false,
+        }
+    }
+
     pub fn wait_status(self) -> i32 {
         match self {
             Self::Exited(code) => i32::from(code) << 8,
-            Self::Signaled(signal) => signal as i32,
+            Self::Signaled {
+                signal,
+                core_dumped,
+            } => signal as i32 | if core_dumped { 0x80 } else { 0 },
         }
     }
 
     pub fn waitid_code(self) -> i32 {
         match self {
             Self::Exited(_) => CLD_EXITED,
-            Self::Signaled(_) => CLD_KILLED,
+            Self::Signaled { .. } => CLD_KILLED,
         }
     }
 
     pub fn waitid_status(self) -> i32 {
         match self {
             Self::Exited(code) => i32::from(code),
-            Self::Signaled(signal) => signal as i32,
+            Self::Signaled { signal, .. } => signal as i32,
         }
     }
 }
