@@ -1,7 +1,15 @@
 use super::*;
 use alloc::collections::BTreeMap;
 
-use crate::object::pipe::PipeEndpoint;
+use crate::{
+    impl_cast_function,
+    object::{
+        Object,
+        pipe::PipeEndpoint,
+        traits::{Readable, Writable},
+    },
+    polling::{event::PollableEvent, object::Pollable},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct FifoKey {
@@ -14,8 +22,80 @@ struct FifoEndpoints {
     write: Arc<PipeEndpoint>,
 }
 
+#[derive(Debug)]
+struct NamedFifoObject {
+    read: Arc<PipeEndpoint>,
+    write: Arc<PipeEndpoint>,
+    flags: Mut<FileFlags>,
+}
+
 static NAMED_FIFOS: spin::Mutex<BTreeMap<FifoKey, FifoEndpoints>> =
     spin::Mutex::new(BTreeMap::new());
+
+impl NamedFifoObject {
+    fn new(read: Arc<PipeEndpoint>, write: Arc<PipeEndpoint>, flags: FileFlags) -> Self {
+        read.clone_fd_reference();
+        write.clone_fd_reference();
+        Self {
+            read,
+            write,
+            flags: Mut::new(flags),
+        }
+    }
+}
+
+impl Drop for NamedFifoObject {
+    fn drop(&mut self) {
+        self.read.close_fd_reference();
+        self.write.close_fd_reference();
+    }
+}
+
+impl Object for NamedFifoObject {
+    fn get_flags(self: Arc<Self>) -> Result<FileFlags, ObjectError> {
+        Ok(*self.flags.lock())
+    }
+
+    fn set_flags(self: Arc<Self>, flags: FileFlags) -> Result<(), ObjectError> {
+        *self.flags.lock() = flags;
+        self.read.clone().set_flags(flags)?;
+        self.write.clone().set_flags(flags)?;
+        Ok(())
+    }
+
+    impl_cast_function!("readable", Readable);
+    impl_cast_function!("writable", Writable);
+    impl_cast_function!("pollable", Pollable);
+    impl_cast_function!("statable", Statable);
+}
+
+impl Readable for NamedFifoObject {
+    fn read(&self, buffer: &mut [u8]) -> Result<usize, ObjectError> {
+        self.read.read(buffer)
+    }
+}
+
+impl Writable for NamedFifoObject {
+    fn write(&self, buffer: &[u8]) -> Result<usize, ObjectError> {
+        self.write.write(buffer)
+    }
+}
+
+impl Pollable for NamedFifoObject {
+    fn is_event_ready(&self, event: PollableEvent) -> bool {
+        self.read.is_event_ready(event) || self.write.is_event_ready(event)
+    }
+
+    fn supports_epoll(&self) -> bool {
+        self.read.supports_epoll() || self.write.supports_epoll()
+    }
+}
+
+impl Statable for NamedFifoObject {
+    fn stat(&self) -> LinuxStat {
+        self.read.stat()
+    }
+}
 
 fn open_fifo_object(
     file_like: &FileLikeObject,
@@ -39,7 +119,15 @@ fn open_fifo_object(
     let object: ObjectRef = match access_mode {
         0o0 => endpoints.read.clone(),
         0o1 => endpoints.write.clone(),
-        0o2 => endpoints.read.clone(),
+        0o2 => Arc::new(NamedFifoObject::new(
+            endpoints.read.clone(),
+            endpoints.write.clone(),
+            if flags.contains(OpenFlags::NONBLOCK) {
+                FileFlags::NONBLOCK
+            } else {
+                FileFlags::empty()
+            },
+        )),
         _ => unreachable!("invalid access mode checked above"),
     };
     if flags.contains(OpenFlags::NONBLOCK) {
