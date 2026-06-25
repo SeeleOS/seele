@@ -109,6 +109,11 @@ mod tests {
         filesystem_fd_state_syscalls_follow_linux_rules
     );
     crate::test!(
+        filesystem_setgid_create_syscalls,
+        "filesystem create strips setgid and inherits group like linux",
+        filesystem_create_strips_setgid_and_inherits_group_like_linux
+    );
+    crate::test!(
         filesystem_metadata_syscalls,
         "filesystem metadata syscalls follow linux rules",
         filesystem_metadata_syscalls_follow_linux_rules
@@ -790,6 +795,70 @@ mod tests {
         assert_eq!(stat.st_mode & 0o170000, 0o100000);
 
         let _ = VirtualFS.lock().delete_file(file_path);
+        let _ = VirtualFS.lock().delete_file(base_path);
+    }
+
+    fn filesystem_create_strips_setgid_and_inherits_group_like_linux() {
+        const AT_FDCWD: u64 = (-100i32) as u64;
+        const O_WRONLY: u64 = 1;
+        const O_CREAT: u64 = 0x40;
+        const O_EXCL: u64 = 0x80;
+        const S_ISGID: u32 = 0o2000;
+
+        let saved_credentials = CredentialSnapshot::save_current();
+        let base_path = Path::new("/tmp/syscall-setgid-create-test");
+        let dir_path = Path::new("/tmp/syscall-setgid-create-test/dir");
+        let file_path = Path::new("/tmp/syscall-setgid-create-test/dir/file");
+        let _ = VirtualFS.lock().delete_file(file_path.clone());
+        let _ = VirtualFS.lock().delete_file(dir_path.clone());
+        let _ = VirtualFS.lock().delete_file(base_path.clone());
+
+        VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+        VirtualFS.lock().create_dir(dir_path.clone()).unwrap();
+        let dir: ObjectRef = Arc::new(open_path(dir_path.clone()).unwrap());
+        let dir_file_like = dir.as_file_like().unwrap();
+        dir_file_like.chown(65_534, 4).unwrap();
+        dir_file_like.chmod(S_ISGID | 0o777).unwrap();
+
+        {
+            let process = get_current_process();
+            let mut process = process.lock();
+            process.real_uid = 65_534;
+            process.effective_uid = 65_534;
+            process.saved_uid = 65_534;
+            process.fs_uid = 65_534;
+            process.real_gid = 65_534;
+            process.effective_gid = 65_534;
+            process.saved_gid = 65_534;
+            process.fs_gid = 65_534;
+            process.supplementary_groups.clear();
+            process.capability_effective = [0; 2];
+        }
+
+        let user_page = allocate_user_test_page();
+        write_user_cstr(user_page, b"/tmp/syscall-setgid-create-test/dir/file\0");
+        let fd = expect_fd(
+            SyscallArgs::new([
+                AT_FDCWD,
+                user_page,
+                O_WRONLY | O_CREAT | O_EXCL,
+                (S_ISGID | 0o777) as u64,
+                0,
+                0,
+            ])
+            .call::<OpenAt>(),
+        );
+        close_test_fd(fd);
+
+        let created = open_path(file_path.clone()).unwrap();
+        let stat = created.stat();
+        assert_eq!(stat.st_gid, 4);
+        assert_eq!(stat.st_mode & S_ISGID, 0);
+        assert_eq!(stat.st_mode & 0o777, 0o777);
+
+        saved_credentials.restore();
+        let _ = VirtualFS.lock().delete_file(file_path);
+        let _ = VirtualFS.lock().delete_file(dir_path);
         let _ = VirtualFS.lock().delete_file(base_path);
     }
 

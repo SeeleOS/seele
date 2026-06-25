@@ -173,15 +173,23 @@ pub(super) fn proc_self_fd_object(path: &Path) -> Result<Option<ObjectRef>, Sysc
     Ok(Some(object))
 }
 pub(super) fn create_file_unlocked(path: Path, mode: u32) -> Result<(), SyscallError> {
-    let (parent_dir, name) = {
+    let (parent_dir, name, normalized) = {
         let vfs = VirtualFS.lock();
         let normalized = vfs.normalize_path(path.clone());
         if normalized.ends_with_slash() {
             return Err(SyscallError::NotADirectory);
         }
-        vfs.ensure_writable_mount(normalized)?;
-        vfs.resolve_parent(path).map_err(SyscallError::from)?
+        vfs.ensure_writable_mount(normalized.clone())?;
+        let (parent_dir, name) = vfs.resolve_parent(path).map_err(SyscallError::from)?;
+        (parent_dir, name, normalized)
     };
+    let parent_stat = LinuxStat::new(parent_dir.lock().info()?);
+    let gid = if (parent_stat.st_mode & S_ISGID) != 0 {
+        parent_stat.st_gid
+    } else {
+        fs_gid()
+    };
+    let mode = strip_sgid_for_create(mode, gid);
 
     parent_dir
         .lock()
@@ -189,7 +197,12 @@ pub(super) fn create_file_unlocked(path: Path, mode: u32) -> Result<(), SyscallE
             DirectoryContentInfo::new(name, DirectoryContentType::File)
                 .with_permission(crate::filesystem::info::UnixPermission(mode & 0o7777)),
         )
-        .map_err(SyscallError::from)
+        .map_err(SyscallError::from)?;
+    let object: ObjectRef = Arc::new(open_path(normalized)?);
+    let file_like = object.as_file_like()?;
+    file_like.chown(fs_uid(), gid)?;
+    file_like.chmod(mode)?;
+    Ok(())
 }
 
 pub(super) fn profile_mkdir_common(dirfd: i32, path: &str, mode: u32) -> Result<(), SyscallError> {
