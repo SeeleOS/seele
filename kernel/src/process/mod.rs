@@ -5,6 +5,7 @@ use alloc::{
     vec::Vec,
 };
 use bitflags::bitflags;
+use num_enum::TryFromPrimitive;
 use x86_64::VirtAddr;
 
 use crate::filesystem::path::Path;
@@ -62,6 +63,33 @@ bitflags! {
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct FdFlags: u32 {
         const CLOEXEC = 1 << 0;
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
+#[repr(i32)]
+pub enum LinuxSchedPolicy {
+    Other = 0,
+    Fifo = 1,
+    RoundRobin = 2,
+    Batch = 3,
+    Idle = 5,
+    Deadline = 6,
+}
+
+impl LinuxSchedPolicy {
+    pub fn min_priority(self) -> i32 {
+        match self {
+            Self::Fifo | Self::RoundRobin => 1,
+            Self::Other | Self::Batch | Self::Idle | Self::Deadline => 0,
+        }
+    }
+
+    pub fn max_priority(self) -> i32 {
+        match self {
+            Self::Fifo | Self::RoundRobin => 99,
+            Self::Other | Self::Batch | Self::Idle | Self::Deadline => 0,
+        }
     }
 }
 
@@ -142,6 +170,8 @@ pub struct Process {
     pub user_namespace_setgroups: Option<String>,
     pub keep_capabilities: bool,
     pub oom_score_adj: i32,
+    pub sched_policy: LinuxSchedPolicy,
+    pub sched_priority: i32,
     pub secure_bits: u32,
     pub rlimit_nofile_cur: u64,
     pub rlimit_nofile_max: u64,
@@ -222,6 +252,8 @@ impl Default for Process {
             user_namespace_setgroups: None,
             keep_capabilities: false,
             oom_score_adj: 0,
+            sched_policy: LinuxSchedPolicy::Other,
+            sched_priority: 0,
             secure_bits: 0,
             rlimit_nofile_cur: DEFAULT_RLIMIT_NOFILE,
             rlimit_nofile_max: DEFAULT_RLIMIT_NOFILE,

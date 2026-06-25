@@ -81,6 +81,8 @@ impl Process {
                 user_namespace_setgroups: parent_locked.user_namespace_setgroups.clone(),
                 keep_capabilities: parent_locked.keep_capabilities,
                 oom_score_adj: parent_locked.oom_score_adj,
+                sched_policy: parent_locked.sched_policy,
+                sched_priority: parent_locked.sched_priority,
                 secure_bits: parent_locked.secure_bits,
                 rlimit_nofile_cur: parent_locked.rlimit_nofile_cur,
                 rlimit_nofile_max: parent_locked.rlimit_nofile_max,

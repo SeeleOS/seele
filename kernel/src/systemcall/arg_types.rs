@@ -17,7 +17,7 @@ use crate::{
     },
     polling::event::PollableEvent,
     process::{
-        ProcessRef,
+        LinuxSchedPolicy, ProcessRef,
         group::ProcessGroupID,
         misc::{ProcessID, get_process_with_pid},
     },
@@ -25,9 +25,9 @@ use crate::{
     systemcall::implementations::{
         AtFlags, ClockNanosleepFlags, CloseRangeFlags, DupFlags, EpollCreateFlags, FallocateFlags,
         FsMountFlags, FsOpenFlags, FsPickFlags, GetMempolicyFlags, GetRandomFlags,
-        InotifyInitFlags, LinuxIoprioWho, LinuxSchedPolicy, MemfdFlags, MlockAllFlags, MmapFlags,
-        MoveMountFlags, MremapFlags, MsyncFlags, OpenFlags, OpenTreeAttrFlags, OpenTreeFlags,
-        PipeFlags, PollEvents, RseqFlags, SetnsFlags, TimerFdFlags, TimerSetTimeFlags, UmountFlags,
+        InotifyInitFlags, LinuxIoprioWho, MemfdFlags, MlockAllFlags, MmapFlags, MoveMountFlags,
+        MremapFlags, MsyncFlags, OpenFlags, OpenTreeAttrFlags, OpenTreeFlags, PipeFlags,
+        PollEvents, RseqFlags, SetnsFlags, TimerFdFlags, TimerSetTimeFlags, UmountFlags,
         Wait4Options, WaitidOptions, XattrFlags,
     },
     systemcall::utils::{SyscallError, SyscallResult, invalid_syscall_flag_error},

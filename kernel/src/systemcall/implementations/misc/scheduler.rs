@@ -40,50 +40,66 @@ define_syscall!(IoprioGet, |which: LinuxIoprioWho, who: i32| {
     Ok(default_linux_ioprio())
 });
 
-define_syscall!(SchedSetparam, |pid: i32, param: *const LinuxSchedParam| {
+pub fn sched_process_for_pid(pid: i32) -> Result<ProcessRef, SyscallError> {
     if pid < 0 {
         return Err(SyscallError::InvalidArguments);
     }
+    if pid == 0 {
+        Ok(get_current_process())
+    } else {
+        get_process_with_pid(ProcessID(pid as u64))
+    }
+}
+
+define_syscall!(SchedSetparam, |pid: i32, param: *const LinuxSchedParam| {
     if param.is_null() {
         return Err(SyscallError::BadAddress);
     }
 
+    let process = sched_process_for_pid(pid)?;
     let param = user_safe::read(param)?;
     if param.sched_priority < 0 {
         return Err(SyscallError::InvalidArguments);
     }
+    let mut process = process.lock();
+    if param.sched_priority < process.sched_policy.min_priority()
+        || param.sched_priority > process.sched_policy.max_priority()
+    {
+        return Err(SyscallError::InvalidArguments);
+    }
+    process.sched_priority = param.sched_priority;
 
     Ok(0)
 });
 
 define_syscall!(SchedGetparam, |pid: i32, param: *mut LinuxSchedParam| {
-    if pid < 0 {
+    if param.is_null() {
         return Err(SyscallError::InvalidArguments);
     }
-    if param.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
 
-    user_safe::write(param, &LinuxSchedParam { sched_priority: 0 })?;
+    let process = sched_process_for_pid(pid)?;
+    let sched_priority = process.lock().sched_priority;
+    user_safe::write(param, &LinuxSchedParam { sched_priority })?;
     Ok(0)
 });
 
 define_syscall!(
     SchedSetscheduler,
     |pid: i32, policy: LinuxSchedPolicy, param: *const LinuxSchedParam| {
-        if pid < 0 {
-            return Err(SyscallError::InvalidArguments);
-        }
         if param.is_null() {
             return Err(SyscallError::BadAddress);
         }
 
+        let process = sched_process_for_pid(pid)?;
         let param = user_safe::read(param)?;
         if param.sched_priority < policy.min_priority()
             || param.sched_priority > policy.max_priority()
         {
             return Err(SyscallError::InvalidArguments);
         }
+        let mut process = process.lock();
+        process.sched_policy = policy;
+        process.sched_priority = param.sched_priority;
 
         Ok(0)
     }
@@ -202,11 +218,8 @@ mod tests {
 }
 
 define_syscall!(SchedGetscheduler, |pid: i32| {
-    if pid < 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
-
-    Ok(LinuxSchedPolicy::Other as usize)
+    let process = sched_process_for_pid(pid)?;
+    Ok(process.lock().sched_policy as usize)
 });
 
 define_syscall!(SchedGetPriorityMax, |policy: LinuxSchedPolicy| {
@@ -229,15 +242,13 @@ define_syscall!(Ioperm, |_from: u64, _num: u64, _turn_on: i32| { Ok(0) });
 define_syscall!(
     SchedSetaffinity,
     |pid: i32, cpusetsize: usize, mask_ptr: *const u8| {
-        if pid < 0 {
-            return Err(SyscallError::InvalidArguments);
-        }
         if cpusetsize == 0 {
             return Err(SyscallError::InvalidArguments);
         }
         if mask_ptr.is_null() {
             return Err(SyscallError::BadAddress);
         }
+        sched_process_for_pid(pid)?;
 
         Ok(0)
     }
@@ -246,12 +257,10 @@ define_syscall!(
 define_syscall!(
     SchedGetaffinity,
     |pid: i32, cpusetsize: usize, mask_ptr: *mut u8| {
-        if pid < 0 {
-            return Err(SyscallError::InvalidArguments);
-        }
         if cpusetsize < core::mem::size_of::<usize>() {
             return Err(SyscallError::InvalidArguments);
         }
+        sched_process_for_pid(pid)?;
 
         let mut mask = vec![0; cpusetsize];
         mask[0] = 1;

@@ -20,7 +20,7 @@ use crate::object::misc::get_object_current_process;
 use crate::object::namespace::{NamespaceKind, NamespaceObject};
 use crate::object::{FileFlags, Object, misc::ObjectRef};
 use crate::process::{
-    FdFlags, Process,
+    FdFlags, LinuxSchedPolicy, Process, ProcessRef,
     manager::{MANAGER, get_current_process},
     misc::{ProcessID, get_process_with_pid},
 };
@@ -729,33 +729,6 @@ fn validate_linux_ioprio_target(which: LinuxIoprioWho, who: i32) -> Result<(), S
 
 fn default_linux_ioprio() -> usize {
     ((LinuxIoprioClass::BestEffort as u16) << LINUX_IOPRIO_CLASS_SHIFT) as usize
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
-#[repr(i32)]
-pub enum LinuxSchedPolicy {
-    Other = 0,
-    Fifo = 1,
-    RoundRobin = 2,
-    Batch = 3,
-    Idle = 5,
-    Deadline = 6,
-}
-
-impl LinuxSchedPolicy {
-    fn min_priority(self) -> i32 {
-        match self {
-            Self::Fifo | Self::RoundRobin => 1,
-            Self::Other | Self::Batch | Self::Idle | Self::Deadline => 0,
-        }
-    }
-
-    fn max_priority(self) -> i32 {
-        match self {
-            Self::Fifo | Self::RoundRobin => 99,
-            Self::Other | Self::Batch | Self::Idle | Self::Deadline => 0,
-        }
-    }
 }
 
 #[repr(C)]

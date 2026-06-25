@@ -7,7 +7,7 @@ use crate::misc::{
 use crate::object::FileFlags;
 use crate::object::linux_anon::{TimerFdObject, wake_linux_io_waiters};
 use crate::object::misc::get_object_current_process;
-use crate::process::{FdFlags, manager::get_current_process};
+use crate::process::{FdFlags, LinuxSchedPolicy, manager::get_current_process};
 use crate::systemcall::utils::{SyscallError, SyscallImpl};
 use crate::thread::yielding::{BlockType, block_current_with_sig_check};
 use crate::{define_syscall, memory::user_safe};
@@ -580,16 +580,20 @@ define_syscall!(Sysinfo, |info_ptr: *mut LinuxSysinfo| {
 });
 
 define_syscall!(SchedRrGetInterval, |pid: i32, tp: *mut LinuxTimespec| {
-    if pid < 0 {
-        return Err(SyscallError::InvalidArguments);
-    }
     if tp.is_null() {
         return Err(SyscallError::BadAddress);
     }
 
+    let policy = crate::systemcall::implementations::sched_process_for_pid(pid)?
+        .lock()
+        .sched_policy;
     let timespec = LinuxTimespec {
         tv_sec: 0,
-        tv_nsec: 100_000_000,
+        tv_nsec: if matches!(policy, LinuxSchedPolicy::Fifo) {
+            0
+        } else {
+            100_000_000
+        },
     };
     user_safe::write(tp, &timespec)?;
     Ok(0)
