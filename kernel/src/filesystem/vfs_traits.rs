@@ -239,6 +239,36 @@ pub trait FileSystem: Send + Sync {
     fn magic(&self) -> i64;
     fn mount_source(&self) -> &'static str;
     fn default_mount_flags(&self, path: &Path) -> MountFlags;
+    fn stats(&self) -> FileSystemStats {
+        FileSystemStats::default()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct FileSystemStats {
+    pub block_size: u64,
+    pub blocks: u64,
+    pub blocks_free: u64,
+    pub blocks_available: u64,
+    pub files: u64,
+    pub files_free: u64,
+    pub max_name_len: u64,
+    pub fragment_size: u64,
+}
+
+impl Default for FileSystemStats {
+    fn default() -> Self {
+        Self {
+            block_size: 4096,
+            blocks: 262_144,
+            blocks_free: 131_072,
+            blocks_available: 131_072,
+            files: 262_144,
+            files_free: 131_072,
+            max_name_len: 255,
+            fragment_size: 4096,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

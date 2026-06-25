@@ -235,6 +235,9 @@ impl BlockDevice for CachedBlockDevice {
         if buffer.len() < block_size {
             return Err(BlockDeviceError::BufferTooSmall);
         }
+        if id >= self.total_blocks() {
+            return Err(BlockDeviceError::OutOfBounds);
+        }
 
         let mut state = self.state.lock();
         drop(state);
@@ -253,7 +256,10 @@ impl BlockDevice for CachedBlockDevice {
         }
 
         let total_blocks = buffer.len() / block_size;
-        if start + total_blocks > self.total_blocks() {
+        if start
+            .checked_add(total_blocks)
+            .is_none_or(|end| end > self.total_blocks())
+        {
             return Err(BlockDeviceError::OutOfBounds);
         }
 
@@ -283,4 +289,72 @@ impl BlockDevice for CachedBlockDevice {
         }
         self.inner.flush()
     }
+}
+
+#[cfg(test)]
+crate::test!(
+    cached_block_device_rejects_out_of_bounds_writes,
+    "cached block device rejects out-of-bounds writes before caching",
+    cached_block_device_rejects_out_of_bounds_writes_before_caching
+);
+
+#[cfg(test)]
+struct TestBlockDevice {
+    blocks: usize,
+    block_size: usize,
+}
+
+#[cfg(test)]
+impl TestBlockDevice {
+    fn new(blocks: usize, block_size: usize) -> Self {
+        Self { blocks, block_size }
+    }
+}
+
+#[cfg(test)]
+impl BlockDevice for TestBlockDevice {
+    fn total_blocks(&self) -> usize {
+        self.blocks
+    }
+
+    fn block_size(&self) -> usize {
+        self.block_size
+    }
+
+    fn read_single_block(&self, id: usize, buffer: &mut [u8]) -> BlockDeviceResult {
+        if buffer.len() < self.block_size {
+            return Err(BlockDeviceError::BufferTooSmall);
+        }
+        if id >= self.blocks {
+            return Err(BlockDeviceError::OutOfBounds);
+        }
+        buffer[..self.block_size].fill(0);
+        Ok(self.block_size)
+    }
+
+    fn write_single_block(&self, id: usize, buffer: &[u8]) -> BlockDeviceResult {
+        if buffer.len() < self.block_size {
+            return Err(BlockDeviceError::BufferTooSmall);
+        }
+        if id >= self.blocks {
+            return Err(BlockDeviceError::OutOfBounds);
+        }
+        Ok(self.block_size)
+    }
+}
+
+#[cfg(test)]
+fn cached_block_device_rejects_out_of_bounds_writes_before_caching() {
+    let device = Arc::new(TestBlockDevice::new(2, 512));
+    let cache = CachedBlockDevice::with_capacity(device, 2);
+    let block = [0x5au8; 512];
+
+    assert!(matches!(
+        cache.write_single_block(2, &block),
+        Err(BlockDeviceError::OutOfBounds)
+    ));
+    assert!(matches!(
+        cache.write_blocks(1, &[0x5au8; 1024]),
+        Err(BlockDeviceError::OutOfBounds)
+    ));
 }

@@ -192,7 +192,7 @@ impl OpenedFileObject {
         while written < buf.len() {
             let count = file.write(&buf[written..])?;
             if count == 0 {
-                return Err(FSError::Other);
+                return Err(FSError::NoSpace);
             }
             written += count;
         }

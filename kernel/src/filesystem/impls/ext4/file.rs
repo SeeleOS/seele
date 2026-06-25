@@ -122,6 +122,9 @@ impl File for Ext4File {
         let mut inode = self.refresh_inode()?;
         let written =
             file::write_at(&self.fs, &mut inode, buffer, self.position).map_err(FSError::from)?;
+        if written == 0 && !buffer.is_empty() {
+            return Err(FSError::NoSpace);
+        }
         if written != 0 {
             let now = FileTimes::now();
             let duration = duration_from_parts(now.mtime_sec, now.mtime_nsec)?;

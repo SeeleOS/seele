@@ -11,6 +11,7 @@ pub(super) use fs_magic::*;
 pub(super) use path_metadata::*;
 
 use super::*;
+use crate::filesystem::vfs_traits::FileSystemStats;
 
 pub(super) fn linux_major(dev: u64) -> u32 {
     (((dev >> 8) & 0xfff) | ((dev >> 32) & !0xfff)) as u32
@@ -20,18 +21,22 @@ pub(super) fn linux_minor(dev: u64) -> u32 {
     ((dev & 0xff) | ((dev >> 12) & !0xff)) as u32
 }
 
-pub(super) fn linux_statfs_with_flags(f_type: i64, flags: MountFlags) -> LinuxStatFs {
+pub(super) fn linux_statfs_with_flags(
+    f_type: i64,
+    stats: FileSystemStats,
+    flags: MountFlags,
+) -> LinuxStatFs {
     LinuxStatFs {
         f_type,
-        f_bsize: 4096,
-        f_blocks: 262_144,
-        f_bfree: 131_072,
-        f_bavail: 131_072,
-        f_files: 262_144,
-        f_ffree: 131_072,
+        f_bsize: stats.block_size as i64,
+        f_blocks: stats.blocks,
+        f_bfree: stats.blocks_free,
+        f_bavail: stats.blocks_available,
+        f_files: stats.files,
+        f_ffree: stats.files_free,
         f_fsid: 1,
-        f_namelen: 255,
-        f_frsize: 4096,
+        f_namelen: stats.max_name_len as i64,
+        f_frsize: stats.fragment_size as i64,
         f_flags: flags.bits() as i64,
         f_spare: [0; 4],
     }

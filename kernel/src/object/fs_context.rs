@@ -188,6 +188,8 @@ impl FsContextObject {
     }
 
     fn instantiate_ext_filesystem(&self) -> Result<FileSystemRef, SyscallError> {
+        // FIXME: This only wires ext-family fs_context mounts to the ext4plus-backed
+        // block-device adapter. Full Linux ext4 feature compatibility is not implemented.
         let source = self
             .state
             .lock()

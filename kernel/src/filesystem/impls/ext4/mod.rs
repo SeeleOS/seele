@@ -20,7 +20,7 @@ use crate::filesystem::{
     info::FileTimes,
     path::{Path, PathPart},
     vfs::{FSResult, WrappedDirectory},
-    vfs_traits::{FileLike, FileSystem},
+    vfs_traits::{FileLike, FileSystem, FileSystemStats},
 };
 use anyhow::{Context, Result};
 
@@ -463,6 +463,22 @@ impl FileSystem for EXT4 {
 
     fn default_mount_flags(&self, _path: &Path) -> crate::filesystem::vfs_traits::MountFlags {
         crate::filesystem::vfs_traits::MountFlags::MS_RELATIME
+    }
+
+    fn stats(&self) -> FileSystemStats {
+        let superblock = self.fs.superblock();
+        let blocks_free = superblock.free_blocks_count();
+        FileSystemStats {
+            block_size: 4096,
+            blocks: superblock.blocks_count(),
+            blocks_free,
+            blocks_available: blocks_free,
+            files: u64::from(superblock.inodes_per_block_group().get())
+                * u64::from(superblock.num_block_groups()),
+            files_free: u64::from(superblock.free_inodes_count()),
+            max_name_len: 255,
+            fragment_size: 4096,
+        }
     }
 }
 
