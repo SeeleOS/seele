@@ -164,6 +164,9 @@ where
             let bytes =
                 user_safe::read_buffer(unsafe { iov.iov_base.add(copied_from_iov) }, chunk_len)?;
             let written = write_fn(&bytes, total)?;
+            if written == 0 {
+                return Err(SyscallError::NoSpaceLeft);
+            }
             total += written;
             copied_from_iov += written;
             if written < chunk_len {
@@ -513,6 +516,9 @@ fn write_object_in_chunks(
         let chunk_len = (len - total).min(LINEAR_IO_CHUNK_SIZE);
         let bytes = user_safe::read_buffer(unsafe { buf_ptr.add(total) }, chunk_len)?;
         let written = writable.write(&bytes)?;
+        if written == 0 {
+            return Err(SyscallError::NoSpaceLeft);
+        }
         total += written;
         if written < chunk_len {
             break;
@@ -568,6 +574,9 @@ fn pwrite_object_in_chunks(
             let chunk_len = (len - total).min(LINEAR_IO_CHUNK_SIZE);
             let bytes = user_safe::read_buffer(unsafe { buf_ptr.add(total) }, chunk_len)?;
             let written = file.write_at(&bytes, offset as u64 + total as u64)?;
+            if written == 0 {
+                return Err(SyscallError::NoSpaceLeft);
+            }
             total += written;
             if written < chunk_len {
                 break;
@@ -586,6 +595,9 @@ fn pwrite_object_in_chunks(
         let chunk_len = (len - total).min(LINEAR_IO_CHUNK_SIZE);
         let bytes = user_safe::read_buffer(unsafe { buf_ptr.add(total) }, chunk_len)?;
         let written = writable.write(&bytes)?;
+        if written == 0 {
+            return Err(SyscallError::NoSpaceLeft);
+        }
         total += written;
         if written < chunk_len {
             break;
@@ -617,7 +629,8 @@ fn preadv_file_like_nowait(
         return Ok(0);
     }
 
-    if PREADV2_NOWAIT_CALLS.fetch_add(1, Ordering::Relaxed) & 1 == 0 {
+    let call = PREADV2_NOWAIT_CALLS.fetch_add(1, Ordering::Relaxed);
+    if call & 1 == 0 {
         return Err(SyscallError::TryAgain);
     }
 
