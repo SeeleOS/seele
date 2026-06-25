@@ -18,11 +18,15 @@ use crate::{
 impl AddrSpace {
     #[cfg(test)]
     fn can_use_kernel_test_pointer(addr: u64) -> bool {
-        !Self::is_user_addr(VirtAddr::new(addr))
+        !Self::is_user_addr(VirtAddr::new(addr)) && addr != u64::MAX
     }
 
-    fn ensure_user_page_readable(&mut self, addr: VirtAddr) -> bool {
-        if !Self::is_user_addr(addr) {
+    fn valid_user_access(addr: u64, len: usize) -> bool {
+        Self::checked_user_range(addr, len as u64).is_some()
+    }
+
+    fn ensure_user_page_readable(&mut self, addr: VirtAddr, len: usize) -> bool {
+        if !Self::valid_user_access(addr.as_u64(), len) {
             return false;
         }
         let Some(area) = self.get_area(addr).cloned() else {
@@ -56,8 +60,8 @@ impl AddrSpace {
         }
     }
 
-    fn ensure_user_page_writable(&mut self, addr: VirtAddr) -> bool {
-        if !Self::is_user_addr(addr) {
+    fn ensure_user_page_writable(&mut self, addr: VirtAddr, len: usize) -> bool {
+        if !Self::valid_user_access(addr.as_u64(), len) {
             return false;
         }
         match self.page_table.translate(addr) {
@@ -109,16 +113,14 @@ impl AddrSpace {
             }
 
             let virt = VirtAddr::new(addr);
-            if !self.ensure_user_page_writable(virt) {
+            let page_offset = (virt.as_u64() & 0xfff) as usize;
+            let chunk_len = src.len().min(4096 - page_offset);
+            if !self.ensure_user_page_writable(virt, chunk_len) {
                 return Err(SyscallError::BadAddress);
             }
-
             let Some(phys) = self.translate_addr(virt) else {
                 return Err(SyscallError::BadAddress);
             };
-
-            let page_offset = (virt.as_u64() & 0xfff) as usize;
-            let chunk_len = src.len().min(4096 - page_offset);
             let dst = crate::memory::utils::apply_offset(phys.as_u64()) as *mut u8;
 
             unsafe {
@@ -143,16 +145,14 @@ impl AddrSpace {
             }
 
             let virt = VirtAddr::new(addr);
-            if !self.ensure_user_page_readable(virt) {
+            let page_offset = (virt.as_u64() & 0xfff) as usize;
+            let chunk_len = dst.len().min(4096 - page_offset);
+            if !self.ensure_user_page_readable(virt, chunk_len) {
                 return Err(SyscallError::BadAddress);
             }
-
             let Some(phys) = self.translate_addr(virt) else {
                 return Err(SyscallError::BadAddress);
             };
-
-            let page_offset = (virt.as_u64() & 0xfff) as usize;
-            let chunk_len = dst.len().min(4096 - page_offset);
             let src = crate::memory::utils::apply_offset(phys.as_u64()) as *const u8;
 
             unsafe {
