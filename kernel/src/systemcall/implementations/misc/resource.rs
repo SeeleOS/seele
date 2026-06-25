@@ -10,13 +10,16 @@ fn get_rlimit(resource: RlimitResource) -> LinuxRlimit64 {
     let process = process.lock();
     match resource {
         RlimitResource::Cpu
-        | RlimitResource::Data
         | RlimitResource::Rss
         | RlimitResource::As
         | RlimitResource::Locks
         | RlimitResource::Nice => LinuxRlimit64 {
             rlim_cur: RLIM_INFINITY,
             rlim_max: RLIM_INFINITY,
+        },
+        RlimitResource::Data => LinuxRlimit64 {
+            rlim_cur: process.rlimit_data_cur,
+            rlim_max: process.rlimit_data_max,
         },
         RlimitResource::Core => LinuxRlimit64 {
             rlim_cur: process.rlimit_core_cur,
@@ -66,7 +69,6 @@ fn set_rlimit(resource: RlimitResource, limit: LinuxRlimit64) {
     let mut process = process.lock();
     match resource {
         RlimitResource::Cpu
-        | RlimitResource::Data
         | RlimitResource::Rss
         | RlimitResource::As
         | RlimitResource::Locks
@@ -81,6 +83,10 @@ fn set_rlimit(resource: RlimitResource, limit: LinuxRlimit64) {
         RlimitResource::Fsize => {
             process.rlimit_fsize_cur = limit.rlim_cur;
             process.rlimit_fsize_max = limit.rlim_max;
+        }
+        RlimitResource::Data => {
+            process.rlimit_data_cur = limit.rlim_cur;
+            process.rlimit_data_max = limit.rlim_max;
         }
         RlimitResource::Nproc => {
             process.rlimit_nproc_cur = limit.rlim_cur;

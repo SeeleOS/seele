@@ -54,6 +54,7 @@ const DEFAULT_RLIMIT_STACK_MAX: u64 = u64::MAX;
 const DEFAULT_RLIMIT_CORE: u64 = 0;
 const DEFAULT_RLIMIT_FSIZE: u64 = u64::MAX;
 const DEFAULT_RLIMIT_NPROC: u64 = 4096;
+const DEFAULT_RLIMIT_DATA: u64 = 64 * 1024 * 1024;
 const CLD_EXITED: i32 = 1;
 const CLD_KILLED: i32 = 2;
 
@@ -126,6 +127,7 @@ pub struct Process {
     pub controlling_terminal: Option<ControllingTerminal>,
     pub timers: Vec<Option<Timer>>,
     pub program_break: u64,
+    pub program_break_base: u64,
     pub real_uid: u32,
     pub effective_uid: u32,
     pub saved_uid: u32,
@@ -153,6 +155,8 @@ pub struct Process {
     pub rlimit_fsize_max: u64,
     pub rlimit_nproc_cur: u64,
     pub rlimit_nproc_max: u64,
+    pub rlimit_data_cur: u64,
+    pub rlimit_data_max: u64,
     pub rlimit_stack_cur: u64,
     pub rlimit_stack_max: u64,
     pub session_keyring: i32,
@@ -192,6 +196,7 @@ impl Default for Process {
             pending_signal_info: alloc::vec![None; SIGNAL_AMOUNT],
             signal_actions: default_signal_action_vec(),
             program_break: 0,
+            program_break_base: 0,
             pid: ProcessID::default(),
             addrspace: AddrSpace::default(),
             kernel_stack_top: VirtAddr::zero(),
@@ -230,6 +235,8 @@ impl Default for Process {
             rlimit_fsize_max: DEFAULT_RLIMIT_FSIZE,
             rlimit_nproc_cur: DEFAULT_RLIMIT_NPROC,
             rlimit_nproc_max: DEFAULT_RLIMIT_NPROC,
+            rlimit_data_cur: DEFAULT_RLIMIT_DATA,
+            rlimit_data_max: DEFAULT_RLIMIT_DATA,
             rlimit_stack_cur: DEFAULT_RLIMIT_STACK_CUR,
             rlimit_stack_max: DEFAULT_RLIMIT_STACK_MAX,
             session_keyring: 0,

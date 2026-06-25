@@ -134,6 +134,7 @@ impl Process {
         self.pending_signal_info.fill(None);
         self.signal_actions = execve_signal_actions(&self.signal_actions);
         self.program_break = 0;
+        self.program_break_base = 0;
         self.command_line = prepared.command_line;
         self.exec_path = prepared.exec_path;
         self.sysv_shm_mappings.clear();

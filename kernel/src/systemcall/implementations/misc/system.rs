@@ -29,6 +29,7 @@ define_syscall!(Brk, |addr: u64| {
             .user_mem
             .as_u64()
             .saturating_sub(INITIAL_BRK_RESERVE);
+        process.program_break_base = process.program_break;
     }
 
     let current = process.program_break;
@@ -37,7 +38,16 @@ define_syscall!(Brk, |addr: u64| {
     }
 
     let old_aligned = current.div_ceil(4096) * 4096;
-    let new_aligned = addr.div_ceil(4096) * 4096;
+    let Some(new_aligned) = addr.checked_add(4095).map(|addr| addr / 4096 * 4096) else {
+        return Ok(current as usize);
+    };
+    if new_aligned >= crate::memory::addrspace::USER_MEM_END {
+        return Ok(current as usize);
+    }
+    let brk_base = process.program_break_base;
+    if new_aligned.saturating_sub(brk_base) > process.rlimit_data_cur {
+        return Ok(current as usize);
+    }
 
     if new_aligned > old_aligned {
         process.addrspace.register_area(MemoryArea::new(
@@ -484,6 +494,32 @@ mod tests {
 
         expect_ok(SyscallArgs::new([30, 0, 0, 0, 0, 0]).call::<Alarm>(), 0);
         expect_ok(SyscallArgs::none().call::<Sync>(), 0);
+
+        let (old_break, old_break_base, old_user_mem) = {
+            let process = process.lock();
+            (
+                process.program_break,
+                process.program_break_base,
+                process.addrspace.user_mem,
+            )
+        };
+        let current_break = SyscallArgs::new([0, 0, 0, 0, 0, 0])
+            .call::<Brk>()
+            .expect("brk query should succeed");
+        expect_ok(
+            SyscallArgs::new([crate::memory::addrspace::USER_MEM_END, 0, 0, 0, 0, 0]).call::<Brk>(),
+            current_break,
+        );
+        expect_ok(
+            SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<Brk>(),
+            current_break,
+        );
+        {
+            let mut process = process.lock();
+            process.program_break = old_break;
+            process.program_break_base = old_break_base;
+            process.addrspace.user_mem = old_user_mem;
+        }
 
         process.lock().timers = old_timers;
         crate::misc::time::set_timezone(old_timezone.0, old_timezone.1);
