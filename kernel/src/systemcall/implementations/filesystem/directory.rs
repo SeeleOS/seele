@@ -6,8 +6,8 @@ define_syscall!(UnlinkAt, |dirfd: i32, path: CString, flags: AtFlags| {
         return Err(SyscallError::InvalidArguments);
     }
     let path = resolve_path_at(dirfd, &path)?;
-    let object = open_path_nofollow(path.clone())?;
-    let is_directory = matches!(object.info()?.file_like_type, FileLikeType::Directory);
+    let (info, _) = resolve_path_info_with_final(path.clone(), false)?;
+    let is_directory = matches!(info.file_like_type, FileLikeType::Directory);
     if flags.contains(AtFlags::REMOVEDIR) {
         if !is_directory {
             return Err(SyscallError::NotADirectory);
