@@ -239,10 +239,13 @@ pub(in crate::systemcall::implementations::filesystem) fn check_access_target(
     let credentials = access_credentials(flags.contains(AtFlags::EACCESS));
     check_access_path_search_permissions(&path, &credentials)?;
     let object = if flags.contains(AtFlags::SYMLINK_NOFOLLOW) {
-        open_path_nofollow(path)
+        open_path_nofollow(path.clone())
     } else {
-        open_path(path)
+        open_path(path.clone())
     }?;
+    if mode & 2 != 0 {
+        VirtualFS.lock().ensure_writable_mount(path)?;
+    }
     check_access_permissions_for_ids(&object.stat(), mode, &credentials)
 }
 

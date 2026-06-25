@@ -36,6 +36,10 @@ static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
 const COPY_CHUNK_SIZE: usize = 16 * 1024;
 const LINEAR_IO_CHUNK_SIZE: usize = 64 * 1024;
 const LINUX_IOV_MAX: i32 = 1024;
+const S_IFMT: u32 = 0o170000;
+const S_IFDIR: u32 = 0o040000;
+const S_IFBLK: u32 = 0o060000;
+const S_IFREG: u32 = 0o100000;
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -1038,9 +1042,23 @@ define_syscall!(Flock, |object: ObjectRef, operation: i32| {
     flock_lock(&object, operation)
 });
 
-define_syscall!(Fsync, |_object: ObjectRef| { Ok(0) });
+fn check_syncable_file(object: ObjectRef) -> Result<(), SyscallError> {
+    let stat = object.as_statable()?.stat();
+    match stat.st_mode & S_IFMT {
+        S_IFREG | S_IFDIR | S_IFBLK => Ok(()),
+        _ => Err(SyscallError::InvalidArguments),
+    }
+}
 
-define_syscall!(Fdatasync, |_object: ObjectRef| { Ok(0) });
+define_syscall!(Fsync, |object: ObjectRef| {
+    check_syncable_file(object)?;
+    Ok(0)
+});
+
+define_syscall!(Fdatasync, |object: ObjectRef| {
+    check_syncable_file(object)?;
+    Ok(0)
+});
 
 define_syscall!(Fadvise64, |_object: ObjectRef,
                             _offset: i64,
@@ -1054,6 +1072,15 @@ define_syscall!(Fadvise64, |_object: ObjectRef,
 
 define_syscall!(Ftruncate, |object: ObjectRef, length: i64| {
     if length < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let stat = object.clone().as_statable()?.stat();
+    if stat.st_mode & S_IFMT != S_IFREG {
+        return Err(SyscallError::InvalidArguments);
+    }
+    let flags = object.clone().get_flags()?;
+    if !flags.intersects(FileFlags::WRONLY | FileFlags::RDWR) {
         return Err(SyscallError::InvalidArguments);
     }
 

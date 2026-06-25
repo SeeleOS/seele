@@ -17,8 +17,11 @@ define_syscall!(Chdir, |dir: String| {
     if !matches!(object.info()?.file_like_type, FileLikeType::Directory) {
         return Err(SyscallError::NotADirectory);
     }
-    check_chdir_target(&path.as_normal(), &object.stat())?;
-    get_current_process().lock().change_directory(path)?;
+    let resolved_path = AbsolutePath::from_root_path(&object.path());
+    check_chdir_target(&resolved_path.as_normal(), &object.stat())?;
+    get_current_process()
+        .lock()
+        .change_directory(resolved_path)?;
     Ok(0)
 });
 
@@ -29,6 +32,7 @@ define_syscall!(Fchdir, |fd: u64| {
         return Err(SyscallError::NotADirectory);
     }
     let path = AbsolutePath::from_root_path(&file_like.path());
+    check_chdir_target(&path.as_normal(), &file_like.stat())?;
     get_current_process().lock().change_directory(path)?;
     Ok(0)
 });
