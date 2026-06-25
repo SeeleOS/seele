@@ -486,6 +486,8 @@ mod tests {
 
         const ARCH_SET_FS: u64 = 0x1002;
         const ARCH_GET_FS: u64 = 0x1003;
+        const ARCH_GET_CPUID: u64 = 0x1011;
+        const ARCH_SET_CPUID: u64 = 0x1012;
         let fs_page = allocate_user_test_page();
         expect_ok(
             SyscallArgs::new([ARCH_GET_FS, fs_page, 0, 0, 0, 0]).call::<ArchPrctl>(),
@@ -508,6 +510,14 @@ mod tests {
         expect_errno(
             SyscallArgs::new([ARCH_GET_FS, 0, 0, 0, 0, 0]).call::<ArchPrctl>(),
             SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([ARCH_SET_CPUID, 0, 0, 0, 0, 0]).call::<ArchPrctl>(),
+            SyscallError::NoDevice,
+        );
+        expect_ok(
+            SyscallArgs::new([ARCH_GET_CPUID, 0, 0, 0, 0, 0]).call::<ArchPrctl>(),
+            1,
         );
         expect_errno(
             SyscallArgs::new([0x9999, 0, 0, 0, 0, 0]).call::<ArchPrctl>(),

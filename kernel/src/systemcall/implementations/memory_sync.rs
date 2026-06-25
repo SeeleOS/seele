@@ -77,6 +77,8 @@ enum FutexWakeCmp {
 enum ArchPrctlCode {
     SetFs = 0x1002,
     GetFs = 0x1003,
+    SetCpuid = 0x1012,
+    GetCpuid = 0x1011,
 }
 
 bitflags! {
@@ -850,6 +852,8 @@ define_syscall!(ArchPrctl, |code: u64, addr: u64| {
             user_safe::write(addr as *mut u8, &FsBase::read().as_u64())?;
             Ok(0)
         }
+        ArchPrctlCode::SetCpuid => Err(SyscallError::NoDevice),
+        ArchPrctlCode::GetCpuid => Ok(1),
     }
 });
 
