@@ -22,6 +22,7 @@ use crate::{
     misc::others::protection_to_page_flags,
     misc::time::Time,
     process::manager::get_current_process,
+    signal::{Signal, send_signal_to_process},
     systemcall::{
         implementations::{InterruptibleWaitGuard, take_signal_interrupt},
         utils::{SyscallError, SyscallImpl},
@@ -1276,10 +1277,11 @@ define_syscall!(Munmap, |addr: VirtAddr, len: u64| {
     if end > crate::memory::addrspace::USER_MEM_END {
         return Err(SyscallError::NoMemory);
     }
-    get_current_process()
-        .lock()
-        .addrspace
-        .unmap(addr, end - start);
+    let process = get_current_process();
+    if let Err(err) = process.lock().addrspace.try_unmap(addr, end - start) {
+        send_signal_to_process(&process, Signal::SIGBUS);
+        return Err(SyscallError::from(err));
+    }
     Ok(0)
 });
 

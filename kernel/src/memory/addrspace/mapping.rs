@@ -46,11 +46,19 @@ impl AddrSpace {
     }
 
     pub fn unmap(&mut self, start: VirtAddr, len: u64) {
+        let _ = self.try_unmap(start, len);
+    }
+
+    pub fn try_unmap(
+        &mut self,
+        start: VirtAddr,
+        len: u64,
+    ) -> Result<(), crate::filesystem::errors::FSError> {
         if len == 0 {
-            return;
+            return Ok(());
         }
 
-        let _ = self.flush_file_mappings(start, len);
+        self.flush_file_mappings(start, len)?;
 
         let end = start + len;
         let last_mapped_addr = end - 1u64;
@@ -80,6 +88,7 @@ impl AddrSpace {
         }
 
         self.unmap_areas(start, end);
+        Ok(())
     }
 
     // Unmaps the memory_areas inside AddrSpace, not the actual memory.
