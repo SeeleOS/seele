@@ -241,6 +241,7 @@ define_syscall_table!(
     Prlimit64,
     NameToHandleAt,
     Setns,
+    Getcpu,
     Kcmp,
     MemfdCreate,
     Getpriority,

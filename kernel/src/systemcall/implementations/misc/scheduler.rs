@@ -83,10 +83,12 @@ define_syscall!(
 mod tests {
     use crate::systemcall::{
         implementations::{
-            Getpriority, Ioperm, Iopl, IoprioGet, IoprioSet, Madvise, SchedGetPriorityMax,
+            Getcpu, Getpriority, Ioperm, Iopl, IoprioGet, IoprioSet, Madvise, SchedGetPriorityMax,
             SchedGetPriorityMin, SchedGetscheduler, SchedYield, Setpriority,
         },
-        test_helpers::{SyscallArgs, expect_errno, expect_ok},
+        test_helpers::{
+            SyscallArgs, allocate_user_test_page, expect_errno, expect_ok, read_user_value,
+        },
         utils::SyscallError,
     };
 
@@ -165,6 +167,19 @@ mod tests {
             SyscallError::InvalidArguments,
         );
         expect_ok(SyscallArgs::new([0, 1, 1, 0, 0, 0]).call::<Ioperm>(), 0);
+
+        let page = allocate_user_test_page();
+        expect_ok(
+            SyscallArgs::new([page, page + 4, 0, 0, 0, 0]).call::<Getcpu>(),
+            0,
+        );
+        assert_eq!(read_user_value::<u32>(page), 0);
+        assert_eq!(read_user_value::<u32>(page + 4), 0);
+        expect_ok(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Getcpu>(), 0);
+        expect_errno(
+            SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<Getcpu>(),
+            SyscallError::BadAddress,
+        );
     }
 }
 
@@ -227,3 +242,14 @@ define_syscall!(
         Ok(core::mem::size_of::<usize>())
     }
 );
+
+define_syscall!(Getcpu, |cpu: *mut u32, node: *mut u32, _tcache: *mut u8| {
+    if !cpu.is_null() {
+        user_safe::write(cpu, &0u32)?;
+    }
+    if !node.is_null() {
+        user_safe::write(node, &0u32)?;
+    }
+
+    Ok(0)
+});

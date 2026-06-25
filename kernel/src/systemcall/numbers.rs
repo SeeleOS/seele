@@ -234,6 +234,7 @@ pub enum SyscallNumber {
     NameToHandleAt = 303,
     Splice = 275,
     Setns = 308,
+    Getcpu = 309,
     Kcmp = 312,
     MemfdCreate = 319,
     Setrlimit = 160,

@@ -111,6 +111,7 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         ClockGettime => "clock_and_affinity_syscalls_follow_linux_pointer_rules",
         ClockSettime => "clock_and_affinity_syscalls_follow_linux_pointer_rules",
         ClockNanosleep => "clock_and_affinity_syscalls_follow_linux_pointer_rules",
+        Getcpu => "clock_and_affinity_syscalls_follow_linux_pointer_rules",
         SchedSetaffinity => "clock_and_affinity_syscalls_follow_linux_pointer_rules",
         SchedGetaffinity => "clock_and_affinity_syscalls_follow_linux_pointer_rules",
         InotifyInit => "inotify_init_syscalls_follow_linux_flag_rules",
