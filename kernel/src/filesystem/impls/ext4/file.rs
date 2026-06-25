@@ -164,6 +164,7 @@ impl File for Ext4File {
         )
         .with_owner(inode.uid(), inode.gid())
         .with_inode(inode.index.get().into())
+        .with_nlink(inode.links_count().into())
         .with_times(inode_times(&inode)))
     }
 

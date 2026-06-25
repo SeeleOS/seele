@@ -123,7 +123,10 @@ define_syscall!(Reboot, |magic1: u32,
     }
 });
 
-define_syscall!(Sync, { Ok(0) });
+define_syscall!(Sync, {
+    crate::filesystem::vfs::VirtualFS.lock().sync_all()?;
+    Ok(0)
+});
 define_syscall!(
     Getrandom,
     |buf: *mut u8, len: usize, flags: GetRandomFlags| {

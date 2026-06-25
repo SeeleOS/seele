@@ -1042,8 +1042,8 @@ define_syscall!(Flock, |object: ObjectRef, operation: i32| {
     flock_lock(&object, operation)
 });
 
-fn check_syncable_file(object: ObjectRef) -> Result<(), SyscallError> {
-    let stat = object.as_statable()?.stat();
+fn check_syncable_file(object: &ObjectRef) -> Result<(), SyscallError> {
+    let stat = object.clone().as_statable()?.stat();
     match stat.st_mode & S_IFMT {
         S_IFREG | S_IFDIR | S_IFBLK => Ok(()),
         _ => Err(SyscallError::InvalidArguments),
@@ -1051,12 +1051,20 @@ fn check_syncable_file(object: ObjectRef) -> Result<(), SyscallError> {
 }
 
 define_syscall!(Fsync, |object: ObjectRef| {
-    check_syncable_file(object)?;
+    check_syncable_file(&object)?;
+    let file_like = object.as_file_like()?;
+    crate::filesystem::vfs::VirtualFS
+        .lock()
+        .sync_path(file_like.path())?;
     Ok(0)
 });
 
 define_syscall!(Fdatasync, |object: ObjectRef| {
-    check_syncable_file(object)?;
+    check_syncable_file(&object)?;
+    let file_like = object.as_file_like()?;
+    crate::filesystem::vfs::VirtualFS
+        .lock()
+        .sync_path(file_like.path())?;
     Ok(0)
 });
 

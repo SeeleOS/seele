@@ -15,6 +15,7 @@ use ext4plus::{
 };
 
 use crate::filesystem::{
+    block_device::BlockDevice,
     errors::FSError,
     impls::ext4::{directory::Ext4Directory, file::Ext4File},
     info::FileTimes,
@@ -212,6 +213,7 @@ fn directory_is_empty(fs: &Ext4, path: &Path) -> FSResult<bool> {
 /// through the kernel's generic `FileSystem` trait.
 pub struct EXT4 {
     fs: Ext4,
+    device: Option<Arc<dyn BlockDevice>>,
     root_inode: Inode,
     lookup_cache: LookupCache,
     operation_lock: OperationLock,
@@ -219,11 +221,20 @@ pub struct EXT4 {
 
 impl EXT4 {
     pub fn new(fs: Ext4) -> Result<Self> {
+        Self::new_with_optional_device(fs, None)
+    }
+
+    pub fn new_with_device(fs: Ext4, device: Arc<dyn BlockDevice>) -> Result<Self> {
+        Self::new_with_optional_device(fs, Some(device))
+    }
+
+    fn new_with_optional_device(fs: Ext4, device: Option<Arc<dyn BlockDevice>>) -> Result<Self> {
         let root_inode = fs
             .path_to_inode(Ext4Path::new("/"), FollowSymlinks::All)
             .context("ext4 root inode must exist")?;
         Ok(Self {
             fs,
+            device,
             root_inode,
             lookup_cache: Arc::new(Mut::new(LookupCacheState::default())),
             operation_lock: Arc::new(Mut::new(())),
@@ -263,6 +274,13 @@ impl FileSystem for EXT4 {
     }
 
     fn init(&mut self) -> FSResult<()> {
+        Ok(())
+    }
+
+    fn sync(&self) -> FSResult<()> {
+        if let Some(device) = &self.device {
+            device.flush()?;
+        }
         Ok(())
     }
 

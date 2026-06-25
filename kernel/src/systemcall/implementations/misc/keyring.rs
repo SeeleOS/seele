@@ -20,6 +20,10 @@ define_syscall!(AddKey, |type_name: String,
         _ => return Err(SyscallError::NoDevice),
     }
     let _ = resolve_keyring(keyring, true)?;
+    if type_name == "user" {
+        let uid = get_current_process().lock().effective_uid;
+        reserve_user_key_quota(uid, &description, plen)?;
+    }
     let serial = NEXT_KEY_SERIAL.fetch_add(1, Ordering::Relaxed);
     if type_name == "keyring" {
         ensure_keyring_entry(serial, &description);
@@ -72,6 +76,11 @@ define_syscall!(Keyctl, |cmd: u64,
 
 #[cfg(test)]
 mod tests {
+    use super::super::{
+        KEY_USER_DEFAULT_MAX_BYTES, KEY_USER_DEFAULT_MAX_KEYS, proc_key_users_bytes,
+        reserve_user_key_quota,
+    };
+
     use crate::systemcall::{
         implementations::{AddKey, Bpf, Eventfd, Keyctl},
         test::{close_test_fd, expect_fd, write_user_cstr},
@@ -137,6 +146,54 @@ mod tests {
         "add_key keyctl and bpf follow linux rules",
         key_and_bpf_syscalls_follow_linux_rules
     );
+
+    crate::test!(
+        key_user_quota_proc_format,
+        "key user quotas expose Linux-compatible proc fields",
+        key_user_quota_proc_format_matches_linux
+    );
+
+    fn key_user_quota_proc_format_matches_linux() {
+        let uid = 60_001;
+        for index in 0..KEY_USER_DEFAULT_MAX_KEYS {
+            let description = alloc::format!("abc{index}");
+            reserve_user_key_quota(uid, &description, 64)
+                .expect("64-byte keys should reach the max-key limit before max-bytes");
+        }
+
+        let proc = alloc::string::String::from_utf8(proc_key_users_bytes())
+            .expect("/proc/key-users should be UTF-8");
+        let line = proc
+            .lines()
+            .find(|line| line.trim_start().starts_with(&alloc::format!("{uid}:")))
+            .expect("quota entry should be visible in /proc/key-users");
+        let fields = line.split_whitespace().collect::<alloc::vec::Vec<_>>();
+        assert_eq!(fields[0], alloc::format!("{uid}:"));
+        assert_eq!(
+            fields[3],
+            alloc::format!("{0}/{0}", KEY_USER_DEFAULT_MAX_KEYS)
+        );
+        let expected_bytes = (0..KEY_USER_DEFAULT_MAX_KEYS)
+            .map(|index| alloc::format!("abc{index}").len() + 1 + 64)
+            .sum::<usize>();
+        assert_eq!(
+            fields[4],
+            alloc::format!("{expected_bytes}/{KEY_USER_DEFAULT_MAX_BYTES}")
+        );
+
+        expect_errno(
+            reserve_user_key_quota(uid, "overflow", 64).map(|()| 0),
+            SyscallError::QuotaExceeded,
+        );
+
+        let bytes_uid = uid + 1;
+        reserve_user_key_quota(bytes_uid, "near_limit", KEY_USER_DEFAULT_MAX_BYTES - 11)
+            .expect("payload at the byte quota should fit");
+        expect_errno(
+            reserve_user_key_quota(bytes_uid, "x", 0).map(|()| 0),
+            SyscallError::QuotaExceeded,
+        );
+    }
 
     fn key_and_bpf_syscalls_follow_linux_rules() {
         const KEY_SPEC_THREAD_KEYRING: u64 = (-1i32) as u64;

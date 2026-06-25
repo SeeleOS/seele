@@ -190,5 +190,6 @@ PY
 fi
 echo __SEELE_LTP_JSON_END__
 echo __SEELE_LTP_EXIT__:$status
+sync
 exit "$status"
 "#;

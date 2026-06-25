@@ -232,6 +232,9 @@ pub enum DirectoryContentType {
 pub trait FileSystem: Send + Sync {
     fn as_any(&self) -> &dyn Any;
     fn init(&mut self) -> FSResult<()>;
+    fn sync(&self) -> FSResult<()> {
+        Ok(())
+    }
     fn lookup(&self, path: &Path) -> FSResult<FileLike>;
     fn rename(&self, old_path: &Path, new_path: &Path) -> FSResult<()>;
     fn link(&self, old_path: &Path, new_path: &Path) -> FSResult<()>;

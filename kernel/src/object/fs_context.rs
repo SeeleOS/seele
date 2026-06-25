@@ -205,10 +205,10 @@ impl FsContextObject {
         let device: Arc<dyn BlockDevice> =
             Arc::new(CachedBlockDevice::new(block_device.backing_device()));
         let reader = Ext4BlockOperator::new(device.clone());
-        let writer = Ext4BlockOperator::new(device);
+        let writer = Ext4BlockOperator::new(device.clone());
         let ext4 = Ext4Inner::load_with_writer(Box::new(reader), Some(Box::new(writer)))
             .map_err(|_| SyscallError::IOError)?;
-        let ext4 = EXT4::new(ext4).map_err(|_| SyscallError::IOError)?;
+        let ext4 = EXT4::new_with_device(ext4, device).map_err(|_| SyscallError::IOError)?;
         Ok(Arc::new(Mut::new(ext4)))
     }
 

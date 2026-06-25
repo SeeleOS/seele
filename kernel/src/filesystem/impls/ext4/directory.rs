@@ -81,6 +81,7 @@ fn file_like_info_from_inode(
     )
     .with_owner(inode.uid(), inode.gid())
     .with_inode(inode.index.get().into())
+    .with_nlink(inode.links_count().into())
     .with_times(crate::filesystem::impls::ext4::inode_times(inode))
 }
 

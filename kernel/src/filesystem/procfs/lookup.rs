@@ -35,6 +35,11 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             PROC_KPAGEFLAGS_INODE,
             proc_kpageflags_read_at,
         )),
+        ["key-users"] => Ok(proc_file(
+            "key-users",
+            PROC_KEY_USERS_INODE,
+            crate::systemcall::implementations::proc_key_users_bytes,
+        )),
         ["loadavg"] => Ok(proc_file("loadavg", PROC_LOADAVG_INODE, proc_loadavg_bytes)),
         ["meminfo"] => Ok(proc_file("meminfo", PROC_MEMINFO_INODE, proc_meminfo_bytes)),
         ["mounts"] => Ok(proc_file("mounts", PROC_MOUNTS_INODE, proc_mounts_bytes)),

@@ -23,6 +23,7 @@ use crate::filesystem::{
     vfs_traits::{FileLikeType, MountFlags},
 };
 use crate::misc::utsname::{current_domainname, current_hostname, set_domainname, set_hostname};
+use crate::object::traits::Statable;
 use crate::object::tty_device::{get_active_vt, set_active_vt};
 use crate::process::manager::get_current_process;
 
@@ -100,6 +101,16 @@ crate::test!(
     page_cache_cluster_reuse,
     "page cache reuses cached cluster across neighboring pages",
     page_cache_reuses_cached_cluster_for_neighboring_pages
+);
+crate::test!(
+    ext4_hard_link_nlink,
+    "ext4 hard links report shared inode link counts",
+    ext4_hard_links_report_shared_inode_link_counts
+);
+crate::test!(
+    ext4_rename_replace_file_type,
+    "ext4 rename replacement preserves regular file type",
+    ext4_rename_replacement_preserves_regular_file_type
 );
 crate::test!(
     vfs_open_without_reborrowing_virtualfs,
@@ -325,6 +336,101 @@ fn page_cache_reuses_cached_cluster_for_neighboring_pages() {
     assert_eq!(&second.data[4096..4096 + 32], &contents[4096..4096 + 32]);
 
     let _ = VirtualFS.lock().delete_file(path);
+}
+
+fn ext4_hard_links_report_shared_inode_link_counts() {
+    let source = ext4_test_path("ext4-hard-link-nlink-source");
+    let linked = ext4_test_path("ext4-hard-link-nlink-linked");
+    let _ = VirtualFS.lock().delete_file(linked.clone());
+    let _ = VirtualFS.lock().delete_file(source.clone());
+    VirtualFS.lock().create_file(source.clone()).unwrap();
+
+    {
+        let mut vfs = VirtualFS.lock();
+        vfs.link_file(source.clone(), linked.clone()).unwrap();
+    }
+
+    let source_stat = open_path(source.clone()).unwrap().stat();
+    let linked_stat = open_path(linked.clone()).unwrap().stat();
+    assert_eq!(source_stat.st_ino, linked_stat.st_ino);
+    assert_eq!(source_stat.st_nlink, 2);
+    assert_eq!(linked_stat.st_nlink, 2);
+
+    let _ = VirtualFS.lock().delete_file(linked);
+    let _ = VirtualFS.lock().delete_file(source);
+}
+
+fn ext4_rename_replacement_preserves_regular_file_type() {
+    let target = ext4_test_path("ext4-rename-replace-target");
+    let lock_temp = ext4_test_path("ext4-rename-replace-target.1234");
+    let lock = ext4_test_path("ext4-rename-replace-target.lock");
+    let backup_temp = ext4_test_path("ext4-rename-replace-target.cio111111");
+    let backup = ext4_test_path("ext4-rename-replace-target-");
+    let replacement_temp = ext4_test_path("ext4-rename-replace-target.cio222222");
+    let _ = VirtualFS.lock().delete_file(replacement_temp.clone());
+    let _ = VirtualFS.lock().delete_file(backup.clone());
+    let _ = VirtualFS.lock().delete_file(backup_temp.clone());
+    let _ = VirtualFS.lock().delete_file(lock.clone());
+    let _ = VirtualFS.lock().delete_file(lock_temp.clone());
+    let _ = VirtualFS.lock().delete_file(target.clone());
+    VirtualFS.lock().create_file(target.clone()).unwrap();
+
+    let target_file = open_path(target.clone()).unwrap();
+    target_file.write_exact_at(b"original", 0).unwrap();
+
+    VirtualFS.lock().create_file(lock_temp.clone()).unwrap();
+    {
+        let mut vfs = VirtualFS.lock();
+        vfs.link_file(lock_temp.clone(), lock.clone()).unwrap();
+        vfs.delete_file(lock_temp.clone()).unwrap();
+    }
+
+    VirtualFS.lock().create_file(backup_temp.clone()).unwrap();
+    let backup_temp_file = open_path(backup_temp.clone()).unwrap();
+    backup_temp_file.write_exact_at(b"original", 0).unwrap();
+    VirtualFS
+        .lock()
+        .rename_file(backup_temp.clone(), backup.clone())
+        .unwrap();
+
+    VirtualFS
+        .lock()
+        .create_file(replacement_temp.clone())
+        .unwrap();
+    let replacement_file = open_path(replacement_temp.clone()).unwrap();
+    replacement_file.write_exact_at(b"replacement", 0).unwrap();
+    VirtualFS
+        .lock()
+        .rename_file(replacement_temp.clone(), target.clone())
+        .unwrap();
+    VirtualFS.lock().delete_file(lock.clone()).unwrap();
+
+    let target_file = open_path(target.clone()).unwrap();
+    let stat = target_file.stat();
+    assert_eq!(stat.st_mode & 0o170000, 0o100000);
+    assert!(matches!(
+        VirtualFS.lock().open(replacement_temp.clone()),
+        Err(FSError::NotFound)
+    ));
+
+    let mut buffer = [0; 11];
+    target_file.read_exact_at(&mut buffer, 0).unwrap();
+    assert_eq!(&buffer, b"replacement");
+
+    let backup_file = open_path(backup.clone()).unwrap();
+    let backup_stat = backup_file.stat();
+    assert_eq!(backup_stat.st_mode & 0o170000, 0o100000);
+
+    let mut backup_buffer = [0; 8];
+    backup_file.read_exact_at(&mut backup_buffer, 0).unwrap();
+    assert_eq!(&backup_buffer[..8], b"original");
+
+    let _ = VirtualFS.lock().delete_file(replacement_temp);
+    let _ = VirtualFS.lock().delete_file(backup);
+    let _ = VirtualFS.lock().delete_file(backup_temp);
+    let _ = VirtualFS.lock().delete_file(lock);
+    let _ = VirtualFS.lock().delete_file(lock_temp);
+    let _ = VirtualFS.lock().delete_file(target);
 }
 
 fn staticfs_exposes_metadata_tree_shape_and_readonly_rules() {

@@ -193,6 +193,8 @@ const KEY_SPEC_SESSION_KEYRING: i32 = -3;
 const KEY_SPEC_USER_KEYRING: i32 = -4;
 const KEY_SPEC_USER_SESSION_KEYRING: i32 = -5;
 const KEY_USER_MAX_PAYLOAD: usize = 32_767;
+const KEY_USER_DEFAULT_MAX_KEYS: usize = 200;
+const KEY_USER_DEFAULT_MAX_BYTES: usize = 20_000;
 
 static NEXT_SESSION_KEYRING_ID: AtomicI32 = AtomicI32::new(1);
 static NEXT_KEY_SERIAL: AtomicI32 = AtomicI32::new(1024);
@@ -201,6 +203,7 @@ lazy_static! {
     static ref KEY_REGISTRY: Mut<BTreeMap<i32, KeyEntry>> = Mut::new(BTreeMap::new());
     static ref USER_KEYRINGS: Mut<BTreeMap<(u32, UserKeyringKind), i32>> =
         Mut::new(BTreeMap::new());
+    static ref KEY_USER_QUOTAS: Mut<BTreeMap<u32, KeyUserQuota>> = Mut::new(BTreeMap::new());
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -216,6 +219,12 @@ struct KeyEntry {
     links: Vec<i32>,
     is_keyring: bool,
     revoked: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+struct KeyUserQuota {
+    keys: usize,
+    bytes: usize,
 }
 
 #[repr(C)]
@@ -360,6 +369,47 @@ fn ensure_keyring_entry(serial: i32, description: &str) {
 
 fn ensure_key_entry(serial: i32) {
     KEY_REGISTRY.lock().entry(serial).or_default();
+}
+
+fn key_user_payload_bytes(description: &str, plen: usize) -> usize {
+    description.len().saturating_add(1).saturating_add(plen)
+}
+
+fn reserve_user_key_quota(uid: u32, description: &str, plen: usize) -> Result<(), SyscallError> {
+    if uid == 0 {
+        return Ok(());
+    }
+
+    let bytes = key_user_payload_bytes(description, plen);
+    let mut quotas = KEY_USER_QUOTAS.lock();
+    let quota = quotas.entry(uid).or_default();
+    if quota.keys.saturating_add(1) > KEY_USER_DEFAULT_MAX_KEYS
+        || quota.bytes.saturating_add(bytes) > KEY_USER_DEFAULT_MAX_BYTES
+    {
+        return Err(SyscallError::QuotaExceeded);
+    }
+
+    quota.keys += 1;
+    quota.bytes += bytes;
+    Ok(())
+}
+
+pub(crate) fn proc_key_users_bytes() -> Vec<u8> {
+    let quotas = KEY_USER_QUOTAS.lock();
+    let mut out = String::new();
+    for (uid, quota) in quotas.iter() {
+        out.push_str(&alloc::format!(
+            "{uid:5}: {:5} {}/{} {}/{} {}/{}\n",
+            0,
+            quota.keys,
+            quota.keys,
+            quota.keys,
+            KEY_USER_DEFAULT_MAX_KEYS,
+            quota.bytes,
+            KEY_USER_DEFAULT_MAX_BYTES,
+        ));
+    }
+    out.into_bytes()
 }
 
 fn set_key_permissions(serial: i32, permissions: u32) -> Result<(), SyscallError> {

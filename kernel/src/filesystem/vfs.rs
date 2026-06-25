@@ -90,7 +90,7 @@ impl VFS {
         ));
         log::info!("vfs: loading ext4 from root block device");
         let reader = Ext4BlockOperator::new(block_device.clone());
-        let writer = Ext4BlockOperator::new(block_device);
+        let writer = Ext4BlockOperator::new(block_device.clone());
         let ext4 = Ext4Inner::load_with_writer(Box::new(reader), Some(Box::new(writer)))
             .context("failed to load root ext4 filesystem")
             .map_err(|err| {
@@ -99,7 +99,7 @@ impl VFS {
                 FSError::Other
             })?;
         log::info!("vfs: ext4 loaded");
-        let ext4 = EXT4::new(ext4).map_err(|err| {
+        let ext4 = EXT4::new_with_device(ext4, block_device).map_err(|err| {
             let err = KernelError::from(err);
             log::error!("vfs: {err:?}");
             FSError::Other
@@ -429,6 +429,18 @@ impl VFS {
             mount.source_path.clone(),
             mount.flags,
         ))
+    }
+
+    pub fn sync_all(&self) -> FSResult<()> {
+        for mount in &self.mounts {
+            mount.fs.lock().sync()?;
+        }
+        Ok(())
+    }
+
+    pub fn sync_path(&self, path: Path) -> FSResult<()> {
+        let (mount, _) = self.find_mount(&self.normalize_path(path))?;
+        mount.fs.lock().sync()
     }
 
     pub fn mount_metadata_with_propagation(
