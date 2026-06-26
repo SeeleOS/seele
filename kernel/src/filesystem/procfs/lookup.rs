@@ -281,6 +281,12 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             || proc_sysctl_value_bytes(&PROC_NR_OPEN),
             |buffer| proc_write_sysctl_u64(&PROC_NR_OPEN, buffer),
         )),
+        ["sys", "fs", "pipe-max-size"] => Ok(proc_rw_file(
+            "pipe-max-size",
+            PROC_SYS_FS_PIPE_MAX_SIZE_INODE,
+            || proc_sysctl_value_bytes(&PROC_PIPE_MAX_SIZE),
+            |buffer| proc_write_sysctl_u64(&PROC_PIPE_MAX_SIZE, buffer),
+        )),
         ["self", ..] => lookup_proc_self_path(&parts),
         [pid, ..] if parse_pid(pid).is_ok() => lookup_proc_pid_path(&parts),
         _ => Err(FSError::NotFound),

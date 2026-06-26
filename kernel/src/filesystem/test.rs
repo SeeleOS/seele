@@ -896,6 +896,24 @@ fn procfs_exposes_dynamic_pid_entries_symlinks_and_writable_control_nodes() {
         Err(FSError::Other)
     ));
 
+    let FileLike::File(pipe_max_size) = fs.lookup(&Path::new("/sys/fs/pipe-max-size")).unwrap()
+    else {
+        panic!("pipe-max-size should be writable");
+    };
+    let mut pipe_max_size = pipe_max_size.lock();
+    assert_eq!(pipe_max_size.write(b" 65536\n").unwrap(), 7);
+    pipe_max_size.seek(0, Whence::Start).unwrap();
+    let mut pipe_max_size_bytes = [0; 32];
+    let pipe_max_size_read = pipe_max_size.read(&mut pipe_max_size_bytes).unwrap();
+    assert_eq!(
+        str::from_utf8(&pipe_max_size_bytes[..pipe_max_size_read]).unwrap(),
+        "65536\n"
+    );
+    assert!(matches!(
+        pipe_max_size.write(b"not-a-number"),
+        Err(FSError::Other)
+    ));
+
     let oom_path = format!("/{}/oom_score_adj", current_pid.0);
     let FileLike::File(oom_score_adj) = fs.lookup(&Path::new(&oom_path)).unwrap() else {
         panic!("oom_score_adj should be writable");

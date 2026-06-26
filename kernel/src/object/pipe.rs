@@ -5,6 +5,7 @@ use alloc::{
 
 use crate::{
     filesystem::info::LinuxStat,
+    filesystem::procfs::PROC_PIPE_MAX_SIZE,
     impl_cast_function, impl_cast_function_non_trait,
     memory::utils::Mut,
     object::{
@@ -15,11 +16,14 @@ use crate::{
     },
     polling::{event::PollableEvent, object::Pollable, wait_for_object_event},
     socket::SocketError,
+    systemcall::utils::SyscallError,
     thread::yielding::wake_pollers_for_object,
 };
+use core::sync::atomic::Ordering;
 
 pub const PIPE_CAPACITY: usize = 64 * 1024;
 const PIPE_BUF: usize = 4096;
+const PIPE_MAX_SIZE_LIMIT: usize = 1 << 31;
 
 #[derive(Debug)]
 struct PipeState {
@@ -54,7 +58,7 @@ impl PipeEndpoint {
         let inner = Arc::new(PipeInner {
             state: Mut::new(PipeState {
                 buffer: VecDeque::new(),
-                capacity: PIPE_CAPACITY,
+                capacity: default_pipe_capacity(),
                 readers: 0,
                 writers: 0,
             }),
@@ -137,12 +141,31 @@ impl PipeEndpoint {
         self.inner.state.lock().capacity
     }
 
-    pub fn set_capacity(&self, capacity: usize) -> ObjectResult<usize> {
-        let capacity = capacity.clamp(4096, PIPE_CAPACITY);
+    pub fn set_capacity(&self, capacity: usize) -> Result<usize, SyscallError> {
+        if capacity > PIPE_MAX_SIZE_LIMIT {
+            return Err(SyscallError::InvalidArguments);
+        }
+
+        let pipe_max_size = proc_pipe_max_size();
         let mut state = self.inner.state.lock();
-        state.capacity = capacity.max(state.buffer.len());
+        if capacity < state.buffer.len() {
+            return Err(SyscallError::DeviceOrResourceBusy);
+        }
+        if capacity > pipe_max_size {
+            return Err(SyscallError::PermissionDenied);
+        }
+
+        state.capacity = capacity.max(PIPE_BUF);
         Ok(state.capacity)
     }
+}
+
+fn proc_pipe_max_size() -> usize {
+    PROC_PIPE_MAX_SIZE.load(Ordering::Relaxed) as usize
+}
+
+fn default_pipe_capacity() -> usize {
+    PIPE_CAPACITY.min(proc_pipe_max_size()).max(PIPE_BUF)
 }
 
 impl Object for PipeEndpoint {
