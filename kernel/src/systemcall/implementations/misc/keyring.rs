@@ -93,22 +93,24 @@ define_syscall!(RequestKey, |type_name_ptr: *const u8,
         Err(err) => return Err(err),
     };
 
-    if type_name == "keyring" && !keyring_allows_write(keyring)? {
+    let can_write = keyring_allows_write(keyring)?;
+    if type_name == "keyring" && !can_write {
         return Err(SyscallError::AccessDenied);
     }
 
-    let serial = NEXT_KEY_SERIAL.fetch_add(1, Ordering::Relaxed);
     if type_name == "keyring" {
+        let serial = NEXT_KEY_SERIAL.fetch_add(1, Ordering::Relaxed);
         ensure_keyring_entry(serial, &description);
-    } else {
+        link_key_into_keyring(serial, keyring)?;
+        return Ok(serial as usize);
+    }
+
+    if can_write {
+        let serial = NEXT_KEY_SERIAL.fetch_add(1, Ordering::Relaxed);
         ensure_negative_key_entry(serial, &type_name, &description);
+        link_key_into_keyring(serial, keyring)?;
     }
-    link_key_into_keyring(serial, keyring)?;
-    if type_name == "keyring" {
-        Ok(serial as usize)
-    } else {
-        Err(SyscallError::NoKey)
-    }
+    Err(SyscallError::NoKey)
 });
 
 fn keyctl_key_serial(spec: u64) -> Result<i32, SyscallError> {
