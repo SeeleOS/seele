@@ -219,12 +219,27 @@ mod tests {
         {
             let mut process = process.lock();
             process.capability_effective = [0x1111_1111, 0x22];
-            process.capability_permitted = [0x3333_3333, 0x44];
-            process.capability_inheritable = [0x5555_5555, 0x66];
+            process.capability_permitted = [0xffff_ffff, 0xffff];
+            process.capability_inheritable = [0xffff_ffff, 0xffff_ffff];
         }
 
         let cap_page = allocate_user_test_page();
         write_user_value(cap_page, &TestLinuxCapHeader { version: 0, pid: 0 });
+        expect_errno(
+            SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capget>(),
+            SyscallError::InvalidArguments,
+        );
+        let header = read_user_value::<TestLinuxCapHeader>(cap_page);
+        assert_eq!(header.version, LINUX_CAPABILITY_VERSION_3);
+        assert_eq!(header.pid, 0);
+
+        write_user_value(
+            cap_page,
+            &TestLinuxCapHeader {
+                version: LINUX_CAPABILITY_VERSION_3,
+                pid: 0,
+            },
+        );
         expect_ok(
             SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capget>(),
             0,
@@ -235,11 +250,33 @@ mod tests {
         let cap0 = read_user_value::<TestLinuxCapData>(cap_page + 16);
         let cap1 = read_user_value::<TestLinuxCapData>(cap_page + 28);
         assert_eq!(cap0.effective, 0x1111_1111);
-        assert_eq!(cap0.permitted, 0x3333_3333);
-        assert_eq!(cap0.inheritable, 0x5555_5555);
+        assert_eq!(cap0.permitted, 0xffff_ffff);
+        assert_eq!(cap0.inheritable, 0xffff_ffff);
         assert_eq!(cap1.effective, 0x22);
-        assert_eq!(cap1.permitted, 0x44);
-        assert_eq!(cap1.inheritable, 0x66);
+        assert_eq!(cap1.permitted, 0xffff);
+        assert_eq!(cap1.inheritable, 0xffff_ffff);
+        write_user_value(
+            cap_page,
+            &TestLinuxCapHeader {
+                version: LINUX_CAPABILITY_VERSION_3,
+                pid: -1,
+            },
+        );
+        expect_errno(
+            SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capget>(),
+            SyscallError::InvalidArguments,
+        );
+        write_user_value(
+            cap_page,
+            &TestLinuxCapHeader {
+                version: LINUX_CAPABILITY_VERSION_3,
+                pid: i32::MAX,
+            },
+        );
+        expect_errno(
+            SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capget>(),
+            SyscallError::NoProcess,
+        );
         expect_errno(
             SyscallArgs::new([0, cap_page + 16, 0, 0, 0, 0]).call::<Capget>(),
             SyscallError::BadAddress,
@@ -259,7 +296,7 @@ mod tests {
                 inheritable: 0xcc,
             },
             TestLinuxCapData {
-                effective: 0xdd,
+                effective: 0xcc,
                 permitted: 0xee,
                 inheritable: 0xff,
             },
@@ -271,7 +308,7 @@ mod tests {
         );
         {
             let process = process.lock();
-            assert_eq!(process.capability_effective, [0xaa, 0xdd]);
+            assert_eq!(process.capability_effective, [0xaa, 0xcc]);
             assert_eq!(process.capability_permitted, [0xbb, 0xee]);
             assert_eq!(process.capability_inheritable, [0xcc, 0xff]);
         }
@@ -285,6 +322,82 @@ mod tests {
         expect_errno(
             SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capset>(),
             SyscallError::InvalidArguments,
+        );
+        let header = read_user_value::<TestLinuxCapHeader>(cap_page);
+        assert_eq!(header.version, LINUX_CAPABILITY_VERSION_3);
+        write_user_value(
+            cap_page,
+            &TestLinuxCapHeader {
+                version: LINUX_CAPABILITY_VERSION_3,
+                pid: -1,
+            },
+        );
+        expect_errno(
+            SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capset>(),
+            SyscallError::InvalidArguments,
+        );
+        write_user_value(
+            cap_page,
+            &TestLinuxCapHeader {
+                version: LINUX_CAPABILITY_VERSION_3,
+                pid: i32::MAX,
+            },
+        );
+        expect_errno(
+            SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capset>(),
+            SyscallError::PermissionDenied,
+        );
+        write_user_value(
+            cap_page,
+            &TestLinuxCapHeader {
+                version: LINUX_CAPABILITY_VERSION_3,
+                pid: 0,
+            },
+        );
+        write_user_value(
+            cap_page + 16,
+            &[
+                TestLinuxCapData {
+                    effective: 0x4,
+                    permitted: 0,
+                    inheritable: 0,
+                },
+                TestLinuxCapData::default(),
+            ],
+        );
+        expect_errno(
+            SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capset>(),
+            SyscallError::PermissionDenied,
+        );
+        write_user_value(
+            cap_page + 16,
+            &[
+                TestLinuxCapData {
+                    effective: 0,
+                    permitted: 0x100,
+                    inheritable: 0,
+                },
+                TestLinuxCapData::default(),
+            ],
+        );
+        expect_errno(
+            SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capset>(),
+            SyscallError::PermissionDenied,
+        );
+        write_user_value(
+            cap_page + 16,
+            &[
+                TestLinuxCapData {
+                    effective: 0,
+                    permitted: 0,
+                    inheritable: 0x100,
+                },
+                TestLinuxCapData::default(),
+            ],
+        );
+        expect_errno(
+            SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capset>(),
+            SyscallError::PermissionDenied,
         );
         expect_errno(
             SyscallArgs::new([0, cap_page + 16, 0, 0, 0, 0]).call::<Capset>(),

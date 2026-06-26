@@ -183,6 +183,7 @@ const RSEQ_CPU_ID_SINGLE_CORE: u32 = 0;
 const INITIAL_BRK_RESERVE: u64 = 0x4000_0000;
 const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
 const LINUX_CAPABILITY_U32S_3: usize = 2;
+const CAP_SETPCAP: usize = 8;
 const LINUX_REBOOT_MAGIC1: u32 = 0xfee1_dead;
 const LINUX_REBOOT_MAGIC2: u32 = 0x2812_1969;
 const LINUX_REBOOT_CMD_CAD_OFF: u32 = 0x0000_0000;
@@ -242,18 +243,38 @@ struct LinuxCapData {
     inheritable: u32,
 }
 
-fn capability_header_targets_current_process(header: &LinuxCapHeader) -> bool {
-    header.pid == 0 || header.pid == get_current_process().lock().pid.0 as i32
+fn capability_header_target_pid(
+    header: &LinuxCapHeader,
+) -> Result<Option<ProcessID>, SyscallError> {
+    if header.pid < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if header.pid == 0 {
+        return Ok(None);
+    }
+    Ok(Some(ProcessID(header.pid as u64)))
 }
 
-fn current_capability_data() -> [LinuxCapData; LINUX_CAPABILITY_U32S_3] {
-    let process = get_current_process();
+fn capability_header_targets_current_process(
+    header: &LinuxCapHeader,
+) -> Result<bool, SyscallError> {
+    let Some(pid) = capability_header_target_pid(header)? else {
+        return Ok(true);
+    };
+    Ok(pid == get_current_process().lock().pid)
+}
+
+fn capability_data_for_process(process: &ProcessRef) -> [LinuxCapData; LINUX_CAPABILITY_U32S_3] {
     let process = process.lock();
     core::array::from_fn(|index| LinuxCapData {
         effective: process.capability_effective[index],
         permitted: process.capability_permitted[index],
         inheritable: process.capability_inheritable[index],
     })
+}
+
+fn current_capability_data() -> [LinuxCapData; LINUX_CAPABILITY_U32S_3] {
+    capability_data_for_process(&get_current_process())
 }
 
 fn capability_slot_and_mask(capability: u64) -> Result<(usize, u32), SyscallError> {
@@ -265,6 +286,41 @@ fn capability_slot_and_mask(capability: u64) -> Result<(usize, u32), SyscallErro
         .checked_shl((capability % 32) as u32)
         .ok_or(SyscallError::InvalidArguments)?;
     Ok((slot, mask))
+}
+
+fn has_capability_bits(caps: &[u32; LINUX_CAPABILITY_U32S_3], capability: usize) -> bool {
+    let slot = capability / 32;
+    let mask = 1u32 << (capability % 32);
+    caps[slot] & mask != 0
+}
+
+fn validate_capset_data(
+    new_data: &[LinuxCapData; LINUX_CAPABILITY_U32S_3],
+) -> Result<(), SyscallError> {
+    let process = get_current_process();
+    let process = process.lock();
+    let has_setpcap = has_capability_bits(&process.capability_effective, CAP_SETPCAP);
+
+    for (index, caps) in new_data.iter().enumerate() {
+        if caps.effective & !caps.permitted != 0 {
+            return Err(SyscallError::PermissionDenied);
+        }
+        if caps.permitted & !process.capability_permitted[index] != 0 {
+            return Err(SyscallError::PermissionDenied);
+        }
+
+        let allowed_inheritable = if has_setpcap {
+            process.capability_inheritable[index]
+                | (process.capability_permitted[index] & process.capability_bounding[index])
+        } else {
+            process.capability_inheritable[index]
+        };
+        if caps.inheritable & !allowed_inheritable != 0 {
+            return Err(SyscallError::PermissionDenied);
+        }
+    }
+
+    Ok(())
 }
 
 fn next_keyring_id() -> i32 {
