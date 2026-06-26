@@ -60,6 +60,9 @@ pub(super) fn validate_user_xattr_target(
     object: &FileLikeObject,
     name: &str,
 ) -> Result<(), SyscallError> {
+    if !name.starts_with("user.") {
+        return Ok(());
+    }
     validate_user_xattr_mode(object.stat().st_mode, name)
 }
 

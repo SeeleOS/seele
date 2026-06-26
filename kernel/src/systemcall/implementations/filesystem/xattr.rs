@@ -46,12 +46,14 @@ define_syscall!(Setxattr, |path: CString,
     validate_xattr_flags(flags)?;
     let value = xattr_value_from_user(value, size)?;
     let (create, replace) = xattr_flag_modes(flags);
-    validate_user_xattr_mode(
-        file_info_path(resolve_path_at(AT_FDCWD, &path_str)?)?
-            .as_linux()
-            .st_mode,
-        &name,
-    )?;
+    if name.starts_with("user.") {
+        validate_user_xattr_mode(
+            file_info_path(resolve_path_at(AT_FDCWD, &path_str)?)?
+                .as_linux()
+                .st_mode,
+            &name,
+        )?;
+    }
     let object = xattr_path_object_at(AT_FDCWD, &path_str, false)?;
     object
         .set_xattr(name, value, create, replace)
@@ -69,13 +71,15 @@ define_syscall!(Lsetxattr, |path: CString,
     validate_xattr_flags(flags)?;
     let value = xattr_value_from_user(value, size)?;
     let (create, replace) = xattr_flag_modes(flags);
-    validate_user_xattr_mode(
-        resolve_path_info_with_final(resolve_path_at(AT_FDCWD, &path_str)?, true)?
-            .0
-            .as_linux()
-            .st_mode,
-        &name,
-    )?;
+    if name.starts_with("user.") {
+        validate_user_xattr_mode(
+            resolve_path_info_with_final(resolve_path_at(AT_FDCWD, &path_str)?, true)?
+                .0
+                .as_linux()
+                .st_mode,
+            &name,
+        )?;
+    }
     let object = xattr_path_object_at(AT_FDCWD, &path_str, true)?;
     object
         .lset_xattr(name, value, create, replace)
