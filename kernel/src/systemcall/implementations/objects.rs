@@ -948,6 +948,7 @@ define_syscall!(Writev, |object: ObjectRef,
                          iovcnt: i32| {
     ensure_object_writable(&object)?;
     let iovs = read_iovecs_for_syscall(iov_ptr, iovcnt)?;
+    iovec_total_len(&iovs)?;
     validate_iovecs_readable(&iovs)?;
     let writable = object.clone().as_writable()?;
     match write_from_iovecs(&iovs, |bytes, _total| {
