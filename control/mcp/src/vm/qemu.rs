@@ -191,7 +191,7 @@ pub fn vm_status(repo: &Path) -> VmStatus {
         running,
         qemu_pid,
         qmp_socket: config.qmp_socket.clone(),
-        qmp_connectable: config.qmp_socket.exists(),
+        qmp_connectable: qmp_connectable(&config.qmp_socket),
         serial_log_exists: config.serial_log.exists(),
         serial_log: config.serial_log,
     }
@@ -446,12 +446,15 @@ fn wait_for_qmp_or_exit(
             let _ = fs::remove_file(&qemu_pid_path);
             return Ok(1);
         }
-        if qmp_socket.exists() {
+        if qmp_connectable(qmp_socket) {
             return Ok(0);
         }
         if let Some(status) = child.try_wait().context("failed to poll qemu")? {
             let _ = fs::remove_file(&qemu_pid_path);
-            return Ok(status.code().unwrap_or(1).max(1));
+            bail!(
+                "qemu exited before QMP became connectable with code {}",
+                status.code().unwrap_or(1).max(1)
+            );
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
@@ -461,6 +464,10 @@ fn wait_for_qmp_or_exit(
         }
         thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn qmp_connectable(qmp_socket: &Path) -> bool {
+    UnixStream::connect(qmp_socket).is_ok()
 }
 
 fn decode_qemu_exit_code(code: Option<i32>) -> i32 {
