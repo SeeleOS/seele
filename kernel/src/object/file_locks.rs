@@ -43,7 +43,7 @@ pub(super) enum AdvisoryLockApi {
     Flock,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum AdvisoryLockOwner {
     Process(ProcessID),
     OpenFileDescription(usize),
@@ -69,8 +69,16 @@ pub(super) struct ParsedFlockRequest {
     pub(super) range: AdvisoryLockRange,
 }
 
+#[derive(Clone, Debug)]
+struct AdvisoryLockWait {
+    key: String,
+    lock: AdvisoryLock,
+}
+
 lazy_static! {
     static ref ADVISORY_LOCKS: Mut<BTreeMap<String, Vec<AdvisoryLock>>> = Mut::new(BTreeMap::new());
+    static ref ADVISORY_LOCK_WAITS: Mut<BTreeMap<AdvisoryLockOwner, AdvisoryLockWait>> =
+        Mut::new(BTreeMap::new());
 }
 
 pub(crate) fn fcntl_get_lock(object: &ObjectRef, arg: *mut LinuxFlock, ofd: bool) -> SyscallResult {
@@ -137,23 +145,21 @@ pub(crate) fn fcntl_set_lock(
     let requested = parse_flock_request(&flock, object)?;
     let owner = lock_owner(object, ofd);
     let key = lock_key(object)?;
+    let requested_lock = requested.lock_type.map(|lock_type| AdvisoryLock {
+        api: AdvisoryLockApi::Posix,
+        owner,
+        lock_type,
+        range: requested.range,
+    });
 
     loop {
         let mut changed = false;
         let conflict = {
             let mut locks = ADVISORY_LOCKS.lock();
             let entries = locks.entry(key.clone()).or_default();
-            if let Some(conflict) = find_conflict(
-                entries,
-                owner,
-                requested.lock_type.map(|lock_type| AdvisoryLock {
-                    api: AdvisoryLockApi::Posix,
-                    owner,
-                    lock_type,
-                    range: requested.range,
-                }),
-                AdvisoryLockApi::Posix,
-            ) {
+            if let Some(conflict) =
+                find_conflict(entries, owner, requested_lock, AdvisoryLockApi::Posix)
+            {
                 Some(conflict)
             } else {
                 apply_posix_lock(entries, owner, requested);
@@ -166,6 +172,7 @@ pub(crate) fn fcntl_set_lock(
         };
 
         if conflict.is_none() {
+            clear_lock_wait(owner);
             if changed {
                 wake_lock_waiters();
             }
@@ -174,11 +181,22 @@ pub(crate) fn fcntl_set_lock(
         if !blocking {
             return Err(SyscallError::TryAgain);
         }
+        if let Some(lock) = requested_lock {
+            let conflict = conflict.expect("conflict checked above");
+            if lock_wait_chain_reaches(conflict.owner, owner) {
+                return Err(SyscallError::ResourceDeadlock);
+            }
+            set_lock_wait(owner, key.clone(), lock);
+        }
 
-        block_current_with_sig_check(BlockType::WakeRequired {
+        let wait_result = block_current_with_sig_check(BlockType::WakeRequired {
             wake_type: WakeType::IO,
             deadline: None,
-        })?;
+        });
+        if wait_result.is_err() {
+            clear_lock_wait(owner);
+        }
+        wait_result?;
     }
 }
 
@@ -221,6 +239,7 @@ pub(crate) fn flock_lock(object: &ObjectRef, operation: i32) -> SyscallResult {
         };
 
         if conflict.is_none() {
+            clear_lock_wait(owner);
             if changed {
                 wake_lock_waiters();
             }
@@ -229,11 +248,22 @@ pub(crate) fn flock_lock(object: &ObjectRef, operation: i32) -> SyscallResult {
         if !blocking {
             return Err(SyscallError::TryAgain);
         }
+        if let Some(lock) = requested_type {
+            let conflict = conflict.expect("conflict checked above");
+            if lock_wait_chain_reaches(conflict.owner, owner) {
+                return Err(SyscallError::ResourceDeadlock);
+            }
+            set_lock_wait(owner, key.clone(), lock);
+        }
 
-        block_current_with_sig_check(BlockType::WakeRequired {
+        let wait_result = block_current_with_sig_check(BlockType::WakeRequired {
             wake_type: WakeType::IO,
             deadline: None,
-        })?;
+        });
+        if wait_result.is_err() {
+            clear_lock_wait(owner);
+        }
+        wait_result?;
     }
 }
 
@@ -513,6 +543,7 @@ impl AdvisoryLockOwner {
 }
 
 fn release_process_lock(key: &str, process_pid: ProcessID) -> bool {
+    clear_lock_wait(AdvisoryLockOwner::Process(process_pid));
     let mut locks = ADVISORY_LOCKS.lock();
     let Some(entries) = locks.get_mut(key) else {
         return false;
@@ -527,6 +558,7 @@ fn release_process_lock(key: &str, process_pid: ProcessID) -> bool {
 }
 
 fn release_ofd_lock(key: &str, owner: usize) -> bool {
+    clear_lock_wait(AdvisoryLockOwner::OpenFileDescription(owner));
     let mut locks = ADVISORY_LOCKS.lock();
     let Some(entries) = locks.get_mut(key) else {
         return false;
@@ -538,6 +570,63 @@ fn release_ofd_lock(key: &str, owner: usize) -> bool {
         locks.remove(key);
     }
     changed
+}
+
+fn set_lock_wait(owner: AdvisoryLockOwner, key: String, lock: AdvisoryLock) {
+    ADVISORY_LOCK_WAITS
+        .lock()
+        .insert(owner, AdvisoryLockWait { key, lock });
+}
+
+fn clear_lock_wait(owner: AdvisoryLockOwner) {
+    ADVISORY_LOCK_WAITS.lock().remove(&owner);
+}
+
+#[cfg(test)]
+pub(super) fn set_lock_wait_for_test(owner: AdvisoryLockOwner, key: String, lock: AdvisoryLock) {
+    set_lock_wait(owner, key, lock);
+}
+
+#[cfg(test)]
+pub(super) fn set_locks_for_test(key: String, locks: &[AdvisoryLock]) {
+    ADVISORY_LOCKS.lock().insert(key, locks.into());
+}
+
+#[cfg(test)]
+pub(super) fn clear_lock_test_state() {
+    ADVISORY_LOCKS.lock().clear();
+    ADVISORY_LOCK_WAITS.lock().clear();
+}
+
+pub(super) fn lock_wait_chain_reaches(start: AdvisoryLockOwner, target: AdvisoryLockOwner) -> bool {
+    let waits = ADVISORY_LOCK_WAITS.lock();
+    let locks = ADVISORY_LOCKS.lock();
+    let mut stack = vec![start];
+    let mut visited = Vec::new();
+
+    while let Some(owner) = stack.pop() {
+        if owner == target {
+            return true;
+        }
+        if visited.contains(&owner) {
+            continue;
+        }
+        visited.push(owner);
+
+        let Some(wait) = waits.get(&owner) else {
+            continue;
+        };
+        let Some(entries) = locks.get(&wait.key) else {
+            continue;
+        };
+        for entry in entries {
+            if find_conflict(&[*entry], wait.lock.owner, Some(wait.lock), wait.lock.api).is_some() {
+                stack.push(entry.owner);
+            }
+        }
+    }
+
+    false
 }
 
 fn wake_lock_waiters() {

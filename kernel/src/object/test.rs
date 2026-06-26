@@ -9,8 +9,8 @@ use crate::{
         error::ObjectError,
         file_locks::{
             AdvisoryLock, AdvisoryLockApi, AdvisoryLockOwner, AdvisoryLockRange, AdvisoryLockType,
-            F_RDLCK, F_WRLCK, apply_posix_lock, find_conflict, parse_flock_operation,
-            ranges_overlap,
+            F_RDLCK, F_WRLCK, apply_posix_lock, find_conflict, lock_wait_chain_reaches,
+            parse_flock_operation, ranges_overlap,
         },
         linux_ioctl_semantics::{
             KNOWN_LINUX_IOCTL_COVERAGE_GAPS, LINUX_IOCTL_SEMANTICS_COVERAGE, LinuxIoctlTestKind,
@@ -52,6 +52,11 @@ crate::test!(
     file_lock_posix_merge,
     "posix file locks merge adjacent ranges and split unlocks",
     posix_file_locks_merge_adjacent_ranges_and_split_unlocks
+);
+crate::test!(
+    file_lock_deadlock_detection,
+    "posix file locks detect owner wait cycles",
+    posix_file_locks_detect_owner_wait_cycles
 );
 crate::test!(
     flock_operation_parsing,
@@ -303,6 +308,39 @@ fn posix_file_locks_merge_adjacent_ranges_and_split_unlocks() {
             end: Some(20)
         }
     );
+}
+
+fn posix_file_locks_detect_owner_wait_cycles() {
+    let owner_a = AdvisoryLockOwner::Process(ProcessID(10));
+    let owner_b = AdvisoryLockOwner::Process(ProcessID(11));
+    let lock_a = AdvisoryLock {
+        api: AdvisoryLockApi::Posix,
+        owner: owner_a,
+        lock_type: AdvisoryLockType::Write,
+        range: AdvisoryLockRange {
+            start: 0,
+            end: Some(10),
+        },
+    };
+    let lock_b = AdvisoryLock {
+        owner: owner_b,
+        range: AdvisoryLockRange {
+            start: 20,
+            end: Some(30),
+        },
+        ..lock_a
+    };
+    let wait_b_on_a = AdvisoryLock {
+        owner: owner_b,
+        range: lock_a.range,
+        ..lock_b
+    };
+
+    crate::object::file_locks::set_lock_wait_for_test(owner_b, "deadlock-test".into(), wait_b_on_a);
+    crate::object::file_locks::set_locks_for_test("deadlock-test".into(), &[lock_a, lock_b]);
+    assert!(lock_wait_chain_reaches(owner_b, owner_a));
+    assert!(!lock_wait_chain_reaches(owner_a, owner_b));
+    crate::object::file_locks::clear_lock_test_state();
 }
 
 fn flock_operation_parser_accepts_one_mode_plus_nonblock() {
