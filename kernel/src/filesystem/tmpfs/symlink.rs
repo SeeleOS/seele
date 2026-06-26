@@ -36,7 +36,9 @@ impl Symlink for TmpfsSymlinkHandle {
             .with_owner(node.uid, node.gid)
             .with_nlink(node.link_count)
             .with_times(node.times)),
-            TmpNodeKind::Directory { .. } | TmpNodeKind::File { .. } => Err(FSError::NotASymlink),
+            TmpNodeKind::Directory { .. }
+            | TmpNodeKind::File { .. }
+            | TmpNodeKind::Device { .. } => Err(FSError::NotASymlink),
         }
     }
 
@@ -45,7 +47,9 @@ impl Symlink for TmpfsSymlinkHandle {
         let node = state.node(&self.path)?;
         match &node.kind {
             TmpNodeKind::Symlink { target } => Ok(Path::new(target)),
-            TmpNodeKind::Directory { .. } | TmpNodeKind::File { .. } => Err(FSError::NotASymlink),
+            TmpNodeKind::Directory { .. }
+            | TmpNodeKind::File { .. }
+            | TmpNodeKind::Device { .. } => Err(FSError::NotASymlink),
         }
     }
 
@@ -54,7 +58,9 @@ impl Symlink for TmpfsSymlinkHandle {
         let node = state.node(&self.path)?;
         match &node.kind {
             TmpNodeKind::Symlink { target } => Ok(target.clone()),
-            TmpNodeKind::Directory { .. } | TmpNodeKind::File { .. } => Err(FSError::NotASymlink),
+            TmpNodeKind::Directory { .. }
+            | TmpNodeKind::File { .. }
+            | TmpNodeKind::Device { .. } => Err(FSError::NotASymlink),
         }
     }
 

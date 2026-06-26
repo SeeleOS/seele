@@ -17,13 +17,13 @@ use crate::filesystem::{
         StaticSymlinkNode,
     },
     sysfs::SysFs,
-    tmpfs::TmpfsState,
+    tmpfs::{TmpFs, TmpfsState},
     vfs::VirtualFS,
     vfs_operations::open_path,
     vfs_traits::{FileLikeType, MountFlags},
 };
 use crate::misc::utsname::{current_domainname, current_hostname, set_domainname, set_hostname};
-use crate::object::traits::Statable;
+use crate::object::traits::{Statable, Writable};
 use crate::object::tty_device::{get_active_vt, set_active_vt};
 use crate::process::manager::get_current_process;
 
@@ -46,6 +46,11 @@ crate::test!(
     tmpfs_child_state,
     "tmpfs state tracks children and empty directory rules",
     tmpfs_state_tracks_children_and_empty_directory_rules
+);
+crate::test!(
+    tmpfs_mknod_device_nodes,
+    "tmpfs mknod device nodes open through device backends",
+    tmpfs_mknod_device_nodes_open_through_device_backends
 );
 crate::test!(
     linux_stat_mode_bits,
@@ -183,6 +188,33 @@ fn tmpfs_state_tracks_children_and_empty_directory_rules() {
     state.delete_node("/run", "pid").unwrap();
     state.delete_node("/", "run").unwrap();
     assert!(matches!(state.node("/run"), Err(FSError::NotFound)));
+}
+
+fn tmpfs_mknod_device_nodes_open_through_device_backends() {
+    let fs = TmpFs::new();
+    let FileLike::Directory(root) = fs.lookup(&Path::new("/")).unwrap() else {
+        panic!("tmpfs root should be a directory");
+    };
+    root.lock()
+        .create(
+            DirectoryContentInfo::new("null".into(), DirectoryContentType::File)
+                .with_permission(UnixPermission(0o020666))
+                .with_rdev(LinuxStat::linux_makedev(1, 3)),
+        )
+        .unwrap();
+
+    let file_like = fs.lookup(&Path::new("/null")).unwrap();
+    let info = file_like.info().unwrap();
+    assert_eq!(info.permission.0 & 0o170000, 0o020000);
+    assert_eq!(info.rdev, LinuxStat::linux_makedev(1, 3));
+
+    let file =
+        crate::filesystem::object::OpenedFileObject::new(file_like, Path::new("/null")).unwrap();
+    let stat = file.stat();
+    assert_eq!(stat.st_mode & 0o170000, 0o020000);
+    assert_eq!(stat.st_rdev, LinuxStat::linux_makedev(1, 3));
+    assert!(file.is_device_backed());
+    assert_eq!(file.write(b"discarded").unwrap(), 9);
 }
 
 fn linux_stat_preserves_explicit_mode_type_bits_and_fills_metadata() {

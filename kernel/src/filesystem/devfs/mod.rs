@@ -474,7 +474,7 @@ fn dynamic_children(state: &TmpfsStateRef, path: &str) -> FSResult<Vec<Directory
     let node = state.node(path)?;
     let children = match &node.kind {
         TmpNodeKind::Directory { children, .. } => children,
-        TmpNodeKind::File { .. } | TmpNodeKind::Symlink { .. } => {
+        TmpNodeKind::File { .. } | TmpNodeKind::Device { .. } | TmpNodeKind::Symlink { .. } => {
             return Err(FSError::NotADirectory);
         }
     };
@@ -485,7 +485,7 @@ fn dynamic_children(state: &TmpfsStateRef, path: &str) -> FSResult<Vec<Directory
         let child_node = state.node(&child_path)?;
         let content_type = match child_node.kind {
             TmpNodeKind::Directory { .. } => DirectoryContentType::Directory,
-            TmpNodeKind::File { .. } => DirectoryContentType::File,
+            TmpNodeKind::File { .. } | TmpNodeKind::Device { .. } => DirectoryContentType::File,
             TmpNodeKind::Symlink { .. } => DirectoryContentType::Symlink,
         };
         entries.push(

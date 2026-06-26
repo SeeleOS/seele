@@ -13,6 +13,7 @@ use crate::{
         staticfs::{
             device::StaticDeviceHandle, directory::StaticDirectoryHandle, file::StaticFileHandle,
         },
+        tmpfs::TmpfsDeviceHandle,
         vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
         vfs_operations::{open_path, resolve_dir_path, resolve_file_path},
         vfs_traits::{
@@ -63,16 +64,23 @@ enum OpenBackend {
 
 fn device_object_for_file(file: &WrappedFile) -> FSResult<Option<ObjectRef>> {
     let file = file.lock();
-    let Some(device) = file.as_any().downcast_ref::<StaticDeviceHandle>() else {
-        return Ok(None);
-    };
-    Ok(Some(device.object()?))
+    if let Some(device) = file.as_any().downcast_ref::<StaticDeviceHandle>() {
+        return Ok(Some(device.object()?));
+    }
+    if let Some(device) = file.as_any().downcast_ref::<TmpfsDeviceHandle>() {
+        return Ok(device.object().ok());
+    }
+    Ok(None)
 }
 
 fn device_rdev_for_file(file: &WrappedFile) -> Option<u64> {
     let file = file.lock();
-    let device = file.as_any().downcast_ref::<StaticDeviceHandle>()?;
-    device.rdev()
+    if let Some(device) = file.as_any().downcast_ref::<StaticDeviceHandle>() {
+        return device.rdev();
+    }
+    file.as_any()
+        .downcast_ref::<TmpfsDeviceHandle>()
+        .map(TmpfsDeviceHandle::rdev)
 }
 
 pub(crate) fn mount_device_id_for_path(path: &Path) -> u64 {

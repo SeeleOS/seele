@@ -8,8 +8,8 @@ use crate::filesystem::{
 };
 
 use super::{
-    TmpFsVariant, TmpNodeKind, TmpfsDirectoryHandle, TmpfsFileHandle, TmpfsQuota, TmpfsState,
-    TmpfsStateRef, TmpfsSymlinkHandle,
+    TmpFsVariant, TmpNodeKind, TmpfsDeviceHandle, TmpfsDirectoryHandle, TmpfsFileHandle,
+    TmpfsQuota, TmpfsState, TmpfsStateRef, TmpfsSymlinkHandle,
 };
 
 pub(crate) fn relative_components(path: &Path) -> Vec<String> {
@@ -51,7 +51,7 @@ pub(crate) fn tmpfs_lookup_path(state: &TmpfsStateRef, path: &str) -> FSResult<F
         let node = state_guard.node(&path)?;
         let kind = match &node.kind {
             TmpNodeKind::Directory { .. } => DirectoryContentType::Directory,
-            TmpNodeKind::File { .. } => DirectoryContentType::File,
+            TmpNodeKind::File { .. } | TmpNodeKind::Device { .. } => DirectoryContentType::File,
             TmpNodeKind::Symlink { .. } => DirectoryContentType::Symlink,
         };
         (node.inode, kind)
@@ -63,11 +63,27 @@ pub(crate) fn tmpfs_lookup_path(state: &TmpfsStateRef, path: &str) -> FSResult<F
         ))),
         DirectoryContentType::File => {
             state.lock().retain_inode(inode)?;
-            FileLike::File(Arc::new(Mut::new(TmpfsFileHandle::new(
-                state.clone(),
-                path,
-                inode,
-            ))))
+            let device = {
+                let state_guard = state.lock();
+                match &state_guard.node_by_inode(inode)?.kind {
+                    TmpNodeKind::Device { mode, rdev } => Some(TmpfsDeviceHandle::new(
+                        state.clone(),
+                        node_name(&path),
+                        inode,
+                        *mode,
+                        *rdev,
+                    )?),
+                    _ => None,
+                }
+            };
+            match device {
+                Some(device) => FileLike::File(Arc::new(Mut::new(device))),
+                None => FileLike::File(Arc::new(Mut::new(TmpfsFileHandle::new(
+                    state.clone(),
+                    path,
+                    inode,
+                )))),
+            }
         }
         DirectoryContentType::Symlink => FileLike::Symlink(Arc::new(Mut::new(
             TmpfsSymlinkHandle::new(state.clone(), path),

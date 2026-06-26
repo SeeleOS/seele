@@ -2560,7 +2560,7 @@ mod tests {
         assert_eq!(node_object.stat().st_mode & 0o777, 0o600);
         expect_errno(
             SyscallArgs::new([AT_FDCWD, user_page + 192, 0o040755, 0, 0, 0]).call::<Mknodat>(),
-            SyscallError::NoSyscall,
+            SyscallError::InvalidArguments,
         );
 
         close_test_fd(fd);

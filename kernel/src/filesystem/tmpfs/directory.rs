@@ -34,7 +34,7 @@ impl Directory for TmpfsDirectoryHandle {
         let node = state.node(&self.path)?;
         let mode = match &node.kind {
             TmpNodeKind::Directory { mode, .. } => *mode,
-            TmpNodeKind::File { .. } | TmpNodeKind::Symlink { .. } => {
+            TmpNodeKind::File { .. } | TmpNodeKind::Device { .. } | TmpNodeKind::Symlink { .. } => {
                 return Err(FSError::NotADirectory);
             }
         };
@@ -59,7 +59,7 @@ impl Directory for TmpfsDirectoryHandle {
         let node = state.node(&self.path)?;
         let children = match &node.kind {
             TmpNodeKind::Directory { children, .. } => children,
-            TmpNodeKind::File { .. } | TmpNodeKind::Symlink { .. } => {
+            TmpNodeKind::File { .. } | TmpNodeKind::Device { .. } | TmpNodeKind::Symlink { .. } => {
                 return Err(FSError::NotADirectory);
             }
         };
@@ -70,7 +70,7 @@ impl Directory for TmpfsDirectoryHandle {
             let child_node = state.node(&child_path)?;
             let content_type = match child_node.kind {
                 TmpNodeKind::Directory { .. } => DirectoryContentType::Directory,
-                TmpNodeKind::File { .. } => DirectoryContentType::File,
+                TmpNodeKind::File { .. } | TmpNodeKind::Device { .. } => DirectoryContentType::File,
                 TmpNodeKind::Symlink { .. } => DirectoryContentType::Symlink,
             };
             entries.push(
@@ -121,7 +121,9 @@ impl Directory for TmpfsDirectoryHandle {
                 *dir_mode = mode & 0o7777;
                 Ok(())
             }
-            TmpNodeKind::File { .. } | TmpNodeKind::Symlink { .. } => Err(FSError::NotADirectory),
+            TmpNodeKind::File { .. } | TmpNodeKind::Device { .. } | TmpNodeKind::Symlink { .. } => {
+                Err(FSError::NotADirectory)
+            }
         }
     }
 

@@ -56,6 +56,17 @@ impl File for TmpfsFileHandle {
             .with_nlink(node.link_count)
             .with_rdev(*rdev)
             .with_times(node.times)),
+            TmpNodeKind::Device { mode, rdev } => Ok(FileLikeInfo::new(
+                node_name(&self.path),
+                0,
+                UnixPermission(*mode),
+                FileLikeType::File,
+            )
+            .with_inode(node.inode)
+            .with_owner(node.uid, node.gid)
+            .with_nlink(node.link_count)
+            .with_rdev(*rdev)
+            .with_times(node.times)),
             TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => Err(FSError::NotAFile),
         }
     }
@@ -65,7 +76,9 @@ impl File for TmpfsFileHandle {
         let node = state.node_by_inode(self.inode)?;
         let data = match &node.kind {
             TmpNodeKind::File { data, .. } => data,
-            TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => {
+            TmpNodeKind::Device { .. }
+            | TmpNodeKind::Directory { .. }
+            | TmpNodeKind::Symlink { .. } => {
                 return Err(FSError::NotAFile);
             }
         };
@@ -83,7 +96,9 @@ impl File for TmpfsFileHandle {
         let node = state.node_by_inode_mut(self.inode)?;
         let data = match &mut node.kind {
             TmpNodeKind::File { data, .. } => data,
-            TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => {
+            TmpNodeKind::Device { .. }
+            | TmpNodeKind::Directory { .. }
+            | TmpNodeKind::Symlink { .. } => {
                 return Err(FSError::NotAFile);
             }
         };
@@ -98,7 +113,9 @@ impl File for TmpfsFileHandle {
             let node = state.node_by_inode(self.inode)?;
             match &node.kind {
                 TmpNodeKind::File { data, .. } => data.len() as i64,
-                TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => {
+                TmpNodeKind::Device { .. }
+                | TmpNodeKind::Directory { .. }
+                | TmpNodeKind::Symlink { .. } => {
                     return Err(FSError::NotAFile);
                 }
             }
@@ -133,7 +150,9 @@ impl File for TmpfsFileHandle {
         let node = state.node_by_inode_mut(self.inode)?;
         let data = match &mut node.kind {
             TmpNodeKind::File { data, .. } => data,
-            TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => {
+            TmpNodeKind::Device { .. }
+            | TmpNodeKind::Directory { .. }
+            | TmpNodeKind::Symlink { .. } => {
                 return Err(FSError::NotAFile);
             }
         };
@@ -153,7 +172,9 @@ impl File for TmpfsFileHandle {
         let node = state.node_by_inode_mut(self.inode)?;
         let data = match &mut node.kind {
             TmpNodeKind::File { data, .. } => data,
-            TmpNodeKind::Directory { .. } | TmpNodeKind::Symlink { .. } => {
+            TmpNodeKind::Device { .. }
+            | TmpNodeKind::Directory { .. }
+            | TmpNodeKind::Symlink { .. } => {
                 return Err(FSError::NotAFile);
             }
         };

@@ -1,7 +1,7 @@
 use alloc::{collections::btree_map::BTreeMap, string::String, sync::Arc};
 
 use crate::{
-    drivers::virtio::block::named_device,
+    drivers::virtio::block::{list_devices as list_block_devices, named_device},
     drm::object::DrmCardObject,
     evdev::open_event_device,
     misc::{
@@ -19,6 +19,18 @@ use crate::{
     systemcall::utils::{SyscallError, SyscallResult},
     terminal::pty::open_ptmx,
 };
+
+const fn char_rdev(major: u64, minor: u64) -> u64 {
+    LinuxDeviceNumber::makedev(major, minor)
+}
+
+struct LinuxDeviceNumber;
+
+impl LinuxDeviceNumber {
+    const fn makedev(major: u64, minor: u64) -> u64 {
+        ((major & 0xfff) << 8) | (minor & 0xff) | ((minor & !0xff) << 12) | ((major & !0xfff) << 32)
+    }
+}
 
 lazy_static::lazy_static! {
     pub static ref DEVICES: BTreeMap<&'static str,ObjectRef> = {
@@ -96,6 +108,49 @@ pub fn get_device_ref(name: &str) -> SyscallResult<ObjectRef> {
         .get(name)
         .ok_or(SyscallError::InvalidArguments)
         .cloned()
+}
+
+pub fn get_device_ref_by_rdev(rdev: u64) -> SyscallResult<ObjectRef> {
+    let name = match rdev {
+        rdev if rdev == char_rdev(1, 3) => Some("devnull"),
+        rdev if rdev == char_rdev(1, 5) => Some("devzero"),
+        rdev if rdev == char_rdev(1, 8) => Some("random"),
+        rdev if rdev == char_rdev(1, 9) => Some("urandom"),
+        rdev if rdev == char_rdev(4, 0) => Some("tty0"),
+        rdev if rdev == char_rdev(4, 1) => Some("tty1"),
+        rdev if rdev == char_rdev(4, 2) => Some("tty2"),
+        rdev if rdev == char_rdev(4, 3) => Some("tty3"),
+        rdev if rdev == char_rdev(4, 4) => Some("tty4"),
+        rdev if rdev == char_rdev(4, 5) => Some("tty5"),
+        rdev if rdev == char_rdev(4, 6) => Some("tty6"),
+        rdev if rdev == char_rdev(4, 64) => Some("ttyS0"),
+        rdev if rdev == char_rdev(5, 0) => Some("tty"),
+        rdev if rdev == char_rdev(5, 1) => Some("console"),
+        rdev if rdev == char_rdev(5, 2) => Some("ptmx"),
+        rdev if rdev == char_rdev(10, 1) => Some("ps2mouse"),
+        rdev if rdev == char_rdev(10, 229) => Some("fuse"),
+        rdev if rdev == char_rdev(13, 32) => Some("ps2mouse"),
+        rdev if rdev == char_rdev(13, 64) => Some("event-kbd"),
+        rdev if rdev == char_rdev(13, 65) => Some("event-mouse"),
+        rdev if rdev == char_rdev(29, 0) => Some("framebuffer"),
+        _ => None,
+    };
+    if let Some(name) = name {
+        return get_device_ref(name);
+    }
+
+    if let Some(device) = list_block_devices()
+        .into_iter()
+        .find(|device| device.rdev() == rdev)
+    {
+        return Ok(Arc::new(BlockDeviceObject::new(
+            device.name,
+            device.minor,
+            device.device,
+        )) as ObjectRef);
+    }
+
+    Err(SyscallError::InvalidArguments)
 }
 
 fn current_process_tty() -> Option<ObjectRef> {

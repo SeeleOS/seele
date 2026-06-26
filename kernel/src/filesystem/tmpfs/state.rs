@@ -39,6 +39,10 @@ pub(crate) enum TmpNodeKind {
         mode: u32,
         rdev: u64,
     },
+    Device {
+        mode: u32,
+        rdev: u64,
+    },
     Symlink {
         target: String,
     },
@@ -139,7 +143,9 @@ impl TmpfsState {
         let node = self.node_mut(path)?;
         match &mut node.kind {
             TmpNodeKind::Directory { children, .. } => Ok(children),
-            TmpNodeKind::File { .. } | TmpNodeKind::Symlink { .. } => Err(FSError::NotADirectory),
+            TmpNodeKind::File { .. } | TmpNodeKind::Device { .. } | TmpNodeKind::Symlink { .. } => {
+                Err(FSError::NotADirectory)
+            }
         }
     }
 
@@ -150,15 +156,16 @@ impl TmpfsState {
         mode: u32,
         rdev: u64,
     ) -> FSResult<()> {
-        self.create_node(
-            parent,
-            name,
+        let kind = if mode & S_IFMT == 0o020000 || mode & S_IFMT == 0o060000 {
+            TmpNodeKind::Device { mode, rdev }
+        } else {
             TmpNodeKind::File {
                 data: SparseFileData::new(),
                 mode,
                 rdev,
-            },
-        )
+            }
+        };
+        self.create_node(parent, name, kind)
     }
 
     pub(crate) fn create_directory(&mut self, parent: &str, name: &str, mode: u32) -> FSResult<()> {
@@ -196,7 +203,7 @@ impl TmpfsState {
         let parent_gid = self.node(&parent)?.gid;
         let parent_setgid = match &self.node(&parent)?.kind {
             TmpNodeKind::Directory { mode, .. } => *mode & 0o2000 != 0,
-            TmpNodeKind::File { .. } | TmpNodeKind::Symlink { .. } => {
+            TmpNodeKind::File { .. } | TmpNodeKind::Device { .. } | TmpNodeKind::Symlink { .. } => {
                 return Err(FSError::NotADirectory);
             }
         };
@@ -410,7 +417,10 @@ impl TmpfsState {
         }
 
         let node = self.node_by_inode(inode)?;
-        if !matches!(node.kind, TmpNodeKind::File { .. }) {
+        if !matches!(
+            node.kind,
+            TmpNodeKind::File { .. } | TmpNodeKind::Device { .. }
+        ) {
             return Err(FSError::Other);
         }
 
@@ -491,6 +501,16 @@ impl TmpfsState {
                     *file_mode = mode;
                 } else {
                     *file_mode = (*file_mode & S_IFMT) | (mode & 0o7777);
+                }
+                Ok(())
+            }
+            TmpNodeKind::Device {
+                mode: device_mode, ..
+            } => {
+                if (mode & S_IFMT) != 0 {
+                    *device_mode = mode;
+                } else {
+                    *device_mode = (*device_mode & S_IFMT) | (mode & 0o7777);
                 }
                 Ok(())
             }
