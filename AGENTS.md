@@ -10,9 +10,11 @@
 - If a required tool is missing for this repository workflow, add it to the `flake.nix` dev shell instead of treating it as a one-off host prerequisite.
 - When adding new tooling for builds, tests, MCP workflows, debugging, image conversion, or VM automation, prefer adding it to the appropriate `flake.nix` dev shell or runtime input instead of relying on whatever happens to be installed on the host `PATH`.
 - When polling VM state or serial output, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
+- Avoid long `job_wait` calls; keep each wait under 30 seconds when practical, with 10 seconds as the recommended default. After each wait returns, check whether the job is making normal progress instead of assuming it is not stuck.
 - `cargo xtest` and MCP `run_tests` default to kernel unit tests plus LTP. Use a specific selector such as `kernel_unit` or `ltp` for targeted debugging.
 - In the default kernel-unit-plus-LTP test gate, stop immediately if kernel unit tests fail instead of continuing into LTP. LTP is expensive, and continuing after unit failure can obscure the serial context for the first failure.
 - Because LTP is expensive, when fixing LTP failures, collect the currently known failing tests, fix that batch together, and then run the appropriate LTP verification once for the batch. Do not rerun LTP after each single LTP fix; use targeted unit checks or narrow compile checks while editing.
+- When expanding the LTP default pattern after a green run, prioritize important coverage that is likely to expose real kernel compatibility bugs or surprising interactions over merely low-risk tests.
 - After finishing VM-based testing, shut the VM down and verify there is no leftover runner or QEMU process before moving on.
 - To inspect the current VM and runner processes before shutdown, prefer `status` for MCP-managed sessions; otherwise inspect host runner/QEMU processes directly and kill leftover PIDs explicitly.
 - Do not assume `target/rootfs_mnt/` is mounted or synchronized with `target/rootfs.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the control-plane VM flow when in doubt.
