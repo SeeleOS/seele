@@ -548,6 +548,9 @@ fn ensure_keyring_entry(serial: i32, description: &str) {
 fn ensure_keyring_entry_with_owner(serial: i32, description: &str, uid: u32, gid: u32) {
     let mut registry = KEY_REGISTRY.lock();
     let entry = registry.entry(serial).or_default();
+    if !entry.is_keyring {
+        entry.permissions = 0x3f3f_0000;
+    }
     entry.type_name = "keyring".into();
     entry.is_keyring = true;
     entry.uid = uid;
