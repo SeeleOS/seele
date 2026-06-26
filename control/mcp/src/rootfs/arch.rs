@@ -98,6 +98,32 @@ Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
 Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch
 "#;
 
+const KMOD_WRAPPER: &str = r#"#!/bin/sh
+command="$1"
+if [ "$1" = "load" ] || [ "$1" = "modprobe" ]; then
+    shift
+    for arg in "$@"; do
+        case "$arg" in
+            -*)
+                ;;
+            dns_resolver)
+                exit 0
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+fi
+if [ "$command" = "dns_resolver" ]; then
+    exit 0
+fi
+if [ "$command" = "load" ] || [ "$command" = "modprobe" ]; then
+    exec /usr/bin/kmod.real "$command" "$@"
+fi
+exec /usr/bin/kmod.real "$@"
+"#;
+
 pub struct PacmanConfig {
     path: PathBuf,
 }
@@ -191,6 +217,36 @@ pub fn configure_login_services(
             .arg("-sfn")
             .arg("/usr/lib/systemd/system/getty@.service")
             .arg(getty_wants.join("getty@tty1.service")),
+    )?;
+    Ok(())
+}
+
+pub fn install_modprobe_wrapper(
+    runner: &ProcessRunner,
+    context: &JobContext,
+    rootfs_mount: &Path,
+) -> Result<()> {
+    let kmod = rootfs_mount.join("usr/bin/kmod");
+    let real_kmod = rootfs_mount.join("usr/bin/kmod.real");
+    if !real_kmod.exists() {
+        runner.run_success(
+            context,
+            "rootfs_preserve_real_kmod",
+            Command::new("sudo").arg("mv").arg(&kmod).arg(&real_kmod),
+        )?;
+    }
+    let wrapper_source = runner.artifact_dir().join("kmod-wrapper");
+    fs::write(&wrapper_source, KMOD_WRAPPER)
+        .with_context(|| format!("failed to write {}", wrapper_source.display()))?;
+    runner.run_success(
+        context,
+        "rootfs_install_kmod_wrapper",
+        Command::new("sudo")
+            .arg("install")
+            .arg("-m")
+            .arg("0755")
+            .arg(&wrapper_source)
+            .arg(&kmod),
     )?;
     Ok(())
 }

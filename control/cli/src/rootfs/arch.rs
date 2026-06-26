@@ -97,6 +97,32 @@ Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
 Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch
 "#;
 
+const KMOD_WRAPPER: &str = r#"#!/bin/sh
+command="$1"
+if [ "$1" = "load" ] || [ "$1" = "modprobe" ]; then
+    shift
+    for arg in "$@"; do
+        case "$arg" in
+            -*)
+                ;;
+            dns_resolver)
+                exit 0
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+fi
+if [ "$command" = "dns_resolver" ]; then
+    exit 0
+fi
+if [ "$command" = "load" ] || [ "$command" = "modprobe" ]; then
+    exec /usr/bin/kmod.real "$command" "$@"
+fi
+exec /usr/bin/kmod.real "$@"
+"#;
+
 pub struct PacmanConfig {
     path: PathBuf,
 }
@@ -155,5 +181,19 @@ pub fn configure_login_services(sh: &Shell, rootfs_mount: &Path) -> Result<()> {
         "sudo ln -sfn /usr/lib/systemd/system/getty@.service {tty1_getty}"
     )
     .run()?;
+    Ok(())
+}
+
+pub fn install_modprobe_wrapper(sh: &Shell, rootfs_mount: &Path) -> Result<()> {
+    let kmod = rootfs_mount.join("usr/bin/kmod");
+    let real_kmod = rootfs_mount.join("usr/bin/kmod.real");
+    if !real_kmod.exists() {
+        cmd!(sh, "sudo mv {kmod} {real_kmod}").run()?;
+    }
+    let wrapper_source = std::env::temp_dir().join("seele-kmod-wrapper");
+    fs::write(&wrapper_source, KMOD_WRAPPER)
+        .with_context(|| format!("failed to write {}", wrapper_source.display()))?;
+    cmd!(sh, "sudo install -m 0755 {wrapper_source} {kmod}").run()?;
+    fs::remove_file(&wrapper_source).ok();
     Ok(())
 }

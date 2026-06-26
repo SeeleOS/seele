@@ -1,5 +1,8 @@
 use super::{
-    arch::{PacmanConfig, configure_login_services, install_packages, set_empty_root_password},
+    arch::{
+        PacmanConfig, configure_login_services, install_modprobe_wrapper, install_packages,
+        set_empty_root_password,
+    },
     aur::{install_aur_packages, validate_rebuild_packages},
     config::BuildRootfsConfig,
     kirk::install_kirk,
@@ -52,6 +55,7 @@ pub fn build_rootfs(repo: &Path, config: &BuildRootfsConfig) -> Result<i32> {
     step("configure rootfs directories");
     fs::create_dir_all(paths.mount.join("var/log")).context("failed to create var/log")?;
     fs::create_dir_all(paths.mount.join("tmp")).context("failed to create tmp")?;
+    install_modprobe_wrapper(&sh, &paths.mount)?;
     step("unmount rootfs");
     unmount(&sh, &paths.mount)?;
     eprintln!("rootfs image: {}", paths.image.display());

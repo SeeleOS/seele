@@ -223,6 +223,7 @@ const KEY_POS_SEARCH: u32 = 0x0800_0000;
 const KEY_POS_LINK: u32 = 0x1000_0000;
 const KEY_POS_SETATTR: u32 = 0x2000_0000;
 const KEY_PERMISSION_MASK: u32 = 0x3f3f_3f3f;
+const KEY_POS_ALL: u32 = 0x3f00_0000;
 const KEY_USER_MAX_PAYLOAD: usize = 32_767;
 const KEY_BIG_MAX_PAYLOAD: usize = (1 << 20) - 1;
 pub(crate) const KEY_USER_DEFAULT_MAX_KEYS: usize = 200;
@@ -271,6 +272,7 @@ enum KeyType {
     Logon,
     BigKey,
     Encrypted,
+    DnsResolver,
     Unsupported,
 }
 
@@ -394,6 +396,7 @@ fn key_type_from_name(type_name: &str) -> KeyType {
         "logon" => KeyType::Logon,
         "big_key" => KeyType::BigKey,
         "encrypted" => KeyType::Encrypted,
+        "dns_resolver" => KeyType::DnsResolver,
         _ => KeyType::Unsupported,
     }
 }
@@ -420,8 +423,16 @@ fn validate_key_payload(
         KeyType::BigKey if plen > KEY_BIG_MAX_PAYLOAD => Err(SyscallError::InvalidArguments),
         KeyType::BigKey => Ok(payload_bytes),
         KeyType::Encrypted => validate_encrypted_key_payload(payload_bytes),
+        KeyType::DnsResolver => validate_dns_resolver_key_payload(payload_bytes),
         KeyType::Unsupported => Err(SyscallError::NoDevice),
     }
+}
+
+fn validate_dns_resolver_key_payload(payload: Vec<u8>) -> Result<Vec<u8>, SyscallError> {
+    if payload.len() < 6 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    Ok(payload)
 }
 
 fn validate_encrypted_key_payload(payload: Vec<u8>) -> Result<Vec<u8>, SyscallError> {
@@ -625,9 +636,7 @@ fn ensure_keyring_entry(serial: i32, description: &str) {
 fn ensure_keyring_entry_with_owner(serial: i32, description: &str, uid: u32, gid: u32) {
     let mut registry = KEY_REGISTRY.lock();
     let entry = registry.entry(serial).or_default();
-    if !entry.is_keyring {
-        entry.permissions = 0x3f3f_0000;
-    }
+    entry.permissions = 0x3f3f_0000;
     entry.type_name = "keyring".into();
     entry.is_keyring = true;
     entry.uid = uid;
@@ -640,6 +649,10 @@ fn ensure_keyring_entry_with_owner(serial: i32, description: &str, uid: u32, gid
 fn ensure_key_entry(serial: i32, type_name: &str, description: &str, payload: Vec<u8>) {
     let (uid, gid) = current_key_owner();
     let quota_bytes = key_user_payload_bytes(description, payload.len());
+    let permissions = match key_type_from_name(type_name) {
+        KeyType::DnsResolver => KEY_POS_ALL & !KEY_POS_WRITE,
+        _ => 0x3f3f_0000,
+    };
     let mut registry = KEY_REGISTRY.lock();
     let entry = registry.entry(serial).or_default();
     entry.type_name = type_name.into();
@@ -647,7 +660,7 @@ fn ensure_key_entry(serial: i32, type_name: &str, description: &str, payload: Ve
     entry.payload = payload;
     entry.uid = uid;
     entry.gid = gid;
-    entry.permissions = 0x3f3f_0000;
+    entry.permissions = permissions;
     entry.is_keyring = false;
     entry.negative = false;
     entry.quota_bytes = quota_bytes;
@@ -836,6 +849,9 @@ fn update_key_payload(serial: i32, payload: *const u8, plen: usize) -> Result<()
     }
     if current.is_keyring {
         return Err(SyscallError::InvalidArguments);
+    }
+    if matches!(key_type_from_name(&current.type_name), KeyType::DnsResolver) {
+        return Err(SyscallError::OperationNotSupported);
     }
     if current.permissions & KEY_POS_WRITE == 0 {
         return Err(SyscallError::AccessDenied);
