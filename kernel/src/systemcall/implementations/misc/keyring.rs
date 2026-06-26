@@ -79,7 +79,12 @@ define_syscall!(RequestKey, |type_name_ptr: *const u8,
         KEY_REQKEY_DEFL_THREAD_KEYRING => current_thread_keyring(true)?,
         KEY_REQKEY_DEFL_PROCESS_KEYRING => current_process_keyring(true)?,
         KEY_REQKEY_DEFL_SESSION_KEYRING => current_session_keyring(true)?,
-        _ => resolve_existing_keyring(dest_keyring)?,
+        KEY_SPEC_THREAD_KEYRING
+        | KEY_SPEC_PROCESS_KEYRING
+        | KEY_SPEC_SESSION_KEYRING
+        | KEY_SPEC_USER_KEYRING
+        | KEY_SPEC_USER_SESSION_KEYRING => resolve_keyring(effective_dest_keyring, true)?,
+        _ => resolve_existing_keyring(effective_dest_keyring)?,
     };
 
     match search_keyring(keyring, &type_name, &description) {
@@ -88,7 +93,7 @@ define_syscall!(RequestKey, |type_name_ptr: *const u8,
         Err(err) => return Err(err),
     };
 
-    if !keyring_allows_write(keyring)? {
+    if type_name == "keyring" && !keyring_allows_write(keyring)? {
         return Err(SyscallError::AccessDenied);
     }
 
