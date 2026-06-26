@@ -170,6 +170,9 @@ define_syscall!(Sendto, |socket: ObjectRef,
     if len > 0 && buffer.is_null() {
         return Err(SyscallError::BadAddress);
     }
+    if (_flags & MSG_OOB) != 0 {
+        return Err(SyscallError::OperationNotSupported);
+    }
 
     let user_buffer = if len == 0 {
         Vec::new()

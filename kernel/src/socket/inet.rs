@@ -47,6 +47,7 @@ const IP_DROP_MEMBERSHIP: u64 = 36;
 const MCAST_JOIN_GROUP: u64 = 42;
 const MCAST_LEAVE_GROUP: u64 = 45;
 const IP_MULTICAST_ALL: u64 = 49;
+const MAX_UDP_PAYLOAD_SIZE: usize = 65_507;
 
 type LocalListenerKey = (u64, [u8; 4], u16);
 
@@ -734,6 +735,10 @@ impl InetSocketObject {
             return Ok(buffer.len());
         }
 
+        if self.state.lock().peer.is_none() {
+            return Err(SocketError::BrokenPipe);
+        }
+
         loop {
             net::poll();
             let handle = self.current_handle();
@@ -756,6 +761,9 @@ impl InetSocketObject {
     fn send_datagram(&self, buffer: &[u8], remote: InetAddress) -> SocketResult<usize> {
         if self.state.lock().write_shutdown {
             return Err(SocketError::BrokenPipe);
+        }
+        if buffer.len() > MAX_UDP_PAYLOAD_SIZE {
+            return Err(SocketError::MessageTooLong);
         }
 
         let local = self.ensure_udp_bound()?;
@@ -1110,9 +1118,12 @@ impl SocketLike for InetSocketObject {
     }
 
     fn sendto(self: Arc<Self>, buffer: &[u8], address: Option<&[u8]>) -> SocketResult<usize> {
-        match address {
-            Some(address) => self.send_to(buffer, Self::decode_addr(address)?),
-            None => self.send(buffer),
+        match self.kind {
+            InetSocketKind::Stream => self.send(buffer),
+            InetSocketKind::Datagram => match address {
+                Some(address) => self.send_to(buffer, Self::decode_addr(address)?),
+                None => self.send(buffer),
+            },
         }
     }
 

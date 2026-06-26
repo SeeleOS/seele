@@ -35,9 +35,11 @@ pub(super) const MSG_PEEK: u64 = 0x2;
 pub(super) const MSG_CTRUNC: i32 = 0x8;
 pub(super) const MSG_CMSG_CLOEXEC: u64 = 0x40000000;
 pub(super) const MSG_DONTWAIT: u64 = 0x40;
+pub(super) const MSG_OOB: u64 = 0x1;
 pub(super) const MSG_TRUNC: u64 = 0x20;
 pub(super) const SCM_RIGHTS: i32 = 1;
 pub(super) const SCM_CREDENTIALS: i32 = 2;
+const SOCKADDR_STORAGE_SIZE: u32 = 128;
 
 pub(super) enum SocketAddress {
     Inet(InetAddress),
@@ -141,6 +143,9 @@ pub(super) fn socket_address_bytes(
         return Err(SyscallError::BadAddress);
     }
     if address_len < 2 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if address_len > SOCKADDR_STORAGE_SIZE {
         return Err(SyscallError::InvalidArguments);
     }
     user_safe::read_buffer(address, address_len as usize)

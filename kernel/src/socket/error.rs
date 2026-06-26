@@ -34,6 +34,8 @@ pub enum SocketError {
     IsConnected,
     #[error("socket is not connected")]
     NotConnected,
+    #[error("message is too long")]
+    MessageTooLong,
     #[error("connection refused")]
     ConnectionRefused,
     #[error("broken pipe")]
@@ -60,6 +62,7 @@ impl AsSyscallError for SocketError {
             Self::PermissionDenied => SyscallError::PermissionDenied,
             Self::IsConnected => SyscallError::IsConnected,
             Self::NotConnected => SyscallError::NotConnected,
+            Self::MessageTooLong => SyscallError::MessageTooLong,
             Self::ConnectionRefused => SyscallError::ConnectionRefused,
             Self::BrokenPipe => SyscallError::BrokenPipe,
         }
