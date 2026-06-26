@@ -67,6 +67,10 @@ pub enum SyscallError {
     NotConnected = -107,
     TimedOut = -110,
     ConnectionRefused = -111,
+    NoKey = -126,
+    KeyExpired = -127,
+    KeyRevoked = -128,
+    KeyRejected = -129,
 }
 
 impl SyscallError {
@@ -177,6 +181,10 @@ impl From<isize> for SyscallError {
             -107 => Self::NotConnected,
             -110 => Self::TimedOut,
             -111 => Self::ConnectionRefused,
+            -126 => Self::NoKey,
+            -127 => Self::KeyExpired,
+            -128 => Self::KeyRevoked,
+            -129 => Self::KeyRejected,
             _ => Self::IOError,
         }
     }

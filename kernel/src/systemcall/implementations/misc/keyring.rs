@@ -1,16 +1,12 @@
 use super::*;
+use crate::misc::others::KernelFrom;
 
 define_syscall!(AddKey, |type_name: String,
                          description: String,
                          payload: *const u8,
                          plen: usize,
                          keyring: i32| {
-    if plen != 0 {
-        if payload.is_null() {
-            return Err(SyscallError::BadAddress);
-        }
-        let _ = user_safe::read_buffer(payload, plen)?;
-    }
+    let payload_bytes = user_safe::read_buffer(payload, plen)?;
     match type_name.as_str() {
         "keyring" if plen != 0 => return Err(SyscallError::InvalidArguments),
         "keyring" => {}
@@ -19,7 +15,7 @@ define_syscall!(AddKey, |type_name: String,
         "logon" | "big_key" => return Err(SyscallError::NoDevice),
         _ => return Err(SyscallError::NoDevice),
     }
-    let _ = resolve_keyring(keyring, true)?;
+    let target_keyring = resolve_keyring(keyring, true)?;
     if type_name == "user" {
         let uid = get_current_process().lock().effective_uid;
         reserve_user_key_quota(uid, &description, plen)?;
@@ -28,34 +24,76 @@ define_syscall!(AddKey, |type_name: String,
     if type_name == "keyring" {
         ensure_keyring_entry(serial, &description);
     } else {
-        ensure_key_entry(serial);
+        ensure_key_entry(serial, &type_name, &description, payload_bytes);
     }
+    link_key_into_keyring(serial, target_keyring)?;
     Ok(serial as usize)
 });
 
 define_syscall!(Keyctl, |cmd: u64,
                          arg2: u64,
                          arg3: u64,
-                         _arg4: u64,
-                         _arg5: u64| {
+                         arg4: u64,
+                         arg5: u64| {
     match KeyctlCommand::try_from(cmd) {
         Ok(KeyctlCommand::GetKeyringId) => {
             let keyring = resolve_keyring(arg2 as i32, arg3 != 0)?;
             Ok(keyring as usize)
         }
         Ok(KeyctlCommand::JoinSessionKeyring) => Ok(current_session_keyring(true)? as usize),
+        Ok(KeyctlCommand::Update) => {
+            update_key_payload(arg2 as i32, arg3 as *const u8, arg4 as usize)?;
+            Ok(0)
+        }
         Ok(KeyctlCommand::Revoke) => {
             revoke_key(arg2 as i32)?;
             Ok(0)
         }
+        Ok(KeyctlCommand::Chown) => {
+            chown_key(arg2 as i32, arg3 as u32, arg4 as u32)?;
+            Ok(0)
+        }
         Ok(KeyctlCommand::Setperm) => {
-            let keyring = resolve_keyring(arg2 as i32, true)?;
-            set_key_permissions(keyring, arg3 as u32)?;
+            set_key_permissions(arg2 as i32, arg3 as u32)?;
+            Ok(0)
+        }
+        Ok(KeyctlCommand::Describe) => {
+            let description = describe_key(arg2 as i32)?;
+            copy_keyctl_bytes_to_user(&description, arg3 as *mut u8, arg4 as usize)
+        }
+        Ok(KeyctlCommand::Clear) => {
+            clear_keyring(arg2 as i32)?;
             Ok(0)
         }
         Ok(KeyctlCommand::Link) => {
             let target = resolve_keyring(arg3 as i32, true)?;
             link_key_into_keyring(arg2 as i32, target)?;
+            Ok(0)
+        }
+        Ok(KeyctlCommand::Unlink) => {
+            unlink_key_from_keyring(arg2 as i32, arg3 as i32)?;
+            Ok(0)
+        }
+        Ok(KeyctlCommand::Search) => {
+            let keyring = resolve_keyring(arg2 as i32, false)?;
+            let type_name =
+                String::k_from(arg3 as *const u8).map_err(|_| SyscallError::BadAddress)?;
+            let description =
+                String::k_from(arg4 as *const u8).map_err(|_| SyscallError::BadAddress)?;
+            let serial = search_keyring(keyring, &type_name, &description)?;
+            if arg5 != 0 {
+                let target = resolve_keyring(arg5 as i32, true)?;
+                link_key_into_keyring(serial, target)?;
+            }
+            Ok(serial as usize)
+        }
+        Ok(KeyctlCommand::Read) => {
+            let bytes = read_key(arg2 as i32)?;
+            copy_keyctl_bytes_to_user(&bytes, arg3 as *mut u8, arg4 as usize)
+        }
+        Ok(KeyctlCommand::SetReqkeyKeyring) => Ok(0),
+        Ok(KeyctlCommand::SetTimeout) => {
+            set_key_timeout(arg2 as i32, arg3 as u32)?;
             Ok(0)
         }
         Ok(KeyctlCommand::SessionToParent) => {
@@ -70,7 +108,28 @@ define_syscall!(Keyctl, |cmd: u64,
             ensure_keyring_entry(current_keyring, "");
             Ok(0)
         }
-        Err(_) => Err(SyscallError::NoSyscall),
+        Ok(KeyctlCommand::Invalidate) => {
+            invalidate_key(arg2 as i32)?;
+            Ok(0)
+        }
+        Ok(KeyctlCommand::GetPersistent) => {
+            let keyring = current_user_keyring(UserKeyringKind::UserSession, true)?;
+            Ok(keyring as usize)
+        }
+        Ok(KeyctlCommand::RestrictKeyring) => Ok(0),
+        Ok(KeyctlCommand::Move) => {
+            let source = arg2 as i32;
+            let from = arg3 as i32;
+            let to = resolve_keyring(arg4 as i32, true)?;
+            unlink_key_from_keyring(source, from)?;
+            link_key_into_keyring(source, to)?;
+            Ok(0)
+        }
+        Ok(KeyctlCommand::Capabilities) => {
+            let caps = [0x21u8, 0, 0, 0];
+            copy_keyctl_bytes_to_user(&caps, arg2 as *mut u8, arg3 as usize)
+        }
+        Err(_) => Err(SyscallError::InvalidArguments),
     }
 });
 
