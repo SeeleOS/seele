@@ -662,13 +662,19 @@ fn link_key_into_keyring(source: i32, target: i32) -> Result<(), SyscallError> {
 
 fn revoke_key(serial: i32) -> Result<(), SyscallError> {
     let mut registry = KEY_REGISTRY.lock();
+    let Some(entry) = registry.get(&serial) else {
+        return Err(SyscallError::NoKey);
+    };
+    if !entry.is_keyring {
+        let entry = registry.remove(&serial).ok_or(SyscallError::NoKey)?;
+        release_key_quota(&entry);
+        remove_key_from_all_keyrings(&mut registry, serial);
+        return Ok(());
+    }
+
     let entry = registry.get_mut(&serial).ok_or(SyscallError::NoKey)?;
     entry.revoked = true;
     entry.links.clear();
-    let quota_entry = entry.clone();
-    entry.payload.clear();
-    entry.quota_bytes = 0;
-    release_key_quota(&quota_entry);
     Ok(())
 }
 
