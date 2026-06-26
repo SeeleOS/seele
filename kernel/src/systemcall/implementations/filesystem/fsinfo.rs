@@ -46,6 +46,9 @@ define_syscall!(ReadlinkAt, |dirfd: i32,
                              path: CString,
                              out_buf: *mut u8,
                              out_len: usize| {
+    if out_len == 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
     let path_str = path_from_raw(path)?;
     if path_str.is_empty() {
         let object = get_object_current_process(dirfd as u64).map_err(SyscallError::from)?;

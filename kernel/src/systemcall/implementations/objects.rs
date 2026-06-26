@@ -7,9 +7,12 @@ use alloc::{format, string::String, vec, vec::Vec};
 
 use crate::{
     define_syscall,
-    filesystem::vfs_traits::DirectoryContentType,
-    filesystem::vfs_traits::Whence,
-    filesystem::{info::DirectoryContentInfo, object::FileLikeObject, path::Path},
+    filesystem::vfs_traits::{DirectoryContentType, FileLikeType, LinuxFileAttributes, Whence},
+    filesystem::{
+        info::{DirectoryContentInfo, FileTimes},
+        object::FileLikeObject,
+        path::Path,
+    },
     memory::protection::Protection,
     memory::user_safe,
     misc::c_types::CString,
@@ -181,6 +184,25 @@ where
     }
 
     Ok(total)
+}
+
+fn validate_iovecs_readable(iovs: &[LinuxIovec]) -> SyscallResult<()> {
+    for iov in iovs {
+        if iov.iov_len == 0 {
+            continue;
+        }
+        if iov.iov_base.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+
+        let mut checked = 0usize;
+        while checked < iov.iov_len {
+            let chunk_len = (iov.iov_len - checked).min(LINEAR_IO_CHUNK_SIZE);
+            let _ = user_safe::read_buffer(unsafe { iov.iov_base.add(checked) }, chunk_len)?;
+            checked += chunk_len;
+        }
+    }
+    Ok(())
 }
 
 fn fallback_dirent_inode(info: &DirectoryContentInfo, offset: usize) -> u64 {
@@ -394,6 +416,111 @@ fn write_object_at_offset(object: &ObjectRef, buffer: &[u8], offset: i64) -> Sys
     Ok(written)
 }
 
+fn object_current_offset(object: &ObjectRef) -> SyscallResult<i64> {
+    Ok(object.clone().as_seekable()?.seek(0, Whence::Current)? as i64)
+}
+
+fn copy_file_offset(object: &ObjectRef, offset: Option<*mut i64>) -> SyscallResult<i64> {
+    match offset {
+        Some(offset) => user_safe::read(offset),
+        None => object_current_offset(object),
+    }
+}
+
+fn ranges_overlap(start_a: i64, start_b: i64, len: usize) -> bool {
+    if len == 0 {
+        return false;
+    }
+    let Ok(len) = i64::try_from(len) else {
+        return true;
+    };
+    let Some(end_a) = start_a.checked_add(len) else {
+        return true;
+    };
+    let Some(end_b) = start_b.checked_add(len) else {
+        return true;
+    };
+    start_a < end_b && start_b < end_a
+}
+
+fn validate_copy_file_range(
+    input: &ObjectRef,
+    input_offset: Option<*mut i64>,
+    output: &ObjectRef,
+    output_offset: Option<*mut i64>,
+    len: usize,
+) -> SyscallResult<()> {
+    let Ok(output_file) = output.clone().as_file_like() else {
+        return Err(SyscallError::InvalidArguments);
+    };
+    let output_info = output_file.info()?;
+    match output_info.file_like_type {
+        FileLikeType::Directory => return Err(SyscallError::IsADirectory),
+        FileLikeType::Symlink => return Err(SyscallError::InvalidArguments),
+        FileLikeType::File => {}
+    }
+    if output_file.is_device_backed() {
+        return Err(SyscallError::InvalidArguments);
+    }
+    ensure_object_writable(output)?;
+    if output.clone().get_flags()?.contains(FileFlags::APPEND) {
+        return Err(SyscallError::BadFileDescriptor);
+    }
+    if output_file
+        .linux_file_attributes()?
+        .contains(LinuxFileAttributes::FS_IMMUTABLE_FL)
+    {
+        return Err(SyscallError::PermissionDenied);
+    }
+
+    let Ok(input_file) = input.clone().as_file_like() else {
+        return Err(SyscallError::InvalidArguments);
+    };
+    let input_info = input_file.info()?;
+    if !matches!(input_info.file_like_type, FileLikeType::File) || input_file.is_device_backed() {
+        return Err(SyscallError::InvalidArguments);
+    }
+    ensure_object_readable(input)?;
+
+    let output_start = copy_file_offset(output, output_offset)?;
+    if output_start < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if len > i64::MAX as usize {
+        return Err(SyscallError::ValueTooLarge);
+    }
+    if output_start
+        .checked_add(len as i64)
+        .is_none_or(|end| end < 0)
+    {
+        return Err(SyscallError::FileTooLarge);
+    }
+
+    if input_file.mount_id() == output_file.mount_id() && input_info.inode == output_info.inode {
+        let input_start = copy_file_offset(input, input_offset)?;
+        if input_start < 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if ranges_overlap(input_start, output_start, len) {
+            return Err(SyscallError::InvalidArguments);
+        }
+    }
+
+    Ok(())
+}
+
+fn update_copy_file_range_output_times(output: &ObjectRef) -> SyscallResult<()> {
+    let output_file = output.clone().as_file_like()?;
+    let mut times = output_file.info()?.times;
+    let now = FileTimes::now();
+    times.mtime_sec = now.mtime_sec;
+    times.mtime_nsec = now.mtime_nsec;
+    times.ctime_sec = now.ctime_sec;
+    times.ctime_nsec = now.ctime_nsec;
+    output_file.set_times(times, true)?;
+    Ok(())
+}
+
 fn readable_object_phase(object: &ObjectRef) -> HotSyscallPhase {
     if object.clone().as_tty_device().is_ok() {
         HotSyscallPhase::ReadReadableTty
@@ -439,7 +566,10 @@ fn copy_between_objects_with_offsets(
 
         if let Some(offset_ptr) = input_offset {
             let offset = user_safe::read(offset_ptr)?;
-            user_safe::write(offset_ptr, &(offset + read as i64))?;
+            let new_offset = offset
+                .checked_add(read as i64)
+                .ok_or(SyscallError::ValueTooLarge)?;
+            user_safe::write(offset_ptr, &new_offset)?;
         }
 
         let mut written = 0usize;
@@ -456,7 +586,10 @@ fn copy_between_objects_with_offsets(
 
             if let Some(offset_ptr) = output_offset {
                 let offset = user_safe::read(offset_ptr)?;
-                user_safe::write(offset_ptr, &(offset + count as i64))?;
+                let new_offset = offset
+                    .checked_add(count as i64)
+                    .ok_or(SyscallError::ValueTooLarge)?;
+                user_safe::write(offset_ptr, &new_offset)?;
             }
 
             written += count;
@@ -814,6 +947,7 @@ define_syscall!(Writev, |object: ObjectRef,
                          iovcnt: i32| {
     ensure_object_writable(&object)?;
     let iovs = read_iovecs_for_syscall(iov_ptr, iovcnt)?;
+    validate_iovecs_readable(&iovs)?;
     let writable = object.clone().as_writable()?;
     match write_from_iovecs(&iovs, |bytes, _total| {
         writable.write(bytes).map_err(SyscallError::from)
@@ -960,13 +1094,15 @@ define_syscall!(CopyFileRange, |fd_in: ObjectRef,
         return Err(SyscallError::InvalidArguments);
     }
 
-    copy_between_objects_with_offsets(
-        fd_in,
-        (!off_in.is_null()).then_some(off_in),
-        fd_out,
-        (!off_out.is_null()).then_some(off_out),
-        len,
-    )
+    let input_offset = (!off_in.is_null()).then_some(off_in);
+    let output_offset = (!off_out.is_null()).then_some(off_out);
+    validate_copy_file_range(&fd_in, input_offset, &fd_out, output_offset, len)?;
+    let copied =
+        copy_between_objects_with_offsets(fd_in, input_offset, fd_out.clone(), output_offset, len)?;
+    if copied > 0 {
+        update_copy_file_range_output_times(&fd_out)?;
+    }
+    Ok(copied)
 });
 
 define_syscall!(Splice, |fd_in: ObjectRef,
@@ -1070,12 +1206,15 @@ define_syscall!(Fdatasync, |object: ObjectRef| {
     Ok(0)
 });
 
-define_syscall!(Fadvise64, |_object: ObjectRef,
+define_syscall!(Fadvise64, |object: ObjectRef,
                             _offset: i64,
                             _len: i64,
                             advice: i32| {
     if !(0..=5).contains(&advice) {
         return Err(SyscallError::InvalidArguments);
+    }
+    if object.clone().as_seekable().is_err() && object.clone().as_file_like().is_err() {
+        return Err(SyscallError::IllegalSeek);
     }
     Ok(0)
 });

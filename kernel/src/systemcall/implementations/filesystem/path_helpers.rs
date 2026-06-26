@@ -233,6 +233,10 @@ pub(super) fn readlink_impl(
     out_buf: *mut u8,
     out_len: usize,
 ) -> Result<usize, SyscallError> {
+    if out_len == 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    check_access_path_search_permissions(&path, &fs_access_credentials())?;
     let target = match open_path_nofollow(path)?.read_link() {
         Ok(target) => target,
         Err(FSError::NotASymlink) => return Err(SyscallError::InvalidArguments),
