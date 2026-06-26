@@ -17,7 +17,7 @@ use crate::{
         vfs::{FSResult, WrappedFile},
         vfs_traits::{File, FileLike, FileLikeType, Whence},
     },
-    object::misc::ObjectRef,
+    object::{FileFlags, misc::ObjectRef},
     systemcall::utils::{SyscallError, SyscallResult},
 };
 
@@ -238,5 +238,11 @@ pub fn create_memfd_object(path: Path, name: String, allow_sealing: bool) -> Obj
 
     let inode = NEXT_MEMFD_INODE.fetch_add(1, Ordering::Relaxed);
     let file: WrappedFile = Arc::new(Mut::new(MemFdFile::new(name, inode, path.clone())));
-    Arc::new(FileLikeObject::new(FileLike::File(file), path).expect("memfd must open")) as ObjectRef
+    let object =
+        Arc::new(FileLikeObject::new(FileLike::File(file), path).expect("memfd must open"));
+    object
+        .clone()
+        .set_flags(FileFlags::RDWR)
+        .expect("memfd flags must update");
+    object as ObjectRef
 }

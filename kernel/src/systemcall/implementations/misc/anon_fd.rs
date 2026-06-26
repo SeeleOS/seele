@@ -155,6 +155,9 @@ mod tests {
         const MFD_ALLOW_SEALING: u64 = 0x0002;
         const MFD_NOEXEC_SEAL: u64 = 0x0008;
         const MFD_EXEC: u64 = 0x0010;
+        const O_RDWR: usize = 0o2;
+        const O_ACCMODE: usize = 0o3;
+        const F_GETFL: u64 = 3;
 
         let user_page = allocate_user_test_page();
         write_user_cstr(user_page, b"demo/memfd\0");
@@ -163,6 +166,12 @@ mod tests {
                 .call::<MemfdCreate>(),
         );
         assert_fd_flags(memfd, FdFlags::CLOEXEC);
+        assert_object_flags(memfd, FileFlags::RDWR);
+        let memfd_status_flags = expect_ok(
+            SyscallArgs::new([memfd as u64, F_GETFL, 0, 0, 0, 0]).call::<Fcntl>(),
+            0,
+        );
+        assert_eq!(memfd_status_flags & O_ACCMODE, O_RDWR);
         let memfd_stat = get_object_current_process(memfd as u64)
             .unwrap()
             .as_statable()
