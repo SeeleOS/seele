@@ -15,6 +15,7 @@
 - In the default kernel-unit-plus-LTP test gate, stop immediately if kernel unit tests fail instead of continuing into LTP. LTP is expensive, and continuing after unit failure can obscure the serial context for the first failure.
 - Because LTP is expensive, when fixing LTP failures, collect the currently known failing tests, fix that batch together, and then run the appropriate LTP verification once for the batch. Do not rerun LTP after each single LTP fix; use targeted unit checks or narrow compile checks while editing.
 - When expanding the LTP default pattern after a green run, prioritize important coverage that is likely to expose real kernel compatibility bugs or surprising interactions over merely low-risk tests.
+- When expanding the LTP default pattern, include relevant tests that currently end in `CONF` or `SKIP` as well as passing tests. Do not filter the default pattern down to only pass cases when skipped/config-gated cases are part of the same meaningful coverage area.
 - After finishing VM-based testing, shut the VM down and verify there is no leftover runner or QEMU process before moving on.
 - To inspect the current VM and runner processes before shutdown, prefer `status` for MCP-managed sessions; otherwise inspect host runner/QEMU processes directly and kill leftover PIDs explicitly.
 - Do not assume `target/rootfs_mnt/` is mounted or synchronized with `target/rootfs.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the control-plane VM flow when in doubt.
