@@ -153,6 +153,7 @@ define_syscall!(Keyctl, |cmd: u64,
                 if description.starts_with('.') {
                     return Err(SyscallError::PermissionDenied);
                 }
+                return Ok(join_named_session_keyring(&description)? as usize);
             }
             Ok(current_session_keyring(true)? as usize)
         }
@@ -209,6 +210,23 @@ define_syscall!(Keyctl, |cmd: u64,
             let bytes = read_key(keyctl_key_serial(arg2)?)?;
             copy_keyctl_bytes_to_user(&bytes, arg3 as *mut u8, arg4 as usize)
         }
+        Ok(KeyctlCommand::Instantiate) => {
+            let serial = keyctl_key_serial(arg2)?;
+            instantiate_key(serial, arg3 as *const u8, arg4 as usize)?;
+            if arg5 != 0 {
+                let target = resolve_keyring(arg5 as i32, true)?;
+                link_key_into_keyring(serial, target)?;
+            }
+            Ok(0)
+        }
+        Ok(KeyctlCommand::Negate) => {
+            reject_key(keyctl_key_serial(arg2)?, arg3 as u32)?;
+            if arg4 != 0 {
+                let target = resolve_keyring(arg4 as i32, true)?;
+                link_key_into_keyring(keyctl_key_serial(arg2)?, target)?;
+            }
+            Ok(0)
+        }
         Ok(KeyctlCommand::SetReqkeyKeyring) => {
             let requested = arg2 as i32;
             if requested == KEY_REQKEY_DEFL_NO_CHANGE {
@@ -233,6 +251,11 @@ define_syscall!(Keyctl, |cmd: u64,
             set_key_timeout(keyctl_key_serial(arg2)?, arg3 as u32)?;
             Ok(0)
         }
+        Ok(KeyctlCommand::AssumeAuthority) => unsupported_keyctl(),
+        Ok(KeyctlCommand::GetSecurity) => {
+            let security = get_key_security(keyctl_key_serial(arg2)?)?;
+            copy_keyctl_bytes_to_user(&security, arg3 as *mut u8, arg4 as usize)
+        }
         Ok(KeyctlCommand::SessionToParent) => {
             let current_keyring = current_session_keyring(true)?;
             let current = get_current_process();
@@ -245,6 +268,15 @@ define_syscall!(Keyctl, |cmd: u64,
             ensure_keyring_entry(current_keyring, "");
             Ok(0)
         }
+        Ok(KeyctlCommand::Reject) => {
+            reject_key(keyctl_key_serial(arg2)?, arg3 as u32)?;
+            if arg5 != 0 {
+                let target = resolve_keyring(arg5 as i32, true)?;
+                link_key_into_keyring(keyctl_key_serial(arg2)?, target)?;
+            }
+            Ok(0)
+        }
+        Ok(KeyctlCommand::InstantiateIov) => unsupported_keyctl(),
         Ok(KeyctlCommand::Invalidate) => {
             invalidate_key(keyctl_key_serial(arg2)?)?;
             Ok(0)
@@ -253,8 +285,17 @@ define_syscall!(Keyctl, |cmd: u64,
             let keyring = current_user_keyring(UserKeyringKind::UserSession, true)?;
             Ok(keyring as usize)
         }
-        Ok(KeyctlCommand::RestrictKeyring) => Ok(0),
+        Ok(KeyctlCommand::DhCompute)
+        | Ok(KeyctlCommand::PkeyQuery)
+        | Ok(KeyctlCommand::PkeyEncrypt)
+        | Ok(KeyctlCommand::PkeyDecrypt)
+        | Ok(KeyctlCommand::PkeySign)
+        | Ok(KeyctlCommand::PkeyVerify) => unsupported_keyctl(),
+        Ok(KeyctlCommand::RestrictKeyring) => unsupported_keyctl(),
         Ok(KeyctlCommand::Move) => {
+            if arg5 != 0 {
+                return Err(SyscallError::OperationNotSupported);
+            }
             let source = keyctl_unlink_target(arg2)?;
             let from = keyctl_keyring_serial(arg3, false)?;
             let to = resolve_keyring(arg4 as i32, true)?;
@@ -263,9 +304,10 @@ define_syscall!(Keyctl, |cmd: u64,
             Ok(0)
         }
         Ok(KeyctlCommand::Capabilities) => {
-            let caps = [0x21u8, 0, 0, 0];
+            let caps = [0xb3u8, 0, 0, 0];
             copy_keyctl_bytes_to_user(&caps, arg2 as *mut u8, arg3 as usize)
         }
+        Ok(KeyctlCommand::WatchKey) => unsupported_keyctl(),
         Err(_) => Err(SyscallError::InvalidArguments),
     }
 });

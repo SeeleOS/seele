@@ -160,14 +160,27 @@ enum KeyctlCommand {
     Unlink = 9,
     Search = 10,
     Read = 11,
+    Instantiate = 12,
+    Negate = 13,
     SetReqkeyKeyring = 14,
     SetTimeout = 15,
+    AssumeAuthority = 16,
+    GetSecurity = 17,
     SessionToParent = 18,
+    Reject = 19,
+    InstantiateIov = 20,
     Invalidate = 21,
     GetPersistent = 22,
+    DhCompute = 23,
+    PkeyQuery = 24,
+    PkeyEncrypt = 25,
+    PkeyDecrypt = 26,
+    PkeySign = 27,
+    PkeyVerify = 28,
     RestrictKeyring = 29,
     Move = 30,
     Capabilities = 31,
+    WatchKey = 32,
 }
 
 #[derive(Clone, Copy, Debug, TryFromPrimitive)]
@@ -224,6 +237,8 @@ const KEY_POS_LINK: u32 = 0x1000_0000;
 const KEY_POS_SETATTR: u32 = 0x2000_0000;
 const KEY_PERMISSION_MASK: u32 = 0x3f3f_3f3f;
 const KEY_POS_ALL: u32 = 0x3f00_0000;
+const KEY_USR_SHIFT: u32 = 16;
+const KEY_GRP_SHIFT: u32 = 8;
 const KEY_USER_MAX_PAYLOAD: usize = 32_767;
 const KEY_BIG_MAX_PAYLOAD: usize = (1 << 20) - 1;
 pub(crate) const KEY_USER_DEFAULT_MAX_KEYS: usize = 200;
@@ -549,6 +564,38 @@ fn current_session_keyring(create: bool) -> Result<i32, SyscallError> {
     Ok(serial)
 }
 
+fn join_named_session_keyring(description: &str) -> Result<i32, SyscallError> {
+    let (uid, gid) = current_key_owner();
+    let serial = {
+        let mut registry = KEY_REGISTRY.lock();
+        if let Some((serial, _)) = registry.iter().find(|(_, entry)| {
+            entry.is_keyring
+                && entry.uid == uid
+                && entry.description == description
+                && !entry.revoked
+                && !entry.invalidated
+        }) {
+            *serial
+        } else {
+            let serial = next_keyring_id();
+            let mut entry = KeyEntry {
+                type_name: "keyring".into(),
+                description: description.into(),
+                uid,
+                gid,
+                permissions: 0x3f3f_0000,
+                is_keyring: true,
+                ..Default::default()
+            };
+            entry.links.clear();
+            registry.insert(serial, entry);
+            serial
+        }
+    };
+    get_current_process().lock().session_keyring = serial;
+    Ok(serial)
+}
+
 fn current_user_keyring(kind: UserKeyringKind, create: bool) -> Result<i32, SyscallError> {
     let (uid, gid) = current_key_owner();
     {
@@ -730,6 +777,41 @@ fn release_key_quota(entry: &KeyEntry) {
     quota.bytes = quota.bytes.saturating_sub(entry.quota_bytes);
 }
 
+fn current_process_key_credentials() -> (u32, u32, Vec<u32>) {
+    let process = get_current_process();
+    let process = process.lock();
+    (
+        process.fs_uid,
+        process.fs_gid,
+        process.supplementary_groups.clone(),
+    )
+}
+
+fn key_permission_bit(entry: &KeyEntry, possession_bit: u32) -> u32 {
+    let (uid, gid, supplementary_groups) = current_process_key_credentials();
+    let possession = entry.permissions & possession_bit;
+    let relative_bit = possession_bit >> 24;
+    if uid == entry.uid {
+        return possession | (entry.permissions & (relative_bit << KEY_USR_SHIFT));
+    }
+    if gid == entry.gid || supplementary_groups.contains(&entry.gid) {
+        return possession | (entry.permissions & (relative_bit << KEY_GRP_SHIFT));
+    }
+    possession | (entry.permissions & relative_bit)
+}
+
+fn key_has_permission(entry: &KeyEntry, possession_bit: u32) -> bool {
+    key_permission_bit(entry, possession_bit) != 0
+}
+
+fn check_key_permission(entry: &KeyEntry, possession_bit: u32) -> Result<(), SyscallError> {
+    if key_has_permission(entry, possession_bit) {
+        Ok(())
+    } else {
+        Err(SyscallError::AccessDenied)
+    }
+}
+
 fn set_key_permissions(serial: i32, permissions: u32) -> Result<(), SyscallError> {
     let mut registry = KEY_REGISTRY.lock();
     let entry = registry.get_mut(&serial).ok_or(SyscallError::NoKey)?;
@@ -739,9 +821,7 @@ fn set_key_permissions(serial: i32, permissions: u32) -> Result<(), SyscallError
     if entry.invalidated {
         return Err(SyscallError::NoKey);
     }
-    if entry.permissions & KEY_POS_SETATTR == 0 {
-        return Err(SyscallError::AccessDenied);
-    }
+    check_key_permission(entry, KEY_POS_SETATTR)?;
     entry.permissions = permissions & KEY_PERMISSION_MASK;
     Ok(())
 }
@@ -757,9 +837,7 @@ fn link_key_into_keyring(source: i32, target: i32) -> Result<(), SyscallError> {
     if source_entry.invalidated {
         return Err(SyscallError::NoKey);
     }
-    if source_entry.permissions & KEY_POS_LINK == 0 {
-        return Err(SyscallError::AccessDenied);
-    }
+    check_key_permission(&source_entry, KEY_POS_LINK)?;
     let target_entry = registry.get(&target).ok_or(SyscallError::NoKey)?;
     if !target_entry.is_keyring || target_entry.revoked {
         return Err(SyscallError::NoKey);
@@ -767,9 +845,7 @@ fn link_key_into_keyring(source: i32, target: i32) -> Result<(), SyscallError> {
     if target_entry.invalidated {
         return Err(SyscallError::NoKey);
     }
-    if target_entry.permissions & KEY_POS_WRITE == 0 {
-        return Err(SyscallError::AccessDenied);
-    }
+    check_key_permission(target_entry, KEY_POS_WRITE)?;
     let old_serial = target_entry.links.iter().copied().find(|serial| {
         registry.get(serial).is_some_and(|entry| {
             entry.type_name == source_entry.type_name
@@ -853,9 +929,7 @@ fn update_key_payload(serial: i32, payload: *const u8, plen: usize) -> Result<()
     if matches!(key_type_from_name(&current.type_name), KeyType::DnsResolver) {
         return Err(SyscallError::OperationNotSupported);
     }
-    if current.permissions & KEY_POS_WRITE == 0 {
-        return Err(SyscallError::AccessDenied);
-    }
+    check_key_permission(&current, KEY_POS_WRITE)?;
     drop(registry);
 
     let next_payload = validate_key_payload(
@@ -901,9 +975,7 @@ fn chown_key(serial: i32, uid: u32, gid: u32) -> Result<(), SyscallError> {
     if entry.invalidated {
         return Err(SyscallError::NoKey);
     }
-    if entry.permissions & KEY_POS_SETATTR == 0 {
-        return Err(SyscallError::AccessDenied);
-    }
+    check_key_permission(entry, KEY_POS_SETATTR)?;
     entry.uid = uid;
     entry.gid = gid;
     Ok(())
@@ -921,9 +993,7 @@ fn clear_keyring(serial: i32) -> Result<(), SyscallError> {
     if entry.invalidated {
         return Err(SyscallError::NoKey);
     }
-    if entry.permissions & KEY_POS_WRITE == 0 {
-        return Err(SyscallError::AccessDenied);
-    }
+    check_key_permission(entry, KEY_POS_WRITE)?;
     entry.links.clear();
     Ok(())
 }
@@ -943,9 +1013,7 @@ fn unlink_key_from_keyring(source: i32, target: i32) -> Result<(), SyscallError>
     if entry.invalidated {
         return Err(SyscallError::NoKey);
     }
-    if entry.permissions & KEY_POS_WRITE == 0 {
-        return Err(SyscallError::AccessDenied);
-    }
+    check_key_permission(entry, KEY_POS_WRITE)?;
     entry.links.retain(|link| *link != source);
     Ok(())
 }
@@ -973,9 +1041,7 @@ fn search_keyring(keyring: i32, type_name: &str, description: &str) -> Result<i3
     if entry.expires_at_sec != 0 && KernelTime::current().as_seconds() >= entry.expires_at_sec {
         return Err(SyscallError::KeyExpired);
     }
-    if entry.permissions & KEY_POS_SEARCH == 0 {
-        return Err(SyscallError::AccessDenied);
-    }
+    check_key_permission(entry, KEY_POS_SEARCH)?;
     for serial in &entry.links {
         let Some(linked) = registry.get(serial) else {
             continue;
@@ -1018,7 +1084,7 @@ fn keyring_allows_write(serial: i32) -> Result<bool, SyscallError> {
     if !entry.is_keyring {
         return Err(SyscallError::InvalidArguments);
     }
-    Ok(entry.permissions & KEY_POS_WRITE != 0)
+    Ok(key_has_permission(&entry, KEY_POS_WRITE))
 }
 
 fn keyring_allows_search(serial: i32) -> Result<bool, SyscallError> {
@@ -1026,7 +1092,7 @@ fn keyring_allows_search(serial: i32) -> Result<bool, SyscallError> {
     if !entry.is_keyring {
         return Err(SyscallError::InvalidArguments);
     }
-    Ok(entry.permissions & KEY_POS_SEARCH != 0)
+    Ok(key_has_permission(&entry, KEY_POS_SEARCH))
 }
 
 fn describe_key(serial: i32) -> Result<Vec<u8>, SyscallError> {
@@ -1044,9 +1110,7 @@ fn describe_key(serial: i32) -> Result<Vec<u8>, SyscallError> {
 
 fn read_key(serial: i32) -> Result<Vec<u8>, SyscallError> {
     let entry = get_live_key(serial)?;
-    if entry.permissions & KEY_POS_READ == 0 {
-        return Err(SyscallError::AccessDenied);
-    }
+    check_key_permission(&entry, KEY_POS_READ)?;
     if entry.is_keyring {
         let mut out = Vec::with_capacity(entry.links.len() * core::mem::size_of::<i32>());
         for link in entry.links {
@@ -1093,9 +1157,7 @@ fn set_key_timeout(serial: i32, timeout_sec: u32) -> Result<(), SyscallError> {
     if entry.invalidated {
         return Err(SyscallError::NoKey);
     }
-    if entry.permissions & KEY_POS_SETATTR == 0 {
-        return Err(SyscallError::AccessDenied);
-    }
+    check_key_permission(entry, KEY_POS_SETATTR)?;
     entry.timeout_sec = timeout_sec;
     entry.expires_at_sec = if timeout_sec == 0 {
         0
@@ -1105,6 +1167,87 @@ fn set_key_timeout(serial: i32, timeout_sec: u32) -> Result<(), SyscallError> {
             .saturating_add(timeout_sec as u64)
     };
     Ok(())
+}
+
+fn instantiate_key(serial: i32, payload: *const u8, plen: usize) -> Result<(), SyscallError> {
+    let current = {
+        let registry = KEY_REGISTRY.lock();
+        let entry = registry.get(&serial).ok_or(SyscallError::NoKey)?;
+        if entry.revoked {
+            return Err(SyscallError::KeyRevoked);
+        }
+        if !entry.negative {
+            return Err(SyscallError::InvalidArguments);
+        }
+        entry.clone()
+    };
+    let payload_bytes = validate_key_payload(
+        key_type_from_name(&current.type_name),
+        &current.description,
+        payload,
+        plen,
+    )?;
+    let reserved_quota = matches!(
+        key_type_from_name(&current.type_name),
+        KeyType::User | KeyType::Logon | KeyType::BigKey | KeyType::Encrypted
+    );
+    if reserved_quota {
+        reserve_user_key_quota(current.uid, &current.description, plen)?;
+    }
+
+    let mut registry = KEY_REGISTRY.lock();
+    let entry = registry.get_mut(&serial).ok_or(SyscallError::NoKey)?;
+    if entry.revoked {
+        release_reserved_key_quota(&current, plen, reserved_quota);
+        return Err(SyscallError::KeyRevoked);
+    }
+    if !entry.negative {
+        release_reserved_key_quota(&current, plen, reserved_quota);
+        return Err(SyscallError::InvalidArguments);
+    }
+    entry.quota_bytes = key_user_payload_bytes(&entry.description, plen);
+    entry.payload = payload_bytes;
+    entry.negative = false;
+    Ok(())
+}
+
+fn release_reserved_key_quota(entry: &KeyEntry, plen: usize, reserved: bool) {
+    if !reserved {
+        return;
+    }
+    let mut entry = entry.clone();
+    entry.quota_bytes = key_user_payload_bytes(&entry.description, plen);
+    release_key_quota(&entry);
+}
+
+fn reject_key(serial: i32, timeout_sec: u32) -> Result<(), SyscallError> {
+    let mut registry = KEY_REGISTRY.lock();
+    let entry = registry.get_mut(&serial).ok_or(SyscallError::NoKey)?;
+    if entry.revoked {
+        return Err(SyscallError::KeyRevoked);
+    }
+    if !entry.negative {
+        return Err(SyscallError::InvalidArguments);
+    }
+    entry.timeout_sec = timeout_sec;
+    entry.expires_at_sec = if timeout_sec == 0 {
+        KernelTime::current().as_seconds().saturating_add(60)
+    } else {
+        KernelTime::current()
+            .as_seconds()
+            .saturating_add(timeout_sec as u64)
+    };
+    Ok(())
+}
+
+fn get_key_security(serial: i32) -> Result<Vec<u8>, SyscallError> {
+    let entry = get_live_key(serial)?;
+    check_key_permission(&entry, KEY_POS_READ)?;
+    Ok(b"seele\0".to_vec())
+}
+
+fn unsupported_keyctl() -> Result<usize, SyscallError> {
+    Err(SyscallError::OperationNotSupported)
 }
 
 fn clone_cleared_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalAction> {
