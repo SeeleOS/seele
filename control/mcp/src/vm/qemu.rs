@@ -50,9 +50,10 @@ pub struct QemuRunResult {
 
 impl VmConfig {
     pub fn for_repo(repo: &Path) -> Self {
+        let artifact_dir = target_dir(repo).join("control-artifacts").join("vm");
         Self {
-            qmp_socket: PathBuf::from("/tmp/seele-agent-qmp.sock"),
-            serial_log: PathBuf::from("/tmp/seele-agent-serial.log"),
+            qmp_socket: artifact_dir.join("qmp.sock"),
+            serial_log: artifact_dir.join("serial.log"),
             rootfs_image: target_dir(repo).join("rootfs.img"),
             ltp_device_image: target_dir(repo).join("ltp-dev.img"),
             iso_image: None,
@@ -64,6 +65,14 @@ impl VmConfig {
 
 pub fn start_vm(repo: &Path, mut config: VmConfig, context: &JobContext) -> Result<i32> {
     absolutize_paths(repo, &mut config);
+    let status = vm_status(repo);
+    if status.running || status.qmp_connectable {
+        bail!(
+            "VM is already running; stop it before starting another one (qemu pid: {:?}, qmp socket: {})",
+            status.qemu_pid,
+            status.qmp_socket.display()
+        );
+    }
     let iso = match config.iso_image.clone() {
         Some(iso) => iso,
         None => {
@@ -597,5 +606,24 @@ fn read_qmp_response(reader: &mut BufReader<UnixStream>) -> Result<serde_json::V
             }
             return Ok(value);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VmConfig;
+    use std::path::PathBuf;
+
+    #[test]
+    fn vm_config_defaults_are_repo_local() {
+        let config = VmConfig::for_repo(&PathBuf::from("/repo"));
+        assert_eq!(
+            config.qmp_socket,
+            PathBuf::from("/repo/target/control-artifacts/vm/qmp.sock")
+        );
+        assert_eq!(
+            config.serial_log,
+            PathBuf::from("/repo/target/control-artifacts/vm/serial.log")
+        );
     }
 }
