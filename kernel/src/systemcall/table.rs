@@ -198,6 +198,7 @@ define_syscall_table!(
     InotifyRmWatch,
     Waitid,
     AddKey,
+    RequestKey,
     Keyctl,
     EpollCreate,
     EpollWait,

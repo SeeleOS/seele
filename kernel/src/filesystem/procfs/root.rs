@@ -60,6 +60,11 @@ pub(super) const PROC_VERSION_INODE: u64 = 0x302a;
 pub(super) const PROC_CPUINFO_INODE: u64 = 0x302b;
 pub(super) const PROC_KPAGEFLAGS_INODE: u64 = 0x302c;
 pub(super) const PROC_KEY_USERS_INODE: u64 = 0x302d;
+pub(super) const PROC_SYS_KERNEL_KEYS_INODE: u64 = 0x3030;
+pub(super) const PROC_SYS_KERNEL_KEYS_ROOT_MAXKEYS_INODE: u64 = 0x3031;
+pub(super) const PROC_SYS_KERNEL_KEYS_ROOT_MAXBYTES_INODE: u64 = 0x3032;
+pub(super) const PROC_SYS_KERNEL_KEYS_MAXKEYS_INODE: u64 = 0x3033;
+pub(super) const PROC_SYS_KERNEL_KEYS_MAXBYTES_INODE: u64 = 0x3034;
 
 static PROC_UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -220,6 +225,7 @@ pub(super) fn proc_kernel_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("pid_max".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("cap_last_cap".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("tainted".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("keys".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("random".into(), DirectoryContentType::Directory),
     ]
 }

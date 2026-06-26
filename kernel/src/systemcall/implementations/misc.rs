@@ -211,8 +211,8 @@ const KEY_SPEC_SESSION_KEYRING: i32 = -3;
 const KEY_SPEC_USER_KEYRING: i32 = -4;
 const KEY_SPEC_USER_SESSION_KEYRING: i32 = -5;
 const KEY_USER_MAX_PAYLOAD: usize = 32_767;
-const KEY_USER_DEFAULT_MAX_KEYS: usize = 200;
-const KEY_USER_DEFAULT_MAX_BYTES: usize = 20_000;
+pub(crate) const KEY_USER_DEFAULT_MAX_KEYS: usize = 200;
+pub(crate) const KEY_USER_DEFAULT_MAX_BYTES: usize = 20_000;
 
 static NEXT_SESSION_KEYRING_ID: AtomicI32 = AtomicI32::new(1);
 static NEXT_KEY_SERIAL: AtomicI32 = AtomicI32::new(1024);

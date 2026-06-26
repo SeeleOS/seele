@@ -30,6 +30,38 @@ define_syscall!(AddKey, |type_name: String,
     Ok(serial as usize)
 });
 
+define_syscall!(RequestKey, |type_name: String,
+                             description: String,
+                             callout_info: *const u8,
+                             dest_keyring: i32| {
+    if type_name.starts_with('.') {
+        return Err(SyscallError::PermissionDenied);
+    }
+    if !callout_info.is_null() {
+        let _ = user_safe::read_buffer(callout_info, 1)?;
+    }
+
+    match type_name.as_str() {
+        "keyring" | "user" => {}
+        "encrypted" | "trusted" | "logon" | "big_key" => return Err(SyscallError::NoDevice),
+        _ => return Err(SyscallError::NoDevice),
+    }
+
+    let keyring = match dest_keyring {
+        0 => current_session_keyring(false)
+            .or_else(|_| current_user_keyring(UserKeyringKind::UserSession, true))?,
+        KEY_SPEC_THREAD_KEYRING
+        | KEY_SPEC_PROCESS_KEYRING
+        | KEY_SPEC_SESSION_KEYRING
+        | KEY_SPEC_USER_KEYRING
+        | KEY_SPEC_USER_SESSION_KEYRING => resolve_keyring(dest_keyring, false)?,
+        serial if serial > 0 => resolve_keyring(serial, false)?,
+        _ => return Err(SyscallError::NoKey),
+    };
+
+    search_keyring(keyring, &type_name, &description).map(|serial| serial as usize)
+});
+
 define_syscall!(Keyctl, |cmd: u64,
                          arg2: u64,
                          arg3: u64,
@@ -141,7 +173,7 @@ mod tests {
     };
 
     use crate::systemcall::{
-        implementations::{AddKey, Bpf, Eventfd, Keyctl},
+        implementations::{AddKey, Bpf, Eventfd, Keyctl, RequestKey},
         test::{close_test_fd, expect_fd, write_user_cstr},
         test_helpers::{
             SyscallArgs, allocate_user_test_page, expect_errno, expect_ok, read_user_value,

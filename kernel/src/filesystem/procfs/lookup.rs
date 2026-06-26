@@ -125,6 +125,12 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             PROC_SYS_KERNEL_INODE,
             proc_kernel_entries(),
         )),
+        ["sys", "kernel", "keys"] => Ok(proc_dir(
+            "/sys/kernel/keys",
+            "keys",
+            PROC_SYS_KERNEL_KEYS_INODE,
+            proc_kernel_keys_entries(),
+        )),
         ["sys", "net"] => Ok(proc_dir(
             "/sys/net",
             "net",
@@ -228,6 +234,30 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             "tainted",
             PROC_SYS_KERNEL_TAINTED_INODE,
             proc_tainted_bytes,
+        )),
+        ["sys", "kernel", "keys", "root_maxkeys"] => Ok(proc_rw_file(
+            "root_maxkeys",
+            PROC_SYS_KERNEL_KEYS_ROOT_MAXKEYS_INODE,
+            || proc_sysctl_value_bytes(&PROC_KEYS_ROOT_MAXKEYS),
+            |buffer| proc_write_sysctl_u64(&PROC_KEYS_ROOT_MAXKEYS, buffer),
+        )),
+        ["sys", "kernel", "keys", "root_maxbytes"] => Ok(proc_rw_file(
+            "root_maxbytes",
+            PROC_SYS_KERNEL_KEYS_ROOT_MAXBYTES_INODE,
+            || proc_sysctl_value_bytes(&PROC_KEYS_ROOT_MAXBYTES),
+            |buffer| proc_write_sysctl_u64(&PROC_KEYS_ROOT_MAXBYTES, buffer),
+        )),
+        ["sys", "kernel", "keys", "maxkeys"] => Ok(proc_rw_file(
+            "maxkeys",
+            PROC_SYS_KERNEL_KEYS_MAXKEYS_INODE,
+            || proc_sysctl_value_bytes(&PROC_KEYS_MAXKEYS),
+            |buffer| proc_write_sysctl_u64(&PROC_KEYS_MAXKEYS, buffer),
+        )),
+        ["sys", "kernel", "keys", "maxbytes"] => Ok(proc_rw_file(
+            "maxbytes",
+            PROC_SYS_KERNEL_KEYS_MAXBYTES_INODE,
+            || proc_sysctl_value_bytes(&PROC_KEYS_MAXBYTES),
+            |buffer| proc_write_sysctl_u64(&PROC_KEYS_MAXBYTES, buffer),
         )),
         ["sys", "kernel", "random"] => Ok(proc_dir(
             "/sys/kernel/random",

@@ -173,6 +173,7 @@ pub enum SyscallNumber {
     Fadvise64 = 221,
     Waitid = 247,
     AddKey = 248,
+    RequestKey = 249,
     Keyctl = 250,
     InotifyInit = 253,
     InotifyAddWatch = 254,
