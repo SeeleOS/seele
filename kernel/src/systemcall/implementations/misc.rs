@@ -533,10 +533,6 @@ fn key_user_payload_bytes(description: &str, plen: usize) -> usize {
 }
 
 fn reserve_user_key_quota(uid: u32, description: &str, plen: usize) -> Result<(), SyscallError> {
-    if uid == 0 {
-        return Ok(());
-    }
-
     let bytes = key_user_payload_bytes(description, plen);
     let mut quotas = KEY_USER_QUOTAS.lock();
     let quota = quotas.entry(uid).or_default();

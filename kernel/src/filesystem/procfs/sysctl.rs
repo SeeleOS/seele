@@ -7,8 +7,10 @@ const DEFAULT_INOTIFY_MAX_USER_WATCHES: u64 = 524_288;
 const DEFAULT_NR_OPEN: u64 = 1_048_576;
 const DEFAULT_PIPE_MAX_SIZE: u64 = 1_048_576;
 const DEFAULT_PID_MAX: u64 = 4_194_304;
-const DEFAULT_KEYS_ROOT_MAXKEYS: u64 = 1_000_000;
-const DEFAULT_KEYS_ROOT_MAXBYTES: u64 = 25_000_000;
+const DEFAULT_KEYS_ROOT_MAXKEYS: u64 =
+    crate::systemcall::implementations::KEY_USER_DEFAULT_MAX_KEYS as u64;
+const DEFAULT_KEYS_ROOT_MAXBYTES: u64 =
+    crate::systemcall::implementations::KEY_USER_DEFAULT_MAX_BYTES as u64;
 
 pub(super) static PROC_FILE_MAX: AtomicU64 = AtomicU64::new(DEFAULT_FILE_MAX);
 pub(super) static PROC_INOTIFY_MAX_QUEUED_EVENTS: AtomicU64 =
