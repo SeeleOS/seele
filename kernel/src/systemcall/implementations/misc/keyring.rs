@@ -6,22 +6,18 @@ define_syscall!(AddKey, |type_name: String,
                          payload: *const u8,
                          plen: usize,
                          keyring: i32| {
-    let payload_bytes = user_safe::read_buffer(payload, plen)?;
-    match type_name.as_str() {
-        "keyring" if plen != 0 => return Err(SyscallError::InvalidArguments),
-        "keyring" => {}
-        "user" if plen > KEY_USER_MAX_PAYLOAD => return Err(SyscallError::InvalidArguments),
-        "user" => {}
-        "logon" | "big_key" => return Err(SyscallError::NoDevice),
-        _ => return Err(SyscallError::NoDevice),
-    }
+    let key_type = key_type_from_name(&type_name);
+    let payload_bytes = validate_key_payload(key_type, &description, payload, plen)?;
     let target_keyring = resolve_keyring(keyring, true)?;
-    if type_name == "user" {
+    if matches!(
+        key_type,
+        KeyType::User | KeyType::Logon | KeyType::BigKey | KeyType::Encrypted
+    ) {
         let uid = get_current_process().lock().effective_uid;
         reserve_user_key_quota(uid, &description, plen)?;
     }
     let serial = NEXT_KEY_SERIAL.fetch_add(1, Ordering::Relaxed);
-    if type_name == "keyring" {
+    if key_type == KeyType::Keyring {
         ensure_keyring_entry(serial, &description);
     } else {
         ensure_key_entry(serial, &type_name, &description, payload_bytes);
@@ -43,10 +39,9 @@ define_syscall!(RequestKey, |type_name_ptr: *const u8,
         let _ = user_safe::read_buffer(callout_info, 1)?;
     }
 
-    match type_name.as_str() {
-        "keyring" | "user" => {}
-        "encrypted" | "trusted" | "logon" | "big_key" => return Err(SyscallError::NoDevice),
-        _ => return Err(SyscallError::NoDevice),
+    let key_type = key_type_from_name(&type_name);
+    if key_type == KeyType::Unsupported {
+        return Err(SyscallError::NoDevice);
     }
 
     let effective_dest_keyring = if dest_keyring == KEY_REQKEY_DEFL_DEFAULT {
@@ -79,6 +74,10 @@ define_syscall!(RequestKey, |type_name_ptr: *const u8,
         KEY_REQKEY_DEFL_THREAD_KEYRING => current_thread_keyring(true)?,
         KEY_REQKEY_DEFL_PROCESS_KEYRING => current_process_keyring(true)?,
         KEY_REQKEY_DEFL_SESSION_KEYRING => current_session_keyring(true)?,
+        KEY_REQKEY_DEFL_USER_KEYRING => current_user_keyring(UserKeyringKind::User, true)?,
+        KEY_REQKEY_DEFL_USER_SESSION_KEYRING => {
+            current_user_keyring(UserKeyringKind::UserSession, true)?
+        }
         KEY_SPEC_THREAD_KEYRING
         | KEY_SPEC_PROCESS_KEYRING
         | KEY_SPEC_SESSION_KEYRING
@@ -93,11 +92,14 @@ define_syscall!(RequestKey, |type_name_ptr: *const u8,
         Err(err) => return Err(err),
     };
 
+    if !keyring_allows_search(keyring)? {
+        return Err(SyscallError::AccessDenied);
+    }
     if !keyring_allows_write(keyring)? {
         return Err(SyscallError::AccessDenied);
     }
 
-    if type_name == "keyring" {
+    if key_type == KeyType::Keyring {
         let serial = NEXT_KEY_SERIAL.fetch_add(1, Ordering::Relaxed);
         ensure_keyring_entry(serial, &description);
         link_key_into_keyring(serial, keyring)?;
@@ -209,11 +211,16 @@ define_syscall!(Keyctl, |cmd: u64,
         }
         Ok(KeyctlCommand::SetReqkeyKeyring) => {
             let requested = arg2 as i32;
+            if requested == KEY_REQKEY_DEFL_NO_CHANGE {
+                return Ok(get_current_process().lock().request_key_default_keyring as usize);
+            }
             match requested {
                 KEY_REQKEY_DEFL_DEFAULT
                 | KEY_REQKEY_DEFL_THREAD_KEYRING
                 | KEY_REQKEY_DEFL_PROCESS_KEYRING
-                | KEY_REQKEY_DEFL_SESSION_KEYRING => {}
+                | KEY_REQKEY_DEFL_SESSION_KEYRING
+                | KEY_REQKEY_DEFL_USER_KEYRING
+                | KEY_REQKEY_DEFL_USER_SESSION_KEYRING => {}
                 _ => return Err(SyscallError::InvalidArguments),
             }
             let current = get_current_process();
@@ -402,6 +409,18 @@ mod tests {
         write_user_cstr(page, b"user\0");
         write_user_cstr(page + 64, b"demo\0");
         write_user_cstr(page + 96, b"keyring\0");
+        write_user_cstr(page + 352, b"logon\0");
+        write_user_cstr(page + 384, b"big_key\0");
+        write_user_cstr(page + 416, b"encrypted\0");
+        write_user_cstr(page + 448, b"service:secret\0");
+        write_user_cstr(
+            page + 512,
+            b"new enc32 user:masterkey 32 abcdefABCDEF1234567890aaaaaaaaaaabcdefABCDEF1234567890aaaaaaaaaa\0",
+        );
+        write_user_cstr(
+            page + 640,
+            b"new enc32 user:masterkey 32 plaintext123@123!123@123!123@123plaintext123@123!123@123!123@123\0",
+        );
         expect_errno(
             SyscallArgs::new([page, page + 64, 1, 1, KEY_SPEC_SESSION_KEYRING, 0]).call::<AddKey>(),
             SyscallError::BadAddress,
@@ -429,10 +448,68 @@ mod tests {
             .call::<AddKey>(),
             SyscallError::NoDevice,
         );
+        expect_errno(
+            SyscallArgs::new([page + 96, page + 64, 0, 0, 0x7fff_ffff, 0]).call::<AddKey>(),
+            SyscallError::NoKey,
+        );
         let _small_user_key =
             SyscallArgs::new([page, page + 64, page + 128, 16, KEY_SPEC_THREAD_KEYRING, 0])
                 .call::<AddKey>()
                 .expect("add_key should accept user payload under the limit");
+        expect_errno(
+            SyscallArgs::new([
+                page + 352,
+                page + 64,
+                page + 128,
+                16,
+                KEY_SPEC_THREAD_KEYRING,
+                0,
+            ])
+            .call::<AddKey>(),
+            SyscallError::InvalidArguments,
+        );
+        SyscallArgs::new([
+            page + 352,
+            page + 448,
+            page + 128,
+            16,
+            KEY_SPEC_THREAD_KEYRING,
+            0,
+        ])
+        .call::<AddKey>()
+        .expect("add_key should accept logon payloads with a qualified description");
+        SyscallArgs::new([
+            page + 384,
+            page + 64,
+            page + 128,
+            16,
+            KEY_SPEC_THREAD_KEYRING,
+            0,
+        ])
+        .call::<AddKey>()
+        .expect("add_key should accept big_key payloads under the limit");
+        SyscallArgs::new([
+            page + 416,
+            page + 64,
+            page + 512,
+            96,
+            KEY_SPEC_THREAD_KEYRING,
+            0,
+        ])
+        .call::<AddKey>()
+        .expect("add_key should accept encrypted keys with hex encoded decrypted data");
+        expect_errno(
+            SyscallArgs::new([
+                page + 416,
+                page + 448,
+                page + 640,
+                97,
+                KEY_SPEC_THREAD_KEYRING,
+                0,
+            ])
+            .call::<AddKey>(),
+            SyscallError::InvalidArguments,
+        );
         expect_errno(
             SyscallArgs::new([
                 page + 96,
@@ -471,6 +548,10 @@ mod tests {
             SyscallArgs::new([5, session_keyring, 0x1234_5678, 0, 0, 0]).call::<Keyctl>(),
             0,
         );
+        expect_errno(
+            SyscallArgs::new([15, session_keyring, 1, 0, 0, 0]).call::<Keyctl>(),
+            SyscallError::AccessDenied,
+        );
         expect_ok(
             SyscallArgs::new([8, key_serial, session_keyring, 0, 0, 0]).call::<Keyctl>(),
             0,
@@ -494,6 +575,14 @@ mod tests {
             .call::<Keyctl>()
             .expect("get_keyring_id should create user session keyring");
         assert_ne!(user_keyring, user_session_keyring);
+        let old_default = SyscallArgs::new([14, (-1i32) as u64, 0, 0, 0, 0])
+            .call::<Keyctl>()
+            .expect("KEY_REQKEY_DEFL_NO_CHANGE should return the old default");
+        assert_eq!(old_default, 0);
+        expect_ok(
+            SyscallArgs::new([14, 5, 0, 0, 0, 0]).call::<Keyctl>(),
+            old_default,
+        );
         expect_errno(
             SyscallArgs::new([99, 0, 0, 0, 0, 0]).call::<Keyctl>(),
             SyscallError::NoSyscall,
