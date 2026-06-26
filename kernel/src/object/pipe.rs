@@ -15,6 +15,7 @@ use crate::{
         traits::{Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable, wait_for_object_event},
+    process::manager::get_current_process,
     socket::SocketError,
     systemcall::utils::SyscallError,
     thread::yielding::wake_pollers_for_object,
@@ -24,6 +25,7 @@ use core::sync::atomic::Ordering;
 pub const PIPE_CAPACITY: usize = 64 * 1024;
 const PIPE_BUF: usize = 4096;
 const PIPE_MAX_SIZE_LIMIT: usize = 1 << 31;
+const CAP_SYS_RESOURCE: usize = 24;
 
 #[derive(Debug)]
 struct PipeState {
@@ -165,7 +167,17 @@ fn proc_pipe_max_size() -> usize {
 }
 
 fn default_pipe_capacity() -> usize {
-    PIPE_CAPACITY.min(proc_pipe_max_size()).max(PIPE_BUF)
+    if current_process_has_pipe_resource_privilege() {
+        PIPE_CAPACITY
+    } else {
+        PIPE_CAPACITY.min(proc_pipe_max_size()).max(PIPE_BUF)
+    }
+}
+
+fn current_process_has_pipe_resource_privilege() -> bool {
+    let process = get_current_process();
+    let process = process.lock();
+    process.effective_uid == 0 || process.capability_effective[0] & (1 << CAP_SYS_RESOURCE) != 0
 }
 
 impl Object for PipeEndpoint {
