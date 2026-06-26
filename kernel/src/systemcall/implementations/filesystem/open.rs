@@ -343,17 +343,15 @@ define_syscall!(OpenAt, |dirfd: i32,
         );
     }
     let file_flags = file_flags_from_open_flags(flags)?;
-    if !file_flags.is_empty() {
-        let set_flags_start = profile::scope_start();
-        match object.clone().set_flags(file_flags) {
-            Ok(()) | Err(ObjectError::Unimplemented) => {}
-            Err(err) => return Err(err.into()),
-        }
-        profile::record_hot_syscall_phase(
-            HotSyscallPhase::OpenAtSetFlags,
-            profile::scope_start().saturating_sub(set_flags_start),
-        );
+    let set_flags_start = profile::scope_start();
+    match object.clone().set_flags(file_flags) {
+        Ok(()) | Err(ObjectError::Unimplemented) => {}
+        Err(err) => return Err(err.into()),
     }
+    profile::record_hot_syscall_phase(
+        HotSyscallPhase::OpenAtSetFlags,
+        profile::scope_start().saturating_sub(set_flags_start),
+    );
 
     let fd_flags = if flags.contains(OpenFlags::CLOEXEC) {
         FdFlags::CLOEXEC
