@@ -178,6 +178,10 @@ impl Object for PipeEndpoint {
         Ok(())
     }
 
+    fn notify_readable(self: Arc<Self>) {
+        crate::object::control::notify_fcntl_async_readable(&(self as ObjectRef));
+    }
+
     impl_cast_function!("readable", Readable);
     impl_cast_function!("writable", Writable);
     impl_cast_function!("pollable", Pollable);
@@ -266,6 +270,15 @@ impl Writable for PipeEndpoint {
                 state.buffer.extend(buffer[..write_len].iter().copied());
                 drop(state);
                 self.wake_readers();
+                if let Some(read) = self
+                    .inner
+                    .read_endpoint
+                    .lock()
+                    .as_ref()
+                    .and_then(Weak::upgrade)
+                {
+                    read.notify_readable();
+                }
                 return Ok(write_len);
             }
 

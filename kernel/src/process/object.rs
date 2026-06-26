@@ -2,6 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 
 use crate::{
     object::{
+        control::release_fcntl_object_state,
         error::ObjectError,
         file_locks::{release_fd_entry_locks, release_process_fd_table_locks},
         misc::{ObjectRef, ObjectResult},
@@ -9,6 +10,11 @@ use crate::{
     },
     process::{FdEntry, FdFlags, Process, new_fd_table},
 };
+
+fn release_fd_entry_resources(process_pid: crate::process::misc::ProcessID, entry: &FdEntry) {
+    release_fd_entry_locks(process_pid, entry);
+    release_fcntl_object_state(&entry.object);
+}
 
 pub fn close_cloexec_fd_entries(fd_table: &mut [Option<FdEntry>]) {
     for entry in fd_table {
@@ -109,7 +115,7 @@ impl Process {
             fd_table.resize(slot + 1, None);
         }
         if let Some(old_entry) = fd_table[slot].take() {
-            release_fd_entry_locks(self.pid, &old_entry);
+            release_fd_entry_resources(self.pid, &old_entry);
         }
         fd_table[slot] = Some(FdEntry::new(object, fd_flags));
         Ok(slot)
@@ -121,7 +127,7 @@ impl Process {
         let Some(old_entry) = entry.take() else {
             return Err(ObjectError::DoesNotExist);
         };
-        release_fd_entry_locks(self.pid, &old_entry);
+        release_fd_entry_resources(self.pid, &old_entry);
         Ok(())
     }
 
@@ -211,13 +217,16 @@ impl Process {
         if is_shared {
             let entries = self.fd_table.lock().clone();
             release_process_fd_table_locks(self.pid, &entries);
+            for entry in entries.iter().flatten() {
+                release_fcntl_object_state(&entry.object);
+            }
         } else {
             let entries = {
                 let mut fd_table = self.fd_table.lock();
                 core::mem::take(&mut *fd_table)
             };
             for entry in entries.into_iter().flatten() {
-                release_fd_entry_locks(self.pid, &entry);
+                release_fd_entry_resources(self.pid, &entry);
             }
         }
 

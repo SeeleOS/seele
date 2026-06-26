@@ -96,6 +96,8 @@ pub trait Object: Send + Sync + Debug {
         Err(ObjectError::Unimplemented)
     }
 
+    fn notify_readable(self: Arc<Self>) {}
+
     define_cast_function!("writable", Writable, BadFileDescriptor);
     define_cast_function!("readable", Readable, BadFileDescriptor);
     define_cast_function!("configuratable", Configuratable, InappropriateIoctl);
