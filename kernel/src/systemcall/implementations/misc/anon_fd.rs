@@ -167,10 +167,9 @@ mod tests {
         );
         assert_fd_flags(memfd, FdFlags::CLOEXEC);
         assert_object_flags(memfd, FileFlags::RDWR);
-        let memfd_status_flags = expect_ok(
-            SyscallArgs::new([memfd as u64, F_GETFL, 0, 0, 0, 0]).call::<Fcntl>(),
-            0,
-        );
+        let memfd_status_flags = SyscallArgs::new([memfd as u64, F_GETFL, 0, 0, 0, 0])
+            .call::<Fcntl>()
+            .expect("F_GETFL on memfd should succeed");
         assert_eq!(memfd_status_flags & O_ACCMODE, O_RDWR);
         let memfd_stat = get_object_current_process(memfd as u64)
             .unwrap()
