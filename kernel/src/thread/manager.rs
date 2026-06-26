@@ -18,6 +18,7 @@ use crate::{
         misc::{State, ThreadID},
         scheduling::request_all_cpus_resched,
         snapshot::ThreadSnapshotType,
+        stack::KernelStack,
         thread::Thread,
         yielding::{BlockType, BlockedQueues},
     },
@@ -35,6 +36,7 @@ pub struct ThreadManager {
     pub ready_queues: Vec<VecDeque<ThreadRef>>,
     pub zombies: Vec<ThreadRef>,
     pending_thread_exits: Vec<PendingThreadExit>,
+    deferred_kernel_stacks: Vec<KernelStack>,
     pub blocked_queues: BlockedQueues,
     next_ready_cpu: usize,
 }
@@ -262,11 +264,15 @@ impl ThreadManager {
             let thread_id;
             {
                 log::trace!("clean_zombies: lock thread");
-                let thread = ele.lock();
+                let mut thread = ele.lock();
                 log::trace!("clean_zombies: locked thread");
                 parent_arc = thread.parent.clone();
                 self.threads.remove(&thread.id);
                 thread_id = thread.id;
+                self.deferred_kernel_stacks
+                    .extend(thread.kernel_stack.take());
+                self.deferred_kernel_stacks
+                    .extend(thread.scheduler_stack.take());
 
                 drop(thread);
             }
@@ -322,6 +328,10 @@ impl ThreadManager {
         }
         log::debug!("cleanup_exited_threads done");
         to_remove
+    }
+
+    pub fn drain_deferred_kernel_stacks(&mut self) {
+        self.deferred_kernel_stacks.clear();
     }
 
     fn flush_pending_thread_exits(&mut self) {

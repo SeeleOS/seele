@@ -328,6 +328,7 @@ pub fn return_to_scheduler_no_save() -> ! {
 
 pub fn run() -> ! {
     loop {
+        with_thread_manager(|manager| manager.drain_deferred_kernel_stacks());
         let scheduler_start = profile::scope_start();
         if should_run_global_scheduler_work() {
             let deferred_work = scheduler_deferred_work_snapshot();
