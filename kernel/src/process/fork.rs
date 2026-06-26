@@ -104,6 +104,7 @@ impl Process {
                 process_keyring: parent_locked.process_keyring,
                 session_keyring: parent_locked.session_keyring,
                 user_keyring: parent_locked.user_keyring,
+                request_key_default_keyring: parent_locked.request_key_default_keyring,
                 capability_effective: parent_locked.capability_effective,
                 capability_permitted: parent_locked.capability_permitted,
                 capability_inheritable: parent_locked.capability_inheritable,

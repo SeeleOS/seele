@@ -49,7 +49,18 @@ define_syscall!(RequestKey, |type_name_ptr: *const u8,
         _ => return Err(SyscallError::NoDevice),
     }
 
-    let keyring = match dest_keyring {
+    let effective_dest_keyring = if dest_keyring == KEY_REQKEY_DEFL_DEFAULT {
+        let default_keyring = get_current_process().lock().request_key_default_keyring;
+        if default_keyring == KEY_REQKEY_DEFL_DEFAULT {
+            dest_keyring
+        } else {
+            default_keyring
+        }
+    } else {
+        dest_keyring
+    };
+
+    let keyring = match effective_dest_keyring {
         KEY_REQKEY_DEFL_DEFAULT => {
             let search_keyrings = [
                 current_thread_keyring(false).ok(),
@@ -88,7 +99,11 @@ define_syscall!(RequestKey, |type_name_ptr: *const u8,
         ensure_negative_key_entry(serial, &type_name, &description);
     }
     link_key_into_keyring(serial, keyring)?;
-    Ok(serial as usize)
+    if type_name == "keyring" {
+        Ok(serial as usize)
+    } else {
+        Err(SyscallError::NoKey)
+    }
 });
 
 fn keyctl_key_serial(spec: u64) -> Result<i32, SyscallError> {
@@ -188,7 +203,21 @@ define_syscall!(Keyctl, |cmd: u64,
             let bytes = read_key(keyctl_key_serial(arg2)?)?;
             copy_keyctl_bytes_to_user(&bytes, arg3 as *mut u8, arg4 as usize)
         }
-        Ok(KeyctlCommand::SetReqkeyKeyring) => Ok(0),
+        Ok(KeyctlCommand::SetReqkeyKeyring) => {
+            let requested = arg2 as i32;
+            match requested {
+                KEY_REQKEY_DEFL_DEFAULT
+                | KEY_REQKEY_DEFL_THREAD_KEYRING
+                | KEY_REQKEY_DEFL_PROCESS_KEYRING
+                | KEY_REQKEY_DEFL_SESSION_KEYRING => {}
+                _ => return Err(SyscallError::InvalidArguments),
+            }
+            let current = get_current_process();
+            let mut process = current.lock();
+            let old = process.request_key_default_keyring;
+            process.request_key_default_keyring = requested;
+            Ok(old as usize)
+        }
         Ok(KeyctlCommand::SetTimeout) => {
             set_key_timeout(keyctl_key_serial(arg2)?, arg3 as u32)?;
             Ok(0)
