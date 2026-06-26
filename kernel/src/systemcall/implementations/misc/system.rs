@@ -327,7 +327,7 @@ mod tests {
         let new_caps = [
             TestLinuxCapData {
                 effective: 0xaa,
-                permitted: 0xbb,
+                permitted: 0xff,
                 inheritable: 0xcc,
             },
             TestLinuxCapData {
@@ -344,7 +344,7 @@ mod tests {
         {
             let process = process.lock();
             assert_eq!(process.capability_effective, [0xaa, 0xcc]);
-            assert_eq!(process.capability_permitted, [0xbb, 0xee]);
+            assert_eq!(process.capability_permitted, [0xff, 0xee]);
             assert_eq!(process.capability_inheritable, [0xcc, 0xff]);
         }
         write_user_value(
@@ -357,9 +357,9 @@ mod tests {
         write_user_value(
             cap_page + 16,
             &TestLinuxCapData {
-                effective: 0x11,
+                effective: 0x22,
                 permitted: 0x22,
-                inheritable: 0x33,
+                inheritable: 0x44,
             },
         );
         expect_ok(
@@ -368,9 +368,9 @@ mod tests {
         );
         {
             let process = process.lock();
-            assert_eq!(process.capability_effective, [0x11, 0xcc]);
+            assert_eq!(process.capability_effective, [0x22, 0xcc]);
             assert_eq!(process.capability_permitted, [0x22, 0xee]);
-            assert_eq!(process.capability_inheritable, [0x33, 0xff]);
+            assert_eq!(process.capability_inheritable, [0x44, 0xff]);
         }
         write_user_value(
             cap_page,
