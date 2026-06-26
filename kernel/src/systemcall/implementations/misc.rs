@@ -360,48 +360,101 @@ fn next_keyring_id() -> i32 {
 
 fn current_thread_keyring(create: bool) -> Result<i32, SyscallError> {
     let process = get_current_process();
-    let mut process = process.lock();
-    if process.thread_keyring == 0 {
-        if !create {
-            return Err(SyscallError::NoData);
+    let (serial, uid, gid, created) = {
+        let mut process = process.lock();
+        if process.thread_keyring == 0 {
+            if !create {
+                return Err(SyscallError::NoData);
+            }
+            process.thread_keyring = next_keyring_id();
+            (
+                process.thread_keyring,
+                process.effective_uid,
+                process.effective_gid,
+                true,
+            )
+        } else {
+            (
+                process.thread_keyring,
+                process.effective_uid,
+                process.effective_gid,
+                false,
+            )
         }
-        process.thread_keyring = next_keyring_id();
-        ensure_keyring_entry(process.thread_keyring, "");
+    };
+    if created {
+        ensure_keyring_entry_with_owner(serial, "", uid, gid);
     }
-    Ok(process.thread_keyring)
+    Ok(serial)
 }
 
 fn current_process_keyring(create: bool) -> Result<i32, SyscallError> {
     let process = get_current_process();
-    let mut process = process.lock();
-    if process.process_keyring == 0 {
-        if !create {
-            return Err(SyscallError::NoData);
+    let (serial, uid, gid, created) = {
+        let mut process = process.lock();
+        if process.process_keyring == 0 {
+            if !create {
+                return Err(SyscallError::NoData);
+            }
+            process.process_keyring = next_keyring_id();
+            (
+                process.process_keyring,
+                process.effective_uid,
+                process.effective_gid,
+                true,
+            )
+        } else {
+            (
+                process.process_keyring,
+                process.effective_uid,
+                process.effective_gid,
+                false,
+            )
         }
-        process.process_keyring = next_keyring_id();
-        ensure_keyring_entry(process.process_keyring, "");
+    };
+    if created {
+        ensure_keyring_entry_with_owner(serial, "", uid, gid);
     }
-    Ok(process.process_keyring)
+    Ok(serial)
 }
 
 fn current_session_keyring(create: bool) -> Result<i32, SyscallError> {
     let process = get_current_process();
-    let mut process = process.lock();
-    if process.session_keyring == 0 {
-        if !create {
-            return Err(SyscallError::NoData);
+    let (serial, uid, gid, created) = {
+        let mut process = process.lock();
+        if process.session_keyring == 0 {
+            if !create {
+                return Err(SyscallError::NoData);
+            }
+            process.session_keyring = next_keyring_id();
+            (
+                process.session_keyring,
+                process.effective_uid,
+                process.effective_gid,
+                true,
+            )
+        } else {
+            (
+                process.session_keyring,
+                process.effective_uid,
+                process.effective_gid,
+                false,
+            )
         }
-        process.session_keyring = next_keyring_id();
-        ensure_keyring_entry(process.session_keyring, "");
+    };
+    if created {
+        ensure_keyring_entry_with_owner(serial, "", uid, gid);
     }
-    Ok(process.session_keyring)
+    Ok(serial)
 }
 
 fn current_user_keyring(kind: UserKeyringKind, create: bool) -> Result<i32, SyscallError> {
-    let uid = get_current_process().lock().effective_uid;
-    let mut user_keyrings = USER_KEYRINGS.lock();
-    if let Some(serial) = user_keyrings.get(&(uid, kind)) {
-        return Ok(*serial);
+    let (uid, gid) = current_key_owner();
+    {
+        let user_keyrings = USER_KEYRINGS.lock();
+        if let Some(serial) = user_keyrings.get(&(uid, kind)) {
+            return Ok(*serial);
+        }
     }
     if !create {
         return Err(SyscallError::NoData);
@@ -412,8 +465,8 @@ fn current_user_keyring(kind: UserKeyringKind, create: bool) -> Result<i32, Sysc
         UserKeyringKind::User => alloc::format!("_uid.{uid}"),
         UserKeyringKind::UserSession => alloc::format!("_uid_ses.{uid}"),
     };
-    ensure_keyring_entry(serial, &description);
-    user_keyrings.insert((uid, kind), serial);
+    ensure_keyring_entry_with_owner(serial, &description, uid, gid);
+    USER_KEYRINGS.lock().insert((uid, kind), serial);
     Ok(serial)
 }
 
@@ -447,6 +500,10 @@ fn keyring_exists(serial: i32) -> bool {
 
 fn ensure_keyring_entry(serial: i32, description: &str) {
     let (uid, gid) = current_key_owner();
+    ensure_keyring_entry_with_owner(serial, description, uid, gid);
+}
+
+fn ensure_keyring_entry_with_owner(serial: i32, description: &str, uid: u32, gid: u32) {
     let mut registry = KEY_REGISTRY.lock();
     let entry = registry.entry(serial).or_default();
     entry.type_name = "keyring".into();
