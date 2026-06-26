@@ -18,9 +18,12 @@ use crate::filesystem::{
     info::{FileLikeInfo, FileTimes, UnixPermission},
     path::Path,
     vfs::FSResult,
-    vfs_traits::{File, FileLikeType, LinuxFileAttributes, Whence},
+    vfs_traits::{FallocateMode, File, FileLikeType, LinuxFileAttributes, Whence},
 };
 use crate::memory::utils::Mut;
+
+const FALLOCATE_GRANULE: u64 = 4096;
+const MAX_SYNCHRONOUS_FALLOCATE_LEN: u64 = 512 * 1024;
 
 pub struct Ext4File {
     name: String,
@@ -77,6 +80,21 @@ impl Ext4File {
 
     fn replace_cached_inode(&self, inode: Inode) {
         *self.inode.lock() = inode;
+    }
+
+    fn write_zero_range(&self, inode: &mut Inode, mut offset: u64, end: u64) -> FSResult<()> {
+        let zeroes = [0u8; 4096];
+        while offset < end {
+            let chunk_len = usize::try_from((end - offset).min(zeroes.len() as u64))
+                .map_err(|_| FSError::Other)?;
+            let written = file::write_at(&self.fs, inode, &zeroes[..chunk_len], offset)
+                .map_err(FSError::from)?;
+            if written == 0 {
+                return Err(FSError::NoSpace);
+            }
+            offset = offset.saturating_add(written as u64);
+        }
+        Ok(())
     }
 
     fn set_xattr_impl(
@@ -224,19 +242,41 @@ impl File for Ext4File {
         Ok(())
     }
 
-    fn allocate(&mut self, mode: u32, offset: u64, len: u64) -> FSResult<()> {
+    fn allocate(&mut self, mode: FallocateMode, offset: u64, len: u64) -> FSResult<()> {
         let _operation = self.operation_lock.lock();
-        if mode != 0 {
-            return Err(FSError::Other);
-        }
-
         let end = offset.checked_add(len).ok_or(FSError::Other)?;
         let mut inode = self.refresh_inode()?;
-        if end > inode.size_in_bytes() {
-            file::truncate(&self.fs, &mut inode, end).map_err(FSError::from)?;
-            self.replace_cached_inode(inode);
-            self.update_lookup_cache();
+        let punch_hole = FallocateMode::FALLOC_FL_KEEP_SIZE | FallocateMode::FALLOC_FL_PUNCH_HOLE;
+        if mode.contains(FallocateMode::FALLOC_FL_PUNCH_HOLE) && mode != punch_hole {
+            return Err(FSError::InvalidArguments);
         }
+        if mode == punch_hole {
+            return Err(FSError::OperationNotSupported);
+        }
+        let unsupported = FallocateMode::FALLOC_FL_COLLAPSE_RANGE
+            | FallocateMode::FALLOC_FL_ZERO_RANGE
+            | FallocateMode::FALLOC_FL_INSERT_RANGE
+            | FallocateMode::FALLOC_FL_UNSHARE_RANGE;
+        if mode.intersects(unsupported) {
+            return Err(FSError::OperationNotSupported);
+        }
+        if mode.is_empty()
+            && (!offset.is_multiple_of(FALLOCATE_GRANULE)
+                || !len.is_multiple_of(FALLOCATE_GRANULE)
+                || len > MAX_SYNCHRONOUS_FALLOCATE_LEN)
+        {
+            // TODO: replace this with real extent reservation. Synchronously
+            // zero-writing incomplete blocks or large fallocate ranges can
+            // monopolize the VM and is not Linux-compatible preallocation.
+            return Err(FSError::OperationNotSupported);
+        }
+
+        let original_size = inode.size_in_bytes();
+        if !mode.contains(FallocateMode::FALLOC_FL_KEEP_SIZE) && end > original_size {
+            self.write_zero_range(&mut inode, original_size, end)?;
+        }
+        self.replace_cached_inode(inode);
+        self.update_lookup_cache();
         Ok(())
     }
 

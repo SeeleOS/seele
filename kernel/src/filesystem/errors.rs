@@ -39,6 +39,8 @@ pub enum FSError {
     TooManySymlinks,
     #[error("filesystem is read-only")]
     Readonly,
+    #[error("operation not supported")]
+    OperationNotSupported,
     #[error("filesystem I/O failed")]
     Other,
     #[error(transparent)]
@@ -65,6 +67,7 @@ impl AsSyscallError for FSError {
             Self::TooManySymlinks => SyscallError::TooManySymbolicLinks,
 
             Self::Readonly => SyscallError::ReadOnlyFileSystem,
+            Self::OperationNotSupported => SyscallError::OperationNotSupported,
 
             Self::StorageDeviceError(err) => err.as_syscall_error(),
 

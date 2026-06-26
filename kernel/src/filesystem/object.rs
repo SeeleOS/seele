@@ -555,7 +555,12 @@ impl OpenedFileObject {
         }
     }
 
-    pub fn allocate(&self, mode: u32, offset: u64, len: u64) -> FSResult<()> {
+    pub fn allocate(
+        &self,
+        mode: crate::filesystem::vfs_traits::FallocateMode,
+        offset: u64,
+        len: u64,
+    ) -> FSResult<()> {
         self.invalidate_page_cache();
         self.resolve_file()?.lock().allocate(mode, offset, len)
     }

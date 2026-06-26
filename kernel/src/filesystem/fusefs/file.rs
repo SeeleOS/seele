@@ -8,7 +8,7 @@ use crate::filesystem::{
     info::{FileLikeInfo, UnixPermission},
     path::Path,
     vfs::FSResult,
-    vfs_traits::{File, FileLikeType, Whence},
+    vfs_traits::{FallocateMode, File, FileLikeType, Whence},
 };
 
 use super::connection::FuseConnection;
@@ -94,7 +94,7 @@ impl File for FuseFile {
         Ok(())
     }
 
-    fn allocate(&mut self, _mode: u32, _offset: u64, _len: u64) -> FSResult<()> {
+    fn allocate(&mut self, _mode: FallocateMode, _offset: u64, _len: u64) -> FSResult<()> {
         Err(FSError::Readonly)
     }
 

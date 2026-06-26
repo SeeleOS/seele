@@ -34,7 +34,8 @@ use crate::{
     thread::get_current_thread,
 };
 
-use super::{CloseRangeFlags, DupFlags, FallocateFlags, MemfdFlags, PositionedIoFlags};
+use super::{CloseRangeFlags, DupFlags, MemfdFlags, PositionedIoFlags};
+use crate::filesystem::vfs_traits::FallocateMode;
 
 static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
 const COPY_CHUNK_SIZE: usize = 16 * 1024;
@@ -1243,20 +1244,17 @@ define_syscall!(Ftruncate, |object: ObjectRef, length: i64| {
 });
 
 define_syscall!(Fallocate, |object: ObjectRef,
-                            mode: FallocateFlags,
+                            mode: FallocateMode,
                             offset: i64,
                             len: i64| {
-    if offset < 0 || len < 0 {
+    if offset < 0 || len <= 0 {
         return Err(SyscallError::InvalidArguments);
     }
-    let punch_hole = FallocateFlags::FALLOC_FL_KEEP_SIZE | FallocateFlags::FALLOC_FL_PUNCH_HOLE;
-    if !mode.is_empty() && mode.bits() != punch_hole.bits() {
-        return Err(SyscallError::OperationNotSupported);
-    }
-
+    offset.checked_add(len).ok_or(SyscallError::FileTooLarge)?;
+    ensure_object_writable(&object)?;
     object
         .as_file_like()?
-        .allocate(mode.bits() as u32, offset as u64, len as u64)
+        .allocate(mode, offset as u64, len as u64)
         .map_err(SyscallError::from)?;
     Ok(0)
 });

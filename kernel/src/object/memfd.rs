@@ -15,16 +15,13 @@ use crate::{
         path::Path,
         sparse_file::SparseFileData,
         vfs::{FSResult, WrappedFile},
-        vfs_traits::{File, FileLike, FileLikeType, Whence},
+        vfs_traits::{FallocateMode, File, FileLike, FileLikeType, Whence},
     },
     memory::{addrspace::mem_area::Data, protection::Protection},
     object::{FileFlags, Object, misc::ObjectRef},
     process::manager::MANAGER,
     systemcall::utils::{SyscallError, SyscallResult},
 };
-
-const FALLOC_FL_KEEP_SIZE: u32 = 0x01;
-const FALLOC_FL_PUNCH_HOLE: u32 = 0x02;
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -175,26 +172,42 @@ impl File for MemFdFile {
         Ok(())
     }
 
-    fn allocate(&mut self, mode: u32, offset: u64, len: u64) -> FSResult<()> {
+    fn allocate(&mut self, mode: FallocateMode, offset: u64, len: u64) -> FSResult<()> {
         let seals = self.current_seals();
-        if mode == (FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE) {
+        let punch_hole = FallocateMode::FALLOC_FL_KEEP_SIZE | FallocateMode::FALLOC_FL_PUNCH_HOLE;
+        if mode.contains(FallocateMode::FALLOC_FL_PUNCH_HOLE) && mode != punch_hole {
+            return Err(FSError::InvalidArguments);
+        }
+        let unsupported = FallocateMode::FALLOC_FL_COLLAPSE_RANGE
+            | FallocateMode::FALLOC_FL_ZERO_RANGE
+            | FallocateMode::FALLOC_FL_INSERT_RANGE
+            | FallocateMode::FALLOC_FL_UNSHARE_RANGE;
+        if mode.intersects(unsupported) {
+            return Err(FSError::OperationNotSupported);
+        }
+        if mode == punch_hole {
             if seals.contains(MemFdSealFlags::F_SEAL_WRITE) {
                 return Err(FSError::PermissionDenied);
             }
+            let offset = usize::try_from(offset).map_err(|_| FSError::Other)?;
+            let len = usize::try_from(len).map_err(|_| FSError::Other)?;
+            self.data.zero_range(offset, len);
             return Ok(());
-        }
-        if mode != 0 {
-            return Err(FSError::Other);
         }
 
         let offset = usize::try_from(offset).map_err(|_| FSError::Other)?;
         let len = usize::try_from(len).map_err(|_| FSError::Other)?;
         let end = offset.checked_add(len).ok_or(FSError::Other)?;
-        if end > self.data.len() && seals.contains(MemFdSealFlags::F_SEAL_GROW) {
+        if !mode.contains(FallocateMode::FALLOC_FL_KEEP_SIZE)
+            && end > self.data.len()
+            && seals.contains(MemFdSealFlags::F_SEAL_GROW)
+        {
             return Err(FSError::PermissionDenied);
         }
 
-        self.data.ensure_len(end);
+        if !mode.contains(FallocateMode::FALLOC_FL_KEEP_SIZE) {
+            self.data.ensure_len(end);
+        }
         Ok(())
     }
 }

@@ -4,7 +4,7 @@ use alloc::{string::String, vec::Vec};
 use x86_64::VirtAddr;
 
 use crate::{
-    filesystem::vfs_traits::Whence,
+    filesystem::vfs_traits::{FallocateMode, Whence},
     memory::protection::Protection,
     misc::{
         c_types::{CString, CVec},
@@ -23,12 +23,12 @@ use crate::{
     },
     signal::{Signal, Signals},
     systemcall::implementations::{
-        AtFlags, ClockNanosleepFlags, CloseRangeFlags, DupFlags, EpollCreateFlags, FallocateFlags,
-        FsMountFlags, FsOpenFlags, FsPickFlags, GetMempolicyFlags, GetRandomFlags,
-        InotifyInitFlags, LinuxIoprioWho, MemfdFlags, MlockAllFlags, MmapFlags, MoveMountFlags,
-        MremapFlags, MsyncFlags, OpenFlags, OpenTreeAttrFlags, OpenTreeFlags, PipeFlags,
-        PollEvents, RseqFlags, SetnsFlags, TimerFdFlags, TimerSetTimeFlags, UmountFlags,
-        Wait4Options, WaitidOptions, XattrFlags,
+        AtFlags, ClockNanosleepFlags, CloseRangeFlags, DupFlags, EpollCreateFlags, FsMountFlags,
+        FsOpenFlags, FsPickFlags, GetMempolicyFlags, GetRandomFlags, InotifyInitFlags,
+        LinuxIoprioWho, MemfdFlags, MlockAllFlags, MmapFlags, MoveMountFlags, MremapFlags,
+        MsyncFlags, OpenFlags, OpenTreeAttrFlags, OpenTreeFlags, PipeFlags, PollEvents, RseqFlags,
+        SetnsFlags, TimerFdFlags, TimerSetTimeFlags, UmountFlags, Wait4Options, WaitidOptions,
+        XattrFlags,
     },
     systemcall::utils::{SyscallError, SyscallResult, invalid_syscall_flag_error},
 };
@@ -168,8 +168,8 @@ add_syscall_arg_flags_type!(
     i32,
     PipeFlags,
     i32,
-    FallocateFlags,
-    i32,
+    FallocateMode,
+    u32,
     UmountFlags,
     i32,
     FsOpenFlags,

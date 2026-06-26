@@ -270,7 +270,7 @@ fn ensure_ltp_device_image(path: &Path) -> Result<()> {
         .truncate(false)
         .open(path)
         .with_context(|| format!("failed to open {}", path.display()))?;
-    let min_size = 512 * 1024 * 1024;
+    let min_size = 1024 * 1024 * 1024;
     if file.metadata()?.len() < min_size {
         file.set_len(min_size)
             .with_context(|| format!("failed to size {}", path.display()))?;

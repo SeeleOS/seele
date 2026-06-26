@@ -28,6 +28,24 @@ impl SparseFileData {
         self.len = self.len.max(len);
     }
 
+    pub fn zero_range(&mut self, offset: usize, len: usize) {
+        let end = offset.saturating_add(len).min(self.len);
+        if offset >= end {
+            return;
+        }
+
+        let first_page = offset / PAGE_SIZE;
+        let last_page = (end - 1) / PAGE_SIZE;
+        for page_index in first_page..=last_page {
+            let page_start = page_index * PAGE_SIZE;
+            let range_start = offset.saturating_sub(page_start);
+            let range_end = (end - page_start).min(PAGE_SIZE);
+            if let Some(page) = self.pages.get_mut(&page_index) {
+                page[range_start..range_end].fill(0);
+            }
+        }
+    }
+
     pub fn truncate(&mut self, len: usize) {
         if len >= self.len {
             self.len = len;

@@ -7,7 +7,7 @@ use crate::filesystem::{
     info::{FileLikeInfo, FileTimes, UnixPermission},
     path::Path,
     vfs::FSResult,
-    vfs_traits::{File, FileLikeType, LinuxFileAttributes, Whence},
+    vfs_traits::{FallocateMode, File, FileLikeType, LinuxFileAttributes, Whence},
 };
 
 use super::{S_IFMT, TmpNodeKind, TmpfsStateRef, node_name};
@@ -160,14 +160,24 @@ impl File for TmpfsFileHandle {
         Ok(())
     }
 
-    fn allocate(&mut self, mode: u32, offset: u64, len: u64) -> FSResult<()> {
-        if mode != 0 {
-            return Err(FSError::Other);
-        }
-
+    fn allocate(&mut self, mode: FallocateMode, offset: u64, len: u64) -> FSResult<()> {
         let offset = usize::try_from(offset).map_err(|_| FSError::Other)?;
         let len = usize::try_from(len).map_err(|_| FSError::Other)?;
         let end = offset.checked_add(len).ok_or(FSError::Other)?;
+        let punch_hole = FallocateMode::FALLOC_FL_KEEP_SIZE | FallocateMode::FALLOC_FL_PUNCH_HOLE;
+        if mode.contains(FallocateMode::FALLOC_FL_PUNCH_HOLE) && mode != punch_hole {
+            return Err(FSError::InvalidArguments);
+        }
+        if mode == punch_hole {
+            return Err(FSError::OperationNotSupported);
+        }
+        let unsupported = FallocateMode::FALLOC_FL_COLLAPSE_RANGE
+            | FallocateMode::FALLOC_FL_ZERO_RANGE
+            | FallocateMode::FALLOC_FL_INSERT_RANGE
+            | FallocateMode::FALLOC_FL_UNSHARE_RANGE;
+        if mode.intersects(unsupported) {
+            return Err(FSError::OperationNotSupported);
+        }
         let mut state = self.state.lock();
         let node = state.node_by_inode_mut(self.inode)?;
         let data = match &mut node.kind {
@@ -178,7 +188,9 @@ impl File for TmpfsFileHandle {
                 return Err(FSError::NotAFile);
             }
         };
-        data.ensure_len(end);
+        if !mode.contains(FallocateMode::FALLOC_FL_KEEP_SIZE) {
+            data.ensure_len(end);
+        }
         Ok(())
     }
 

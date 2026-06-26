@@ -35,6 +35,18 @@ bitflags! {
     }
 }
 
+bitflags! {
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct FallocateMode: u32 {
+        const FALLOC_FL_KEEP_SIZE = 0x01;
+        const FALLOC_FL_PUNCH_HOLE = 0x02;
+        const FALLOC_FL_COLLAPSE_RANGE = 0x08;
+        const FALLOC_FL_ZERO_RANGE = 0x10;
+        const FALLOC_FL_INSERT_RANGE = 0x20;
+        const FALLOC_FL_UNSHARE_RANGE = 0x40;
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MountPropagation {
     Private,
@@ -110,7 +122,7 @@ pub trait File: Send + Sync {
     fn truncate(&mut self, _length: u64) -> FSResult<()> {
         Err(FSError::Readonly)
     }
-    fn allocate(&mut self, _mode: u32, _offset: u64, _len: u64) -> FSResult<()> {
+    fn allocate(&mut self, _mode: FallocateMode, _offset: u64, _len: u64) -> FSResult<()> {
         Err(FSError::Readonly)
     }
     fn link_to(&self, _new_path: &Path) -> FSResult<()> {

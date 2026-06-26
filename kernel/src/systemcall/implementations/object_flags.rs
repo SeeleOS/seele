@@ -2,18 +2,6 @@ use bitflags::bitflags;
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
-    pub struct FallocateFlags: i32 {
-        const FALLOC_FL_KEEP_SIZE = 0x01;
-        const FALLOC_FL_PUNCH_HOLE = 0x02;
-        const FALLOC_FL_COLLAPSE_RANGE = 0x08;
-        const FALLOC_FL_ZERO_RANGE = 0x10;
-        const FALLOC_FL_INSERT_RANGE = 0x20;
-        const FALLOC_FL_UNSHARE_RANGE = 0x40;
-    }
-}
-
-bitflags! {
-    #[derive(Clone, Copy, Debug)]
     pub struct DupFlags: i32 {
         const O_CLOEXEC = 0o2_000_000;
     }
