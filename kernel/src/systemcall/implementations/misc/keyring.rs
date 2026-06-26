@@ -36,7 +36,7 @@ define_syscall!(RequestKey, |type_name_ptr: *const u8,
                              dest_keyring: i32| {
     let type_name = String::k_from(type_name_ptr).map_err(|_| SyscallError::BadAddress)?;
     let description = String::k_from(description_ptr).map_err(|_| SyscallError::BadAddress)?;
-    if type_name.starts_with('.') {
+    if type_name.starts_with('.') || description.starts_with('.') {
         return Err(SyscallError::PermissionDenied);
     }
     if !callout_info.is_null() {
@@ -50,21 +50,45 @@ define_syscall!(RequestKey, |type_name_ptr: *const u8,
     }
 
     let keyring = match dest_keyring {
-        0 => current_session_keyring(false)
-            .or_else(|_| current_user_keyring(UserKeyringKind::UserSession, true))?,
+        KEY_REQKEY_DEFL_DEFAULT => {
+            let search_keyrings = [
+                current_thread_keyring(false).ok(),
+                current_process_keyring(false).ok(),
+                current_session_keyring(false).ok(),
+            ];
+            for keyring in search_keyrings.into_iter().flatten() {
+                match search_keyring(keyring, &type_name, &description) {
+                    Ok(serial) => return Ok(serial as usize),
+                    Err(SyscallError::NoKey) => {}
+                    Err(err) => return Err(err),
+                }
+            }
+            return Err(SyscallError::NoKey);
+        }
+        KEY_REQKEY_DEFL_THREAD_KEYRING => current_thread_keyring(true)?,
+        KEY_REQKEY_DEFL_PROCESS_KEYRING => current_process_keyring(true)?,
+        KEY_REQKEY_DEFL_SESSION_KEYRING => current_session_keyring(true)?,
         _ => resolve_existing_keyring(dest_keyring)?,
     };
 
     match search_keyring(keyring, &type_name, &description) {
-        Ok(serial) => Ok(serial as usize),
-        Err(SyscallError::NoKey) if type_name == "keyring" => {
-            let serial = NEXT_KEY_SERIAL.fetch_add(1, Ordering::Relaxed);
-            ensure_keyring_entry(serial, &description);
-            link_key_into_keyring(serial, keyring)?;
-            Ok(serial as usize)
-        }
-        Err(err) => Err(err),
+        Ok(serial) => return Ok(serial as usize),
+        Err(SyscallError::NoKey) => {}
+        Err(err) => return Err(err),
+    };
+
+    if !keyring_allows_write(keyring)? {
+        return Err(SyscallError::AccessDenied);
     }
+
+    let serial = NEXT_KEY_SERIAL.fetch_add(1, Ordering::Relaxed);
+    if type_name == "keyring" {
+        ensure_keyring_entry(serial, &description);
+    } else {
+        ensure_negative_key_entry(serial, &type_name, &description);
+    }
+    link_key_into_keyring(serial, keyring)?;
+    Ok(serial as usize)
 });
 
 fn keyctl_key_serial(spec: u64) -> Result<i32, SyscallError> {
@@ -101,7 +125,16 @@ define_syscall!(Keyctl, |cmd: u64,
             let keyring = resolve_keyring(arg2 as i32, arg3 != 0)?;
             Ok(keyring as usize)
         }
-        Ok(KeyctlCommand::JoinSessionKeyring) => Ok(current_session_keyring(true)? as usize),
+        Ok(KeyctlCommand::JoinSessionKeyring) => {
+            if arg2 != 0 {
+                let description =
+                    String::k_from(arg2 as *const u8).map_err(|_| SyscallError::BadAddress)?;
+                if description.starts_with('.') {
+                    return Err(SyscallError::PermissionDenied);
+                }
+            }
+            Ok(current_session_keyring(true)? as usize)
+        }
         Ok(KeyctlCommand::Update) => {
             update_key_payload(keyctl_key_serial(arg2)?, arg3 as *const u8, arg4 as usize)?;
             Ok(0)

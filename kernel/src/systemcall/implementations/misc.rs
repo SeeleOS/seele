@@ -210,6 +210,11 @@ const KEY_SPEC_PROCESS_KEYRING: i32 = -2;
 const KEY_SPEC_SESSION_KEYRING: i32 = -3;
 const KEY_SPEC_USER_KEYRING: i32 = -4;
 const KEY_SPEC_USER_SESSION_KEYRING: i32 = -5;
+const KEY_REQKEY_DEFL_DEFAULT: i32 = 0;
+const KEY_REQKEY_DEFL_THREAD_KEYRING: i32 = 1;
+const KEY_REQKEY_DEFL_PROCESS_KEYRING: i32 = 2;
+const KEY_REQKEY_DEFL_SESSION_KEYRING: i32 = 3;
+const KEY_POS_WRITE: u32 = 0x0400_0000;
 const KEY_USER_MAX_PAYLOAD: usize = 32_767;
 pub(crate) const KEY_USER_DEFAULT_MAX_KEYS: usize = 200;
 pub(crate) const KEY_USER_DEFAULT_MAX_BYTES: usize = 200_000;
@@ -242,6 +247,7 @@ struct KeyEntry {
     permissions: u32,
     links: Vec<i32>,
     is_keyring: bool,
+    negative: bool,
     revoked: bool,
     invalidated: bool,
     timeout_sec: u32,
@@ -563,7 +569,23 @@ fn ensure_key_entry(serial: i32, type_name: &str, description: &str, payload: Ve
     entry.gid = gid;
     entry.permissions = 0x3f3f_0000;
     entry.is_keyring = false;
+    entry.negative = false;
     entry.quota_bytes = quota_bytes;
+}
+
+fn ensure_negative_key_entry(serial: i32, type_name: &str, description: &str) {
+    let (uid, gid) = current_key_owner();
+    let mut registry = KEY_REGISTRY.lock();
+    let entry = registry.entry(serial).or_default();
+    entry.type_name = type_name.into();
+    entry.description = description.into();
+    entry.payload.clear();
+    entry.uid = uid;
+    entry.gid = gid;
+    entry.permissions = 0x3f3f_0000;
+    entry.is_keyring = false;
+    entry.negative = true;
+    entry.quota_bytes = 0;
 }
 
 fn key_user_payload_bytes(description: &str, plen: usize) -> usize {
@@ -693,6 +715,9 @@ fn get_live_key(serial: i32) -> Result<KeyEntry, SyscallError> {
     if entry.invalidated {
         return Err(SyscallError::NoKey);
     }
+    if entry.negative {
+        return Err(SyscallError::NoKey);
+    }
     if entry.expires_at_sec != 0 && KernelTime::current().as_seconds() >= entry.expires_at_sec {
         return Err(SyscallError::KeyExpired);
     }
@@ -795,6 +820,7 @@ fn search_keyring(keyring: i32, type_name: &str, description: &str) -> Result<i3
         };
         if !linked.revoked
             && !linked.invalidated
+            && !linked.negative
             && linked.type_name == type_name
             && linked.description == description
         {
@@ -817,9 +843,20 @@ fn search_keyring(keyring: i32, type_name: &str, description: &str) -> Result<i3
             if linked.invalidated {
                 return Err(SyscallError::NoKey);
             }
+            if linked.negative {
+                return Err(SyscallError::NoKey);
+            }
         }
     }
     Err(SyscallError::NoKey)
+}
+
+fn keyring_allows_write(serial: i32) -> Result<bool, SyscallError> {
+    let entry = get_live_key(serial)?;
+    if !entry.is_keyring {
+        return Err(SyscallError::InvalidArguments);
+    }
+    Ok(entry.permissions & KEY_POS_WRITE != 0)
 }
 
 fn describe_key(serial: i32) -> Result<Vec<u8>, SyscallError> {
