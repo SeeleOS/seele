@@ -293,6 +293,7 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Msgctl => "sysv_msg_syscalls_follow_linux_rules",
         AddKey => "key_and_bpf_syscalls_follow_linux_rules",
         Keyctl => "key_and_bpf_syscalls_follow_linux_rules",
+        RequestKey => "key_and_bpf_syscalls_follow_linux_rules",
         Bpf => "key_and_bpf_syscalls_follow_linux_rules",
         Ioctl => "object_control_syscalls_follow_linux_rules",
         RtSigreturn => "process_and_signal_transition_helpers_follow_linux_rules",

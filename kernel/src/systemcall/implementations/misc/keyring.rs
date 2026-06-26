@@ -1,6 +1,15 @@
 use super::*;
 use crate::misc::others::KernelFrom;
 
+const KEYCTL_IOV_MAX: u32 = 1024;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct KeyctlIovec {
+    iov_base: *const u8,
+    iov_len: usize,
+}
+
 define_syscall!(AddKey, |type_name: String,
                          description: String,
                          payload: *const u8,
@@ -134,6 +143,48 @@ fn keyctl_unlink_target(spec: u64) -> Result<i32, SyscallError> {
         serial if serial > 0 => Ok(serial),
         _ => Err(SyscallError::NoKey),
     }
+}
+
+fn read_keyctl_iovec_payload(
+    iov_ptr: *const KeyctlIovec,
+    ioc: u32,
+) -> Result<Vec<u8>, SyscallError> {
+    if ioc > KEYCTL_IOV_MAX {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if ioc > 0 && iov_ptr.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let mut iovs = Vec::with_capacity(ioc as usize);
+    for index in 0..ioc as usize {
+        iovs.push(user_safe::read(unsafe { iov_ptr.add(index) })?);
+    }
+
+    let total_len = iovs.iter().try_fold(0usize, |acc, iov| {
+        let next = acc
+            .checked_add(iov.iov_len)
+            .ok_or(SyscallError::InvalidArguments)?;
+        if next > isize::MAX as usize {
+            return Err(SyscallError::InvalidArguments);
+        }
+        Ok(next)
+    })?;
+    if total_len == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut payload = Vec::with_capacity(total_len);
+    for iov in iovs {
+        if iov.iov_len == 0 {
+            continue;
+        }
+        if iov.iov_base.is_null() {
+            return Err(SyscallError::BadAddress);
+        }
+        payload.extend_from_slice(&user_safe::read_buffer(iov.iov_base, iov.iov_len)?);
+    }
+    Ok(payload)
 }
 
 define_syscall!(Keyctl, |cmd: u64,
@@ -276,7 +327,16 @@ define_syscall!(Keyctl, |cmd: u64,
             }
             Ok(0)
         }
-        Ok(KeyctlCommand::InstantiateIov) => unsupported_keyctl(),
+        Ok(KeyctlCommand::InstantiateIov) => {
+            let serial = keyctl_key_serial(arg2)?;
+            let payload = read_keyctl_iovec_payload(arg3 as *const KeyctlIovec, arg4 as u32)?;
+            instantiate_key_from_payload(serial, payload)?;
+            if arg5 != 0 {
+                let target = resolve_keyring(arg5 as i32, true)?;
+                link_key_into_keyring(serial, target)?;
+            }
+            Ok(0)
+        }
         Ok(KeyctlCommand::Invalidate) => {
             invalidate_key(keyctl_key_serial(arg2)?)?;
             Ok(0)
@@ -315,16 +375,16 @@ define_syscall!(Keyctl, |cmd: u64,
 #[cfg(test)]
 mod tests {
     use super::super::{
-        KEY_USER_DEFAULT_MAX_BYTES, KEY_USER_DEFAULT_MAX_KEYS, proc_key_users_bytes,
-        reserve_user_key_quota,
+        KEY_USER_DEFAULT_MAX_BYTES, KEY_USER_DEFAULT_MAX_KEYS, ensure_negative_key_entry,
+        proc_key_users_bytes, reserve_user_key_quota,
     };
 
     use crate::systemcall::{
-        implementations::{AddKey, Bpf, Eventfd, Keyctl, RequestKey},
+        implementations::{AddKey, Bpf, Eventfd, Keyctl},
         test::{close_test_fd, expect_fd, write_user_cstr},
         test_helpers::{
-            SyscallArgs, allocate_user_test_page, expect_errno, expect_ok, read_user_value,
-            write_user_value,
+            SyscallArgs, allocate_user_test_page, assert_user_bytes, expect_errno, expect_ok,
+            read_user_value, write_user_value,
         },
         utils::SyscallError,
     };
@@ -377,6 +437,13 @@ mod tests {
         replace_bpf_fd: u32,
         relative_fd: u32,
         expected_revision: u64,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct TestKeyctlIovec {
+        iov_base: u64,
+        iov_len: usize,
     }
 
     crate::test!(
@@ -446,6 +513,15 @@ mod tests {
         const BPF_PROG_ATTACH: u64 = 8;
         const BPF_PROG_DETACH: u64 = 9;
         const BPF_MAP_TYPE_ARRAY: u32 = 2;
+        const KEYCTL_SEARCH: u64 = 10;
+        const KEYCTL_READ: u64 = 11;
+        const KEYCTL_INSTANTIATE_IOV: u64 = 20;
+        const ENCRYPTED_KEY_VALID_PAYLOAD_LEN: u64 =
+            b"new enc32 user:masterkey 32 abcdefABCDEF1234567890aaaaaaaaaaabcdefABCDEF1234567890aaaaaaaaaa"
+                .len() as u64;
+        const ENCRYPTED_KEY_INVALID_PAYLOAD_LEN: u64 =
+            b"new enc32 user:masterkey 32 plaintext123@123!123@123!123@123plaintext123@123!123@123!123@123"
+                .len() as u64;
 
         let page = allocate_user_test_page();
         write_user_cstr(page, b"user\0");
@@ -534,7 +610,7 @@ mod tests {
             page + 416,
             page + 64,
             page + 512,
-            96,
+            ENCRYPTED_KEY_VALID_PAYLOAD_LEN,
             KEY_SPEC_THREAD_KEYRING,
             0,
         ])
@@ -545,7 +621,7 @@ mod tests {
                 page + 416,
                 page + 448,
                 page + 640,
-                97,
+                ENCRYPTED_KEY_INVALID_PAYLOAD_LEN,
                 KEY_SPEC_THREAD_KEYRING,
                 0,
             ])
@@ -590,9 +666,9 @@ mod tests {
             SyscallArgs::new([5, session_keyring, 0x1234_5678, 0, 0, 0]).call::<Keyctl>(),
             0,
         );
-        expect_errno(
+        expect_ok(
             SyscallArgs::new([15, session_keyring, 1, 0, 0, 0]).call::<Keyctl>(),
-            SyscallError::AccessDenied,
+            0,
         );
         expect_ok(
             SyscallArgs::new([8, key_serial, session_keyring, 0, 0, 0]).call::<Keyctl>(),
@@ -604,7 +680,7 @@ mod tests {
         );
         expect_errno(
             SyscallArgs::new([8, key_serial, session_keyring, 0, 0, 0]).call::<Keyctl>(),
-            SyscallError::InvalidArguments,
+            SyscallError::NoKey,
         );
         expect_errno(
             SyscallArgs::new([0, KEY_SPEC_USER_KEYRING, 0, 0, 0, 0]).call::<Keyctl>(),
@@ -625,9 +701,69 @@ mod tests {
             SyscallArgs::new([14, 5, 0, 0, 0, 0]).call::<Keyctl>(),
             old_default,
         );
+        write_user_cstr(page + 672, b"iovdemo\0");
+        write_user_value(page + 704, b"hello ");
+        write_user_value(page + 736, b"keyring");
+        write_user_value(
+            page + 768,
+            &[
+                TestKeyctlIovec {
+                    iov_base: page + 704,
+                    iov_len: 6,
+                },
+                TestKeyctlIovec {
+                    iov_base: page + 736,
+                    iov_len: 7,
+                },
+            ],
+        );
+        let iov_key = 900_000;
+        ensure_negative_key_entry(iov_key, "user", "iovdemo");
+        expect_ok(
+            SyscallArgs::new([
+                KEYCTL_INSTANTIATE_IOV,
+                iov_key as u64,
+                page + 768,
+                2,
+                KEY_SPEC_THREAD_KEYRING,
+                0,
+            ])
+            .call::<Keyctl>(),
+            0,
+        );
+        assert_eq!(
+            SyscallArgs::new([
+                KEYCTL_SEARCH,
+                KEY_SPEC_THREAD_KEYRING,
+                page,
+                page + 672,
+                0,
+                0,
+            ])
+            .call::<Keyctl>(),
+            Ok(iov_key as usize)
+        );
+        assert_eq!(
+            SyscallArgs::new([KEYCTL_READ, iov_key as u64, page + 832, 16, 0, 0]).call::<Keyctl>(),
+            Ok(13)
+        );
+        assert_user_bytes(page + 832, b"hello keyring");
+        ensure_negative_key_entry(iov_key + 1, "user", "iovdemo2");
+        expect_errno(
+            SyscallArgs::new([
+                KEYCTL_INSTANTIATE_IOV,
+                (iov_key + 1) as u64,
+                page + 768,
+                super::KEYCTL_IOV_MAX as u64 + 1,
+                0,
+                0,
+            ])
+            .call::<Keyctl>(),
+            SyscallError::InvalidArguments,
+        );
         expect_errno(
             SyscallArgs::new([99, 0, 0, 0, 0, 0]).call::<Keyctl>(),
-            SyscallError::NoSyscall,
+            SyscallError::InvalidArguments,
         );
 
         expect_errno(

@@ -416,6 +416,7 @@ mod tests {
                 "pid_max",
                 "cap_last_cap",
                 "tainted",
+                "keys",
                 "random"
             ]
         );

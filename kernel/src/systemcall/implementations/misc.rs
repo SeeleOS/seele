@@ -426,6 +426,15 @@ fn validate_key_payload(
         return Err(SyscallError::BadAddress);
     }
     let payload_bytes = user_safe::read_buffer(payload, plen)?;
+    validate_key_payload_bytes(key_type, description, payload_bytes)
+}
+
+fn validate_key_payload_bytes(
+    key_type: KeyType,
+    description: &str,
+    payload_bytes: Vec<u8>,
+) -> Result<Vec<u8>, SyscallError> {
+    let plen = payload_bytes.len();
     match key_type {
         KeyType::Keyring if plen != 0 => Err(SyscallError::InvalidArguments),
         KeyType::Keyring => Ok(Vec::new()),
@@ -1169,7 +1178,7 @@ fn set_key_timeout(serial: i32, timeout_sec: u32) -> Result<(), SyscallError> {
     Ok(())
 }
 
-fn instantiate_key(serial: i32, payload: *const u8, plen: usize) -> Result<(), SyscallError> {
+fn instantiate_key_from_payload(serial: i32, payload_bytes: Vec<u8>) -> Result<(), SyscallError> {
     let current = {
         let registry = KEY_REGISTRY.lock();
         let entry = registry.get(&serial).ok_or(SyscallError::NoKey)?;
@@ -1181,11 +1190,11 @@ fn instantiate_key(serial: i32, payload: *const u8, plen: usize) -> Result<(), S
         }
         entry.clone()
     };
-    let payload_bytes = validate_key_payload(
+    let plen = payload_bytes.len();
+    let payload_bytes = validate_key_payload_bytes(
         key_type_from_name(&current.type_name),
         &current.description,
-        payload,
-        plen,
+        payload_bytes,
     )?;
     let reserved_quota = matches!(
         key_type_from_name(&current.type_name),
@@ -1209,6 +1218,18 @@ fn instantiate_key(serial: i32, payload: *const u8, plen: usize) -> Result<(), S
     entry.payload = payload_bytes;
     entry.negative = false;
     Ok(())
+}
+
+fn instantiate_key(serial: i32, payload: *const u8, plen: usize) -> Result<(), SyscallError> {
+    if plen != 0 && payload.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+    let payload = if plen == 0 {
+        Vec::new()
+    } else {
+        user_safe::read_buffer(payload, plen)?
+    };
+    instantiate_key_from_payload(serial, payload)
 }
 
 fn release_reserved_key_quota(entry: &KeyEntry, plen: usize, reserved: bool) {
