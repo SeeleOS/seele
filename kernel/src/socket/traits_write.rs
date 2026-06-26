@@ -3,7 +3,7 @@ use alloc::{sync::Weak, vec::Vec};
 use super::{
     DATAGRAM_RECV_CAPACITY, PendingRights, STREAM_RECV_CAPACITY, SocketError, SocketResult,
     UNIX_SOCKET_REGISTRY, UnixDatagramMessage, UnixSocketKind, UnixSocketObject,
-    UnixSocketRegistryEntry, UnixSocketRegistryKey, UnixSocketState, current_socket_peer_cred,
+    UnixSocketRegistryEntry, UnixSocketState, bind::socket_registry_key, current_socket_peer_cred,
     self_ref::object_ref, wait::wait_for_object_event, wake_io, wake_pollers,
 };
 use crate::{
@@ -36,8 +36,8 @@ impl UnixSocketObject {
         }
 
         let peer = if let Some(target_path) = target_path {
-            let target_key = UnixSocketRegistryKey::from_socket_path(target_path)
-                .ok_or(SocketError::ConnectionRefused)?;
+            let target_key =
+                socket_registry_key(target_path).ok_or(SocketError::ConnectionRefused)?;
             let endpoint = {
                 let registry = UNIX_SOCKET_REGISTRY.lock();
                 match registry.get(&target_key) {
@@ -62,8 +62,7 @@ impl UnixSocketObject {
                 .lock()
                 .clone()
                 .ok_or(SocketError::ConnectionRefused)?;
-            let peer_key = UnixSocketRegistryKey::from_socket_path(&peer_name)
-                .ok_or(SocketError::ConnectionRefused)?;
+            let peer_key = socket_registry_key(&peer_name).ok_or(SocketError::ConnectionRefused)?;
             let endpoint = {
                 let registry = UNIX_SOCKET_REGISTRY.lock();
                 match registry.get(&peer_key) {

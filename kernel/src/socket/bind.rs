@@ -4,24 +4,38 @@ use super::{
     SocketError, SocketResult, UNIX_SOCKET_REGISTRY, UnixListenerInner, UnixSocketKind,
     UnixSocketObject, UnixSocketRegistryEntry, UnixSocketRegistryKey, UnixSocketState,
 };
-use crate::filesystem::{errors::FSError, path::Path, vfs::VirtualFS};
+use crate::filesystem::{errors::FSError, misc::smart_resolve_path, path::Path, vfs::VirtualFS};
 
 const S_IFSOCK: u32 = 0o140000;
 const UNIX_SOCKET_PATH_MODE: u32 = S_IFSOCK | 0o777;
 
 fn create_socket_path(path: &str) -> Result<(), FSError> {
-    let path = Path::new(path);
-    {
-        let mut vfs = VirtualFS.lock();
-        vfs.create_file(path.clone())?;
+    let path = socket_pathname_path(path)?;
+    VirtualFS
+        .lock()
+        .create_file_with_mode(path, Some(UNIX_SOCKET_PATH_MODE))
+}
+
+pub(super) fn socket_pathname_path(path: &str) -> Result<Path, FSError> {
+    smart_resolve_path(path.into(), true).ok_or(FSError::NotFound)
+}
+
+pub(super) fn socket_registry_key(path: &str) -> Option<UnixSocketRegistryKey> {
+    if path.as_bytes().first() == Some(&0) {
+        return Some(UnixSocketRegistryKey::Abstract(path.into()));
     }
-    {
-        let opened = VirtualFS.lock().open(path)?;
-        opened
-            .chmod(UNIX_SOCKET_PATH_MODE)
-            .map_err(|_| FSError::Other)?;
+
+    UnixSocketRegistryKey::from_resolved_path(socket_pathname_path(path).ok()?)
+}
+
+fn map_socket_path_create_error(err: FSError) -> SocketError {
+    match err {
+        FSError::AlreadyExists => SocketError::AddressInUse,
+        FSError::NotADirectory => SocketError::NotADirectory,
+        FSError::AccessDenied => SocketError::AccessDenied,
+        FSError::InvalidArguments => SocketError::InvalidArguments,
+        _ => SocketError::IoError,
     }
-    Ok(())
 }
 
 impl UnixSocketObject {
@@ -46,7 +60,7 @@ impl UnixSocketObject {
             match create_result {
                 Ok(()) => {}
                 Err(FSError::AlreadyExists) => {
-                    let Some(existing_key) = UnixSocketRegistryKey::from_socket_path(&path) else {
+                    let Some(existing_key) = socket_registry_key(&path) else {
                         return Err(SocketError::AddressInUse);
                     };
                     if UNIX_SOCKET_REGISTRY.lock().contains_key(&existing_key) {
@@ -58,19 +72,21 @@ impl UnixSocketObject {
                     // in-kernel listener registry no longer owns the node.
                     VirtualFS
                         .lock()
-                        .delete_file(Path::new(&path))
+                        .delete_file(
+                            socket_pathname_path(&path).map_err(|_| SocketError::AddressInUse)?,
+                        )
                         .map_err(|_| SocketError::AddressInUse)?;
                     create_socket_path(&path).map_err(|_| SocketError::AddressInUse)?;
                 }
-                Err(_) => return Err(SocketError::InvalidArguments),
+                Err(err) => return Err(map_socket_path_create_error(err)),
             }
-            UnixSocketRegistryKey::from_socket_path(&path).ok_or(SocketError::InvalidArguments)?
+            socket_registry_key(&path).ok_or(SocketError::InvalidArguments)?
         };
 
         let mut registry = UNIX_SOCKET_REGISTRY.lock();
         if registry.contains_key(&registry_key) {
-            if !is_abstract {
-                let _ = VirtualFS.lock().delete_file(Path::new(&path));
+            if !is_abstract && let Ok(socket_path) = socket_pathname_path(&path) {
+                let _ = VirtualFS.lock().delete_file(socket_path);
             }
             return Err(SocketError::AddressInUse);
         }

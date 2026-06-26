@@ -443,6 +443,15 @@ pub fn interfaces() -> Vec<NetworkInterfaceInfo> {
         .interfaces_for_namespace(current_namespace_inode())
 }
 
+pub fn is_local_ipv4_address(addr: [u8; 4]) -> bool {
+    addr == [0, 0, 0, 0]
+        || manager()
+            .lock()
+            .interfaces_for_namespace(current_namespace_inode())
+            .iter()
+            .any(|interface| interface.ipv4.is_some_and(|(ipv4, _)| ipv4 == addr))
+}
+
 pub fn create_socket(kind: TransportKind) -> NetResult<NetSocketHandle> {
     let namespace_inode = current_namespace_inode();
     manager().lock().with_stack_mut(namespace_inode, |stack| {

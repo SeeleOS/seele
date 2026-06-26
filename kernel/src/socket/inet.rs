@@ -24,6 +24,7 @@ use crate::{
         traits::{Configuratable, Readable, Statable, Writable},
     },
     polling::{event::PollableEvent, object::Pollable},
+    process::manager::get_current_process,
     thread::yielding::{
         BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
         wake_pollers_for_object,
@@ -40,6 +41,7 @@ use super::{
 };
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
+const CAP_NET_BIND_SERVICE: usize = 10;
 const IP_ADD_MEMBERSHIP: u64 = 35;
 const IP_DROP_MEMBERSHIP: u64 = 36;
 const MCAST_JOIN_GROUP: u64 = 42;
@@ -50,9 +52,15 @@ type LocalListenerKey = (u64, [u8; 4], u16);
 
 static LOCAL_LISTENERS: OnceCell<Mut<BTreeMap<LocalListenerKey, Weak<InetSocketObject>>>> =
     OnceCell::uninit();
+static LOCAL_DATAGRAMS: OnceCell<Mut<BTreeMap<LocalListenerKey, Weak<InetSocketObject>>>> =
+    OnceCell::uninit();
 
 fn local_listeners() -> &'static Mut<BTreeMap<LocalListenerKey, Weak<InetSocketObject>>> {
     LOCAL_LISTENERS.get_or_init(|| Mut::new(BTreeMap::new()))
+}
+
+fn local_datagrams() -> &'static Mut<BTreeMap<LocalListenerKey, Weak<InetSocketObject>>> {
+    LOCAL_DATAGRAMS.get_or_init(|| Mut::new(BTreeMap::new()))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,14 +69,97 @@ pub enum InetSocketKind {
     Datagram,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct InetState {
     handle: NetSocketHandle,
     local: Option<InetAddress>,
     peer: Option<InetAddress>,
+    local_stream: Option<LocalStreamEndpoint>,
+    local_datagrams: VecDeque<LocalDatagramMessage>,
     listening: bool,
     read_shutdown: bool,
     write_shutdown: bool,
+}
+
+#[derive(Debug, Clone)]
+struct LocalDatagramMessage {
+    data: Vec<u8>,
+    source: InetAddress,
+}
+
+#[derive(Debug, Clone)]
+struct LocalStreamEndpoint {
+    incoming: Arc<Mut<VecDeque<u8>>>,
+    outgoing: Arc<Mut<VecDeque<u8>>>,
+    local_write_closed: Arc<Mut<bool>>,
+    peer_write_closed: Arc<Mut<bool>>,
+    peer_closed: Arc<Mut<bool>>,
+    peer: Weak<InetSocketObject>,
+}
+
+impl LocalStreamEndpoint {
+    fn pair(client: &Arc<InetSocketObject>, server: &Arc<InetSocketObject>) -> (Self, Self) {
+        let client_to_server = Arc::new(Mut::new(VecDeque::new()));
+        let server_to_client = Arc::new(Mut::new(VecDeque::new()));
+        let client_write_closed = Arc::new(Mut::new(false));
+        let server_write_closed = Arc::new(Mut::new(false));
+        let client_closed = Arc::new(Mut::new(false));
+        let server_closed = Arc::new(Mut::new(false));
+        (
+            Self {
+                incoming: server_to_client.clone(),
+                outgoing: client_to_server.clone(),
+                local_write_closed: client_write_closed.clone(),
+                peer_write_closed: server_write_closed.clone(),
+                peer_closed: server_closed.clone(),
+                peer: Arc::downgrade(server),
+            },
+            Self {
+                incoming: client_to_server,
+                outgoing: server_to_client,
+                local_write_closed: server_write_closed,
+                peer_write_closed: client_write_closed,
+                peer_closed: client_closed,
+                peer: Arc::downgrade(client),
+            },
+        )
+    }
+
+    fn close_write(&self) {
+        *self.local_write_closed.lock() = true;
+        self.wake_peer(PollableEvent::CanBeRead);
+        self.wake_peer(PollableEvent::ReadClosed);
+        crate::socket::wake_io();
+    }
+
+    fn close_local(&self) {
+        *self.local_write_closed.lock() = true;
+        if let Some(peer) = self.peer.upgrade()
+            && let Some(peer_endpoint) = peer.state.lock().local_stream.clone()
+        {
+            *peer_endpoint.peer_closed.lock() = true;
+        }
+        self.wake_peer(PollableEvent::CanBeRead);
+        self.wake_peer(PollableEvent::ReadClosed);
+        self.wake_peer(PollableEvent::Closed);
+        self.wake_peer(PollableEvent::CanBeWritten);
+        crate::socket::wake_io();
+    }
+
+    fn wake_peer(&self, event: PollableEvent) {
+        if let Some(peer) = self.peer.upgrade()
+            && let Some(object) = object_ref(&peer.self_ref)
+        {
+            wake_pollers_for_object(object as ObjectRef, event);
+        }
+    }
+
+    fn can_recv(&self) -> bool {
+        !self.incoming.lock().is_empty()
+            || *self.peer_write_closed.lock()
+            || *self.peer_closed.lock()
+            || self.peer.upgrade().is_none()
+    }
 }
 
 #[derive(Debug)]
@@ -107,6 +198,9 @@ impl InetSocketObject {
             return Err(SocketError::InvalidArguments);
         }
         let sockaddr = unsafe { &*(address.as_ptr().cast::<LinuxSockAddrIn>()) };
+        if u64::from(sockaddr.sin_family) != AF_INET {
+            return Err(SocketError::AddressFamilyNotSupported);
+        }
         Ok(InetAddress::new(
             sockaddr.sin_addr,
             u16::from_be(sockaddr.sin_port),
@@ -145,6 +239,8 @@ impl InetSocketObject {
                 handle,
                 local: None,
                 peer: None,
+                local_stream: None,
+                local_datagrams: VecDeque::new(),
                 listening: false,
                 read_shutdown: false,
                 write_shutdown: false,
@@ -168,6 +264,8 @@ impl InetSocketObject {
                 handle,
                 local: Some(local),
                 peer: Some(peer),
+                local_stream: None,
+                local_datagrams: VecDeque::new(),
                 listening: false,
                 read_shutdown: false,
                 write_shutdown: false,
@@ -226,11 +324,40 @@ impl InetSocketObject {
         local_listeners().lock().remove(&key);
     }
 
+    fn register_local_datagram(&self, local: InetAddress) {
+        let Some(owner) = self.self_ref.lock().clone() else {
+            return;
+        };
+        let key = (
+            self.current_handle().namespace_inode(),
+            local.addr,
+            local.port,
+        );
+        local_datagrams().lock().insert(key, owner);
+    }
+
+    fn unregister_local_datagram(&self, local: InetAddress) {
+        let namespace_inode = self.current_handle().namespace_inode();
+        local_datagrams()
+            .lock()
+            .remove(&(namespace_inode, local.addr, local.port));
+    }
+
     fn find_local_listener(namespace_inode: u64, remote: InetAddress) -> Option<Arc<Self>> {
         let listeners = local_listeners().lock();
         for key in Self::local_listener_keys(namespace_inode, remote) {
             if let Some(listener) = listeners.get(&key).and_then(Weak::upgrade) {
                 return Some(listener);
+            }
+        }
+        None
+    }
+
+    fn find_local_datagram(namespace_inode: u64, remote: InetAddress) -> Option<Arc<Self>> {
+        let datagrams = local_datagrams().lock();
+        for key in Self::local_listener_keys(namespace_inode, remote) {
+            if let Some(socket) = datagrams.get(&key).and_then(Weak::upgrade) {
+                return Some(socket);
             }
         }
         None
@@ -312,16 +439,26 @@ impl InetSocketObject {
                         || state.handle.tcp_listener_accept_ready())
             }
             (InetSocketKind::Stream, InetWaitKind::Send) => {
-                state.handle.tcp_can_send() || state.handle.tcp_is_closed()
+                state.local_stream.is_some()
+                    || state.handle.tcp_can_send()
+                    || state.handle.tcp_is_closed()
             }
             (InetSocketKind::Stream, InetWaitKind::Recv) => {
-                state.read_shutdown || state.handle.tcp_can_recv() || state.handle.tcp_is_closed()
+                if let Some(local_stream) = &state.local_stream {
+                    state.read_shutdown || local_stream.can_recv()
+                } else {
+                    state.read_shutdown
+                        || state.handle.tcp_can_recv()
+                        || state.handle.tcp_is_closed()
+                }
             }
             (InetSocketKind::Datagram, InetWaitKind::Send) => {
                 !state.write_shutdown && state.handle.udp_can_send()
             }
             (InetSocketKind::Datagram, InetWaitKind::Recv) => {
-                state.read_shutdown || state.handle.udp_can_recv()
+                state.read_shutdown
+                    || !state.local_datagrams.is_empty()
+                    || state.handle.udp_can_recv()
             }
             (InetSocketKind::Datagram, InetWaitKind::Connect | InetWaitKind::Accept) => false,
         }
@@ -356,6 +493,7 @@ impl InetSocketObject {
         self.current_handle()
             .udp_bind(local)
             .map_err(Self::map_net_error)?;
+        self.register_local_datagram(local);
         self.state.lock().local = Some(local);
         Ok(local)
     }
@@ -374,6 +512,18 @@ impl InetSocketObject {
         if state.local.is_some() {
             return Err(SocketError::AddressInUse);
         }
+        if !net::is_local_ipv4_address(addr.addr) {
+            return Err(SocketError::AddressNotAvailable);
+        }
+        if addr.port < 1024 {
+            let process = get_current_process();
+            let process = process.lock();
+            let slot = CAP_NET_BIND_SERVICE / 32;
+            let mask = 1u32 << (CAP_NET_BIND_SERVICE % 32);
+            if process.capability_effective[slot] & mask == 0 {
+                return Err(SocketError::AccessDenied);
+            }
+        }
 
         match self.kind {
             InetSocketKind::Stream => {
@@ -382,6 +532,9 @@ impl InetSocketObject {
             }
             InetSocketKind::Datagram => {
                 state.handle.udp_bind(addr).map_err(Self::map_net_error)?;
+                drop(state);
+                self.register_local_datagram(addr);
+                let mut state = self.state.lock();
                 state.local = Some(addr);
                 Ok(())
             }
@@ -443,6 +596,14 @@ impl InetSocketObject {
             let server_handle =
                 net::create_socket(TransportKind::Tcp).map_err(Self::map_net_error)?;
             let server_socket = Self::from_accepted(server_handle, remote, local);
+            let Some(client_socket) =
+                object_ref(&self.self_ref).and_then(|object| object.as_inet_socket().ok())
+            else {
+                return Err(SocketError::InvalidArguments);
+            };
+            let (client_endpoint, server_endpoint) =
+                LocalStreamEndpoint::pair(&client_socket, &server_socket);
+            server_socket.state.lock().local_stream = Some(server_endpoint);
             listener
                 .pending_local_streams
                 .lock()
@@ -451,6 +612,7 @@ impl InetSocketObject {
                 let mut state = self.state.lock();
                 state.local = Some(local);
                 state.peer = Some(remote);
+                state.local_stream = Some(client_endpoint);
             }
             if let Some(object) = object_ref(&listener.self_ref) {
                 wake_pollers_for_object(object as ObjectRef, PollableEvent::CanBeRead);
@@ -558,6 +720,19 @@ impl InetSocketObject {
         if self.state.lock().write_shutdown {
             return Err(SocketError::BrokenPipe);
         }
+        let local_stream = { self.state.lock().local_stream.clone() };
+        if let Some(local_stream) = local_stream {
+            if *local_stream.local_write_closed.lock()
+                || local_stream.peer.upgrade().is_none()
+                || *local_stream.peer_closed.lock()
+            {
+                return Err(SocketError::BrokenPipe);
+            }
+            local_stream.outgoing.lock().extend(buffer.iter().copied());
+            local_stream.wake_peer(PollableEvent::CanBeRead);
+            crate::socket::wake_io();
+            return Ok(buffer.len());
+        }
 
         loop {
             net::poll();
@@ -585,6 +760,30 @@ impl InetSocketObject {
 
         let local = self.ensure_udp_bound()?;
         self.state.lock().local = Some(local);
+
+        if Self::is_local_address(remote.addr)
+            && let Some(target) =
+                Self::find_local_datagram(self.current_handle().namespace_inode(), remote)
+        {
+            let source = Self::local_for_remote(local, remote);
+            {
+                let mut target_state = target.state.lock();
+                if target_state.read_shutdown {
+                    return Err(SocketError::ConnectionRefused);
+                }
+                target_state
+                    .local_datagrams
+                    .push_back(LocalDatagramMessage {
+                        data: buffer.to_vec(),
+                        source,
+                    });
+            }
+            if let Some(object) = object_ref(&target.self_ref) {
+                wake_pollers_for_object(object as ObjectRef, PollableEvent::CanBeRead);
+            }
+            crate::socket::wake_io();
+            return Ok(buffer.len());
+        }
 
         loop {
             net::poll();
@@ -616,6 +815,34 @@ impl InetSocketObject {
         if self.state.lock().read_shutdown {
             return Ok(0);
         }
+        let local_stream = { self.state.lock().local_stream.clone() };
+        if let Some(local_stream) = local_stream {
+            loop {
+                let mut incoming = local_stream.incoming.lock();
+                if !incoming.is_empty() {
+                    let read = buffer.len().min(incoming.len());
+                    for slot in buffer.iter_mut().take(read) {
+                        *slot = incoming.pop_front().ok_or(SocketError::InvalidArguments)?;
+                    }
+                    return Ok(read);
+                }
+                drop(incoming);
+
+                if *local_stream.peer_write_closed.lock()
+                    || *local_stream.peer_closed.lock()
+                    || local_stream.peer.upgrade().is_none()
+                {
+                    return Ok(0);
+                }
+                if self.state.lock().read_shutdown {
+                    return Ok(0);
+                }
+                if self.is_nonblocking() {
+                    return Err(SocketError::TryAgain);
+                }
+                self.wait_for_event_or_io(InetWaitKind::Recv);
+            }
+        }
 
         loop {
             net::poll();
@@ -642,6 +869,11 @@ impl InetSocketObject {
         }
 
         loop {
+            if let Some(message) = self.state.lock().local_datagrams.pop_front() {
+                let read = buffer.len().min(message.data.len());
+                buffer[..read].copy_from_slice(&message.data[..read]);
+                return Ok((read, Some(message.source)));
+            }
             net::poll();
             match self.current_handle().udp_recv(buffer) {
                 Ok((read, remote, _)) => return Ok((read, Some(remote))),
@@ -659,17 +891,26 @@ impl InetSocketObject {
     pub fn shutdown(&self, how: u64) -> SocketResult<()> {
         let mut state = self.state.lock();
         match how {
-            0 => state.read_shutdown = true,
+            0 => {
+                state.read_shutdown = true;
+                if let Some(local_stream) = &state.local_stream {
+                    local_stream.wake_peer(PollableEvent::CanBeWritten);
+                }
+            }
             1 => {
                 state.write_shutdown = true;
-                if self.kind == InetSocketKind::Stream {
+                if let Some(local_stream) = &state.local_stream {
+                    local_stream.close_write();
+                } else if self.kind == InetSocketKind::Stream {
                     state.handle.tcp_close().map_err(Self::map_net_error)?;
                 }
             }
             2 => {
                 state.read_shutdown = true;
                 state.write_shutdown = true;
-                if self.kind == InetSocketKind::Stream {
+                if let Some(local_stream) = &state.local_stream {
+                    local_stream.close_local();
+                } else if self.kind == InetSocketKind::Stream {
                     state.handle.tcp_close().map_err(Self::map_net_error)?;
                 }
             }
@@ -707,7 +948,19 @@ impl InetSocketObject {
 impl Drop for InetSocketObject {
     fn drop(&mut self) {
         self.unregister_local_listener();
-        net::remove_socket(self.state.lock().handle);
+        let (handle, local, local_stream) = {
+            let state = self.state.lock();
+            (state.handle, state.local, state.local_stream.clone())
+        };
+        if self.kind == InetSocketKind::Datagram
+            && let Some(local) = local
+        {
+            self.unregister_local_datagram(local);
+        }
+        if let Some(local_stream) = &local_stream {
+            local_stream.close_local();
+        }
+        net::remove_socket(handle);
     }
 }
 
@@ -781,6 +1034,8 @@ impl Pollable for InetSocketObject {
                     if state.listening {
                         !self.pending_local_streams.lock().is_empty()
                             || state.handle.tcp_listener_accept_ready()
+                    } else if let Some(local_stream) = &state.local_stream {
+                        state.read_shutdown || local_stream.can_recv()
                     } else {
                         state.read_shutdown
                             || state.handle.tcp_can_recv()
@@ -788,14 +1043,32 @@ impl Pollable for InetSocketObject {
                     }
                 }
                 PollableEvent::CanBeWritten => {
-                    !state.write_shutdown && !state.listening && state.handle.tcp_can_send()
+                    !state.write_shutdown
+                        && !state.listening
+                        && (state.local_stream.is_some() || state.handle.tcp_can_send())
                 }
-                PollableEvent::ReadClosed => state.read_shutdown || state.handle.tcp_is_closed(),
-                PollableEvent::Closed => state.handle.tcp_is_closed(),
+                PollableEvent::ReadClosed => {
+                    state.read_shutdown
+                        || state
+                            .local_stream
+                            .as_ref()
+                            .is_some_and(|stream| *stream.peer_write_closed.lock())
+                        || state.handle.tcp_is_closed()
+                }
+                PollableEvent::Closed => {
+                    state
+                        .local_stream
+                        .as_ref()
+                        .is_some_and(|stream| *stream.peer_closed.lock())
+                        || state.handle.tcp_is_closed()
+                }
                 _ => false,
             },
             InetSocketKind::Datagram => match event {
-                PollableEvent::CanBeRead => !state.read_shutdown && state.handle.udp_can_recv(),
+                PollableEvent::CanBeRead => {
+                    !state.read_shutdown
+                        && (!state.local_datagrams.is_empty() || state.handle.udp_can_recv())
+                }
                 PollableEvent::CanBeWritten => !state.write_shutdown && state.handle.udp_can_send(),
                 PollableEvent::ReadClosed => state.read_shutdown,
                 PollableEvent::Closed => state.read_shutdown && state.write_shutdown,

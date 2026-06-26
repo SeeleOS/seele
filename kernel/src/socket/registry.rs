@@ -23,7 +23,11 @@ impl UnixSocketRegistryKey {
             return Some(Self::Abstract(String::from(path)));
         }
 
-        let opened = open_path(Path::new(path)).ok()?;
+        Self::from_resolved_path(Path::new(path))
+    }
+
+    pub fn from_resolved_path(path: Path) -> Option<Self> {
+        let opened = open_path(path).ok()?;
         let stat = opened.stat();
         Some(Self::Path {
             mount_device_id: stat.st_dev,

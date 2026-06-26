@@ -87,6 +87,11 @@ crate::test!(
     inet_loopback_connect_wakes_target_listener
 );
 crate::test!(
+    inet_loopback_stream_transfers_data,
+    "inet loopback stream sockets transfer data through accepted sockets",
+    inet_loopback_stream_sockets_transfer_data
+);
+crate::test!(
     object_wait_recv_ignores_unrelated_writable_events,
     "recv wait pollers ignore unrelated writable activity",
     object_wait_recv_ignores_unrelated_writable_events
@@ -116,6 +121,13 @@ fn inet_sockaddr_uses_network_byte_order_for_ports() {
     assert_eq!(&encoded[2..4], &[0x12, 0x34]);
     assert_eq!(InetSocketObject::decode_addr(&encoded).unwrap(), addr);
     assert!(InetSocketObject::decode_addr(&encoded[..8]).is_err());
+
+    let mut unix_family = encoded;
+    unix_family[0..2].copy_from_slice(&1u16.to_ne_bytes());
+    assert!(matches!(
+        InetSocketObject::decode_addr(&unix_family),
+        Err(crate::socket::SocketError::AddressFamilyNotSupported)
+    ));
 }
 
 fn timeout_sockopts_have_linux_timeval_size() {
@@ -445,6 +457,34 @@ fn inet_loopback_connect_wakes_target_listener() {
         .expect("listener should accept local client");
     assert!(!listener.is_event_ready(PollableEvent::CanBeRead));
     drop(accepted);
+}
+
+fn inet_loopback_stream_sockets_transfer_data() {
+    let listener = InetSocketObject::create(AF_INET, crate::socket::SOCK_STREAM, 0)
+        .expect("inet listener should be created");
+    let server_addr = InetAddress::new([127, 0, 0, 1], 22350);
+    listener.bind(server_addr).expect("listener should bind");
+    listener.listen(1).expect("listener should listen");
+
+    let client = InetSocketObject::create(AF_INET, crate::socket::SOCK_STREAM, 0)
+        .expect("inet client should be created");
+    client
+        .connect(server_addr)
+        .expect("loopback connect should succeed");
+    let accepted = listener
+        .accept()
+        .expect("listener should accept local client");
+
+    client.send(b"ping").expect("client write should succeed");
+    assert!(accepted.is_event_ready(PollableEvent::CanBeRead));
+    let mut buffer = [0u8; 4];
+    assert_eq!(accepted.recv(&mut buffer).expect("server should read"), 4);
+    assert_eq!(&buffer, b"ping");
+
+    accepted.send(b"pong").expect("server write should succeed");
+    assert!(client.is_event_ready(PollableEvent::CanBeRead));
+    assert_eq!(client.recv(&mut buffer).expect("client should read"), 4);
+    assert_eq!(&buffer, b"pong");
 }
 
 fn object_wait_recv_ignores_unrelated_writable_events() {

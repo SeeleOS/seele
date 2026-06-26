@@ -6,7 +6,7 @@ use alloc::{
 
 use super::{
     SocketError, SocketResult, UNIX_SOCKET_REGISTRY, UnixSocketKind, UnixSocketObject,
-    UnixSocketRegistryEntry, UnixSocketRegistryKey, UnixSocketState, UnixStreamInner,
+    UnixSocketRegistryEntry, UnixSocketState, UnixStreamInner, bind::socket_registry_key,
     current_socket_peer_cred, wake_io, wake_pollers,
 };
 use crate::object::FileFlags;
@@ -16,8 +16,8 @@ impl UnixSocketObject {
     pub fn connect(self: &Arc<Self>, path: String) -> SocketResult<()> {
         match self.kind {
             UnixSocketKind::Stream | UnixSocketKind::SeqPacket => {
-                let registry_key = UnixSocketRegistryKey::from_socket_path(&path)
-                    .ok_or(SocketError::ConnectionRefused)?;
+                let registry_key =
+                    socket_registry_key(&path).ok_or(SocketError::ConnectionRefused)?;
                 let listener = {
                     let registry = UNIX_SOCKET_REGISTRY.lock();
                     match registry.get(&registry_key) {
@@ -81,8 +81,8 @@ impl UnixSocketObject {
                 Ok(())
             }
             UnixSocketKind::Datagram => {
-                let registry_key = UnixSocketRegistryKey::from_socket_path(&path)
-                    .ok_or(SocketError::ConnectionRefused)?;
+                let registry_key =
+                    socket_registry_key(&path).ok_or(SocketError::ConnectionRefused)?;
                 let endpoint = {
                     let registry = UNIX_SOCKET_REGISTRY.lock();
                     match registry.get(&registry_key) {

@@ -22,6 +22,12 @@ pub enum SocketError {
     AddressNotAvailable,
     #[error("network is down")]
     NetworkDown,
+    #[error("not a directory")]
+    NotADirectory,
+    #[error("I/O error")]
+    IoError,
+    #[error("access denied")]
+    AccessDenied,
     #[error("permission denied")]
     PermissionDenied,
     #[error("socket is already connected")]
@@ -48,6 +54,9 @@ impl AsSyscallError for SocketError {
             Self::AddressInUse => SyscallError::AddressInUse,
             Self::AddressNotAvailable => SyscallError::AddressNotAvailable,
             Self::NetworkDown => SyscallError::NetworkDown,
+            Self::NotADirectory => SyscallError::NotADirectory,
+            Self::IoError => SyscallError::IOError,
+            Self::AccessDenied => SyscallError::AccessDenied,
             Self::PermissionDenied => SyscallError::PermissionDenied,
             Self::IsConnected => SyscallError::IsConnected,
             Self::NotConnected => SyscallError::NotConnected,
