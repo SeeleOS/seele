@@ -18,7 +18,9 @@ use crate::{
             file_info_path, open_path, open_path_nofollow, resolve_dir_path,
             resolve_path_info_with_final, resolve_path_with_mount_info,
         },
-        vfs_traits::{DirectoryContentType, FileLike, FileLikeType, MountFlags},
+        vfs_traits::{
+            DirectoryContentType, FileLike, FileLikeType, LinuxFileAttributes, MountFlags,
+        },
     },
     memory::{user_safe, utils::Mut},
     misc::{
@@ -207,6 +209,11 @@ mod tests {
         filesystem_utimensat_invalid_flag_syscalls,
         "utimensat rejects invalid flags like linux",
         filesystem_utimensat_invalid_flag_syscalls_follow_linux_rules
+    );
+    crate::test!(
+        filesystem_utimensat_file_attributes_syscalls,
+        "utimensat respects append-only and immutable file attributes",
+        filesystem_utimensat_file_attributes_syscalls_follow_linux_rules
     );
     crate::test!(
         procfs_syscalls,
@@ -3317,6 +3324,42 @@ mod tests {
             SyscallError::InvalidArguments,
         );
 
+        cleanup_utimensat_test_file(file_fd);
+    }
+
+    fn filesystem_utimensat_file_attributes_syscalls_follow_linux_rules() {
+        let (file_fd, [user_page, times_page]) = prepare_utimensat_test_file();
+        let object = get_object_current_process(file_fd as u64).unwrap();
+        let file = object.as_file_like().unwrap();
+
+        file.set_linux_file_attributes(LinuxFileAttributes::FS_APPEND_FL)
+            .unwrap();
+        write_user_value(times_page, &[[0i64, UTIME_NOW], [0i64, UTIME_NOW]]);
+        expect_ok(
+            SyscallArgs::new([file_fd as u64, user_page, times_page, 0, 0, 0]).call::<Utimensat>(),
+            0,
+        );
+        write_user_value(times_page, &[[0i64, UTIME_NOW], [0i64, UTIME_OMIT]]);
+        expect_errno(
+            SyscallArgs::new([file_fd as u64, user_page, times_page, 0, 0, 0]).call::<Utimensat>(),
+            SyscallError::PermissionDenied,
+        );
+
+        file.set_linux_file_attributes(LinuxFileAttributes::FS_IMMUTABLE_FL)
+            .unwrap();
+        write_user_value(times_page, &[[0i64, UTIME_NOW], [0i64, UTIME_OMIT]]);
+        expect_errno(
+            SyscallArgs::new([file_fd as u64, user_page, times_page, 0, 0, 0]).call::<Utimensat>(),
+            SyscallError::PermissionDenied,
+        );
+        write_user_value(times_page, &[[0i64, UTIME_OMIT], [0i64, UTIME_OMIT]]);
+        expect_ok(
+            SyscallArgs::new([file_fd as u64, user_page, times_page, 0, 0, 0]).call::<Utimensat>(),
+            0,
+        );
+
+        file.set_linux_file_attributes(LinuxFileAttributes::empty())
+            .unwrap();
         cleanup_utimensat_test_file(file_fd);
     }
 

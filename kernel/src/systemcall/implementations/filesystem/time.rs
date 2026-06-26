@@ -56,6 +56,10 @@ impl RequestedTime {
         matches!(self, Self::Set { .. })
     }
 
+    fn is_now(self) -> bool {
+        matches!(self, Self::Now)
+    }
+
     fn is_omit(self) -> bool {
         matches!(self, Self::Omit)
     }
@@ -147,6 +151,29 @@ fn check_utime_permissions(
     }
 }
 
+fn check_file_attribute_utime_permissions(
+    attributes: LinuxFileAttributes,
+    requested: [RequestedTime; 2],
+) -> Result<(), SyscallError> {
+    if requested.iter().all(|time| time.is_omit()) {
+        return Ok(());
+    }
+
+    if attributes.contains(LinuxFileAttributes::FS_IMMUTABLE_FL) {
+        return Err(SyscallError::PermissionDenied);
+    }
+
+    if attributes.contains(LinuxFileAttributes::FS_APPEND_FL) {
+        let all_now = requested.iter().all(|time| time.is_now());
+        let all_omit = requested.iter().all(|time| time.is_omit());
+        if !all_now && !all_omit {
+            return Err(SyscallError::PermissionDenied);
+        }
+    }
+
+    Ok(())
+}
+
 fn set_times_on_path(
     path: Path,
     requested: [RequestedTime; 2],
@@ -166,6 +193,7 @@ fn set_times_on_path(
         .ensure_writable_mount(path.clone())
         .map_err(SyscallError::from)?;
     let info = object.info()?;
+    check_file_attribute_utime_permissions(object.linux_file_attributes()?, requested)?;
     check_utime_permissions(&info, requested)?;
     let times = build_file_times(info.times, requested);
     object
@@ -186,6 +214,7 @@ fn set_times_on_fd(fd: i32, requested: [RequestedTime; 2]) -> Result<usize, Sysc
         .ensure_writable_mount(file_like.path())
         .map_err(SyscallError::from)?;
     let info = file_like.info()?;
+    check_file_attribute_utime_permissions(file_like.linux_file_attributes()?, requested)?;
     check_utime_permissions(&info, requested)?;
     let times = build_file_times(info.times, requested);
     file_like

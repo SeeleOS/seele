@@ -421,6 +421,28 @@ impl OpenedFileObject {
         }
     }
 
+    pub fn linux_file_attributes(&self) -> FSResult<LinuxFileAttributes> {
+        match &self.backend {
+            OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => {
+                file.lock().linux_file_attributes()
+            }
+            OpenBackend::Directory(_) | OpenBackend::SymlinkPath { .. } => {
+                Err(FSError::InvalidArguments)
+            }
+        }
+    }
+
+    pub fn set_linux_file_attributes(&self, attributes: LinuxFileAttributes) -> FSResult<()> {
+        match &self.backend {
+            OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => {
+                file.lock().set_linux_file_attributes(attributes)
+            }
+            OpenBackend::Directory(_) | OpenBackend::SymlinkPath { .. } => {
+                Err(FSError::InvalidArguments)
+            }
+        }
+    }
+
     pub fn get_xattr(&self, name: &str) -> FSResult<Option<Vec<u8>>> {
         match &self.backend {
             OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => {
@@ -765,8 +787,9 @@ impl Configuratable for OpenedFileObject {
         match request {
             ConfigurateRequest::FileGetFlags(ptr) => {
                 let flags = match &self.backend {
-                    OpenBackend::RegularFile(file) => file.lock().linux_file_attributes()?,
-                    OpenBackend::Device { file, .. } => file.lock().linux_file_attributes()?,
+                    OpenBackend::RegularFile(_) | OpenBackend::Device { .. } => {
+                        self.linux_file_attributes()?
+                    }
                     OpenBackend::Directory(_) | OpenBackend::SymlinkPath { .. } => {
                         return Err(ObjectError::InvalidRequest);
                     }
@@ -778,11 +801,8 @@ impl Configuratable for OpenedFileObject {
                 let raw = user_safe::read(ptr).map_err(|_| ObjectError::BadAddress)?;
                 let flags = LinuxFileAttributes::from_bits_retain(raw);
                 match &self.backend {
-                    OpenBackend::RegularFile(file) => {
-                        file.lock().set_linux_file_attributes(flags)?
-                    }
-                    OpenBackend::Device { file, .. } => {
-                        file.lock().set_linux_file_attributes(flags)?
+                    OpenBackend::RegularFile(_) | OpenBackend::Device { .. } => {
+                        self.set_linux_file_attributes(flags)?
                     }
                     OpenBackend::Directory(_) | OpenBackend::SymlinkPath { .. } => {
                         return Err(ObjectError::InvalidRequest);
