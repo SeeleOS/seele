@@ -711,12 +711,12 @@ mod tests {
         expect_errno(
             SyscallArgs::new([inet_socket as u64, SOL_TCP, 99, page + 1056, 4, 0])
                 .call::<Setsockopt>(),
-            SyscallError::InvalidArguments,
+            SyscallError::ProtocolOptionNotSupported,
         );
         expect_errno(
             SyscallArgs::new([inet_socket as u64, SOL_TCP, 99, page + 1072, page + 1064, 0])
                 .call::<Getsockopt>(),
-            SyscallError::InvalidArguments,
+            SyscallError::ProtocolOptionNotSupported,
         );
 
         let netlink_socket = expect_fd(
