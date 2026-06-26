@@ -32,8 +32,10 @@ bitflags! {
     pub struct MemfdFlags: u32 {
         const MFD_CLOEXEC = 0x0001;
         const MFD_ALLOW_SEALING = 0x0002;
+        const MFD_HUGETLB = 0x0004;
         const MFD_NOEXEC_SEAL = 0x0008;
         const MFD_EXEC = 0x0010;
+        const MFD_HUGE_MASK = 0x3f << 26;
     }
 }
 

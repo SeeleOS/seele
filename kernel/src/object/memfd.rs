@@ -17,9 +17,14 @@ use crate::{
         vfs::{FSResult, WrappedFile},
         vfs_traits::{File, FileLike, FileLikeType, Whence},
     },
+    memory::{addrspace::mem_area::Data, protection::Protection},
     object::{FileFlags, Object, misc::ObjectRef},
+    process::manager::MANAGER,
     systemcall::utils::{SyscallError, SyscallResult},
 };
+
+const FALLOC_FL_KEEP_SIZE: u32 = 0x01;
+const FALLOC_FL_PUNCH_HOLE: u32 = 0x02;
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -78,6 +83,18 @@ impl MemFdFile {
             .map(MemFdSealFlags::from_bits_retain)
             .unwrap_or_else(MemFdSealFlags::empty)
     }
+
+    fn write_data_at(&mut self, buffer: &[u8], offset: usize) -> FSResult<usize> {
+        let end = offset.checked_add(buffer.len()).ok_or(FSError::Other)?;
+        let seals = self.current_seals();
+        if seals.contains(MemFdSealFlags::F_SEAL_WRITE)
+            || (end > self.data.len() && seals.contains(MemFdSealFlags::F_SEAL_GROW))
+        {
+            return Err(FSError::PermissionDenied);
+        }
+
+        Ok(self.data.write_at(offset, buffer))
+    }
 }
 
 impl File for MemFdFile {
@@ -107,15 +124,11 @@ impl File for MemFdFile {
     }
 
     fn write(&mut self, buffer: &[u8]) -> FSResult<usize> {
-        if self.current_seals().contains(MemFdSealFlags::F_SEAL_WRITE) {
-            return Err(FSError::AccessDenied);
-        }
-
         let end = self
             .offset
             .checked_add(buffer.len())
             .ok_or(FSError::Other)?;
-        let written = self.data.write_at(self.offset, buffer);
+        let written = self.write_data_at(buffer, self.offset)?;
         self.offset = end;
         Ok(written)
     }
@@ -152,10 +165,10 @@ impl File for MemFdFile {
         let length = usize::try_from(length).map_err(|_| FSError::Other)?;
         let seals = self.current_seals();
         if length < self.data.len() && seals.contains(MemFdSealFlags::F_SEAL_SHRINK) {
-            return Err(FSError::AccessDenied);
+            return Err(FSError::PermissionDenied);
         }
         if length > self.data.len() && seals.contains(MemFdSealFlags::F_SEAL_GROW) {
-            return Err(FSError::AccessDenied);
+            return Err(FSError::PermissionDenied);
         }
 
         self.data.truncate(length);
@@ -163,6 +176,13 @@ impl File for MemFdFile {
     }
 
     fn allocate(&mut self, mode: u32, offset: u64, len: u64) -> FSResult<()> {
+        let seals = self.current_seals();
+        if mode == (FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE) {
+            if seals.contains(MemFdSealFlags::F_SEAL_WRITE) {
+                return Err(FSError::PermissionDenied);
+            }
+            return Ok(());
+        }
         if mode != 0 {
             return Err(FSError::Other);
         }
@@ -170,12 +190,8 @@ impl File for MemFdFile {
         let offset = usize::try_from(offset).map_err(|_| FSError::Other)?;
         let len = usize::try_from(len).map_err(|_| FSError::Other)?;
         let end = offset.checked_add(len).ok_or(FSError::Other)?;
-        let seals = self.current_seals();
-        if end > self.data.len()
-            && (seals.contains(MemFdSealFlags::F_SEAL_GROW)
-                || seals.contains(MemFdSealFlags::F_SEAL_WRITE))
-        {
-            return Err(FSError::AccessDenied);
+        if end > self.data.len() && seals.contains(MemFdSealFlags::F_SEAL_GROW) {
+            return Err(FSError::PermissionDenied);
         }
 
         self.data.ensure_len(end);
@@ -209,6 +225,38 @@ pub fn memfd_get_seals(path: &Path) -> Option<u32> {
         .map(|state| state.seals.bits())
 }
 
+pub fn memfd_allows_shared_write(path: &Path) -> Option<bool> {
+    MEMFD_REGISTRY
+        .lock()
+        .states
+        .get(&memfd_key(path))
+        .map(|state| !state.seals.contains(MemFdSealFlags::F_SEAL_WRITE))
+}
+
+fn has_writable_shared_mapping(path: &Path) -> bool {
+    let key = memfd_key(path);
+    let processes = MANAGER
+        .lock()
+        .processes
+        .values()
+        .cloned()
+        .collect::<alloc::vec::Vec<_>>();
+
+    processes.iter().any(|process| {
+        process.lock().addrspace.memory_areas.iter().any(|area| {
+            matches!(
+                &area.data,
+                Data::File {
+                    file,
+                    shared: true,
+                    ..
+                } if area.protection.contains(Protection::WRITE)
+                    && memfd_key(&file.path()) == key
+            )
+        })
+    })
+}
+
 pub fn memfd_add_seals(path: &Path, seals: u32) -> SyscallResult {
     let raw_seals = seals;
     let seals = MemFdSealFlags::from_bits(seals).ok_or_else(|| {
@@ -226,6 +274,9 @@ pub fn memfd_add_seals(path: &Path, seals: u32) -> SyscallResult {
         .ok_or(SyscallError::InvalidArguments)?;
 
     if !state.allow_sealing || state.seals.contains(MemFdSealFlags::F_SEAL_SEAL) {
+        return Err(SyscallError::PermissionDenied);
+    }
+    if seals.contains(MemFdSealFlags::F_SEAL_WRITE) && has_writable_shared_mapping(path) {
         return Err(SyscallError::PermissionDenied);
     }
 

@@ -12,6 +12,7 @@ use crate::{
     filesystem::{info::DirectoryContentInfo, object::FileLikeObject, path::Path},
     memory::protection::Protection,
     memory::user_safe,
+    misc::c_types::CString,
     misc::profile::{self, HotSyscallPhase},
     object::{
         FileFlags,
@@ -36,6 +37,7 @@ static MEMFD_COUNTER: AtomicU64 = AtomicU64::new(0);
 const COPY_CHUNK_SIZE: usize = 16 * 1024;
 const LINEAR_IO_CHUNK_SIZE: usize = 64 * 1024;
 const LINUX_IOV_MAX: i32 = 1024;
+const MEMFD_NAME_MAX: usize = 249;
 const S_IFMT: u32 = 0o170000;
 const S_IFDIR: u32 = 0o040000;
 const S_IFBLK: u32 = 0o060000;
@@ -1108,12 +1110,8 @@ define_syscall!(Fallocate, |object: ObjectRef,
     if offset < 0 || len < 0 {
         return Err(SyscallError::InvalidArguments);
     }
-    if mode.bits()
-        == (FallocateFlags::FALLOC_FL_KEEP_SIZE | FallocateFlags::FALLOC_FL_PUNCH_HOLE).bits()
-    {
-        return Ok(0);
-    }
-    if !mode.is_empty() {
+    let punch_hole = FallocateFlags::FALLOC_FL_KEEP_SIZE | FallocateFlags::FALLOC_FL_PUNCH_HOLE;
+    if !mode.is_empty() && mode.bits() != punch_hole.bits() {
         return Err(SyscallError::OperationNotSupported);
     }
 
@@ -1219,11 +1217,39 @@ define_syscall!(OpenDevice, |name: String| {
     })
 });
 
-define_syscall!(MemfdCreate, |name: String, flags: MemfdFlags| {
+fn memfd_name_from_raw(name: CString) -> Result<String, SyscallError> {
+    if name.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let mut out = String::new();
+    for offset in 0..=MEMFD_NAME_MAX {
+        let byte =
+            user_safe::read(unsafe { name.add(offset) }).map_err(|_| SyscallError::BadAddress)?;
+        if byte == 0 {
+            return Ok(out);
+        }
+        if offset == MEMFD_NAME_MAX {
+            return Err(SyscallError::InvalidArguments);
+        }
+        out.push(byte as char);
+    }
+
+    Err(SyscallError::InvalidArguments)
+}
+
+define_syscall!(MemfdCreate, |name: CString, flags: MemfdFlags| {
     if flags.contains(MemfdFlags::MFD_NOEXEC_SEAL) && flags.contains(MemfdFlags::MFD_EXEC) {
         return Err(SyscallError::InvalidArguments);
     }
+    if flags.intersects(MemfdFlags::MFD_HUGE_MASK) && !flags.contains(MemfdFlags::MFD_HUGETLB) {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if flags.contains(MemfdFlags::MFD_HUGETLB) {
+        return Err(SyscallError::NoDevice);
+    }
 
+    let name = memfd_name_from_raw(name)?;
     let pid = get_current_process().lock().pid.0;
     let id = MEMFD_COUNTER.fetch_add(1, Ordering::Relaxed);
     let sanitized_name = if name.is_empty() {

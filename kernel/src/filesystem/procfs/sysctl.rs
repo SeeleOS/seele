@@ -162,6 +162,7 @@ pub(super) fn proc_sys_net_ipv4_conf_if_entries() -> Vec<DirectoryContentInfo> {
 
 pub(super) fn proc_vm_entries() -> Vec<DirectoryContentInfo> {
     vec![
+        DirectoryContentInfo::new("compact_memory".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("drop_caches".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("nr_hugepages".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("hugetlb_shm_group".into(), DirectoryContentType::File),

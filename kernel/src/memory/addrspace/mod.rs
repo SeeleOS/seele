@@ -24,7 +24,7 @@ use crate::{
         profile::{self, HotSyscallPhase},
         stack_builder::StackBuilder,
     },
-    object::{FileFlags, Object},
+    object::{FileFlags, Object, memfd::memfd_allows_shared_write},
     systemcall::utils::SyscallError,
 };
 
@@ -511,6 +511,9 @@ impl AddrSpace {
                     } => {
                         let flags = file.clone().get_flags().map_err(SyscallError::from)?;
                         if !flags.intersects(FileFlags::WRONLY | FileFlags::RDWR) {
+                            return Err(SyscallError::AccessDenied);
+                        }
+                        if memfd_allows_shared_write(&file.path()) == Some(false) {
                             return Err(SyscallError::AccessDenied);
                         }
                     }

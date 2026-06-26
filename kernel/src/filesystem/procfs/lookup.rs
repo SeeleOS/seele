@@ -167,6 +167,12 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             proc_drop_caches_bytes,
             proc_write_drop_caches,
         )),
+        ["sys", "vm", "compact_memory"] => Ok(proc_rw_file(
+            "compact_memory",
+            PROC_SYS_VM_COMPACT_MEMORY_INODE,
+            || b"0\n".to_vec(),
+            proc_write_drop_caches,
+        )),
         ["sys", "vm", "nr_hugepages"] => Ok(proc_rw_file(
             "nr_hugepages",
             PROC_SYS_VM_NR_HUGEPAGES_INODE,

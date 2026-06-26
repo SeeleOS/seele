@@ -1116,7 +1116,20 @@ fn anonymous_mapping_data(
 
 fn fd_allows_shared_write(object: &Arc<dyn crate::object::Object>) -> Result<bool, SyscallError> {
     let flags = object.clone().get_flags().map_err(SyscallError::from)?;
-    Ok(flags.intersects(crate::object::FileFlags::WRONLY | crate::object::FileFlags::RDWR))
+    let fd_writable =
+        flags.intersects(crate::object::FileFlags::WRONLY | crate::object::FileFlags::RDWR);
+    if !fd_writable {
+        return Ok(false);
+    }
+
+    if let Ok(file_like) = object.clone().as_file_like()
+        && let Some(allows_write) =
+            crate::object::memfd::memfd_allows_shared_write(&file_like.path())
+    {
+        return Ok(allows_write);
+    }
+
+    Ok(true)
 }
 
 fn check_file_mapping_readable(

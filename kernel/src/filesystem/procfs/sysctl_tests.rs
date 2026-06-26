@@ -81,11 +81,12 @@ fn procfs_static_entry_builders_expose_stable_names() {
     assert_eq!(if_entries[0].name, "tag");
 
     let vm_entries = proc_vm_entries();
-    assert_eq!(vm_entries.len(), 4);
-    assert_eq!(vm_entries[0].name, "drop_caches");
-    assert_eq!(vm_entries[1].name, "nr_hugepages");
-    assert_eq!(vm_entries[2].name, "hugetlb_shm_group");
-    assert_eq!(vm_entries[3].name, "overcommit_memory");
+    assert_eq!(vm_entries.len(), 5);
+    assert_eq!(vm_entries[0].name, "compact_memory");
+    assert_eq!(vm_entries[1].name, "drop_caches");
+    assert_eq!(vm_entries[2].name, "nr_hugepages");
+    assert_eq!(vm_entries[3].name, "hugetlb_shm_group");
+    assert_eq!(vm_entries[4].name, "overcommit_memory");
 
     assert_eq!(proc_sysctl_value_bytes(&PROC_PID_MAX), b"4194304\n");
 }

@@ -342,6 +342,10 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
         FcntlCmd::SetLease => fcntl_set_lease(&object, arg as i32),
         FcntlCmd::GetLease => Ok(fcntl_object_state(&object).lease as usize),
         FcntlCmd::AddSeals => {
+            let flags = object.clone().get_flags().map_err(SyscallError::from)?;
+            if !flags.intersects(FileFlags::WRONLY | FileFlags::RDWR) {
+                return Err(SyscallError::PermissionDenied);
+            }
             let file_like = object.as_file_like()?;
             memfd_add_seals(&file_like.path(), arg as u32)
         }

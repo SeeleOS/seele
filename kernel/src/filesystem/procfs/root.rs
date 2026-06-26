@@ -50,6 +50,7 @@ pub(super) const PROC_SYS_VM_NR_HUGEPAGES_INODE: u64 = 0x3021;
 pub(super) const PROC_SYS_VM_HUGETLB_SHM_GROUP_INODE: u64 = 0x3022;
 pub(super) const PROC_SYS_VM_OVERCOMMIT_MEMORY_INODE: u64 = 0x3023;
 pub(super) const PROC_SYS_VM_DROP_CACHES_INODE: u64 = 0x3029;
+pub(super) const PROC_SYS_VM_COMPACT_MEMORY_INODE: u64 = 0x302f;
 pub(super) const PROC_SYSVIPC_INODE: u64 = 0x3024;
 pub(super) const PROC_SYSVIPC_MSG_INODE: u64 = 0x3025;
 pub(super) const PROC_SYSVIPC_SEM_INODE: u64 = 0x3026;
