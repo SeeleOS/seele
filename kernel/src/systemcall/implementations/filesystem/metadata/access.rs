@@ -361,11 +361,12 @@ fn chmod_file_like(
 ) -> Result<(), SyscallError> {
     let stat = file_like.stat();
     let credentials = fs_access_credentials();
+
+    ensure_file_like_writable(file_like, path)?;
+
     if credentials.uid != stat.st_uid && !has_capability(&credentials, CAP_FOWNER) {
         return Err(SyscallError::PermissionDenied);
     }
-
-    ensure_file_like_writable(file_like, path)?;
 
     let mut mode = mode & 0o7777;
     if (mode & S_ISGID) != 0

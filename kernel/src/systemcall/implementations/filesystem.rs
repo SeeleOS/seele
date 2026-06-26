@@ -1110,6 +1110,52 @@ mod tests {
             .stat();
         assert_eq!(file_stat_after_fchmod.st_mode & 0o777, 0o600);
 
+        let readonly_devfs_path = Path::new("/tmp/syscall-metadata-test/devro");
+        VirtualFS
+            .lock()
+            .create_dir(readonly_devfs_path.clone())
+            .unwrap();
+        let readonly_devfs = Arc::new(Mut::new(DevFs::new()));
+        VirtualFS
+            .lock()
+            .attach_mount(
+                readonly_devfs_path.clone(),
+                readonly_devfs,
+                Path::new("/"),
+                MountFlags::MS_RDONLY,
+            )
+            .unwrap();
+        write_user_cstr(
+            user_page + 640,
+            b"/tmp/syscall-metadata-test/devro/console\0",
+        );
+        let readonly_fd =
+            expect_fd(SyscallArgs::new([AT_FDCWD, user_page + 640, 0, 0, 0, 0]).call::<OpenAt>());
+        let saved_credentials = CredentialSnapshot::save_current();
+        {
+            let process = get_current_process();
+            let mut process = process.lock();
+            process.real_uid = 65_534;
+            process.effective_uid = 65_534;
+            process.saved_uid = 65_534;
+            process.fs_uid = 65_534;
+            process.capability_effective = [0; 2];
+        }
+        expect_errno(
+            SyscallArgs::new([readonly_fd as u64, 0o600, 0, 0, 0, 0]).call::<Fchmod>(),
+            SyscallError::ReadOnlyFileSystem,
+        );
+        saved_credentials.restore();
+        close_test_fd(readonly_fd);
+        VirtualFS
+            .lock()
+            .unmount(readonly_devfs_path.clone())
+            .unwrap();
+        VirtualFS
+            .lock()
+            .delete_file(readonly_devfs_path.clone())
+            .unwrap();
+
         write_user_cstr(user_page + 128, b"\0");
         expect_ok(
             SyscallArgs::new([file_fd as u64, user_page + 128, 0o644, AT_EMPTY_PATH, 0, 0])
