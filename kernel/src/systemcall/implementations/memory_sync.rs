@@ -1050,6 +1050,38 @@ fn resized_file_mapping(
     file.mmap_data(offset, pages, shared)
 }
 
+fn remapped_area_data(area: &MemoryArea, offset: u64, pages: u64) -> Result<Data, SyscallError> {
+    let len = pages * Size4KiB::SIZE;
+    match &area.data {
+        Data::Normal(permissions) => Ok(Data::Normal(*permissions)),
+        Data::File {
+            offset: file_offset,
+            file_bytes,
+            zero_fill_after_file,
+            file,
+            shared,
+        } => Ok(Data::File {
+            offset: *file_offset + offset,
+            file_bytes: file_bytes.saturating_sub(offset).min(len),
+            zero_fill_after_file: *zero_fill_after_file,
+            file: file.clone(),
+            shared: *shared,
+        }),
+        Data::Shared { .. } => Err(SyscallError::InvalidArguments),
+    }
+}
+
+fn area_covers_range(area: &MemoryArea, start: VirtAddr, pages: u64) -> bool {
+    let end = start + pages * Size4KiB::SIZE;
+    area.start <= start && area.end >= end
+}
+
+fn ranges_overlap(start: VirtAddr, len: u64, other_start: VirtAddr, other_len: u64) -> bool {
+    let end = start + len;
+    let other_end = other_start + other_len;
+    start < other_end && other_start < end
+}
+
 fn anonymous_mapping_data(
     pages: u64,
     shared: bool,
@@ -1336,13 +1368,31 @@ define_syscall!(Mremap, |old_addr: VirtAddr,
                          old_len: u64,
                          new_len: u64,
                          flags: MremapFlags,
-                         _new_addr: u64| {
+                         new_addr: VirtAddr| {
     if old_len == 0 || new_len == 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if flags.contains(MremapFlags::FIXED) && !flags.contains(MremapFlags::MAYMOVE) {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if flags.contains(MremapFlags::FIXED) && !new_addr.is_aligned(Size4KiB::SIZE) {
         return Err(SyscallError::InvalidArguments);
     }
 
     let old_pages = old_len.div_ceil(4096);
     let new_pages = new_len.div_ceil(4096);
+    checked_user_mapping(old_addr.as_u64(), old_pages)?;
+    if flags.contains(MremapFlags::FIXED) {
+        checked_user_mapping(new_addr.as_u64(), new_pages)?;
+        if ranges_overlap(
+            old_addr,
+            old_pages * Size4KiB::SIZE,
+            new_addr,
+            new_pages * Size4KiB::SIZE,
+        ) {
+            return Err(SyscallError::InvalidArguments);
+        }
+    }
 
     let current = get_current_process();
     let mut current = current.lock();
@@ -1350,7 +1400,61 @@ define_syscall!(Mremap, |old_addr: VirtAddr,
         .addrspace
         .get_area(old_addr)
         .cloned()
-        .ok_or(SyscallError::InvalidArguments)?;
+        .ok_or(SyscallError::BadAddress)?;
+
+    if !area_covers_range(&area, old_addr, old_pages) {
+        return Err(SyscallError::BadAddress);
+    }
+    let area_offset = old_addr.as_u64() - area.start.as_u64();
+
+    if flags.contains(MremapFlags::FIXED) {
+        let data = remapped_area_data(&area, area_offset, new_pages)?;
+        let new_area = MemoryArea::new(
+            new_addr,
+            new_pages,
+            area.flags,
+            area.protection,
+            data,
+            area.lazy,
+        )
+        .with_locked(area.locked)
+        .with_grows_down(area.grows_down);
+        current
+            .addrspace
+            .try_unmap(new_addr, new_pages * Size4KiB::SIZE)
+            .map_err(SyscallError::from)?;
+        current.addrspace.register_area(new_area.clone());
+        let copy_pages = old_pages.min(new_pages);
+        for page_index in 0..copy_pages {
+            let src_addr = old_addr + page_index * Size4KiB::SIZE;
+            let Some(src_phys) = current.addrspace.translate_addr(src_addr) else {
+                continue;
+            };
+
+            let dst_addr = new_addr + page_index * Size4KiB::SIZE;
+            current.addrspace.apply_page(
+                x86_64::structures::paging::Page::containing_address(dst_addr),
+                new_area.clone(),
+            );
+            let dst_phys = current
+                .addrspace
+                .translate_addr(dst_addr)
+                .ok_or(SyscallError::InvalidArguments)?;
+            if src_phys == dst_phys {
+                continue;
+            }
+            let copy_len = core::cmp::min(4096, (old_len - page_index * 4096) as usize);
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    crate::memory::utils::apply_offset(src_phys.as_u64()) as *const u8,
+                    crate::memory::utils::apply_offset(dst_phys.as_u64()) as *mut u8,
+                    copy_len,
+                );
+            }
+        }
+        current.addrspace.unmap(old_addr, old_len);
+        return Ok(new_addr.as_u64() as usize);
+    }
 
     if area.start != old_addr {
         return Err(SyscallError::InvalidArguments);
@@ -1402,16 +1506,7 @@ define_syscall!(Mremap, |old_addr: VirtAddr,
     }
 
     let new_start = current.addrspace.fetch_add_user_mem(new_pages);
-    let new_data = match &area.data {
-        Data::Normal(permissions) => Data::Normal(*permissions),
-        Data::File {
-            offset,
-            file,
-            shared,
-            ..
-        } => resized_file_mapping(file.clone(), *offset, new_pages, *shared),
-        Data::Shared { .. } => return Err(SyscallError::InvalidArguments),
-    };
+    let new_data = remapped_area_data(&area, 0, new_pages)?;
     let new_area = MemoryArea::new(
         new_start,
         new_pages,
