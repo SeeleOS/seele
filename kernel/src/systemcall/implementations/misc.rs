@@ -212,7 +212,7 @@ const KEY_SPEC_USER_KEYRING: i32 = -4;
 const KEY_SPEC_USER_SESSION_KEYRING: i32 = -5;
 const KEY_USER_MAX_PAYLOAD: usize = 32_767;
 pub(crate) const KEY_USER_DEFAULT_MAX_KEYS: usize = 200;
-pub(crate) const KEY_USER_DEFAULT_MAX_BYTES: usize = 20_000;
+pub(crate) const KEY_USER_DEFAULT_MAX_BYTES: usize = 200_000;
 pub(crate) const KEY_ROOT_DEFAULT_MAX_KEYS: usize = 1_000_000;
 pub(crate) const KEY_ROOT_DEFAULT_MAX_BYTES: usize = 25_000_000;
 
