@@ -135,12 +135,18 @@ pub(super) fn mount_flags_from_mount_bits(bits: u64) -> MountFlags {
 }
 
 pub(super) fn apply_initial_mount_flags(path: Path, flags: MountFlags) -> Result<(), SyscallError> {
-    if flags.is_empty() {
-        return Ok(());
-    }
+    let mask = MountFlags::MS_RDONLY
+        | MountFlags::MS_NOSUID
+        | MountFlags::MS_NODEV
+        | MountFlags::MS_NOEXEC
+        | MountFlags::MS_RELATIME
+        | MountFlags::MS_NOATIME
+        | MountFlags::MS_STRICTATIME
+        | MountFlags::MS_NODIRATIME
+        | MountFlags::MS_NOSYMFOLLOW;
     VirtualFS
         .lock()
-        .remount_bind(path, flags, flags, false)
+        .remount_bind(path, flags, mask, false)
         .map_err(SyscallError::from)
 }
 

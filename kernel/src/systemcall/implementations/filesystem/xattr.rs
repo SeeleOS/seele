@@ -27,7 +27,11 @@ define_syscall!(Fgetxattr, |object: ObjectRef,
                             value: *mut u8,
                             size: usize| {
     let name = xattr_name_from_raw(name)?;
-    let object = xattr_fd_object(&object)?;
+    let object = match xattr_fd_object(&object) {
+        Ok(object) => object,
+        Err(SyscallError::BadFileDescriptor) => return Err(SyscallError::NoData),
+        Err(err) => return Err(err),
+    };
     let xattr_value = object.get_xattr(&name)?.ok_or(SyscallError::NoData)?;
     write_xattr_value(value, size, xattr_value)
 });
@@ -42,7 +46,14 @@ define_syscall!(Setxattr, |path: CString,
     validate_xattr_flags(flags)?;
     let value = xattr_value_from_user(value, size)?;
     let (create, replace) = xattr_flag_modes(flags);
-    xattr_path_object_at(AT_FDCWD, &path_str, false)?
+    validate_user_xattr_mode(
+        file_info_path(resolve_path_at(AT_FDCWD, &path_str)?)?
+            .as_linux()
+            .st_mode,
+        &name,
+    )?;
+    let object = xattr_path_object_at(AT_FDCWD, &path_str, false)?;
+    object
         .set_xattr(name, value, create, replace)
         .map_err(xattr_not_found)?;
     Ok(0)
@@ -58,7 +69,15 @@ define_syscall!(Lsetxattr, |path: CString,
     validate_xattr_flags(flags)?;
     let value = xattr_value_from_user(value, size)?;
     let (create, replace) = xattr_flag_modes(flags);
-    xattr_path_object_at(AT_FDCWD, &path_str, true)?
+    validate_user_xattr_mode(
+        resolve_path_info_with_final(resolve_path_at(AT_FDCWD, &path_str)?, true)?
+            .0
+            .as_linux()
+            .st_mode,
+        &name,
+    )?;
+    let object = xattr_path_object_at(AT_FDCWD, &path_str, true)?;
+    object
         .lset_xattr(name, value, create, replace)
         .map_err(xattr_not_found)?;
     Ok(0)
@@ -73,7 +92,9 @@ define_syscall!(Fsetxattr, |object: ObjectRef,
     validate_xattr_flags(flags)?;
     let value = xattr_value_from_user(value, size)?;
     let (create, replace) = xattr_flag_modes(flags);
-    xattr_fd_object(&object)?
+    let object = xattr_fd_object(&object)?;
+    validate_user_xattr_target(&object, &name)?;
+    object
         .set_xattr(name, value, create, replace)
         .map_err(xattr_not_found)?;
     Ok(0)

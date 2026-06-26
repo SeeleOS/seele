@@ -56,6 +56,27 @@ pub(super) fn xattr_flag_modes(flags: XattrFlags) -> (bool, bool) {
     )
 }
 
+pub(super) fn validate_user_xattr_target(
+    object: &FileLikeObject,
+    name: &str,
+) -> Result<(), SyscallError> {
+    validate_user_xattr_mode(object.stat().st_mode, name)
+}
+
+pub(super) fn validate_user_xattr_mode(mode: u32, name: &str) -> Result<(), SyscallError> {
+    if !name.starts_with("user.") {
+        return Ok(());
+    }
+
+    const S_IFMT: u32 = 0o170000;
+    const S_IFREG: u32 = 0o100000;
+    const S_IFDIR: u32 = 0o040000;
+    match mode & S_IFMT {
+        S_IFREG | S_IFDIR => Ok(()),
+        _ => Err(SyscallError::PermissionDenied),
+    }
+}
+
 pub(super) fn xattr_value_from_user(
     value: *const u8,
     size: usize,
