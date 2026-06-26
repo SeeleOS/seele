@@ -1932,7 +1932,9 @@ mod tests {
         const F_SETFD: u64 = 2;
         const F_GETFL: u64 = 3;
         const F_SETFL: u64 = 4;
+        const F_CREATED_QUERY: u64 = 1028;
         const FD_CLOEXEC: u64 = 1;
+        const O_CREAT: u64 = 0o100;
         const POSIX_FADV_RANDOM: u64 = 1;
         const FALLOC_FL_KEEP_SIZE: u64 = 0x01;
         const FALLOC_FL_PUNCH_HOLE: u64 = 0x02;
@@ -2055,6 +2057,27 @@ mod tests {
 
         expect_ok(
             SyscallArgs::new([fd as u64, F_GETFD, 0, 0, 0, 0]).call::<Fcntl>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([fd as u64, F_CREATED_QUERY, 0, 0, 0, 0]).call::<Fcntl>(),
+            0,
+        );
+        write_user_cstr(
+            user_page + 704,
+            b"/tmp/syscall-file-object-test/created-query\0",
+        );
+        let created_fd = expect_fd(
+            SyscallArgs::new([AT_FDCWD, user_page + 704, O_CREAT, 0o600, 0, 0]).call::<OpenAt>(),
+        );
+        expect_ok(
+            SyscallArgs::new([created_fd as u64, F_CREATED_QUERY, 0, 0, 0, 0]).call::<Fcntl>(),
+            1,
+        );
+        let reopened_fd =
+            expect_fd(SyscallArgs::new([AT_FDCWD, user_page + 704, 0, 0, 0, 0]).call::<OpenAt>());
+        expect_ok(
+            SyscallArgs::new([reopened_fd as u64, F_CREATED_QUERY, 0, 0, 0, 0]).call::<Fcntl>(),
             0,
         );
         expect_ok(

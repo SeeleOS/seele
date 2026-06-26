@@ -48,6 +48,7 @@ enum FcntlCmd {
     GetPipeSz = 1032,
     AddSeals = 1033,
     GetSeals = 1034,
+    CreatedQuery = 1028,
 }
 
 const O_WRONLY: usize = 0o1;
@@ -262,6 +263,9 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
         FcntlCmd::GetFd => {
             with_current_process(|process| Ok(process.get_fd_flags(fd as usize)?.bits() as usize))
         }
+        FcntlCmd::CreatedQuery => with_current_process(|process| {
+            Ok(usize::from(process.fd_created_by_open(fd as usize)?))
+        }),
         FcntlCmd::SetFd => with_current_process(|process| {
             let descriptor_flags = DescriptorFlags::from_bits_truncate(arg as u32);
             let flags = if descriptor_flags.contains(DescriptorFlags::FD_CLOEXEC) {

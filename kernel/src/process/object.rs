@@ -106,6 +106,16 @@ impl Process {
         object: ObjectRef,
         fd_flags: FdFlags,
     ) -> ObjectResult<usize> {
+        self.set_fd_entry_with_created_by_open(slot, object, fd_flags, false)
+    }
+
+    pub fn set_fd_entry_with_created_by_open(
+        &mut self,
+        slot: usize,
+        object: ObjectRef,
+        fd_flags: FdFlags,
+        created_by_open: bool,
+    ) -> ObjectResult<usize> {
         if !self.fd_within_limit(slot) {
             return Err(ObjectError::DoesNotExist);
         }
@@ -117,7 +127,11 @@ impl Process {
         if let Some(old_entry) = fd_table[slot].take() {
             release_fd_entry_resources(self.pid, &old_entry);
         }
-        fd_table[slot] = Some(FdEntry::new(object, fd_flags));
+        fd_table[slot] = Some(FdEntry::with_created_by_open(
+            object,
+            fd_flags,
+            created_by_open,
+        ));
         Ok(slot)
     }
 
@@ -137,6 +151,15 @@ impl Process {
             .get(index)
             .and_then(|entry| entry.as_ref())
             .map(|entry| entry.fd_flags)
+            .ok_or(ObjectError::DoesNotExist)
+    }
+
+    pub fn fd_created_by_open(&self, index: usize) -> ObjectResult<bool> {
+        self.fd_table
+            .lock()
+            .get(index)
+            .and_then(|entry| entry.as_ref())
+            .map(|entry| entry.created_by_open)
             .ok_or(ObjectError::DoesNotExist)
     }
 

@@ -160,7 +160,7 @@ define_syscall!(OpenAt, |dirfd: i32,
                 Err(err) => return Err(err.into()),
             }
         }
-        return install_fd(object, fd_flags);
+        return install_fd(object, fd_flags, false);
     }
     let create = flags.contains(OpenFlags::CREAT);
     let nofollow = flags.contains(OpenFlags::NOFOLLOW);
@@ -177,6 +177,7 @@ define_syscall!(OpenAt, |dirfd: i32,
         HotSyscallPhase::OpenAtPathResolve,
         profile::scope_start().saturating_sub(resolve_start),
     );
+    let mut created_by_open = false;
     let object = if !nofollow {
         let open_start = profile::scope_start();
         let open_vfs_start = profile::scope_start();
@@ -211,6 +212,7 @@ define_syscall!(OpenAt, |dirfd: i32,
                         Ok(None) => {
                             let create_start = profile::scope_start();
                             create_file_unlocked(path.clone(), create_mode)?;
+                            created_by_open = true;
                             profile::record_hot_syscall_phase(
                                 HotSyscallPhase::OpenAtCreateFile,
                                 profile::scope_start().saturating_sub(create_start),
@@ -256,6 +258,7 @@ define_syscall!(OpenAt, |dirfd: i32,
             Err(FSError::NotFound) if create => {
                 let create_start = profile::scope_start();
                 create_file_unlocked(path.clone(), create_mode)?;
+                created_by_open = true;
                 profile::record_hot_syscall_phase(
                     HotSyscallPhase::OpenAtCreateFile,
                     profile::scope_start().saturating_sub(create_start),
@@ -314,7 +317,7 @@ define_syscall!(OpenAt, |dirfd: i32,
         } else {
             FdFlags::empty()
         };
-        return install_fd(object, fd_flags);
+        return install_fd(object, fd_flags, created_by_open);
     }
     if flags.contains(OpenFlags::NOATIME) {
         let stat = file_like.stat();
@@ -359,7 +362,7 @@ define_syscall!(OpenAt, |dirfd: i32,
         FdFlags::empty()
     };
     let install_fd_start = profile::scope_start();
-    let fd = install_fd(object, fd_flags)?;
+    let fd = install_fd(object, fd_flags, created_by_open)?;
     profile::record_hot_syscall_phase(
         HotSyscallPhase::OpenAtInstallFd,
         profile::scope_start().saturating_sub(install_fd_start),
@@ -386,11 +389,15 @@ fn file_flags_from_open_flags(flags: OpenFlags) -> Result<FileFlags, SyscallErro
     Ok(file_flags)
 }
 
-fn install_fd(object: ObjectRef, fd_flags: FdFlags) -> Result<usize, SyscallError> {
+fn install_fd(
+    object: ObjectRef,
+    fd_flags: FdFlags,
+    created_by_open: bool,
+) -> Result<usize, SyscallError> {
     let current_process = get_current_process();
     let mut process = current_process.lock();
     let slot = process.alloc_fd_slot()?;
-    process.set_fd_entry(slot, object, fd_flags)?;
+    process.set_fd_entry_with_created_by_open(slot, object, fd_flags, created_by_open)?;
     Ok(slot)
 }
 

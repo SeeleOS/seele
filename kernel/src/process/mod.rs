@@ -121,15 +121,25 @@ impl Drop for PipeFdReference {
 pub struct FdEntry {
     pub object: ObjectRef,
     pub fd_flags: FdFlags,
+    pub created_by_open: bool,
     _pipe_reference: Option<PipeFdReference>,
 }
 
 impl FdEntry {
     pub fn new(object: ObjectRef, fd_flags: FdFlags) -> Self {
+        Self::with_created_by_open(object, fd_flags, false)
+    }
+
+    pub fn with_created_by_open(
+        object: ObjectRef,
+        fd_flags: FdFlags,
+        created_by_open: bool,
+    ) -> Self {
         let pipe_reference = object.clone().as_pipe().ok().map(PipeFdReference::new);
         Self {
             object,
             fd_flags,
+            created_by_open,
             _pipe_reference: pipe_reference,
         }
     }
