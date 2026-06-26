@@ -2163,7 +2163,7 @@ mod tests {
             SyscallArgs::new([fd as u64, 0, 1, 2, 0, 0]).call::<Fallocate>(),
             0,
         );
-        expect_ok(
+        expect_errno(
             SyscallArgs::new([
                 fd as u64,
                 FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE,
@@ -2173,7 +2173,7 @@ mod tests {
                 0,
             ])
             .call::<Fallocate>(),
-            0,
+            SyscallError::InvalidArguments,
         );
         expect_errno(
             SyscallArgs::new([fd as u64, 0x10, 0, 1, 0, 0]).call::<Fallocate>(),

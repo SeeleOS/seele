@@ -194,7 +194,7 @@ mod tests {
 
         expect_errno(
             SyscallArgs::new([user_page, 0x4, 0, 0, 0, 0]).call::<MemfdCreate>(),
-            SyscallError::InvalidArguments,
+            SyscallError::NoDevice,
         );
         expect_errno(
             SyscallArgs::new([user_page, MFD_NOEXEC_SEAL | MFD_EXEC, 0, 0, 0, 0])
