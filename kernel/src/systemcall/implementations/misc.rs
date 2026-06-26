@@ -669,13 +669,13 @@ fn link_key_into_keyring(source: i32, target: i32) -> Result<(), SyscallError> {
                 && !entry.is_keyring
         })
     });
-    if let Some(old_serial) = old_serial {
-        if old_serial != source {
-            if let Some(old_entry) = registry.remove(&old_serial) {
-                release_key_quota(&old_entry);
-            }
-            remove_key_from_all_keyrings(&mut registry, old_serial);
+    if let Some(old_serial) = old_serial
+        && old_serial != source
+    {
+        if let Some(old_entry) = registry.remove(&old_serial) {
+            release_key_quota(&old_entry);
         }
+        remove_key_from_all_keyrings(&mut registry, old_serial);
     }
 
     let target_entry = registry.get_mut(&target).ok_or(SyscallError::NoKey)?;

@@ -130,7 +130,7 @@ fn keyctl_unlink_target(spec: u64) -> Result<i32, SyscallError> {
         | KEY_SPEC_USER_KEYRING
         | KEY_SPEC_USER_SESSION_KEYRING => resolve_keyring(spec as i32, false),
         serial if serial > 0 => Ok(serial),
-        _ => return Err(SyscallError::NoKey),
+        _ => Err(SyscallError::NoKey),
     }
 }
 
