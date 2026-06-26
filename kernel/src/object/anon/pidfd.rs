@@ -13,7 +13,7 @@ use crate::{
         misc::{ObjectRef, ObjectResult},
         traits::Statable,
     },
-    polling::{event::PollableEvent, object::Pollable},
+    polling::{event::PollableEvent, notify_pollers, object::Pollable},
     process::{manager::MANAGER, misc::ProcessID},
     thread::{manager::ThreadManager, yielding::wake_pollers_for_object},
 };
@@ -98,9 +98,17 @@ fn pidfds_for_process(pid: u64) -> Vec<Arc<PidFdObject>> {
 }
 
 pub fn wake_pidfd_for_process_with_manager(pid: u64, manager: &mut ThreadManager) {
+    let mut affected_pollers = Vec::new();
     for pidfd in pidfds_for_process(pid) {
         pidfd.mark_exited();
         pidfd.wake_waiters_with_manager(manager);
+        if let Some(object) = pidfd.self_object() {
+            affected_pollers.extend(notify_pollers(object, PollableEvent::CanBeRead));
+        }
+    }
+    if !affected_pollers.is_empty() {
+        manager.mark_pollers_dirty();
+        manager.wake_affected_pollers(&affected_pollers);
     }
 }
 

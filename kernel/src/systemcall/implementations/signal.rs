@@ -1,3 +1,4 @@
+use crate::process::ProcessRef;
 use crate::process::group::ProcessGroupID;
 use crate::process::manager::MANAGER;
 use crate::process::misc::ProcessID;
@@ -11,6 +12,7 @@ use crate::thread::thread::LinuxStack;
 use crate::thread::yielding::{BlockType, WakeType, block_current_with_sig_check};
 use crate::{
     define_syscall,
+    filesystem::path::{Path, PathPart},
     memory::user_safe,
     object::{
         FileFlags, Object,
@@ -31,6 +33,7 @@ use core::mem::size_of;
 use num_enum::TryFromPrimitive;
 use strum::IntoEnumIterator;
 
+const CAP_KILL: u64 = 5;
 const SIG_DFL: usize = 0;
 const SIG_IGN: usize = 1;
 const MINSIGSTKSZ: usize = 2048;
@@ -142,6 +145,65 @@ fn read_or_build_signal_info(
     }
 
     Ok(siginfo)
+}
+
+fn signal_info_for_signal(
+    signal: Signal,
+    info: *const SigInfo,
+    default_code: i32,
+) -> SyscallResult<SigInfo> {
+    if info.is_null() {
+        return read_or_build_signal_info(signal, info, default_code);
+    }
+
+    let user_siginfo = user_safe::read(info)?;
+    if user_siginfo.si_signo != signal as i32 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    read_or_build_signal_info(signal, info, default_code)
+}
+
+fn proc_pidfd_path_pid(path: &Path) -> Option<u64> {
+    match path.normalize().parts.as_slice() {
+        [
+            PathPart::Root,
+            PathPart::Normal(proc),
+            PathPart::Normal(pid),
+        ] if proc == "proc" => {
+            if pid == "self" {
+                Some(get_current_process().lock().pid.0)
+            } else {
+                pid.parse().ok()
+            }
+        }
+        _ => None,
+    }
+}
+
+fn pidfd_signal_target(pidfd: ObjectRef) -> SyscallResult<ProcessRef> {
+    if let Ok(pidfd) = pidfd.clone().as_pidfd() {
+        return get_process_with_pid(ProcessID(pidfd.pid()));
+    }
+
+    let file_like = pidfd.as_file_like()?;
+    let pid = proc_pidfd_path_pid(&file_like.path()).ok_or(SyscallError::BadFileDescriptor)?;
+    get_process_with_pid(ProcessID(pid))
+}
+
+fn can_signal_process(target: &ProcessRef) -> bool {
+    let current = get_current_process();
+    let current = current.lock();
+    if current.effective_uid == 0 || current.capability_effective[0] & (1 << CAP_KILL) != 0 {
+        return true;
+    }
+
+    let target = target.lock();
+    current.real_uid == target.real_uid
+        || current.real_uid == target.effective_uid
+        || current.real_uid == target.saved_uid
+        || current.effective_uid == target.real_uid
+        || current.effective_uid == target.effective_uid
+        || current.effective_uid == target.saved_uid
 }
 
 fn linux_timespec_to_ns(timespec: LinuxTimespec) -> Result<u64, SyscallError> {
@@ -457,17 +519,23 @@ define_syscall!(
             return Err(SyscallError::InvalidArguments);
         }
 
-        let pid = pidfd.as_pidfd()?.pid();
-        let process = get_process_with_pid(ProcessID(pid))?;
         if signal == 0 {
             if !info.is_null() {
                 return Err(SyscallError::InvalidArguments);
+            }
+            let process = pidfd_signal_target(pidfd)?;
+            if !can_signal_process(&process) {
+                return Err(SyscallError::PermissionDenied);
             }
             return Ok(0);
         }
 
         let signal = Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?;
-        let siginfo = read_or_build_signal_info(signal, info, SI_QUEUE)?;
+        let siginfo = signal_info_for_signal(signal, info, SI_QUEUE)?;
+        let process = pidfd_signal_target(pidfd)?;
+        if !can_signal_process(&process) {
+            return Err(SyscallError::PermissionDenied);
+        }
         send_signal_to_process_with_siginfo(&process, signal, siginfo);
         Ok(0)
     }
