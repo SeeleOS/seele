@@ -184,6 +184,8 @@ mod tests {
         assert_linux_layout::<TestLinuxSysinfo>(112, 8);
         assert_linux_layout::<TestLinuxRseq>(32, 8);
 
+        const LINUX_CAPABILITY_VERSION_1: u32 = 0x1998_0330;
+        const LINUX_CAPABILITY_VERSION_2: u32 = 0x2007_1026;
         const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
         const RSEQ_LEN_X86_64: u64 = 32;
         const RSEQ_FLAG_UNREGISTER: u64 = 1;
@@ -258,6 +260,39 @@ mod tests {
         write_user_value(
             cap_page,
             &TestLinuxCapHeader {
+                version: LINUX_CAPABILITY_VERSION_1,
+                pid: 0,
+            },
+        );
+        write_user_value(cap_page + 28, &TestLinuxCapData::default());
+        expect_ok(
+            SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capget>(),
+            0,
+        );
+        let header = read_user_value::<TestLinuxCapHeader>(cap_page);
+        assert_eq!(header.version, LINUX_CAPABILITY_VERSION_1);
+        let cap0 = read_user_value::<TestLinuxCapData>(cap_page + 16);
+        let cap1 = read_user_value::<TestLinuxCapData>(cap_page + 28);
+        assert_eq!(cap0.effective, 0x1111_1111);
+        assert_eq!(cap1.effective, 0);
+        write_user_value(
+            cap_page,
+            &TestLinuxCapHeader {
+                version: LINUX_CAPABILITY_VERSION_2,
+                pid: 0,
+            },
+        );
+        expect_ok(
+            SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capget>(),
+            0,
+        );
+        let header = read_user_value::<TestLinuxCapHeader>(cap_page);
+        assert_eq!(header.version, LINUX_CAPABILITY_VERSION_2);
+        let cap1 = read_user_value::<TestLinuxCapData>(cap_page + 28);
+        assert_eq!(cap1.effective, 0x22);
+        write_user_value(
+            cap_page,
+            &TestLinuxCapHeader {
                 version: LINUX_CAPABILITY_VERSION_3,
                 pid: -1,
             },
@@ -311,6 +346,31 @@ mod tests {
             assert_eq!(process.capability_effective, [0xaa, 0xcc]);
             assert_eq!(process.capability_permitted, [0xbb, 0xee]);
             assert_eq!(process.capability_inheritable, [0xcc, 0xff]);
+        }
+        write_user_value(
+            cap_page,
+            &TestLinuxCapHeader {
+                version: LINUX_CAPABILITY_VERSION_1,
+                pid: 0,
+            },
+        );
+        write_user_value(
+            cap_page + 16,
+            &TestLinuxCapData {
+                effective: 0x11,
+                permitted: 0x22,
+                inheritable: 0x33,
+            },
+        );
+        expect_ok(
+            SyscallArgs::new([cap_page, cap_page + 16, 0, 0, 0, 0]).call::<Capset>(),
+            0,
+        );
+        {
+            let process = process.lock();
+            assert_eq!(process.capability_effective, [0x11, 0xcc]);
+            assert_eq!(process.capability_permitted, [0x22, 0xee]);
+            assert_eq!(process.capability_inheritable, [0x33, 0xff]);
         }
         write_user_value(
             cap_page,

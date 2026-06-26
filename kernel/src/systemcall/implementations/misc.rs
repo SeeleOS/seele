@@ -181,7 +181,10 @@ const RSEQ_LEN_X86_64: u32 = 32;
 const RSEQ_CPU_ID_UNINITIALIZED: u32 = u32::MAX;
 const RSEQ_CPU_ID_SINGLE_CORE: u32 = 0;
 const INITIAL_BRK_RESERVE: u64 = 0x4000_0000;
+const LINUX_CAPABILITY_VERSION_1: u32 = 0x1998_0330;
+const LINUX_CAPABILITY_VERSION_2: u32 = 0x2007_1026;
 const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
+const LINUX_CAPABILITY_U32S_1: usize = 1;
 const LINUX_CAPABILITY_U32S_3: usize = 2;
 const CAP_SETPCAP: usize = 8;
 const LINUX_REBOOT_MAGIC1: u32 = 0xfee1_dead;
@@ -275,6 +278,14 @@ fn capability_data_for_process(process: &ProcessRef) -> [LinuxCapData; LINUX_CAP
 
 fn current_capability_data() -> [LinuxCapData; LINUX_CAPABILITY_U32S_3] {
     capability_data_for_process(&get_current_process())
+}
+
+fn capability_u32s(version: u32) -> Option<usize> {
+    match version {
+        LINUX_CAPABILITY_VERSION_1 => Some(LINUX_CAPABILITY_U32S_1),
+        LINUX_CAPABILITY_VERSION_2 | LINUX_CAPABILITY_VERSION_3 => Some(LINUX_CAPABILITY_U32S_3),
+        _ => None,
+    }
 }
 
 fn capability_slot_and_mask(capability: u64) -> Result<(usize, u32), SyscallError> {

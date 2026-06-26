@@ -80,6 +80,23 @@ pub fn is_ref_counted(frame: PhysFrame) -> bool {
 }
 
 #[must_use]
+pub fn release_mapping_ref(frame: PhysFrame) -> bool {
+    let mut ref_counter_locked = FRAME_REF_COUNT.lock();
+    if let Some(count) = ref_counter_locked.get_mut(&frame.start_address().as_u64()) {
+        *count -= 1;
+
+        if *count == 0 {
+            ref_counter_locked.remove(&frame.start_address().as_u64());
+            return true;
+        }
+
+        return false;
+    }
+
+    true
+}
+
+#[must_use]
 pub fn decrease_ref(frame: PhysFrame) -> bool {
     let mut ref_counter_locked = FRAME_REF_COUNT.lock();
     if let Some(count) = ref_counter_locked.get_mut(&frame.start_address().as_u64()) {

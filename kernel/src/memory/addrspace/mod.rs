@@ -10,7 +10,7 @@ use crate::{
     filesystem::page_cache::FileCacheKey,
     memory::{
         addrspace::{
-            cow::decrease_ref,
+            cow::release_mapping_ref,
             mem_area::{Data, MemoryArea},
             misc::split_memory_area,
         },
@@ -385,7 +385,7 @@ impl AddrSpace {
                 if let Ok((frame, flush)) = self.page_table.unmap(page) {
                     flush.flush();
                     changed = true;
-                    if decrease_ref(frame) {
+                    if release_mapping_ref(frame) {
                         frames_to_deallocate.push(frame);
                     }
                 }
