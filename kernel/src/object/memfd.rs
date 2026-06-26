@@ -17,7 +17,7 @@ use crate::{
         vfs::{FSResult, WrappedFile},
         vfs_traits::{File, FileLike, FileLikeType, Whence},
     },
-    object::{FileFlags, misc::ObjectRef},
+    object::{FileFlags, Object, misc::ObjectRef},
     systemcall::utils::{SyscallError, SyscallResult},
 };
 
