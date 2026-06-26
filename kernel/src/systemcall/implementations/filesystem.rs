@@ -866,6 +866,7 @@ mod tests {
         const AT_FDCWD: u64 = (-100i32) as u64;
         const O_RDONLY: u64 = 0;
         const O_WRONLY: u64 = 1;
+        const O_RDWR: u64 = 2;
         const O_CREAT: u64 = 0x40;
         const O_EXCL: u64 = 0x80;
         const O_TRUNC: u64 = 0x200;
@@ -878,6 +879,7 @@ mod tests {
         let cleanup_paths = [
             "/tmp/syscall-fd-state-test/file",
             "/tmp/syscall-fd-state-test/dir",
+            "/tmp/syscall-fd-state-test/devro",
             "/tmp/syscall-fd-state-test",
         ];
         for path in cleanup_paths {
@@ -994,6 +996,48 @@ mod tests {
             SyscallArgs::new([AT_FDCWD, user_page, O_DIRECTORY, 0, 0, 0]).call::<OpenAt>(),
             SyscallError::NotADirectory,
         );
+
+        let readonly_devfs_path = Path::new("/tmp/syscall-fd-state-test/devro");
+        VirtualFS
+            .lock()
+            .create_dir(readonly_devfs_path.clone())
+            .unwrap();
+        let readonly_devfs = Arc::new(Mut::new(DevFs::new()));
+        VirtualFS
+            .lock()
+            .attach_mount(
+                readonly_devfs_path.clone(),
+                readonly_devfs,
+                Path::new("/"),
+                MountFlags::MS_RDONLY,
+            )
+            .unwrap();
+        write_user_cstr(
+            user_page + 128,
+            b"/tmp/syscall-fd-state-test/devro/console\0",
+        );
+        let console_fd = expect_fd(
+            SyscallArgs::new([AT_FDCWD, user_page + 128, O_WRONLY, 0, 0, 0]).call::<OpenAt>(),
+        );
+        close_test_fd(console_fd);
+        write_user_cstr(
+            user_page + 256,
+            b"/tmp/syscall-fd-state-test/devro/created\0",
+        );
+        expect_errno(
+            SyscallArgs::new([AT_FDCWD, user_page + 256, O_WRONLY | O_CREAT, 0o600, 0, 0])
+                .call::<OpenAt>(),
+            SyscallError::ReadOnlyFileSystem,
+        );
+        let truncated_console_fd = expect_fd(
+            SyscallArgs::new([AT_FDCWD, user_page + 128, O_RDWR | O_TRUNC, 0, 0, 0])
+                .call::<OpenAt>(),
+        );
+        close_test_fd(truncated_console_fd);
+        VirtualFS
+            .lock()
+            .unmount(readonly_devfs_path.clone())
+            .unwrap();
 
         for path in cleanup_paths {
             let _ = VirtualFS.lock().delete_file(Path::new(path));

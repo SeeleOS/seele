@@ -323,7 +323,7 @@ define_syscall!(OpenAt, |dirfd: i32,
             return Err(SyscallError::PermissionDenied);
         }
     }
-    ensure_open_writable_mount(&path, flags)?;
+    ensure_open_writable_mount(&path, flags, &file_like)?;
     if flags.contains(OpenFlags::TRUNC) && !path_only {
         let truncate_start = profile::scope_start();
         let file_like = object.clone().as_file_like()?;
@@ -525,7 +525,11 @@ fn validate_openat2_resolve(
     Ok(())
 }
 
-fn ensure_open_writable_mount(path: &Path, flags: OpenFlags) -> Result<(), SyscallError> {
+fn ensure_open_writable_mount(
+    path: &Path,
+    flags: OpenFlags,
+    file_like: &FileLikeObject,
+) -> Result<(), SyscallError> {
     if flags.contains(OpenFlags::PATH) {
         return Ok(());
     }
@@ -533,6 +537,9 @@ fn ensure_open_writable_mount(path: &Path, flags: OpenFlags) -> Result<(), Sysca
     let access_mode = flags.bits() & 0o3;
     let wants_write = access_mode == 0o1 || access_mode == 0o2 || flags.contains(OpenFlags::TRUNC);
     if !wants_write {
+        return Ok(());
+    }
+    if file_like.is_device_backed() {
         return Ok(());
     }
 
