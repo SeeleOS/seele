@@ -105,13 +105,16 @@ define_syscall!(Unshare, |flags: u64| {
         | UnshareFlags::NEWNS
         | UnshareFlags::NEWUTS
         | UnshareFlags::NEWIPC
-        | UnshareFlags::NEWPID)
+        | UnshareFlags::NEWPID
+        | UnshareFlags::NEWUSER)
         .bits();
-    let unsupported_namespace_flags = (UnshareFlags::NEWCGROUP | UnshareFlags::NEWUSER).bits();
+    let supported_privileged_namespace_flags =
+        supported_namespace_flags & !UnshareFlags::NEWUSER.bits();
+    let unsupported_namespace_flags = UnshareFlags::NEWCGROUP.bits();
     if flags & unsupported_namespace_flags != 0 {
         return Err(SyscallError::OperationNotSupported);
     }
-    if flags & supported_namespace_flags != 0 {
+    if flags & supported_privileged_namespace_flags != 0 {
         let process = get_current_process();
         let mut process = process.lock();
         let slot = CAP_SYS_ADMIN / 32;
@@ -144,6 +147,14 @@ define_syscall!(Unshare, |flags: u64| {
             process.pending_child_pid_namespace =
                 Some(NamespaceObject::dynamic(NamespaceKind::Pid));
         }
+    }
+    if flags & UnshareFlags::NEWUSER.bits() != 0 {
+        let process = get_current_process();
+        let mut process = process.lock();
+        process.user_namespace = NamespaceObject::dynamic(NamespaceKind::User);
+        process.user_namespace_uid_map = None;
+        process.user_namespace_gid_map = None;
+        process.user_namespace_setgroups = None;
     }
     if flags & UnshareFlags::FS.bits() != 0 {
         let process = get_current_process();

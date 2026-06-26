@@ -119,6 +119,7 @@ impl Process {
                 pid_namespace: child_pid_namespace,
                 pid_namespace_local_pid: child_pid_namespace_local_pid,
                 pending_child_pid_namespace: None,
+                user_namespace: parent_locked.user_namespace.clone(),
                 uts_namespace: parent_locked.uts_namespace.clone(),
                 sysv_shm_mappings: inherited_shm_mappings.clone(),
                 ..Default::default()

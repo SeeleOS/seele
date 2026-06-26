@@ -20,6 +20,7 @@ pub enum NamespaceKind {
     Ipc,
     Mnt,
     Pid,
+    User,
     Uts,
 }
 
@@ -59,6 +60,7 @@ impl NamespaceObject {
             NamespaceKind::Ipc => "ipc",
             NamespaceKind::Mnt => "mnt",
             NamespaceKind::Pid => "pid",
+            NamespaceKind::User => "user",
             NamespaceKind::Uts => "uts",
         }
     }

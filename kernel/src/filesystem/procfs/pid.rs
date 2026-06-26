@@ -46,7 +46,6 @@ const PROC_NAMESPACE_NAMES: [&str; 8] =
 
 const PROC_CGROUP_INIT_INO: u64 = 0xEFFF_FFFB;
 const PROC_TIME_INIT_INO: u64 = 0xEFFF_FFFA;
-const PROC_USER_INIT_INO: u64 = 0xEFFF_FFFD;
 const USER_HZ: u64 = 100;
 
 fn default_user_namespace_map(id: u32) -> String {
@@ -687,7 +686,11 @@ pub(super) fn pid_ns_inode(pid: ProcessID, name: &str) -> FSResult<u64> {
             .pid_namespace
             .inode()),
         "time" => Ok(PROC_TIME_INIT_INO),
-        "user" => Ok(PROC_USER_INIT_INO),
+        "user" => Ok(get_process_with_pid(pid)
+            .map_err(|_| FSError::NotFound)?
+            .lock()
+            .user_namespace
+            .inode()),
         "uts" => Ok(get_process_with_pid(pid)
             .map_err(|_| FSError::NotFound)?
             .lock()
@@ -732,6 +735,13 @@ pub(super) fn pid_ns_object(pid: ProcessID, name: &str) -> FSResult<Option<Objec
                 .map_err(|_| FSError::NotFound)?
                 .lock()
                 .pid_namespace
+                .clone(),
+        )),
+        "user" => Ok(Some(
+            get_process_with_pid(pid)
+                .map_err(|_| FSError::NotFound)?
+                .lock()
+                .user_namespace
                 .clone(),
         )),
         _ => Ok(None),
