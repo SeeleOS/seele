@@ -30,10 +30,12 @@ define_syscall!(AddKey, |type_name: String,
     Ok(serial as usize)
 });
 
-define_syscall!(RequestKey, |type_name: String,
-                             description: String,
+define_syscall!(RequestKey, |type_name_ptr: *const u8,
+                             description_ptr: *const u8,
                              callout_info: *const u8,
                              dest_keyring: i32| {
+    let type_name = String::k_from(type_name_ptr).map_err(|_| SyscallError::BadAddress)?;
+    let description = String::k_from(description_ptr).map_err(|_| SyscallError::BadAddress)?;
     if type_name.starts_with('.') {
         return Err(SyscallError::PermissionDenied);
     }
@@ -50,17 +52,44 @@ define_syscall!(RequestKey, |type_name: String,
     let keyring = match dest_keyring {
         0 => current_session_keyring(false)
             .or_else(|_| current_user_keyring(UserKeyringKind::UserSession, true))?,
+        _ => resolve_existing_keyring(dest_keyring)?,
+    };
+
+    match search_keyring(keyring, &type_name, &description) {
+        Ok(serial) => Ok(serial as usize),
+        Err(SyscallError::NoKey) if type_name == "keyring" => {
+            let serial = NEXT_KEY_SERIAL.fetch_add(1, Ordering::Relaxed);
+            ensure_keyring_entry(serial, &description);
+            link_key_into_keyring(serial, keyring)?;
+            Ok(serial as usize)
+        }
+        Err(err) => Err(err),
+    }
+});
+
+fn keyctl_key_serial(spec: u64) -> Result<i32, SyscallError> {
+    resolve_key_serial(spec as i32)
+}
+
+fn keyctl_keyring_serial(spec: u64, create: bool) -> Result<i32, SyscallError> {
+    if create {
+        resolve_keyring(spec as i32, true)
+    } else {
+        resolve_existing_keyring(spec as i32)
+    }
+}
+
+fn keyctl_unlink_target(spec: u64) -> Result<i32, SyscallError> {
+    match spec as i32 {
         KEY_SPEC_THREAD_KEYRING
         | KEY_SPEC_PROCESS_KEYRING
         | KEY_SPEC_SESSION_KEYRING
         | KEY_SPEC_USER_KEYRING
-        | KEY_SPEC_USER_SESSION_KEYRING => resolve_keyring(dest_keyring, false)?,
-        serial if serial > 0 => resolve_keyring(serial, false)?,
+        | KEY_SPEC_USER_SESSION_KEYRING => resolve_keyring(spec as i32, false),
+        serial if serial > 0 => Ok(serial),
         _ => return Err(SyscallError::NoKey),
-    };
-
-    search_keyring(keyring, &type_name, &description).map(|serial| serial as usize)
-});
+    }
+}
 
 define_syscall!(Keyctl, |cmd: u64,
                          arg2: u64,
@@ -74,40 +103,43 @@ define_syscall!(Keyctl, |cmd: u64,
         }
         Ok(KeyctlCommand::JoinSessionKeyring) => Ok(current_session_keyring(true)? as usize),
         Ok(KeyctlCommand::Update) => {
-            update_key_payload(arg2 as i32, arg3 as *const u8, arg4 as usize)?;
+            update_key_payload(keyctl_key_serial(arg2)?, arg3 as *const u8, arg4 as usize)?;
             Ok(0)
         }
         Ok(KeyctlCommand::Revoke) => {
-            revoke_key(arg2 as i32)?;
+            revoke_key(keyctl_key_serial(arg2)?)?;
             Ok(0)
         }
         Ok(KeyctlCommand::Chown) => {
-            chown_key(arg2 as i32, arg3 as u32, arg4 as u32)?;
+            chown_key(keyctl_key_serial(arg2)?, arg3 as u32, arg4 as u32)?;
             Ok(0)
         }
         Ok(KeyctlCommand::Setperm) => {
-            set_key_permissions(arg2 as i32, arg3 as u32)?;
+            set_key_permissions(keyctl_key_serial(arg2)?, arg3 as u32)?;
             Ok(0)
         }
         Ok(KeyctlCommand::Describe) => {
-            let description = describe_key(arg2 as i32)?;
+            let description = describe_key(keyctl_key_serial(arg2)?)?;
             copy_keyctl_bytes_to_user(&description, arg3 as *mut u8, arg4 as usize)
         }
         Ok(KeyctlCommand::Clear) => {
-            clear_keyring(arg2 as i32)?;
+            clear_keyring(keyctl_keyring_serial(arg2, false)?)?;
             Ok(0)
         }
         Ok(KeyctlCommand::Link) => {
             let target = resolve_keyring(arg3 as i32, true)?;
-            link_key_into_keyring(arg2 as i32, target)?;
+            link_key_into_keyring(keyctl_key_serial(arg2)?, target)?;
             Ok(0)
         }
         Ok(KeyctlCommand::Unlink) => {
-            unlink_key_from_keyring(arg2 as i32, arg3 as i32)?;
+            unlink_key_from_keyring(
+                keyctl_unlink_target(arg2)?,
+                keyctl_keyring_serial(arg3, false)?,
+            )?;
             Ok(0)
         }
         Ok(KeyctlCommand::Search) => {
-            let keyring = resolve_keyring(arg2 as i32, false)?;
+            let keyring = keyctl_keyring_serial(arg2, false)?;
             let type_name =
                 String::k_from(arg3 as *const u8).map_err(|_| SyscallError::BadAddress)?;
             let description =
@@ -120,12 +152,12 @@ define_syscall!(Keyctl, |cmd: u64,
             Ok(serial as usize)
         }
         Ok(KeyctlCommand::Read) => {
-            let bytes = read_key(arg2 as i32)?;
+            let bytes = read_key(keyctl_key_serial(arg2)?)?;
             copy_keyctl_bytes_to_user(&bytes, arg3 as *mut u8, arg4 as usize)
         }
         Ok(KeyctlCommand::SetReqkeyKeyring) => Ok(0),
         Ok(KeyctlCommand::SetTimeout) => {
-            set_key_timeout(arg2 as i32, arg3 as u32)?;
+            set_key_timeout(keyctl_key_serial(arg2)?, arg3 as u32)?;
             Ok(0)
         }
         Ok(KeyctlCommand::SessionToParent) => {
@@ -141,7 +173,7 @@ define_syscall!(Keyctl, |cmd: u64,
             Ok(0)
         }
         Ok(KeyctlCommand::Invalidate) => {
-            invalidate_key(arg2 as i32)?;
+            invalidate_key(keyctl_key_serial(arg2)?)?;
             Ok(0)
         }
         Ok(KeyctlCommand::GetPersistent) => {
@@ -150,8 +182,8 @@ define_syscall!(Keyctl, |cmd: u64,
         }
         Ok(KeyctlCommand::RestrictKeyring) => Ok(0),
         Ok(KeyctlCommand::Move) => {
-            let source = arg2 as i32;
-            let from = arg3 as i32;
+            let source = keyctl_unlink_target(arg2)?;
+            let from = keyctl_keyring_serial(arg3, false)?;
             let to = resolve_keyring(arg4 as i32, true)?;
             unlink_key_from_keyring(source, from)?;
             link_key_into_keyring(source, to)?;

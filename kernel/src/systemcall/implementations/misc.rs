@@ -213,6 +213,8 @@ const KEY_SPEC_USER_SESSION_KEYRING: i32 = -5;
 const KEY_USER_MAX_PAYLOAD: usize = 32_767;
 pub(crate) const KEY_USER_DEFAULT_MAX_KEYS: usize = 200;
 pub(crate) const KEY_USER_DEFAULT_MAX_BYTES: usize = 20_000;
+pub(crate) const KEY_ROOT_DEFAULT_MAX_KEYS: usize = 1_000_000;
+pub(crate) const KEY_ROOT_DEFAULT_MAX_BYTES: usize = 25_000_000;
 
 static NEXT_SESSION_KEYRING_ID: AtomicI32 = AtomicI32::new(1);
 static NEXT_KEY_SERIAL: AtomicI32 = AtomicI32::new(1024);
@@ -243,6 +245,8 @@ struct KeyEntry {
     revoked: bool,
     invalidated: bool,
     timeout_sec: u32,
+    expires_at_sec: u64,
+    quota_bytes: usize,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -491,6 +495,38 @@ fn resolve_keyring(spec: i32, create: bool) -> Result<i32, SyscallError> {
     }
 }
 
+fn resolve_key_serial(spec: i32) -> Result<i32, SyscallError> {
+    match spec {
+        KEY_SPEC_THREAD_KEYRING
+        | KEY_SPEC_PROCESS_KEYRING
+        | KEY_SPEC_SESSION_KEYRING
+        | KEY_SPEC_USER_KEYRING
+        | KEY_SPEC_USER_SESSION_KEYRING => resolve_keyring(spec, true),
+        serial if serial > 0 => Ok(serial),
+        _ => Err(SyscallError::NoKey),
+    }
+}
+
+fn resolve_existing_keyring(spec: i32) -> Result<i32, SyscallError> {
+    match spec {
+        KEY_SPEC_THREAD_KEYRING
+        | KEY_SPEC_PROCESS_KEYRING
+        | KEY_SPEC_SESSION_KEYRING
+        | KEY_SPEC_USER_KEYRING
+        | KEY_SPEC_USER_SESSION_KEYRING => resolve_keyring(spec, false),
+        serial if serial > 0 => {
+            let registry = KEY_REGISTRY.lock();
+            let entry = registry.get(&serial).ok_or(SyscallError::NoKey)?;
+            if entry.is_keyring {
+                Ok(serial)
+            } else {
+                Err(SyscallError::InvalidArguments)
+            }
+        }
+        _ => Err(SyscallError::NoKey),
+    }
+}
+
 fn keyring_exists(serial: i32) -> bool {
     KEY_REGISTRY
         .lock()
@@ -517,6 +553,7 @@ fn ensure_keyring_entry_with_owner(serial: i32, description: &str, uid: u32, gid
 
 fn ensure_key_entry(serial: i32, type_name: &str, description: &str, payload: Vec<u8>) {
     let (uid, gid) = current_key_owner();
+    let quota_bytes = key_user_payload_bytes(description, payload.len());
     let mut registry = KEY_REGISTRY.lock();
     let entry = registry.entry(serial).or_default();
     entry.type_name = type_name.into();
@@ -526,6 +563,7 @@ fn ensure_key_entry(serial: i32, type_name: &str, description: &str, payload: Ve
     entry.gid = gid;
     entry.permissions = 0x3f3f_0000;
     entry.is_keyring = false;
+    entry.quota_bytes = quota_bytes;
 }
 
 fn key_user_payload_bytes(description: &str, plen: usize) -> usize {
@@ -536,9 +574,8 @@ fn reserve_user_key_quota(uid: u32, description: &str, plen: usize) -> Result<()
     let bytes = key_user_payload_bytes(description, plen);
     let mut quotas = KEY_USER_QUOTAS.lock();
     let quota = quotas.entry(uid).or_default();
-    if quota.keys.saturating_add(1) > KEY_USER_DEFAULT_MAX_KEYS
-        || quota.bytes.saturating_add(bytes) > KEY_USER_DEFAULT_MAX_BYTES
-    {
+    let (max_keys, max_bytes) = crate::filesystem::procfs::proc_keys_quota_limits(uid);
+    if quota.keys.saturating_add(1) > max_keys || quota.bytes.saturating_add(bytes) > max_bytes {
         return Err(SyscallError::QuotaExceeded);
     }
 
@@ -551,18 +588,31 @@ pub(crate) fn proc_key_users_bytes() -> Vec<u8> {
     let quotas = KEY_USER_QUOTAS.lock();
     let mut out = String::new();
     for (uid, quota) in quotas.iter() {
+        let (max_keys, max_bytes) = crate::filesystem::procfs::proc_keys_quota_limits(*uid);
         out.push_str(&alloc::format!(
             "{uid:5}: {:5} {}/{} {}/{} {}/{}\n",
             0,
             quota.keys,
             quota.keys,
             quota.keys,
-            KEY_USER_DEFAULT_MAX_KEYS,
+            max_keys,
             quota.bytes,
-            KEY_USER_DEFAULT_MAX_BYTES,
+            max_bytes,
         ));
     }
     out.into_bytes()
+}
+
+fn release_key_quota(entry: &KeyEntry) {
+    if entry.quota_bytes == 0 {
+        return;
+    }
+    let mut quotas = KEY_USER_QUOTAS.lock();
+    let Some(quota) = quotas.get_mut(&entry.uid) else {
+        return;
+    };
+    quota.keys = quota.keys.saturating_sub(1);
+    quota.bytes = quota.bytes.saturating_sub(entry.quota_bytes);
 }
 
 fn set_key_permissions(serial: i32, permissions: u32) -> Result<(), SyscallError> {
@@ -577,16 +627,33 @@ fn set_key_permissions(serial: i32, permissions: u32) -> Result<(), SyscallError
 
 fn link_key_into_keyring(source: i32, target: i32) -> Result<(), SyscallError> {
     let mut registry = KEY_REGISTRY.lock();
-    let Some(source_entry) = registry.get(&source) else {
+    let Some(source_entry) = registry.get(&source).cloned() else {
         return Err(SyscallError::NoKey);
     };
     if source_entry.revoked {
         return Err(SyscallError::KeyRevoked);
     }
-    let target_entry = registry.get_mut(&target).ok_or(SyscallError::NoKey)?;
+    let target_entry = registry.get(&target).ok_or(SyscallError::NoKey)?;
     if !target_entry.is_keyring || target_entry.revoked {
         return Err(SyscallError::NoKey);
     }
+    let old_serial = target_entry.links.iter().copied().find(|serial| {
+        registry.get(serial).is_some_and(|entry| {
+            entry.type_name == source_entry.type_name
+                && entry.description == source_entry.description
+                && !entry.is_keyring
+        })
+    });
+    if let Some(old_serial) = old_serial {
+        if old_serial != source {
+            if let Some(old_entry) = registry.remove(&old_serial) {
+                release_key_quota(&old_entry);
+            }
+            remove_key_from_all_keyrings(&mut registry, old_serial);
+        }
+    }
+
+    let target_entry = registry.get_mut(&target).ok_or(SyscallError::NoKey)?;
     if !target_entry.links.contains(&source) {
         target_entry.links.push(source);
     }
@@ -598,6 +665,10 @@ fn revoke_key(serial: i32) -> Result<(), SyscallError> {
     let entry = registry.get_mut(&serial).ok_or(SyscallError::NoKey)?;
     entry.revoked = true;
     entry.links.clear();
+    let quota_entry = entry.clone();
+    entry.payload.clear();
+    entry.quota_bytes = 0;
+    release_key_quota(&quota_entry);
     Ok(())
 }
 
@@ -616,12 +687,33 @@ fn get_live_key(serial: i32) -> Result<KeyEntry, SyscallError> {
     if entry.invalidated {
         return Err(SyscallError::NoKey);
     }
+    if entry.expires_at_sec != 0 && KernelTime::current().as_seconds() >= entry.expires_at_sec {
+        return Err(SyscallError::KeyExpired);
+    }
     Ok(entry.clone())
 }
 
 fn update_key_payload(serial: i32, payload: *const u8, plen: usize) -> Result<(), SyscallError> {
     let next_payload = user_safe::read_buffer(payload, plen)?;
     let mut registry = KEY_REGISTRY.lock();
+    let current = registry.get(&serial).ok_or(SyscallError::NoKey)?.clone();
+    if current.revoked {
+        return Err(SyscallError::KeyRevoked);
+    }
+    if current.is_keyring {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if current.type_name == "user" {
+        if plen > KEY_USER_MAX_PAYLOAD {
+            return Err(SyscallError::InvalidArguments);
+        }
+        release_key_quota(&current);
+        if let Err(err) = reserve_user_key_quota(current.uid, &current.description, plen) {
+            let _ =
+                reserve_user_key_quota(current.uid, &current.description, current.payload.len());
+            return Err(err);
+        }
+    }
     let entry = registry.get_mut(&serial).ok_or(SyscallError::NoKey)?;
     if entry.revoked {
         return Err(SyscallError::KeyRevoked);
@@ -629,9 +721,7 @@ fn update_key_payload(serial: i32, payload: *const u8, plen: usize) -> Result<()
     if entry.is_keyring {
         return Err(SyscallError::InvalidArguments);
     }
-    if entry.type_name == "user" && plen > KEY_USER_MAX_PAYLOAD {
-        return Err(SyscallError::InvalidArguments);
-    }
+    entry.quota_bytes = key_user_payload_bytes(&entry.description, plen);
     entry.payload = next_payload;
     Ok(())
 }
@@ -673,11 +763,25 @@ fn unlink_key_from_keyring(source: i32, target: i32) -> Result<(), SyscallError>
     Ok(())
 }
 
+fn remove_key_from_all_keyrings(registry: &mut BTreeMap<i32, KeyEntry>, serial: i32) {
+    for entry in registry.values_mut() {
+        if entry.is_keyring {
+            entry.links.retain(|link| *link != serial);
+        }
+    }
+}
+
 fn search_keyring(keyring: i32, type_name: &str, description: &str) -> Result<i32, SyscallError> {
     let registry = KEY_REGISTRY.lock();
     let entry = registry.get(&keyring).ok_or(SyscallError::NoKey)?;
     if !entry.is_keyring {
         return Err(SyscallError::InvalidArguments);
+    }
+    if entry.revoked {
+        return Err(SyscallError::KeyRevoked);
+    }
+    if entry.expires_at_sec != 0 && KernelTime::current().as_seconds() >= entry.expires_at_sec {
+        return Err(SyscallError::KeyExpired);
     }
     for serial in &entry.links {
         let Some(linked) = registry.get(serial) else {
@@ -689,6 +793,24 @@ fn search_keyring(keyring: i32, type_name: &str, description: &str) -> Result<i3
             && linked.description == description
         {
             return Ok(*serial);
+        }
+    }
+    for serial in &entry.links {
+        let Some(linked) = registry.get(serial) else {
+            continue;
+        };
+        if linked.type_name == type_name && linked.description == description {
+            if linked.revoked {
+                return Err(SyscallError::KeyRevoked);
+            }
+            if linked.expires_at_sec != 0
+                && KernelTime::current().as_seconds() >= linked.expires_at_sec
+            {
+                return Err(SyscallError::KeyExpired);
+            }
+            if linked.invalidated {
+                return Err(SyscallError::NoKey);
+            }
         }
     }
     Err(SyscallError::NoKey)
@@ -731,17 +853,18 @@ fn copy_keyctl_bytes_to_user(
     if buffer.is_null() {
         return Err(SyscallError::BadAddress);
     }
-    if buflen < bytes.len() {
-        return Err(SyscallError::RangeError);
-    }
-    user_safe::write_buffer(buffer, bytes)?;
+    let copied = core::cmp::min(buflen, bytes.len());
+    user_safe::write_buffer(buffer, &bytes[..copied])?;
     Ok(bytes.len())
 }
 
 fn invalidate_key(serial: i32) -> Result<(), SyscallError> {
     let mut registry = KEY_REGISTRY.lock();
-    let entry = registry.get_mut(&serial).ok_or(SyscallError::NoKey)?;
-    entry.invalidated = true;
+    let Some(entry) = registry.remove(&serial) else {
+        return Err(SyscallError::NoKey);
+    };
+    release_key_quota(&entry);
+    remove_key_from_all_keyrings(&mut registry, serial);
     Ok(())
 }
 
@@ -752,6 +875,13 @@ fn set_key_timeout(serial: i32, timeout_sec: u32) -> Result<(), SyscallError> {
         return Err(SyscallError::KeyRevoked);
     }
     entry.timeout_sec = timeout_sec;
+    entry.expires_at_sec = if timeout_sec == 0 {
+        0
+    } else {
+        KernelTime::current()
+            .as_seconds()
+            .saturating_add(timeout_sec as u64)
+    };
     Ok(())
 }
 

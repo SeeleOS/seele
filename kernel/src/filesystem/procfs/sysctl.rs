@@ -8,9 +8,9 @@ const DEFAULT_NR_OPEN: u64 = 1_048_576;
 const DEFAULT_PIPE_MAX_SIZE: u64 = 1_048_576;
 const DEFAULT_PID_MAX: u64 = 4_194_304;
 const DEFAULT_KEYS_ROOT_MAXKEYS: u64 =
-    crate::systemcall::implementations::KEY_USER_DEFAULT_MAX_KEYS as u64;
+    crate::systemcall::implementations::KEY_ROOT_DEFAULT_MAX_KEYS as u64;
 const DEFAULT_KEYS_ROOT_MAXBYTES: u64 =
-    crate::systemcall::implementations::KEY_USER_DEFAULT_MAX_BYTES as u64;
+    crate::systemcall::implementations::KEY_ROOT_DEFAULT_MAX_BYTES as u64;
 
 pub(super) static PROC_FILE_MAX: AtomicU64 = AtomicU64::new(DEFAULT_FILE_MAX);
 pub(super) static PROC_INOTIFY_MAX_QUEUED_EVENTS: AtomicU64 =
@@ -31,6 +31,7 @@ pub(super) static PROC_KEYS_MAXKEYS: AtomicU64 =
     AtomicU64::new(crate::systemcall::implementations::KEY_USER_DEFAULT_MAX_KEYS as u64);
 pub(super) static PROC_KEYS_MAXBYTES: AtomicU64 =
     AtomicU64::new(crate::systemcall::implementations::KEY_USER_DEFAULT_MAX_BYTES as u64);
+pub(super) static PROC_KEYS_GC_DELAY: AtomicU64 = AtomicU64::new(300);
 
 pub(super) fn proc_hostname_bytes() -> Vec<u8> {
     proc_c_string_bytes(crate::misc::utsname::current_hostname(crate::NAME))
@@ -148,7 +149,23 @@ pub(super) fn proc_kernel_keys_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("root_maxbytes".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("maxkeys".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("maxbytes".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("gc_delay".into(), DirectoryContentType::File),
     ]
+}
+
+pub(crate) fn proc_keys_quota_limits(uid: u32) -> (usize, usize) {
+    let (keys, bytes) = if uid == 0 {
+        (
+            PROC_KEYS_ROOT_MAXKEYS.load(Ordering::Relaxed),
+            PROC_KEYS_ROOT_MAXBYTES.load(Ordering::Relaxed),
+        )
+    } else {
+        (
+            PROC_KEYS_MAXKEYS.load(Ordering::Relaxed),
+            PROC_KEYS_MAXBYTES.load(Ordering::Relaxed),
+        )
+    };
+    (keys as usize, bytes as usize)
 }
 
 pub(super) fn proc_sys_net_entries() -> Vec<DirectoryContentInfo> {

@@ -259,6 +259,12 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             || proc_sysctl_value_bytes(&PROC_KEYS_MAXBYTES),
             |buffer| proc_write_sysctl_u64(&PROC_KEYS_MAXBYTES, buffer),
         )),
+        ["sys", "kernel", "keys", "gc_delay"] => Ok(proc_rw_file(
+            "gc_delay",
+            PROC_SYS_KERNEL_KEYS_GC_DELAY_INODE,
+            || proc_sysctl_value_bytes(&PROC_KEYS_GC_DELAY),
+            |buffer| proc_write_sysctl_u64(&PROC_KEYS_GC_DELAY, buffer),
+        )),
         ["sys", "kernel", "random"] => Ok(proc_dir(
             "/sys/kernel/random",
             "random",
