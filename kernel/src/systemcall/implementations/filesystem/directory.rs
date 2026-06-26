@@ -130,6 +130,24 @@ define_syscall!(MkdirAt, |dirfd: i32, path: CString, mode: u32| {
 define_syscall!(Mknodat, |dirfd: i32, path: CString, mode: u32, dev: u64| {
     let path = path_from_raw(path)?;
     let path = resolve_path_at(dirfd, &path)?;
+    if VirtualFS
+        .lock()
+        .mount_metadata(path.clone())?
+        .3
+        .contains(MountFlags::MS_RDONLY)
+    {
+        return Err(SyscallError::ReadOnlyFileSystem);
+    }
+    if let Some(parent) = path.parent() {
+        let credentials = fs_access_credentials();
+        check_access_path_search_permissions(&parent, &credentials)?;
+        check_access_permissions_for_ids_with_options(
+            &open_path(parent)?.stat(),
+            3,
+            &credentials,
+            false,
+        )?;
+    }
     let umask = {
         let process = get_current_process();
         let process = process.lock();
@@ -139,13 +157,16 @@ define_syscall!(Mknodat, |dirfd: i32, path: CString, mode: u32, dev: u64| {
     let create_mode = file_type | (mode & 0o7777 & !umask);
 
     match file_type {
+        S_IFCHR | S_IFBLK if get_current_process().lock().effective_uid != 0 => {
+            Err(SyscallError::PermissionDenied)
+        }
         0 | S_IFREG | S_IFIFO | S_IFCHR | S_IFBLK | S_IFSOCK => {
             VirtualFS
                 .lock()
                 .create_file_with_metadata(path.clone(), Some(create_mode), dev)?;
             Ok(0)
         }
-        _ => Err(SyscallError::NoSyscall),
+        _ => Err(SyscallError::InvalidArguments),
     }
 });
 
