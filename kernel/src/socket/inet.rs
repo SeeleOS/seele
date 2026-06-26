@@ -35,8 +35,8 @@ use super::{
     AF_INET, IPPROTO_TCP, IPPROTO_UDP, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PRIORITY,
     SO_PROTOCOL, SO_RCVBUF, SO_RCVBUFFORCE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_REUSEADDR,
     SO_SNDBUF, SO_SNDBUFFORCE, SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD, SO_TYPE, SOCK_CLOEXEC, SOCK_DGRAM,
-    SOCK_NONBLOCK, SOCK_STREAM, SOL_IP, SOL_SOCKET, SOL_TCP, SocketError, SocketLike, SocketResult,
-    can_set_socket_priority, self_ref::object_ref, socket_timeout_option_len,
+    SOCK_NONBLOCK, SOCK_RAW, SOCK_STREAM, SOL_IP, SOL_SOCKET, SOL_TCP, SocketError, SocketLike,
+    SocketResult, can_set_socket_priority, self_ref::object_ref, socket_timeout_option_len,
     wait::wait_for_object_event,
 };
 
@@ -215,19 +215,16 @@ impl InetSocketObject {
 
         let socket_type = kind & !(SOCK_NONBLOCK | SOCK_CLOEXEC);
         let transport = match socket_type {
-            SOCK_STREAM => {
-                if protocol != 0 && protocol != IPPROTO_TCP {
-                    return Err(SocketError::ProtocolNotSupported);
-                }
-                TransportKind::Tcp
-            }
-            SOCK_DGRAM => {
-                if protocol != 0 && protocol != IPPROTO_UDP {
-                    return Err(SocketError::ProtocolNotSupported);
-                }
-                TransportKind::Udp
-            }
-            _ => return Err(SocketError::ProtocolNotSupported),
+            SOCK_STREAM => match protocol {
+                0 | IPPROTO_TCP => TransportKind::Tcp,
+                _ => return Err(SocketError::ProtocolNotSupported),
+            },
+            SOCK_DGRAM => match protocol {
+                0 | IPPROTO_UDP => TransportKind::Udp,
+                _ => return Err(SocketError::ProtocolNotSupported),
+            },
+            SOCK_RAW => return Err(SocketError::ProtocolNotSupported),
+            _ => return Err(SocketError::InvalidArguments),
         };
 
         let handle = net::create_socket(transport).map_err(Self::map_net_error)?;
@@ -1180,8 +1177,12 @@ impl SocketLike for InetSocketObject {
                         Err(SocketError::AddressNotAvailable)
                     }
                 }
-                _ => Err(SocketError::InvalidArguments),
+                _ => Err(SocketError::ProtocolOptionNotSupported),
             };
+        }
+
+        if level == super::SOL_UDP {
+            return Err(SocketError::ProtocolOptionNotSupported);
         }
 
         if level == SOL_TCP {
@@ -1189,11 +1190,11 @@ impl SocketLike for InetSocketObject {
                 let _ = Self::decode_i32(option_value)?;
                 return Ok(());
             }
-            return Err(SocketError::InvalidArguments);
+            return Err(SocketError::ProtocolOptionNotSupported);
         }
 
         if level != SOL_SOCKET {
-            return Err(SocketError::InvalidArguments);
+            return Err(SocketError::ProtocolOptionNotSupported);
         }
 
         match option_name {
@@ -1223,19 +1224,23 @@ impl SocketLike for InetSocketObject {
         if level == SOL_IP {
             return match option_name {
                 IP_MULTICAST_ALL => Self::encode_i32(option_len, 1),
-                _ => Err(SocketError::InvalidArguments),
+                _ => Err(SocketError::ProtocolOptionNotSupported),
             };
+        }
+
+        if level == super::SOL_UDP {
+            return Err(SocketError::OperationNotSupported);
         }
 
         if level == SOL_TCP {
             if option_name == super::TCP_NODELAY {
                 return Self::encode_i32(option_len, 1);
             }
-            return Err(SocketError::InvalidArguments);
+            return Err(SocketError::ProtocolOptionNotSupported);
         }
 
         if level != SOL_SOCKET {
-            return Err(SocketError::InvalidArguments);
+            return Err(SocketError::OperationNotSupported);
         }
 
         match option_name {

@@ -16,6 +16,8 @@ pub enum SocketError {
     AddressFamilyNotSupported,
     #[error("protocol not supported")]
     ProtocolNotSupported,
+    #[error("protocol option not supported")]
+    ProtocolOptionNotSupported,
     #[error("address already in use")]
     AddressInUse,
     #[error("address not available")]
@@ -53,6 +55,7 @@ impl AsSyscallError for SocketError {
             Self::SocketTypeNotSupported => SyscallError::SocketTypeNotSupported,
             Self::AddressFamilyNotSupported => SyscallError::AddressFamilyNotSupported,
             Self::ProtocolNotSupported => SyscallError::ProtocolNotSupported,
+            Self::ProtocolOptionNotSupported => SyscallError::ProtocolOptionNotSupported,
             Self::AddressInUse => SyscallError::AddressInUse,
             Self::AddressNotAvailable => SyscallError::AddressNotAvailable,
             Self::NetworkDown => SyscallError::NetworkDown,

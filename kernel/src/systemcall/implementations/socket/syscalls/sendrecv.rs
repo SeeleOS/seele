@@ -200,6 +200,12 @@ define_syscall!(
         if len > 0 && buffer.is_null() {
             return Err(SyscallError::BadAddress);
         }
+        if (flags & MSG_OOB) != 0 {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if (flags & MSG_ERRQUEUE) != 0 {
+            return Err(SyscallError::TryAgain);
+        }
 
         if let Ok(socket) = socket.clone().as_netlink_socket()
             && (flags & (MSG_PEEK | MSG_TRUNC)) != 0

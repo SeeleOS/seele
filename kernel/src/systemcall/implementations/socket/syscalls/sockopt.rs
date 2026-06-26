@@ -33,6 +33,9 @@ define_syscall!(
         }
 
         let option_len = user_safe::read(option_len_ptr)? as usize;
+        if option_value.is_null() && option_len != 0 {
+            return Err(SyscallError::BadAddress);
+        }
         let value = socket_like(socket)?
             .getsockopt(level as u64, option_name as u64, option_len)
             .map_err(ObjectError::from)?;

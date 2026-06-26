@@ -35,6 +35,7 @@ pub(super) const MSG_PEEK: u64 = 0x2;
 pub(super) const MSG_CTRUNC: i32 = 0x8;
 pub(super) const MSG_CMSG_CLOEXEC: u64 = 0x40000000;
 pub(super) const MSG_DONTWAIT: u64 = 0x40;
+pub(super) const MSG_ERRQUEUE: u64 = 0x2000;
 pub(super) const MSG_OOB: u64 = 0x1;
 pub(super) const MSG_TRUNC: u64 = 0x20;
 pub(super) const SCM_RIGHTS: i32 = 1;
@@ -123,6 +124,9 @@ pub(super) fn write_socket_name(
     }
 
     let requested_len = user_safe::read(address_len_ptr)? as usize;
+    if requested_len > SOCKADDR_STORAGE_SIZE as usize {
+        return Err(SyscallError::InvalidArguments);
+    }
     let copy_len = requested_len.min(name.len());
     if copy_len > 0 && address.is_null() {
         return Err(SyscallError::BadAddress);
