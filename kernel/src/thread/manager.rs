@@ -262,11 +262,12 @@ impl ThreadManager {
             let thread_id;
             {
                 log::trace!("clean_zombies: lock thread");
-                let thread = ele.lock();
+                let mut thread = ele.lock();
                 log::trace!("clean_zombies: locked thread");
                 parent_arc = thread.parent.clone();
                 self.threads.remove(&thread.id);
                 thread_id = thread.id;
+                thread.kernel_stack.take();
 
                 drop(thread);
             }
