@@ -2,7 +2,11 @@ use alloc::{string::String, vec::Vec};
 use core::any::Any;
 
 use ext4plus::{
-    DirEntryName, Ext4, FollowSymlinks, dir::Dir, file, inode::Inode, path::Path as Ext4Path,
+    DirEntryName, Ext4, FollowSymlinks,
+    dir::Dir,
+    file,
+    inode::{Inode, InodeFlags},
+    path::Path as Ext4Path,
 };
 
 use crate::filesystem::{
@@ -14,7 +18,7 @@ use crate::filesystem::{
     info::{FileLikeInfo, FileTimes, UnixPermission},
     path::Path,
     vfs::FSResult,
-    vfs_traits::{File, FileLikeType, Whence},
+    vfs_traits::{File, FileLikeType, LinuxFileAttributes, Whence},
 };
 use crate::memory::utils::Mut;
 
@@ -289,6 +293,26 @@ impl File for Ext4File {
         lookup_cache_insert_raw(&self.lookup_cache, self.parent_inode, &self.name, &inode);
         self.replace_cached_inode(inode);
         crate::filesystem::impls::ext4::lookup_cache_clear(&self.lookup_cache);
+        Ok(())
+    }
+
+    fn linux_file_attributes(&self) -> FSResult<LinuxFileAttributes> {
+        let inode = self.refresh_inode()?;
+        Ok(LinuxFileAttributes::from_bits_retain(inode.flags().bits()))
+    }
+
+    fn set_linux_file_attributes(&self, attributes: LinuxFileAttributes) -> FSResult<()> {
+        let _operation = self.operation_lock.lock();
+        let mut inode = self.refresh_inode()?;
+        let managed = InodeFlags::from_bits_retain(
+            (LinuxFileAttributes::FS_IMMUTABLE_FL | LinuxFileAttributes::FS_APPEND_FL).bits(),
+        );
+        let requested =
+            InodeFlags::from_bits_retain((attributes & LinuxFileAttributes::all()).bits());
+        inode.set_flags((inode.flags() - managed) | requested);
+        inode.write(&self.fs).map_err(FSError::from)?;
+        self.replace_cached_inode(inode);
+        self.update_lookup_cache();
         Ok(())
     }
 

@@ -29,6 +29,8 @@ pub enum FSError {
     InvalidArguments,
     #[error("access denied")]
     AccessDenied,
+    #[error("permission denied")]
+    PermissionDenied,
     #[error("path too long")]
     PathTooLong,
     #[error("exec format error")]
@@ -57,6 +59,7 @@ impl AsSyscallError for FSError {
             Self::IllegalSeek => SyscallError::IllegalSeek,
             Self::InvalidArguments => SyscallError::InvalidArguments,
             Self::AccessDenied => SyscallError::AccessDenied,
+            Self::PermissionDenied => SyscallError::PermissionDenied,
             Self::PathTooLong => SyscallError::PathTooLong,
             Self::ExecFormat => SyscallError::ExecFormatError,
             Self::TooManySymlinks => SyscallError::TooManySymbolicLinks,

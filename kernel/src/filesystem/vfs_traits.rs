@@ -27,6 +27,14 @@ bitflags! {
     }
 }
 
+bitflags! {
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct LinuxFileAttributes: u32 {
+        const FS_IMMUTABLE_FL = 0x0000_0010;
+        const FS_APPEND_FL = 0x0000_0020;
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MountPropagation {
     Private,
@@ -115,6 +123,12 @@ pub trait File: Send + Sync {
         Err(FSError::Readonly)
     }
     fn set_times(&self, _times: FileTimes) -> FSResult<()> {
+        Err(FSError::Readonly)
+    }
+    fn linux_file_attributes(&self) -> FSResult<LinuxFileAttributes> {
+        Ok(LinuxFileAttributes::empty())
+    }
+    fn set_linux_file_attributes(&self, _attributes: LinuxFileAttributes) -> FSResult<()> {
         Err(FSError::Readonly)
     }
     fn get_xattr(&self, _name: &str) -> FSResult<Option<Vec<u8>>> {

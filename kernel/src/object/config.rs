@@ -58,6 +58,8 @@ pub enum ConfigurateRequest {
     BlockGetZoneSize(*mut u32),
     BlockGetDiscardZeroes(*mut u32),
     BlockZeroOut(*const [u64; 2]),
+    FileGetFlags(*mut u32),
+    FileSetFlags(*const u32),
     FbGetVariableScreenInfo(*mut FbVarScreeninfo),
     FbPutVariableScreenInfo(*mut FbVarScreeninfo),
     FbGetFixedScreenInfo(*mut FbFixScreeninfo),
@@ -204,6 +206,8 @@ impl ConfigurateRequest {
             Self::BlockGetZoneSize(_) => "BlockGetZoneSize",
             Self::BlockGetDiscardZeroes(_) => "BlockGetDiscardZeroes",
             Self::BlockZeroOut(_) => "BlockZeroOut",
+            Self::FileGetFlags(_) => "FileGetFlags",
+            Self::FileSetFlags(_) => "FileSetFlags",
             Self::FbGetVariableScreenInfo(_) => "FbGetVariableScreenInfo",
             Self::FbPutVariableScreenInfo(_) => "FbPutVariableScreenInfo",
             Self::FbGetFixedScreenInfo(_) => "FbGetFixedScreenInfo",
@@ -409,7 +413,9 @@ impl ConfigurateRequest {
             | Self::BlockGetZoneCount(_)
             | Self::BlockGetZoneSize(_)
             | Self::BlockGetDiscardZeroes(_)
-            | Self::BlockZeroOut(_) => return None,
+            | Self::BlockZeroOut(_)
+            | Self::FileGetFlags(_)
+            | Self::FileSetFlags(_) => return None,
             Self::LinuxTcGetA(_) => return None,
             Self::RawIoctl { .. } => return None,
         })
@@ -618,6 +624,8 @@ impl ConfigurateRequest {
             0x127b => Self::BlockGetPhysicalSectorSize(ptr as *mut u32),
             0x127c => Self::BlockGetDiscardZeroes(ptr as *mut u32),
             0x127f => Self::BlockZeroOut(ptr as *const [u64; 2]),
+            0x8004_6601 | 0x8008_6601 => Self::FileGetFlags(ptr as *mut u32),
+            0x4004_6602 | 0x4008_6602 => Self::FileSetFlags(ptr as *const u32),
             0x80081280 => Self::BlockGetDiskSequence(ptr as *mut u64),
             0x80041284 => Self::BlockGetZoneSize(ptr as *mut u32),
             0x80041285 => Self::BlockGetZoneCount(ptr as *mut u32),

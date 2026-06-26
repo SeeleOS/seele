@@ -7,7 +7,7 @@ use crate::filesystem::{
     info::{FileLikeInfo, FileTimes, UnixPermission},
     path::Path,
     vfs::FSResult,
-    vfs_traits::{File, FileLikeType, Whence},
+    vfs_traits::{File, FileLikeType, LinuxFileAttributes, Whence},
 };
 
 use super::{S_IFMT, TmpNodeKind, TmpfsStateRef, node_name};
@@ -184,6 +184,16 @@ impl File for TmpfsFileHandle {
 
     fn set_times(&self, times: FileTimes) -> FSResult<()> {
         self.state.lock().update_times_by_inode(self.inode, times)
+    }
+
+    fn linux_file_attributes(&self) -> FSResult<LinuxFileAttributes> {
+        self.state.lock().file_attributes(self.inode)
+    }
+
+    fn set_linux_file_attributes(&self, attributes: LinuxFileAttributes) -> FSResult<()> {
+        self.state
+            .lock()
+            .set_file_attributes(self.inode, attributes)
     }
 
     fn get_xattr(&self, name: &str) -> FSResult<Option<Vec<u8>>> {

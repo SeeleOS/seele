@@ -15,10 +15,13 @@ use crate::{
         },
         vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
         vfs_operations::{open_path, resolve_dir_path, resolve_file_path},
-        vfs_traits::{File as VfsFile, FileLike, FileLikeType, MountFlags, Symlink, Whence},
+        vfs_traits::{
+            File as VfsFile, FileLike, FileLikeType, LinuxFileAttributes, MountFlags, Symlink,
+            Whence,
+        },
     },
     impl_cast_function, impl_cast_function_non_trait,
-    memory::{addrspace::mem_area::Data, protection::Protection, utils::Mut},
+    memory::{addrspace::mem_area::Data, protection::Protection, user_safe, utils::Mut},
     object::{
         FileFlags, Object,
         config::ConfigurateRequest,
@@ -132,6 +135,15 @@ impl OpenBackend {
             Self::SymlinkPath { info, .. } => Ok(info.clone()),
         }
     }
+}
+
+fn reject_xattr_on_protected_file(attributes: LinuxFileAttributes) -> FSResult<()> {
+    if attributes
+        .intersects(LinuxFileAttributes::FS_IMMUTABLE_FL | LinuxFileAttributes::FS_APPEND_FL)
+    {
+        return Err(FSError::PermissionDenied);
+    }
+    Ok(())
 }
 
 impl OpenedFileObject {
@@ -430,7 +442,9 @@ impl OpenedFileObject {
     ) -> FSResult<()> {
         match &self.backend {
             OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => {
-                file.lock().set_xattr(name, value, create, replace)
+                let file = file.lock();
+                reject_xattr_on_protected_file(file.linux_file_attributes()?)?;
+                file.set_xattr(name, value, create, replace)
             }
             OpenBackend::Directory(dir) => dir.lock().set_xattr(name, value, create, replace),
             OpenBackend::SymlinkPath { target, .. } => {
@@ -448,7 +462,9 @@ impl OpenedFileObject {
     ) -> FSResult<()> {
         match &self.backend {
             OpenBackend::RegularFile(file) | OpenBackend::Device { file, .. } => {
-                file.lock().set_xattr(name, value, create, replace)
+                let file = file.lock();
+                reject_xattr_on_protected_file(file.linux_file_attributes()?)?;
+                file.set_xattr(name, value, create, replace)
             }
             OpenBackend::Directory(dir) => dir.lock().set_xattr(name, value, create, replace),
             OpenBackend::SymlinkPath { symlink, .. } => {
@@ -738,6 +754,37 @@ impl MemoryMappable for OpenedFileObject {
 
 impl Configuratable for OpenedFileObject {
     fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
+        match request {
+            ConfigurateRequest::FileGetFlags(ptr) => {
+                let flags = match &self.backend {
+                    OpenBackend::RegularFile(file) => file.lock().linux_file_attributes()?,
+                    OpenBackend::Device { file, .. } => file.lock().linux_file_attributes()?,
+                    OpenBackend::Directory(_) | OpenBackend::SymlinkPath { .. } => {
+                        return Err(ObjectError::InvalidRequest);
+                    }
+                };
+                user_safe::write(ptr, &flags.bits()).map_err(|_| ObjectError::BadAddress)?;
+                return Ok(0);
+            }
+            ConfigurateRequest::FileSetFlags(ptr) => {
+                let raw = user_safe::read(ptr).map_err(|_| ObjectError::BadAddress)?;
+                let flags = LinuxFileAttributes::from_bits_retain(raw);
+                match &self.backend {
+                    OpenBackend::RegularFile(file) => {
+                        file.lock().set_linux_file_attributes(flags)?
+                    }
+                    OpenBackend::Device { file, .. } => {
+                        file.lock().set_linux_file_attributes(flags)?
+                    }
+                    OpenBackend::Directory(_) | OpenBackend::SymlinkPath { .. } => {
+                        return Err(ObjectError::InvalidRequest);
+                    }
+                }
+                return Ok(0);
+            }
+            _ => {}
+        }
+
         let Some(device) = self.device_object() else {
             return Err(ObjectError::InvalidRequest);
         };

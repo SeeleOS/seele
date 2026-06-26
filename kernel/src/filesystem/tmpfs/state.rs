@@ -8,6 +8,7 @@ use alloc::{
 
 use crate::filesystem::{
     errors::FSError, info::FileTimes, path::Path, sparse_file::SparseFileData, vfs::FSResult,
+    vfs_traits::LinuxFileAttributes,
 };
 
 const ROOT_INODE: u64 = 0x7000_0000;
@@ -51,6 +52,7 @@ pub(crate) struct TmpNode {
     pub(crate) open_count: u64,
     pub(crate) times: FileTimes,
     pub(crate) xattrs: BTreeMap<String, Vec<u8>>,
+    pub(crate) file_attributes: LinuxFileAttributes,
     pub(crate) kind: TmpNodeKind,
 }
 
@@ -78,6 +80,7 @@ impl TmpfsState {
                 open_count: 0,
                 times: FileTimes::now(),
                 xattrs: BTreeMap::new(),
+                file_attributes: LinuxFileAttributes::empty(),
                 kind: TmpNodeKind::Directory {
                     children: BTreeSet::new(),
                     mode: DEFAULT_DIR_MODE,
@@ -221,6 +224,7 @@ impl TmpfsState {
                 open_count: 0,
                 times: FileTimes::creation_now(),
                 xattrs: BTreeMap::new(),
+                file_attributes: LinuxFileAttributes::empty(),
                 kind,
             },
         );
@@ -296,6 +300,19 @@ impl TmpfsState {
             .get(&inode)
             .and_then(|node| node.xattrs.get(name))
             .cloned()
+    }
+
+    pub(crate) fn file_attributes(&self, inode: u64) -> FSResult<LinuxFileAttributes> {
+        Ok(self.node_by_inode(inode)?.file_attributes)
+    }
+
+    pub(crate) fn set_file_attributes(
+        &mut self,
+        inode: u64,
+        attributes: LinuxFileAttributes,
+    ) -> FSResult<()> {
+        self.node_by_inode_mut(inode)?.file_attributes = attributes;
+        Ok(())
     }
 
     pub(crate) fn set_xattr(
