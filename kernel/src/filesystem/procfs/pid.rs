@@ -913,13 +913,23 @@ mod tests {
     }
 
     fn procfs_pid_static_entry_builders_expose_stable_names() {
-        assert_eq!(PROC_NAMESPACE_NAMES.len(), 8);
+        assert_eq!(PROC_NAMESPACE_NAMES.len(), 9);
         assert_eq!(
             pid_ns_entries()
                 .into_iter()
                 .map(|entry| entry.name)
                 .collect::<Vec<_>>(),
-            alloc::vec!["cgroup", "ipc", "mnt", "net", "pid", "time", "user", "uts"]
+            alloc::vec![
+                "cgroup",
+                "ipc",
+                "mnt",
+                "net",
+                "pid",
+                "time",
+                "time_for_children",
+                "user",
+                "uts"
+            ]
         );
         let names = pid_dir_entries()
             .into_iter()
