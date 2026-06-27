@@ -228,13 +228,8 @@ fn has_other_open_file_description(object: &ObjectRef) -> bool {
         if Arc::ptr_eq(&process, &current_process) {
             return false;
         }
-        let process = process.lock();
-        process
-            .fd_table
-            .lock()
-            .iter()
-            .flatten()
-            .any(|entry| fd_entry_is_other_open_file(entry, object))
+        let fd_table = process.lock().fd_table.clone();
+        fd_table_has_other_open_file_description(&fd_table.lock().clone(), None, object)
     })
 }
 
@@ -242,7 +237,8 @@ pub(crate) fn current_process_has_other_open_file_description(
     fd: usize,
     object: &ObjectRef,
 ) -> bool {
-    let fd_table = get_current_process().lock().fd_table.lock().clone();
+    let fd_table = get_current_process().lock().fd_table.clone();
+    let fd_table = fd_table.lock().clone();
     fd_table_has_other_open_file_description(&fd_table, Some(fd), object)
 }
 
