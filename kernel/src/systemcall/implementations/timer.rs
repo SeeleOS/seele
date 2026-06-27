@@ -39,8 +39,8 @@ impl TryFrom<LinuxSigevent> for TimerNotifyMethod {
     type Error = SyscallError;
 
     fn try_from(value: LinuxSigevent) -> Result<Self, Self::Error> {
-        const SIGEV_NONE: i32 = 0;
-        const SIGEV_SIGNAL: i32 = 1;
+        const SIGEV_SIGNAL: i32 = 0;
+        const SIGEV_NONE: i32 = 1;
         const SIGEV_THREAD: i32 = 2;
         const SIGEV_THREAD_ID: i32 = 4;
 
@@ -100,10 +100,12 @@ define_syscall!(
 #[cfg(test)]
 mod tests {
     use crate::{
-        signal::Signal,
+        misc::time::Time,
+        process::manager::get_current_process,
+        signal::{Signal, Signals},
         systemcall::{
             implementations::{
-                TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime,
+                ClockSettime, TimerCreate, TimerDelete, TimerGetoverrun, TimerGettime, TimerSettime,
             },
             test::{TestLinuxItimerspec, TestLinuxTimespec, allocate_large_user_test_region},
             test_helpers::{
@@ -123,8 +125,8 @@ mod tests {
     fn posix_timer_syscalls_follow_linux_rules() {
         const CLOCK_REALTIME: u64 = 0;
         const TIMER_ABSTIME: u64 = 1;
-        const SIGEV_NONE: i32 = 0;
-        const SIGEV_SIGNAL: i32 = 1;
+        const SIGEV_SIGNAL: i32 = 0;
+        const SIGEV_NONE: i32 = 1;
 
         #[repr(C)]
         #[derive(Clone, Copy)]
@@ -300,6 +302,112 @@ mod tests {
         );
 
         let _ = SIGEV_NONE;
+    }
+
+    crate::test!(
+        realtime_absolute_posix_timer,
+        "realtime absolute posix timer follows wallclock jumps",
+        realtime_absolute_posix_timer_follows_wallclock_jumps
+    );
+
+    fn realtime_absolute_posix_timer_follows_wallclock_jumps() {
+        const CLOCK_REALTIME: u64 = 0;
+        const TIMER_ABSTIME: u64 = 1;
+        const SIGEV_SIGNAL: i32 = 0;
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct TestLinuxSigevent {
+            value: u64,
+            signal: i32,
+            notify_type: i32,
+        }
+
+        let page = allocate_large_user_test_region(2);
+        let process = get_current_process();
+        let old_timers = core::mem::take(&mut process.lock().timers);
+        let old_realtime = Time::current();
+        let old_pending_signals = process.lock().pending_signals;
+
+        write_user_value(
+            page,
+            &TestLinuxSigevent {
+                value: 0,
+                signal: Signal::SIGABRT as i32,
+                notify_type: SIGEV_SIGNAL,
+            },
+        );
+        expect_ok(
+            SyscallArgs::new([CLOCK_REALTIME, page, page + 64, 0, 0, 0]).call::<TimerCreate>(),
+            0,
+        );
+        let timer_id = read_user_value::<i32>(page + 64);
+
+        write_user_value(
+            page + 128,
+            &TestLinuxTimespec {
+                tv_sec: 0x7fff_fffe,
+                tv_nsec: 0,
+            },
+        );
+        expect_ok(
+            SyscallArgs::new([CLOCK_REALTIME, page + 128, 0, 0, 0, 0]).call::<ClockSettime>(),
+            0,
+        );
+        write_user_value(
+            page + 192,
+            &TestLinuxItimerspec {
+                it_interval: TestLinuxTimespec::default(),
+                it_value: TestLinuxTimespec {
+                    tv_sec: 0x8000_0001,
+                    tv_nsec: 0,
+                },
+            },
+        );
+        expect_ok(
+            SyscallArgs::new([timer_id as u64, TIMER_ABSTIME, page + 192, 0, 0, 0])
+                .call::<TimerSettime>(),
+            0,
+        );
+
+        {
+            let mut process = process.lock();
+            let deadline = process
+                .next_timer_deadline()
+                .expect("armed realtime timer should expose a scheduler deadline");
+            assert!(deadline > Time::since_boot());
+            assert!(deadline <= Time::since_boot().add_ns(4_000_000_000));
+            assert!(
+                !process
+                    .pending_signals
+                    .contains(Signals::from(Signal::SIGABRT))
+            );
+        }
+
+        write_user_value(
+            page + 256,
+            &TestLinuxTimespec {
+                tv_sec: 0x8000_0001,
+                tv_nsec: 0,
+            },
+        );
+        expect_ok(
+            SyscallArgs::new([CLOCK_REALTIME, page + 256, 0, 0, 0, 0]).call::<ClockSettime>(),
+            0,
+        );
+        assert!(
+            process
+                .lock()
+                .pending_signals
+                .contains(Signals::from(Signal::SIGABRT))
+        );
+
+        {
+            let mut process = process.lock();
+            process.timers = old_timers;
+            process.pending_signals = old_pending_signals;
+        }
+        crate::misc::time::set_unix_timestamp_nanoseconds(old_realtime.as_nanoseconds() as i64);
     }
 }
 
