@@ -1140,10 +1140,10 @@ define_syscall!(Cachestat, |fd: i32,
     let file = object
         .clone()
         .as_file_like()
-        .map_err(|_| SyscallError::OperationNotSupported)?;
+        .map_err(|_| SyscallError::BadFileDescriptor)?;
     let stat_info = file.stat();
     if stat_info.st_mode & S_IFMT != S_IFREG {
-        return Err(SyscallError::OperationNotSupported);
+        return Err(SyscallError::BadFileDescriptor);
     }
 
     let range = user_safe::read(range)?;

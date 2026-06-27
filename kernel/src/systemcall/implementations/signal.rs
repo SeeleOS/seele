@@ -727,7 +727,7 @@ define_syscall!(
             }
 
             let block_type = BlockType::WakeRequired {
-                wake_type: WakeType::IO,
+                wake_type: WakeType::SignalWait(wait_mask),
                 deadline,
             };
             match block_current_with_sig_check(block_type) {

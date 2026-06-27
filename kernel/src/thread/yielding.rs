@@ -12,6 +12,7 @@ use crate::{
     },
     polling::event::PollableEvent,
     process::{manager::get_current_process, misc::ProcessID},
+    signal::{Signal, Signals},
     systemcall::implementations::{FutexWaitId, remove_futex_waiter},
     thread::{
         ThreadRef,
@@ -67,6 +68,7 @@ pub enum WakeType {
     // exact waitpid/wait4 filter after wakeup.
     ProcsesExit,
     IO,
+    SignalWait(Signals),
     // Blocked by the polling system
     // the first argument points to the poller.
     Poller(ObjectRef),
@@ -78,6 +80,7 @@ pub struct BlockedQueues {
     pub pty: VecDeque<ThreadRef>,
     pub io: VecDeque<ThreadRef>,
     pub process_exit: VecDeque<ThreadRef>,
+    pub signal_wait: VecDeque<ThreadRef>,
     pub mouse: VecDeque<ThreadRef>,
     pub poller: VecDeque<ThreadRef>,
     pub timed: BTreeMap<(Time, ThreadID), ThreadRef>,
@@ -93,6 +96,7 @@ impl BlockedQueues {
             WakeType::ProcsesExit => &mut self.process_exit,
             WakeType::Poller(_) => &mut self.poller,
             WakeType::IO => &mut self.io,
+            WakeType::SignalWait(_) => &mut self.signal_wait,
         }
     }
 
@@ -219,6 +223,9 @@ impl ThreadManager {
         self.blocked_queues.pty.retain(|t| !Arc::ptr_eq(t, thread));
         self.blocked_queues.io.retain(|t| !Arc::ptr_eq(t, thread));
         self.blocked_queues
+            .signal_wait
+            .retain(|t| !Arc::ptr_eq(t, thread));
+        self.blocked_queues
             .process_exit
             .retain(|t| !Arc::ptr_eq(t, thread));
         self.blocked_queues
@@ -269,6 +276,32 @@ impl ThreadManager {
             {
                 to_wake.push(f.clone());
                 false
+            } else {
+                true
+            }
+        });
+
+        for thread in to_wake {
+            self.wake(thread);
+        }
+    }
+
+    pub fn wake_signal_waiters(&mut self, signal: Signal) {
+        let signal_bits = Signals::from(signal);
+        let mut to_wake = Vec::new();
+
+        self.blocked_queues.signal_wait.retain(|thread| {
+            if let State::Blocked(BlockType::WakeRequired {
+                wake_type: WakeType::SignalWait(wait_mask),
+                ..
+            }) = &thread.lock().state
+            {
+                if wait_mask.contains(signal_bits) {
+                    to_wake.push(thread.clone());
+                    false
+                } else {
+                    true
+                }
             } else {
                 true
             }

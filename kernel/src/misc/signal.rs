@@ -631,6 +631,7 @@ fn queue_signal(process: &ProcessRef, signal: Signal, siginfo: Option<SigInfo>) 
                 process.pid.0
             };
             wake_signalfd_for_process(pid);
+            crate::thread::with_thread_manager(|manager| manager.wake_signal_waiters(signal));
             request_all_cpus_resched();
             wake_process_threads_for_signal(process, signal);
         }
@@ -677,6 +678,7 @@ fn queue_signal_to_thread(thread: &ThreadRef, signal: Signal, siginfo: Option<Si
 
     let pid = parent.lock().pid.0;
     wake_signalfd_for_process(pid);
+    crate::thread::with_thread_manager(|manager| manager.wake_signal_waiters(signal));
     request_all_cpus_resched();
     wake_specific_thread_for_signal(thread, signal);
 }
