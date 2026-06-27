@@ -184,11 +184,13 @@ impl BpfObject {
                     pc += 2;
                     continue;
                 }
-                (BPF_ALU | BPF_ALU64, BPF_MOV, BPF_X) => regs[dst] = regs[src],
-                (BPF_ALU | BPF_ALU64, BPF_MOV, BPF_IMM) => regs[dst] = VerifierReg::Scalar,
-                (BPF_ALU64, BPF_ADD | BPF_SUB, BPF_X | BPF_IMM)
-                    if matches!(regs[dst], VerifierReg::StackPtr) => {}
-                (BPF_ALU64, BPF_ADD | BPF_SUB, BPF_X | BPF_IMM)
+                (BPF_ALU | BPF_ALU64, BPF_MOV, _) if insn.source() == BPF_X => {
+                    regs[dst] = regs[src]
+                }
+                (BPF_ALU | BPF_ALU64, BPF_MOV, _) => regs[dst] = VerifierReg::Scalar,
+                (BPF_ALU64, BPF_ADD | BPF_SUB, _) if matches!(regs[dst], VerifierReg::StackPtr) => {
+                }
+                (BPF_ALU64, BPF_ADD | BPF_SUB, _)
                     if matches!(regs[dst], VerifierReg::MapValuePtr) =>
                 {
                     return Err("map value pointer arithmetic is not allowed");
@@ -355,12 +357,14 @@ impl<'a> BpfInterpreter<'a> {
                     pc += 2;
                     continue;
                 }
-                (BPF_ALU | BPF_ALU64, BPF_MOV, BPF_X) => self.regs[dst] = self.regs[src].clone(),
-                (BPF_ALU | BPF_ALU64, BPF_MOV, BPF_IMM) => {
+                (BPF_ALU | BPF_ALU64, BPF_MOV, _) if insn.source() == BPF_X => {
+                    self.regs[dst] = self.regs[src].clone()
+                }
+                (BPF_ALU | BPF_ALU64, BPF_MOV, _) => {
                     self.regs[dst] = BpfValue::Scalar(insn.imm as i64 as u64)
                 }
-                (BPF_ALU | BPF_ALU64, op, source) => {
-                    self.apply_alu(dst, src, op, source == BPF_X, insn.imm);
+                (BPF_ALU | BPF_ALU64, op, _) => {
+                    self.apply_alu(dst, src, op, insn.source() == BPF_X, insn.imm);
                 }
                 (BPF_ST, _, BPF_MEM) => {
                     self.write_value(dst, insn.off, insn.imm as i64 as u64, insn.size())?;
@@ -375,9 +379,9 @@ impl<'a> BpfInterpreter<'a> {
                         return Err(SyscallError::OperationNotSupported);
                     }
                 }
-                (BPF_JMP, BPF_JEQ | BPF_JNE, source) => {
+                (BPF_JMP, BPF_JEQ | BPF_JNE, _) => {
                     let left = self.regs[dst].scalar();
-                    let right = if source == BPF_X {
+                    let right = if insn.source() == BPF_X {
                         self.regs[src].scalar()
                     } else {
                         insn.imm as i64 as u64
@@ -504,6 +508,10 @@ impl BpfInsn {
 
     fn mode(self) -> u8 {
         self.code & 0xe0
+    }
+
+    fn source(self) -> u8 {
+        self.code & 0x08
     }
 
     fn size(self) -> usize {

@@ -1141,15 +1141,23 @@ define_syscall!(Cachestat, |fd: i32,
         .clone()
         .as_file_like()
         .map_err(|_| SyscallError::OperationNotSupported)?;
-    if file.stat().st_mode & S_IFMT != S_IFREG {
+    let stat_info = file.stat();
+    if stat_info.st_mode & S_IFMT != S_IFREG {
         return Err(SyscallError::OperationNotSupported);
     }
 
     let range = user_safe::read(range)?;
-    let cached_pages = if range.len == 0 {
+    let file_size = u64::try_from(stat_info.st_size).unwrap_or(0);
+    let covered_len = range
+        .off
+        .checked_add(range.len)
+        .map(|range_end| range_end.min(file_size))
+        .unwrap_or(file_size)
+        .saturating_sub(range.off.min(file_size));
+    let cached_pages = if covered_len == 0 {
         0
     } else {
-        range.len.saturating_add(4095) / 4096
+        covered_len.saturating_add(4095) / 4096
     };
     user_safe::write(
         stat,

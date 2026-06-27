@@ -826,8 +826,8 @@ pub(super) fn proc_pid_write_timens_offsets(pid: ProcessID, buffer: &[u8]) -> FS
             .and_then(|value| value.checked_add(nsec))
             .ok_or(FSError::Other)?;
         match clock {
-            "monotonic" => monotonic = Some(offset_ns),
-            "boottime" => boottime = Some(offset_ns),
+            "1" | "monotonic" => monotonic = Some(offset_ns),
+            "7" | "boottime" => boottime = Some(offset_ns),
             _ => return Err(FSError::Other),
         }
     }

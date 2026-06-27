@@ -1,13 +1,14 @@
 use crate::{
     memory::user_safe,
     misc::time::Time,
-    misc::timer::{ClockId, TimerNotifyMethod, TimerState},
+    misc::timer::{ClockId, TimerNotifyMethod, TimerState, process_expired_process_timers},
     process::misc::with_current_process,
     signal::Signal,
     systemcall::{
         implementations::TimerSetTimeFlags,
         utils::{SyscallError, SyscallImpl},
     },
+    thread::scheduling::request_all_cpus_resched,
 };
 
 use crate::define_syscall;
@@ -375,6 +376,8 @@ define_syscall!(
         if !old_value.is_null() {
             user_safe::write(old_value, &old_spec)?;
         }
+        process_expired_process_timers();
+        request_all_cpus_resched();
         Ok(0)
     }
 );
