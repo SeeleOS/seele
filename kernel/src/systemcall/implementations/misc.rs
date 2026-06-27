@@ -1472,14 +1472,7 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
             Some(&parent_mnt_namespace),
             Some(&user_namespace),
         );
-        child.mount_namespace_snapshot = Some(
-            crate::filesystem::vfs::VirtualFS
-                .lock()
-                .mount_snapshots()
-                .into_iter()
-                .map(|(_, _, _, _, _, mount_id)| mount_id)
-                .collect(),
-        );
+        child.mount_namespace_snapshot = Some(crate::filesystem::vfs::VirtualFS.lock().mount_ids());
         child.mount_namespace_shared_with_parent = shared_with_parent;
     }
     if clone_flags.contains(CloneFlags::NEWPID) {

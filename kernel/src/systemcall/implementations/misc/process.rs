@@ -138,14 +138,8 @@ define_syscall!(Unshare, |flags: u64| {
                 Some(&process.user_namespace),
             );
             process.fs_context = crate::process::clone_fs_context(&process.fs_context);
-            process.mount_namespace_snapshot = Some(
-                crate::filesystem::vfs::VirtualFS
-                    .lock()
-                    .mount_snapshots()
-                    .into_iter()
-                    .map(|(_, _, _, _, _, mount_id)| mount_id)
-                    .collect(),
-            );
+            process.mount_namespace_snapshot =
+                Some(crate::filesystem::vfs::VirtualFS.lock().mount_ids());
         }
         if flags & UnshareFlags::NEWPID.bits() != 0 {
             process.pending_child_pid_namespace = Some(NamespaceObject::dynamic_with_parent(

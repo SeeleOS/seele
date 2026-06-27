@@ -43,6 +43,7 @@ pub struct OpenedFileObject {
     mount_device_id: u64,
     mount_id: u64,
     mount_root: bool,
+    mount_flags: MountFlags,
 }
 
 pub type FileLikeObject = OpenedFileObject;
@@ -189,6 +190,7 @@ impl OpenedFileObject {
         mount_device_id: u64,
         mount_id: u64,
         mount_root: bool,
+        mount_flags: MountFlags,
     ) -> Self {
         Self {
             backend,
@@ -198,6 +200,7 @@ impl OpenedFileObject {
             mount_device_id,
             mount_id,
             mount_root,
+            mount_flags,
         }
     }
 
@@ -240,6 +243,7 @@ impl OpenedFileObject {
             mount_device_id,
             mount_id,
             mount_root,
+            mount_flags,
         ))
     }
 
@@ -251,6 +255,7 @@ impl OpenedFileObject {
             mount_device_id,
             1,
             false,
+            MountFlags::empty(),
         ))
     }
 
@@ -264,6 +269,10 @@ impl OpenedFileObject {
 
     pub fn mount_root(&self) -> bool {
         self.mount_root
+    }
+
+    pub fn mount_flags(&self) -> MountFlags {
+        self.mount_flags
     }
 
     pub fn info(&self) -> FSResult<FileLikeInfo> {

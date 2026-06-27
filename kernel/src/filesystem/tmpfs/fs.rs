@@ -66,11 +66,10 @@ pub(crate) fn tmpfs_lookup_path(state: &TmpfsStateRef, path: &str) -> FSResult<F
             let device = {
                 let state_guard = state.lock();
                 match &state_guard.node_by_inode(inode)?.kind {
-                    TmpNodeKind::Device { mode, rdev } => Some(TmpfsDeviceHandle::new(
+                    TmpNodeKind::Device { rdev, .. } => Some(TmpfsDeviceHandle::new(
                         state.clone(),
                         node_name(&path),
                         inode,
-                        *mode,
                         *rdev,
                     )?),
                     _ => None,

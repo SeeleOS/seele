@@ -8,16 +8,12 @@ use alloc::{
 
 use crate::{
     drivers::virtio::block::{list_devices as list_block_devices, named_device},
-    drm::fs::DEV_DRI_NODE,
+    drm::card::{CARD0_RDEV, RENDERD128_RDEV},
     filesystem::{
         errors::FSError,
         info::{DirectoryContentInfo, FileLikeInfo, UnixPermission},
         path::{Path, PathPart},
-        staticfs::{
-            StaticDeviceNode, StaticDirEntry, StaticDirectoryNode, StaticNode, StaticSymlinkNode,
-            device::StaticDeviceHandle, directory::StaticDirectoryHandle,
-        },
-        tmpfs::{DEFAULT_FILE_MODE, TmpNodeKind, TmpfsState, TmpfsStateRef, tmpfs_lookup_path},
+        tmpfs::{TmpNodeKind, TmpfsState, TmpfsStateRef, tmpfs_lookup_path},
         vfs::FSResult,
         vfs_traits::{Directory, DirectoryContentType, FileLike, FileLikeType, FileSystem},
     },
@@ -25,330 +21,203 @@ use crate::{
     terminal::pty::{get_pty_slave, list_ptys},
 };
 
-static DEV_NULL_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "null",
-    inode: 0x1001,
-    mode: 0o020666,
-    device_name: "devnull",
-    rdev: Some((1u64 << 8) | 3),
-});
+const S_IFCHR: u32 = 0o020000;
+const S_IFBLK: u32 = 0o060000;
 
-static DEV_ZERO_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "zero",
-    inode: 0x1019,
-    mode: 0o020666,
-    device_name: "devzero",
-    rdev: Some((1u64 << 8) | 5),
-});
+struct SeedDevice {
+    parent: &'static str,
+    name: &'static str,
+    mode: u32,
+    rdev: u64,
+}
 
-static DEV_RANDOM_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "random",
-    inode: 0x1017,
-    mode: 0o020666,
-    device_name: "random",
-    rdev: Some((1u64 << 8) | 8),
-});
+struct SeedDirectory {
+    parent: &'static str,
+    name: &'static str,
+    mode: u32,
+}
 
-static DEV_URANDOM_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "urandom",
-    inode: 0x1018,
-    mode: 0o020666,
-    device_name: "urandom",
-    rdev: Some((1u64 << 8) | 9),
-});
+struct SeedSymlink {
+    parent: &'static str,
+    name: &'static str,
+    target: &'static str,
+}
 
-static DEV_TTY_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "tty",
-    inode: 0x1002,
-    mode: 0o020666,
-    device_name: "tty",
-    rdev: Some(5u64 << 8),
-});
-
-static DEV_CONSOLE_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "console",
-    inode: 0x1003,
-    mode: 0o020600,
-    device_name: "console",
-    rdev: Some((5u64 << 8) | 1),
-});
-
-static DEV_TTY0_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "tty0",
-    inode: 0x1004,
-    mode: 0o020620,
-    device_name: "tty0",
-    rdev: Some(4u64 << 8),
-});
-
-static DEV_TTY1_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "tty1",
-    inode: 0x1005,
-    mode: 0o020620,
-    device_name: "tty1",
-    rdev: Some((4u64 << 8) | 1),
-});
-
-static DEV_TTYS0_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "ttyS0",
-    inode: 0x101a,
-    mode: 0o020620,
-    device_name: "ttyS0",
-    rdev: Some((4u64 << 8) | 64),
-});
-
-static DEV_TTY2_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "tty2",
-    inode: 0x1011,
-    mode: 0o020620,
-    device_name: "tty2",
-    rdev: Some((4u64 << 8) | 2),
-});
-
-static DEV_TTY3_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "tty3",
-    inode: 0x1012,
-    mode: 0o020620,
-    device_name: "tty3",
-    rdev: Some((4u64 << 8) | 3),
-});
-
-static DEV_TTY4_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "tty4",
-    inode: 0x1013,
-    mode: 0o020620,
-    device_name: "tty4",
-    rdev: Some((4u64 << 8) | 4),
-});
-
-static DEV_TTY5_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "tty5",
-    inode: 0x1014,
-    mode: 0o020620,
-    device_name: "tty5",
-    rdev: Some((4u64 << 8) | 5),
-});
-
-static DEV_TTY6_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "tty6",
-    inode: 0x1015,
-    mode: 0o020620,
-    device_name: "tty6",
-    rdev: Some((4u64 << 8) | 6),
-});
-
-static DEV_FB0_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "fb0",
-    inode: 0x1006,
-    mode: 0o020666,
-    device_name: "framebuffer",
-    rdev: Some(29u64 << 8),
-});
-
-static DEV_PSAUX_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "psaux",
-    inode: 0x1007,
-    mode: 0o020666,
-    device_name: "ps2mouse",
-    rdev: Some((10u64 << 8) | 1),
-});
-
-static DEV_MOUSE_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "mouse",
-    inode: 0x1008,
-    mode: 0o020666,
-    device_name: "ps2mouse",
-    rdev: Some((13u64 << 8) | 32),
-});
-
-static DEV_INPUT_EVENT0_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "event0",
-    inode: 0x100A,
-    mode: 0o020660,
-    device_name: "event-kbd",
-    rdev: Some((13u64 << 8) | 64),
-});
-
-static DEV_INPUT_EVENT1_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "event1",
-    inode: 0x100B,
-    mode: 0o020660,
-    device_name: "event-mouse",
-    rdev: Some((13u64 << 8) | 65),
-});
-
-static DEV_INPUT_ENTRIES: &[StaticDirEntry] = &[
-    StaticDirEntry {
-        name: "event0",
-        node: &DEV_INPUT_EVENT0_NODE,
-    },
-    StaticDirEntry {
-        name: "event1",
-        node: &DEV_INPUT_EVENT1_NODE,
-    },
-];
-
-static DEV_INPUT_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
-    name: "input",
-    inode: 0x1009,
-    mode: 0o040755,
-    entries: DEV_INPUT_ENTRIES,
-});
-
-static DEV_PTMX_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "ptmx",
-    inode: 0x1010,
-    mode: 0o020666,
-    device_name: "ptmx",
-    rdev: Some((5u64 << 8) | 2),
-});
-
-static DEV_PTS_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
-    name: "pts",
-    inode: 0x100c,
-    mode: 0o040755,
-    entries: &[],
-});
-
-static DEV_SHM_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
-    name: "shm",
-    inode: 0x100d,
-    mode: 0o041777,
-    entries: &[],
-});
-
-static DEV_LOG_NODE: StaticNode = StaticNode::Symlink(StaticSymlinkNode {
-    name: "log",
-    inode: 0x100e,
-    mode: 0o120777,
-    target: "/run/systemd/journal/dev-log",
-});
-
-static DEV_KMSG_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "kmsg",
-    inode: 0x100f,
-    mode: 0o020600,
-    device_name: "kmsg",
-    rdev: None,
-});
-
-static DEV_FUSE_NODE: StaticNode = StaticNode::Device(StaticDeviceNode {
-    name: "fuse",
-    inode: 0x1016,
-    mode: 0o020666,
-    device_name: "fuse",
-    rdev: Some((10u64 << 8) | 229),
-});
-
-static DEV_ROOT_ENTRIES: &[StaticDirEntry] = &[
-    StaticDirEntry {
-        name: "null",
-        node: &DEV_NULL_NODE,
-    },
-    StaticDirEntry {
-        name: "zero",
-        node: &DEV_ZERO_NODE,
-    },
-    StaticDirEntry {
-        name: "random",
-        node: &DEV_RANDOM_NODE,
-    },
-    StaticDirEntry {
-        name: "urandom",
-        node: &DEV_URANDOM_NODE,
-    },
-    StaticDirEntry {
-        name: "tty",
-        node: &DEV_TTY_NODE,
-    },
-    StaticDirEntry {
-        name: "console",
-        node: &DEV_CONSOLE_NODE,
-    },
-    StaticDirEntry {
-        name: "tty0",
-        node: &DEV_TTY0_NODE,
-    },
-    StaticDirEntry {
-        name: "tty1",
-        node: &DEV_TTY1_NODE,
-    },
-    StaticDirEntry {
-        name: "ttyS0",
-        node: &DEV_TTYS0_NODE,
-    },
-    StaticDirEntry {
-        name: "tty2",
-        node: &DEV_TTY2_NODE,
-    },
-    StaticDirEntry {
-        name: "tty3",
-        node: &DEV_TTY3_NODE,
-    },
-    StaticDirEntry {
-        name: "tty4",
-        node: &DEV_TTY4_NODE,
-    },
-    StaticDirEntry {
-        name: "tty5",
-        node: &DEV_TTY5_NODE,
-    },
-    StaticDirEntry {
-        name: "tty6",
-        node: &DEV_TTY6_NODE,
-    },
-    StaticDirEntry {
-        name: "fb0",
-        node: &DEV_FB0_NODE,
-    },
-    StaticDirEntry {
-        name: "psaux",
-        node: &DEV_PSAUX_NODE,
-    },
-    StaticDirEntry {
-        name: "mouse",
-        node: &DEV_MOUSE_NODE,
-    },
-    StaticDirEntry {
+static SEED_DIRECTORIES: &[SeedDirectory] = &[
+    SeedDirectory {
+        parent: "/",
         name: "input",
-        node: &DEV_INPUT_NODE,
+        mode: 0o040755,
     },
-    StaticDirEntry {
+    SeedDirectory {
+        parent: "/",
         name: "dri",
-        node: &DEV_DRI_NODE,
+        mode: 0o040755,
     },
-    StaticDirEntry {
-        name: "ptmx",
-        node: &DEV_PTMX_NODE,
-    },
-    StaticDirEntry {
+    SeedDirectory {
+        parent: "/",
         name: "pts",
-        node: &DEV_PTS_NODE,
+        mode: 0o040755,
     },
-    StaticDirEntry {
+    SeedDirectory {
+        parent: "/",
         name: "shm",
-        node: &DEV_SHM_NODE,
-    },
-    StaticDirEntry {
-        name: "log",
-        node: &DEV_LOG_NODE,
-    },
-    StaticDirEntry {
-        name: "kmsg",
-        node: &DEV_KMSG_NODE,
-    },
-    StaticDirEntry {
-        name: "fuse",
-        node: &DEV_FUSE_NODE,
+        mode: 0o041777,
     },
 ];
 
-static DEV_ROOT_NODE: StaticNode = StaticNode::Directory(StaticDirectoryNode {
-    name: "dev",
-    inode: 0x1000,
-    mode: 0o040755,
-    entries: DEV_ROOT_ENTRIES,
-});
+static SEED_DEVICES: &[SeedDevice] = &[
+    SeedDevice {
+        parent: "/",
+        name: "null",
+        mode: S_IFCHR | 0o666,
+        rdev: (1u64 << 8) | 3,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "zero",
+        mode: S_IFCHR | 0o666,
+        rdev: (1u64 << 8) | 5,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "random",
+        mode: S_IFCHR | 0o666,
+        rdev: (1u64 << 8) | 8,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "urandom",
+        mode: S_IFCHR | 0o666,
+        rdev: (1u64 << 8) | 9,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "tty",
+        mode: S_IFCHR | 0o666,
+        rdev: 5u64 << 8,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "console",
+        mode: S_IFCHR | 0o600,
+        rdev: (5u64 << 8) | 1,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "tty0",
+        mode: S_IFCHR | 0o620,
+        rdev: 4u64 << 8,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "tty1",
+        mode: S_IFCHR | 0o620,
+        rdev: (4u64 << 8) | 1,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "ttyS0",
+        mode: S_IFCHR | 0o620,
+        rdev: (4u64 << 8) | 64,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "tty2",
+        mode: S_IFCHR | 0o620,
+        rdev: (4u64 << 8) | 2,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "tty3",
+        mode: S_IFCHR | 0o620,
+        rdev: (4u64 << 8) | 3,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "tty4",
+        mode: S_IFCHR | 0o620,
+        rdev: (4u64 << 8) | 4,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "tty5",
+        mode: S_IFCHR | 0o620,
+        rdev: (4u64 << 8) | 5,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "tty6",
+        mode: S_IFCHR | 0o620,
+        rdev: (4u64 << 8) | 6,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "fb0",
+        mode: S_IFCHR | 0o666,
+        rdev: 29u64 << 8,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "psaux",
+        mode: S_IFCHR | 0o666,
+        rdev: (10u64 << 8) | 1,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "mouse",
+        mode: S_IFCHR | 0o666,
+        rdev: (13u64 << 8) | 32,
+    },
+    SeedDevice {
+        parent: "/input",
+        name: "event0",
+        mode: S_IFCHR | 0o660,
+        rdev: (13u64 << 8) | 64,
+    },
+    SeedDevice {
+        parent: "/input",
+        name: "event1",
+        mode: S_IFCHR | 0o660,
+        rdev: (13u64 << 8) | 65,
+    },
+    SeedDevice {
+        parent: "/dri",
+        name: "card0",
+        mode: S_IFCHR | 0o660,
+        rdev: CARD0_RDEV,
+    },
+    SeedDevice {
+        parent: "/dri",
+        name: "renderD128",
+        mode: S_IFCHR | 0o660,
+        rdev: RENDERD128_RDEV,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "ptmx",
+        mode: S_IFCHR | 0o666,
+        rdev: (5u64 << 8) | 2,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "kmsg",
+        mode: S_IFCHR | 0o600,
+        rdev: (1u64 << 8) | 11,
+    },
+    SeedDevice {
+        parent: "/",
+        name: "fuse",
+        mode: S_IFCHR | 0o666,
+        rdev: (10u64 << 8) | 229,
+    },
+];
+
+static SEED_SYMLINKS: &[SeedSymlink] = &[SeedSymlink {
+    parent: "/",
+    name: "log",
+    target: "/run/systemd/journal/dev-log",
+}];
 
 pub struct DevFs {
     state: TmpfsStateRef,
@@ -359,27 +228,15 @@ pub struct DevPtsFs;
 struct DevDirectoryHandle {
     state: TmpfsStateRef,
     path: String,
-    node: &'static StaticDirectoryNode,
 }
 struct DevPtsDirectoryHandle;
 
-fn root_directory_node() -> &'static StaticDirectoryNode {
-    let StaticNode::Directory(node) = &DEV_ROOT_NODE else {
-        unreachable!()
-    };
-    node
-}
-
 fn root_directory_file_like(state: TmpfsStateRef) -> FileLike {
-    static_directory_file_like(state, "/".into(), root_directory_node())
+    directory_file_like(state, "/".into())
 }
 
-fn static_directory_file_like(
-    state: TmpfsStateRef,
-    path: String,
-    node: &'static StaticDirectoryNode,
-) -> FileLike {
-    FileLike::Directory(Arc::new(Mut::new(DevDirectoryHandle { state, path, node })))
+fn directory_file_like(state: TmpfsStateRef, path: String) -> FileLike {
+    FileLike::Directory(Arc::new(Mut::new(DevDirectoryHandle { state, path })))
 }
 
 fn pts_directory_file_like() -> FileLike {
@@ -393,7 +250,7 @@ fn pts_inode(number: u32) -> u64 {
 fn pts_file_like(number: u32) -> FSResult<FileLike> {
     let object = get_pty_slave(number).ok_or(FSError::NotFound)?;
     Ok(FileLike::File(Arc::new(Mut::new(
-        StaticDeviceHandle::from_object(
+        crate::filesystem::staticfs::device::StaticDeviceHandle::from_object(
             number.to_string(),
             pts_inode(number),
             0o020620,
@@ -407,66 +264,14 @@ fn block_device_file_like(name: &str) -> FSResult<FileLike> {
     let device = named_device(name).ok_or(FSError::NotFound)?;
     let object = get_device_ref(name).map_err(|_| FSError::NotFound)?;
     Ok(FileLike::File(Arc::new(Mut::new(
-        StaticDeviceHandle::from_object(
+        crate::filesystem::staticfs::device::StaticDeviceHandle::from_object(
             device.name.clone(),
             0x3000 + device.minor,
-            0o060660,
+            S_IFBLK | 0o660,
             Some(device.rdev()),
             object,
         ),
     ))))
-}
-
-fn overlay_directory_path(path: &Path) -> String {
-    let normalized = path.normalize();
-    let components = normalized
-        .parts
-        .iter()
-        .filter_map(|part| match part {
-            PathPart::Normal(name) => Some(name.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    if components.is_empty() {
-        "/".into()
-    } else {
-        alloc::format!("/{}", components.join("/"))
-    }
-}
-
-fn static_directory_child(
-    node: &'static StaticDirectoryNode,
-    name: &str,
-) -> Option<&'static StaticNode> {
-    node.entries
-        .iter()
-        .find(|entry| entry.name == name)
-        .map(|entry| entry.node)
-}
-
-fn static_node_file_like(
-    state: TmpfsStateRef,
-    path: String,
-    node: &'static StaticNode,
-) -> FileLike {
-    match node {
-        StaticNode::Directory(directory) => {
-            if path == "/pts" {
-                pts_directory_file_like()
-            } else {
-                static_directory_file_like(state, path, directory)
-            }
-        }
-        StaticNode::File(file) => FileLike::File(Arc::new(Mut::new(
-            crate::filesystem::staticfs::file::StaticFileHandle::new(file),
-        ))),
-        StaticNode::Symlink(symlink) => FileLike::Symlink(Arc::new(Mut::new(
-            crate::filesystem::staticfs::symlink::StaticSymlinkHandle::new(symlink),
-        ))),
-        StaticNode::Device(device) => {
-            FileLike::File(Arc::new(Mut::new(StaticDeviceHandle::new(device))))
-        }
-    }
 }
 
 fn dynamic_children(state: &TmpfsStateRef, path: &str) -> FSResult<Vec<DirectoryContentInfo>> {
@@ -495,39 +300,55 @@ fn dynamic_children(state: &TmpfsStateRef, path: &str) -> FSResult<Vec<Directory
     Ok(entries)
 }
 
-fn static_root_paths() -> &'static [&'static str] {
-    &["/input", "/dri", "/pts", "/shm"]
-}
-
-fn seeded_static_directory(path: &str) -> bool {
-    path == "/" || static_root_paths().contains(&path)
-}
-
 impl Directory for DevDirectoryHandle {
     fn as_any(&self) -> &dyn core::any::Any {
         self
     }
 
     fn info(&self) -> FSResult<FileLikeInfo> {
-        StaticDirectoryHandle::new(self.node).info()
+        let state = self.state.lock();
+        let node = state.node(&self.path)?;
+        let TmpNodeKind::Directory { mode, .. } = node.kind else {
+            return Err(FSError::NotADirectory);
+        };
+        Ok(FileLikeInfo::new(
+            if self.path == "/" {
+                "dev".into()
+            } else {
+                self.path
+                    .rsplit('/')
+                    .next()
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or("dev")
+                    .into()
+            },
+            0,
+            UnixPermission(mode),
+            FileLikeType::Directory,
+        )
+        .with_inode(node.inode)
+        .with_owner(node.uid, node.gid)
+        .with_nlink(node.link_count)
+        .with_times(node.times))
     }
 
     fn name(&self) -> FSResult<String> {
-        Ok(self.node.name.into())
+        if self.path == "/" {
+            Ok("dev".into())
+        } else {
+            Ok(self
+                .path
+                .rsplit('/')
+                .next()
+                .filter(|name| !name.is_empty())
+                .unwrap_or("dev")
+                .into())
+        }
     }
 
     fn contents(&self) -> FSResult<Vec<DirectoryContentInfo>> {
         let mut seen = BTreeSet::new();
         let mut entries = Vec::new();
-
-        for entry in self.node.entries {
-            seen.insert(entry.name.to_string());
-            entries.push(
-                DirectoryContentInfo::new(entry.name.into(), entry.node.content_type())
-                    .with_inode(entry.node.inode()),
-            );
-        }
-
         for entry in dynamic_children(&self.state, &self.path)? {
             if seen.insert(entry.name.clone()) {
                 entries.push(entry);
@@ -549,17 +370,13 @@ impl Directory for DevDirectoryHandle {
     }
 
     fn create(&self, info: DirectoryContentInfo) -> FSResult<()> {
-        if static_directory_child(self.node, &info.name).is_some() {
-            return Err(FSError::AlreadyExists);
-        }
-
         let mut state = self.state.lock();
         match info.content_type {
             DirectoryContentType::File => state.create_file(
                 &self.path,
                 &info.name,
                 info.permission
-                    .unwrap_or(UnixPermission(DEFAULT_FILE_MODE))
+                    .unwrap_or(UnixPermission(crate::filesystem::tmpfs::DEFAULT_FILE_MODE))
                     .0,
                 info.rdev,
             ),
@@ -573,25 +390,19 @@ impl Directory for DevDirectoryHandle {
     }
 
     fn create_symlink(&self, name: &str, target: &str) -> FSResult<()> {
-        if static_directory_child(self.node, name).is_some() {
-            return Err(FSError::AlreadyExists);
-        }
-
         self.state.lock().create_symlink(&self.path, name, target)
     }
 
     fn delete(&self, name: &str) -> FSResult<()> {
-        if static_directory_child(self.node, name).is_some() {
-            return Err(FSError::Readonly);
-        }
-
         self.state.lock().delete_node(&self.path, name)
     }
 
     fn get(&self, name: &str) -> FSResult<FileLike> {
-        if let Some(node) = static_directory_child(self.node, name) {
-            let child_path = TmpfsState::child_path(&self.path, name);
-            return Ok(static_node_file_like(self.state.clone(), child_path, node));
+        if self.path == "/pts" {
+            let FileLike::Directory(directory) = pts_directory_file_like() else {
+                unreachable!();
+            };
+            return directory.lock().get(name);
         }
 
         if self.path == "/" && named_device(name).is_some() {
@@ -599,8 +410,52 @@ impl Directory for DevDirectoryHandle {
         }
 
         let child_path = TmpfsState::child_path(&self.path, name);
-        tmpfs_lookup_path(&self.state, &child_path)
+        let file_like = tmpfs_lookup_path(&self.state, &child_path)?;
+        if child_path == "/pts" {
+            Ok(pts_directory_file_like())
+        } else {
+            Ok(file_like)
+        }
     }
+
+    fn chmod(&self, mode: u32) -> FSResult<()> {
+        let mut state = self.state.lock();
+        let node = state.node_mut(&self.path)?;
+        match &mut node.kind {
+            TmpNodeKind::Directory { mode: dir_mode, .. } => {
+                *dir_mode = mode & 0o7777;
+                Ok(())
+            }
+            TmpNodeKind::File { .. } | TmpNodeKind::Device { .. } | TmpNodeKind::Symlink { .. } => {
+                Err(FSError::NotADirectory)
+            }
+        }
+    }
+
+    fn chown(&self, uid: u32, gid: u32) -> FSResult<()> {
+        let mut state = self.state.lock();
+        let inode = state.node(&self.path)?.inode;
+        state.update_owner_by_inode(inode, uid, gid)
+    }
+
+    fn set_times(&self, times: crate::filesystem::info::FileTimes) -> FSResult<()> {
+        let mut state = self.state.lock();
+        let inode = state.node(&self.path)?.inode;
+        state.update_times_by_inode(inode, times)
+    }
+}
+
+fn seed_devfs_state(state: &mut TmpfsState) -> FSResult<()> {
+    for directory in SEED_DIRECTORIES {
+        state.create_directory(directory.parent, directory.name, directory.mode)?;
+    }
+    for device in SEED_DEVICES {
+        state.create_file(device.parent, device.name, device.mode, device.rdev)?;
+    }
+    for symlink in SEED_SYMLINKS {
+        state.create_symlink(symlink.parent, symlink.name, symlink.target)?;
+    }
+    Ok(())
 }
 
 impl DevFs {
@@ -608,12 +463,7 @@ impl DevFs {
         let state = Arc::new(Mut::new(TmpfsState::new()));
         {
             let mut state_guard = state.lock();
-            for path in static_root_paths() {
-                let name = path.trim_start_matches('/');
-                state_guard
-                    .create_directory("/", name, UnixPermission::directory().0)
-                    .expect("devfs static directory seed should succeed");
-            }
+            seed_devfs_state(&mut state_guard).expect("devfs seed should succeed");
         }
         Self { state }
     }
@@ -667,26 +517,14 @@ impl FileSystem for DevFs {
     }
 
     fn rename(&self, old_path: &Path, new_path: &Path) -> FSResult<()> {
-        let old_path = overlay_directory_path(old_path);
-        let new_path = overlay_directory_path(new_path);
-        if seeded_static_directory(&old_path)
-            || seeded_static_directory(&new_path)
-            || static_path_exists(&old_path)
-        {
-            return Err(FSError::Readonly);
-        }
-        if static_path_exists(&new_path) {
-            return Err(FSError::Readonly);
-        }
+        let old_path = devfs_path(old_path);
+        let new_path = devfs_path(new_path);
         self.state.lock().rename(&old_path, &new_path)
     }
 
     fn link(&self, old_path: &Path, new_path: &Path) -> FSResult<()> {
-        let old_path = overlay_directory_path(old_path);
-        let new_path = overlay_directory_path(new_path);
-        if static_path_exists(&old_path) || static_path_exists(&new_path) {
-            return Err(FSError::Readonly);
-        }
+        let old_path = devfs_path(old_path);
+        let new_path = devfs_path(new_path);
         self.state.lock().link(&old_path, &new_path)
     }
 
@@ -705,6 +543,23 @@ impl FileSystem for DevFs {
     fn default_mount_flags(&self, _path: &Path) -> crate::filesystem::vfs_traits::MountFlags {
         crate::filesystem::vfs_traits::MountFlags::MS_NOSUID
             | crate::filesystem::vfs_traits::MountFlags::MS_RELATIME
+    }
+}
+
+fn devfs_path(path: &Path) -> String {
+    let components = path
+        .normalize()
+        .parts
+        .iter()
+        .filter_map(|part| match part {
+            PathPart::Normal(name) => Some(name.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if components.is_empty() {
+        "/".into()
+    } else {
+        alloc::format!("/{}", components.join("/"))
     }
 }
 
@@ -799,68 +654,5 @@ impl Directory for DevPtsDirectoryHandle {
     fn get(&self, name: &str) -> FSResult<FileLike> {
         let number = name.parse::<u32>().map_err(|_| FSError::NotFound)?;
         pts_file_like(number)
-    }
-}
-
-fn static_path_exists(path: &str) -> bool {
-    if path == "/" {
-        return true;
-    }
-
-    let mut current = root_directory_node();
-    let mut parts = path.trim_start_matches('/').split('/').peekable();
-    while let Some(name) = parts.next() {
-        let Some(node) = static_directory_child(current, name) else {
-            return false;
-        };
-        match node {
-            StaticNode::Directory(directory) => {
-                if parts.peek().is_none() {
-                    return true;
-                }
-                current = directory;
-            }
-            StaticNode::File(_) | StaticNode::Device(_) | StaticNode::Symlink(_) => {
-                return parts.peek().is_none();
-            }
-        }
-    }
-    true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        overlay_directory_path, pts_inode, seeded_static_directory, static_path_exists,
-        static_root_paths,
-    };
-    use crate::filesystem::path::Path;
-
-    crate::test!(
-        devfs_overlay_path_rules,
-        "devfs overlay path normalization and seeded static gating stay stable",
-        devfs_overlay_path_normalization_and_seeded_static_gating_stay_stable
-    );
-
-    fn devfs_overlay_path_normalization_and_seeded_static_gating_stay_stable() {
-        assert_eq!(overlay_directory_path(&Path::new("/")), "/");
-        assert_eq!(overlay_directory_path(&Path::new("/pts/../shm/.")), "/shm");
-        assert_eq!(
-            overlay_directory_path(&Path::new("input/./foo")),
-            "/input/foo"
-        );
-
-        assert_eq!(static_root_paths(), &["/input", "/dri", "/pts", "/shm"]);
-        assert!(seeded_static_directory("/"));
-        assert!(seeded_static_directory("/pts"));
-        assert!(!seeded_static_directory("/null"));
-
-        assert!(static_path_exists("/null"));
-        assert!(static_path_exists("/input/event0"));
-        assert!(static_path_exists("/log"));
-        assert!(!static_path_exists("/input/missing"));
-
-        assert_eq!(pts_inode(0), 0x2000);
-        assert_eq!(pts_inode(7), 0x2007);
     }
 }

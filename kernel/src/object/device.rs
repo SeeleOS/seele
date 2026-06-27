@@ -116,6 +116,7 @@ pub fn get_device_ref_by_rdev(rdev: u64) -> SyscallResult<ObjectRef> {
         rdev if rdev == char_rdev(1, 5) => Some("devzero"),
         rdev if rdev == char_rdev(1, 8) => Some("random"),
         rdev if rdev == char_rdev(1, 9) => Some("urandom"),
+        rdev if rdev == char_rdev(1, 11) => Some("kmsg"),
         rdev if rdev == char_rdev(4, 0) => Some("tty0"),
         rdev if rdev == char_rdev(4, 1) => Some("tty1"),
         rdev if rdev == char_rdev(4, 2) => Some("tty2"),

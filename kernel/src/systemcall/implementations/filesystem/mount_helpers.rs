@@ -163,7 +163,7 @@ pub(super) fn apply_initial_mount_flags(path: Path, flags: MountFlags) -> Result
         | MountFlags::MS_NOSYMFOLLOW;
     VirtualFS
         .lock()
-        .remount_bind(path, flags, mask, false)
+        .remount_bind_in_current_namespace(path, flags, mask, false)
         .map_err(SyscallError::from)
 }
 

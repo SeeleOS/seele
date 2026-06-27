@@ -260,6 +260,55 @@ impl VFS {
         Ok(())
     }
 
+    pub fn remount_bind_in_current_namespace(
+        &mut self,
+        path: Path,
+        flags: MountFlags,
+        mask: MountFlags,
+        recursive: bool,
+    ) -> FSResult<()> {
+        if crate::process::manager::get_current_process()
+            .lock()
+            .mount_namespace_snapshot
+            .is_none()
+        {
+            return self.remount_bind(path, flags, mask, recursive);
+        }
+
+        let mount_path = self.mount_path(path)?;
+        let mount_path_string = mount_path.clone().as_string();
+        let targets = self
+            .mounts
+            .iter()
+            .filter(|mount| {
+                let is_target = mount.path.clone().as_string() == mount_path_string;
+                is_target || recursive && mount.path.starts_with(&mount_path)
+            })
+            .map(|mount| (mount.mount_id, mount.flags))
+            .collect::<Vec<_>>();
+        if targets.is_empty() {
+            return Err(FSError::NotFound);
+        }
+
+        let process = crate::process::manager::get_current_process();
+        let mut process = process.lock();
+        for (mount_id, current_flags) in targets {
+            let current_flags = process
+                .mount_namespace_flag_overrides
+                .get(&mount_id)
+                .copied()
+                .unwrap_or(current_flags);
+            let mut next_flags = current_flags;
+            next_flags.remove(mask);
+            next_flags.insert(flags & mask);
+            process
+                .mount_namespace_flag_overrides
+                .insert(mount_id, next_flags);
+        }
+
+        Ok(())
+    }
+
     pub fn set_mount_propagation(
         &mut self,
         path: Path,
@@ -495,6 +544,10 @@ impl VFS {
 
     pub fn mount_count(&self) -> usize {
         self.mounts.len()
+    }
+
+    pub fn mount_ids(&self) -> Vec<u64> {
+        self.mounts.iter().map(|mount| mount.mount_id).collect()
     }
 
     pub fn mount_snapshots(&self) -> Vec<(Path, FileSystemRef, Path, MountFlags, u64, u64)> {

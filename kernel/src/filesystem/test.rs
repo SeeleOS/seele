@@ -73,9 +73,9 @@ crate::test!(
     sysfs_exposes_stable_metadata_flags_and_static_tree_entries
 );
 crate::test!(
-    devfs_static_overlay_rules,
-    "devfs preserves static overlay roots and readonly gating",
-    devfs_preserves_static_overlay_roots_and_readonly_gating
+    devfs_default_nodes_are_mutable_devtmpfs_entries,
+    "devfs default nodes are mutable devtmpfs entries",
+    devfs_default_nodes_are_mutable_devtmpfs_entries
 );
 crate::test!(
     procfs_static_entries,
@@ -653,7 +653,7 @@ fn sysfs_exposes_stable_metadata_flags_and_static_tree_entries() {
     );
 }
 
-fn devfs_preserves_static_overlay_roots_and_readonly_gating() {
+fn devfs_default_nodes_are_mutable_devtmpfs_entries() {
     let fs = DevFs::new();
     assert_eq!(fs.name(), "devtmpfs");
     assert_eq!(fs.magic(), 0x0102_1994);
@@ -682,16 +682,32 @@ fn devfs_preserves_static_overlay_roots_and_readonly_gating() {
     let FileLike::File(zero) = fs.lookup(&Path::new("/zero")).unwrap() else {
         panic!("/zero should be a device");
     };
-    let zero_info = zero.lock().info().unwrap();
+    let mut zero = zero.lock();
+    let zero_info = zero.info().unwrap();
     assert_eq!(zero_info.permission.0, 0o020666);
     assert_eq!(zero_info.rdev, (1u64 << 8) | 5);
+    drop(zero);
+
+    let FileLike::File(tty1) = fs.lookup(&Path::new("/tty1")).unwrap() else {
+        panic!("/tty1 should be a device");
+    };
+    let tty1 = tty1.lock();
+    tty1.chown(0, 5).unwrap();
+    tty1.chmod(0o620).unwrap();
+    drop(tty1);
+    let FileLike::File(tty1) = fs.lookup(&Path::new("/tty1")).unwrap() else {
+        panic!("/tty1 should still be a device");
+    };
+    let tty1_info = tty1.lock().info().unwrap();
+    assert_eq!(tty1_info.uid, 0);
+    assert_eq!(tty1_info.gid, 5);
+    assert_eq!(tty1_info.permission.0, 0o020620);
 
     let FileLike::Directory(pts) = fs.lookup(&Path::new("/pts")).unwrap() else {
         panic!("/pts should be a directory");
     };
     let pts_info = pts.lock().info().unwrap();
     assert_eq!(pts_info.name, "pts");
-    assert_eq!(pts_info.inode, 0x100c);
     assert_eq!(pts_info.permission.0, 0o040755);
 
     let FileLike::Symlink(log) = fs.lookup(&Path::new("/log")).unwrap() else {
@@ -702,22 +718,26 @@ fn devfs_preserves_static_overlay_roots_and_readonly_gating() {
         "/run/systemd/journal/dev-log"
     );
 
+    let FileLike::Directory(root) = fs.lookup(&Path::new("/")).unwrap() else {
+        panic!("/dev root should be a directory");
+    };
+    root.lock()
+        .create(DirectoryContentInfo::new(
+            "hugepages".into(),
+            DirectoryContentType::Directory,
+        ))
+        .unwrap();
     assert!(matches!(
-        fs.rename(&Path::new("/pts"), &Path::new("/pts2")),
-        Err(FSError::Readonly)
+        fs.lookup(&Path::new("/hugepages")).unwrap(),
+        FileLike::Directory(_)
     ));
-    assert!(matches!(
-        fs.rename(&Path::new("/shadow"), &Path::new("/null")),
-        Err(FSError::Readonly)
-    ));
-    assert!(matches!(
-        fs.link(&Path::new("/null"), &Path::new("/shadow")),
-        Err(FSError::Readonly)
-    ));
-    assert!(matches!(
-        fs.link(&Path::new("/shadow"), &Path::new("/ptmx")),
-        Err(FSError::Readonly)
-    ));
+
+    fs.link(&Path::new("/null"), &Path::new("/null-link"))
+        .unwrap();
+    let FileLike::File(null_link) = fs.lookup(&Path::new("/null-link")).unwrap() else {
+        panic!("/null-link should be a hard link to a device");
+    };
+    assert_eq!(null_link.lock().info().unwrap().rdev, (1u64 << 8) | 3);
 }
 
 fn procfs_exposes_stable_static_directories_files_and_mount_flags() {

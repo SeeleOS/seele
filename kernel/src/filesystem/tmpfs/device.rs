@@ -5,36 +5,28 @@ use alloc::string::String;
 use crate::{
     filesystem::{
         errors::FSError,
-        info::{FileLikeInfo, UnixPermission},
+        info::{FileLikeInfo, FileTimes, UnixPermission},
         vfs::FSResult,
-        vfs_traits::{File, FileLikeType, Whence},
+        vfs_traits::{File, FileLikeType, LinuxFileAttributes, Whence},
     },
     object::{device::get_device_ref_by_rdev, misc::ObjectRef},
 };
 
-use super::TmpfsStateRef;
+use super::{TmpNodeKind, TmpfsStateRef};
 
 pub(crate) struct TmpfsDeviceHandle {
     state: TmpfsStateRef,
     name: String,
     inode: u64,
-    mode: u32,
     rdev: u64,
 }
 
 impl TmpfsDeviceHandle {
-    pub(crate) fn new(
-        state: TmpfsStateRef,
-        name: String,
-        inode: u64,
-        mode: u32,
-        rdev: u64,
-    ) -> FSResult<Self> {
+    pub(crate) fn new(state: TmpfsStateRef, name: String, inode: u64, rdev: u64) -> FSResult<Self> {
         Ok(Self {
             state,
             name,
             inode,
-            mode,
             rdev,
         })
     }
@@ -60,14 +52,22 @@ impl File for TmpfsDeviceHandle {
     }
 
     fn info(&mut self) -> FSResult<FileLikeInfo> {
+        let state = self.state.lock();
+        let node = state.node_by_inode(self.inode)?;
+        let TmpNodeKind::Device { mode, rdev } = node.kind else {
+            return Err(FSError::NotAFile);
+        };
         Ok(FileLikeInfo::new(
             self.name.clone(),
             0,
-            UnixPermission(self.mode),
+            UnixPermission(mode),
             FileLikeType::File,
         )
         .with_inode(self.inode)
-        .with_rdev(self.rdev))
+        .with_owner(node.uid, node.gid)
+        .with_nlink(node.link_count)
+        .with_rdev(rdev)
+        .with_times(node.times))
     }
 
     fn read_at(&mut self, buffer: &mut [u8], offset: u64) -> FSResult<usize> {
@@ -106,5 +106,31 @@ impl File for TmpfsDeviceHandle {
         let object = self.object()?;
         let seekable = object.as_seekable().map_err(|_| FSError::IllegalSeek)?;
         seekable.seek(offset, seek_type).map_err(|_| FSError::Other)
+    }
+
+    fn chmod(&self, mode: u32) -> FSResult<()> {
+        self.state
+            .lock()
+            .update_file_mode_by_inode(self.inode, mode)
+    }
+
+    fn chown(&self, uid: u32, gid: u32) -> FSResult<()> {
+        self.state
+            .lock()
+            .update_owner_by_inode(self.inode, uid, gid)
+    }
+
+    fn set_times(&self, times: FileTimes) -> FSResult<()> {
+        self.state.lock().update_times_by_inode(self.inode, times)
+    }
+
+    fn linux_file_attributes(&self) -> FSResult<LinuxFileAttributes> {
+        self.state.lock().file_attributes(self.inode)
+    }
+
+    fn set_linux_file_attributes(&self, attributes: LinuxFileAttributes) -> FSResult<()> {
+        self.state
+            .lock()
+            .set_file_attributes(self.inode, attributes)
     }
 }

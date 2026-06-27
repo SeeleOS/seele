@@ -21,7 +21,7 @@ bitflags! {
         const MS_NOEXEC = 8;
         const MS_NOATIME = 1024;
         const MS_NODIRATIME = 2048;
-        const MS_NOSYMFOLLOW = 8192;
+        const MS_NOSYMFOLLOW = 1 << 8;
         const MS_RELATIME = 1 << 21;
         const MS_STRICTATIME = 1 << 24;
     }

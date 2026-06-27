@@ -29,7 +29,7 @@ define_syscall!(Mount, |source: CString,
             let (remount_flags, remount_mask) = remount_bind_flag_update(mountflags);
             VirtualFS
                 .lock()
-                .remount_bind(
+                .remount_bind_in_current_namespace(
                     target_path,
                     remount_flags,
                     remount_mask,
@@ -85,7 +85,7 @@ define_syscall!(Mount, |source: CString,
         let (remount_flags, remount_mask) = remount_bind_flag_update(mountflags);
         VirtualFS
             .lock()
-            .remount_bind(
+            .remount_bind_in_current_namespace(
                 target_path,
                 remount_flags,
                 remount_mask,
@@ -599,7 +599,7 @@ define_syscall!(OpenTreeAttr, |dirfd: i32,
     let (remount_flags, remount_mask, propagation) = mount_attr_flag_update(&attr)?;
     VirtualFS
         .lock()
-        .remount_bind(
+        .remount_bind_in_current_namespace(
             target_path.clone(),
             remount_flags,
             remount_mask,
@@ -649,7 +649,7 @@ define_syscall!(MountSetattr, |dirfd: i32,
 
     VirtualFS
         .lock()
-        .remount_bind(
+        .remount_bind_in_current_namespace(
             target_path.clone(),
             remount_flags,
             remount_mask,

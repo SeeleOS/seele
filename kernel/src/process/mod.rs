@@ -1,5 +1,6 @@
 use crate::memory::utils::Mut;
 use alloc::{
+    collections::BTreeMap,
     string::String,
     sync::{Arc, Weak},
     vec::Vec,
@@ -8,7 +9,7 @@ use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
 use x86_64::VirtAddr;
 
-use crate::filesystem::path::Path;
+use crate::filesystem::{path::Path, vfs_traits::MountFlags};
 use crate::ipc::sysv_shm::ProcessShmMapping;
 use crate::memory::addrspace::AddrSpace;
 use crate::misc::timer::Timer;
@@ -226,6 +227,7 @@ pub struct Process {
     pub user_namespace: NamespaceRef,
     pub uts_namespace: NamespaceRef,
     pub mount_namespace_snapshot: Option<Vec<u64>>,
+    pub mount_namespace_flag_overrides: BTreeMap<u64, MountFlags>,
     pub mount_namespace_shared_with_parent: bool,
     pub sysv_shm_mappings: Vec<ProcessShmMapping>,
     pub vfork_blocker: Option<ThreadID>,
@@ -317,6 +319,7 @@ impl Default for Process {
             user_namespace: NamespaceObject::new(NamespaceKind::User, 0xEFFF_FFFD),
             uts_namespace: NamespaceObject::new(NamespaceKind::Uts, 0xEFFF_FFFE),
             mount_namespace_snapshot: None,
+            mount_namespace_flag_overrides: BTreeMap::new(),
             mount_namespace_shared_with_parent: true,
             sysv_shm_mappings: Vec::new(),
             vfork_blocker: None,

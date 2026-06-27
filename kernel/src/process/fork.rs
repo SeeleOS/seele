@@ -154,6 +154,9 @@ impl Process {
                 user_namespace: parent_locked.user_namespace.clone(),
                 uts_namespace: parent_locked.uts_namespace.clone(),
                 mount_namespace_snapshot: parent_locked.mount_namespace_snapshot.clone(),
+                mount_namespace_flag_overrides: parent_locked
+                    .mount_namespace_flag_overrides
+                    .clone(),
                 mount_namespace_shared_with_parent: parent_locked
                     .mount_namespace_shared_with_parent,
                 sysv_shm_mappings: inherited_shm_mappings.clone(),

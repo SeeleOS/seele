@@ -490,9 +490,13 @@ fn clear_chown_mode_bits(
 
 fn ensure_file_like_writable(
     file_like: &FileLikeObject,
-    path: Option<Path>,
+    _path: Option<Path>,
 ) -> Result<(), SyscallError> {
-    let path = path.unwrap_or_else(|| file_like.path());
-    VirtualFS.lock().ensure_writable_mount(path)?;
+    if file_like
+        .mount_flags()
+        .contains(crate::filesystem::vfs_traits::MountFlags::MS_RDONLY)
+    {
+        return Err(SyscallError::ReadOnlyFileSystem);
+    }
     Ok(())
 }
