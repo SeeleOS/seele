@@ -5,6 +5,8 @@ define_syscall!(Socket, |domain: u64, kind: u64, protocol: u64| {
         NetlinkSocketObject::create(kind, protocol).map_err(ObjectError::from)?
     } else if domain == AF_INET {
         InetSocketObject::create(domain, kind, protocol).map_err(ObjectError::from)?
+    } else if domain == AF_PACKET {
+        PacketSocketObject::create(kind, protocol).map_err(ObjectError::from)?
     } else {
         UnixSocketObject::create(domain, kind, protocol).map_err(ObjectError::from)?
     };
