@@ -217,6 +217,7 @@ fn release_fcntl_object_state_for_object(object: &ObjectRef) {
 
 fn has_other_open_file_description(object: &ObjectRef) -> bool {
     let current_process = get_current_process();
+    let current_fd_table = current_process.lock().fd_table.clone();
     let processes = MANAGER
         .lock()
         .processes
@@ -229,6 +230,9 @@ fn has_other_open_file_description(object: &ObjectRef) -> bool {
             return false;
         }
         let fd_table = process.lock().fd_table.clone();
+        if Arc::ptr_eq(&fd_table, &current_fd_table) {
+            return false;
+        }
         fd_table_has_other_open_file_description(&fd_table.lock().clone(), None, object)
     })
 }
