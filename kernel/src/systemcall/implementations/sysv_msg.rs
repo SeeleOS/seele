@@ -36,6 +36,7 @@ fn current_credentials() -> SysvMsgCredentials {
     let process = get_current_process();
     let process = process.lock();
     SysvMsgCredentials {
+        namespace_inode: process.ipc_namespace.inode(),
         pid: process.pid.0 as i32,
         effective_uid: process.effective_uid,
         effective_gid: process.effective_gid,

@@ -46,8 +46,7 @@ pub use fs_context::{FsContext, clone_fs_context, new_fs_context};
 pub struct ControllingTerminal(pub u64);
 
 pub const CAP_LAST_CAP: u32 = 40;
-const DEFAULT_CAPABILITY_LOW: u32 = u32::MAX;
-const DEFAULT_CAPABILITY_HIGH: u32 = (1u32 << (CAP_LAST_CAP - 31)) - 1;
+pub const DEFAULT_CAPABILITY_SET: [u32; 2] = [u32::MAX, (1u32 << (CAP_LAST_CAP - 31)) - 1];
 const DEFAULT_RLIMIT_NOFILE: u64 = 1024;
 const DEFAULT_RLIMIT_MEMLOCK: u64 = 8 * 1024 * 1024;
 const DEFAULT_RLIMIT_STACK_CUR: u64 = 8 * 1024 * 1024;
@@ -222,10 +221,12 @@ pub struct Process {
     pub mnt_namespace: NamespaceRef,
     pub pid_namespace: NamespaceRef,
     pub pid_namespace_local_pid: Option<u64>,
+    pub pid_namespace_parent_inode: Option<u64>,
     pub pending_child_pid_namespace: Option<NamespaceRef>,
     pub user_namespace: NamespaceRef,
     pub uts_namespace: NamespaceRef,
     pub mount_namespace_snapshot: Option<Vec<u64>>,
+    pub mount_namespace_shared_with_parent: bool,
     pub sysv_shm_mappings: Vec<ProcessShmMapping>,
     pub vfork_blocker: Option<ThreadID>,
     pub borrowed_addrspace_from_parent: bool,
@@ -296,10 +297,10 @@ impl Default for Process {
             request_key_auth_key: 0,
             request_key_requested_key: 0,
             request_key_requestor_keyring: 0,
-            capability_effective: [DEFAULT_CAPABILITY_LOW, DEFAULT_CAPABILITY_HIGH],
-            capability_permitted: [DEFAULT_CAPABILITY_LOW, DEFAULT_CAPABILITY_HIGH],
+            capability_effective: DEFAULT_CAPABILITY_SET,
+            capability_permitted: DEFAULT_CAPABILITY_SET,
             capability_inheritable: [0; 2],
-            capability_bounding: [DEFAULT_CAPABILITY_LOW, DEFAULT_CAPABILITY_HIGH],
+            capability_bounding: DEFAULT_CAPABILITY_SET,
             capability_ambient: [0; 2],
             child_subreaper: false,
             parent_death_signal: None,
@@ -311,16 +312,48 @@ impl Default for Process {
             mnt_namespace: NamespaceObject::new(NamespaceKind::Mnt, 0xEFFF_FFF8),
             pid_namespace: NamespaceObject::new(NamespaceKind::Pid, 0xEFFF_FFFC),
             pid_namespace_local_pid: None,
+            pid_namespace_parent_inode: None,
             pending_child_pid_namespace: None,
             user_namespace: NamespaceObject::new(NamespaceKind::User, 0xEFFF_FFFD),
             uts_namespace: NamespaceObject::new(NamespaceKind::Uts, 0xEFFF_FFFE),
             mount_namespace_snapshot: None,
+            mount_namespace_shared_with_parent: true,
             sysv_shm_mappings: Vec::new(),
             vfork_blocker: None,
             borrowed_addrspace_from_parent: false,
             ptrace: ptrace::PtraceState::default(),
             wait_event: None,
         }
+    }
+}
+
+impl Process {
+    pub fn update_uid_capabilities(&mut self, old_effective_uid: u32) {
+        if self.effective_uid == 0 {
+            self.capability_effective = self.capability_permitted;
+        } else if old_effective_uid == 0 {
+            self.capability_effective = [0; 2];
+        }
+
+        if self.real_uid != 0
+            && self.effective_uid != 0
+            && self.saved_uid != 0
+            && !self.keep_capabilities
+        {
+            self.capability_permitted = [0; 2];
+            self.capability_ambient = [0; 2];
+        }
+    }
+
+    pub fn update_exec_uid_capabilities(&mut self, old_effective_uid: u32, gained_root: bool) {
+        if gained_root && !self.no_new_privs {
+            self.capability_permitted = self.capability_bounding;
+            self.capability_effective = self.capability_permitted;
+            self.capability_ambient = [0; 2];
+            return;
+        }
+
+        self.update_uid_capabilities(old_effective_uid);
     }
 }
 

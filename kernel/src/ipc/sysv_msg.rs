@@ -75,6 +75,7 @@ pub struct LinuxMsginfo {
 
 #[derive(Clone, Debug)]
 pub struct SysvMsgCredentials {
+    pub namespace_inode: u64,
     pub pid: i32,
     pub effective_uid: u32,
     pub effective_gid: u32,
@@ -89,6 +90,7 @@ struct SysvMsgState {
 
 #[derive(Clone, Debug)]
 struct SysvMsgQueue {
+    namespace_inode: u64,
     key: i32,
     messages: Vec<SysvMessage>,
     bytes: usize,
@@ -212,10 +214,11 @@ pub fn msgget(credentials: &SysvMsgCredentials, key: i32, msgflg: i32) -> Syscal
 
     let mut state = SYSV_MSG_STATE.lock();
     if key != IPC_PRIVATE
-        && let Some((msqid, queue)) = state
-            .queues
-            .iter()
-            .find(|(_, queue)| queue.key == key && !queue.removed)
+        && let Some((msqid, queue)) = state.queues.iter().find(|(_, queue)| {
+            queue.namespace_inode == credentials.namespace_inode
+                && queue.key == key
+                && !queue.removed
+        })
     {
         if create && exclusive {
             return Err(SyscallError::FileAlreadyExists);
@@ -238,6 +241,7 @@ pub fn msgget(credentials: &SysvMsgCredentials, key: i32, msgflg: i32) -> Syscal
     state.queues.insert(
         msqid,
         SysvMsgQueue {
+            namespace_inode: credentials.namespace_inode,
             key,
             messages: Vec::new(),
             bytes: 0,
@@ -288,7 +292,9 @@ pub fn msgsnd(
             let queue = state
                 .queues
                 .get_mut(&msqid)
-                .filter(|queue| !queue.removed)
+                .filter(|queue| {
+                    queue.namespace_inode == credentials.namespace_inode && !queue.removed
+                })
                 .ok_or(SyscallError::InvalidArguments)?;
             if !has_access(queue, credentials, true) {
                 return Err(SyscallError::PermissionDenied);
@@ -340,7 +346,9 @@ pub fn msgrcv(
             let queue = state
                 .queues
                 .get_mut(&msqid)
-                .filter(|queue| !queue.removed)
+                .filter(|queue| {
+                    queue.namespace_inode == credentials.namespace_inode && !queue.removed
+                })
                 .ok_or(SyscallError::IdentifierRemoved)?;
             if !has_access(queue, credentials, false) {
                 return Err(SyscallError::PermissionDenied);
@@ -397,7 +405,7 @@ pub fn msgctl(
     let queue = state
         .queues
         .get_mut(&msqid)
-        .filter(|queue| !queue.removed)
+        .filter(|queue| queue.namespace_inode == credentials.namespace_inode && !queue.removed)
         .ok_or(SyscallError::InvalidArguments)?;
 
     match cmd {
@@ -449,9 +457,16 @@ pub fn msgctl(
 }
 
 pub fn proc_sysvipc_msg_bytes() -> Vec<u8> {
+    let namespace_inode = crate::process::manager::get_current_process()
+        .lock()
+        .ipc_namespace
+        .inode();
     let state = SYSV_MSG_STATE.lock();
     let mut out = b"       key      msqid perms      cbytes       qnum lspid lrpid   uid   gid  cuid  cgid      stime      rtime      ctime\n".to_vec();
     for (msqid, queue) in &state.queues {
+        if queue.namespace_inode != namespace_inode {
+            continue;
+        }
         out.extend_from_slice(
             alloc::format!(
                 "{:10} {:10} {:5o} {:10} {:10} {:5} {:5} {:5} {:5} {:5} {:5} {:10} {:10} {:10}\n",

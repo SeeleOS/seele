@@ -27,7 +27,7 @@ use crate::{
         send_signal_to_thread_with_siginfo,
     },
 };
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 use bitflags::bitflags;
 use core::mem::size_of;
 use num_enum::TryFromPrimitive;
@@ -255,6 +255,23 @@ fn dequeue_wait_signal(wait_mask: Signals) -> Option<(Signal, SigInfo)> {
     None
 }
 
+fn pid_visible_from_namespace(process: &ProcessRef, viewer_namespace_inode: u64) -> Option<u64> {
+    let process = process.lock();
+    if process.pid_namespace.inode() == viewer_namespace_inode {
+        return Some(process.pid_namespace_local_pid.unwrap_or(process.pid.0));
+    }
+
+    if Some(viewer_namespace_inode) == process.pid_namespace_parent_inode {
+        return Some(process.pid.0);
+    }
+
+    None
+}
+
+fn process_visible_from_namespace(process: &ProcessRef, viewer_namespace_inode: u64) -> bool {
+    pid_visible_from_namespace(process, viewer_namespace_inode).is_some()
+}
+
 define_syscall!(
     Signalfd4,
     |fd: i32, mask: *const u64, sigsetsize: usize, flags: SignalfdFlags| {
@@ -403,7 +420,23 @@ define_syscall!(Kill, |pid: i32, signal: i32| {
         Some(Signal::try_from(signal as u64).map_err(|_| SyscallError::InvalidArguments)?)
     };
 
-    let current_group = get_current_process().lock().group_id;
+    let current_process = get_current_process();
+    let (
+        current_group,
+        current_pid_namespace_inode,
+        current_pid_namespace_local_pid,
+        sender_pid,
+        sender_uid,
+    ) = {
+        let current = current_process.lock();
+        (
+            current.group_id,
+            current.pid_namespace.inode(),
+            current.pid_namespace_local_pid,
+            current.pid.0 as i32,
+            current.real_uid,
+        )
+    };
     let mut targets = Vec::new();
     {
         let manager = MANAGER.lock();
@@ -412,19 +445,40 @@ define_syscall!(Kill, |pid: i32, signal: i32| {
             i32::MIN..=-2 => {
                 let group = ProcessGroupID((-pid) as u64);
                 for process in manager.processes.values() {
-                    if process.lock().group_id == group {
+                    let process_lock = process.lock();
+                    let visible = if process_lock.pid_namespace.inode()
+                        == current_pid_namespace_inode
+                    {
+                        true
+                    } else {
+                        Some(current_pid_namespace_inode) == process_lock.pid_namespace_parent_inode
+                    };
+                    if visible && process_lock.group_id == group {
                         targets.push(process.clone());
                     }
                 }
             }
             -1 => {
                 for process in manager.processes.values() {
-                    targets.push(process.clone());
+                    if Arc::ptr_eq(process, &current_process) {
+                        continue;
+                    }
+                    if process_visible_from_namespace(process, current_pid_namespace_inode) {
+                        targets.push(process.clone());
+                    }
                 }
             }
             0 => {
                 for process in manager.processes.values() {
-                    if process.lock().group_id == current_group {
+                    let process_lock = process.lock();
+                    let visible = if process_lock.pid_namespace.inode()
+                        == current_pid_namespace_inode
+                    {
+                        true
+                    } else {
+                        Some(current_pid_namespace_inode) == process_lock.pid_namespace_parent_inode
+                    };
+                    if visible && process_lock.group_id == current_group {
                         targets.push(process.clone());
                     }
                 }
@@ -432,7 +486,11 @@ define_syscall!(Kill, |pid: i32, signal: i32| {
             positive => {
                 let process = manager
                     .processes
-                    .get(&ProcessID(positive as u64))
+                    .values()
+                    .find(|process| {
+                        pid_visible_from_namespace(process, current_pid_namespace_inode)
+                            == Some(positive as u64)
+                    })
                     .cloned()
                     .ok_or(SyscallError::NoProcess)?;
                 targets.push(process);
@@ -446,7 +504,17 @@ define_syscall!(Kill, |pid: i32, signal: i32| {
 
     if let Some(signal) = signal {
         for process in targets {
-            send_signal_to_process(&process, signal);
+            if signal == Signal::SIGKILL
+                && Arc::ptr_eq(&process, &current_process)
+                && current_pid_namespace_local_pid == Some(1)
+            {
+                continue;
+            }
+            send_signal_to_process_with_siginfo(
+                &process,
+                signal,
+                SigInfo::for_process_signal(signal, sender_pid, sender_uid),
+            );
         }
     }
 

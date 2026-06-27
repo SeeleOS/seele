@@ -15,6 +15,8 @@ use crate::{
     thread::{misc::State, with_thread_manager, yielding::BlockType},
 };
 
+pub const USER_NAMESPACE_OVERFLOW_ID: u32 = 65_534;
+
 impl Process {
     pub fn have_exited(&self) -> bool {
         self.exit_status.is_some()
@@ -46,6 +48,103 @@ impl Process {
             }
         });
     }
+
+    pub fn pid_visible_from(&self, viewer: &Process) -> Option<u64> {
+        if self.pid_namespace.inode() == viewer.pid_namespace.inode() {
+            return Some(self.pid_namespace_local_pid.unwrap_or(self.pid.0));
+        }
+
+        if Some(viewer.pid_namespace.inode()) == self.pid_namespace_parent_inode {
+            return Some(self.pid.0);
+        }
+
+        None
+    }
+
+    pub fn pid_visible_from_namespace_inode(&self, viewer_namespace_inode: u64) -> Option<u64> {
+        if self.pid_namespace.inode() == viewer_namespace_inode {
+            return Some(self.pid_namespace_local_pid.unwrap_or(self.pid.0));
+        }
+
+        if Some(viewer_namespace_inode) == self.pid_namespace_parent_inode {
+            return Some(self.pid.0);
+        }
+
+        None
+    }
+
+    pub fn is_visible_from(&self, viewer: &Process) -> bool {
+        self.pid_visible_from(viewer).is_some()
+    }
+
+    pub fn visible_group_id_from(&self, viewer: &Process) -> Option<u64> {
+        self.visible_group_id_from_namespace_inode(viewer.pid_namespace.inode())
+    }
+
+    pub fn visible_group_id_from_namespace_inode(
+        &self,
+        viewer_namespace_inode: u64,
+    ) -> Option<u64> {
+        self.pid_visible_from_namespace_inode(viewer_namespace_inode)?;
+        if self.pid_namespace.inode() == viewer_namespace_inode && self.group_id.0 == self.pid.0 {
+            return Some(self.pid_namespace_local_pid.unwrap_or(self.pid.0));
+        }
+        if self.pid_namespace.inode() == viewer_namespace_inode {
+            return None;
+        }
+        Some(self.group_id.0)
+    }
+
+    pub fn visible_session_id_from(&self, viewer: &Process) -> Option<u64> {
+        self.visible_session_id_from_namespace_inode(viewer.pid_namespace.inode())
+    }
+
+    pub fn visible_session_id_from_namespace_inode(
+        &self,
+        viewer_namespace_inode: u64,
+    ) -> Option<u64> {
+        self.pid_visible_from_namespace_inode(viewer_namespace_inode)?;
+        if self.pid_namespace.inode() == viewer_namespace_inode && self.session_id.0 == self.pid.0 {
+            return Some(self.pid_namespace_local_pid.unwrap_or(self.pid.0));
+        }
+        if self.pid_namespace.inode() == viewer_namespace_inode {
+            return None;
+        }
+        Some(self.session_id.0)
+    }
+
+    pub fn namespace_uid(&self, uid: u32) -> u32 {
+        namespace_id_from_map(uid, self.user_namespace_uid_map.as_deref())
+    }
+
+    pub fn namespace_gid(&self, gid: u32) -> u32 {
+        namespace_id_from_map(gid, self.user_namespace_gid_map.as_deref())
+    }
+}
+
+fn namespace_id_from_map(kernel_id: u32, map: Option<&str>) -> u32 {
+    let Some(map) = map else {
+        return kernel_id;
+    };
+
+    for line in map.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(namespace_start) = fields.next().and_then(|value| value.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Some(kernel_start) = fields.next().and_then(|value| value.parse::<u32>().ok()) else {
+            continue;
+        };
+        let Some(length) = fields.next().and_then(|value| value.parse::<u32>().ok()) else {
+            continue;
+        };
+        if kernel_id >= kernel_start && kernel_id < kernel_start.saturating_add(length) {
+            return namespace_start + (kernel_id - kernel_start);
+        }
+    }
+
+    USER_NAMESPACE_OVERFLOW_ID
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]

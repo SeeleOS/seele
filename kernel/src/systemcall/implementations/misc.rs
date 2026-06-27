@@ -1458,7 +1458,45 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
         child_process.lock().net_namespace = NetNamespace::new();
     }
     if clone_flags.contains(CloneFlags::NEWNS) {
-        child_process.lock().mnt_namespace = NamespaceObject::dynamic(NamespaceKind::Mnt);
+        let (parent_mnt_namespace, user_namespace) = {
+            let current = current.lock();
+            (
+                current.mnt_namespace.clone(),
+                current.user_namespace.clone(),
+            )
+        };
+        let mut child = child_process.lock();
+        child.mnt_namespace = NamespaceObject::dynamic_with_parent(
+            NamespaceKind::Mnt,
+            Some(&parent_mnt_namespace),
+            Some(&user_namespace),
+        );
+        child.mount_namespace_snapshot = Some(
+            crate::filesystem::vfs::VirtualFS
+                .lock()
+                .mount_snapshots()
+                .into_iter()
+                .map(|(_, _, _, _, _, mount_id)| mount_id)
+                .collect(),
+        );
+        child.mount_namespace_shared_with_parent = false;
+    }
+    if clone_flags.contains(CloneFlags::NEWPID) {
+        let (parent_pid_namespace, user_namespace) = {
+            let current = current.lock();
+            (
+                current.pid_namespace.clone(),
+                current.user_namespace.clone(),
+            )
+        };
+        let mut child = child_process.lock();
+        child.pid_namespace = NamespaceObject::dynamic_with_parent(
+            NamespaceKind::Pid,
+            Some(&parent_pid_namespace),
+            Some(&user_namespace),
+        );
+        child.pid_namespace_parent_inode = Some(parent_pid_namespace.inode());
+        child.pid_namespace_local_pid = Some(1);
     }
     if clone_flags.contains(CloneFlags::NEWUTS) {
         child_process.lock().uts_namespace = NamespaceObject::dynamic(NamespaceKind::Uts);
@@ -1476,6 +1514,13 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
     }
     let pid = child_process.lock().pid;
     MANAGER.lock().processes.insert(pid, child_process.clone());
+    let visible_pid = {
+        let current = current.lock();
+        child_process
+            .lock()
+            .pid_visible_from_namespace_inode(current.pid_namespace.inode())
+            .unwrap_or(pid.0)
+    };
 
     if clone_flags.contains(CloneFlags::VFORK) {
         child_process.lock().vfork_blocker = Some(crate::thread::get_current_thread().lock().id);
@@ -1507,12 +1552,12 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
     }
 
     if clone_flags.contains(CloneFlags::PARENT_SETTID) {
-        user_safe::write(parent_tid, &(pid.0 as i32))?;
+        user_safe::write(parent_tid, &(visible_pid as i32))?;
         if share_addrspace {
             child_process
                 .lock()
                 .addrspace
-                .write(parent_tid, &(pid.0 as i32))?;
+                .write(parent_tid, &(visible_pid as i32))?;
         }
     }
 
@@ -1520,7 +1565,7 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
         child_process
             .lock()
             .addrspace
-            .write(child_tid, &(pid.0 as i32))?;
+            .write(child_tid, &(visible_pid as i32))?;
     }
 
     if clone_flags.contains(CloneFlags::CHILD_CLEARTID) {
@@ -1546,7 +1591,7 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
         wait_for_vfork_completion(&child_process);
     }
 
-    Ok(pid.0 as usize)
+    Ok(visible_pid as usize)
 }
 
 fn prefault_clone_vm_tid_pages(

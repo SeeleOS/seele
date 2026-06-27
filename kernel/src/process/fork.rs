@@ -1,7 +1,9 @@
 use crate::memory::utils::Mut;
 use crate::{
     ipc::sysv_shm::inherit_forked_mappings,
-    process::{Process, ProcessRef, clone_fd_table, clone_fs_context, misc::ProcessID},
+    process::{
+        Process, ProcessRef, clone_fd_table, clone_fs_context, manager::MANAGER, misc::ProcessID,
+    },
     signal::Signal,
     thread::{ThreadRef, get_current_thread, misc::ThreadID, yielding::BlockType},
 };
@@ -44,9 +46,34 @@ impl Process {
                 .pending_child_pid_namespace
                 .take()
                 .unwrap_or_else(|| parent_locked.pid_namespace.clone());
+            let child_pid_namespace_parent_inode =
+                if Arc::ptr_eq(&child_pid_namespace, &parent_locked.pid_namespace) {
+                    parent_locked.pid_namespace_parent_inode
+                } else {
+                    Some(parent_locked.pid_namespace.inode())
+                };
             let child_pid_namespace_local_pid =
                 if Arc::ptr_eq(&child_pid_namespace, &parent_locked.pid_namespace) {
-                    parent_locked.pid_namespace_local_pid
+                    parent_locked.pid_namespace_local_pid.map(|_| {
+                        let namespace_inode = parent_locked.pid_namespace.inode();
+                        let parent_local_pid = parent_locked.pid_namespace_local_pid.unwrap_or(1);
+                        MANAGER
+                            .lock()
+                            .processes
+                            .values()
+                            .filter_map(|process| {
+                                if Arc::ptr_eq(process, &parent) {
+                                    return None;
+                                }
+                                let process = process.lock();
+                                (process.pid_namespace.inode() == namespace_inode)
+                                    .then_some(process.pid_namespace_local_pid)
+                                    .flatten()
+                            })
+                            .max()
+                            .unwrap_or(parent_local_pid)
+                            + 1
+                    })
                 } else {
                     Some(1)
                 };
@@ -122,9 +149,13 @@ impl Process {
                 mnt_namespace: parent_locked.mnt_namespace.clone(),
                 pid_namespace: child_pid_namespace,
                 pid_namespace_local_pid: child_pid_namespace_local_pid,
+                pid_namespace_parent_inode: child_pid_namespace_parent_inode,
                 pending_child_pid_namespace: None,
                 user_namespace: parent_locked.user_namespace.clone(),
                 uts_namespace: parent_locked.uts_namespace.clone(),
+                mount_namespace_snapshot: parent_locked.mount_namespace_snapshot.clone(),
+                mount_namespace_shared_with_parent: parent_locked
+                    .mount_namespace_shared_with_parent,
                 sysv_shm_mappings: inherited_shm_mappings.clone(),
                 ..Default::default()
             }));

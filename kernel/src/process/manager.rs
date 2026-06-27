@@ -70,20 +70,42 @@ pub fn get_current_process() -> ProcessRef {
     current_process()
 }
 
+pub fn mark_mount_shared_with_parent(namespace_inode: u64, mount_id: u64) {
+    for process in MANAGER.lock().processes.values() {
+        let mut process = process.lock();
+        if process.mnt_namespace.inode() != namespace_inode {
+            continue;
+        }
+        let Some(snapshot) = process.mount_namespace_snapshot.as_mut() else {
+            continue;
+        };
+        if !snapshot.contains(&mount_id) {
+            snapshot.push(mount_id);
+        }
+    }
+}
+
 pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
     let process_ref = process.clone();
-    let (pid, threads, vfork_blocker, parent) = {
+    let (pid, threads, vfork_blocker, parent, exited_pid_namespace_inode, was_namespace_init) = {
         let mut process = process.lock();
         process.restore_borrowed_addrspace_to_parent();
         let vfork_blocker = process.vfork_blocker.take();
         let pid = process.pid;
+        let exited_pid_namespace_inode = process.pid_namespace.inode();
+        let was_namespace_init = process.pid_namespace_local_pid == Some(1);
         (
             pid,
             process.terminate_inner(exit_status),
             vfork_blocker,
             process.parent.clone(),
+            exited_pid_namespace_inode,
+            was_namespace_init,
         )
     };
+    if was_namespace_init {
+        terminate_pid_namespace_members(pid, exited_pid_namespace_inode, exit_status);
+    }
     let reparent_target = nearest_live_subreaper(parent).or_else(init_process_ref);
     let parent_death_signals = collect_parent_death_signals_for_children(pid, &process_ref);
     let reparented_children = reparent_children(pid, &process_ref, reparent_target);
@@ -123,6 +145,34 @@ pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
         }
         thread_manager.cleanup_exited_threads();
     });
+}
+
+fn terminate_pid_namespace_members(
+    init_pid: ProcessID,
+    namespace_inode: u64,
+    exit_status: ProcessExitStatus,
+) {
+    let members = MANAGER
+        .lock()
+        .processes
+        .values()
+        .filter_map(|candidate| {
+            let candidate_lock = candidate.lock();
+            (candidate_lock.pid != init_pid
+                && candidate_lock.pid_namespace.inode() == namespace_inode
+                && candidate_lock.exit_status.is_none())
+            .then_some(candidate.clone())
+        })
+        .collect::<Vec<_>>();
+
+    for member in members {
+        let threads = member.lock().terminate_inner(exit_status);
+        with_thread_manager(|thread_manager| {
+            for thread in threads {
+                thread_manager.mark_thread_exited(thread);
+            }
+        });
+    }
 }
 
 fn collect_parent_death_signals_for_children(

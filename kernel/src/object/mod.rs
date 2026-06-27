@@ -34,7 +34,10 @@ use crate::{
     },
     polling::{object::Pollable, poller::PollerObject},
     socket::{InetSocketObject, SocketLike, UnixSocketObject},
-    systemcall::utils::{SyscallError, SyscallResult},
+    systemcall::{
+        implementations::PosixMessageQueueObject,
+        utils::{SyscallError, SyscallResult},
+    },
     terminal::pty::slave::PtySlave,
 };
 
@@ -128,4 +131,9 @@ pub trait Object: Send + Sync + Debug {
     define_cast_function_non_trait!("drm_prime_buffer", DrmPrimeBufferObject, BadFileDescriptor);
     define_cast_function_non_trait!("tty_device", TtyDevice, BadFileDescriptor);
     define_cast_function_non_trait!("pty_slave", PtySlave, BadFileDescriptor);
+    define_cast_function_non_trait!(
+        "posix_message_queue",
+        PosixMessageQueueObject,
+        BadFileDescriptor
+    );
 }

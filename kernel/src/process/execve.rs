@@ -1,7 +1,11 @@
 use core::mem;
 
 use crate::{
-    filesystem::{errors::FSError, path::Path, vfs_operations::resolve_path_with_final},
+    filesystem::{
+        errors::FSError,
+        path::Path,
+        vfs_operations::{open_path, resolve_path_with_final},
+    },
     ipc::sysv_shm::detach_all_process_mappings,
     memory::addrspace::AddrSpace,
     process::{
@@ -50,12 +54,18 @@ impl Process {
         args: Vec<String>,
         env: Vec<String>,
     ) -> Result<PreparedExecve, FSError> {
+        const S_ISUID: u32 = 0o4000;
+        const S_ISGID: u32 = 0o2000;
+
         let path_string = exec_path.clone().as_string();
         let command_line = if args.is_empty() {
             vec![path_string.clone()]
         } else {
             args.clone()
         };
+        let exec_info = open_path(path.clone())?.info()?;
+        let setuid = (exec_info.permission.0 & S_ISUID != 0).then_some(exec_info.uid);
+        let setgid = (exec_info.permission.0 & S_ISGID != 0).then_some(exec_info.gid);
         let mut next_addrspace = AddrSpace::default();
         let mut next_fd_table = self.fd_table.lock().clone();
         let fs_context = self.fs_context.lock().clone();
@@ -79,6 +89,8 @@ impl Process {
             next_snapshot,
             exec_path: path,
             command_line,
+            setuid,
+            setgid,
             threads: self.threads.clone(),
             borrowed_addrspace_from_parent: self.borrowed_addrspace_from_parent,
             parent: self.parent.clone(),
@@ -138,6 +150,19 @@ impl Process {
         self.command_line = prepared.command_line;
         self.exec_path = prepared.exec_path;
         self.sysv_shm_mappings.clear();
+        let old_effective_uid = self.effective_uid;
+        let gained_root = prepared.setuid == Some(0) && old_effective_uid != 0;
+        if let Some(uid) = prepared.setuid {
+            self.effective_uid = uid;
+            self.saved_uid = uid;
+            self.fs_uid = uid;
+        }
+        if let Some(gid) = prepared.setgid {
+            self.effective_gid = gid;
+            self.saved_gid = gid;
+            self.fs_gid = gid;
+        }
+        self.update_exec_uid_capabilities(old_effective_uid, gained_root);
 
         self.addrspace.load();
         set_current_kernel_stack(thread_locked.kernel_stack_top);
@@ -155,6 +180,8 @@ struct PreparedExecve {
     next_snapshot: ThreadSnapshot,
     exec_path: Path,
     command_line: Vec<String>,
+    setuid: Option<u32>,
+    setgid: Option<u32>,
     threads: Vec<alloc::sync::Weak<crate::memory::utils::Mut<crate::thread::thread::Thread>>>,
     borrowed_addrspace_from_parent: bool,
     parent: Option<crate::process::ProcessRef>,

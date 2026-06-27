@@ -88,6 +88,7 @@ pub struct LinuxSembuf {
 
 #[derive(Clone, Debug)]
 pub struct SysvSemCredentials {
+    pub namespace_inode: u64,
     pub pid: i32,
     pub effective_uid: u32,
     pub effective_gid: u32,
@@ -102,6 +103,7 @@ struct SysvSemState {
 
 #[derive(Clone, Debug)]
 struct SysvSemSet {
+    namespace_inode: u64,
     key: i32,
     values: Vec<u16>,
     last_pid: i32,
@@ -278,10 +280,9 @@ pub fn semget(
 
     let mut state = SYSV_SEM_STATE.lock();
     if key != IPC_PRIVATE
-        && let Some((semid, set)) = state
-            .sets
-            .iter()
-            .find(|(_, set)| set.key == key && !set.removed)
+        && let Some((semid, set)) = state.sets.iter().find(|(_, set)| {
+            set.namespace_inode == credentials.namespace_inode && set.key == key && !set.removed
+        })
     {
         if create && exclusive {
             return Err(SyscallError::FileAlreadyExists);
@@ -310,6 +311,7 @@ pub fn semget(
     state.sets.insert(
         semid,
         SysvSemSet {
+            namespace_inode: credentials.namespace_inode,
             key,
             values: vec![0; nsems],
             last_pid: credentials.pid,
@@ -349,7 +351,7 @@ pub fn semctl(
     let set = state
         .sets
         .get_mut(&semid)
-        .filter(|set| !set.removed)
+        .filter(|set| set.namespace_inode == credentials.namespace_inode && !set.removed)
         .ok_or(SyscallError::InvalidArguments)?;
 
     match cmd {
@@ -481,7 +483,7 @@ pub fn semtimedop(
             let set = state
                 .sets
                 .get_mut(&semid)
-                .filter(|set| !set.removed)
+                .filter(|set| set.namespace_inode == credentials.namespace_inode && !set.removed)
                 .ok_or(SyscallError::IdentifierRemoved)?;
             if !has_access(set, credentials, true) {
                 return Err(SyscallError::PermissionDenied);
@@ -528,11 +530,18 @@ pub fn semop(
 }
 
 pub fn proc_sysvipc_sem_bytes() -> Vec<u8> {
+    let namespace_inode = crate::process::manager::get_current_process()
+        .lock()
+        .ipc_namespace
+        .inode();
     let state = SYSV_SEM_STATE.lock();
     let mut out =
         b"       key      semid perms      nsems   uid   gid  cuid  cgid      otime      ctime\n"
             .to_vec();
     for (semid, set) in &state.sets {
+        if set.namespace_inode != namespace_inode {
+            continue;
+        }
         out.extend_from_slice(
             alloc::format!(
                 "{:10} {:10} {:5o} {:10} {:5} {:5} {:5} {:5} {:10} {:10}\n",

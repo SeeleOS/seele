@@ -22,7 +22,6 @@ use crate::{
         Process, ProcessExitStatus, ProcessRef,
         execve::execve,
         manager::{MANAGER, exit_current_thread, get_current_process, terminate_process},
-        misc::{ProcessID, get_process_with_pid},
         wait::{ProcessWaitEvent, take_wait_event},
     },
     signal::{Signal, Signals},
@@ -168,7 +167,10 @@ fn check_wait_outcome(
     wait_behavior: WaitBehavior,
     current_process: &ProcessRef,
 ) -> Result<Option<WaitOutcome>, SyscallError> {
-    let current_group = current_process.lock().group_id;
+    let (current_group, current_pid_namespace_inode) = {
+        let current = current_process.lock();
+        (current.group_id, current.pid_namespace.inode())
+    };
     let manager = MANAGER.lock();
     let mut matched_child = false;
     let mut ready_child = None;
@@ -186,12 +188,14 @@ fn check_wait_outcome(
             .parent
             .clone()
             .is_some_and(|parent| Arc::ptr_eq(&parent, current_process));
+        let visible_pid = pid_visible_from_namespace(&p_lock, current_pid_namespace_inode);
+        let visible_group = visible_group_id_from_namespace(&p_lock, current_pid_namespace_inode);
 
         let matches = match target_process {
             -1 => is_current_child,
             0 => is_current_child && p_lock.group_id == current_group,
-            1.. => pid.0 == target_process as u64 && is_current_child,
-            ..=-2 => is_current_child && Some(p_lock.group_id.0) == target_group,
+            1.. => visible_pid == Some(target_process as u64) && is_current_child,
+            ..=-2 => is_current_child && visible_group == target_group,
         };
 
         if !matches {
@@ -204,14 +208,32 @@ fn check_wait_outcome(
             && let Some(exit_status) = p_lock.exit_status
             && p_lock.threads.is_empty()
         {
-            ready_child = Some(WaitOutcome::Exited(process.clone(), pid.0, exit_status));
+            let reported_pid = if p_lock.pid_namespace.inode() == current_pid_namespace_inode {
+                visible_pid.unwrap_or(pid.0)
+            } else {
+                pid.0
+            };
+            ready_child = Some(WaitOutcome::Exited(
+                process.clone(),
+                reported_pid,
+                exit_status,
+            ));
             break;
         }
 
         if wait_behavior.report_stopped
             && let Some(wait_event) = take_wait_event(&mut p_lock, wait_behavior.preserve_child)
         {
-            ready_child = Some(WaitOutcome::Stopped(process.clone(), pid.0, wait_event));
+            let reported_pid = if p_lock.pid_namespace.inode() == current_pid_namespace_inode {
+                visible_pid.unwrap_or(pid.0)
+            } else {
+                pid.0
+            };
+            ready_child = Some(WaitOutcome::Stopped(
+                process.clone(),
+                reported_pid,
+                wait_event,
+            ));
             break;
         }
     }
@@ -223,6 +245,21 @@ fn check_wait_outcome(
     } else {
         Err(SyscallError::NoChildProcesses)
     }
+}
+
+fn pid_visible_from_namespace(process: &Process, viewer_namespace_inode: u64) -> Option<u64> {
+    process.pid_visible_from_namespace_inode(viewer_namespace_inode)
+}
+
+fn visible_group_id_from_namespace(process: &Process, viewer_namespace_inode: u64) -> Option<u64> {
+    process.visible_group_id_from_namespace_inode(viewer_namespace_inode)
+}
+
+fn visible_session_id_from_namespace(
+    process: &Process,
+    viewer_namespace_inode: u64,
+) -> Option<u64> {
+    process.visible_session_id_from_namespace_inode(viewer_namespace_inode)
 }
 
 fn wait_for_child_exit(
@@ -294,7 +331,7 @@ define_syscall!(Getppid, {
         return Ok(0);
     }
     if let Some(parent) = current.parent.clone() {
-        Ok(parent.lock().pid.0 as usize)
+        Ok(parent.lock().pid_visible_from(&current).unwrap_or(0) as usize)
     } else {
         Ok(0)
     }
@@ -545,35 +582,96 @@ define_syscall!(SetTidAddress, |tidptr: *mut i32| {
 });
 
 define_syscall!(Getpgid, |pid: i32| {
-    let pid = if pid == 0 {
-        get_current_process().lock().pid.0
-    } else {
-        pid as u64
+    let current = get_current_process();
+    let (current_pid_namespace_inode, current_visible_group) = {
+        let current = current.lock();
+        (
+            current.pid_namespace.inode(),
+            visible_group_id_from_namespace(&current, current.pid_namespace.inode()),
+        )
     };
-    let process = get_process_with_pid(ProcessID(pid))?;
-    Ok(process.lock().group_id.0 as usize)
+    if pid == 0 {
+        return Ok(current_visible_group.unwrap_or(0) as usize);
+    }
+
+    let process = {
+        MANAGER
+            .lock()
+            .processes
+            .values()
+            .find(|process| {
+                pid_visible_from_namespace(&process.lock(), current_pid_namespace_inode)
+                    == Some(pid as u64)
+            })
+            .cloned()
+            .ok_or(SyscallError::NoProcess)?
+    };
+    let visible_group = {
+        let process = process.lock();
+        visible_group_id_from_namespace(&process, current_pid_namespace_inode)
+    };
+    Ok(visible_group.ok_or(SyscallError::NoProcess)? as usize)
 });
 
 define_syscall!(Setpgid, |pid: i32, group_id: i32| {
-    let pid = if pid == 0 {
-        get_current_process().lock().pid.0
+    let current = get_current_process();
+    let current_pid_namespace_inode = current.lock().pid_namespace.inode();
+    let process = if pid == 0 {
+        current.clone()
     } else {
-        pid as u64
+        MANAGER
+            .lock()
+            .processes
+            .values()
+            .find(|process| {
+                pid_visible_from_namespace(&process.lock(), current_pid_namespace_inode)
+                    == Some(pid as u64)
+            })
+            .cloned()
+            .ok_or(SyscallError::NoProcess)?
     };
-    let process = get_process_with_pid(ProcessID(pid))?;
-    let new_group_id = if group_id == 0 { pid } else { group_id as u64 };
+    let group_names_namespace_init = group_id == 1
+        && process.lock().pid_namespace.inode() == current_pid_namespace_inode
+        && process.lock().pid_namespace_local_pid == Some(1);
+    let new_group_id = if group_id == 0 || group_names_namespace_init {
+        process.lock().pid.0
+    } else {
+        group_id as u64
+    };
     process.lock().group_id.0 = new_group_id;
     Ok(0)
 });
 
 define_syscall!(Getsid, |pid: i32| {
-    let pid = if pid == 0 {
-        get_current_process().lock().pid.0
-    } else {
-        pid as u64
+    let current = get_current_process();
+    let (current_pid_namespace_inode, current_visible_session) = {
+        let current = current.lock();
+        (
+            current.pid_namespace.inode(),
+            visible_session_id_from_namespace(&current, current.pid_namespace.inode()),
+        )
     };
-    let process = get_process_with_pid(ProcessID(pid))?;
-    Ok(process.lock().session_id.0 as usize)
+    if pid == 0 {
+        return Ok(current_visible_session.unwrap_or(0) as usize);
+    }
+
+    let process = {
+        MANAGER
+            .lock()
+            .processes
+            .values()
+            .find(|process| {
+                pid_visible_from_namespace(&process.lock(), current_pid_namespace_inode)
+                    == Some(pid as u64)
+            })
+            .cloned()
+            .ok_or(SyscallError::NoProcess)?
+    };
+    let visible_session = {
+        let process = process.lock();
+        visible_session_id_from_namespace(&process, current_pid_namespace_inode)
+    };
+    Ok(visible_session.ok_or(SyscallError::NoProcess)? as usize)
 });
 
 define_syscall!(Setsid, {
@@ -586,7 +684,7 @@ define_syscall!(Setsid, {
     current.group_id.0 = pid;
     current.session_id.0 = pid;
     current.controlling_terminal = None;
-    Ok(pid as usize)
+    Ok(current.pid_namespace_local_pid.unwrap_or(pid) as usize)
 });
 
 #[cfg(test)]

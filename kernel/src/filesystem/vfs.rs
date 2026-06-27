@@ -457,6 +457,19 @@ impl VFS {
         ))
     }
 
+    pub fn mount_metadata_for_path_with_propagation(
+        &self,
+        path: Path,
+    ) -> FSResult<(FileSystemRef, Path, MountFlags, MountPropagation)> {
+        let (mount, source_path) = self.find_mount(&self.normalize_path(path))?;
+        Ok((
+            mount.fs.clone(),
+            source_path,
+            mount.flags,
+            mount.propagation,
+        ))
+    }
+
     pub fn ensure_writable_mount(&self, path: Path) -> FSResult<()> {
         let (mount, _) = self.find_mount(&self.normalize_path(path))?;
         if mount.flags.contains(MountFlags::MS_RDONLY) {

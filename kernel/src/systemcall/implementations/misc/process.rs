@@ -132,7 +132,11 @@ define_syscall!(Unshare, |flags: u64| {
             process.ipc_namespace = NamespaceObject::dynamic(NamespaceKind::Ipc);
         }
         if flags & UnshareFlags::NEWNS.bits() != 0 {
-            process.mnt_namespace = NamespaceObject::dynamic(NamespaceKind::Mnt);
+            process.mnt_namespace = NamespaceObject::dynamic_with_parent(
+                NamespaceKind::Mnt,
+                Some(&process.mnt_namespace),
+                Some(&process.user_namespace),
+            );
             process.fs_context = crate::process::clone_fs_context(&process.fs_context);
             process.mount_namespace_snapshot = Some(
                 crate::filesystem::vfs::VirtualFS
@@ -142,18 +146,27 @@ define_syscall!(Unshare, |flags: u64| {
                     .map(|(_, _, _, _, _, mount_id)| mount_id)
                     .collect(),
             );
+            process.mount_namespace_shared_with_parent = false;
         }
         if flags & UnshareFlags::NEWPID.bits() != 0 {
-            process.pending_child_pid_namespace =
-                Some(NamespaceObject::dynamic(NamespaceKind::Pid));
+            process.pending_child_pid_namespace = Some(NamespaceObject::dynamic_with_parent(
+                NamespaceKind::Pid,
+                Some(&process.pid_namespace),
+                Some(&process.user_namespace),
+            ));
         }
     }
     if flags & UnshareFlags::NEWUSER.bits() != 0 {
         let process = get_current_process();
         let mut process = process.lock();
-        process.user_namespace = NamespaceObject::dynamic(NamespaceKind::User);
-        process.user_namespace_uid_map = None;
-        process.user_namespace_gid_map = None;
+        let user_namespace = NamespaceObject::dynamic_with_parent(
+            NamespaceKind::User,
+            Some(&process.user_namespace),
+            Some(&process.user_namespace),
+        );
+        process.user_namespace = user_namespace;
+        process.user_namespace_uid_map = Some(alloc::string::String::new());
+        process.user_namespace_gid_map = Some(alloc::string::String::new());
         process.user_namespace_setgroups = None;
     }
     if flags & UnshareFlags::FS.bits() != 0 {

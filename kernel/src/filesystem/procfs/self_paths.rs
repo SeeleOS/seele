@@ -15,8 +15,12 @@ pub(super) fn proc_pid_namespace_file(
 pub(super) fn lookup_proc_self_path(parts: &[&str]) -> FSResult<FileLike> {
     match parts {
         ["self"] => {
-            let pid = current_pid()?;
-            Ok(proc_symlink("self", PROC_SELF_INODE, format!("{}", pid.0)))
+            let current = crate::process::manager::get_current_process();
+            let current = current.lock();
+            let pid = current
+                .pid_visible_from_namespace_inode(current.pid_namespace.inode())
+                .unwrap_or(current.pid.0);
+            Ok(proc_symlink("self", PROC_SELF_INODE, format!("{pid}")))
         }
         ["self", "cmdline"] => {
             let pid = current_pid()?;

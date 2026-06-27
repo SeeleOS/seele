@@ -1,7 +1,10 @@
 use crate::{
     misc::snapshot::Snapshot,
     object::linux_anon::wake_signalfd_for_process,
-    process::{Process, ProcessExitStatus, ProcessRef, ptrace::report_signal_stop},
+    process::{
+        Process, ProcessExitStatus, ProcessRef, manager::MANAGER, misc::ProcessID,
+        ptrace::report_signal_stop,
+    },
     thread::{
         ThreadRef,
         extended_state::update_active_user_extended_state_ptr_for_thread,
@@ -95,8 +98,15 @@ pub enum Signal {
 
 pub const SIGNAL_AMOUNT: usize = 64;
 pub const SI_USER: i32 = 0;
+pub const SI_MESGQ: i32 = -3;
 pub const SI_QUEUE: i32 = -1;
 pub const SI_TKILL: i32 = -6;
+pub const POLL_IN: i32 = 1;
+pub const POLL_OUT: i32 = 2;
+pub const POLL_MSG: i32 = 3;
+pub const POLL_ERR: i32 = 4;
+pub const POLL_PRI: i32 = 5;
+pub const POLL_HUP: i32 = 6;
 
 pub type SignalHandlerFn = extern "C" fn(i32);
 pub type SigHandlerFn2 = extern "C" fn(i32, *const SigInfo, *const UContext);
@@ -119,6 +129,7 @@ pub struct PendingSignalInfo {
     pub si_pid: i32,
     pub si_uid: u32,
     pub si_value: u64,
+    pub si_fd: i32,
 }
 
 #[repr(C)]
@@ -127,6 +138,7 @@ union SigInfoFields {
     pad: [u8; 112],
     child: SigInfoChild,
     fault: SigInfoFault,
+    poll: SigInfoPoll,
     value: SigInfoValue,
 }
 
@@ -145,6 +157,13 @@ struct SigInfoChild {
 #[derive(Clone, Copy, Default)]
 struct SigInfoFault {
     si_addr: *mut c_void,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct SigInfoPoll {
+    si_band: i64,
+    si_fd: i32,
 }
 
 #[repr(C)]
@@ -227,6 +246,28 @@ impl SigInfo {
     pub fn signal_value_ptr(&self) -> u64 {
         unsafe { self.fields.value.si_value.sival_ptr as usize as u64 }
     }
+
+    pub fn set_signal_value(&mut self, value: u64) {
+        self.fields.value.si_value.sival_ptr = value as usize as *mut c_void;
+    }
+
+    pub fn for_poll_signal(signal: Signal, code: i32, fd: i32) -> Self {
+        Self {
+            si_signo: signal as i32,
+            si_code: code,
+            fields: SigInfoFields {
+                poll: SigInfoPoll {
+                    si_fd: fd,
+                    ..Default::default()
+                },
+            },
+            ..Default::default()
+        }
+    }
+
+    fn poll_fd(&self) -> i32 {
+        unsafe { self.fields.poll.si_fd }
+    }
 }
 
 impl PendingSignalInfo {
@@ -238,6 +279,10 @@ impl PendingSignalInfo {
     }
 
     pub fn from_siginfo(siginfo: SigInfo) -> Self {
+        let is_poll_signal = matches!(
+            siginfo.si_code,
+            POLL_IN | POLL_OUT | POLL_MSG | POLL_ERR | POLL_PRI | POLL_HUP
+        );
         Self {
             si_signo: siginfo.si_signo,
             si_errno: siginfo.si_errno,
@@ -245,10 +290,29 @@ impl PendingSignalInfo {
             si_pid: siginfo.sender_pid(),
             si_uid: siginfo.sender_uid(),
             si_value: siginfo.signal_value_ptr(),
+            si_fd: if is_poll_signal { siginfo.poll_fd() } else { 0 },
         }
     }
 
     pub fn to_siginfo(self) -> SigInfo {
+        if matches!(
+            self.si_code,
+            POLL_IN | POLL_OUT | POLL_MSG | POLL_ERR | POLL_PRI | POLL_HUP
+        ) {
+            return SigInfo {
+                si_signo: self.si_signo,
+                si_errno: self.si_errno,
+                si_code: self.si_code,
+                fields: SigInfoFields {
+                    poll: SigInfoPoll {
+                        si_fd: self.si_fd,
+                        ..Default::default()
+                    },
+                },
+                ..Default::default()
+            };
+        }
+
         SigInfo {
             si_signo: self.si_signo,
             si_errno: self.si_errno,
@@ -507,20 +571,62 @@ fn wake_process_threads_for_signal(process: &ProcessRef, signal: Signal) {
     }
 }
 
+fn namespace_pending_siginfo(
+    siginfo: SigInfo,
+    receiver_pid: ProcessID,
+    receiver_namespace_inode: u64,
+    receiver_visible_pid: u64,
+) -> PendingSignalInfo {
+    let mut pending = PendingSignalInfo::from_siginfo(siginfo);
+    if pending.si_code == SI_MESGQ {
+        return pending;
+    }
+    if pending.si_pid <= 0 {
+        return pending;
+    }
+
+    let sender_pid = ProcessID(pending.si_pid as u64);
+    if sender_pid == receiver_pid {
+        pending.si_pid = receiver_visible_pid as i32;
+        return pending;
+    }
+
+    pending.si_pid = MANAGER
+        .lock()
+        .processes
+        .get(&sender_pid)
+        .and_then(|process| {
+            process
+                .lock()
+                .pid_visible_from_namespace_inode(receiver_namespace_inode)
+        })
+        .unwrap_or(0) as i32;
+    pending
+}
+
 fn queue_signal(process: &ProcessRef, signal: Signal, siginfo: Option<SigInfo>) {
     match signal {
         Signal::SIGCONT => wake_process_threads(process, true),
         _ => {
             let pid = {
                 let mut process = process.lock();
+                let receiver_namespace_inode = process.pid_namespace.inode();
+                let receiver_pid = process.pid;
+                let receiver_visible_pid = process
+                    .pid_visible_from_namespace_inode(receiver_namespace_inode)
+                    .unwrap_or(process.pid.0);
                 let signal_bits = Signals::from(signal);
                 let already_pending = process.pending_signals.contains(signal_bits);
                 process.pending_signals.insert(signal_bits);
                 if let Some(siginfo) = siginfo
                     && (!already_pending || process.pending_signal_info[signal.index()].is_none())
                 {
-                    process.pending_signal_info[signal.index()] =
-                        Some(PendingSignalInfo::from_siginfo(siginfo));
+                    process.pending_signal_info[signal.index()] = Some(namespace_pending_siginfo(
+                        siginfo,
+                        receiver_pid,
+                        receiver_namespace_inode,
+                        receiver_visible_pid,
+                    ));
                 }
                 process.pid.0
             };
@@ -542,14 +648,29 @@ pub fn send_signal_to_process_with_siginfo(process: &ProcessRef, signal: Signal,
 fn queue_signal_to_thread(thread: &ThreadRef, signal: Signal, siginfo: Option<SigInfo>) {
     let parent = {
         let mut thread = thread.lock();
+        let (receiver_pid, receiver_namespace_inode, receiver_visible_pid) = {
+            let parent = thread.parent.lock();
+            let namespace_inode = parent.pid_namespace.inode();
+            (
+                parent.pid,
+                namespace_inode,
+                parent
+                    .pid_visible_from_namespace_inode(namespace_inode)
+                    .unwrap_or(parent.pid.0),
+            )
+        };
         let signal_bits = Signals::from(signal);
         let already_pending = thread.pending_signals.contains(signal_bits);
         thread.pending_signals.insert(signal_bits);
         if let Some(siginfo) = siginfo
             && (!already_pending || thread.pending_signal_info[signal.index()].is_none())
         {
-            thread.pending_signal_info[signal.index()] =
-                Some(PendingSignalInfo::from_siginfo(siginfo));
+            thread.pending_signal_info[signal.index()] = Some(namespace_pending_siginfo(
+                siginfo,
+                receiver_pid,
+                receiver_namespace_inode,
+                receiver_visible_pid,
+            ));
         }
         thread.parent.clone()
     };

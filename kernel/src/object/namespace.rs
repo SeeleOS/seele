@@ -7,10 +7,20 @@ use crate::{
         vfs_traits::FileLikeType,
     },
     impl_cast_function, impl_cast_function_non_trait,
-    object::{FileFlags, Object, misc::ObjectResult, open_state::OpenState, traits::Statable},
+    object::{
+        FileFlags, Object,
+        config::ConfigurateRequest,
+        error::ObjectError,
+        misc::ObjectResult,
+        open_state::OpenState,
+        traits::{Configuratable, Statable},
+    },
+    process::{FdFlags, manager::get_current_process},
 };
 
 const NEXT_DYNAMIC_NAMESPACE_INO_START: u64 = 0xF100_0000;
+const NS_GET_PARENT: u64 = 0xb702;
+const NS_GET_USERNS: u64 = 0xb701;
 static NEXT_DYNAMIC_NAMESPACE_INO: AtomicU64 = AtomicU64::new(NEXT_DYNAMIC_NAMESPACE_INO_START);
 
 pub type NamespaceRef = Arc<NamespaceObject>;
@@ -28,6 +38,8 @@ pub enum NamespaceKind {
 pub struct NamespaceObject {
     kind: NamespaceKind,
     inode: u64,
+    parent_inode: Option<u64>,
+    user_inode: Option<u64>,
     open_state: OpenState,
 }
 
@@ -36,15 +48,28 @@ impl NamespaceObject {
         Arc::new(Self {
             kind,
             inode,
+            parent_inode: None,
+            user_inode: None,
             open_state: OpenState::default(),
         })
     }
 
     pub fn dynamic(kind: NamespaceKind) -> NamespaceRef {
-        Self::new(
+        Self::dynamic_with_parent(kind, None, None)
+    }
+
+    pub fn dynamic_with_parent(
+        kind: NamespaceKind,
+        parent: Option<&NamespaceRef>,
+        user: Option<&NamespaceRef>,
+    ) -> NamespaceRef {
+        Arc::new(Self {
             kind,
-            NEXT_DYNAMIC_NAMESPACE_INO.fetch_add(1, Ordering::Relaxed),
-        )
+            inode: NEXT_DYNAMIC_NAMESPACE_INO.fetch_add(1, Ordering::Relaxed),
+            parent_inode: parent.map(|namespace| namespace.inode()),
+            user_inode: user.map(|namespace| namespace.inode()),
+            open_state: OpenState::default(),
+        })
     }
 
     pub fn kind(&self) -> NamespaceKind {
@@ -53,6 +78,14 @@ impl NamespaceObject {
 
     pub fn inode(&self) -> u64 {
         self.inode
+    }
+
+    pub fn parent_inode(&self) -> Option<u64> {
+        self.parent_inode
+    }
+
+    pub fn user_inode(&self) -> Option<u64> {
+        self.user_inode
     }
 
     fn name(&self) -> &'static str {
@@ -79,6 +112,44 @@ impl Statable for NamespaceObject {
     }
 }
 
+impl Configuratable for NamespaceObject {
+    fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
+        let ConfigurateRequest::RawIoctl { request, .. } = request else {
+            return Err(ObjectError::InvalidRequest);
+        };
+
+        let target_inode = match request {
+            NS_GET_PARENT => self.parent_inode,
+            NS_GET_USERNS => self.user_inode,
+            _ => return Err(ObjectError::InvalidRequest),
+        }
+        .ok_or(ObjectError::InvalidRequest)?;
+
+        let namespace = crate::process::manager::MANAGER
+            .lock()
+            .processes
+            .values()
+            .find_map(|process| {
+                let process = process.lock();
+                [
+                    process.ipc_namespace.clone(),
+                    process.mnt_namespace.clone(),
+                    process.pid_namespace.clone(),
+                    process.user_namespace.clone(),
+                    process.uts_namespace.clone(),
+                ]
+                .into_iter()
+                .find(|namespace| namespace.inode() == target_inode)
+            })
+            .ok_or(ObjectError::InvalidRequest)?;
+
+        let fd = get_current_process()
+            .lock()
+            .push_object_with_flags(namespace, FdFlags::CLOEXEC);
+        Ok(fd as isize)
+    }
+}
+
 impl Object for NamespaceObject {
     fn get_flags(self: Arc<Self>) -> ObjectResult<FileFlags> {
         Ok(self.open_state.get_flags())
@@ -90,5 +161,6 @@ impl Object for NamespaceObject {
     }
 
     impl_cast_function!("statable", Statable);
+    impl_cast_function!("configuratable", Configuratable);
     impl_cast_function_non_trait!("namespace", NamespaceObject);
 }

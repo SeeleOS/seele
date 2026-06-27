@@ -20,7 +20,11 @@ define_syscall!(Getresuid, |ruid: *mut u32,
     let (real_uid, effective_uid, saved_uid) = {
         let process = get_current_process();
         let process = process.lock();
-        (process.real_uid, process.effective_uid, process.saved_uid)
+        (
+            process.namespace_uid(process.real_uid),
+            process.namespace_uid(process.effective_uid),
+            process.namespace_uid(process.saved_uid),
+        )
     };
     user_safe::write(ruid, &real_uid)?;
     user_safe::write(euid, &effective_uid)?;
@@ -35,7 +39,11 @@ define_syscall!(Getresgid, |rgid: *mut u32,
     let (real_gid, effective_gid, saved_gid) = {
         let process = get_current_process();
         let process = process.lock();
-        (process.real_gid, process.effective_gid, process.saved_gid)
+        (
+            process.namespace_gid(process.real_gid),
+            process.namespace_gid(process.effective_gid),
+            process.namespace_gid(process.saved_gid),
+        )
     };
     user_safe::write(rgid, &real_gid)?;
     user_safe::write(egid, &effective_gid)?;
@@ -58,7 +66,7 @@ define_syscall!(Setresuid, |ruid: i32, euid: i32, suid: i32| {
     if suid != -1 {
         process.saved_uid = suid as u32;
     }
-    update_uid_capabilities(&mut process, old_effective_uid);
+    process.update_uid_capabilities(old_effective_uid);
     Ok(0)
 });
 
@@ -79,11 +87,15 @@ define_syscall!(Setresgid, |rgid: i32, egid: i32, sgid: i32| {
 });
 
 define_syscall!(Getuid, {
-    Ok(get_current_process().lock().real_uid as usize)
+    let process = get_current_process();
+    let process = process.lock();
+    Ok(process.namespace_uid(process.real_uid) as usize)
 });
 
 define_syscall!(Getgid, {
-    Ok(get_current_process().lock().real_gid as usize)
+    let process = get_current_process();
+    let process = process.lock();
+    Ok(process.namespace_gid(process.real_gid) as usize)
 });
 
 define_syscall!(Setuid, |uid: u32| {
@@ -94,7 +106,7 @@ define_syscall!(Setuid, |uid: u32| {
     process.effective_uid = uid;
     process.saved_uid = uid;
     process.fs_uid = uid;
-    update_uid_capabilities(&mut process, old_effective_uid);
+    process.update_uid_capabilities(old_effective_uid);
     Ok(0)
 });
 
@@ -110,7 +122,7 @@ define_syscall!(Setreuid, |ruid: i32, euid: i32| {
         process.saved_uid = euid as u32;
         process.fs_uid = euid as u32;
     }
-    update_uid_capabilities(&mut process, old_effective_uid);
+    process.update_uid_capabilities(old_effective_uid);
     Ok(0)
 });
 
@@ -139,11 +151,15 @@ define_syscall!(Setregid, |rgid: i32, egid: i32| {
 });
 
 define_syscall!(Geteuid, {
-    Ok(get_current_process().lock().effective_uid as usize)
+    let process = get_current_process();
+    let process = process.lock();
+    Ok(process.namespace_uid(process.effective_uid) as usize)
 });
 
 define_syscall!(Getegid, {
-    Ok(get_current_process().lock().effective_gid as usize)
+    let process = get_current_process();
+    let process = process.lock();
+    Ok(process.namespace_gid(process.effective_gid) as usize)
 });
 
 define_syscall!(Getgroups, |size: i32, list: *mut u32| {
@@ -187,26 +203,9 @@ define_syscall!(Setfsgid, |gid: u32| {
 
 define_syscall!(Vhangup, { Ok(0) });
 
-fn update_uid_capabilities(process: &mut crate::process::Process, old_effective_uid: u32) {
-    if process.effective_uid == 0 {
-        process.capability_effective = process.capability_permitted;
-    } else if old_effective_uid == 0 {
-        process.capability_effective = [0; 2];
-    }
-
-    if process.real_uid != 0
-        && process.effective_uid != 0
-        && process.saved_uid != 0
-        && !process.keep_capabilities
-    {
-        process.capability_permitted = [0; 2];
-        process.capability_ambient = [0; 2];
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::process::manager::get_current_process;
+    use crate::process::{DEFAULT_CAPABILITY_SET, manager::get_current_process};
     use crate::systemcall::{
         implementations::{
             Getegid, Geteuid, Getgid, Getgroups, Getuid, Setfsgid, Setfsuid, Setgid, Setgroups,
@@ -236,6 +235,11 @@ mod tests {
         group_syscalls,
         "group syscalls validate linux size rules",
         group_syscalls_validate_linux_size_rules
+    );
+    crate::test!(
+        setuid_root_exec_capabilities,
+        "setuid root exec restores linux permitted capabilities",
+        setuid_root_exec_restores_linux_permitted_capabilities
     );
 
     fn credential_getters_return_current_linux_ids() {
@@ -389,5 +393,29 @@ mod tests {
         assert!(process.lock().supplementary_groups.is_empty());
 
         process.lock().supplementary_groups = saved_groups;
+    }
+
+    fn setuid_root_exec_restores_linux_permitted_capabilities() {
+        let saved = CredentialSnapshot::save_current();
+
+        {
+            let process = get_current_process();
+            let mut process = process.lock();
+            process.real_uid = 1000;
+            process.effective_uid = 0;
+            process.saved_uid = 0;
+            process.fs_uid = 0;
+            process.capability_effective = [0; 2];
+            process.capability_permitted = [0; 2];
+            process.capability_bounding = DEFAULT_CAPABILITY_SET;
+            process.no_new_privs = false;
+
+            process.update_exec_uid_capabilities(1000, true);
+
+            assert_eq!(process.capability_permitted, DEFAULT_CAPABILITY_SET);
+            assert_eq!(process.capability_effective, DEFAULT_CAPABILITY_SET);
+        }
+
+        saved.restore();
     }
 }

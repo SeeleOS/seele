@@ -13,7 +13,7 @@ define_syscall!(Mount, |source: CString,
     let filesystemtype =
         string_from_raw_optional(filesystemtype)?.filter(|value| !value.is_empty());
     let data = string_from_raw_optional(data)?.filter(|value| !value.is_empty());
-    let target_object = open_path(target)?;
+    let target_object = open_path(target.clone())?;
     let target_path = target_object.path();
     let target_is_directory = matches!(
         target_object.info()?.file_like_type,
@@ -48,11 +48,22 @@ define_syscall!(Mount, |source: CString,
             VirtualFS
                 .lock()
                 .bind_mount(
-                    source_path,
-                    target_path,
+                    source_path.clone(),
+                    target_path.clone(),
                     operation_flags.contains(MountOperationFlags::MS_REC),
                 )
                 .map_err(SyscallError::from)?;
+            let process = get_current_process();
+            let process = process.lock();
+            if process.mount_namespace_shared_with_parent {
+                let mount_id = VirtualFS
+                    .lock()
+                    .mount_id(target_path)
+                    .map_err(SyscallError::from)?;
+                let namespace_inode = process.mnt_namespace.inode();
+                drop(process);
+                crate::process::manager::mark_mount_shared_with_parent(namespace_inode, mount_id);
+            }
         }
         return Ok(0);
     }
@@ -99,8 +110,10 @@ define_syscall!(Mount, |source: CString,
             | MountOperationFlags::MS_SLAVE
             | MountOperationFlags::MS_SHARED
             | MountOperationFlags::MS_UNBINDABLE,
-    ) && filesystemtype.as_deref().is_none_or(|fs| fs == "none")
-    {
+    ) {
+        if filesystemtype.as_deref().is_some_and(|fs| fs != "none") {
+            return Err(SyscallError::InvalidArguments);
+        }
         let propagation = propagation.ok_or(SyscallError::InvalidArguments)?;
         VirtualFS
             .lock()
@@ -110,6 +123,13 @@ define_syscall!(Mount, |source: CString,
                 operation_flags.contains(MountOperationFlags::MS_REC),
             )
             .map_err(SyscallError::from)?;
+        if propagation == crate::filesystem::vfs::MountPropagationUpdate::Shared {
+            let process = get_current_process();
+            let mut process = process.lock();
+            if process.user_namespace_uid_map.is_none() {
+                process.mount_namespace_shared_with_parent = true;
+            }
+        }
         return Ok(0);
     }
 
@@ -373,8 +393,9 @@ define_syscall!(
             }
         };
 
-        let (mount_path, mount_fs, mount_source_path, mount_flags) =
-            VirtualFS.lock().mount_metadata(source_path.clone())?;
+        let (mount_path, mount_fs, mount_source_path, mount_flags, mount_propagation) = VirtualFS
+            .lock()
+            .mount_metadata_with_propagation(source_path.clone())?;
         if mount_path != source_path {
             return Err(SyscallError::InvalidArguments);
         }
@@ -407,14 +428,32 @@ define_syscall!(
                 .stack_mount_beneath(source_path.clone(), target_path)
                 .map_err(SyscallError::from)?;
         } else {
+            let attached_path = target_path.clone();
             VirtualFS
                 .lock()
-                .attach_mount(target_path, mount_fs, mount_source_path, mount_flags)
+                .attach_mount_with_propagation(
+                    target_path,
+                    mount_fs,
+                    mount_source_path,
+                    mount_flags,
+                    mount_propagation,
+                )
                 .map_err(SyscallError::from)?;
             VirtualFS
                 .lock()
                 .unmount(source_path.clone())
                 .map_err(SyscallError::from)?;
+            let process = get_current_process();
+            let process = process.lock();
+            if process.mount_namespace_shared_with_parent {
+                let mount_id = VirtualFS
+                    .lock()
+                    .mount_id(attached_path)
+                    .map_err(SyscallError::from)?;
+                let namespace_inode = process.mnt_namespace.inode();
+                drop(process);
+                crate::process::manager::mark_mount_shared_with_parent(namespace_inode, mount_id);
+            }
         }
         if is_api_mount_path(&source_path) {
             let _ = VirtualFS.lock().delete_file(source_path);
@@ -503,12 +542,9 @@ define_syscall!(OpenTree, |dirfd: i32,
     };
 
     let object: ObjectRef = if flags.contains(OpenTreeFlags::OPEN_TREE_CLONE) {
-        let (mount_path, fs, source_path, mount_flags, propagation) = VirtualFS
+        let (fs, source_path, mount_flags, propagation) = VirtualFS
             .lock()
-            .mount_metadata_with_propagation(object_path.clone())?;
-        if mount_path != object_path {
-            return Err(SyscallError::InvalidArguments);
-        }
+            .mount_metadata_for_path_with_propagation(object_path.clone())?;
         let detached_path = next_api_mount_path()?;
         VirtualFS
             .lock()
@@ -721,6 +757,7 @@ mod tests {
     fn mount_api_syscalls_follow_linux_rules() {
         const AT_FDCWD: u64 = (-100i32) as u64;
         const AT_RECURSIVE: u64 = 0x8000;
+        const OPEN_TREE_CLONE: u64 = 0x0000_0001;
         const OPEN_TREE_CLOEXEC: u64 = 0x0008_0000;
         const MOVE_MOUNT_F_EMPTY_PATH: u64 = 0x0000_0004;
         const FSCONFIG_SET_STRING: u64 = 1;
@@ -753,6 +790,10 @@ mod tests {
             .lock()
             .create_dir(Path::new("/tmp/syscall-mount-test/newdst"))
             .unwrap();
+        VirtualFS
+            .lock()
+            .create_dir(Path::new("/tmp/syscall-mount-test/cloned-src"))
+            .unwrap();
         for path in [
             "/tmp/syscall-mount-test/proc",
             "/tmp/syscall-mount-test/sys",
@@ -765,6 +806,7 @@ mod tests {
         write_user_cstr(page, b"/tmp/syscall-mount-test/src\0");
         write_user_cstr(page + 128, b"/tmp/syscall-mount-test/dst\0");
         write_user_cstr(page + 256, b"/tmp/syscall-mount-test/newdst\0");
+        write_user_cstr(page + 320, b"/tmp/syscall-mount-test/cloned-src\0");
         write_user_cstr(page + 384, b"tmpfs\0");
         write_user_cstr(page + 448, b"mode=700\0");
         write_user_cstr(page + 512, b"mode\0");
@@ -858,6 +900,29 @@ mod tests {
         };
         let moved_stat = moved_root.stat();
         assert_eq!(moved_stat.st_mode & 0o777, 0o755);
+
+        let subtree_fd = expect_fd(
+            SyscallArgs::new([AT_FDCWD, page, OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC, 0, 0, 0])
+                .call::<OpenTree>(),
+        );
+        expect_ok(
+            SyscallArgs::new([
+                subtree_fd as u64,
+                page + 704,
+                AT_FDCWD,
+                page + 320,
+                MOVE_MOUNT_F_EMPTY_PATH,
+                0,
+            ])
+            .call::<MoveMount>(),
+            0,
+        );
+        let cloned_root = {
+            let mut vfs = VirtualFS.lock();
+            vfs.open(Path::new("/tmp/syscall-mount-test/cloned-src"))
+                .unwrap()
+        };
+        assert_eq!(cloned_root.path(), Path::new("/tmp/syscall-mount-test/src"));
 
         let picked_fd =
             expect_fd(SyscallArgs::new([AT_FDCWD, page + 256, 1, 0, 0, 0]).call::<Fspick>());
