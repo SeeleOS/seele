@@ -1329,9 +1329,15 @@ mod tests {
             current.pending_signal_info.fill(None);
         }
 
-        let mut timed_siginfo = SigInfo::for_process_signal(Signal::SIGUSR1, 123, 456);
-        timed_siginfo.si_code = SI_QUEUE;
         let thread_parent = crate::thread::get_current_thread().lock().parent.clone();
+        let timed_receiver_namespace = thread_parent.lock().pid_namespace.inode();
+        let timed_sender_pid = current.lock().pid.0 as i32;
+        let timed_visible_sender_pid = current
+            .lock()
+            .pid_visible_from_namespace_inode(timed_receiver_namespace)
+            .unwrap_or(0) as i32;
+        let mut timed_siginfo = SigInfo::for_process_signal(Signal::SIGUSR1, timed_sender_pid, 456);
+        timed_siginfo.si_code = SI_QUEUE;
         send_signal_to_process_with_siginfo(&thread_parent, Signal::SIGUSR1, timed_siginfo);
         assert_eq!(
             crate::thread::get_current_thread()
@@ -1353,7 +1359,7 @@ mod tests {
         let waited_info = read_user_value::<TestWaitidSigInfo>(page + 640);
         assert_eq!(waited_info.si_signo, Signal::SIGUSR1 as i32);
         assert_eq!(waited_info.si_code, SI_QUEUE);
-        assert_eq!(waited_info.si_pid, 123);
+        assert_eq!(waited_info.si_pid, timed_visible_sender_pid);
         assert_eq!(waited_info.si_uid, 456);
         assert!(
             !current
