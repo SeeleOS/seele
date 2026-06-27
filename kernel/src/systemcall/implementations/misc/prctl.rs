@@ -222,6 +222,8 @@ mod tests {
             process.real_gid = 200;
             process.effective_gid = 201;
             process.saved_gid = 202;
+            process.user_namespace_uid_map = None;
+            process.user_namespace_gid_map = None;
         }
 
         expect_ok(
