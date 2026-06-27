@@ -128,6 +128,7 @@ define_syscall_table!(
     Flock,
     Fsync,
     Fdatasync,
+    Syncfs,
     Acct,
     Truncate,
     Ftruncate,

@@ -101,7 +101,7 @@ define_syscall!(Truncate, |path: CString, length: i64| {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::systemcall::implementations::{Close, Lseek, Pipe, Read};
+    use crate::systemcall::implementations::{Close, Lseek, Pipe, Read, Syncfs};
     use crate::systemcall::test::*;
     use alloc::{string::ToString, vec};
 
@@ -2232,6 +2232,14 @@ mod tests {
         expect_ok(
             SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Fdatasync>(),
             0,
+        );
+        expect_ok(
+            SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Syncfs>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([9999, 0, 0, 0, 0, 0]).call::<Syncfs>(),
+            SyscallError::BadFileDescriptor,
         );
 
         write_user_value(user_page + 704, b"abcdef");

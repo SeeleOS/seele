@@ -1270,6 +1270,15 @@ define_syscall!(Fdatasync, |object: ObjectRef| {
     Ok(0)
 });
 
+define_syscall!(Syncfs, |object: ObjectRef| {
+    check_syncable_file(&object)?;
+    let file_like = object.as_file_like()?;
+    crate::filesystem::vfs::VirtualFS
+        .lock()
+        .sync_path(file_like.path())?;
+    Ok(0)
+});
+
 define_syscall!(Fadvise64, |object: ObjectRef,
                             _offset: i64,
                             _len: i64,

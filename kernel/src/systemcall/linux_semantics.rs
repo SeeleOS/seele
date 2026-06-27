@@ -187,6 +187,7 @@ pub const LINUX_SYSCALL_SEMANTICS_COVERAGE: &[LinuxSyscallCoverage] = syscall_co
         Flock => "filesystem_file_object_syscalls_follow_linux_rules",
         Fsync => "filesystem_file_object_syscalls_follow_linux_rules",
         Fdatasync => "filesystem_file_object_syscalls_follow_linux_rules",
+        Syncfs => "filesystem_file_object_syscalls_follow_linux_rules",
         Ftruncate => "filesystem_file_object_syscalls_follow_linux_rules",
         Fadvise64 => "filesystem_file_object_syscalls_follow_linux_rules",
         Fallocate => "filesystem_file_object_syscalls_follow_linux_rules",

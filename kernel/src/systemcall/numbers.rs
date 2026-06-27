@@ -248,6 +248,7 @@ pub enum SyscallNumber {
     Prlimit64 = 302,
     NameToHandleAt = 303,
     ClockAdjtime = 305,
+    Syncfs = 306,
     Splice = 275,
     Setns = 308,
     Getcpu = 309,
