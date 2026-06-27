@@ -55,6 +55,30 @@ define_syscall!(Acct, |path: *const u8| {
     Ok(0)
 });
 
+define_syscall!(PerfEventOpen, |_attr: *const u8,
+                                _pid: i32,
+                                _cpu: i32,
+                                _group_fd: i32,
+                                _flags: u64| {
+    Err(SyscallError::PermissionDenied)
+});
+
+define_syscall!(FanotifyInit, |_flags: u32, _event_f_flags: u32| {
+    Err(SyscallError::OperationNotSupported)
+});
+
+define_syscall!(Userfaultfd, |_flags: u32| {
+    Err(SyscallError::OperationNotSupported)
+});
+
+define_syscall!(IoUringSetup, |_entries: u32, _params: *mut u8| {
+    Err(SyscallError::OperationNotSupported)
+});
+
+define_syscall!(MemfdSecret, |_flags: u32| {
+    Err(SyscallError::OperationNotSupported)
+});
+
 bitflags! {
     #[derive(Clone, Copy, Debug)]
     struct CloneFlags: u64 {
@@ -1790,6 +1814,40 @@ fn write_rseq_area(rseq_ptr: *mut LinuxRseq, registered: bool) -> Result<(), Sys
     }
     user_safe::write(rseq_ptr, &rseq)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systemcall::test::*;
+
+    crate::test!(
+        optional_fd_provider_syscalls,
+        "optional fd provider syscalls return Linux feature unavailable errors",
+        optional_fd_provider_syscalls_return_linux_feature_unavailable_errors
+    );
+    fn optional_fd_provider_syscalls_return_linux_feature_unavailable_errors() {
+        expect_errno(
+            SyscallArgs::new([0, 0, 0, u64::MAX, 0, 0]).call::<PerfEventOpen>(),
+            SyscallError::PermissionDenied,
+        );
+        expect_errno(
+            SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<FanotifyInit>(),
+            SyscallError::OperationNotSupported,
+        );
+        expect_errno(
+            SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Userfaultfd>(),
+            SyscallError::OperationNotSupported,
+        );
+        expect_errno(
+            SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<IoUringSetup>(),
+            SyscallError::OperationNotSupported,
+        );
+        expect_errno(
+            SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<MemfdSecret>(),
+            SyscallError::OperationNotSupported,
+        );
+    }
 }
 
 mod anon_fd;
