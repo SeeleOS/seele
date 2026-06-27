@@ -1989,10 +1989,6 @@ mod tests {
         write_user_cstr(user_page, b"/tmp/syscall-file-object-test/file\0");
         let fd =
             expect_fd(SyscallArgs::new([AT_FDCWD, user_page, O_RDWR, 0, 0, 0]).call::<OpenAt>());
-        write_user_cstr(user_page + 128, b"/tmp/syscall-file-object-test/file\0");
-        let out_fd = expect_fd(
-            SyscallArgs::new([AT_FDCWD, user_page + 128, O_RDWR, 0, 0, 0]).call::<OpenAt>(),
-        );
         write_user_cstr(user_page + 192, b"/tmp/syscall-file-object-test/out\0");
         let copy_out_fd = expect_fd(
             SyscallArgs::new([AT_FDCWD, user_page + 192, O_RDWR, 0, 0, 0]).call::<OpenAt>(),
@@ -2153,15 +2149,19 @@ mod tests {
             SyscallArgs::new([fd as u64, F_SETLEASE, F_UNLCK, 0, 0, 0]).call::<Fcntl>(),
             0,
         );
-        expect_ok(
+        expect_errno(
             SyscallArgs::new([fd as u64, F_SETLEASE, F_RDLCK, 0, 0, 0]).call::<Fcntl>(),
-            0,
+            SyscallError::TryAgain,
         );
         expect_ok(
             SyscallArgs::new([fd as u64, F_SETLEASE, F_UNLCK, 0, 0, 0]).call::<Fcntl>(),
             0,
         );
 
+        write_user_cstr(user_page + 128, b"/tmp/syscall-file-object-test/file\0");
+        let out_fd = expect_fd(
+            SyscallArgs::new([AT_FDCWD, user_page + 128, O_RDWR, 0, 0, 0]).call::<OpenAt>(),
+        );
         expect_ok(
             SyscallArgs::new([fd as u64, LOCK_EX | LOCK_NB, 0, 0, 0, 0]).call::<Flock>(),
             0,

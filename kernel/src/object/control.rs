@@ -125,10 +125,12 @@ fn access_mode_bits(object: &ObjectRef) -> usize {
 }
 
 fn fcntl_object_key(object: &ObjectRef) -> String {
-    if let Ok(file_like) = object.clone().as_file_like()
-        && let Ok(info) = file_like.info()
-    {
-        return format!("file:{}:{}", file_like.mount_id(), info.inode);
+    if let Ok(file_like) = object.clone().as_file_like() {
+        return format!(
+            "file-path:{}:{}",
+            file_like.mount_id(),
+            file_like.path().normalize().as_string()
+        );
     }
 
     format!("object:{:p}", Arc::as_ptr(object))
@@ -191,6 +193,19 @@ fn fd_entry_is_other_open_file(entry: &FdEntry, object: &ObjectRef) -> bool {
     fcntl_object_key(&entry.object) == fcntl_object_key(object)
 }
 
+fn fd_table_has_other_open_file_description(
+    fd_table: &[Option<FdEntry>],
+    fd: Option<usize>,
+    object: &ObjectRef,
+) -> bool {
+    fd_table
+        .iter()
+        .enumerate()
+        .filter(|(entry_fd, _)| Some(*entry_fd) != fd)
+        .filter_map(|(_, entry)| entry.as_ref())
+        .any(|entry| fd_entry_is_other_open_file(entry, object))
+}
+
 fn release_fcntl_object_state_by_key(object_key: &str) {
     FCNTL_OBJECT_STATE.lock().remove(object_key);
 }
@@ -201,6 +216,7 @@ fn release_fcntl_object_state_for_object(object: &ObjectRef) {
 }
 
 fn has_other_open_file_description(object: &ObjectRef) -> bool {
+    let current_process = get_current_process();
     let processes = MANAGER
         .lock()
         .processes
@@ -209,6 +225,9 @@ fn has_other_open_file_description(object: &ObjectRef) -> bool {
         .collect::<Vec<_>>();
 
     processes.into_iter().any(|process| {
+        if Arc::ptr_eq(&process, &current_process) {
+            return false;
+        }
         let process = process.lock();
         process
             .fd_table
@@ -219,14 +238,32 @@ fn has_other_open_file_description(object: &ObjectRef) -> bool {
     })
 }
 
-fn fcntl_set_lease(object: &ObjectRef, lease: i32) -> SyscallResult {
+pub(crate) fn current_process_has_other_open_file_description(
+    fd: usize,
+    object: &ObjectRef,
+) -> bool {
+    let fd_table = get_current_process().lock().fd_table.lock().clone();
+    fd_table_has_other_open_file_description(&fd_table, Some(fd), object)
+}
+
+fn fcntl_set_lease(
+    object: &ObjectRef,
+    lease: i32,
+    current_process_has_other_open_file: bool,
+) -> SyscallResult {
     if !matches!(lease, F_RDLCK | F_WRLCK | F_UNLCK) {
         return Err(SyscallError::InvalidArguments);
+    }
+    if lease == F_UNLCK {
+        update_fcntl_object_state(object, |state| state.lease = lease);
+        return Ok(0);
     }
     if lease == F_RDLCK && matches!(access_mode_bits(object), O_WRONLY | O_RDWR) {
         return Err(SyscallError::TryAgain);
     }
-    if lease == F_WRLCK && has_other_open_file_description(object) {
+    if lease == F_WRLCK
+        && (current_process_has_other_open_file || has_other_open_file_description(object))
+    {
         return Err(SyscallError::TryAgain);
     }
 
@@ -323,6 +360,8 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
         _ => {}
     }
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
+    let current_process_has_other_open_file = matches!(command, FcntlCmd::SetLease)
+        && current_process_has_other_open_file_description(fd as usize, &object);
     match command {
         FcntlCmd::SetFl => {
             let mut flags = object.clone().get_flags().map_err(SyscallError::from)?
@@ -450,7 +489,9 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
             let pipe = object.as_pipe()?;
             Ok(pipe.capacity())
         }
-        FcntlCmd::SetLease => fcntl_set_lease(&object, arg as i32),
+        FcntlCmd::SetLease => {
+            fcntl_set_lease(&object, arg as i32, current_process_has_other_open_file)
+        }
         FcntlCmd::GetLease => Ok(fcntl_object_state(&object).lease as usize),
         FcntlCmd::AddSeals => {
             let flags = object.clone().get_flags().map_err(SyscallError::from)?;
