@@ -73,9 +73,13 @@ fn ns_to_linux_timespec(ns: u64) -> LinuxTimespec {
     }
 }
 
+fn timer_id_to_index(id: i32) -> Result<usize, SyscallError> {
+    usize::try_from(id).map_err(|_| SyscallError::InvalidArguments)
+}
+
 define_syscall!(
     TimerCreate,
-    |time_type: ClockId, notify_method: *const LinuxSigevent, timer_id: *mut usize| {
+    |time_type: ClockId, notify_method: *const LinuxSigevent, timer_id: *mut i32| {
         if timer_id.is_null() {
             return Err(SyscallError::BadAddress);
         }
@@ -87,6 +91,7 @@ define_syscall!(
         };
 
         let id = with_current_process(|process| process.create_timer(time_type, notify_method));
+        let id = i32::try_from(id).map_err(|_| SyscallError::InvalidArguments)?;
         user_safe::write(timer_id, &id)?;
         Ok(0)
     }
@@ -156,13 +161,13 @@ mod tests {
             SyscallArgs::new([CLOCK_REALTIME, page, timer_id_page, 0, 0, 0]).call::<TimerCreate>(),
             0,
         );
-        let signal_timer_id = read_user_value::<usize>(timer_id_page);
+        let signal_timer_id = read_user_value::<i32>(timer_id_page);
 
         expect_ok(
-            SyscallArgs::new([CLOCK_REALTIME, 0, timer_id_page + 8, 0, 0, 0]).call::<TimerCreate>(),
+            SyscallArgs::new([CLOCK_REALTIME, 0, timer_id_page + 4, 0, 0, 0]).call::<TimerCreate>(),
             0,
         );
-        let default_timer_id = read_user_value::<usize>(timer_id_page + 8);
+        let default_timer_id = read_user_value::<i32>(timer_id_page + 4);
         assert_ne!(signal_timer_id, default_timer_id);
 
         expect_ok(
@@ -267,11 +272,11 @@ mod tests {
             SyscallError::BadAddress,
         );
         expect_errno(
-            SyscallArgs::new([usize::MAX as u64, 0, 0, 0, 0, 0]).call::<TimerDelete>(),
+            SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<TimerDelete>(),
             SyscallError::InvalidArguments,
         );
         expect_errno(
-            SyscallArgs::new([usize::MAX as u64, 0, 0, 0, 0, 0]).call::<TimerGetoverrun>(),
+            SyscallArgs::new([u64::MAX, 0, 0, 0, 0, 0]).call::<TimerGetoverrun>(),
             SyscallError::InvalidArguments,
         );
 
@@ -298,18 +303,20 @@ mod tests {
     }
 }
 
-define_syscall!(TimerDelete, |id: usize| {
+define_syscall!(TimerDelete, |id: i32| {
+    let id = timer_id_to_index(id)?;
     with_current_process(|process| process.delete_timer(id))?;
     Ok(0)
 });
 
-define_syscall!(TimerGetoverrun, |id: usize| {
+define_syscall!(TimerGetoverrun, |id: i32| {
+    let id = timer_id_to_index(id)?;
     with_current_process(|process| process.get_timer_overrun(id))
 });
 
 define_syscall!(
     TimerSettime,
-    |id: usize,
+    |id: i32,
      flags: TimerSetTimeFlags,
      timer_state: *const LinuxItimerspec,
      old_value: *mut LinuxItimerspec| {
@@ -317,6 +324,7 @@ define_syscall!(
             return Err(SyscallError::BadAddress);
         }
 
+        let id = timer_id_to_index(id)?;
         let new_value = user_safe::read(timer_state)?;
         let value_ns = linux_timespec_to_ns(new_value.it_value)?;
         let interval_ns = linux_timespec_to_ns(new_value.it_interval)?;
@@ -384,11 +392,12 @@ define_syscall!(
 
 define_syscall!(
     TimerGettime,
-    |id: usize, timer_state: *mut LinuxItimerspec| {
+    |id: i32, timer_state: *mut LinuxItimerspec| {
         if timer_state.is_null() {
             return Err(SyscallError::BadAddress);
         }
 
+        let id = timer_id_to_index(id)?;
         let spec = with_current_process(|process| -> Result<LinuxItimerspec, SyscallError> {
             let timer = process
                 .timers
