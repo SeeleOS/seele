@@ -250,6 +250,8 @@ mod tests {
         process.effective_uid = 1002;
         process.real_gid = 1003;
         process.effective_gid = 1004;
+        process.user_namespace_uid_map = None;
+        process.user_namespace_gid_map = None;
         drop(process);
 
         expect_ok(SyscallArgs::none().call::<Getuid>(), 1001);
