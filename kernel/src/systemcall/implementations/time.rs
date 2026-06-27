@@ -267,10 +267,38 @@ fn itimer_to_linux_value(state: TimerState, clock: ClockId) -> LinuxItimerval {
 fn linux_clock_now_ns(clock_id: i32) -> Result<i64, SyscallError> {
     match clock_id {
         0 | 5 | 8 | 11 => Ok(KernelTime::current().as_nanoseconds() as i64),
-        1 | 4 | 6 | 7 | 9 => Ok(KernelTime::since_boot().as_nanoseconds() as i64),
+        1 => Ok((KernelTime::since_boot().as_nanoseconds() as i64)
+            .saturating_add(current_monotonic_offset_ns())),
+        7 => Ok((KernelTime::since_boot().as_nanoseconds() as i64)
+            .saturating_add(current_boottime_offset_ns())),
+        4 | 6 | 9 => Ok(KernelTime::since_boot().as_nanoseconds() as i64),
         2 | 3 => Ok(KernelTime::since_boot().as_nanoseconds().max(1) as i64),
         _ => Err(SyscallError::InvalidArguments),
     }
+}
+
+fn current_monotonic_offset_ns() -> i64 {
+    get_current_process()
+        .lock()
+        .time_namespace_state
+        .monotonic_offset_ns()
+}
+
+fn current_boottime_offset_ns() -> i64 {
+    get_current_process()
+        .lock()
+        .time_namespace_state
+        .boottime_offset_ns()
+}
+
+fn monotonic_namespace_deadline_to_boot(deadline_ns: u64, clock_id: i32) -> KernelTime {
+    let offset = if clock_id == 7 {
+        current_boottime_offset_ns()
+    } else {
+        current_monotonic_offset_ns()
+    };
+    let boot_ns = (deadline_ns as i64).saturating_sub(offset).max(0) as u64;
+    KernelTime::from_nanoseconds(boot_ns)
 }
 
 fn clock_nanosleep_clock(clock_id: i32) -> Result<SleepClock, SyscallError> {
@@ -716,7 +744,9 @@ define_syscall!(
                     let now_boot = KernelTime::since_boot();
                     now_boot.add_ns(requested_ns.saturating_sub(now_realtime.as_nanoseconds()))
                 }
-                SleepClock::Monotonic => KernelTime::from_nanoseconds(requested_ns),
+                SleepClock::Monotonic => {
+                    monotonic_namespace_deadline_to_boot(requested_ns, clock_id)
+                }
             }
         } else {
             // Blocked-thread timeouts are evaluated against since_boot.

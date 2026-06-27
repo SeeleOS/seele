@@ -39,13 +39,14 @@ use pid::{
     pid_fdinfo_inode, pid_gid_map_inode, pid_loginuid_inode, pid_maps_inode, pid_mountinfo_inode,
     pid_ns_dir_inode, pid_ns_entries, pid_ns_inode, pid_ns_object, pid_oom_score_adj_inode,
     pid_pagemap_inode, pid_root_inode, pid_sessionid_inode, pid_setgroups_inode, pid_stat_inode,
-    pid_status_inode, pid_string, pid_uid_map_inode, proc_kpageflags_read_at,
-    proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_comm_bytes, proc_pid_environ_bytes,
-    proc_pid_exe_target, proc_pid_fdinfo_bytes, proc_pid_gid_map_bytes, proc_pid_loginuid_bytes,
-    proc_pid_maps_bytes, proc_pid_oom_score_adj_bytes, proc_pid_pagemap_read_at,
-    proc_pid_sessionid_bytes, proc_pid_setgroups_bytes, proc_pid_stat_bytes, proc_pid_status_bytes,
+    pid_status_inode, pid_string, pid_timens_offsets_inode, pid_uid_map_inode,
+    proc_kpageflags_read_at, proc_pid_cgroup_bytes, proc_pid_cmdline_bytes, proc_pid_comm_bytes,
+    proc_pid_environ_bytes, proc_pid_exe_target, proc_pid_fdinfo_bytes, proc_pid_gid_map_bytes,
+    proc_pid_loginuid_bytes, proc_pid_maps_bytes, proc_pid_oom_score_adj_bytes,
+    proc_pid_pagemap_read_at, proc_pid_sessionid_bytes, proc_pid_setgroups_bytes,
+    proc_pid_stat_bytes, proc_pid_status_bytes, proc_pid_timens_offsets_bytes,
     proc_pid_uid_map_bytes, proc_pid_write_gid_map, proc_pid_write_oom_score_adj,
-    proc_pid_write_setgroups, proc_pid_write_uid_map,
+    proc_pid_write_setgroups, proc_pid_write_timens_offsets, proc_pid_write_uid_map,
 };
 use pid_paths::lookup_proc_pid_path;
 use root::{

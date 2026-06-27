@@ -90,6 +90,7 @@ bitflags! {
         const VFORK = 0x0000_4000;
         const PARENT = 0x0000_8000;
         const NEWPID = 0x2000_0000;
+        const NEWTIME = 0x0000_0080;
         const NEWNS = 0x0002_0000;
         const SYSVSEM = 0x0004_0000;
         const NEWCGROUP = 0x0200_0000;
@@ -120,6 +121,7 @@ bitflags! {
         const NEWUSER = CloneFlags::NEWUSER.bits();
         const NEWPID = CloneFlags::NEWPID.bits();
         const NEWNET = CloneFlags::NEWNET.bits();
+        const NEWTIME = CloneFlags::NEWTIME.bits();
     }
 }
 
@@ -131,6 +133,7 @@ bitflags! {
         const NEWPID = CloneFlags::NEWPID.bits() as u32;
         const NEWUTS = CloneFlags::NEWUTS.bits() as u32;
         const NEWNET = CloneFlags::NEWNET.bits() as u32;
+        const NEWTIME = CloneFlags::NEWTIME.bits() as u32;
     }
 }
 
@@ -1448,6 +1451,7 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
             | CloneFlags::NEWUSER.bits()
             | CloneFlags::NEWPID.bits()
             | CloneFlags::NEWNET.bits()
+            | CloneFlags::NEWTIME.bits()
             | CloneFlags::CLEAR_SIGHAND.bits()
             | CloneFlags::PARENT_SETTID.bits()
             | CloneFlags::CHILD_SETTID.bits()
@@ -1496,6 +1500,22 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
     };
     if clone_flags.contains(CloneFlags::NEWNET) {
         child_process.lock().net_namespace = NetNamespace::new();
+    }
+    if clone_flags.contains(CloneFlags::NEWTIME) {
+        let (parent_time_namespace, user_namespace) = {
+            let current = current.lock();
+            (
+                current.time_namespace.clone(),
+                current.user_namespace.clone(),
+            )
+        };
+        let mut child = child_process.lock();
+        child.time_namespace = NamespaceObject::dynamic_with_parent(
+            NamespaceKind::Time,
+            Some(&parent_time_namespace),
+            Some(&user_namespace),
+        );
+        child.time_namespace_state = crate::process::time_namespace::TimeNamespace::new();
     }
     if clone_flags.contains(CloneFlags::NEWNS) {
         let (parent_mnt_namespace, user_namespace, shared_with_parent) = {

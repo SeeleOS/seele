@@ -23,6 +23,7 @@ use crate::thread::misc::ThreadID;
 use crate::{process::misc::ProcessID, thread::thread::Thread};
 use fd_table::FdTableRef;
 use fs_context::FsContextRef;
+use time_namespace::{TimeNamespace, TimeNamespaceRef};
 
 pub mod acct;
 pub mod execve;
@@ -35,6 +36,7 @@ pub mod misc;
 pub mod new;
 pub mod object;
 pub mod ptrace;
+pub mod time_namespace;
 pub mod wait;
 
 #[cfg(test)]
@@ -225,6 +227,10 @@ pub struct Process {
     pub pid_namespace_local_pid: Option<u64>,
     pub pid_namespace_parent_inode: Option<u64>,
     pub pending_child_pid_namespace: Option<NamespaceRef>,
+    pub time_namespace: NamespaceRef,
+    pub time_namespace_state: TimeNamespaceRef,
+    pub pending_child_time_namespace: Option<NamespaceRef>,
+    pub pending_child_time_namespace_state: Option<TimeNamespaceRef>,
     pub user_namespace: NamespaceRef,
     pub uts_namespace: NamespaceRef,
     pub mount_namespace_snapshot: Option<Vec<u64>>,
@@ -317,6 +323,10 @@ impl Default for Process {
             pid_namespace_local_pid: None,
             pid_namespace_parent_inode: None,
             pending_child_pid_namespace: None,
+            time_namespace: NamespaceObject::new(NamespaceKind::Time, 0xEFFF_FFFA),
+            time_namespace_state: TimeNamespace::new(),
+            pending_child_time_namespace: None,
+            pending_child_time_namespace_state: None,
             user_namespace: NamespaceObject::new(NamespaceKind::User, 0xEFFF_FFFD),
             uts_namespace: NamespaceObject::new(NamespaceKind::Uts, 0xEFFF_FFFE),
             mount_namespace_snapshot: None,

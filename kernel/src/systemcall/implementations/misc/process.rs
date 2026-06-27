@@ -106,6 +106,7 @@ define_syscall!(Unshare, |flags: u64| {
         | UnshareFlags::NEWUTS
         | UnshareFlags::NEWIPC
         | UnshareFlags::NEWPID
+        | UnshareFlags::NEWTIME
         | UnshareFlags::NEWUSER)
         .bits();
     let supported_privileged_namespace_flags =
@@ -147,6 +148,15 @@ define_syscall!(Unshare, |flags: u64| {
                 Some(&process.pid_namespace),
                 Some(&process.user_namespace),
             ));
+        }
+        if flags & UnshareFlags::NEWTIME.bits() != 0 {
+            process.pending_child_time_namespace = Some(NamespaceObject::dynamic_with_parent(
+                NamespaceKind::Time,
+                Some(&process.time_namespace),
+                Some(&process.user_namespace),
+            ));
+            process.pending_child_time_namespace_state =
+                Some(crate::process::time_namespace::TimeNamespace::new());
         }
     }
     if flags & UnshareFlags::NEWUSER.bits() != 0 {
@@ -197,18 +207,22 @@ define_syscall!(Setns, |fd: ObjectRef, flags: SetnsFlags| {
         .and_then(|file| file.device_backing_object())
         .unwrap_or(fd);
 
-    let process = get_current_process();
-    let mut process = process.lock();
-    let slot = CAP_SYS_ADMIN / 32;
-    let mask = 1u32 << (CAP_SYS_ADMIN % 32);
-    if process.capability_effective[slot] & mask == 0 {
-        return Err(SyscallError::PermissionDenied);
+    {
+        let process = get_current_process();
+        let process = process.lock();
+        let slot = CAP_SYS_ADMIN / 32;
+        let mask = 1u32 << (CAP_SYS_ADMIN % 32);
+        if process.capability_effective[slot] & mask == 0 {
+            return Err(SyscallError::PermissionDenied);
+        }
     }
 
     if let Ok(net_namespace) = namespace_object.clone().as_net_namespace() {
         if !flags.is_empty() && flags != SetnsFlags::NEWNET {
             return Err(SyscallError::InvalidArguments);
         }
+        let process = get_current_process();
+        let mut process = process.lock();
         process.net_namespace = net_namespace;
         return Ok(0);
     }
@@ -216,6 +230,25 @@ define_syscall!(Setns, |fd: ObjectRef, flags: SetnsFlags| {
     let namespace = namespace_object
         .as_namespace()
         .map_err(|_| SyscallError::InvalidArguments)?;
+    let time_namespace_state = if namespace.kind() == NamespaceKind::Time {
+        let namespace_inode = namespace.inode();
+        Some(
+            MANAGER
+                .lock()
+                .processes
+                .values()
+                .find_map(|candidate| {
+                    let candidate = candidate.lock();
+                    (candidate.time_namespace.inode() == namespace_inode)
+                        .then(|| candidate.time_namespace_state.clone())
+                })
+                .unwrap_or_else(crate::process::time_namespace::TimeNamespace::new),
+        )
+    } else {
+        None
+    };
+    let process = get_current_process();
+    let mut process = process.lock();
     match namespace.kind() {
         NamespaceKind::Ipc if flags.is_empty() || flags == SetnsFlags::NEWIPC => {
             process.ipc_namespace = namespace;
@@ -223,6 +256,11 @@ define_syscall!(Setns, |fd: ObjectRef, flags: SetnsFlags| {
         }
         NamespaceKind::Uts if flags.is_empty() || flags == SetnsFlags::NEWUTS => {
             process.uts_namespace = namespace;
+            Ok(0)
+        }
+        NamespaceKind::Time if flags.is_empty() || flags == SetnsFlags::NEWTIME => {
+            process.pending_child_time_namespace = Some(namespace.clone());
+            process.pending_child_time_namespace_state = time_namespace_state;
             Ok(0)
         }
         NamespaceKind::Mnt | NamespaceKind::Pid => Err(SyscallError::InvalidArguments),
@@ -251,6 +289,7 @@ fn validate_clone_flags(flags: CloneFlags, exit_signal: u64) -> Result<(), Sysca
         | CloneFlags::NEWNET
         | CloneFlags::NEWNS
         | CloneFlags::NEWPID
+        | CloneFlags::NEWTIME
         | CloneFlags::NEWUTS;
     if flags.intersects(namespace_flags) {
         const CAP_SYS_ADMIN: usize = 21;

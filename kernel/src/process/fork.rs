@@ -46,6 +46,14 @@ impl Process {
                 .pending_child_pid_namespace
                 .take()
                 .unwrap_or_else(|| parent_locked.pid_namespace.clone());
+            let child_time_namespace = parent_locked
+                .pending_child_time_namespace
+                .take()
+                .unwrap_or_else(|| parent_locked.time_namespace.clone());
+            let child_time_namespace_state = parent_locked
+                .pending_child_time_namespace_state
+                .take()
+                .unwrap_or_else(|| parent_locked.time_namespace_state.clone());
             let child_pid_namespace_parent_inode =
                 if Arc::ptr_eq(&child_pid_namespace, &parent_locked.pid_namespace) {
                     parent_locked.pid_namespace_parent_inode
@@ -151,6 +159,10 @@ impl Process {
                 pid_namespace_local_pid: child_pid_namespace_local_pid,
                 pid_namespace_parent_inode: child_pid_namespace_parent_inode,
                 pending_child_pid_namespace: None,
+                time_namespace: child_time_namespace,
+                time_namespace_state: child_time_namespace_state,
+                pending_child_time_namespace: None,
+                pending_child_time_namespace_state: None,
                 user_namespace: parent_locked.user_namespace.clone(),
                 uts_namespace: parent_locked.uts_namespace.clone(),
                 mount_namespace_snapshot: parent_locked.mount_namespace_snapshot.clone(),

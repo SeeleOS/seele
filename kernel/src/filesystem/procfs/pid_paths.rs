@@ -124,6 +124,15 @@ pub(super) fn lookup_proc_pid_path(parts: &[&str]) -> FSResult<FileLike> {
                 move |buffer| proc_pid_write_setgroups(pid, buffer),
             ))
         }
+        [pid, "timens_offsets"] => {
+            let pid = parse_pid(pid)?;
+            Ok(proc_rw_file(
+                "timens_offsets",
+                pid_timens_offsets_inode(pid),
+                move || proc_pid_timens_offsets_bytes(pid).unwrap_or_default(),
+                move |buffer| proc_pid_write_timens_offsets(pid, buffer),
+            ))
+        }
         [pid, "root"] => {
             let pid = parse_pid(pid)?;
             Ok(proc_symlink("root", pid_root_inode(pid), "/".into()))

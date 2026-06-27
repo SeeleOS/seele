@@ -33,6 +33,7 @@ pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("uid_map".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("gid_map".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("setgroups".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("timens_offsets".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("exe".into(), DirectoryContentType::Symlink),
         DirectoryContentInfo::new("root".into(), DirectoryContentType::Symlink),
         DirectoryContentInfo::new("ns".into(), DirectoryContentType::Directory),
@@ -41,11 +42,19 @@ pub(super) fn pid_dir_entries() -> Vec<DirectoryContentInfo> {
     ]
 }
 
-const PROC_NAMESPACE_NAMES: [&str; 8] =
-    ["cgroup", "ipc", "mnt", "net", "pid", "time", "user", "uts"];
+const PROC_NAMESPACE_NAMES: [&str; 9] = [
+    "cgroup",
+    "ipc",
+    "mnt",
+    "net",
+    "pid",
+    "time",
+    "time_for_children",
+    "user",
+    "uts",
+];
 
 const PROC_CGROUP_INIT_INO: u64 = 0xEFFF_FFFB;
-const PROC_TIME_INIT_INO: u64 = 0xEFFF_FFFA;
 const USER_HZ: u64 = 100;
 
 fn default_user_namespace_map(id: u32) -> String {
@@ -630,6 +639,10 @@ pub(super) fn pid_setgroups_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 12
 }
 
+pub(super) fn pid_timens_offsets_inode(pid: ProcessID) -> u64 {
+    pid_dir_inode(pid) + 18
+}
+
 pub(super) fn pid_root_inode(pid: ProcessID) -> u64 {
     pid_dir_inode(pid) + 13
 }
@@ -685,7 +698,20 @@ pub(super) fn pid_ns_inode(pid: ProcessID, name: &str) -> FSResult<u64> {
             .lock()
             .pid_namespace
             .inode()),
-        "time" => Ok(PROC_TIME_INIT_INO),
+        "time" => Ok(get_process_with_pid(pid)
+            .map_err(|_| FSError::NotFound)?
+            .lock()
+            .time_namespace
+            .inode()),
+        "time_for_children" => {
+            let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+            let process = process.lock();
+            Ok(process
+                .pending_child_time_namespace
+                .as_ref()
+                .unwrap_or(&process.time_namespace)
+                .inode())
+        }
         "user" => Ok(get_process_with_pid(pid)
             .map_err(|_| FSError::NotFound)?
             .lock()
@@ -737,6 +763,24 @@ pub(super) fn pid_ns_object(pid: ProcessID, name: &str) -> FSResult<Option<Objec
                 .pid_namespace
                 .clone(),
         )),
+        "time" => Ok(Some(
+            get_process_with_pid(pid)
+                .map_err(|_| FSError::NotFound)?
+                .lock()
+                .time_namespace
+                .clone(),
+        )),
+        "time_for_children" => {
+            let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+            let process = process.lock();
+            Ok(Some(
+                process
+                    .pending_child_time_namespace
+                    .as_ref()
+                    .unwrap_or(&process.time_namespace)
+                    .clone(),
+            ))
+        }
         "user" => Ok(Some(
             get_process_with_pid(pid)
                 .map_err(|_| FSError::NotFound)?
@@ -746,6 +790,59 @@ pub(super) fn pid_ns_object(pid: ProcessID, name: &str) -> FSResult<Option<Objec
         )),
         _ => Ok(None),
     }
+}
+
+pub(super) fn proc_pid_timens_offsets_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    let process = process.lock();
+    Ok(process
+        .pending_child_time_namespace_state
+        .as_ref()
+        .unwrap_or(&process.time_namespace_state)
+        .offsets_text()
+        .into_bytes())
+}
+
+pub(super) fn proc_pid_write_timens_offsets(pid: ProcessID, buffer: &[u8]) -> FSResult<usize> {
+    let content = core::str::from_utf8(buffer).map_err(|_| FSError::Other)?;
+    let mut monotonic = None;
+    let mut boottime = None;
+
+    for line in content.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(clock) = fields.next() else {
+            continue;
+        };
+        let sec = fields
+            .next()
+            .and_then(|value| value.parse::<i64>().ok())
+            .ok_or(FSError::Other)?;
+        let nsec = fields
+            .next()
+            .and_then(|value| value.parse::<i64>().ok())
+            .ok_or(FSError::Other)?;
+        let offset_ns = sec
+            .checked_mul(1_000_000_000)
+            .and_then(|value| value.checked_add(nsec))
+            .ok_or(FSError::Other)?;
+        match clock {
+            "monotonic" => monotonic = Some(offset_ns),
+            "boottime" => boottime = Some(offset_ns),
+            _ => return Err(FSError::Other),
+        }
+    }
+
+    let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
+    let process = process.lock();
+    let state = process
+        .pending_child_time_namespace_state
+        .as_ref()
+        .unwrap_or(&process.time_namespace_state);
+    state.set_offsets(
+        monotonic.unwrap_or_else(|| state.monotonic_offset_ns()),
+        boottime.unwrap_or_else(|| state.boottime_offset_ns()),
+    );
+    Ok(buffer.len())
 }
 
 pub(super) fn fd_target(pid: ProcessID, fd: &str) -> FSResult<String> {

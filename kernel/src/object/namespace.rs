@@ -30,6 +30,7 @@ pub enum NamespaceKind {
     Ipc,
     Mnt,
     Pid,
+    Time,
     User,
     Uts,
 }
@@ -93,6 +94,7 @@ impl NamespaceObject {
             NamespaceKind::Ipc => "ipc",
             NamespaceKind::Mnt => "mnt",
             NamespaceKind::Pid => "pid",
+            NamespaceKind::Time => "time",
             NamespaceKind::User => "user",
             NamespaceKind::Uts => "uts",
         }
@@ -135,6 +137,7 @@ impl Configuratable for NamespaceObject {
                     process.ipc_namespace.clone(),
                     process.mnt_namespace.clone(),
                     process.pid_namespace.clone(),
+                    process.time_namespace.clone(),
                     process.user_namespace.clone(),
                     process.uts_namespace.clone(),
                 ]
