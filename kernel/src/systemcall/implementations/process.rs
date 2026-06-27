@@ -13,7 +13,6 @@ use crate::{
     memory::user_safe,
     misc::{
         c_types::{CString, CVec},
-        others::KernelFrom,
         signal::{SigInfo, SignalHandlingType},
     },
     object::misc::get_object_current_process,
@@ -448,8 +447,59 @@ fn execve_path_from_raw(path: CString) -> Result<String, SyscallError> {
     unreachable!()
 }
 
+const EXEC_ARG_MAX: usize = 2 * 1024 * 1024;
+const EXEC_MAX_ARG_STRLEN: usize = 128 * 1024;
+const EXEC_MAX_ARG_STRINGS: usize = 0x7fff_ffff;
+
+fn execve_string_from_raw(value: CString, total_bytes: &mut usize) -> Result<String, SyscallError> {
+    if value.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let mut out = String::new();
+    for index in 0..=EXEC_MAX_ARG_STRLEN {
+        let byte =
+            user_safe::read(unsafe { value.add(index) }).map_err(|_| SyscallError::BadAddress)?;
+        if byte == 0 {
+            *total_bytes = total_bytes
+                .checked_add(out.len() + 1)
+                .ok_or(SyscallError::ArgumentListTooLong)?;
+            if *total_bytes > EXEC_ARG_MAX {
+                return Err(SyscallError::ArgumentListTooLong);
+            }
+            return Ok(out);
+        }
+
+        if index == EXEC_MAX_ARG_STRLEN {
+            return Err(SyscallError::ArgumentListTooLong);
+        }
+        out.push(byte as char);
+    }
+
+    unreachable!()
+}
+
 fn execve_strings_from_raw(values: CVec<CString>) -> Result<Vec<String>, SyscallError> {
-    Vec::k_from(values).map_err(|err| err.as_syscall_error())
+    if values.is_null() {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::new();
+    let mut total_bytes = 0;
+    for index in 0..=EXEC_MAX_ARG_STRINGS {
+        let ptr =
+            user_safe::read(unsafe { values.add(index) }).map_err(|_| SyscallError::BadAddress)?;
+        if ptr.is_null() {
+            return Ok(out);
+        }
+
+        if index == EXEC_MAX_ARG_STRINGS {
+            return Err(SyscallError::ArgumentListTooLong);
+        }
+        out.push(execve_string_from_raw(ptr, &mut total_bytes)?);
+    }
+
+    unreachable!()
 }
 
 fn check_execve_permissions(path: &Path) -> Result<(), SyscallError> {
@@ -1241,6 +1291,22 @@ mod tests {
         write_user_value(page + 704, &envp);
         expect_errno(
             SyscallArgs::new([page + 512, page + 640, page + 704, 0, 0, 0]).call::<Execve>(),
+            SyscallError::FileNotFound,
+        );
+
+        let long_page = get_current_process()
+            .lock()
+            .addrspace
+            .allocate_user(3)
+            .0
+            .as_u64();
+        let long_arg = [b'a'; 5000];
+        user_safe::write_buffer(long_page as *mut u8, &long_arg).unwrap();
+        user_safe::write((long_page + long_arg.len() as u64) as *mut u8, &0u8).unwrap();
+        let long_argv = [page + 512, long_page, 0];
+        write_user_value(page + 768, &long_argv);
+        expect_errno(
+            SyscallArgs::new([page + 512, page + 768, page + 704, 0, 0, 0]).call::<Execve>(),
             SyscallError::FileNotFound,
         );
     }
