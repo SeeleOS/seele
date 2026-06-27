@@ -300,6 +300,8 @@ pub enum SyscallNumber {
     Cachestat = 451,
     Fchmodat2 = 452,
     OpenTreeAttr = 467,
+    FileGetattr = 468,
+    FileSetattr = 469,
 }
 
 impl SyscallNumber {

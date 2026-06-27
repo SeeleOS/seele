@@ -48,6 +48,7 @@ use core::{
 use ext4plus::Ext4 as Ext4Inner;
 
 mod directory;
+mod file_attr;
 mod fsinfo;
 mod metadata;
 mod mount;
@@ -76,6 +77,7 @@ pub(crate) use types::{
 use xattr_helpers::*;
 
 pub use directory::*;
+pub use file_attr::*;
 pub use fsinfo::*;
 pub use mount::*;
 pub use open::*;
@@ -164,6 +166,11 @@ mod tests {
         filesystem_xattr_syscalls,
         "filesystem xattr syscalls follow linux rules",
         filesystem_xattr_syscalls_follow_linux_rules
+    );
+    crate::test!(
+        filesystem_file_attr_syscalls,
+        "filesystem file_attr syscalls follow linux rules",
+        filesystem_file_attr_syscalls_follow_linux_rules
     );
     crate::test!(
         filesystem_statx_syscalls,
@@ -2818,6 +2825,164 @@ mod tests {
             SyscallArgs::new([user_page + 192, user_page + 128, user_page + 384, 16, 0, 0])
                 .call::<Getxattr>(),
             SyscallError::FileNotFound,
+        );
+
+        close_test_fd(fd);
+        for path in cleanup_paths {
+            let _ = VirtualFS.lock().delete_file(Path::new(path));
+        }
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct TestLinuxFileAttr {
+        fa_xflags: u64,
+        fa_extsize: u32,
+        fa_nextents: u32,
+        fa_projid: u32,
+        fa_cowextsize: u32,
+    }
+
+    fn filesystem_file_attr_syscalls_follow_linux_rules() {
+        const AT_FDCWD: u64 = (-100i32) as u64;
+        const AT_EMPTY_PATH: u64 = 0x1000;
+        const FILE_ATTR_SIZE_LATEST: u64 = 24;
+        const FS_IMMUTABLE_FL: u64 = 0x10;
+        const FS_APPEND_FL: u64 = 0x20;
+        const FS_XFLAG_EXTSIZE: u64 = 0x800;
+
+        let base_path = Path::new("/tmp/syscall-file-attr-test");
+        let cleanup_paths = [
+            "/tmp/syscall-file-attr-test/file",
+            "/tmp/syscall-file-attr-test",
+        ];
+        for path in cleanup_paths {
+            let _ = VirtualFS.lock().delete_file(Path::new(path));
+        }
+        VirtualFS.lock().create_dir(base_path.clone()).unwrap();
+        VirtualFS
+            .lock()
+            .create_file(Path::new("/tmp/syscall-file-attr-test/file"))
+            .unwrap();
+
+        let user_page = allocate_user_test_page();
+        write_user_cstr(user_page, b"/tmp/syscall-file-attr-test/file\0");
+        let attr_ptr = user_page + 512;
+
+        expect_ok(
+            SyscallArgs::new([AT_FDCWD, user_page, attr_ptr, FILE_ATTR_SIZE_LATEST, 0, 0])
+                .call::<FileGetattr>(),
+            0,
+        );
+        let initial = read_user_value::<TestLinuxFileAttr>(attr_ptr);
+        assert_eq!(initial.fa_xflags, 0);
+        assert_eq!(initial.fa_extsize, 0);
+        assert_eq!(initial.fa_nextents, 0);
+        assert_eq!(initial.fa_projid, 0);
+        assert_eq!(initial.fa_cowextsize, 0);
+
+        write_user_value(
+            attr_ptr,
+            &TestLinuxFileAttr {
+                fa_xflags: FS_IMMUTABLE_FL | FS_APPEND_FL,
+                ..Default::default()
+            },
+        );
+        expect_ok(
+            SyscallArgs::new([AT_FDCWD, user_page, attr_ptr, FILE_ATTR_SIZE_LATEST, 0, 0])
+                .call::<FileSetattr>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([AT_FDCWD, user_page, attr_ptr, FILE_ATTR_SIZE_LATEST, 0, 0])
+                .call::<FileGetattr>(),
+            0,
+        );
+        let updated = read_user_value::<TestLinuxFileAttr>(attr_ptr);
+        assert_eq!(updated.fa_xflags, FS_IMMUTABLE_FL | FS_APPEND_FL);
+
+        write_user_value(
+            attr_ptr,
+            &TestLinuxFileAttr {
+                fa_xflags: FS_XFLAG_EXTSIZE,
+                fa_extsize: 4096,
+                ..Default::default()
+            },
+        );
+        expect_errno(
+            SyscallArgs::new([AT_FDCWD, user_page, attr_ptr, FILE_ATTR_SIZE_LATEST, 0, 0])
+                .call::<FileSetattr>(),
+            SyscallError::OperationNotSupported,
+        );
+
+        write_user_value(attr_ptr, &TestLinuxFileAttr::default());
+        expect_errno(
+            SyscallArgs::new([AT_FDCWD, user_page, attr_ptr, 0, 0, 0]).call::<FileGetattr>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([AT_FDCWD, user_page, attr_ptr, 4097, 0, 0]).call::<FileGetattr>(),
+            SyscallError::ArgumentListTooLong,
+        );
+        expect_errno(
+            SyscallArgs::new([
+                AT_FDCWD,
+                user_page,
+                attr_ptr,
+                FILE_ATTR_SIZE_LATEST,
+                0xffff_ffff,
+                0,
+            ])
+            .call::<FileGetattr>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([AT_FDCWD, 0, attr_ptr, FILE_ATTR_SIZE_LATEST, 0, 0])
+                .call::<FileGetattr>(),
+            SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([AT_FDCWD, user_page, 0, FILE_ATTR_SIZE_LATEST, 0, 0])
+                .call::<FileSetattr>(),
+            SyscallError::BadAddress,
+        );
+        write_user_cstr(user_page + 128, b"file\0");
+        expect_errno(
+            SyscallArgs::new([
+                u64::MAX,
+                user_page + 128,
+                attr_ptr,
+                FILE_ATTR_SIZE_LATEST,
+                0,
+                0,
+            ])
+            .call::<FileGetattr>(),
+            SyscallError::BadFileDescriptor,
+        );
+
+        let fd = expect_fd(
+            SyscallArgs::new([
+                AT_FDCWD,
+                user_page,
+                OpenFlags::empty().bits() as u64,
+                0,
+                0,
+                0,
+            ])
+            .call::<OpenAt>(),
+        );
+        write_user_cstr(user_page + 128, b"\0");
+        expect_ok(
+            SyscallArgs::new([
+                fd as u64,
+                user_page + 128,
+                attr_ptr,
+                FILE_ATTR_SIZE_LATEST,
+                AT_EMPTY_PATH,
+                0,
+            ])
+            .call::<FileGetattr>(),
+            0,
         );
 
         close_test_fd(fd);

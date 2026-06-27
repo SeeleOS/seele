@@ -317,5 +317,7 @@ define_syscall_table!(
     Cachestat,
     Fchmodat2,
     OpenTreeAttr,
+    FileGetattr,
+    FileSetattr,
     Vmsplice,
 );
