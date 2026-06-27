@@ -254,6 +254,7 @@ impl ThreadManager {
 
     pub fn cleanup_exited_threads(&mut self) -> Vec<ProcessRef> {
         let mut to_remove = Vec::new();
+        let current_thread = crate::smp::try_current_thread();
 
         self.flush_pending_thread_exits();
 
@@ -269,10 +270,18 @@ impl ThreadManager {
                 parent_arc = thread.parent.clone();
                 self.threads.remove(&thread.id);
                 thread_id = thread.id;
-                self.deferred_kernel_stacks
-                    .extend(thread.kernel_stack.take());
-                self.deferred_kernel_stacks
-                    .extend(thread.scheduler_stack.take());
+                if current_thread
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &ele))
+                {
+                    self.deferred_kernel_stacks
+                        .extend(thread.kernel_stack.take());
+                    self.deferred_kernel_stacks
+                        .extend(thread.scheduler_stack.take());
+                } else {
+                    let _ = thread.kernel_stack.take();
+                    let _ = thread.scheduler_stack.take();
+                }
 
                 drop(thread);
             }
