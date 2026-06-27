@@ -309,7 +309,7 @@ impl BpfValue {
     fn scalar(&self) -> u64 {
         match self {
             Self::Scalar(value) => *value,
-            _ => 0,
+            Self::StackPtr(_) | Self::Map(_) | Self::MapValuePtr { .. } => 1,
         }
     }
 }
