@@ -22,13 +22,16 @@ use crate::{
         config::ConfigurateRequest,
         control::control_object,
         device::get_device,
-        file_locks::{flock_lock, release_fd_entry_locks},
+        file_locks::flock_lock,
         linux_ioctl::{LinuxIoctlOp, LinuxIoctlTarget, socket_raw_ioctl_op},
         memfd::create_memfd_object,
         misc::{ObjectRef, get_object_current_process},
         traits::{Readable, Statable},
     },
-    process::{FdEntry, FdFlags, manager::get_current_process, misc::with_current_process},
+    process::{
+        FdEntry, FdFlags, manager::get_current_process, misc::with_current_process,
+        object::release_fd_entry_resources,
+    },
     signal::{Signal, send_signal_to_process},
     systemcall::utils::{SyscallError, SyscallImpl, SyscallResult},
     thread::get_current_thread,
@@ -89,9 +92,9 @@ fn iovec_total_len(iovs: &[LinuxIovec]) -> Result<usize, SyscallError> {
     })
 }
 
-fn release_closed_fd_locks(pid: crate::process::misc::ProcessID, entries: Vec<FdEntry>) {
+fn release_closed_fd_entries(pid: crate::process::misc::ProcessID, entries: Vec<FdEntry>) {
     for entry in entries {
-        release_fd_entry_locks(pid, &entry);
+        release_fd_entry_resources(pid, &entry);
     }
 }
 
@@ -1411,7 +1414,7 @@ define_syscall!(
             }
         }
 
-        release_closed_fd_locks(pid, closed_entries);
+        release_closed_fd_entries(pid, closed_entries);
 
         Ok(0)
     }
@@ -1594,13 +1597,19 @@ mod tests {
         assert_fd_flags(fd3, FdFlags::empty());
         assert_eq!(occupied_fd_count(), base_count + 4);
 
+        let expected_count_after_close_range = occupied_fd_count()
+            - (fd1..=fd2)
+                .filter(|fd| get_object_current_process(*fd as u64).is_ok())
+                .count();
         expect_ok(
             SyscallArgs::new([fd1 as u64, fd2 as u64, 0, 0, 0, 0]).call::<CloseRange>(),
             0,
         );
         assert!(get_object_current_process(fd1 as u64).is_err());
         assert!(get_object_current_process(fd2 as u64).is_err());
-        assert_eq!(occupied_fd_count(), base_count + 2);
+        assert_eq!(occupied_fd_count(), expected_count_after_close_range);
+        assert!(get_object_current_process(fd0 as u64).is_ok());
+        assert!(get_object_current_process(fd3 as u64).is_ok());
 
         expect_errno(
             SyscallArgs::new([fd0 as u64, fd3 as u64, 1, 0, 0, 0]).call::<CloseRange>(),
