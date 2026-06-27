@@ -5,7 +5,7 @@ use alloc::{
 };
 
 use crate::{
-    misc::{profile, time::Time},
+    misc::{profile, signal::SignalHandlingType, time::Time},
     object::{
         error::ObjectError,
         misc::{ObjectRef, ObjectResult},
@@ -483,19 +483,38 @@ pub fn block_current(block_type: BlockType) {
     finish_block_current();
 }
 
+fn has_interrupting_pending_signal() -> bool {
+    let process = get_current_process();
+    {
+        let mut process = process.lock();
+        for signal in [Signal::SIGCHLD, Signal::SIGURG, Signal::SIGWINCH] {
+            let signal_bits = Signals::from(signal);
+            if process.pending_signals.contains(signal_bits)
+                && matches!(
+                    process.signal_actions[signal.index()].handling_type,
+                    SignalHandlingType::Default | SignalHandlingType::Ignore
+                )
+            {
+                process.pending_signals.remove(signal_bits);
+                process.pending_signal_info[signal.index()] = None;
+            }
+        }
+    }
+
+    let process_has_pending_signals = !process.lock().pending_signals.is_empty();
+    let thread_has_pending_signals = !current_thread_ref().lock().pending_signals.is_empty();
+    process_has_pending_signals || thread_has_pending_signals
+}
+
 // Avoid sleeping forever in interruptible waits by re-checking for pending
 // signals before and after blocking
 pub fn block_current_with_sig_check(block_type: BlockType) -> ObjectResult<()> {
-    let process_has_pending_signals = !get_current_process().lock().pending_signals.is_empty();
-    let thread_has_pending_signals = !current_thread_ref().lock().pending_signals.is_empty();
-    if process_has_pending_signals || thread_has_pending_signals {
+    if has_interrupting_pending_signal() {
         return Err(ObjectError::Interrupted);
     }
     prepare_block_current(block_type);
     finish_block_current();
-    let process_has_pending_signals = !get_current_process().lock().pending_signals.is_empty();
-    let thread_has_pending_signals = !current_thread_ref().lock().pending_signals.is_empty();
-    if process_has_pending_signals || thread_has_pending_signals {
+    if has_interrupting_pending_signal() {
         return Err(ObjectError::Interrupted);
     }
     Ok(())
