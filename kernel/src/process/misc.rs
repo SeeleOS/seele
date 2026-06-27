@@ -5,7 +5,10 @@ use alloc::{string::String, vec::Vec};
 use crate::{
     define_with_accessor,
     elfloader::ElfInfo,
-    filesystem::{absolute_path::AbsolutePath, errors::FSError, vfs_operations::resolve_dir_path},
+    filesystem::{
+        absolute_path::AbsolutePath, errors::FSError, procfs::proc_pid_max,
+        vfs_operations::resolve_dir_path,
+    },
     misc::{stack_builder::StackBuilder, time::Time},
     process::{
         Process, ProcessRef,
@@ -151,9 +154,16 @@ fn namespace_id_from_map(kernel_id: u32, map: Option<&str>) -> u32 {
 pub struct ProcessID(pub u64);
 
 pub(crate) fn next_linux_task_id() -> u64 {
-    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    static LAST_ID: AtomicU64 = AtomicU64::new(0);
 
-    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+    let previous = LAST_ID.load(Ordering::Relaxed);
+    let candidate = if previous >= proc_pid_max() {
+        1
+    } else {
+        previous + 1
+    };
+    LAST_ID.store(candidate, Ordering::Relaxed);
+    candidate
 }
 
 impl ProcessID {

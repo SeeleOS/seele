@@ -5,6 +5,7 @@ use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
     filesystem::cgroupfs::remove_pid_cgroup_path,
+    filesystem::procfs::proc_pid_max,
     ipc::sysv_shm::detach_all_process_mappings,
     object::linux_anon::wake_pidfd_for_process_with_manager,
     process::{Process, ProcessExitStatus, ProcessRef, misc::ProcessID},
@@ -29,6 +30,18 @@ pub struct Manager {
 }
 
 impl Manager {
+    pub fn allocate_process_id(&self) -> ProcessID {
+        let pid_max = proc_pid_max();
+        for _ in 0..pid_max {
+            let pid = ProcessID::new();
+            if !self.processes.contains_key(&pid) {
+                return pid;
+            }
+        }
+
+        ProcessID(1)
+    }
+
     pub fn init(&mut self) {
         without_interrupts(|| {
             let kernel_process = Process::empty();

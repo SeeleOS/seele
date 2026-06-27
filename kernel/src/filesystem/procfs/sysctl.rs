@@ -8,6 +8,7 @@ const DEFAULT_NR_OPEN: u64 = 1_048_576;
 const DEFAULT_PIPE_MAX_SIZE: u64 = 1_048_576;
 const DEFAULT_PIPE_USER_PAGES_SOFT: u64 = 16_384;
 const DEFAULT_PID_MAX: u64 = 4_194_304;
+const MIN_PID_MAX: u64 = 301;
 const DEFAULT_KEYS_ROOT_MAXKEYS: u64 =
     crate::systemcall::implementations::KEY_ROOT_DEFAULT_MAX_KEYS as u64;
 const DEFAULT_KEYS_ROOT_MAXBYTES: u64 =
@@ -212,6 +213,12 @@ pub(super) fn proc_vm_entries() -> Vec<DirectoryContentInfo> {
 
 pub(super) fn proc_sysctl_value_bytes(value: &AtomicU64) -> Vec<u8> {
     format!("{}\n", value.load(Ordering::Relaxed)).into_bytes()
+}
+
+pub(crate) fn proc_pid_max() -> u64 {
+    PROC_PID_MAX
+        .load(Ordering::Relaxed)
+        .clamp(MIN_PID_MAX, DEFAULT_PID_MAX)
 }
 
 pub(super) fn proc_net_ipv4_conf_lo_tag_bytes() -> Vec<u8> {

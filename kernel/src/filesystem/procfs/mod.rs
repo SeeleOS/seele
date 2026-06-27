@@ -78,8 +78,8 @@ use root::{
     proc_version_bytes,
 };
 use self_paths::{lookup_proc_self_path, proc_pid_namespace_file};
-pub(crate) use sysctl::proc_keys_quota_limits;
 use sysctl::*;
+pub(crate) use sysctl::{proc_keys_quota_limits, proc_pid_max};
 
 pub(crate) use nodes::ProcFile;
 pub(crate) use sysctl::PROC_NR_OPEN;

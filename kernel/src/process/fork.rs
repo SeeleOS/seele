@@ -23,7 +23,7 @@ impl Process {
                 "Forking. Parent Current RSP: {:x}",
                 current_thread.lock().snapshot.inner.rsp
             );
-            let pid = ProcessID::new();
+            let pid = MANAGER.lock().allocate_process_id();
 
             log::debug!("fork: parent {} -> child {}", parent_locked.pid.0, pid.0);
             let inherited_shm_mappings = parent_locked.sysv_shm_mappings.clone();
