@@ -259,8 +259,12 @@ define_syscall!(Setns, |fd: ObjectRef, flags: SetnsFlags| {
             Ok(0)
         }
         NamespaceKind::Time if flags.is_empty() || flags == SetnsFlags::NEWTIME => {
+            process.time_namespace = namespace.clone();
+            process.time_namespace_state = time_namespace_state
+                .clone()
+                .unwrap_or_else(crate::process::time_namespace::TimeNamespace::new);
             process.pending_child_time_namespace = Some(namespace.clone());
-            process.pending_child_time_namespace_state = time_namespace_state;
+            process.pending_child_time_namespace_state = Some(process.time_namespace_state.clone());
             Ok(0)
         }
         NamespaceKind::Mnt | NamespaceKind::Pid => Err(SyscallError::InvalidArguments),

@@ -267,11 +267,10 @@ fn itimer_to_linux_value(state: TimerState, clock: ClockId) -> LinuxItimerval {
 fn linux_clock_now_ns(clock_id: i32) -> Result<i64, SyscallError> {
     match clock_id {
         0 | 5 | 8 | 11 => Ok(KernelTime::current().as_nanoseconds() as i64),
-        1 => Ok((KernelTime::since_boot().as_nanoseconds() as i64)
+        1 | 4 | 6 => Ok((KernelTime::since_boot().as_nanoseconds() as i64)
             .saturating_add(current_monotonic_offset_ns())),
-        7 => Ok((KernelTime::since_boot().as_nanoseconds() as i64)
+        7 | 9 => Ok((KernelTime::since_boot().as_nanoseconds() as i64)
             .saturating_add(current_boottime_offset_ns())),
-        4 | 6 | 9 => Ok(KernelTime::since_boot().as_nanoseconds() as i64),
         2 | 3 => Ok(KernelTime::since_boot().as_nanoseconds().max(1) as i64),
         _ => Err(SyscallError::InvalidArguments),
     }
@@ -292,7 +291,7 @@ fn current_boottime_offset_ns() -> i64 {
 }
 
 fn monotonic_namespace_deadline_to_boot(deadline_ns: u64, clock_id: i32) -> KernelTime {
-    let offset = if clock_id == 7 {
+    let offset = if matches!(clock_id, 7 | 9) {
         current_boottime_offset_ns()
     } else {
         current_monotonic_offset_ns()
