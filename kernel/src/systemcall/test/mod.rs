@@ -320,6 +320,9 @@ pub(crate) struct CredentialSnapshot {
     pub(crate) capability_effective: [u32; 2],
     pub(crate) capability_permitted: [u32; 2],
     pub(crate) capability_inheritable: [u32; 2],
+    pub(crate) user_namespace_uid_map: Option<String>,
+    pub(crate) user_namespace_gid_map: Option<String>,
+    pub(crate) user_namespace_setgroups: Option<String>,
 }
 
 impl CredentialSnapshot {
@@ -336,6 +339,9 @@ impl CredentialSnapshot {
             capability_effective: process.capability_effective,
             capability_permitted: process.capability_permitted,
             capability_inheritable: process.capability_inheritable,
+            user_namespace_uid_map: process.user_namespace_uid_map.clone(),
+            user_namespace_gid_map: process.user_namespace_gid_map.clone(),
+            user_namespace_setgroups: process.user_namespace_setgroups.clone(),
         }
     }
 
@@ -359,6 +365,9 @@ impl CredentialSnapshot {
         process.capability_effective = self.capability_effective;
         process.capability_permitted = self.capability_permitted;
         process.capability_inheritable = self.capability_inheritable;
+        process.user_namespace_uid_map = self.user_namespace_uid_map;
+        process.user_namespace_gid_map = self.user_namespace_gid_map;
+        process.user_namespace_setgroups = self.user_namespace_setgroups;
     }
 }
 
