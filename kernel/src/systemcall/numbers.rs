@@ -89,6 +89,7 @@ pub enum SyscallNumber {
     Umask = 95,
     Gettimeofday = 96,
     Settimeofday = 164,
+    Adjtimex = 159,
     Utime = 132,
     Reboot = 169,
     Sethostname = 170,
@@ -243,6 +244,7 @@ pub enum SyscallNumber {
     Pwritev = 296,
     Prlimit64 = 302,
     NameToHandleAt = 303,
+    ClockAdjtime = 305,
     Splice = 275,
     Setns = 308,
     Getcpu = 309,
@@ -288,6 +290,7 @@ pub enum SyscallNumber {
     EpollPwait2 = 441,
     MountSetattr = 442,
     QuotactlFd = 443,
+    Cachestat = 451,
     Fchmodat2 = 452,
     OpenTreeAttr = 467,
 }

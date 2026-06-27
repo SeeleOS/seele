@@ -109,6 +109,8 @@ CONFIG_EXT4_FS=y
 CONFIG_NET=y
 CONFIG_UNIX=y
 CONFIG_PID_NS=y
+CONFIG_USER_NS=y
+CONFIG_NET_NS=y
 # CONFIG_AIO is not set
 EOF
 export KCONFIG_PATH=/tmp/seele-kernel.config

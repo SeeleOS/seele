@@ -26,7 +26,7 @@ use crate::{
         linux_ioctl::{LinuxIoctlOp, LinuxIoctlTarget, socket_raw_ioctl_op},
         memfd::create_memfd_object,
         misc::{ObjectRef, get_object_current_process},
-        traits::Readable,
+        traits::{Readable, Statable},
     },
     process::{FdEntry, FdFlags, manager::get_current_process, misc::with_current_process},
     signal::{Signal, send_signal_to_process},
@@ -46,6 +46,23 @@ const S_IFMT: u32 = 0o170000;
 const S_IFDIR: u32 = 0o040000;
 const S_IFBLK: u32 = 0o060000;
 const S_IFREG: u32 = 0o100000;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct LinuxCacheStatRange {
+    off: u64,
+    len: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxCacheStat {
+    nr_cache: u64,
+    nr_dirty: u64,
+    nr_writeback: u64,
+    nr_evicted: u64,
+    nr_recently_evicted: u64,
+}
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -1105,6 +1122,43 @@ define_syscall!(CopyFileRange, |fd_in: ObjectRef,
         update_copy_file_range_output_times(&fd_out)?;
     }
     Ok(copied)
+});
+
+define_syscall!(Cachestat, |fd: i32,
+                            range: *const LinuxCacheStatRange,
+                            stat: *mut LinuxCacheStat,
+                            flags: u32| {
+    if flags != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if range.is_null() || stat.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+
+    let object =
+        get_object_current_process(fd as u64).map_err(|_| SyscallError::BadFileDescriptor)?;
+    let file = object
+        .clone()
+        .as_file_like()
+        .map_err(|_| SyscallError::OperationNotSupported)?;
+    if file.stat().st_mode & S_IFMT != S_IFREG {
+        return Err(SyscallError::OperationNotSupported);
+    }
+
+    let range = user_safe::read(range)?;
+    let cached_pages = if range.len == 0 {
+        0
+    } else {
+        range.len.saturating_add(4095) / 4096
+    };
+    user_safe::write(
+        stat,
+        &LinuxCacheStat {
+            nr_cache: cached_pages,
+            ..Default::default()
+        },
+    )?;
+    Ok(0)
 });
 
 define_syscall!(Splice, |fd_in: ObjectRef,

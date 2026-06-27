@@ -1,3 +1,5 @@
+use core::sync::atomic::{AtomicI32, AtomicI64, Ordering};
+
 use bitflags::bitflags;
 
 use crate::misc::{
@@ -11,6 +13,43 @@ use crate::process::{FdFlags, LinuxSchedPolicy, manager::get_current_process};
 use crate::systemcall::utils::{SyscallError, SyscallImpl};
 use crate::thread::yielding::{BlockType, block_current_with_sig_check};
 use crate::{define_syscall, memory::user_safe};
+
+const ADJ_OFFSET: u32 = 0x0001;
+const ADJ_FREQUENCY: u32 = 0x0002;
+const ADJ_MAXERROR: u32 = 0x0004;
+const ADJ_ESTERROR: u32 = 0x0008;
+const ADJ_STATUS: u32 = 0x0010;
+const ADJ_TIMECONST: u32 = 0x0020;
+const ADJ_TAI: u32 = 0x0080;
+const ADJ_SETOFFSET: u32 = 0x0100;
+const ADJ_MICRO: u32 = 0x1000;
+const ADJ_NANO: u32 = 0x2000;
+const ADJ_TICK: u32 = 0x4000;
+const ADJ_OFFSET_SINGLESHOT: u32 = 0x8001;
+const ADJ_OFFSET_SS_READ: u32 = 0xa001;
+const ADJ_VALID_MASK: u32 = ADJ_OFFSET
+    | ADJ_FREQUENCY
+    | ADJ_MAXERROR
+    | ADJ_ESTERROR
+    | ADJ_STATUS
+    | ADJ_TIMECONST
+    | ADJ_TAI
+    | ADJ_SETOFFSET
+    | ADJ_MICRO
+    | ADJ_NANO
+    | ADJ_TICK
+    | ADJ_OFFSET_SINGLESHOT
+    | ADJ_OFFSET_SS_READ;
+
+static TIMEX_MODES: AtomicI32 = AtomicI32::new(0);
+static TIMEX_STATUS: AtomicI32 = AtomicI32::new(0);
+static TIMEX_OFFSET: AtomicI64 = AtomicI64::new(0);
+static TIMEX_FREQ: AtomicI64 = AtomicI64::new(0);
+static TIMEX_MAXERROR: AtomicI64 = AtomicI64::new(0);
+static TIMEX_ESTERROR: AtomicI64 = AtomicI64::new(0);
+static TIMEX_CONSTANT: AtomicI64 = AtomicI64::new(0);
+static TIMEX_TICK: AtomicI64 = AtomicI64::new(10_000);
+static TIMEX_TAI: AtomicI32 = AtomicI32::new(0);
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -93,6 +132,35 @@ struct LinuxTimespec {
 struct LinuxItimerspec {
     it_interval: LinuxTimespec,
     it_value: LinuxTimespec,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct LinuxTimex {
+    modes: u32,
+    _pad0: u32,
+    offset: i64,
+    freq: i64,
+    maxerror: i64,
+    esterror: i64,
+    status: i32,
+    _pad1: u32,
+    constant: i64,
+    precision: i64,
+    tolerance: i64,
+    time: LinuxTimeval,
+    tick: i64,
+    ppsfreq: i64,
+    jitter: i64,
+    shift: i32,
+    _pad2: u32,
+    stabil: i64,
+    jitcnt: i64,
+    calcnt: i64,
+    errcnt: i64,
+    stbcnt: i64,
+    tai: i32,
+    _pad3: [i32; 11],
 }
 
 fn linux_timespec_to_ns(timespec: LinuxTimespec) -> Result<u64, SyscallError> {
@@ -204,6 +272,108 @@ fn clock_nanosleep_clock(clock_id: i32) -> Result<SleepClock, SyscallError> {
     }
 }
 
+fn has_cap_sys_time() -> bool {
+    const CAP_SYS_TIME: usize = 25;
+    let process = get_current_process();
+    let process = process.lock();
+    let slot = CAP_SYS_TIME / 32;
+    let mask = 1u32 << (CAP_SYS_TIME % 32);
+    process.capability_effective[slot] & mask != 0
+}
+
+fn timex_from_state(modes: u32) -> LinuxTimex {
+    let now_ns = KernelTime::current().as_nanoseconds() as i64;
+    LinuxTimex {
+        modes,
+        offset: TIMEX_OFFSET.load(Ordering::SeqCst),
+        freq: TIMEX_FREQ.load(Ordering::SeqCst),
+        maxerror: TIMEX_MAXERROR.load(Ordering::SeqCst),
+        esterror: TIMEX_ESTERROR.load(Ordering::SeqCst),
+        status: TIMEX_STATUS.load(Ordering::SeqCst),
+        constant: TIMEX_CONSTANT.load(Ordering::SeqCst),
+        precision: 1,
+        tolerance: 32_768_000,
+        time: LinuxTimeval {
+            tv_sec: now_ns / 1_000_000_000,
+            tv_usec: (now_ns % 1_000_000_000) / 1_000,
+        },
+        tick: TIMEX_TICK.load(Ordering::SeqCst),
+        tai: TIMEX_TAI.load(Ordering::SeqCst),
+        ..Default::default()
+    }
+}
+
+fn apply_timex(clock_id: Option<i32>, txc: *mut LinuxTimex) -> Result<usize, SyscallError> {
+    if txc.is_null() {
+        return Err(SyscallError::BadAddress);
+    }
+    if let Some(clock_id) = clock_id
+        && clock_id != ClockId::Realtime as i32
+    {
+        return Err(SyscallError::OperationNotSupported);
+    }
+
+    let requested = user_safe::read(txc)?;
+    let modes = requested.modes;
+    if modes & !ADJ_VALID_MASK != 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if modes & (ADJ_MICRO | ADJ_NANO) == (ADJ_MICRO | ADJ_NANO) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    let writes_time = modes
+        & (ADJ_OFFSET
+            | ADJ_FREQUENCY
+            | ADJ_MAXERROR
+            | ADJ_ESTERROR
+            | ADJ_STATUS
+            | ADJ_TIMECONST
+            | ADJ_TAI
+            | ADJ_SETOFFSET
+            | ADJ_TICK
+            | ADJ_OFFSET_SINGLESHOT)
+        != 0;
+    if writes_time && !has_cap_sys_time() {
+        return Err(SyscallError::PermissionDenied);
+    }
+
+    if modes & ADJ_OFFSET != 0 || modes == ADJ_OFFSET_SINGLESHOT {
+        TIMEX_OFFSET.store(requested.offset, Ordering::SeqCst);
+    }
+    if modes & ADJ_FREQUENCY != 0 {
+        TIMEX_FREQ.store(requested.freq, Ordering::SeqCst);
+    }
+    if modes & ADJ_MAXERROR != 0 {
+        TIMEX_MAXERROR.store(requested.maxerror, Ordering::SeqCst);
+    }
+    if modes & ADJ_ESTERROR != 0 {
+        TIMEX_ESTERROR.store(requested.esterror, Ordering::SeqCst);
+    }
+    if modes & ADJ_STATUS != 0 {
+        TIMEX_STATUS.store(requested.status, Ordering::SeqCst);
+    }
+    if modes & ADJ_TIMECONST != 0 {
+        TIMEX_CONSTANT.store(requested.constant, Ordering::SeqCst);
+    }
+    if modes & ADJ_TICK != 0 {
+        TIMEX_TICK.store(requested.tick, Ordering::SeqCst);
+    }
+    if modes & ADJ_TAI != 0 {
+        TIMEX_TAI.store(requested.tai, Ordering::SeqCst);
+    }
+    if modes & ADJ_SETOFFSET != 0 {
+        let offset_ns = linux_timeval_to_realtime_ns(requested.time)?;
+        let now = KernelTime::current().as_nanoseconds() as i64;
+        time::set_unix_timestamp_nanoseconds(now.saturating_add(offset_ns));
+        crate::misc::timer::process_expired_process_timers();
+    }
+
+    TIMEX_MODES.store(modes as i32, Ordering::SeqCst);
+    user_safe::write(txc, &timex_from_state(modes))?;
+    Ok(0)
+}
+
 define_syscall!(ClockGettime, |clock_id: i32, tp: *mut LinuxTimespec| {
     if tp.is_null() {
         return Err(SyscallError::BadAddress);
@@ -228,8 +398,15 @@ define_syscall!(ClockSettime, |clock_id: i32, tp: *const LinuxTimespec| {
 
     let timespec = user_safe::read(tp)?;
     time::set_unix_timestamp_nanoseconds(linux_timespec_to_realtime_ns(timespec)?);
+    crate::misc::timer::process_expired_process_timers();
 
     Ok(0)
+});
+
+define_syscall!(Adjtimex, |txc: *mut LinuxTimex| { apply_timex(None, txc) });
+
+define_syscall!(ClockAdjtime, |clock_id: i32, txc: *mut LinuxTimex| {
+    apply_timex(Some(clock_id), txc)
 });
 
 define_syscall!(ClockGetres, |clock_id: i32, tp: *mut LinuxTimespec| {
