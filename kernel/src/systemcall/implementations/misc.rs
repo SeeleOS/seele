@@ -1458,11 +1458,12 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
         child_process.lock().net_namespace = NetNamespace::new();
     }
     if clone_flags.contains(CloneFlags::NEWNS) {
-        let (parent_mnt_namespace, user_namespace) = {
+        let (parent_mnt_namespace, user_namespace, shared_with_parent) = {
             let current = current.lock();
             (
                 current.mnt_namespace.clone(),
                 current.user_namespace.clone(),
+                current.mount_namespace_shared_with_parent,
             )
         };
         let mut child = child_process.lock();
@@ -1479,7 +1480,7 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
                 .map(|(_, _, _, _, _, mount_id)| mount_id)
                 .collect(),
         );
-        child.mount_namespace_shared_with_parent = false;
+        child.mount_namespace_shared_with_parent = shared_with_parent;
     }
     if clone_flags.contains(CloneFlags::NEWPID) {
         let (parent_pid_namespace, user_namespace) = {

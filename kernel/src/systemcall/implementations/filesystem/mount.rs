@@ -53,17 +53,7 @@ define_syscall!(Mount, |source: CString,
                     operation_flags.contains(MountOperationFlags::MS_REC),
                 )
                 .map_err(SyscallError::from)?;
-            let process = get_current_process();
-            let process = process.lock();
-            if process.mount_namespace_shared_with_parent {
-                let mount_id = VirtualFS
-                    .lock()
-                    .mount_id(target_path)
-                    .map_err(SyscallError::from)?;
-                let namespace_inode = process.mnt_namespace.inode();
-                drop(process);
-                crate::process::manager::mark_mount_shared_with_parent(namespace_inode, mount_id);
-            }
+            publish_mount_to_shared_namespace(target_path)?;
         }
         return Ok(0);
     }
@@ -156,8 +146,12 @@ define_syscall!(Mount, |source: CString,
 
         VirtualFS
             .lock()
-            .mount(target_path, FuseFs::new(fuse_device.connection.clone()))
+            .mount(
+                target_path.clone(),
+                FuseFs::new(fuse_device.connection.clone()),
+            )
             .map_err(SyscallError::from)?;
+        publish_mount_to_shared_namespace(target_path)?;
         return Ok(0);
     }
 
@@ -184,9 +178,10 @@ define_syscall!(Mount, |source: CString,
             .map_err(SyscallError::from)?;
         apply_initial_mount_flags(target_path.clone(), requested_mount_flags)?;
         if let Some(mode) = root_mode {
-            let mount_root = open_path(target_path)?;
+            let mount_root = open_path(target_path.clone())?;
             mount_root.chmod(mode)?;
         }
+        publish_mount_to_shared_namespace(target_path)?;
         return Ok(0);
     }
 
@@ -216,7 +211,8 @@ define_syscall!(Mount, |source: CString,
             .lock()
             .mount(target_path.clone(), ext4)
             .map_err(SyscallError::from)?;
-        apply_initial_mount_flags(target_path, requested_mount_flags)?;
+        apply_initial_mount_flags(target_path.clone(), requested_mount_flags)?;
+        publish_mount_to_shared_namespace(target_path)?;
         return Ok(0);
     }
 
@@ -225,7 +221,8 @@ define_syscall!(Mount, |source: CString,
         .lock()
         .mount_ref(target_path.clone(), fs)
         .map_err(SyscallError::from)?;
-    apply_initial_mount_flags(target_path, requested_mount_flags)?;
+    apply_initial_mount_flags(target_path.clone(), requested_mount_flags)?;
+    publish_mount_to_shared_namespace(target_path)?;
     Ok(0)
 });
 
@@ -443,17 +440,7 @@ define_syscall!(
                 .lock()
                 .unmount(source_path.clone())
                 .map_err(SyscallError::from)?;
-            let process = get_current_process();
-            let process = process.lock();
-            if process.mount_namespace_shared_with_parent {
-                let mount_id = VirtualFS
-                    .lock()
-                    .mount_id(attached_path)
-                    .map_err(SyscallError::from)?;
-                let namespace_inode = process.mnt_namespace.inode();
-                drop(process);
-                crate::process::manager::mark_mount_shared_with_parent(namespace_inode, mount_id);
-            }
+            publish_mount_to_shared_namespace(attached_path)?;
         }
         if is_api_mount_path(&source_path) {
             let _ = VirtualFS.lock().delete_file(source_path);
@@ -737,16 +724,20 @@ mod tests {
         process::FdFlags,
         systemcall::{
             implementations::{
-                Fsconfig, Fsmount, Fsopen, Fspick, Mount, MountSetattr, MoveMount, OpenTree,
-                Umount2,
+                Fsconfig, Fsmount, Fsopen, Fspick, Mkdir, Mount, MountSetattr, MoveMount, OpenTree,
+                Statx, Umount2,
             },
-            test::{assert_fd_flags, close_test_fd, expect_fd, write_user_cstr},
+            test::{
+                TestLinuxStatx, assert_fd_flags, close_test_fd, expect_fd, read_user_value,
+                write_user_cstr,
+            },
             test_helpers::{
                 SyscallArgs, allocate_user_test_page, expect_errno, expect_ok, write_user_value,
             },
             utils::SyscallError,
         },
     };
+    use alloc::string::String;
 
     crate::test!(
         mount_api_syscalls,
@@ -763,6 +754,9 @@ mod tests {
         const FSCONFIG_SET_STRING: u64 = 1;
         const FSCONFIG_CMD_CREATE: u64 = 6;
         const MS_BIND: u64 = 4096;
+        const STATX_BASIC_STATS: u64 = 0x0000_07ff;
+        const STATX_ATTR_MOUNT_ROOT: u64 = 0x0000_2000;
+        const STATX_BUF: u64 = 3584;
 
         #[repr(C)]
         #[derive(Clone, Copy, Default)]
@@ -771,6 +765,33 @@ mod tests {
             attr_clr: u64,
             propagation: u64,
             userns_fd: u64,
+        }
+
+        fn assert_mount_root(page: u64, path_ptr: u64, expected: bool) {
+            expect_ok(
+                SyscallArgs::new([
+                    AT_FDCWD,
+                    path_ptr,
+                    0,
+                    STATX_BASIC_STATS,
+                    page + STATX_BUF,
+                    0,
+                ])
+                .call::<Statx>(),
+                0,
+            );
+            let statx = read_user_value::<TestLinuxStatx>(page + STATX_BUF);
+            assert_eq!(statx.stx_attributes & STATX_ATTR_MOUNT_ROOT != 0, expected);
+        }
+
+        fn proc_mountinfo() -> String {
+            let mountinfo = {
+                let mut vfs = VirtualFS.lock();
+                vfs.open(Path::new("/proc/self/mountinfo")).unwrap()
+            };
+            let mut buffer = [0u8; 4096];
+            let read = mountinfo.read(&mut buffer).unwrap();
+            String::from(core::str::from_utf8(&buffer[..read]).unwrap())
         }
 
         let page = allocate_user_test_page();
@@ -800,6 +821,9 @@ mod tests {
             "/tmp/syscall-mount-test/dev",
             "/tmp/syscall-mount-test/pts",
             "/tmp/syscall-mount-test/cgroup",
+            "/tmp/syscall-mount-test/run",
+            "/tmp/syscall-mount-test/tmp",
+            "/tmp/syscall-mount-test/shm",
         ] {
             VirtualFS.lock().create_dir(Path::new(path)).unwrap();
         }
@@ -825,6 +849,16 @@ mod tests {
         write_user_cstr(page + 1920, b"devpts\0");
         write_user_cstr(page + 2048, b"cgroup2\0");
         write_user_cstr(page + 2176, b"missingfs\0");
+        write_user_cstr(page + 2304, b"/tmp/syscall-mount-test/dev\0");
+        write_user_cstr(page + 2432, b"/tmp/syscall-mount-test/run\0");
+        write_user_cstr(page + 2560, b"/tmp/syscall-mount-test/tmp\0");
+        write_user_cstr(page + 2688, b"/tmp/syscall-mount-test/shm\0");
+        write_user_cstr(page + 2816, b"/tmp/syscall-mount-test/dev/hugepages\0");
+        write_user_cstr(page + 2944, b"/dev/hugepages\0");
+
+        for path_ptr in [page + 2304, page + 2432, page + 2560, page + 2688] {
+            assert_mount_root(page, path_ptr, false);
+        }
 
         expect_ok(
             SyscallArgs::new([0, page + 128, page + 384, 0, page + 448, 0]).call::<Mount>(),
@@ -922,7 +956,10 @@ mod tests {
             vfs.open(Path::new("/tmp/syscall-mount-test/cloned-src"))
                 .unwrap()
         };
-        assert_eq!(cloned_root.path(), Path::new("/tmp/syscall-mount-test/src"));
+        assert_eq!(
+            cloned_root.path(),
+            Path::new("/tmp/syscall-mount-test/cloned-src")
+        );
 
         let picked_fd =
             expect_fd(SyscallArgs::new([AT_FDCWD, page + 256, 1, 0, 0, 0]).call::<Fspick>());
@@ -1028,6 +1065,41 @@ mod tests {
             SyscallArgs::new([0, page + 1408, page + 2048, 0, 0, 0]).call::<Mount>(),
             0,
         );
+        expect_ok(
+            SyscallArgs::new([0, page + 2432, page + 384, 0, 0, 0]).call::<Mount>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([0, page + 2560, page + 384, 0, 0, 0]).call::<Mount>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([0, page + 2688, page + 384, 0, 0, 0]).call::<Mount>(),
+            0,
+        );
+        for path_ptr in [page + 2304, page + 2432, page + 2560, page + 2688] {
+            assert_mount_root(page, path_ptr, true);
+        }
+        expect_ok(
+            SyscallArgs::new([page + 2816, 0o755, 0, 0, 0, 0]).call::<Mkdir>(),
+            0,
+        );
+        let _ = SyscallArgs::new([page + 2944, 0, 0, 0, 0, 0]).call::<Umount2>();
+        let _ = VirtualFS.lock().delete_file(Path::new("/dev/hugepages"));
+        expect_ok(
+            SyscallArgs::new([page + 2944, 0o755, 0, 0, 0, 0]).call::<Mkdir>(),
+            0,
+        );
+        let _ = VirtualFS.lock().delete_file(Path::new("/dev/hugepages"));
+        let mountinfo = proc_mountinfo();
+        for mount_path in [
+            "/tmp/syscall-mount-test/dev",
+            "/tmp/syscall-mount-test/run",
+            "/tmp/syscall-mount-test/tmp",
+            "/tmp/syscall-mount-test/shm",
+        ] {
+            assert!(mountinfo.contains(mount_path));
+        }
         expect_errno(
             SyscallArgs::new([0, page + 128, page + 2176, 0, 0, 0]).call::<Mount>(),
             SyscallError::NoDevice,
@@ -1094,6 +1166,9 @@ mod tests {
         close_test_fd(mount_fd);
         close_test_fd(fsfd);
         for path in [
+            page + 2688,
+            page + 2560,
+            page + 2432,
             page + 256,
             page + 1408,
             page + 1280,
@@ -1110,6 +1185,9 @@ mod tests {
             "/tmp/syscall-mount-test/dev",
             "/tmp/syscall-mount-test/sys",
             "/tmp/syscall-mount-test/proc",
+            "/tmp/syscall-mount-test/shm",
+            "/tmp/syscall-mount-test/tmp",
+            "/tmp/syscall-mount-test/run",
         ] {
             let _ = VirtualFS.lock().delete_file(Path::new(path));
         }

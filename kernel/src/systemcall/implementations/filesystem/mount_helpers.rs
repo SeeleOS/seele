@@ -59,6 +59,23 @@ pub(super) fn create_api_filesystem(fstype: &str) -> Result<FileSystemRef, Sysca
     Ok(fs)
 }
 
+pub(super) fn publish_mount_to_shared_namespace(path: Path) -> Result<(), SyscallError> {
+    let process = get_current_process();
+    let process = process.lock();
+    if !process.mount_namespace_shared_with_parent {
+        return Ok(());
+    }
+
+    let mount_id = VirtualFS
+        .lock()
+        .mount_id(path)
+        .map_err(SyscallError::from)?;
+    let namespace_inode = process.mnt_namespace.inode();
+    drop(process);
+    crate::process::manager::mark_mount_shared_with_parent(namespace_inode, mount_id);
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct FuseMountOptions {
     pub(super) fd: Option<u64>,

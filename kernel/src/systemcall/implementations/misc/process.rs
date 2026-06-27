@@ -146,7 +146,6 @@ define_syscall!(Unshare, |flags: u64| {
                     .map(|(_, _, _, _, _, mount_id)| mount_id)
                     .collect(),
             );
-            process.mount_namespace_shared_with_parent = false;
         }
         if flags & UnshareFlags::NEWPID.bits() != 0 {
             process.pending_child_pid_namespace = Some(NamespaceObject::dynamic_with_parent(

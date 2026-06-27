@@ -76,11 +76,16 @@ impl VFS {
 
     pub fn create_dir_with_mode(&mut self, path: Path, mode: Option<u32>) -> FSResult<()> {
         let normalized = self.normalize_path(path);
-        self.ensure_writable_mount(normalized.clone())?;
-        let (parent_dir, name) = self.resolve_parent_normalized(normalized)?;
+        match self.resolve_nofollow(normalized.clone()) {
+            Ok(_) => return Err(FSError::AlreadyExists),
+            Err(FSError::NotFound) => {}
+            Err(err) => return Err(err),
+        }
+        let (parent_dir, name) = self.resolve_parent_normalized(normalized.clone())?;
         if parent_dir.lock().get(&name).is_ok() {
             return Err(FSError::AlreadyExists);
         }
+        self.ensure_writable_mount(normalized.clone())?;
 
         let parent_stat = LinuxStat::new(parent_dir.lock().info()?);
         let inherited_gid = (parent_stat.st_mode & S_ISGID != 0).then_some(parent_stat.st_gid);
@@ -103,8 +108,13 @@ impl VFS {
 
     pub fn create_symlink(&mut self, path: Path, target: &str) -> FSResult<()> {
         let normalized = self.normalize_path(path);
-        self.ensure_writable_mount(normalized.clone())?;
-        let (parent_dir, name) = self.resolve_parent_normalized(normalized)?;
+        match self.resolve_nofollow(normalized.clone()) {
+            Ok(_) => return Err(FSError::AlreadyExists),
+            Err(FSError::NotFound) => {}
+            Err(err) => return Err(err),
+        }
+        let (parent_dir, name) = self.resolve_parent_normalized(normalized.clone())?;
+        self.ensure_writable_mount(normalized)?;
         parent_dir.lock().create_symlink(&name, target)
     }
 
