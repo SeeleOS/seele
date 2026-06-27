@@ -10,7 +10,7 @@
 - If a required tool is missing for this repository workflow, add it to the `flake.nix` dev shell instead of treating it as a one-off host prerequisite.
 - When adding new tooling for builds, tests, MCP workflows, debugging, image conversion, or VM automation, prefer adding it to the appropriate `flake.nix` dev shell or runtime input instead of relying on whatever happens to be installed on the host `PATH`.
 - When polling VM state or serial output, prefer short polling intervals and frequent checks instead of waiting a long time in one shot.
-- Avoid long `job_wait` calls; keep each wait under 30 seconds when practical, with 10 seconds as the recommended default. After each wait returns, check whether the job is making normal progress instead of assuming it is not stuck.
+- Avoid long `job_wait` calls; keep each wait under 30 seconds when practical, with 10 seconds as the recommended default. After each wait returns, immediately inspect `serial_tail` before deciding whether the job is making normal progress or is stuck.
 - `cargo xtest` and MCP `run_tests` default to kernel unit tests plus LTP. Use a specific selector such as `kernel_unit` or `ltp` for targeted debugging.
 - In the default kernel-unit-plus-LTP test gate, stop immediately if kernel unit tests fail instead of continuing into LTP. LTP is expensive, and continuing after unit failure can obscure the serial context for the first failure.
 - Because LTP is expensive, when fixing LTP failures, collect the currently known failing tests, fix that batch together, and then run the appropriate LTP verification once for the batch. Do not rerun LTP after each single LTP fix; use targeted unit checks or narrow compile checks while editing.
