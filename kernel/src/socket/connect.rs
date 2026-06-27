@@ -52,6 +52,7 @@ impl UnixSocketObject {
                     flags: Mut::new(FileFlags::empty()),
                     pass_cred: Mut::new(false),
                     priority: Mut::new(*self.priority.lock()),
+                    attached_bpf: Mut::new(None),
                     self_ref: Mut::new(None),
                     creator_cred: server_cred,
                 });

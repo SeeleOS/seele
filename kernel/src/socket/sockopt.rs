@@ -2,12 +2,12 @@ use alloc::{string::ToString, sync::Arc, vec, vec::Vec};
 use core::{mem, slice};
 
 use super::{
-    AF_UNIX, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PASSCRED, SO_PASSPIDFD, SO_PASSRIGHTS,
-    SO_PASSSEC, SO_PEERCRED, SO_PEERGROUPS, SO_PEERPIDFD, SO_PEERSEC, SO_PRIORITY, SO_PROTOCOL,
-    SO_RCVBUF, SO_RCVBUFFORCE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_REUSEADDR, SO_SNDBUF,
-    SO_SNDBUFFORCE, SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD, SO_TIMESTAMP_NEW, SO_TIMESTAMP_OLD,
-    SO_TIMESTAMPNS_NEW, SO_TIMESTAMPNS_OLD, SO_TYPE, SOCK_DGRAM, SOCK_SEQPACKET, SOCK_STREAM,
-    SOL_SOCKET, SocketError, SocketLike, SocketPeerCred, SocketResult, UnixSocketKind,
+    AF_UNIX, SO_ACCEPTCONN, SO_ATTACH_BPF, SO_DETACH_BPF, SO_DOMAIN, SO_ERROR, SO_PASSCRED,
+    SO_PASSPIDFD, SO_PASSRIGHTS, SO_PASSSEC, SO_PEERCRED, SO_PEERGROUPS, SO_PEERPIDFD, SO_PEERSEC,
+    SO_PRIORITY, SO_PROTOCOL, SO_RCVBUF, SO_RCVBUFFORCE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD,
+    SO_REUSEADDR, SO_SNDBUF, SO_SNDBUFFORCE, SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD, SO_TIMESTAMP_NEW,
+    SO_TIMESTAMP_OLD, SO_TIMESTAMPNS_NEW, SO_TIMESTAMPNS_OLD, SO_TYPE, SOCK_DGRAM, SOCK_SEQPACKET,
+    SOCK_STREAM, SOL_SOCKET, SocketError, SocketLike, SocketPeerCred, SocketResult, UnixSocketKind,
     UnixSocketObject, UnixSocketState, can_set_socket_priority, parse_unix_socket_path,
     socket_timeout_option_len,
 };
@@ -85,6 +85,22 @@ impl UnixSocketObject {
             }
             option_name if Self::is_boolean_sockopt(option_name) => {
                 let _ = Self::decode_i32(option_value)?;
+                Ok(())
+            }
+            SO_ATTACH_BPF => {
+                let fd = Self::decode_i32(option_value)?;
+                let program = get_object_current_process(fd as u64)
+                    .map_err(|_| SocketError::InvalidArguments)?
+                    .as_bpf()
+                    .map_err(|_| SocketError::InvalidArguments)?;
+                program
+                    .prog_type()
+                    .map_err(|_| SocketError::InvalidArguments)?;
+                *self.attached_bpf.lock() = Some(program);
+                Ok(())
+            }
+            SO_DETACH_BPF => {
+                *self.attached_bpf.lock() = None;
                 Ok(())
             }
             SO_ERROR | SO_TYPE | SO_ACCEPTCONN | SO_DOMAIN | SO_PROTOCOL | SO_PEERCRED => {

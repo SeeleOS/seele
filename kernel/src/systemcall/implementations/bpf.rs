@@ -5,7 +5,11 @@ use num_enum::TryFromPrimitive;
 use crate::{
     define_syscall,
     memory::user_safe,
-    object::{Object, bpf::BpfObject, misc::get_object_current_process},
+    object::{
+        Object,
+        bpf::{BpfInsn, BpfObject},
+        misc::get_object_current_process,
+    },
     process::{FdFlags, manager::get_current_process},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
@@ -107,7 +111,12 @@ fn get_fd_object(fd: u32) -> Result<Arc<dyn Object>, SyscallError> {
 }
 
 fn create_map(attr: BpfMapCreateAttr) -> Result<usize, SyscallError> {
-    if attr.key_size == 0 || attr.value_size == 0 || attr.max_entries == 0 {
+    const BPF_MAP_TYPE_RINGBUF: u32 = 27;
+    let is_ringbuf = attr.map_type == BPF_MAP_TYPE_RINGBUF;
+    if attr.max_entries == 0
+        || (!is_ringbuf && (attr.key_size == 0 || attr.value_size == 0))
+        || (is_ringbuf && (attr.key_size != 0 || attr.value_size != 0))
+    {
         return Err(SyscallError::InvalidArguments);
     }
 
@@ -147,10 +156,47 @@ fn load_program(attr: BpfProgLoadAttr) -> Result<usize, SyscallError> {
         return Err(SyscallError::BadAddress);
     }
 
-    let fd = get_current_process()
-        .lock()
-        .push_object_with_flags(BpfObject::new_program(attr.prog_type), FdFlags::empty());
+    let insn_len = attr.insn_cnt as usize;
+    let insns = user_safe::read_buffer(
+        attr.insns as *const u8,
+        insn_len
+            .checked_mul(size_of::<BpfInsn>())
+            .ok_or(SyscallError::InvalidArguments)?,
+    )?;
+    let insns: Vec<BpfInsn> = insns
+        .chunks_exact(size_of::<BpfInsn>())
+        .map(|bytes| {
+            let mut raw = [0u8; size_of::<BpfInsn>()];
+            raw.copy_from_slice(bytes);
+            BpfInsn::from(raw)
+        })
+        .collect();
+
+    if let Err(reason) = BpfObject::verify_program(&insns) {
+        write_verifier_log(&attr, reason)?;
+        return Err(SyscallError::AccessDenied);
+    }
+
+    let fd = get_current_process().lock().push_object_with_flags(
+        BpfObject::new_program(attr.prog_type, insns),
+        FdFlags::empty(),
+    );
     Ok(fd)
+}
+
+fn write_verifier_log(attr: &BpfProgLoadAttr, reason: &str) -> Result<(), SyscallError> {
+    if attr._log_buf == 0 || attr._log_size == 0 {
+        return Ok(());
+    }
+    let message = alloc::format!("verification failed: {reason}\n");
+    let mut bytes = message.into_bytes();
+    let max_len = attr._log_size as usize;
+    if bytes.len() >= max_len {
+        bytes.truncate(max_len.saturating_sub(1));
+    }
+    bytes.push(0);
+    user_safe::write_buffer(attr._log_buf as *mut u8, &bytes)?;
+    Ok(())
 }
 
 fn attach_program(attr: BpfProgAttachAttr) -> Result<usize, SyscallError> {

@@ -81,6 +81,12 @@ impl UnixSocketObject {
             return Err(SocketError::BrokenPipe);
         }
 
+        if let Some(program) = peer.attached_bpf.lock().clone() {
+            program
+                .run_socket_filter(buffer)
+                .map_err(|_| SocketError::InvalidArguments)?;
+        }
+
         loop {
             let mut recv_queue = peer_datagram.recv_queue.lock();
             if recv_queue.len() >= DATAGRAM_RECV_CAPACITY {

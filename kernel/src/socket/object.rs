@@ -1,5 +1,5 @@
-use crate::memory::utils::Mut;
-use alloc::sync::Weak;
+use crate::{memory::utils::Mut, object::bpf::BpfObject};
+use alloc::sync::{Arc, Weak};
 
 use crate::object::FileFlags;
 
@@ -25,6 +25,7 @@ pub struct UnixSocketObject {
     pub flags: Mut<FileFlags>,
     pub pass_cred: Mut<bool>,
     pub priority: Mut<i32>,
+    pub attached_bpf: Mut<Option<Arc<BpfObject>>>,
     pub self_ref: Mut<Option<Weak<UnixSocketObject>>>,
     pub creator_cred: SocketPeerCred,
 }
