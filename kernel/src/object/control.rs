@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
 
 use crate::{
     memory::{user_safe, utils::Mut},
@@ -9,7 +9,7 @@ use crate::{
         misc::{ObjectRef, get_object_current_process},
     },
     process::{
-        FdFlags,
+        FdEntry, FdFlags,
         group::ProcessGroupID,
         manager::{MANAGER, get_current_process},
         misc::{ProcessID, get_process_with_pid, with_current_process},
@@ -86,7 +86,7 @@ impl Default for FcntlObjectState {
 }
 
 lazy_static! {
-    static ref FCNTL_OBJECT_STATE: Mut<BTreeMap<usize, FcntlObjectState>> =
+    static ref FCNTL_OBJECT_STATE: Mut<BTreeMap<String, FcntlObjectState>> =
         Mut::new(BTreeMap::new());
 }
 
@@ -124,8 +124,14 @@ fn access_mode_bits(object: &ObjectRef) -> usize {
     }
 }
 
-fn fcntl_object_key(object: &ObjectRef) -> usize {
-    Arc::as_ptr(object) as *const () as usize
+fn fcntl_object_key(object: &ObjectRef) -> String {
+    if let Ok(file_like) = object.clone().as_file_like()
+        && let Ok(info) = file_like.info()
+    {
+        return format!("file:{}:{}", file_like.mount_id(), info.inode);
+    }
+
+    format!("object:{:p}", Arc::as_ptr(object))
 }
 
 fn fcntl_object_state(object: &ObjectRef) -> FcntlObjectState {
@@ -177,11 +183,50 @@ fn owner_from_legacy_pid(owner_pid: i32) -> LinuxFOwnerEx {
     }
 }
 
+fn fd_entry_is_other_open_file(entry: &FdEntry, object: &ObjectRef) -> bool {
+    if Arc::ptr_eq(&entry.object, object) {
+        return false;
+    }
+
+    fcntl_object_key(&entry.object) == fcntl_object_key(object)
+}
+
+fn release_fcntl_object_state_by_key(object_key: &str) {
+    FCNTL_OBJECT_STATE.lock().remove(object_key);
+}
+
+fn release_fcntl_object_state_for_object(object: &ObjectRef) {
+    let object_key = fcntl_object_key(object);
+    release_fcntl_object_state_by_key(&object_key);
+}
+
+fn has_other_open_file_description(object: &ObjectRef) -> bool {
+    let processes = MANAGER
+        .lock()
+        .processes
+        .values()
+        .cloned()
+        .collect::<Vec<_>>();
+
+    processes.into_iter().any(|process| {
+        let process = process.lock();
+        process
+            .fd_table
+            .lock()
+            .iter()
+            .flatten()
+            .any(|entry| fd_entry_is_other_open_file(entry, object))
+    })
+}
+
 fn fcntl_set_lease(object: &ObjectRef, lease: i32) -> SyscallResult {
     if !matches!(lease, F_RDLCK | F_WRLCK | F_UNLCK) {
         return Err(SyscallError::InvalidArguments);
     }
     if lease == F_RDLCK && matches!(access_mode_bits(object), O_WRONLY | O_RDWR) {
+        return Err(SyscallError::TryAgain);
+    }
+    if lease == F_WRLCK && has_other_open_file_description(object) {
         return Err(SyscallError::TryAgain);
     }
 
@@ -259,8 +304,8 @@ fn fd_for_object_owner(process: &crate::process::ProcessRef, object: &ObjectRef)
 }
 
 pub(crate) fn release_fcntl_object_state(object: &ObjectRef) {
-    if Arc::strong_count(object) == 1 {
-        FCNTL_OBJECT_STATE.lock().remove(&fcntl_object_key(object));
+    if !has_other_open_file_description(object) {
+        release_fcntl_object_state_for_object(object);
     }
 }
 

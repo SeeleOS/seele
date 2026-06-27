@@ -11,20 +11,27 @@ use crate::{
     process::{FdEntry, FdFlags, Process, new_fd_table},
 };
 
-fn release_fd_entry_resources(process_pid: crate::process::misc::ProcessID, entry: &FdEntry) {
+pub(crate) fn release_fd_entry_resources(
+    process_pid: crate::process::misc::ProcessID,
+    entry: &FdEntry,
+) {
     release_fd_entry_locks(process_pid, entry);
     release_fcntl_object_state(&entry.object);
 }
 
-pub fn close_cloexec_fd_entries(fd_table: &mut [Option<FdEntry>]) {
+pub fn close_cloexec_fd_entries(fd_table: &mut [Option<FdEntry>]) -> Vec<FdEntry> {
+    let mut closed = Vec::new();
     for entry in fd_table {
-        if entry
+        if let Some(old_entry) = entry
             .as_ref()
             .is_some_and(|entry| entry.fd_flags.contains(FdFlags::CLOEXEC))
+            .then(|| entry.take())
+            .flatten()
         {
-            *entry = None;
+            closed.push(old_entry);
         }
     }
+    closed
 }
 
 pub fn init_objects(fd_table: &mut Vec<Option<FdEntry>>) {
@@ -224,14 +231,8 @@ impl Process {
 
     pub fn close_cloexec_objects(&mut self) {
         let mut fd_table = self.fd_table.lock();
-        for entry in fd_table.iter_mut() {
-            if entry
-                .as_ref()
-                .is_some_and(|entry| entry.fd_flags.contains(FdFlags::CLOEXEC))
-                && let Some(old_entry) = entry.take()
-            {
-                release_fd_entry_locks(self.pid, &old_entry);
-            }
+        for old_entry in close_cloexec_fd_entries(&mut fd_table) {
+            release_fd_entry_resources(self.pid, &old_entry);
         }
     }
 

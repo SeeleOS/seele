@@ -69,7 +69,7 @@ impl Process {
         let mut next_addrspace = AddrSpace::default();
         let mut next_fd_table = self.fd_table.lock().clone();
         let fs_context = self.fs_context.lock().clone();
-        close_cloexec_fd_entries(&mut next_fd_table);
+        let closed_fd_entries = close_cloexec_fd_entries(&mut next_fd_table);
         let next_snapshot = setup_process(
             SetupProcessRequest {
                 path: path.clone(),
@@ -91,6 +91,7 @@ impl Process {
             command_line,
             setuid,
             setgid,
+            closed_fd_entries,
             threads: self.threads.clone(),
             borrowed_addrspace_from_parent: self.borrowed_addrspace_from_parent,
             parent: self.parent.clone(),
@@ -127,6 +128,9 @@ impl Process {
         let fd_table = new_fd_table();
         *fd_table.lock() = prepared.next_fd_table;
         self.fd_table = fd_table;
+        for entry in prepared.closed_fd_entries {
+            crate::process::object::release_fd_entry_resources(self.pid, &entry);
+        }
         thread_locked.snapshot = prepared.next_snapshot;
         thread_locked.snapshot_state = SnapshotState::Normal;
         thread_locked.sig_handler_snapshot = ThreadSnapshot::default();
@@ -182,6 +186,7 @@ struct PreparedExecve {
     command_line: Vec<String>,
     setuid: Option<u32>,
     setgid: Option<u32>,
+    closed_fd_entries: Vec<crate::process::FdEntry>,
     threads: Vec<alloc::sync::Weak<crate::memory::utils::Mut<crate::thread::thread::Thread>>>,
     borrowed_addrspace_from_parent: bool,
     parent: Option<crate::process::ProcessRef>,

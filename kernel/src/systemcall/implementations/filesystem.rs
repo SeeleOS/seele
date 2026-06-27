@@ -1954,7 +1954,12 @@ mod tests {
         const F_SETFD: u64 = 2;
         const F_GETFL: u64 = 3;
         const F_SETFL: u64 = 4;
+        const F_SETLEASE: u64 = 1024;
+        const F_GETLEASE: u64 = 1025;
         const F_CREATED_QUERY: u64 = 1028;
+        const F_RDLCK: u64 = 0;
+        const F_WRLCK: u64 = 1;
+        const F_UNLCK: u64 = 2;
         const FD_CLOEXEC: u64 = 1;
         const O_CREAT: u64 = 0o100;
         const POSIX_FADV_RANDOM: u64 = 1;
@@ -2102,6 +2107,7 @@ mod tests {
             SyscallArgs::new([reopened_fd as u64, F_CREATED_QUERY, 0, 0, 0, 0]).call::<Fcntl>(),
             0,
         );
+        close_test_fd(reopened_fd);
         expect_ok(
             SyscallArgs::new([fd as u64, F_SETFD, FD_CLOEXEC, 0, 0, 0]).call::<Fcntl>(),
             0,
@@ -2126,6 +2132,34 @@ mod tests {
         expect_errno(
             SyscallArgs::new([fd as u64, 9999, 0, 0, 0, 0]).call::<Fcntl>(),
             SyscallError::InvalidArguments,
+        );
+        expect_ok(
+            SyscallArgs::new([fd as u64, F_SETLEASE, F_WRLCK, 0, 0, 0]).call::<Fcntl>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([fd as u64, F_GETLEASE, 0, 0, 0, 0]).call::<Fcntl>(),
+            F_WRLCK as usize,
+        );
+        let lease_conflict_fd =
+            expect_fd(SyscallArgs::new([AT_FDCWD, user_page, O_RDWR, 0, 0, 0]).call::<OpenAt>());
+        expect_errno(
+            SyscallArgs::new([lease_conflict_fd as u64, F_SETLEASE, F_WRLCK, 0, 0, 0])
+                .call::<Fcntl>(),
+            SyscallError::TryAgain,
+        );
+        close_test_fd(lease_conflict_fd);
+        expect_ok(
+            SyscallArgs::new([fd as u64, F_SETLEASE, F_UNLCK, 0, 0, 0]).call::<Fcntl>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([fd as u64, F_SETLEASE, F_RDLCK, 0, 0, 0]).call::<Fcntl>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([fd as u64, F_SETLEASE, F_UNLCK, 0, 0, 0]).call::<Fcntl>(),
+            0,
         );
 
         expect_ok(
