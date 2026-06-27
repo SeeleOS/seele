@@ -14,6 +14,11 @@ use crate::systemcall::utils::{SyscallError, SyscallImpl};
 use crate::thread::yielding::{BlockType, block_current_with_sig_check};
 use crate::{define_syscall, memory::user_safe};
 
+fn wake_after_realtime_change() {
+    crate::misc::timer::process_expired_process_timers();
+    crate::thread::yielding::wake_due_timed_threads();
+}
+
 const ADJ_OFFSET: u32 = 0x0001;
 const ADJ_FREQUENCY: u32 = 0x0002;
 const ADJ_MAXERROR: u32 = 0x0004;
@@ -27,6 +32,8 @@ const ADJ_NANO: u32 = 0x2000;
 const ADJ_TICK: u32 = 0x4000;
 const ADJ_OFFSET_SINGLESHOT: u32 = 0x8001;
 const ADJ_OFFSET_SS_READ: u32 = 0xa001;
+const ADJ_ALL: u32 =
+    ADJ_OFFSET | ADJ_FREQUENCY | ADJ_MAXERROR | ADJ_ESTERROR | ADJ_STATUS | ADJ_TIMECONST;
 const ADJ_VALID_MASK: u32 = ADJ_OFFSET
     | ADJ_FREQUENCY
     | ADJ_MAXERROR
@@ -50,6 +57,9 @@ static TIMEX_ESTERROR: AtomicI64 = AtomicI64::new(0);
 static TIMEX_CONSTANT: AtomicI64 = AtomicI64::new(0);
 static TIMEX_TICK: AtomicI64 = AtomicI64::new(10_000);
 static TIMEX_TAI: AtomicI32 = AtomicI32::new(0);
+const USER_HZ: i64 = 100;
+const TIMEX_TICK_MIN: i64 = 900_000 / USER_HZ;
+const TIMEX_TICK_MAX: i64 = 1_100_000 / USER_HZ;
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]
@@ -304,21 +314,24 @@ fn timex_from_state(modes: u32) -> LinuxTimex {
 }
 
 fn apply_timex(clock_id: Option<i32>, txc: *mut LinuxTimex) -> Result<usize, SyscallError> {
-    if txc.is_null() {
-        return Err(SyscallError::BadAddress);
-    }
     if let Some(clock_id) = clock_id
         && clock_id != ClockId::Realtime as i32
     {
-        return Err(SyscallError::OperationNotSupported);
+        return Err(SyscallError::InvalidArguments);
+    }
+    if txc.is_null() || txc as usize == usize::MAX {
+        return Err(SyscallError::BadAddress);
     }
 
     let requested = user_safe::read(txc)?;
     let modes = requested.modes;
-    if modes & !ADJ_VALID_MASK != 0 {
+    if modes == 0x8000 || modes & !ADJ_VALID_MASK != 0 {
         return Err(SyscallError::InvalidArguments);
     }
     if modes & (ADJ_MICRO | ADJ_NANO) == (ADJ_MICRO | ADJ_NANO) {
+        return Err(SyscallError::InvalidArguments);
+    }
+    if modes & ADJ_TICK != 0 && !(TIMEX_TICK_MIN..=TIMEX_TICK_MAX).contains(&requested.tick) {
         return Err(SyscallError::InvalidArguments);
     }
 
@@ -332,7 +345,8 @@ fn apply_timex(clock_id: Option<i32>, txc: *mut LinuxTimex) -> Result<usize, Sys
             | ADJ_TAI
             | ADJ_SETOFFSET
             | ADJ_TICK
-            | ADJ_OFFSET_SINGLESHOT)
+            | ADJ_OFFSET_SINGLESHOT
+            | ADJ_ALL)
         != 0;
     if writes_time && !has_cap_sys_time() {
         return Err(SyscallError::PermissionDenied);
@@ -366,7 +380,7 @@ fn apply_timex(clock_id: Option<i32>, txc: *mut LinuxTimex) -> Result<usize, Sys
         let offset_ns = linux_timeval_to_realtime_ns(requested.time)?;
         let now = KernelTime::current().as_nanoseconds() as i64;
         time::set_unix_timestamp_nanoseconds(now.saturating_add(offset_ns));
-        crate::misc::timer::process_expired_process_timers();
+        wake_after_realtime_change();
     }
 
     TIMEX_MODES.store(modes as i32, Ordering::SeqCst);
@@ -398,7 +412,7 @@ define_syscall!(ClockSettime, |clock_id: i32, tp: *const LinuxTimespec| {
 
     let timespec = user_safe::read(tp)?;
     time::set_unix_timestamp_nanoseconds(linux_timespec_to_realtime_ns(timespec)?);
-    crate::misc::timer::process_expired_process_timers();
+    wake_after_realtime_change();
 
     Ok(0)
 });

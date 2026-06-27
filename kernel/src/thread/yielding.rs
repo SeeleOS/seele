@@ -181,6 +181,13 @@ impl ThreadManager {
         }
     }
 
+    pub fn wake_due_timed_threads(&mut self) {
+        if self.has_timed_out_threads_due(Time::since_boot()) {
+            self.process_timed_out_threads();
+            request_all_cpus_resched();
+        }
+    }
+
     pub(crate) fn remove_from_blocked_queues(&mut self, thread: &ThreadRef) {
         let (timed_key, futex_wait_id) = {
             let thread = thread.lock();
@@ -360,6 +367,10 @@ pub fn wake_pollers_for_object(target_object: ObjectRef, event: PollableEvent) {
         manager.mark_pollers_dirty();
         manager.wake_affected_pollers(&affected_pollers);
     });
+}
+
+pub fn wake_due_timed_threads() {
+    with_thread_manager(ThreadManager::wake_due_timed_threads);
 }
 
 pub fn block(thread_ref: ThreadRef, block_type: BlockType) {
