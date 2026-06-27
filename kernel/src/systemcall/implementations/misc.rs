@@ -1899,6 +1899,16 @@ mod tests {
             SyscallError::FileNotFound,
         );
 
+        let acct_dir = Path::new("/tmp/acct-dir-target");
+        let _ = VirtualFS.lock().delete_file(acct_dir.clone());
+        VirtualFS.lock().create_dir(acct_dir.clone()).unwrap();
+        write_user_cstr(page, b"/tmp/acct-dir-target\0");
+        expect_errno(
+            SyscallArgs::new([page, 0, 0, 0, 0, 0]).call::<Acct>(),
+            SyscallError::IsADirectory,
+        );
+        let _ = VirtualFS.lock().delete_file(acct_dir);
+
         saved.restore();
     }
 }

@@ -4,7 +4,9 @@ use core::mem;
 use lazy_static::lazy_static;
 
 use crate::{
-    filesystem::{object::FileLikeObject, path::Path, vfs_operations::open_path},
+    filesystem::{
+        object::FileLikeObject, path::Path, vfs_operations::open_path, vfs_traits::MountFlags,
+    },
     memory::utils::Mut,
     misc::time::Time,
     object::traits::Statable,
@@ -49,10 +51,13 @@ pub fn set_accounting_file(path: Option<String>) -> Result<(), SyscallError> {
     let file = open_path(Path::new(&path))
         .map_err(SyscallError::from)
         .and_then(|file| {
-            if file.stat().st_mode & 0o170000 != 0o100000 {
-                Err(SyscallError::AccessDenied)
-            } else {
-                Ok(file)
+            if file.mount_flags().contains(MountFlags::MS_RDONLY) {
+                return Err(SyscallError::ReadOnlyFileSystem);
+            }
+            match file.stat().st_mode & 0o170000 {
+                0o100000 => Ok(file),
+                0o040000 => Err(SyscallError::IsADirectory),
+                _ => Err(SyscallError::AccessDenied),
             }
         })?;
 
