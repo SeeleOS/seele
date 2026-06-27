@@ -9,7 +9,8 @@ use crate::{
         misc::{ObjectRef, get_object_current_process},
     },
     process::{
-        FdEntry, FdFlags,
+        FdEntry, FdFlags, ProcessRef,
+        fd_table::FdTableRef,
         group::ProcessGroupID,
         manager::{MANAGER, get_current_process},
         misc::{ProcessID, get_process_with_pid, with_current_process},
@@ -215,9 +216,11 @@ fn release_fcntl_object_state_for_object(object: &ObjectRef) {
     release_fcntl_object_state_by_key(&object_key);
 }
 
-fn has_other_open_file_description(object: &ObjectRef) -> bool {
-    let current_process = get_current_process();
-    let current_fd_table = current_process.lock().fd_table.clone();
+fn has_other_open_file_description(
+    object: &ObjectRef,
+    current_process: &ProcessRef,
+    current_fd_table: &FdTableRef,
+) -> bool {
     let processes = MANAGER
         .lock()
         .processes
@@ -226,30 +229,48 @@ fn has_other_open_file_description(object: &ObjectRef) -> bool {
         .collect::<Vec<_>>();
 
     processes.into_iter().any(|process| {
-        if Arc::ptr_eq(&process, &current_process) {
+        if Arc::ptr_eq(&process, current_process) {
             return false;
         }
-        let fd_table = process.lock().fd_table.clone();
-        if Arc::ptr_eq(&fd_table, &current_fd_table) {
+        let Some(process) = process.try_lock() else {
+            return true;
+        };
+        let fd_table = process.fd_table.clone();
+        if Arc::ptr_eq(&fd_table, current_fd_table) {
             return false;
         }
-        fd_table_has_other_open_file_description(&fd_table.lock().clone(), None, object)
+        let Some(fd_table) = fd_table.try_lock() else {
+            return true;
+        };
+        fd_table_has_other_open_file_description(&fd_table, None, object)
     })
 }
 
-pub(crate) fn current_process_has_other_open_file_description(
-    fd: usize,
-    object: &ObjectRef,
-) -> bool {
-    let fd_table = get_current_process().lock().fd_table.clone();
-    let fd_table = fd_table.lock().clone();
-    fd_table_has_other_open_file_description(&fd_table, Some(fd), object)
+fn has_other_open_file_description_for_release(object: &ObjectRef) -> bool {
+    let processes = MANAGER
+        .lock()
+        .processes
+        .values()
+        .cloned()
+        .collect::<Vec<_>>();
+
+    processes.into_iter().any(|process| {
+        let Some(process) = process.try_lock() else {
+            return true;
+        };
+        let Some(fd_table) = process.fd_table.try_lock() else {
+            return true;
+        };
+        fd_table_has_other_open_file_description(&fd_table, None, object)
+    })
 }
 
 fn fcntl_set_lease(
     object: &ObjectRef,
     lease: i32,
     current_process_has_other_open_file: bool,
+    current_process: &ProcessRef,
+    current_fd_table: &FdTableRef,
 ) -> SyscallResult {
     if !matches!(lease, F_RDLCK | F_WRLCK | F_UNLCK) {
         return Err(SyscallError::InvalidArguments);
@@ -262,7 +283,8 @@ fn fcntl_set_lease(
         return Err(SyscallError::TryAgain);
     }
     if lease == F_WRLCK
-        && (current_process_has_other_open_file || has_other_open_file_description(object))
+        && (current_process_has_other_open_file
+            || has_other_open_file_description(object, current_process, current_fd_table))
     {
         return Err(SyscallError::TryAgain);
     }
@@ -341,7 +363,7 @@ fn fd_for_object_owner(process: &crate::process::ProcessRef, object: &ObjectRef)
 }
 
 pub(crate) fn release_fcntl_object_state(object: &ObjectRef) {
-    if !has_other_open_file_description(object) {
+    if !has_other_open_file_description_for_release(object) {
         release_fcntl_object_state_for_object(object);
     }
 }
@@ -360,8 +382,6 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
         _ => {}
     }
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
-    let current_process_has_other_open_file = matches!(command, FcntlCmd::SetLease)
-        && current_process_has_other_open_file_description(fd as usize, &object);
     match command {
         FcntlCmd::SetFl => {
             let mut flags = object.clone().get_flags().map_err(SyscallError::from)?
@@ -490,7 +510,26 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
             Ok(pipe.capacity())
         }
         FcntlCmd::SetLease => {
-            fcntl_set_lease(&object, arg as i32, current_process_has_other_open_file)
+            let current_process = get_current_process();
+            let Some(current_process_guard) = current_process.try_lock() else {
+                return Err(SyscallError::TryAgain);
+            };
+            let current_fd_table = current_process_guard.fd_table.clone();
+            let Some(current_fd_table_guard) = current_fd_table.try_lock() else {
+                return Err(SyscallError::TryAgain);
+            };
+            let current_process_has_other_open_file = fd_table_has_other_open_file_description(
+                &current_fd_table_guard,
+                Some(fd as usize),
+                &object,
+            );
+            fcntl_set_lease(
+                &object,
+                arg as i32,
+                current_process_has_other_open_file,
+                &current_process,
+                &current_fd_table,
+            )
         }
         FcntlCmd::GetLease => Ok(fcntl_object_state(&object).lease as usize),
         FcntlCmd::AddSeals => {

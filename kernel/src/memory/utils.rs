@@ -32,6 +32,10 @@ impl<T: ?Sized> Mut<T> {
     pub fn lock(&self) -> MutGuard<'_, T> {
         self.inner.borrow_mut()
     }
+
+    pub fn try_lock(&self) -> Option<MutGuard<'_, T>> {
+        self.inner.try_borrow_mut().ok()
+    }
 }
 
 unsafe impl<T: ?Sized + Send> Send for Mut<T> {}
