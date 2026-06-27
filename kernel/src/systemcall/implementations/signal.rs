@@ -1201,7 +1201,14 @@ mod tests {
             .lock()
             .processes
             .insert(ProcessID(queued_pid as u64), queued_process.clone());
-        let mut queued_siginfo = SigInfo::for_process_signal(Signal::SIGTERM, 77, 88);
+        let queued_receiver_namespace = queued_process.lock().pid_namespace.inode();
+        let queued_sender_pid = current.lock().pid.0 as i32;
+        let queued_visible_sender_pid = current
+            .lock()
+            .pid_visible_from_namespace_inode(queued_receiver_namespace)
+            .unwrap_or(0) as i32;
+        let mut queued_siginfo =
+            SigInfo::for_process_signal(Signal::SIGTERM, queued_sender_pid, 88);
         queued_siginfo.si_code = SI_QUEUE;
         write_user_value(page + 768, &queued_siginfo);
         expect_ok(
@@ -1226,7 +1233,7 @@ mod tests {
             let pending = queued_process.pending_signal_info[Signal::SIGTERM.index()]
                 .expect("sigqueueinfo should store pending siginfo");
             assert_eq!(pending.si_code, SI_QUEUE);
-            assert_eq!(pending.si_pid, 77);
+            assert_eq!(pending.si_pid, queued_visible_sender_pid);
             assert_eq!(pending.si_uid, 88);
         }
         expect_errno(
