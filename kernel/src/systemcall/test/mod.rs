@@ -137,6 +137,16 @@ pub(crate) struct TestLinuxSockAddrIn {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub(crate) struct TestLinuxSockAddrIn6 {
+    pub(crate) sin6_family: u16,
+    pub(crate) sin6_port: u16,
+    pub(crate) sin6_flowinfo: u32,
+    pub(crate) sin6_addr: [u8; 16],
+    pub(crate) sin6_scope_id: u32,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub(crate) struct TestRelibcIovec {
     pub(crate) iov_base: *mut u8,

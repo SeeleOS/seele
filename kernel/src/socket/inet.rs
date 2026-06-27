@@ -32,12 +32,12 @@ use crate::{
 };
 
 use super::{
-    AF_INET, IPPROTO_TCP, IPPROTO_UDP, SO_ACCEPTCONN, SO_DOMAIN, SO_ERROR, SO_PRIORITY,
-    SO_PROTOCOL, SO_RCVBUF, SO_RCVBUFFORCE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_REUSEADDR,
-    SO_SNDBUF, SO_SNDBUFFORCE, SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD, SO_TYPE, SOCK_CLOEXEC, SOCK_DGRAM,
-    SOCK_NONBLOCK, SOCK_RAW, SOCK_STREAM, SOL_IP, SOL_SOCKET, SOL_TCP, SocketError, SocketLike,
-    SocketResult, can_set_socket_priority, self_ref::object_ref, socket_timeout_option_len,
-    wait::wait_for_object_event,
+    AF_INET, AF_INET6, IPPROTO_SCTP, IPPROTO_TCP, IPPROTO_UDP, IPPROTO_UDPLITE, SO_ACCEPTCONN,
+    SO_DOMAIN, SO_ERROR, SO_PRIORITY, SO_PROTOCOL, SO_RCVBUF, SO_RCVBUFFORCE, SO_RCVTIMEO_NEW,
+    SO_RCVTIMEO_OLD, SO_REUSEADDR, SO_SNDBUF, SO_SNDBUFFORCE, SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD,
+    SO_TYPE, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_RAW, SOCK_STREAM, SOL_IP, SOL_SOCKET,
+    SOL_TCP, SocketError, SocketLike, SocketResult, can_set_socket_priority, self_ref::object_ref,
+    socket_timeout_option_len, wait::wait_for_object_event,
 };
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
@@ -165,6 +165,7 @@ impl LocalStreamEndpoint {
 
 #[derive(Debug)]
 pub struct InetSocketObject {
+    domain: u64,
     pub kind: InetSocketKind,
     state: Mut<InetState>,
     flags: Mut<FileFlags>,
@@ -193,23 +194,60 @@ struct LinuxSockAddrIn {
     sin_zero: [u8; 8],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct LinuxSockAddrIn6 {
+    sin6_family: u16,
+    sin6_port: u16,
+    sin6_flowinfo: u32,
+    sin6_addr: [u8; 16],
+    sin6_scope_id: u32,
+}
+
 impl InetSocketObject {
-    pub(crate) fn decode_addr(address: &[u8]) -> SocketResult<InetAddress> {
-        if address.len() < mem::size_of::<LinuxSockAddrIn>() {
+    pub(crate) fn decode_addr_for_domain(domain: u64, address: &[u8]) -> SocketResult<InetAddress> {
+        let family = if address.len() >= mem::size_of::<u16>() {
+            u16::from_ne_bytes(address[..2].try_into().unwrap())
+        } else {
             return Err(SocketError::InvalidArguments);
+        };
+
+        if domain == AF_INET {
+            if address.len() < mem::size_of::<LinuxSockAddrIn>() {
+                return Err(SocketError::InvalidArguments);
+            }
+            let sockaddr = unsafe { &*(address.as_ptr().cast::<LinuxSockAddrIn>()) };
+            if u64::from(sockaddr.sin_family) != AF_INET {
+                return Err(SocketError::AddressFamilyNotSupported);
+            }
+            return Ok(InetAddress::new(
+                sockaddr.sin_addr,
+                u16::from_be(sockaddr.sin_port),
+            ));
         }
-        let sockaddr = unsafe { &*(address.as_ptr().cast::<LinuxSockAddrIn>()) };
-        if u64::from(sockaddr.sin_family) != AF_INET {
+
+        if domain != AF_INET6 {
             return Err(SocketError::AddressFamilyNotSupported);
         }
-        Ok(InetAddress::new(
-            sockaddr.sin_addr,
-            u16::from_be(sockaddr.sin_port),
-        ))
+        if address.len() < mem::size_of::<LinuxSockAddrIn6>() {
+            return Err(SocketError::InvalidArguments);
+        }
+        let sockaddr = unsafe { &*(address.as_ptr().cast::<LinuxSockAddrIn6>()) };
+        if u64::from(family) != AF_INET6 || u64::from(sockaddr.sin6_family) != AF_INET6 {
+            return Err(SocketError::AddressFamilyNotSupported);
+        }
+
+        let mapped = match sockaddr.sin6_addr {
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] => [0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1] => [127, 0, 0, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, a, b, c, d] => [a, b, c, d],
+            _ => return Err(SocketError::AddressNotAvailable),
+        };
+        Ok(InetAddress::new(mapped, u16::from_be(sockaddr.sin6_port)))
     }
 
     pub fn create(domain: u64, kind: u64, protocol: u64) -> SocketResult<Arc<Self>> {
-        if domain != AF_INET {
+        if !matches!(domain, AF_INET | AF_INET6) {
             return Err(SocketError::AddressFamilyNotSupported);
         }
 
@@ -217,10 +255,12 @@ impl InetSocketObject {
         let transport = match socket_type {
             SOCK_STREAM => match protocol {
                 0 | IPPROTO_TCP => TransportKind::Tcp,
+                IPPROTO_SCTP => return Err(SocketError::ProtocolNotSupported),
                 _ => return Err(SocketError::ProtocolNotSupported),
             },
             SOCK_DGRAM => match protocol {
                 0 | IPPROTO_UDP => TransportKind::Udp,
+                IPPROTO_UDPLITE => return Err(SocketError::ProtocolNotSupported),
                 _ => return Err(SocketError::ProtocolNotSupported),
             },
             SOCK_RAW => return Err(SocketError::ProtocolNotSupported),
@@ -229,6 +269,7 @@ impl InetSocketObject {
 
         let handle = net::create_socket(transport).map_err(Self::map_net_error)?;
         let socket = Arc::new(Self {
+            domain,
             kind: match transport {
                 TransportKind::Tcp => InetSocketKind::Stream,
                 TransportKind::Udp => InetSocketKind::Datagram,
@@ -255,8 +296,14 @@ impl InetSocketObject {
         Ok(socket)
     }
 
-    fn from_accepted(handle: NetSocketHandle, local: InetAddress, peer: InetAddress) -> Arc<Self> {
+    fn from_accepted(
+        domain: u64,
+        handle: NetSocketHandle,
+        local: InetAddress,
+        peer: InetAddress,
+    ) -> Arc<Self> {
         let socket = Arc::new(Self {
+            domain,
             kind: InetSocketKind::Stream,
             state: Mut::new(InetState {
                 handle,
@@ -395,7 +442,37 @@ impl InetSocketObject {
         self.flags.lock().contains(FileFlags::NONBLOCK)
     }
 
-    pub(crate) fn encode_addr(addr: InetAddress) -> Vec<u8> {
+    pub(crate) fn encode_addr_for_domain(domain: u64, addr: InetAddress) -> Vec<u8> {
+        if domain == AF_INET6 {
+            let sin6_addr = if addr.is_unspecified() {
+                [0; 16]
+            } else if addr.addr[0] == 127 {
+                let mut loopback = [0; 16];
+                loopback[15] = 1;
+                loopback
+            } else {
+                let mut mapped = [0; 16];
+                mapped[10] = 0xff;
+                mapped[11] = 0xff;
+                mapped[12..16].copy_from_slice(&addr.addr);
+                mapped
+            };
+            let sockaddr = LinuxSockAddrIn6 {
+                sin6_family: AF_INET6 as u16,
+                sin6_port: addr.port.to_be(),
+                sin6_flowinfo: 0,
+                sin6_addr,
+                sin6_scope_id: 0,
+            };
+            return unsafe {
+                slice::from_raw_parts(
+                    (&sockaddr as *const LinuxSockAddrIn6).cast::<u8>(),
+                    mem::size_of::<LinuxSockAddrIn6>(),
+                )
+            }
+            .to_vec();
+        }
+
         let sockaddr = LinuxSockAddrIn {
             sin_family: AF_INET as u16,
             sin_port: addr.port.to_be(),
@@ -593,7 +670,7 @@ impl InetSocketObject {
             }
             let server_handle =
                 net::create_socket(TransportKind::Tcp).map_err(Self::map_net_error)?;
-            let server_socket = Self::from_accepted(server_handle, remote, local);
+            let server_socket = Self::from_accepted(self.domain, server_handle, remote, local);
             let Some(client_socket) =
                 object_ref(&self.self_ref).and_then(|object| object.as_inet_socket().ok())
             else {
@@ -684,7 +761,12 @@ impl InetSocketObject {
                         state.listening = true;
                         old
                     };
-                    return Ok(Self::from_accepted(old_handle, accepted_local, peer));
+                    return Ok(Self::from_accepted(
+                        self.domain,
+                        old_handle,
+                        accepted_local,
+                        peer,
+                    ));
                 }
                 Err(NetError::TryAgain) => {
                     if self.is_nonblocking() {
@@ -1099,7 +1181,7 @@ impl Statable for InetSocketObject {
 
 impl SocketLike for InetSocketObject {
     fn bind_bytes(self: Arc<Self>, address: &[u8]) -> SocketResult<()> {
-        self.bind(Self::decode_addr(address)?)
+        self.bind(Self::decode_addr_for_domain(self.domain, address)?)
     }
 
     fn listen(self: Arc<Self>, backlog: usize) -> SocketResult<()> {
@@ -1107,7 +1189,7 @@ impl SocketLike for InetSocketObject {
     }
 
     fn connect_bytes(self: Arc<Self>, address: &[u8]) -> SocketResult<()> {
-        self.connect(Self::decode_addr(address)?)
+        self.connect(Self::decode_addr_for_domain(self.domain, address)?)
     }
 
     fn accept(self: Arc<Self>) -> SocketResult<crate::object::misc::ObjectRef> {
@@ -1118,7 +1200,9 @@ impl SocketLike for InetSocketObject {
         match self.kind {
             InetSocketKind::Stream => self.send(buffer),
             InetSocketKind::Datagram => match address {
-                Some(address) => self.send_to(buffer, Self::decode_addr(address)?),
+                Some(address) => {
+                    self.send_to(buffer, Self::decode_addr_for_domain(self.domain, address)?)
+                }
                 None => self.send(buffer),
             },
         }
@@ -1126,7 +1210,10 @@ impl SocketLike for InetSocketObject {
 
     fn recvfrom(&self, buffer: &mut [u8]) -> SocketResult<(usize, Option<Vec<u8>>)> {
         let (read, source) = self.recv_from(buffer)?;
-        Ok((read, source.map(Self::encode_addr)))
+        Ok((
+            read,
+            source.map(|addr| Self::encode_addr_for_domain(self.domain, addr)),
+        ))
     }
 
     fn getsockname_bytes(&self) -> SocketResult<Vec<u8>> {
@@ -1136,7 +1223,7 @@ impl SocketLike for InetSocketObject {
             InetSocketKind::Datagram => state.handle.udp_local_addr().or(state.local),
         }
         .unwrap_or_else(|| InetAddress::any(0));
-        Ok(Self::encode_addr(addr))
+        Ok(Self::encode_addr_for_domain(self.domain, addr))
     }
 
     fn getpeername_bytes(&self) -> SocketResult<Vec<u8>> {
@@ -1146,7 +1233,7 @@ impl SocketLike for InetSocketObject {
             InetSocketKind::Datagram => state.peer,
         }
         .ok_or(SocketError::NotConnected)?;
-        Ok(Self::encode_addr(addr))
+        Ok(Self::encode_addr_for_domain(self.domain, addr))
     }
 
     fn shutdown(&self, how: u64) -> SocketResult<()> {
@@ -1253,7 +1340,7 @@ impl SocketLike for InetSocketObject {
                 },
             ),
             SO_ACCEPTCONN => Self::encode_i32(option_len, self.state.lock().listening as i32),
-            SO_DOMAIN => Self::encode_i32(option_len, AF_INET as i32),
+            SO_DOMAIN => Self::encode_i32(option_len, self.domain as i32),
             SO_PROTOCOL => Self::encode_i32(
                 option_len,
                 match self.kind {

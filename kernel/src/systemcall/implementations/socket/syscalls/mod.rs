@@ -9,8 +9,8 @@ use crate::{
     },
     process::{FdFlags, manager::get_current_process},
     socket::{
-        AF_INET, AF_NETLINK, AF_PACKET, InetSocketObject, PacketSocketObject, SOCK_CLOEXEC,
-        SOCK_NONBLOCK, SOL_SOCKET, UnixSocketKind, UnixSocketState,
+        AF_INET, AF_INET6, AF_NETLINK, AF_PACKET, InetSocketObject, PacketSocketObject,
+        SOCK_CLOEXEC, SOCK_NONBLOCK, SOL_SOCKET, UnixSocketKind, UnixSocketState,
     },
     systemcall::utils::{SyscallError, SyscallImpl},
 };

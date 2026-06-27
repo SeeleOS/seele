@@ -12,8 +12,8 @@ use crate::{
     },
     polling::{event::PollableEvent, object::Pollable, poller::PollerObject},
     socket::{
-        AF_INET, NETLINK_ROUTE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD,
-        SOCK_DGRAM, SOCK_RAW, UnixSocketObject,
+        AF_INET, AF_INET6, NETLINK_ROUTE, SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_SNDTIMEO_NEW,
+        SO_SNDTIMEO_OLD, SOCK_DGRAM, SOCK_RAW, UnixSocketObject,
         inet::InetSocketObject,
         name::{parse_unix_socket_path, serialize_unix_addr},
         registry::UnixSocketRegistryKey,
@@ -116,18 +116,32 @@ fn unix_sockaddr_round_trips_path_and_abstract_names() {
 
 fn inet_sockaddr_uses_network_byte_order_for_ports() {
     let addr = InetAddress::new([127, 0, 0, 1], 0x1234);
-    let encoded = InetSocketObject::encode_addr(addr);
+    let encoded = InetSocketObject::encode_addr_for_domain(AF_INET, addr);
 
     assert_eq!(&encoded[2..4], &[0x12, 0x34]);
-    assert_eq!(InetSocketObject::decode_addr(&encoded).unwrap(), addr);
-    assert!(InetSocketObject::decode_addr(&encoded[..8]).is_err());
+    assert_eq!(
+        InetSocketObject::decode_addr_for_domain(AF_INET, &encoded).unwrap(),
+        addr
+    );
+    assert!(InetSocketObject::decode_addr_for_domain(AF_INET, &encoded[..8]).is_err());
 
     let mut unix_family = encoded;
     unix_family[0..2].copy_from_slice(&1u16.to_ne_bytes());
     assert!(matches!(
-        InetSocketObject::decode_addr(&unix_family),
+        InetSocketObject::decode_addr_for_domain(AF_INET, &unix_family),
         Err(crate::socket::SocketError::AddressFamilyNotSupported)
     ));
+
+    let encoded6 = InetSocketObject::encode_addr_for_domain(AF_INET6, addr);
+    assert_eq!(&encoded6[2..4], &[0x12, 0x34]);
+    assert_eq!(
+        &encoded6[8..24],
+        &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
+    );
+    assert_eq!(
+        InetSocketObject::decode_addr_for_domain(AF_INET6, &encoded6).unwrap(),
+        addr
+    );
 }
 
 fn timeout_sockopts_have_linux_timeval_size() {

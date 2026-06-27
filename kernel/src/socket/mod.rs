@@ -28,6 +28,7 @@ use crate::process::manager::get_current_process;
 
 pub const AF_UNIX: u64 = 1;
 pub const AF_INET: u64 = 2;
+pub const AF_INET6: u64 = 10;
 pub const AF_PACKET: u64 = 17;
 pub const AF_NETLINK: u64 = 16;
 pub const SOL_IP: u64 = 0;
@@ -83,6 +84,8 @@ pub const NETLINK_EXT_ACK: u64 = 11;
 pub const NETLINK_GET_STRICT_CHK: u64 = 12;
 pub const IPPROTO_TCP: u64 = 6;
 pub const IPPROTO_UDP: u64 = 17;
+pub const IPPROTO_SCTP: u64 = 132;
+pub const IPPROTO_UDPLITE: u64 = 136;
 pub const TCP_NODELAY: u64 = 1;
 
 pub use datagram::{DATAGRAM_RECV_CAPACITY, UnixDatagramInner, UnixDatagramMessage};

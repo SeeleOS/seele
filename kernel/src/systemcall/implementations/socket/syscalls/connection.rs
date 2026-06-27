@@ -3,7 +3,7 @@ use super::*;
 define_syscall!(Socket, |domain: u64, kind: u64, protocol: u64| {
     let socket: ObjectRef = if domain == AF_NETLINK {
         NetlinkSocketObject::create(kind, protocol).map_err(ObjectError::from)?
-    } else if domain == AF_INET {
+    } else if domain == AF_INET || domain == AF_INET6 {
         InetSocketObject::create(domain, kind, protocol).map_err(ObjectError::from)?
     } else if domain == AF_PACKET {
         PacketSocketObject::create(kind, protocol).map_err(ObjectError::from)?
@@ -137,7 +137,10 @@ mod tests {
     );
     fn socket_bind_connect_accept_syscalls_follow_linux_rules() {
         const AF_INET: u64 = 2;
+        const AF_INET6: u64 = 10;
         const AF_UNIX: u64 = 1;
+        const IPPROTO_SCTP: u64 = 132;
+        const IPPROTO_UDPLITE: u64 = 136;
         const SOCK_STREAM: u64 = 1;
         const SOCK_DGRAM: u64 = 2;
         const SOCK_NONBLOCK: u64 = 0o0004000;
@@ -145,6 +148,7 @@ mod tests {
 
         assert_linux_layout::<TestLinuxSockAddrUn>(110, 2);
         assert_linux_layout::<TestLinuxSockAddrIn>(16, 2);
+        assert_linux_layout::<TestLinuxSockAddrIn6>(28, 4);
 
         let page = allocate_user_test_page();
         let socket_path = b"/tmp/accept4-linux.sock\0";
@@ -279,6 +283,39 @@ mod tests {
             SyscallError::OperationNotSupported,
         );
 
+        let inet6_stream = expect_fd(
+            SyscallArgs::new([AF_INET6, SOCK_STREAM | SOCK_NONBLOCK, 0, 0, 0, 0]).call::<Socket>(),
+        );
+        let inet6_any = TestLinuxSockAddrIn6 {
+            sin6_family: AF_INET6 as u16,
+            sin6_port: 0,
+            sin6_flowinfo: 0,
+            sin6_addr: [0; 16],
+            sin6_scope_id: 0,
+        };
+        write_user_value(page + 896, &inet6_any);
+        expect_ok(
+            SyscallArgs::new([inet6_stream as u64, page + 896, 28, 0, 0, 0]).call::<Bind>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([inet6_stream as u64, 1, 0, 0, 0, 0]).call::<Listen>(),
+            0,
+        );
+
+        let unsupported_protocol_cases = [
+            [AF_INET, SOCK_STREAM, IPPROTO_SCTP, 0, 0, 0],
+            [AF_INET, SOCK_DGRAM, IPPROTO_UDPLITE, 0, 0, 0],
+            [AF_INET6, SOCK_STREAM, IPPROTO_SCTP, 0, 0, 0],
+            [AF_INET6, SOCK_DGRAM, IPPROTO_UDPLITE, 0, 0, 0],
+        ];
+        for args in unsupported_protocol_cases {
+            expect_errno(
+                SyscallArgs::new(args).call::<Socket>(),
+                SyscallError::ProtocolNotSupported,
+            );
+        }
+
         let non_socket = expect_fd(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Eventfd>());
         expect_errno(
             SyscallArgs::new([non_socket as u64, page + 256, page + 264, 0, 0, 0])
@@ -287,6 +324,7 @@ mod tests {
         );
         close_test_fd(non_socket);
 
+        close_test_fd(inet6_stream);
         close_test_fd(inet_dgram);
         close_test_fd(inet_stream);
         close_test_fd(unix_dgram);
