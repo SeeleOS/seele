@@ -24,6 +24,7 @@ use crate::{process::misc::ProcessID, thread::thread::Thread};
 use fd_table::FdTableRef;
 use fs_context::FsContextRef;
 
+pub mod acct;
 pub mod execve;
 pub mod fd_table;
 pub mod fork;

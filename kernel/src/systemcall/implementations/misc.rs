@@ -11,8 +11,8 @@ use crate::memory::{
     protection::Protection,
     user_safe,
 };
-use crate::misc::error::AsSyscallError;
 use crate::misc::time::Time as KernelTime;
+use crate::misc::{error::AsSyscallError, others::KernelFrom};
 use crate::misc::{others::protection_to_page_flags, reboot as reboot_state, utsname::UtsName};
 use crate::net::namespace::NetNamespace;
 use crate::object::linux_anon::{EventFdFlags, EventFdObject, InotifyObject, PidFdObject};
@@ -38,6 +38,22 @@ use crate::thread::yielding::{
     prepare_block_current,
 };
 use crate::{NAME, define_syscall};
+
+define_syscall!(Acct, |path: *const u8| {
+    if get_current_process().lock().effective_uid != 0 {
+        return Err(SyscallError::PermissionDenied);
+    }
+
+    if path.is_null() {
+        crate::process::acct::set_accounting_file(None)?;
+    } else {
+        crate::process::acct::set_accounting_file(Some(
+            String::k_from(path).map_err(|err| err.as_syscall_error())?,
+        ))?;
+    }
+
+    Ok(0)
+});
 
 bitflags! {
     #[derive(Clone, Copy, Debug)]

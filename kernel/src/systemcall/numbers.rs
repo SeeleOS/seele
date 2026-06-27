@@ -105,6 +105,7 @@ pub enum SyscallNumber {
     Flock = 73,
     Fsync = 74,
     Fdatasync = 75,
+    Acct = 163,
     Ftruncate = 77,
     Getdents = 78,
     Prctl = 157,

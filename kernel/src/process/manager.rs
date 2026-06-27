@@ -94,6 +94,7 @@ pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
         let pid = process.pid;
         let exited_pid_namespace_inode = process.pid_namespace.inode();
         let was_namespace_init = process.pid_namespace_local_pid == Some(1);
+        crate::process::acct::write_process_accounting_record(&process, exit_status);
         (
             pid,
             process.terminate_inner(exit_status),
