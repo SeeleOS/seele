@@ -818,7 +818,7 @@ mod tests {
         );
         expect_ok(
             SyscallArgs::new([0, KEY_SPEC_REQUESTOR_KEYRING as u64, 0, 0, 0, 0]).call::<Keyctl>(),
-            session_keyring,
+            session_keyring as usize,
         );
         write_user_cstr(page + 672, b"iovdemo\0");
         write_user_value(page + 704, b"hello ");
