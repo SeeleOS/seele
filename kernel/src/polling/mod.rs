@@ -46,7 +46,7 @@ pub use entry::PollerEntry;
 pub use object::PollerObject;
 pub use ready::PollerReadyEvent;
 pub use registration::notify_pollers;
-pub use wait::wait_for_object_event;
+pub use wait::{wait_for_object_event, wait_for_object_event_interruptible};
 
 #[cfg(test)]
 mod test;

@@ -10,6 +10,7 @@ bitflags::bitflags! {
         const WRONLY = 1 << 2;
         const RDWR = 1 << 3;
         const PATH = 1 << 4;
+        const DIRECT = 1 << 5;
     }
 }
 

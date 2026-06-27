@@ -8,6 +8,7 @@ use crate::{
         fusefs::FuseFs,
         impls::ext4::{EXT4, operator::Ext4BlockOperator},
         info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
+        misc::smart_resolve_path,
         object::{FileLikeObject, OpenedFileObject, mount_device_id_for_path},
         path::Path,
         procfs::ProcFs,
@@ -29,7 +30,7 @@ use crate::{
         profile::{self, HotSyscallPhase},
     },
     object::{
-        FileFlags,
+        FileFlags, Object,
         error::ObjectError,
         fs_context::{FsConfigCommand, FsContextObject},
         misc::{ObjectRef, get_object_current_process},
@@ -82,6 +83,20 @@ pub use path_ops::*;
 pub use stat::*;
 pub use time::*;
 pub use xattr::*;
+
+define_syscall!(Truncate, |path: CString, length: i64| {
+    if length < 0 {
+        return Err(SyscallError::InvalidArguments);
+    }
+    let path_str = path_from_raw(path)?;
+    let resolved = smart_resolve_path(path_str, true).ok_or(SyscallError::FileNotFound)?;
+    let file = open_path(resolved).map_err(SyscallError::from)?;
+    let file_like = Arc::new(file).as_file_like()?;
+    file_like
+        .truncate(length as u64)
+        .map_err(SyscallError::from)?;
+    Ok(0)
+});
 
 #[cfg(test)]
 mod tests {

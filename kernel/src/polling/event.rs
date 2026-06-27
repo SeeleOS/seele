@@ -7,6 +7,7 @@ pub enum PollableEvent {
     Error,
     Closed,
     ReadClosed,
+    PipeWriteSpace,
     Other(u64),
 }
 

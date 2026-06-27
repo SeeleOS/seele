@@ -441,6 +441,7 @@ fn collect_ready(
             PollableEvent::CanBeWritten => write_ready[fd] = true,
             PollableEvent::Error => except_ready[fd] = true,
             PollableEvent::Priority => {}
+            PollableEvent::PipeWriteSpace => {}
             PollableEvent::Other(_) => {}
         }
 

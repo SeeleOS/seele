@@ -223,6 +223,8 @@ const KEY_SPEC_PROCESS_KEYRING: i32 = -2;
 const KEY_SPEC_SESSION_KEYRING: i32 = -3;
 const KEY_SPEC_USER_KEYRING: i32 = -4;
 const KEY_SPEC_USER_SESSION_KEYRING: i32 = -5;
+const KEY_SPEC_REQUESTOR_KEYRING: i32 = -8;
+const KEY_SPEC_REQKEY_AUTH_KEY: i32 = -7;
 const KEY_REQKEY_DEFL_NO_CHANGE: i32 = -1;
 const KEY_REQKEY_DEFL_DEFAULT: i32 = 0;
 const KEY_REQKEY_DEFL_THREAD_KEYRING: i32 = 1;
@@ -230,6 +232,8 @@ const KEY_REQKEY_DEFL_PROCESS_KEYRING: i32 = 2;
 const KEY_REQKEY_DEFL_SESSION_KEYRING: i32 = 3;
 const KEY_REQKEY_DEFL_USER_KEYRING: i32 = 4;
 const KEY_REQKEY_DEFL_USER_SESSION_KEYRING: i32 = 5;
+const KEY_REQKEY_DEFL_GROUP_KEYRING: i32 = 6;
+const KEY_REQKEY_DEFL_REQUESTOR_KEYRING: i32 = 7;
 const KEY_POS_READ: u32 = 0x0200_0000;
 const KEY_POS_WRITE: u32 = 0x0400_0000;
 const KEY_POS_SEARCH: u32 = 0x0800_0000;
@@ -627,6 +631,33 @@ fn current_user_keyring(kind: UserKeyringKind, create: bool) -> Result<i32, Sysc
     Ok(serial)
 }
 
+fn current_persistent_keyring(uid: u32) -> Result<i32, SyscallError> {
+    let description = alloc::format!("_persistent.{uid}");
+    let mut registry = KEY_REGISTRY.lock();
+    if let Some((serial, _)) = registry.iter().find(|(_, entry)| {
+        entry.is_keyring
+            && entry.uid == uid
+            && entry.description == description
+            && !entry.revoked
+            && !entry.invalidated
+    }) {
+        return Ok(*serial);
+    }
+
+    let serial = next_keyring_id();
+    let entry = KeyEntry {
+        type_name: "keyring".into(),
+        description,
+        uid,
+        gid: uid,
+        permissions: 0x3f3f_0000,
+        is_keyring: true,
+        ..Default::default()
+    };
+    registry.insert(serial, entry);
+    Ok(serial)
+}
+
 fn resolve_keyring(spec: i32, create: bool) -> Result<i32, SyscallError> {
     match spec {
         KEY_SPEC_THREAD_KEYRING => current_thread_keyring(create),
@@ -634,6 +665,24 @@ fn resolve_keyring(spec: i32, create: bool) -> Result<i32, SyscallError> {
         KEY_SPEC_SESSION_KEYRING => current_session_keyring(create),
         KEY_SPEC_USER_KEYRING => current_user_keyring(UserKeyringKind::User, create),
         KEY_SPEC_USER_SESSION_KEYRING => current_user_keyring(UserKeyringKind::UserSession, true),
+        KEY_SPEC_REQUESTOR_KEYRING => {
+            let process = get_current_process();
+            let process = process.lock();
+            if process.request_key_requestor_keyring == 0 {
+                Err(SyscallError::NoData)
+            } else {
+                Ok(process.request_key_requestor_keyring)
+            }
+        }
+        KEY_SPEC_REQKEY_AUTH_KEY => {
+            let process = get_current_process();
+            let process = process.lock();
+            if process.request_key_auth_key == 0 {
+                Err(SyscallError::NoData)
+            } else {
+                Ok(process.request_key_auth_key)
+            }
+        }
         serial if serial > 0 => {
             if keyring_exists(serial) {
                 Ok(serial)
@@ -651,7 +700,9 @@ fn resolve_key_serial(spec: i32) -> Result<i32, SyscallError> {
         | KEY_SPEC_PROCESS_KEYRING
         | KEY_SPEC_SESSION_KEYRING
         | KEY_SPEC_USER_KEYRING
-        | KEY_SPEC_USER_SESSION_KEYRING => resolve_keyring(spec, true),
+        | KEY_SPEC_USER_SESSION_KEYRING
+        | KEY_SPEC_REQUESTOR_KEYRING
+        | KEY_SPEC_REQKEY_AUTH_KEY => resolve_keyring(spec, true),
         serial if serial > 0 => Ok(serial),
         _ => Err(SyscallError::NoKey),
     }
@@ -663,7 +714,9 @@ fn resolve_existing_keyring(spec: i32) -> Result<i32, SyscallError> {
         | KEY_SPEC_PROCESS_KEYRING
         | KEY_SPEC_SESSION_KEYRING
         | KEY_SPEC_USER_KEYRING
-        | KEY_SPEC_USER_SESSION_KEYRING => resolve_keyring(spec, false),
+        | KEY_SPEC_USER_SESSION_KEYRING
+        | KEY_SPEC_REQUESTOR_KEYRING
+        | KEY_SPEC_REQKEY_AUTH_KEY => resolve_keyring(spec, false),
         serial if serial > 0 => {
             let registry = KEY_REGISTRY.lock();
             let entry = registry.get(&serial).ok_or(SyscallError::NoKey)?;

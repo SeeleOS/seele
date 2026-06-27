@@ -1,6 +1,7 @@
 use alloc::{
     collections::VecDeque,
     sync::{Arc, Weak},
+    vec::Vec,
 };
 
 use crate::{
@@ -10,14 +11,15 @@ use crate::{
     memory::utils::Mut,
     object::{
         FileFlags, Object,
+        config::ConfigurateRequest,
         error::ObjectError,
         misc::{ObjectRef, ObjectResult},
-        traits::{Readable, Statable, Writable},
+        traits::{Configuratable, Readable, Statable, Writable},
     },
-    polling::{event::PollableEvent, object::Pollable, wait_for_object_event},
+    polling::{event::PollableEvent, object::Pollable, wait_for_object_event_interruptible},
     process::manager::get_current_process,
     socket::SocketError,
-    systemcall::utils::SyscallError,
+    systemcall::utils::{SyscallError, SyscallResult},
     thread::yielding::wake_pollers_for_object,
 };
 use core::sync::atomic::Ordering;
@@ -75,7 +77,7 @@ impl PipeEndpoint {
         let write = Arc::new(Self {
             inner: inner.clone(),
             kind: PipeEndpointKind::Write,
-            flags: Mut::new(flags),
+            flags: Mut::new(flags | FileFlags::WRONLY),
         });
 
         *inner.read_endpoint.lock() = Some(Arc::downgrade(&read));
@@ -111,6 +113,18 @@ impl PipeEndpoint {
         }
     }
 
+    fn wake_blocked_writers(&self) {
+        if let Some(write) = self
+            .inner
+            .write_endpoint
+            .lock()
+            .as_ref()
+            .and_then(Weak::upgrade)
+        {
+            wake_pollers_for_object(write as ObjectRef, PollableEvent::PipeWriteSpace);
+        }
+    }
+
     pub fn clone_fd_reference(&self) {
         let mut state = self.inner.state.lock();
         match self.kind {
@@ -127,6 +141,7 @@ impl PipeEndpoint {
                 if state.readers == 0 {
                     drop(state);
                     self.wake_writers();
+                    self.wake_blocked_writers();
                 }
             }
             PipeEndpointKind::Write => {
@@ -141,6 +156,66 @@ impl PipeEndpoint {
 
     pub fn capacity(&self) -> usize {
         self.inner.state.lock().capacity
+    }
+
+    pub fn readable_len(&self) -> usize {
+        self.inner.state.lock().buffer.len()
+    }
+
+    pub fn tee_to(&self, output: &PipeEndpoint, len: usize) -> Result<usize, SyscallError> {
+        if self.kind != PipeEndpointKind::Read || output.kind != PipeEndpointKind::Write {
+            return Err(SyscallError::InvalidArguments);
+        }
+        if Arc::ptr_eq(&self.inner, &output.inner) {
+            return Err(SyscallError::InvalidArguments);
+        }
+
+        let input = self.inner.state.lock();
+        if input.buffer.is_empty() {
+            return Err(SyscallError::TryAgain);
+        }
+
+        let mut output_state = output.inner.state.lock();
+        if output_state.readers == 0 {
+            return Err(SyscallError::BrokenPipe);
+        }
+        let available = output_state
+            .capacity
+            .saturating_sub(output_state.buffer.len());
+        if available == 0 {
+            return Err(SyscallError::TryAgain);
+        }
+
+        let copy_len = len.min(input.buffer.len()).min(available);
+        if copy_len == 0 {
+            return Err(SyscallError::TryAgain);
+        }
+        output_state
+            .buffer
+            .extend(input.buffer.iter().take(copy_len).copied());
+        drop(output_state);
+        output.wake_readers();
+        if let Some(read) = output
+            .inner
+            .read_endpoint
+            .lock()
+            .as_ref()
+            .and_then(Weak::upgrade)
+        {
+            read.notify_readable();
+        }
+
+        Ok(copy_len)
+    }
+
+    pub fn peek_into(&self, len: usize, out: &mut Vec<u8>) -> usize {
+        let state = self.inner.state.lock();
+        if self.kind != PipeEndpointKind::Read {
+            return 0;
+        }
+        let copy_len = len.min(state.buffer.len());
+        out.extend(state.buffer.iter().take(copy_len).copied());
+        copy_len
     }
 
     pub fn set_capacity(&self, capacity: usize) -> Result<usize, SyscallError> {
@@ -186,7 +261,11 @@ impl Object for PipeEndpoint {
     }
 
     fn set_flags(self: Arc<Self>, flags: FileFlags) -> ObjectResult<()> {
-        *self.flags.lock() = flags;
+        let status_flags = flags & !(FileFlags::WRONLY | FileFlags::RDWR);
+        *self.flags.lock() = match self.kind {
+            PipeEndpointKind::Read => status_flags,
+            PipeEndpointKind::Write => status_flags | FileFlags::WRONLY,
+        };
         Ok(())
     }
 
@@ -194,8 +273,23 @@ impl Object for PipeEndpoint {
         crate::object::control::notify_fcntl_async_readable(&(self as ObjectRef));
     }
 
-    impl_cast_function!("readable", Readable);
-    impl_cast_function!("writable", Writable);
+    fn as_readable(self: Arc<Self>) -> SyscallResult<Arc<dyn Readable>> {
+        if self.kind == PipeEndpointKind::Read {
+            Ok(self)
+        } else {
+            Err(SyscallError::BadFileDescriptor)
+        }
+    }
+
+    fn as_writable(self: Arc<Self>) -> SyscallResult<Arc<dyn Writable>> {
+        if self.kind == PipeEndpointKind::Write {
+            Ok(self)
+        } else {
+            Err(SyscallError::BadFileDescriptor)
+        }
+    }
+
+    impl_cast_function!("configuratable", Configuratable);
     impl_cast_function!("pollable", Pollable);
     impl_cast_function!("statable", Statable);
     impl_cast_function_non_trait!("pipe", PipeEndpoint);
@@ -211,6 +305,22 @@ impl Statable for PipeEndpoint {
             st_mode: S_IFIFO | 0o600,
             st_blksize: 4096,
             ..Default::default()
+        }
+    }
+}
+
+impl Configuratable for PipeEndpoint {
+    fn configure(&self, request: ConfigurateRequest) -> ObjectResult<isize> {
+        match request {
+            ConfigurateRequest::LinuxFionRead(out) => {
+                if out.is_null() {
+                    return Err(ObjectError::BadAddress);
+                }
+                crate::memory::user_safe::write(out, &(self.readable_len() as i32))
+                    .map_err(|_| ObjectError::BadAddress)?;
+                Ok(0)
+            }
+            _ => Err(ObjectError::InvalidRequest),
         }
     }
 }
@@ -238,6 +348,7 @@ impl Readable for PipeEndpoint {
                 drop(state);
                 if was_full {
                     self.wake_writers();
+                    self.wake_blocked_writers();
                 }
                 return Ok(read_len);
             }
@@ -256,7 +367,7 @@ impl Readable for PipeEndpoint {
                 .as_ref()
                 .and_then(Weak::upgrade)
                 .expect("pipe read endpoint must exist while reading");
-            wait_for_object_event(read as ObjectRef, PollableEvent::CanBeRead);
+            wait_for_object_event_interruptible(read as ObjectRef, PollableEvent::CanBeRead)?;
         }
     }
 }
@@ -305,7 +416,7 @@ impl Writable for PipeEndpoint {
                 .as_ref()
                 .and_then(Weak::upgrade)
                 .expect("pipe write endpoint must exist while writing");
-            wait_for_object_event(write as ObjectRef, PollableEvent::CanBeWritten);
+            wait_for_object_event_interruptible(write as ObjectRef, PollableEvent::PipeWriteSpace)?;
         }
     }
 }
@@ -322,6 +433,9 @@ impl Pollable for PipeEndpoint {
             }
             (PipeEndpointKind::Write, PollableEvent::CanBeWritten) => {
                 state.readers == 0 || state.capacity.saturating_sub(state.buffer.len()) >= PIPE_BUF
+            }
+            (PipeEndpointKind::Write, PollableEvent::PipeWriteSpace) => {
+                state.readers == 0 || state.buffer.len() < state.capacity
             }
             (PipeEndpointKind::Write, PollableEvent::Closed) => state.readers == 0,
             _ => false,

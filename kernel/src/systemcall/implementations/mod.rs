@@ -14,11 +14,14 @@ mod quota;
 mod select;
 mod signal;
 mod socket;
+mod sync_file_range;
 mod sysv_msg;
 mod sysv_sem;
 mod sysv_shm;
+mod tee;
 mod time;
 mod timer;
+mod vmsplice;
 
 #[cfg(test)]
 pub(in crate::systemcall) use select::Timespec as SelectTimespec;
@@ -39,8 +42,11 @@ pub use quota::*;
 pub use select::*;
 pub use signal::*;
 pub use socket::*;
+pub use sync_file_range::*;
 pub use sysv_msg::*;
 pub use sysv_sem::*;
 pub use sysv_shm::*;
+pub use tee::*;
 pub use time::*;
 pub use timer::*;
+pub use vmsplice::*;

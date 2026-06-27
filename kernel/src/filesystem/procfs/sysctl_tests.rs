@@ -44,11 +44,12 @@ fn procfs_string_helpers_trim_sysctl_values_and_preserve_c_string_bytes() {
 
 fn procfs_static_entry_builders_expose_stable_names() {
     let fs_entries = proc_fs_entries();
-    assert_eq!(fs_entries.len(), 4);
+    assert_eq!(fs_entries.len(), 5);
     assert_eq!(fs_entries[0].name, "file-max");
     assert_eq!(fs_entries[1].name, "inotify");
     assert_eq!(fs_entries[2].name, "nr_open");
     assert_eq!(fs_entries[3].name, "pipe-max-size");
+    assert_eq!(fs_entries[4].name, "pipe-user-pages-soft");
 
     let inotify_entries = proc_fs_inotify_entries();
     assert_eq!(inotify_entries.len(), 3);

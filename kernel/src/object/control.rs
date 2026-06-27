@@ -94,6 +94,7 @@ bitflags! {
     struct FileStatusFlags: u64 {
         const O_APPEND = 0o2_000;
         const O_NONBLOCK = 0o4_000;
+        const O_DIRECT = 0o40_000;
     }
 }
 
@@ -228,6 +229,9 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
             if status_flags.contains(FileStatusFlags::O_NONBLOCK) {
                 flags.insert(FileFlags::NONBLOCK);
             }
+            if status_flags.contains(FileStatusFlags::O_DIRECT) {
+                flags.insert(FileFlags::DIRECT);
+            }
             match object.set_flags(flags) {
                 Ok(()) => Ok(0),
                 Err(err) => Err(err.into()),
@@ -242,6 +246,9 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
                     }
                     if flags.contains(FileFlags::NONBLOCK) {
                         linux_flags |= FileStatusFlags::O_NONBLOCK.bits() as usize;
+                    }
+                    if flags.contains(FileFlags::DIRECT) {
+                        linux_flags |= FileStatusFlags::O_DIRECT.bits() as usize;
                     }
                     linux_flags
                 }

@@ -78,6 +78,7 @@ pub enum ConfigurateRequest {
     LinuxTiocgPgrp(*mut i32),
     LinuxTiocnotty,
     LinuxTiocspgrp(*const i32),
+    LinuxFionRead(*mut i32),
     LinuxTiocoutq(*mut i32),
     LinuxTiocgwinsz(*mut LinuxWinsize),
     LinuxTiocswinsz(*const LinuxWinsize),
@@ -226,6 +227,7 @@ impl ConfigurateRequest {
             Self::LinuxTiocgPgrp(_) => "LinuxTiocgPgrp",
             Self::LinuxTiocnotty => "LinuxTiocnotty",
             Self::LinuxTiocspgrp(_) => "LinuxTiocspgrp",
+            Self::LinuxFionRead(_) => "LinuxFionRead",
             Self::LinuxTiocoutq(_) => "LinuxTiocoutq",
             Self::LinuxTiocgwinsz(_) => "LinuxTiocgwinsz",
             Self::LinuxTiocswinsz(_) => "LinuxTiocswinsz",
@@ -415,7 +417,8 @@ impl ConfigurateRequest {
             | Self::BlockGetDiscardZeroes(_)
             | Self::BlockZeroOut(_)
             | Self::FileGetFlags(_)
-            | Self::FileSetFlags(_) => return None,
+            | Self::FileSetFlags(_)
+            | Self::LinuxFionRead(_) => return None,
             Self::LinuxTcGetA(_) => return None,
             Self::RawIoctl { .. } => return None,
         })
@@ -689,6 +692,7 @@ impl ConfigurateRequest {
             0x5422 => Self::LinuxTiocnotty,
             0x5410 => Self::LinuxTiocspgrp(ptr as *const i32),
             0x5411 => Self::LinuxTiocoutq(ptr as *mut i32),
+            0x541B => Self::LinuxFionRead(ptr as *mut i32),
             0x5413 => Self::LinuxTiocgwinsz(ptr as *mut LinuxWinsize),
             0x5414 => Self::LinuxTiocswinsz(ptr as *const LinuxWinsize),
             0x80045430 => Self::LinuxTiocgptn(ptr as *mut i32),

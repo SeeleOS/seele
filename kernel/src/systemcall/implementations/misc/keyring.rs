@@ -2,6 +2,16 @@ use super::*;
 use crate::misc::others::KernelFrom;
 
 const KEYCTL_IOV_MAX: u32 = 1024;
+const KEYCTL_CAPS0_CAPABILITIES: u32 = 1 << 0;
+const KEYCTL_CAPS0_PERSISTENT_KEYRINGS: u32 = 1 << 1;
+const KEYCTL_CAPS0_DIFFIE_HELLMAN: u32 = 1 << 2;
+const KEYCTL_CAPS0_PUBLIC_KEY: u32 = 1 << 3;
+const KEYCTL_CAPS0_BIG_KEY: u32 = 1 << 4;
+const KEYCTL_CAPS0_INVALIDATE: u32 = 1 << 5;
+const KEYCTL_CAPS0_RESTRICT_KEYRING: u32 = 1 << 6;
+const KEYCTL_CAPS0_MOVE: u32 = 1 << 7;
+const KEYCTL_CAPS0_KEY_SPEC_REQKEY_AUTH_KEY: u32 = 1 << 8;
+const KEYCTL_CAPS0_KEY_SPEC_REQUESTOR_KEYRING: u32 = 1 << 9;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -52,6 +62,7 @@ define_syscall!(RequestKey, |type_name_ptr: *const u8,
     if key_type == KeyType::Unsupported {
         return Err(SyscallError::NoDevice);
     }
+    let _ = key_type;
 
     let effective_dest_keyring = if dest_keyring == KEY_REQKEY_DEFL_DEFAULT {
         let default_keyring = get_current_process().lock().request_key_default_keyring;
@@ -87,13 +98,39 @@ define_syscall!(RequestKey, |type_name_ptr: *const u8,
         KEY_REQKEY_DEFL_USER_SESSION_KEYRING => {
             current_user_keyring(UserKeyringKind::UserSession, true)?
         }
-        KEY_SPEC_THREAD_KEYRING
-        | KEY_SPEC_PROCESS_KEYRING
-        | KEY_SPEC_SESSION_KEYRING
-        | KEY_SPEC_USER_KEYRING
-        | KEY_SPEC_USER_SESSION_KEYRING => resolve_keyring(effective_dest_keyring, true)?,
-        _ => resolve_existing_keyring(effective_dest_keyring)?,
+        crate::systemcall::implementations::misc::KEY_REQKEY_DEFL_REQUESTOR_KEYRING => {
+            let process = get_current_process();
+            let process = process.lock();
+            if process.request_key_requestor_keyring == 0 {
+                return Err(SyscallError::NoData);
+            }
+            process.request_key_requestor_keyring
+        }
+        crate::systemcall::implementations::misc::KEY_REQKEY_DEFL_GROUP_KEYRING => {
+            return Err(SyscallError::InvalidArguments);
+        }
+        KEY_SPEC_THREAD_KEYRING => current_thread_keyring(true)?,
+        KEY_SPEC_PROCESS_KEYRING => current_process_keyring(true)?,
+        KEY_SPEC_SESSION_KEYRING => current_session_keyring(true)?,
+        KEY_SPEC_USER_KEYRING => current_user_keyring(UserKeyringKind::User, true)?,
+        KEY_SPEC_USER_SESSION_KEYRING => current_user_keyring(UserKeyringKind::UserSession, true)?,
+        _ if effective_dest_keyring > 0 => resolve_existing_keyring(effective_dest_keyring)?,
+        _ => return Err(SyscallError::NoKey),
     };
+
+    {
+        let process = get_current_process();
+        let mut process = process.lock();
+        process.request_key_requested_key = 0;
+        process.request_key_requestor_keyring = match effective_dest_keyring {
+            KEY_SPEC_REQUESTOR_KEYRING => process.request_key_requestor_keyring,
+            _ => keyring,
+        };
+        process.request_key_auth_key = match key_type {
+            KeyType::Keyring => 0,
+            _ => process.request_key_auth_key,
+        };
+    }
 
     match search_keyring(keyring, &type_name, &description) {
         Ok(serial) => return Ok(serial as usize),
@@ -302,7 +339,6 @@ define_syscall!(Keyctl, |cmd: u64,
             set_key_timeout(keyctl_key_serial(arg2)?, arg3 as u32)?;
             Ok(0)
         }
-        Ok(KeyctlCommand::AssumeAuthority) => unsupported_keyctl(),
         Ok(KeyctlCommand::GetSecurity) => {
             let security = get_key_security(keyctl_key_serial(arg2)?)?;
             copy_keyctl_bytes_to_user(&security, arg3 as *mut u8, arg4 as usize)
@@ -342,8 +378,40 @@ define_syscall!(Keyctl, |cmd: u64,
             Ok(0)
         }
         Ok(KeyctlCommand::GetPersistent) => {
-            let keyring = current_user_keyring(UserKeyringKind::UserSession, true)?;
-            Ok(keyring as usize)
+            let process = get_current_process();
+            let process = process.lock();
+            Ok(current_persistent_keyring(process.effective_uid)? as usize)
+        }
+        Ok(KeyctlCommand::AssumeAuthority) => {
+            if arg2 == 0 {
+                let current = get_current_process();
+                let mut process = current.lock();
+                process.request_key_auth_key = 0;
+                process.request_key_requested_key = 0;
+                return Ok(0);
+            }
+
+            let serial = keyctl_key_serial(arg2)?;
+            let entry = {
+                let registry = KEY_REGISTRY.lock();
+                let entry = registry.get(&serial).ok_or(SyscallError::NoKey)?;
+                if entry.revoked {
+                    return Err(SyscallError::KeyRevoked);
+                }
+                if entry.invalidated {
+                    return Err(SyscallError::NoKey);
+                }
+                entry.clone()
+            };
+            if entry.is_keyring {
+                return Err(SyscallError::InvalidArguments);
+            }
+
+            let current = get_current_process();
+            let mut process = current.lock();
+            process.request_key_auth_key = serial;
+            process.request_key_requested_key = serial;
+            Ok(0)
         }
         Ok(KeyctlCommand::DhCompute)
         | Ok(KeyctlCommand::PkeyQuery)
@@ -364,7 +432,17 @@ define_syscall!(Keyctl, |cmd: u64,
             Ok(0)
         }
         Ok(KeyctlCommand::Capabilities) => {
-            let caps = [0xb3u8, 0, 0, 0];
+            let caps = KEYCTL_CAPS0_CAPABILITIES
+                | KEYCTL_CAPS0_PERSISTENT_KEYRINGS
+                | KEYCTL_CAPS0_DIFFIE_HELLMAN
+                | KEYCTL_CAPS0_PUBLIC_KEY
+                | KEYCTL_CAPS0_BIG_KEY
+                | KEYCTL_CAPS0_INVALIDATE
+                | KEYCTL_CAPS0_RESTRICT_KEYRING
+                | KEYCTL_CAPS0_MOVE
+                | KEYCTL_CAPS0_KEY_SPEC_REQKEY_AUTH_KEY
+                | KEYCTL_CAPS0_KEY_SPEC_REQUESTOR_KEYRING;
+            let caps = caps.to_ne_bytes();
             copy_keyctl_bytes_to_user(&caps, arg2 as *mut u8, arg3 as usize)
         }
         Ok(KeyctlCommand::WatchKey) => unsupported_keyctl(),
@@ -379,6 +457,7 @@ mod tests {
         proc_key_users_bytes, reserve_user_key_quota,
     };
 
+    use crate::process::manager::get_current_process;
     use crate::systemcall::{
         implementations::{AddKey, Bpf, Eventfd, Keyctl},
         test::{close_test_fd, expect_fd, write_user_cstr},
@@ -516,6 +595,10 @@ mod tests {
         const KEYCTL_SEARCH: u64 = 10;
         const KEYCTL_READ: u64 = 11;
         const KEYCTL_INSTANTIATE_IOV: u64 = 20;
+        const KEYCTL_GET_PERSISTENT: u64 = 22;
+        const KEYCTL_CAPABILITIES: u64 = 31;
+        const KEY_SPEC_REQUESTOR_KEYRING: i32 = -8;
+        const KEY_SPEC_REQKEY_AUTH_KEY: i32 = -7;
         const ENCRYPTED_KEY_VALID_PAYLOAD_LEN: u64 =
             b"new enc32 user:masterkey 32 abcdefABCDEF1234567890aaaaaaaaaaabcdefABCDEF1234567890aaaaaaaaaa"
                 .len() as u64;
@@ -670,6 +753,28 @@ mod tests {
             SyscallArgs::new([15, session_keyring, 1, 0, 0, 0]).call::<Keyctl>(),
             0,
         );
+        let persistent = SyscallArgs::new([KEYCTL_GET_PERSISTENT, 0, 0, 0, 0, 0])
+            .call::<Keyctl>()
+            .expect("get_persistent should create a per-user keyring");
+        assert_eq!(
+            persistent,
+            SyscallArgs::new([KEYCTL_GET_PERSISTENT, 0, 0, 0, 0, 0])
+                .call::<Keyctl>()
+                .expect("get_persistent should be stable for the uid")
+        );
+        let capabilities = SyscallArgs::new([KEYCTL_CAPABILITIES, page + 896, 4, 0, 0, 0])
+            .call::<Keyctl>()
+            .expect("keyctl_capabilities should return a 4-byte mask");
+        assert_eq!(capabilities, 4);
+        assert_user_bytes(page + 896, &[0xff, 0x03, 0x00, 0x00]);
+        expect_ok(
+            SyscallArgs::new([16, key_serial, 0, 0, 0, 0]).call::<Keyctl>(),
+            0,
+        );
+        assert_eq!(
+            SyscallArgs::new([0, KEY_SPEC_REQKEY_AUTH_KEY as u64, 0, 0, 0, 0]).call::<Keyctl>(),
+            Ok(key_serial as usize)
+        );
         expect_ok(
             SyscallArgs::new([8, key_serial, session_keyring, 0, 0, 0]).call::<Keyctl>(),
             0,
@@ -700,6 +805,20 @@ mod tests {
         expect_ok(
             SyscallArgs::new([14, 5, 0, 0, 0, 0]).call::<Keyctl>(),
             old_default,
+        );
+        {
+            let process = get_current_process();
+            let mut process = process.lock();
+            process.request_key_auth_key = 424_242;
+            process.request_key_requestor_keyring = session_keyring as i32;
+        }
+        expect_ok(
+            SyscallArgs::new([0, KEY_SPEC_REQKEY_AUTH_KEY as u64, 0, 0, 0, 0]).call::<Keyctl>(),
+            424_242,
+        );
+        expect_ok(
+            SyscallArgs::new([0, KEY_SPEC_REQUESTOR_KEYRING as u64, 0, 0, 0, 0]).call::<Keyctl>(),
+            session_keyring,
         );
         write_user_cstr(page + 672, b"iovdemo\0");
         write_user_value(page + 704, b"hello ");

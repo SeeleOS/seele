@@ -70,6 +70,7 @@ impl Pollable for FuseDevice {
             | PollableEvent::Error
             | PollableEvent::Closed
             | PollableEvent::ReadClosed
+            | PollableEvent::PipeWriteSpace
             | PollableEvent::Other(_) => false,
         }
     }

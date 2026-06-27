@@ -2,7 +2,7 @@ use crate::{
     define_syscall,
     memory::user_safe,
     object::{FileFlags, pipe::PipeEndpoint},
-    process::{FdFlags, manager::get_current_process},
+    process::{FdEntry, FdFlags, manager::get_current_process},
     systemcall::utils::{SyscallError, SyscallImpl},
 };
 use bitflags::bitflags;
@@ -11,6 +11,7 @@ bitflags! {
     #[derive(Clone, Copy, Debug)]
     pub(crate) struct PipeFlags: i32 {
         const O_NONBLOCK = 0o4_000;
+        const O_DIRECT = 0o40_000;
         const O_CLOEXEC = 0o2_000_000;
     }
 }
@@ -20,23 +21,44 @@ fn create_pipe(fds: *mut i32, flags: PipeFlags) -> Result<usize, SyscallError> {
         return Err(SyscallError::BadAddress);
     }
 
-    let object_flags = if flags.contains(PipeFlags::O_NONBLOCK) {
-        FileFlags::NONBLOCK
-    } else {
-        FileFlags::empty()
-    };
+    let mut object_flags = FileFlags::empty();
+    if flags.contains(PipeFlags::O_NONBLOCK) {
+        object_flags.insert(FileFlags::NONBLOCK);
+    }
+    if flags.contains(PipeFlags::O_DIRECT) {
+        object_flags.insert(FileFlags::DIRECT);
+    }
     let (read_end, write_end) = PipeEndpoint::pair(object_flags);
 
     let process = get_current_process();
     let (read_fd, write_fd) = {
-        let mut process = process.lock();
+        let process = process.lock();
         let fd_flags = if flags.contains(PipeFlags::O_CLOEXEC) {
             FdFlags::CLOEXEC
         } else {
             FdFlags::empty()
         };
-        let read_fd = process.push_object_with_flags(read_end, fd_flags);
-        let write_fd = process.push_object_with_flags(write_end, fd_flags);
+
+        let limit = process.rlimit_nofile_cur as usize;
+        let mut fd_table = process.fd_table.lock();
+        let mut slots = [None, None];
+        for slot in 0..limit {
+            if fd_table.get(slot).is_none_or(Option::is_none) {
+                if slots[0].is_none() {
+                    slots[0] = Some(slot);
+                } else {
+                    slots[1] = Some(slot);
+                    break;
+                }
+            }
+        }
+        let read_fd = slots[0].ok_or(SyscallError::TooManyOpenFilesProcess)?;
+        let write_fd = slots[1].ok_or(SyscallError::TooManyOpenFilesProcess)?;
+        if fd_table.len() <= write_fd {
+            fd_table.resize(write_fd + 1, None);
+        }
+        fd_table[read_fd] = Some(FdEntry::new(read_end, fd_flags));
+        fd_table[write_fd] = Some(FdEntry::new(write_end, fd_flags));
         (read_fd, write_fd)
     };
 
@@ -65,7 +87,7 @@ mod tests {
         object::FileFlags,
         process::FdFlags,
         systemcall::{
-            implementations::{Dup, Dup2, Dup3, Fstat, Ioctl, Pipe, Pipe2, Read, Write},
+            implementations::{Dup, Dup2, Dup3, Fcntl, Fstat, Ioctl, Pipe, Pipe2, Read, Write},
             test::{
                 assert_fd_flags, assert_object_flags, assert_same_object, close_test_fd, expect_fd,
                 occupied_fd_count,
@@ -86,7 +108,9 @@ mod tests {
 
     fn pipe_and_dup_syscalls_follow_linux_fd_rules() {
         const O_NONBLOCK: u64 = 0o4_000;
+        const O_DIRECT: u64 = 0o40_000;
         const O_CLOEXEC: u64 = 0o2_000_000;
+        const F_SETFL: u64 = 4;
         const S_IFMT: u32 = 0o170000;
         const S_IFIFO: u32 = 0o010000;
         const FIONBIO: u64 = 0x5421;
@@ -110,7 +134,17 @@ mod tests {
         assert_fd_flags(read_fd, FdFlags::empty());
         assert_fd_flags(write_fd, FdFlags::empty());
         assert_object_flags(read_fd, FileFlags::empty());
-        assert_object_flags(write_fd, FileFlags::empty());
+        assert_object_flags(write_fd, FileFlags::WRONLY);
+        expect_ok(
+            SyscallArgs::new([write_fd as u64, F_SETFL, O_NONBLOCK, 0, 0, 0]).call::<Fcntl>(),
+            0,
+        );
+        assert_object_flags(write_fd, FileFlags::NONBLOCK | FileFlags::WRONLY);
+        expect_ok(
+            SyscallArgs::new([write_fd as u64, F_SETFL, 0, 0, 0, 0]).call::<Fcntl>(),
+            0,
+        );
+        assert_object_flags(write_fd, FileFlags::WRONLY);
         expect_ok(
             SyscallArgs::new([read_fd as u64, stat_page, 0, 0, 0, 0]).call::<Fstat>(),
             0,
@@ -191,11 +225,23 @@ mod tests {
         assert_fd_flags(pipe2_read_fd, FdFlags::CLOEXEC);
         assert_fd_flags(pipe2_write_fd, FdFlags::CLOEXEC);
         assert_object_flags(pipe2_read_fd, FileFlags::NONBLOCK);
-        assert_object_flags(pipe2_write_fd, FileFlags::NONBLOCK);
+        assert_object_flags(pipe2_write_fd, FileFlags::NONBLOCK | FileFlags::WRONLY);
         expect_errno(
             SyscallArgs::new([fd_page, 0x8000_0000, 0, 0, 0, 0]).call::<Pipe2>(),
             SyscallError::InvalidArguments,
         );
+        expect_ok(
+            SyscallArgs::new([fd_page, O_DIRECT, 0, 0, 0, 0]).call::<Pipe2>(),
+            0,
+        );
+        let direct_pipe_fds = read_user_value::<[i32; 2]>(fd_page);
+        assert_object_flags(direct_pipe_fds[0] as usize, FileFlags::DIRECT);
+        assert_object_flags(
+            direct_pipe_fds[1] as usize,
+            FileFlags::DIRECT | FileFlags::WRONLY,
+        );
+        close_test_fd(direct_pipe_fds[1] as usize);
+        close_test_fd(direct_pipe_fds[0] as usize);
 
         let dup_fd =
             expect_fd(SyscallArgs::new([pipe2_read_fd as u64, 0, 0, 0, 0, 0]).call::<Dup>());
