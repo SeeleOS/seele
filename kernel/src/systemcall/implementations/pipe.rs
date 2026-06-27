@@ -87,7 +87,9 @@ mod tests {
         object::FileFlags,
         process::FdFlags,
         systemcall::{
-            implementations::{Dup, Dup2, Dup3, Fcntl, Fstat, Ioctl, Pipe, Pipe2, Read, Write},
+            implementations::{
+                Dup, Dup2, Dup3, Fcntl, Fstat, Ioctl, Pipe, Pipe2, Read, Tee, Vmsplice, Write,
+            },
             test::{
                 assert_fd_flags, assert_object_flags, assert_same_object, close_test_fd, expect_fd,
                 occupied_fd_count,
@@ -299,11 +301,80 @@ mod tests {
             SyscallError::InvalidArguments,
         );
 
+        expect_ok(SyscallArgs::new([fd_page, 0, 0, 0, 0, 0]).call::<Pipe>(), 0);
+        let tee_fds = read_user_value::<[i32; 2]>(fd_page);
+        let tee_read_fd = tee_fds[0] as usize;
+        let tee_write_fd = tee_fds[1] as usize;
+        user_safe::write_buffer((fd_page + 704) as *mut u8, b"ab").unwrap();
+        expect_ok(
+            SyscallArgs::new([write_fd as u64, fd_page + 704, 2, 0, 0, 0]).call::<Write>(),
+            2,
+        );
+        expect_ok(
+            SyscallArgs::new([read_fd as u64, tee_write_fd as u64, 2, 0, 0, 0]).call::<Tee>(),
+            2,
+        );
+        expect_errno(
+            SyscallArgs::new([read_fd as u64, tee_write_fd as u64, 1, 2, 0, 0]).call::<Tee>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_ok(
+            SyscallArgs::new([tee_read_fd as u64, fd_page + 736, 2, 0, 0, 0]).call::<Read>(),
+            2,
+        );
+        assert_eq!(
+            user_safe::read_buffer((fd_page + 736) as *const u8, 2).unwrap(),
+            b"ab"
+        );
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct TestLinuxIovec {
+            iov_base: *const u8,
+            iov_len: usize,
+        }
+
+        user_safe::write_buffer((fd_page + 768) as *mut u8, b"vm").unwrap();
+        write_user_value(
+            fd_page + 800,
+            &[TestLinuxIovec {
+                iov_base: (fd_page + 768) as *const u8,
+                iov_len: 2,
+            }],
+        );
+        expect_ok(
+            SyscallArgs::new([tee_write_fd as u64, fd_page + 800, 1, 0, 0, 0]).call::<Vmsplice>(),
+            2,
+        );
+        expect_errno(
+            SyscallArgs::new([tee_write_fd as u64, fd_page + 800, -1i32 as u64, 0, 0, 0])
+                .call::<Vmsplice>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([tee_write_fd as u64, fd_page + 800, 1, 2, 0, 0]).call::<Vmsplice>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_ok(
+            SyscallArgs::new([tee_read_fd as u64, fd_page + 832, 2, 0, 0, 0]).call::<Read>(),
+            2,
+        );
+        assert_eq!(
+            user_safe::read_buffer((fd_page + 832) as *const u8, 2).unwrap(),
+            b"vm"
+        );
+        close_test_fd(tee_write_fd);
+        close_test_fd(tee_read_fd);
+
         close_test_fd(dup3_dest);
         close_test_fd(dup2_dest);
         close_test_fd(dup_fd);
         close_test_fd(pipe2_write_fd);
         close_test_fd(pipe2_read_fd);
+        expect_ok(
+            SyscallArgs::new([read_fd as u64, fd_page + 864, 2, 0, 0, 0]).call::<Read>(),
+            2,
+        );
         close_test_fd(write_fd);
         expect_ok(
             SyscallArgs::new([read_fd as u64, fd_page, 1, 0, 0, 0]).call::<Read>(),

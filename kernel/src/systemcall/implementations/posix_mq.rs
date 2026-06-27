@@ -313,3 +313,134 @@ fn next_queue_inode() -> u64 {
     *next += 1;
     inode
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systemcall::{
+        implementations::{Close, MqGetsetattr, MqNotify, MqOpen, MqTimedreceive, MqTimedsend},
+        test::{assert_fd_flags, assert_object_flags},
+        test_helpers::{SyscallArgs, allocate_user_test_page, expect_errno, expect_ok},
+        utils::SyscallError,
+    };
+
+    crate::test!(
+        posix_message_queue_syscalls,
+        "posix message queue syscalls follow linux rules",
+        posix_message_queue_syscalls_follow_linux_rules
+    );
+
+    fn posix_message_queue_syscalls_follow_linux_rules() {
+        let page = allocate_user_test_page();
+        let queue_name = String::from("/mq-unit-test");
+        let empty_name = String::new();
+
+        expect_errno(
+            SyscallArgs::new([&empty_name as *const String as u64, 0, 0, 0, 0, 0]).call::<MqOpen>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([&queue_name as *const String as u64, 0, 0, 0, 0, 0]).call::<MqOpen>(),
+            SyscallError::FileNotFound,
+        );
+
+        let fd = SyscallArgs::new([
+            &queue_name as *const String as u64,
+            (O_CREAT | O_CLOEXEC | O_NONBLOCK) as u64,
+            0o600,
+            0,
+            0,
+            0,
+        ])
+        .call::<MqOpen>()
+        .expect("mq_open should create a descriptor");
+        assert_fd_flags(fd, FdFlags::CLOEXEC);
+        assert_object_flags(fd, FileFlags::NONBLOCK);
+
+        expect_errno(
+            SyscallArgs::new([
+                &queue_name as *const String as u64,
+                (O_CREAT | O_EXCL) as u64,
+                0o600,
+                0,
+                0,
+                0,
+            ])
+            .call::<MqOpen>(),
+            SyscallError::FileAlreadyExists,
+        );
+
+        expect_ok(
+            SyscallArgs::new([fd as u64, 0, page, 0, 0, 0]).call::<MqGetsetattr>(),
+            0,
+        );
+        let old_attr = crate::memory::user_safe::read(page as *const LinuxMqAttr).unwrap();
+        assert_eq!(old_attr.mq_flags, O_NONBLOCK as i64);
+        assert_eq!(old_attr.mq_maxmsg, 10);
+        assert_eq!(old_attr.mq_msgsize, 8192);
+
+        crate::memory::user_safe::write(
+            (page + 64) as *mut LinuxMqAttr,
+            &LinuxMqAttr {
+                mq_flags: 0,
+                ..LinuxMqAttr::default()
+            },
+        )
+        .unwrap();
+        expect_ok(
+            SyscallArgs::new([fd as u64, page + 64, 0, 0, 0, 0]).call::<MqGetsetattr>(),
+            0,
+        );
+        assert_object_flags(fd, FileFlags::empty());
+
+        expect_errno(
+            SyscallArgs::new([fd as u64, page + 128, 8193, 0, 0, 0]).call::<MqTimedsend>(),
+            SyscallError::MessageTooLong,
+        );
+        expect_ok(
+            SyscallArgs::new([fd as u64, page + 128, 1, 0, 0, 0]).call::<MqTimedsend>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([fd as u64, page + 128, 1, 0, 0, 0]).call::<MqTimedreceive>(),
+            SyscallError::TryAgain,
+        );
+
+        expect_ok(
+            SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<MqNotify>(),
+            0,
+        );
+        crate::memory::user_safe::write(
+            page as *mut LinuxSigevent,
+            &LinuxSigevent {
+                sigev_value: 0x55,
+                sigev_signo: Signal::SIGUSR1 as i32,
+                sigev_notify: 0,
+            },
+        )
+        .unwrap();
+        expect_ok(
+            SyscallArgs::new([fd as u64, page, 0, 0, 0, 0]).call::<MqNotify>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([fd as u64, page, 0, 0, 0, 0]).call::<MqNotify>(),
+            SyscallError::DeviceOrResourceBusy,
+        );
+
+        expect_ok(
+            SyscallArgs::new([fd as u64, 0, 0, 0, 0, 0]).call::<Close>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([&queue_name as *const String as u64, 0, 0, 0, 0, 0])
+                .call::<MqUnlink>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([&queue_name as *const String as u64, 0, 0, 0, 0, 0])
+                .call::<MqUnlink>(),
+            SyscallError::FileNotFound,
+        );
+    }
+}

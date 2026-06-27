@@ -48,7 +48,7 @@ define_syscall!(Acct, |path: *const u8| {
         crate::process::acct::set_accounting_file(None)?;
     } else {
         crate::process::acct::set_accounting_file(Some(
-            String::k_from(path).map_err(|err| err.as_syscall_error())?,
+            String::k_from(path).map_err(|_| SyscallError::BadAddress)?,
         ))?;
     }
 
@@ -1846,6 +1846,12 @@ mod tests {
         "optional fd provider syscalls return Linux feature unavailable errors",
         optional_fd_provider_syscalls_return_linux_feature_unavailable_errors
     );
+    crate::test!(
+        process_accounting_syscalls,
+        "process accounting syscalls follow linux rules",
+        process_accounting_syscalls_follow_linux_rules
+    );
+
     fn optional_fd_provider_syscalls_return_linux_feature_unavailable_errors() {
         expect_errno(
             SyscallArgs::new([0, 0, 0, u64::MAX, 0, 0]).call::<PerfEventOpen>(),
@@ -1867,6 +1873,33 @@ mod tests {
             SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<MemfdSecret>(),
             SyscallError::OperationNotSupported,
         );
+    }
+
+    fn process_accounting_syscalls_follow_linux_rules() {
+        let saved = CredentialSnapshot::save_current();
+        let process = get_current_process();
+        let page = allocate_user_test_page();
+
+        process.lock().effective_uid = 1000;
+        expect_errno(
+            SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Acct>(),
+            SyscallError::PermissionDenied,
+        );
+
+        process.lock().effective_uid = 0;
+        expect_errno(
+            SyscallArgs::new([1, 0, 0, 0, 0, 0]).call::<Acct>(),
+            SyscallError::BadAddress,
+        );
+        expect_ok(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Acct>(), 0);
+
+        write_user_cstr(page, b"/tmp/no-such-acct-file\0");
+        expect_errno(
+            SyscallArgs::new([page, 0, 0, 0, 0, 0]).call::<Acct>(),
+            SyscallError::FileNotFound,
+        );
+
+        saved.restore();
     }
 }
 

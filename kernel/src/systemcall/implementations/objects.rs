@@ -1525,6 +1525,7 @@ define_syscall!(Pwrite64, |object: ObjectRef,
 
 #[cfg(test)]
 mod tests {
+    use super::{LinuxCacheStat, LinuxCacheStatRange};
     use crate::{
         object::{
             FileFlags, config::LinuxTermios, file_locks::LinuxFlock,
@@ -1533,11 +1534,12 @@ mod tests {
         process::FdFlags,
         systemcall::{
             implementations::{
-                CloseRange, CreatePty, Eventfd, Fcntl, Ioctl, SchedSetscheduler, Socket,
+                Cachestat, CloseRange, CreatePty, Eventfd, Fcntl, Ioctl, OpenAt, SchedSetscheduler,
+                Socket, Write,
             },
             test::{
                 TestLinuxSchedParam, assert_fd_flags, assert_object_flags, close_test_fd,
-                expect_fd, occupied_fd_count,
+                expect_fd, occupied_fd_count, write_user_cstr,
             },
             test_helpers::{
                 SyscallArgs, allocate_user_test_page, assert_linux_layout, expect_errno, expect_ok,
@@ -1556,6 +1558,11 @@ mod tests {
         object_control_syscalls,
         "ioctl and sched_setscheduler follow linux rules",
         object_control_syscalls_follow_linux_rules
+    );
+    crate::test!(
+        cachestat_syscalls,
+        "cachestat syscall follows linux cache query rules",
+        cachestat_syscall_follows_linux_cache_query_rules
     );
 
     fn close_range_syscalls_follow_linux_rules() {
@@ -1601,6 +1608,58 @@ mod tests {
 
         close_test_fd(fd0);
         close_test_fd(fd3);
+    }
+
+    fn cachestat_syscall_follows_linux_cache_query_rules() {
+        const AT_FDCWD: u64 = (-100i32) as u64;
+        const O_RDWR: u64 = 0o2;
+        const O_CREAT: u64 = 0o100;
+        const O_TRUNC: u64 = 0o1000;
+
+        let page = allocate_user_test_page();
+        write_user_cstr(page, b"/tmp/cachestat-unit-test\0");
+        let fd = expect_fd(
+            SyscallArgs::new([AT_FDCWD, page, O_RDWR | O_CREAT | O_TRUNC, 0o600, 0, 0])
+                .call::<OpenAt>(),
+        );
+
+        write_user_value(page + 128, &[0x5au8; 2048]);
+        expect_ok(
+            SyscallArgs::new([fd as u64, page + 128, 2048, 0, 0, 0]).call::<Write>(),
+            2048,
+        );
+
+        write_user_value(page + 512, &LinuxCacheStatRange { off: 0, len: 2048 });
+        write_user_value(page + 544, &LinuxCacheStat::default());
+        expect_ok(
+            SyscallArgs::new([fd as u64, page + 512, page + 544, 0, 0, 0]).call::<Cachestat>(),
+            0,
+        );
+        let stat = read_user_value::<LinuxCacheStat>(page + 544);
+        assert_eq!(stat.nr_cache, 1);
+        assert_eq!(stat.nr_dirty, 0);
+        assert_eq!(stat.nr_writeback, 0);
+        assert_eq!(stat.nr_evicted, 0);
+        assert_eq!(stat.nr_recently_evicted, 0);
+
+        expect_errno(
+            SyscallArgs::new([fd as u64, 0, page + 544, 0, 0, 0]).call::<Cachestat>(),
+            SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([fd as u64, page + 512, 0, 0, 0, 0]).call::<Cachestat>(),
+            SyscallError::BadAddress,
+        );
+        expect_errno(
+            SyscallArgs::new([fd as u64, page + 512, page + 544, 1, 0, 0]).call::<Cachestat>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([u64::MAX, page + 512, page + 544, 0, 0, 0]).call::<Cachestat>(),
+            SyscallError::BadFileDescriptor,
+        );
+
+        close_test_fd(fd);
     }
 
     fn object_control_syscalls_follow_linux_rules() {

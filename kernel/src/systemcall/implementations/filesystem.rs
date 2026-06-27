@@ -2164,6 +2164,32 @@ mod tests {
             SyscallArgs::new([fd as u64, (-1i64) as u64, 0, 0, 0, 0]).call::<Ftruncate>(),
             SyscallError::InvalidArguments,
         );
+        expect_ok(
+            SyscallArgs::new([user_page, 1, 0, 0, 0, 0]).call::<Truncate>(),
+            0,
+        );
+        let path_truncated_stat = get_object_current_process(fd as u64)
+            .unwrap()
+            .as_statable()
+            .unwrap()
+            .stat();
+        assert_eq!(path_truncated_stat.st_size, 1);
+        expect_errno(
+            SyscallArgs::new([user_page, (-1i64) as u64, 0, 0, 0, 0]).call::<Truncate>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_ok(
+            SyscallArgs::new([fd as u64, 0, 1, 1 | 2 | 4, 0, 0]).call::<SyncFileRange>(),
+            0,
+        );
+        expect_errno(
+            SyscallArgs::new([fd as u64, (-1i64) as u64, 1, 0, 0, 0]).call::<SyncFileRange>(),
+            SyscallError::InvalidArguments,
+        );
+        expect_errno(
+            SyscallArgs::new([fd as u64, 0, 1, 8, 0, 0]).call::<SyncFileRange>(),
+            SyscallError::InvalidArguments,
+        );
 
         expect_ok(
             SyscallArgs::new([fd as u64, 0, 0, POSIX_FADV_RANDOM, 0, 0]).call::<Fadvise64>(),
