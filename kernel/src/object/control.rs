@@ -137,6 +137,9 @@ fn fcntl_object_key(object: &ObjectRef) -> String {
             file_like.path().normalize().as_string()
         );
     }
+    if let Ok(pipe) = object.clone().as_pipe() {
+        return format!("pipe:{:p}", Arc::as_ptr(&pipe));
+    }
 
     format!("object:{:p}", Arc::as_ptr(object))
 }

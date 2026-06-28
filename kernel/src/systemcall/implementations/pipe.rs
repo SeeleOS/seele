@@ -86,6 +86,7 @@ mod tests {
         memory::user_safe,
         object::FileFlags,
         process::FdFlags,
+        signal::{Signal, Signals},
         systemcall::{
             implementations::{
                 Dup, Dup2, Dup3, Fcntl, Fstat, Ioctl, Pipe, Pipe2, Read, Tee, Vmsplice, Write,
@@ -100,7 +101,15 @@ mod tests {
             },
             utils::SyscallError,
         },
+        thread::get_current_thread,
     };
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, Default)]
+    struct TestLinuxFOwnerEx {
+        owner_type: i32,
+        pid: i32,
+    }
 
     crate::test!(
         pipe_and_dup_syscalls,
@@ -110,9 +119,13 @@ mod tests {
 
     fn pipe_and_dup_syscalls_follow_linux_fd_rules() {
         const O_NONBLOCK: u64 = 0o4_000;
+        const O_ASYNC: u64 = 0o20_000;
         const O_DIRECT: u64 = 0o40_000;
         const O_CLOEXEC: u64 = 0o2_000_000;
         const F_SETFL: u64 = 4;
+        const F_SETSIG: u64 = 10;
+        const F_SETOWN_EX: u64 = 15;
+        const F_OWNER_TID: i32 = 0;
         const S_IFMT: u32 = 0o170000;
         const S_IFIFO: u32 = 0o010000;
         const FIONBIO: u64 = 0x5421;
@@ -194,6 +207,50 @@ mod tests {
             user_safe::read_buffer(fd_page as *const u8, 3).unwrap(),
             b"abc"
         );
+
+        expect_ok(
+            SyscallArgs::new([read_fd as u64, F_SETFL, O_ASYNC, 0, 0, 0]).call::<Fcntl>(),
+            0,
+        );
+        assert_object_flags(read_fd, FileFlags::ASYNC);
+        let current_tid = get_current_thread().lock().id.0 as i32;
+        let async_owner = TestLinuxFOwnerEx {
+            owner_type: F_OWNER_TID,
+            pid: current_tid,
+        };
+        write_user_value(fd_page + 648, &async_owner);
+        if current_tid > 0 {
+            expect_ok(
+                SyscallArgs::new([read_fd as u64, F_SETOWN_EX, fd_page + 648, 0, 0, 0])
+                    .call::<Fcntl>(),
+                0,
+            );
+            expect_ok(
+                SyscallArgs::new([read_fd as u64, F_SETSIG, Signal::SIGUSR1 as u64, 0, 0, 0])
+                    .call::<Fcntl>(),
+                0,
+            );
+            user_safe::write_buffer(fd_page as *mut u8, b"z")
+                .expect("test buffer should be writable");
+            expect_ok(
+                SyscallArgs::new([write_fd as u64, fd_page, 1, 0, 0, 0]).call::<Write>(),
+                1,
+            );
+            {
+                let thread = get_current_thread();
+                let mut thread = thread.lock();
+                assert!(
+                    thread
+                        .pending_signals
+                        .contains(Signals::from(Signal::SIGUSR1))
+                );
+                thread
+                    .pending_signals
+                    .remove(Signals::from(Signal::SIGUSR1));
+                thread.pending_signal_info[Signal::SIGUSR1.index()] = None;
+            }
+        }
+
         expect_ok(SyscallArgs::new([fd_page, 0, 0, 0, 0, 0]).call::<Pipe>(), 0);
         let sigpipe_fds = read_user_value::<[i32; 2]>(fd_page);
         let sigpipe_read_fd = sigpipe_fds[0] as usize;
