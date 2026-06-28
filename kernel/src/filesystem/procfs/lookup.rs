@@ -231,6 +231,16 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             PROC_SYS_KERNEL_NGROUPS_MAX_INODE,
             proc_ngroups_max_bytes,
         )),
+        ["sys", "kernel", "overflowuid"] => Ok(proc_file(
+            "overflowuid",
+            PROC_SYS_KERNEL_OVERFLOWUID_INODE,
+            proc_overflowuid_bytes,
+        )),
+        ["sys", "kernel", "overflowgid"] => Ok(proc_file(
+            "overflowgid",
+            PROC_SYS_KERNEL_OVERFLOWGID_INODE,
+            proc_overflowgid_bytes,
+        )),
         ["sys", "kernel", "pid_max"] => Ok(proc_rw_file(
             "pid_max",
             PROC_SYS_KERNEL_PID_MAX_INODE,

@@ -2,6 +2,7 @@ use super::*;
 use alloc::collections::BTreeMap;
 
 use crate::{
+    filesystem::path::PathPart,
     impl_cast_function,
     object::{
         Object,
@@ -31,6 +32,22 @@ struct NamedFifoObject {
 
 static NAMED_FIFOS: spin::Mutex<BTreeMap<FifoKey, FifoEndpoints>> =
     spin::Mutex::new(BTreeMap::new());
+
+fn is_proc_user_namespace_control_path(path: &Path) -> bool {
+    let normalized = path.normalize();
+    let parts = normalized
+        .parts
+        .iter()
+        .filter_map(|part| match part {
+            PathPart::Normal(name) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    matches!(
+        parts.as_slice(),
+        ["proc", pid, "uid_map" | "gid_map" | "setgroups"] if pid.bytes().all(|byte| byte.is_ascii_digit())
+    )
+}
 
 impl NamedFifoObject {
     fn new(read: Arc<PipeEndpoint>, write: Arc<PipeEndpoint>, flags: FileFlags) -> Self {
@@ -309,7 +326,9 @@ define_syscall!(OpenAt, |dirfd: i32,
     if directory_only {
         profile::record_hot_syscall_phase(HotSyscallPhase::OpenAtDirectoryCheck, 1);
     }
-    check_open_permissions(&file_like.stat(), flags)?;
+    if !(flags.bits() & 0o3 != 0 && is_proc_user_namespace_control_path(&path)) {
+        check_open_permissions(&file_like.stat(), flags)?;
+    }
     if info.permission.0 & S_IFMT == S_IFIFO && !path_only {
         let object = open_fifo_object(&file_like, flags)?;
         let fd_flags = if flags.contains(OpenFlags::CLOEXEC) {

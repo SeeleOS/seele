@@ -46,6 +46,8 @@ pub(super) const PROC_SYS_KERNEL_CAP_LAST_CAP_INODE: u64 = 0x301c;
 pub(super) const PROC_FILESYSTEMS_INODE: u64 = 0x301d;
 pub(super) const PROC_SYS_KERNEL_TAINTED_INODE: u64 = 0x301e;
 pub(super) const PROC_SYS_KERNEL_PID_MAX_INODE: u64 = 0x301f;
+pub(super) const PROC_SYS_KERNEL_OVERFLOWUID_INODE: u64 = 0x3038;
+pub(super) const PROC_SYS_KERNEL_OVERFLOWGID_INODE: u64 = 0x3039;
 pub(super) const PROC_SYS_VM_INODE: u64 = 0x3020;
 pub(super) const PROC_SYS_VM_NR_HUGEPAGES_INODE: u64 = 0x3021;
 pub(super) const PROC_SYS_VM_HUGETLB_SHM_GROUP_INODE: u64 = 0x3022;
@@ -226,6 +228,8 @@ pub(super) fn proc_kernel_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("domainname".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("osrelease".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("ngroups_max".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("overflowuid".into(), DirectoryContentType::File),
+        DirectoryContentInfo::new("overflowgid".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("pid_max".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("cap_last_cap".into(), DirectoryContentType::File),
         DirectoryContentInfo::new("tainted".into(), DirectoryContentType::File),
@@ -256,6 +260,14 @@ pub(super) fn proc_random_uuid_bytes() -> Vec<u8> {
 
 pub(super) fn proc_ngroups_max_bytes() -> Vec<u8> {
     b"65536\n".to_vec()
+}
+
+pub(super) fn proc_overflowuid_bytes() -> Vec<u8> {
+    format!("{}\n", crate::process::misc::USER_NAMESPACE_OVERFLOW_ID).into_bytes()
+}
+
+pub(super) fn proc_overflowgid_bytes() -> Vec<u8> {
+    format!("{}\n", crate::process::misc::USER_NAMESPACE_OVERFLOW_ID).into_bytes()
 }
 
 pub(super) fn proc_cap_last_cap_bytes() -> Vec<u8> {
@@ -416,6 +428,8 @@ mod tests {
                 "domainname",
                 "osrelease",
                 "ngroups_max",
+                "overflowuid",
+                "overflowgid",
                 "pid_max",
                 "cap_last_cap",
                 "tainted",
@@ -444,6 +458,8 @@ mod tests {
     fn procfs_root_static_bytes_end_with_newline() {
         assert!(proc_boot_id_bytes().ends_with(b"\n"));
         assert_eq!(proc_ngroups_max_bytes(), b"65536\n");
+        assert_eq!(proc_overflowuid_bytes(), b"65534\n");
+        assert_eq!(proc_overflowgid_bytes(), b"65534\n");
         assert!(proc_cap_last_cap_bytes().ends_with(b"\n"));
         assert_eq!(proc_tainted_bytes(), b"0\n");
     }

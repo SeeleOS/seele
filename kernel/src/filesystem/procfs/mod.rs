@@ -63,7 +63,8 @@ use root::{
     PROC_SYS_KERNEL_KEYS_INODE, PROC_SYS_KERNEL_KEYS_MAXBYTES_INODE,
     PROC_SYS_KERNEL_KEYS_MAXKEYS_INODE, PROC_SYS_KERNEL_KEYS_ROOT_MAXBYTES_INODE,
     PROC_SYS_KERNEL_KEYS_ROOT_MAXKEYS_INODE, PROC_SYS_KERNEL_NGROUPS_MAX_INODE,
-    PROC_SYS_KERNEL_OSRELEASE_INODE, PROC_SYS_KERNEL_PID_MAX_INODE,
+    PROC_SYS_KERNEL_OSRELEASE_INODE, PROC_SYS_KERNEL_OVERFLOWGID_INODE,
+    PROC_SYS_KERNEL_OVERFLOWUID_INODE, PROC_SYS_KERNEL_PID_MAX_INODE,
     PROC_SYS_KERNEL_RANDOM_BOOT_ID_INODE, PROC_SYS_KERNEL_RANDOM_INODE,
     PROC_SYS_KERNEL_RANDOM_UUID_INODE, PROC_SYS_KERNEL_TAINTED_INODE, PROC_SYS_USER_INODE,
     PROC_SYS_USER_MAX_USER_NAMESPACES_INODE, PROC_SYS_VM_COMPACT_MEMORY_INODE,
@@ -73,9 +74,9 @@ use root::{
     PROC_VERSION_INODE, proc_boot_id_bytes, proc_cap_last_cap_bytes, proc_cpuinfo_bytes,
     proc_devices_bytes, proc_filesystems_bytes, proc_kernel_cmdline_bytes, proc_kernel_entries,
     proc_kernel_random_entries, proc_loadavg_bytes, proc_mountinfo_bytes, proc_mounts_bytes,
-    proc_ngroups_max_bytes, proc_pressure_entries, proc_random_uuid_bytes, proc_root_entries,
-    proc_stat_bytes, proc_sysvipc_entries, proc_tainted_bytes, proc_uptime_bytes,
-    proc_version_bytes,
+    proc_ngroups_max_bytes, proc_overflowgid_bytes, proc_overflowuid_bytes, proc_pressure_entries,
+    proc_random_uuid_bytes, proc_root_entries, proc_stat_bytes, proc_sysvipc_entries,
+    proc_tainted_bytes, proc_uptime_bytes, proc_version_bytes,
 };
 use self_paths::{lookup_proc_self_path, proc_pid_namespace_file};
 use sysctl::*;

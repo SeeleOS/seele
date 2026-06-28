@@ -206,14 +206,18 @@ pub(in crate::systemcall::implementations) fn check_access_permissions_for_ids_w
         if (mode & 1) != 0 && permission & 0o111 == 0 {
             return Err(SyscallError::AccessDenied);
         }
-        return Ok(());
+        if mapped_file_uid(stat.st_uid, credentials) == 0 {
+            return Ok(());
+        }
     }
 
     if mode & 1 == 0 {
-        if mode & 4 != 0 && has_capability(credentials, CAP_DAC_READ_SEARCH) {
+        let capability_applies =
+            credentials.namespace_uid == 0 && mapped_file_uid(stat.st_uid, credentials) == 0;
+        if capability_applies && mode & 4 != 0 && has_capability(credentials, CAP_DAC_READ_SEARCH) {
             return Ok(());
         }
-        if mode & 2 != 0 && has_capability(credentials, CAP_DAC_OVERRIDE) {
+        if capability_applies && mode & 2 != 0 && has_capability(credentials, CAP_DAC_OVERRIDE) {
             return Ok(());
         }
     }

@@ -20,7 +20,7 @@ use crate::object::misc::get_object_current_process;
 use crate::object::namespace::{NamespaceKind, NamespaceObject};
 use crate::object::{FileFlags, Object, misc::ObjectRef};
 use crate::process::{
-    FdFlags, LinuxSchedPolicy, Process, ProcessRef,
+    DEFAULT_CAPABILITY_SET, FdFlags, LinuxSchedPolicy, Process, ProcessRef,
     manager::{MANAGER, get_current_process},
     misc::{ProcessID, get_process_with_pid},
 };
@@ -1516,6 +1516,9 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
         child.user_namespace_uid_map = Some(alloc::string::String::new());
         child.user_namespace_gid_map = Some(alloc::string::String::new());
         child.user_namespace_setgroups = None;
+        child.capability_effective = DEFAULT_CAPABILITY_SET;
+        child.capability_permitted = DEFAULT_CAPABILITY_SET;
+        child.capability_ambient = [0; 2];
     }
     if clone_flags.contains(CloneFlags::NEWTIME) {
         let (parent_time_namespace, user_namespace) = {
