@@ -291,17 +291,20 @@ impl ThreadManager {
         let mut to_wake = Vec::new();
 
         self.blocked_queues.signal_wait.retain(|thread| {
-            if let State::Blocked(BlockType::WakeRequired {
-                wake_type: WakeType::SignalWait(wait_mask),
-                ..
-            }) = &thread.lock().state
-            {
-                if wait_mask.contains(signal_bits) {
-                    to_wake.push(thread.clone());
-                    false
-                } else {
-                    true
-                }
+            let should_wake = match &thread.lock().state {
+                State::Blocking(BlockType::WakeRequired {
+                    wake_type: WakeType::SignalWait(wait_mask),
+                    ..
+                })
+                | State::Blocked(BlockType::WakeRequired {
+                    wake_type: WakeType::SignalWait(wait_mask),
+                    ..
+                }) => wait_mask.contains(signal_bits),
+                _ => false,
+            };
+            if should_wake {
+                to_wake.push(thread.clone());
+                false
             } else {
                 true
             }
