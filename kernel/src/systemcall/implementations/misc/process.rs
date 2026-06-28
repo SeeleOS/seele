@@ -267,6 +267,16 @@ define_syscall!(Setns, |fd: ObjectRef, flags: SetnsFlags| {
             process.pending_child_time_namespace_state = Some(process.time_namespace_state.clone());
             Ok(0)
         }
+        NamespaceKind::User if flags.is_empty() || flags == SetnsFlags::NEWUSER => {
+            if namespace.parent_inode() != Some(process.user_namespace.inode()) {
+                return Err(SyscallError::PermissionDenied);
+            }
+            process.user_namespace = namespace;
+            process.user_namespace_uid_map = Some(alloc::string::String::new());
+            process.user_namespace_gid_map = Some(alloc::string::String::new());
+            process.user_namespace_setgroups = None;
+            Ok(0)
+        }
         NamespaceKind::Mnt | NamespaceKind::Pid => Err(SyscallError::InvalidArguments),
         _ => Err(SyscallError::InvalidArguments),
     }

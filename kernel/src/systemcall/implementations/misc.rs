@@ -135,6 +135,7 @@ bitflags! {
         const NEWNS = CloneFlags::NEWNS.bits() as u32;
         const NEWPID = CloneFlags::NEWPID.bits() as u32;
         const NEWUTS = CloneFlags::NEWUTS.bits() as u32;
+        const NEWUSER = CloneFlags::NEWUSER.bits() as u32;
         const NEWNET = CloneFlags::NEWNET.bits() as u32;
         const NEWTIME = CloneFlags::NEWTIME.bits() as u32;
     }
@@ -1503,6 +1504,18 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
     };
     if clone_flags.contains(CloneFlags::NEWNET) {
         child_process.lock().net_namespace = NetNamespace::new();
+    }
+    if clone_flags.contains(CloneFlags::NEWUSER) {
+        let parent_user_namespace = current.lock().user_namespace.clone();
+        let mut child = child_process.lock();
+        child.user_namespace = NamespaceObject::dynamic_with_parent(
+            NamespaceKind::User,
+            Some(&parent_user_namespace),
+            Some(&parent_user_namespace),
+        );
+        child.user_namespace_uid_map = Some(alloc::string::String::new());
+        child.user_namespace_gid_map = Some(alloc::string::String::new());
+        child.user_namespace_setgroups = None;
     }
     if clone_flags.contains(CloneFlags::NEWTIME) {
         let (parent_time_namespace, user_namespace) = {
