@@ -2,7 +2,7 @@ use super::*;
 
 const S_ISGID: u32 = 0o2000;
 
-pub(super) fn path_from_raw(path: CString) -> Result<String, SyscallError> {
+pub(crate) fn path_from_raw(path: CString) -> Result<String, SyscallError> {
     const PATH_MAX: usize = 4096;
     const NAME_MAX: usize = 255;
 

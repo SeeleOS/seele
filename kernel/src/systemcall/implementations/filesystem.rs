@@ -86,6 +86,10 @@ pub use stat::*;
 pub use time::*;
 pub use xattr::*;
 
+pub(crate) fn path_from_raw(path: CString) -> Result<String, SyscallError> {
+    path_helpers::path_from_raw(path)
+}
+
 define_syscall!(Truncate, |path: CString, length: i64| {
     if length < 0 {
         return Err(SyscallError::InvalidArguments);

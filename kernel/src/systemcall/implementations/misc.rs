@@ -11,8 +11,8 @@ use crate::memory::{
     protection::Protection,
     user_safe,
 };
+use crate::misc::error::AsSyscallError;
 use crate::misc::time::Time as KernelTime;
-use crate::misc::{error::AsSyscallError, others::KernelFrom};
 use crate::misc::{others::protection_to_page_flags, reboot as reboot_state, utsname::UtsName};
 use crate::net::namespace::NetNamespace;
 use crate::object::linux_anon::{EventFdFlags, EventFdObject, InotifyObject, PidFdObject};
@@ -29,6 +29,7 @@ use crate::signal::{
     action::{SignalAction, SignalHandlingType, Signals},
     misc::default_signal_action_vec,
 };
+use crate::systemcall::implementations::filesystem::path_from_raw;
 use crate::systemcall::utils::{SyscallError, SyscallImpl};
 use crate::terminal::pty::create_pty;
 use crate::thread::misc::with_current_thread;
@@ -47,9 +48,11 @@ define_syscall!(Acct, |path: *const u8| {
     if path.is_null() {
         crate::process::acct::set_accounting_file(None)?;
     } else {
-        crate::process::acct::set_accounting_file(Some(
-            String::k_from(path).map_err(|_| SyscallError::BadAddress)?,
-        ))?;
+        let path = path_from_raw(path)?;
+        if path.len() > 1 && path.ends_with('/') {
+            return Err(SyscallError::NotADirectory);
+        }
+        crate::process::acct::set_accounting_file(Some(path))?;
     }
 
     Ok(0)

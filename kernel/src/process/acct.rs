@@ -5,7 +5,8 @@ use lazy_static::lazy_static;
 
 use crate::{
     filesystem::{
-        object::FileLikeObject, path::Path, vfs_operations::open_path, vfs_traits::MountFlags,
+        misc::smart_resolve_path, object::FileLikeObject, vfs_operations::open_path,
+        vfs_traits::MountFlags,
     },
     memory::utils::Mut,
     misc::time::Time,
@@ -48,7 +49,8 @@ pub fn set_accounting_file(path: Option<String>) -> Result<(), SyscallError> {
         return Ok(());
     };
 
-    let file = open_path(Path::new(&path))
+    let resolved = smart_resolve_path(path, true).ok_or(SyscallError::FileNotFound)?;
+    let file = open_path(resolved)
         .map_err(SyscallError::from)
         .and_then(|file| {
             if file.mount_flags().contains(MountFlags::MS_RDONLY) {
@@ -110,5 +112,7 @@ pub fn write_process_accounting_record(process: &Process, exit_status: ProcessEx
         )
     };
     let offset = u64::try_from(file.stat().st_size).unwrap_or(0);
-    let _ = file.write_at(bytes, offset);
+    let _ = file.with_file_write_cursor(false, |writer| {
+        crate::filesystem::object::OpenedFileObject::write_all_to_cursor(writer, bytes, offset)
+    });
 }
