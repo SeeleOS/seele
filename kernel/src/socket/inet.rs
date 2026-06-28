@@ -168,6 +168,7 @@ impl LocalStreamEndpoint {
 #[derive(Debug)]
 pub struct InetSocketObject {
     domain: Mut<u64>,
+    protocol: Mut<u64>,
     pub kind: InetSocketKind,
     state: Mut<InetState>,
     flags: Mut<FileFlags>,
@@ -254,15 +255,15 @@ impl InetSocketObject {
         }
 
         let socket_type = kind & !(SOCK_NONBLOCK | SOCK_CLOEXEC);
-        let transport = match socket_type {
+        let (transport, protocol) = match socket_type {
             SOCK_STREAM => match protocol {
-                0 | IPPROTO_TCP => TransportKind::Tcp,
-                IPPROTO_SCTP => return Err(SocketError::ProtocolNotSupported),
+                0 | IPPROTO_TCP => (TransportKind::Tcp, IPPROTO_TCP),
+                IPPROTO_SCTP => (TransportKind::Tcp, IPPROTO_SCTP),
                 _ => return Err(SocketError::ProtocolNotSupported),
             },
             SOCK_DGRAM => match protocol {
-                0 | IPPROTO_UDP => TransportKind::Udp,
-                IPPROTO_UDPLITE => return Err(SocketError::ProtocolNotSupported),
+                0 | IPPROTO_UDP => (TransportKind::Udp, IPPROTO_UDP),
+                IPPROTO_UDPLITE => (TransportKind::Udp, IPPROTO_UDPLITE),
                 _ => return Err(SocketError::ProtocolNotSupported),
             },
             SOCK_RAW => return Err(SocketError::ProtocolNotSupported),
@@ -272,6 +273,7 @@ impl InetSocketObject {
         let handle = net::create_socket(transport).map_err(Self::map_net_error)?;
         let socket = Arc::new(Self {
             domain: Mut::new(domain),
+            protocol: Mut::new(protocol),
             kind: match transport {
                 TransportKind::Tcp => InetSocketKind::Stream,
                 TransportKind::Udp => InetSocketKind::Datagram,
@@ -300,12 +302,14 @@ impl InetSocketObject {
 
     fn from_accepted(
         domain: u64,
+        protocol: u64,
         handle: NetSocketHandle,
         local: InetAddress,
         peer: InetAddress,
     ) -> Arc<Self> {
         let socket = Arc::new(Self {
             domain: Mut::new(domain),
+            protocol: Mut::new(protocol),
             kind: InetSocketKind::Stream,
             state: Mut::new(InetState {
                 handle,
@@ -673,7 +677,13 @@ impl InetSocketObject {
             }
             let server_handle =
                 net::create_socket(TransportKind::Tcp).map_err(Self::map_net_error)?;
-            let server_socket = Self::from_accepted(listener_domain, server_handle, remote, local);
+            let server_socket = Self::from_accepted(
+                listener_domain,
+                *listener.protocol.lock(),
+                server_handle,
+                remote,
+                local,
+            );
             let Some(client_socket) =
                 object_ref(&self.self_ref).and_then(|object| object.as_inet_socket().ok())
             else {
@@ -792,6 +802,7 @@ impl InetSocketObject {
                     };
                     return Ok(Self::from_accepted(
                         *self.domain.lock(),
+                        *self.protocol.lock(),
                         old_handle,
                         accepted_local,
                         peer,
@@ -1402,13 +1413,7 @@ impl SocketLike for InetSocketObject {
             ),
             SO_ACCEPTCONN => Self::encode_i32(option_len, self.state.lock().listening as i32),
             SO_DOMAIN => Self::encode_i32(option_len, *self.domain.lock() as i32),
-            SO_PROTOCOL => Self::encode_i32(
-                option_len,
-                match self.kind {
-                    InetSocketKind::Stream => IPPROTO_TCP as i32,
-                    InetSocketKind::Datagram => IPPROTO_UDP as i32,
-                },
-            ),
+            SO_PROTOCOL => Self::encode_i32(option_len, *self.protocol.lock() as i32),
             SO_SNDBUF | SO_RCVBUF | SO_SNDBUFFORCE | SO_RCVBUFFORCE => {
                 Self::encode_i32(option_len, DEFAULT_SOCKET_BUFFER_SIZE)
             }
