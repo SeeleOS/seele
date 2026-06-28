@@ -123,6 +123,14 @@ impl Process {
     pub fn namespace_gid(&self, gid: u32) -> u32 {
         namespace_id_from_map(gid, self.user_namespace_gid_map.as_deref())
     }
+
+    pub fn kernel_uid_from_namespace(&self, uid: u32) -> Option<u32> {
+        kernel_id_from_namespace_map(uid, self.user_namespace_uid_map.as_deref())
+    }
+
+    pub fn kernel_gid_from_namespace(&self, gid: u32) -> Option<u32> {
+        kernel_id_from_namespace_map(gid, self.user_namespace_gid_map.as_deref())
+    }
 }
 
 fn namespace_id_from_map(kernel_id: u32, map: Option<&str>) -> u32 {
@@ -148,6 +156,32 @@ fn namespace_id_from_map(kernel_id: u32, map: Option<&str>) -> u32 {
     }
 
     USER_NAMESPACE_OVERFLOW_ID
+}
+
+fn kernel_id_from_namespace_map(namespace_id: u32, map: Option<&str>) -> Option<u32> {
+    let Some(map) = map else {
+        return Some(namespace_id);
+    };
+
+    for line in map.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(namespace_start) = fields.next().and_then(|value| value.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Some(kernel_start) = fields.next().and_then(|value| value.parse::<u32>().ok()) else {
+            continue;
+        };
+        let Some(length) = fields.next().and_then(|value| value.parse::<u32>().ok()) else {
+            continue;
+        };
+        if namespace_id >= namespace_start && namespace_id < namespace_start.saturating_add(length)
+        {
+            return Some(kernel_start + (namespace_id - namespace_start));
+        }
+    }
+
+    None
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]

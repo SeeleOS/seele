@@ -1,5 +1,17 @@
 use super::*;
 
+fn kernel_uid_from_namespace(process: &Process, uid: u32) -> Result<u32, SyscallError> {
+    process
+        .kernel_uid_from_namespace(uid)
+        .ok_or(SyscallError::InvalidArguments)
+}
+
+fn kernel_gid_from_namespace(process: &Process, gid: u32) -> Result<u32, SyscallError> {
+    process
+        .kernel_gid_from_namespace(gid)
+        .ok_or(SyscallError::InvalidArguments)
+}
+
 define_syscall!(Setgroups, |size: usize, list: *const u32| {
     let groups = if size == 0 {
         Vec::new()
@@ -57,14 +69,15 @@ define_syscall!(Setresuid, |ruid: i32, euid: i32, suid: i32| {
     let mut process = process.lock();
     let old_effective_uid = process.effective_uid;
     if ruid != -1 {
-        process.real_uid = ruid as u32;
+        process.real_uid = kernel_uid_from_namespace(&process, ruid as u32)?;
     }
     if euid != -1 {
-        process.effective_uid = euid as u32;
-        process.fs_uid = euid as u32;
+        let euid = kernel_uid_from_namespace(&process, euid as u32)?;
+        process.effective_uid = euid;
+        process.fs_uid = euid;
     }
     if suid != -1 {
-        process.saved_uid = suid as u32;
+        process.saved_uid = kernel_uid_from_namespace(&process, suid as u32)?;
     }
     process.update_uid_capabilities(old_effective_uid);
     Ok(0)
@@ -74,14 +87,15 @@ define_syscall!(Setresgid, |rgid: i32, egid: i32, sgid: i32| {
     let process = get_current_process();
     let mut process = process.lock();
     if rgid != -1 {
-        process.real_gid = rgid as u32;
+        process.real_gid = kernel_gid_from_namespace(&process, rgid as u32)?;
     }
     if egid != -1 {
-        process.effective_gid = egid as u32;
-        process.fs_gid = egid as u32;
+        let egid = kernel_gid_from_namespace(&process, egid as u32)?;
+        process.effective_gid = egid;
+        process.fs_gid = egid;
     }
     if sgid != -1 {
-        process.saved_gid = sgid as u32;
+        process.saved_gid = kernel_gid_from_namespace(&process, sgid as u32)?;
     }
     Ok(0)
 });
@@ -102,6 +116,7 @@ define_syscall!(Setuid, |uid: u32| {
     let process = get_current_process();
     let mut process = process.lock();
     let old_effective_uid = process.effective_uid;
+    let uid = kernel_uid_from_namespace(&process, uid)?;
     process.real_uid = uid;
     process.effective_uid = uid;
     process.saved_uid = uid;
@@ -115,12 +130,13 @@ define_syscall!(Setreuid, |ruid: i32, euid: i32| {
     let mut process = process.lock();
     let old_effective_uid = process.effective_uid;
     if ruid != -1 {
-        process.real_uid = ruid as u32;
+        process.real_uid = kernel_uid_from_namespace(&process, ruid as u32)?;
     }
     if euid != -1 {
-        process.effective_uid = euid as u32;
-        process.saved_uid = euid as u32;
-        process.fs_uid = euid as u32;
+        let euid = kernel_uid_from_namespace(&process, euid as u32)?;
+        process.effective_uid = euid;
+        process.saved_uid = euid;
+        process.fs_uid = euid;
     }
     process.update_uid_capabilities(old_effective_uid);
     Ok(0)
@@ -129,6 +145,7 @@ define_syscall!(Setreuid, |ruid: i32, euid: i32| {
 define_syscall!(Setgid, |gid: u32| {
     let process = get_current_process();
     let mut process = process.lock();
+    let gid = kernel_gid_from_namespace(&process, gid)?;
     process.real_gid = gid;
     process.effective_gid = gid;
     process.saved_gid = gid;
@@ -140,12 +157,13 @@ define_syscall!(Setregid, |rgid: i32, egid: i32| {
     let process = get_current_process();
     let mut process = process.lock();
     if rgid != -1 {
-        process.real_gid = rgid as u32;
+        process.real_gid = kernel_gid_from_namespace(&process, rgid as u32)?;
     }
     if egid != -1 {
-        process.effective_gid = egid as u32;
-        process.saved_gid = egid as u32;
-        process.fs_gid = egid as u32;
+        let egid = kernel_gid_from_namespace(&process, egid as u32)?;
+        process.effective_gid = egid;
+        process.saved_gid = egid;
+        process.fs_gid = egid;
     }
     Ok(0)
 });
@@ -188,7 +206,8 @@ define_syscall!(Getgroups, |size: i32, list: *mut u32| {
 define_syscall!(Setfsuid, |uid: u32| {
     let process = get_current_process();
     let mut process = process.lock();
-    let old_uid = process.fs_uid;
+    let old_uid = process.namespace_uid(process.fs_uid);
+    let uid = kernel_uid_from_namespace(&process, uid)?;
     process.fs_uid = uid;
     Ok(old_uid as usize)
 });
@@ -196,7 +215,8 @@ define_syscall!(Setfsuid, |uid: u32| {
 define_syscall!(Setfsgid, |gid: u32| {
     let process = get_current_process();
     let mut process = process.lock();
-    let old_gid = process.fs_gid;
+    let old_gid = process.namespace_gid(process.fs_gid);
+    let gid = kernel_gid_from_namespace(&process, gid)?;
     process.fs_gid = gid;
     Ok(old_gid as usize)
 });
@@ -335,6 +355,27 @@ mod tests {
             assert_eq!(process.effective_gid, 61);
             assert_eq!(process.saved_gid, 62);
             assert_eq!(process.fs_gid, 61);
+        }
+
+        {
+            let process = get_current_process();
+            let mut process = process.lock();
+            process.user_namespace_uid_map = Some(String::from("0 100000 1000\n"));
+            process.user_namespace_gid_map = Some(String::from("0 200000 1000\n"));
+        }
+        expect_ok(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Setuid>(), 0);
+        expect_ok(SyscallArgs::new([0, 0, 0, 0, 0, 0]).call::<Setgid>(), 0);
+        {
+            let process = get_current_process();
+            let process = process.lock();
+            assert_eq!(process.real_uid, 100000);
+            assert_eq!(process.effective_uid, 100000);
+            assert_eq!(process.saved_uid, 100000);
+            assert_eq!(process.fs_uid, 100000);
+            assert_eq!(process.real_gid, 200000);
+            assert_eq!(process.effective_gid, 200000);
+            assert_eq!(process.saved_gid, 200000);
+            assert_eq!(process.fs_gid, 200000);
         }
 
         saved.restore();

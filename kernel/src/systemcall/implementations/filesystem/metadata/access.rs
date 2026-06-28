@@ -32,24 +32,40 @@ pub(in crate::systemcall::implementations) struct AccessCredentials {
     uid: u32,
     gid: u32,
     supplementary_groups: Vec<u32>,
+    namespace_uid: u32,
+    namespace_gid: u32,
+    namespace_supplementary_groups: Vec<u32>,
+    user_namespace_uid_map: Option<String>,
+    user_namespace_gid_map: Option<String>,
     capability_effective: [u32; 2],
 }
 
 fn access_credentials(use_effective_ids: bool) -> AccessCredentials {
     let process = get_current_process();
     let process = process.lock();
+    let uid = if use_effective_ids {
+        process.effective_uid
+    } else {
+        process.real_uid
+    };
+    let gid = if use_effective_ids {
+        process.effective_gid
+    } else {
+        process.real_gid
+    };
+    let supplementary_groups = process.supplementary_groups.clone();
     AccessCredentials {
-        uid: if use_effective_ids {
-            process.effective_uid
-        } else {
-            process.real_uid
-        },
-        gid: if use_effective_ids {
-            process.effective_gid
-        } else {
-            process.real_gid
-        },
-        supplementary_groups: process.supplementary_groups.clone(),
+        uid,
+        gid,
+        supplementary_groups: supplementary_groups.clone(),
+        namespace_uid: process.namespace_uid(uid),
+        namespace_gid: process.namespace_gid(gid),
+        namespace_supplementary_groups: supplementary_groups
+            .iter()
+            .map(|gid| process.namespace_gid(*gid))
+            .collect(),
+        user_namespace_uid_map: process.user_namespace_uid_map.clone(),
+        user_namespace_gid_map: process.user_namespace_gid_map.clone(),
         capability_effective: if use_effective_ids {
             process.capability_effective
         } else {
@@ -61,10 +77,19 @@ fn access_credentials(use_effective_ids: bool) -> AccessCredentials {
 pub(in crate::systemcall::implementations) fn fs_access_credentials() -> AccessCredentials {
     let process = get_current_process();
     let process = process.lock();
+    let supplementary_groups = process.supplementary_groups.clone();
     AccessCredentials {
         uid: process.fs_uid,
         gid: process.fs_gid,
-        supplementary_groups: process.supplementary_groups.clone(),
+        supplementary_groups: supplementary_groups.clone(),
+        namespace_uid: process.namespace_uid(process.fs_uid),
+        namespace_gid: process.namespace_gid(process.fs_gid),
+        namespace_supplementary_groups: supplementary_groups
+            .iter()
+            .map(|gid| process.namespace_gid(*gid))
+            .collect(),
+        user_namespace_uid_map: process.user_namespace_uid_map.clone(),
+        user_namespace_gid_map: process.user_namespace_gid_map.clone(),
         capability_effective: process.capability_effective,
     }
 }
@@ -75,6 +100,39 @@ pub(in crate::systemcall::implementations::filesystem) fn fs_gid() -> u32 {
 
 pub(in crate::systemcall::implementations::filesystem) fn fs_uid() -> u32 {
     fs_access_credentials().uid
+}
+
+fn namespace_id_from_map(kernel_id: u32, map: Option<&str>) -> u32 {
+    let Some(map) = map else {
+        return kernel_id;
+    };
+
+    for line in map.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(namespace_start) = fields.next().and_then(|value| value.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Some(kernel_start) = fields.next().and_then(|value| value.parse::<u32>().ok()) else {
+            continue;
+        };
+        let Some(length) = fields.next().and_then(|value| value.parse::<u32>().ok()) else {
+            continue;
+        };
+        if kernel_id >= kernel_start && kernel_id < kernel_start.saturating_add(length) {
+            return namespace_start + (kernel_id - kernel_start);
+        }
+    }
+
+    crate::process::misc::USER_NAMESPACE_OVERFLOW_ID
+}
+
+fn mapped_file_uid(uid: u32, credentials: &AccessCredentials) -> u32 {
+    namespace_id_from_map(uid, credentials.user_namespace_uid_map.as_deref())
+}
+
+fn mapped_file_gid(gid: u32, credentials: &AccessCredentials) -> u32 {
+    namespace_id_from_map(gid, credentials.user_namespace_gid_map.as_deref())
 }
 
 pub(in crate::systemcall::implementations::filesystem) fn check_open_permissions(
@@ -141,7 +199,7 @@ pub(in crate::systemcall::implementations) fn check_access_permissions_for_ids_w
     allow_root_directory_search: bool,
 ) -> Result<(), SyscallError> {
     let permission = stat.st_mode & 0o777;
-    if credentials.uid == 0 {
+    if credentials.namespace_uid == 0 {
         if allow_root_directory_search && (stat.st_mode & S_IFMT) == S_IFDIR {
             return Ok(());
         }
@@ -160,10 +218,14 @@ pub(in crate::systemcall::implementations) fn check_access_permissions_for_ids_w
         }
     }
 
-    let permission_shift = if credentials.uid == stat.st_uid {
+    let owner_uid = mapped_file_uid(stat.st_uid, credentials);
+    let owner_gid = mapped_file_gid(stat.st_gid, credentials);
+    let permission_shift = if credentials.namespace_uid == owner_uid {
         6
-    } else if credentials.gid == stat.st_gid
-        || credentials.supplementary_groups.contains(&stat.st_gid)
+    } else if credentials.namespace_gid == owner_gid
+        || credentials
+            .namespace_supplementary_groups
+            .contains(&owner_gid)
     {
         3
     } else {
