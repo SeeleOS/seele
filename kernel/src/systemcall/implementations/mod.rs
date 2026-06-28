@@ -8,7 +8,7 @@ mod objects;
 mod pipe;
 mod poll;
 mod polling;
-mod posix_mq;
+pub(crate) mod posix_mq;
 mod process;
 mod ptrace;
 mod quota;

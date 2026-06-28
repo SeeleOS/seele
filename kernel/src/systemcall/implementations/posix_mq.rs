@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, string::String, sync::Arc};
+use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use spin::Mutex;
 
 use crate::{
@@ -34,6 +34,9 @@ struct QueueKey {
 #[derive(Debug)]
 pub struct PosixMessageQueueObject {
     inode: u64,
+    mode: Mut<u32>,
+    uid: Mut<u32>,
+    gid: Mut<u32>,
     flags: Mut<FileFlags>,
     notification: Mut<Option<QueueNotification>>,
 }
@@ -63,9 +66,12 @@ struct LinuxSigevent {
 }
 
 impl PosixMessageQueueObject {
-    fn new(inode: u64, flags: FileFlags) -> Arc<Self> {
+    fn new(inode: u64, flags: FileFlags, mode: u32, uid: u32, gid: u32) -> Arc<Self> {
         Arc::new(Self {
             inode,
+            mode: Mut::new(mode & 0o7777),
+            uid: Mut::new(uid),
+            gid: Mut::new(gid),
             flags: Mut::new(flags),
             notification: Mut::new(None),
         })
@@ -138,6 +144,84 @@ impl PosixMessageQueueObject {
             mq_curmsgs: 0,
         }
     }
+
+    pub fn inode(&self) -> u64 {
+        self.inode
+    }
+
+    pub fn chmod(&self, mode: u32) {
+        *self.mode.lock() = mode & 0o7777;
+    }
+
+    pub fn chown(&self, uid: u32, gid: u32) {
+        if uid != u32::MAX {
+            *self.uid.lock() = uid;
+        }
+        if gid != u32::MAX {
+            *self.gid.lock() = gid;
+        }
+    }
+
+    pub fn file_info(&self, name: String) -> crate::filesystem::info::FileLikeInfo {
+        crate::filesystem::info::FileLikeInfo::new(
+            name,
+            0,
+            crate::filesystem::info::UnixPermission(*self.mode.lock()),
+            crate::filesystem::vfs_traits::FileLikeType::File,
+        )
+        .with_inode(self.inode)
+        .with_owner(*self.uid.lock(), *self.gid.lock())
+    }
+}
+
+pub fn list_posix_mqueues(ipc_namespace_inode: u64) -> Vec<(String, Arc<PosixMessageQueueObject>)> {
+    POSIX_MQUEUES
+        .lock()
+        .iter()
+        .filter(|(key, _)| key.ipc_namespace_inode == ipc_namespace_inode)
+        .map(|(key, queue)| (key.name.clone(), queue.clone()))
+        .collect()
+}
+
+pub fn get_posix_mqueue(
+    ipc_namespace_inode: u64,
+    name: &str,
+) -> Result<Arc<PosixMessageQueueObject>, SyscallError> {
+    let key = queue_key(ipc_namespace_inode, String::from(name))?;
+    POSIX_MQUEUES
+        .lock()
+        .get(&key)
+        .cloned()
+        .ok_or(SyscallError::FileNotFound)
+}
+
+pub fn create_posix_mqueue(
+    ipc_namespace_inode: u64,
+    name: &str,
+    mode: u32,
+) -> Result<Arc<PosixMessageQueueObject>, SyscallError> {
+    let key = queue_key(ipc_namespace_inode, String::from(name))?;
+    let mut queues = POSIX_MQUEUES.lock();
+    if queues.contains_key(&key) {
+        return Err(SyscallError::FileAlreadyExists);
+    }
+    let (uid, gid) = {
+        let process = get_current_process();
+        let process = process.lock();
+        (process.fs_uid, process.fs_gid)
+    };
+    let queue =
+        PosixMessageQueueObject::new(next_queue_inode(), FileFlags::empty(), mode, uid, gid);
+    queues.insert(key, queue.clone());
+    Ok(queue)
+}
+
+pub fn unlink_posix_mqueue(ipc_namespace_inode: u64, name: &str) -> Result<(), SyscallError> {
+    let key = queue_key(ipc_namespace_inode, String::from(name))?;
+    if POSIX_MQUEUES.lock().remove(&key).is_none() {
+        return Err(SyscallError::FileNotFound);
+    }
+    Ok(())
 }
 
 impl Object for PosixMessageQueueObject {
@@ -172,7 +256,9 @@ impl Statable for PosixMessageQueueObject {
             st_dev: 1,
             st_ino: self.inode,
             st_nlink: 1,
-            st_mode: S_IFREG | 0o600,
+            st_mode: S_IFREG | *self.mode.lock(),
+            st_uid: *self.uid.lock(),
+            st_gid: *self.gid.lock(),
             st_blksize: 4096,
             ..Default::default()
         }
@@ -200,7 +286,13 @@ define_syscall!(MqOpen, |name: String, flags: u32, mode: u32, _attr: u64| {
             if flags & O_CREAT == 0 {
                 return Err(SyscallError::FileNotFound);
             }
-            let queue = PosixMessageQueueObject::new(next_queue_inode(), file_flags);
+            let (uid, gid) = {
+                let process = get_current_process();
+                let process = process.lock();
+                (process.fs_uid, process.fs_gid)
+            };
+            let queue =
+                PosixMessageQueueObject::new(next_queue_inode(), file_flags, mode, uid, gid);
             queues.insert(key, queue.clone());
             queue
         }
@@ -274,11 +366,14 @@ define_syscall!(
 );
 
 fn current_queue_key(name: String) -> Result<QueueKey, SyscallError> {
-    let name = normalize_queue_name(name)?;
     let ipc_namespace_inode = get_current_process().lock().ipc_namespace.inode();
+    queue_key(ipc_namespace_inode, name)
+}
+
+fn queue_key(ipc_namespace_inode: u64, name: String) -> Result<QueueKey, SyscallError> {
     Ok(QueueKey {
         ipc_namespace_inode,
-        name,
+        name: normalize_queue_name(name)?,
     })
 }
 

@@ -7,6 +7,7 @@ pub mod fusefs;
 pub mod impls;
 pub mod info;
 pub mod misc;
+pub mod mqueuefs;
 pub mod object;
 pub mod page_cache;
 pub mod path;

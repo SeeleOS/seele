@@ -9,6 +9,7 @@ use crate::{
         impls::ext4::{EXT4, operator::Ext4BlockOperator},
         info::{DirectoryContentInfo, FileLikeInfo, LinuxStat},
         misc::smart_resolve_path,
+        mqueuefs::MqueueFs,
         object::{FileLikeObject, OpenedFileObject, mount_device_id_for_path},
         path::Path,
         procfs::ProcFs,

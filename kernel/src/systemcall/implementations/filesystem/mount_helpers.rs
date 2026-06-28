@@ -35,6 +35,7 @@ pub(super) fn is_supported_fs_context_type(fstype: &str) -> bool {
             | "tmpfs"
             | "devpts"
             | "cgroup2"
+            | "mqueue"
             | "bpf"
             | "pstore"
             | "securityfs"
@@ -53,6 +54,7 @@ pub(super) fn create_api_filesystem(fstype: &str) -> Result<FileSystemRef, Sysca
         "tmpfs" => Arc::new(Mut::new(TmpFs::new())),
         "devpts" => Arc::new(Mut::new(DevPtsFs::new())),
         "cgroup2" => Arc::new(Mut::new(CgroupFs::new())),
+        "mqueue" => Arc::new(Mut::new(MqueueFs::new_for_current_process())),
         "bpf" | "pstore" | "securityfs" => Arc::new(Mut::new(TmpFs::new())),
         _ => return Err(SyscallError::NoDevice),
     };
