@@ -113,6 +113,7 @@ fn parse_report(path: &Path, config: &RunTestsConfig) -> Result<LtpReport> {
                 .unwrap_or("unknown")
                 .to_string(),
             duration_ms: case.get("duration_ms").and_then(Value::as_u64),
+            log: case_log(case),
         })
         .collect::<Vec<_>>();
 
@@ -144,6 +145,16 @@ fn count_status(cases: &[LtpCase], needle: &str) -> u64 {
         .iter()
         .filter(|case| case.status.to_ascii_lowercase().contains(needle))
         .count() as u64
+}
+
+fn case_log(case: &Value) -> String {
+    case.get("log")
+        .or_else(|| case.pointer("/test/log"))
+        .or_else(|| case.get("stdout"))
+        .or_else(|| case.pointer("/test/stdout"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
 }
 
 fn strip_ansi_escape_sequences(input: &str) -> String {

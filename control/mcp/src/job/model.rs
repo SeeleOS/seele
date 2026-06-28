@@ -234,6 +234,7 @@ pub struct LtpCase {
     pub name: String,
     pub status: String,
     pub duration_ms: Option<u64>,
+    pub log: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

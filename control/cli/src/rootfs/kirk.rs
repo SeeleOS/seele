@@ -162,11 +162,6 @@ for path in sorted(glob.glob(sys.argv[1] + "/report-*.json")):
     data = re.sub(r"\x1b[%()*+\-./].", "", data)
     report = json.loads(data)
     combined["results"].extend(report.get("results", []))
-for result in combined["results"]:
-    test = result.get("test", {})
-    status = result.get("status") or test.get("result")
-    if status not in ("fail", "brok"):
-        test.pop("log", None)
 sys.stdout.write(json.dumps(combined, separators=(",", ":")))
 PY
 echo __SEELE_LTP_JSON_END__
