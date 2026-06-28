@@ -367,24 +367,105 @@ pub(super) fn proc_pid_loginuid_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
     Ok(b"4294967295\n".to_vec())
 }
 
+#[derive(Clone, Copy)]
+struct UserNamespaceMapEntry {
+    inside_start: u32,
+    outside_start: u32,
+    length: u32,
+}
+
+fn parse_user_namespace_map(map: &str) -> Option<UserNamespaceMapEntry> {
+    let mut fields = map.split_whitespace();
+    let inside_start = fields.next()?.parse::<u32>().ok()?;
+    let outside_start = fields.next()?.parse::<u32>().ok()?;
+    let length = fields.next()?.parse::<u32>().ok()?;
+    Some(UserNamespaceMapEntry {
+        inside_start,
+        outside_start,
+        length,
+    })
+}
+
+fn namespace_id_from_map(kernel_id: u32, map: &str) -> Option<u32> {
+    let entry = parse_user_namespace_map(map)?;
+    if kernel_id >= entry.outside_start
+        && kernel_id < entry.outside_start.saturating_add(entry.length)
+    {
+        Some(entry.inside_start + (kernel_id - entry.outside_start))
+    } else {
+        None
+    }
+}
+
+fn proc_pid_user_namespace_map_bytes(
+    stored_map: Option<&str>,
+    default_outer_id: u32,
+    target_user_namespace_inode: u64,
+    current_map: Option<&str>,
+    current_user_namespace_inode: u64,
+) -> Vec<u8> {
+    let map = stored_map
+        .map(String::from)
+        .unwrap_or_else(|| default_user_namespace_map(default_outer_id));
+    let Some(entry) = parse_user_namespace_map(&map) else {
+        return map.into_bytes();
+    };
+
+    let outside_start = if target_user_namespace_inode == current_user_namespace_inode {
+        entry.outside_start
+    } else {
+        current_map
+            .and_then(|map| namespace_id_from_map(entry.inside_start, map))
+            .unwrap_or(entry.inside_start)
+    };
+
+    format!(
+        "{} {} {}\n",
+        entry.inside_start, outside_start, entry.length
+    )
+    .into_bytes()
+}
+
 pub(super) fn proc_pid_uid_map_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
     let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
-    let process = process.lock();
-    Ok(process
-        .user_namespace_uid_map
-        .clone()
-        .unwrap_or_else(|| default_user_namespace_map(process.real_uid))
-        .into_bytes())
+    let (stored_map, default_outer_id, target_user_namespace_inode) = {
+        let process = process.lock();
+        (
+            process.user_namespace_uid_map.clone(),
+            process.real_uid,
+            process.user_namespace.inode(),
+        )
+    };
+    let current = get_current_process();
+    let current = current.lock();
+    Ok(proc_pid_user_namespace_map_bytes(
+        stored_map.as_deref(),
+        default_outer_id,
+        target_user_namespace_inode,
+        current.user_namespace_uid_map.as_deref(),
+        current.user_namespace.inode(),
+    ))
 }
 
 pub(super) fn proc_pid_gid_map_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
     let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
-    let process = process.lock();
-    Ok(process
-        .user_namespace_gid_map
-        .clone()
-        .unwrap_or_else(|| default_user_namespace_map(process.real_gid))
-        .into_bytes())
+    let (stored_map, default_outer_id, target_user_namespace_inode) = {
+        let process = process.lock();
+        (
+            process.user_namespace_gid_map.clone(),
+            process.real_gid,
+            process.user_namespace.inode(),
+        )
+    };
+    let current = get_current_process();
+    let current = current.lock();
+    Ok(proc_pid_user_namespace_map_bytes(
+        stored_map.as_deref(),
+        default_outer_id,
+        target_user_namespace_inode,
+        current.user_namespace_gid_map.as_deref(),
+        current.user_namespace.inode(),
+    ))
 }
 
 pub(super) fn proc_pid_setgroups_bytes(pid: ProcessID) -> FSResult<Vec<u8>> {
@@ -414,7 +495,11 @@ pub(super) fn proc_pid_write_gid_map(pid: ProcessID, buffer: &[u8]) -> FSResult<
 pub(super) fn proc_pid_write_setgroups(pid: ProcessID, buffer: &[u8]) -> FSResult<usize> {
     let value = normalize_proc_control_write(buffer)?;
     let process = get_process_with_pid(pid).map_err(|_| FSError::NotFound)?;
-    process.lock().user_namespace_setgroups = Some(value);
+    let mut process = process.lock();
+    if process.user_namespace_setgroups.as_deref() == Some("deny\n") && value == "allow\n" {
+        return Err(FSError::PermissionDenied);
+    }
+    process.user_namespace_setgroups = Some(value);
     Ok(buffer.len())
 }
 
@@ -1003,6 +1088,10 @@ mod tests {
         assert_eq!(proc_pid_uid_map_bytes(pid).unwrap(), b"0 2000 1\n");
         assert_eq!(proc_pid_gid_map_bytes(pid).unwrap(), b"0 3000 1\n");
         assert_eq!(proc_pid_setgroups_bytes(pid).unwrap(), b"deny\n");
+        assert!(matches!(
+            proc_pid_write_setgroups(pid, b"allow"),
+            Err(FSError::PermissionDenied)
+        ));
         assert_eq!(proc_pid_oom_score_adj_bytes(pid).unwrap(), b"-1000\n");
         assert!(matches!(
             proc_pid_write_oom_score_adj(pid, b"1001"),
