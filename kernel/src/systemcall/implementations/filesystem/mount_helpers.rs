@@ -61,21 +61,56 @@ pub(super) fn create_api_filesystem(fstype: &str) -> Result<FileSystemRef, Sysca
     Ok(fs)
 }
 
-pub(super) fn publish_mount_to_shared_namespace(path: Path) -> Result<(), SyscallError> {
-    let process = get_current_process();
-    let process = process.lock();
-    if !process.mount_namespace_shared_with_parent {
-        return Ok(());
-    }
+pub(super) fn publish_mount_to_shared_namespace(
+    source_mount_id: u64,
+    path: Path,
+) -> Result<(), SyscallError> {
+    let new_mount_id = VirtualFS
+        .lock()
+        .mount_id(path)
+        .map_err(SyscallError::from)?;
+    crate::process::manager::propagate_mount_from_source(source_mount_id, new_mount_id);
+    Ok(())
+}
 
+pub(super) fn add_mount_to_current_namespace(path: Path) -> Result<(), SyscallError> {
     let mount_id = VirtualFS
         .lock()
         .mount_id(path)
         .map_err(SyscallError::from)?;
-    let namespace_inode = process.mnt_namespace.inode();
-    drop(process);
-    crate::process::manager::mark_mount_shared_with_parent(namespace_inode, mount_id);
+    add_mount_to_current_namespace_by_id(mount_id);
     Ok(())
+}
+
+pub(super) fn add_mount_to_current_namespace_by_id(mount_id: u64) {
+    let process = get_current_process();
+    let mut process = process.lock();
+    if let Some(snapshot) = process.mount_namespace_snapshot.as_mut()
+        && !snapshot.contains(&mount_id)
+    {
+        snapshot.push(mount_id);
+        crate::smp::set_current_mount_namespace_snapshot(Some(snapshot.clone()));
+    }
+}
+
+pub(super) fn replace_mount_in_current_namespace(old_mount_id: u64, new_mount_id: u64) {
+    let process = get_current_process();
+    let mut process = process.lock();
+    if let Some(snapshot) = process.mount_namespace_snapshot.as_mut() {
+        snapshot.retain(|mount_id| *mount_id != old_mount_id);
+        if !snapshot.contains(&new_mount_id) {
+            snapshot.push(new_mount_id);
+        }
+        crate::smp::set_current_mount_namespace_snapshot(Some(snapshot.clone()));
+    }
+}
+
+pub(super) fn add_mount_to_current_and_shared_namespaces(
+    source_mount_id: u64,
+    path: Path,
+) -> Result<(), SyscallError> {
+    add_mount_to_current_namespace(path.clone())?;
+    publish_mount_to_shared_namespace(source_mount_id, path)
 }
 
 #[derive(Clone, Copy, Debug, Default)]

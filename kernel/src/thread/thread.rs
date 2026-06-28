@@ -71,6 +71,7 @@ pub struct Thread {
     pub name: [u8; 16],
     pub timeslice_remaining_ns: u64,
     pub sigaltstack: LinuxStack,
+    pub mount_namespace_snapshot: Option<Vec<u64>>,
 
     pub sig_handler_snapshot: ThreadSnapshot,
 }
@@ -79,6 +80,7 @@ impl Default for Thread {
     fn default() -> Self {
         Self {
             saved_blocked_signals: Vec::new(),
+            mount_namespace_snapshot: None,
             sig_handler_snapshot: ThreadSnapshot::default(),
             snapshot_state: SnapshotState::default(),
             parent: Process::empty(),
@@ -167,6 +169,7 @@ impl Thread {
             kernel_stack: Some(kernel_stack),
             scheduler_snapshot: ThreadSnapshot::new_scheduler(scheduler_stack_top),
             scheduler_stack: Some(scheduler_stack),
+            mount_namespace_snapshot: parent_lock.mount_namespace_snapshot.clone(),
             ..Default::default()
         }
     }

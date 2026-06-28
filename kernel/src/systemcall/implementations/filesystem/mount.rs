@@ -22,6 +22,10 @@ define_syscall!(Mount, |source: CString,
     let operation_flags = MountOperationFlags::from_bits_retain(mountflags);
     let requested_mount_flags = mount_flags_from_mount_bits(mountflags);
     let propagation = mount_propagation_from_mount_flags(operation_flags);
+    let source_mount_id = VirtualFS
+        .lock()
+        .mount_id_for_current_namespace(target_path.clone())
+        .ok();
 
     if operation_flags.contains(MountOperationFlags::MS_BIND) {
         if operation_flags.contains(MountOperationFlags::MS_REMOUNT) {
@@ -53,7 +57,11 @@ define_syscall!(Mount, |source: CString,
                     operation_flags.contains(MountOperationFlags::MS_REC),
                 )
                 .map_err(SyscallError::from)?;
-            publish_mount_to_shared_namespace(target_path)?;
+            if let Some(source_mount_id) = source_mount_id {
+                add_mount_to_current_and_shared_namespaces(source_mount_id, target_path)?;
+            } else {
+                add_mount_to_current_namespace(target_path)?;
+            }
         }
         return Ok(0);
     }
@@ -105,6 +113,20 @@ define_syscall!(Mount, |source: CString,
             return Err(SyscallError::InvalidArguments);
         }
         let propagation = propagation.ok_or(SyscallError::InvalidArguments)?;
+        if propagation == crate::filesystem::vfs::MountPropagationUpdate::Slave {
+            let old_mount_id = VirtualFS
+                .lock()
+                .mount_id_for_current_namespace(target_path.clone())
+                .ok();
+            let namespace_mount_id = VirtualFS
+                .lock()
+                .copy_mount_for_current_namespace(target_path.clone())?;
+            if let Some(old_mount_id) = old_mount_id {
+                replace_mount_in_current_namespace(old_mount_id, namespace_mount_id);
+            } else {
+                add_mount_to_current_namespace_by_id(namespace_mount_id);
+            }
+        }
         VirtualFS
             .lock()
             .set_mount_propagation(
@@ -151,7 +173,11 @@ define_syscall!(Mount, |source: CString,
                 FuseFs::new(fuse_device.connection.clone()),
             )
             .map_err(SyscallError::from)?;
-        publish_mount_to_shared_namespace(target_path)?;
+        if let Some(source_mount_id) = source_mount_id {
+            add_mount_to_current_and_shared_namespaces(source_mount_id, target_path)?;
+        } else {
+            add_mount_to_current_namespace(target_path)?;
+        }
         return Ok(0);
     }
 
@@ -181,7 +207,11 @@ define_syscall!(Mount, |source: CString,
             let mount_root = open_path(target_path.clone())?;
             mount_root.chmod(mode)?;
         }
-        publish_mount_to_shared_namespace(target_path)?;
+        if let Some(source_mount_id) = source_mount_id {
+            add_mount_to_current_and_shared_namespaces(source_mount_id, target_path)?;
+        } else {
+            add_mount_to_current_namespace(target_path)?;
+        }
         return Ok(0);
     }
 
@@ -212,7 +242,11 @@ define_syscall!(Mount, |source: CString,
             .mount(target_path.clone(), ext4)
             .map_err(SyscallError::from)?;
         apply_initial_mount_flags(target_path.clone(), requested_mount_flags)?;
-        publish_mount_to_shared_namespace(target_path)?;
+        if let Some(source_mount_id) = source_mount_id {
+            add_mount_to_current_and_shared_namespaces(source_mount_id, target_path)?;
+        } else {
+            add_mount_to_current_namespace(target_path)?;
+        }
         return Ok(0);
     }
 
@@ -222,7 +256,11 @@ define_syscall!(Mount, |source: CString,
         .mount_ref(target_path.clone(), fs)
         .map_err(SyscallError::from)?;
     apply_initial_mount_flags(target_path.clone(), requested_mount_flags)?;
-    publish_mount_to_shared_namespace(target_path)?;
+    if let Some(source_mount_id) = source_mount_id {
+        add_mount_to_current_and_shared_namespaces(source_mount_id, target_path)?;
+    } else {
+        add_mount_to_current_namespace(target_path)?;
+    }
     Ok(0)
 });
 
@@ -245,13 +283,10 @@ define_syscall!(Umount2, |target: CString, flags: UmountFlags| {
         }
     }
 
-    let mount_path = VirtualFS
+    let mount_id = VirtualFS
         .lock()
-        .mount_path(path.clone())
+        .mount_id_for_current_namespace(path.clone())
         .map_err(SyscallError::from)?;
-    if mount_path != path {
-        return Err(SyscallError::InvalidArguments);
-    }
     if flags.contains(UmountFlags::EXPIRE) {
         if flags.intersects(UmountFlags::FORCE | UmountFlags::DETACH) {
             return Err(SyscallError::InvalidArguments);
@@ -260,7 +295,7 @@ define_syscall!(Umount2, |target: CString, flags: UmountFlags| {
             return Err(SyscallError::TryAgain);
         }
     }
-    if VirtualFS.lock().is_mount_busy(path.clone())? {
+    if VirtualFS.lock().is_mount_id_busy(mount_id) {
         return Err(SyscallError::DeviceOrResourceBusy);
     }
 
@@ -270,7 +305,11 @@ define_syscall!(Umount2, |target: CString, flags: UmountFlags| {
             .detach_mount(path)
             .map_err(SyscallError::from)?;
     } else {
-        VirtualFS.lock().unmount(path).map_err(SyscallError::from)?;
+        VirtualFS.lock().unmount_id(mount_id)?;
+        if let Some(mut snapshot) = crate::smp::current_mount_namespace_snapshot() {
+            snapshot.retain(|id| *id != mount_id);
+            crate::smp::set_current_mount_namespace_snapshot(Some(snapshot));
+        }
     }
     Ok(0)
 });
@@ -418,6 +457,10 @@ define_syscall!(
         };
 
         let _ = open_path(target_path.clone())?;
+        let source_mount_id = VirtualFS
+            .lock()
+            .mount_id_for_current_namespace(target_path.clone())
+            .ok();
 
         if flags.contains(MoveMountFlags::MOVE_MOUNT_BENEATH) {
             VirtualFS
@@ -440,7 +483,11 @@ define_syscall!(
                 .lock()
                 .unmount(source_path.clone())
                 .map_err(SyscallError::from)?;
-            publish_mount_to_shared_namespace(attached_path)?;
+            if let Some(source_mount_id) = source_mount_id {
+                add_mount_to_current_and_shared_namespaces(source_mount_id, attached_path)?;
+            } else {
+                add_mount_to_current_namespace(attached_path)?;
+            }
         }
         if is_api_mount_path(&source_path) {
             let _ = VirtualFS.lock().delete_file(source_path);

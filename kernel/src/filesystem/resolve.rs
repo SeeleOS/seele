@@ -281,7 +281,12 @@ pub fn resolve_path_with_mount_info(
 }
 
 fn mount_snapshots() -> Vec<MountSnapshot> {
-    VirtualFS.lock().mount_snapshots()
+    let namespace_snapshot = crate::smp::current_mount_namespace_snapshot();
+    let vfs = VirtualFS.lock();
+    match namespace_snapshot {
+        Some(snapshot) => vfs.visible_mount_snapshots(Some(&snapshot)),
+        None => vfs.mount_snapshots(),
+    }
 }
 
 fn find_mount_in_snapshots(path: &Path, mounts: &[MountSnapshot]) -> FSResult<MountSnapshot> {

@@ -4,8 +4,10 @@ use lazy_static::lazy_static;
 use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
-    filesystem::cgroupfs::remove_pid_cgroup_path,
-    filesystem::procfs::proc_pid_max,
+    filesystem::{
+        cgroupfs::remove_pid_cgroup_path, procfs::proc_pid_max, vfs::VirtualFS,
+        vfs_traits::MountPropagation,
+    },
     ipc::sysv_shm::detach_all_process_mappings,
     object::linux_anon::wake_pidfd_for_process_with_manager,
     process::{Process, ProcessExitStatus, ProcessRef, misc::ProcessID},
@@ -83,17 +85,37 @@ pub fn get_current_process() -> ProcessRef {
     current_process()
 }
 
-pub fn mark_mount_shared_with_parent(namespace_inode: u64, mount_id: u64) {
+pub fn propagate_mount_from_source(source_mount_id: u64, new_mount_id: u64) {
+    let peer_group = {
+        let vfs = VirtualFS.lock();
+        match vfs.mount_propagation_by_id(source_mount_id) {
+            Ok(MountPropagation::Shared(peer_group)) => peer_group,
+            _ => return,
+        }
+    };
+
     for process in MANAGER.lock().processes.values() {
         let mut process = process.lock();
-        if process.mnt_namespace.inode() != namespace_inode {
-            continue;
-        }
         let Some(snapshot) = process.mount_namespace_snapshot.as_mut() else {
             continue;
         };
-        if !snapshot.contains(&mount_id) {
-            snapshot.push(mount_id);
+        if !VirtualFS
+            .lock()
+            .snapshot_receives_peer_group(snapshot, peer_group)
+        {
+            continue;
+        }
+        if !snapshot.contains(&new_mount_id) {
+            snapshot.push(new_mount_id);
+        }
+    }
+}
+
+pub fn remove_mount_from_namespaces(removed_mount_id: u64) {
+    for process in MANAGER.lock().processes.values() {
+        let mut process = process.lock();
+        if let Some(snapshot) = process.mount_namespace_snapshot.as_mut() {
+            snapshot.retain(|mount_id| *mount_id != removed_mount_id);
         }
     }
 }

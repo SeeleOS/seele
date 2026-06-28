@@ -46,6 +46,15 @@ pub struct VFS {
 }
 
 impl VFS {
+    fn sort_mounts(&mut self) {
+        self.mounts.sort_by_key(|mount| {
+            (
+                Reverse(mount.path.clone().as_string().len()),
+                Reverse(mount.mount_id),
+            )
+        });
+    }
+
     fn remove_mounts_at(&mut self, path: &Path, include_children: bool) -> FSResult<()> {
         let normalized_path = self.normalize_path(path.clone());
         let normalized_path_string = normalized_path.clone().as_string();
@@ -141,7 +150,6 @@ impl VFS {
         propagation: MountPropagation,
     ) -> FSResult<()> {
         let normalized_path = self.normalize_path(path);
-        let normalized_path_string = normalized_path.clone().as_string();
         let device_id = self
             .mounts
             .iter()
@@ -152,18 +160,8 @@ impl VFS {
                 self.next_mount_device_id += 1;
                 device_id
             });
-        let mount_id = self
-            .mounts
-            .iter()
-            .find(|mount| mount.path == normalized_path)
-            .map(|mount| mount.mount_id)
-            .unwrap_or_else(|| {
-                let mount_id = self.next_mount_id;
-                self.next_mount_id += 1;
-                mount_id
-            });
-        self.mounts
-            .retain(|mount| mount.path.clone().as_string() != normalized_path_string);
+        let mount_id = self.next_mount_id;
+        self.next_mount_id += 1;
         self.mounts.push(Mount {
             path: normalized_path,
             fs,
@@ -174,8 +172,7 @@ impl VFS {
             mount_id,
             expire_pending: false,
         });
-        self.mounts
-            .sort_by_key(|mount| Reverse(mount.path.clone().as_string().len()));
+        self.sort_mounts();
         Ok(())
     }
 
@@ -198,6 +195,9 @@ impl VFS {
             .collect::<Vec<_>>();
 
         let (source_mount, source_relative) = self.find_mount(&source)?;
+        if source_mount.propagation == MountPropagation::Unbindable {
+            return Err(FSError::InvalidArguments);
+        }
         self.attach_mount_with_propagation(
             target.clone(),
             source_mount.fs.clone(),
@@ -316,6 +316,7 @@ impl VFS {
         recursive: bool,
     ) -> FSResult<()> {
         let mount_path = self.mount_path(path)?;
+        let namespace_snapshot = crate::smp::current_mount_namespace_snapshot();
         let mut updated = false;
         let shared_id = if propagation == MountPropagationUpdate::Shared {
             let id = self.next_peer_group_id;
@@ -326,6 +327,12 @@ impl VFS {
         };
 
         for mount in &mut self.mounts {
+            if namespace_snapshot
+                .as_ref()
+                .is_some_and(|snapshot| !snapshot.contains(&mount.mount_id))
+            {
+                continue;
+            }
             if !(mount.path == mount_path || recursive && mount.path.starts_with(&mount_path)) {
                 continue;
             }
@@ -357,6 +364,37 @@ impl VFS {
         Ok(())
     }
 
+    pub fn copy_mount_for_current_namespace(&mut self, path: Path) -> FSResult<u64> {
+        let normalized_path = self.normalize_path(path);
+        let namespace_snapshot = crate::smp::current_mount_namespace_snapshot();
+        let Some(namespace_snapshot) = namespace_snapshot else {
+            return self.mount_id(normalized_path);
+        };
+        let source_index = self
+            .mounts
+            .iter()
+            .position(|mount| {
+                mount.path == normalized_path && namespace_snapshot.contains(&mount.mount_id)
+            })
+            .ok_or(FSError::NotFound)?;
+        let source_mount = &self.mounts[source_index];
+        let mount_id = self.next_mount_id;
+        self.next_mount_id += 1;
+        let cloned_mount = Mount {
+            path: source_mount.path.clone(),
+            fs: source_mount.fs.clone(),
+            source_path: source_mount.source_path.clone(),
+            flags: source_mount.flags,
+            propagation: source_mount.propagation,
+            device_id: source_mount.device_id,
+            mount_id,
+            expire_pending: source_mount.expire_pending,
+        };
+        self.mounts.push(cloned_mount);
+        self.sort_mounts();
+        Ok(mount_id)
+    }
+
     pub fn stack_mount_beneath(&mut self, source: Path, target: Path) -> FSResult<()> {
         let source = self.normalize_path(source);
         let target = self.normalize_path(target);
@@ -381,8 +419,7 @@ impl VFS {
         source_mount.mount_id = self.next_mount_id;
         self.next_mount_id += 1;
         self.mounts.insert(target_index + 1, source_mount);
-        self.mounts
-            .sort_by_key(|mount| Reverse(mount.path.clone().as_string().len()));
+        self.sort_mounts();
         Ok(())
     }
 
@@ -396,6 +433,17 @@ impl VFS {
             return Err(FSError::Busy);
         }
         self.remove_mounts_at(&normalized_path, false)
+    }
+
+    pub fn unmount_id(&mut self, mount_id: u64) -> FSResult<()> {
+        let index = self
+            .mounts
+            .iter()
+            .position(|mount| mount.mount_id == mount_id)
+            .ok_or(FSError::NotFound)?;
+        self.mounts.remove(index);
+        crate::process::manager::remove_mount_from_namespaces(mount_id);
+        Ok(())
     }
 
     pub fn begin_expire_mount(&mut self, path: Path) -> FSResult<bool> {
@@ -458,6 +506,31 @@ impl VFS {
                         })
                     })
             }))
+    }
+
+    pub fn is_mount_id_busy(&self, target_mount_id: u64) -> bool {
+        crate::process::manager::MANAGER
+            .lock()
+            .processes
+            .values()
+            .any(|process| {
+                let process = process.lock();
+                if process.exit_status.is_some()
+                    || process
+                        .mount_namespace_snapshot
+                        .as_ref()
+                        .is_some_and(|snapshot| !snapshot.contains(&target_mount_id))
+                {
+                    return false;
+                }
+                process.fd_table.lock().iter().any(|entry| {
+                    entry.as_ref().is_some_and(|entry| {
+                        entry.object.clone().as_file_like().is_ok_and(|file| {
+                            file.mount_id() == target_mount_id && !file.mount_root()
+                        })
+                    })
+                })
+            })
     }
 
     pub fn detach_mount(&mut self, path: Path) -> FSResult<()> {
@@ -542,6 +615,49 @@ impl VFS {
         Ok(mount.mount_id)
     }
 
+    pub fn mount_id_for_current_namespace(&self, path: Path) -> FSResult<u64> {
+        let normalized_path = self.normalize_path(path);
+        let namespace_snapshot = crate::smp::current_mount_namespace_snapshot();
+        self.mounts
+            .iter()
+            .find(|mount| {
+                normalized_path.strip_prefix(&mount.path).is_some()
+                    && namespace_snapshot
+                        .as_ref()
+                        .is_none_or(|snapshot| snapshot.contains(&mount.mount_id))
+            })
+            .map(|mount| mount.mount_id)
+            .ok_or(FSError::NotFound)
+    }
+
+    pub fn mount_propagation_by_id(&self, mount_id: u64) -> FSResult<MountPropagation> {
+        self.mounts
+            .iter()
+            .find(|mount| mount.mount_id == mount_id)
+            .map(|mount| mount.propagation)
+            .ok_or(FSError::NotFound)
+    }
+
+    pub fn snapshot_receives_peer_group(
+        &self,
+        namespace_snapshot: &[u64],
+        peer_group: u64,
+    ) -> bool {
+        self.mounts.iter().any(|mount| {
+            namespace_snapshot.contains(&mount.mount_id)
+                && matches!(
+                    mount.propagation,
+                    MountPropagation::Shared(id) if id == peer_group
+                )
+        }) || self.mounts.iter().any(|mount| {
+            namespace_snapshot.contains(&mount.mount_id)
+                && matches!(
+                    mount.propagation,
+                    MountPropagation::Slave { master } if master == peer_group
+                )
+        })
+    }
+
     pub fn mount_count(&self) -> usize {
         self.mounts.len()
     }
@@ -550,9 +666,70 @@ impl VFS {
         self.mounts.iter().map(|mount| mount.mount_id).collect()
     }
 
+    pub fn clone_mount_namespace(&mut self, namespace_snapshot: Option<&[u64]>) -> Vec<u64> {
+        let mut cloned_paths = Vec::new();
+        let source_mounts = self
+            .mounts
+            .iter()
+            .filter(|mount| namespace_snapshot.is_none_or(|ids| ids.contains(&mount.mount_id)))
+            .filter(|mount| {
+                if cloned_paths.contains(&mount.path) {
+                    false
+                } else {
+                    cloned_paths.push(mount.path.clone());
+                    true
+                }
+            })
+            .map(|mount| Mount {
+                path: mount.path.clone(),
+                fs: mount.fs.clone(),
+                source_path: mount.source_path.clone(),
+                flags: mount.flags,
+                propagation: mount.propagation,
+                device_id: mount.device_id,
+                mount_id: mount.mount_id,
+                expire_pending: mount.expire_pending,
+            })
+            .collect::<Vec<_>>();
+
+        let mut cloned_mounts = Vec::new();
+        for mount in source_mounts {
+            let mount_id = self.next_mount_id;
+            self.next_mount_id += 1;
+            cloned_mounts.push(Mount { mount_id, ..mount });
+        }
+        let mount_ids = cloned_mounts
+            .iter()
+            .map(|mount| mount.mount_id)
+            .collect::<Vec<_>>();
+        self.mounts.extend(cloned_mounts);
+        self.sort_mounts();
+        mount_ids
+    }
+
     pub fn mount_snapshots(&self) -> Vec<(Path, FileSystemRef, Path, MountFlags, u64, u64)> {
         self.mounts
             .iter()
+            .map(|mount| {
+                (
+                    mount.path.clone(),
+                    mount.fs.clone(),
+                    mount.source_path.clone(),
+                    mount.flags,
+                    mount.device_id,
+                    mount.mount_id,
+                )
+            })
+            .collect()
+    }
+
+    pub fn visible_mount_snapshots(
+        &self,
+        namespace_snapshot: Option<&[u64]>,
+    ) -> Vec<(Path, FileSystemRef, Path, MountFlags, u64, u64)> {
+        self.mounts
+            .iter()
+            .filter(|mount| namespace_snapshot.is_none_or(|ids| ids.contains(&mount.mount_id)))
             .map(|mount| {
                 (
                     mount.path.clone(),
@@ -579,6 +756,35 @@ impl VFS {
     )> {
         self.mounts
             .iter()
+            .map(|mount| {
+                (
+                    mount.path.clone(),
+                    mount.fs.clone(),
+                    mount.source_path.clone(),
+                    mount.flags,
+                    mount.propagation,
+                    mount.device_id,
+                    mount.mount_id,
+                )
+            })
+            .collect()
+    }
+
+    pub fn visible_mount_snapshots_with_propagation(
+        &self,
+        namespace_snapshot: Option<&[u64]>,
+    ) -> Vec<(
+        Path,
+        FileSystemRef,
+        Path,
+        MountFlags,
+        MountPropagation,
+        u64,
+        u64,
+    )> {
+        self.mounts
+            .iter()
+            .filter(|mount| namespace_snapshot.is_none_or(|ids| ids.contains(&mount.mount_id)))
             .map(|mount| {
                 (
                     mount.path.clone(),

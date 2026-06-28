@@ -1,4 +1,4 @@
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use core::arch::x86_64::__cpuid;
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 
@@ -50,6 +50,7 @@ pub struct CpuCoreContext {
     pub scheduler_thread: ThreadRef,
     pub current_thread: Option<ThreadRef>,
     pub current_process: Option<ProcessRef>,
+    pub current_mount_namespace_snapshot: Option<Vec<u64>>,
     pub(crate) segments: CpuSegments,
 }
 
@@ -139,7 +140,28 @@ pub fn current_process() -> ProcessRef {
 }
 
 pub fn set_current_process(process: Option<ProcessRef>) {
-    with_current_cpu(|cpu| cpu.current_process = process);
+    let mount_namespace_snapshot = process
+        .as_ref()
+        .and_then(|process| process.lock().mount_namespace_snapshot.clone());
+    set_current_process_with_mount_namespace_snapshot(process, mount_namespace_snapshot);
+}
+
+pub fn set_current_process_with_mount_namespace_snapshot(
+    process: Option<ProcessRef>,
+    mount_namespace_snapshot: Option<Vec<u64>>,
+) {
+    with_current_cpu(|cpu| {
+        cpu.current_process = process;
+        cpu.current_mount_namespace_snapshot = mount_namespace_snapshot;
+    });
+}
+
+pub fn current_mount_namespace_snapshot() -> Option<Vec<u64>> {
+    with_current_cpu(|cpu| cpu.current_mount_namespace_snapshot.clone())
+}
+
+pub fn set_current_mount_namespace_snapshot(snapshot: Option<Vec<u64>>) {
+    with_current_cpu(|cpu| cpu.current_mount_namespace_snapshot = snapshot);
 }
 
 pub fn try_current_thread() -> Option<ThreadRef> {
@@ -260,6 +282,7 @@ impl CpuCoreContext {
             scheduler_thread: Thread::empty(),
             current_thread: None,
             current_process: None,
+            current_mount_namespace_snapshot: None,
             segments,
         }
     }

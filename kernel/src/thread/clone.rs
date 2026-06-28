@@ -33,6 +33,7 @@ impl Thread {
             last_user_snapshot: self.last_user_snapshot,
             last_user_fs_base: self.last_user_fs_base,
             name: self.name,
+            mount_namespace_snapshot: process.lock().mount_namespace_snapshot.clone(),
             ..Default::default()
         }
     }

@@ -18,8 +18,8 @@ use crate::{
     polling::event::PollableEvent,
     signal::process_current_process_signals,
     smp::{
-        current_apic_id, current_cpu_index, set_current_kernel_stack, set_current_process,
-        set_current_thread,
+        current_apic_id, current_cpu_index, set_current_kernel_stack,
+        set_current_process_with_mount_namespace_snapshot, set_current_thread,
     },
     thread::{
         ThreadRef,
@@ -418,8 +418,12 @@ fn run_ready_thread(thread_ref: ThreadRef) -> u64 {
 
         // The process object can keep the same Arc while execve replaces its
         // address space, so each CPU must refresh CR3 before resuming it.
-        process.lock().addrspace.load();
-        set_current_process(Some(process));
+        let mount_namespace_snapshot = {
+            let mut process = process.lock();
+            process.addrspace.load();
+            process.mount_namespace_snapshot.clone()
+        };
+        set_current_process_with_mount_namespace_snapshot(Some(process), mount_namespace_snapshot);
 
         Some((
             thread.get_appropriate_snapshot() as *mut ThreadSnapshot,
