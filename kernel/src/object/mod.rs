@@ -11,6 +11,7 @@ bitflags::bitflags! {
         const RDWR = 1 << 3;
         const PATH = 1 << 4;
         const DIRECT = 1 << 5;
+        const ASYNC = 1 << 6;
     }
 }
 

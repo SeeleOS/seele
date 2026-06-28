@@ -270,6 +270,9 @@ impl Object for PipeEndpoint {
     }
 
     fn notify_readable(self: Arc<Self>) {
+        if !self.flags.lock().contains(FileFlags::ASYNC) {
+            return;
+        }
         crate::object::control::notify_fcntl_async_readable(&(self as ObjectRef));
     }
 

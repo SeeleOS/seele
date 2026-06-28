@@ -42,6 +42,8 @@ use super::{
 
 const DEFAULT_SOCKET_BUFFER_SIZE: i32 = 64 * 1024;
 const CAP_NET_BIND_SERVICE: usize = 10;
+const SOL_IPV6: u64 = 41;
+const IPV6_ADDRFORM: u64 = 1;
 const IP_ADD_MEMBERSHIP: u64 = 35;
 const IP_DROP_MEMBERSHIP: u64 = 36;
 const MCAST_JOIN_GROUP: u64 = 42;
@@ -165,7 +167,7 @@ impl LocalStreamEndpoint {
 
 #[derive(Debug)]
 pub struct InetSocketObject {
-    domain: u64,
+    domain: Mut<u64>,
     pub kind: InetSocketKind,
     state: Mut<InetState>,
     flags: Mut<FileFlags>,
@@ -269,7 +271,7 @@ impl InetSocketObject {
 
         let handle = net::create_socket(transport).map_err(Self::map_net_error)?;
         let socket = Arc::new(Self {
-            domain,
+            domain: Mut::new(domain),
             kind: match transport {
                 TransportKind::Tcp => InetSocketKind::Stream,
                 TransportKind::Udp => InetSocketKind::Datagram,
@@ -303,7 +305,7 @@ impl InetSocketObject {
         peer: InetAddress,
     ) -> Arc<Self> {
         let socket = Arc::new(Self {
-            domain,
+            domain: Mut::new(domain),
             kind: InetSocketKind::Stream,
             state: Mut::new(InetState {
                 handle,
@@ -670,7 +672,8 @@ impl InetSocketObject {
             }
             let server_handle =
                 net::create_socket(TransportKind::Tcp).map_err(Self::map_net_error)?;
-            let server_socket = Self::from_accepted(self.domain, server_handle, remote, local);
+            let server_socket =
+                Self::from_accepted(*self.domain.lock(), server_handle, remote, local);
             let Some(client_socket) =
                 object_ref(&self.self_ref).and_then(|object| object.as_inet_socket().ok())
             else {
@@ -725,6 +728,32 @@ impl InetSocketObject {
         }
     }
 
+    fn disconnect_stream(&self) -> SocketResult<()> {
+        if self.kind != InetSocketKind::Stream {
+            return Err(SocketError::ProtocolNotSupported);
+        }
+
+        self.unregister_local_listener();
+        let old = {
+            let mut state = self.state.lock();
+            if let Some(local_stream) = state.local_stream.take() {
+                local_stream.close_local();
+            } else {
+                state.handle.tcp_close().map_err(Self::map_net_error)?;
+            }
+            let old = state.handle;
+            state.handle = net::create_socket(TransportKind::Tcp).map_err(Self::map_net_error)?;
+            state.local = None;
+            state.peer = None;
+            state.listening = false;
+            state.read_shutdown = false;
+            state.write_shutdown = false;
+            old
+        };
+        net::remove_socket(old);
+        Ok(())
+    }
+
     fn connect_datagram(&self, remote: InetAddress) -> SocketResult<()> {
         let local = self.ensure_udp_bound()?;
         let mut state = self.state.lock();
@@ -762,7 +791,7 @@ impl InetSocketObject {
                         old
                     };
                     return Ok(Self::from_accepted(
-                        self.domain,
+                        *self.domain.lock(),
                         old_handle,
                         accepted_local,
                         peer,
@@ -1181,7 +1210,7 @@ impl Statable for InetSocketObject {
 
 impl SocketLike for InetSocketObject {
     fn bind_bytes(self: Arc<Self>, address: &[u8]) -> SocketResult<()> {
-        self.bind(Self::decode_addr_for_domain(self.domain, address)?)
+        self.bind(Self::decode_addr_for_domain(*self.domain.lock(), address)?)
     }
 
     fn listen(self: Arc<Self>, backlog: usize) -> SocketResult<()> {
@@ -1189,7 +1218,13 @@ impl SocketLike for InetSocketObject {
     }
 
     fn connect_bytes(self: Arc<Self>, address: &[u8]) -> SocketResult<()> {
-        self.connect(Self::decode_addr_for_domain(self.domain, address)?)
+        if address.len() >= mem::size_of::<u16>() {
+            let family = u16::from_ne_bytes(address[..2].try_into().unwrap());
+            if family == 0 {
+                return self.disconnect_stream();
+            }
+        }
+        self.connect(Self::decode_addr_for_domain(*self.domain.lock(), address)?)
     }
 
     fn accept(self: Arc<Self>) -> SocketResult<crate::object::misc::ObjectRef> {
@@ -1200,9 +1235,10 @@ impl SocketLike for InetSocketObject {
         match self.kind {
             InetSocketKind::Stream => self.send(buffer),
             InetSocketKind::Datagram => match address {
-                Some(address) => {
-                    self.send_to(buffer, Self::decode_addr_for_domain(self.domain, address)?)
-                }
+                Some(address) => self.send_to(
+                    buffer,
+                    Self::decode_addr_for_domain(*self.domain.lock(), address)?,
+                ),
                 None => self.send(buffer),
             },
         }
@@ -1212,7 +1248,7 @@ impl SocketLike for InetSocketObject {
         let (read, source) = self.recv_from(buffer)?;
         Ok((
             read,
-            source.map(|addr| Self::encode_addr_for_domain(self.domain, addr)),
+            source.map(|addr| Self::encode_addr_for_domain(*self.domain.lock(), addr)),
         ))
     }
 
@@ -1223,7 +1259,7 @@ impl SocketLike for InetSocketObject {
             InetSocketKind::Datagram => state.handle.udp_local_addr().or(state.local),
         }
         .unwrap_or_else(|| InetAddress::any(0));
-        Ok(Self::encode_addr_for_domain(self.domain, addr))
+        Ok(Self::encode_addr_for_domain(*self.domain.lock(), addr))
     }
 
     fn getpeername_bytes(&self) -> SocketResult<Vec<u8>> {
@@ -1233,7 +1269,7 @@ impl SocketLike for InetSocketObject {
             InetSocketKind::Datagram => state.peer,
         }
         .ok_or(SocketError::NotConnected)?;
-        Ok(Self::encode_addr_for_domain(self.domain, addr))
+        Ok(Self::encode_addr_for_domain(*self.domain.lock(), addr))
     }
 
     fn shutdown(&self, how: u64) -> SocketResult<()> {
@@ -1241,6 +1277,26 @@ impl SocketLike for InetSocketObject {
     }
 
     fn setsockopt(&self, level: u64, option_name: u64, option_value: &[u8]) -> SocketResult<()> {
+        if level == SOL_IPV6 {
+            if option_name != IPV6_ADDRFORM {
+                return Err(SocketError::ProtocolOptionNotSupported);
+            }
+            let family = Self::decode_i32(option_value)?;
+            if *self.domain.lock() != AF_INET6
+                || self.kind != InetSocketKind::Stream
+                || family != AF_INET as i32
+            {
+                return Err(SocketError::InvalidArguments);
+            }
+            let state = self.state.lock();
+            if state.peer.is_none() {
+                return Err(SocketError::NotConnected);
+            }
+            drop(state);
+            *self.domain.lock() = AF_INET;
+            return Ok(());
+        }
+
         if level == SOL_IP {
             return match option_name {
                 IP_MULTICAST_ALL => {
@@ -1340,7 +1396,7 @@ impl SocketLike for InetSocketObject {
                 },
             ),
             SO_ACCEPTCONN => Self::encode_i32(option_len, self.state.lock().listening as i32),
-            SO_DOMAIN => Self::encode_i32(option_len, self.domain as i32),
+            SO_DOMAIN => Self::encode_i32(option_len, *self.domain.lock() as i32),
             SO_PROTOCOL => Self::encode_i32(
                 option_len,
                 match self.kind {
