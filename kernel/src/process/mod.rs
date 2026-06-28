@@ -368,6 +368,15 @@ impl Process {
         }
 
         self.update_uid_capabilities(old_effective_uid);
+        if self.namespace_uid(self.real_uid) != 0
+            && self.namespace_uid(self.effective_uid) != 0
+            && self.namespace_uid(self.saved_uid) != 0
+            && !self.keep_capabilities
+        {
+            self.capability_effective = [0; 2];
+            self.capability_permitted = [0; 2];
+            self.capability_ambient = [0; 2];
+        }
     }
 }
 

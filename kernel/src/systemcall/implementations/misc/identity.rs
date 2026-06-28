@@ -416,6 +416,18 @@ mod tests {
 
             assert_eq!(process.capability_permitted, DEFAULT_CAPABILITY_SET);
             assert_eq!(process.capability_effective, DEFAULT_CAPABILITY_SET);
+
+            process.real_uid = 0;
+            process.effective_uid = 0;
+            process.saved_uid = 0;
+            process.user_namespace_uid_map = Some(String::from("200 0 1\n"));
+            process.capability_effective = DEFAULT_CAPABILITY_SET;
+            process.capability_permitted = DEFAULT_CAPABILITY_SET;
+
+            process.update_exec_uid_capabilities(0, false);
+
+            assert_eq!(process.capability_permitted, [0; 2]);
+            assert_eq!(process.capability_effective, [0; 2]);
         }
 
         saved.restore();
