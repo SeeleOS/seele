@@ -889,7 +889,9 @@ pub(super) fn proc_pid_timens_offsets_bytes(pid: ProcessID) -> FSResult<Vec<u8>>
 }
 
 pub(super) fn proc_pid_write_timens_offsets(pid: ProcessID, buffer: &[u8]) -> FSResult<usize> {
-    let content = core::str::from_utf8(buffer).map_err(|_| FSError::Other)?;
+    const KTIME_SEC_MAX: i64 = 9_223_372_035;
+
+    let content = core::str::from_utf8(buffer).map_err(|_| FSError::InvalidArguments)?;
     let mut monotonic = None;
     let mut boottime = None;
 
@@ -901,19 +903,28 @@ pub(super) fn proc_pid_write_timens_offsets(pid: ProcessID, buffer: &[u8]) -> FS
         let sec = fields
             .next()
             .and_then(|value| value.parse::<i64>().ok())
-            .ok_or(FSError::Other)?;
+            .ok_or(FSError::InvalidArguments)?;
         let nsec = fields
             .next()
             .and_then(|value| value.parse::<i64>().ok())
-            .ok_or(FSError::Other)?;
+            .ok_or(FSError::InvalidArguments)?;
+        if fields.next().is_some() {
+            return Err(FSError::InvalidArguments);
+        }
+        if !(0..1_000_000_000).contains(&nsec) {
+            return Err(FSError::InvalidArguments);
+        }
+        if !(-KTIME_SEC_MAX..=KTIME_SEC_MAX).contains(&sec) {
+            return Err(FSError::RangeError);
+        }
         let offset_ns = sec
             .checked_mul(1_000_000_000)
             .and_then(|value| value.checked_add(nsec))
-            .ok_or(FSError::Other)?;
+            .ok_or(FSError::RangeError)?;
         match clock {
             "1" | "monotonic" => monotonic = Some(offset_ns),
             "7" | "boottime" => boottime = Some(offset_ns),
-            _ => return Err(FSError::Other),
+            _ => return Err(FSError::InvalidArguments),
         }
     }
 

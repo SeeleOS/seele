@@ -27,6 +27,8 @@ pub enum FSError {
     IllegalSeek,
     #[error("invalid arguments")]
     InvalidArguments,
+    #[error("numeric result out of range")]
+    RangeError,
     #[error("access denied")]
     AccessDenied,
     #[error("permission denied")]
@@ -60,6 +62,7 @@ impl AsSyscallError for FSError {
             Self::NoSpace => SyscallError::NoSpaceLeft,
             Self::IllegalSeek => SyscallError::IllegalSeek,
             Self::InvalidArguments => SyscallError::InvalidArguments,
+            Self::RangeError => SyscallError::RangeError,
             Self::AccessDenied => SyscallError::AccessDenied,
             Self::PermissionDenied => SyscallError::PermissionDenied,
             Self::PathTooLong => SyscallError::PathTooLong,
