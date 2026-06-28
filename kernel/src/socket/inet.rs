@@ -650,6 +650,7 @@ impl InetSocketObject {
     }
 
     fn connect_stream(&self, remote: InetAddress) -> SocketResult<()> {
+        let domain = *self.domain.lock();
         let local = {
             let state = self.state.lock();
             if state.peer.is_some() || state.listening {
@@ -672,8 +673,7 @@ impl InetSocketObject {
             }
             let server_handle =
                 net::create_socket(TransportKind::Tcp).map_err(Self::map_net_error)?;
-            let server_socket =
-                Self::from_accepted(*self.domain.lock(), server_handle, remote, local);
+            let server_socket = Self::from_accepted(domain, server_handle, remote, local);
             let Some(client_socket) =
                 object_ref(&self.self_ref).and_then(|object| object.as_inet_socket().ok())
             else {
