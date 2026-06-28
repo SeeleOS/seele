@@ -120,6 +120,27 @@ pub fn remove_mount_from_namespaces(removed_mount_id: u64) {
     }
 }
 
+fn unreferenced_mounts_after_process_exit(pid: ProcessID, snapshot: &[u64]) -> Vec<u64> {
+    let manager = MANAGER.lock();
+    snapshot
+        .iter()
+        .copied()
+        .filter(|mount_id| {
+            !manager.processes.iter().any(|(candidate_pid, candidate)| {
+                if *candidate_pid == pid {
+                    return false;
+                }
+                let candidate = candidate.lock();
+                candidate.exit_status.is_none()
+                    && candidate
+                        .mount_namespace_snapshot
+                        .as_ref()
+                        .is_some_and(|candidate_snapshot| candidate_snapshot.contains(mount_id))
+            })
+        })
+        .collect()
+}
+
 pub fn terminate_process(process: ProcessRef, exit_status: ProcessExitStatus) {
     let process_ref = process.clone();
     let (pid, threads, vfork_blocker, parent, exited_pid_namespace_inode, was_namespace_init) = {
@@ -325,9 +346,13 @@ impl Process {
             self.exit_status = Some(exit_status);
             remove_pid_cgroup_path(self.pid);
             if let Some(snapshot) = &self.mount_namespace_snapshot {
-                crate::filesystem::vfs::VirtualFS
-                    .lock()
-                    .detach_mounts_created_after_snapshot(snapshot);
+                let unreferenced_mounts =
+                    unreferenced_mounts_after_process_exit(self.pid, snapshot);
+                if !unreferenced_mounts.is_empty() {
+                    crate::filesystem::vfs::VirtualFS
+                        .lock()
+                        .detach_unreferenced_mounts(&unreferenced_mounts);
+                }
             }
         }
 

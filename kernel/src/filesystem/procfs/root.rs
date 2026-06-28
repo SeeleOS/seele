@@ -381,7 +381,8 @@ mod tests {
     use super::{
         generate_uuid, proc_boot_id_bytes, proc_cap_last_cap_bytes, proc_filesystems_bytes,
         proc_kernel_entries, proc_kernel_random_entries, proc_mountinfo_bytes, proc_mounts_bytes,
-        proc_ngroups_max_bytes, proc_pressure_entries, proc_root_entries, proc_tainted_bytes,
+        proc_ngroups_max_bytes, proc_overflowgid_bytes, proc_overflowuid_bytes,
+        proc_pressure_entries, proc_root_entries, proc_tainted_bytes,
     };
     use crate::process::manager::get_current_process;
     use alloc::{

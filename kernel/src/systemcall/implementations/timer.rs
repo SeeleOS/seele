@@ -371,7 +371,7 @@ mod tests {
         );
 
         {
-            let mut process = process.lock();
+            let process = process.lock();
             let deadline = process
                 .next_timer_deadline()
                 .expect("armed realtime timer should expose a scheduler deadline");

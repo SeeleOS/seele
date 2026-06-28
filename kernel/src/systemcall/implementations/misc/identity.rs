@@ -235,6 +235,7 @@ mod tests {
         test_helpers::{SyscallArgs, expect_errno, expect_ok},
         utils::SyscallError,
     };
+    use alloc::string::String;
 
     crate::test!(
         credential_getter_syscalls,

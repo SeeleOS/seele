@@ -1537,12 +1537,13 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
         child.time_namespace_state = crate::process::time_namespace::TimeNamespace::new();
     }
     if clone_flags.contains(CloneFlags::NEWNS) {
-        let (parent_mnt_namespace, user_namespace, shared_with_parent) = {
+        let (parent_mnt_namespace, user_namespace, shared_with_parent, parent_snapshot) = {
             let current = current.lock();
             (
                 current.mnt_namespace.clone(),
                 current.user_namespace.clone(),
                 current.mount_namespace_shared_with_parent,
+                current.mount_namespace_snapshot.clone(),
             )
         };
         let mut child = child_process.lock();
@@ -1551,7 +1552,9 @@ fn clone_process(args: CloneProcessArgs) -> Result<usize, SyscallError> {
             Some(&parent_mnt_namespace),
             Some(&user_namespace),
         );
-        let snapshot = crate::filesystem::vfs::VirtualFS.lock().mount_ids();
+        let snapshot = crate::filesystem::vfs::VirtualFS
+            .lock()
+            .clone_mount_namespace(parent_snapshot.as_deref());
         child.mount_namespace_snapshot = Some(snapshot.clone());
         child.mount_namespace_shared_with_parent = shared_with_parent;
         child_thread.lock().mount_namespace_snapshot = Some(snapshot);

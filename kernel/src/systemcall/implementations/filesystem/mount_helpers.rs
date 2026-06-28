@@ -17,11 +17,6 @@ pub(super) fn is_supported_api_mount(fstype: &str) -> bool {
     is_supported_fs_context_type(fstype) || matches!(fstype, "fuse" | "fuseblk")
 }
 
-pub(super) fn is_proc_fd_path(path: &str) -> bool {
-    let path = Path::new(path).normalize().as_string();
-    path.starts_with("/proc/") && path.contains("/fd/")
-}
-
 pub(super) fn is_char_device_mode(mode: u32) -> bool {
     mode & S_IFMT == S_IFCHR || mode != 0 && mode & S_IFMT == 0 && mode & S_IFCHR == S_IFCHR
 }
@@ -90,6 +85,38 @@ pub(super) fn add_mount_to_current_namespace_by_id(mount_id: u64) {
     {
         snapshot.push(mount_id);
         crate::smp::set_current_mount_namespace_snapshot(Some(snapshot.clone()));
+    }
+}
+
+pub(super) fn remove_mount_from_current_namespace_by_id(mount_id: u64) {
+    let process = get_current_process();
+    let mut process = process.lock();
+    let updated_snapshot = if let Some(snapshot) = process.mount_namespace_snapshot.as_mut() {
+        snapshot.retain(|id| *id != mount_id);
+        Some(snapshot.clone())
+    } else {
+        None
+    };
+    process.mount_namespace_flag_overrides.remove(&mount_id);
+    if let Some(snapshot) = updated_snapshot {
+        crate::smp::set_current_mount_namespace_snapshot(Some(snapshot));
+    }
+}
+
+pub(super) fn remove_mounts_from_current_namespace_by_ids(mount_ids: &[u64]) {
+    let process = get_current_process();
+    let mut process = process.lock();
+    let updated_snapshot = if let Some(snapshot) = process.mount_namespace_snapshot.as_mut() {
+        snapshot.retain(|id| !mount_ids.contains(id));
+        Some(snapshot.clone())
+    } else {
+        None
+    };
+    for mount_id in mount_ids {
+        process.mount_namespace_flag_overrides.remove(mount_id);
+    }
+    if let Some(snapshot) = updated_snapshot {
+        crate::smp::set_current_mount_namespace_snapshot(Some(snapshot));
     }
 }
 
@@ -254,7 +281,8 @@ pub(super) fn mount_attr_flag_update(
         | MOUNT_ATTR_NOATIME
         | MOUNT_ATTR_STRICTATIME
         | MOUNT_ATTR_NODIRATIME
-        | MOUNT_ATTR_NOSYMFOLLOW;
+        | MOUNT_ATTR_NOSYMFOLLOW
+        | MOUNT_ATTR_IDMAP;
     let supported_clr = supported_basic | MOUNT_ATTR__ATIME;
 
     let propagation = match attr.propagation {
@@ -279,10 +307,6 @@ pub(super) fn mount_attr_flag_update(
     if attr.attr_clr & !supported_clr != 0 {
         return Err(SyscallError::OperationNotSupported);
     }
-    if attr.attr_set & MOUNT_ATTR_IDMAP != 0 {
-        return Err(SyscallError::OperationNotSupported);
-    }
-
     let basic_mask = MountFlags::MS_RDONLY
         | MountFlags::MS_NOSUID
         | MountFlags::MS_NODEV

@@ -133,7 +133,9 @@ define_syscall!(Unshare, |flags: u64| {
             process.ipc_namespace = NamespaceObject::dynamic(NamespaceKind::Ipc);
         }
         if flags & UnshareFlags::NEWNS.bits() != 0 {
-            let snapshot = crate::filesystem::vfs::VirtualFS.lock().mount_ids();
+            let snapshot = crate::filesystem::vfs::VirtualFS
+                .lock()
+                .clone_mount_namespace(process.mount_namespace_snapshot.as_deref());
             process.mnt_namespace = NamespaceObject::dynamic_with_parent(
                 NamespaceKind::Mnt,
                 Some(&process.mnt_namespace),

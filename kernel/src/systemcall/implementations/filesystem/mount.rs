@@ -8,7 +8,6 @@ define_syscall!(Mount, |source: CString,
     require_cap_sys_admin()?;
     let source = string_from_raw_optional(source)?.filter(|value| !value.is_empty());
     let target = path_from_raw(target)?;
-    let target_is_proc_fd = is_proc_fd_path(&target);
     let target = resolve_path_at(AT_FDCWD, &target)?;
     let filesystemtype =
         string_from_raw_optional(filesystemtype)?.filter(|value| !value.is_empty());
@@ -43,12 +42,6 @@ define_syscall!(Mount, |source: CString,
         } else {
             let source = source.ok_or(SyscallError::BadAddress)?;
             let source_path = resolve_path_at(AT_FDCWD, &source)?;
-            if target_is_proc_fd {
-                return Err(SyscallError::FileNotFound);
-            }
-            if is_proc_fd_path(&source_path.clone().normalize().as_string()) {
-                return Err(SyscallError::FileNotFound);
-            }
             VirtualFS
                 .lock()
                 .bind_mount(
@@ -69,19 +62,19 @@ define_syscall!(Mount, |source: CString,
     if operation_flags.contains(MountOperationFlags::MS_MOVE) {
         let source = source.ok_or(SyscallError::InvalidArguments)?;
         let source_path = resolve_path_at(AT_FDCWD, &source)?.normalize();
-        let (mount_path, mount_fs, mount_source_path, mount_flags) =
-            VirtualFS.lock().mount_metadata(source_path.clone())?;
+        let mount_path = VirtualFS.lock().mount_path(source_path.clone())?;
         if mount_path != source_path {
             return Err(SyscallError::InvalidArguments);
         }
         VirtualFS
             .lock()
-            .attach_mount(target_path, mount_fs, mount_source_path, mount_flags)
+            .move_mount_tree(source_path, target_path.clone())
             .map_err(SyscallError::from)?;
-        VirtualFS
-            .lock()
-            .unmount(source_path)
-            .map_err(SyscallError::from)?;
+        if let Some(source_mount_id) = source_mount_id {
+            add_mount_to_current_and_shared_namespaces(source_mount_id, target_path)?;
+        } else {
+            add_mount_to_current_namespace(target_path)?;
+        }
         return Ok(0);
     }
 
@@ -192,7 +185,10 @@ define_syscall!(Mount, |source: CString,
         return Err(SyscallError::NotADirectory);
     }
     resolve_dir_path(target_path.clone())?;
-    if VirtualFS.lock().contains_mount_at(target_path.clone()) {
+    if VirtualFS
+        .lock()
+        .contains_mount_at_in_current_namespace(target_path.clone())
+    {
         return Err(SyscallError::DeviceOrResourceBusy);
     }
 
@@ -300,16 +296,14 @@ define_syscall!(Umount2, |target: CString, flags: UmountFlags| {
     }
 
     if flags.contains(UmountFlags::DETACH) {
-        VirtualFS
+        let mount_ids = VirtualFS
             .lock()
-            .detach_mount(path)
+            .detach_mount_ids(path)
             .map_err(SyscallError::from)?;
+        remove_mounts_from_current_namespace_by_ids(&mount_ids);
     } else {
         VirtualFS.lock().unmount_id(mount_id)?;
-        if let Some(mut snapshot) = crate::smp::current_mount_namespace_snapshot() {
-            snapshot.retain(|id| *id != mount_id);
-            crate::smp::set_current_mount_namespace_snapshot(Some(snapshot));
-        }
+        remove_mount_from_current_namespace_by_id(mount_id);
     }
     Ok(0)
 });
@@ -351,7 +345,8 @@ define_syscall!(Fsmount, |fd: i32, flags: FsMountFlags, mount_attrs: u32| {
         | MOUNT_ATTR_NOEXEC
         | MOUNT_ATTR_NOATIME
         | MOUNT_ATTR_STRICTATIME
-        | MOUNT_ATTR_NODIRATIME) as u32;
+        | MOUNT_ATTR_NODIRATIME
+        | MOUNT_ATTR_NOSYMFOLLOW) as u32;
     if mount_attrs & !FSMOUNT_SUPPORTED_ATTRS != 0 {
         return Err(SyscallError::InvalidArguments);
     }
@@ -429,9 +424,7 @@ define_syscall!(
             }
         };
 
-        let (mount_path, mount_fs, mount_source_path, mount_flags, mount_propagation) = VirtualFS
-            .lock()
-            .mount_metadata_with_propagation(source_path.clone())?;
+        let mount_path = VirtualFS.lock().mount_path(source_path.clone())?;
         if mount_path != source_path {
             return Err(SyscallError::InvalidArguments);
         }
@@ -471,20 +464,11 @@ define_syscall!(
             let attached_path = target_path.clone();
             VirtualFS
                 .lock()
-                .attach_mount_with_propagation(
-                    target_path,
-                    mount_fs,
-                    mount_source_path,
-                    mount_flags,
-                    mount_propagation,
-                )
-                .map_err(SyscallError::from)?;
-            VirtualFS
-                .lock()
-                .unmount(source_path.clone())
+                .move_mount_tree(source_path.clone(), target_path)
                 .map_err(SyscallError::from)?;
             if let Some(source_mount_id) = source_mount_id {
-                add_mount_to_current_and_shared_namespaces(source_mount_id, attached_path)?;
+                add_mount_to_current_namespace(attached_path.clone())?;
+                publish_mount_to_shared_namespace(source_mount_id, attached_path)?;
             } else {
                 add_mount_to_current_namespace(attached_path)?;
             }
@@ -684,6 +668,22 @@ define_syscall!(MountSetattr, |dirfd: i32,
     }
 
     let attr = user_safe::read(attr)?;
+    if attr.attr_set & MOUNT_ATTR_IDMAP != 0 {
+        let userns_object = get_object_current_process(attr.userns_fd)?;
+        let namespace_object = userns_object
+            .clone()
+            .as_file_like()
+            .ok()
+            .and_then(|file| file.device_backing_object())
+            .unwrap_or(userns_object);
+        let namespace = namespace_object.as_namespace().map_err(|err| {
+            let _ = err;
+            SyscallError::InvalidArguments
+        })?;
+        if namespace.kind() != crate::object::namespace::NamespaceKind::User {
+            return Err(SyscallError::InvalidArguments);
+        }
+    }
     let target_path = mount_setattr_target_path(dirfd, path, flags)?;
     let mount_path = VirtualFS
         .lock()
@@ -762,13 +762,14 @@ define_syscall!(
 
 #[cfg(test)]
 mod tests {
+    use super::{MOUNT_ATTR_IDMAP, MOUNT_ATTR_NODEV, MOUNT_ATTR_NOEXEC, MOUNT_ATTR_NOSUID};
     use crate::{
         filesystem::{path::Path, vfs::VirtualFS},
         object::{
             misc::get_object_current_process,
             traits::{Readable, Statable},
         },
-        process::FdFlags,
+        process::{FdFlags, manager::get_current_process},
         systemcall::{
             implementations::{
                 Fsconfig, Fsmount, Fsopen, Fspick, Mkdir, Mount, MountSetattr, MoveMount, OpenTree,
@@ -795,6 +796,7 @@ mod tests {
     fn mount_api_syscalls_follow_linux_rules() {
         const AT_FDCWD: u64 = (-100i32) as u64;
         const AT_RECURSIVE: u64 = 0x8000;
+        const AT_EMPTY_PATH: u64 = 0x1000;
         const OPEN_TREE_CLONE: u64 = 0x0000_0001;
         const OPEN_TREE_CLOEXEC: u64 = 0x0008_0000;
         const MOVE_MOUNT_F_EMPTY_PATH: u64 = 0x0000_0004;
@@ -1112,10 +1114,35 @@ mod tests {
             SyscallArgs::new([0, page + 1408, page + 2048, 0, 0, 0]).call::<Mount>(),
             0,
         );
+        let parent_mount_snapshot = {
+            let process = get_current_process();
+            process.lock().mount_namespace_snapshot.clone()
+        };
+        let child_mount_snapshot = VirtualFS
+            .lock()
+            .clone_mount_namespace(parent_mount_snapshot.as_deref());
         expect_ok(
             SyscallArgs::new([0, page + 2432, page + 384, 0, 0, 0]).call::<Mount>(),
             0,
         );
+        {
+            let process = get_current_process();
+            process.lock().mount_namespace_snapshot = Some(child_mount_snapshot.clone());
+            crate::smp::set_current_mount_namespace_snapshot(Some(child_mount_snapshot));
+        }
+        expect_ok(
+            SyscallArgs::new([0, page + 2432, page + 384, 0, 0, 0]).call::<Mount>(),
+            0,
+        );
+        expect_ok(
+            SyscallArgs::new([page + 2432, 0, 0, 0, 0, 0]).call::<Umount2>(),
+            0,
+        );
+        {
+            let process = get_current_process();
+            process.lock().mount_namespace_snapshot = parent_mount_snapshot.clone();
+            crate::smp::set_current_mount_namespace_snapshot(parent_mount_snapshot);
+        }
         expect_ok(
             SyscallArgs::new([0, page + 2560, page + 384, 0, 0, 0]).call::<Mount>(),
             0,
@@ -1166,10 +1193,10 @@ mod tests {
         write_user_value(
             page + 768,
             &TestLinuxMountAttr {
-                attr_set: 1,
+                attr_set: MOUNT_ATTR_NOSUID | MOUNT_ATTR_NODEV | MOUNT_ATTR_NOEXEC,
                 attr_clr: 0,
                 propagation: 0,
-                userns_fd: 0,
+                userns_fd: (-9i64) as u64,
             },
         );
         expect_ok(
@@ -1177,6 +1204,44 @@ mod tests {
                 AT_FDCWD,
                 page + 256,
                 AT_RECURSIVE,
+                page + 768,
+                core::mem::size_of::<TestLinuxMountAttr>() as u64,
+                0,
+            ])
+            .call::<MountSetattr>(),
+            0,
+        );
+        let idmapped_tree_fd = expect_fd(
+            SyscallArgs::new([
+                AT_FDCWD,
+                page + 256,
+                OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC,
+                0,
+                0,
+                0,
+            ])
+            .call::<OpenTree>(),
+        );
+        let user_namespace_fd = get_current_process().lock().push_object_with_flags(
+            crate::object::namespace::NamespaceObject::dynamic(
+                crate::object::namespace::NamespaceKind::User,
+            ),
+            FdFlags::CLOEXEC,
+        );
+        write_user_value(
+            page + 768,
+            &TestLinuxMountAttr {
+                attr_set: MOUNT_ATTR_IDMAP | MOUNT_ATTR_NOSUID,
+                attr_clr: 0,
+                propagation: 0,
+                userns_fd: user_namespace_fd as u64,
+            },
+        );
+        expect_ok(
+            SyscallArgs::new([
+                idmapped_tree_fd as u64,
+                page + 704,
+                AT_EMPTY_PATH,
                 page + 768,
                 core::mem::size_of::<TestLinuxMountAttr>() as u64,
                 0,
@@ -1206,6 +1271,8 @@ mod tests {
         );
 
         close_test_fd(tree_fd);
+        close_test_fd(idmapped_tree_fd);
+        close_test_fd(user_namespace_fd);
         close_test_fd(tmpfs_mount_fd);
         close_test_fd(tmpfs_fsfd);
         close_test_fd(proc_mount_fd);

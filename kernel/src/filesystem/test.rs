@@ -783,7 +783,7 @@ fn procfs_exposes_stable_static_directories_files_and_mount_flags() {
         .into_iter()
         .map(|entry| entry.name)
         .collect::<Vec<_>>();
-    assert_eq!(sys_names, vec!["fs", "kernel", "net", "vm"]);
+    assert_eq!(sys_names, vec!["fs", "kernel", "net", "user", "vm"]);
 
     let FileLike::Directory(net_conf) = fs.lookup(&Path::new("/sys/net/ipv4/conf")).unwrap() else {
         panic!("/proc/sys/net/ipv4/conf should be a directory");

@@ -423,6 +423,27 @@ impl VFS {
         Ok(())
     }
 
+    pub fn move_mount_tree(&mut self, source: Path, target: Path) -> FSResult<()> {
+        let source = self.normalize_path(source);
+        let target = self.normalize_path(target);
+        if !self.mounts.iter().any(|mount| mount.path == source) {
+            return Err(FSError::NotFound);
+        }
+
+        for mount in &mut self.mounts {
+            if mount.path == source {
+                mount.path = target.clone();
+                continue;
+            }
+            let Some(suffix) = mount.path.strip_prefix(&source) else {
+                continue;
+            };
+            mount.path = join_paths(&target, &suffix);
+        }
+        self.sort_mounts();
+        Ok(())
+    }
+
     pub fn unmount(&mut self, path: Path) -> FSResult<()> {
         let normalized_path = self.normalize_path(path);
         if self
@@ -444,6 +465,39 @@ impl VFS {
         self.mounts.remove(index);
         crate::process::manager::remove_mount_from_namespaces(mount_id);
         Ok(())
+    }
+
+    pub fn detach_mount_ids(&mut self, path: Path) -> FSResult<Vec<u64>> {
+        let normalized_path = self.normalize_path(path);
+        let normalized_path_string = normalized_path.clone().as_string();
+        let namespace_snapshot = crate::smp::current_mount_namespace_snapshot();
+        let mount_ids = self
+            .mounts
+            .iter()
+            .filter_map(|mount| {
+                if namespace_snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| !snapshot.contains(&mount.mount_id))
+                {
+                    return None;
+                }
+                let mount_path = mount.path.clone();
+                let mount_path_string = mount_path.clone().as_string();
+                (mount_path_string == normalized_path_string
+                    || mount_path.starts_with(&normalized_path))
+                .then_some(mount.mount_id)
+            })
+            .collect::<Vec<_>>();
+        if mount_ids.is_empty() {
+            return Err(FSError::NotFound);
+        }
+        self.mounts
+            .retain(|mount| !mount_ids.contains(&mount.mount_id));
+        for mount_id in &mount_ids {
+            crate::process::manager::remove_mount_from_namespaces(*mount_id);
+        }
+        self.sort_mounts();
+        Ok(mount_ids)
     }
 
     pub fn begin_expire_mount(&mut self, path: Path) -> FSResult<bool> {
@@ -479,6 +533,17 @@ impl VFS {
         self.mounts
             .iter()
             .any(|mount| mount.path == normalized_path)
+    }
+
+    pub fn contains_mount_at_in_current_namespace(&self, path: Path) -> bool {
+        let normalized_path = self.normalize_path(path);
+        let namespace_snapshot = crate::smp::current_mount_namespace_snapshot();
+        self.mounts.iter().any(|mount| {
+            mount.path == normalized_path
+                && namespace_snapshot
+                    .as_ref()
+                    .is_none_or(|snapshot| snapshot.contains(&mount.mount_id))
+        })
     }
 
     pub fn is_mount_busy(&self, path: Path) -> FSResult<bool> {
@@ -538,9 +603,9 @@ impl VFS {
         self.remove_mounts_at(&normalized_path, true)
     }
 
-    pub fn detach_mounts_created_after_snapshot(&mut self, snapshot_mount_ids: &[u64]) {
+    pub fn detach_unreferenced_mounts(&mut self, mount_ids: &[u64]) {
         self.mounts
-            .retain(|mount| snapshot_mount_ids.contains(&mount.mount_id));
+            .retain(|mount| !mount_ids.contains(&mount.mount_id));
     }
 
     pub fn mount_metadata(&self, path: Path) -> FSResult<(Path, FileSystemRef, Path, MountFlags)> {
