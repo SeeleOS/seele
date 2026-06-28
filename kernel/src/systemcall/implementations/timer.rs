@@ -447,7 +447,10 @@ define_syscall!(
 
             let now = match timer.time_type {
                 ClockId::Realtime => Time::current(),
-                ClockId::SinceBoot | ClockId::ProcessCpu | ClockId::ThreadCpu => Time::since_boot(),
+                ClockId::SinceBoot
+                | ClockId::ProcessCpu
+                | ClockId::ThreadCpu
+                | ClockId::Boottime => Time::since_boot(),
             };
             let old_spec = match timer.state {
                 TimerState::Disabled => LinuxItimerspec::default(),
@@ -466,9 +469,10 @@ define_syscall!(
             } else {
                 let now = match timer.time_type {
                     ClockId::Realtime => Time::current(),
-                    ClockId::SinceBoot | ClockId::ProcessCpu | ClockId::ThreadCpu => {
-                        Time::since_boot()
-                    }
+                    ClockId::SinceBoot
+                    | ClockId::ProcessCpu
+                    | ClockId::ThreadCpu
+                    | ClockId::Boottime => Time::since_boot(),
                 };
                 let deadline = if flags.contains(TimerSetTimeFlags::TFD_TIMER_ABSTIME) {
                     Time::from_nanoseconds(value_ns)
@@ -515,7 +519,10 @@ define_syscall!(
                 .ok_or(SyscallError::InvalidArguments)?;
             let now = match timer.time_type {
                 ClockId::Realtime => Time::current(),
-                ClockId::SinceBoot | ClockId::ProcessCpu | ClockId::ThreadCpu => Time::since_boot(),
+                ClockId::SinceBoot
+                | ClockId::ProcessCpu
+                | ClockId::ThreadCpu
+                | ClockId::Boottime => Time::since_boot(),
             };
             let spec = match timer.state {
                 TimerState::Disabled => LinuxItimerspec::default(),

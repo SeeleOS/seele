@@ -9,7 +9,7 @@ use crate::{
         vfs_traits::{DirectoryContentType, MountFlags, MountPropagation},
     },
     misc::time::Time,
-    process::manager::MANAGER,
+    process::manager::{MANAGER, get_current_process},
 };
 
 pub(super) const PROC_ROOT_INODE: u64 = 0x3000;
@@ -211,15 +211,17 @@ pub(super) fn proc_version_bytes() -> Vec<u8> {
 }
 
 pub(super) fn proc_uptime_bytes() -> Vec<u8> {
-    let uptime = Time::since_boot();
-    format!(
-        "{}.{:02} {}.{:02}\n",
-        uptime.as_seconds(),
-        uptime.subsec_milliseconds() / 10,
-        uptime.as_seconds(),
-        uptime.subsec_milliseconds() / 10,
-    )
-    .into_bytes()
+    let offset_ns = get_current_process()
+        .lock()
+        .time_namespace_state
+        .boottime_offset_ns();
+    let uptime_ns = (Time::since_boot().as_nanoseconds() as i64).saturating_add(offset_ns);
+    let uptime_seconds = if uptime_ns >= 0 {
+        uptime_ns.saturating_add(999_999_999) / 1_000_000_000
+    } else {
+        uptime_ns / 1_000_000_000
+    };
+    format!("{uptime_seconds}.00 {uptime_seconds}.00\n").into_bytes()
 }
 
 pub(super) fn proc_kernel_entries() -> Vec<DirectoryContentInfo> {

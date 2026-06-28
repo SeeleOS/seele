@@ -183,6 +183,17 @@ fn linux_timespec_to_ns(timespec: LinuxTimespec) -> Result<u64, SyscallError> {
         .saturating_add(timespec.tv_nsec as u64))
 }
 
+fn linux_timespec_to_signed_ns(timespec: LinuxTimespec) -> Result<i64, SyscallError> {
+    if !(0..1_000_000_000).contains(&timespec.tv_nsec) {
+        return Err(SyscallError::InvalidArguments);
+    }
+
+    Ok(timespec
+        .tv_sec
+        .saturating_mul(1_000_000_000)
+        .saturating_add(timespec.tv_nsec))
+}
+
 fn ns_to_linux_timespec(ns: u64) -> LinuxTimespec {
     LinuxTimespec {
         tv_sec: (ns / 1_000_000_000) as i64,
@@ -249,7 +260,9 @@ fn itimer_signal(which: i32) -> Result<crate::signal::Signal, SyscallError> {
 fn itimer_to_linux_value(state: TimerState, clock: ClockId) -> LinuxItimerval {
     let now = match clock {
         ClockId::Realtime => KernelTime::current(),
-        ClockId::SinceBoot | ClockId::ProcessCpu | ClockId::ThreadCpu => KernelTime::since_boot(),
+        ClockId::SinceBoot | ClockId::ProcessCpu | ClockId::ThreadCpu | ClockId::Boottime => {
+            KernelTime::since_boot()
+        }
     };
     match state {
         TimerState::Disabled => LinuxItimerval::default(),
@@ -276,6 +289,12 @@ fn linux_clock_now_ns(clock_id: i32) -> Result<i64, SyscallError> {
     }
 }
 
+fn since_boot_ns() -> i64 {
+    KernelTime::since_boot()
+        .as_nanoseconds()
+        .min(i64::MAX as u64) as i64
+}
+
 fn current_monotonic_offset_ns() -> i64 {
     get_current_process()
         .lock()
@@ -291,13 +310,57 @@ fn current_boottime_offset_ns() -> i64 {
 }
 
 fn monotonic_namespace_deadline_to_boot(deadline_ns: u64, clock_id: i32) -> KernelTime {
+    signed_monotonic_namespace_deadline_to_boot(deadline_ns.min(i64::MAX as u64) as i64, clock_id)
+}
+
+fn signed_monotonic_namespace_deadline_to_boot(deadline_ns: i64, clock_id: i32) -> KernelTime {
     let offset = if matches!(clock_id, 7 | 9) {
         current_boottime_offset_ns()
     } else {
         current_monotonic_offset_ns()
     };
-    let boot_ns = (deadline_ns as i64).saturating_sub(offset).max(0) as u64;
+    let boot_ns = deadline_ns.saturating_sub(offset).max(0) as u64;
     KernelTime::from_nanoseconds(boot_ns)
+}
+
+fn boottime_namespace_now_ns() -> i64 {
+    since_boot_ns().saturating_add(current_boottime_offset_ns())
+}
+
+fn timerfd_clock(clock_id: i32) -> Result<ClockId, SyscallError> {
+    match clock_id {
+        0 => Ok(ClockId::Realtime),
+        1 => Ok(ClockId::SinceBoot),
+        7 => Ok(ClockId::Boottime),
+        _ => Err(SyscallError::InvalidArguments),
+    }
+}
+
+fn signed_timerfd_absolute_deadline_to_boot(deadline_ns: i64, clock_id: ClockId) -> KernelTime {
+    match clock_id {
+        ClockId::Realtime => {
+            let now_realtime = KernelTime::current();
+            let now_boot = KernelTime::since_boot();
+            let delta = deadline_ns.saturating_sub(now_realtime.as_nanoseconds() as i64);
+            if delta <= 0 {
+                KernelTime::since_boot()
+            } else {
+                now_boot.add_ns(delta as u64)
+            }
+        }
+        ClockId::Boottime => signed_monotonic_namespace_deadline_to_boot(deadline_ns, 7),
+        ClockId::SinceBoot | ClockId::ProcessCpu | ClockId::ThreadCpu => {
+            signed_monotonic_namespace_deadline_to_boot(deadline_ns, 1)
+        }
+    }
+}
+
+fn div_ns_ceil_seconds(ns: i64) -> i64 {
+    if ns >= 0 {
+        ns.saturating_add(999_999_999) / 1_000_000_000
+    } else {
+        ns / 1_000_000_000
+    }
 }
 
 fn clock_nanosleep_clock(clock_id: i32) -> Result<SleepClock, SyscallError> {
@@ -467,16 +530,14 @@ define_syscall!(ClockGetres, |clock_id: i32, tp: *mut LinuxTimespec| {
 });
 
 define_syscall!(TimerfdCreate, |clock_id: i32, flags: TimerFdFlags| {
-    if !matches!(clock_id, 0 | 1) {
-        return Err(SyscallError::InvalidArguments);
-    }
+    let clock = timerfd_clock(clock_id)?;
 
     let file_flags = if flags.contains(TimerFdFlags::TFD_NONBLOCK) {
         FileFlags::NONBLOCK
     } else {
         FileFlags::empty()
     };
-    let object = TimerFdObject::new(file_flags);
+    let object = TimerFdObject::new(clock, file_flags);
     let fd_flags = if flags.contains(TimerFdFlags::TFD_CLOEXEC) {
         FdFlags::CLOEXEC
     } else {
@@ -502,6 +563,7 @@ define_syscall!(
         let timerfd = object
             .as_timerfd()
             .map_err(|_| SyscallError::InvalidArguments)?;
+        let clock_id = timerfd.clock_id();
         let now = KernelTime::since_boot();
         let (old_deadline, old_interval_ns) = timerfd.current_timer();
         if !old_value.is_null() {
@@ -516,14 +578,18 @@ define_syscall!(
         }
 
         let new_spec = user_safe::read(new_value)?;
-        let value_ns = linux_timespec_to_ns(new_spec.it_value)?;
+        let value_ns = if flags.contains(TimerSetTimeFlags::TFD_TIMER_ABSTIME) {
+            linux_timespec_to_signed_ns(new_spec.it_value)?
+        } else {
+            linux_timespec_to_ns(new_spec.it_value)? as i64
+        };
         let interval_ns = linux_timespec_to_ns(new_spec.it_interval)?;
         let deadline = if value_ns == 0 {
             None
         } else if flags.contains(TimerSetTimeFlags::TFD_TIMER_ABSTIME) {
-            Some(KernelTime::from_nanoseconds(value_ns))
+            Some(signed_timerfd_absolute_deadline_to_boot(value_ns, clock_id))
         } else {
-            Some(now.add_ns(value_ns))
+            Some(now.add_ns(value_ns as u64))
         };
         timerfd.set_timer(deadline, interval_ns);
         if timerfd.is_read_ready() {
@@ -673,9 +739,10 @@ define_syscall!(
         } else {
             let now = match clock {
                 ClockId::Realtime => KernelTime::current(),
-                ClockId::SinceBoot | ClockId::ProcessCpu | ClockId::ThreadCpu => {
-                    KernelTime::since_boot()
-                }
+                ClockId::SinceBoot
+                | ClockId::ProcessCpu
+                | ClockId::ThreadCpu
+                | ClockId::Boottime => KernelTime::since_boot(),
             };
             let deadline = now.add_ns(value_ns);
             if interval_ns == 0 {
@@ -785,7 +852,7 @@ define_syscall!(Time, |time_ptr: *mut i64| {
 });
 
 define_syscall!(Sysinfo, |info_ptr: *mut LinuxSysinfo| {
-    let uptime = (KernelTime::since_boot().as_nanoseconds() / 1_000_000_000) as i64;
+    let uptime = div_ns_ceil_seconds(boottime_namespace_now_ns());
     let totalram = crate::memory::usable_memory_bytes();
     let info = LinuxSysinfo {
         uptime,

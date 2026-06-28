@@ -8,7 +8,7 @@ use crate::{
     filesystem::info::LinuxStat,
     impl_cast_function, impl_cast_function_non_trait,
     memory::utils::Mut,
-    misc::time::Time,
+    misc::{time::Time, timer::ClockId},
     object::{
         FileFlags, Object,
         error::ObjectError,
@@ -40,14 +40,16 @@ struct TimerFdState {
 
 #[derive(Debug, Default)]
 pub struct TimerFdObject {
+    clock_id: ClockId,
     flags: Mut<FileFlags>,
     state: Mut<TimerFdState>,
     self_ref: Mut<Option<Weak<TimerFdObject>>>,
 }
 
 impl TimerFdObject {
-    pub fn new(flags: FileFlags) -> Arc<Self> {
+    pub fn new(clock_id: ClockId, flags: FileFlags) -> Arc<Self> {
         let timerfd = Arc::new(Self {
+            clock_id,
             flags: Mut::new(flags),
             state: Mut::new(TimerFdState::default()),
             self_ref: Mut::new(None),
@@ -71,7 +73,11 @@ impl TimerFdObject {
         (state.deadline, state.interval_ns)
     }
 
-    fn refresh(state: &mut TimerFdState) {
+    pub fn clock_id(&self) -> ClockId {
+        self.clock_id
+    }
+
+    fn refresh(&self, state: &mut TimerFdState) {
         let Some(mut deadline) = state.deadline else {
             return;
         };
@@ -99,7 +105,7 @@ impl TimerFdObject {
         let (previous_deadline, state) = {
             let mut state = self.state.lock();
             let previous_deadline = state.deadline;
-            Self::refresh(&mut state);
+            self.refresh(&mut state);
             (previous_deadline, *state)
         };
         self.update_registry(previous_deadline, state.deadline);

@@ -16,6 +16,7 @@ pub enum ClockId {
     SinceBoot = 1,
     ProcessCpu = 2,
     ThreadCpu = 3,
+    Boottime = 7,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
@@ -136,7 +137,9 @@ impl Timer {
     pub fn get_appropriate_time(&self) -> Time {
         match self.time_type {
             ClockId::Realtime => Time::current(),
-            ClockId::SinceBoot | ClockId::ProcessCpu | ClockId::ThreadCpu => Time::since_boot(),
+            ClockId::SinceBoot | ClockId::ProcessCpu | ClockId::ThreadCpu | ClockId::Boottime => {
+                Time::since_boot()
+            }
         }
     }
 
