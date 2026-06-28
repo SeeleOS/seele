@@ -23,6 +23,7 @@ lazy_static! {
         inode: PROC_NET_INIT_INO,
         ipv4_conf_lo_tag: AtomicU64::new(0),
         ipv4_conf_default_tag: AtomicU64::new(0),
+        loopback_flags: AtomicU64::new(0),
         open_state: OpenState::default(),
     });
 }
@@ -34,6 +35,7 @@ pub struct NetNamespace {
     inode: u64,
     ipv4_conf_lo_tag: AtomicU64,
     ipv4_conf_default_tag: AtomicU64,
+    loopback_flags: AtomicU64,
     open_state: OpenState,
 }
 
@@ -47,6 +49,7 @@ impl NetNamespace {
             inode: NEXT_DYNAMIC_NET_NAMESPACE_INO.fetch_add(1, Ordering::Relaxed),
             ipv4_conf_lo_tag: AtomicU64::new(0),
             ipv4_conf_default_tag: AtomicU64::new(0),
+            loopback_flags: AtomicU64::new(0),
             open_state: OpenState::default(),
         })
     }
@@ -69,6 +72,14 @@ impl NetNamespace {
 
     pub fn set_ipv4_conf_default_tag(&self, value: u64) {
         self.ipv4_conf_default_tag.store(value, Ordering::Relaxed);
+    }
+
+    pub fn loopback_flags(&self) -> u64 {
+        self.loopback_flags.load(Ordering::Relaxed)
+    }
+
+    pub fn set_loopback_flags(&self, flags: u64) {
+        self.loopback_flags.store(flags, Ordering::Relaxed);
     }
 }
 

@@ -161,6 +161,18 @@ pub(super) fn lookup_proc_path(path: &Path) -> FSResult<FileLike> {
             PROC_SYS_INODE + 0x104,
             proc_sys_net_ipv4_conf_if_entries(),
         )),
+        ["sys", "user"] => Ok(proc_dir(
+            "/sys/user",
+            "user",
+            PROC_SYS_USER_INODE,
+            proc_user_entries(),
+        )),
+        ["sys", "user", "max_user_namespaces"] => Ok(proc_rw_file(
+            "max_user_namespaces",
+            PROC_SYS_USER_MAX_USER_NAMESPACES_INODE,
+            || proc_sysctl_value_bytes(&PROC_MAX_USER_NAMESPACES),
+            |buffer| proc_write_sysctl_u64(&PROC_MAX_USER_NAMESPACES, buffer),
+        )),
         ["sys", "vm"] => Ok(proc_dir(
             "/sys/vm",
             "vm",

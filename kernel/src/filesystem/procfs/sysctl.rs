@@ -8,6 +8,7 @@ const DEFAULT_NR_OPEN: u64 = 1_048_576;
 const DEFAULT_PIPE_MAX_SIZE: u64 = 1_048_576;
 const DEFAULT_PIPE_USER_PAGES_SOFT: u64 = 16_384;
 const DEFAULT_PID_MAX: u64 = 4_194_304;
+const DEFAULT_MAX_USER_NAMESPACES: u64 = 1024;
 const MIN_PID_MAX: u64 = 301;
 const DEFAULT_KEYS_ROOT_MAXKEYS: u64 =
     crate::systemcall::implementations::KEY_ROOT_DEFAULT_MAX_KEYS as u64;
@@ -26,6 +27,7 @@ pub(crate) static PROC_PIPE_MAX_SIZE: AtomicU64 = AtomicU64::new(DEFAULT_PIPE_MA
 pub(super) static PROC_PIPE_USER_PAGES_SOFT: AtomicU64 =
     AtomicU64::new(DEFAULT_PIPE_USER_PAGES_SOFT);
 pub(super) static PROC_PID_MAX: AtomicU64 = AtomicU64::new(DEFAULT_PID_MAX);
+pub(super) static PROC_MAX_USER_NAMESPACES: AtomicU64 = AtomicU64::new(DEFAULT_MAX_USER_NAMESPACES);
 pub(super) static PROC_NR_HUGEPAGES: AtomicU64 = AtomicU64::new(0);
 pub(super) static PROC_HUGETLB_SHM_GROUP: AtomicU64 = AtomicU64::new(0);
 pub(super) static PROC_OVERCOMMIT_MEMORY: AtomicU64 = AtomicU64::new(0);
@@ -144,8 +146,16 @@ pub(super) fn proc_sys_entries() -> Vec<DirectoryContentInfo> {
         DirectoryContentInfo::new("fs".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("kernel".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("net".into(), DirectoryContentType::Directory),
+        DirectoryContentInfo::new("user".into(), DirectoryContentType::Directory),
         DirectoryContentInfo::new("vm".into(), DirectoryContentType::Directory),
     ]
+}
+
+pub(super) fn proc_user_entries() -> Vec<DirectoryContentInfo> {
+    vec![DirectoryContentInfo::new(
+        "max_user_namespaces".into(),
+        DirectoryContentType::File,
+    )]
 }
 
 pub(super) fn proc_kernel_keys_entries() -> Vec<DirectoryContentInfo> {

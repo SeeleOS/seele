@@ -22,9 +22,8 @@ use super::{
 const SIOCGIFINDEX: u64 = 0x8933;
 const SIOCSIFFLAGS: u64 = 0x8914;
 const LOOPBACK_IFINDEX: i32 = 1;
-const IFF_UP: i16 = 0x1;
-const IFF_LOOPBACK: i16 = 0x8;
-const IFF_RUNNING: i16 = 0x40;
+const IFF_LOOPBACK: u64 = 0x8;
+const IFF_RUNNING: u64 = 0x40;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -105,7 +104,7 @@ impl PacketSocketObject {
 impl SocketLike for PacketSocketObject {
     fn bind_bytes(self: Arc<Self>, address: &[u8]) -> SocketResult<()> {
         let sockaddr = Self::decode_sockaddr_ll(address)?;
-        if sockaddr.sll_ifindex != LOOPBACK_IFINDEX {
+        if !matches!(sockaddr.sll_ifindex, 0 | LOOPBACK_IFINDEX) {
             return Err(SocketError::NetworkDown);
         }
         *self.bound_ifindex.lock() = Some(sockaddr.sll_ifindex);
@@ -207,7 +206,12 @@ impl Configuratable for PacketSocketObject {
                 if Self::ifreq_name(&ifreq) != "lo" {
                     return Err(ObjectError::DoesNotExist);
                 }
-                let _flags = ifreq.value as i16 & (IFF_UP | IFF_LOOPBACK | IFF_RUNNING);
+                let requested_flags = ifreq.value as u64;
+                let loopback_flags = requested_flags & (IFF_LOOPBACK | IFF_RUNNING);
+                crate::process::manager::get_current_process()
+                    .lock()
+                    .net_namespace
+                    .set_loopback_flags(loopback_flags);
                 Ok(0)
             }
             _ => Err(ObjectError::InvalidRequest),
