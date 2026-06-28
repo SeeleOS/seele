@@ -237,9 +237,19 @@ pub(super) fn readlink_impl(
         return Err(SyscallError::InvalidArguments);
     }
     check_access_path_search_permissions(&path, &fs_access_credentials())?;
-    let target = match open_path_nofollow(path)?.read_link() {
+    let object = open_path_nofollow(path)?;
+    let target = match object.read_link() {
         Ok(target) => target,
-        Err(FSError::NotASymlink) => return Err(SyscallError::InvalidArguments),
+        Err(FSError::NotASymlink) => {
+            if let Some(namespace) = object
+                .device_backing_object()
+                .and_then(|object| object.as_namespace().ok())
+            {
+                namespace.readlink_target()
+            } else {
+                return Err(SyscallError::InvalidArguments);
+            }
+        }
         Err(err) => return Err(err.into()),
     };
     let bytes = target.as_bytes();

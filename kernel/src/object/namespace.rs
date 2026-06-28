@@ -99,6 +99,10 @@ impl NamespaceObject {
             NamespaceKind::Uts => "uts",
         }
     }
+
+    pub fn readlink_target(&self) -> String {
+        alloc::format!("{}:[{}]", self.name(), self.inode)
+    }
 }
 
 impl Statable for NamespaceObject {
