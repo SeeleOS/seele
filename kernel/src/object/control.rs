@@ -15,8 +15,11 @@ use crate::{
         manager::{MANAGER, get_current_process},
         misc::{ProcessID, get_process_with_pid, with_current_process},
     },
-    signal::{SigInfo, Signal, send_signal_to_process_with_siginfo},
+    signal::{
+        SigInfo, Signal, send_signal_to_process_with_siginfo, send_signal_to_thread_with_siginfo,
+    },
     systemcall::utils::{SyscallError, SyscallResult},
+    thread::{misc::ThreadID, with_thread_manager},
 };
 use bitflags::bitflags;
 use lazy_static::lazy_static;
@@ -171,6 +174,21 @@ fn process_pid_visible_to_current(pid: i32) -> Option<ProcessID> {
     })
 }
 
+fn thread_tid_visible_to_current(tid: i32) -> Option<ThreadID> {
+    if tid <= 0 {
+        return None;
+    }
+    let viewer_namespace_inode = get_current_process().lock().pid_namespace.inode();
+    with_thread_manager(|manager| {
+        manager.threads.values().find_map(|thread| {
+            let thread = thread.lock();
+            let process = thread.parent.lock();
+            let visible_pid = process.pid_visible_from_namespace_inode(viewer_namespace_inode)?;
+            (visible_pid == tid as u64).then_some(thread.id)
+        })
+    })
+}
+
 fn owner_from_legacy_pid(owner_pid: i32) -> LinuxFOwnerEx {
     if owner_pid < 0 {
         LinuxFOwnerEx {
@@ -309,7 +327,26 @@ pub(crate) fn notify_fcntl_async_readable(object: &ObjectRef) {
     };
 
     match state.owner.owner_type {
-        F_OWNER_TID | F_OWNER_PID => {
+        F_OWNER_TID => {
+            if let Some(thread) = with_thread_manager(|manager| {
+                manager
+                    .threads
+                    .get(&ThreadID(state.owner.pid as u64))
+                    .cloned()
+            }) {
+                let process = thread.lock().parent.clone();
+                send_signal_to_thread_with_siginfo(
+                    &thread,
+                    signal,
+                    SigInfo::for_poll_signal(
+                        signal,
+                        POLL_IN,
+                        fd_for_object_owner(&process, object),
+                    ),
+                );
+            }
+        }
+        F_OWNER_PID => {
             if let Ok(process) = get_process_with_pid(ProcessID(state.owner.pid as u64)) {
                 send_signal_to_process_with_siginfo(
                     &process,
@@ -364,7 +401,7 @@ fn fd_for_object_owner(process: &crate::process::ProcessRef, object: &ObjectRef)
 }
 
 pub(crate) fn release_fcntl_object_state(object: &ObjectRef) {
-    if !has_other_open_file_description_for_release(object) {
+    if Arc::strong_count(object) == 1 && !has_other_open_file_description_for_release(object) {
         release_fcntl_object_state_for_object(object);
     }
 }
@@ -471,10 +508,18 @@ pub fn control_object(fd: u64, command: u64, arg: u64) -> SyscallResult {
         FcntlCmd::SetOwnEx => {
             let mut owner = user_safe::read(arg as *const LinuxFOwnerEx)?;
             validate_owner_ex(owner)?;
-            if matches!(owner.owner_type, F_OWNER_PID | F_OWNER_TID)
-                && let Some(global_pid) = process_pid_visible_to_current(owner.pid)
-            {
-                owner.pid = global_pid.0 as i32;
+            match owner.owner_type {
+                F_OWNER_PID => {
+                    if let Some(global_pid) = process_pid_visible_to_current(owner.pid) {
+                        owner.pid = global_pid.0 as i32;
+                    }
+                }
+                F_OWNER_TID => {
+                    if let Some(thread_id) = thread_tid_visible_to_current(owner.pid) {
+                        owner.pid = thread_id.0 as i32;
+                    }
+                }
+                _ => {}
             }
             update_fcntl_object_state(&object, |state| state.owner = owner);
             Ok(0)
