@@ -1210,7 +1210,9 @@ impl Statable for InetSocketObject {
 
 impl SocketLike for InetSocketObject {
     fn bind_bytes(self: Arc<Self>, address: &[u8]) -> SocketResult<()> {
-        self.bind(Self::decode_addr_for_domain(*self.domain.lock(), address)?)
+        let domain = *self.domain.lock();
+        let address = Self::decode_addr_for_domain(domain, address)?;
+        self.bind(address)
     }
 
     fn listen(self: Arc<Self>, backlog: usize) -> SocketResult<()> {
@@ -1224,7 +1226,9 @@ impl SocketLike for InetSocketObject {
                 return self.disconnect_stream();
             }
         }
-        self.connect(Self::decode_addr_for_domain(*self.domain.lock(), address)?)
+        let domain = *self.domain.lock();
+        let address = Self::decode_addr_for_domain(domain, address)?;
+        self.connect(address)
     }
 
     fn accept(self: Arc<Self>) -> SocketResult<crate::object::misc::ObjectRef> {
@@ -1235,10 +1239,11 @@ impl SocketLike for InetSocketObject {
         match self.kind {
             InetSocketKind::Stream => self.send(buffer),
             InetSocketKind::Datagram => match address {
-                Some(address) => self.send_to(
-                    buffer,
-                    Self::decode_addr_for_domain(*self.domain.lock(), address)?,
-                ),
+                Some(address) => {
+                    let domain = *self.domain.lock();
+                    let address = Self::decode_addr_for_domain(domain, address)?;
+                    self.send_to(buffer, address)
+                }
                 None => self.send(buffer),
             },
         }
