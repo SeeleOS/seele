@@ -185,7 +185,8 @@ fn thread_tid_visible_to_current(tid: i32) -> Option<ThreadID> {
     with_thread_manager(|manager| {
         manager.threads.values().find_map(|thread| {
             let thread = thread.lock();
-            let process = thread.parent.lock();
+            let process_ref = thread.parent();
+            let process = process_ref.lock();
             let visible_pid = process.pid_visible_from_namespace_inode(viewer_namespace_inode)?;
             (visible_pid == tid as u64).then_some(thread.id)
         })
@@ -337,7 +338,7 @@ pub(crate) fn notify_fcntl_async_readable(object: &ObjectRef) {
                     .get(&ThreadID(state.owner.pid as u64))
                     .cloned()
             }) {
-                let process = thread.lock().parent.clone();
+                let process = thread.lock().parent();
                 send_signal_to_thread_with_siginfo(
                     &thread,
                     signal,

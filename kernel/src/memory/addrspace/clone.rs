@@ -76,8 +76,6 @@ impl AddrSpace {
                             flags
                         };
 
-                        // Only writable pages should enter the CoW path. Read-only
-                        // mappings can stay shared with their original permissions.
                         new_page_table
                             .map_to(page, frame, new_flags, &mut *frame_allocator)
                             .unwrap()

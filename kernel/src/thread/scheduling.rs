@@ -18,7 +18,7 @@ use crate::{
     polling::event::PollableEvent,
     signal::process_current_process_signals,
     smp::{
-        current_apic_id, current_cpu_index, set_current_kernel_stack,
+        current_apic_id, current_cpu_index, set_current_kernel_stack, set_current_process,
         set_current_process_with_mount_namespace_snapshot, set_current_thread,
     },
     thread::{
@@ -316,10 +316,15 @@ extern "C" fn return_to_scheduler_from_current_inner(snapshot_ptr: *mut Snapshot
 pub fn return_to_scheduler_no_save() -> ! {
     log::trace!("return_to_scheduler_no_save");
     let current_ref = crate::thread::get_current_thread();
+    return_to_scheduler_no_save_with_thread(current_ref)
+}
+
+pub fn return_to_scheduler_no_save_with_thread(current_ref: ThreadRef) -> ! {
     let mut current = current_ref.lock();
     let thread_snapshot = current.get_appropriate_snapshot() as *mut ThreadSnapshot;
     let scheduler_snapshot = &mut current.scheduler_snapshot as *mut ThreadSnapshot;
     drop(current);
+    drop(current_ref);
 
     unsafe { (*scheduler_snapshot).switch_from(Some(&mut *thread_snapshot), None) };
 
@@ -328,6 +333,7 @@ pub fn return_to_scheduler_no_save() -> ! {
 
 pub fn run() -> ! {
     loop {
+        with_thread_manager(|manager| manager.drain_deferred_threads());
         with_thread_manager(|manager| manager.drain_deferred_kernel_stacks());
         let scheduler_start = profile::scope_start();
         if should_run_global_scheduler_work() {
@@ -400,7 +406,7 @@ fn run_ready_thread(thread_ref: ThreadRef) -> u64 {
             return None;
         }
 
-        let process = thread.parent.clone();
+        let process = thread.parent();
         thread.state = State::Running;
         if matches!(
             thread.get_appropriate_snapshot().snapshot_type,
@@ -530,11 +536,28 @@ extern "C" fn switch_from_scheduler_to_thread_inner(
 
 fn after_thread_yield(thread_ref: ThreadRef) {
     let state = thread_ref.lock().state.clone();
-    if matches!(state, State::Exiting) {
-        with_thread_manager(|manager| {
-            manager.mark_thread_exited(thread_ref.clone());
-            manager.cleanup_exited_threads();
-        });
+    if matches!(state, State::Exiting | State::Zombie) {
+        crate::process::manager::MANAGER
+            .lock()
+            .load_kernel_process();
+        set_current_thread(None);
+        set_current_process(None);
+        if matches!(state, State::Exiting) {
+            let exit_status = thread_ref.lock().pending_exit_status.take();
+            if let Some(exit_status) = exit_status {
+                let process = thread_ref.lock().parent();
+                crate::process::manager::terminate_process(process, exit_status);
+            }
+            with_thread_manager(|manager| {
+                manager.mark_thread_exited(thread_ref.clone());
+                manager.cleanup_exited_threads();
+            });
+        } else {
+            with_thread_manager(|manager| manager.defer_current_zombie_thread(thread_ref));
+            set_current_thread(Some(scheduler_thread()));
+            clear_active_user_extended_state_ptr();
+            return;
+        }
         set_current_thread(Some(scheduler_thread()));
         clear_active_user_extended_state_ptr();
         return;
@@ -543,7 +566,7 @@ fn after_thread_yield(thread_ref: ThreadRef) {
     let (process, was_running_user_context) = {
         let thread = thread_ref.lock();
         (
-            thread.parent.clone(),
+            thread.parent(),
             matches!(
                 match thread.snapshot_state {
                     SnapshotState::Normal => thread.snapshot.snapshot_type,
@@ -579,15 +602,40 @@ fn after_thread_yield(thread_ref: ThreadRef) {
             with_thread_manager(|manager| manager.push_ready_balanced(thread_ref.clone()));
         }
         State::Exiting => {
-            with_thread_manager(|manager| manager.mark_thread_exited(thread_ref.clone()));
-            with_thread_manager(|manager| manager.cleanup_exited_threads());
+            crate::process::manager::MANAGER
+                .lock()
+                .load_kernel_process();
+            set_current_thread(None);
+            set_current_process(None);
+            let exit_status = thread_ref.lock().pending_exit_status.take();
+            if let Some(exit_status) = exit_status {
+                let process = thread_ref.lock().parent();
+                crate::process::manager::terminate_process(process, exit_status);
+            }
+            with_thread_manager(|manager| {
+                manager.mark_thread_exited(thread_ref.clone());
+                manager.cleanup_exited_threads();
+            });
+            set_current_thread(Some(scheduler_thread()));
+            clear_active_user_extended_state_ptr();
+            return;
         }
         State::Zombie => {
             with_thread_manager(|manager| manager.cleanup_exited_threads());
         }
     }
 
-    set_current_thread(Some(scheduler_thread()));
+    if matches!(thread_ref.lock().state, State::Zombie) {
+        crate::process::manager::MANAGER
+            .lock()
+            .load_kernel_process();
+        set_current_thread(Some(scheduler_thread()));
+        set_current_process(None);
+        thread_ref.lock().take_parent();
+    } else {
+        set_current_thread(Some(scheduler_thread()));
+        set_current_process(None);
+    }
     clear_active_user_extended_state_ptr();
 }
 

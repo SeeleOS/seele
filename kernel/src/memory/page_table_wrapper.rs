@@ -18,6 +18,7 @@ use crate::memory::{
 #[derive(Debug)]
 pub struct PageTableWrapped {
     pub frame: PhysFrame<Size4KiB>,
+    released: bool,
 }
 
 impl Default for PageTableWrapped {
@@ -41,7 +42,14 @@ impl Default for PageTableWrapped {
 
         Self {
             frame: page_table_frame,
+            released: false,
         }
+    }
+}
+
+impl Drop for PageTableWrapped {
+    fn drop(&mut self) {
+        self.deallocate_user_page_tables();
     }
 }
 
@@ -62,6 +70,7 @@ impl PageTableWrapped {
 
         Self {
             frame: page_table_frame,
+            released: false,
         }
     }
 }
@@ -78,6 +87,31 @@ impl PageTableWrapped {
     fn table_from_frame(frame: PhysFrame<Size4KiB>) -> &'static mut PageTable {
         let table_addr = VirtAddr::new(apply_offset(frame.start_address().as_u64()));
         unsafe { &mut *table_addr.as_mut_ptr() }
+    }
+
+    fn update_parent_table_flags(&mut self, addr: VirtAddr, flags: PageTableFlags) {
+        let parent_flags = flags & (PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE);
+        if parent_flags.is_empty() {
+            return;
+        }
+
+        let l4 = self.level_4_table_mut();
+        let l4_entry = &mut l4[addr.p4_index()];
+        l4_entry.set_flags(l4_entry.flags() | parent_flags);
+        let Ok(l3_frame) = l4_entry.frame() else {
+            return;
+        };
+
+        let l3 = Self::table_from_frame(l3_frame);
+        let l3_entry = &mut l3[addr.p3_index()];
+        l3_entry.set_flags(l3_entry.flags() | parent_flags);
+        let Ok(l2_frame) = l3_entry.frame() else {
+            return;
+        };
+
+        let l2 = Self::table_from_frame(l2_frame);
+        let l2_entry = &mut l2[addr.p2_index()];
+        l2_entry.set_flags(l2_entry.flags() | parent_flags);
     }
 
     fn collect_child_table_frames(
@@ -106,7 +140,11 @@ impl PageTableWrapped {
         }
     }
 
-    pub fn deallocate_user_page_tables(self) {
+    pub fn deallocate_user_page_tables(&mut self) {
+        if self.released || self.is_loaded() {
+            return;
+        }
+
         let mut frames = alloc::vec::Vec::new();
         Self::collect_child_table_frames(self.frame, 4, 0..128, &mut frames);
         frames.push(self.frame);
@@ -117,6 +155,7 @@ impl PageTableWrapped {
                 frame_allocator.deallocate_frame(frame);
             }
         }
+        self.released = true;
     }
 
     fn with_mapper<R>(&mut self, f: impl FnOnce(&mut OffsetPageTable<'_>) -> R) -> R {
@@ -156,7 +195,10 @@ impl PageTableWrapped {
         flags: PageTableFlags,
         allocator: &mut A,
     ) -> Result<MapperFlush<Size4KiB>, MapToError<Size4KiB>> {
-        self.with_mapper(|mapper| unsafe { mapper.map_to(page, frame, flags, allocator) })
+        let flush =
+            self.with_mapper(|mapper| unsafe { mapper.map_to(page, frame, flags, allocator) })?;
+        self.update_parent_table_flags(page.start_address(), flags);
+        Ok(flush)
     }
 
     pub fn unmap(
@@ -175,16 +217,19 @@ impl PageTableWrapped {
         page: Page<Size4KiB>,
         flags: PageTableFlags,
     ) -> Result<MapperFlush<Size4KiB>, FlagUpdateError> {
-        self.with_mapper(|mapper| unsafe { mapper.update_flags(page, flags) })
+        let flush = self.with_mapper(|mapper| unsafe { mapper.update_flags(page, flags) })?;
+        self.update_parent_table_flags(page.start_address(), flags);
+        Ok(flush)
     }
 
     pub fn load(&mut self) {
+        debug_assert!(!self.released);
         unsafe {
             Cr3::write(self.frame, Cr3Flags::empty());
         }
     }
 
     pub fn is_loaded(&self) -> bool {
-        Cr3::read().0 == self.frame
+        !self.released && Cr3::read().0 == self.frame
     }
 }

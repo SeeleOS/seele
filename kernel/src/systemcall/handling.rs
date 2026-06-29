@@ -16,7 +16,7 @@ use crate::{
     thread::{
         get_current_thread,
         misc::{BlockedSyscall, State, with_current_thread},
-        scheduling::{enable_ap_task_scheduling, return_to_scheduler_no_save},
+        scheduling::{enable_ap_task_scheduling, return_to_scheduler_no_save_with_thread},
     },
 };
 use x86_64::registers::model_specific::FsBase;
@@ -62,6 +62,14 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
     let result = syscall_handler_unwrapped(
         syscall_no, args[0], args[1], args[2], args[3], args[4], args[5],
     );
+    if matches!(thread_ref.lock().state, State::Exiting) {
+        profile::record(
+            ProfileCategory::SyscallCpu,
+            profile::scope_start().saturating_sub(syscall_start),
+        );
+        profile::record_cycles(ProfileCategory::SyscallEntry, entry_cycles);
+        return_to_scheduler_no_save_with_thread(thread_ref);
+    }
     if result < 0 {
         log_unsupported_syscall_result(syscall_no, args, SyscallError::from(result));
     }
@@ -107,7 +115,7 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
 
     if matches!(get_current_thread().lock().state, State::Exiting) {
         profile::record(ProfileCategory::SyscallExit, exit_start);
-        return_to_scheduler_no_save();
+        return_to_scheduler_no_save_with_thread(thread_ref);
     }
 
     let should_switch = process_current_process_signals(&get_current_process());
@@ -116,7 +124,7 @@ extern "C" fn syscall_handler(snapshot_ptr: *mut Snapshot) {
         // Its fine to no_save becuase we've already saved everything manually
         // And returned the value (snapshot.rax = result)
         profile::record(ProfileCategory::SyscallExit, exit_start);
-        return_to_scheduler_no_save();
+        return_to_scheduler_no_save_with_thread(thread_ref);
     }
 
     profile::record(ProfileCategory::SyscallExit, exit_start);

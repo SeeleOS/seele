@@ -77,10 +77,8 @@ impl AddrSpace {
 
     fn flush_page_table_updates(&self, changed: bool) {
         if changed {
-            crate::memory::tlb::flush_after_page_table_update(
-                self.page_table.is_loaded(),
-                self.loaded_cpu_mask.load(Ordering::Acquire),
-            );
+            let loaded_cpu_mask = self.loaded_cpu_mask.load(Ordering::Acquire);
+            crate::memory::tlb::flush_after_page_table_update(true, loaded_cpu_mask);
         }
     }
 
@@ -369,8 +367,7 @@ impl AddrSpace {
             .fetch_or(current_cpu_bit, Ordering::AcqRel);
     }
 
-    pub fn clean(&mut self) {
-        log::debug!("addrspace: clean");
+    fn release_user_mappings(&mut self, write_back: bool) {
         let areas = self.memory_areas.clone();
         let mut changed = false;
         let mut frames_to_deallocate = Vec::new();
@@ -379,7 +376,9 @@ impl AddrSpace {
                 continue;
             }
 
-            let _ = self.write_back_area_range(area, area.start, area.end);
+            if write_back {
+                let _ = self.write_back_area_range(area, area.start, area.end);
+            }
 
             for page in area.page_range() {
                 if let Ok((frame, flush)) = self.page_table.unmap(page) {
@@ -401,12 +400,26 @@ impl AddrSpace {
             }
         }
         self.user_mem = VirtAddr::new(USER_MEM_START);
-        let old_page_table = core::mem::take(&mut self.page_table);
         self.loaded_cpu_mask.store(0, Ordering::Release);
         self.memory_areas = Vec::new();
         self.last_area_index = None;
+    }
+
+    pub fn clean(&mut self) {
+        log::debug!("addrspace: clean");
+        self.release_user_mappings(true);
+        let mut old_page_table = core::mem::take(&mut self.page_table);
         self.page_table.load();
         old_page_table.deallocate_user_page_tables();
+    }
+
+    pub fn clean_for_exit(&mut self) {
+        log::debug!("addrspace: clean_for_exit");
+        self.release_user_mappings(true);
+    }
+
+    pub fn release_page_tables(&mut self) {
+        self.page_table.deallocate_user_page_tables();
     }
 
     pub fn update_permissions(&mut self, start: VirtAddr, end: VirtAddr, protection: Protection) {

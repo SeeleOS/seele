@@ -25,7 +25,7 @@ use crate::process::{
     misc::{ProcessID, get_process_with_pid},
 };
 use crate::signal::{
-    Signal,
+    SIGNAL_AMOUNT, Signal,
     action::{SignalAction, SignalHandlingType, Signals},
     misc::default_signal_action_vec,
 };
@@ -1371,18 +1371,14 @@ fn unsupported_keyctl() -> Result<usize, SyscallError> {
     Err(SyscallError::OperationNotSupported)
 }
 
-fn clone_cleared_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalAction> {
-    let defaults = default_signal_action_vec();
-    old_actions
-        .iter()
-        .zip(defaults)
-        .map(|(old, default)| match old.handling_type {
-            SignalHandlingType::Ignore => old.clone(),
-            SignalHandlingType::Default
-            | SignalHandlingType::Function1(_)
-            | SignalHandlingType::Function2(_) => default,
-        })
-        .collect()
+fn clone_cleared_signal_actions(old_actions: &[SignalAction]) -> [SignalAction; SIGNAL_AMOUNT] {
+    let mut actions = default_signal_action_vec();
+    for (index, old) in old_actions.iter().enumerate() {
+        if matches!(old.handling_type, SignalHandlingType::Ignore) {
+            actions[index] = *old;
+        }
+    }
+    actions
 }
 
 fn process_fd_object(process: &Process, fd: usize) -> Result<ObjectRef, SyscallError> {

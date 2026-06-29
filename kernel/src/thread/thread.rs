@@ -1,9 +1,12 @@
 use crate::memory::utils::Mut;
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{
+    sync::{Arc, Weak},
+    vec::Vec,
+};
 
 use crate::{
     misc::snapshot::Snapshot,
-    process::{Process, ProcessRef},
+    process::{Process, ProcessExitStatus, ProcessRef},
     signal::{PendingSignalInfo, SIGNAL_AMOUNT, Signals},
     thread::{
         ThreadRef,
@@ -34,8 +37,20 @@ impl Default for LinuxStack {
 }
 
 #[derive(Debug)]
+pub(crate) struct ThreadInit {
+    pub(crate) parent: ProcessRef,
+    pub(crate) id: ThreadID,
+    pub(crate) snapshot: ThreadSnapshot,
+    pub(crate) scheduler_snapshot: ThreadSnapshot,
+    pub(crate) kernel_stack: Option<KernelStack>,
+    pub(crate) scheduler_stack: Option<KernelStack>,
+    pub(crate) kernel_stack_top: u64,
+    pub(crate) mount_namespace_snapshot: Option<Vec<u64>>,
+}
+
+#[derive(Debug)]
 pub struct Thread {
-    pub parent: ProcessRef,
+    parent: Option<Weak<Mut<Process>>>,
     pub id: ThreadID,
     pub snapshot_state: SnapshotState,
     pub snapshot: ThreadSnapshot,
@@ -51,7 +66,7 @@ pub struct Thread {
     pub blocked_signals: Signals,
     pub temporary_blocked_signals: Option<(Signals, Signals)>,
     pub pending_signals: Signals,
-    pub pending_signal_info: Vec<Option<PendingSignalInfo>>,
+    pub pending_signal_info: [Option<PendingSignalInfo>; SIGNAL_AMOUNT],
     pub interrupted_by_signal: bool,
     pub interruptible_wait_active: bool,
     pub clear_child_tid: u64,
@@ -67,6 +82,7 @@ pub struct Thread {
     pub active_syscall_profile: Option<BlockedSyscall>,
     pub blocked_syscall_started_at: Option<u64>,
     pub blocked_syscall_cycles: u64,
+    pub pending_exit_status: Option<ProcessExitStatus>,
     pub io_buffer: Vec<u8>,
     pub name: [u8; 16],
     pub timeslice_remaining_ns: u64,
@@ -83,7 +99,7 @@ impl Default for Thread {
             mount_namespace_snapshot: None,
             sig_handler_snapshot: ThreadSnapshot::default(),
             snapshot_state: SnapshotState::default(),
-            parent: Process::empty(),
+            parent: None,
             id: ThreadID::default(),
             snapshot: ThreadSnapshot::default(),
             scheduler_snapshot: ThreadSnapshot::default(),
@@ -94,7 +110,7 @@ impl Default for Thread {
             blocked_signals: Signals::default(),
             temporary_blocked_signals: None,
             pending_signals: Signals::default(),
-            pending_signal_info: alloc::vec![None; SIGNAL_AMOUNT],
+            pending_signal_info: [None; SIGNAL_AMOUNT],
             interrupted_by_signal: false,
             interruptible_wait_active: false,
             clear_child_tid: 0,
@@ -110,6 +126,7 @@ impl Default for Thread {
             active_syscall_profile: None,
             blocked_syscall_started_at: None,
             blocked_syscall_cycles: 0,
+            pending_exit_status: None,
             io_buffer: Vec::new(),
             name: [0; 16],
             timeslice_remaining_ns: DEFAULT_USER_TIMESLICE_NS,
@@ -119,19 +136,77 @@ impl Default for Thread {
 }
 
 impl Thread {
+    pub fn parent(&self) -> ProcessRef {
+        self.parent
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .expect("thread parent process should be present")
+    }
+
+    pub fn set_parent(&mut self, parent: ProcessRef) {
+        self.parent = Some(Arc::downgrade(&parent));
+    }
+
+    pub fn take_parent(&mut self) -> Option<ProcessRef> {
+        self.parent.take().and_then(|parent| parent.upgrade())
+    }
+
+    pub(super) fn new_base(init: ThreadInit) -> Self {
+        Self {
+            parent: Some(Arc::downgrade(&init.parent)),
+            id: init.id,
+            snapshot_state: SnapshotState::default(),
+            snapshot: init.snapshot,
+            scheduler_snapshot: init.scheduler_snapshot,
+            state: State::Ready,
+            kernel_stack_top: init.kernel_stack_top,
+            kernel_stack: init.kernel_stack,
+            scheduler_stack: init.scheduler_stack,
+            saved_blocked_signals: Vec::new(),
+            blocked_signals: Signals::default(),
+            temporary_blocked_signals: None,
+            pending_signals: Signals::default(),
+            pending_signal_info: [None; SIGNAL_AMOUNT],
+            interrupted_by_signal: false,
+            interruptible_wait_active: false,
+            clear_child_tid: 0,
+            robust_list_head: 0,
+            robust_list_len: 0,
+            rseq_area: 0,
+            rseq_len: 0,
+            rseq_flags: 0,
+            rseq_sig: 0,
+            last_syscall_no: 0,
+            last_user_snapshot: Snapshot::default(),
+            last_user_fs_base: 0,
+            active_syscall_profile: None,
+            blocked_syscall_started_at: None,
+            blocked_syscall_cycles: 0,
+            pending_exit_status: None,
+            io_buffer: Vec::new(),
+            name: [0; 16],
+            timeslice_remaining_ns: DEFAULT_USER_TIMESLICE_NS,
+            sigaltstack: LinuxStack::default(),
+            mount_namespace_snapshot: init.mount_namespace_snapshot,
+            sig_handler_snapshot: ThreadSnapshot::default(),
+        }
+    }
+
     pub fn empty() -> ThreadRef {
         let kernel_stack = allocate_owned_kernel_stack(16).finish();
         let kernel_stack_top = kernel_stack.top().as_u64();
         let scheduler_stack = allocate_owned_kernel_stack(16).finish();
         let scheduler_stack_top = scheduler_stack.top().as_u64();
-
-        Arc::new(Mut::new(Thread {
-            kernel_stack_top,
-            kernel_stack: Some(kernel_stack),
+        Arc::new(Mut::new(Thread::new_base(ThreadInit {
+            parent: Process::empty(),
+            id: ThreadID::default(),
+            snapshot: ThreadSnapshot::default(),
             scheduler_snapshot: ThreadSnapshot::new_scheduler(scheduler_stack_top),
+            kernel_stack: Some(kernel_stack),
             scheduler_stack: Some(scheduler_stack),
-            ..Default::default()
-        }))
+            kernel_stack_top,
+            mount_namespace_snapshot: None,
+        })))
     }
 }
 
@@ -148,30 +223,34 @@ impl Thread {
         let kernel_stack_top = kernel_stack.top().as_u64();
         let scheduler_stack = allocate_owned_kernel_stack(16).finish();
         let scheduler_stack_top = scheduler_stack.top().as_u64();
-        Self {
-            id,
-            snapshot: ThreadSnapshot::new(
-                entry_point,
-                &mut parent.clone().lock().addrspace,
-                user_stack,
-                kernel_stack_top,
-                ThreadSnapshotType::Thread,
-            ),
-            last_user_snapshot: Snapshot::default_regs(
-                entry_point,
-                crate::smp::user_code_selector().0,
-                0x202,
-                user_stack,
-                crate::smp::user_data_selector().0,
-            ),
-            parent: parent.clone(),
+        let snapshot = ThreadSnapshot::new(
+            entry_point,
+            &mut parent.clone().lock().addrspace,
+            user_stack,
             kernel_stack_top,
-            kernel_stack: Some(kernel_stack),
+            ThreadSnapshotType::Thread,
+        );
+        let mount_namespace_snapshot = parent_lock.mount_namespace_snapshot.clone();
+        drop(parent_lock);
+
+        let mut thread = Self::new_base(ThreadInit {
+            parent: parent.clone(),
+            id,
+            snapshot,
             scheduler_snapshot: ThreadSnapshot::new_scheduler(scheduler_stack_top),
+            kernel_stack: Some(kernel_stack),
             scheduler_stack: Some(scheduler_stack),
-            mount_namespace_snapshot: parent_lock.mount_namespace_snapshot.clone(),
-            ..Default::default()
-        }
+            kernel_stack_top,
+            mount_namespace_snapshot,
+        });
+        thread.last_user_snapshot = Snapshot::default_regs(
+            entry_point,
+            crate::smp::user_code_selector().0,
+            0x202,
+            user_stack,
+            crate::smp::user_data_selector().0,
+        );
+        thread
     }
 
     pub fn from_snapshot(
@@ -191,17 +270,20 @@ impl Thread {
         let kernel_stack_top = kernel_stack.top().as_u64();
         let scheduler_stack = allocate_owned_kernel_stack(16).finish();
         let scheduler_stack_top = scheduler_stack.top().as_u64();
-        Self {
-            id,
-            last_user_snapshot: snapshot.inner,
-            last_user_fs_base: snapshot.fs_base,
-            snapshot,
+        let last_user_snapshot = snapshot.inner;
+        let last_user_fs_base = snapshot.fs_base;
+        let mut thread = Self::new_base(ThreadInit {
             parent,
-            kernel_stack_top,
-            kernel_stack: Some(kernel_stack),
+            id,
+            snapshot,
             scheduler_snapshot: ThreadSnapshot::new_scheduler(scheduler_stack_top),
+            kernel_stack: Some(kernel_stack),
             scheduler_stack: Some(scheduler_stack),
-            ..Default::default()
-        }
+            kernel_stack_top,
+            mount_namespace_snapshot: None,
+        });
+        thread.last_user_snapshot = last_user_snapshot;
+        thread.last_user_fs_base = last_user_fs_base;
+        thread
     }
 }

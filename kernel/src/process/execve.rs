@@ -17,7 +17,7 @@ use crate::{
         ptrace::maybe_stop_current_after_exec,
     },
     signal::{
-        Signals,
+        SIGNAL_AMOUNT, Signals,
         action::{SignalAction, SignalHandlingType},
         misc::default_signal_action_vec,
     },
@@ -33,17 +33,14 @@ use crate::{
 };
 use alloc::{string::String, vec, vec::Vec};
 
-fn execve_signal_actions(old_actions: &[SignalAction]) -> Vec<SignalAction> {
-    let defaults = default_signal_action_vec();
-    old_actions
-        .iter()
-        .zip(defaults)
-        .map(|(old, default)| match old.handling_type {
-            SignalHandlingType::Ignore => old.clone(),
-            SignalHandlingType::Default => default,
-            SignalHandlingType::Function1(_) | SignalHandlingType::Function2(_) => default,
-        })
-        .collect()
+fn execve_signal_actions(old_actions: &[SignalAction]) -> [SignalAction; SIGNAL_AMOUNT] {
+    let mut actions = default_signal_action_vec();
+    for (index, old) in old_actions.iter().enumerate() {
+        if matches!(old.handling_type, SignalHandlingType::Ignore) {
+            actions[index] = *old;
+        }
+    }
+    actions
 }
 
 impl Process {

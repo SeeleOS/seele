@@ -441,7 +441,7 @@ mod tests {
         let traced_thread = crate::thread::thread::Thread::empty();
         {
             let mut thread = traced_thread.lock();
-            thread.parent = traced.clone();
+            thread.set_parent(traced.clone());
             thread.last_syscall_no = SyscallNumber::Read as u64;
             thread.last_user_snapshot.rax = -38;
             thread.last_user_snapshot.rip = 0x1234;

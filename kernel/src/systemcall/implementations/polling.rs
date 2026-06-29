@@ -1031,7 +1031,7 @@ mod tests {
         extern "C" fn test_signal_handler(_: i32) {}
 
         let current = get_current_thread();
-        let process = current.lock().parent.clone();
+        let process = current.lock().parent();
         let (saved_process_signals, saved_sigusr1_action) = {
             let mut process = process.lock();
             let saved_signals = process.pending_signals;

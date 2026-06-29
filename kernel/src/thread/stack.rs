@@ -11,12 +11,22 @@ use x86_64::{
 use crate::{
     memory::{
         paging::{FRAME_ALLOCATOR, MAPPER},
-        utils::apply_offset,
+        utils::{Mut, apply_offset},
     },
     misc::stack_builder::StackBuilder,
 };
 
 static KERNEL_MEM: AtomicU64 = AtomicU64::new(0xFFFF_9000_3000_0000);
+
+#[derive(Clone, Copy, Debug)]
+struct StackSlot {
+    start: Page<Size4KiB>,
+    pages: u64,
+}
+
+lazy_static::lazy_static! {
+    static ref FREE_STACK_SLOTS: Mut<Vec<StackSlot>> = Mut::new(Vec::new());
+}
 
 #[derive(Debug)]
 pub struct KernelStack {
@@ -51,6 +61,11 @@ impl Drop for KernelStack {
                 frame_allocator.deallocate_frame(frame);
             }
         }
+
+        FREE_STACK_SLOTS.lock().push(StackSlot {
+            start: self.start,
+            pages: (self.top - self.start.start_address()) / 4096,
+        });
     }
 }
 
@@ -94,10 +109,12 @@ pub fn allocate_kernel_stack(pages: u64) -> StackBuilder {
 }
 
 pub fn allocate_owned_kernel_stack(pages: u64) -> OwnedStackBuilder {
-    let guard_page = Page::containing_address(VirtAddr::new(
-        KERNEL_MEM.fetch_add((pages + 1) * 4096, Ordering::Relaxed),
-    ));
-    let start = guard_page + 1;
+    let start = take_free_stack_slot(pages).unwrap_or_else(|| {
+        let guard_page = Page::containing_address(VirtAddr::new(
+            KERNEL_MEM.fetch_add((pages + 1) * 4096, Ordering::Relaxed),
+        ));
+        guard_page + 1
+    });
     let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
 
     let mut page_write_bases = Vec::with_capacity(pages as usize);
@@ -139,6 +156,12 @@ pub fn allocate_owned_kernel_stack(pages: u64) -> OwnedStackBuilder {
             frames,
         },
     }
+}
+
+fn take_free_stack_slot(pages: u64) -> Option<Page<Size4KiB>> {
+    let mut slots = FREE_STACK_SLOTS.lock();
+    let index = slots.iter().position(|slot| slot.pages == pages)?;
+    Some(slots.swap_remove(index).start)
 }
 
 pub struct OwnedStackBuilder {

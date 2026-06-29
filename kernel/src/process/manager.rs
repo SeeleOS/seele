@@ -70,14 +70,28 @@ impl Manager {
     pub fn reap_process(&mut self, process: ProcessRef) {
         let pid = process.lock().pid;
         self.processes.remove(&pid);
+        self.zombies.retain(|zombie| zombie.lock().pid != pid);
         remove_pid_cgroup_path(pid);
+        process.lock().addrspace.release_page_tables();
+        process.lock().release_reaped_resources();
     }
 
     pub fn load_process(&mut self, process: ProcessRef) {
-        let mut process_locked = process.lock();
+        let mount_namespace_snapshot = {
+            let mut process_locked = process.lock();
+            process_locked.addrspace.load();
+            process_locked.mount_namespace_snapshot.clone()
+        };
+        crate::smp::set_current_process_with_mount_namespace_snapshot(
+            Some(process),
+            mount_namespace_snapshot,
+        );
+    }
 
-        process_locked.addrspace.load();
-        set_current_process(Some(process.clone()));
+    pub fn load_kernel_process(&mut self) {
+        if let Some(process) = self.processes.get(&ProcessID(0)).cloned() {
+            self.load_process(process);
+        }
     }
 }
 
@@ -313,26 +327,9 @@ fn reparent_children(
 
 pub fn exit_current_thread(exit_status: ProcessExitStatus) {
     let current = crate::thread::get_current_thread();
-    let process = current.lock().parent.clone();
-    let live_threads = {
-        let process = process.lock();
-        process
-            .threads
-            .iter()
-            .filter_map(|thread| thread.upgrade())
-            .filter(|thread| !matches!(thread.lock().state, State::Zombie))
-            .count()
-    };
-
-    if live_threads <= 1 {
-        terminate_process(process, exit_status);
-        return;
-    }
-
-    with_thread_manager(|thread_manager| {
-        thread_manager.mark_thread_exited(current);
-        thread_manager.cleanup_exited_threads();
-    });
+    let mut current = current.lock();
+    current.pending_exit_status = Some(exit_status);
+    current.state = State::Exiting;
 }
 
 pub fn wake_vfork_blocker(thread_id: ThreadID) {
@@ -359,7 +356,7 @@ impl Process {
         self.close_all_fds();
         self.timers.clear();
         detach_all_process_mappings(self);
-        self.addrspace.clean();
+        self.addrspace.clean_for_exit();
 
         self.threads
             .iter()

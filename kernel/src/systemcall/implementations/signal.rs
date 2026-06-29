@@ -216,7 +216,7 @@ fn linux_timespec_to_ns(timespec: LinuxTimespec) -> Result<u64, SyscallError> {
 
 fn dequeue_wait_signal(wait_mask: Signals) -> Option<(Signal, SigInfo)> {
     let thread_ref = get_current_thread();
-    let process_ref = thread_ref.lock().parent.clone();
+    let process_ref = thread_ref.lock().parent();
 
     {
         let mut thread = thread_ref.lock();
@@ -529,7 +529,7 @@ define_syscall!(Tgkill, |tgid: i32, tid: i32, signal: i32| {
     let thread = crate::thread::with_thread_manager(|manager| manager.threads.get(&tid).cloned())
         .ok_or(SyscallError::NoProcess)?;
 
-    let process = thread.lock().parent.clone();
+    let process = thread.lock().parent();
     if process.lock().pid != tgid {
         return Err(SyscallError::NoProcess);
     }
@@ -687,7 +687,8 @@ define_syscall!(RtSigpending, |set: *mut u64, sigsetsize: usize| {
     let pending = {
         let thread = get_current_thread();
         let thread = thread.lock();
-        let process = thread.parent.lock();
+        let process_ref = thread.parent();
+        let process = process_ref.lock();
         (process.pending_signals | thread.pending_signals).bits()
     };
     user_safe::write(set, &pending)?;
@@ -1247,7 +1248,7 @@ mod tests {
         let tgkill_thread = crate::thread::thread::Thread::empty();
         let target_tid = {
             let mut thread = tgkill_thread.lock();
-            thread.parent = current.clone();
+            thread.set_parent(current.clone());
             thread.id = crate::thread::misc::ThreadID::new();
             thread.id.0 as u64
         };
@@ -1323,13 +1324,13 @@ mod tests {
             thread.pending_signal_info.fill(None);
         }
         {
-            let thread_parent = crate::thread::get_current_thread().lock().parent.clone();
+            let thread_parent = crate::thread::get_current_thread().lock().parent();
             let mut current = thread_parent.lock();
             current.pending_signals = Signals::empty();
             current.pending_signal_info.fill(None);
         }
 
-        let thread_parent = crate::thread::get_current_thread().lock().parent.clone();
+        let thread_parent = crate::thread::get_current_thread().lock().parent();
         let timed_receiver_namespace = thread_parent.lock().pid_namespace.inode();
         let timed_sender_pid = current.lock().pid.0 as i32;
         let timed_visible_sender_pid = current

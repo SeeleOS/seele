@@ -37,6 +37,7 @@ pub struct ThreadManager {
     pub zombies: Vec<ThreadRef>,
     pending_thread_exits: Vec<PendingThreadExit>,
     deferred_kernel_stacks: Vec<KernelStack>,
+    deferred_threads: Vec<ThreadRef>,
     pub blocked_queues: BlockedQueues,
     next_ready_cpu: usize,
 }
@@ -178,7 +179,7 @@ impl ThreadManager {
     pub fn exit_process_threads_except(&mut self, current: ThreadRef) -> bool {
         let (threads, current_id) = {
             let current = current.lock();
-            (current.parent.lock().threads.clone(), current.id)
+            (current.parent().lock().threads.clone(), current.id)
         };
         self.exit_thread_list_except(threads, current_id)
     }
@@ -229,7 +230,10 @@ impl ThreadManager {
         let (process, clear_child_tid) = {
             let mut thread = thread.lock();
             log::debug!("mark_thread_exited tid={:?}", thread.id);
-            let process = thread.parent.clone();
+            if matches!(thread.state, State::Zombie) {
+                return;
+            }
+            let process = thread.parent();
             let clear_child_tid = thread.clear_child_tid;
 
             if clear_child_tid != 0 {
@@ -240,6 +244,7 @@ impl ThreadManager {
         };
 
         self.remove_from_blocked_queues(&thread);
+        self.remove_ready_thread(&thread);
         thread.lock().state = State::Zombie;
 
         if clear_child_tid != 0 {
@@ -267,13 +272,19 @@ impl ThreadManager {
                 log::trace!("clean_zombies: lock thread");
                 let mut thread = ele.lock();
                 log::trace!("clean_zombies: locked thread");
-                parent_arc = thread.parent.clone();
+                let is_current_thread = current_thread
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &ele));
+                parent_arc = if is_current_thread {
+                    thread.parent()
+                } else {
+                    thread
+                        .take_parent()
+                        .expect("zombie thread should have parent")
+                };
                 self.threads.remove(&thread.id);
                 thread_id = thread.id;
-                if current_thread
-                    .as_ref()
-                    .is_some_and(|current| Arc::ptr_eq(current, &ele))
-                {
+                if is_current_thread {
                     self.deferred_kernel_stacks
                         .extend(thread.kernel_stack.take());
                     self.deferred_kernel_stacks
@@ -282,7 +293,6 @@ impl ThreadManager {
                     let _ = thread.kernel_stack.take();
                     let _ = thread.scheduler_stack.take();
                 }
-
                 drop(thread);
             }
             let mut parent = parent_arc.lock();
@@ -341,6 +351,38 @@ impl ThreadManager {
 
     pub fn drain_deferred_kernel_stacks(&mut self) {
         self.deferred_kernel_stacks.clear();
+    }
+
+    pub fn drain_deferred_threads(&mut self) {
+        self.deferred_threads.clear();
+    }
+
+    pub fn defer_current_zombie_thread(&mut self, thread_ref: ThreadRef) {
+        let (thread_id, parent) = {
+            let mut thread = thread_ref.lock();
+            let parent = thread.take_parent();
+            self.deferred_kernel_stacks
+                .extend(thread.kernel_stack.take());
+            self.deferred_kernel_stacks
+                .extend(thread.scheduler_stack.take());
+            (thread.id, parent)
+        };
+
+        self.threads.remove(&thread_id);
+        self.remove_ready_thread(&thread_ref);
+        self.remove_from_blocked_queues(&thread_ref);
+        self.zombies
+            .retain(|thread| !Arc::ptr_eq(thread, &thread_ref));
+
+        if let Some(parent) = parent {
+            parent.lock().threads.retain(|thread| {
+                thread
+                    .upgrade()
+                    .is_some_and(|thread| thread.lock().id != thread_id)
+            });
+        }
+
+        self.deferred_threads.push(thread_ref);
     }
 
     fn flush_pending_thread_exits(&mut self) {

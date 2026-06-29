@@ -20,14 +20,13 @@ use crate::{
     process::{
         Process, ProcessExitStatus, ProcessRef,
         execve::execve,
-        manager::{MANAGER, exit_current_thread, get_current_process, terminate_process},
+        manager::{MANAGER, exit_current_thread, get_current_process},
         wait::{ProcessWaitEvent, take_wait_event},
     },
     signal::{Signal, Signals},
     systemcall::utils::{SyscallError, SyscallImpl},
     thread::{
         get_current_thread,
-        scheduling::return_to_scheduler_no_save,
         yielding::{
             BlockType, WakeType, cancel_block, finish_block_current, prepare_block_current,
         },
@@ -131,6 +130,11 @@ const CLD_STOPPED: i32 = 5;
 enum WaitOutcome {
     Exited(ProcessRef, u64, ProcessExitStatus),
     Stopped(ProcessRef, u64, ProcessWaitEvent),
+}
+
+enum WaitReport {
+    Exited(u64, ProcessExitStatus),
+    Stopped(u64, ProcessWaitEvent),
 }
 
 #[derive(Clone, Copy)]
@@ -264,7 +268,7 @@ fn visible_session_id_from_namespace(
 fn wait_for_child_exit(
     target_process: i32,
     wait_behavior: WaitBehavior,
-) -> Result<Option<WaitOutcome>, SyscallError> {
+) -> Result<Option<WaitReport>, SyscallError> {
     let current_process = get_current_process();
 
     loop {
@@ -274,15 +278,18 @@ fn wait_for_child_exit(
 
         match check_result {
             Some(WaitOutcome::Exited(process, pid, exit_status)) => {
-                consume_ignored_child_signal(&current_process);
-                if !wait_behavior.preserve_child {
-                    MANAGER.lock().reap_process(process.clone());
-                }
-                return Ok(Some(WaitOutcome::Exited(process, pid, exit_status)));
+                return Ok(Some(finish_wait_outcome(
+                    &current_process,
+                    wait_behavior,
+                    WaitOutcome::Exited(process, pid, exit_status),
+                )));
             }
             Some(WaitOutcome::Stopped(process, pid, wait_event)) => {
-                consume_ignored_child_signal(&current_process);
-                return Ok(Some(WaitOutcome::Stopped(process, pid, wait_event)));
+                return Ok(Some(finish_wait_outcome(
+                    &current_process,
+                    wait_behavior,
+                    WaitOutcome::Stopped(process, pid, wait_event),
+                )));
             }
             None if wait_behavior.nohang => return Ok(None),
             None => {
@@ -296,7 +303,7 @@ fn wait_for_child_exit(
                 });
                 match check_wait_outcome(target_process, wait_behavior, &current_process) {
                     Ok(Some(outcome)) => {
-                        consume_ignored_child_signal(&current_process);
+                        let outcome = finish_wait_outcome(&current_process, wait_behavior, outcome);
                         cancel_block(&current);
                         finish_block_current();
                         return Ok(Some(outcome));
@@ -320,6 +327,23 @@ fn wait_for_child_exit(
                 }
             }
         }
+    }
+}
+
+fn finish_wait_outcome(
+    current_process: &ProcessRef,
+    wait_behavior: WaitBehavior,
+    outcome: WaitOutcome,
+) -> WaitReport {
+    consume_ignored_child_signal(current_process);
+    match outcome {
+        WaitOutcome::Exited(process, pid, exit_status) => {
+            if !wait_behavior.preserve_child {
+                MANAGER.lock().reap_process(process);
+            }
+            WaitReport::Exited(pid, exit_status)
+        }
+        WaitOutcome::Stopped(_, pid, wait_event) => WaitReport::Stopped(pid, wait_event),
     }
 }
 
@@ -351,8 +375,8 @@ define_syscall!(Wait4, |target_process: i32,
 
     if !status_ptr.is_null() {
         let status = match outcome {
-            WaitOutcome::Exited(_, _, exit_status) => exit_status.wait_status(),
-            WaitOutcome::Stopped(_, _, wait_event) => wait_event.wait_status(),
+            WaitReport::Exited(_, exit_status) => exit_status.wait_status(),
+            WaitReport::Stopped(_, wait_event) => wait_event.wait_status(),
         };
         user_safe::write(status_ptr, &status)?;
     }
@@ -361,7 +385,7 @@ define_syscall!(Wait4, |target_process: i32,
     }
 
     let pid = match outcome {
-        WaitOutcome::Exited(_, pid, _) | WaitOutcome::Stopped(_, pid, _) => pid,
+        WaitReport::Exited(pid, _) | WaitReport::Stopped(pid, _) => pid,
     };
     Ok(pid as usize)
 });
@@ -388,13 +412,13 @@ define_syscall!(Waitid, |id_type: i32,
     if !info_ptr.is_null() {
         let info = if let Some(result) = &result {
             match result {
-                WaitOutcome::Exited(_, pid, exit_status) => SigInfo::for_waitid(
+                WaitReport::Exited(pid, exit_status) => SigInfo::for_waitid(
                     Signal::SIGCHLD,
                     exit_status.waitid_code(),
                     *pid as i32,
                     exit_status.waitid_status(),
                 ),
-                WaitOutcome::Stopped(_, pid, wait_event) => SigInfo::for_waitid(
+                WaitReport::Stopped(pid, wait_event) => SigInfo::for_waitid(
                     Signal::SIGCHLD,
                     if wait_event.is_ptrace() {
                         CLD_TRAPPED
@@ -591,15 +615,12 @@ define_syscall!(Execveat, |dirfd: i32,
 
 define_syscall!(Exit, |exit_code: u64| {
     exit_current_thread(ProcessExitStatus::from_exit_code(exit_code));
-    return_to_scheduler_no_save();
+    Ok(0)
 });
 
 define_syscall!(ExitGroup, |exit_code: u64| {
-    terminate_process(
-        get_current_process(),
-        ProcessExitStatus::from_exit_code(exit_code),
-    );
-    return_to_scheduler_no_save();
+    exit_current_thread(ProcessExitStatus::from_exit_code(exit_code));
+    Ok(0)
 });
 
 define_syscall!(Fork, {

@@ -285,6 +285,12 @@ mod tests {
 
     fn credential_setters_update_linux_real_effective_saved_and_fs_ids() {
         let saved = CredentialSnapshot::save_current();
+        {
+            let process = get_current_process();
+            let mut process = process.lock();
+            process.user_namespace_uid_map = None;
+            process.user_namespace_gid_map = None;
+        }
 
         expect_ok(SyscallArgs::new([42, 0, 0, 0, 0, 0]).call::<Setuid>(), 0);
         {

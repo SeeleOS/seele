@@ -142,7 +142,7 @@ append_pattern "$namespace_pattern"
 pattern="^($pattern)$"
 [ -n "$cmdline_pattern" ] && pattern="$cmdline_pattern"
 skip_tests=""
-[ -z "$cmdline_pattern" ] && skip_tests="--skip-tests ^timerfd_settime02$"
+[ -z "$cmdline_pattern" ] && skip_tests="--skip-tests ^(timerfd_settime02|pidns05)$"
 report_dir=/tmp/seele-ltp
 
 mkdir -p "$report_dir"

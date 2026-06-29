@@ -686,7 +686,7 @@ impl VFS {
         self.mounts
             .iter()
             .find(|mount| {
-                normalized_path.strip_prefix(&mount.path).is_some()
+                mount.path == normalized_path
                     && namespace_snapshot
                         .as_ref()
                         .is_none_or(|snapshot| snapshot.contains(&mount.mount_id))
@@ -893,5 +893,89 @@ fn join_paths(base: &Path, suffix: &Path) -> Path {
 impl Default for VFS {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::filesystem::errors::FSError;
+    use crate::filesystem::path::Path;
+    use crate::filesystem::vfs_traits::MountFlags;
+    use crate::filesystem::vfs_traits::{FileLike, FileSystem};
+
+    #[derive(Default)]
+    struct TestFs;
+
+    impl FileSystem for TestFs {
+        fn as_any(&self) -> &dyn core::any::Any {
+            self
+        }
+
+        fn init(&mut self) -> FSResult<()> {
+            Ok(())
+        }
+
+        fn lookup(&self, _path: &Path) -> FSResult<FileLike> {
+            Err(FSError::NotFound)
+        }
+
+        fn rename(&self, _old_path: &Path, _new_path: &Path) -> FSResult<()> {
+            Err(FSError::Readonly)
+        }
+
+        fn link(&self, _old_path: &Path, _new_path: &Path) -> FSResult<()> {
+            Err(FSError::Readonly)
+        }
+
+        fn name(&self) -> &'static str {
+            "testfs"
+        }
+
+        fn magic(&self) -> i64 {
+            0
+        }
+
+        fn mount_source(&self) -> &'static str {
+            "testfs"
+        }
+
+        fn default_mount_flags(&self, _path: &Path) -> MountFlags {
+            MountFlags::empty()
+        }
+    }
+
+    crate::test!(
+        vfs_current_namespace_mount_match_is_exact,
+        "current namespace mount lookups require exact mount points",
+        vfs_current_namespace_mount_match_is_exact
+    );
+
+    fn vfs_current_namespace_mount_match_is_exact() {
+        let mut vfs = VFS::new();
+        vfs.mount(Path::new("/"), TestFs).unwrap();
+        vfs.mount(Path::new("/proc"), TestFs).unwrap();
+
+        let root_id = vfs.mount_id(Path::new("/")).unwrap();
+        let proc_id = vfs.mount_id(Path::new("/proc")).unwrap();
+
+        crate::smp::set_current_mount_namespace_snapshot(Some(vec![root_id]));
+        assert!(vfs.contains_mount_at_in_current_namespace(Path::new("/")));
+        assert!(!vfs.contains_mount_at_in_current_namespace(Path::new("/proc")));
+        assert!(vfs.mount_id_for_current_namespace(Path::new("/")).is_ok());
+        assert!(
+            vfs.mount_id_for_current_namespace(Path::new("/proc"))
+                .is_err()
+        );
+
+        crate::smp::set_current_mount_namespace_snapshot(Some(vec![root_id, proc_id]));
+        assert!(vfs.contains_mount_at_in_current_namespace(Path::new("/proc")));
+        assert_eq!(
+            vfs.mount_id_for_current_namespace(Path::new("/proc"))
+                .unwrap(),
+            proc_id
+        );
+
+        crate::smp::set_current_mount_namespace_snapshot(None);
     }
 }

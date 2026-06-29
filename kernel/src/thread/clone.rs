@@ -14,28 +14,27 @@ impl Thread {
         let kernel_stack_top = kernel_stack.top().as_u64();
         let scheduler_stack = allocate_owned_kernel_stack(16).finish();
         let scheduler_stack_top = scheduler_stack.top().as_u64();
-        Self {
-            parent: process.clone(),
+        snapshot.kernel_rsp = kernel_stack_top;
+        let mount_namespace_snapshot = process.lock().mount_namespace_snapshot.clone();
+        let mut thread = Self::new_base(crate::thread::thread::ThreadInit {
+            parent: process,
             id,
-            snapshot: {
-                snapshot.kernel_rsp = kernel_stack_top;
-                snapshot
-            },
-            kernel_stack_top,
-            kernel_stack: Some(kernel_stack),
+            snapshot,
             scheduler_snapshot: crate::thread::snapshot::ThreadSnapshot::new_scheduler(
                 scheduler_stack_top,
             ),
+            kernel_stack: Some(kernel_stack),
             scheduler_stack: Some(scheduler_stack),
-            blocked_signals: self.blocked_signals,
-            saved_blocked_signals: self.saved_blocked_signals.clone(),
-            last_syscall_no: self.last_syscall_no,
-            last_user_snapshot: self.last_user_snapshot,
-            last_user_fs_base: self.last_user_fs_base,
-            name: self.name,
-            mount_namespace_snapshot: process.lock().mount_namespace_snapshot.clone(),
-            ..Default::default()
-        }
+            kernel_stack_top,
+            mount_namespace_snapshot,
+        });
+        thread.blocked_signals = self.blocked_signals;
+        thread.saved_blocked_signals = self.saved_blocked_signals.clone();
+        thread.last_syscall_no = self.last_syscall_no;
+        thread.last_user_snapshot = self.last_user_snapshot;
+        thread.last_user_fs_base = self.last_user_fs_base;
+        thread.name = self.name;
+        thread
     }
 
     pub fn clone_and_spawn(&self, process: ProcessRef) -> ThreadRef {

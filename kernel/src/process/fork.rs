@@ -1,13 +1,14 @@
-use crate::memory::utils::Mut;
+use crate::{filesystem::path::Path, memory::utils::Mut};
 use crate::{
     ipc::sysv_shm::inherit_forked_mappings,
     process::{
         Process, ProcessRef, clone_fd_table, clone_fs_context, manager::MANAGER, misc::ProcessID,
+        ptrace,
     },
     signal::Signal,
     thread::{ThreadRef, get_current_thread, misc::ThreadID, yielding::BlockType},
 };
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 
 impl Process {
     fn fork_process(
@@ -89,17 +90,21 @@ impl Process {
             let new_process = Arc::new(Mut::new(Self {
                 pid,
                 pending_signals: parent_locked.pending_signals,
-                pending_signal_info: parent_locked.pending_signal_info.clone(),
+                pending_signal_info: parent_locked.pending_signal_info,
                 addrspace: child_addrspace,
                 kernel_stack_top: parent_locked.kernel_stack_top,
+                threads: Vec::new(),
                 fd_table: child_fd_table,
                 fs_context: child_fs_context,
+                exec_path: Path::new(""),
                 command_line: parent_locked.command_line.clone(),
+                exit_status: None,
                 parent: Some(parent.clone()),
-                signal_actions: parent_locked.signal_actions.clone(),
+                signal_actions: parent_locked.signal_actions,
                 group_id: parent_locked.group_id,
                 session_id: parent_locked.session_id,
                 controlling_terminal: parent_locked.controlling_terminal,
+                timers: Vec::new(),
                 program_break: parent_locked.program_break,
                 program_break_base: parent_locked.program_break_base,
                 real_uid: parent_locked.real_uid,
@@ -149,6 +154,7 @@ impl Process {
                 capability_bounding: parent_locked.capability_bounding,
                 capability_ambient: parent_locked.capability_ambient,
                 child_subreaper: false,
+                parent_death_signal: None,
                 child_exit_signal: Signal::SIGCHLD,
                 dumpable: parent_locked.dumpable,
                 no_new_privs: parent_locked.no_new_privs,
@@ -172,7 +178,10 @@ impl Process {
                 mount_namespace_shared_with_parent: parent_locked
                     .mount_namespace_shared_with_parent,
                 sysv_shm_mappings: inherited_shm_mappings.clone(),
-                ..Default::default()
+                vfork_blocker: None,
+                borrowed_addrspace_from_parent: false,
+                ptrace: ptrace::PtraceState::default(),
+                wait_event: None,
             }));
             (pid, new_process, inherited_shm_mappings)
         };

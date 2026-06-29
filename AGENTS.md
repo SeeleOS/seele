@@ -23,6 +23,7 @@
 - To inspect the current VM and runner processes before shutdown, prefer `status` for MCP-managed sessions; otherwise inspect host runner/QEMU processes directly and kill leftover PIDs explicitly.
 - Do not assume `target/rootfs_mnt/` is mounted or synchronized with `target/rootfs.img`. Verify whether it is mounted before using it for runtime inspection, and prefer guest logs captured through the control-plane VM flow when in doubt.
 - If you need `target/rootfs_mnt/` mounted, prefer the MCP `ensure_rootfs_mounted` tool; for manual fallback, check `mountpoint -q target/rootfs_mnt` and mount `target/rootfs.img` to `target/rootfs_mnt/` as a separate step first. Do not chain the mount step together with the real inspection command.
+- Do not mount `target/rootfs_mnt/` while the VM is running unless that is the explicit task; prefer guest-side logs and MCP VM inspection instead.
 - After mounting `target/rootfs_mnt/`, if you only need to read files from it, read them directly without `sudo` or a fresh privilege escalation unless it is actually necessary.
 - If the sandbox, `no_new_privileges`, missing mounts, or network restrictions block a necessary command, ask the user for privilege escalation or the required access instead of silently giving up on that path.
 
@@ -41,6 +42,7 @@ After finishing a change, prefer the `seele` MCP workflow when available: run `r
 - When a file grows to cover multiple distinct responsibilities, split it by behavior instead of keeping one catch-all module. Prefer small neighboring modules such as `state.rs`, `events.rs`, `ioctl_display.rs`, or `ioctl_buffer.rs` over monoliths or generic `abi.rs` buckets. DRM-style ABI constants and structs should live next to the subsystem they serve, not in one shared dump file. File size should preferably stay under 200 lines, but it is acceptable to exceed that when the alternative would make the structure worse.
 - When there is a clearly better structural solution, prefer it over local patching. In particular, favor changes that remove repetitive boilerplate, unify error handling, and let call sites use direct propagation such as `?` instead of open-coded checks.
 - When Rust ownership, `Drop`, `Clone`, RAII guards, or standard library/container features can model resource lifetime or reference accounting, use those native mechanisms instead of manual `alloc/free`-style bookkeeping or scattered open-coded increment/decrement calls.
+- Avoid explicit `drop()` calls when a smaller lexical scope can let the value be dropped naturally.
 - When an existing library or crate feature can cleanly replace handwritten repetitive decoding or boilerplate, prefer using it over custom open-coded conversion logic.
 - Prefer existing crates over reinventing well-covered functionality locally.
 - Prefer `Into` conversions over `From` at call sites. If inference makes the code unclear, use an explicit target type with `let value: Target = source.into();` or `into::<Target>()`.

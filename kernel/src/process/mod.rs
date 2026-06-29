@@ -160,9 +160,9 @@ pub struct Process {
     pub command_line: Vec<String>,
     pub exit_status: Option<ProcessExitStatus>,
     pub parent: Option<ProcessRef>,
-    pub signal_actions: Vec<SignalAction>,
+    pub signal_actions: [SignalAction; SIGNAL_AMOUNT],
     pub pending_signals: Signals,
-    pub pending_signal_info: Vec<Option<PendingSignalInfo>>,
+    pub pending_signal_info: [Option<PendingSignalInfo>; SIGNAL_AMOUNT],
     pub group_id: ProcessGroupID,
     pub session_id: SessionID,
     pub controlling_terminal: Option<ControllingTerminal>,
@@ -250,7 +250,7 @@ impl Default for Process {
             session_id: SessionID::default(),
             controlling_terminal: None,
             pending_signals: Signals::default(),
-            pending_signal_info: alloc::vec![None; SIGNAL_AMOUNT],
+            pending_signal_info: [None; SIGNAL_AMOUNT],
             signal_actions: default_signal_action_vec(),
             program_break: 0,
             program_break_base: 0,
@@ -342,6 +342,30 @@ impl Default for Process {
 }
 
 impl Process {
+    pub fn release_reaped_resources(&mut self) {
+        self.threads = Vec::new();
+        self.fd_table = fd_table::new_fd_table();
+        self.fs_context = fs_context::new_fs_context();
+        self.exec_path = Path::new("");
+        self.parent = None;
+        self.pending_signal_info = [None; SIGNAL_AMOUNT];
+        self.signal_actions = default_signal_action_vec();
+        self.command_line = Vec::new();
+        self.supplementary_groups = Vec::new();
+        self.user_namespace_uid_map = None;
+        self.user_namespace_gid_map = None;
+        self.user_namespace_setgroups = None;
+        self.pending_child_pid_namespace = None;
+        self.pending_child_time_namespace = None;
+        self.pending_child_time_namespace_state = None;
+        self.mount_namespace_snapshot = None;
+        self.mount_namespace_flag_overrides = BTreeMap::new();
+        self.sysv_shm_mappings = Vec::new();
+        self.vfork_blocker = None;
+        self.ptrace = ptrace::PtraceState::default();
+        self.wait_event = None;
+    }
+
     pub fn update_uid_capabilities(&mut self, old_effective_uid: u32) {
         if self.effective_uid == 0 {
             self.capability_effective = self.capability_permitted;

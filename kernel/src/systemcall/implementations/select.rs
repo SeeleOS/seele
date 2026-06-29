@@ -50,7 +50,7 @@ pub(in crate::systemcall) fn has_unblocked_pending_signals() -> bool {
         (
             current.blocked_signals,
             current.pending_signals,
-            current.parent.clone(),
+            current.parent(),
         )
     };
     let pending_signals = pending_signals | parent.lock().pending_signals;
@@ -66,7 +66,7 @@ pub(in crate::systemcall) fn has_pending_signal_handlers_ignoring_restart() -> b
         (
             effective_user_signal_mask(&current),
             current.pending_signals,
-            current.parent.clone(),
+            current.parent(),
         )
     };
     let parent = parent.lock();
@@ -96,7 +96,7 @@ fn has_temporary_unblocked_pending_signal_handlers() -> bool {
         (
             current.temporary_blocked_signals,
             current.pending_signals,
-            current.parent.clone(),
+            current.parent(),
         )
     }) else {
         return false;

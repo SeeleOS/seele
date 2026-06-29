@@ -340,7 +340,7 @@ pub struct UContext {
     pub gregs: [u64; 20],
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct SignalAction {
     pub handling_type: SignalHandlingType,
@@ -349,7 +349,7 @@ pub struct SignalAction {
     pub restorer: usize,
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
 pub enum SignalHandlingType {
     #[default]
@@ -470,8 +470,8 @@ impl From<Signal> for Signals {
     }
 }
 
-pub fn default_signal_action_vec() -> Vec<action::SignalAction> {
-    alloc::vec![action::SignalAction::default(); SIGNAL_AMOUNT]
+pub fn default_signal_action_vec() -> [action::SignalAction; SIGNAL_AMOUNT] {
+    [action::SignalAction::default(); SIGNAL_AMOUNT]
 }
 
 pub mod misc {
@@ -650,7 +650,8 @@ fn queue_signal_to_thread(thread: &ThreadRef, signal: Signal, siginfo: Option<Si
     let parent = {
         let mut thread = thread.lock();
         let (receiver_pid, receiver_namespace_inode, receiver_visible_pid) = {
-            let parent = thread.parent.lock();
+            let parent_ref = thread.parent();
+            let parent = parent_ref.lock();
             let namespace_inode = parent.pid_namespace.inode();
             (
                 parent.pid,
@@ -673,7 +674,7 @@ fn queue_signal_to_thread(thread: &ThreadRef, signal: Signal, siginfo: Option<Si
                 receiver_visible_pid,
             ));
         }
-        thread.parent.clone()
+        thread.parent()
     };
 
     let pid = parent.lock().pid.0;
@@ -714,7 +715,7 @@ pub fn process_current_process_signals(process: &ProcessRef) -> bool {
         (
             thread.blocked_signals,
             mem::take(&mut thread.pending_signals),
-            mem::take(&mut thread.pending_signal_info),
+            mem::replace(&mut thread.pending_signal_info, [None; SIGNAL_AMOUNT]),
         )
     };
     let result = {
@@ -794,7 +795,8 @@ impl Process {
     #[must_use]
     pub fn process_signals(&mut self, blocked_signals: Signals) -> ProcessSignalsResult {
         let mut pending_signals = mem::take(&mut self.pending_signals);
-        let mut pending_signal_info = mem::take(&mut self.pending_signal_info);
+        let mut pending_signal_info =
+            mem::replace(&mut self.pending_signal_info, [None; SIGNAL_AMOUNT]);
         let result = process_pending_signals(
             self,
             &mut pending_signals,
@@ -878,7 +880,7 @@ fn process_pending_signals(
         if pending_signals.contains(signal_bits)
             && (signal.is_unblockable() || !blocked_signals.contains(signal_bits))
         {
-            let action = process.signal_actions[signal.index()].clone();
+            let action = process.signal_actions[signal.index()];
             pending_signals.remove(signal_bits);
             let siginfo = pending_signal_info[signal.index()]
                 .take()

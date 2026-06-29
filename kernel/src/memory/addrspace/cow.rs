@@ -21,22 +21,33 @@ impl AddrSpace {
     pub fn replace_cow_page(&mut self, addr: VirtAddr) {
         let page = Page::containing_address(addr);
 
-        let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
-
-        let new_frame = frame_allocator.allocate_frame().unwrap();
-        let new_addr = apply_offset(new_frame.start_address().as_u64());
-
         let TranslateResult::Mapped { mut flags, .. } =
             self.page_table.translate(page.start_address())
         else {
             return;
         };
 
-        let (old_frame, flush) = self.page_table.unmap(page).unwrap();
-        flush.flush();
+        let Ok(old_frame) = self.page_table.translate_page(page) else {
+            return;
+        };
 
         flags.remove(COW_FLAG);
         flags |= PageTableFlags::WRITABLE;
+
+        if take_exclusive_ref(old_frame) {
+            unsafe {
+                self.page_table.update_flags(page, flags).unwrap().flush();
+            }
+            self.flush_page_table_updates(true);
+            return;
+        }
+
+        let mut frame_allocator = FRAME_ALLOCATOR.get().unwrap().lock();
+
+        let new_frame = frame_allocator.allocate_frame().unwrap();
+        let new_addr = apply_offset(new_frame.start_address().as_u64());
+        let (old_frame, flush) = self.page_table.unmap(page).unwrap();
+        flush.flush();
 
         unsafe {
             copy_nonoverlapping(
@@ -77,6 +88,20 @@ pub fn is_ref_counted(frame: PhysFrame) -> bool {
     FRAME_REF_COUNT
         .lock()
         .contains_key(&frame.start_address().as_u64())
+}
+
+fn take_exclusive_ref(frame: PhysFrame) -> bool {
+    let mut ref_counter_locked = FRAME_REF_COUNT.lock();
+    let Some(count) = ref_counter_locked.get_mut(&frame.start_address().as_u64()) else {
+        return true;
+    };
+
+    if *count == 1 {
+        ref_counter_locked.remove(&frame.start_address().as_u64());
+        return true;
+    }
+
+    false
 }
 
 #[must_use]

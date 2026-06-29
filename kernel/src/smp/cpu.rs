@@ -33,6 +33,7 @@ const TSS_INDEX: u16 = 5;
 pub const DOUBLE_FAULT_IST_LOCATION: u16 = 0;
 pub const PAGE_FAULT_IST_LOCATION: u16 = 1;
 pub const GP_IST_LOCATION: u16 = 2;
+const EXCEPTION_IST_STACK_PAGES: u64 = 16;
 
 static CPU_BY_APIC_ID: [AtomicPtr<CpuCoreContext>; MAX_XAPIC_IDS] =
     [const { AtomicPtr::new(core::ptr::null_mut()) }; MAX_XAPIC_IDS];
@@ -244,10 +245,11 @@ impl CpuCoreContext {
         let tss = Box::leak(Box::new(TaskStateSegment::new()));
         tss.privilege_stack_table[0] = allocate_kernel_stack(16).finish();
         tss.interrupt_stack_table[DOUBLE_FAULT_IST_LOCATION as usize] =
-            allocate_kernel_stack(5).finish();
+            allocate_kernel_stack(EXCEPTION_IST_STACK_PAGES).finish();
         tss.interrupt_stack_table[PAGE_FAULT_IST_LOCATION as usize] =
-            allocate_kernel_stack(5).finish();
-        tss.interrupt_stack_table[GP_IST_LOCATION as usize] = allocate_kernel_stack(5).finish();
+            allocate_kernel_stack(EXCEPTION_IST_STACK_PAGES).finish();
+        tss.interrupt_stack_table[GP_IST_LOCATION as usize] =
+            allocate_kernel_stack(EXCEPTION_IST_STACK_PAGES).finish();
 
         let tss_ptr = tss as *mut TaskStateSegment;
         let tss_ref = unsafe { &*tss_ptr };
