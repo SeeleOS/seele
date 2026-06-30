@@ -5,7 +5,7 @@ use crate::{
     target_dir,
     vm::{BootConfig, VmConfig, create_boot_iso, run_iso_capture},
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use serde_json::Value;
 use std::{fs, path::Path, time::Duration};
 
@@ -30,7 +30,9 @@ pub fn run(repo: &Path, config: &RunTestsConfig, context: &JobContext) -> Result
     let kernels = build_kernel(
         repo,
         KernelBuildMode::Run,
-        KernelBuildOptions::default(),
+        KernelBuildOptions {
+            enable_profiling: config.enable_profiling,
+        },
         context,
     )?;
     let iso = create_boot_iso(
@@ -64,7 +66,7 @@ pub fn run(repo: &Path, config: &RunTestsConfig, context: &JobContext) -> Result
     report.artifact = Some(kirk_json);
     let exit_code = parse_ltp_exit_code(&result.serial_output).unwrap_or(result.exit_code);
     if exit_code != 0 || report.failed > 0 {
-        bail!(
+        report.stderr = format!(
             "LTP failed: kirk exit {exit_code}, failed cases {}",
             report.failed
         );

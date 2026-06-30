@@ -207,8 +207,9 @@ define_syscall!(Setfsuid, |uid: u32| {
     let process = get_current_process();
     let mut process = process.lock();
     let old_uid = process.namespace_uid(process.fs_uid);
-    let uid = kernel_uid_from_namespace(&process, uid)?;
-    process.fs_uid = uid;
+    if let Some(uid) = process.kernel_uid_from_namespace(uid) {
+        process.fs_uid = uid;
+    }
     Ok(old_uid as usize)
 });
 
@@ -216,8 +217,9 @@ define_syscall!(Setfsgid, |gid: u32| {
     let process = get_current_process();
     let mut process = process.lock();
     let old_gid = process.namespace_gid(process.fs_gid);
-    let gid = kernel_gid_from_namespace(&process, gid)?;
-    process.fs_gid = gid;
+    if let Some(gid) = process.kernel_gid_from_namespace(gid) {
+        process.fs_gid = gid;
+    }
     Ok(old_gid as usize)
 });
 
@@ -251,6 +253,11 @@ mod tests {
         fsuid_fsgid_syscalls,
         "fsuid and fsgid syscalls return previous ids and update state",
         fsuid_fsgid_syscalls_return_previous_ids_and_update_state
+    );
+    crate::test!(
+        fsuid_fsgid_syscalls_unmapped,
+        "fsuid and fsgid syscalls ignore unmapped ids and return previous values",
+        fsuid_fsgid_syscalls_ignore_unmapped_ids_and_return_previous_values
     );
     crate::test!(
         group_syscalls,
@@ -411,6 +418,36 @@ mod tests {
             let process = process.lock();
             assert_eq!(process.fs_uid, 701);
             assert_eq!(process.fs_gid, 801);
+        }
+
+        saved.restore();
+    }
+
+    fn fsuid_fsgid_syscalls_ignore_unmapped_ids_and_return_previous_values() {
+        let saved = CredentialSnapshot::save_current();
+
+        {
+            let process = get_current_process();
+            let mut process = process.lock();
+            process.fs_uid = 700;
+            process.fs_gid = 800;
+            process.user_namespace_uid_map = Some(String::from("0 100000 1\n"));
+            process.user_namespace_gid_map = Some(String::from("0 200000 1\n"));
+        }
+
+        expect_ok(
+            SyscallArgs::new([701, 0, 0, 0, 0, 0]).call::<Setfsuid>(),
+            700,
+        );
+        expect_ok(
+            SyscallArgs::new([801, 0, 0, 0, 0, 0]).call::<Setfsgid>(),
+            800,
+        );
+        {
+            let process = get_current_process();
+            let process = process.lock();
+            assert_eq!(process.fs_uid, 700);
+            assert_eq!(process.fs_gid, 800);
         }
 
         saved.restore();

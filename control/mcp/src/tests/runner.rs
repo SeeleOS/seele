@@ -17,7 +17,7 @@ pub fn run_tests(repo: &Path, config: &RunTestsConfig, context: &JobContext) -> 
         selector,
         TestSelector::Default | TestSelector::Full | TestSelector::KernelUnit
     ) {
-        let report = kernel_unit::run(repo, context)?;
+        let report = kernel_unit::run(repo, config, context)?;
         if report.passed {
             passed += 1;
         } else {

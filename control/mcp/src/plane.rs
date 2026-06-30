@@ -87,6 +87,10 @@ impl ControlPlane {
         })
     }
 
+    pub fn last_ltp_result(&self) -> anyhow::Result<crate::JobStatus> {
+        self.jobs.last_ltp_result()
+    }
+
     pub fn screenshot(&self) -> Result<PathBuf> {
         vm::screenshot(&self.repo)
     }

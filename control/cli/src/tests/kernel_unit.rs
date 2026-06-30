@@ -1,3 +1,4 @@
+use super::config::RunTestsConfig;
 use crate::{
     build::{KernelBuildMode, KernelBuildOptions, build_kernel, shell_for_repo},
     vm::{BootConfig, VmConfig, create_boot_iso, run_iso_capture},
@@ -5,13 +6,15 @@ use crate::{
 use anyhow::Result;
 use std::{path::Path, time::Duration};
 
-pub fn run(repo: &Path) -> Result<bool> {
+pub fn run(repo: &Path, config: &RunTestsConfig) -> Result<bool> {
     eprintln!("==> running kernel unit tests");
     let sh = shell_for_repo(repo)?;
     let kernels = build_kernel(
         &sh,
         KernelBuildMode::UnitTest,
-        KernelBuildOptions::default(),
+        KernelBuildOptions {
+            enable_profiling: config.enable_profiling,
+        },
     )?;
     let iso = create_boot_iso(&sh, repo, &kernels[0], &BootConfig::default())?;
     let result = run_iso_capture(

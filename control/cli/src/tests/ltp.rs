@@ -21,7 +21,13 @@ pub struct LtpSummary {
 pub fn run(repo: &Path, config: &RunTestsConfig) -> Result<LtpSummary> {
     eprintln!("==> running LTP");
     let sh = shell_for_repo(repo)?;
-    let kernels = build_kernel(&sh, KernelBuildMode::Run, KernelBuildOptions::default())?;
+    let kernels = build_kernel(
+        &sh,
+        KernelBuildMode::Run,
+        KernelBuildOptions {
+            enable_profiling: config.enable_profiling,
+        },
+    )?;
     let iso = create_boot_iso(
         &sh,
         repo,

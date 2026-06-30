@@ -39,7 +39,7 @@ pub fn run_tests(repo: &Path, config: &RunTestsConfig) -> Result<i32> {
     let mut skipped = 0;
 
     if selector.includes_kernel_unit() {
-        if kernel_unit::run(repo)? {
+        if kernel_unit::run(repo, config)? {
             passed += 1;
         } else {
             failed += 1;

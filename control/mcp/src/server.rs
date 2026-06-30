@@ -35,6 +35,7 @@ pub struct RunTestsRequest {
     pub test: Option<String>,
     pub ltp_suite: Option<String>,
     pub ltp_pattern: Option<String>,
+    pub enable_profiling: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -107,6 +108,7 @@ impl ControlMcp {
             selector: request.selector.or(request.test),
             ltp_suite: request.ltp_suite,
             ltp_pattern: request.ltp_pattern,
+            enable_profiling: request.enable_profiling.unwrap_or(false),
         })))
     }
 
@@ -192,6 +194,11 @@ impl ControlMcp {
     #[tool(description = "Return structured job status")]
     async fn job_status(&self, Parameters(request): Parameters<JobRequest>) -> CallToolResult {
         json_result(self.plane.jobs().status(request.id))
+    }
+
+    #[tool(description = "Return the most recent completed LTP result")]
+    async fn last_ltp_result(&self) -> CallToolResult {
+        json_result(self.plane.last_ltp_result())
     }
 
     #[tool(description = "Wait for a structured job to reach a terminal state")]

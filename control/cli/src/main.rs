@@ -51,6 +51,8 @@ struct TestArgs {
     ltp_suite: Option<String>,
     #[arg(long)]
     ltp_pattern: Option<String>,
+    #[arg(long)]
+    enable_profiling: bool,
 }
 
 fn main() -> ExitCode {
@@ -82,6 +84,7 @@ fn real_main() -> Result<i32> {
                 selector: args.selector,
                 ltp_suite: args.ltp_suite,
                 ltp_pattern: args.ltp_pattern,
+                enable_profiling: args.enable_profiling,
             },
         ),
     }

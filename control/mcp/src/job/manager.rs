@@ -194,6 +194,31 @@ impl JobManager {
         }
         Ok(status)
     }
+
+    pub fn last_ltp_result(&self) -> Result<JobStatus> {
+        let jobs = self.inner.jobs.lock().expect("job lock poisoned");
+        jobs.values()
+            .filter(|entry| entry.status.kind == JobKind::RunTests)
+            .filter(|entry| {
+                matches!(
+                    entry.status.state,
+                    JobState::Finished
+                        | JobState::Failed
+                        | JobState::Cancelled
+                        | JobState::TimedOut
+                )
+            })
+            .filter(|entry| {
+                entry
+                    .status
+                    .reports
+                    .iter()
+                    .any(|report| matches!(report, Report::Ltp(_)))
+            })
+            .max_by_key(|entry| entry.status.id)
+            .map(|entry| entry.status.clone())
+            .ok_or_else(|| anyhow!("no completed LTP result available"))
+    }
 }
 
 impl JobContext {
@@ -243,7 +268,7 @@ impl JobContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Event, JobKind};
+    use crate::{Event, JobKind, Report};
     use std::sync::atomic::{AtomicBool, AtomicUsize};
 
     #[test]
@@ -309,5 +334,63 @@ mod tests {
         let status = manager.cancel(status.id).unwrap();
         assert_eq!(status.state, JobState::Cancelled);
         assert_eq!(cleanup_count.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn last_ltp_result_returns_latest_completed_ltp_job() {
+        let manager = JobManager::default();
+
+        let first = manager.start(JobKind::RunTests, |context| {
+            context.report(Report::Ltp(crate::LtpReport {
+                suite: Some("syscalls".to_string()),
+                pattern: Some("^mount.*$".to_string()),
+                passed: 1,
+                failed: 0,
+                skipped: 0,
+                cases: Vec::new(),
+                artifact: None,
+                stdout: "first".to_string(),
+                stderr: String::new(),
+            }));
+            Ok(0)
+        });
+        let first = manager.wait(first.id, Some(5_000)).unwrap();
+
+        let second = manager.start(JobKind::RunTests, |context| {
+            context.report(Report::Ltp(crate::LtpReport {
+                suite: Some("syscalls".to_string()),
+                pattern: Some("^mount.*$".to_string()),
+                passed: 2,
+                failed: 1,
+                skipped: 0,
+                cases: Vec::new(),
+                artifact: None,
+                stdout: "second".to_string(),
+                stderr: String::new(),
+            }));
+            Ok(0)
+        });
+        let second = manager.wait(second.id, Some(5_000)).unwrap();
+
+        let status = manager.last_ltp_result().unwrap();
+        assert_eq!(status.id, second.id);
+        assert_eq!(status.reports.len(), 1);
+        assert!(matches!(status.reports[0], Report::Ltp(_)));
+        assert_eq!(first.id, status.id - 1);
+    }
+
+    #[test]
+    fn last_ltp_result_skips_running_jobs_and_errors_when_absent() {
+        let manager = JobManager::default();
+        assert!(manager.last_ltp_result().is_err());
+
+        let running = manager.start(JobKind::RunTests, |context| {
+            while !context.is_cancelled() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Ok(0)
+        });
+        assert!(manager.last_ltp_result().is_err());
+        let _ = manager.cancel(running.id).unwrap();
     }
 }

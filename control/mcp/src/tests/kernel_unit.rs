@@ -1,3 +1,4 @@
+use super::config::RunTestsConfig;
 use crate::{
     JobContext, KernelUnitReport,
     build::{KernelBuildMode, KernelBuildOptions, build_kernel},
@@ -6,11 +7,13 @@ use crate::{
 use anyhow::Result;
 use std::{path::Path, time::Duration};
 
-pub fn run(repo: &Path, context: &JobContext) -> Result<KernelUnitReport> {
+pub fn run(repo: &Path, config: &RunTestsConfig, context: &JobContext) -> Result<KernelUnitReport> {
     let kernels = build_kernel(
         repo,
         KernelBuildMode::UnitTest,
-        KernelBuildOptions::default(),
+        KernelBuildOptions {
+            enable_profiling: config.enable_profiling,
+        },
         context,
     )?;
     let iso = create_boot_iso(repo, &kernels[0], &BootConfig::default(), context)?;
