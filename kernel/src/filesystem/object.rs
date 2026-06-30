@@ -15,7 +15,7 @@ use crate::{
         },
         tmpfs::TmpfsDeviceHandle,
         vfs::{FSResult, VirtualFS, WrappedDirectory, WrappedFile},
-        vfs_operations::{open_path, resolve_dir_path, resolve_file_path},
+        vfs_operations::{open_path, open_path_nofollow, resolve_dir_path, resolve_file_path},
         vfs_traits::{
             File as VfsFile, FileLike, FileLikeType, LinuxFileAttributes, MountFlags, Symlink,
             Whence,
@@ -148,6 +148,15 @@ impl OpenBackend {
     fn is_magic_link(&self) -> bool {
         match self {
             Self::SymlinkPath { symlink, .. } => symlink.lock().is_magic_link(),
+            Self::RegularFile(_) | Self::Device { .. } | Self::Directory(_) => false,
+        }
+    }
+
+    fn symlink_target_is_magic_link(&self) -> bool {
+        match self {
+            Self::SymlinkPath { target, .. } => {
+                open_path_nofollow(target.clone()).is_ok_and(|target| target.is_magic_link())
+            }
             Self::RegularFile(_) | Self::Device { .. } | Self::Directory(_) => false,
         }
     }
@@ -284,6 +293,10 @@ impl OpenedFileObject {
 
     pub fn is_magic_link(&self) -> bool {
         self.backend.is_magic_link()
+    }
+
+    pub fn symlink_target_is_magic_link(&self) -> bool {
+        self.backend.symlink_target_is_magic_link()
     }
 
     pub fn info(&self) -> FSResult<FileLikeInfo> {
