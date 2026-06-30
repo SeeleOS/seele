@@ -11,6 +11,7 @@ pub(super) struct ProcSymlink {
     name: String,
     inode: u64,
     target: ProcSymlinkTarget,
+    magic_link: bool,
 }
 
 enum ProcSymlinkTarget {
@@ -24,6 +25,7 @@ impl ProcSymlink {
             name,
             inode,
             target: ProcSymlinkTarget::Static(target),
+            magic_link: false,
         }
     }
 
@@ -36,6 +38,20 @@ impl ProcSymlink {
             name,
             inode,
             target: ProcSymlinkTarget::Dynamic(target),
+            magic_link: false,
+        }
+    }
+
+    pub(super) fn new_magic_dynamic(
+        name: String,
+        inode: u64,
+        target: Arc<dyn Fn() -> FSResult<String> + Send + Sync>,
+    ) -> Self {
+        Self {
+            name,
+            inode,
+            target: ProcSymlinkTarget::Dynamic(target),
+            magic_link: true,
         }
     }
 
@@ -61,5 +77,9 @@ impl Symlink for ProcSymlink {
 
     fn target(&self) -> FSResult<Path> {
         Ok(Path::new(&self.target_string()?))
+    }
+
+    fn is_magic_link(&self) -> bool {
+        self.magic_link
     }
 }

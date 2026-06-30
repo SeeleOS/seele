@@ -618,6 +618,20 @@ impl VFS {
         ))
     }
 
+    pub fn mount_metadata_with_id(
+        &self,
+        path: Path,
+    ) -> FSResult<(Path, FileSystemRef, Path, MountFlags, u64)> {
+        let (mount, _) = self.find_mount(&self.normalize_path(path))?;
+        Ok((
+            mount.path.clone(),
+            mount.fs.clone(),
+            mount.source_path.clone(),
+            mount.flags,
+            mount.mount_id,
+        ))
+    }
+
     pub fn sync_all(&self) -> FSResult<()> {
         for mount in &self.mounts {
             mount.fs.lock().sync()?;
@@ -903,6 +917,7 @@ mod tests {
     use crate::filesystem::path::Path;
     use crate::filesystem::vfs_traits::MountFlags;
     use crate::filesystem::vfs_traits::{FileLike, FileSystem};
+    use alloc::vec;
 
     #[derive(Default)]
     struct TestFs;

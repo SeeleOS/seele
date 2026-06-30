@@ -144,6 +144,13 @@ impl OpenBackend {
             Self::SymlinkPath { info, .. } => Ok(info.clone()),
         }
     }
+
+    fn is_magic_link(&self) -> bool {
+        match self {
+            Self::SymlinkPath { symlink, .. } => symlink.lock().is_magic_link(),
+            Self::RegularFile(_) | Self::Device { .. } | Self::Directory(_) => false,
+        }
+    }
 }
 
 fn reject_xattr_on_protected_file(attributes: LinuxFileAttributes) -> FSResult<()> {
@@ -273,6 +280,10 @@ impl OpenedFileObject {
 
     pub fn mount_flags(&self) -> MountFlags {
         self.mount_flags
+    }
+
+    pub fn is_magic_link(&self) -> bool {
+        self.backend.is_magic_link()
     }
 
     pub fn info(&self) -> FSResult<FileLikeInfo> {

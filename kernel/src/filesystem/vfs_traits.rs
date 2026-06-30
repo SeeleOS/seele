@@ -216,6 +216,9 @@ pub trait Directory: Send + Sync {
 pub trait Symlink: Send + Sync {
     fn info(&self) -> FSResult<FileLikeInfo>;
     fn target(&self) -> FSResult<Path>;
+    fn is_magic_link(&self) -> bool {
+        false
+    }
     fn read_link_target(&self) -> FSResult<String> {
         Ok(self.target()?.as_string())
     }

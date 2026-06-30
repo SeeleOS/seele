@@ -12,6 +12,10 @@ define_syscall!(Mount, |source: CString,
     let filesystemtype =
         string_from_raw_optional(filesystemtype)?.filter(|value| !value.is_empty());
     let data = string_from_raw_optional(data)?.filter(|value| !value.is_empty());
+    let target_nofollow = open_path_nofollow(target.clone())?;
+    if target_nofollow.is_magic_link() {
+        return Err(SyscallError::FileNotFound);
+    }
     let target_object = open_path(target.clone())?;
     let target_path = target_object.path();
     let target_is_directory = matches!(

@@ -146,3 +146,14 @@ where
         Arc::new(target),
     ))))
 }
+
+pub(super) fn proc_magic_symlink<F>(name: &str, inode: u64, target: F) -> FileLike
+where
+    F: Fn() -> FSResult<String> + Send + Sync + 'static,
+{
+    FileLike::Symlink(Arc::new(Mut::new(ProcSymlink::new_magic_dynamic(
+        name.into(),
+        inode,
+        Arc::new(target),
+    ))))
+}

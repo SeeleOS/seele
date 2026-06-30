@@ -5,7 +5,9 @@ define_syscall!(Statfs, |path: CString, buf: *mut LinuxStatFs| {
     let path = resolve_path_at(AT_FDCWD, &path)?;
 
     let _ = open_path(path.clone())?;
-    let (_, fs, _, mount_flags) = VirtualFS.lock().mount_metadata(path.clone())?;
+    let (_, fs, _, mount_flags, mount_id) =
+        VirtualFS.lock().mount_metadata_with_id(path.clone())?;
+    let mount_flags = current_mount_flags(mount_id, mount_flags);
     let fs = fs.lock();
     let statfs = linux_statfs_with_flags(fs.magic(), fs.stats(), mount_flags);
     user_safe::write(buf, &statfs)?;
@@ -15,12 +17,14 @@ define_syscall!(Statfs, |path: CString, buf: *mut LinuxStatFs| {
 
 define_syscall!(Fstatfs, |fd: u64, buf: *mut LinuxStatFs| {
     let object = get_object_current_process(fd).map_err(SyscallError::from)?;
-    let mount_metadata = object
-        .clone()
-        .as_file_like()
-        .ok()
-        .and_then(|file_like| VirtualFS.lock().mount_metadata(file_like.path()).ok());
-    let statfs = if let Some((_, fs, _, mount_flags)) = mount_metadata {
+    let mount_metadata = object.clone().as_file_like().ok().and_then(|file_like| {
+        VirtualFS
+            .lock()
+            .mount_metadata_with_id(file_like.path())
+            .ok()
+    });
+    let statfs = if let Some((_, fs, _, mount_flags, mount_id)) = mount_metadata {
+        let mount_flags = current_mount_flags(mount_id, mount_flags);
         let fs = fs.lock();
         linux_statfs_with_flags(fs.magic(), fs.stats(), mount_flags)
     } else {
@@ -33,6 +37,16 @@ define_syscall!(Fstatfs, |fd: u64, buf: *mut LinuxStatFs| {
     user_safe::write(buf, &statfs)?;
     Ok(0)
 });
+
+fn current_mount_flags(mount_id: u64, flags: MountFlags) -> MountFlags {
+    let process = get_current_process();
+    process
+        .lock()
+        .mount_namespace_flag_overrides
+        .get(&mount_id)
+        .copied()
+        .unwrap_or(flags)
+}
 
 define_syscall!(Readlink, |path: CString,
                            out_buf: *mut u8,

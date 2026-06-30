@@ -26,6 +26,41 @@ pub(super) fn linux_statfs_with_flags(
     stats: FileSystemStats,
     flags: MountFlags,
 ) -> LinuxStatFs {
+    const ST_RDONLY: i64 = 1;
+    const ST_NOSUID: i64 = 2;
+    const ST_NODEV: i64 = 4;
+    const ST_NOEXEC: i64 = 8;
+    const ST_NOATIME: i64 = 1024;
+    const ST_NODIRATIME: i64 = 2048;
+    const ST_RELATIME: i64 = 4096;
+    const ST_NOSYMFOLLOW: i64 = 8192;
+
+    let mut statfs_flags = 0;
+    if flags.contains(MountFlags::MS_RDONLY) {
+        statfs_flags |= ST_RDONLY;
+    }
+    if flags.contains(MountFlags::MS_NOSUID) {
+        statfs_flags |= ST_NOSUID;
+    }
+    if flags.contains(MountFlags::MS_NODEV) {
+        statfs_flags |= ST_NODEV;
+    }
+    if flags.contains(MountFlags::MS_NOEXEC) {
+        statfs_flags |= ST_NOEXEC;
+    }
+    if flags.contains(MountFlags::MS_NOATIME) {
+        statfs_flags |= ST_NOATIME;
+    }
+    if flags.contains(MountFlags::MS_NODIRATIME) {
+        statfs_flags |= ST_NODIRATIME;
+    }
+    if flags.contains(MountFlags::MS_RELATIME) {
+        statfs_flags |= ST_RELATIME;
+    }
+    if flags.contains(MountFlags::MS_NOSYMFOLLOW) {
+        statfs_flags |= ST_NOSYMFOLLOW;
+    }
+
     LinuxStatFs {
         f_type,
         f_bsize: stats.block_size as i64,
@@ -37,7 +72,7 @@ pub(super) fn linux_statfs_with_flags(
         f_fsid: 1,
         f_namelen: stats.max_name_len as i64,
         f_frsize: stats.fragment_size as i64,
-        f_flags: flags.bits() as i64,
+        f_flags: statfs_flags,
         f_spare: [0; 4],
     }
 }

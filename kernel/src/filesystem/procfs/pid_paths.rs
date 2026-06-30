@@ -1,4 +1,5 @@
 use super::*;
+use crate::filesystem::procfs::nodes::proc_magic_symlink;
 
 pub(super) fn lookup_proc_pid_path(parts: &[&str]) -> FSResult<FileLike> {
     match parts {
@@ -198,7 +199,7 @@ pub(super) fn lookup_proc_pid_path(parts: &[&str]) -> FSResult<FileLike> {
             let pid = parse_pid(pid)?;
             let fd = parse_fd(fd)?;
             let fd_name = String::from(fd);
-            Ok(proc_dynamic_symlink(fd, pid_fd_inode(pid, fd), move || {
+            Ok(proc_magic_symlink(fd, pid_fd_inode(pid, fd), move || {
                 fd_target(pid, &fd_name)
             }))
         }

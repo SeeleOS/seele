@@ -349,10 +349,13 @@ type ProcMountSnapshot = (
 );
 
 fn sorted_mounts() -> Vec<ProcMountSnapshot> {
-    let namespace_snapshot = {
+    let (namespace_snapshot, flag_overrides) = {
         let process = get_current_process();
         let process = process.lock();
-        process.mount_namespace_snapshot.clone()
+        (
+            process.mount_namespace_snapshot.clone(),
+            process.mount_namespace_flag_overrides.clone(),
+        )
     };
     let mut mounts = VirtualFS
         .lock()
@@ -364,7 +367,7 @@ fn sorted_mounts() -> Vec<ProcMountSnapshot> {
                     path.as_string(),
                     fs,
                     source_path.as_string(),
-                    flags,
+                    flag_overrides.get(&mount_id).copied().unwrap_or(flags),
                     propagation,
                     device_id,
                     mount_id,
