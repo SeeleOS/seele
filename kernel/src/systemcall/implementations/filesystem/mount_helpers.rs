@@ -78,58 +78,19 @@ pub(super) fn add_mount_to_current_namespace(path: Path) -> Result<(), SyscallEr
 }
 
 pub(super) fn add_mount_to_current_namespace_by_id(mount_id: u64) {
-    let process = get_current_process();
-    let mut process = process.lock();
-    if let Some(snapshot) = process.mount_namespace_snapshot.as_mut()
-        && !snapshot.contains(&mount_id)
-    {
-        snapshot.push(mount_id);
-        crate::smp::set_current_mount_namespace_snapshot(Some(snapshot.clone()));
-    }
+    crate::process::manager::add_mount_to_current_mnt_namespace(mount_id);
 }
 
 pub(super) fn remove_mount_from_current_namespace_by_id(mount_id: u64) {
-    let process = get_current_process();
-    let mut process = process.lock();
-    let updated_snapshot = if let Some(snapshot) = process.mount_namespace_snapshot.as_mut() {
-        snapshot.retain(|id| *id != mount_id);
-        Some(snapshot.clone())
-    } else {
-        None
-    };
-    process.mount_namespace_flag_overrides.remove(&mount_id);
-    if let Some(snapshot) = updated_snapshot {
-        crate::smp::set_current_mount_namespace_snapshot(Some(snapshot));
-    }
+    crate::process::manager::remove_mount_from_current_mnt_namespace(mount_id);
 }
 
 pub(super) fn remove_mounts_from_current_namespace_by_ids(mount_ids: &[u64]) {
-    let process = get_current_process();
-    let mut process = process.lock();
-    let updated_snapshot = if let Some(snapshot) = process.mount_namespace_snapshot.as_mut() {
-        snapshot.retain(|id| !mount_ids.contains(id));
-        Some(snapshot.clone())
-    } else {
-        None
-    };
-    for mount_id in mount_ids {
-        process.mount_namespace_flag_overrides.remove(mount_id);
-    }
-    if let Some(snapshot) = updated_snapshot {
-        crate::smp::set_current_mount_namespace_snapshot(Some(snapshot));
-    }
+    crate::process::manager::remove_mounts_from_current_mnt_namespace(mount_ids);
 }
 
 pub(super) fn replace_mount_in_current_namespace(old_mount_id: u64, new_mount_id: u64) {
-    let process = get_current_process();
-    let mut process = process.lock();
-    if let Some(snapshot) = process.mount_namespace_snapshot.as_mut() {
-        snapshot.retain(|mount_id| *mount_id != old_mount_id);
-        if !snapshot.contains(&new_mount_id) {
-            snapshot.push(new_mount_id);
-        }
-        crate::smp::set_current_mount_namespace_snapshot(Some(snapshot.clone()));
-    }
+    crate::process::manager::replace_mount_in_current_mnt_namespace(old_mount_id, new_mount_id);
 }
 
 pub(super) fn add_mount_to_current_and_shared_namespaces(

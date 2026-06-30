@@ -5,8 +5,10 @@ use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
     filesystem::{
-        cgroupfs::remove_pid_cgroup_path, procfs::proc_pid_max, vfs::VirtualFS,
-        vfs_traits::MountPropagation,
+        cgroupfs::remove_pid_cgroup_path,
+        procfs::proc_pid_max,
+        vfs::VirtualFS,
+        vfs_traits::{MountFlags, MountPropagation},
     },
     ipc::sysv_shm::detach_all_process_mappings,
     object::linux_anon::wake_pidfd_for_process_with_manager,
@@ -100,18 +102,21 @@ pub fn get_current_process() -> ProcessRef {
 }
 
 pub fn propagate_mount_from_source(source_mount_id: u64, new_mount_id: u64) {
-    let peer_group = {
+    let (peer_group, all_mount_ids) = {
         let vfs = VirtualFS.lock();
         match vfs.mount_propagation_by_id(source_mount_id) {
-            Ok(MountPropagation::Shared(peer_group)) => peer_group,
+            Ok(MountPropagation::Shared(peer_group)) => (peer_group, vfs.mount_ids()),
             _ => return,
         }
     };
 
     for process in MANAGER.lock().processes.values() {
         let mut process = process.lock();
+        if process.mount_namespace_snapshot.is_none() {
+            process.mount_namespace_snapshot = Some(all_mount_ids.clone());
+        }
         let Some(snapshot) = process.mount_namespace_snapshot.as_mut() else {
-            continue;
+            unreachable!();
         };
         if !VirtualFS
             .lock()
@@ -125,6 +130,71 @@ pub fn propagate_mount_from_source(source_mount_id: u64, new_mount_id: u64) {
     }
 }
 
+pub fn add_mount_to_current_mnt_namespace(mount_id: u64) {
+    update_current_mnt_namespace_snapshots(|snapshot, _| {
+        if !snapshot.contains(&mount_id) {
+            snapshot.push(mount_id);
+        }
+    });
+}
+
+pub fn remove_mount_from_current_mnt_namespace(mount_id: u64) {
+    update_current_mnt_namespace_snapshots(|snapshot, flag_overrides| {
+        snapshot.retain(|id| *id != mount_id);
+        flag_overrides.remove(&mount_id);
+    });
+}
+
+pub fn remove_mounts_from_current_mnt_namespace(mount_ids: &[u64]) {
+    update_current_mnt_namespace_snapshots(|snapshot, flag_overrides| {
+        snapshot.retain(|id| !mount_ids.contains(id));
+        for mount_id in mount_ids {
+            flag_overrides.remove(mount_id);
+        }
+    });
+}
+
+pub fn replace_mount_in_current_mnt_namespace(old_mount_id: u64, new_mount_id: u64) {
+    update_current_mnt_namespace_snapshots(|snapshot, _| {
+        snapshot.retain(|mount_id| *mount_id != old_mount_id);
+        if !snapshot.contains(&new_mount_id) {
+            snapshot.push(new_mount_id);
+        }
+    });
+}
+
+fn update_current_mnt_namespace_snapshots(
+    mut update: impl FnMut(&mut Vec<u64>, &mut BTreeMap<u64, MountFlags>),
+) {
+    let current = get_current_process();
+    let (current_pid, current_mnt_namespace_inode) = {
+        let current = current.lock();
+        (current.pid, current.mnt_namespace.inode())
+    };
+    let mut current_snapshot = None;
+
+    for process in MANAGER.lock().processes.values() {
+        let mut process = process.lock();
+        if process.exit_status.is_some()
+            || process.mnt_namespace.inode() != current_mnt_namespace_inode
+        {
+            continue;
+        }
+        let Some(mut snapshot) = process.mount_namespace_snapshot.take() else {
+            continue;
+        };
+        update(&mut snapshot, &mut process.mount_namespace_flag_overrides);
+        if process.pid == current_pid {
+            current_snapshot = Some(snapshot.clone());
+        }
+        process.mount_namespace_snapshot = Some(snapshot);
+    }
+
+    if let Some(snapshot) = current_snapshot {
+        crate::smp::set_current_mount_namespace_snapshot(Some(snapshot));
+    }
+}
+
 pub fn remove_mount_from_namespaces(removed_mount_id: u64) {
     for process in MANAGER.lock().processes.values() {
         let mut process = process.lock();
@@ -134,7 +204,11 @@ pub fn remove_mount_from_namespaces(removed_mount_id: u64) {
     }
 }
 
-fn unreferenced_mounts_after_process_exit(pid: ProcessID, snapshot: &[u64]) -> Vec<u64> {
+fn unreferenced_mounts_after_process_exit(
+    pid: ProcessID,
+    mnt_namespace_inode: u64,
+    snapshot: &[u64],
+) -> Vec<u64> {
     let manager = MANAGER.lock();
     snapshot
         .iter()
@@ -145,11 +219,15 @@ fn unreferenced_mounts_after_process_exit(pid: ProcessID, snapshot: &[u64]) -> V
                     return false;
                 }
                 let candidate = candidate.lock();
-                candidate.exit_status.is_none()
-                    && candidate
-                        .mount_namespace_snapshot
-                        .as_ref()
-                        .is_some_and(|candidate_snapshot| candidate_snapshot.contains(mount_id))
+                if candidate.exit_status.is_some()
+                    || candidate.mnt_namespace.inode() != mnt_namespace_inode
+                {
+                    return false;
+                }
+                candidate
+                    .mount_namespace_snapshot
+                    .as_ref()
+                    .is_none_or(|candidate_snapshot| candidate_snapshot.contains(mount_id))
             })
         })
         .collect()
@@ -343,8 +421,11 @@ impl Process {
             self.exit_status = Some(exit_status);
             remove_pid_cgroup_path(self.pid);
             if let Some(snapshot) = &self.mount_namespace_snapshot {
-                let unreferenced_mounts =
-                    unreferenced_mounts_after_process_exit(self.pid, snapshot);
+                let unreferenced_mounts = unreferenced_mounts_after_process_exit(
+                    self.pid,
+                    self.mnt_namespace.inode(),
+                    snapshot,
+                );
                 if !unreferenced_mounts.is_empty() {
                     crate::filesystem::vfs::VirtualFS
                         .lock()

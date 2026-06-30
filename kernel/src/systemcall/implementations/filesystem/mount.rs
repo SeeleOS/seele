@@ -27,7 +27,7 @@ define_syscall!(Mount, |source: CString,
     let propagation = mount_propagation_from_mount_flags(operation_flags);
     let source_mount_id = VirtualFS
         .lock()
-        .mount_id_for_current_namespace(target_path.clone())
+        .containing_mount_id_for_current_namespace(target_path.clone())
         .ok();
 
     if operation_flags.contains(MountOperationFlags::MS_BIND) {
@@ -456,7 +456,7 @@ define_syscall!(
         let _ = open_path(target_path.clone())?;
         let source_mount_id = VirtualFS
             .lock()
-            .mount_id_for_current_namespace(target_path.clone())
+            .containing_mount_id_for_current_namespace(target_path.clone())
             .ok();
 
         if flags.contains(MoveMountFlags::MOVE_MOUNT_BENEATH) {

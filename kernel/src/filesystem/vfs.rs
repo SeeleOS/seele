@@ -709,6 +709,21 @@ impl VFS {
             .ok_or(FSError::NotFound)
     }
 
+    pub fn containing_mount_id_for_current_namespace(&self, path: Path) -> FSResult<u64> {
+        let normalized_path = self.normalize_path(path);
+        let namespace_snapshot = crate::smp::current_mount_namespace_snapshot();
+        self.mounts
+            .iter()
+            .find(|mount| {
+                normalized_path.strip_prefix(&mount.path).is_some()
+                    && namespace_snapshot
+                        .as_ref()
+                        .is_none_or(|snapshot| snapshot.contains(&mount.mount_id))
+            })
+            .map(|mount| mount.mount_id)
+            .ok_or(FSError::NotFound)
+    }
+
     pub fn mount_propagation_by_id(&self, mount_id: u64) -> FSResult<MountPropagation> {
         self.mounts
             .iter()
