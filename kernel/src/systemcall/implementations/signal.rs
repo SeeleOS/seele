@@ -1408,7 +1408,7 @@ mod tests {
                 .pending_signals
                 .insert(Signals::from(Signal::SIGUSR1));
             current
-                .parent
+                .parent()
                 .lock()
                 .pending_signals
                 .insert(Signals::from(Signal::SIGTERM));
@@ -1434,7 +1434,7 @@ mod tests {
                 .pending_signals
                 .remove(Signals::from(Signal::SIGUSR1));
             current
-                .parent
+                .parent()
                 .lock()
                 .pending_signals
                 .remove(Signals::from(Signal::SIGTERM));
